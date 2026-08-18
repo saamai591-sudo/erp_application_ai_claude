@@ -465,6 +465,10 @@ const OLAP_MEASURES: OlapMeasure[] = ["debit", "credit", "balance", "turnover", 
 interface OlapFilters {
   fromDate?: string;
   toDate?: string;
+  /** بازه‌ی ماه شمسی (۱ تا ۱۲) که مستقل از سال روی هر سند اعمال می‌شود — برای مقایسه‌ی یک ماه مشخص در چند سال؛
+   * اگر monthFrom > monthTo باشد یعنی بازه از انتهای سال به ابتدای سال بعد کشیده شده (مثلاً دی تا اردیبهشت) */
+  monthFrom?: number;
+  monthTo?: number;
   accountIds?: number[];
   detail1Codes?: string[];
   detail2Codes?: string[];
@@ -521,7 +525,7 @@ router.post("/olap-pivot", async (req, res) => {
     return res.status(400).json({ error: "تعداد ردیف‌های منطبق با فیلتر بسیار زیاد است؛ لطفاً بازه زمانی یا فیلترها را محدودتر کنید" });
   }
 
-  const lines = await prisma.journalEntryLine.findMany({
+  const lineWithMonthFilterCandidates = await prisma.journalEntryLine.findMany({
     where,
     select: {
       accountId: true,
@@ -533,6 +537,20 @@ router.post("/olap-pivot", async (req, res) => {
       journalEntry: { select: { date: true } },
     },
   });
+
+  // فیلتر «بازه زمانی» (ماه شمسی، مستقل از سال) — چون نمی‌شود ماه شمسی را در where پریزما محاسبه کرد،
+  // این فیلتر روی همان ردیف‌های واکشی‌شده در حافظه اعمال می‌شود (مثلاً فقط فروردین، برای مقایسه‌ی چند سال)
+  const monthFrom = f.monthFrom && f.monthFrom >= 1 && f.monthFrom <= 12 ? f.monthFrom : null;
+  const monthTo = f.monthTo && f.monthTo >= 1 && f.monthTo <= 12 ? f.monthTo : null;
+  const lines =
+    monthFrom || monthTo
+      ? lineWithMonthFilterCandidates.filter((l) => {
+          const { month } = toJalaliYearMonth(l.journalEntry.date);
+          const from = monthFrom || 1;
+          const to = monthTo || 12;
+          return from <= to ? month >= from && month <= to : month >= from || month <= to;
+        })
+      : lineWithMonthFilterCandidates;
 
   // نگاشت هر حساب به اجدادش در هر سطح گزارشگری (کش‌شده)، برای پیمایش «این ردیف سند در بعد حساب زیرمجموعه‌ی کدام گروه/کل/معین است؟»
   const levels = await prisma.reportingLevel.findMany();

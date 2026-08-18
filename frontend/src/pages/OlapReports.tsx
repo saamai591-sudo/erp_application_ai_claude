@@ -45,6 +45,9 @@ interface CodeOption { id: string; code: string; title: string }
 interface FiltersState {
   fromDate: string;
   toDate: string;
+  /** بازه‌ی ماه شمسی (۱ تا ۱۲)، مستقل از سال — برای مقایسه‌ی یک ماه مشخص در چند سال؛ "" یعنی بدون فیلتر */
+  monthFrom: string;
+  monthTo: string;
   accounts: { id: number; code: string; title: string }[];
   detail1: CodeOption[];
   detail2: CodeOption[];
@@ -101,9 +104,13 @@ const ISSUING_SYSTEM_OPTIONS = [
 
 const CHART_COLORS = ["#0f766e", "#059669", "#2563eb", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#65a30d"];
 
+const PERSIAN_MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
+
 const DEFAULT_FILTERS: FiltersState = {
   fromDate: "",
   toDate: "",
+  monthFrom: "",
+  monthTo: "",
   accounts: [],
   detail1: [],
   detail2: [],
@@ -316,6 +323,8 @@ function OlapBuilder({ editId }: { editId?: number }) {
     return {
       fromDate: f.fromDate || undefined,
       toDate: f.toDate || undefined,
+      monthFrom: f.monthFrom ? Number(f.monthFrom) : undefined,
+      monthTo: f.monthTo ? Number(f.monthTo) : undefined,
       accountIds: f.accounts.length ? f.accounts.map((a) => a.id) : undefined,
       detail1Codes: f.detail1.length ? f.detail1.map((d) => d.code) : undefined,
       detail2Codes: f.detail2.length ? f.detail2.map((d) => d.code) : undefined,
@@ -348,6 +357,33 @@ function OlapBuilder({ editId }: { editId?: number }) {
 
   function runReport() {
     return runReportWith(config);
+  }
+
+  function csvEscape(v: string | number): string {
+    const s = String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }
+
+  function downloadCsv() {
+    if (!result) return;
+    const cols = result.cols ?? [{ key: "_", label: MEASURE_OPTIONS.find((m) => m.value === config.measure)?.label || "" }];
+    const header = ["", ...cols.map((c) => c.label), ...(result.cols ? ["جمع"] : [])];
+    const bodyRows = result.rows.map((r) => {
+      const vals = cols.map((c) => result.cells[r.key]?.[c.key] ?? 0);
+      return [r.label, ...vals, ...(result.cols ? [result.rowTotals[r.key] ?? 0] : [])];
+    });
+    const totalsRow = ["جمع کل", ...cols.map((c) => result.colTotals[c.key] ?? 0), ...(result.cols ? [result.grandTotal] : [])];
+    const csvBody = [header, ...bodyRows, totalsRow].map((row) => row.map(csvEscape).join(",")).join("\r\n");
+    const BOM = String.fromCharCode(0xfeff);
+    const blob = new Blob([BOM + csvBody], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(title || "olap-report").trim()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   async function onSubmit(e: FormEvent) {
@@ -443,7 +479,7 @@ function OlapBuilder({ editId }: { editId?: number }) {
           <div className="form-field-inline">
             <label>نوع نمایش</label>
             <select value={config.chartType} onChange={(e) => setConfig({ ...config, chartType: e.target.value as ChartType })}>
-              {CHART_OPTIONS.filter((c) => c.value !== "pie" || !config.colDimension).map((c) => (
+              {CHART_OPTIONS.map((c) => (
                 <option key={c.value} value={c.value}>
                   {c.label}
                 </option>
@@ -460,6 +496,30 @@ function OlapBuilder({ editId }: { editId?: number }) {
           <div className="form-field-inline">
             <label>تا تاریخ</label>
             <JalaliDatePicker value={config.filters.toDate} onChange={(v) => setConfig({ ...config, filters: { ...config.filters, toDate: v } })} />
+          </div>
+          <div className="form-field-inline">
+            <label>
+              بازه زمانی (ماه)
+              <InfoHint text="مستقل از سال اعمال می‌شود — مثلاً با انتخاب فروردین تا فروردین، فقط ماه فروردین در همه‌ی سال‌ها در نظر گرفته می‌شود؛ برای مقایسه‌ی یک ماه در چند سال، این فیلتر را با بعد ستون «دوره زمانی (سال)» ترکیب کنید." title="بازه زمانی" />
+            </label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <select value={config.filters.monthFrom} onChange={(e) => setConfig({ ...config, filters: { ...config.filters, monthFrom: e.target.value } })}>
+                <option value="">از ماه</option>
+                {PERSIAN_MONTHS.map((m, i) => (
+                  <option key={i} value={i + 1}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+              <select value={config.filters.monthTo} onChange={(e) => setConfig({ ...config, filters: { ...config.filters, monthTo: e.target.value } })}>
+                <option value="">تا ماه</option>
+                {PERSIAN_MONTHS.map((m, i) => (
+                  <option key={i} value={i + 1}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="form-field-inline" style={{ alignItems: "flex-start" }}>
             <label>دامنه حساب</label>
@@ -543,17 +603,24 @@ function OlapBuilder({ editId }: { editId?: number }) {
         </div>
         </div>
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }} className="olap-print-hide">
           <button type="button" className="btn" disabled={running} onClick={runReport}>
             {running ? "در حال اجرا..." : "اجرای گزارش"}
+          </button>
+          <button type="button" className="btn secondary" disabled={!result} onClick={downloadCsv}>
+            دانلود CSV
+          </button>
+          <button type="button" className="btn secondary" disabled={!result} onClick={() => window.print()}>
+            چاپ گزارش
           </button>
         </div>
 
         {result && (
-          <>
+          <div className="olap-print-area">
+            <div className="olap-print-title">{title || "گزارش تحلیلی (OLAP)"}</div>
             <OlapMatrixTable result={result} measureLabel={MEASURE_OPTIONS.find((m) => m.value === config.measure)?.label || ""} />
             {config.chartType !== "none" && <OlapChart result={result} chartType={config.chartType} />}
-          </>
+          </div>
         )}
       </form>
     </FormPage>
@@ -618,12 +685,15 @@ function OlapChart({ result, chartType }: { result: PivotResult; chartType: Char
   });
 
   if (chartType === "pie") {
+    // برای دایره‌ای، همیشه یک مقدار به ازای هر ردیف لازم است — اگر بعد ستون هم انتخاب شده باشد (که چند مقدار
+    // در هر ردیف می‌دهد)، از جمع سطر (rowTotals) به‌عنوان اندازه‌ی هر برش استفاده می‌شود
+    const pieData = result.rows.map((r) => ({ name: r.label, value: cols ? result.rowTotals[r.key] ?? 0 : result.cells[r.key]?.["_"] ?? 0 }));
     return (
       <div className="card" style={{ padding: 14, marginTop: 14, height: 420 }}>
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
-            <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius="75%" label={(d: any) => toFaDigits(String(d.name))}>
-              {data.map((_, i) => (
+            <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius="75%" label={(d: any) => toFaDigits(String(d.name))}>
+              {pieData.map((_, i) => (
                 <PieCell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
               ))}
             </Pie>

@@ -921,6 +921,17 @@ body {
 .olap-matrix thead th:first-child { position: sticky; right: 0; top: 0; z-index: 3; text-align: right; background: var(--bg); }
 .olap-matrix tfoot th, .olap-matrix tfoot td { font-weight: 700; background: var(--bg); border-top: 2px solid var(--line-strong); }
 .olap-matrix .olap-total-col { font-weight: 700; }
+.olap-print-title { display: none; }
+
+/* چاپ گزارش تحلیلی (OLAP): فقط عنوان + جدول ماتریس + نمودار چاپ می‌شود؛ نوار کناری/بالایی و تنظیمات صفحه پنهان می‌شوند */
+@media print {
+  body * { visibility: hidden; }
+  .olap-print-area, .olap-print-area * { visibility: visible; }
+  .olap-print-area { position: absolute; inset: 0; padding: 16px; }
+  .olap-print-title { display: block; font-size: 18px; font-weight: 700; margin-bottom: 14px; }
+  .olap-matrix-wrap { max-height: none !important; overflow: visible !important; }
+}
+
 .picker-table-wrap { max-height: 50vh; overflow: auto; margin-bottom: 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .picker-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .picker-table th {
