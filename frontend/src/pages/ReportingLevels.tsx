@@ -8,8 +8,9 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { FieldHint } from "../components/FieldHint";
 
-interface Level { id: number; order: number; title: string; codeLength: number }
+interface Level { id: number; order: number; title: string; codeLength: number; hasAccounts: boolean }
 
 export default function ReportingLevels() {
   const location = useLocation();
@@ -79,6 +80,10 @@ function LevelForm({ editId }: { editId?: number }) {
   // وجود این‌که state واقعی درست است، فیلد همچنان «۰۲» را نشان می‌دهد. با کنترل کامل رشته (پاک‌سازی
   // کاراکتر به کاراکتر در onChange) از این رفتار مرورگر عبور می‌کنیم.
   const [form, setForm] = usePersistedState(cacheKey, { title: "", codeLength: "1" });
+  // آیا این سطح از قبل حساب تعریف‌شده دارد؟ اگر بله، طول کد دیگر قابل ویرایش نیست (کدهای همان
+  // حساب‌ها بر اساس طول فعلی ساخته شده‌اند و تغییرش کدهای موجود را نامعتبر می‌کند) — بک‌اند هم همین
+  // قاعده را در PUT کنترل می‌کند؛ این فقط برای غیرفعال‌کردن فیلد در فرانت‌اند است.
+  const [hasAccounts, setHasAccounts] = usePersistedState(`${cacheKey}:hasAccounts`, false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const { saved, flash } = useSavedFlash();
@@ -87,7 +92,10 @@ function LevelForm({ editId }: { editId?: number }) {
     if (!editId || hasPersistedState(cacheKey)) return;
     api.get("/reporting-levels").then((items: Level[]) => {
       const found = items.find((i) => i.id === editId);
-      if (found) setForm({ title: found.title, codeLength: String(found.codeLength) });
+      if (found) {
+        setForm({ title: found.title, codeLength: String(found.codeLength) });
+        setHasAccounts(found.hasAccounts);
+      }
       setLoaded(true);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -145,11 +153,15 @@ function LevelForm({ editId }: { editId?: number }) {
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
           </div>
           <div className="form-field">
-            <label>طول کد</label>
+            <label>
+              طول کد
+              {hasAccounts && <FieldHint text="این سطح حساب تعریف‌شده دارد؛ چون کد آن حساب‌ها بر اساس همین طول ساخته شده، طول کد دیگر قابل تغییر نیست." />}
+            </label>
             <input
               type="text"
               inputMode="numeric"
               value={form.codeLength}
+              disabled={hasAccounts}
               onChange={(e) => {
                 const digitsOnly = e.target.value.replace(/[^\d]/g, "");
                 const normalized = digitsOnly.replace(/^0+(?=\d)/, "");
