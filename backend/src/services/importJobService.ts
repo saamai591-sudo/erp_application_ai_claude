@@ -9,7 +9,10 @@ export type ImportGroupProcessor = (rows: Record<string, string>[], ctx: ImportR
 interface EntityConfig {
   row?: ImportRowProcessor;
   group?: ImportGroupProcessor;
-  groupByKey?: string;
+  /** نام یک ستون (برای گروه‌بندی تک‌فیلدی)، یا تابعی که کلید گروه‌بندی را از کل ردیف می‌سازد (برای
+   * گروه‌بندی ترکیبی — مثلاً «شماره گروه سند» + «تاریخ» با هم، تا دو سند با شماره گروه یکسان در دو
+   * تاریخ متفاوت اشتباهاً یکی نشوند) */
+  groupByKey?: string | ((row: Record<string, string>) => string);
 }
 
 const registry: Record<string, EntityConfig> = {};
@@ -60,7 +63,7 @@ async function processJob(jobId: number, config: EntityConfig, rows: Record<stri
     const groupOrder: string[] = [];
     const groupIndices = new Map<string, number[]>();
     rows.forEach((r, i) => {
-      const key = r[config.groupByKey!] || `__row_${i}`;
+      const key = (typeof config.groupByKey === "function" ? config.groupByKey(r) : r[config.groupByKey!]) || `__row_${i}`;
       if (!groupIndices.has(key)) {
         groupIndices.set(key, []);
         groupOrder.push(key);
