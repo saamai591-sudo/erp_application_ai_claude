@@ -1,4 +1,8 @@
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
+// اگر VITE_API_URL صراحتاً تنظیم نشده باشد، آدرس بک‌اند از روی همان host ای که فرانت‌اند رویش باز شده
+// محاسبه می‌شود (نه localhost ثابت) — چون این مقدار در زمان build/dev یک‌بار برای همه‌ی کلاینت‌ها ساخته
+// می‌شود؛ اگر ثابت روی localhost باشد، کاربرهایی که از یک PC دیگر در شبکه به آدرس IP سرور وصل می‌شوند
+// درخواستشان به localhost خودشان (نه سرور) می‌رود و با ERR_CONNECTION_REFUSED مواجه می‌شوند.
+const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:4000/api`;
 
 export class ApiError extends Error {
   warning?: boolean;

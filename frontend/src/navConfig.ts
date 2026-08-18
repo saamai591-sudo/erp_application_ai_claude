@@ -127,6 +127,12 @@ export const MODULES: ModuleGroup[] = [
           { key: "warehousing-warehouse-adjustments", label: "انبارگردانی / تعدیل موجودی", list: "/warehousing/warehouse-adjustments", create: "/warehousing/warehouse-adjustments/new", icon: "ledger" },
         ],
       },
+      {
+        title: "گزارش",
+        items: [
+          { key: "warehousing-warehouse-review", label: "مرور تعدادی", list: "/warehousing/warehouse-review", icon: "tree" },
+        ],
+      },
     ],
   },
   {
@@ -140,6 +146,12 @@ export const MODULES: ModuleGroup[] = [
           { key: "accounting-warehouse-issues", label: "حواله انبار", list: "/warehouse-accounting/warehouse-issues", icon: "file" },
           { key: "accounting-warehouse-transfers", label: "انتقال بین انبارها", list: "/warehouse-accounting/warehouse-transfers", icon: "sitemap" },
           { key: "accounting-warehouse-adjustments", label: "انبارگردانی / تعدیل موجودی", list: "/warehouse-accounting/warehouse-adjustments", icon: "ledger" },
+        ],
+      },
+      {
+        title: "گزارش",
+        items: [
+          { key: "accounting-warehouse-review", label: "مرور مبلغی", list: "/warehouse-accounting/warehouse-review", icon: "tree" },
         ],
       },
     ],
@@ -166,6 +178,7 @@ export const MODULES: ModuleGroup[] = [
           { key: "inquiry-evaluations", label: "ارزیابی استعلام", list: "/inquiry-evaluations", create: "/inquiry-evaluations/new", icon: "layers" },
           { key: "purchase-orders", label: "سفارش خرید", list: "/purchase-orders", create: "/purchase-orders/new", icon: "file" },
           { key: "delivery-authorizations", label: "مجوز تحویل", list: "/delivery-authorizations", create: "/delivery-authorizations/new", icon: "shield" },
+          { key: "purchase-invoices", label: "فاکتور خرید", list: "/purchase-invoices", create: "/purchase-invoices/new", icon: "ledger" },
         ],
       },
     ],

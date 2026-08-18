@@ -40,7 +40,8 @@ services:
     depends_on:
       - backend
     environment:
-      VITE_API_URL: http://localhost:4000/api
+      # عمداً تنظیم نشده: frontend/src/lib/api.ts در نبود این متغیر، آدرس بک‌اند را از روی
+      # window.location.hostname مرورگر می‌سازد تا هم از localhost و هم از IP سرور در شبکه کار کند.
       CI: "true"
     ports:
       - "5174:5173"

@@ -62,6 +62,8 @@ import SalesQuotes from "./pages/SalesQuotes";
 import SalesOrders from "./pages/SalesOrders";
 import SalesDeliveries from "./pages/SalesDeliveries";
 import SalesInvoices from "./pages/SalesInvoices";
+import PurchaseInvoices from "./pages/PurchaseInvoices";
+import WarehouseReview from "./pages/WarehouseReview";
 import Receipts from "./pages/Receipts";
 import Payments from "./pages/Payments";
 import Cheques from "./pages/Cheques";
@@ -196,6 +198,8 @@ export default function App() {
             <Route path="/warehouse-accounting/warehouse-receipts" element={<WarehouseReceipts mode="accounting" />} />
             <Route path="/warehouse-accounting/warehouse-receipts/new" element={<WarehouseReceipts mode="accounting" />} />
             <Route path="/warehouse-accounting/warehouse-receipts/:id/edit" element={<WarehouseReceipts mode="accounting" />} />
+            <Route path="/warehousing/warehouse-review" element={<WarehouseReview mode="qty" />} />
+            <Route path="/warehouse-accounting/warehouse-review" element={<WarehouseReview mode="amount" />} />
 
             <Route path="/warehousing/warehouse-issues" element={<WarehouseIssues mode="warehousing" />} />
             <Route path="/warehousing/warehouse-issues/new" element={<WarehouseIssues mode="warehousing" />} />
@@ -259,6 +263,9 @@ export default function App() {
             <Route path="/delivery-authorizations" element={<DeliveryAuthorizations />} />
             <Route path="/delivery-authorizations/new" element={<DeliveryAuthorizations />} />
             <Route path="/delivery-authorizations/:id/edit" element={<DeliveryAuthorizations />} />
+            <Route path="/purchase-invoices" element={<PurchaseInvoices />} />
+            <Route path="/purchase-invoices/new" element={<PurchaseInvoices />} />
+            <Route path="/purchase-invoices/:id/edit" element={<PurchaseInvoices />} />
 
             <Route path="/customers" element={<Customers />} />
             <Route path="/customers/new" element={<Customers />} />
