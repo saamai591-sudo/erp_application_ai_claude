@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { registerImportEntity } from "../services/importJobService";
-import { resolveDetailCode, registerDetailCode, generateDetailCode, nextSerialNumber } from "../utils/coding";
+import { resolveDetailCode, registerDetailCode, nextSerialNumber } from "../utils/coding";
 import { computeFullAccountCode, buildAccountByIdMap } from "../utils/accountCode";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { resolveDateString } from "../utils/jalaliDate";
@@ -126,7 +126,9 @@ export function registerAllImportProcessors() {
           currencyId = base?.id;
         }
 
-        const { code, detailTypeId } = await generateDetailCode(DETAIL_TYPE_BANK_ACCOUNT);
+        // برخلاف فرم دستی «حساب بانکی جدید» (که کد تفصیل همیشه خودکار است)، ورود اکسل امکان تعیین
+        // صریح کد تفصیل را هم می‌دهد — برای مهاجرت داده از سیستم قبلی که کدهای از پیش موجود دارد.
+        const { code, detailTypeId } = await resolveDetailCode(DETAIL_TYPE_BANK_ACCOUNT, row.detailCode);
         const created = await prisma.bankAccount.create({
           data: {
             detailCode: code,

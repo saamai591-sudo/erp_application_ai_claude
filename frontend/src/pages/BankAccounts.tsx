@@ -75,6 +75,7 @@ function AccountList() {
               { key: "branchTitle", label: "عنوان شعبه بانک", required: true },
               { key: "accountNumber", label: "شماره حساب", required: true },
               { key: "currencyCode", label: "کد ارز", hint: "اختیاری — خالی بگذارید تا ارز پایه در نظر گرفته شود" },
+              { key: "detailCode", label: "کد تفصیل", hint: "اختیاری — خالی بگذارید تا خودکار ساخته شود؛ برای مهاجرت کدهای از پیش موجود پر کنید" },
             ]}
             onDone={reload}
           />
