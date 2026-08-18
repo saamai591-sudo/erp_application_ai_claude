@@ -1,0 +1,359 @@
+import { FormEvent, useEffect, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { DataTable } from "../components/DataTable";
+import { FormPage } from "../components/FormPage";
+import { RecordPickerField } from "../components/RecordPicker";
+import { api, ApiError } from "../lib/api";
+import { useSavedFlash } from "../lib/useSavedFlash";
+import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { RefreshButton } from "../components/RefreshButton";
+import { NewRecordButton } from "../components/NewRecordButton";
+import { InfoHint } from "../components/InfoHint";
+import { FieldHint } from "../components/FieldHint";
+import { toFaDigits } from "../lib/formatAmount";
+import { AccountingGroup } from "./AccountingGroups";
+import { WarehouseGroup } from "./WarehouseGroups";
+
+const ACCOUNT_TYPE_FA: Record<string, string> = {
+  SALES_VAT: "ارزش افزوده فروش",
+  SALES_RECEIVABLE: "حساب دریافتنی فروش",
+  SALES_RETURN: "برگشت از فروش",
+  SALES_DISCOUNT: "تخفیف فروش",
+  SALES_REVENUE: "درآمد فروش",
+  INVENTORY: "حساب موجودی کالا",
+  WAREHOUSE_RECEIPT_CREDIT: "حساب بستانکار رسید انبار",
+  WAREHOUSE_ISSUE_DEBIT: "حساب بدهکار حواله انبار",
+  PURCHASE_PAYABLE: "حساب پرداختنی خرید",
+  PURCHASE_CONTROL: "کنترل خرید",
+  PURCHASE_VAT: "ارزش افزوده خرید",
+};
+
+const SALES_TYPES = new Set(["SALES_VAT", "SALES_RECEIVABLE", "SALES_RETURN", "SALES_DISCOUNT", "SALES_REVENUE"]);
+const INVENTORY_TYPES = new Set(["INVENTORY"]);
+const WAREHOUSE_DOC_TYPES = new Set(["WAREHOUSE_RECEIPT_CREDIT", "WAREHOUSE_ISSUE_DEBIT"]);
+const PURCHASE_TYPES = new Set(["PURCHASE_PAYABLE", "PURCHASE_CONTROL", "PURCHASE_VAT"]);
+
+interface Level {
+  id: number;
+  order: number;
+  title: string;
+}
+interface AccountRow {
+  id: number;
+  parentId: number | null;
+  code: string;
+  title: string;
+  levelId: number;
+  level: Level;
+}
+
+interface GoodsServiceAccountingSetting {
+  id: number;
+  accountingGroupId: number;
+  accountingGroup: AccountingGroup;
+  accountType: string;
+  warehouseGroupId: number | null;
+  warehouseGroup: WarehouseGroup | null;
+  accountId: number;
+  account: AccountRow;
+  salesTypeRef: number | null;
+  warehouseDocTypeRef: number | null;
+  purchaseTypeRef: number | null;
+  hasTransactions: boolean;
+}
+
+export default function GoodsServiceAccounting() {
+  const location = useLocation();
+  const { id } = useParams();
+  const isNew = location.pathname.endsWith("/new");
+  const isEdit = location.pathname.endsWith("/edit");
+  if (isNew) return <SettingForm />;
+  if (isEdit) return <SettingForm editId={Number(id)} />;
+  return <SettingList />;
+}
+
+function SettingList() {
+  const cacheKey = "/goods-service-accounting";
+  const [items, setItems] = usePersistedState<GoodsServiceAccountingSetting[]>(cacheKey, []);
+  const [error, setError] = useState<string | null>(null);
+  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
+  const navigate = useNavigate();
+
+  async function reload() {
+    api.get("/goods-service-accounting").then(setItems).catch((e) => setError(e.message));
+  }
+  useEffect(() => {
+    if (!hasPersistedState(cacheKey)) reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function onDelete(row: GoodsServiceAccountingSetting) {
+    try {
+      await api.del(`/goods-service-accounting/${row.id}`);
+      await reload();
+    } catch (e) {
+      alert((e as ApiError).message);
+    }
+  }
+
+  return (
+    <div>
+      <div className="page-header">
+        <div>
+          <h2>حسابداری کالا و خدمت</h2>
+        </div>
+        <div className="header-toolbar" style={{ gap: 4 }}>
+          <InfoHint text={`تعریف نحوه صدور سند حسابداری اسناد انبار، فروش و تامین کنندگان به تفکیک گروه حسابداری`} title="حسابداری کالا و خدمت" />
+          <NewRecordButton path="/goods-service-accounting/new" />
+          <RefreshButton onClick={reload} />
+          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
+        </div>
+      </div>
+      {error && <div className="alert error">{error}</div>}
+      <DataTable
+        bulkActionsContainer={bulkSlot}
+        columns={[
+          { header: "گروه حسابداری", render: (r) => r.accountingGroup?.title, filterType: "string", filterValue: (r) => r.accountingGroup?.title },
+          { header: "نوع حساب", render: (r) => ACCOUNT_TYPE_FA[r.accountType] || r.accountType },
+          { header: "گروه انبار", render: (r) => r.warehouseGroup?.title || "—" },
+          { header: "معین", render: (r) => (r.account ? `${r.account.code} - ${r.account.title}` : "—") },
+        ]}
+        rows={items}
+        onEdit={(r) => navigate(`/goods-service-accounting/${r.id}/edit`)}
+        onDelete={onDelete}
+      />
+    </div>
+  );
+}
+
+const DEFAULT_SETTING_FORM = {
+  accountingGroupId: "",
+  accountType: "",
+  warehouseGroupId: "",
+  accountId: "",
+  salesTypeRef: "",
+  warehouseDocTypeRef: "",
+  purchaseTypeRef: "",
+};
+
+function SettingForm({ editId }: { editId?: number }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const cacheKey = `form:${location.pathname}:form`;
+  const [accountingGroups, setAccountingGroups] = useState<AccountingGroup[]>([]);
+  const [warehouseGroups, setWarehouseGroups] = useState<WarehouseGroup[]>([]);
+  const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [hasTransactions, setHasTransactions] = useState(false);
+  const [form, setForm] = usePersistedState(cacheKey, DEFAULT_SETTING_FORM);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
+  const { saved, flash } = useSavedFlash();
+
+  useEffect(() => {
+    api.get("/accounting-groups").then((g: AccountingGroup[]) => setAccountingGroups(g.filter((x) => x.isActive)));
+    api.get("/warehouse-groups").then((g: WarehouseGroup[]) => setWarehouseGroups(g.filter((x) => x.isActive)));
+    api.get("/accounts").then(setAccounts);
+  }, []);
+
+  useEffect(() => {
+    // این کامپوننت وقتی از حالت ویرایش با دکمه‌ی «جدید» به فرم خالی می‌رود، remount نمی‌شود؛
+    // پس باید فرم را صریحاً به مقدار پیش‌فرض برگردانیم
+    if (!editId) {
+      if (!hasPersistedState(cacheKey)) {
+        setForm(DEFAULT_SETTING_FORM);
+        setHasTransactions(false);
+      }
+      return;
+    }
+    if (hasPersistedState(cacheKey)) return;
+    api.get("/goods-service-accounting").then((items: GoodsServiceAccountingSetting[]) => {
+      const found = items.find((i) => i.id === editId);
+      if (found) {
+        setHasTransactions(found.hasTransactions);
+        setForm({
+          accountingGroupId: String(found.accountingGroupId),
+          accountType: found.accountType,
+          warehouseGroupId: found.warehouseGroupId ? String(found.warehouseGroupId) : "",
+          accountId: String(found.accountId),
+          salesTypeRef: found.salesTypeRef != null ? String(found.salesTypeRef) : "",
+          warehouseDocTypeRef: found.warehouseDocTypeRef != null ? String(found.warehouseDocTypeRef) : "",
+          purchaseTypeRef: found.purchaseTypeRef != null ? String(found.purchaseTypeRef) : "",
+        });
+      }
+      setLoaded(true);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editId]);
+
+  const moeinAccounts = accounts.filter((a) => a.level?.title === "معین");
+  function fullCode(a: AccountRow): string {
+    let code = a.code;
+    let cur = a;
+    while (cur.parentId) {
+      const parent = accounts.find((x) => x.id === cur.parentId);
+      if (!parent) break;
+      code = parent.code + code;
+      cur = parent;
+    }
+    return code;
+  }
+  const selectedAccount = accounts.find((a) => String(a.id) === form.accountId);
+
+  const showSalesType = SALES_TYPES.has(form.accountType);
+  const showWarehouseGroup = INVENTORY_TYPES.has(form.accountType);
+  const showWarehouseDocType = WAREHOUSE_DOC_TYPES.has(form.accountType);
+  const showPurchaseType = PURCHASE_TYPES.has(form.accountType);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    const body = {
+      accountingGroupId: Number(form.accountingGroupId),
+      accountType: form.accountType,
+      warehouseGroupId: showWarehouseGroup && form.warehouseGroupId ? Number(form.warehouseGroupId) : null,
+      accountId: Number(form.accountId),
+      salesTypeRef: showSalesType && form.salesTypeRef ? Number(form.salesTypeRef) : null,
+      warehouseDocTypeRef: showWarehouseDocType && form.warehouseDocTypeRef ? Number(form.warehouseDocTypeRef) : null,
+      purchaseTypeRef: showPurchaseType && form.purchaseTypeRef ? Number(form.purchaseTypeRef) : null,
+    };
+    try {
+      if (editId) {
+        await api.put(`/goods-service-accounting/${editId}`, body);
+        flash();
+      } else {
+        const created = await api.post("/goods-service-accounting", body);
+        flash();
+        navigate(`/goods-service-accounting/${created.id}/edit`);
+      }
+    } catch (e) {
+      setError((e as ApiError).message);
+    }
+  }
+
+  async function handleDelete() {
+    if (!editId) return;
+    try {
+      await api.del(`/goods-service-accounting/${editId}`);
+      navigate("/goods-service-accounting");
+    } catch (e) {
+      alert((e as ApiError).message);
+    }
+  }
+
+  if (!loaded) return null;
+
+  return (
+    <FormPage
+      title={editId ? "ویرایش حسابداری کالا و خدمت" : "حسابداری کالا و خدمت جدید"}
+      description={
+        hasTransactions
+          ? "این تنظیم برای اسناد صادرشده استفاده شده است و قابل ویرایش نیست"
+          : "فیلدهای «نوع فروش»، «نوع سند انبار» و «نوع خرید» تا پیاده‌سازی ماژولهای فروش/انبار/خرید به‌صورت کد عددی موقت ثبت می‌شوند"
+      }
+      formId="goods-service-accounting-form"
+      closePath="/goods-service-accounting"
+      newPath="/goods-service-accounting/new"
+      onDelete={editId ? handleDelete : undefined}
+      saveDisabled={hasTransactions}
+    >
+      <form id="goods-service-accounting-form" onSubmit={onSubmit}>
+        {error && <div className="alert error">{error}</div>}
+        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
+        <div className="form-grid">
+          <div className="form-field">
+            <label>گروه حسابداری</label>
+            <select
+              value={form.accountingGroupId}
+              disabled={hasTransactions}
+              onChange={(e) => setForm({ ...form, accountingGroupId: e.target.value })}
+            >
+              <option value="">انتخاب کنید</option>
+              {accountingGroups.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
+            </select>
+          </div>
+          <div className="form-field">
+            <label>نوع حساب</label>
+            <select
+              value={form.accountType}
+              disabled={hasTransactions}
+              onChange={(e) => setForm({ ...form, accountType: e.target.value })}
+            >
+              <option value="">انتخاب کنید</option>
+              {Object.entries(ACCOUNT_TYPE_FA).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+          </div>
+          {/* هر چهار فیلد زیر روی یک خانه‌ی مشترک از گرید قرار می‌گیرند (نه هرکدام خانه‌ی جدا) تا هم با
+              تغییر «نوع حساب» فیلد «معین» بعدی جابه‌جا نشود، و هم در حالتی که هنوز نوعی انتخاب نشده
+              فضای خالی زیاد ایجاد نشود؛ چون این چهار حالت متقابلاً انحصاری‌اند (بر اساس نوع حساب) */}
+          <div className={`form-field ${showSalesType || showWarehouseGroup || showWarehouseDocType || showPurchaseType ? "" : "form-field-hidden"}`}>
+            {showSalesType && (
+              <>
+                <label>نوع فروش <FieldHint label="نوع فروش" text="موقت — تا پیاده‌سازی ماژول فروش، این فیلد یک کد عددی ساده است" /></label>
+                <input
+                  type="number"
+                  dir="ltr"
+                  disabled={hasTransactions}
+                  value={form.salesTypeRef}
+                  onChange={(e) => setForm({ ...form, salesTypeRef: e.target.value })}
+                />
+              </>
+            )}
+            {showWarehouseGroup && (
+              <>
+                <label>گروه انبار</label>
+                <select
+                  value={form.warehouseGroupId}
+                  disabled={hasTransactions}
+                  onChange={(e) => setForm({ ...form, warehouseGroupId: e.target.value })}
+                >
+                  <option value="">انتخاب کنید</option>
+                  {warehouseGroups.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
+                </select>
+              </>
+            )}
+            {showWarehouseDocType && (
+              <>
+                <label>نوع سند انبار <FieldHint label="نوع سند انبار" text="موقت — تا پیاده‌سازی ماژول انبار، این فیلد یک کد عددی ساده است" /></label>
+                <input
+                  type="number"
+                  dir="ltr"
+                  disabled={hasTransactions}
+                  value={form.warehouseDocTypeRef}
+                  onChange={(e) => setForm({ ...form, warehouseDocTypeRef: e.target.value })}
+                />
+              </>
+            )}
+            {showPurchaseType && (
+              <>
+                <label>نوع خرید <FieldHint label="نوع خرید" text="موقت — تا پیاده‌سازی ماژول خرید، این فیلد یک کد عددی ساده است" /></label>
+                <input
+                  type="number"
+                  dir="ltr"
+                  disabled={hasTransactions}
+                  value={form.purchaseTypeRef}
+                  onChange={(e) => setForm({ ...form, purchaseTypeRef: e.target.value })}
+                />
+              </>
+            )}
+          </div>
+          <div className="form-field">
+            <label>معین</label>
+            <RecordPickerField
+              title="انتخاب معین"
+              displayValue={selectedAccount ? `${toFaDigits(fullCode(selectedAccount))} - ${selectedAccount.title}` : ""}
+              rows={moeinAccounts}
+              disabled={hasTransactions}
+              columns={[
+                { header: "کد", render: (a) => toFaDigits(fullCode(a)), filterValue: (a) => fullCode(a), width: "110px" },
+                { header: "عنوان", render: (a) => a.title, filterValue: (a) => a.title },
+              ]}
+              onSelect={(a) => setForm({ ...form, accountId: String(a.id) })}
+            />
+          </div>
+        </div>
+      </form>
+    </FormPage>
+  );
+}

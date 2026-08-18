@@ -1,0 +1,69 @@
+import { Router } from "express";
+import { prisma } from "../lib/prisma";
+
+const router = Router();
+
+router.get("/", async (_req, res) => {
+  const nodes = await prisma.orgStructure.findMany({ orderBy: { code: "asc" } });
+  res.json(nodes);
+});
+
+router.post("/", async (req, res) => {
+  const { parentId, code, title } = req.body as { parentId?: number | null; code?: string; title: string };
+  if (!title) return res.status(400).json({ error: "عنوان الزامی است" });
+
+  let finalCode = code;
+  if (!finalCode) {
+    const siblings = await prisma.orgStructure.findMany({
+      where: { parentId: parentId ?? null },
+      orderBy: { code: "desc" },
+      take: 1,
+    });
+    const lastNum = siblings.length ? parseInt(siblings[0].code, 10) || 0 : 0;
+    finalCode = String(lastNum + 1);
+  }
+
+  const dup = await prisma.orgStructure.findFirst({ where: { parentId: parentId ?? null, code: finalCode } });
+  if (dup) return res.status(400).json({ error: "کد در این سطح تکراری است" });
+
+  const node = await prisma.orgStructure.create({
+    data: { parentId: parentId ?? null, code: finalCode, title },
+  });
+  res.status(201).json(node);
+});
+
+router.put("/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const { title, code } = req.body as { title?: string; code?: string };
+
+  const node = await prisma.orgStructure.findUnique({ where: { id } });
+  if (!node) return res.status(404).json({ error: "شاخه یافت نشد" });
+
+  if (code && code !== node.code) {
+    const dup = await prisma.orgStructure.findFirst({ where: { parentId: node.parentId, code, NOT: { id } } });
+    if (dup) return res.status(400).json({ error: "کد در این سطح تکراری است" });
+  }
+
+  const updated = await prisma.orgStructure.update({ where: { id }, data: { title, code } });
+  res.json(updated);
+});
+
+router.delete("/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const children = await prisma.orgStructure.findFirst({ where: { parentId: id } });
+  const usedByOrgUnit = await prisma.orgUnit.findFirst({ where: { orgStructureId: id } });
+  if (children || usedByOrgUnit) {
+    return res.status(400).json({ error: "این شاخه دارای زیرشاخه یا گردش است و قابل حذف نیست" });
+  }
+  try {
+    await prisma.orgStructure.delete({ where: { id } });
+    res.status(204).send();
+  } catch (e: any) {
+    if (e?.code === "P2003") {
+      return res.status(400).json({ error: "این شاخه دارای زیرشاخه یا گردش است و قابل حذف نیست" });
+    }
+    res.status(400).json({ error: e?.message || "خطا در حذف شاخه سازمانی" });
+  }
+});
+
+export default router;

@@ -1,0 +1,248 @@
+import { prisma } from "../lib/prisma";
+import { registerImportEntity } from "../services/importJobService";
+import { resolveDetailCode, registerDetailCode, nextSerialNumber } from "../utils/coding";
+import { computeFullAccountCode, buildAccountByIdMap } from "../utils/accountCode";
+import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
+import { resolveDateString } from "../utils/jalaliDate";
+
+const DETAIL_TYPE_PARTY = 1;
+const DETAIL_TYPE_COST_CENTER = 2;
+const DETAIL_TYPE_CASHBOX = 3;
+
+const NATURE_GROUP_FA_REVERSE: Record<string, string> = { "ترازنامه‌ای": "BALANCE_SHEET", "سود و زیانی": "PROFIT_LOSS", "انتظامی": "MEMORANDUM" };
+const NATURE_DETAIL_FA_REVERSE: Record<string, string> = { "دارایی": "ASSET", "بدهی": "LIABILITY", "درآمد": "REVENUE", "هزینه": "EXPENSE", "انتظامی": "MEMORANDUM" };
+const BALANCE_NATURE_FA_REVERSE: Record<string, string> = { "بدهکار": "DEBIT", "بستانکار": "CREDIT" };
+const LEGAL_TYPE_FA_REVERSE: Record<string, string> = { "حقوقی": "LEGAL", "مشارکت خاص": "SPECIAL_PARTNERSHIP", "بانک/موسسه مالی": "BANK" };
+const COST_CENTER_TYPE_FA_REVERSE: Record<string, string> = { "عملیاتی/تولیدی": "OPERATIONAL", "پشتیبانی": "SUPPORT", "خدماتی": "SERVICE", "اداری و تشکیلاتی": "ADMIN" };
+
+export function registerAllImportProcessors() {
+  registerImportEntity("party", {
+    row: async (row, ctx) => {
+      try {
+        const category = row.category === "LEGAL" ? "LEGAL" : "INDIVIDUAL";
+        const nationality = row.nationality === "خارجی" ? "FOREIGN" : "LOCAL";
+        const data: any = { category, nationality };
+        if (category === "INDIVIDUAL") {
+          if (!row.firstName || !row.lastName) return { ok: false, error: "نام و نام خانوادگی الزامی است" };
+          data.firstName = row.firstName;
+          data.lastName = row.lastName;
+          data.nationalId = row.nationalId || null;
+        } else {
+          if (!row.name) return { ok: false, error: "نام الزامی است" };
+          data.name = row.name;
+          data.legalType = LEGAL_TYPE_FA_REVERSE[row.legalType] || "LEGAL";
+          data.nationalId = row.nationalId || null;
+          data.economicCode = row.economicCode || null;
+        }
+
+        if (!ctx.allowDuplicates) {
+          const dup = await prisma.party.findFirst({
+            where: category === "INDIVIDUAL" ? { firstName: data.firstName, lastName: data.lastName } : { name: data.name },
+          });
+          if (dup) return { ok: false, error: "طرف‌حساب مشابه (هم‌نام) از قبل موجود است" };
+        }
+
+        const { code, detailTypeId } = await resolveDetailCode(DETAIL_TYPE_PARTY, row.detailCode);
+        const party = await prisma.party.create({ data: { ...data, detailCode: code } });
+        await registerDetailCode(code, detailTypeId, "Party", party.id);
+        return { ok: true };
+      } catch (e: any) {
+        if (e.code === "P2002") return { ok: false, error: "یکی از فیلدهای یکتا (کد ملی/شناسه ملی/کد اقتصادی/کد تفصیل) تکراری است" };
+        return { ok: false, error: e.message || "خطا در ثبت طرف‌حساب" };
+      }
+    },
+  });
+
+  registerImportEntity("cash-box", {
+    row: async (row) => {
+      try {
+        if (!row.title) return { ok: false, error: "عنوان الزامی است" };
+        const dup = await prisma.cashBox.findUnique({ where: { title: row.title } });
+        if (dup) return { ok: false, error: "عنوان تکراری است" };
+        const { code, detailTypeId } = await resolveDetailCode(DETAIL_TYPE_CASHBOX, row.detailCode);
+        const cashBox = await prisma.cashBox.create({ data: { detailCode: code, title: row.title } });
+        await registerDetailCode(code, detailTypeId, "CashBox", cashBox.id);
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت صندوق" };
+      }
+    },
+  });
+
+  registerImportEntity("org-unit", {
+    row: async (row) => {
+      try {
+        if (!row.title || !row.orgStructureTitle) return { ok: false, error: "عنوان و شاخه ساختار سازمانی الزامی است" };
+        const nodes = await prisma.orgStructure.findMany();
+        const parentIds = new Set(nodes.map((n: any) => n.parentId).filter(Boolean));
+        const leaf = nodes.find((n: any) => n.title === row.orgStructureTitle && !parentIds.has(n.id));
+        if (!leaf) return { ok: false, error: `شاخه ساختار سازمانی «${row.orgStructureTitle}» (به‌عنوان آخرین شاخه) یافت نشد` };
+        const dup = await prisma.orgUnit.findUnique({ where: { title: row.title } });
+        if (dup) return { ok: false, error: "عنوان تکراری است" };
+        const finalCode = row.code ? Number(row.code) : await nextSerialNumber(prisma.orgUnit as any, "code");
+        await prisma.orgUnit.create({ data: { code: finalCode, title: row.title, orgStructureId: leaf.id } });
+        return { ok: true };
+      } catch (e: any) {
+        if (e.code === "P2002") return { ok: false, error: "کد یا عنوان تکراری است" };
+        return { ok: false, error: e.message || "خطا در ثبت واحد سازمانی" };
+      }
+    },
+  });
+
+  registerImportEntity("cost-center", {
+    row: async (row) => {
+      try {
+        if (!row.title || !row.orgUnitTitle) return { ok: false, error: "عنوان و واحد سازمانی الزامی است" };
+        const type = COST_CENTER_TYPE_FA_REVERSE[row.type];
+        if (!type) return { ok: false, error: `نوع «${row.type}» نامعتبر است` };
+        const orgUnit = await prisma.orgUnit.findFirst({ where: { title: row.orgUnitTitle } });
+        if (!orgUnit) return { ok: false, error: `واحد سازمانی «${row.orgUnitTitle}» یافت نشد` };
+        const dup = await prisma.costCenter.findUnique({ where: { title: row.title } });
+        if (dup) return { ok: false, error: "عنوان تکراری است" };
+        const { code, detailTypeId } = await resolveDetailCode(DETAIL_TYPE_COST_CENTER, row.detailCode);
+        const created = await prisma.costCenter.create({
+          data: { detailCode: code, title: row.title, type: type as any, orgUnitId: orgUnit.id },
+        });
+        await registerDetailCode(code, detailTypeId, "CostCenter", created.id);
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت مرکز هزینه" };
+      }
+    },
+  });
+
+  registerImportEntity("currency", {
+    row: async (row) => {
+      try {
+        if (!row.code || !row.title) return { ok: false, error: "کد و عنوان الزامی است" };
+        const dup = await prisma.currency.findFirst({ where: { OR: [{ code: row.code }, { title: row.title }] } });
+        if (dup) return { ok: false, error: "کد یا عنوان تکراری است" };
+        await prisma.currency.create({
+          data: {
+            code: row.code,
+            title: row.title,
+            decimalPlaces: row.decimalPlaces ? Number(row.decimalPlaces) : 2,
+            isBase: false,
+            rateDirection: "TO_BASE",
+            baseVolume: 1,
+          },
+        });
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت ارز" };
+      }
+    },
+  });
+
+  registerImportEntity("account", {
+    row: async (row) => {
+      try {
+        if (!row.code || !row.title) return { ok: false, error: "کد و عنوان الزامی است" };
+
+        let parentId: number | null = null;
+        let level;
+        if (row.parentFullCode) {
+          const allAccounts = await prisma.account.findMany({ select: { id: true, code: true, parentId: true } });
+          const byId = buildAccountByIdMap(allAccounts as any);
+          const parent = allAccounts.find((a: any) => computeFullAccountCode(a.id, byId) === row.parentFullCode);
+          if (!parent) return { ok: false, error: `حساب والد با کد کامل «${row.parentFullCode}» یافت نشد` };
+          parentId = parent.id;
+          const parentFull = await prisma.account.findUnique({ where: { id: parentId }, include: { level: true } });
+          level = await prisma.reportingLevel.findFirst({ where: { order: parentFull!.level.order + 1 } });
+          if (!level) return { ok: false, error: "سطح گزارشگری بعدی تعریف نشده است" };
+        } else {
+          level = await prisma.reportingLevel.findFirst({ where: { order: 1 } });
+          if (!level) return { ok: false, error: "ابتدا سطح گزارشگری (سطح گروه) را تعریف کنید" };
+        }
+
+        if (row.code.length !== level.codeLength) {
+          return { ok: false, error: `طول کد باید ${level.codeLength} رقم باشد (سطح ${level.title})` };
+        }
+        const dup = await prisma.account.findFirst({ where: { parentId, code: row.code } });
+        if (dup) return { ok: false, error: "کد در این سطح تکراری است" };
+
+        const data: any = { parentId, levelId: level.id, code: row.code, title: row.title };
+        if (level.order === 1) {
+          if (!row.natureGroup) return { ok: false, error: "ماهیت حساب (سطح گروه) الزامی است" };
+          data.natureGroup = NATURE_GROUP_FA_REVERSE[row.natureGroup];
+        } else if (level.order === 2) {
+          if (!row.natureDetail) return { ok: false, error: "ماهیت حساب (سطح کل) الزامی است" };
+          data.natureDetail = NATURE_DETAIL_FA_REVERSE[row.natureDetail];
+        } else {
+          if (!row.balanceNature) return { ok: false, error: "ماهیت مانده الزامی است" };
+          data.balanceNature = BALANCE_NATURE_FA_REVERSE[row.balanceNature];
+          data.isCurrency = row.isCurrency === "بله";
+          data.isRevaluable = row.isRevaluable === "بله";
+          if (row.detailType1 || row.detailType2 || row.detailType3) {
+            const detailTypes = await prisma.detailType.findMany();
+            for (const [col, field] of [
+              ["detailType1", "detailType1Id"],
+              ["detailType2", "detailType2Id"],
+              ["detailType3", "detailType3Id"],
+            ] as const) {
+              const value = (row as any)[col];
+              if (!value) continue;
+              const match = detailTypes.find((t: any) => String(t.code) === value.trim());
+              if (!match) return { ok: false, error: `نوع تفصیل با کد «${value}» یافت نشد` };
+              data[field] = match.id;
+            }
+          }
+        }
+
+        await prisma.account.create({ data });
+        return { ok: true };
+      } catch (e: any) {
+        if (e.code === "P2002") return { ok: false, error: "کد در این سطح تکراری است" };
+        return { ok: false, error: e.message || "خطا در ثبت حساب" };
+      }
+    },
+  });
+
+  registerImportEntity("journal-entry", {
+    groupByKey: "documentGroup",
+    group: async (groupRows) => {
+      try {
+        const first = groupRows[0];
+        const docType = await prisma.documentType.findFirst({ where: { title: first.documentType } });
+        if (!docType) return { ok: false, error: `نوع سند «${first.documentType}» یافت نشد` };
+
+        const allAccounts = await prisma.account.findMany({ select: { id: true, code: true, parentId: true } });
+        const byId = buildAccountByIdMap(allAccounts as any);
+        const currencies = await prisma.currency.findMany();
+        const baseCurrency = currencies.find((c: any) => c.isBase);
+        if (!baseCurrency) return { ok: false, error: "ارز پایه تعریف نشده است" };
+
+        const lines: IssueLineInput[] = [];
+        for (const row of groupRows) {
+          const account = allAccounts.find((a: any) => computeFullAccountCode(a.id, byId) === row.accountCode);
+          if (!account) return { ok: false, error: `حساب با کد «${row.accountCode}» یافت نشد` };
+          const currency = row.currencyCode ? currencies.find((c: any) => c.code === row.currencyCode) : baseCurrency;
+          if (!currency) return { ok: false, error: `ارز «${row.currencyCode}» یافت نشد` };
+          lines.push({
+            accountId: account.id,
+            detail1Code: row.detail1Code || null,
+            detail2Code: row.detail2Code || null,
+            detail3Code: row.detail3Code || null,
+            currencyId: currency.id,
+            debit: Number(row.debit) || 0,
+            credit: Number(row.credit) || 0,
+            fxRate: currency.id === baseCurrency.id ? 1 : Number(row.fxRate) || 1,
+            description: row.lineDescription || first.description || "-",
+          });
+        }
+
+        await issueJournalEntry({
+          date: new Date(resolveDateString(first.date)),
+          documentTypeId: docType.id,
+          description: first.description,
+          issuingSystem: "ACCOUNTING_EXCEL_IMPORT",
+          isManual: true,
+          lines,
+        });
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت سند" };
+      }
+    },
+  });
+}

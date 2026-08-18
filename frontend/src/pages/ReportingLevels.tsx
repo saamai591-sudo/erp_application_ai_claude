@@ -1,0 +1,145 @@
+import { FormEvent, useEffect, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { DataTable } from "../components/DataTable";
+import { FormPage } from "../components/FormPage";
+import { api, ApiError } from "../lib/api";
+import { useSavedFlash } from "../lib/useSavedFlash";
+import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { RefreshButton } from "../components/RefreshButton";
+import { NewRecordButton } from "../components/NewRecordButton";
+import { InfoHint } from "../components/InfoHint";
+
+interface Level { id: number; order: number; title: string; codeLength: number }
+
+export default function ReportingLevels() {
+  const location = useLocation();
+  const { id } = useParams();
+  const isNew = location.pathname.endsWith("/new");
+  const isEdit = location.pathname.endsWith("/edit");
+  if (isNew) return <LevelForm />;
+  if (isEdit) return <LevelForm editId={Number(id)} />;
+  return <LevelList />;
+}
+
+function LevelList() {
+  const cacheKey = "/reporting-levels";
+  const [items, setItems] = usePersistedState<Level[]>(cacheKey, []);
+  const [error, setError] = useState<string | null>(null);
+  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
+  const navigate = useNavigate();
+
+  async function reload() {
+    api.get("/reporting-levels").then(setItems).catch((e) => setError(e.message));
+  }
+  useEffect(() => {
+    if (!hasPersistedState(cacheKey)) reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function onDelete(row: Level) {
+    try {
+      await api.del(`/reporting-levels/${row.id}`);
+      await reload();
+    } catch (e) {
+      alert((e as ApiError).message);
+    }
+  }
+
+  return (
+    <div>
+      <div className="page-header">
+        <div>
+          <h2>سطح گزارشگری</h2>
+        </div>
+        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف سطوح درختی سرفصل حسابها (گروه، کل، معین، جزء) با ترتیب اجباری و طول کد هر سطح`} title="سطح گزارشگری" /><NewRecordButton path="/reporting-levels/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
+      </div>
+      {error && <div className="alert error">{error}</div>}
+      <DataTable
+        bulkActionsContainer={bulkSlot}
+        columns={[
+          { header: "ترتیب", render: (r) => r.order, width: "70px", filterType: "number", filterValue: (r) => r.order },
+          { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
+          { header: "طول کد", render: (r) => r.codeLength, width: "90px", filterType: "number", filterValue: (r) => r.codeLength },
+        ]}
+        rows={items}
+        onEdit={(r) => navigate(`/reporting-levels/${r.id}/edit`)}
+        onDelete={onDelete}
+      />
+    </div>
+  );
+}
+
+function LevelForm({ editId }: { editId?: number }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const cacheKey = `form:${location.pathname}:form`;
+  const [form, setForm] = usePersistedState(cacheKey, { title: "", codeLength: 1 });
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
+  const { saved, flash } = useSavedFlash();
+
+  useEffect(() => {
+    if (!editId || hasPersistedState(cacheKey)) return;
+    api.get("/reporting-levels").then((items: Level[]) => {
+      const found = items.find((i) => i.id === editId);
+      if (found) setForm({ title: found.title, codeLength: found.codeLength });
+      setLoaded(true);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editId]);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      if (editId) {
+        await api.put(`/reporting-levels/${editId}`, { title: form.title, codeLength: Number(form.codeLength) });
+        flash();
+      } else {
+        const created = await api.post("/reporting-levels", { title: form.title, codeLength: Number(form.codeLength) });
+        flash();
+        navigate(`/reporting-levels/${created.id}/edit`);
+      }
+    } catch (e) {
+      setError((e as ApiError).message);
+    }
+  }
+
+  async function handleDelete() {
+    if (!editId) return;
+    try {
+      await api.del(`/reporting-levels/${editId}`);
+      navigate("/reporting-levels");
+    } catch (e) {
+      alert((e as ApiError).message);
+    }
+  }
+
+  if (!loaded) return null;
+
+  return (
+    <FormPage
+      title={editId ? "ویرایش سطح گزارشگری" : "سطح گزارشگری جدید"}
+      description="سطح جدید همیشه به‌عنوان آخرین (پایین‌ترین) سطح درخت اضافه می‌شود"
+      formId="level-form"
+      closePath="/reporting-levels"
+      newPath="/reporting-levels/new"
+      onDelete={editId ? handleDelete : undefined}
+    >
+      <form id="level-form" onSubmit={onSubmit}>
+        {error && <div className="alert error">{error}</div>}
+        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
+        <div className="form-grid">
+          <div className="form-field">
+            <label>عنوان</label>
+            <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
+          </div>
+          <div className="form-field">
+            <label>طول کد</label>
+            <input type="number" min={1} value={form.codeLength} onChange={(e) => setForm({ ...form, codeLength: Number(e.target.value) })} />
+          </div>
+        </div>
+      </form>
+    </FormPage>
+  );
+}

@@ -1,0 +1,1211 @@
+@import url("https://cdnjs.cloudflare.com/ajax/libs/vazirmatn/33.0.3/Vazirmatn-font-face.css");
+@import url("https://cdn.jsdelivr.net/gh/rastikerdar/shabnam-font@v5.0.1/dist/font-face.css");
+@import url("https://cdn.jsdelivr.net/gh/rastikerdar/sahel-font@v3.4.0/dist/font-face.css");
+@import url("https://cdn.jsdelivr.net/gh/rastikerdar/samim-font@v4.0.5/dist/font-face.css");
+
+:root {
+  --app-font: "Vazirmatn";
+}
+
+:root {
+  --bg: #f3f4f6;
+  --surface: #ffffff;
+  --ink: #1c2430;
+  --ink-soft: #5b6472;
+  --line: #a8b0bc;
+  --primary: #107e3e;
+  --primary-soft: #e2f3e7;
+  --accent: #c9762f;
+  --danger: #b3392c;
+  --radius: 10px;
+  --sidebar-bg: #0d2b26;
+  --sidebar-ink: #eef4f2;
+  --menu-title-ink: #ffffff;
+  --menu-hover-bg: rgba(255, 255, 255, 0.12);
+  --menu-accent-1: #3ddc85;
+  --menu-accent-1-bg: rgba(61, 220, 133, 0.22);
+  --menu-accent-1-bg-hover: rgba(61, 220, 133, 0.32);
+  --menu-accent-2: #e3a465;
+  --menu-accent-2-bg: rgba(201, 118, 47, 0.18);
+  --menu-accent-2-bg-hover: rgba(201, 118, 47, 0.28);
+  --menu-accent-2-text: #f2c795;
+  --menu-accent-2-text-hover: #ffd9a8;
+  --menu-item-bg: rgba(120, 160, 255, 0.07);
+  --menu-item-bg-hover: rgba(120, 160, 255, 0.15);
+  --menu-item-bg-active: rgba(120, 160, 255, 0.22);
+  --menu-item-text: #cfe0ff;
+  --menu-folder-icon: #6d9c8f;
+  --menu-form-icon: #6fb3a0;
+  --menu-form-icon-hover: #9fd8c4;
+
+  /* رنگ اختصاصی هر آیکن فرم (سایدبار تیره) — برای تنوع رنگی به‌جای تک‌رنگ بودن همه‌ی آیکن‌ها */
+  --nc-shield: #e56c6c;
+  --nc-user: #e5966c;
+  --nc-coin: #e5c16c;
+  --nc-trend: #dde56c;
+  --nc-calendar: #b2e56c;
+  --nc-sitemap: #88e56c;
+  --nc-pin: #6ce57a;
+  --nc-tag: #6ce5a4;
+  --nc-building: #6ce5cf;
+  --nc-wallet: #6ccfe5;
+  --nc-card: #6ca4e5;
+  --nc-bank: #6c7ae5;
+  --nc-briefcase: #886ce5;
+  --nc-layers: #b26ce5;
+  --nc-tree: #dd6ce5;
+  --nc-file: #e56cc1;
+  --nc-ledger: #e56c96;
+
+  /* رنگ اختصاصی هر ماژول/زیرماژول — برای تمایز بصری بین ماژول‌ها */
+  --nc-mod-settings: #946ce5;
+  --nc-mod-info: #6cbde5;
+  --nc-mod-accounting: #6ce5a8;
+  --nc-mod-goods: #e5a86c;
+  --nc-mod-warehouse: #6ce5e0;
+  --nc-sub-ops: #e5d16c;
+  --nc-sub-structure: #6ca8e5;
+  --nc-sub-report: #e56c94;
+  --nc-sub-config: #6ce56c;
+  --info-icon: #c9962a;
+}
+
+/* تم روشن (سایدبار هم روشن) */
+[data-theme="light"] {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --ink: #1c2430;
+  --ink-soft: #5b6472;
+  --line: #a8b0bc;
+  --primary: #0f5c4f;
+  --primary-soft: #e5f1ee;
+  --accent: #c9762f;
+  --danger: #b3392c;
+  --sidebar-bg: #ffffff;
+  --sidebar-ink: #1c2430;
+  --menu-title-ink: #10201c;
+  --menu-hover-bg: rgba(15, 92, 79, 0.08);
+  --menu-accent-1: #0f5c4f;
+  --menu-accent-1-bg: rgba(15, 92, 79, 0.10);
+  --menu-accent-1-bg-hover: rgba(15, 92, 79, 0.17);
+  --menu-accent-2: #c9762f;
+  --menu-accent-2-bg: rgba(201, 118, 47, 0.10);
+  --menu-accent-2-bg-hover: rgba(201, 118, 47, 0.18);
+  --menu-accent-2-text: #8a4f1d;
+  --menu-accent-2-text-hover: #6e3d14;
+  --menu-item-bg: rgba(15, 92, 121, 0.045);
+  --menu-item-bg-hover: rgba(15, 92, 121, 0.09);
+  --menu-item-bg-active: rgba(15, 92, 121, 0.15);
+  --menu-item-text: #33475b;
+  --menu-folder-icon: #5b8f80;
+  --menu-form-icon: #4f8a76;
+  --menu-form-icon-hover: #2f6b58;
+
+  /* رنگ اختصاصی هر آیکن فرم (سایدبار روشن) — تیره‌تر از نسخه‌ی تیره تا روی پس‌زمینه‌ی سفید خوانا بماند */
+  --nc-shield: #a31f1f;
+  --nc-user: #a34d1f;
+  --nc-coin: #816118;
+  --nc-trend: #7a8118;
+  --nc-calendar: #558118;
+  --nc-sitemap: #318118;
+  --nc-pin: #188125;
+  --nc-tag: #188149;
+  --nc-building: #18816d;
+  --nc-wallet: #186d81;
+  --nc-card: #1f5da3;
+  --nc-bank: #1f2ea3;
+  --nc-briefcase: #3e1fa3;
+  --nc-layers: #6c1fa3;
+  --nc-tree: #9a1fa3;
+  --nc-file: #a31f7b;
+  --nc-ledger: #a31f4d;
+
+  --nc-mod-settings: #4b1fa3;
+  --nc-mod-info: #1f77a3;
+  --nc-mod-accounting: #18814d;
+  --nc-mod-goods: #a3611f;
+  --nc-mod-warehouse: #1f8a83;
+  --nc-sub-ops: #816f18;
+  --nc-sub-structure: #1f61a3;
+  --nc-sub-report: #a31f4b;
+  --nc-sub-config: #188118;
+  --info-icon: #c9962a;
+}
+[data-theme="light"] .sidebar { border-left: 1px solid var(--line); }
+
+/* تم تیره */
+[data-theme="dark"] {
+  --bg: #12161c;
+  --surface: #1a1f27;
+  --ink: #e8ecf1;
+  --ink-soft: #9aa4b2;
+  --line: #2a313c;
+  --primary: #2fbf8f;
+  --primary-soft: #17332b;
+  --accent: #e0954f;
+  --danger: #e5675a;
+  --sidebar-bg: #090c10;
+  --sidebar-ink: #e8ecf1;
+  --menu-title-ink: #ffffff;
+  --menu-hover-bg: rgba(255, 255, 255, 0.12);
+  --menu-accent-1: #3ddc97;
+  --menu-accent-1-bg: rgba(61, 220, 151, 0.20);
+  --menu-accent-1-bg-hover: rgba(61, 220, 151, 0.30);
+  --menu-accent-2: #f0a95f;
+  --menu-accent-2-bg: rgba(240, 169, 95, 0.16);
+  --menu-accent-2-bg-hover: rgba(240, 169, 95, 0.26);
+  --menu-accent-2-text: #f7c895;
+  --menu-accent-2-text-hover: #ffdfae;
+  --menu-item-bg: rgba(120, 160, 255, 0.10);
+  --menu-item-bg-hover: rgba(120, 160, 255, 0.18);
+  --menu-item-bg-active: rgba(120, 160, 255, 0.26);
+  --menu-item-text: #d7e3ff;
+  --menu-folder-icon: #7fb3a5;
+  --menu-form-icon: #7fc2ad;
+  --menu-form-icon-hover: #a9e3cf;
+
+  --nc-shield: #e56c6c;
+  --nc-user: #e5966c;
+  --nc-coin: #e5c16c;
+  --nc-trend: #dde56c;
+  --nc-calendar: #b2e56c;
+  --nc-sitemap: #88e56c;
+  --nc-pin: #6ce57a;
+  --nc-tag: #6ce5a4;
+  --nc-building: #6ce5cf;
+  --nc-wallet: #6ccfe5;
+  --nc-card: #6ca4e5;
+  --nc-bank: #6c7ae5;
+  --nc-briefcase: #886ce5;
+  --nc-layers: #b26ce5;
+  --nc-tree: #dd6ce5;
+  --nc-file: #e56cc1;
+  --nc-ledger: #e56c96;
+
+  --nc-mod-settings: #946ce5;
+  --nc-mod-info: #6cbde5;
+  --nc-mod-accounting: #6ce5a8;
+  --nc-mod-goods: #e5a86c;
+  --nc-mod-warehouse: #6ce5e0;
+  --nc-sub-ops: #e5d16c;
+  --nc-sub-structure: #6ca8e5;
+  --nc-sub-report: #e56c94;
+  --nc-sub-config: #6ce56c;
+  --info-icon: #f2c200;
+}
+
+/* تم آبی (Blue Opal) - روشن، با هویت رنگی آبی‌فیروزه‌ای اپال */
+[data-theme="blue"] {
+  --bg: #eef6f8;
+  --surface: #ffffff;
+  --ink: #1b2b36;
+  --ink-soft: #56717d;
+  --line: #9fb3ba;
+  --primary: #0e7a90;
+  --primary-soft: #e3f3f6;
+  --accent: #2dd4bf;
+  --danger: #c0392b;
+  --sidebar-bg: #f5fafb;
+  --sidebar-ink: #1b2b36;
+  --menu-title-ink: #0f2c36;
+  --menu-hover-bg: rgba(14, 122, 144, 0.09);
+  --menu-accent-1: #0e7a90;
+  --menu-accent-1-bg: rgba(14, 122, 144, 0.10);
+  --menu-accent-1-bg-hover: rgba(14, 122, 144, 0.18);
+  --menu-accent-2: #2dd4bf;
+  --menu-accent-2-bg: rgba(45, 212, 191, 0.14);
+  --menu-accent-2-bg-hover: rgba(45, 212, 191, 0.22);
+  --menu-accent-2-text: #0f766e;
+  --menu-accent-2-text-hover: #0c5a54;
+  --menu-item-bg: rgba(14, 122, 144, 0.045);
+  --menu-item-bg-hover: rgba(14, 122, 144, 0.09);
+  --menu-item-bg-active: rgba(14, 122, 144, 0.15);
+  --menu-item-text: #2b4a56;
+  --menu-folder-icon: #3d8a9c;
+  --menu-form-icon: #2f7d8f;
+  --menu-form-icon-hover: #1c5c6b;
+
+  --nc-shield: #a31f1f;
+  --nc-user: #a34d1f;
+  --nc-coin: #816118;
+  --nc-trend: #7a8118;
+  --nc-calendar: #558118;
+  --nc-sitemap: #318118;
+  --nc-pin: #188125;
+  --nc-tag: #188149;
+  --nc-building: #18816d;
+  --nc-wallet: #186d81;
+  --nc-card: #1f5da3;
+  --nc-bank: #1f2ea3;
+  --nc-briefcase: #3e1fa3;
+  --nc-layers: #6c1fa3;
+  --nc-tree: #9a1fa3;
+  --nc-file: #a31f7b;
+  --nc-ledger: #a31f4d;
+
+  --nc-mod-settings: #4b1fa3;
+  --nc-mod-info: #1f77a3;
+  --nc-mod-accounting: #18814d;
+  --nc-mod-goods: #a3611f;
+  --nc-mod-warehouse: #1f8a83;
+  --nc-sub-ops: #816f18;
+  --nc-sub-structure: #1f61a3;
+  --nc-sub-report: #a31f4b;
+  --nc-sub-config: #188118;
+  --info-icon: #c9962a;
+}
+[data-theme="blue"] .sidebar { border-left: 1px solid var(--line); }
+
+* { box-sizing: border-box; }
+
+button, input, select, textarea {
+  font-family: inherit;
+}
+
+body {
+  margin: 0;
+  font-family: var(--app-font), "Tahoma", sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 14px;
+}
+
+#root { height: 100vh; }
+
+/* ارتفاع ثابت به اندازه‌ی صفحه‌نمایش؛ اسکرول باید فقط داخل ناحیه‌ی محتوا (و گرید) اتفاق بیفتد، نه در کل صفحه */
+.app-shell { display: flex; height: 100vh; overflow: hidden; }
+
+/* نوار عمودی دکمه‌های رنگی (تنظیمات/خروج) در لبه‌ی بیرونی صفحه، کنار سایدبار اصلی */
+.icon-dock {
+  width: 56px;
+  flex-shrink: 0;
+  background: var(--sidebar-bg);
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 0;
+}
+[data-theme="light"] .icon-dock,
+[data-theme="blue"] .icon-dock {
+  border-left: 1px solid var(--line);
+}
+.icon-dock-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #ffffff;
+  transition: filter 0.15s, transform 0.1s;
+}
+.icon-dock-btn:hover { filter: brightness(1.12); }
+.icon-dock-btn:active { transform: scale(0.94); }
+.icon-dock-btn.dock-c-blue { background: #2f6fd6; }
+.icon-dock-btn.dock-c-red { background: #d64545; }
+
+.sidebar {
+  width: 250px;
+  background: var(--sidebar-bg);
+  color: var(--sidebar-ink);
+  padding: 20px 14px;
+  flex-shrink: 0;
+  overflow-y: auto;
+}
+
+.sidebar h1 { font-size: 16px; margin: 0 0 20px; padding: 0 8px; }
+
+.nav-module { margin-bottom: 8px; }
+.module-title {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--menu-accent-1-bg);
+  border: none;
+  border-right: 3px solid var(--menu-accent-1);
+  color: var(--menu-title-ink);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  padding: 10px 10px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.module-title:hover { background: var(--menu-accent-1-bg-hover); }
+.module-title svg { color: var(--menu-accent-1); flex-shrink: 0; }
+/* رنگ اختصاصی هر ماژول — این قاعده مشخص‌تر است و بر قاعده‌ی عمومی بالا اولویت دارد */
+.module-title .module-icon svg { color: inherit; }
+.module-icon.mod-ic-gear { color: var(--nc-mod-settings); }
+.module-icon.mod-ic-database { color: var(--nc-mod-info); }
+.module-icon.mod-ic-calculator { color: var(--nc-mod-accounting); }
+.module-icon.mod-ic-box { color: var(--nc-mod-goods); }
+.module-icon.mod-ic-warehouse { color: var(--nc-mod-warehouse); }
+
+.nav-submodule { margin: 4px 0 8px 0; padding-right: 8px; margin-right: 10px; }
+.submodule-title {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--menu-accent-2-bg);
+  border: none;
+  border-right: 3px solid var(--menu-accent-2);
+  color: var(--menu-accent-2-text);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  padding: 7px 8px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.submodule-title:hover { background: var(--menu-accent-2-bg-hover); color: var(--menu-accent-2-text-hover); }
+.submodule-title svg { color: var(--menu-accent-2); flex-shrink: 0; }
+/* رنگ اختصاصی هر زیرماژول — این قاعده مشخص‌تر است و بر قاعده‌ی عمومی بالا اولویت دارد */
+.submodule-title .submodule-icon svg { color: inherit; }
+.submodule-icon.sub-ic-bolt { color: var(--nc-sub-ops); }
+.submodule-icon.sub-ic-layers { color: var(--nc-sub-structure); }
+.submodule-icon.sub-ic-chart { color: var(--nc-sub-report); }
+.submodule-icon.sub-ic-sliders { color: var(--nc-sub-config); }
+
+.nav-submodule .nav-item { padding-right: 10px; }
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  margin-bottom: 2px;
+  padding: 2px;
+  background: var(--menu-item-bg);
+}
+.nav-item:hover { background: var(--menu-item-bg-hover); }
+.nav-item.active-list { background: var(--menu-item-bg-active); }
+.nav-item .folder-btn {
+  background: none;
+  border: none;
+  color: var(--menu-folder-icon);
+  cursor: pointer;
+  padding: 6px 7px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  line-height: 0;
+  flex-shrink: 0;
+}
+.nav-item .folder-btn:hover { background: var(--menu-hover-bg); color: var(--menu-title-ink); }
+.nav-item .folder-btn.active { color: var(--accent); }
+.nav-item .nav-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--menu-item-text);
+  text-decoration: none;
+  padding: 8px 4px 8px 0;
+  font-size: 12.5px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  text-align: right;
+  font-family: inherit;
+  min-width: 0;
+}
+.nav-item .nav-label span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-item .nav-label:hover { color: var(--menu-title-ink); }
+.nav-item .nav-label.active-new { color: var(--accent); font-weight: 600; }
+.nav-form-icon { display: flex; flex-shrink: 0; color: var(--menu-form-icon); }
+/* رنگ اختصاصی هر آیکن فرم؛ تنوع رنگی سایدبار به‌جای تک‌رنگ بودن همه‌ی آیکن‌ها.
+   specificity این کلاس‌ها از قوانین hover/active-new زیر کمتر است، پس آن دو حالت همچنان اولویت دارند. */
+.nav-form-icon.ic-shield { color: var(--nc-shield); }
+.nav-form-icon.ic-user { color: var(--nc-user); }
+.nav-form-icon.ic-coin { color: var(--nc-coin); }
+.nav-form-icon.ic-trend { color: var(--nc-trend); }
+.nav-form-icon.ic-calendar { color: var(--nc-calendar); }
+.nav-form-icon.ic-sitemap { color: var(--nc-sitemap); }
+.nav-form-icon.ic-pin { color: var(--nc-pin); }
+.nav-form-icon.ic-tag { color: var(--nc-tag); }
+.nav-form-icon.ic-building { color: var(--nc-building); }
+.nav-form-icon.ic-wallet { color: var(--nc-wallet); }
+.nav-form-icon.ic-card { color: var(--nc-card); }
+.nav-form-icon.ic-bank { color: var(--nc-bank); }
+.nav-form-icon.ic-briefcase { color: var(--nc-briefcase); }
+.nav-form-icon.ic-layers { color: var(--nc-layers); }
+.nav-form-icon.ic-tree { color: var(--nc-tree); }
+.nav-form-icon.ic-file { color: var(--nc-file); }
+.nav-form-icon.ic-ledger { color: var(--nc-ledger); }
+.nav-item .nav-label:hover .nav-form-icon { color: var(--menu-form-icon-hover); filter: brightness(1.15) saturate(1.15); }
+.nav-item .nav-label.active-new .nav-form-icon { color: var(--accent); filter: none; }
+
+.welcome-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  text-align: center;
+  color: var(--ink-soft);
+}
+.welcome-page h2 { color: var(--ink); font-size: 20px; margin-bottom: 6px; }
+.welcome-page p { font-size: 13px; max-width: 420px; line-height: 1.9; }
+
+.form-page-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+/* انتخابگر تاریخ شمسی */
+.jalali-date-wrapper { position: relative; width: 100%; }
+.form-field .jalali-date-wrapper { flex: 1; min-width: 0; }
+.jalali-date-input {
+  width: 100%;
+  padding: 9px 10px 9px 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  background: #fff;
+  color: var(--ink);
+  text-align: right;
+  letter-spacing: 1px;
+}
+.jalali-date-input:focus { outline: 2px solid var(--primary); outline-offset: 1px; }
+.jalali-date-calendar-btn {
+  position: absolute;
+  top: 50%;
+  left: 8px;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+  display: flex;
+  padding: 2px;
+}
+.jalali-date-calendar-btn:hover { color: var(--primary); }
+.rmdp-wrapper { direction: rtl; font-family: var(--app-font), "Tahoma", sans-serif; }
+.rmdp-day-picker { direction: rtl; }
+.rmdp-header-values { font-family: inherit; }
+.rmdp-arrow-container:hover { background: var(--primary); }
+.rmdp-day.rmdp-selected span:not(.highlight) { background-color: var(--primary); }
+.rmdp-day:not(.rmdp-disabled):not(.rmdp-day-hidden) span:hover { background-color: var(--primary-soft); color: var(--primary); }
+
+/* راست‌چین‌سازی همه‌ی فیلدهای فرم به‌جز مواردی که صراحتا چپ‌چین تعریف شده‌اند (کد/موبایل و…) */
+.form-field input,
+.form-field select,
+.form-field textarea {
+  text-align: right;
+}
+/* dir="ltr" فقط برای درست نمایش داده شدن ترتیب ارقام لازم است؛ از نظر بصری باید مثل بقیه‌ی فیلدهای
+   فرم راست‌چین بمونه تا با چیدمان RTL فرم هم‌خوان باشه (کد، شماره سند، عنوان دوره مالی و مشابه). */
+.form-field input[dir="ltr"]:not(.jalali-date-input) {
+  text-align: right;
+}
+.amount-input {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  background: #fff;
+  color: var(--ink);
+  text-align: right;
+  width: 100%;
+}
+.amount-input:focus { outline: 2px solid var(--primary); outline-offset: 1px; }
+
+/* درخت دسترسی نقش کاربری */
+.perm-tree {
+  max-height: 420px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.perm-node { margin: 1px 0; }
+.perm-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 4px;
+  border-radius: 6px;
+}
+.perm-row:hover { background: #f5f7f8; }
+.perm-chevron {
+  background: none;
+  border: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+  display: flex;
+  padding: 2px;
+  flex-shrink: 0;
+}
+.perm-label { font-size: 13px; cursor: default; }
+.perm-label-module { font-weight: 700; }
+.perm-label-submodule { color: var(--ink-soft); font-size: 12px; }
+.perm-label-form { font-weight: 500; }
+.perm-level-submodule { margin-right: 20px; }
+.perm-level-form { margin-right: 20px; }
+.perm-ops {
+  margin-right: 44px;
+  display: flex;
+  gap: 16px;
+  padding: 3px 0 6px;
+}
+.perm-op-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+/* فیلتر ستون‌های فهرست */
+.filter-btn {
+  background: none;
+  border: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+  display: flex;
+  padding: 2px;
+  border-radius: 4px;
+}
+.filter-btn:hover { background: rgba(0,0,0,.06); color: var(--ink); }
+.filter-btn.active { color: var(--primary); }
+.filter-backdrop { position: fixed; inset: 0; z-index: 20; }
+.filter-popover {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.12);
+  padding: 10px;
+  width: 220px;
+  z-index: 30;
+  font-weight: 400;
+  text-align: right;
+}
+.filter-op-select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  margin-bottom: 6px;
+  text-align: right;
+}
+.filter-value-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  margin-bottom: 6px;
+  box-sizing: border-box;
+}
+.filter-actions { display: flex; gap: 6px; }
+
+/* نوار عملیات فهرست‌ها (همیشه نمایان) */
+.bulk-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 14px;
+  margin-bottom: 10px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+.bulk-toolbar.active {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.bulk-toolbar.in-header {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-bottom: 0;
+}
+.bulk-toolbar.in-header.active { background: none; }
+.bulk-toolbar.in-header .bulk-toolbar-info { display: none; }
+.bulk-toolbar-actions { display: flex; align-items: center; gap: 10px; }
+.toolbar-menu-item:disabled { color: #c7cdd1; cursor: not-allowed; }
+.toolbar-menu-item:disabled:hover { background: none; }
+
+/* تب‌های داخلی فرم طرف‌حساب */
+.party-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 16px;
+}
+.party-tab {
+  background: none;
+  border: none;
+  padding: 8px 14px;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.party-tab:hover:not(:disabled) { color: var(--ink); }
+.party-tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+.party-tab:disabled { color: #c7cdd1; cursor: not-allowed; }
+
+.sub-list { margin-bottom: 14px; display: flex; flex-direction: column; gap: 6px; }
+.sub-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: #f8f9fb;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+.sub-form { border-top: 1px solid var(--line); padding-top: 14px; }
+
+/* جدول ردیف‌های سند حسابداری */
+.je-lines-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.je-lines-table th {
+  text-align: right;
+  padding: 6px 8px;
+  background: #f8f9fb;
+  border: 1px solid var(--line);
+  font-weight: 600;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.je-lines-table td { padding: 5px 6px; border: 1px solid var(--line); vertical-align: top; }
+.je-lines-table select, .je-lines-table input {
+  width: 100%;
+  padding: 6px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12.5px;
+  box-sizing: border-box;
+}
+.je-lines-scroll { border: 1px solid var(--line); border-radius: 8px; }
+.je-lines-scroll .je-lines-table { border: none; }
+.je-lines-scroll .je-lines-table th { position: sticky; top: 0; z-index: 2; }
+.grid-scroll-area thead th { position: sticky; top: 0; z-index: 2; }
+
+.je-lines-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.je-lines-title { font-weight: 600; font-size: 13px; color: var(--ink); }
+.je-lines-totals { font-weight: 600; color: var(--ink); white-space: nowrap; }
+.je-lines-balance-bad { color: var(--danger); font-size: 12px; font-weight: 600; }
+.je-lines-balance-ok { color: var(--primary); font-size: 12px; font-weight: 600; }
+.grid-scroll-area {
+  max-height: calc(100vh - 300px);
+  min-height: 200px;
+}
+
+/* ریشه‌ی برگشتی DataTable (شامل نوار عملیات دسته‌جمعی + grid-wrap) باید خودش هم در ستون فرم‌گیرِ صفحه
+   (.content > div) کشیده شود، وگرنه به‌اندازه‌ی محتوا کوتاه می‌ماند و grid-wrap زیرِ آن فضای خالی صفحه را پر نمی‌کند. */
+.datatable-root { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+
+/* بسته‌بندی مشترک گرید + فوتر صفحه‌بندی؛ گرید بالا با گوشه‌های تخت پایین، فوتر پایین با گوشه‌های تخت بالا.
+   خود grid-wrap با flex:1 فضای باقیمانده‌ی datatable-root (یا ریشه‌ی صفحه، .content > div) را پر می‌کند و
+   grid-scroll-area داخل آن هم با flex:1 کشیده می‌شود؛ نتیجه این‌که grid-footer همیشه ته صفحه می‌ماند، نه فقط
+   بعد از آخرین ردیف. این flex:1ها خارج از یک زمینه‌ی flex-column (مثلاً je-lines-wrap داخل فرم سند حسابداری
+   که والدش flex نیست) بی‌اثرند. */
+.grid-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.grid-wrap .grid-scroll-area { flex: 1; border-radius: var(--radius) var(--radius) 0 0; border-bottom: none; }
+.grid-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 9px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0 0 var(--radius) var(--radius);
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  /* فوتر همیشه به پایین ناحیه‌ی اسکرول (.content) می‌چسبد؛ کاربر مجبور نیست برای دیدنش
+     تا آخرین ردیف گرید اسکرول کند — چه گرید کوتاه باشد چه بلندتر از صفحه‌ی نمایش */
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.04);
+}
+.grid-footer-controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.grid-page-size { display: flex; align-items: center; gap: 6px; }
+.grid-page-size select {
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.grid-page-nav { display: flex; align-items: center; gap: 8px; }
+.grid-page-nav .btn { padding: 5px 12px; font-size: 12px; }
+.grid-page-indicator { white-space: nowrap; }
+
+.je-breadcrumb {
+  margin-top: 8px;
+  padding: 10px 14px;
+  background: #f8f9fb;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.je-breadcrumb b { color: var(--ink); font-weight: 600; margin-left: 4px; }
+
+/* سلکتور چندستونی با فیلتر (RecordPicker) */
+.picker-field-wrap { display: flex; align-items: center; gap: 4px; width: 100%; }
+.picker-field {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  color: var(--ink);
+  text-align: right;
+}
+.picker-field:hover { border-color: var(--primary); }
+.picker-field:disabled { background: #f3f4f6; color: var(--ink-soft); cursor: not-allowed; }
+.picker-field span { text-align: right; }
+.picker-field svg { color: var(--ink-soft); flex-shrink: 0; }
+.picker-clear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.picker-clear-btn:hover { color: var(--danger); border-color: var(--danger); }
+.picker-placeholder { color: var(--ink-soft); }
+.picker-table-wrap { max-height: 50vh; overflow: auto; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 8px; }
+.picker-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.picker-table th {
+  position: sticky; top: 0; background: #f8f9fb; text-align: right; padding: 6px 8px;
+  border-bottom: 1px solid var(--line); font-weight: 600; color: var(--ink-soft); z-index: 1;
+}
+.picker-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); }
+.picker-table tr:hover td { background: #f8f9fb; }
+.picker-table tr.active-list td { background: rgba(120,160,255,.15); }
+.picker-filter-input {
+  width: 100%; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px;
+  font-family: inherit; font-size: 12px; box-sizing: border-box;
+}
+
+/* هدر سند حسابداری - شبکه سه‌ستونه فشرده */
+.je-header-grid { display: grid; grid-template-columns: 1fr 1fr 1.8fr; gap: 12px 20px; }
+.je-header-grid .form-field { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.je-header-grid .form-field label { font-size: 11.5px; color: var(--ink-soft); white-space: nowrap; flex-shrink: 0; min-width: 78px; text-align: right; }
+.je-header-grid input,
+.je-header-grid select,
+.je-header-grid .jalali-date-input {
+  padding: 6px 8px;
+  font-size: 12.5px;
+  flex: 1;
+  min-width: 0;
+}
+.je-header-grid input:disabled { background: #f3f4f6; color: var(--ink-soft); }
+
+/* ویزارد چندمرحله‌ای پایه */
+.wizard-steps { display: flex; align-items: center; margin-bottom: 20px; }
+.wizard-step { display: flex; align-items: center; gap: 8px; flex: 1; }
+.wizard-step:last-child { flex: 0; }
+.wizard-step-circle {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--line); color: var(--ink-soft);
+  font-size: 12.5px; font-weight: 700; flex-shrink: 0;
+}
+.wizard-step.active .wizard-step-circle { background: var(--primary); color: #fff; }
+.wizard-step.done .wizard-step-circle { background: var(--primary-soft); color: var(--primary); }
+.wizard-step-label { font-size: 12.5px; color: var(--ink-soft); white-space: nowrap; }
+.wizard-step.active .wizard-step-label { color: var(--ink); font-weight: 600; }
+.wizard-step-line { flex: 1; height: 2px; background: var(--line); margin: 0 10px; }
+.wizard-step.done .wizard-step-line { background: var(--primary-soft); }
+.wizard-body { min-height: 200px; margin-bottom: 20px; }
+.wizard-footer { display: flex; align-items: center; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
+
+.theme-swatch-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.theme-swatch-btn:hover { border-color: var(--primary); }
+.theme-swatch-colors { display: flex; }
+.theme-swatch-colors span {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,.15);
+  margin-right: -5px;
+}
+.theme-swatch-colors span:first-child { margin-right: -5px; }
+.theme-swatch-colors span:last-child { margin-right: 0; }
+
+/* گزارش مرور حسابها */
+.ar-filters { padding: 16px; margin-bottom: 14px; }
+.ar-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+.ar-tab {
+  background: none;
+  border: none;
+  padding: 9px 16px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+}
+.ar-tab:hover:not(:disabled) { color: var(--ink); }
+.ar-tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+.ar-tab:disabled { color: #c7cdd1; cursor: not-allowed; }
+.ar-ledger-toolbar { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; }
+.ar-filter-btn { display: flex; align-items: center; gap: 7px; }
+.ar-filter-btn .badge { background: var(--primary); color: #fff; }
+
+/* لیبل کنار فیلد (نه بالای فیلد) - فعلاً مخصوص مرور حسابها */
+.form-field-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.form-field-inline label {
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  min-width: 90px;
+  text-align: left;
+}
+.form-field-inline input,
+.form-field-inline select {
+  flex: 1;
+}
+
+.fx-computed {
+  padding: 9px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: #f8f9fb;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  text-align: left;
+  direction: ltr;
+}
+.fx-cell { display: flex; align-items: center; gap: 4px; justify-content: space-between; }
+.fx-value { flex: 1; text-align: left; direction: ltr; color: var(--ink-soft); font-size: 12px; }
+.fx-icon-btn {
+  background: none;
+  border: none;
+  color: var(--primary);
+  cursor: pointer;
+  display: flex;
+  padding: 3px;
+  flex-shrink: 0;
+}
+.fx-icon-btn:hover { color: var(--accent); }
+
+/* نوار ابزار بالای فرم‌ها */
+.form-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin-bottom: 4px;
+}
+.form-toolbar-left { display: flex; align-items: center; gap: 8px; }
+.form-toolbar-right { display: flex; align-items: center; gap: 10px; }
+.form-toolbar-title { font-size: 14px; font-weight: 600; }
+.form-toolbar-desc { font-size: 12px; color: var(--ink-soft); margin: 8px 2px 14px; }
+.toolbar-icon-btn {
+  background: none;
+  border: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+  display: flex;
+  padding: 6px;
+  border-radius: 6px;
+}
+.toolbar-icon-btn:hover { background: #f0f1f3; color: var(--ink); }
+.toolbar-icon-btn.primary { background: var(--primary); color: #fff; }
+.toolbar-icon-btn.primary:hover { background: var(--primary); filter: brightness(1.08); }
+.toolbar-icon-btn:disabled { opacity: .5; cursor: not-allowed; }
+.form-toolbar-left .toolbar-icon-btn,
+.form-toolbar-right .toolbar-icon-btn {
+  width: 32px; height: 32px; border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center; padding: 0;
+}
+.header-toolbar { display: flex; align-items: center; gap: 6px; }
+.header-toolbar .btn,
+.header-toolbar .toolbar-icon-btn {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0 14px;
+  border-radius: 8px;
+}
+.header-toolbar .toolbar-icon-btn { width: 34px; padding: 0; }
+.bulk-toolbar.in-header .bulk-toolbar-actions { gap: 4px; }
+.toolbar-menu-wrap { position: relative; }
+.toolbar-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.12);
+  min-width: 150px;
+  z-index: 30;
+  overflow: hidden;
+}
+.toolbar-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: right;
+  background: none;
+  border: none;
+  padding: 9px 14px;
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  color: var(--ink);
+}
+.toolbar-menu-item:hover { background: #f5f7f8; }
+.toolbar-menu-item.danger { color: var(--danger); }
+
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+.topbar {
+  height: 56px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 22px;
+  flex-shrink: 0;
+}
+.topbar .user { font-size: 13px; color: var(--ink-soft); }
+.topbar button.logout {
+  background: none; border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 12px; font-size: 12px; cursor: pointer; color: var(--ink-soft);
+}
+
+/* ناحیه‌ی واقعی اسکرول صفحه؛ با flex:1 + min-height:0 داخل ستون .main محدود به فضای باقیمانده می‌شود
+   (نه کل صفحه) و به همین دلیل اسکرول گرید داخلی (grid-scroll-area) و فوتر آن همیشه در محدوده‌ی دید باقی می‌مانند */
+.content { flex: 1; min-height: 0; padding: 22px; overflow-y: auto; }
+/* ریشه‌ی هر صفحه (تک-div برگشتی از کامپوننت صفحه) به‌صورت ستونی حداقل به اندازه‌ی کل ارتفاع .content کشیده
+   می‌شود؛ به همین دلیل اگر داخل آن گریدی (grid-wrap، با flex:1) وجود داشته باشد، فوتر صفحه‌بندی‌اش همیشه
+   به پایین صفحه می‌چسبد — چه تعداد ردیفهای گرید کم باشد چه زیاد — نه فقط وقتی محتوا از صفحه بلندتر است */
+.content > div { display: flex; flex-direction: column; min-height: 100%; }
+
+.tabs-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 8px 16px 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.tab-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: #f3f4f6;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.tab-item:hover { background: #ececef; }
+.tab-item.active {
+  background: var(--bg);
+  color: var(--ink);
+  font-weight: 600;
+  border-color: var(--line);
+  position: relative;
+  top: 1px;
+}
+.tab-close {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: .6;
+  cursor: pointer;
+  display: flex;
+  padding: 1px;
+  border-radius: 4px;
+}
+.tab-close:hover { opacity: 1; background: rgba(0,0,0,.08); }
+
+.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.page-header h2 { margin: 0; font-size: 18px; }
+.page-header p { margin: 2px 0 0; color: var(--ink-soft); font-size: 12.5px; }
+
+.btn {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:hover { filter: brightness(1.08); }
+.btn.secondary { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+.btn.danger { background: var(--danger); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th {
+  text-align: right; padding: 10px 12px; background: #f8f9fb;
+  border-bottom: 1px solid var(--line); color: var(--ink-soft); font-weight: 600; font-size: 12px;
+}
+tbody td { padding: 9px 12px; border-bottom: 1px solid var(--line); }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: #fafbfc; }
+
+.badge {
+  display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px;
+  background: var(--primary-soft); color: var(--primary);
+}
+
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px; }
+.form-field { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.form-field.full { grid-column: 1 / -1; }
+/* فیلدهایی که نمایش‌شان به مقدار فیلد دیگری در همان فرم بستگی دارد (مثلاً «نرخ مالیات» فقط وقتی «کالای
+   خاص» تیک خورده باشد): به‌جای حذف کامل از DOM هنگام غیرفعال بودن شرط (که باعث جابه‌جا شدن فیلدهای
+   بعدی گرید به خانه‌ی قبلی می‌شد)، همیشه رندر می‌شوند و فقط نامرئی/غیرقابل‌کلیک می‌گردند؛ جای‌شان در
+   گرید محفوظ می‌ماند و با تغییر شرط، فیلدهای اطراف دیگر جابه‌جا نمی‌شوند. */
+.form-field.form-field-hidden { visibility: hidden; pointer-events: none; }
+.form-field label { font-size: 12.5px; color: var(--ink-soft); white-space: nowrap; flex-shrink: 0; min-width: 92px; text-align: right; display: inline-flex; align-items: center; gap: 3px; }
+/* آیکن راهنمای کوچک کنار عنوان فیلد؛ به‌جای نوشتن توضیح تکمیلی به‌صورت متن دراز داخل خود لیبل
+   (که تراز فیلدهای هم‌ردیف را به‌هم می‌ریزد)، توضیح پشت این آیکن پنهان می‌شود */
+.field-hint-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.info-hint-btn,
+.field-hint-btn { color: var(--info-icon); }
+.info-hint-btn:hover,
+.field-hint-btn:hover { color: var(--info-icon); filter: brightness(1.15); }
+.form-field input, .form-field select, .form-field textarea {
+  padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; font-family: inherit; font-size: 13px;
+  background: #fff; flex: 1; min-width: 0;
+}
+.form-field input:focus, .form-field select:focus, .form-field textarea:focus {
+  outline: 2px solid var(--primary); outline-offset: 1px;
+}
+.form-field input:disabled, .form-field select:disabled, .form-field textarea:disabled {
+  background: #f3f4f6; color: var(--ink-soft); cursor: not-allowed;
+}
+.checkbox-row { display: flex; align-items: center; gap: 8px; }
+
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(15,20,25,.45);
+  display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; z-index: 50;
+  overflow-y: auto;
+}
+.modal {
+  background: #fff; border-radius: 12px; width: 100%; max-width: 620px; padding: 22px;
+}
+.modal h3 { margin: 0 0 16px; font-size: 16px; }
+.modal .actions { display: flex; justify-content: flex-start; gap: 10px; margin-top: 18px; }
+
+.alert { padding: 10px 14px; border-radius: 8px; font-size: 12.5px; margin-bottom: 14px; }
+.alert.error { background: #fdecea; color: var(--danger); border: 1px solid #f5c6c0; }
+.alert.warn { background: #fff6e6; color: #92600d; border: 1px solid #f2dba3; }
+
+.tree-node { padding: 4px 0; }
+.tree-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
+.tree-row:hover { background: #f2f4f6; }
+.tree-children { margin-right: 20px; border-right: 1px dashed var(--line); padding-right: 10px; }
+
+.login-page {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--primary);
+}
+.login-card {
+  background: #fff; border-radius: 14px; padding: 34px; width: 100%; max-width: 360px;
+}
+.login-card h1 { margin: 0 0 4px; font-size: 18px; }
+.login-card p { margin: 0 0 20px; color: var(--ink-soft); font-size: 12.5px; }
+
+.empty-state { padding: 30px; text-align: center; color: var(--ink-soft); font-size: 13px; }

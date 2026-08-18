@@ -1,0 +1,437 @@
+import { Router } from "express";
+import { prisma } from "../lib/prisma";
+import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
+import { assertNoNegativeStockAfterChange } from "../services/warehouseStockService";
+import { isGoodsItemAllowedForDocNature } from "../services/warehouseDocGoodsFilterService";
+import { validateTrackingFields, trackingFieldsForCreate } from "../utils/warehouseTracking";
+
+// =========================================================================
+// ماژول‌های «انبارداری» / «حسابداری انبار» > ساب‌ماژول: عملیات > حواله انبار (مصرف)
+//
+// فاز دوم سیستم انبار؛ بدون مستند تحلیل اختصاصی (نگاه کنید به یادداشت بالای schema.prisma). مبنا:
+// بدون مبنا / درخواست کالا (طبق «درخواست کالا.md» — الگوی «انتخابگر درخواست کالای تحویل شده»، همان
+// الگوی «باقیمانده»ی رسید انبار خرید، این‌بار روی GoodsRequestLine.approvedQuantity).
+// طبق ماتریس نوع کالا-ماهیت سند انبار: OUTBOUND/«مصرف». طبق تصمیم فاز اول کاربر، فی/مبلغ در این فاز
+// کاربر ندارد (unitCost/amount همیشه صفر؛ نمای حسابداری انبار کاملاً فقط‌خواندنی است).
+// =========================================================================
+
+const router = Router();
+
+interface LineInput {
+  sourceGoodsRequestLineId?: number | null;
+  goodsItemId?: number | null;
+  unitId?: number | null;
+  quantity: number;
+  description?: string | null;
+  serialNumber?: string | null;
+  batchNumber?: string | null;
+  expiryDate?: string | null;
+  physicalLocation?: string | null;
+}
+
+interface HeaderBody {
+  warehouseId: number;
+  date: string;
+  basis: "NO_BASIS" | "GOODS_REQUEST";
+  costCenterId?: number | null;
+  projectId?: number | null;
+  description?: string;
+  lines: LineInput[];
+}
+
+// طرف مقابل حواله انبار (تفصیل نوع «مرکز هزینه» یا «پروژه») همیشه دستی انتخاب می‌شود؛ دقیقاً یکی از
+// این دو فیلد باید پر شود (نه هر دو، نه هیچ‌کدام) — مشابه الگوی «محل مصرف» در GoodsRequestLine.
+function validateCounterparty(costCenterId?: number | null, projectId?: number | null) {
+  if (costCenterId && projectId) throw new Error("طرف مقابل نباید هم‌زمان مرکز هزینه و پروژه باشد");
+  if (!costCenterId && !projectId) throw new Error("طرف مقابل (مرکز هزینه یا پروژه) الزامی است");
+}
+
+async function validateWarehouseAndPeriod(warehouseId: number, date: Date) {
+  const warehouse = await prisma.warehouse.findUnique({ where: { id: warehouseId } });
+  if (!warehouse) throw new Error("انبار یافت نشد");
+  if (!warehouse.isActive) throw new Error("این انبار غیرفعال است و امکان ثبت حواله انبار برای آن وجود ندارد");
+
+  const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
+  if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
+
+  await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
+
+  return { warehouse, fiscalPeriod };
+}
+
+async function goodsRequestLineRemaining(id: number, excludeIssueId?: number) {
+  const line = await prisma.goodsRequestLine.findUnique({
+    where: { id },
+    include: { goodsRequest: true, warehouseIssueLines: true },
+  });
+  if (!line) return null;
+  const approved = line.approvedQuantity != null ? Number(line.approvedQuantity) : Number(line.quantity);
+  const done = line.warehouseIssueLines
+    .filter((w: any) => !excludeIssueId || w.warehouseIssueId !== excludeIssueId)
+    .reduce((s: number, w: any) => s + Number(w.quantity), 0);
+  const remaining = approved - done;
+  return { line, remaining };
+}
+
+async function validateLines(lines: LineInput[], basis: string, excludeIssueId?: number) {
+  if (!Array.isArray(lines) || lines.length === 0) throw new Error("حواله انبار باید حداقل یک ردیف کالا داشته باشد");
+
+  const cleaned: {
+    sourceGoodsRequestLineId: number | null;
+    goodsItemId: number;
+    unitId: number;
+    quantity: number;
+    description: string | null;
+    serialNumber: string | null;
+    batchNumber: string | null;
+    expiryDate: string | null;
+    physicalLocation: string | null;
+  }[] = [];
+
+  for (const [idx, l] of lines.entries()) {
+    const qty = Number(l.quantity);
+    if (!(qty > 0)) throw new Error(`مقدار ردیف ${idx + 1} باید عددی مثبت باشد`);
+
+    let goodsItemId = l.goodsItemId || 0;
+    let unitId = l.unitId || 0;
+    let sourceGoodsRequestLineId: number | null = null;
+
+    if (basis === "GOODS_REQUEST") {
+      if (!l.sourceGoodsRequestLineId) throw new Error(`ردیف ${idx + 1}: انتخاب ردیف درخواست کالا الزامی است`);
+      const info = await goodsRequestLineRemaining(l.sourceGoodsRequestLineId, excludeIssueId);
+      if (!info) throw new Error(`ردیف درخواست کالا برای ردیف ${idx + 1} یافت نشد`);
+      if (info.line.goodsRequest.status !== "APPROVED") throw new Error(`درخواست کالای ردیف ${idx + 1} در وضعیت تایید نیست`);
+      if (qty > info.remaining) throw new Error(`مقدار ردیف ${idx + 1} از باقیمانده‌ی قابل تحویل (${info.remaining}) بیشتر است`);
+      sourceGoodsRequestLineId = info.line.id;
+      goodsItemId = info.line.goodsItemId;
+      unitId = info.line.unitId;
+    } else {
+      // بدون مبنا
+      if (!goodsItemId) throw new Error(`کالا برای ردیف ${idx + 1} الزامی است`);
+      const allowed = await isGoodsItemAllowedForDocNature(goodsItemId, "OUTBOUND", "مصرف");
+      if (!allowed) throw new Error(`کالای ردیف ${idx + 1} برای حواله انبار مجاز نیست`);
+    }
+
+    const item = await prisma.goodsItem.findUnique({ where: { id: goodsItemId } });
+    if (!item) throw new Error(`کالای ردیف ${idx + 1} یافت نشد`);
+    if (item.kind !== "GOODS") throw new Error(`ردیف ${idx + 1}: فقط کالا قابل انتخاب است`);
+    if (!item.isActive) throw new Error(`کالای ردیف ${idx + 1} غیرفعال است`);
+    if (!unitId) unitId = item.mainUnitId;
+
+    cleaned.push({
+      sourceGoodsRequestLineId,
+      goodsItemId,
+      unitId,
+      quantity: qty,
+      description: l.description || null,
+      serialNumber: l.serialNumber || null,
+      batchNumber: l.batchNumber || null,
+      expiryDate: l.expiryDate || null,
+      physicalLocation: l.physicalLocation || null,
+    });
+  }
+  await validateTrackingFields(cleaned);
+  return cleaned;
+}
+
+// =========================================================================
+// پیکر «باقیمانده» درخواست کالای تحویل‌شده (طبق «درخواست کالا.md»)
+// =========================================================================
+
+router.get("/warehouse-issues/pickable-goods-request-lines", async (req, res) => {
+  const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
+  const lines = await prisma.goodsRequestLine.findMany({
+    where: { goodsRequest: { status: "APPROVED", ...(destDate ? { date: { lte: destDate } } : {}) } },
+    include: { goodsRequest: { include: { orgUnit: true } }, goodsItem: true, unit: true, warehouseIssueLines: true },
+    orderBy: { id: "desc" },
+  });
+  const result = lines
+    .map((l: any) => {
+      const approved = l.approvedQuantity != null ? Number(l.approvedQuantity) : Number(l.quantity);
+      const done = l.warehouseIssueLines.reduce((s: number, w: any) => s + Number(w.quantity), 0);
+      const remaining = approved - done;
+      return {
+        id: l.id,
+        sourceGoodsRequestLineId: l.id,
+        goodsRequestId: l.goodsRequest.id,
+        number: l.goodsRequest.number,
+        date: l.goodsRequest.date,
+        orgUnitTitle: l.goodsRequest.orgUnit.title,
+        goodsItemId: l.goodsItemId,
+        goodsItemCode: l.goodsItem.fullCode,
+        goodsItemTitle: l.goodsItem.title,
+        unitId: l.unitId,
+        unitTitle: l.unit.title,
+        quantity: approved,
+        done,
+        remaining,
+      };
+    })
+    .filter((r: any) => r.remaining > 0);
+  res.json(result);
+});
+
+// =========================================================================
+// CRUD + قطعی‌کردن/برگشت
+// =========================================================================
+
+function counterpartyTitle(d: any): string | null {
+  if (d.costCenter) return d.costCenter.title;
+  if (d.project) return d.project.title;
+  return null;
+}
+
+router.get("/warehouse-issues", async (_req, res) => {
+  const items = await prisma.warehouseIssue.findMany({
+    include: { warehouse: true, fiscalPeriod: true, lines: true, costCenter: true, project: true },
+    orderBy: { id: "desc" },
+  });
+  res.json(
+    items.map((d: any) => ({
+      id: d.id,
+      number: d.number,
+      date: d.date,
+      warehouseId: d.warehouseId,
+      warehouseTitle: d.warehouse.title,
+      fiscalPeriodTitle: d.fiscalPeriod.title,
+      basis: d.basis,
+      costCenterId: d.costCenterId,
+      projectId: d.projectId,
+      counterpartyTitle: counterpartyTitle(d),
+      description: d.description,
+      status: d.status,
+      lineCount: d.lines.length,
+      totalQuantity: d.lines.reduce((s: number, l: any) => s + Number(l.quantity), 0),
+      totalAmount: d.lines.reduce((s: number, l: any) => s + Number(l.amount), 0),
+    }))
+  );
+});
+
+router.get("/warehouse-issues/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const d = await prisma.warehouseIssue.findUnique({
+    where: { id },
+    include: {
+      warehouse: true,
+      fiscalPeriod: true,
+      costCenter: true,
+      project: true,
+      lines: { include: { goodsItem: true, unit: true }, orderBy: { rowOrder: "asc" } },
+    },
+  });
+  if (!d) return res.status(404).json({ error: "حواله انبار یافت نشد" });
+  res.json({
+    id: d.id,
+    number: d.number,
+    date: d.date,
+    warehouseId: d.warehouseId,
+    warehouseTitle: d.warehouse.title,
+    fiscalPeriodId: d.fiscalPeriodId,
+    fiscalPeriodTitle: d.fiscalPeriod.title,
+    basis: d.basis,
+    costCenterId: d.costCenterId,
+    projectId: d.projectId,
+    counterpartyTitle: counterpartyTitle(d),
+    description: d.description,
+    status: d.status,
+    finalizedAt: d.finalizedAt,
+    lines: d.lines.map((l: any) => ({
+      id: l.id,
+      sourceGoodsRequestLineId: l.sourceGoodsRequestLineId,
+      goodsItemId: l.goodsItemId,
+      goodsItemCode: l.goodsItem.fullCode,
+      goodsItemTitle: l.goodsItem.title,
+      unitId: l.unitId,
+      unitTitle: l.unit.title,
+      quantity: Number(l.quantity),
+      unitCost: Number(l.unitCost),
+      amount: Number(l.amount),
+      description: l.description,
+      serialNumber: l.serialNumber,
+      batchNumber: l.batchNumber,
+      expiryDate: l.expiryDate,
+      physicalLocation: l.physicalLocation,
+    })),
+  });
+});
+
+router.post("/warehouse-issues", async (req, res) => {
+  const body = req.body as HeaderBody;
+  if (!body.warehouseId || !body.date) return res.status(400).json({ error: "انبار و تاریخ سند الزامی است" });
+  if (!body.basis) return res.status(400).json({ error: "مبنا الزامی است" });
+
+  try {
+    validateCounterparty(body.costCenterId, body.projectId);
+    if (body.costCenterId) {
+      const cc = await prisma.costCenter.findUnique({ where: { id: body.costCenterId } });
+      if (!cc) throw new Error("مرکز هزینه یافت نشد");
+    }
+    if (body.projectId) {
+      const p = await prisma.project.findUnique({ where: { id: body.projectId } });
+      if (!p) throw new Error("پروژه یافت نشد");
+    }
+    const cleanedLines = await validateLines(body.lines, body.basis);
+    const date = new Date(body.date);
+    const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
+
+    const lastNumber = await prisma.warehouseIssue.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
+    const number = lastNumber ? lastNumber.number + 1 : 1;
+
+    const created = await prisma.warehouseIssue.create({
+      data: {
+        warehouseId: warehouse.id,
+        fiscalPeriodId: fiscalPeriod.id,
+        number,
+        date,
+        basis: body.basis,
+        costCenterId: body.costCenterId || null,
+        projectId: body.projectId || null,
+        description: body.description || null,
+        status: "DRAFT",
+        lines: {
+          create: cleanedLines.map((l, idx) => ({
+            sourceGoodsRequestLineId: l.sourceGoodsRequestLineId,
+            goodsItemId: l.goodsItemId,
+            unitId: l.unitId,
+            quantity: l.quantity,
+            unitCost: 0,
+            amount: 0,
+            description: l.description,
+            rowOrder: idx,
+            ...trackingFieldsForCreate(l),
+          })),
+        },
+      },
+    });
+
+    res.status(201).json(created);
+  } catch (e: any) {
+    if (e.code === "P2002") return res.status(400).json({ error: "شماره سند تکراری است" });
+    res.status(400).json({ error: e.message || "خطا در ذخیره" });
+  }
+});
+
+router.put("/warehouse-issues/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const body = req.body as HeaderBody;
+
+  const existing = await prisma.warehouseIssue.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ error: "حواله انبار یافت نشد" });
+  if (existing.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل ویرایش هستند؛ ابتدا از «قطعی» برگردانید" });
+
+  if (!body.warehouseId || !body.date) return res.status(400).json({ error: "انبار و تاریخ سند الزامی است" });
+  if (!body.basis) return res.status(400).json({ error: "مبنا الزامی است" });
+
+  try {
+    validateCounterparty(body.costCenterId, body.projectId);
+    if (body.costCenterId) {
+      const cc = await prisma.costCenter.findUnique({ where: { id: body.costCenterId } });
+      if (!cc) throw new Error("مرکز هزینه یافت نشد");
+    }
+    if (body.projectId) {
+      const p = await prisma.project.findUnique({ where: { id: body.projectId } });
+      if (!p) throw new Error("پروژه یافت نشد");
+    }
+    const cleanedLines = await validateLines(body.lines, body.basis, id);
+    const date = new Date(body.date);
+    const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
+
+    await prisma.$transaction([
+      prisma.warehouseIssueLine.deleteMany({ where: { warehouseIssueId: id } }),
+      prisma.warehouseIssue.update({
+        where: { id },
+        data: {
+          warehouseId: warehouse.id,
+          fiscalPeriodId: fiscalPeriod.id,
+          date,
+          basis: body.basis,
+          costCenterId: body.costCenterId || null,
+          projectId: body.projectId || null,
+          description: body.description || null,
+          lines: {
+            create: cleanedLines.map((l, idx) => ({
+              sourceGoodsRequestLineId: l.sourceGoodsRequestLineId,
+              goodsItemId: l.goodsItemId,
+              unitId: l.unitId,
+              quantity: l.quantity,
+              unitCost: 0,
+              amount: 0,
+              description: l.description,
+              rowOrder: idx,
+              ...trackingFieldsForCreate(l),
+            })),
+          },
+        },
+      }),
+    ]);
+
+    res.json({ id });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در ذخیره" });
+  }
+});
+
+router.delete("/warehouse-issues/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const d = await prisma.warehouseIssue.findUnique({ where: { id } });
+  if (!d) return res.status(404).json({ error: "یافت نشد" });
+  if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «قطعی» برگردانید" });
+  await prisma.warehouseIssue.delete({ where: { id } });
+  res.status(204).send();
+});
+
+// قطعی کردن: برخلاف اسناد وارده (که قطعی‌کردن‌شان همیشه ایمن است)، حواله انبار یک سند صادره است — یعنی
+// خود عملیات قطعی‌کردن موجودی را کم می‌کند، پس دقیقاً همین‌جا (نه در برگشت) باید کنترل موجودی منفی
+// انجام شود (اگر انبار پرچم کنترل موجودی منفی را داشته باشد).
+router.post("/warehouse-issues/:id/finalize", async (req, res) => {
+  const id = Number(req.params.id);
+  const d = await prisma.warehouseIssue.findUnique({ where: { id }, include: { lines: true, warehouse: true } });
+  if (!d) return res.status(404).json({ error: "یافت نشد" });
+  if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل قطعی‌کردن هستند" });
+  if (d.lines.length === 0) return res.status(400).json({ error: "سند باید حداقل یک ردیف کالا داشته باشد" });
+
+  try {
+    await validateWarehouseAndPeriod(d.warehouseId, d.date);
+
+    if (d.warehouse.stockControl) {
+      for (const l of d.lines) {
+        // eslint-disable-next-line no-await-in-loop
+        await assertNoNegativeStockAfterChange({
+          warehouseId: d.warehouseId,
+          goodsItemId: l.goodsItemId,
+          asOfDate: d.date,
+          delta: -Number(l.quantity),
+          excludeWarehouseIssueId: d.id,
+        });
+      }
+    }
+
+    await prisma.$transaction([
+      prisma.warehouseIssue.update({ where: { id }, data: { status: "FINALIZED", finalizedAt: new Date() } }),
+      prisma.warehouse.update({ where: { id: d.warehouseId }, data: { hasTransactions: true } }),
+      ...d.lines.map((l: any) => prisma.goodsItem.update({ where: { id: l.goodsItemId }, data: { hasTransactions: true } })),
+    ]);
+
+    res.json({ id, status: "FINALIZED" });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در قطعی‌کردن سند" });
+  }
+});
+
+// برگشت از قطعی: برای سند صادره، برگشت یعنی موجودی دوباره افزایش پیدا می‌کند — ایمن است و نیازی به
+// کنترل موجودی منفی ندارد (برخلاف اسناد وارده که برگشت‌شان کاهشی و ریسک‌دار است).
+router.post("/warehouse-issues/:id/revert", async (req, res) => {
+  const id = Number(req.params.id);
+  const d = await prisma.warehouseIssue.findUnique({ where: { id } });
+  if (!d) return res.status(404).json({ error: "یافت نشد" });
+  if (d.status !== "FINALIZED") return res.status(400).json({ error: "فقط اسناد «قطعی» قابل برگشت هستند" });
+
+  try {
+    await prisma.warehouseIssue.update({ where: { id }, data: { status: "DRAFT", finalizedAt: null } });
+    res.json({ id, status: "DRAFT" });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در برگشت از قطعی" });
+  }
+});
+
+export default router;

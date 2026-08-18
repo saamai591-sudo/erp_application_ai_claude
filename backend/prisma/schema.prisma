@@ -1,0 +1,2148 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Permission {
+  id        Int              @id @default(autoincrement())
+  module    String
+  form      String
+  operation String
+  code      String           @unique
+  roles     RolePermission[]
+}
+
+model Role {
+  id          Int              @id @default(autoincrement())
+  code        Int              @unique
+  title       String           @unique
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  permissions RolePermission[]
+  users       UserRole[]
+}
+
+model RolePermission {
+  roleId       Int
+  permissionId Int
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model User {
+  id                       Int               @id @default(autoincrement())
+  code                     Int               @unique
+  mobile                   String            @unique @db.VarChar(10)
+  firstName                String
+  lastName                 String
+  isActive                 Boolean           @default(true)
+  passwordHash             String
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
+  hasTransactions          Boolean           @default(false)
+  partyId                  Int?
+  goodsRequestsApproved    GoodsRequest[]    @relation("GoodsRequestApprover")
+  goodsRequestsReviewed    GoodsRequest[]    @relation("GoodsRequestReviewer")
+  purchaseRequestsApproved PurchaseRequest[] @relation("PurchaseRequestApprover")
+  purchaseRequestsReviewed PurchaseRequest[] @relation("PurchaseRequestReviewer")
+  supplyRequestsApproved   SupplyRequest[]   @relation("SupplyRequestApprover")
+  supplyRequestsReviewed   SupplyRequest[]   @relation("SupplyRequestReviewer")
+  party                    Party?            @relation(fields: [partyId], references: [id])
+  roles                    UserRole[]
+}
+
+model UserRole {
+  userId Int
+  roleId Int
+  role   Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+model Currency {
+  id               Int                  @id @default(autoincrement())
+  code             String               @unique
+  title            String               @unique
+  decimalPlaces    Int                  @default(2)
+  isBase           Boolean              @default(false)
+  rateDirection    RateDirection?
+  baseVolume       Int                  @default(1)
+  hasTransactions  Boolean              @default(false)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  closingLines     AccountClosingLine[]
+  cheques          ChequeItem[]
+  rates            ExchangeRate[]
+  journalLines     JournalEntryLine[]
+  payments         Payment[]
+  priceInquiries   PriceInquiry[]
+  purchaseInvoices PurchaseInvoice[]
+  purchaseOrders   PurchaseOrder[]
+  receipts         Receipt[]
+  salesInvoices    SalesInvoice[]
+  salesOrders      SalesOrder[]
+  salesQuotes      SalesQuote[]
+}
+
+model ExchangeRate {
+  id         Int      @id @default(autoincrement())
+  date       DateTime @db.Date
+  currencyId Int
+  rate       Decimal  @db.Decimal(18, 6)
+  createdAt  DateTime @default(now())
+  currency   Currency @relation(fields: [currencyId], references: [id])
+
+  @@unique([date, currencyId])
+}
+
+model FiscalPeriod {
+  id                     Int                     @id @default(autoincrement())
+  code                   String                  @unique
+  title                  String                  @unique @db.VarChar(4)
+  fromDate               DateTime                @db.Date
+  toDate                 DateTime                @db.Date
+  hasTransactions        Boolean                 @default(false)
+  createdAt              DateTime                @default(now())
+  accountClosings        AccountClosing[]
+  chequeDeposits         ChequeDeposit[]
+  chequeDepositReturns   ChequeDepositReturn[]
+  chequeClearingReceivables ChequeClearingReceivable[]
+  chequeClearingPayables ChequeClearingPayable[]
+  deliveryAuthorizations DeliveryAuthorization[]
+  goodsRequests          GoodsRequest[]
+  initialInventories     InitialInventory[]
+  inquiryAuthorizations  InquiryAuthorization[]
+  inquiryEvaluations     InquiryEvaluation[]
+  journalEntries         JournalEntry[]
+  openingClosingEntries  OpeningClosingEntry[]
+  payments               Payment[]
+  priceInquiries         PriceInquiry[]
+  purchaseInvoices       PurchaseInvoice[]
+  purchaseOrders         PurchaseOrder[]
+  purchasePlannings      PurchasePlanning[]
+  purchaseRequests       PurchaseRequest[]
+  receipts               Receipt[]
+  salesDeliveries        SalesDelivery[]
+  salesInvoices          SalesInvoice[]
+  salesOrders            SalesOrder[]
+  salesQuotes            SalesQuote[]
+  supplyRequests         SupplyRequest[]
+  warehouseAdjustments   WarehouseAdjustment[]
+  warehouseIssues        WarehouseIssue[]
+  warehouseReceipts      WarehouseReceipt[]
+  warehouseTransfers     WarehouseTransfer[]
+}
+
+model OrgStructure {
+  id       Int            @id @default(autoincrement())
+  parentId Int?
+  code     String
+  title    String
+  parent   OrgStructure?  @relation("OrgTree", fields: [parentId], references: [id])
+  children OrgStructure[] @relation("OrgTree")
+  orgUnits OrgUnit[]
+
+  @@unique([parentId, code])
+}
+
+model GeoRegion {
+  id        Int            @id @default(autoincrement())
+  parentId  Int?
+  level     GeoLevel
+  code      String
+  title     String
+  parent    GeoRegion?     @relation("GeoTree", fields: [parentId], references: [id])
+  children  GeoRegion[]    @relation("GeoTree")
+  addresses PartyAddress[]
+
+  @@unique([parentId, code])
+}
+
+model DetailType {
+  id                Int               @id @default(autoincrement())
+  code              Int               @unique
+  title             String            @unique
+  codeLength        Int               @default(5)
+  startNumber       Int
+  endNumber         Int
+  manualEntry       Boolean           @default(false)
+  accountsAsDetail1 Account[]         @relation("AccountDetailType1")
+  accountsAsDetail2 Account[]         @relation("AccountDetailType2")
+  accountsAsDetail3 Account[]         @relation("AccountDetailType3")
+  codes             DetailCodeUsage[]
+}
+
+model DetailCodeUsage {
+  id           Int        @id @default(autoincrement())
+  code         String     @unique
+  detailTypeId Int
+  entityTable  String
+  entityId     Int
+  createdAt    DateTime   @default(now())
+  detailType   DetailType @relation(fields: [detailTypeId], references: [id])
+}
+
+model Party {
+  id                 Int                @id @default(autoincrement())
+  detailCode         String             @unique
+  category           PartyCategory
+  nationality        Nationality        @default(LOCAL)
+  nationalId         String?
+  foreignId          String?
+  economicCode       String?
+  firstName          String?
+  lastName           String?
+  legalType          LegalPartyType?
+  name               String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  hasTransactions    Boolean            @default(false)
+  isActive           Boolean            @default(true)
+  bankAccountsAsBank BankAccount[]      @relation("BankAccountBankParty")
+  bankBranches       BankBranch[]       @relation("BankParty")
+  cheques            ChequeItem[]
+  customer           Customer?
+  goodsRequestLines  GoodsRequestLine[]
+  addresses          PartyAddress[]
+  bankAccounts       PartyBankAccount[]
+  phones             PartyPhone[]
+  payments           Payment[]
+  purchaseExpert     PurchaseExpert?
+  purchaseInvoices   PurchaseInvoice[]
+  receipts           Receipt[]
+  supplier           Supplier?
+  users              User[]
+  warehousesManaged  Warehouse[]        @relation("WarehouseManager")
+  warehouseReceipts  WarehouseReceipt[]
+}
+
+model PartyAddress {
+  id         Int         @id @default(autoincrement())
+  partyId    Int
+  type       AddressType
+  cityId     Int
+  address    String?
+  postalCode String?
+  isPrimary  Boolean     @default(false)
+  city       GeoRegion   @relation(fields: [cityId], references: [id])
+  party      Party       @relation(fields: [partyId], references: [id], onDelete: Cascade)
+}
+
+model PartyPhone {
+  id        Int       @id @default(autoincrement())
+  partyId   Int
+  type      PhoneType
+  number    String
+  isPrimary Boolean   @default(false)
+  party     Party     @relation(fields: [partyId], references: [id], onDelete: Cascade)
+}
+
+model PartyBankAccount {
+  id            Int     @id @default(autoincrement())
+  partyId       Int
+  bankPartyId   Int?
+  accountNumber String?
+  iban          String?
+  cardNumber    String?
+  party         Party   @relation(fields: [partyId], references: [id], onDelete: Cascade)
+}
+
+model BankAccountType {
+  id            Int           @id @default(autoincrement())
+  code          Int           @unique
+  title         String        @unique
+  hasChequeBook Boolean       @default(false)
+  bankAccounts  BankAccount[]
+}
+
+model BankBranch {
+  id                           Int                     @id @default(autoincrement())
+  code                         Int
+  title                        String                  @unique
+  bankPartyId                  Int
+  hasTransactions              Boolean                 @default(false)
+  bankAccounts                 BankAccount[]
+  bankParty                    Party                   @relation("BankParty", fields: [bankPartyId], references: [id])
+  cheques                      ChequeItem[]
+  paymentInstrumentChequeLines PaymentInstrumentLine[] @relation("PaymentInstrumentChequeBankBranch")
+  receiptInstrumentChequeLines ReceiptInstrumentLine[] @relation("ReceiptInstrumentChequeBankBranch")
+
+  @@unique([bankPartyId, code])
+}
+
+model BankAccount {
+  id                     Int                     @id @default(autoincrement())
+  detailCode             String                  @unique
+  accountTypeId          Int
+  bankBranchId           Int
+  accountNumber          String
+  currencyId             Int?
+  bankPartyId            Int?
+  hasTransactions        Boolean                 @default(false)
+  accountType            BankAccountType         @relation(fields: [accountTypeId], references: [id])
+  bankBranch             BankBranch              @relation(fields: [bankBranchId], references: [id])
+  bankParty              Party?                  @relation("BankAccountBankParty", fields: [bankPartyId], references: [id])
+  chequesOwned           ChequeItem[]
+  paymentInstrumentLines PaymentInstrumentLine[] @relation("PaymentInstrumentBankAccount")
+  receiptInstrumentLines ReceiptInstrumentLine[] @relation("ReceiptInstrumentBankAccount")
+  chequeDeposits         ChequeDeposit[]
+
+  @@unique([bankPartyId, accountNumber])
+}
+
+model CostCenter {
+  id                Int                @id @default(autoincrement())
+  detailCode        String             @unique
+  title             String             @unique
+  type              CostCenterType     @default(ADMIN)
+  orgUnitId         Int
+  hasTransactions   Boolean            @default(false)
+  orgUnit           OrgUnit            @relation(fields: [orgUnitId], references: [id])
+  goodsRequestLines GoodsRequestLine[]
+  warehouseIssues   WarehouseIssue[]
+}
+
+model OrgUnit {
+  id               Int               @id @default(autoincrement())
+  code             Int               @unique
+  title            String            @unique
+  orgStructureId   Int
+  hasTransactions  Boolean           @default(false)
+  costCenters      CostCenter[]
+  goodsRequests    GoodsRequest[]
+  orgStructure     OrgStructure      @relation(fields: [orgStructureId], references: [id])
+  purchaseRequests PurchaseRequest[]
+  supplyRequests   SupplyRequest[]
+}
+
+model CashBox {
+  id                     Int                     @id @default(autoincrement())
+  detailCode             String                  @unique
+  title                  String                  @unique
+  hasTransactions        Boolean                 @default(false)
+  paymentInstrumentLines PaymentInstrumentLine[]
+  receiptInstrumentLines ReceiptInstrumentLine[]
+}
+
+model ReportingLevel {
+  id         Int       @id @default(autoincrement())
+  order      Int       @unique
+  title      String    @unique
+  codeLength Int
+  accounts   Account[]
+}
+
+model Account {
+  id                             Int                             @id @default(autoincrement())
+  parentId                       Int?
+  levelId                        Int
+  code                           String
+  title                          String
+  natureGroup                    AccountNatureGroup?
+  natureDetail                   AccountNatureDetail?
+  balanceNature                  BalanceNature?
+  isCurrency                     Boolean                         @default(false)
+  isRevaluable                   Boolean                         @default(false)
+  detailType1Id                  Int?
+  detailType2Id                  Int?
+  detailType3Id                  Int?
+  hasTransactions                Boolean                         @default(false)
+  createdAt                      DateTime                        @default(now())
+  detailType1                    DetailType?                     @relation("AccountDetailType1", fields: [detailType1Id], references: [id])
+  detailType2                    DetailType?                     @relation("AccountDetailType2", fields: [detailType2Id], references: [id])
+  detailType3                    DetailType?                     @relation("AccountDetailType3", fields: [detailType3Id], references: [id])
+  level                          ReportingLevel                  @relation(fields: [levelId], references: [id])
+  parent                         Account?                        @relation("AccountTree", fields: [parentId], references: [id])
+  children                       Account[]                       @relation("AccountTree")
+  closingDestinations            AccountClosing[]                @relation("ClosingDestination")
+  closingLines                   AccountClosingLine[]            @relation("ClosingLineAccount")
+  goodsServiceAccountingSettings GoodsServiceAccountingSetting[]
+  lines                          JournalEntryLine[]
+
+  @@unique([parentId, code])
+}
+
+model DocumentType {
+  id             Int            @id @default(autoincrement())
+  code           Int            @unique
+  title          String         @unique
+  isSystem       Boolean        @default(false)
+  systemKey      String?        @unique
+  journalEntries JournalEntry[]
+}
+
+model JournalEntry {
+  id                  Int                  @id @default(autoincrement())
+  fiscalPeriodId      Int
+  number              Int
+  referenceNumber     Int
+  dailyNumber         Int
+  date                DateTime             @db.Date
+  documentTypeId      Int
+  description         String?
+  status              JournalEntryStatus   @default(DRAFT)
+  isManual            Boolean              @default(true)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  issuingSystem       IssuingSystem        @default(ACCOUNTING)
+  accountClosing      AccountClosing?
+  documentType        DocumentType         @relation(fields: [documentTypeId], references: [id])
+  fiscalPeriod        FiscalPeriod         @relation(fields: [fiscalPeriodId], references: [id])
+  lines               JournalEntryLine[]
+  sources             JournalEntrySource[]
+  openingClosingEntry OpeningClosingEntry?
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model JournalEntrySource {
+  id             Int          @id @default(autoincrement())
+  journalEntryId Int
+  label          String
+  path           String
+  createdAt      DateTime     @default(now())
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+}
+
+model JournalEntryLine {
+  id             Int          @id @default(autoincrement())
+  journalEntryId Int
+  accountId      Int
+  detail1Code    String?
+  detail2Code    String?
+  detail3Code    String?
+  currencyId     Int
+  debit          Decimal      @default(0) @db.Decimal(18, 2)
+  credit         Decimal      @default(0) @db.Decimal(18, 2)
+  fxRate         Decimal      @default(1) @db.Decimal(18, 6)
+  baseDebit      Decimal      @default(0) @db.Decimal(18, 2)
+  baseCredit     Decimal      @default(0) @db.Decimal(18, 2)
+  description    String?
+  rowOrder       Int          @default(0)
+  account        Account      @relation(fields: [accountId], references: [id])
+  currency       Currency     @relation(fields: [currencyId], references: [id])
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+}
+
+model AccountClosing {
+  id                   Int                  @id @default(autoincrement())
+  fiscalPeriodId       Int
+  number               Int
+  date                 DateTime             @db.Date
+  destinationAccountId Int
+  detail1Code          String?
+  detail2Code          String?
+  detail3Code          String?
+  description          String
+  totalDebit           Decimal              @default(0) @db.Decimal(18, 2)
+  totalCredit          Decimal              @default(0) @db.Decimal(18, 2)
+  difference           Decimal              @default(0) @db.Decimal(18, 2)
+  journalEntryId       Int?                 @unique
+  createdAt            DateTime             @default(now())
+  destinationAccount   Account              @relation("ClosingDestination", fields: [destinationAccountId], references: [id])
+  fiscalPeriod         FiscalPeriod         @relation(fields: [fiscalPeriodId], references: [id])
+  journalEntry         JournalEntry?        @relation(fields: [journalEntryId], references: [id])
+  lines                AccountClosingLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model AccountClosingLine {
+  id          Int            @id @default(autoincrement())
+  closingId   Int
+  accountId   Int
+  detail1Code String?
+  detail2Code String?
+  detail3Code String?
+  currencyId  Int
+  debit       Decimal        @default(0) @db.Decimal(18, 2)
+  credit      Decimal        @default(0) @db.Decimal(18, 2)
+  fxRate      Decimal        @default(1) @db.Decimal(18, 6)
+  baseDebit   Decimal        @default(0) @db.Decimal(18, 2)
+  baseCredit  Decimal        @default(0) @db.Decimal(18, 2)
+  account     Account        @relation("ClosingLineAccount", fields: [accountId], references: [id])
+  closing     AccountClosing @relation(fields: [closingId], references: [id], onDelete: Cascade)
+  currency    Currency       @relation(fields: [currencyId], references: [id])
+}
+
+model OpeningClosingEntry {
+  id             Int                @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime           @db.Date
+  type           OpeningClosingType
+  description    String
+  journalEntryId Int?               @unique
+  createdAt      DateTime           @default(now())
+  fiscalPeriod   FiscalPeriod       @relation(fields: [fiscalPeriodId], references: [id])
+  journalEntry   JournalEntry?      @relation(fields: [journalEntryId], references: [id])
+
+  @@unique([fiscalPeriodId, type])
+  @@unique([fiscalPeriodId, number])
+}
+
+model ImportJob {
+  id            Int      @id @default(autoincrement())
+  entityType    String
+  status        String   @default("PENDING")
+  totalRows     Int      @default(0)
+  processedRows Int      @default(0)
+  successCount  Int      @default(0)
+  errorCount    Int      @default(0)
+  resultData    Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model UnitOfMeasure {
+  id                         Int                         @id @default(autoincrement())
+  code                       Int                         @unique
+  title                      String                      @unique
+  isWeight                   Boolean                     @default(false)
+  kgEquivalent               Decimal?                    @db.Decimal(18, 6)
+  hasTransactions            Boolean                     @default(false)
+  createdAt                  DateTime                    @default(now())
+  deliveryAuthorizationLines DeliveryAuthorizationLine[]
+  mainOfItems                GoodsItem[]                 @relation("GoodsItemMainUnit")
+  weightOfItems              GoodsItem[]                 @relation("GoodsItemWeightUnit")
+  goodsRequestLines          GoodsRequestLine[]
+  initialInventoryLines      InitialInventoryLine[]
+  priceInquiryItemLines      PriceInquiryItemLine[]
+  purchaseInvoiceLines       PurchaseInvoiceLine[]
+  purchaseOrderLines         PurchaseOrderLine[]
+  purchasePlanningStage1Rows PurchasePlanningStage1Row[]
+  purchasePlanningStage2Rows PurchasePlanningStage2Row[]
+  purchaseRequestLines       PurchaseRequestLine[]
+  salesDeliveryLines         SalesDeliveryLine[]
+  salesInvoiceLines          SalesInvoiceLine[]
+  salesOrderLines            SalesOrderLine[]
+  salesQuoteLines            SalesQuoteLine[]
+  supplyRequestLines         SupplyRequestLine[]
+  warehouseAdjustmentLines   WarehouseAdjustmentLine[]
+  warehouseIssueLines        WarehouseIssueLine[]
+  warehouseReceiptLines      WarehouseReceiptLine[]
+  warehouseTransferLines     WarehouseTransferLine[]
+}
+
+model WarehouseGroup {
+  id                 Int                             @id @default(autoincrement())
+  code               Int                             @unique
+  title              String                          @unique
+  isActive           Boolean                         @default(true)
+  hasTransactions    Boolean                         @default(false)
+  createdAt          DateTime                        @default(now())
+  accountingSettings GoodsServiceAccountingSetting[]
+  warehouses         Warehouse[]
+}
+
+model Warehouse {
+  id                         Int                   @id @default(autoincrement())
+  code                       Int                   @unique
+  title                      String                @unique
+  warehouseGroupId           Int
+  address                    String?
+  phone                      String?
+  managerId                  Int?
+  stockControl               Boolean               @default(true)
+  isActive                   Boolean               @default(true)
+  hasTransactions            Boolean               @default(false)
+  createdAt                  DateTime              @default(now())
+  initialInventories         InitialInventory[]
+  salesDeliveries            SalesDelivery[]
+  manager                    Party?                @relation("WarehouseManager", fields: [managerId], references: [id])
+  warehouseGroup             WarehouseGroup        @relation(fields: [warehouseGroupId], references: [id])
+  warehouseAdjustments       WarehouseAdjustment[]
+  warehouseIssues            WarehouseIssue[]
+  warehouseReceipts          WarehouseReceipt[]
+  warehouseTransfersAsDest   WarehouseTransfer[]   @relation("WarehouseTransferDest")
+  warehouseTransfersAsSource WarehouseTransfer[]   @relation("WarehouseTransferSource")
+}
+
+model GoodsGroupLevel {
+  id               Int          @id @default(autoincrement())
+  code             Int          @unique
+  title            String       @unique
+  order            Int          @unique
+  codeLength       Int
+  affectsGoodsCode Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  groups           GoodsGroup[]
+}
+
+model GoodsGroup {
+  id                Int                   @id @default(autoincrement())
+  parentId          Int?
+  levelId           Int
+  code              String
+  title             String
+  isLastBranch      Boolean               @default(false)
+  affectsGoodsTitle Boolean               @default(false)
+  childCodeLength   Int?
+  isActive          Boolean               @default(true)
+  hasTransactions   Boolean               @default(false)
+  createdAt         DateTime              @default(now())
+  level             GoodsGroupLevel       @relation(fields: [levelId], references: [id])
+  parent            GoodsGroup?           @relation("GoodsGroupTree", fields: [parentId], references: [id])
+  children          GoodsGroup[]          @relation("GoodsGroupTree")
+  attributes        GoodsGroupAttribute[]
+  items             GoodsItem[]
+
+  @@unique([parentId, code])
+}
+
+model GoodsGroupAttribute {
+  id           Int                       @id @default(autoincrement())
+  goodsGroupId Int
+  attributeId  Int
+  order        Int                       @default(0)
+  affectsCode  Boolean                   @default(true)
+  titleEffect  GoodsAttributeTitleEffect @default(NONE)
+  attribute    GoodsAttribute            @relation(fields: [attributeId], references: [id])
+  goodsGroup   GoodsGroup                @relation(fields: [goodsGroupId], references: [id], onDelete: Cascade)
+
+  @@unique([goodsGroupId, attributeId])
+}
+
+model GoodsAttribute {
+  id              Int                       @id @default(autoincrement())
+  code            Int                       @unique
+  title           String                    @unique
+  itemCodeLength  Int
+  hasTransactions Boolean                   @default(false)
+  createdAt       DateTime                  @default(now())
+  items           GoodsAttributeItem[]
+  groupLinks      GoodsGroupAttribute[]
+  itemValues      GoodsItemAttributeValue[]
+}
+
+model GoodsAttributeItem {
+  id          Int                       @id @default(autoincrement())
+  attributeId Int
+  code        String
+  title       String
+  attribute   GoodsAttribute            @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  itemValues  GoodsItemAttributeValue[]
+
+  @@unique([attributeId, code])
+}
+
+model GoodsItem {
+  id                            Int                            @id @default(autoincrement())
+  kind                          GoodsItemKind
+  goodsGroupId                  Int
+  code                          String
+  fullCode                      String                         @unique
+  rawTitle                      String
+  title                         String
+  mainUnitId                    Int
+  weightUnitId                  Int?
+  weightRatio                   Decimal?                       @db.Decimal(18, 6)
+  technicalSpec                 String?
+  barcode                       String?
+  reorderControl                Boolean                        @default(false)
+  reorderPoint                  Decimal?                       @db.Decimal(18, 6)
+  hasSerialNumber               Boolean                        @default(false)
+  hasExpiryDate                 Boolean                        @default(false)
+  isSerialTracked               Boolean                        @default(false)
+  isExpiryTracked               Boolean                        @default(false)
+  isBatchTracked                Boolean                        @default(false)
+  isLocationTracked             Boolean                        @default(false)
+  accountingGroupId             Int
+  isSpecial                     Boolean                        @default(false)
+  taxRate                       Decimal?                       @db.Decimal(9, 4)
+  isActive                      Boolean                        @default(true)
+  hasTransactions               Boolean                        @default(false)
+  createdAt                     DateTime                       @default(now())
+  deliveryAuthorizationLines    DeliveryAuthorizationLine[]
+  accountingGroup               AccountingGroup                @relation(fields: [accountingGroupId], references: [id])
+  goodsGroup                    GoodsGroup                     @relation(fields: [goodsGroupId], references: [id])
+  mainUnit                      UnitOfMeasure                  @relation("GoodsItemMainUnit", fields: [mainUnitId], references: [id])
+  weightUnit                    UnitOfMeasure?                 @relation("GoodsItemWeightUnit", fields: [weightUnitId], references: [id])
+  attributeValues               GoodsItemAttributeValue[]
+  goodsRequestLines             GoodsRequestLine[]
+  initialInventoryLines         InitialInventoryLine[]
+  priceInquiryItemLines         PriceInquiryItemLine[]
+  priceInquiryOtherCostLines    PriceInquiryOtherCostLine[]
+  purchaseGroupItems            PurchaseGroupGoodsItem[]
+  purchaseInvoiceLines          PurchaseInvoiceLine[]
+  purchaseInvoiceOtherCostLines PurchaseInvoiceOtherCostLine[]
+  purchaseOrderLines            PurchaseOrderLine[]
+  purchasePlanningStage1Rows    PurchasePlanningStage1Row[]
+  purchasePlanningStage2Rows    PurchasePlanningStage2Row[]
+  purchaseRequestLines          PurchaseRequestLine[]
+  salesDeliveryLines            SalesDeliveryLine[]
+  salesInvoiceLines             SalesInvoiceLine[]
+  salesOrderLines               SalesOrderLine[]
+  salesQuoteLines               SalesQuoteLine[]
+  supplyRequestLines            SupplyRequestLine[]
+  warehouseAdjustmentLines      WarehouseAdjustmentLine[]
+  warehouseIssueLines           WarehouseIssueLine[]
+  warehouseReceiptLines         WarehouseReceiptLine[]
+  warehouseTransferLines        WarehouseTransferLine[]
+
+  @@unique([goodsGroupId, code])
+}
+
+model GoodsItemAttributeValue {
+  id          Int                @id @default(autoincrement())
+  goodsItemId Int
+  attributeId Int
+  itemId      Int
+  attribute   GoodsAttribute     @relation(fields: [attributeId], references: [id])
+  goodsItem   GoodsItem          @relation(fields: [goodsItemId], references: [id], onDelete: Cascade)
+  item        GoodsAttributeItem @relation(fields: [itemId], references: [id])
+
+  @@unique([goodsItemId, attributeId])
+}
+
+model AccountingGroup {
+  id              Int                             @id @default(autoincrement())
+  code            Int                             @unique
+  title           String                          @unique
+  goodsType       GoodsType
+  isActive        Boolean                         @default(true)
+  hasTransactions Boolean                         @default(false)
+  createdAt       DateTime                        @default(now())
+  items           GoodsItem[]
+  settings        GoodsServiceAccountingSetting[]
+}
+
+model GoodsServiceAccountingSetting {
+  id                  Int              @id @default(autoincrement())
+  accountingGroupId   Int
+  accountType         GoodsAccountType
+  warehouseGroupId    Int?
+  accountId           Int
+  salesTypeRef        Int?
+  warehouseDocTypeRef Int?
+  purchaseTypeRef     Int?
+  hasTransactions     Boolean          @default(false)
+  createdAt           DateTime         @default(now())
+  account             Account          @relation(fields: [accountId], references: [id])
+  accountingGroup     AccountingGroup  @relation(fields: [accountingGroupId], references: [id])
+  warehouseGroup      WarehouseGroup?  @relation(fields: [warehouseGroupId], references: [id])
+}
+
+model GoodsRequestType {
+  id              Int                @id @default(autoincrement())
+  code            Int                @unique
+  title           String             @unique
+  nature          GoodsRequestNature @default(CENTER_REQUEST)
+  hasTransactions Boolean            @default(false)
+  createdAt       DateTime           @default(now())
+  goodsRequests   GoodsRequest[]
+}
+
+model InitialInventory {
+  id             Int                      @id @default(autoincrement())
+  warehouseId    Int
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime                 @db.Date
+  description    String?
+  creationType   WarehouseDocCreationType @default(MANUAL)
+  status         WarehouseDocStatus       @default(DRAFT)
+  finalizedAt    DateTime?
+  createdAt      DateTime                 @default(now())
+  fiscalPeriod   FiscalPeriod             @relation(fields: [fiscalPeriodId], references: [id])
+  warehouse      Warehouse                @relation(fields: [warehouseId], references: [id])
+  lines          InitialInventoryLine[]
+
+  @@unique([warehouseId, fiscalPeriodId])
+  @@unique([fiscalPeriodId, number])
+}
+
+model InitialInventoryLine {
+  id                 Int              @id @default(autoincrement())
+  initialInventoryId Int
+  goodsItemId        Int
+  unitId             Int
+  quantity           Decimal          @db.Decimal(36, 10)
+  unitCost           Decimal          @default(0) @db.Decimal(28, 10)
+  amount             Decimal          @default(0) @db.Decimal(18, 2)
+  rowOrder           Int              @default(0)
+  batchNumber        String?
+  expiryDate         DateTime?        @db.Date
+  physicalLocation   String?
+  serialNumber       String?
+  goodsItem          GoodsItem        @relation(fields: [goodsItemId], references: [id])
+  initialInventory   InitialInventory @relation(fields: [initialInventoryId], references: [id], onDelete: Cascade)
+  unit               UnitOfMeasure    @relation(fields: [unitId], references: [id])
+}
+
+model Project {
+  id                Int                @id @default(autoincrement())
+  code              Int                @unique
+  title             String             @unique
+  isActive          Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  goodsRequestLines GoodsRequestLine[]
+  warehouseIssues   WarehouseIssue[]
+}
+
+model GoodsRequest {
+  id             Int                @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime           @db.Date
+  requestTypeId  Int
+  orgUnitId      Int
+  description    String?
+  status         RequestStatus      @default(DRAFT)
+  reviewerId     Int?
+  reviewedAt     DateTime?
+  approverId     Int?
+  approvedAt     DateTime?
+  createdAt      DateTime           @default(now())
+  approver       User?              @relation("GoodsRequestApprover", fields: [approverId], references: [id])
+  fiscalPeriod   FiscalPeriod       @relation(fields: [fiscalPeriodId], references: [id])
+  orgUnit        OrgUnit            @relation(fields: [orgUnitId], references: [id])
+  requestType    GoodsRequestType   @relation(fields: [requestTypeId], references: [id])
+  reviewer       User?              @relation("GoodsRequestReviewer", fields: [reviewerId], references: [id])
+  lines          GoodsRequestLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model GoodsRequestLine {
+  id                  Int                  @id @default(autoincrement())
+  goodsRequestId      Int
+  rowOrder            Int                  @default(0)
+  goodsItemId         Int
+  unitId              Int
+  quantity            Decimal              @db.Decimal(36, 10)
+  approvedQuantity    Decimal?             @db.Decimal(36, 10)
+  costCenterId        Int?
+  projectId           Int?
+  partyId             Int?
+  description         String?
+  approvalDescription String?
+  costCenter          CostCenter?          @relation(fields: [costCenterId], references: [id])
+  goodsItem           GoodsItem            @relation(fields: [goodsItemId], references: [id])
+  goodsRequest        GoodsRequest         @relation(fields: [goodsRequestId], references: [id], onDelete: Cascade)
+  party               Party?               @relation(fields: [partyId], references: [id])
+  project             Project?             @relation(fields: [projectId], references: [id])
+  unit                UnitOfMeasure        @relation(fields: [unitId], references: [id])
+  suppliedByLines     SupplyRequestLine[]  @relation("SupplyRequestSourceLine")
+  warehouseIssueLines WarehouseIssueLine[] @relation("WarehouseIssueSourceGoodsRequestLine")
+}
+
+model SupplyRequest {
+  id             Int                 @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime            @db.Date
+  basis          SupplyRequestBasis
+  route          SupplyRoute
+  orgUnitId      Int
+  description    String?
+  status         RequestStatus       @default(DRAFT)
+  reviewerId     Int?
+  reviewedAt     DateTime?
+  approverId     Int?
+  approvedAt     DateTime?
+  createdAt      DateTime            @default(now())
+  approver       User?               @relation("SupplyRequestApprover", fields: [approverId], references: [id])
+  fiscalPeriod   FiscalPeriod        @relation(fields: [fiscalPeriodId], references: [id])
+  orgUnit        OrgUnit             @relation(fields: [orgUnitId], references: [id])
+  reviewer       User?               @relation("SupplyRequestReviewer", fields: [reviewerId], references: [id])
+  lines          SupplyRequestLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model SupplyRequestLine {
+  id                       Int                    @id @default(autoincrement())
+  supplyRequestId          Int
+  rowOrder                 Int                    @default(0)
+  sourceGoodsRequestLineId Int?
+  goodsItemId              Int
+  unitId                   Int
+  quantity                 Decimal                @db.Decimal(36, 10)
+  description              String?
+  purchaseRequestLines     PurchaseRequestLine[]  @relation("PurchaseRequestSourceLine")
+  goodsItem                GoodsItem              @relation(fields: [goodsItemId], references: [id])
+  sourceGoodsRequestLine   GoodsRequestLine?      @relation("SupplyRequestSourceLine", fields: [sourceGoodsRequestLineId], references: [id])
+  supplyRequest            SupplyRequest          @relation(fields: [supplyRequestId], references: [id], onDelete: Cascade)
+  unit                     UnitOfMeasure          @relation(fields: [unitId], references: [id])
+  warehouseReceiptLines    WarehouseReceiptLine[] @relation("WarehouseReceiptSourceSupplyRequestLine")
+}
+
+model PurchaseRoute {
+  id                Int                 @id @default(autoincrement())
+  code              Int                 @unique
+  title             String              @unique
+  nature            PurchaseRouteNature
+  isActive          Boolean             @default(true)
+  hasTransactions   Boolean             @default(false)
+  createdAt         DateTime            @default(now())
+  purchasePlannings PurchasePlanning[]
+}
+
+model PurchaseGroup {
+  id                Int                      @id @default(autoincrement())
+  code              Int                      @unique
+  title             String                   @unique
+  isActive          Boolean                  @default(true)
+  hasTransactions   Boolean                  @default(false)
+  createdAt         DateTime                 @default(now())
+  experts           PurchaseExpertGroup[]
+  goodsItems        PurchaseGroupGoodsItem[]
+  suppliers         PurchaseGroupSupplier[]
+  purchasePlannings PurchasePlanning[]
+}
+
+model Supplier {
+  id                        Int                        @id @default(autoincrement())
+  code                      Int                        @unique
+  partyId                   Int                        @unique
+  isActive                  Boolean                    @default(true)
+  hasTransactions           Boolean                    @default(false)
+  createdAt                 DateTime                   @default(now())
+  deliveryAuthorizations    DeliveryAuthorization[]
+  inquiryAuthorizationLines InquiryAuthorizationLine[]
+  priceInquiries            PriceInquiry[]
+  groups                    PurchaseGroupSupplier[]
+  purchaseOrders            PurchaseOrder[]
+  party                     Party                      @relation(fields: [partyId], references: [id])
+}
+
+model PurchaseGroupSupplier {
+  id              Int           @id @default(autoincrement())
+  purchaseGroupId Int
+  supplierId      Int
+  rowOrder        Int           @default(0)
+  purchaseGroup   PurchaseGroup @relation(fields: [purchaseGroupId], references: [id], onDelete: Cascade)
+  supplier        Supplier      @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@unique([purchaseGroupId, supplierId])
+}
+
+model PurchaseGroupGoodsItem {
+  id              Int           @id @default(autoincrement())
+  purchaseGroupId Int
+  goodsItemId     Int
+  rowOrder        Int           @default(0)
+  goodsItem       GoodsItem     @relation(fields: [goodsItemId], references: [id])
+  purchaseGroup   PurchaseGroup @relation(fields: [purchaseGroupId], references: [id], onDelete: Cascade)
+
+  @@unique([purchaseGroupId, goodsItemId])
+}
+
+model PurchaseExpert {
+  id                Int                   @id @default(autoincrement())
+  code              Int                   @unique
+  isActive          Boolean               @default(true)
+  hasTransactions   Boolean               @default(false)
+  createdAt         DateTime              @default(now())
+  partyId           Int                   @unique
+  party             Party                 @relation(fields: [partyId], references: [id])
+  groups            PurchaseExpertGroup[]
+  purchasePlannings PurchasePlanning[]
+}
+
+model PurchaseExpertGroup {
+  id               Int            @id @default(autoincrement())
+  purchaseExpertId Int
+  purchaseGroupId  Int
+  rowOrder         Int            @default(0)
+  purchaseExpert   PurchaseExpert @relation(fields: [purchaseExpertId], references: [id], onDelete: Cascade)
+  purchaseGroup    PurchaseGroup  @relation(fields: [purchaseGroupId], references: [id], onDelete: Cascade)
+
+  @@unique([purchaseExpertId, purchaseGroupId])
+}
+
+model PurchaseRequest {
+  id             Int                   @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime              @db.Date
+  basis          PurchaseRequestBasis
+  orgUnitId      Int
+  description    String?
+  status         RequestStatus         @default(DRAFT)
+  reviewerId     Int?
+  reviewedAt     DateTime?
+  approverId     Int?
+  approvedAt     DateTime?
+  createdAt      DateTime              @default(now())
+  approver       User?                 @relation("PurchaseRequestApprover", fields: [approverId], references: [id])
+  fiscalPeriod   FiscalPeriod          @relation(fields: [fiscalPeriodId], references: [id])
+  orgUnit        OrgUnit               @relation(fields: [orgUnitId], references: [id])
+  reviewer       User?                 @relation("PurchaseRequestReviewer", fields: [reviewerId], references: [id])
+  lines          PurchaseRequestLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model PurchaseRequestLine {
+  id                        Int                         @id @default(autoincrement())
+  purchaseRequestId         Int
+  rowOrder                  Int                         @default(0)
+  sourceSupplyRequestLineId Int?
+  goodsItemId               Int
+  unitId                    Int
+  quantity                  Decimal                     @db.Decimal(36, 10)
+  description               String?
+  planningStage1Rows        PurchasePlanningStage1Row[]
+  goodsItem                 GoodsItem                   @relation(fields: [goodsItemId], references: [id])
+  purchaseRequest           PurchaseRequest             @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  sourceSupplyRequestLine   SupplyRequestLine?          @relation("PurchaseRequestSourceLine", fields: [sourceSupplyRequestLineId], references: [id])
+  unit                      UnitOfMeasure               @relation(fields: [unitId], references: [id])
+}
+
+model PurchasePlanning {
+  id                        Int                         @id @default(autoincrement())
+  fiscalPeriodId            Int
+  number                    Int
+  date                      DateTime                    @db.Date
+  neededDate                DateTime?                   @db.Date
+  purchaseGroupId           Int
+  description               String?
+  status                    RequestStatus               @default(DRAFT)
+  purchaseExpertId          Int?
+  purchaseRouteId           Int?
+  allowMultiSupplierPerLine Boolean                     @default(false)
+  createdAt                 DateTime                    @default(now())
+  inquiryAuthorization      InquiryAuthorization?
+  inquiryEvaluation         InquiryEvaluation?
+  priceInquiries            PriceInquiry[]
+  fiscalPeriod              FiscalPeriod                @relation(fields: [fiscalPeriodId], references: [id])
+  purchaseExpert            PurchaseExpert?             @relation(fields: [purchaseExpertId], references: [id])
+  purchaseGroup             PurchaseGroup               @relation(fields: [purchaseGroupId], references: [id])
+  purchaseRoute             PurchaseRoute?              @relation(fields: [purchaseRouteId], references: [id])
+  stage1Rows                PurchasePlanningStage1Row[]
+  stage2Rows                PurchasePlanningStage2Row[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model PurchasePlanningStage1Row {
+  id                    Int                 @id @default(autoincrement())
+  purchasePlanningId    Int
+  rowOrder              Int                 @default(0)
+  purchaseRequestLineId Int
+  goodsItemId           Int
+  unitId                Int
+  quantity              Decimal             @db.Decimal(36, 10)
+  description           String?
+  goodsItem             GoodsItem           @relation(fields: [goodsItemId], references: [id])
+  purchasePlanning      PurchasePlanning    @relation(fields: [purchasePlanningId], references: [id], onDelete: Cascade)
+  purchaseRequestLine   PurchaseRequestLine @relation(fields: [purchaseRequestLineId], references: [id])
+  unit                  UnitOfMeasure       @relation(fields: [unitId], references: [id])
+}
+
+model PurchasePlanningStage2Row {
+  id                    Int                    @id @default(autoincrement())
+  purchasePlanningId    Int
+  rowOrder              Int                    @default(0)
+  goodsItemId           Int
+  unitId                Int
+  quantity              Decimal                @db.Decimal(36, 10)
+  estimatedAmount       Decimal                @default(0) @db.Decimal(36, 10)
+  description           String?
+  priceInquiryItemLines PriceInquiryItemLine[]
+  goodsItem             GoodsItem              @relation(fields: [goodsItemId], references: [id])
+  purchasePlanning      PurchasePlanning       @relation(fields: [purchasePlanningId], references: [id], onDelete: Cascade)
+  unit                  UnitOfMeasure          @relation(fields: [unitId], references: [id])
+
+  @@unique([purchasePlanningId, goodsItemId])
+}
+
+model InquiryAuthorization {
+  id                 Int                        @id @default(autoincrement())
+  fiscalPeriodId     Int
+  number             Int
+  date               DateTime                   @db.Date
+  purchasePlanningId Int                        @unique
+  description        String?
+  status             RequestStatus              @default(DRAFT)
+  createdAt          DateTime                   @default(now())
+  fiscalPeriod       FiscalPeriod               @relation(fields: [fiscalPeriodId], references: [id])
+  purchasePlanning   PurchasePlanning           @relation(fields: [purchasePlanningId], references: [id])
+  lines              InquiryAuthorizationLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model InquiryAuthorizationLine {
+  id                     Int                  @id @default(autoincrement())
+  inquiryAuthorizationId Int
+  rowOrder               Int                  @default(0)
+  supplierId             Int
+  description            String?
+  inquiryAuthorization   InquiryAuthorization @relation(fields: [inquiryAuthorizationId], references: [id], onDelete: Cascade)
+  supplier               Supplier             @relation(fields: [supplierId], references: [id])
+
+  @@unique([inquiryAuthorizationId, supplierId])
+}
+
+model PriceInquiry {
+  id                  Int                         @id @default(autoincrement())
+  fiscalPeriodId      Int
+  number              Int
+  date                DateTime                    @db.Date
+  purchasePlanningId  Int
+  supplierId          Int
+  validUntil          DateTime                    @db.Date
+  currencyId          Int
+  paymentDeadline     DateTime?                   @db.Date
+  description         String?
+  status              RequestStatus               @default(DRAFT)
+  createdAt           DateTime                    @default(now())
+  evaluationQuoteRows InquiryEvaluationQuoteRow[]
+  currency            Currency                    @relation(fields: [currencyId], references: [id])
+  fiscalPeriod        FiscalPeriod                @relation(fields: [fiscalPeriodId], references: [id])
+  purchasePlanning    PurchasePlanning            @relation(fields: [purchasePlanningId], references: [id])
+  supplier            Supplier                    @relation(fields: [supplierId], references: [id])
+  itemLines           PriceInquiryItemLine[]
+  otherCostLines      PriceInquiryOtherCostLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model PriceInquiryItemLine {
+  id                  Int                         @id @default(autoincrement())
+  priceInquiryId      Int
+  rowOrder            Int                         @default(0)
+  planningStage2RowId Int
+  goodsItemId         Int
+  unitId              Int
+  quantity            Decimal                     @db.Decimal(36, 10)
+  unitPrice           Decimal                     @db.Decimal(36, 10)
+  amount              Decimal                     @db.Decimal(36, 10)
+  deliveryDate        DateTime                    @db.Date
+  description         String?
+  evaluationItemLines InquiryEvaluationItemLine[]
+  goodsItem           GoodsItem                   @relation(fields: [goodsItemId], references: [id])
+  planningStage2Row   PurchasePlanningStage2Row   @relation(fields: [planningStage2RowId], references: [id])
+  priceInquiry        PriceInquiry                @relation(fields: [priceInquiryId], references: [id], onDelete: Cascade)
+  unit                UnitOfMeasure               @relation(fields: [unitId], references: [id])
+  purchaseOrderLines  PurchaseOrderLine[]
+}
+
+model PriceInquiryOtherCostLine {
+  id             Int          @id @default(autoincrement())
+  priceInquiryId Int
+  rowOrder       Int          @default(0)
+  serviceId      Int
+  amount         Decimal      @default(0) @db.Decimal(36, 10)
+  description    String?
+  priceInquiry   PriceInquiry @relation(fields: [priceInquiryId], references: [id], onDelete: Cascade)
+  service        GoodsItem    @relation(fields: [serviceId], references: [id])
+}
+
+model InquiryEvaluation {
+  id                 Int                         @id @default(autoincrement())
+  fiscalPeriodId     Int
+  number             Int
+  date               DateTime                    @db.Date
+  purchasePlanningId Int                         @unique
+  description        String?
+  status             RequestStatus               @default(DRAFT)
+  createdAt          DateTime                    @default(now())
+  fiscalPeriod       FiscalPeriod                @relation(fields: [fiscalPeriodId], references: [id])
+  purchasePlanning   PurchasePlanning            @relation(fields: [purchasePlanningId], references: [id])
+  itemLines          InquiryEvaluationItemLine[]
+  quoteRows          InquiryEvaluationQuoteRow[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model InquiryEvaluationQuoteRow {
+  id                  Int               @id @default(autoincrement())
+  inquiryEvaluationId Int
+  rowOrder            Int               @default(0)
+  priceInquiryId      Int
+  description         String?
+  inquiryEvaluation   InquiryEvaluation @relation(fields: [inquiryEvaluationId], references: [id], onDelete: Cascade)
+  priceInquiry        PriceInquiry      @relation(fields: [priceInquiryId], references: [id])
+
+  @@unique([inquiryEvaluationId, priceInquiryId])
+}
+
+model InquiryEvaluationItemLine {
+  id                     Int                  @id @default(autoincrement())
+  inquiryEvaluationId    Int
+  rowOrder               Int                  @default(0)
+  priceInquiryItemLineId Int
+  approved               Boolean              @default(false)
+  description            String?
+  inquiryEvaluation      InquiryEvaluation    @relation(fields: [inquiryEvaluationId], references: [id], onDelete: Cascade)
+  priceInquiryItemLine   PriceInquiryItemLine @relation(fields: [priceInquiryItemLineId], references: [id])
+
+  @@unique([inquiryEvaluationId, priceInquiryItemLineId])
+}
+
+model PurchaseOrder {
+  id             Int                 @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime            @db.Date
+  basis          PurchaseOrderBasis
+  supplierId     Int
+  currencyId     Int
+  description    String?
+  status         RequestStatus       @default(DRAFT)
+  createdAt      DateTime            @default(now())
+  currency       Currency            @relation(fields: [currencyId], references: [id])
+  fiscalPeriod   FiscalPeriod        @relation(fields: [fiscalPeriodId], references: [id])
+  supplier       Supplier            @relation(fields: [supplierId], references: [id])
+  lines          PurchaseOrderLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model PurchaseOrderLine {
+  id                         Int                         @id @default(autoincrement())
+  purchaseOrderId            Int
+  rowOrder                   Int                         @default(0)
+  priceInquiryItemLineId     Int?
+  goodsItemId                Int
+  unitId                     Int
+  quantity                   Decimal                     @db.Decimal(36, 10)
+  unitPrice                  Decimal                     @db.Decimal(36, 10)
+  amount                     Decimal                     @db.Decimal(36, 10)
+  description                String?
+  deliveryAuthorizationLines DeliveryAuthorizationLine[]
+  goodsItem                  GoodsItem                   @relation(fields: [goodsItemId], references: [id])
+  priceInquiryItemLine       PriceInquiryItemLine?       @relation(fields: [priceInquiryItemLineId], references: [id])
+  purchaseOrder              PurchaseOrder               @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  unit                       UnitOfMeasure               @relation(fields: [unitId], references: [id])
+  warehouseReceiptLines      WarehouseReceiptLine[]      @relation("WarehouseReceiptSourcePurchaseOrderLine")
+}
+
+model DeliveryAuthorization {
+  id             Int                         @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime                    @db.Date
+  supplierId     Int
+  deliveryDate   DateTime                    @db.Date
+  description    String?
+  status         RequestStatus               @default(DRAFT)
+  createdAt      DateTime                    @default(now())
+  fiscalPeriod   FiscalPeriod                @relation(fields: [fiscalPeriodId], references: [id])
+  supplier       Supplier                    @relation(fields: [supplierId], references: [id])
+  lines          DeliveryAuthorizationLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model DeliveryAuthorizationLine {
+  id                      Int                    @id @default(autoincrement())
+  deliveryAuthorizationId Int
+  rowOrder                Int                    @default(0)
+  purchaseOrderLineId     Int
+  goodsItemId             Int
+  unitId                  Int
+  quantity                Decimal                @db.Decimal(36, 10)
+  receiptType             DeliveryReceiptType
+  description             String?
+  deliveryAuthorization   DeliveryAuthorization  @relation(fields: [deliveryAuthorizationId], references: [id], onDelete: Cascade)
+  goodsItem               GoodsItem              @relation(fields: [goodsItemId], references: [id])
+  purchaseOrderLine       PurchaseOrderLine      @relation(fields: [purchaseOrderLineId], references: [id])
+  unit                    UnitOfMeasure          @relation(fields: [unitId], references: [id])
+  warehouseReceiptLines   WarehouseReceiptLine[] @relation("WarehouseReceiptSourceDeliveryAuthorizationLine")
+}
+
+model WarehouseReceipt {
+  id             Int                    @id @default(autoincrement())
+  warehouseId    Int
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime               @db.Date
+  basis          WarehouseReceiptBasis
+  description    String?
+  status         WarehouseDocStatus     @default(DRAFT)
+  finalizedAt    DateTime?
+  createdAt      DateTime               @default(now())
+  partyId        Int?
+  fiscalPeriod   FiscalPeriod           @relation(fields: [fiscalPeriodId], references: [id])
+  party          Party?                 @relation(fields: [partyId], references: [id])
+  warehouse      Warehouse              @relation(fields: [warehouseId], references: [id])
+  lines          WarehouseReceiptLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model WarehouseReceiptLine {
+  id                                Int                        @id @default(autoincrement())
+  warehouseReceiptId                Int
+  rowOrder                          Int                        @default(0)
+  sourceSupplyRequestLineId         Int?
+  sourcePurchaseOrderLineId         Int?
+  sourceDeliveryAuthorizationLineId Int?
+  goodsItemId                       Int
+  unitId                            Int
+  quantity                          Decimal                    @db.Decimal(36, 10)
+  unitCost                          Decimal                    @default(0) @db.Decimal(28, 10)
+  amount                            Decimal                    @default(0) @db.Decimal(18, 2)
+  description                       String?
+  batchNumber                       String?
+  expiryDate                        DateTime?                  @db.Date
+  physicalLocation                  String?
+  serialNumber                      String?
+  purchaseInvoiceLine               PurchaseInvoiceLine?
+  goodsItem                         GoodsItem                  @relation(fields: [goodsItemId], references: [id])
+  sourceDeliveryAuthorizationLine   DeliveryAuthorizationLine? @relation("WarehouseReceiptSourceDeliveryAuthorizationLine", fields: [sourceDeliveryAuthorizationLineId], references: [id])
+  sourcePurchaseOrderLine           PurchaseOrderLine?         @relation("WarehouseReceiptSourcePurchaseOrderLine", fields: [sourcePurchaseOrderLineId], references: [id])
+  sourceSupplyRequestLine           SupplyRequestLine?         @relation("WarehouseReceiptSourceSupplyRequestLine", fields: [sourceSupplyRequestLineId], references: [id])
+  unit                              UnitOfMeasure              @relation(fields: [unitId], references: [id])
+  warehouseReceipt                  WarehouseReceipt           @relation(fields: [warehouseReceiptId], references: [id], onDelete: Cascade)
+}
+
+model WarehouseIssue {
+  id             Int                  @id @default(autoincrement())
+  warehouseId    Int
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime             @db.Date
+  basis          WarehouseIssueBasis
+  description    String?
+  status         WarehouseDocStatus   @default(DRAFT)
+  finalizedAt    DateTime?
+  createdAt      DateTime             @default(now())
+  costCenterId   Int?
+  projectId      Int?
+  costCenter     CostCenter?          @relation(fields: [costCenterId], references: [id])
+  fiscalPeriod   FiscalPeriod         @relation(fields: [fiscalPeriodId], references: [id])
+  project        Project?             @relation(fields: [projectId], references: [id])
+  warehouse      Warehouse            @relation(fields: [warehouseId], references: [id])
+  lines          WarehouseIssueLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model WarehouseIssueLine {
+  id                       Int               @id @default(autoincrement())
+  warehouseIssueId         Int
+  rowOrder                 Int               @default(0)
+  sourceGoodsRequestLineId Int?
+  goodsItemId              Int
+  unitId                   Int
+  quantity                 Decimal           @db.Decimal(36, 10)
+  unitCost                 Decimal           @default(0) @db.Decimal(28, 10)
+  amount                   Decimal           @default(0) @db.Decimal(18, 2)
+  description              String?
+  batchNumber              String?
+  expiryDate               DateTime?         @db.Date
+  physicalLocation         String?
+  serialNumber             String?
+  goodsItem                GoodsItem         @relation(fields: [goodsItemId], references: [id])
+  sourceGoodsRequestLine   GoodsRequestLine? @relation("WarehouseIssueSourceGoodsRequestLine", fields: [sourceGoodsRequestLineId], references: [id])
+  unit                     UnitOfMeasure     @relation(fields: [unitId], references: [id])
+  warehouseIssue           WarehouseIssue    @relation(fields: [warehouseIssueId], references: [id], onDelete: Cascade)
+}
+
+model WarehouseTransfer {
+  id                Int                     @id @default(autoincrement())
+  sourceWarehouseId Int
+  destWarehouseId   Int
+  fiscalPeriodId    Int
+  number            Int
+  date              DateTime                @db.Date
+  description       String?
+  status            WarehouseDocStatus      @default(DRAFT)
+  finalizedAt       DateTime?
+  createdAt         DateTime                @default(now())
+  destWarehouse     Warehouse               @relation("WarehouseTransferDest", fields: [destWarehouseId], references: [id])
+  fiscalPeriod      FiscalPeriod            @relation(fields: [fiscalPeriodId], references: [id])
+  sourceWarehouse   Warehouse               @relation("WarehouseTransferSource", fields: [sourceWarehouseId], references: [id])
+  lines             WarehouseTransferLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model WarehouseTransferLine {
+  id                  Int               @id @default(autoincrement())
+  warehouseTransferId Int
+  rowOrder            Int               @default(0)
+  goodsItemId         Int
+  unitId              Int
+  quantity            Decimal           @db.Decimal(36, 10)
+  unitCost            Decimal           @default(0) @db.Decimal(28, 10)
+  amount              Decimal           @default(0) @db.Decimal(18, 2)
+  description         String?
+  batchNumber         String?
+  expiryDate          DateTime?         @db.Date
+  physicalLocation    String?
+  serialNumber        String?
+  goodsItem           GoodsItem         @relation(fields: [goodsItemId], references: [id])
+  unit                UnitOfMeasure     @relation(fields: [unitId], references: [id])
+  warehouseTransfer   WarehouseTransfer @relation(fields: [warehouseTransferId], references: [id], onDelete: Cascade)
+}
+
+model WarehouseAdjustment {
+  id             Int                       @id @default(autoincrement())
+  warehouseId    Int
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime                  @db.Date
+  description    String?
+  status         WarehouseDocStatus        @default(DRAFT)
+  finalizedAt    DateTime?
+  createdAt      DateTime                  @default(now())
+  fiscalPeriod   FiscalPeriod              @relation(fields: [fiscalPeriodId], references: [id])
+  warehouse      Warehouse                 @relation(fields: [warehouseId], references: [id])
+  lines          WarehouseAdjustmentLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model WarehouseAdjustmentLine {
+  id                    Int                 @id @default(autoincrement())
+  warehouseAdjustmentId Int
+  rowOrder              Int                 @default(0)
+  goodsItemId           Int
+  unitId                Int
+  systemQuantity        Decimal             @db.Decimal(36, 10)
+  countedQuantity       Decimal             @db.Decimal(36, 10)
+  adjustmentQuantity    Decimal             @db.Decimal(36, 10)
+  unitCost              Decimal             @default(0) @db.Decimal(28, 10)
+  amount                Decimal             @default(0) @db.Decimal(18, 2)
+  description           String?
+  batchNumber           String?
+  expiryDate            DateTime?           @db.Date
+  physicalLocation      String?
+  serialNumber          String?
+  goodsItem             GoodsItem           @relation(fields: [goodsItemId], references: [id])
+  unit                  UnitOfMeasure       @relation(fields: [unitId], references: [id])
+  warehouseAdjustment   WarehouseAdjustment @relation(fields: [warehouseAdjustmentId], references: [id], onDelete: Cascade)
+}
+
+model PurchaseInvoice {
+  id                     Int                            @id @default(autoincrement())
+  fiscalPeriodId         Int
+  number                 Int
+  date                   DateTime                       @db.Date
+  vendorInvoiceNumber    String?
+  basis                  PurchaseInvoiceBasis
+  partyId                Int
+  currencyId             Int
+  description            String?
+  status                 RequestStatus                  @default(DRAFT)
+  createdAt              DateTime                       @default(now())
+  paymentSettlementLines PaymentSettlementLine[]
+  currency               Currency                       @relation(fields: [currencyId], references: [id])
+  fiscalPeriod           FiscalPeriod                   @relation(fields: [fiscalPeriodId], references: [id])
+  party                  Party                          @relation(fields: [partyId], references: [id])
+  lines                  PurchaseInvoiceLine[]
+  otherCostLines         PurchaseInvoiceOtherCostLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model PurchaseInvoiceLine {
+  id                           Int                   @id @default(autoincrement())
+  purchaseInvoiceId            Int
+  rowOrder                     Int                   @default(0)
+  sourceWarehouseReceiptLineId Int?                  @unique
+  goodsItemId                  Int
+  unitId                       Int
+  quantity                     Decimal               @db.Decimal(36, 10)
+  unitPrice                    Decimal               @db.Decimal(36, 10)
+  amount                       Decimal               @db.Decimal(36, 10)
+  description                  String?
+  goodsItem                    GoodsItem             @relation(fields: [goodsItemId], references: [id])
+  purchaseInvoice              PurchaseInvoice       @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  sourceWarehouseReceiptLine   WarehouseReceiptLine? @relation(fields: [sourceWarehouseReceiptLineId], references: [id])
+  unit                         UnitOfMeasure         @relation(fields: [unitId], references: [id])
+}
+
+model PurchaseInvoiceOtherCostLine {
+  id                Int                  @id @default(autoincrement())
+  purchaseInvoiceId Int
+  rowOrder          Int                  @default(0)
+  serviceId         Int
+  amount            Decimal              @default(0) @db.Decimal(36, 10)
+  allocationBasis   CostAllocationBasis?
+  description       String?
+  purchaseInvoice   PurchaseInvoice      @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  service           GoodsItem            @relation(fields: [serviceId], references: [id])
+}
+
+model Customer {
+  id              Int            @id @default(autoincrement())
+  code            Int            @unique
+  partyId         Int            @unique
+  isActive        Boolean        @default(true)
+  hasTransactions Boolean        @default(false)
+  createdAt       DateTime       @default(now())
+  party           Party          @relation(fields: [partyId], references: [id])
+  salesInvoices   SalesInvoice[]
+  salesOrders     SalesOrder[]
+  salesQuotes     SalesQuote[]
+}
+
+model SalesQuote {
+  id             Int              @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime         @db.Date
+  customerId     Int
+  currencyId     Int
+  description    String?
+  status         SalesDocStatus   @default(DRAFT)
+  createdAt      DateTime         @default(now())
+  currency       Currency         @relation(fields: [currencyId], references: [id])
+  customer       Customer         @relation(fields: [customerId], references: [id])
+  fiscalPeriod   FiscalPeriod     @relation(fields: [fiscalPeriodId], references: [id])
+  lines          SalesQuoteLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model SalesQuoteLine {
+  id              Int              @id @default(autoincrement())
+  salesQuoteId    Int
+  rowOrder        Int              @default(0)
+  goodsItemId     Int
+  unitId          Int
+  quantity        Decimal          @db.Decimal(36, 10)
+  unitPrice       Decimal          @db.Decimal(36, 10)
+  amount          Decimal          @db.Decimal(36, 10)
+  description     String?
+  salesOrderLines SalesOrderLine[] @relation("SalesOrderSourceSalesQuoteLine")
+  goodsItem       GoodsItem        @relation(fields: [goodsItemId], references: [id])
+  salesQuote      SalesQuote       @relation(fields: [salesQuoteId], references: [id], onDelete: Cascade)
+  unit            UnitOfMeasure    @relation(fields: [unitId], references: [id])
+}
+
+model SalesOrder {
+  id             Int              @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime         @db.Date
+  basis          SalesOrderBasis
+  customerId     Int
+  currencyId     Int
+  description    String?
+  status         SalesDocStatus   @default(DRAFT)
+  createdAt      DateTime         @default(now())
+  currency       Currency         @relation(fields: [currencyId], references: [id])
+  customer       Customer         @relation(fields: [customerId], references: [id])
+  fiscalPeriod   FiscalPeriod     @relation(fields: [fiscalPeriodId], references: [id])
+  lines          SalesOrderLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model SalesOrderLine {
+  id                     Int                 @id @default(autoincrement())
+  salesOrderId           Int
+  rowOrder               Int                 @default(0)
+  sourceSalesQuoteLineId Int?
+  goodsItemId            Int
+  unitId                 Int
+  quantity               Decimal             @db.Decimal(36, 10)
+  unitPrice              Decimal             @db.Decimal(36, 10)
+  amount                 Decimal             @db.Decimal(36, 10)
+  description            String?
+  salesDeliveryLines     SalesDeliveryLine[] @relation("SalesDeliverySourceSalesOrderLine")
+  goodsItem              GoodsItem           @relation(fields: [goodsItemId], references: [id])
+  salesOrder             SalesOrder          @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  sourceSalesQuoteLine   SalesQuoteLine?     @relation("SalesOrderSourceSalesQuoteLine", fields: [sourceSalesQuoteLineId], references: [id])
+  unit                   UnitOfMeasure       @relation(fields: [unitId], references: [id])
+}
+
+model SalesDelivery {
+  id             Int                 @id @default(autoincrement())
+  warehouseId    Int
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime            @db.Date
+  basis          SalesDeliveryBasis
+  description    String?
+  status         WarehouseDocStatus  @default(DRAFT)
+  finalizedAt    DateTime?
+  createdAt      DateTime            @default(now())
+  fiscalPeriod   FiscalPeriod        @relation(fields: [fiscalPeriodId], references: [id])
+  warehouse      Warehouse           @relation(fields: [warehouseId], references: [id])
+  lines          SalesDeliveryLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model SalesDeliveryLine {
+  id                     Int                @id @default(autoincrement())
+  salesDeliveryId        Int
+  rowOrder               Int                @default(0)
+  sourceSalesOrderLineId Int?
+  goodsItemId            Int
+  unitId                 Int
+  quantity               Decimal            @db.Decimal(36, 10)
+  unitCost               Decimal            @default(0) @db.Decimal(28, 10)
+  amount                 Decimal            @default(0) @db.Decimal(18, 2)
+  description            String?
+  goodsItem              GoodsItem          @relation(fields: [goodsItemId], references: [id])
+  salesDelivery          SalesDelivery      @relation(fields: [salesDeliveryId], references: [id], onDelete: Cascade)
+  sourceSalesOrderLine   SalesOrderLine?    @relation("SalesDeliverySourceSalesOrderLine", fields: [sourceSalesOrderLineId], references: [id])
+  unit                   UnitOfMeasure      @relation(fields: [unitId], references: [id])
+  salesInvoiceLines      SalesInvoiceLine[] @relation("SalesInvoiceSourceSalesDeliveryLine")
+}
+
+model SalesInvoice {
+  id                     Int                     @id @default(autoincrement())
+  fiscalPeriodId         Int
+  number                 Int
+  date                   DateTime                @db.Date
+  basis                  SalesInvoiceBasis
+  customerId             Int
+  currencyId             Int
+  description            String?
+  status                 SalesDocStatus          @default(DRAFT)
+  createdAt              DateTime                @default(now())
+  receiptSettlementLines ReceiptSettlementLine[]
+  currency               Currency                @relation(fields: [currencyId], references: [id])
+  customer               Customer                @relation(fields: [customerId], references: [id])
+  fiscalPeriod           FiscalPeriod            @relation(fields: [fiscalPeriodId], references: [id])
+  lines                  SalesInvoiceLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model SalesInvoiceLine {
+  id                        Int                @id @default(autoincrement())
+  salesInvoiceId            Int
+  rowOrder                  Int                @default(0)
+  sourceSalesDeliveryLineId Int?
+  goodsItemId               Int
+  unitId                    Int
+  quantity                  Decimal            @db.Decimal(36, 10)
+  unitPrice                 Decimal            @db.Decimal(36, 10)
+  amount                    Decimal            @db.Decimal(36, 10)
+  description               String?
+  goodsItem                 GoodsItem          @relation(fields: [goodsItemId], references: [id])
+  salesInvoice              SalesInvoice       @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
+  sourceSalesDeliveryLine   SalesDeliveryLine? @relation("SalesInvoiceSourceSalesDeliveryLine", fields: [sourceSalesDeliveryLineId], references: [id])
+  unit                      UnitOfMeasure      @relation(fields: [unitId], references: [id])
+}
+
+model ChequeItem {
+  id                     Int                     @id @default(autoincrement())
+  direction              ChequeDirection
+  number                 String
+  dueDate                DateTime                @db.Date
+  bankBranchId           Int?
+  ownerBankAccountId     Int?
+  partyId                Int
+  amount                 Decimal                 @db.Decimal(18, 2)
+  currencyId             Int
+  status                 ChequeStatus            @default(IN_HAND)
+  // شمارنده‌ی نسخه (فاز ۲.۲): با هر رویداد چرخه‌ی عمر (ایجاد، خرج/ظهرنویسی، واگذاری، برگشت از
+  // واگذاری، نتیجه وصول/برگشت) یک واحد بالا می‌رود. همان مقدار روی ردیف سندی که آن رویداد را ایجاد
+  // کرده (فیلد chequeStep در ۶ جدول ردیف مرتبط) هم ذخیره می‌شود؛ فقط وقتی chequeStep یک ردیف با
+  // step فعلی همین چک برابر باشد، آن ردیف «آخرین اتفاق» برای این چک است و بدون برگشت از تایید کل
+  // سند مادر، مستقیماً از همان سند قابل ویرایش/حذف (و افزودن ردیف تازه) است — نگاه کنید به توضیح
+  // بالای هرکدام از فایل‌های routes/receipts.ts, payments.ts, chequeDeposits.ts,
+  // chequeDepositReturns.ts, chequeClearingReceivable.ts, chequeClearingPayable.ts.
+  step                   Int                     @default(1)
+  description            String?
+  createdAt              DateTime                @default(now())
+  bankBranch             BankBranch?             @relation(fields: [bankBranchId], references: [id])
+  currency               Currency                @relation(fields: [currencyId], references: [id])
+  ownerBankAccount       BankAccount?            @relation(fields: [ownerBankAccountId], references: [id])
+  party                  Party                   @relation(fields: [partyId], references: [id])
+  paymentInstrumentLines PaymentInstrumentLine[]
+  receiptInstrumentLines ReceiptInstrumentLine[]
+  depositLines           ChequeDepositLine[]
+  depositReturnLines     ChequeDepositReturnLine[]
+  clearingReceivableLines ChequeClearingReceivableLine[]
+  clearingPayableLines   ChequeClearingPayableLine[]
+}
+
+model Receipt {
+  id              Int                     @id @default(autoincrement())
+  fiscalPeriodId  Int
+  number          Int
+  date            DateTime                @db.Date
+  partyId         Int
+  currencyId      Int
+  description     String?
+  status          TreasuryDocStatus       @default(DRAFT)
+  createdAt       DateTime                @default(now())
+  currency        Currency                @relation(fields: [currencyId], references: [id])
+  fiscalPeriod    FiscalPeriod            @relation(fields: [fiscalPeriodId], references: [id])
+  party           Party                   @relation(fields: [partyId], references: [id])
+  instrumentLines ReceiptInstrumentLine[]
+  settlementLines ReceiptSettlementLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model ReceiptInstrumentLine {
+  id                 Int                   @id @default(autoincrement())
+  receiptId          Int
+  rowOrder           Int                   @default(0)
+  type               PaymentInstrumentType
+  amount             Decimal               @db.Decimal(18, 2)
+  cashBoxId          Int?
+  bankAccountId      Int?
+  referenceNumber    String?
+  chequeItemId       Int?
+  chequeNumber       String?
+  chequeDueDate      DateTime?             @db.Date
+  chequeBankBranchId Int?
+  // فقط برای ردیف نوع CHEQUE، در لحظه‌ی تایید سند برابر step همان لحظه‌ی ChequeItem پر می‌شود
+  // (نگاه کنید به توضیح بالای ChequeItem.step).
+  chequeStep         Int?
+  posTerminal        String?
+  description        String?
+  bankAccount        BankAccount?          @relation("ReceiptInstrumentBankAccount", fields: [bankAccountId], references: [id])
+  cashBox            CashBox?              @relation(fields: [cashBoxId], references: [id])
+  chequeBankBranch   BankBranch?           @relation("ReceiptInstrumentChequeBankBranch", fields: [chequeBankBranchId], references: [id])
+  chequeItem         ChequeItem?           @relation(fields: [chequeItemId], references: [id])
+  receipt            Receipt               @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+}
+
+model ReceiptSettlementLine {
+  id             Int           @id @default(autoincrement())
+  receiptId      Int
+  rowOrder       Int           @default(0)
+  salesInvoiceId Int?
+  amount         Decimal       @db.Decimal(18, 2)
+  description    String?
+  receipt        Receipt       @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  salesInvoice   SalesInvoice? @relation(fields: [salesInvoiceId], references: [id])
+}
+
+model Payment {
+  id              Int                     @id @default(autoincrement())
+  fiscalPeriodId  Int
+  number          Int
+  date            DateTime                @db.Date
+  partyId         Int
+  currencyId      Int
+  description     String?
+  status          TreasuryDocStatus       @default(DRAFT)
+  createdAt       DateTime                @default(now())
+  currency        Currency                @relation(fields: [currencyId], references: [id])
+  fiscalPeriod    FiscalPeriod            @relation(fields: [fiscalPeriodId], references: [id])
+  party           Party                   @relation(fields: [partyId], references: [id])
+  instrumentLines PaymentInstrumentLine[]
+  settlementLines PaymentSettlementLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model PaymentInstrumentLine {
+  id                 Int                   @id @default(autoincrement())
+  paymentId          Int
+  rowOrder           Int                   @default(0)
+  type               PaymentInstrumentType
+  amount             Decimal               @db.Decimal(18, 2)
+  cashBoxId          Int?
+  bankAccountId      Int?
+  referenceNumber    String?
+  chequeItemId       Int?
+  chequeNumber       String?
+  chequeDueDate      DateTime?             @db.Date
+  chequeBankBranchId Int?
+  // فقط برای ردیف نوع CHEQUE (چه صدور تازه چه خرج‌کردن چک دریافتنی موجود)، در لحظه‌ی تایید سند
+  // برابر step همان لحظه‌ی ChequeItem پر می‌شود (نگاه کنید به توضیح بالای ChequeItem.step).
+  chequeStep         Int?
+  posTerminal        String?
+  description        String?
+  bankAccount        BankAccount?          @relation("PaymentInstrumentBankAccount", fields: [bankAccountId], references: [id])
+  cashBox            CashBox?              @relation(fields: [cashBoxId], references: [id])
+  chequeBankBranch   BankBranch?           @relation("PaymentInstrumentChequeBankBranch", fields: [chequeBankBranchId], references: [id])
+  chequeItem         ChequeItem?           @relation(fields: [chequeItemId], references: [id])
+  payment            Payment               @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+}
+
+model PaymentSettlementLine {
+  id                Int              @id @default(autoincrement())
+  paymentId         Int
+  rowOrder          Int              @default(0)
+  purchaseInvoiceId Int?
+  amount            Decimal          @db.Decimal(18, 2)
+  description       String?
+  payment           Payment          @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  purchaseInvoice   PurchaseInvoice? @relation(fields: [purchaseInvoiceId], references: [id])
+}
+
+enum SalesDocStatus {
+  DRAFT
+  APPROVED
+}
+
+enum SalesOrderBasis {
+  NO_BASIS
+  QUOTE
+}
+
+enum SalesDeliveryBasis {
+  NO_BASIS
+  SALES_ORDER
+}
+
+enum SalesInvoiceBasis {
+  NO_BASIS
+  SALES_DELIVERY
+}
+
+enum RateDirection {
+  TO_BASE
+  FROM_BASE
+}
+
+enum GeoLevel {
+  COUNTRY
+  PROVINCE
+  CITY
+}
+
+enum PartyCategory {
+  INDIVIDUAL
+  LEGAL
+}
+
+enum LegalPartyType {
+  LEGAL
+  SPECIAL_PARTNERSHIP
+  BANK
+}
+
+enum Nationality {
+  LOCAL
+  FOREIGN
+}
+
+enum AddressType {
+  HEAD_OFFICE
+  FACTORY
+  WAREHOUSE
+  HOME
+}
+
+enum PhoneType {
+  MOBILE
+  HEAD_OFFICE
+  FACTORY
+  WAREHOUSE
+  HOME
+}
+
+enum CostCenterType {
+  OPERATIONAL
+  SUPPORT
+  SERVICE
+  ADMIN
+}
+
+enum AccountNatureGroup {
+  BALANCE_SHEET
+  PROFIT_LOSS
+  MEMORANDUM
+}
+
+enum AccountNatureDetail {
+  ASSET
+  LIABILITY
+  REVENUE
+  EXPENSE
+  MEMORANDUM
+}
+
+enum BalanceNature {
+  DEBIT
+  CREDIT
+}
+
+enum JournalEntryStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+}
+
+enum IssuingSystem {
+  ACCOUNTING
+  ACCOUNTING_EXCEL_IMPORT
+  ACCOUNT_CLOSING
+  OPENING_CLOSING
+}
+
+enum OpeningClosingType {
+  OPENING
+  CLOSING
+}
+
+enum GoodsType {
+  RAW_MATERIAL
+  SEMI_FINISHED
+  PRODUCT
+  SUPPLIES
+  SERVICE
+  CONTRACT_GOODS
+  SCRAP
+  FIXED_ASSET
+  TRADE_GOODS
+}
+
+enum GoodsAttributeTitleEffect {
+  NONE
+  VALUE
+  VALUE_AND_TITLE
+}
+
+enum GoodsAccountType {
+  SALES_VAT
+  SALES_RECEIVABLE
+  SALES_RETURN
+  SALES_DISCOUNT
+  SALES_REVENUE
+  INVENTORY
+  WAREHOUSE_RECEIPT_CREDIT
+  WAREHOUSE_ISSUE_DEBIT
+  PURCHASE_PAYABLE
+  PURCHASE_CONTROL
+  PURCHASE_VAT
+}
+
+enum GoodsRequestNature {
+  CENTER_REQUEST
+  PROJECT_REQUEST
+  FIXED_ASSET_REQUEST
+}
+
+enum GoodsItemKind {
+  GOODS
+  SERVICE
+}
+
+enum WarehouseDocStatus {
+  DRAFT
+  FINALIZED
+  VOID
+}
+
+enum WarehouseDocCreationType {
+  MANUAL
+  SYSTEM
+}
+
+enum RequestStatus {
+  DRAFT
+  REVIEWED
+  APPROVED
+  REJECTED
+  CLOSED
+}
+
+enum SupplyRequestBasis {
+  FROM_GOODS_REQUEST
+  NO_BASIS
+}
+
+enum SupplyRoute {
+  TRANSFER
+  PURCHASE
+}
+
+enum PurchaseRouteNature {
+  TENDER
+  INQUIRY
+  NO_FORMALITY
+  EXCLUSIVE
+}
+
+enum PurchaseRequestBasis {
+  NO_BASIS
+  SUPPLY_REQUEST
+}
+
+enum PurchaseOrderBasis {
+  NO_BASIS
+  PRICE_INQUIRY
+}
+
+enum DeliveryReceiptType {
+  INSPECTED
+  TO_BE_INSPECTED
+}
+
+enum WarehouseReceiptBasis {
+  NO_BASIS
+  SUPPLY_REQUEST
+  PURCHASE_ORDER
+  DELIVERY_AUTHORIZATION
+}
+
+enum WarehouseIssueBasis {
+  NO_BASIS
+  GOODS_REQUEST
+}
+
+enum CostAllocationBasis {
+  VALUE
+  QUANTITY
+  WEIGHT
+}
+
+enum PurchaseInvoiceBasis {
+  NO_BASIS
+  WAREHOUSE_RECEIPT
+}
+
+enum PaymentInstrumentType {
+  CASH
+  BANK_TRANSFER
+  CHEQUE
+  POS
+}
+
+enum TreasuryDocStatus {
+  DRAFT
+  APPROVED
+}
+
+enum ChequeDirection {
+  RECEIVABLE
+  PAYABLE
+}
+
+enum ChequeStatus {
+  IN_HAND
+  IN_COLLECTION
+  ISSUED
+  CLEARED
+  BOUNCED
+  ENDORSED
+  CANCELLED
+}
+
+// ==================== خزانه‌داری > چرخه‌ی عمر چک (واگذاری/برگشت/نتیجه‌ی وصول) ====================
+//
+// طبق تصمیم صریح کاربر، «تغییر وضعیت تکی» برای وصول/برگشت چک کافی نیست — چون در واقعیت چند چک با هم
+// در یک واگذاری به یک حساب بانکی مشخص تحویل بانک داده می‌شوند و نتیجه‌ی وصول/برگشت هم می‌تواند سند
+// حسابداری بگیرد (در فاز بعد). بنابراین این عملیات‌ها به‌صورت اسناد مستقل با هدر/آیتم مدل شده‌اند:
+//
+// - ChequeDeposit («واگذاری به بانک»): فقط چک دریافتنی؛ هدر = تاریخ + حساب بانکی مقصد؛ در تایید،
+//   وضعیت چک‌های انتخاب‌شده IN_HAND -> IN_COLLECTION می‌شود.
+// - ChequeDepositReturn («برگشت از واگذاری»): فقط چک دریافتنی؛ چک‌ها (حتی زیرمجموعه‌ای از یک
+//   واگذاری) از بانک پس گرفته می‌شوند؛ در تایید IN_COLLECTION -> IN_HAND.
+// - ChequeClearingReceivable («نتیجه وصول/برگشت چک دریافتنی») و ChequeClearingPayable («نتیجه
+//   وصول/برگشت چک پرداختنی»): دو فرم جداگانه (طبق تصمیم کاربر)؛ هر ردیف نتیجه‌ی خودش را جداگانه
+//   مشخص می‌کند (وصول‌شده یا برگشتی) چون ممکن است در یک دسته، برخی وصول و برخی برگشت بخورند.
+//   دریافتنی: IN_COLLECTION -> CLEARED|BOUNCED. پرداختنی: ISSUED -> CLEARED|BOUNCED (چک پرداختنی
+//   مرحله‌ی «واگذاری به بانک» ندارد، چون خودمان صادرکننده‌ایم؛ مستقیم از ISSUED به نتیجه می‌رود).
+//
+// فعلاً (طبق تصمیم کاربر) هیچ‌کدام سند حسابداری خودکار صادر نمی‌کنند؛ فقط ساختار سند و گردش وضعیت
+// ساده‌ی ثبت/تایید (TreasuryDocStatus) پیاده شده است.
+// ============================================================================================
+
+enum ChequeClearingOutcome {
+  CLEARED
+  BOUNCED
+}
+
+model ChequeDeposit {
+  id             Int                 @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime            @db.Date
+  bankAccountId  Int
+  description    String?
+  status         TreasuryDocStatus   @default(DRAFT)
+  createdAt      DateTime            @default(now())
+  fiscalPeriod   FiscalPeriod        @relation(fields: [fiscalPeriodId], references: [id])
+  bankAccount    BankAccount         @relation(fields: [bankAccountId], references: [id])
+  lines          ChequeDepositLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model ChequeDepositLine {
+  id              Int           @id @default(autoincrement())
+  chequeDepositId Int
+  rowOrder        Int           @default(0)
+  chequeItemId    Int
+  // در لحظه‌ی تایید سند برابر step همان لحظه‌ی ChequeItem پر می‌شود (نگاه کنید به توضیح بالای
+  // ChequeItem.step).
+  chequeStep      Int?
+  chequeDeposit   ChequeDeposit @relation(fields: [chequeDepositId], references: [id], onDelete: Cascade)
+  chequeItem      ChequeItem    @relation(fields: [chequeItemId], references: [id])
+}
+
+model ChequeDepositReturn {
+  id             Int                       @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime                  @db.Date
+  description    String?
+  status         TreasuryDocStatus         @default(DRAFT)
+  createdAt      DateTime                  @default(now())
+  fiscalPeriod   FiscalPeriod              @relation(fields: [fiscalPeriodId], references: [id])
+  lines          ChequeDepositReturnLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model ChequeDepositReturnLine {
+  id                    Int                 @id @default(autoincrement())
+  chequeDepositReturnId Int
+  rowOrder              Int                 @default(0)
+  chequeItemId          Int
+  chequeStep            Int?
+  chequeDepositReturn   ChequeDepositReturn @relation(fields: [chequeDepositReturnId], references: [id], onDelete: Cascade)
+  chequeItem            ChequeItem          @relation(fields: [chequeItemId], references: [id])
+}
+
+model ChequeClearingReceivable {
+  id             Int                            @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime                       @db.Date
+  description    String?
+  status         TreasuryDocStatus              @default(DRAFT)
+  createdAt      DateTime                       @default(now())
+  fiscalPeriod   FiscalPeriod                   @relation(fields: [fiscalPeriodId], references: [id])
+  lines          ChequeClearingReceivableLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model ChequeClearingReceivableLine {
+  id                         Int                      @id @default(autoincrement())
+  chequeClearingReceivableId Int
+  rowOrder                   Int                      @default(0)
+  chequeItemId               Int
+  outcome                    ChequeClearingOutcome
+  chequeStep                 Int?
+  chequeClearingReceivable   ChequeClearingReceivable @relation(fields: [chequeClearingReceivableId], references: [id], onDelete: Cascade)
+  chequeItem                 ChequeItem               @relation(fields: [chequeItemId], references: [id])
+}
+
+model ChequeClearingPayable {
+  id             Int                         @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime                    @db.Date
+  description    String?
+  status         TreasuryDocStatus           @default(DRAFT)
+  createdAt      DateTime                    @default(now())
+  fiscalPeriod   FiscalPeriod                @relation(fields: [fiscalPeriodId], references: [id])
+  lines          ChequeClearingPayableLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model ChequeClearingPayableLine {
+  id                      Int                   @id @default(autoincrement())
+  chequeClearingPayableId Int
+  rowOrder                Int                   @default(0)
+  chequeItemId            Int
+  outcome                 ChequeClearingOutcome
+  chequeStep              Int?
+  chequeClearingPayable   ChequeClearingPayable @relation(fields: [chequeClearingPayableId], references: [id], onDelete: Cascade)
+  chequeItem              ChequeItem            @relation(fields: [chequeItemId], references: [id])
+}

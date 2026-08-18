@@ -1,0 +1,422 @@
+import { Router } from "express";
+import { prisma } from "../lib/prisma";
+import { getMovements, Movement } from "../services/warehouseMovementService";
+
+// =========================================================================
+// ماژول‌های «انبارداری» (مرور تعدادی) / «حسابداری انبار» (مرور مبلغی) > ساب‌ماژول: گزارش
+//
+// یک entity/API مشترک برای هر دو نما (دقیقاً مثل بقیه‌ی اسناد انبار)؛ فرانت‌اند بر اساس mode تصمیم
+// می‌گیرد کدام ستون‌ها (تعدادی/مبلغی) را نشان دهد — بک‌اند همیشه هر دو مقدار (qty و amount) را
+// برمی‌گرداند. با همان فرمت «مرور حسابها» (ChainedTabsBar + useChainedMultiSelect سمت فرانت‌اند):
+// انبار، [یک تب به ازای هر سطح گروه کالا]، کالا، کالا-تاریخ‌انقضا، کالا-سریال، کالا-شماره‌بچ،
+// کالا-محل‌فیزیکی، گردش.
+//
+// طبق «مستند عمومی عملیات انبار» بخش ۷ (گزارش‌های انبار)، این گزارش «سند یا رویداد مستقلی در فرآیند
+// انبار محسوب نمی‌شود» — صرفاً از گردش‌های قطعی‌شده‌ی اسناد انبار (warehouseMovementService) استخراج
+// می‌شود.
+//
+// تب‌های «سطح گروه کالا» (goods-group-level): دقیقاً مثل تب‌های سطح گزارشگری در «مرور حسابها»
+// (reports.ts /trial-balance) — برای یک levelOrder مشخص، گردش‌ها بر اساس گره‌ی گروه کالای اجدادی هر
+// کالا در آن سطح جمع می‌زنند (نه خودِ کالا). فیلتر زنجیره‌ای بین تب‌ها به مکانیزم موجود (goodsItemIds
+// جمع‌شده سمت فرانت از تب‌های «پیش‌تر لمس‌شده») متکی است: هر ردیف این تب، goodsItemIds زیرمجموعه‌ی
+// خودش را هم برمی‌گرداند تا وقتی انتخاب شود، دقیقاً مثل انتخاب چند ردیف در تب «کالا» عمل کند.
+// =========================================================================
+
+const router = Router();
+
+interface CommonQuery {
+  fromDate?: string;
+  toDate?: string;
+  warehouseIds?: string;
+  goodsItemIds?: string;
+  expiryDates?: string;
+  serialNumbers?: string;
+  batchNumbers?: string;
+  physicalLocations?: string;
+}
+
+function parseIdList(s?: string): number[] {
+  if (!s) return [];
+  return s.split(",").map(Number).filter((n) => !Number.isNaN(n));
+}
+function parseStrList(s?: string): string[] {
+  if (!s) return [];
+  return s.split(",").filter(Boolean);
+}
+
+function parseFilters(q: CommonQuery) {
+  if (!q.fromDate || !q.toDate) throw new Error("بازه تاریخ الزامی است");
+  return {
+    fromDate: new Date(q.fromDate),
+    toDate: new Date(q.toDate),
+    warehouseIds: parseIdList(q.warehouseIds),
+    goodsItemIds: parseIdList(q.goodsItemIds),
+    expiryDateStrs: parseStrList(q.expiryDates),
+    serialNumbers: parseStrList(q.serialNumbers),
+    batchNumbers: parseStrList(q.batchNumbers),
+    physicalLocations: parseStrList(q.physicalLocations),
+  };
+}
+
+function movementFiltersFrom(f: ReturnType<typeof parseFilters>) {
+  return {
+    toDate: f.toDate,
+    warehouseIds: f.warehouseIds,
+    goodsItemIds: f.goodsItemIds,
+    serialNumbers: f.serialNumbers,
+    batchNumbers: f.batchNumbers,
+    expiryDates: f.expiryDateStrs.map((s) => new Date(s)),
+    physicalLocations: f.physicalLocations,
+  };
+}
+
+interface Bucket {
+  qty: number;
+  amount: number;
+}
+function emptyBucket(): Bucket {
+  return { qty: 0, amount: 0 };
+}
+
+/**
+ * از فهرست گردش‌های خام (Movement[])، ردیف‌های گزارش را بر اساس یک کلید دلخواه (keyOf) گروه‌بندی و
+ * جمع می‌زند: مقدار/مبلغ اول دوره (گردش‌های پیش از fromDate، امضادار)، وارده/صادره (در بازه، هر کدام
+ * جدا)، و مانده (اول‌دوره + وارده − صادره). ردیف‌هایی که در کل صفر هستند حذف می‌شوند (مثل «فقط
+ * حساب‌های دارای گردش» در مرور حسابها).
+ */
+function buildRows(
+  movements: Movement[],
+  fromDate: Date,
+  toDate: Date,
+  keyOf: (m: Movement) => string | null,
+  rowMeta: (key: string, sample: Movement) => Record<string, any>
+) {
+  const rows = new Map<string, { opening: Bucket; in: Bucket; out: Bucket; meta: Record<string, any> }>();
+  for (const m of movements) {
+    const key = keyOf(m);
+    if (key === null) continue;
+    if (!rows.has(key)) rows.set(key, { opening: emptyBucket(), in: emptyBucket(), out: emptyBucket(), meta: rowMeta(key, m) });
+    const row = rows.get(key)!;
+    if (m.date < fromDate) {
+      if (m.direction === "IN") {
+        row.opening.qty += m.quantity;
+        row.opening.amount += m.amount;
+      } else {
+        row.opening.qty -= m.quantity;
+        row.opening.amount -= m.amount;
+      }
+    } else if (m.date <= toDate) {
+      const bucket = m.direction === "IN" ? row.in : row.out;
+      bucket.qty += m.quantity;
+      bucket.amount += m.amount;
+    }
+  }
+
+  return Array.from(rows.entries())
+    .map(([id, r]) => ({
+      id,
+      ...r.meta,
+      openingQuantity: r.opening.qty,
+      openingAmount: r.opening.amount,
+      inQuantity: r.in.qty,
+      inAmount: r.in.amount,
+      outQuantity: r.out.qty,
+      outAmount: r.out.amount,
+      balanceQuantity: r.opening.qty + r.in.qty - r.out.qty,
+      balanceAmount: r.opening.amount + r.in.amount - r.out.amount,
+    }))
+    .filter((r) => r.openingQuantity !== 0 || r.inQuantity !== 0 || r.outQuantity !== 0 || r.openingAmount !== 0 || r.inAmount !== 0 || r.outAmount !== 0);
+}
+
+router.get("/warehouse-review/warehouses", async (req, res) => {
+  try {
+    const f = parseFilters(req.query as CommonQuery);
+    const movements = await getMovements(movementFiltersFrom(f));
+    const warehouses = await prisma.warehouse.findMany({ select: { id: true, code: true, title: true } });
+    const whById = new Map(warehouses.map((w: any) => [w.id, w]));
+    const rows = buildRows(
+      movements,
+      f.fromDate,
+      f.toDate,
+      (m) => String(m.warehouseId),
+      (_key, m) => {
+        const w: any = whById.get(m.warehouseId);
+        return { warehouseId: m.warehouseId, warehouseCode: w?.code ?? null, warehouseTitle: w?.title ?? `#${m.warehouseId}` };
+      }
+    );
+    res.json(rows);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
+  }
+});
+
+// =========================================================================
+// تب‌های «سطح گروه کالا» — یک endpoint پارامتری (levelOrder)، مشابه /reports/trial-balance
+// =========================================================================
+
+interface GoodsGroupNode {
+  id: number;
+  parentId: number | null;
+  levelId: number;
+  code: string;
+}
+interface GoodsGroupLevelMeta {
+  id: number;
+  order: number;
+  title: string;
+  affectsGoodsCode: boolean;
+}
+
+async function loadGoodsGroupTree() {
+  const [groups, levels, items] = await Promise.all([
+    prisma.goodsGroup.findMany({ select: { id: true, parentId: true, levelId: true, code: true, title: true } }),
+    prisma.goodsGroupLevel.findMany({ select: { id: true, order: true, title: true, affectsGoodsCode: true } }),
+    prisma.goodsItem.findMany({ select: { id: true, goodsGroupId: true } }),
+  ]);
+  const groupById = new Map<number, (typeof groups)[number]>(groups.map((g: any) => [g.id, g]));
+  const levelById = new Map<number, GoodsGroupLevelMeta>(levels.map((l: any) => [l.id, l]));
+  const itemGroupById = new Map<number, number>(items.map((i: any) => [i.id, i.goodsGroupId]));
+  return { groupById, levelById, itemGroupById };
+}
+
+/** از یک گروه کالا (در هر عمقی)، به سمت بالا می‌رود تا گره‌ی هم‌سطح با targetLevelId را پیدا کند */
+function ancestorGroupAtLevel(groupId: number, targetLevelId: number, groupById: Map<number, GoodsGroupNode>): number | null {
+  let cur: GoodsGroupNode | undefined = groupById.get(groupId);
+  while (cur) {
+    if (cur.levelId === targetLevelId) return cur.id;
+    cur = cur.parentId != null ? groupById.get(cur.parentId) : undefined;
+  }
+  return null;
+}
+
+/** کد کامل یک گره‌ی گروه کالا با پیمایش زنجیره‌ی والدها (فقط سطوحی که «تاثیر در کد کالا» دارند) — دقیقاً همان منطق computePrefixes در routes/goodsItems.ts */
+function fullGoodsGroupCode(groupId: number, groupById: Map<number, GoodsGroupNode>, levelById: Map<number, GoodsGroupLevelMeta>): string {
+  const parts: string[] = [];
+  let cur: GoodsGroupNode | undefined = groupById.get(groupId);
+  while (cur) {
+    const level = levelById.get(cur.levelId);
+    if (!level || level.affectsGoodsCode) parts.unshift(cur.code);
+    cur = cur.parentId != null ? groupById.get(cur.parentId) : undefined;
+  }
+  return parts.join("");
+}
+
+router.get("/warehouse-review/goods-group-level", async (req, res) => {
+  try {
+    const q = req.query as CommonQuery & { levelOrder?: string };
+    if (!q.levelOrder) return res.status(400).json({ error: "سطح گروه کالا مشخص نشده است" });
+
+    const targetLevel = await prisma.goodsGroupLevel.findFirst({ where: { order: Number(q.levelOrder) } });
+    if (!targetLevel) return res.status(404).json({ error: "سطح گروه کالا یافت نشد" });
+
+    const f = parseFilters(q);
+    const movements = await getMovements(movementFiltersFrom(f));
+    const { groupById, levelById, itemGroupById } = await loadGoodsGroupTree();
+
+    const rows = new Map<string, { opening: Bucket; in: Bucket; out: Bucket; groupId: number; itemIds: Set<number> }>();
+    for (const m of movements) {
+      const leafGroupId = itemGroupById.get(m.goodsItemId);
+      if (leafGroupId == null) continue;
+      const ancestorId = ancestorGroupAtLevel(leafGroupId, targetLevel.id, groupById);
+      if (ancestorId == null) continue; // این کالا در این سطح جدِ متناظری ندارد (درخت گروهش کوتاه‌تر است)
+      const key = String(ancestorId);
+      if (!rows.has(key)) rows.set(key, { opening: emptyBucket(), in: emptyBucket(), out: emptyBucket(), groupId: ancestorId, itemIds: new Set() });
+      const row = rows.get(key)!;
+      row.itemIds.add(m.goodsItemId);
+      if (m.date < f.fromDate) {
+        if (m.direction === "IN") {
+          row.opening.qty += m.quantity;
+          row.opening.amount += m.amount;
+        } else {
+          row.opening.qty -= m.quantity;
+          row.opening.amount -= m.amount;
+        }
+      } else if (m.date <= f.toDate) {
+        const bucket = m.direction === "IN" ? row.in : row.out;
+        bucket.qty += m.quantity;
+        bucket.amount += m.amount;
+      }
+    }
+
+    const result = Array.from(rows.entries())
+      .map(([id, r]) => {
+        const g = groupById.get(r.groupId);
+        return {
+          id,
+          groupId: r.groupId,
+          groupCode: fullGoodsGroupCode(r.groupId, groupById, levelById),
+          groupTitle: g?.title ?? `#${r.groupId}`,
+          goodsItemIds: Array.from(r.itemIds),
+          openingQuantity: r.opening.qty,
+          openingAmount: r.opening.amount,
+          inQuantity: r.in.qty,
+          inAmount: r.in.amount,
+          outQuantity: r.out.qty,
+          outAmount: r.out.amount,
+          balanceQuantity: r.opening.qty + r.in.qty - r.out.qty,
+          balanceAmount: r.opening.amount + r.in.amount - r.out.amount,
+        };
+      })
+      .filter((r) => r.openingQuantity !== 0 || r.inQuantity !== 0 || r.outQuantity !== 0 || r.openingAmount !== 0 || r.inAmount !== 0 || r.outAmount !== 0);
+
+    res.json(result);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
+  }
+});
+
+router.get("/warehouse-review/goods-items", async (req, res) => {
+  try {
+    const f = parseFilters(req.query as CommonQuery);
+    const movements = await getMovements(movementFiltersFrom(f));
+    const rows = buildRows(
+      movements,
+      f.fromDate,
+      f.toDate,
+      (m) => String(m.goodsItemId),
+      (_key, m) => ({ goodsItemId: m.goodsItemId, goodsItemCode: m.goodsItemCode, goodsItemTitle: m.goodsItemTitle })
+    );
+    res.json(rows);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
+  }
+});
+
+router.get("/warehouse-review/goods-expiry", async (req, res) => {
+  try {
+    const f = parseFilters(req.query as CommonQuery);
+    const movements = await getMovements(movementFiltersFrom(f));
+    const rows = buildRows(
+      movements,
+      f.fromDate,
+      f.toDate,
+      (m) => (m.expiryDate ? `${m.goodsItemId}|${m.expiryDate.toISOString().slice(0, 10)}` : null),
+      (_key, m) => ({
+        goodsItemId: m.goodsItemId,
+        goodsItemCode: m.goodsItemCode,
+        goodsItemTitle: m.goodsItemTitle,
+        expiryDate: m.expiryDate,
+      })
+    );
+    res.json(rows);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
+  }
+});
+
+router.get("/warehouse-review/goods-serial", async (req, res) => {
+  try {
+    const f = parseFilters(req.query as CommonQuery);
+    const movements = await getMovements(movementFiltersFrom(f));
+    const rows = buildRows(
+      movements,
+      f.fromDate,
+      f.toDate,
+      (m) => (m.serialNumber ? `${m.goodsItemId}|${m.serialNumber}` : null),
+      (_key, m) => ({
+        goodsItemId: m.goodsItemId,
+        goodsItemCode: m.goodsItemCode,
+        goodsItemTitle: m.goodsItemTitle,
+        serialNumber: m.serialNumber,
+      })
+    );
+    res.json(rows);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
+  }
+});
+
+router.get("/warehouse-review/goods-batch", async (req, res) => {
+  try {
+    const f = parseFilters(req.query as CommonQuery);
+    const movements = await getMovements(movementFiltersFrom(f));
+    const rows = buildRows(
+      movements,
+      f.fromDate,
+      f.toDate,
+      (m) => (m.batchNumber ? `${m.goodsItemId}|${m.batchNumber}` : null),
+      (_key, m) => ({
+        goodsItemId: m.goodsItemId,
+        goodsItemCode: m.goodsItemCode,
+        goodsItemTitle: m.goodsItemTitle,
+        batchNumber: m.batchNumber,
+      })
+    );
+    res.json(rows);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
+  }
+});
+
+router.get("/warehouse-review/goods-location", async (req, res) => {
+  try {
+    const f = parseFilters(req.query as CommonQuery);
+    const movements = await getMovements(movementFiltersFrom(f));
+    const rows = buildRows(
+      movements,
+      f.fromDate,
+      f.toDate,
+      (m) => (m.physicalLocation ? `${m.goodsItemId}|${m.physicalLocation}` : null),
+      (_key, m) => ({
+        goodsItemId: m.goodsItemId,
+        goodsItemCode: m.goodsItemCode,
+        goodsItemTitle: m.goodsItemTitle,
+        physicalLocation: m.physicalLocation,
+      })
+    );
+    res.json(rows);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
+  }
+});
+
+// تب «گردش»: فهرست تخت گردش‌ها با مانده‌ی تراکمی در خط (بر اساس تمام گردش‌های منطبق با فیلترها، نه
+// فقط بازه‌ی جاری — دقیقاً مثل «مرور حسابها»)؛ صفحه‌بندی و مرتب‌سازی در حافظه انجام می‌شود.
+router.get("/warehouse-review/ledger", async (req, res) => {
+  try {
+    const f = parseFilters(req.query as CommonQuery);
+    const page = Math.max(1, parseInt((req.query.page as string) || "1", 10));
+    const pageSize = Math.min(1000, Math.max(1, parseInt((req.query.pageSize as string) || "100", 10)));
+
+    const movements = await getMovements(movementFiltersFrom(f));
+    const sorted = [...movements].sort((a, b) => a.date.getTime() - b.date.getTime() || a.docNumber - b.docNumber || a.lineId - b.lineId);
+
+    let cumQty = 0;
+    let cumAmount = 0;
+    const withRunning = sorted.map((m) => {
+      cumQty += m.direction === "IN" ? m.quantity : -m.quantity;
+      cumAmount += m.direction === "IN" ? m.amount : -m.amount;
+      return {
+        direction: m.direction,
+        docType: m.docType,
+        docId: m.docId,
+        docNumber: m.docNumber,
+        date: m.date,
+        goodsItemId: m.goodsItemId,
+        goodsItemCode: m.goodsItemCode,
+        goodsItemTitle: m.goodsItemTitle,
+        quantity: m.quantity,
+        amount: m.amount,
+        serialNumber: m.serialNumber,
+        batchNumber: m.batchNumber,
+        expiryDate: m.expiryDate,
+        physicalLocation: m.physicalLocation,
+        partyCode: m.partyCode,
+        partyTitle: m.partyTitle,
+        runningQuantity: cumQty,
+        runningAmount: cumAmount,
+      };
+    });
+
+    const inRange = withRunning.filter((m) => m.date >= f.fromDate && m.date <= f.toDate);
+    const total = inRange.length;
+    const start = (page - 1) * pageSize;
+    const rows = inRange.slice(start, start + pageSize);
+
+    res.json({ rows, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
+  }
+});
+
+export default router;
