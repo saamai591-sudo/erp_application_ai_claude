@@ -73,7 +73,12 @@ function LevelForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
-  const [form, setForm] = usePersistedState(cacheKey, { title: "", codeLength: 1 });
+  // codeLength به‌صورت رشته نگه‌داری می‌شود (نه number) — چون input عدد مرورگر یک نکته‌ی شناخته‌شده دارد:
+  // وقتی مقدار تایپ‌شده به یک رشته‌ی دیگرِ هم‌ارزِ عددی (مثلاً «۰۲» و «۲») نگاشت می‌شود، مرورگر متن
+  // نمایش‌داده‌شده را دوباره از روی prop جدید بازنویسی نمی‌کند (چون valueAsNumber هر دو یکی است)، پس با
+  // وجود این‌که state واقعی درست است، فیلد همچنان «۰۲» را نشان می‌دهد. با کنترل کامل رشته (پاک‌سازی
+  // کاراکتر به کاراکتر در onChange) از این رفتار مرورگر عبور می‌کنیم.
+  const [form, setForm] = usePersistedState(cacheKey, { title: "", codeLength: "1" });
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const { saved, flash } = useSavedFlash();
@@ -82,7 +87,7 @@ function LevelForm({ editId }: { editId?: number }) {
     if (!editId || hasPersistedState(cacheKey)) return;
     api.get("/reporting-levels").then((items: Level[]) => {
       const found = items.find((i) => i.id === editId);
-      if (found) setForm({ title: found.title, codeLength: found.codeLength });
+      if (found) setForm({ title: found.title, codeLength: String(found.codeLength) });
       setLoaded(true);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -141,7 +146,16 @@ function LevelForm({ editId }: { editId?: number }) {
           </div>
           <div className="form-field">
             <label>طول کد</label>
-            <input type="number" min={1} step={1} value={form.codeLength} onChange={(e) => setForm({ ...form, codeLength: Number(e.target.value) })} />
+            <input
+              type="text"
+              inputMode="numeric"
+              value={form.codeLength}
+              onChange={(e) => {
+                const digitsOnly = e.target.value.replace(/[^\d]/g, "");
+                const normalized = digitsOnly.replace(/^0+(?=\d)/, "");
+                setForm({ ...form, codeLength: normalized });
+              }}
+            />
           </div>
         </div>
       </form>
