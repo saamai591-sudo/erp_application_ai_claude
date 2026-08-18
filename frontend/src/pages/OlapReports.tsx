@@ -245,6 +245,14 @@ function DimensionEditor({
   );
 }
 
+function ChevronIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ transform: collapsed ? "rotate(180deg)" : undefined, transition: "transform 0.15s" }}>
+      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function OlapBuilder({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -256,6 +264,7 @@ function OlapBuilder({ editId }: { editId?: number }) {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = usePersistedState<PivotResult | null>(`${cacheKey}:result`, null);
   const [running, setRunning] = useState(false);
+  const [settingsCollapsed, setSettingsCollapsed] = usePersistedState(`${cacheKey}:collapsed`, false);
   const { saved, flash } = useSavedFlash();
 
   const [levels, setLevels] = useState<Level[]>([]);
@@ -328,6 +337,7 @@ function OlapBuilder({ editId }: { editId?: number }) {
         filters: buildFilters(cfg.filters),
       });
       setResult(res);
+      setSettingsCollapsed(true);
     } catch (e) {
       setError((e as ApiError).message);
       setResult(null);
@@ -375,6 +385,16 @@ function OlapBuilder({ editId }: { editId?: number }) {
     return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
   }
 
+  function dimensionSummary(d: DimensionSpec | null): string {
+    if (!d) return "بدون";
+    if (d.type === "account") return `حساب (${levels.find((l) => l.order === d.levelOrder)?.title || d.levelOrder})`;
+    if (d.type === "detail") return `تفصیل ${d.slot === 1 ? "۱" : d.slot === 2 ? "۲" : "۳"}`;
+    return `دوره (${d.granularity === "year" ? "سال" : "ماه"})`;
+  }
+  const settingsSummary = `ردیف: ${dimensionSummary(config.rowDimension)} — ستون: ${dimensionSummary(config.colDimension)} — شاخص: ${
+    MEASURE_OPTIONS.find((m) => m.value === config.measure)?.label || ""
+  }`;
+
   if (!loaded) return null;
 
   return (
@@ -398,6 +418,15 @@ function OlapBuilder({ editId }: { editId?: number }) {
           </div>
         </div>
 
+        <div className="olap-settings-toggle-row">
+          <button type="button" className="btn secondary" onClick={() => setSettingsCollapsed(!settingsCollapsed)}>
+            <ChevronIcon collapsed={settingsCollapsed} />
+            {settingsCollapsed ? "نمایش تنظیمات" : "جمع کردن تنظیمات"}
+          </button>
+          {settingsCollapsed && <span className="olap-settings-summary">{settingsSummary}</span>}
+        </div>
+
+        <div className={settingsCollapsed ? "olap-settings-hidden" : undefined}>
         <div className="card" style={{ padding: 14, marginTop: 14, marginBottom: 14 }}>
           <DimensionEditor label="بعد ردیف" value={config.rowDimension} allowNone={false} levels={levels} onChange={(v) => v && setConfig({ ...config, rowDimension: v })} />
           <DimensionEditor label="بعد ستون" value={config.colDimension} allowNone levels={levels} onChange={(v) => setConfig({ ...config, colDimension: v })} />
@@ -511,6 +540,7 @@ function OlapBuilder({ editId }: { editId?: number }) {
               ))}
             </div>
           </div>
+        </div>
         </div>
 
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>

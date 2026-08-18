@@ -907,6 +907,11 @@ body {
 }
 .chip button:hover { opacity: 1; }
 
+/* دکمه‌ی جمع‌کردن/نمایش تنظیمات گزارش تحلیلی (OLAP) و خلاصه‌ی تنظیمات فعلی هنگام جمع‌شدن */
+.olap-settings-toggle-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.olap-settings-summary { font-size: 12.5px; color: var(--ink-soft); }
+.olap-settings-hidden { display: none; }
+
 /* جدول ماتریسی گزارش تحلیلی (OLAP) */
 .olap-matrix-wrap { max-height: 65vh; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .olap-matrix { border-collapse: collapse; font-size: 12.5px; width: 100%; }
