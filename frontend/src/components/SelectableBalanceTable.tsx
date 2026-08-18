@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { SelectId } from "../lib/useChainedMultiSelect";
 import { toFaDigits } from "../lib/formatAmount";
+import { ActiveFilter, ColumnFilterType, FilterIcon, FilterPopover, matchesFilter } from "./DataTable";
 
 export interface BalanceTableColumn<T> {
   header: string;
@@ -8,6 +9,10 @@ export interface BalanceTableColumn<T> {
   width?: string;
   /** مقدار خام قابل‌مقایسه برای مرتب‌سازی با کلیک روی هدر؛ اگر ندهید آن ستون قابل‌مرتب‌سازی نیست */
   sortValue?: (row: T) => string | number | null | undefined;
+  /** اگر مشخص شود، امکان فیلتر روی این ستون فعال می‌شود (دقیقاً همان قرارداد ستون‌های DataTable) */
+  filterType?: ColumnFilterType;
+  /** مقدار خام برای اعمال فیلتر؛ اگر ندهید از filterValue استفاده نمی‌شود و آیکن فیلتر نمایش داده نمی‌شود */
+  filterValue?: (row: T) => string | number | null | undefined;
 }
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -24,6 +29,8 @@ export interface BalanceTableServerPaging {
   onPageChange: (page: number) => void;
   onPageSizeChange: (size: number) => void;
   onSortChange?: (sort: { header: string; dir: "asc" | "desc" } | null) => void;
+  /** اگر داده شود، فیلتر ستونی به‌جای پردازش محلی، از طریق این callback به سرور واگذار می‌شود */
+  onFiltersChange?: (filters: Record<string, ActiveFilter>) => void;
 }
 
 function SortIcon({ dir }: { dir: "asc" | "desc" | null }) {
@@ -64,6 +71,10 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
   serverPaging?: BalanceTableServerPaging;
 }) {
   const [sort, setSort] = useState<{ header: string; dir: "asc" | "desc" } | null>(null);
+  const [filters, setFilters] = useState<Record<string, ActiveFilter>>({});
+  const [openFilterFor, setOpenFilterFor] = useState<string | null>(null);
+  const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
+  const filterBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   function toggleSort(col: BalanceTableColumn<T>) {
     if (!col.sortValue) return;
@@ -75,11 +86,31 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
     });
   }
 
-  let sortedRows = rows;
+  function openFilter(header: string) {
+    const btn = filterBtnRefs.current[header];
+    if (btn) {
+      const rect = btn.getBoundingClientRect();
+      setPopoverPos({ top: rect.bottom + 4, left: Math.max(8, rect.right - 220) });
+    }
+    setOpenFilterFor(openFilterFor === header ? null : header);
+  }
+
+  // در حالت سرور، rows همان صفحه‌ی از قبل فیلترشده از سرور است؛ پردازش محلی فیلتر فقط برای حالت کلاینتی اجرا می‌شود
+  const filteredRows = serverPaging
+    ? rows
+    : rows.filter((row) =>
+        columns.every((col) => {
+          const filter = filters[col.header];
+          if (!filter || !col.filterType || !col.filterValue) return true;
+          return matchesFilter(col.filterValue(row), col.filterType, filter);
+        })
+      );
+
+  let sortedRows = filteredRows;
   if (!serverPaging && sort) {
     const col = columns.find((c) => c.header === sort.header);
     if (col?.sortValue) {
-      sortedRows = [...rows].sort((a, b) => {
+      sortedRows = [...filteredRows].sort((a, b) => {
         const av = col.sortValue!(a);
         const bv = col.sortValue!(b);
         if (av === null || av === undefined) return 1;
@@ -107,16 +138,31 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
           <th style={{ width: 34 }}></th>
           {columns.map((c) => {
             const dir = sort?.header === c.header ? sort.dir : null;
+            const hasFilter = !!c.filterType && !!c.filterValue;
+            const isFilterActive = !!filters[c.header];
             return (
               <th key={c.header} style={{ width: c.width }}>
-                {c.sortValue ? (
-                  <span onClick={() => toggleSort(c)} style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }} title="مرتب‌سازی">
-                    {c.header}
-                    <SortIcon dir={dir} />
-                  </span>
-                ) : (
-                  c.header
-                )}
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  {c.sortValue ? (
+                    <span onClick={() => toggleSort(c)} style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }} title="مرتب‌سازی">
+                      {c.header}
+                      <SortIcon dir={dir} />
+                    </span>
+                  ) : (
+                    c.header
+                  )}
+                  {hasFilter && (
+                    <button
+                      ref={(el) => (filterBtnRefs.current[c.header] = el)}
+                      type="button"
+                      className={`filter-btn ${isFilterActive ? "active" : ""}`}
+                      onClick={() => openFilter(c.header)}
+                      title="فیلتر"
+                    >
+                      <FilterIcon active={isFilterActive} />
+                    </button>
+                  )}
+                </div>
               </th>
             );
           })}
@@ -149,11 +195,45 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
     </table>
   );
 
+  const filterPopover = openFilterFor &&
+    columns.map(
+      (c) =>
+        c.header === openFilterFor &&
+        c.filterType &&
+        c.filterValue && (
+          <FilterPopover
+            key={c.header}
+            type={c.filterType}
+            active={filters[c.header] ?? null}
+            position={popoverPos}
+            onApply={(f) =>
+              setFilters((prev) => {
+                const next = { ...prev, [c.header]: f };
+                serverPaging?.onFiltersChange?.(next);
+                return next;
+              })
+            }
+            onClear={() =>
+              setFilters((prev) => {
+                const next = { ...prev };
+                delete next[c.header];
+                serverPaging?.onFiltersChange?.(next);
+                return next;
+              })
+            }
+            onClose={() => setOpenFilterFor(null)}
+          />
+        )
+    );
+
   if (!serverPaging) {
     return (
-      <div className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
-        {table}
-      </div>
+      <>
+        <div className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
+          {table}
+        </div>
+        {filterPopover}
+      </>
     );
   }
 
@@ -192,6 +272,7 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
           </div>
         </div>
       </div>
+      {filterPopover}
     </div>
   );
 }

@@ -64,6 +64,33 @@ export function dateContainsRange(value: string): { gte: Date; lt: Date } | null
   return null;
 }
 
+/**
+ * نسخه‌ی JS (نه Prisma where) از همان قرارداد فیلتر ستونی — برای مسیرهایی که دیتای موردنظر را قبلاً
+ * در حافظه تجمیع کرده‌اند (مثل /reports/detail-summary که خروجی groupBy را دستی aggregate می‌کند) و
+ * فیلتر باید روی همان آرایه‌ی نهایی اعمال شود، نه در سطح کوئری دیتابیس. عملگرهای پشتیبانی‌شده دقیقاً
+ * همان contains/notContains/eq/gt/lt/empty/notEmpty معادلِ matchesFilter در DataTable.tsx است.
+ */
+export function matchesFilterValue(raw: string | number | null | undefined, type: "string" | "number", f: FilterSpec): boolean {
+  if (type === "number") {
+    const num = raw === null || raw === undefined || raw === "" ? null : Number(raw);
+    if (num === null || Number.isNaN(num)) return false;
+    const target = Number(f.value);
+    if (f.value === undefined || f.value === "" || Number.isNaN(target)) return true;
+    if (f.operator === "eq") return num === target;
+    if (f.operator === "gt") return num > target;
+    if (f.operator === "lt") return num < target;
+    return true;
+  }
+  const str = (raw ?? "").toString();
+  if (f.operator === "empty") return str.trim() === "";
+  if (f.operator === "notEmpty") return str.trim() !== "";
+  const needle = (f.value ?? "").toString().trim().toLowerCase();
+  if (!needle) return true;
+  if (f.operator === "contains") return str.toLowerCase().includes(needle);
+  if (f.operator === "notContains") return !str.toLowerCase().includes(needle);
+  return true;
+}
+
 export function dateWhere(f: FilterSpec): any {
   if (f.operator === "empty" || f.operator === "notEmpty") return undefined;
   if (f.operator === "gt" && f.value) return { gt: new Date(`${f.value}T00:00:00.000Z`) };

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { resolveDetailTitles } from "../utils/detailValues";
 import { computeFullAccountCode, buildAccountByIdMap } from "../utils/accountCode";
-import { parseFilters, stringWhere, numberWhere, dateWhere } from "../utils/tableFilters";
+import { parseFilters, stringWhere, numberWhere, dateWhere, matchesFilterValue } from "../utils/tableFilters";
 import { toJalaliYearMonth } from "../utils/jalaliDate";
 
 const router = Router();
@@ -210,6 +210,7 @@ router.get("/detail-summary", async (req, res) => {
     pageSize?: string;
     sortField?: string;
     sortDir?: string;
+    filters?: string;
   } & CommonFilters;
   const slot = Number(q.slot);
   if (![1, 2, 3].includes(slot)) return res.status(400).json({ error: "اسلات تفصیل نامعتبر است" });
@@ -257,14 +258,28 @@ router.get("/detail-summary", async (req, res) => {
     })
     .filter((r) => r.totalDebit > 0 || r.totalCredit > 0);
 
+  // فیلتر ستونی (آیکن فیلتر هدر جدول تفصیل در فرانت‌اند) — چون این endpoint خودش نتیجه را در حافظه
+  // تجمیع می‌کند (نه یک کوئری مستقیم دیتابیس)، فیلتر هم روی همین آرایه‌ی نهایی با matchesFilterValue اعمال می‌شود
+  const DETAIL_FILTER_TYPES: Record<string, "string" | "number"> = { code: "string", title: "string", totalDebit: "number", totalCredit: "number" };
+  const colFilters = parseFilters(q.filters);
+  const filtered = Object.keys(colFilters).length
+    ? results.filter((r: any) =>
+        Object.entries(colFilters).every(([field, f]) => {
+          const type = DETAIL_FILTER_TYPES[field];
+          if (!type) return true;
+          return matchesFilterValue(r[field], type, f);
+        })
+      )
+    : results;
+
   // سازگاری با نسخه‌ی قبلی: بدون پارامتر page، آرایه‌ی خام (بدون صفحه‌بندی) برگردانده می‌شود
   if (q.page === undefined) {
-    res.json(results);
+    res.json(filtered);
     return;
   }
 
   // مرتب‌سازی روی کل نتیجه (که همین‌جا در حافظه محاسبه شده) انجام می‌شود؛ سپس فقط همان صفحه برگردانده می‌شود
-  let sorted = results;
+  let sorted = filtered;
   if (q.sortField && DETAIL_SUMMARY_SORT_FIELDS.has(q.sortField)) {
     const field = q.sortField as "code" | "title" | "totalDebit" | "totalCredit";
     sorted = [...results].sort((a, b) => {

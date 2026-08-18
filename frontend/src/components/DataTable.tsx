@@ -60,7 +60,7 @@ function needsTwoValues(op: string) {
   return op === "between";
 }
 
-function matchesFilter(raw: string | number | null | undefined, type: ColumnFilterType, filter: ActiveFilter): boolean {
+export function matchesFilter(raw: string | number | null | undefined, type: ColumnFilterType, filter: ActiveFilter): boolean {
   if (type === "number") {
     const num = raw === null || raw === undefined || raw === "" ? null : Number(raw);
     if (num === null || Number.isNaN(num)) return false;

@@ -464,140 +464,144 @@ function OlapBuilder({ editId }: { editId?: number }) {
 
         <div className={settingsCollapsed ? "olap-settings-hidden" : undefined}>
         <div className="card" style={{ padding: 14, marginTop: 14, marginBottom: 14 }}>
-          <DimensionEditor label="بعد ردیف" value={config.rowDimension} allowNone={false} levels={levels} onChange={(v) => v && setConfig({ ...config, rowDimension: v })} />
-          <DimensionEditor label="بعد ستون" value={config.colDimension} allowNone levels={levels} onChange={(v) => setConfig({ ...config, colDimension: v })} />
-          <div className="form-field-inline">
-            <label>شاخص</label>
-            <select value={config.measure} onChange={(e) => setConfig({ ...config, measure: e.target.value as Measure })}>
-              {MEASURE_OPTIONS.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="form-field-inline">
-            <label>نوع نمایش</label>
-            <select value={config.chartType} onChange={(e) => setConfig({ ...config, chartType: e.target.value as ChartType })}>
-              {CHART_OPTIONS.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
+          <div className="olap-settings-grid">
+            <DimensionEditor label="بعد ردیف" value={config.rowDimension} allowNone={false} levels={levels} onChange={(v) => v && setConfig({ ...config, rowDimension: v })} />
+            <DimensionEditor label="بعد ستون" value={config.colDimension} allowNone levels={levels} onChange={(v) => setConfig({ ...config, colDimension: v })} />
+            <div className="form-field-inline">
+              <label>شاخص</label>
+              <select value={config.measure} onChange={(e) => setConfig({ ...config, measure: e.target.value as Measure })}>
+                {MEASURE_OPTIONS.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-field-inline">
+              <label>نوع نمایش</label>
+              <select value={config.chartType} onChange={(e) => setConfig({ ...config, chartType: e.target.value as ChartType })}>
+                {CHART_OPTIONS.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
 
         <div className="card" style={{ padding: 14, marginBottom: 14 }}>
-          <div className="form-field-inline">
-            <label>از تاریخ</label>
-            <JalaliDatePicker value={config.filters.fromDate} onChange={(v) => setConfig({ ...config, filters: { ...config.filters, fromDate: v } })} />
-          </div>
-          <div className="form-field-inline">
-            <label>تا تاریخ</label>
-            <JalaliDatePicker value={config.filters.toDate} onChange={(v) => setConfig({ ...config, filters: { ...config.filters, toDate: v } })} />
-          </div>
-          <div className="form-field-inline">
-            <label>
-              بازه زمانی (ماه)
-              <InfoHint text="مستقل از سال اعمال می‌شود — مثلاً با انتخاب فروردین تا فروردین، فقط ماه فروردین در همه‌ی سال‌ها در نظر گرفته می‌شود؛ برای مقایسه‌ی یک ماه در چند سال، این فیلتر را با بعد ستون «دوره زمانی (سال)» ترکیب کنید." title="بازه زمانی" />
-            </label>
-            <div style={{ display: "flex", gap: 8 }}>
-              <select value={config.filters.monthFrom} onChange={(e) => setConfig({ ...config, filters: { ...config.filters, monthFrom: e.target.value } })}>
-                <option value="">از ماه</option>
-                {PERSIAN_MONTHS.map((m, i) => (
-                  <option key={i} value={i + 1}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-              <select value={config.filters.monthTo} onChange={(e) => setConfig({ ...config, filters: { ...config.filters, monthTo: e.target.value } })}>
-                <option value="">تا ماه</option>
-                {PERSIAN_MONTHS.map((m, i) => (
-                  <option key={i} value={i + 1}>
-                    {m}
-                  </option>
-                ))}
-              </select>
+          <div className="olap-settings-grid">
+            <div className="form-field-inline">
+              <label>از تاریخ</label>
+              <JalaliDatePicker value={config.filters.fromDate} onChange={(v) => setConfig({ ...config, filters: { ...config.filters, fromDate: v } })} />
             </div>
-          </div>
-          <div className="form-field-inline" style={{ alignItems: "flex-start" }}>
-            <label>دامنه حساب</label>
-            <MultiRecordPickerField
-              title="انتخاب حساب"
-              rows={accountOptions}
-              columns={[
-                { header: "کد", render: (a) => toFaDigits(a.code), filterValue: (a) => a.code, width: "110px" },
-                { header: "عنوان", render: (a) => a.title, filterValue: (a) => a.title },
-              ]}
-              selected={config.filters.accounts}
-              onChange={(rows) => setConfig({ ...config, filters: { ...config.filters, accounts: rows } })}
-              getLabel={(a) => `${toFaDigits(a.code)} - ${a.title}`}
-            />
-          </div>
-          {([1, 2, 3] as const).map((slot) => (
-            <div className="form-field-inline" style={{ alignItems: "flex-start" }} key={slot}>
-              <label>{`دامنه تفصیل ${slot === 1 ? "۱" : slot === 2 ? "۲" : "۳"}`}</label>
+            <div className="form-field-inline">
+              <label>تا تاریخ</label>
+              <JalaliDatePicker value={config.filters.toDate} onChange={(v) => setConfig({ ...config, filters: { ...config.filters, toDate: v } })} />
+            </div>
+            <div className="form-field-inline">
+              <label>
+                بازه زمانی (ماه)
+                <InfoHint text="مستقل از سال اعمال می‌شود — مثلاً با انتخاب فروردین تا فروردین، فقط ماه فروردین در همه‌ی سال‌ها در نظر گرفته می‌شود؛ برای مقایسه‌ی یک ماه در چند سال، این فیلتر را با بعد ستون «دوره زمانی (سال)» ترکیب کنید." title="بازه زمانی" />
+              </label>
+              <div style={{ display: "flex", gap: 8 }}>
+                <select value={config.filters.monthFrom} onChange={(e) => setConfig({ ...config, filters: { ...config.filters, monthFrom: e.target.value } })}>
+                  <option value="">از ماه</option>
+                  {PERSIAN_MONTHS.map((m, i) => (
+                    <option key={i} value={i + 1}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+                <select value={config.filters.monthTo} onChange={(e) => setConfig({ ...config, filters: { ...config.filters, monthTo: e.target.value } })}>
+                  <option value="">تا ماه</option>
+                  {PERSIAN_MONTHS.map((m, i) => (
+                    <option key={i} value={i + 1}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="form-field-inline olap-settings-wide" style={{ alignItems: "flex-start" }}>
+              <label>دامنه حساب</label>
               <MultiRecordPickerField
-                title={`انتخاب تفصیل ${slot}`}
-                rows={detailRows[slot]}
+                title="انتخاب حساب"
+                rows={accountOptions}
                 columns={[
-                  { header: "کد", render: (o) => toFaDigits(o.code), filterValue: (o) => o.code, width: "90px" },
-                  { header: "عنوان", render: (o) => o.title, filterValue: (o) => o.title },
+                  { header: "کد", render: (a) => toFaDigits(a.code), filterValue: (a) => a.code, width: "110px" },
+                  { header: "عنوان", render: (a) => a.title, filterValue: (a) => a.title },
                 ]}
-                selected={config.filters[`detail${slot}` as "detail1" | "detail2" | "detail3"]}
-                onChange={(rows) =>
-                  setConfig({ ...config, filters: { ...config.filters, [`detail${slot}`]: rows } })
-                }
-                getLabel={(o) => `${toFaDigits(o.code)} - ${o.title}`}
-                placeholder="افزودن..."
-                onOpen={() => loadDetailRows(slot)}
+                selected={config.filters.accounts}
+                onChange={(rows) => setConfig({ ...config, filters: { ...config.filters, accounts: rows } })}
+                getLabel={(a) => `${toFaDigits(a.code)} - ${a.title}`}
               />
             </div>
-          ))}
-          <div className="form-field-inline" style={{ alignItems: "flex-start" }}>
-            <label>انواع سند</label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-              {docTypes.map((d) => (
-                <label key={d.id} className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={config.filters.documentTypeIds.includes(d.id)}
-                    onChange={() => setConfig({ ...config, filters: { ...config.filters, documentTypeIds: toggleFromList(config.filters.documentTypeIds, d.id) } })}
-                  />
-                  {d.title}
-                </label>
-              ))}
+            {([1, 2, 3] as const).map((slot) => (
+              <div className="form-field-inline olap-settings-wide" style={{ alignItems: "flex-start" }} key={slot}>
+                <label>{`دامنه تفصیل ${slot === 1 ? "۱" : slot === 2 ? "۲" : "۳"}`}</label>
+                <MultiRecordPickerField
+                  title={`انتخاب تفصیل ${slot}`}
+                  rows={detailRows[slot]}
+                  columns={[
+                    { header: "کد", render: (o) => toFaDigits(o.code), filterValue: (o) => o.code, width: "90px" },
+                    { header: "عنوان", render: (o) => o.title, filterValue: (o) => o.title },
+                  ]}
+                  selected={config.filters[`detail${slot}` as "detail1" | "detail2" | "detail3"]}
+                  onChange={(rows) =>
+                    setConfig({ ...config, filters: { ...config.filters, [`detail${slot}`]: rows } })
+                  }
+                  getLabel={(o) => `${toFaDigits(o.code)} - ${o.title}`}
+                  placeholder="افزودن..."
+                  onOpen={() => loadDetailRows(slot)}
+                />
+              </div>
+            ))}
+            <div className="form-field-inline olap-settings-wide" style={{ alignItems: "flex-start" }}>
+              <label>انواع سند</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                {docTypes.map((d) => (
+                  <label key={d.id} className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={config.filters.documentTypeIds.includes(d.id)}
+                      onChange={() => setConfig({ ...config, filters: { ...config.filters, documentTypeIds: toggleFromList(config.filters.documentTypeIds, d.id) } })}
+                    />
+                    {d.title}
+                  </label>
+                ))}
+              </div>
             </div>
-          </div>
-          <div className="form-field-inline" style={{ alignItems: "flex-start" }}>
-            <label>وضعیت سند</label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-              {STATUS_OPTIONS.map((s) => (
-                <label key={s.value} className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={config.filters.status.includes(s.value)}
-                    onChange={() => setConfig({ ...config, filters: { ...config.filters, status: toggleFromList(config.filters.status, s.value) } })}
-                  />
-                  {s.label}
-                </label>
-              ))}
+            <div className="form-field-inline olap-settings-wide" style={{ alignItems: "flex-start" }}>
+              <label>وضعیت سند</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                {STATUS_OPTIONS.map((s) => (
+                  <label key={s.value} className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={config.filters.status.includes(s.value)}
+                      onChange={() => setConfig({ ...config, filters: { ...config.filters, status: toggleFromList(config.filters.status, s.value) } })}
+                    />
+                    {s.label}
+                  </label>
+                ))}
+              </div>
             </div>
-          </div>
-          <div className="form-field-inline" style={{ alignItems: "flex-start" }}>
-            <label>سیستم صادرکننده</label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-              {ISSUING_SYSTEM_OPTIONS.map((s) => (
-                <label key={s.value} className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={config.filters.issuingSystem.includes(s.value)}
-                    onChange={() => setConfig({ ...config, filters: { ...config.filters, issuingSystem: toggleFromList(config.filters.issuingSystem, s.value) } })}
-                  />
-                  {s.label}
-                </label>
-              ))}
+            <div className="form-field-inline olap-settings-wide" style={{ alignItems: "flex-start" }}>
+              <label>سیستم صادرکننده</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                {ISSUING_SYSTEM_OPTIONS.map((s) => (
+                  <label key={s.value} className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={config.filters.issuingSystem.includes(s.value)}
+                      onChange={() => setConfig({ ...config, filters: { ...config.filters, issuingSystem: toggleFromList(config.filters.issuingSystem, s.value) } })}
+                    />
+                    {s.label}
+                  </label>
+                ))}
+              </div>
             </div>
           </div>
         </div>

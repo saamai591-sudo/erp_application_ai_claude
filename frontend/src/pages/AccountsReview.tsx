@@ -62,17 +62,29 @@ const ISSUING_SYSTEM_FA: Record<string, string> = {
 const DETAIL_SLOTS = [1, 2, 3] as const;
 
 const balanceColumns = [
-  { header: "کد", render: (r: BalanceRow) => toFaDigits(r.code), width: "110px", sortValue: (r: BalanceRow) => r.code },
-  { header: "عنوان", render: (r: BalanceRow) => r.title, sortValue: (r: BalanceRow) => r.title },
-  { header: "جمع بدهکار", render: (r: BalanceRow) => formatAmountFa(r.totalDebit), sortValue: (r: BalanceRow) => r.totalDebit },
-  { header: "جمع بستانکار", render: (r: BalanceRow) => formatAmountFa(r.totalCredit), sortValue: (r: BalanceRow) => r.totalCredit },
-  { header: "مانده بدهکار", render: (r: BalanceRow) => (r.balanceNature === "DEBIT" && r.balance ? formatAmountFa(r.balance) : "—"), sortValue: (r: BalanceRow) => (r.balanceNature === "DEBIT" ? r.balance : 0) },
-  { header: "مانده بستانکار", render: (r: BalanceRow) => (r.balanceNature === "CREDIT" && r.balance ? formatAmountFa(r.balance) : "—"), sortValue: (r: BalanceRow) => (r.balanceNature === "CREDIT" ? r.balance : 0) },
+  { header: "کد", render: (r: BalanceRow) => toFaDigits(r.code), width: "110px", sortValue: (r: BalanceRow) => r.code, filterType: "string" as ColumnFilterType, filterValue: (r: BalanceRow) => r.code },
+  { header: "عنوان", render: (r: BalanceRow) => r.title, sortValue: (r: BalanceRow) => r.title, filterType: "string" as ColumnFilterType, filterValue: (r: BalanceRow) => r.title },
+  { header: "جمع بدهکار", render: (r: BalanceRow) => formatAmountFa(r.totalDebit), sortValue: (r: BalanceRow) => r.totalDebit, filterType: "number" as ColumnFilterType, filterValue: (r: BalanceRow) => r.totalDebit },
+  { header: "جمع بستانکار", render: (r: BalanceRow) => formatAmountFa(r.totalCredit), sortValue: (r: BalanceRow) => r.totalCredit, filterType: "number" as ColumnFilterType, filterValue: (r: BalanceRow) => r.totalCredit },
+  {
+    header: "مانده بدهکار",
+    render: (r: BalanceRow) => (r.balanceNature === "DEBIT" && r.balance ? formatAmountFa(r.balance) : "—"),
+    sortValue: (r: BalanceRow) => (r.balanceNature === "DEBIT" ? r.balance : 0),
+    filterType: "number" as ColumnFilterType,
+    filterValue: (r: BalanceRow) => (r.balanceNature === "DEBIT" ? r.balance : 0),
+  },
+  {
+    header: "مانده بستانکار",
+    render: (r: BalanceRow) => (r.balanceNature === "CREDIT" && r.balance ? formatAmountFa(r.balance) : "—"),
+    sortValue: (r: BalanceRow) => (r.balanceNature === "CREDIT" ? r.balance : 0),
+    filterType: "number" as ColumnFilterType,
+    filterValue: (r: BalanceRow) => (r.balanceNature === "CREDIT" ? r.balance : 0),
+  },
 ];
 
-// نسخه‌ی ستون‌های تب‌های تفصیل: مثل balanceColumns ولی «مانده بدهکار»/«مانده بستانکار» فاقد sortValue هستند
-// چون این دو، نمایش تفکیک‌شده‌ی یک مقدار محاسبه‌شده (balance/balanceNature) هستند و سمت سرور قابل مرتب‌سازی نیستند
-// (مرتب‌سازی واقعی روی «جمع بدهکار»/«جمع بستانکار» که مقادیر مستقیم دیتابیس هستند، همچنان کاملاً پشتیبانی می‌شود)
+// نسخه‌ی ستون‌های تب‌های تفصیل: مثل balanceColumns ولی «مانده بدهکار»/«مانده بستانکار» فاقد sortValue/filterValue هستند
+// چون این دو، نمایش تفکیک‌شده‌ی یک مقدار محاسبه‌شده (balance/balanceNature) هستند و سمت سرور قابل مرتب‌سازی/فیلتر نیستند
+// (مرتب‌سازی و فیلتر واقعی روی «جمع بدهکار»/«جمع بستانکار» که مقادیر مستقیم دیتابیس هستند، همچنان کاملاً پشتیبانی می‌شود)
 const detailBalanceColumns = balanceColumns.map((c) =>
   c.header === "مانده بدهکار" || c.header === "مانده بستانکار" ? { header: c.header, render: c.render, width: (c as any).width } : c
 );
@@ -85,7 +97,7 @@ const DETAIL_SORT_FIELD_MAP: Record<string, string> = {
   "جمع بستانکار": "totalCredit",
 };
 
-const DEFAULT_DETAIL_QUERY: DetailQueryState = { page: 1, pageSize: 25, sort: null };
+const DEFAULT_DETAIL_QUERY: DetailQueryState = { page: 1, pageSize: 25, sort: null, filters: {} };
 const LEDGER_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 // ستون‌های قابل مرتب‌سازی/فیلتر تب «گردش» — سمت سرور اعمال می‌شود (دقیقاً مثل تب‌های تفصیل بالا و
@@ -301,6 +313,14 @@ export default function AccountsReview() {
           p.set("sortField", field);
           p.set("sortDir", q.sort.dir);
         }
+      }
+      if (q.filters && Object.keys(q.filters).length) {
+        const mapped: Record<string, ActiveFilter> = {};
+        for (const [header, f] of Object.entries(q.filters)) {
+          const field = DETAIL_SORT_FIELD_MAP[header];
+          if (field) mapped[field] = f;
+        }
+        if (Object.keys(mapped).length) p.set("filters", JSON.stringify(mapped));
       }
       const data = await api.get(`/reports/detail-summary?${p.toString()}`);
       setTabData((prev) => ({ ...prev, [tabIndex]: data.rows }));
@@ -592,6 +612,7 @@ export default function AccountsReview() {
             onPageChange: (page) => updateDetailQuery(activeTab, { page }),
             onPageSizeChange: (pageSize) => updateDetailQuery(activeTab, { pageSize, page: 1 }),
             onSortChange: (sort) => updateDetailQuery(activeTab, { sort, page: 1 }),
+            onFiltersChange: (filters) => updateDetailQuery(activeTab, { filters, page: 1 }),
           }}
         />
       )}

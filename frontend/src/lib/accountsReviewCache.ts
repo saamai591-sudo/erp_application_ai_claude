@@ -5,6 +5,7 @@ export interface DetailQueryState {
   page: number;
   pageSize: number;
   sort: { header: string; dir: "asc" | "desc" } | null;
+  filters: Record<string, ActiveFilter>;
 }
 
 export interface AccountsReviewSnapshot {

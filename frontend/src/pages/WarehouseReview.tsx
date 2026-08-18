@@ -10,6 +10,7 @@ import { getSavedFiscalPeriodId } from "../lib/userSettings";
 import { useTabs } from "../lib/TabsContext";
 import { api } from "../lib/api";
 import { InfoHint } from "../components/InfoHint";
+import { ColumnFilterType } from "../components/DataTable";
 
 // گزارش «مرور موجودی انبار» — با همان فرمت «مرور حسابها» (ChainedTabsBar + useChainedMultiSelect):
 // تب‌های زنجیره‌ای که هر تب، انتخاب‌های تب‌های «پیش‌تر لمس‌شده» را به‌عنوان فیلتر اعمال می‌کند (دقیقاً
@@ -117,7 +118,13 @@ function infoText(mode: ReviewMode) {
 const LEDGER_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 function amountCol(header: string, field: keyof DimRow): BalanceTableColumn<DimRow> {
-  return { header, render: (r) => formatAmountFa((r[field] as number) || 0), sortValue: (r) => (r[field] as number) || 0 };
+  return {
+    header,
+    render: (r) => formatAmountFa((r[field] as number) || 0),
+    sortValue: (r) => (r[field] as number) || 0,
+    filterType: "number",
+    filterValue: (r) => (r[field] as number) || 0,
+  };
 }
 
 export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
@@ -334,25 +341,26 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
 
   const columns = useMemo((): BalanceTableColumn<DimRow>[] => {
     const prefix: BalanceTableColumn<DimRow>[] = [];
+    const strFilter: ColumnFilterType = "string";
     if (activeTab === WAREHOUSE_TAB) {
       prefix.push(
-        { header: "کد انبار", render: (r) => (r.warehouseCode != null ? toFaDigits(String(r.warehouseCode)) : "—"), sortValue: (r) => r.warehouseCode ?? 0, width: "90px" },
-        { header: "عنوان", render: (r) => r.warehouseTitle || "—", sortValue: (r) => r.warehouseTitle || "" }
+        { header: "کد انبار", render: (r) => (r.warehouseCode != null ? toFaDigits(String(r.warehouseCode)) : "—"), sortValue: (r) => r.warehouseCode ?? 0, width: "90px", filterType: "number", filterValue: (r) => r.warehouseCode ?? null },
+        { header: "عنوان", render: (r) => r.warehouseTitle || "—", sortValue: (r) => r.warehouseTitle || "", filterType: strFilter, filterValue: (r) => r.warehouseTitle || "" }
       );
     } else if (isGroupLevelTab(activeTab)) {
       prefix.push(
-        { header: "کد گروه", render: (r) => (r.groupCode ? toFaDigits(r.groupCode) : "—"), sortValue: (r) => r.groupCode || "", width: "110px" },
-        { header: "عنوان", render: (r) => r.groupTitle || "—", sortValue: (r) => r.groupTitle || "" }
+        { header: "کد گروه", render: (r) => (r.groupCode ? toFaDigits(r.groupCode) : "—"), sortValue: (r) => r.groupCode || "", width: "110px", filterType: strFilter, filterValue: (r) => r.groupCode || "" },
+        { header: "عنوان", render: (r) => r.groupTitle || "—", sortValue: (r) => r.groupTitle || "", filterType: strFilter, filterValue: (r) => r.groupTitle || "" }
       );
     } else {
       prefix.push(
-        { header: "کد کالا", render: (r) => (r.goodsItemCode ? toFaDigits(r.goodsItemCode) : "—"), sortValue: (r) => r.goodsItemCode || "", width: "110px" },
-        { header: "عنوان", render: (r) => r.goodsItemTitle || "—", sortValue: (r) => r.goodsItemTitle || "" }
+        { header: "کد کالا", render: (r) => (r.goodsItemCode ? toFaDigits(r.goodsItemCode) : "—"), sortValue: (r) => r.goodsItemCode || "", width: "110px", filterType: strFilter, filterValue: (r) => r.goodsItemCode || "" },
+        { header: "عنوان", render: (r) => r.goodsItemTitle || "—", sortValue: (r) => r.goodsItemTitle || "", filterType: strFilter, filterValue: (r) => r.goodsItemTitle || "" }
       );
-      if (activeTab === EXPIRY_TAB) prefix.push({ header: "تاریخ انقضا", render: (r) => (r.expiryDate ? formatJalaliDate(r.expiryDate) : "—"), sortValue: (r) => r.expiryDate || "" });
-      if (activeTab === SERIAL_TAB) prefix.push({ header: "سریال", render: (r) => r.serialNumber || "—", sortValue: (r) => r.serialNumber || "" });
-      if (activeTab === BATCH_TAB) prefix.push({ header: "شماره بچ", render: (r) => r.batchNumber || "—", sortValue: (r) => r.batchNumber || "" });
-      if (activeTab === LOCATION_TAB) prefix.push({ header: "محل فیزیکی", render: (r) => r.physicalLocation || "—", sortValue: (r) => r.physicalLocation || "" });
+      if (activeTab === EXPIRY_TAB) prefix.push({ header: "تاریخ انقضا", render: (r) => (r.expiryDate ? formatJalaliDate(r.expiryDate) : "—"), sortValue: (r) => r.expiryDate || "", filterType: strFilter, filterValue: (r) => r.expiryDate || "" });
+      if (activeTab === SERIAL_TAB) prefix.push({ header: "سریال", render: (r) => r.serialNumber || "—", sortValue: (r) => r.serialNumber || "", filterType: strFilter, filterValue: (r) => r.serialNumber || "" });
+      if (activeTab === BATCH_TAB) prefix.push({ header: "شماره بچ", render: (r) => r.batchNumber || "—", sortValue: (r) => r.batchNumber || "", filterType: strFilter, filterValue: (r) => r.batchNumber || "" });
+      if (activeTab === LOCATION_TAB) prefix.push({ header: "محل فیزیکی", render: (r) => r.physicalLocation || "—", sortValue: (r) => r.physicalLocation || "", filterType: strFilter, filterValue: (r) => r.physicalLocation || "" });
     }
 
     const suffix: BalanceTableColumn<DimRow>[] = [amountCol("مقدار اول دوره", "openingQuantity")];
