@@ -4,7 +4,7 @@ import { getAllowedGoodsTypes } from "../data/warehouseDocNatureMatrix";
 
 const router = Router();
 
-const KIND_FA: Record<string, string> = { GOODS: "کالا", SERVICE: "خدمت" };
+export const KIND_FA: Record<string, string> = { GOODS: "کالا", SERVICE: "خدمت" };
 
 // =========================================================================
 // موتور محاسبه‌ی پیشوند کد/عنوان — طبق مستندات «کالا» و «خدمت»:
@@ -14,7 +14,7 @@ const KIND_FA: Record<string, string> = { GOODS: "کالا", SERVICE: "خدمت"
 //               که «تاثیر در عنوان کالا» غیر از NONE دارند
 // =========================================================================
 
-async function loadGroupChain(goodsGroupId: number) {
+export async function loadGroupChain(goodsGroupId: number) {
   let current = await prisma.goodsGroup.findUnique({ where: { id: goodsGroupId }, include: { level: true } });
   if (!current) throw new Error("گروه یافت نشد");
   const leaf = current;
@@ -30,12 +30,12 @@ async function loadGroupChain(goodsGroupId: number) {
   return { chain, leaf };
 }
 
-interface AttrSelection {
+export interface AttrSelection {
   attributeId: number;
   itemId: number;
 }
 
-async function computePrefixes(goodsGroupId: number, attrSelections: AttrSelection[]) {
+export async function computePrefixes(goodsGroupId: number, attrSelections: AttrSelection[]) {
   const { chain, leaf } = await loadGroupChain(goodsGroupId);
 
   const codeParts: string[] = [];
@@ -66,7 +66,7 @@ async function computePrefixes(goodsGroupId: number, attrSelections: AttrSelecti
   return { leaf, codePrefix: codeParts.join(""), titlePrefix: titleParts.join("، "), resolvedAttrs, groupAttrCount: groupAttrs.length };
 }
 
-async function resolveSerial(goodsGroupId: number, explicitCode: string | undefined, childCodeLength: number, excludeItemId?: number) {
+export async function resolveSerial(goodsGroupId: number, explicitCode: string | undefined, childCodeLength: number, excludeItemId?: number) {
   if (explicitCode && explicitCode.trim()) {
     const trimmed = explicitCode.trim();
     if (trimmed.length > childCodeLength) {

@@ -4,6 +4,7 @@ import { resolveDetailCode, registerDetailCode, nextSerialNumber } from "../util
 import { computeFullAccountCode, buildAccountByIdMap } from "../utils/accountCode";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { resolveDateString } from "../utils/jalaliDate";
+import { KIND_FA, computePrefixes, resolveSerial, AttrSelection } from "../routes/goodsItems";
 
 const DETAIL_TYPE_PARTY = 1;
 const DETAIL_TYPE_COST_CENTER = 2;
@@ -194,6 +195,121 @@ export function registerAllImportProcessors() {
       } catch (e: any) {
         if (e.code === "P2002") return { ok: false, error: "کد در این سطح تکراری است" };
         return { ok: false, error: e.message || "خطا در ثبت حساب" };
+      }
+    },
+  });
+
+  registerImportEntity("goods-item", {
+    row: async (row, ctx) => {
+      try {
+        const kind = row.kind === "SERVICE" ? "SERVICE" : "GOODS";
+        const label = KIND_FA[kind];
+        if (!row.groupFullCode) return { ok: false, error: `کد کامل گروه ${label} الزامی است` };
+        if (!row.title) return { ok: false, error: "عنوان الزامی است" };
+        if (!row.mainUnitCode) return { ok: false, error: "کد واحد اصلی الزامی است" };
+        if (!row.accountingGroupCode) return { ok: false, error: "کد گروه حساب الزامی است" };
+
+        // پیدا کردن گروه (شاخه‌ی آخر) بر اساس کد کامل — دقیقاً همان کدی که در انتخابگر گروه فرانت‌اند
+        // نمایش داده می‌شود (زنجیره‌ی کد همه‌ی سطوح از ریشه تا برگ، نه فقط سطوحی که در کد کالا موثرند).
+        const allGroups = await prisma.goodsGroup.findMany();
+        const byId = new Map(allGroups.map((g: any) => [g.id, g]));
+        function fullGroupCode(g: any): string {
+          const parts: string[] = [];
+          let cur = g;
+          while (cur) {
+            parts.unshift(cur.code);
+            cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+          }
+          return parts.join("");
+        }
+        const group = allGroups.find((g: any) => g.isLastBranch && fullGroupCode(g) === row.groupFullCode!.trim());
+        if (!group) return { ok: false, error: `گروه ${label} با کد کامل «${row.groupFullCode}» (شاخه‌ی آخر) یافت نشد` };
+
+        const mainUnit = await prisma.unitOfMeasure.findFirst({ where: { code: Number(row.mainUnitCode) } });
+        if (!mainUnit) return { ok: false, error: `واحد اصلی با کد «${row.mainUnitCode}» یافت نشد` };
+
+        const accountingGroup = await prisma.accountingGroup.findFirst({ where: { code: Number(row.accountingGroupCode) } });
+        if (!accountingGroup) return { ok: false, error: `گروه حساب با کد «${row.accountingGroupCode}» یافت نشد` };
+
+        // ویژگی‌ها (اختیاری): «عنوان ویژگی=عنوان مقدار» به‌ازای هر ویژگی، جدا شده با «،» — مثلاً «رنگ=قرمز،سایز=بزرگ»
+        const attrSelections: AttrSelection[] = [];
+        if (row.attributes) {
+          const pairs = row.attributes.split(/[،,]/).map((s) => s.trim()).filter(Boolean);
+          for (const pair of pairs) {
+            const [attrTitle, itemTitle] = pair.split("=").map((s) => s?.trim());
+            if (!attrTitle || !itemTitle) {
+              return { ok: false, error: `فرمت ویژگی «${pair}» نامعتبر است — باید «عنوان ویژگی=عنوان مقدار» باشد` };
+            }
+            const attr = await prisma.goodsAttribute.findFirst({ where: { title: attrTitle } });
+            if (!attr) return { ok: false, error: `ویژگی «${attrTitle}» یافت نشد` };
+            const item = await prisma.goodsAttributeItem.findFirst({ where: { attributeId: attr.id, title: itemTitle } });
+            if (!item) return { ok: false, error: `مقدار «${itemTitle}» برای ویژگی «${attrTitle}» یافت نشد` };
+            attrSelections.push({ attributeId: attr.id, itemId: item.id });
+          }
+        }
+
+        let weightUnitId: number | null = null;
+        let weightRatio: number | null = null;
+        if (kind === "GOODS" && !mainUnit.isWeight && row.weightUnitCode) {
+          const weightUnit = await prisma.unitOfMeasure.findFirst({ where: { code: Number(row.weightUnitCode) } });
+          if (!weightUnit) return { ok: false, error: `واحد وزنی با کد «${row.weightUnitCode}» یافت نشد` };
+          weightUnitId = weightUnit.id;
+          if (!row.weightRatio) return { ok: false, error: "نسبت وزنی الزامی است" };
+          weightRatio = Number(row.weightRatio);
+        }
+
+        const isSpecial = row.isSpecial === "بله";
+        let taxRate: number | null = null;
+        if (isSpecial) {
+          if (!row.taxRate) return { ok: false, error: "نرخ مالیات الزامی است" };
+          taxRate = Number(row.taxRate);
+        }
+
+        const reorderControl = kind === "GOODS" && row.reorderControl === "بله";
+        let reorderPoint: number | null = null;
+        if (reorderControl) {
+          if (!row.reorderPoint) return { ok: false, error: "مقدار نقطه سفارش الزامی است" };
+          reorderPoint = Number(row.reorderPoint);
+        }
+
+        const { leaf, codePrefix, titlePrefix, resolvedAttrs } = await computePrefixes(group.id, attrSelections);
+        const serial = await resolveSerial(group.id, row.code || undefined, leaf.childCodeLength!);
+        const fullCode = codePrefix + serial;
+        const rawTitle = row.title.trim();
+        const fullTitle = titlePrefix ? `${titlePrefix}، ${rawTitle}` : rawTitle;
+
+        await prisma.goodsItem.create({
+          data: {
+            kind,
+            goodsGroupId: group.id,
+            code: serial,
+            fullCode,
+            rawTitle,
+            title: fullTitle,
+            mainUnitId: mainUnit.id,
+            weightUnitId,
+            weightRatio,
+            technicalSpec: row.technicalSpec?.trim() || null,
+            barcode: row.barcode?.trim() || null,
+            reorderControl,
+            reorderPoint,
+            hasSerialNumber: kind === "GOODS" && row.hasSerialNumber === "بله",
+            hasExpiryDate: kind === "GOODS" && row.hasExpiryDate === "بله",
+            isSerialTracked: kind === "GOODS" && row.isSerialTracked === "بله",
+            isExpiryTracked: kind === "GOODS" && row.isExpiryTracked === "بله",
+            isBatchTracked: kind === "GOODS" && row.isBatchTracked === "بله",
+            isLocationTracked: kind === "GOODS" && row.isLocationTracked === "بله",
+            accountingGroupId: accountingGroup.id,
+            isSpecial,
+            taxRate,
+            isActive: row.isActive !== "خیر",
+            attributeValues: { create: resolvedAttrs.map((a: AttrSelection) => ({ attributeId: a.attributeId, itemId: a.itemId })) },
+          },
+        });
+        return { ok: true };
+      } catch (e: any) {
+        if (e.code === "P2002") return { ok: false, error: "این کد قبلا در همین گروه استفاده شده است" };
+        return { ok: false, error: e.message || "خطا در ثبت" };
       }
     },
   });

@@ -8,6 +8,7 @@ import { NewRecordButton } from "./NewRecordButton";
 import { InfoHint } from "./InfoHint";
 import { FieldHint } from "./FieldHint";
 import { RecordPickerField } from "./RecordPicker";
+import { ExcelImportButton } from "./ExcelImport";
 import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
@@ -233,6 +234,40 @@ export function GoodsItemList({ kind }: { kind: ItemKind }) {
         </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={`تعریف ${label}‌های سیستم — کد و بخشی از عنوان بر اساس گروه و ویژگی‌های انتخاب‌شده خودکار ساخته می‌شود`} title={label} />
+          <ExcelImportButton
+            entityLabel={label}
+            templateFilename={`قالب-تعریف-${label}`}
+            backendEntityType="goods-item"
+            extraFields={{ kind }}
+            columns={[
+              { key: "groupFullCode", label: `کد کامل ${GROUP_LABEL[kind]}`, required: true, hint: "کد کامل شاخه‌ی آخر، همان‌طور که در انتخابگر گروه فرم نمایش داده می‌شود" },
+              { key: "code", label: "کد", hint: "اختیاری — خالی بگذارید تا خودکار ساخته شود" },
+              { key: "title", label: "عنوان", required: true },
+              { key: "mainUnitCode", label: "کد واحد اصلی", required: true },
+              { key: "accountingGroupCode", label: "کد گروه حساب", required: true },
+              { key: "attributes", label: "ویژگی‌ها", hint: 'اختیاری — به فرم «عنوان ویژگی=عنوان مقدار» جدا شده با «،»، مثلاً «رنگ=قرمز،سایز=بزرگ»' },
+              ...(kind === "GOODS"
+                ? ([
+                    { key: "weightUnitCode", label: "کد واحد وزنی", hint: "اختیاری — فقط اگر واحد اصلی خودش وزنی نباشد" },
+                    { key: "weightRatio", label: "نسبت وزنی", hint: "اگر واحد وزنی پر شده باشد الزامی است" },
+                    { key: "technicalSpec", label: "مشخصه فنی" },
+                    { key: "barcode", label: "بارکد" },
+                    { key: "reorderControl", label: "کنترل نقطه سفارش", hint: "بله / خیر" },
+                    { key: "reorderPoint", label: "مقدار نقطه سفارش", hint: "اگر کنترل نقطه سفارش «بله» باشد الزامی است" },
+                    { key: "hasSerialNumber", label: "شماره سریال دارد", hint: "بله / خیر" },
+                    { key: "hasExpiryDate", label: "تاریخ انقضا دارد", hint: "بله / خیر" },
+                    { key: "isSerialTracked", label: "سریال‌پذیر", hint: "بله / خیر" },
+                    { key: "isExpiryTracked", label: "تاریخ‌انقضاپذیر", hint: "بله / خیر" },
+                    { key: "isBatchTracked", label: "بچ‌پذیر", hint: "بله / خیر" },
+                    { key: "isLocationTracked", label: "محل‌پذیر", hint: "بله / خیر" },
+                  ] as const)
+                : []),
+              { key: "isSpecial", label: `${label} خاص`, hint: "بله / خیر" },
+              { key: "taxRate", label: "نرخ مالیات", hint: `اگر «${label} خاص» «بله» باشد الزامی است` },
+              { key: "isActive", label: "فعال", hint: "بله / خیر — پیش‌فرض بله" },
+            ]}
+            onDone={reload}
+          />
           <NewRecordButton path={`${basePath}/new`} />
           <RefreshButton onClick={reload} />
           <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
