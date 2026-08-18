@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
+import { recomputeBankAccountHasTransactions } from "../utils/treasuryTracking";
 
 // =========================================================================
 // ماژول «خزانه‌داری» > واگذاری چک به بانک (ChequeDeposit)
@@ -262,6 +263,7 @@ router.post("/cheque-deposits/:id/unapprove", async (req, res) => {
       }
       await tx.chequeDeposit.update({ where: { id }, data: { status: "DRAFT" } });
     });
+    await recomputeBankAccountHasTransactions([d.bankAccountId]);
     res.json({ id, status: "DRAFT" });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در برگشت از تایید" });

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
+import { recomputeCashBoxHasTransactions, recomputeBankAccountHasTransactions } from "../utils/treasuryTracking";
 
 // =========================================================================
 // ماژول «خزانه‌داری» > پرداخت (Payment)
@@ -476,6 +477,8 @@ router.post("/payments/:id/unapprove", async (req, res) => {
       }
       await tx.payment.update({ where: { id }, data: { status: "DRAFT" } });
     });
+    await recomputeCashBoxHasTransactions(d.instrumentLines.filter((l: any) => l.cashBoxId).map((l: any) => l.cashBoxId));
+    await recomputeBankAccountHasTransactions(d.instrumentLines.filter((l: any) => l.bankAccountId).map((l: any) => l.bankAccountId));
     res.json({ id, status: "DRAFT" });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در برگشت از تایید" });
