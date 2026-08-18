@@ -915,12 +915,13 @@ body {
 /* جدول ماتریسی گزارش تحلیلی (OLAP) */
 .olap-matrix-wrap { max-height: 65vh; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .olap-matrix { border-collapse: collapse; font-size: 12.5px; width: 100%; }
-.olap-matrix th, .olap-matrix td { padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; text-align: left; }
-.olap-matrix thead th { position: sticky; top: 0; background: var(--bg); color: var(--ink-soft); font-weight: 600; z-index: 2; text-align: left; }
+.olap-matrix th, .olap-matrix td { padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; text-align: right; }
+.olap-matrix thead th { position: sticky; top: 0; background: var(--bg); color: var(--ink-soft); font-weight: 600; z-index: 2; text-align: right; }
 .olap-matrix tbody th { position: sticky; right: 0; background: var(--surface); text-align: right; font-weight: 600; z-index: 1; }
 .olap-matrix thead th:first-child { position: sticky; right: 0; top: 0; z-index: 3; text-align: right; background: var(--bg); }
 .olap-matrix tfoot th, .olap-matrix tfoot td { font-weight: 700; background: var(--bg); border-top: 2px solid var(--line-strong); }
 .olap-matrix .olap-total-col { font-weight: 700; }
+.olap-amount-negative { color: var(--danger); }
 .olap-print-title { display: none; }
 
 /* چاپ گزارش تحلیلی (OLAP): فقط عنوان + جدول ماتریس + نمودار چاپ می‌شود؛ نوار کناری/بالایی و تنظیمات صفحه پنهان می‌شوند */

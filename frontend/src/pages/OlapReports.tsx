@@ -627,6 +627,13 @@ function OlapBuilder({ editId }: { editId?: number }) {
   );
 }
 
+/** اعداد منفی به‌شکل متعارف حسابداری (داخل پرانتز و قرمز) نمایش داده می‌شوند */
+function AmountCell({ value }: { value: number }) {
+  const negative = value < 0;
+  const text = negative ? `(${formatAmountFa(Math.abs(value))})` : formatAmountFa(value);
+  return <span className={negative ? "olap-amount-negative" : undefined}>{text}</span>;
+}
+
 function OlapMatrixTable({ result, measureLabel }: { result: PivotResult; measureLabel: string }) {
   const cols = result.cols ?? [{ key: "_", label: measureLabel }];
   return (
@@ -646,9 +653,15 @@ function OlapMatrixTable({ result, measureLabel }: { result: PivotResult; measur
             <tr key={r.key}>
               <th>{r.label}</th>
               {cols.map((c) => (
-                <td key={c.key}>{formatAmountFa(result.cells[r.key]?.[c.key] ?? 0)}</td>
+                <td key={c.key}>
+                  <AmountCell value={result.cells[r.key]?.[c.key] ?? 0} />
+                </td>
               ))}
-              {result.cols && <td className="olap-total-col">{formatAmountFa(result.rowTotals[r.key] ?? 0)}</td>}
+              {result.cols && (
+                <td className="olap-total-col">
+                  <AmountCell value={result.rowTotals[r.key] ?? 0} />
+                </td>
+              )}
             </tr>
           ))}
           {result.rows.length === 0 && (
@@ -664,9 +677,15 @@ function OlapMatrixTable({ result, measureLabel }: { result: PivotResult; measur
             <tr>
               <th>جمع کل</th>
               {cols.map((c) => (
-                <td key={c.key}>{formatAmountFa(result.colTotals[c.key] ?? 0)}</td>
+                <td key={c.key}>
+                  <AmountCell value={result.colTotals[c.key] ?? 0} />
+                </td>
               ))}
-              {result.cols && <td className="olap-total-col">{formatAmountFa(result.grandTotal)}</td>}
+              {result.cols && (
+                <td className="olap-total-col">
+                  <AmountCell value={result.grandTotal} />
+                </td>
+              )}
             </tr>
           </tfoot>
         )}
