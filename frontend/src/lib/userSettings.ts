@@ -18,9 +18,9 @@ export interface ThemeOption {
 }
 
 export const THEME_OPTIONS: ThemeOption[] = [
-  { key: "default", label: "پیش‌فرض", swatch: ["#f3f4f6", "#107e3e", "#c9762f"] },
-  { key: "light", label: "روشن", swatch: ["#f7f8fa", "#0f5c4f", "#ffffff"] },
-  { key: "dark", label: "تیره", swatch: ["#12161c", "#2fbf8f", "#e0954f"] },
+  { key: "default", label: "پیش‌فرض", swatch: ["#f4f6f8", "#1e3a5f", "#059669"] },
+  { key: "light", label: "روشن", swatch: ["#f6f8fa", "#1e3a5f", "#ffffff"] },
+  { key: "dark", label: "تیره", swatch: ["#0d1420", "#5b8fc7", "#34d399"] },
   { key: "blue", label: "آبی (Blue Opal)", swatch: ["#eef6f8", "#0e7a90", "#2dd4bf"] },
 ];
 
