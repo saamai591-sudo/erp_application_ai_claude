@@ -141,7 +141,7 @@ export function FormPage({
           )}
         </div>
       </div>
-      <div className="card" style={{ padding: 20, maxWidth: "100%" }}>
+      <div className="card" style={{ padding: 16, maxWidth: "100%" }}>
         {children}
       </div>
     </div>
