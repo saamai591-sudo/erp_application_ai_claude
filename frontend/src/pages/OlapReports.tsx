@@ -48,7 +48,7 @@ interface FiltersState {
   /** بازه‌ی ماه شمسی (۱ تا ۱۲)، مستقل از سال — برای مقایسه‌ی یک ماه مشخص در چند سال؛ "" یعنی بدون فیلتر */
   monthFrom: string;
   monthTo: string;
-  accounts: { id: number; code: string; title: string }[];
+  accounts: { id: number; code: string; title: string; levelTitle: string }[];
   detail1: CodeOption[];
   detail2: CodeOption[];
   detail3: CodeOption[];
@@ -304,8 +304,6 @@ function OlapBuilder({ editId }: { editId?: number }) {
       .catch(() => {});
   }
 
-  const parentIds = new Set(accounts.map((a) => a.parentId).filter((x): x is number => x !== null));
-  const leafAccounts = accounts.filter((a) => !parentIds.has(a.id));
   function fullCode(a: AccountRow): string {
     let code = a.code;
     let cur = a;
@@ -317,7 +315,15 @@ function OlapBuilder({ editId }: { editId?: number }) {
     }
     return code;
   }
-  const accountOptions: { id: number; code: string; title: string }[] = leafAccounts.map((a) => ({ id: a.id, code: fullCode(a), title: a.title }));
+  // همه‌ی سطوح (گروه/کل/معین/...) قابل انتخاب‌اند، نه فقط حساب‌های برگ — انتخاب یک حساب سطح بالاتر
+  // یعنی همه‌ی زیرمجموعه‌های آن به‌عنوان دامنه در نظر گرفته می‌شوند (بک‌اند این را با
+  // collectLeafDescendantsMulti از قبل پشتیبانی می‌کند)
+  const accountOptions: { id: number; code: string; title: string; levelTitle: string }[] = accounts.map((a) => ({
+    id: a.id,
+    code: fullCode(a),
+    title: a.title,
+    levelTitle: a.level?.title || "",
+  }));
 
   function buildFilters(f: FiltersState) {
     return {
@@ -525,17 +531,21 @@ function OlapBuilder({ editId }: { editId?: number }) {
               </div>
             </div>
             <div className="form-field-inline olap-settings-wide" style={{ alignItems: "flex-start" }}>
-              <label>دامنه حساب</label>
+              <label>
+                دامنه حساب
+                <InfoHint text="حساب در هر سطحی (گروه، کل، معین، ...) قابل انتخاب است؛ با انتخاب یک حساب سطح بالاتر، همه‌ی زیرمجموعه‌های آن به‌عنوان دامنه در نظر گرفته می‌شوند." title="دامنه حساب" />
+              </label>
               <MultiRecordPickerField
-                title="انتخاب حساب"
+                title="انتخاب حساب (همه سطوح: گروه، کل، معین و ...)"
                 rows={accountOptions}
                 columns={[
                   { header: "کد", render: (a) => toFaDigits(a.code), filterValue: (a) => a.code, width: "110px" },
                   { header: "عنوان", render: (a) => a.title, filterValue: (a) => a.title },
+                  { header: "سطح", render: (a) => a.levelTitle, filterValue: (a) => a.levelTitle, width: "90px" },
                 ]}
                 selected={config.filters.accounts}
                 onChange={(rows) => setConfig({ ...config, filters: { ...config.filters, accounts: rows } })}
-                getLabel={(a) => `${toFaDigits(a.code)} - ${a.title}`}
+                getLabel={(a) => `${toFaDigits(a.code)} - ${a.title} (${a.levelTitle})`}
               />
             </div>
             {([1, 2, 3] as const).map((slot) => (
