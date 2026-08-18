@@ -41,6 +41,16 @@ interface Level { id: number; order: number; title: string }
 interface AccountRow { id: number; parentId: number | null; code: string; title: string; level: Level }
 interface DocType { id: number; title: string }
 interface CodeOption { id: string; code: string; title: string }
+/** یک حساب برای انتخابگر «دامنه حساب» — همراه با زنجیره‌ی اجداد آن به تفکیک سطح گزارشگری
+ * (chain[order] = کد/عنوان همان حساب در آن سطح خاص)، برای نمایش ستون‌های جدا به‌ازای هر سطح */
+interface AccountOption {
+  id: number;
+  code: string;
+  title: string;
+  levelTitle: string;
+  levelOrder: number;
+  chain: Record<number, { code: string; title: string }>;
+}
 
 interface FiltersState {
   fromDate: string;
@@ -48,7 +58,7 @@ interface FiltersState {
   /** بازه‌ی ماه شمسی (۱ تا ۱۲)، مستقل از سال — برای مقایسه‌ی یک ماه مشخص در چند سال؛ "" یعنی بدون فیلتر */
   monthFrom: string;
   monthTo: string;
-  accounts: { id: number; code: string; title: string; levelTitle: string }[];
+  accounts: AccountOption[];
   detail1: CodeOption[];
   detail2: CodeOption[];
   detail3: CodeOption[];
@@ -315,15 +325,37 @@ function OlapBuilder({ editId }: { editId?: number }) {
     }
     return code;
   }
+  /** زنجیره‌ی اجداد یک حساب به تفکیک سطح گزارشگری (شامل خودش در سطح خودش) — برای ستون‌های جدا به‌ازای هر سطح در انتخابگر «دامنه حساب» */
+  function ancestorChainByLevel(a: AccountRow): Record<number, { code: string; title: string }> {
+    // مسیر از ریشه تا خودِ حساب (نه برعکس) تا کد کامل (تجمعی) هر سطح از کد اجدادش تا همان سطح ساخته شود —
+    // نه صرفاً کد جدا و مستقل خودِ آن گره (که به‌تنهایی و بدون پیشوند اجداد یکتا نیست)
+    const path: AccountRow[] = [];
+    let cur: AccountRow | undefined = a;
+    while (cur) {
+      path.unshift(cur);
+      cur = cur.parentId ? accounts.find((x) => x.id === cur!.parentId) : undefined;
+    }
+    const chain: Record<number, { code: string; title: string }> = {};
+    let cumulativeCode = "";
+    for (const node of path) {
+      cumulativeCode += node.code;
+      if (node.level) chain[node.level.order] = { code: cumulativeCode, title: node.title };
+    }
+    return chain;
+  }
+
   // همه‌ی سطوح (گروه/کل/معین/...) قابل انتخاب‌اند، نه فقط حساب‌های برگ — انتخاب یک حساب سطح بالاتر
   // یعنی همه‌ی زیرمجموعه‌های آن به‌عنوان دامنه در نظر گرفته می‌شوند (بک‌اند این را با
   // collectLeafDescendantsMulti از قبل پشتیبانی می‌کند)
-  const accountOptions: { id: number; code: string; title: string; levelTitle: string }[] = accounts.map((a) => ({
+  const accountOptions: AccountOption[] = accounts.map((a) => ({
     id: a.id,
     code: fullCode(a),
     title: a.title,
     levelTitle: a.level?.title || "",
+    levelOrder: a.level?.order ?? 0,
+    chain: ancestorChainByLevel(a),
   }));
+  const sortedLevels = [...levels].sort((a, b) => a.order - b.order);
 
   function buildFilters(f: FiltersState) {
     return {
@@ -538,11 +570,19 @@ function OlapBuilder({ editId }: { editId?: number }) {
               <MultiRecordPickerField
                 title="انتخاب حساب (همه سطوح: گروه، کل، معین و ...)"
                 rows={accountOptions}
-                columns={[
-                  { header: "کد", render: (a) => toFaDigits(a.code), filterValue: (a) => a.code, width: "110px" },
-                  { header: "عنوان", render: (a) => a.title, filterValue: (a) => a.title },
-                  { header: "سطح", render: (a) => a.levelTitle, filterValue: (a) => a.levelTitle, width: "90px" },
-                ]}
+                columns={sortedLevels.flatMap((lvl) => [
+                  {
+                    header: `کد ${lvl.title}`,
+                    render: (a: AccountOption) => (a.chain[lvl.order] ? toFaDigits(a.chain[lvl.order].code) : "—"),
+                    filterValue: (a: AccountOption) => a.chain[lvl.order]?.code || "",
+                    width: "90px",
+                  },
+                  {
+                    header: `عنوان ${lvl.title}`,
+                    render: (a: AccountOption) => a.chain[lvl.order]?.title || "—",
+                    filterValue: (a: AccountOption) => a.chain[lvl.order]?.title || "",
+                  },
+                ])}
                 selected={config.filters.accounts}
                 onChange={(rows) => setConfig({ ...config, filters: { ...config.filters, accounts: rows } })}
                 getLabel={(a) => `${toFaDigits(a.code)} - ${a.title} (${a.levelTitle})`}
