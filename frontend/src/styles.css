@@ -15,6 +15,80 @@
    پررنگ تزئینی.
    =================================================================== */
 :root {
+  --bg: #f7f8fb;
+  --surface: #ffffff;
+  --ink: #111827;
+  --ink-soft: #6b7280;
+  --line: #e5e7eb;
+  --line-strong: #d1d5db;
+  --primary: #4f46e5;
+  --primary-ink: #ffffff;
+  --primary-soft: #eef2ff;
+  --accent: #65a30d;
+  --accent-soft: #ecfccb;
+  --danger: #dc2626;
+  --danger-soft: #fef2f2;
+  --warning: #d97706;
+  --warning-soft: #fffbeb;
+  --radius: 16px;
+  --radius-sm: 10px;
+  --shadow-sm: 0 1px 3px rgba(17, 24, 39, 0.05), 0 1px 2px rgba(17, 24, 39, 0.04);
+  --shadow-md: 0 12px 32px rgba(79, 70, 229, 0.12), 0 4px 10px rgba(17, 24, 39, 0.06);
+
+  --sidebar-bg: #15132a;
+  --sidebar-ink: #e8e8f5;
+  --menu-title-ink: #ffffff;
+  --menu-hover-bg: rgba(255, 255, 255, 0.08);
+  --menu-accent-1: #a3e635;
+  --menu-accent-1-bg: rgba(163, 230, 53, 0.16);
+  --menu-accent-1-bg-hover: rgba(163, 230, 53, 0.26);
+  --menu-accent-2: #818cf8;
+  --menu-accent-2-bg: rgba(129, 140, 248, 0.16);
+  --menu-accent-2-bg-hover: rgba(129, 140, 248, 0.26);
+  --menu-accent-2-text: #c7d2fe;
+  --menu-accent-2-text-hover: #e0e7ff;
+  --menu-item-bg: rgba(255, 255, 255, 0.03);
+  --menu-item-bg-hover: rgba(255, 255, 255, 0.07);
+  --menu-item-bg-active: rgba(163, 230, 53, 0.14);
+  --menu-item-text: #c4c4dd;
+  --menu-folder-icon: #8b87b0;
+  --menu-form-icon: #9490b8;
+  --menu-form-icon-hover: #d6d4ea;
+
+  /* پالت دسته‌بندی‌شده‌ی حرفه‌ای برای آیکن هر فرم (سایدبار تیره) — جایگزین طیف رنگین‌کمانیِ قبلی با
+     مجموعه‌ای هماهنگ و کم‌اشباع‌تر که هم‌خانواده‌ی هویت سرمه‌ای/سبز پروژه است */
+  --nc-shield: #f0a3a3;
+  --nc-user: #f0c08e;
+  --nc-coin: #e8cf7a;
+  --nc-trend: #a8d98a;
+  --nc-calendar: #8fcf9e;
+  --nc-sitemap: #7fc9c9;
+  --nc-pin: #7fb8d9;
+  --nc-tag: #7fa3d9;
+  --nc-building: #94a3d9;
+  --nc-wallet: #a894d9;
+  --nc-card: #bb94d9;
+  --nc-bank: #cf94cf;
+  --nc-briefcase: #d994b3;
+  --nc-layers: #d9a3a3;
+  --nc-tree: #e0b48f;
+  --nc-file: #cbb87a;
+  --nc-ledger: #a3c98f;
+
+  /* رنگ اختصاصی هر ماژول/زیرماژول — برای تمایز بصری بین ماژول‌ها، از همان پالت هماهنگ بالا */
+  --nc-mod-settings: #a894d9;
+  --nc-mod-info: #7fb8d9;
+  --nc-mod-accounting: #a3e635;
+  --nc-mod-goods: #e0b48f;
+  --nc-mod-warehouse: #7fc9c9;
+  --nc-sub-ops: #e8cf7a;
+  --nc-sub-structure: #7fa3d9;
+  --nc-sub-report: #d994b3;
+  --nc-sub-config: #a8d98a;
+  --info-icon: #d9a441;
+}
+
+[data-theme="classic"] {
   --bg: #f4f6f8;
   --surface: #ffffff;
   --ink: #0f172a;
@@ -55,8 +129,6 @@
   --menu-form-icon: #8fa6bd;
   --menu-form-icon-hover: #c7d2e0;
 
-  /* پالت دسته‌بندی‌شده‌ی حرفه‌ای برای آیکن هر فرم (سایدبار تیره) — جایگزین طیف رنگین‌کمانیِ قبلی با
-     مجموعه‌ای هماهنگ و کم‌اشباع‌تر که هم‌خانواده‌ی هویت سرمه‌ای/سبز پروژه است */
   --nc-shield: #f0a3a3;
   --nc-user: #f0c08e;
   --nc-coin: #e8cf7a;
@@ -75,7 +147,6 @@
   --nc-file: #cbb87a;
   --nc-ledger: #a3c98f;
 
-  /* رنگ اختصاصی هر ماژول/زیرماژول — برای تمایز بصری بین ماژول‌ها، از همان پالت هماهنگ بالا */
   --nc-mod-settings: #a894d9;
   --nc-mod-info: #7fb8d9;
   --nc-mod-accounting: #34d399;
