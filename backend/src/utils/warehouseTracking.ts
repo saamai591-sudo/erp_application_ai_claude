@@ -57,3 +57,54 @@ export function trackingFieldsForCreate(l: TrackableLineInput) {
     physicalLocation: l.physicalLocation || null,
   };
 }
+
+// =========================================================================
+// فیلد GoodsItem.hasTransactions / Warehouse.hasTransactions یک کش ساده است که هر ۶ نوع سند انبار/فروش
+// (رسید انبار خرید، حواله انبار، انتقال بین انبارها، انبارگردانی، موجودی اول دوره، حواله فروش) هنگام
+// «قطعی‌کردن» آن را true می‌کنند تا حذف کالا/انبارِ دارای گردش مسدود شود. اما «برگشت از قطعی» فقط وضعیت
+// خودِ سند را به DRAFT برمی‌گرداند و این کش را دست‌نخورده (true) رها می‌کند؛ در نتیجه حتی بعد از برگشت
+// از قطعی و حذف کامل سند، کالا/انبار برای همیشه «دارای گردش» گزارش می‌شود و قابل حذف نیست، هرچند در
+// دیتابیس هیچ سند قطعی‌ای دیگر به آن ارجاع نمی‌دهد. این دو تابع، بعد از هر «برگشت از قطعی»، وضعیت واقعی
+// را با پرس‌وجوی مستقیم بین همه‌ی انواع سند دوباره محاسبه و کش را اصلاح می‌کنند.
+// =========================================================================
+
+export async function recomputeGoodsItemHasTransactions(goodsItemIds: number[]) {
+  const ids = Array.from(new Set(goodsItemIds));
+  for (const goodsItemId of ids) {
+    // eslint-disable-next-line no-await-in-loop
+    const [receipt, issue, transfer, adjustment, initial, delivery] = await Promise.all([
+      prisma.warehouseReceiptLine.findFirst({ where: { goodsItemId, warehouseReceipt: { status: "FINALIZED" } } }),
+      prisma.warehouseIssueLine.findFirst({ where: { goodsItemId, warehouseIssue: { status: "FINALIZED" } } }),
+      prisma.warehouseTransferLine.findFirst({ where: { goodsItemId, warehouseTransfer: { status: "FINALIZED" } } }),
+      prisma.warehouseAdjustmentLine.findFirst({ where: { goodsItemId, warehouseAdjustment: { status: "FINALIZED" } } }),
+      prisma.initialInventoryLine.findFirst({ where: { goodsItemId, initialInventory: { status: "FINALIZED" } } }),
+      prisma.salesDeliveryLine.findFirst({ where: { goodsItemId, salesDelivery: { status: "FINALIZED" } } }),
+    ]);
+    // eslint-disable-next-line no-await-in-loop
+    await prisma.goodsItem.update({
+      where: { id: goodsItemId },
+      data: { hasTransactions: !!(receipt || issue || transfer || adjustment || initial || delivery) },
+    });
+  }
+}
+
+export async function recomputeWarehouseHasTransactions(warehouseIds: number[]) {
+  const ids = Array.from(new Set(warehouseIds));
+  for (const warehouseId of ids) {
+    // eslint-disable-next-line no-await-in-loop
+    const [receipt, issue, transferOut, transferIn, adjustment, initial, delivery] = await Promise.all([
+      prisma.warehouseReceipt.findFirst({ where: { warehouseId, status: "FINALIZED" } }),
+      prisma.warehouseIssue.findFirst({ where: { warehouseId, status: "FINALIZED" } }),
+      prisma.warehouseTransfer.findFirst({ where: { sourceWarehouseId: warehouseId, status: "FINALIZED" } }),
+      prisma.warehouseTransfer.findFirst({ where: { destWarehouseId: warehouseId, status: "FINALIZED" } }),
+      prisma.warehouseAdjustment.findFirst({ where: { warehouseId, status: "FINALIZED" } }),
+      prisma.initialInventory.findFirst({ where: { warehouseId, status: "FINALIZED" } }),
+      prisma.salesDelivery.findFirst({ where: { warehouseId, status: "FINALIZED" } }),
+    ]);
+    // eslint-disable-next-line no-await-in-loop
+    await prisma.warehouse.update({
+      where: { id: warehouseId },
+      data: { hasTransactions: !!(receipt || issue || transferOut || transferIn || adjustment || initial || delivery) },
+    });
+  }
+}

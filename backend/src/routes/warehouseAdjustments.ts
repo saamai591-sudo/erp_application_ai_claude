@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertNoNegativeStockAfterChange, computeStockAsOf } from "../services/warehouseStockService";
 import { isGoodsItemAllowedForDocNature } from "../services/warehouseDocGoodsFilterService";
-import { validateTrackingFields, trackingFieldsForCreate } from "../utils/warehouseTracking";
+import { validateTrackingFields, trackingFieldsForCreate, recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
 
 // =========================================================================
 // ماژول‌های «انبارداری» / «حسابداری انبار» > ساب‌ماژول: عملیات > انبارگردانی / تعدیل موجودی
@@ -359,6 +359,8 @@ router.post("/warehouse-adjustments/:id/revert", async (req, res) => {
     }
 
     await prisma.warehouseAdjustment.update({ where: { id }, data: { status: "DRAFT", finalizedAt: null } });
+    await recomputeGoodsItemHasTransactions(d.lines.map((l: any) => l.goodsItemId));
+    await recomputeWarehouseHasTransactions([d.warehouseId]);
     res.json({ id, status: "DRAFT" });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در برگشت از قطعی" });

@@ -9,7 +9,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:generate": "prisma generate",
     "seed": "tsx prisma/seed.ts",
-    "cleanup-orphans": "tsx src/scripts/cleanupOrphans.ts"
+    "cleanup-orphans": "tsx src/scripts/cleanupOrphans.ts",
+    "recompute-has-transactions": "tsx src/scripts/recomputeHasTransactions.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.19.1",

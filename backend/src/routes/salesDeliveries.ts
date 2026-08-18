@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertNoNegativeStockAfterChange } from "../services/warehouseStockService";
 import { isGoodsItemAllowedForDocNature } from "../services/warehouseDocGoodsFilterService";
+import { recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
 
 // =========================================================================
 // ماژول «فروش» > عملیات > حواله فروش (مجوز خروج از انبار برای فروش)
@@ -358,12 +359,14 @@ router.post("/sales-deliveries/:id/finalize", async (req, res) => {
 // برگشت از قطعی: سند صادره — برگشت یعنی موجودی افزایش پیدا می‌کند، ایمن است
 router.post("/sales-deliveries/:id/revert", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.salesDelivery.findUnique({ where: { id } });
+  const d = await prisma.salesDelivery.findUnique({ where: { id }, include: { lines: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "FINALIZED") return res.status(400).json({ error: "فقط اسناد «قطعی» قابل برگشت هستند" });
 
   try {
     await prisma.salesDelivery.update({ where: { id }, data: { status: "DRAFT", finalizedAt: null } });
+    await recomputeGoodsItemHasTransactions(d.lines.map((l: any) => l.goodsItemId));
+    await recomputeWarehouseHasTransactions([d.warehouseId]);
     res.json({ id, status: "DRAFT" });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در برگشت از قطعی" });

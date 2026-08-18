@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertNoNegativeStockAfterChange } from "../services/warehouseStockService";
-import { validateTrackingFields, trackingFieldsForCreate } from "../utils/warehouseTracking";
+import { validateTrackingFields, trackingFieldsForCreate, recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
 
 // =========================================================================
 // ماژول‌های «انبارداری» / «حسابداری انبار» > ساب‌ماژول: عملیات > انتقال بین انبارها
@@ -341,6 +341,8 @@ router.post("/warehouse-transfers/:id/revert", async (req, res) => {
     }
 
     await prisma.warehouseTransfer.update({ where: { id }, data: { status: "DRAFT", finalizedAt: null } });
+    await recomputeGoodsItemHasTransactions(d.lines.map((l: any) => l.goodsItemId));
+    await recomputeWarehouseHasTransactions([d.sourceWarehouseId, d.destWarehouseId]);
     res.json({ id, status: "DRAFT" });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در برگشت از قطعی" });

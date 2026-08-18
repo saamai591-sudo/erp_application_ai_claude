@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertNoNegativeStockAfterChange } from "../services/warehouseStockService";
 import { isGoodsItemAllowedForDocNature } from "../services/warehouseDocGoodsFilterService";
-import { validateTrackingFields, trackingFieldsForCreate } from "../utils/warehouseTracking";
+import { validateTrackingFields, trackingFieldsForCreate, recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
 
 // =========================================================================
 // ماژول‌های «انبارداری» / «حسابداری انبار» > ساب‌ماژول: عملیات > حواله انبار (مصرف)
@@ -422,12 +422,14 @@ router.post("/warehouse-issues/:id/finalize", async (req, res) => {
 // کنترل موجودی منفی ندارد (برخلاف اسناد وارده که برگشت‌شان کاهشی و ریسک‌دار است).
 router.post("/warehouse-issues/:id/revert", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.warehouseIssue.findUnique({ where: { id } });
+  const d = await prisma.warehouseIssue.findUnique({ where: { id }, include: { lines: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "FINALIZED") return res.status(400).json({ error: "فقط اسناد «قطعی» قابل برگشت هستند" });
 
   try {
     await prisma.warehouseIssue.update({ where: { id }, data: { status: "DRAFT", finalizedAt: null } });
+    await recomputeGoodsItemHasTransactions(d.lines.map((l: any) => l.goodsItemId));
+    await recomputeWarehouseHasTransactions([d.warehouseId]);
     res.json({ id, status: "DRAFT" });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در برگشت از قطعی" });
