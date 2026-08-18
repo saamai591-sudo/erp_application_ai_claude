@@ -28,6 +28,7 @@ import AccountClosing from "./pages/AccountClosing";
 import OpeningClosing from "./pages/OpeningClosing";
 import DocumentConfirmation from "./pages/DocumentConfirmation";
 import AccountsReview from "./pages/AccountsReview";
+import OlapReports from "./pages/OlapReports";
 import UnitsOfMeasure from "./pages/UnitsOfMeasure";
 import WarehouseGroups from "./pages/WarehouseGroups";
 import Warehouses from "./pages/Warehouses";
@@ -150,6 +151,9 @@ export default function App() {
             <Route path="/opening-closing/:id" element={<OpeningClosing />} />
             <Route path="/document-confirmation" element={<DocumentConfirmation />} />
             <Route path="/account-review" element={<AccountsReview />} />
+            <Route path="/olap-reports" element={<OlapReports />} />
+            <Route path="/olap-reports/new" element={<OlapReports />} />
+            <Route path="/olap-reports/:id/edit" element={<OlapReports />} />
 
             <Route path="/units-of-measure" element={<UnitsOfMeasure />} />
             <Route path="/units-of-measure/new" element={<UnitsOfMeasure />} />

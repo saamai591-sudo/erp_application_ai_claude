@@ -77,6 +77,7 @@ export const MODULES: ModuleGroup[] = [
         title: "گزارش",
         items: [
           { key: "account-review", label: "مرور حسابها", list: "/account-review", icon: "tree" },
+          { key: "olap-reports", label: "گزارش تحلیلی (OLAP)", list: "/olap-reports", create: "/olap-reports/new", icon: "trend" },
         ],
       },
     ],

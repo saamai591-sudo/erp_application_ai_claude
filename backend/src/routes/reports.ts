@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { resolveDetailTitles } from "../utils/detailValues";
 import { computeFullAccountCode, buildAccountByIdMap } from "../utils/accountCode";
 import { parseFilters, stringWhere, numberWhere, dateWhere } from "../utils/tableFilters";
+import { toJalaliYearMonth } from "../utils/jalaliDate";
 
 const router = Router();
 
@@ -448,6 +449,243 @@ router.get("/ledger", async (req, res) => {
   });
 
   res.json({ rows, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
+});
+
+/** حداکثر تعداد ردیف سند مطابق فیلتر که یک‌جا در حافظه تجمیع می‌شود؛ فراتر از این، کاربر باید فیلتر را محدودتر کند */
+const OLAP_MAX_LINES = 200000;
+
+type OlapDimension =
+  | { type: "account"; levelOrder: number }
+  | { type: "detail"; slot: 1 | 2 | 3 }
+  | { type: "period"; granularity: "year" | "month" };
+
+type OlapMeasure = "debit" | "credit" | "balance" | "turnover" | "count";
+const OLAP_MEASURES: OlapMeasure[] = ["debit", "credit", "balance", "turnover", "count"];
+
+interface OlapFilters {
+  fromDate?: string;
+  toDate?: string;
+  accountIds?: number[];
+  detail1Codes?: string[];
+  detail2Codes?: string[];
+  detail3Codes?: string[];
+  documentTypeIds?: number[];
+  status?: string[];
+  issuingSystem?: string[];
+}
+
+const NO_DETAIL_KEY = "__none__";
+const NO_DETAIL_LABEL = "(بدون تفصیل)";
+
+router.post("/olap-pivot", async (req, res) => {
+  const body = req.body as { rowDimension?: OlapDimension; colDimension?: OlapDimension | null; measure?: OlapMeasure; filters?: OlapFilters };
+  const rowDimension = body.rowDimension;
+  const colDimension = body.colDimension || null;
+  const measure = body.measure;
+
+  if (!rowDimension || !["account", "detail", "period"].includes(rowDimension.type)) {
+    return res.status(400).json({ error: "بعد ردیف گزارش مشخص نشده است" });
+  }
+  if (!measure || !OLAP_MEASURES.includes(measure)) {
+    return res.status(400).json({ error: "شاخص گزارش نامعتبر است" });
+  }
+
+  const f = body.filters || {};
+
+  const entryWhere: any = {};
+  if (f.fromDate || f.toDate) {
+    entryWhere.date = {};
+    if (f.fromDate) entryWhere.date.gte = new Date(f.fromDate);
+    if (f.toDate) entryWhere.date.lte = new Date(f.toDate);
+  }
+  if (f.documentTypeIds?.length) entryWhere.documentTypeId = { in: f.documentTypeIds };
+  if (f.status?.length) entryWhere.status = { in: f.status };
+  if (f.issuingSystem?.length) entryWhere.issuingSystem = { in: f.issuingSystem };
+
+  const allAccounts = await prisma.account.findMany({ select: { id: true, parentId: true, code: true, title: true, levelId: true } });
+  const accountById = buildAccountByIdMap(allAccounts);
+
+  const lineWhere: any = {};
+  if (f.accountIds?.length) {
+    const leafIds = collectLeafDescendantsMulti(f.accountIds, allAccounts);
+    lineWhere.accountId = { in: leafIds };
+  }
+  if (f.detail1Codes?.length) lineWhere.detail1Code = { in: f.detail1Codes };
+  if (f.detail2Codes?.length) lineWhere.detail2Code = { in: f.detail2Codes };
+  if (f.detail3Codes?.length) lineWhere.detail3Code = { in: f.detail3Codes };
+
+  const where = { ...lineWhere, journalEntry: entryWhere };
+
+  const matchCount = await prisma.journalEntryLine.count({ where });
+  if (matchCount > OLAP_MAX_LINES) {
+    return res.status(400).json({ error: "تعداد ردیف‌های منطبق با فیلتر بسیار زیاد است؛ لطفاً بازه زمانی یا فیلترها را محدودتر کنید" });
+  }
+
+  const lines = await prisma.journalEntryLine.findMany({
+    where,
+    select: {
+      accountId: true,
+      detail1Code: true,
+      detail2Code: true,
+      detail3Code: true,
+      baseDebit: true,
+      baseCredit: true,
+      journalEntry: { select: { date: true } },
+    },
+  });
+
+  // نگاشت هر حساب به اجدادش در هر سطح گزارشگری (کش‌شده)، برای پیمایش «این ردیف سند در بعد حساب زیرمجموعه‌ی کدام گروه/کل/معین است؟»
+  const levels = await prisma.reportingLevel.findMany();
+  const levelOrderById = new Map(levels.map((l: any) => [l.id, l.order]));
+  const ancestorCache = new Map<number, Map<number, number | null>>();
+  function ancestorAtLevel(accountId: number, levelOrder: number): number | null {
+    let byLevel = ancestorCache.get(accountId);
+    if (!byLevel) {
+      byLevel = new Map();
+      ancestorCache.set(accountId, byLevel);
+    }
+    if (byLevel.has(levelOrder)) return byLevel.get(levelOrder)!;
+    let cur = accountById.get(accountId);
+    let found: number | null = null;
+    while (cur) {
+      if (levelOrderById.get(cur.levelId) === levelOrder) {
+        found = cur.id;
+        break;
+      }
+      cur = cur.parentId ? accountById.get(cur.parentId) : undefined;
+    }
+    byLevel.set(levelOrder, found);
+    return found;
+  }
+
+  function keyLabel(dim: OlapDimension, line: (typeof lines)[number]): { key: string; label: string } | null {
+    if (dim.type === "account") {
+      const id = ancestorAtLevel(line.accountId, dim.levelOrder);
+      if (id == null) return null;
+      const acc = accountById.get(id)!;
+      return { key: `a${id}`, label: `${computeFullAccountCode(id, accountById)} - ${acc.title}` };
+    }
+    if (dim.type === "detail") {
+      const code = (line as any)[`detail${dim.slot}Code`] as string | null;
+      if (!code) return { key: NO_DETAIL_KEY, label: NO_DETAIL_LABEL };
+      return { key: code, label: code };
+    }
+    const { year, month } = toJalaliYearMonth(line.journalEntry.date);
+    const key = dim.granularity === "year" ? String(year) : `${year}/${String(month).padStart(2, "0")}`;
+    return { key, label: key };
+  }
+
+  interface Cell {
+    debit: number;
+    credit: number;
+    count: number;
+  }
+  const cells = new Map<string, Map<string, Cell>>();
+  const rowLabels = new Map<string, string>();
+  const colLabels = new Map<string, string>();
+  const detailCodesToResolve = new Set<string>();
+
+  for (const line of lines) {
+    const rowKL = keyLabel(rowDimension, line);
+    if (!rowKL) continue;
+    let colKL: { key: string; label: string };
+    if (colDimension) {
+      const c = keyLabel(colDimension, line);
+      if (!c) continue;
+      colKL = c;
+    } else {
+      colKL = { key: "_", label: "" };
+    }
+
+    rowLabels.set(rowKL.key, rowKL.label);
+    colLabels.set(colKL.key, colKL.label);
+    if (rowDimension.type === "detail" && rowKL.key !== NO_DETAIL_KEY) detailCodesToResolve.add(rowKL.key);
+    if (colDimension?.type === "detail" && colKL.key !== NO_DETAIL_KEY) detailCodesToResolve.add(colKL.key);
+
+    let rowMap = cells.get(rowKL.key);
+    if (!rowMap) {
+      rowMap = new Map();
+      cells.set(rowKL.key, rowMap);
+    }
+    let cell = rowMap.get(colKL.key);
+    if (!cell) {
+      cell = { debit: 0, credit: 0, count: 0 };
+      rowMap.set(colKL.key, cell);
+    }
+    cell.debit += Number(line.baseDebit);
+    cell.credit += Number(line.baseCredit);
+    cell.count += 1;
+  }
+
+  if (detailCodesToResolve.size) {
+    const titles = await resolveDetailTitles(Array.from(detailCodesToResolve));
+    for (const code of detailCodesToResolve) {
+      if (titles[code]) {
+        if (rowLabels.has(code)) rowLabels.set(code, `${code} - ${titles[code]}`);
+        if (colLabels.has(code)) colLabels.set(code, `${code} - ${titles[code]}`);
+      }
+    }
+  }
+
+  function measureValue(cell: Cell): number {
+    switch (measure) {
+      case "debit":
+        return cell.debit;
+      case "credit":
+        return cell.credit;
+      case "balance":
+        return cell.debit - cell.credit;
+      case "turnover":
+        return cell.debit + cell.credit;
+      case "count":
+        return cell.count;
+      default:
+        return 0;
+    }
+  }
+
+  // مرتب‌سازی: دوره زمانی بر اساس خودِ کلید (کلید سال/ماه zero-padded است پس مرتب‌سازی رشته‌ای همان
+  // ترتیب زمانی را می‌دهد)؛ حساب و تفصیل بر اساس برچسب (که با کد حساب یا عنوان تفصیل شروع می‌شود)،
+  // با این تفاوت که ردیف/ستون «بدون تفصیل» همیشه در انتها قرار می‌گیرد.
+  function sortDimKeys(dim: OlapDimension | null, keys: string[], labels: Map<string, string>): string[] {
+    if (!dim) return keys;
+    if (dim.type === "period") return [...keys].sort((a, b) => a.localeCompare(b));
+    return [...keys].sort((a, b) => {
+      if (a === NO_DETAIL_KEY) return 1;
+      if (b === NO_DETAIL_KEY) return -1;
+      return (labels.get(a) || "").localeCompare(labels.get(b) || "", "fa");
+    });
+  }
+
+  const rowKeys = sortDimKeys(rowDimension, Array.from(rowLabels.keys()), rowLabels);
+  const colKeys = colDimension ? sortDimKeys(colDimension, Array.from(colLabels.keys()), colLabels) : ["_"];
+
+  const resultCells: Record<string, Record<string, number>> = {};
+  const rowTotals: Record<string, number> = {};
+  const colTotals: Record<string, number> = {};
+  let grandTotal = 0;
+
+  for (const rowKey of rowKeys) {
+    const rowMap = cells.get(rowKey);
+    resultCells[rowKey] = {};
+    for (const colKey of colKeys) {
+      const cell = rowMap?.get(colKey);
+      const value = cell ? measureValue(cell) : 0;
+      resultCells[rowKey][colKey] = value;
+      rowTotals[rowKey] = (rowTotals[rowKey] || 0) + value;
+      colTotals[colKey] = (colTotals[colKey] || 0) + value;
+      grandTotal += value;
+    }
+  }
+
+  res.json({
+    rows: rowKeys.map((key) => ({ key, label: rowLabels.get(key) || key })),
+    cols: colDimension ? colKeys.map((key) => ({ key, label: colLabels.get(key) || key })) : null,
+    cells: resultCells,
+    rowTotals,
+    colTotals,
+    grandTotal,
+  });
 });
 
 export default router;

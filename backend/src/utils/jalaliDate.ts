@@ -41,3 +41,9 @@ export function resolveDateString(raw: string): string {
     return raw;
   }
 }
+
+/** تاریخ میلادی ذخیره‌شده در دیتابیس را به سال/ماه شمسی تبدیل می‌کند (برای بازه‌بندی گزارش تحلیلی بر اساس دوره) */
+export function toJalaliYearMonth(date: Date): { year: number; month: number } {
+  const j = new DateObject({ date, calendar: gregorian, locale: gregorian_en }).convert(persian, persian_fa);
+  return { year: j.year, month: j.month.number };
+}
