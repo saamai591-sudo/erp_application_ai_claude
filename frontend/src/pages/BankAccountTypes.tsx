@@ -30,7 +30,7 @@ function AccountTypeList() {
   const navigate = useNavigate();
 
   async function reload() {
-    api.get(cacheKey).then(setTypes).catch((e) => setError(e.message));
+    api.get("/banking/account-types").then(setTypes).catch((e) => setError(e.message));
   }
 
   useEffect(() => {

@@ -33,7 +33,7 @@ function BranchList() {
   const navigate = useNavigate();
 
   async function reload() {
-    api.get(cacheKey).then(setBranches).catch((e) => setError(e.message));
+    api.get("/banking/branches").then(setBranches).catch((e) => setError(e.message));
   }
 
   useEffect(() => {

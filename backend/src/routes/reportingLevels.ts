@@ -3,6 +3,13 @@ import { prisma } from "../lib/prisma";
 
 const router = Router();
 
+// طول کد باید عدد صحیح مثبت باشد (تعداد رقم کد این سطح در کدینگ حسابها)؛ مقادیر اعشاری/منفی/صفر
+// نباید پذیرفته شوند — فرانت‌اند فقط با Number() مقدار را تبدیل می‌کند و همین باعث می‌شد مقادیری مثل
+// «۱٫۵» بدون خطا ذخیره شوند، پس این کنترل باید در بک‌اند (منبع معتبر) هم تکرار شود.
+function isValidCodeLength(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v) && v > 0;
+}
+
 router.get("/", async (_req, res) => {
   res.json(await prisma.reportingLevel.findMany({ orderBy: { order: "asc" } }));
 });
@@ -10,6 +17,7 @@ router.get("/", async (_req, res) => {
 router.post("/", async (req, res) => {
   const { title, codeLength } = req.body as { title: string; codeLength: number };
   if (!title || !codeLength) return res.status(400).json({ error: "عنوان و طول کد الزامی است" });
+  if (!isValidCodeLength(codeLength)) return res.status(400).json({ error: "طول کد باید عدد صحیح مثبت باشد" });
 
   const last = await prisma.reportingLevel.findFirst({ orderBy: { order: "desc" } });
   const order = last ? last.order + 1 : 1;
@@ -24,6 +32,9 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   const id = Number(req.params.id);
   const { title, codeLength } = req.body as { title?: string; codeLength?: number };
+  if (codeLength !== undefined && !isValidCodeLength(codeLength)) {
+    return res.status(400).json({ error: "طول کد باید عدد صحیح مثبت باشد" });
+  }
 
   if (title) {
     const dup = await prisma.reportingLevel.findFirst({ where: { title, NOT: { id } } });

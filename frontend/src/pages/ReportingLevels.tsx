@@ -91,12 +91,17 @@ function LevelForm({ editId }: { editId?: number }) {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    const codeLength = Number(form.codeLength);
+    if (!Number.isInteger(codeLength) || codeLength <= 0) {
+      setError("طول کد باید عدد صحیح مثبت باشد");
+      return;
+    }
     try {
       if (editId) {
-        await api.put(`/reporting-levels/${editId}`, { title: form.title, codeLength: Number(form.codeLength) });
+        await api.put(`/reporting-levels/${editId}`, { title: form.title, codeLength });
         flash();
       } else {
-        const created = await api.post("/reporting-levels", { title: form.title, codeLength: Number(form.codeLength) });
+        const created = await api.post("/reporting-levels", { title: form.title, codeLength });
         flash();
         navigate(`/reporting-levels/${created.id}/edit`);
       }
@@ -136,7 +141,7 @@ function LevelForm({ editId }: { editId?: number }) {
           </div>
           <div className="form-field">
             <label>طول کد</label>
-            <input type="number" min={1} value={form.codeLength} onChange={(e) => setForm({ ...form, codeLength: Number(e.target.value) })} />
+            <input type="number" min={1} step={1} value={form.codeLength} onChange={(e) => setForm({ ...form, codeLength: Number(e.target.value) })} />
           </div>
         </div>
       </form>
