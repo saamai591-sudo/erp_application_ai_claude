@@ -1,4 +1,5 @@
 import { SelectId } from "./useChainedMultiSelect";
+import { ActiveFilter } from "../components/DataTable";
 
 export interface DetailQueryState {
   page: number;
@@ -25,6 +26,9 @@ export interface AccountsReviewSnapshot {
   detailTotal: Record<number, number>;
   ledgerRows: any[];
   ledgerPageSize: number;
+  /** مرتب‌سازی/فیلتر ستونی تب «گردش» — سمت سرور اعمال می‌شود، دقیقاً مثل تب‌های تفصیل */
+  ledgerSort: { header: string; dir: "asc" | "desc" } | null;
+  ledgerFilters: Record<string, ActiveFilter>;
   loadedTabs: number[];
 }
 

@@ -101,7 +101,7 @@ function matchesFilter(raw: string | number | null | undefined, type: ColumnFilt
   return true;
 }
 
-function FilterIcon({ active }: { active: boolean }) {
+export function FilterIcon({ active }: { active: boolean }) {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill={active ? "currentColor" : "none"}>
       <path d="M4 5h16l-6 8v6l-4-2v-4L4 5Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
@@ -109,7 +109,7 @@ function FilterIcon({ active }: { active: boolean }) {
   );
 }
 
-function FilterPopover({
+export function FilterPopover({
   type,
   active,
   position,
@@ -195,7 +195,7 @@ function TrashIcon() {
   );
 }
 
-function SortIcon({ dir }: { dir: "asc" | "desc" | null }) {
+export function SortIcon({ dir }: { dir: "asc" | "desc" | null }) {
   if (!dir) {
     return (
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" style={{ opacity: 0.35 }}>

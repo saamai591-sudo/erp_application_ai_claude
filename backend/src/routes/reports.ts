@@ -2,8 +2,20 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { resolveDetailTitles } from "../utils/detailValues";
 import { computeFullAccountCode, buildAccountByIdMap } from "../utils/accountCode";
+import { parseFilters, stringWhere, numberWhere, dateWhere } from "../utils/tableFilters";
 
 const router = Router();
+
+// معادل فارسی وضعیت سند و سیستم صادرکننده — برای ترجمه‌ی عبارت جستجوی فیلتر ستونی «وضعیت»/«سیستم»
+// تب گردش (که روی برچسب فارسی نمایش‌داده‌شده اعمال می‌شود) به مقدار enum؛ دقیقاً همان برچسب‌هایی که
+// AccountsReview.tsx برای رندر این دو ستون استفاده می‌کند.
+const LEDGER_STATUS_FA: Record<string, string> = { DRAFT: "ثبت", REVIEW: "بررسی", APPROVED: "تایید" };
+const LEDGER_ISSUING_SYSTEM_FA: Record<string, string> = {
+  ACCOUNTING: "حسابداری",
+  ACCOUNTING_EXCEL_IMPORT: "حسابداری (ورود از اکسل)",
+  ACCOUNT_CLOSING: "بستن حسابها",
+  OPENING_CLOSING: "افتتاحیه و اختتامیه",
+};
 
 interface CommonFilters {
   fromDate?: string;
@@ -272,7 +284,17 @@ router.get("/detail-summary", async (req, res) => {
 });
 
 router.get("/ledger", async (req, res) => {
-  const q = req.query as any as { parentIds?: string; detail1Codes?: string; detail2Codes?: string; detail3Codes?: string; page?: string; pageSize?: string } & CommonFilters;
+  const q = req.query as any as {
+    parentIds?: string;
+    detail1Codes?: string;
+    detail2Codes?: string;
+    detail3Codes?: string;
+    page?: string;
+    pageSize?: string;
+    sortField?: string;
+    sortDir?: string;
+    filters?: string;
+  } & CommonFilters;
 
   const allAccounts = await prisma.account.findMany({ select: { id: true, parentId: true, code: true } });
   const parentIds = parseIdList(q.parentIds);
@@ -286,8 +308,90 @@ router.get("/ledger", async (req, res) => {
   if (accountScope) lineWhere.accountId = { in: accountScope };
 
   const entryWhere = buildEntryWhere(q);
-  const where = { ...lineWhere, journalEntry: entryWhere };
-  const orderBy = [{ journalEntry: { date: "asc" as const } }, { journalEntry: { number: "asc" as const } }, { rowOrder: "asc" as const }];
+
+  // فیلتر ستونی تب گردش (کلیک روی آیکن فیلتر هر ستون در جدول) — مستقل و علاوه‌بر «فیلترهای بیشتر»ی
+  // که از بالای صفحه (buildEntryWhere) می‌آید؛ هر دو با AND با هم ترکیب می‌شوند نه جایگزین یکدیگر.
+  const colFilters = parseFilters(q.filters);
+  const entryAnd: any[] = [entryWhere];
+  if (colFilters.number) {
+    const w = numberWhere(colFilters.number);
+    if (w) entryAnd.push({ number: w });
+  }
+  if (colFilters.referenceNumber) {
+    const w = numberWhere(colFilters.referenceNumber);
+    if (w) entryAnd.push({ referenceNumber: w });
+  }
+  if (colFilters.date) {
+    const w = dateWhere(colFilters.date);
+    if (w) entryAnd.push({ date: w });
+  }
+  if (colFilters.documentType) {
+    const w = stringWhere(colFilters.documentType);
+    if (w) entryAnd.push({ documentType: { title: w } });
+  }
+  if (colFilters.status) {
+    const f = colFilters.status;
+    if (f.operator === "empty") {
+      entryAnd.push({ id: -1 }); // وضعیت سند همیشه مقدار دارد؛ یعنی هیچ سندی مطابقت ندارد
+    } else if (f.operator === "contains" || f.operator === "notContains") {
+      const needle = (f.value ?? "").trim();
+      if (needle) {
+        const matched = Object.entries(LEDGER_STATUS_FA).filter(([, label]) => label.includes(needle)).map(([key]) => key);
+        if (f.operator === "contains") entryAnd.push(matched.length ? { status: { in: matched } } : { id: -1 });
+        else if (matched.length) entryAnd.push({ status: { notIn: matched } });
+      }
+    }
+  }
+  if (colFilters.issuingSystem) {
+    const f = colFilters.issuingSystem;
+    if (f.operator === "empty") {
+      entryAnd.push({ id: -1 });
+    } else if (f.operator === "contains" || f.operator === "notContains") {
+      const needle = (f.value ?? "").trim();
+      if (needle) {
+        const matched = Object.entries(LEDGER_ISSUING_SYSTEM_FA).filter(([, label]) => label.includes(needle)).map(([key]) => key);
+        if (f.operator === "contains") entryAnd.push(matched.length ? { issuingSystem: { in: matched } } : { id: -1 });
+        else if (matched.length) entryAnd.push({ issuingSystem: { notIn: matched } });
+      }
+    }
+  }
+
+  const lineAnd: any[] = [lineWhere];
+  if (colFilters.description) {
+    const w = stringWhere(colFilters.description);
+    if (w) lineAnd.push({ description: w });
+  }
+  if (colFilters.debit) {
+    const w = numberWhere(colFilters.debit);
+    if (w) lineAnd.push({ baseDebit: w });
+  }
+  if (colFilters.credit) {
+    const w = numberWhere(colFilters.credit);
+    if (w) lineAnd.push({ baseCredit: w });
+  }
+
+  const where = { AND: [...lineAnd, { journalEntry: { AND: entryAnd } }] };
+
+  // مرتب‌سازی: پیش‌فرض همیشه زمانی (تاریخ → شماره سند → ترتیب ردیف) است چون «مانده تجمعی» فقط در
+  // همین ترتیب معنای واقعیِ «مانده‌ی حساب تا این لحظه» را دارد؛ اگر کاربر ستون دیگری را برای
+  // مرتب‌سازی انتخاب کند، مانده‌ی هر ردیف همچنان صحیح محاسبه می‌شود (جمع تجمعی روی همان ترتیب
+  // نمایش‌داده‌شده) ولی دیگر یک «مانده‌ی زمانی» متعارف نیست.
+  const sortDir = q.sortDir === "asc" ? "asc" : "desc";
+  const sortMap: Record<string, any> = {
+    number: { journalEntry: { number: sortDir } },
+    referenceNumber: { journalEntry: { referenceNumber: sortDir } },
+    date: { journalEntry: { date: sortDir } },
+    documentType: { journalEntry: { documentType: { title: sortDir } } },
+    issuingSystem: { journalEntry: { issuingSystem: sortDir } },
+    status: { journalEntry: { status: sortDir } },
+    description: { description: sortDir },
+    debit: { baseDebit: sortDir },
+    credit: { baseCredit: sortDir },
+  };
+  const orderBy =
+    q.sortField && sortMap[q.sortField]
+      ? [sortMap[q.sortField], { rowOrder: "asc" as const }]
+      : [{ journalEntry: { date: "asc" as const } }, { journalEntry: { number: "asc" as const } }, { rowOrder: "asc" as const }];
 
   const page = Math.max(1, parseInt(q.page as any) || 1);
   const pageSize = Math.min(1000, Math.max(1, parseInt(q.pageSize as any) || 100));

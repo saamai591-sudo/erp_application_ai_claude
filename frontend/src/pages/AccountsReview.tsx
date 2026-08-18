@@ -12,6 +12,7 @@ import { useTabs } from "../lib/TabsContext";
 import { getAccountsReviewSnapshot, setAccountsReviewSnapshot, DetailQueryState } from "../lib/accountsReviewCache";
 import { api } from "../lib/api";
 import { InfoHint } from "../components/InfoHint";
+import { FilterIcon, SortIcon, FilterPopover, ActiveFilter, ColumnFilterType } from "../components/DataTable";
 
 interface Level { id: number; order: number; title: string }
 interface DocType { id: number; title: string; systemKey: string | null }
@@ -87,6 +88,22 @@ const DETAIL_SORT_FIELD_MAP: Record<string, string> = {
 const DEFAULT_DETAIL_QUERY: DetailQueryState = { page: 1, pageSize: 25, sort: null };
 const LEDGER_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
+// ستون‌های قابل مرتب‌سازی/فیلتر تب «گردش» — سمت سرور اعمال می‌شود (دقیقاً مثل تب‌های تفصیل بالا و
+// فهرست اسناد حسابداری)؛ ستون‌های «مانده بدهکار/بستانکار» عمداً اینجا نیستند چون یک مقدار تجمعیِ
+// وابسته به ترتیب پردازش ردیف‌هاست، نه یک مقدار مستقیم قابل فیلتر.
+const LEDGER_COLUMNS: { header: string; field: string; filterType: ColumnFilterType }[] = [
+  { header: "شماره سند", field: "number", filterType: "number" },
+  { header: "شماره عطف", field: "referenceNumber", filterType: "number" },
+  { header: "تاریخ", field: "date", filterType: "date" },
+  { header: "نوع سند", field: "documentType", filterType: "string" },
+  { header: "سیستم", field: "issuingSystem", filterType: "string" },
+  { header: "وضعیت", field: "status", filterType: "string" },
+  { header: "شرح", field: "description", filterType: "string" },
+  { header: "بدهکار", field: "debit", filterType: "number" },
+  { header: "بستانکار", field: "credit", filterType: "number" },
+];
+const LEDGER_SORT_FIELD_MAP: Record<string, string> = Object.fromEntries(LEDGER_COLUMNS.map((c) => [c.header, c.field]));
+
 export default function AccountsReview() {
   const { openTab } = useTabs();
   const snapshot = getAccountsReviewSnapshot();
@@ -104,6 +121,11 @@ export default function AccountsReview() {
   const [detailTotal, setDetailTotal] = useState<Record<number, number>>(snapshot?.detailTotal ?? {});
   const [loadedTabs, setLoadedTabs] = useState<Set<number>>(new Set(snapshot?.loadedTabs ?? []));
   const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [ledgerSort, setLedgerSort] = useState<{ header: string; dir: "asc" | "desc" } | null>(snapshot?.ledgerSort ?? null);
+  const [ledgerFilters, setLedgerFilters] = useState<Record<string, ActiveFilter>>(snapshot?.ledgerFilters ?? {});
+  const [openLedgerFilterFor, setOpenLedgerFilterFor] = useState<string | null>(null);
+  const [ledgerPopoverPos, setLedgerPopoverPos] = useState({ top: 0, left: 0 });
+  const ledgerFilterBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [showRunningBalance, setShowRunningBalance] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -149,9 +171,11 @@ export default function AccountsReview() {
       detailTotal,
       ledgerRows,
       ledgerPageSize,
+      ledgerSort,
+      ledgerFilters,
       loadedTabs: Array.from(loadedTabs),
     });
-  }, [chain.selections, chain.order, activeTab, filters, tabData, detailQuery, detailTotal, ledgerRows, ledgerPageSize, loadedTabs]);
+  }, [chain.selections, chain.order, activeTab, filters, tabData, detailQuery, detailTotal, ledgerRows, ledgerPageSize, ledgerSort, ledgerFilters, loadedTabs]);
 
   useEffect(() => {
     async function init() {
@@ -294,7 +318,7 @@ export default function AccountsReview() {
     setDetailQuery((prev) => ({ ...prev, [tabIndex]: { ...(prev[tabIndex] ?? DEFAULT_DETAIL_QUERY), ...patch } }));
   }
 
-  async function loadLedger(page = 1, pageSize = ledgerPageSize) {
+  async function loadLedger(page = 1, pageSize = ledgerPageSize, sort = ledgerSort, colFilters = ledgerFilters) {
     setLedgerLoading(true);
     setError(null);
     try {
@@ -307,6 +331,21 @@ export default function AccountsReview() {
       });
       p.set("page", String(page));
       p.set("pageSize", String(pageSize));
+      if (sort) {
+        const field = LEDGER_SORT_FIELD_MAP[sort.header];
+        if (field) {
+          p.set("sortField", field);
+          p.set("sortDir", sort.dir);
+        }
+      }
+      if (Object.keys(colFilters).length) {
+        const serverFilters: Record<string, ActiveFilter> = {};
+        for (const [header, f] of Object.entries(colFilters)) {
+          const field = LEDGER_SORT_FIELD_MAP[header];
+          if (field) serverFilters[field] = f;
+        }
+        if (Object.keys(serverFilters).length) p.set("filters", JSON.stringify(serverFilters));
+      }
       const data = await api.get(`/reports/ledger?${p.toString()}`);
       setLedgerRows(data.rows);
       setLedgerPage(data.page);
@@ -323,6 +362,35 @@ export default function AccountsReview() {
 
   function changeLedgerPageSize(size: number) {
     loadLedger(1, size);
+  }
+
+  function toggleLedgerSort(header: string) {
+    const next: { header: string; dir: "asc" | "desc" } | null =
+      !ledgerSort || ledgerSort.header !== header ? { header, dir: "asc" } : ledgerSort.dir === "asc" ? { header, dir: "desc" } : null;
+    setLedgerSort(next);
+    loadLedger(1, ledgerPageSize, next, ledgerFilters);
+  }
+
+  function openLedgerFilter(header: string) {
+    const btn = ledgerFilterBtnRefs.current[header];
+    if (btn) {
+      const rect = btn.getBoundingClientRect();
+      setLedgerPopoverPos({ top: rect.bottom + 4, left: Math.max(8, rect.right - 220) });
+    }
+    setOpenLedgerFilterFor(openLedgerFilterFor === header ? null : header);
+  }
+
+  function applyLedgerFilter(header: string, f: ActiveFilter) {
+    const next = { ...ledgerFilters, [header]: f };
+    setLedgerFilters(next);
+    loadLedger(1, ledgerPageSize, ledgerSort, next);
+  }
+
+  function clearLedgerFilter(header: string) {
+    const next = { ...ledgerFilters };
+    delete next[header];
+    setLedgerFilters(next);
+    loadLedger(1, ledgerPageSize, ledgerSort, next);
   }
 
   const skippedInitialFetch = useRef(false);
@@ -547,15 +615,33 @@ export default function AccountsReview() {
               <table>
                 <thead>
                   <tr>
-                    <th>شماره سند</th>
-                    <th>شماره عطف</th>
-                    <th>تاریخ</th>
-                    <th>نوع سند</th>
-                    <th>سیستم</th>
-                    <th>وضعیت</th>
-                    <th>شرح</th>
-                    <th>بدهکار</th>
-                    <th>بستانکار</th>
+                    {LEDGER_COLUMNS.map((c) => {
+                      const sortDir = ledgerSort?.header === c.header ? ledgerSort.dir : null;
+                      const isFilterActive = !!ledgerFilters[c.header];
+                      return (
+                        <th key={c.header}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                            <span
+                              onClick={() => toggleLedgerSort(c.header)}
+                              style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}
+                              title="مرتب‌سازی"
+                            >
+                              {c.header}
+                              <SortIcon dir={sortDir} />
+                            </span>
+                            <button
+                              ref={(el) => (ledgerFilterBtnRefs.current[c.header] = el)}
+                              type="button"
+                              className={`filter-btn ${isFilterActive ? "active" : ""}`}
+                              onClick={() => openLedgerFilter(c.header)}
+                              title="فیلتر"
+                            >
+                              <FilterIcon active={isFilterActive} />
+                            </button>
+                          </div>
+                        </th>
+                      );
+                    })}
                     {showRunningBalance && <th>مانده بدهکار</th>}
                     {showRunningBalance && <th>مانده بستانکار</th>}
                   </tr>
@@ -618,6 +704,22 @@ export default function AccountsReview() {
           </div>
         </div>
       )}
+
+      {openLedgerFilterFor &&
+        LEDGER_COLUMNS.map(
+          (c) =>
+            c.header === openLedgerFilterFor && (
+              <FilterPopover
+                key={c.header}
+                type={c.filterType}
+                active={ledgerFilters[c.header] ?? null}
+                position={ledgerPopoverPos}
+                onApply={(f) => applyLedgerFilter(c.header, f)}
+                onClear={() => clearLedgerFilter(c.header)}
+                onClose={() => setOpenLedgerFilterFor(null)}
+              />
+            )
+        )}
     </div>
   );
 }
