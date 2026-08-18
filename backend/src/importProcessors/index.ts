@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { registerImportEntity } from "../services/importJobService";
-import { resolveDetailCode, registerDetailCode, nextSerialNumber } from "../utils/coding";
+import { resolveDetailCode, registerDetailCode, generateDetailCode, nextSerialNumber } from "../utils/coding";
 import { computeFullAccountCode, buildAccountByIdMap } from "../utils/accountCode";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { resolveDateString } from "../utils/jalaliDate";
@@ -9,6 +9,7 @@ import { KIND_FA, computePrefixes, resolveSerial, AttrSelection } from "../route
 const DETAIL_TYPE_PARTY = 1;
 const DETAIL_TYPE_COST_CENTER = 2;
 const DETAIL_TYPE_CASHBOX = 3;
+const DETAIL_TYPE_BANK_ACCOUNT = 4;
 
 const NATURE_GROUP_FA_REVERSE: Record<string, string> = { "ترازنامه‌ای": "BALANCE_SHEET", "سود و زیانی": "PROFIT_LOSS", "انتظامی": "MEMORANDUM" };
 const NATURE_DETAIL_FA_REVERSE: Record<string, string> = { "دارایی": "ASSET", "بدهی": "LIABILITY", "درآمد": "REVENUE", "هزینه": "EXPENSE", "انتظامی": "MEMORANDUM" };
@@ -66,6 +67,80 @@ export function registerAllImportProcessors() {
         return { ok: true };
       } catch (e: any) {
         return { ok: false, error: e.message || "خطا در ثبت صندوق" };
+      }
+    },
+  });
+
+  registerImportEntity("bank-branch", {
+    row: async (row) => {
+      try {
+        if (!row.partyDetailCode) return { ok: false, error: "کد تفصیل بانک الزامی است" };
+        if (!row.title) return { ok: false, error: "عنوان الزامی است" };
+
+        const bankParty = await prisma.party.findFirst({ where: { detailCode: row.partyDetailCode.trim() } });
+        if (!bankParty) return { ok: false, error: `طرف‌حساب با کد تفصیل «${row.partyDetailCode}» یافت نشد` };
+        if (bankParty.legalType !== "BANK") return { ok: false, error: "طرف‌حساب انتخاب‌شده از نوع بانک/موسسه مالی نیست" };
+
+        const dupTitle = await prisma.bankBranch.findUnique({ where: { title: row.title } });
+        if (dupTitle) return { ok: false, error: "عنوان تکراری است" };
+
+        let finalCode = row.code ? Number(row.code) : undefined;
+        if (!finalCode) {
+          const last = await prisma.bankBranch.findFirst({ where: { bankPartyId: bankParty.id }, orderBy: { code: "desc" } });
+          finalCode = last ? last.code + 1 : 1;
+        }
+        const dupCode = await prisma.bankBranch.findFirst({ where: { bankPartyId: bankParty.id, code: finalCode } });
+        if (dupCode) return { ok: false, error: "کد در سطح این بانک تکراری است" };
+
+        await prisma.bankBranch.create({ data: { code: finalCode, title: row.title, bankPartyId: bankParty.id } });
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت شعبه بانک" };
+      }
+    },
+  });
+
+  registerImportEntity("bank-account", {
+    row: async (row) => {
+      try {
+        if (!row.accountTypeTitle || !row.branchTitle || !row.accountNumber) {
+          return { ok: false, error: "نوع حساب، شعبه بانک و شماره حساب الزامی است" };
+        }
+
+        const accountType = await prisma.bankAccountType.findFirst({ where: { title: row.accountTypeTitle.trim() } });
+        if (!accountType) return { ok: false, error: `نوع حساب بانکی «${row.accountTypeTitle}» یافت نشد` };
+
+        const branch = await prisma.bankBranch.findFirst({ where: { title: row.branchTitle.trim() } });
+        if (!branch) return { ok: false, error: `شعبه بانک «${row.branchTitle}» یافت نشد` };
+
+        const dup = await prisma.bankAccount.findFirst({ where: { bankPartyId: branch.bankPartyId, accountNumber: row.accountNumber.trim() } });
+        if (dup) return { ok: false, error: "شماره حساب در سطح این بانک تکراری است" };
+
+        let currencyId: number | undefined;
+        if (row.currencyCode) {
+          const currency = await prisma.currency.findFirst({ where: { code: row.currencyCode.trim() } });
+          if (!currency) return { ok: false, error: `ارز «${row.currencyCode}» یافت نشد` };
+          currencyId = currency.id;
+        } else {
+          const base = await prisma.currency.findFirst({ where: { isBase: true } });
+          currencyId = base?.id;
+        }
+
+        const { code, detailTypeId } = await generateDetailCode(DETAIL_TYPE_BANK_ACCOUNT);
+        const created = await prisma.bankAccount.create({
+          data: {
+            detailCode: code,
+            accountTypeId: accountType.id,
+            bankBranchId: branch.id,
+            accountNumber: row.accountNumber.trim(),
+            currencyId,
+            bankPartyId: branch.bankPartyId,
+          },
+        });
+        await registerDetailCode(code, detailTypeId, "BankAccount", created.id);
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت حساب بانکی" };
       }
     },
   });

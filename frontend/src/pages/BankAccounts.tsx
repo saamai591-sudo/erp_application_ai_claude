@@ -8,6 +8,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { ExcelImportButton } from "../components/ExcelImport";
 import { toFaDigits } from "../lib/formatAmount";
 
 interface AccountType { id: number; title: string }
@@ -63,7 +64,24 @@ function AccountList() {
         <div>
           <h2>حساب بانکی</h2>
         </div>
-        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف حساب‌های بانکی — کد به صورت خودکار بر اساس «نوع تفصیل» صادر می‌شود`} title="حساب بانکی" /><NewRecordButton path="/bank-accounts/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
+        <div className="header-toolbar" style={{ gap: 4 }}>
+          <InfoHint text={`تعریف حساب‌های بانکی — کد به صورت خودکار بر اساس «نوع تفصیل» صادر می‌شود`} title="حساب بانکی" />
+          <ExcelImportButton
+            entityLabel="حساب بانکی"
+            templateFilename="قالب-تعریف-حساب-بانکی"
+            backendEntityType="bank-account"
+            columns={[
+              { key: "accountTypeTitle", label: "عنوان نوع حساب بانکی", required: true },
+              { key: "branchTitle", label: "عنوان شعبه بانک", required: true },
+              { key: "accountNumber", label: "شماره حساب", required: true },
+              { key: "currencyCode", label: "کد ارز", hint: "اختیاری — خالی بگذارید تا ارز پایه در نظر گرفته شود" },
+            ]}
+            onDone={reload}
+          />
+          <NewRecordButton path="/bank-accounts/new" />
+          <RefreshButton onClick={reload} />
+          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
+        </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable

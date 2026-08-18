@@ -10,6 +10,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RecordPickerField } from "../components/RecordPicker";
+import { ExcelImportButton } from "../components/ExcelImport";
 import { toFaDigits } from "../lib/formatAmount";
 
 interface Branch { id: number; code: number; title: string; bankPartyId?: number; bankParty: { name: string } }
@@ -56,7 +57,23 @@ function BranchList() {
         <div>
           <h2>شعبه بانک</h2>
         </div>
-        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف شعبه‌های بانک، وابسته به طرف‌حساب نوع بانک/موسسه مالی`} title="شعبه بانک" /><NewRecordButton path="/bank-branches/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
+        <div className="header-toolbar" style={{ gap: 4 }}>
+          <InfoHint text={`تعریف شعبه‌های بانک، وابسته به طرف‌حساب نوع بانک/موسسه مالی`} title="شعبه بانک" />
+          <ExcelImportButton
+            entityLabel="شعبه بانک"
+            templateFilename="قالب-تعریف-شعبه-بانک"
+            backendEntityType="bank-branch"
+            columns={[
+              { key: "partyDetailCode", label: "کد تفصیل بانک", required: true, hint: "کد تفصیل طرف‌حساب بانک/موسسه مالی" },
+              { key: "title", label: "عنوان", required: true },
+              { key: "code", label: "کد", hint: "اختیاری — خالی بگذارید تا در سطح همین بانک خودکار ساخته شود" },
+            ]}
+            onDone={reload}
+          />
+          <NewRecordButton path="/bank-branches/new" />
+          <RefreshButton onClick={reload} />
+          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
+        </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
