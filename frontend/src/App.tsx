@@ -57,6 +57,11 @@ import PriceInquiries from "./pages/PriceInquiries";
 import InquiryEvaluations from "./pages/InquiryEvaluations";
 import PurchaseOrders from "./pages/PurchaseOrders";
 import DeliveryAuthorizations from "./pages/DeliveryAuthorizations";
+import Customers from "./pages/Customers";
+import SalesQuotes from "./pages/SalesQuotes";
+import SalesOrders from "./pages/SalesOrders";
+import SalesDeliveries from "./pages/SalesDeliveries";
+import SalesInvoices from "./pages/SalesInvoices";
 import Receipts from "./pages/Receipts";
 import Payments from "./pages/Payments";
 import Cheques from "./pages/Cheques";
@@ -254,6 +259,22 @@ export default function App() {
             <Route path="/delivery-authorizations" element={<DeliveryAuthorizations />} />
             <Route path="/delivery-authorizations/new" element={<DeliveryAuthorizations />} />
             <Route path="/delivery-authorizations/:id/edit" element={<DeliveryAuthorizations />} />
+
+            <Route path="/customers" element={<Customers />} />
+            <Route path="/customers/new" element={<Customers />} />
+            <Route path="/customers/:id/edit" element={<Customers />} />
+            <Route path="/sales-quotes" element={<SalesQuotes />} />
+            <Route path="/sales-quotes/new" element={<SalesQuotes />} />
+            <Route path="/sales-quotes/:id/edit" element={<SalesQuotes />} />
+            <Route path="/sales-orders" element={<SalesOrders />} />
+            <Route path="/sales-orders/new" element={<SalesOrders />} />
+            <Route path="/sales-orders/:id/edit" element={<SalesOrders />} />
+            <Route path="/sales-deliveries" element={<SalesDeliveries />} />
+            <Route path="/sales-deliveries/new" element={<SalesDeliveries />} />
+            <Route path="/sales-deliveries/:id/edit" element={<SalesDeliveries />} />
+            <Route path="/sales-invoices" element={<SalesInvoices />} />
+            <Route path="/sales-invoices/new" element={<SalesInvoices />} />
+            <Route path="/sales-invoices/:id/edit" element={<SalesInvoices />} />
 
             <Route path="/receipts" element={<Receipts />} />
             <Route path="/receipts/new" element={<Receipts />} />

@@ -171,6 +171,26 @@ export const MODULES: ModuleGroup[] = [
     ],
   },
   {
+    title: "فروش",
+    subModules: [
+      {
+        title: "تنظیمات",
+        items: [
+          { key: "customers", label: "مشتری", list: "/customers", create: "/customers/new", icon: "building" },
+        ],
+      },
+      {
+        title: "عملیات",
+        items: [
+          { key: "sales-quotes", label: "پیش‌فاکتور", list: "/sales-quotes", create: "/sales-quotes/new", icon: "file" },
+          { key: "sales-orders", label: "سفارش فروش", list: "/sales-orders", create: "/sales-orders/new", icon: "file" },
+          { key: "sales-deliveries", label: "حواله فروش", list: "/sales-deliveries", create: "/sales-deliveries/new", icon: "ledger" },
+          { key: "sales-invoices", label: "فاکتور فروش", list: "/sales-invoices", create: "/sales-invoices/new", icon: "ledger" },
+        ],
+      },
+    ],
+  },
+  {
     title: "خزانه‌داری",
     subModules: [
       {
