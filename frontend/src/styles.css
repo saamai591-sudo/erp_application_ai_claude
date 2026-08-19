@@ -1192,15 +1192,15 @@ body {
 .header-toolbar { display: flex; align-items: center; gap: 6px; }
 .header-toolbar .btn,
 .header-toolbar .toolbar-icon-btn {
-  height: 29px;
+  height: 23px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  padding: 0 12px;
-  border-radius: var(--radius-sm);
+  padding: 0 10px;
+  border-radius: 6px;
 }
-.header-toolbar .toolbar-icon-btn { width: 29px; padding: 0; }
+.header-toolbar .toolbar-icon-btn { width: 23px; padding: 0; }
 .bulk-toolbar.in-header .bulk-toolbar-actions { gap: 4px; }
 .toolbar-menu-wrap { position: relative; }
 .toolbar-menu {
@@ -1314,7 +1314,7 @@ body {
 .page-header p { margin: 2px 0 0; color: var(--ink-soft); font-size: 12.5px; }
 /* هدر گزارش مرور حسابها — بدون عنوان صفحه (چون همان عنوان در تب بالای صفحه دیده می‌شود)؛ فقط نوار
    آیکن‌ها می‌ماند، پس ارتفاع این بخش به حداقل ممکن (اندازه‌ی خودِ دکمه‌های آیکنی) کاهش می‌یابد */
-.ar-header { justify-content: flex-end; margin-bottom: 6px; }
+.ar-header { justify-content: flex-end; margin-bottom: 4px; }
 
 .btn {
   background: var(--primary);
