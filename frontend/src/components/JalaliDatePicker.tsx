@@ -1,4 +1,4 @@
-import { useEffect, useState, KeyboardEvent, ClipboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import DatePicker from "react-multi-date-picker";
 import DateObject from "react-date-object";
 import persian from "react-date-object/calendars/persian";
@@ -19,26 +19,40 @@ function CalendarIcon() {
 }
 
 const MASK_TEMPLATE = "____/__/__"; // ۴ رقم سال / ۲ رقم ماه / ۲ رقم روز
+/** موقعیت کاراکتری هر یک از ۸ خانه‌ی رقمی در رشته‌ی بالا (بقیه‌ی موقعیت‌ها اسلش‌اند) */
+const SLOT_POSITIONS = [0, 1, 2, 3, 5, 6, 8, 9];
 
-/** رشته‌ی ارقام تایپ‌شده (حداکثر ۸ رقم) را در قالب ماسک با اسلش‌های ثابت نمایش می‌دهد */
-function buildMasked(digits: string): string {
+/** رشته‌ی ماسک‌شده را از روی آرایه‌ی ۸ خانه‌ای (هر خانه یک رقم یا "" برای خالی) می‌سازد */
+function buildMaskedFromSlots(slots: string[]): string {
   let di = 0;
   return MASK_TEMPLATE.split("")
-    .map((ch) => (ch === "_" ? digits[di++] ?? "_" : ch))
+    .map((ch) => (ch === "_" ? slots[di++] || "_" : ch))
     .join("");
 }
 
-function gregorianToJalaliDigits(iso: string): string {
-  if (!iso) return "";
+/** نزدیک‌ترین خانه‌ی رقمی به یک موقعیت کاراکتری دلخواه (مثلاً بعد از کلیک یا حرکت با فلش) را پیدا می‌کند */
+function posToSlotIndex(pos: number): number {
+  let idx = 0;
+  for (const slotPos of SLOT_POSITIONS) {
+    if (pos > slotPos) idx++;
+    else break;
+  }
+  return Math.min(idx, SLOT_POSITIONS.length);
+}
+
+function gregorianToJalaliSlots(iso: string): string[] {
+  if (!iso) return ["", "", "", "", "", "", "", ""];
   const j = new DateObject({ date: iso, format: "YYYY-MM-DD", calendar: gregorian, locale: gregorian_en }).convert(
     persian,
     persian_fa
   );
-  return `${String(j.year).padStart(4, "0")}${String(j.month.number).padStart(2, "0")}${String(j.day).padStart(2, "0")}`;
+  const digits = `${String(j.year).padStart(4, "0")}${String(j.month.number).padStart(2, "0")}${String(j.day).padStart(2, "0")}`;
+  return digits.split("");
 }
 
-function digitsToGregorianIso(digits: string): string | null {
-  if (digits.length !== 8) return null;
+function slotsToGregorianIso(slots: string[]): string | null {
+  if (slots.some((s) => !s)) return null;
+  const digits = slots.join("");
   const year = Number(digits.slice(0, 4));
   const month = Number(digits.slice(4, 6));
   const day = Number(digits.slice(6, 8));
@@ -54,9 +68,9 @@ function digitsToGregorianIso(digits: string): string | null {
 /**
  * انتخابگر تاریخ با تقویم جلالی (هفته از شنبه، ماه‌های فروردین تا اسفند).
  * ورودی/خروجی این کامپوننت همیشه یک رشته‌ی میلادی به فرمت YYYY-MM-DD است.
- * فیلد ورودی همیشه ماسک ثابت با اسلش‌های از پیش نمایش داده‌شده (____/__/__) دارد؛
- * کاربر فقط رقم تایپ می‌کند و نیازی به وارد کردن خود / نیست. همچنین با کلیک روی
- * آیکن تقویم (سمت چپ فیلد) می‌توان از تقویم گرافیکی هم تاریخ را انتخاب کرد.
+ * فیلد ورودی همیشه ماسک ثابت با اسلش‌های از پیش نمایش داده‌شده (____/__/__) دارد؛ کاربر می‌تواند هم
+ * با تایپ رقم به رقم (دقیقاً روی همان خانه‌ای که مکان‌نما/کلیک روی آن است — نه همیشه انتهای فیلد) و هم
+ * با کلیک روی آیکن تقویم (سمت چپ فیلد) از تقویم گرافیکی، تاریخ را وارد کند.
  */
 export function JalaliDatePicker({
   value,
@@ -69,44 +83,102 @@ export function JalaliDatePicker({
   placeholder?: string;
   disabled?: boolean;
 }) {
-  const [digits, setDigits] = useState<string>(() => gregorianToJalaliDigits(value));
+  // slots/cursor هم به‌صورت state (برای رندر) و هم در یک ref (live، برای خواندن هم‌زمان/بدون تاخیر
+  // در خودِ event handlerها) نگه‌داری می‌شوند. علتش این است که در تایپ سریع (چند keydown پشت‌سرهم
+  // پیش از این‌که React فرصت re-render پیدا کند)، اگر handler بعدی مقدار cursor/slots را از کلوژر
+  // state (که هنوز رندر نشده) بخواند، آن به‌روزرسانی گم می‌شود — چون هر keydown روی یک state «قدیمی»
+  // یکسان کار می‌کند نه روی خروجی keydown قبلی. با خواندن/نوشتن مستقیم روی ref در همان تابع (نه صبر
+  // برای رندر بعدی)، هر keydown همیشه از جدیدترین مقدار واقعی ادامه می‌دهد.
+  const live = useRef<{ slots: string[]; cursor: number }>({ slots: gregorianToJalaliSlots(value), cursor: 0 });
+  const [, setRenderTick] = useState(0);
+  const rerender = () => setRenderTick((n) => n + 1);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const pendingCaret = useRef<number | null>(null);
 
   // هماهنگ‌سازی وقتی مقدار از بیرون (مثلا انتخاب از تقویم گرافیکی یا ریست فرم) تغییر می‌کند
   useEffect(() => {
-    const fromValue = gregorianToJalaliDigits(value);
-    if (fromValue !== digits) setDigits(fromValue);
+    const fromValue = gregorianToJalaliSlots(value);
+    if (fromValue.join("") !== live.current.slots.join("")) {
+      live.current = { slots: fromValue, cursor: fromValue.every((s) => s) ? 8 : 0 };
+      rerender();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
-  function commit(newDigits: string) {
-    setDigits(newDigits);
-    if (newDigits.length === 8) {
-      const iso = digitsToGregorianIso(newDigits);
-      onChange(iso ?? "");
-    } else if (newDigits.length === 0) {
+  // بعد از هر رندر (تایپ/بک‌اسپیس/کلیک)، مکان‌نمای واقعی DOM را دقیقاً روی همان خانه‌ای که کاربر
+  // انتظار دارد (cursor) قرار می‌دهد — چون مقدار فیلد کاملاً کنترل‌شده است و مرورگر خودش مکان‌نما را
+  // درست نگه نمی‌دارد، اگر این کار انجام نشود مکان‌نما همیشه به انتهای فیلد می‌پرد
+  useEffect(() => {
+    if (pendingCaret.current === null || !inputRef.current) return;
+    const pos = pendingCaret.current;
+    pendingCaret.current = null;
+    inputRef.current.setSelectionRange(pos, pos);
+  });
+
+  function caretPosForSlot(slotIndex: number): number {
+    return slotIndex >= SLOT_POSITIONS.length ? MASK_TEMPLATE.length : SLOT_POSITIONS[slotIndex];
+  }
+
+  function commit(newSlots: string[], newCursor: number) {
+    live.current = { slots: newSlots, cursor: newCursor };
+    pendingCaret.current = caretPosForSlot(newCursor);
+    rerender();
+    if (newSlots.every((s) => s)) {
+      onChange(slotsToGregorianIso(newSlots) ?? "");
+    } else if (newSlots.every((s) => !s)) {
       onChange("");
     }
   }
 
-  function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    const { slots, cursor } = live.current;
     const key = digitsOnly(e.key);
     if (key.length === 1 && /[0-9]/.test(key)) {
       e.preventDefault();
-      if (digits.length < 8) commit(digits + key);
-    } else if (e.key === "Backspace" || e.key === "Delete") {
+      if (cursor >= 8) return;
+      const next = [...slots];
+      next[cursor] = key;
+      commit(next, cursor + 1);
+    } else if (e.key === "Backspace") {
       e.preventDefault();
-      commit(digits.slice(0, -1));
-    } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+      if (cursor <= 0) return;
+      const target = cursor - 1;
+      const next = [...slots];
+      next[target] = "";
+      commit(next, target);
+    } else if (e.key === "Delete") {
+      e.preventDefault();
+      if (cursor >= 8) return;
+      const next = [...slots];
+      next[cursor] = "";
+      commit(next, cursor);
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home" || e.key === "End" || e.key.length !== 1 || e.ctrlKey || e.metaKey) {
+      // ناوبری با کلیدهای جهت‌دار/Home/End و میانبرهای ترکیبی (کپی/پیست و…) دست‌نخورده به مرورگر سپرده می‌شود؛
+      // موقعیت cursor داخلی با رویداد onSelect زیر با موقعیت واقعی مکان‌نما هماهنگ می‌ماند
+    } else {
       // سایر کاراکترها (از جمله /) نادیده گرفته می‌شوند چون ماسک خودش اسلش را می‌گذارد
       e.preventDefault();
     }
   }
 
-  function handlePaste(e: ClipboardEvent<HTMLInputElement>) {
+  function handlePaste(e: React.ClipboardEvent<HTMLInputElement>) {
     e.preventDefault();
-    const pasted = digitsOnly(e.clipboardData.getData("text")).slice(0, 8);
-    if (pasted) commit(pasted);
+    const { slots, cursor } = live.current;
+    const pasted = digitsOnly(e.clipboardData.getData("text")).slice(0, 8 - cursor);
+    if (!pasted) return;
+    const next = [...slots];
+    for (let i = 0; i < pasted.length; i++) next[cursor + i] = pasted[i];
+    commit(next, Math.min(8, cursor + pasted.length));
   }
+
+  /** مکان‌نمای واقعی (بعد از کلیک یا حرکت با فلش) را به نزدیک‌ترین خانه‌ی رقمی نگاشت می‌کند */
+  function syncCursorFromSelection(e: React.SyntheticEvent<HTMLInputElement>) {
+    const pos = e.currentTarget.selectionStart ?? 0;
+    live.current = { ...live.current, cursor: posToSlotIndex(pos) };
+    rerender();
+  }
+
+  const { slots } = live.current;
 
   const displayValue = value
     ? new DateObject({ date: value, format: "YYYY-MM-DD", calendar: gregorian, locale: gregorian_en }).convert(
@@ -118,7 +190,8 @@ export function JalaliDatePicker({
   function handleCalendarPick(dateObject: DateObject | DateObject[] | null) {
     if (!dateObject || Array.isArray(dateObject)) {
       onChange("");
-      setDigits("");
+      live.current = { slots: ["", "", "", "", "", "", "", ""], cursor: 0 };
+      rerender();
       return;
     }
     const g = dateObject.convert(gregorian, gregorian_en);
@@ -140,12 +213,14 @@ export function JalaliDatePicker({
             <CalendarIcon />
           </button>
           <input
+            ref={inputRef}
             className="jalali-date-input"
             dir="ltr"
             placeholder={placeholder}
-            value={toFaDigits(buildMasked(digits))}
+            value={toFaDigits(buildMaskedFromSlots(slots))}
             onKeyDown={disabled ? undefined : handleKeyDown}
             onPaste={disabled ? undefined : handlePaste}
+            onSelect={disabled ? undefined : syncCursorFromSelection}
             onChange={() => {}}
             disabled={disabled}
           />
@@ -154,4 +229,3 @@ export function JalaliDatePicker({
     />
   );
 }
-
