@@ -98,7 +98,6 @@ export function FormPage({
     <div>
       <div className="form-toolbar">
         <div className="form-toolbar-right">
-          <span className="form-toolbar-title">{title}</span>
           <button type="button" className="toolbar-icon-btn" onClick={() => navigate(closePath)} title="بستن">
             <CloseIcon />
           </button>
