@@ -26,6 +26,7 @@ import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
+import { formatJalaliDate } from "../lib/formatDate";
 
 type DimType = "account" | "detail" | "period";
 interface DimensionSpec {
@@ -176,7 +177,7 @@ function OlapList() {
     { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
     {
       header: "آخرین ویرایش",
-      render: (r) => toFaDigits(new Date(r.updatedAt).toLocaleDateString("fa-IR")),
+      render: (r) => formatJalaliDate(r.updatedAt),
       filterType: "string",
       filterValue: (r) => r.updatedAt,
       width: "160px",
