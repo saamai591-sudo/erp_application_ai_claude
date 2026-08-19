@@ -94,6 +94,10 @@ export function JalaliDatePicker({
   const rerender = () => setRenderTick((n) => n + 1);
   const inputRef = useRef<HTMLInputElement>(null);
   const pendingCaret = useRef<number | null>(null);
+  // اگر فیلد از قبل یک تاریخ کامل داشته باشد و کاربر روی آن فوکوس کند، اولین رقمی که تایپ می‌کند
+  // باید کل تاریخ قبلی را پاک کند و از صفر جایگزینش کند (نه این‌که فقط همان یک خانه را ویرایش کند) —
+  // این پرچم تا اولین ضربه‌کلید رقمی true می‌ماند، حتی اگر بین فوکوس و تایپ کلیک دیگری هم زده شود
+  const pristine = useRef(false);
 
   // هماهنگ‌سازی وقتی مقدار از بیرون (مثلا انتخاب از تقویم گرافیکی یا ریست فرم) تغییر می‌کند
   useEffect(() => {
@@ -135,11 +139,20 @@ export function JalaliDatePicker({
     const key = digitsOnly(e.key);
     if (key.length === 1 && /[0-9]/.test(key)) {
       e.preventDefault();
+      if (pristine.current) {
+        // تاریخ قبلی کامل بود و این اولین رقم بعد از فوکوس است — کل فیلد پاک و با همین رقم از نو شروع می‌شود
+        pristine.current = false;
+        const fresh = ["", "", "", "", "", "", "", ""];
+        fresh[0] = key;
+        commit(fresh, 1);
+        return;
+      }
       if (cursor >= 8) return;
       const next = [...slots];
       next[cursor] = key;
       commit(next, cursor + 1);
     } else if (e.key === "Backspace") {
+      pristine.current = false;
       e.preventDefault();
       if (cursor <= 0) return;
       const target = cursor - 1;
@@ -147,6 +160,7 @@ export function JalaliDatePicker({
       next[target] = "";
       commit(next, target);
     } else if (e.key === "Delete") {
+      pristine.current = false;
       e.preventDefault();
       if (cursor >= 8) return;
       const next = [...slots];
@@ -163,12 +177,18 @@ export function JalaliDatePicker({
 
   function handlePaste(e: React.ClipboardEvent<HTMLInputElement>) {
     e.preventDefault();
+    pristine.current = false;
     const { slots, cursor } = live.current;
     const pasted = digitsOnly(e.clipboardData.getData("text")).slice(0, 8 - cursor);
     if (!pasted) return;
     const next = [...slots];
     for (let i = 0; i < pasted.length; i++) next[cursor + i] = pasted[i];
     commit(next, Math.min(8, cursor + pasted.length));
+  }
+
+  /** اگر فیلد از قبل تاریخ کامل دارد، تا تایپ اولین رقم بعدی «آماده‌ی پاک‌شدن کامل» علامت می‌زند */
+  function handleFocus() {
+    if (live.current.slots.every((s) => s)) pristine.current = true;
   }
 
   /** مکان‌نمای واقعی (بعد از کلیک یا حرکت با فلش) را به نزدیک‌ترین خانه‌ی رقمی نگاشت می‌کند */
@@ -221,6 +241,7 @@ export function JalaliDatePicker({
             onKeyDown={disabled ? undefined : handleKeyDown}
             onPaste={disabled ? undefined : handlePaste}
             onSelect={disabled ? undefined : syncCursorFromSelection}
+            onFocus={disabled ? undefined : handleFocus}
             onChange={() => {}}
             disabled={disabled}
           />
