@@ -261,7 +261,7 @@ function NavIcon({ name }: { name: string }) {
 function GearIconFilled() {
   const teeth = [0, 45, 90, 135, 180, 225, 270, 315];
   return (
-    <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
       <path fillRule="evenodd" d="M12 6.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11Zm0 2.3a3.2 3.2 0 1 1 0 6.4 3.2 3.2 0 0 1 0-6.4Z" />
       {teeth.map((deg) => (
         <rect key={deg} x="10.6" y="1.6" width="2.8" height="4.2" rx="1" transform={`rotate(${deg} 12 12)`} />
@@ -273,7 +273,7 @@ function GearIconFilled() {
 /** آیکن توپر خروج (power) برای دکمه‌ی خروج در نوار دکمه‌های رنگی */
 function PowerIconFilled() {
   return (
-    <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
       <path d="M13 2h-2v9h2V2Z" />
       <path d="M17.8 5.2 16.4 6.6a6 6 0 1 1-8.8 0L6.2 5.2a8 8 0 1 0 11.6 0Z" />
     </svg>
@@ -312,14 +312,6 @@ export default function Layout() {
 
   return (
     <div className="app-shell">
-      <aside className="icon-dock">
-        <button className="icon-dock-btn dock-c-blue" onClick={() => setSettingsOpen(true)} title="تنظیمات کاربری">
-          <GearIconFilled />
-        </button>
-        <button className="icon-dock-btn dock-c-red" onClick={logout} title="خروج">
-          <PowerIconFilled />
-        </button>
-      </aside>
       <aside className="sidebar">
         <h1>حسابداری ERP</h1>
         {MODULES.map((mod) => {
@@ -379,7 +371,15 @@ export default function Layout() {
       </aside>
       <div className="main">
         <div className="topbar">
-          <div className="user">{user.firstName} {user.lastName}</div>
+          <div className="topbar-account">
+            <button className="topbar-dock-btn dock-c-blue" onClick={() => setSettingsOpen(true)} title="تنظیمات کاربری">
+              <GearIconFilled />
+            </button>
+            <button className="topbar-dock-btn dock-c-red" onClick={logout} title="خروج">
+              <PowerIconFilled />
+            </button>
+            <div className="user">{user.firstName} {user.lastName}</div>
+          </div>
         </div>
         <TabsBar />
         <div className="content">

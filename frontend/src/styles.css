@@ -397,25 +397,11 @@ body {
 /* ارتفاع ثابت به اندازه‌ی صفحه‌نمایش؛ اسکرول باید فقط داخل ناحیه‌ی محتوا (و گرید) اتفاق بیفتد، نه در کل صفحه */
 .app-shell { display: flex; height: 100vh; overflow: hidden; }
 
-/* نوار عمودی دکمه‌های رنگی (تنظیمات/خروج) در لبه‌ی بیرونی صفحه، کنار سایدبار اصلی */
-.icon-dock {
-  width: 56px;
-  flex-shrink: 0;
-  background: var(--sidebar-bg);
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 18px 0;
-}
-[data-theme="light"] .icon-dock,
-[data-theme="blue"] .icon-dock {
-  border-left: 1px solid var(--line);
-}
-.icon-dock-btn {
-  width: 38px;
-  height: 38px;
+/* دکمه‌های رنگی تنظیمات/خروج — داخل نوار بالای صفحه (topbar)، کنار نام کاربر */
+.topbar-account { display: flex; align-items: center; gap: 8px; }
+.topbar-dock-btn {
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   border: none;
   display: flex;
@@ -423,12 +409,13 @@ body {
   justify-content: center;
   cursor: pointer;
   color: #ffffff;
+  flex-shrink: 0;
   transition: filter 0.15s, transform 0.1s;
 }
-.icon-dock-btn:hover { filter: brightness(1.12); }
-.icon-dock-btn:active { transform: scale(0.94); }
-.icon-dock-btn.dock-c-blue { background: var(--primary); }
-.icon-dock-btn.dock-c-red { background: var(--danger); }
+.topbar-dock-btn:hover { filter: brightness(1.12); }
+.topbar-dock-btn:active { transform: scale(0.94); }
+.topbar-dock-btn.dock-c-blue { background: var(--primary); }
+.topbar-dock-btn.dock-c-red { background: var(--danger); }
 
 .sidebar {
   width: 250px;
@@ -1189,18 +1176,18 @@ body {
   width: 27px; height: 27px; border-radius: 6px;
   display: inline-flex; align-items: center; justify-content: center; padding: 0;
 }
-.header-toolbar { display: flex; align-items: center; gap: 6px; }
+.header-toolbar { display: flex; align-items: center; gap: 4px; }
 .header-toolbar .btn,
 .header-toolbar .toolbar-icon-btn {
-  height: 23px;
+  height: 19px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  padding: 0 10px;
-  border-radius: 6px;
+  padding: 0 8px;
+  border-radius: 5px;
 }
-.header-toolbar .toolbar-icon-btn { width: 23px; padding: 0; }
+.header-toolbar .toolbar-icon-btn { width: 19px; padding: 0; }
 .bulk-toolbar.in-header .bulk-toolbar-actions { gap: 4px; }
 .toolbar-menu-wrap { position: relative; }
 .toolbar-menu {
@@ -1236,16 +1223,16 @@ body {
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 
 .topbar {
-  height: 46px;
+  height: 36px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 0 14px;
   flex-shrink: 0;
 }
-.topbar .user { font-size: 13px; color: var(--ink-soft); font-weight: 500; }
+.topbar .user { font-size: 11.5px; color: var(--ink-soft); font-weight: 500; }
 .topbar button.logout {
   background: none; border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
   padding: 6px 12px; font-size: 12px; cursor: pointer; color: var(--ink-soft);
