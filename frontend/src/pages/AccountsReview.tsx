@@ -524,10 +524,7 @@ export default function AccountsReview() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <h2>مرور حسابها</h2>
-        </div>
+      <div className="page-header ar-header">
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`گزارش سلسله‌مراتبی مانده‌ی حساب‌ها — در هر تب چندین ردیف قابل انتخاب است؛ فقط حساب‌های دارای گردش در بازه نمایش داده می‌شوند`} title="مرور حسابها" />
           <RefreshButton onClick={refreshCurrentTab} title="رفرش تب جاری" />
           <button type="button" className="toolbar-icon-btn" onClick={clearEverything} title="حذف همه فیلترها">
