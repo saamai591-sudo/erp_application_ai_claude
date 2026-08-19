@@ -372,13 +372,15 @@ export default function Layout() {
       <div className="main">
         <div className="topbar">
           <div className="topbar-account">
+            <div className="user">{user.firstName} {user.lastName}</div>
+          </div>
+          <div className="topbar-account">
             <button className="topbar-dock-btn dock-c-blue" onClick={() => setSettingsOpen(true)} title="تنظیمات کاربری">
               <GearIconFilled />
             </button>
             <button className="topbar-dock-btn dock-c-red" onClick={logout} title="خروج">
               <PowerIconFilled />
             </button>
-            <div className="user">{user.firstName} {user.lastName}</div>
           </div>
         </div>
         <TabsBar />

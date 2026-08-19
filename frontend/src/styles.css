@@ -1177,8 +1177,7 @@ body {
   display: inline-flex; align-items: center; justify-content: center; padding: 0;
 }
 .header-toolbar { display: flex; align-items: center; gap: 4px; }
-.header-toolbar .btn,
-.header-toolbar .toolbar-icon-btn {
+.header-toolbar .btn {
   height: 19px;
   display: inline-flex;
   align-items: center;
@@ -1187,7 +1186,18 @@ body {
   padding: 0 8px;
   border-radius: 5px;
 }
-.header-toolbar .toolbar-icon-btn { width: 19px; padding: 0; }
+/* دکمه‌های آیکنی خالص (بدون متن) دقیقاً هم‌اندازه‌ی خودِ آیکن (بدون هیچ padding اضافه) — فقط
+   یک قاب نامرئی برای کلیک، بدون فاصله‌ی خالی دور آیکن */
+.header-toolbar .toolbar-icon-btn {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0;
+  border-radius: 4px;
+}
 .bulk-toolbar.in-header .bulk-toolbar-actions { gap: 4px; }
 .toolbar-menu-wrap { position: relative; }
 .toolbar-menu {
