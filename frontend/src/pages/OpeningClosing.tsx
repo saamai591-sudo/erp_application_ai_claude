@@ -69,9 +69,6 @@ function ListView() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>افتتاحیه و اختتامیه</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`بستن حساب‌های دائمی در پایان دوره مالی و افتتاح مجدد آن‌ها در دوره مالی بعد`} title="افتتاحیه و اختتامیه" /><NewRecordButton path="/opening-closing/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
       </div>
       {error && <div className="alert error">{error}</div>}

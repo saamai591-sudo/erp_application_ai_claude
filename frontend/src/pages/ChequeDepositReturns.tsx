@@ -125,9 +125,6 @@ function ChequeDepositReturnList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>برگشت از واگذاری</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={infoText()} title="برگشت از واگذاری" />
           <NewRecordButton path="/cheque-deposit-returns/new" />

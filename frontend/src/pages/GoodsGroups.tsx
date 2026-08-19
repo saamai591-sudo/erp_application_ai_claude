@@ -89,9 +89,6 @@ function GroupsTree() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>گروه کالا</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={`درخت گروه‌بندی کالا بر اساس سطوح گروه کالای تعریف‌شده`} title="گروه کالا" />
           <RefreshButton onClick={reload} />

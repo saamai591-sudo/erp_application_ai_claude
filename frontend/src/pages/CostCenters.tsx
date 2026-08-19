@@ -61,9 +61,6 @@ function CostCenterList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>مرکز هزینه</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`زیربنای محاسبات بهای تمام‌شده — کد به صورت خودکار بر اساس «نوع تفصیل» صادر می‌شود`} title="مرکز هزینه" /><NewRecordButton path="/cost-centers/new" />
           <ExcelImportButton
             entityLabel="مراکز هزینه"

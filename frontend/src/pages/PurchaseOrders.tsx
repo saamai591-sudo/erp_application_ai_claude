@@ -90,7 +90,6 @@ function PurchaseOrderList() {
   return (
     <div>
       <div className="page-header">
-        <div><h2>سفارش خرید</h2></div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={INFO_TEXT} title="سفارش خرید" />
           <NewRecordButton path="/purchase-orders/new" />

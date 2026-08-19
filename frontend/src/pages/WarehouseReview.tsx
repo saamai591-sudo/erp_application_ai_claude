@@ -404,9 +404,6 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>{mode === "qty" ? "مرور تعدادی" : "مرور مبلغی"}</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={infoText(mode)} title={mode === "qty" ? "مرور تعدادی" : "مرور مبلغی"} />
           <RefreshButton onClick={refreshCurrentTab} title="رفرش تب جاری" />

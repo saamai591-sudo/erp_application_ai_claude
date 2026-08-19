@@ -52,9 +52,6 @@ function OrgUnitList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>واحد سازمانی</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`برای گزارش‌گیری به تفکیک واحد؛ فقط آخرین شاخه (برگ) ساختار سازمانی قابل انتخاب است`} title="واحد سازمانی" /><NewRecordButton path="/org-units/new" />
           <ExcelImportButton
             entityLabel="واحدهای سازمانی"

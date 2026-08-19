@@ -204,9 +204,6 @@ function WarehouseIssueList({ mode, basePath }: { mode: ViewMode; basePath: stri
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>حواله انبار</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={infoText(mode)} title="حواله انبار" />
           {mode === "warehousing" && <NewRecordButton path={`${basePath}/new`} />}

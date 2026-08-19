@@ -94,7 +94,6 @@ function SalesDeliveryList() {
   return (
     <div>
       <div className="page-header">
-        <div><h2>حواله فروش</h2></div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={INFO_TEXT} title="حواله فروش" />
           <NewRecordButton path="/sales-deliveries/new" />

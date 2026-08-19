@@ -50,9 +50,6 @@ function AccountTypeList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>نوع حساب بانکی</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف انواع حساب بانکی (جاری، پس‌انداز و ...)`} title="نوع حساب بانکی" /><NewRecordButton path="/bank-account-types/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
       </div>
       {error && <div className="alert error">{error}</div>}

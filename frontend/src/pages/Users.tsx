@@ -59,9 +59,6 @@ function UserList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>کاربر</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف کاربران سیستم و تخصیص نقش کاربری`} title="کاربر" /><NewRecordButton path="/users/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
       </div>
       {error && <div className="alert error">{error}</div>}

@@ -82,7 +82,6 @@ function InquiryEvaluationList() {
   return (
     <div>
       <div className="page-header">
-        <div><h2>ارزیابی استعلام</h2></div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={INFO_TEXT} title="ارزیابی استعلام" />
           <NewRecordButton path="/inquiry-evaluations/new" />

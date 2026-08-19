@@ -62,9 +62,6 @@ function AttributeList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>ویژگی کالا خدمت</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={`تعریف ویژگیهای اضافی برای گروه‌های کالا؛ هر ویژگی فهرستی از آیتمهای مجاز دارد`} title="ویژگی کالا خدمت" />
           <NewRecordButton path="/goods-attributes/new" />

@@ -70,8 +70,8 @@ export default function DocumentConfirmation() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>تایید اسناد <InfoHint text={`با تایید اسناد تا یک تاریخ مشخص، دیگر امکان ثبت هیچ سندی با تاریخ مساوی یا قبل از آن وجود نخواهد داشت`} /></h2>
+        <div className="header-toolbar" style={{ gap: 4 }}>
+          <InfoHint text={`با تایید اسناد تا یک تاریخ مشخص، دیگر امکان ثبت هیچ سندی با تاریخ مساوی یا قبل از آن وجود نخواهد داشت`} title="تایید اسناد" />
         </div>
       </div>
 

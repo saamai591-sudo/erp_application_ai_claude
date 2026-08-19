@@ -246,9 +246,6 @@ function EntryList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>سند حسابداری</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`ثبت اسناد حسابداری — شماره سند به‌صورت خودکار و سریالی در سطح دوره مالی صادر می‌شود`} title="سند حسابداری" /><NewRecordButton path="/journal-entries/new" />
           <ExcelImportButton
             entityLabel="اسناد حسابداری"

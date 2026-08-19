@@ -71,9 +71,6 @@ function CustomerList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>مشتری</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text="تعریف مشتریان مختلف سیستم فروش" title="مشتری" />
           <NewRecordButton path="/customers/new" />

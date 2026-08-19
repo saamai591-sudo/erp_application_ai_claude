@@ -186,9 +186,6 @@ function OlapList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>گزارش تحلیلی (OLAP)</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text="گزارش‌های ماتریسی/نموداری ذخیره‌شده؛ برای ساخت گزارش تازه دکمه‌ی «جدید» را بزنید." title="گزارش تحلیلی" />
           <NewRecordButton path="/olap-reports/new" />

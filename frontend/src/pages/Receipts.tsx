@@ -165,9 +165,6 @@ function ReceiptList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>دریافت</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={infoText()} title="دریافت" />
           <NewRecordButton path="/receipts/new" />

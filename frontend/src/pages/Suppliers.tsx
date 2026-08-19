@@ -77,9 +77,6 @@ function SupplierList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>تامین کننده</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text="تعریف تامین کننده های مختلف در سیستم" title="تامین کننده" />
           <NewRecordButton path="/suppliers/new" />

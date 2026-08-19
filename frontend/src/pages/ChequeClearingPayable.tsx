@@ -127,9 +127,6 @@ function ChequeClearingPayableList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>نتیجه وصول/برگشت چک پرداختنی</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={infoText()} title="نتیجه وصول/برگشت چک پرداختنی" />
           <NewRecordButton path="/cheque-clearings-payable/new" />

@@ -94,7 +94,6 @@ function SalesOrderList() {
   return (
     <div>
       <div className="page-header">
-        <div><h2>سفارش فروش</h2></div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={INFO_TEXT} title="سفارش فروش" />
           <NewRecordButton path="/sales-orders/new" />

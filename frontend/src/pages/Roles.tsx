@@ -38,9 +38,6 @@ function RoleList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>نقش کاربری</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف نقش‌ها و تعیین دسترسی به تفکیک ماژول، ساب‌ماژول، فرم و عملیات`} title="نقش کاربری" /><NewRecordButton path="/roles/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
       </div>
       {error && <div className="alert error">{error}</div>}

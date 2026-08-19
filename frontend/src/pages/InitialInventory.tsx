@@ -173,9 +173,6 @@ function InitialInventoryList({ mode, basePath }: { mode: ViewMode; basePath: st
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>موجودی اول دوره</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={infoText(mode)} title="موجودی اول دوره" />
           {mode === "warehousing" && <NewRecordButton path={`${basePath}/new`} />}

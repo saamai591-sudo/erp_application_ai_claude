@@ -98,9 +98,6 @@ function AccountsTree() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>تعریف حسابها</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`درخت سرفصل حسابها بر اساس سطوح گزارشگری تعریف‌شده`} title="تعریف حسابها" />
           <ExcelImportButton
             entityLabel="حسابها"

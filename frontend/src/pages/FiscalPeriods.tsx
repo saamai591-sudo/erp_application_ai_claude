@@ -35,9 +35,6 @@ function PeriodList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>دوره مالی</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`هر دوره باید ادامه‌ی بدون فاصله‌ی دوره‌ی قبلی باشد؛ فقط تا‌تاریخ آخرین دوره قابل ویرایش است`} title="دوره مالی" /><NewRecordButton path="/fiscal-periods/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
       </div>
       {error && <div className="alert error">{error}</div>}

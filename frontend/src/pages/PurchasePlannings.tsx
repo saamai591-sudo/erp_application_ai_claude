@@ -97,7 +97,6 @@ function PurchasePlanningList() {
   return (
     <div>
       <div className="page-header">
-        <div><h2>برنامه ریزی خرید</h2></div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={INFO_TEXT} title="برنامه ریزی خرید" />
           <NewRecordButton path="/purchase-plannings/new" />

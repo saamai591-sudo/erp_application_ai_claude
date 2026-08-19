@@ -78,9 +78,6 @@ function WarehouseList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>انبار</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={`تعریف انبارهای مختلف در سیستم`} title="انبار" />
           <NewRecordButton path="/warehouses/new" />

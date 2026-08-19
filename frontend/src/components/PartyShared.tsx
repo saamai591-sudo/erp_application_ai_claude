@@ -117,9 +117,6 @@ export function PartyList({ category, title, description }: { category: "INDIVID
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>{title}</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={description} title={title} /><NewRecordButton path={`${basePath}/new`} />
           <ExcelImportButton
             entityLabel={title}

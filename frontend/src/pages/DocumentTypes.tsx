@@ -49,9 +49,6 @@ function TypeList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>نوع سند</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`انواع پیش‌فرض سیستمی (عملیاتی، افتتاحیه، بستن حسابها، اختتامیه) قابل حذف نیستند؛ انواع سفارشی برای گزارش‌گیری قابل تعریف است`} title="نوع سند" /><NewRecordButton path="/document-types/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
       </div>
       {error && <div className="alert error">{error}</div>}

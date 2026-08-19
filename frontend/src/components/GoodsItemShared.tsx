@@ -229,9 +229,6 @@ export function GoodsItemList({ kind }: { kind: ItemKind }) {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>{label}</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={`تعریف ${label}‌های سیستم — کد و بخشی از عنوان بر اساس گروه و ویژگی‌های انتخاب‌شده خودکار ساخته می‌شود`} title={label} />
           <ExcelImportButton

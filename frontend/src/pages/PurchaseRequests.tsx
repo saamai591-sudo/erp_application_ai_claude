@@ -163,9 +163,6 @@ function PurchaseRequestList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>درخواست خرید</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={INFO_TEXT} title="درخواست خرید" />
           <NewRecordButton path="/purchase-requests/new" />

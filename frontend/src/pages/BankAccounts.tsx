@@ -61,9 +61,6 @@ function AccountList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>حساب بانکی</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={`تعریف حساب‌های بانکی — کد به صورت خودکار بر اساس «نوع تفصیل» صادر می‌شود`} title="حساب بانکی" />
           <ExcelImportButton

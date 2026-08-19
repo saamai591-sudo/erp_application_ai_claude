@@ -39,10 +39,10 @@ export default function DetailTypes() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>نوع تفصیل <InfoHint text={`انواع پایه سیستم برای کدگذاری خودکار تفصیلی‌ها — پس از ثبت اولین رکورد از هر نوع، طول کد و شماره شروع دیگر قابل تغییر نیست`} /></h2>
+        <div className="header-toolbar" style={{ gap: 4 }}>
+          <InfoHint text={`انواع پایه سیستم برای کدگذاری خودکار تفصیلی‌ها — پس از ثبت اولین رکورد از هر نوع، طول کد و شماره شروع دیگر قابل تغییر نیست`} title="نوع تفصیل" />
+          <RefreshButton onClick={reload} />
         </div>
-        <RefreshButton onClick={reload} />
       </div>
 
       {error && <div className="alert error">{error}</div>}

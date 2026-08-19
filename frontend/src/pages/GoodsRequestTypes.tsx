@@ -62,9 +62,6 @@ function RequestTypeList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>نوع درخواست کالا</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={`تعریف انواع درخواست کالا در سیستم`} title="نوع درخواست کالا" />
           <NewRecordButton path="/goods-request-types/new" />

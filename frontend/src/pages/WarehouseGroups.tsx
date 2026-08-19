@@ -56,9 +56,6 @@ function GroupList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>گروه انبار</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={`گروهبندی انبارها (مثلا داخلی/امانی)`} title="گروه انبار" />
           <NewRecordButton path="/warehouse-groups/new" />

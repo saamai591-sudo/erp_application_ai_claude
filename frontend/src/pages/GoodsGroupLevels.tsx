@@ -65,9 +65,6 @@ function LevelList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>سطح گروه کالا</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={`تعریف سطوح درختی گروه‌بندی کالا؛ ترتیب سطوح با دکمه‌های جابجایی قابل تغییر است (تا قبل از داشتن گردش)`} title="سطح گروه کالا" />
           <NewRecordButton path="/goods-group-levels/new" />

@@ -86,7 +86,6 @@ function InquiryAuthorizationList() {
   return (
     <div>
       <div className="page-header">
-        <div><h2>مجوز استعلام</h2></div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={INFO_TEXT} title="مجوز استعلام" />
           <NewRecordButton path="/inquiry-authorizations/new" />

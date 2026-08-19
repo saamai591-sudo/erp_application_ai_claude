@@ -69,9 +69,6 @@ function GroupList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>گروه حسابداری</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={`تعریف گروه حسابداری برای تعیین نحوه صدور سند حسابداری اسناد انبار، خرید و فروش`} title="گروه حسابداری" />
           <NewRecordButton path="/accounting-groups/new" />

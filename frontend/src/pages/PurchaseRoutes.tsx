@@ -65,9 +65,6 @@ function PurchaseRouteList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>مسیر خرید</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text="تعریف مسیرهای خرید مانند استعلام، مناقصه و ..." title="مسیر خرید" />
           <NewRecordButton path="/purchase-routes/new" />

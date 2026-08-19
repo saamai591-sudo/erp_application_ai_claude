@@ -223,9 +223,6 @@ function WarehouseReceiptList({ mode, basePath }: { mode: ViewMode; basePath: st
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>رسید انبار خرید</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={infoText(mode)} title="رسید انبار خرید" />
           {mode === "warehousing" && <NewRecordButton path={`${basePath}/new`} />}

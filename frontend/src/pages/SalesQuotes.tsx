@@ -91,7 +91,6 @@ function SalesQuoteList() {
   return (
     <div>
       <div className="page-header">
-        <div><h2>پیش‌فاکتور</h2></div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={INFO_TEXT} title="پیش‌فاکتور" />
           <NewRecordButton path="/sales-quotes/new" />

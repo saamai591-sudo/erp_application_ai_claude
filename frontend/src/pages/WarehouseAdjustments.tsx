@@ -167,9 +167,6 @@ function WarehouseAdjustmentList({ mode, basePath }: { mode: ViewMode; basePath:
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>انبارگردانی / تعدیل موجودی</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={infoText(mode)} title="انبارگردانی / تعدیل موجودی" />
           {mode === "warehousing" && <NewRecordButton path={`${basePath}/new`} />}

@@ -166,9 +166,6 @@ function WarehouseTransferList({ mode, basePath }: { mode: ViewMode; basePath: s
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>انتقال بین انبارها</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={infoText(mode)} title="انتقال بین انبارها" />
           {mode === "warehousing" && <NewRecordButton path={`${basePath}/new`} />}

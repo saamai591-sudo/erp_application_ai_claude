@@ -57,9 +57,6 @@ function UnitList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>واحد سنجش</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={`تعریف واحدهای سنجش جهت استفاده در کالا و خدمت`} title="واحد سنجش" />
           <NewRecordButton path="/units-of-measure/new" />

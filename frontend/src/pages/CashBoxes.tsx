@@ -31,9 +31,6 @@ function CashBoxList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>صندوق</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف صندوق‌های نقدی سازمان — کد به صورت خودکار بر اساس «نوع تفصیل» صادر می‌شود`} title="صندوق" /><NewRecordButton path="/cash-boxes/new" />
           <ExcelImportButton
             entityLabel="صندوق‌ها"

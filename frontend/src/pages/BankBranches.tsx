@@ -54,9 +54,6 @@ function BranchList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>شعبه بانک</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={`تعریف شعبه‌های بانک، وابسته به طرف‌حساب نوع بانک/موسسه مالی`} title="شعبه بانک" />
           <ExcelImportButton

@@ -58,10 +58,10 @@ function GeoTree() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>مناطق جغرافیایی <InfoHint text={`تعریف ۳ سطحی: کشور → استان → شهر`} /></h2>
+        <div className="header-toolbar" style={{ gap: 4 }}>
+          <InfoHint text={`تعریف ۳ سطحی: کشور → استان → شهر`} title="مناطق جغرافیایی" />
+          <RefreshButton onClick={reload} />
         </div>
-        <RefreshButton onClick={reload} />
       </div>
       {error && <div className="alert error">{error}</div>}
       <TreeView

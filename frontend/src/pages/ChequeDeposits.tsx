@@ -138,9 +138,6 @@ function ChequeDepositList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>واگذاری چک به بانک</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={infoText()} title="واگذاری چک به بانک" />
           <NewRecordButton path="/cheque-deposits/new" />

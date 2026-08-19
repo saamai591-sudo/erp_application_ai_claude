@@ -53,10 +53,10 @@ function OrgTree() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>ساختار سازمانی <InfoHint text={`تعریف درختی شاخه‌های سازمان — واحدهای سازمانی بعدا از روی آخرین شاخه (برگ) تعریف می‌شوند`} /></h2>
+        <div className="header-toolbar" style={{ gap: 4 }}>
+          <InfoHint text={`تعریف درختی شاخه‌های سازمان — واحدهای سازمانی بعدا از روی آخرین شاخه (برگ) تعریف می‌شوند`} title="ساختار سازمانی" />
+          <RefreshButton onClick={reload} />
         </div>
-        <RefreshButton onClick={reload} />
       </div>
       {error && <div className="alert error">{error}</div>}
       <TreeView

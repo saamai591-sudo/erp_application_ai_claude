@@ -39,9 +39,6 @@ function CurrencyList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>ارز</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف ارزهای سیستم — دقیقاً یک ارز پایه مجاز است`} title="ارز" /><NewRecordButton path="/currencies/new" />
           <ExcelImportButton
             entityLabel="ارزها"

@@ -99,9 +99,6 @@ function SettingList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>حسابداری کالا و خدمت</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={`تعریف نحوه صدور سند حسابداری اسناد انبار، فروش و تامین کنندگان به تفکیک گروه حسابداری`} title="حسابداری کالا و خدمت" />
           <NewRecordButton path="/goods-service-accounting/new" />

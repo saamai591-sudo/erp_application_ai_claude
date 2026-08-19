@@ -79,9 +79,6 @@ function PurchaseExpertList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>کارشناس خرید</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text="تعریف کارشناسان خرید" title="کارشناس خرید" />
           <NewRecordButton path="/purchase-experts/new" />

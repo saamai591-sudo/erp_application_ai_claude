@@ -88,7 +88,6 @@ function DeliveryAuthorizationList() {
   return (
     <div>
       <div className="page-header">
-        <div><h2>مجوز تحویل</h2></div>
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={INFO_TEXT} title="مجوز تحویل" />
           <NewRecordButton path="/delivery-authorizations/new" />

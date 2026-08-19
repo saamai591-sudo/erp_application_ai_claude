@@ -124,9 +124,6 @@ function ClosingList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>بستن حسابها</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`بستن حسابهای سود و زیانیِ دارای مانده در پایان دوره مالی، با صدور خودکار سند حسابداری معکوس‌کننده`} title="بستن حسابها" /><NewRecordButton path="/account-closing/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
       </div>
       {error && <div className="alert error">{error}</div>}

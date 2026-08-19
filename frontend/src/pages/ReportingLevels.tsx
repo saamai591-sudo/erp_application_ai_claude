@@ -49,9 +49,6 @@ function LevelList() {
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h2>سطح گزارشگری</h2>
-        </div>
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف سطوح درختی سرفصل حسابها (گروه، کل، معین، جزء) با ترتیب اجباری و طول کد هر سطح`} title="سطح گزارشگری" /><NewRecordButton path="/reporting-levels/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
       </div>
       {error && <div className="alert error">{error}</div>}
