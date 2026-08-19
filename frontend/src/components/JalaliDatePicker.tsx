@@ -40,6 +40,15 @@ function posToSlotIndex(pos: number): number {
   return Math.min(idx, SLOT_POSITIONS.length);
 }
 
+/** ایندکس خانه‌های رقمی‌ای که در بازه‌ی انتخاب‌شده‌ی متن (مثلاً با دابل‌کلیک یا درگ) قرار گرفته‌اند */
+function slotsInRange(start: number, end: number): number[] {
+  const result: number[] = [];
+  SLOT_POSITIONS.forEach((slotPos, i) => {
+    if (slotPos >= start && slotPos < end) result.push(i);
+  });
+  return result;
+}
+
 function gregorianToJalaliSlots(iso: string): string[] {
   if (!iso) return ["", "", "", "", "", "", "", ""];
   const j = new DateObject({ date: iso, format: "YYYY-MM-DD", calendar: gregorian, locale: gregorian_en }).convert(
@@ -139,6 +148,21 @@ export function JalaliDatePicker({
     const key = digitsOnly(e.key);
     if (key.length === 1 && /[0-9]/.test(key)) {
       e.preventDefault();
+      const selStart = e.currentTarget.selectionStart ?? 0;
+      const selEnd = e.currentTarget.selectionEnd ?? selStart;
+      if (selEnd > selStart) {
+        // بخشی از متن به‌صورت انتخاب‌شده (دابل‌کلیک، درگ یا Ctrl+A) هایلایت است — تایپ باید همان بخش را پاک و جایگزین کند
+        const covered = slotsInRange(selStart, selEnd);
+        if (covered.length > 0) {
+          pristine.current = false;
+          const next = [...slots];
+          covered.forEach((i) => (next[i] = ""));
+          const startSlot = covered[0];
+          next[startSlot] = key;
+          commit(next, Math.min(8, startSlot + 1));
+          return;
+        }
+      }
       if (pristine.current) {
         // تاریخ قبلی کامل بود و این اولین رقم بعد از فوکوس است — کل فیلد پاک و با همین رقم از نو شروع می‌شود
         pristine.current = false;
