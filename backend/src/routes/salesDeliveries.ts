@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertNoNegativeStockAfterChange } from "../services/warehouseStockService";
 import { isGoodsItemAllowedForDocNature } from "../services/warehouseDocGoodsFilterService";
-import { recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
+import { validateTrackingFields, resolveTrackingRefs, recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
 
 // =========================================================================
 // ماژول «فروش» > عملیات > حواله فروش (مجوز خروج از انبار برای فروش)
@@ -18,9 +18,9 @@ import { recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } 
 // - فی/مبلغ در این فاز کاربر ندارد (unitCost/amount همیشه صفر) — دقیقاً مثل رسید انبار خرید.
 // - وضعیت: WarehouseDocStatus (ثبت/قطعی/ابطال) + قطعی‌کردن/برگشت با کنترل موجودی منفی، چون سند صادره
 //   است (مثل حواله انبار مصرف: کنترل موجودی منفی هنگام قطعی‌کردن انجام می‌شود، نه برگشت).
-// - این سند (برخلاف بقیه‌ی ۵ نوع) امروز سریال/بچ/تاریخ‌انقضا/محل‌فیزیکی ندارد — دست‌نخورده مانده؛
-//   افزودن آن (طبق بند ۳۴ سند که «حواله فروش» را هم نوع صادره‌ی ردیابی‌شونده می‌داند) به فاز فرانت‌اند
-//   (پیکرهای بچ/سریال/محل) موکول شده است.
+// - این سند (طبق بند ۳۴ سند که «حواله فروش» را هم نوع صادره‌ی ردیابی‌شونده می‌داند) هم مثل بقیه‌ی ۵
+//   نوع، سریال/بچ/تاریخ‌انقضا/محل‌فیزیکی دارد — همان الگوی warehouseReceipts.ts (validateTrackingFields
+//   + resolveTrackingRefs)، اضافه‌شده در فاز ۳ (فرانت‌اند/پیکرها).
 //
 // طبق stockAnalysis.md (فاز ۲): روی جدول یکپارچه‌ی InventoryDocument/InventoryDocumentLine
 // (documentType=SALES_DELIVERY) ذخیره می‌شود — نگاه کنید به یادداشت بالای warehouseReceipts.ts.
@@ -34,6 +34,10 @@ interface LineInput {
   unitId?: number | null;
   quantity: number;
   description?: string | null;
+  serialNumber?: string | null;
+  batchNumber?: string | null;
+  expiryDate?: string | null;
+  physicalLocation?: string | null;
 }
 
 interface HeaderBody {
@@ -79,6 +83,10 @@ async function validateLines(lines: LineInput[], basis: string, excludeDeliveryI
     unitId: number;
     quantity: number;
     description: string | null;
+    serialNumber: string | null;
+    batchNumber: string | null;
+    expiryDate: string | null;
+    physicalLocation: string | null;
   }[] = [];
 
   for (const [idx, l] of lines.entries()) {
@@ -117,8 +125,13 @@ async function validateLines(lines: LineInput[], basis: string, excludeDeliveryI
       unitId,
       quantity: qty,
       description: l.description || null,
+      serialNumber: l.serialNumber || null,
+      batchNumber: l.batchNumber || null,
+      expiryDate: l.expiryDate || null,
+      physicalLocation: l.physicalLocation || null,
     });
   }
+  await validateTrackingFields(cleaned);
   return cleaned;
 }
 
@@ -201,7 +214,10 @@ router.get("/sales-deliveries/:id", async (req, res) => {
     include: {
       warehouse: true,
       fiscalPeriod: true,
-      lines: { include: { goodsItem: true, unit: true }, orderBy: { rowOrder: "asc" } },
+      lines: {
+        include: { goodsItem: true, unit: true, batch: true, physicalLocation: true, serials: { include: { serial: true } } },
+        orderBy: { rowOrder: "asc" },
+      },
     },
   });
   if (!d) return res.status(404).json({ error: "حواله فروش یافت نشد" });
@@ -229,6 +245,10 @@ router.get("/sales-deliveries/:id", async (req, res) => {
       unitCost: Number(l.unitCost),
       amount: Number(l.amount),
       description: l.description,
+      serialNumber: l.serials[0]?.serial.serialNumber ?? null,
+      batchNumber: l.batch?.batchNumber ?? null,
+      expiryDate: l.batch?.expiryDate ?? null,
+      physicalLocation: l.physicalLocation?.title ?? null,
     })),
   });
 });
@@ -242,6 +262,7 @@ router.post("/sales-deliveries", async (req, res) => {
     const cleanedLines = await validateLines(body.lines, body.basis);
     const date = new Date(body.date);
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
+    const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
 
     const lastNumber = await prisma.inventoryDocument.findFirst({
       where: { documentType: "SALES_DELIVERY", fiscalPeriodId: fiscalPeriod.id },
@@ -269,6 +290,9 @@ router.post("/sales-deliveries", async (req, res) => {
             amount: 0,
             description: l.description,
             rowOrder: idx,
+            batchId: refs[idx].batchId,
+            physicalLocationId: refs[idx].physicalLocationId,
+            serials: refs[idx].serialId ? { create: [{ serialId: refs[idx].serialId! }] } : undefined,
           })),
         },
       },
@@ -296,6 +320,7 @@ router.put("/sales-deliveries/:id", async (req, res) => {
     const cleanedLines = await validateLines(body.lines, body.basis, id);
     const date = new Date(body.date);
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
+    const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
 
     await prisma.$transaction([
       prisma.inventoryDocumentLine.deleteMany({ where: { documentId: id } }),
@@ -317,6 +342,9 @@ router.put("/sales-deliveries/:id", async (req, res) => {
               amount: 0,
               description: l.description,
               rowOrder: idx,
+              batchId: refs[idx].batchId,
+              physicalLocationId: refs[idx].physicalLocationId,
+              serials: refs[idx].serialId ? { create: [{ serialId: refs[idx].serialId! }] } : undefined,
             })),
           },
         },

@@ -5,6 +5,7 @@ import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
 import { RecordPickerField } from "../components/RecordPicker";
+import { TrackingCells } from "../components/TrackingCells";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
@@ -659,34 +660,14 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
                         )}
                       </td>
                       <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>
-                      <td style={{ minWidth: 110 }}>
-                        {item?.isSerialTracked ? (
-                          <input value={row.serialNumber} onChange={(e) => updateRow(idx, { serialNumber: e.target.value })} disabled={coreDisabled} placeholder="سریال" />
-                        ) : (
-                          <span style={{ color: "var(--ink-soft)" }}>—</span>
-                        )}
-                      </td>
-                      <td style={{ minWidth: 110 }}>
-                        {item?.isBatchTracked ? (
-                          <input value={row.batchNumber} onChange={(e) => updateRow(idx, { batchNumber: e.target.value })} disabled={coreDisabled} placeholder="شماره بچ" />
-                        ) : (
-                          <span style={{ color: "var(--ink-soft)" }}>—</span>
-                        )}
-                      </td>
-                      <td style={{ minWidth: 130 }}>
-                        {item?.isExpiryTracked ? (
-                          <JalaliDatePicker value={row.expiryDate} onChange={(v) => updateRow(idx, { expiryDate: v })} disabled={coreDisabled} />
-                        ) : (
-                          <span style={{ color: "var(--ink-soft)" }}>—</span>
-                        )}
-                      </td>
-                      <td style={{ minWidth: 110 }}>
-                        {item?.isLocationTracked ? (
-                          <input value={row.physicalLocation} onChange={(e) => updateRow(idx, { physicalLocation: e.target.value })} disabled={coreDisabled} placeholder="محل فیزیکی" />
-                        ) : (
-                          <span style={{ color: "var(--ink-soft)" }}>—</span>
-                        )}
-                      </td>
+                      <TrackingCells
+                        goodsItemId={row.goodsItemId ? Number(row.goodsItemId) : null}
+                        item={item}
+                        warehouseId={header.warehouseId ? Number(header.warehouseId) : null}
+                        value={row}
+                        onChange={(patch) => updateRow(idx, patch)}
+                        disabled={coreDisabled}
+                      />
                       <td style={{ minWidth: 130 }}>
                         <AmountInput value={row.quantity} onChange={(v) => updateRow(idx, { quantity: v })} allowDecimal placeholder="۰" disabled={coreDisabled} />
                       </td>

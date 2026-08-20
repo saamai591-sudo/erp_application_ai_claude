@@ -8,6 +8,7 @@ import { RecordPickerField } from "../components/RecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { TrackingCells } from "../components/TrackingCells";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
@@ -23,11 +24,38 @@ type Basis = "NO_BASIS" | "SALES_ORDER";
 type DocStatus = "DRAFT" | "FINALIZED" | "VOID";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
-interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean }
+interface GoodsItemRow {
+  id: number;
+  fullCode: string;
+  title: string;
+  mainUnitId: number;
+  mainUnit?: { title: string };
+  isActive: boolean;
+  isSerialTracked: boolean;
+  isBatchTracked: boolean;
+  isExpiryTracked: boolean;
+  isLocationTracked: boolean;
+}
 interface PickableLine { id: number; sourceSalesOrderLineId: number; salesOrderId: number; number: number; date: string; customerTitle: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
 
 interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; basis: Basis; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number }
-interface DetailLine { id: number; sourceSalesOrderLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitCost: number; amount: number; description: string | null }
+interface DetailLine {
+  id: number;
+  sourceSalesOrderLineId: number | null;
+  goodsItemId: number;
+  goodsItemCode: string;
+  goodsItemTitle: string;
+  unitId: number;
+  unitTitle: string;
+  quantity: number;
+  unitCost: number;
+  amount: number;
+  description: string | null;
+  serialNumber: string | null;
+  batchNumber: string | null;
+  expiryDate: string | null;
+  physicalLocation: string | null;
+}
 interface Detail { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; basis: Basis; description: string | null; status: DocStatus; finalizedAt: string | null; lines: DetailLine[] }
 
 const STATUS_FA: Record<DocStatus, string> = { DRAFT: "ثبت", FINALIZED: "قطعی", VOID: "ابطال‌شده" };
@@ -118,10 +146,38 @@ function SalesDeliveryList() {
   );
 }
 
-interface RowState { sourceSalesOrderLineId: string; sourceNumber: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; description: string }
+interface RowState {
+  sourceSalesOrderLineId: string;
+  sourceNumber: string;
+  goodsItemId: string;
+  goodsItemCode: string;
+  goodsItemTitle: string;
+  unitId: string;
+  unitTitle: string;
+  quantity: string;
+  description: string;
+  serialNumber: string;
+  batchNumber: string;
+  expiryDate: string;
+  physicalLocation: string;
+}
 
 function emptyRow(): RowState {
-  return { sourceSalesOrderLineId: "", sourceNumber: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", description: "" };
+  return {
+    sourceSalesOrderLineId: "",
+    sourceNumber: "",
+    goodsItemId: "",
+    goodsItemCode: "",
+    goodsItemTitle: "",
+    unitId: "",
+    unitTitle: "",
+    quantity: "",
+    description: "",
+    serialNumber: "",
+    batchNumber: "",
+    expiryDate: "",
+    physicalLocation: "",
+  };
 }
 
 function SalesDeliveryForm({ editId }: { editId?: number }) {
@@ -167,6 +223,10 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
             unitTitle: l.unitTitle,
             quantity: String(l.quantity),
             description: l.description || "",
+            serialNumber: l.serialNumber || "",
+            batchNumber: l.batchNumber || "",
+            expiryDate: l.expiryDate ? l.expiryDate.slice(0, 10) : "",
+            physicalLocation: l.physicalLocation || "",
           }))
         );
       } else {
@@ -239,6 +299,10 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
         unitId: Number(r.unitId),
         quantity: Number(r.quantity) || 0,
         description: r.description || null,
+        serialNumber: r.serialNumber || null,
+        batchNumber: r.batchNumber || null,
+        expiryDate: r.expiryDate || null,
+        physicalLocation: r.physicalLocation || null,
       })),
     };
   }
@@ -399,6 +463,10 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                   {hasSourceColumn && <th>سفارش فروش مبدا</th>}
                   <th>کالا</th>
                   <th>واحد</th>
+                  <th>سریال</th>
+                  <th>شماره بچ</th>
+                  <th>تاریخ انقضا</th>
+                  <th>محل فیزیکی</th>
                   <th>مقدار</th>
                   <th>شرح</th>
                   <th></th>
@@ -448,6 +516,14 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                         )}
                       </td>
                       <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>
+                      <TrackingCells
+                        goodsItemId={row.goodsItemId ? Number(row.goodsItemId) : null}
+                        item={item}
+                        warehouseId={header.warehouseId ? Number(header.warehouseId) : null}
+                        value={row}
+                        onChange={(patch) => updateRow(idx, patch)}
+                        disabled={coreDisabled}
+                      />
                       <td style={{ minWidth: 130 }}>
                         <AmountInput value={row.quantity} onChange={(v) => updateRow(idx, { quantity: v })} allowDecimal placeholder="۰" disabled={coreDisabled} />
                       </td>

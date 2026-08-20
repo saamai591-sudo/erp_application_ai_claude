@@ -5,6 +5,7 @@ import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
 import { RecordPickerField } from "../components/RecordPicker";
+import { TrackingCells } from "../components/TrackingCells";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
@@ -580,34 +581,14 @@ function InitialInventoryForm({ editId, mode, basePath }: { editId?: number; mod
                         {units.map((u) => <option key={u.id} value={u.id}>{u.title}</option>)}
                       </select>
                     </td>
-                    <td style={{ minWidth: 110 }}>
-                      {item?.isSerialTracked ? (
-                        <input value={row.serialNumber} onChange={(e) => updateRow(idx, { serialNumber: e.target.value })} disabled={nonMoneyReadOnly} placeholder="سریال" />
-                      ) : (
-                        <span style={{ color: "var(--ink-soft)" }}>—</span>
-                      )}
-                    </td>
-                    <td style={{ minWidth: 110 }}>
-                      {item?.isBatchTracked ? (
-                        <input value={row.batchNumber} onChange={(e) => updateRow(idx, { batchNumber: e.target.value })} disabled={nonMoneyReadOnly} placeholder="شماره بچ" />
-                      ) : (
-                        <span style={{ color: "var(--ink-soft)" }}>—</span>
-                      )}
-                    </td>
-                    <td style={{ minWidth: 130 }}>
-                      {item?.isExpiryTracked ? (
-                        <JalaliDatePicker value={row.expiryDate} onChange={(v) => updateRow(idx, { expiryDate: v })} disabled={nonMoneyReadOnly} />
-                      ) : (
-                        <span style={{ color: "var(--ink-soft)" }}>—</span>
-                      )}
-                    </td>
-                    <td style={{ minWidth: 110 }}>
-                      {item?.isLocationTracked ? (
-                        <input value={row.physicalLocation} onChange={(e) => updateRow(idx, { physicalLocation: e.target.value })} disabled={nonMoneyReadOnly} placeholder="محل فیزیکی" />
-                      ) : (
-                        <span style={{ color: "var(--ink-soft)" }}>—</span>
-                      )}
-                    </td>
+                    <TrackingCells
+                      goodsItemId={row.goodsItemId ? Number(row.goodsItemId) : null}
+                      item={item}
+                      warehouseId={header.warehouseId ? Number(header.warehouseId) : null}
+                      value={row}
+                      onChange={(patch) => updateRow(idx, patch)}
+                      disabled={nonMoneyReadOnly}
+                    />
                     <td style={{ minWidth: 130 }}>
                       <AmountInput value={row.quantity} onChange={(v) => onQuantityChange(idx, v)} allowDecimal placeholder="۰" disabled={nonMoneyReadOnly} />
                     </td>
