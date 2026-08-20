@@ -139,6 +139,7 @@ model FiscalPeriod {
   warehouseIssues           WarehouseIssue[]
   warehouseReceipts         WarehouseReceipt[]
   warehouseTransfers        WarehouseTransfer[]
+  inventoryDocuments        InventoryDocument[]
 }
 
 model OrgStructure {
@@ -191,10 +192,10 @@ model DetailCodeUsage {
 }
 
 model Party {
-  id                 Int                @id @default(autoincrement())
-  detailCode         String             @unique
+  id                 Int                 @id @default(autoincrement())
+  detailCode         String              @unique
   category           PartyCategory
-  nationality        Nationality        @default(LOCAL)
+  nationality        Nationality         @default(LOCAL)
   nationalId         String?
   foreignId          String?
   economicCode       String?
@@ -202,12 +203,12 @@ model Party {
   lastName           String?
   legalType          LegalPartyType?
   name               String?
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
-  hasTransactions    Boolean            @default(false)
-  isActive           Boolean            @default(true)
-  bankAccountsAsBank BankAccount[]      @relation("BankAccountBankParty")
-  bankBranches       BankBranch[]       @relation("BankParty")
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  hasTransactions    Boolean             @default(false)
+  isActive           Boolean             @default(true)
+  bankAccountsAsBank BankAccount[]       @relation("BankAccountBankParty")
+  bankBranches       BankBranch[]        @relation("BankParty")
   cheques            ChequeItem[]
   customer           Customer?
   goodsRequestLines  GoodsRequestLine[]
@@ -220,9 +221,10 @@ model Party {
   receipts           Receipt[]
   supplier           Supplier?
   users              User[]
-  warehousesManaged  Warehouse[]        @relation("WarehouseManager")
+  warehousesManaged  Warehouse[]         @relation("WarehouseManager")
   warehouseReceipts  WarehouseReceipt[]
-  batchesAsSupplier  Batch[]            @relation("BatchSupplier")
+  batchesAsSupplier  Batch[]             @relation("BatchSupplier")
+  inventoryDocuments InventoryDocument[]
 }
 
 model PartyAddress {
@@ -300,15 +302,16 @@ model BankAccount {
 }
 
 model CostCenter {
-  id                Int                @id @default(autoincrement())
-  detailCode        String             @unique
-  title             String             @unique
-  type              CostCenterType     @default(ADMIN)
-  orgUnitId         Int
-  hasTransactions   Boolean            @default(false)
-  orgUnit           OrgUnit            @relation(fields: [orgUnitId], references: [id])
-  goodsRequestLines GoodsRequestLine[]
-  warehouseIssues   WarehouseIssue[]
+  id                 Int                 @id @default(autoincrement())
+  detailCode         String              @unique
+  title              String              @unique
+  type               CostCenterType      @default(ADMIN)
+  orgUnitId          Int
+  hasTransactions    Boolean             @default(false)
+  orgUnit            OrgUnit             @relation(fields: [orgUnitId], references: [id])
+  goodsRequestLines  GoodsRequestLine[]
+  warehouseIssues    WarehouseIssue[]
+  inventoryDocuments InventoryDocument[]
 }
 
 model OrgUnit {
@@ -539,6 +542,7 @@ model UnitOfMeasure {
   warehouseIssueLines        WarehouseIssueLine[]
   warehouseReceiptLines      WarehouseReceiptLine[]
   warehouseTransferLines     WarehouseTransferLine[]
+  inventoryDocumentLines     InventoryDocumentLine[]
 }
 
 model WarehouseGroup {
@@ -574,23 +578,27 @@ model Warehouse {
   warehouseTransfersAsDest   WarehouseTransfer[]   @relation("WarehouseTransferDest")
   warehouseTransfersAsSource WarehouseTransfer[]   @relation("WarehouseTransferSource")
   physicalLocations          PhysicalLocation[]
+  inventoryDocuments         InventoryDocument[]   @relation("InventoryDocWarehouse")
+  inventoryDocsAsSource      InventoryDocument[]   @relation("InventoryDocSourceWarehouse")
+  inventoryDocsAsDest        InventoryDocument[]   @relation("InventoryDocDestWarehouse")
 }
 
 // درخت محل فیزیکی — طبق stockAnalysis.md بند ۲۱: هر انبار درخت محل فیزیکی مستقل خودش را دارد
 // (کد/عنوان فقط در همان انبار یکتاست، نه سراسری) — دقیقاً همان الگوی درخت GoodsGroup، با یک سطح
 // اسکوپ اضافه (warehouseId) روی ریشه‌ها.
 model PhysicalLocation {
-  id              Int                @id @default(autoincrement())
+  id              Int                     @id @default(autoincrement())
   warehouseId     Int
   parentId        Int?
   code            String
   title           String
-  isActive        Boolean            @default(true)
-  hasTransactions Boolean            @default(false)
-  createdAt       DateTime           @default(now())
-  warehouse       Warehouse          @relation(fields: [warehouseId], references: [id])
-  parent          PhysicalLocation?  @relation("PhysicalLocationTree", fields: [parentId], references: [id])
-  children        PhysicalLocation[] @relation("PhysicalLocationTree")
+  isActive        Boolean                 @default(true)
+  hasTransactions Boolean                 @default(false)
+  createdAt       DateTime                @default(now())
+  warehouse       Warehouse               @relation(fields: [warehouseId], references: [id])
+  parent          PhysicalLocation?       @relation("PhysicalLocationTree", fields: [parentId], references: [id])
+  children        PhysicalLocation[]      @relation("PhysicalLocationTree")
+  inventoryLines  InventoryDocumentLine[]
 
   @@unique([warehouseId, parentId, code])
 }
@@ -718,6 +726,7 @@ model GoodsItem {
   warehouseTransferLines        WarehouseTransferLine[]
   batches                       Batch[]
   serials                       Serial[]
+  inventoryDocumentLines        InventoryDocumentLine[]
 
   @@unique([goodsGroupId, code])
 }
@@ -738,20 +747,21 @@ model GoodsItemAttributeValue {
 // یکتایی روی (goodsItemId, batchNumber) — یعنی همان شماره بچ برای دو کالای مختلف مجاز است (بند ۱۲).
 // تاریخ انقضا فقط اینجا نگه‌داری می‌شود، نه در سطر سند انبار (بند ۱۳).
 model Batch {
-  id                    Int             @id @default(autoincrement())
+  id                    Int                     @id @default(autoincrement())
   goodsItemId           Int
   batchNumber           String
-  productionDate        DateTime?       @db.Date
-  expiryDate            DateTime?       @db.Date
-  sourceType            BatchSourceType @default(MANUAL)
+  productionDate        DateTime?               @db.Date
+  expiryDate            DateTime?               @db.Date
+  sourceType            BatchSourceType         @default(MANUAL)
   supplierId            Int?
   productionReferenceId Int?
   description           String?
-  isActive              Boolean         @default(true)
-  hasTransactions       Boolean         @default(false)
-  createdAt             DateTime        @default(now())
-  goodsItem             GoodsItem       @relation(fields: [goodsItemId], references: [id])
-  supplier              Party?          @relation("BatchSupplier", fields: [supplierId], references: [id])
+  isActive              Boolean                 @default(true)
+  hasTransactions       Boolean                 @default(false)
+  createdAt             DateTime                @default(now())
+  goodsItem             GoodsItem               @relation(fields: [goodsItemId], references: [id])
+  supplier              Party?                  @relation("BatchSupplier", fields: [supplierId], references: [id])
+  inventoryLines        InventoryDocumentLine[]
 
   @@unique([goodsItemId, batchNumber])
 }
@@ -760,14 +770,15 @@ model Batch {
 // سریال‌های موجود را برای هر سطر سند انتخاب/مصرف می‌کند (از طریق جدول واسط InventoryLineSerial که
 // در فاز اتصال به اسناد انبار اضافه می‌شود، نه اینجا).
 model Serial {
-  id              Int       @id @default(autoincrement())
+  id              Int                   @id @default(autoincrement())
   goodsItemId     Int
   serialNumber    String
   description     String?
-  isActive        Boolean   @default(true)
-  hasTransactions Boolean   @default(false)
-  createdAt       DateTime  @default(now())
-  goodsItem       GoodsItem @relation(fields: [goodsItemId], references: [id])
+  isActive        Boolean               @default(true)
+  hasTransactions Boolean               @default(false)
+  createdAt       DateTime              @default(now())
+  goodsItem       GoodsItem             @relation(fields: [goodsItemId], references: [id])
+  lines           InventoryLineSerial[]
 
   @@unique([goodsItemId, serialNumber])
 }
@@ -854,13 +865,14 @@ model InitialInventoryLine {
 }
 
 model Project {
-  id                Int                @id @default(autoincrement())
-  code              Int                @unique
-  title             String             @unique
-  isActive          Boolean            @default(true)
-  createdAt         DateTime           @default(now())
-  goodsRequestLines GoodsRequestLine[]
-  warehouseIssues   WarehouseIssue[]
+  id                 Int                 @id @default(autoincrement())
+  code               Int                 @unique
+  title              String              @unique
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  goodsRequestLines  GoodsRequestLine[]
+  warehouseIssues    WarehouseIssue[]
+  inventoryDocuments InventoryDocument[]
 }
 
 model GoodsRequest {
@@ -888,26 +900,27 @@ model GoodsRequest {
 }
 
 model GoodsRequestLine {
-  id                  Int                  @id @default(autoincrement())
+  id                  Int                     @id @default(autoincrement())
   goodsRequestId      Int
-  rowOrder            Int                  @default(0)
+  rowOrder            Int                     @default(0)
   goodsItemId         Int
   unitId              Int
-  quantity            Decimal              @db.Decimal(36, 10)
-  approvedQuantity    Decimal?             @db.Decimal(36, 10)
+  quantity            Decimal                 @db.Decimal(36, 10)
+  approvedQuantity    Decimal?                @db.Decimal(36, 10)
   costCenterId        Int?
   projectId           Int?
   partyId             Int?
   description         String?
   approvalDescription String?
-  costCenter          CostCenter?          @relation(fields: [costCenterId], references: [id])
-  goodsItem           GoodsItem            @relation(fields: [goodsItemId], references: [id])
-  goodsRequest        GoodsRequest         @relation(fields: [goodsRequestId], references: [id], onDelete: Cascade)
-  party               Party?               @relation(fields: [partyId], references: [id])
-  project             Project?             @relation(fields: [projectId], references: [id])
-  unit                UnitOfMeasure        @relation(fields: [unitId], references: [id])
-  suppliedByLines     SupplyRequestLine[]  @relation("SupplyRequestSourceLine")
-  warehouseIssueLines WarehouseIssueLine[] @relation("WarehouseIssueSourceGoodsRequestLine")
+  costCenter          CostCenter?             @relation(fields: [costCenterId], references: [id])
+  goodsItem           GoodsItem               @relation(fields: [goodsItemId], references: [id])
+  goodsRequest        GoodsRequest            @relation(fields: [goodsRequestId], references: [id], onDelete: Cascade)
+  party               Party?                  @relation(fields: [partyId], references: [id])
+  project             Project?                @relation(fields: [projectId], references: [id])
+  unit                UnitOfMeasure           @relation(fields: [unitId], references: [id])
+  suppliedByLines     SupplyRequestLine[]     @relation("SupplyRequestSourceLine")
+  warehouseIssueLines WarehouseIssueLine[]    @relation("WarehouseIssueSourceGoodsRequestLine")
+  inventoryLines      InventoryDocumentLine[] @relation("InventoryLineSourceGoodsRequestLine")
 }
 
 model SupplyRequest {
@@ -935,20 +948,21 @@ model SupplyRequest {
 }
 
 model SupplyRequestLine {
-  id                       Int                    @id @default(autoincrement())
+  id                       Int                     @id @default(autoincrement())
   supplyRequestId          Int
-  rowOrder                 Int                    @default(0)
+  rowOrder                 Int                     @default(0)
   sourceGoodsRequestLineId Int?
   goodsItemId              Int
   unitId                   Int
-  quantity                 Decimal                @db.Decimal(36, 10)
+  quantity                 Decimal                 @db.Decimal(36, 10)
   description              String?
-  purchaseRequestLines     PurchaseRequestLine[]  @relation("PurchaseRequestSourceLine")
-  goodsItem                GoodsItem              @relation(fields: [goodsItemId], references: [id])
-  sourceGoodsRequestLine   GoodsRequestLine?      @relation("SupplyRequestSourceLine", fields: [sourceGoodsRequestLineId], references: [id])
-  supplyRequest            SupplyRequest          @relation(fields: [supplyRequestId], references: [id], onDelete: Cascade)
-  unit                     UnitOfMeasure          @relation(fields: [unitId], references: [id])
-  warehouseReceiptLines    WarehouseReceiptLine[] @relation("WarehouseReceiptSourceSupplyRequestLine")
+  purchaseRequestLines     PurchaseRequestLine[]   @relation("PurchaseRequestSourceLine")
+  goodsItem                GoodsItem               @relation(fields: [goodsItemId], references: [id])
+  sourceGoodsRequestLine   GoodsRequestLine?       @relation("SupplyRequestSourceLine", fields: [sourceGoodsRequestLineId], references: [id])
+  supplyRequest            SupplyRequest           @relation(fields: [supplyRequestId], references: [id], onDelete: Cascade)
+  unit                     UnitOfMeasure           @relation(fields: [unitId], references: [id])
+  warehouseReceiptLines    WarehouseReceiptLine[]  @relation("WarehouseReceiptSourceSupplyRequestLine")
+  inventoryLines           InventoryDocumentLine[] @relation("InventoryLineSourceSupplyRequestLine")
 }
 
 model PurchaseRoute {
@@ -1293,6 +1307,7 @@ model PurchaseOrderLine {
   purchaseOrder              PurchaseOrder               @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   unit                       UnitOfMeasure               @relation(fields: [unitId], references: [id])
   warehouseReceiptLines      WarehouseReceiptLine[]      @relation("WarehouseReceiptSourcePurchaseOrderLine")
+  inventoryLines             InventoryDocumentLine[]     @relation("InventoryLineSourcePurchaseOrderLine")
 }
 
 model DeliveryAuthorization {
@@ -1313,20 +1328,21 @@ model DeliveryAuthorization {
 }
 
 model DeliveryAuthorizationLine {
-  id                      Int                    @id @default(autoincrement())
+  id                      Int                     @id @default(autoincrement())
   deliveryAuthorizationId Int
-  rowOrder                Int                    @default(0)
+  rowOrder                Int                     @default(0)
   purchaseOrderLineId     Int
   goodsItemId             Int
   unitId                  Int
-  quantity                Decimal                @db.Decimal(36, 10)
+  quantity                Decimal                 @db.Decimal(36, 10)
   receiptType             DeliveryReceiptType
   description             String?
-  deliveryAuthorization   DeliveryAuthorization  @relation(fields: [deliveryAuthorizationId], references: [id], onDelete: Cascade)
-  goodsItem               GoodsItem              @relation(fields: [goodsItemId], references: [id])
-  purchaseOrderLine       PurchaseOrderLine      @relation(fields: [purchaseOrderLineId], references: [id])
-  unit                    UnitOfMeasure          @relation(fields: [unitId], references: [id])
-  warehouseReceiptLines   WarehouseReceiptLine[] @relation("WarehouseReceiptSourceDeliveryAuthorizationLine")
+  deliveryAuthorization   DeliveryAuthorization   @relation(fields: [deliveryAuthorizationId], references: [id], onDelete: Cascade)
+  goodsItem               GoodsItem               @relation(fields: [goodsItemId], references: [id])
+  purchaseOrderLine       PurchaseOrderLine       @relation(fields: [purchaseOrderLineId], references: [id])
+  unit                    UnitOfMeasure           @relation(fields: [unitId], references: [id])
+  warehouseReceiptLines   WarehouseReceiptLine[]  @relation("WarehouseReceiptSourceDeliveryAuthorizationLine")
+  inventoryLines          InventoryDocumentLine[] @relation("InventoryLineSourceDeliveryAuthorizationLine")
 }
 
 model WarehouseReceipt {
@@ -1612,21 +1628,22 @@ model SalesOrder {
 }
 
 model SalesOrderLine {
-  id                     Int                 @id @default(autoincrement())
+  id                     Int                     @id @default(autoincrement())
   salesOrderId           Int
-  rowOrder               Int                 @default(0)
+  rowOrder               Int                     @default(0)
   sourceSalesQuoteLineId Int?
   goodsItemId            Int
   unitId                 Int
-  quantity               Decimal             @db.Decimal(36, 10)
-  unitPrice              Decimal             @db.Decimal(36, 10)
-  amount                 Decimal             @db.Decimal(36, 10)
+  quantity               Decimal                 @db.Decimal(36, 10)
+  unitPrice              Decimal                 @db.Decimal(36, 10)
+  amount                 Decimal                 @db.Decimal(36, 10)
   description            String?
-  salesDeliveryLines     SalesDeliveryLine[] @relation("SalesDeliverySourceSalesOrderLine")
-  goodsItem              GoodsItem           @relation(fields: [goodsItemId], references: [id])
-  salesOrder             SalesOrder          @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
-  sourceSalesQuoteLine   SalesQuoteLine?     @relation("SalesOrderSourceSalesQuoteLine", fields: [sourceSalesQuoteLineId], references: [id])
-  unit                   UnitOfMeasure       @relation(fields: [unitId], references: [id])
+  salesDeliveryLines     SalesDeliveryLine[]     @relation("SalesDeliverySourceSalesOrderLine")
+  goodsItem              GoodsItem               @relation(fields: [goodsItemId], references: [id])
+  salesOrder             SalesOrder              @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  sourceSalesQuoteLine   SalesQuoteLine?         @relation("SalesOrderSourceSalesQuoteLine", fields: [sourceSalesQuoteLineId], references: [id])
+  unit                   UnitOfMeasure           @relation(fields: [unitId], references: [id])
+  inventoryLines         InventoryDocumentLine[] @relation("InventoryLineSourceSalesOrderLine")
 }
 
 model SalesDelivery {
@@ -1663,6 +1680,109 @@ model SalesDeliveryLine {
   sourceSalesOrderLine   SalesOrderLine?    @relation("SalesDeliverySourceSalesOrderLine", fields: [sourceSalesOrderLineId], references: [id])
   unit                   UnitOfMeasure      @relation(fields: [unitId], references: [id])
   salesInvoiceLines      SalesInvoiceLine[] @relation("SalesInvoiceSourceSalesDeliveryLine")
+}
+
+// =========================================================================
+// stockAnalysis.md — شمای یکپارچه‌ی اسناد انبار (فاز ۲، بخش افزایشی/additive)
+// طبق تصمیم صریح کاربر: بجای ۶ جدول جداگانه‌ی سند انبار (بالا)، این دو مدل یک جدول واحد برای همه‌ی
+// انواع سند انبار می‌سازند (بند ۲۸-۲۹ و ۶۴ سند). این فاز فقط اسکیمای جدید را اضافه می‌کند — جدول‌های
+// قدیمی (WarehouseReceipt/Issue/Transfer/Adjustment/InitialInventory/SalesDeliveryLine) و
+// route/serviceهای فعلی دست‌نخورده باقی می‌مانند تا مهاجرت داده و اتصال routeها (که کار مخرب‌تری است
+// و باید جداگانه با تایید کاربر انجام شود) کامل شود. تا آن زمان این دو جدول خالی و بلااستفاده‌اند.
+// اتصال دوطرفه‌ی purchaseInvoiceLine/salesInvoiceLines (که امروز روی WarehouseReceiptLine/
+// SalesDeliveryLine هستند) عمداً در این فاز اضافه نشده — در همان مرحله‌ی اتصال routeها اضافه می‌شود.
+// =========================================================================
+
+enum InventoryDocumentType {
+  INITIAL_INVENTORY
+  WAREHOUSE_RECEIPT
+  WAREHOUSE_ISSUE
+  WAREHOUSE_TRANSFER
+  WAREHOUSE_ADJUSTMENT
+  SALES_DELIVERY
+}
+
+// اجتماع WarehouseReceiptBasis + WarehouseIssueBasis + SalesDeliveryBasis — هر documentType فقط
+// زیرمجموعه‌ی مربوط به خودش را معنادار می‌داند (کنترل در سطح اپلیکیشن، نه دیتابیس)
+enum InventoryBasis {
+  NO_BASIS
+  SUPPLY_REQUEST
+  PURCHASE_ORDER
+  DELIVERY_AUTHORIZATION
+  GOODS_REQUEST
+  SALES_ORDER
+}
+
+model InventoryDocument {
+  id                Int                     @id @default(autoincrement())
+  documentType      InventoryDocumentType
+  warehouseId       Int?
+  sourceWarehouseId Int?
+  destWarehouseId   Int?
+  fiscalPeriodId    Int
+  number            Int
+  date              DateTime                @db.Date
+  basis             InventoryBasis?
+  partyId           Int?
+  costCenterId      Int?
+  projectId         Int?
+  description       String?
+  status            WarehouseDocStatus      @default(DRAFT)
+  finalizedAt       DateTime?
+  createdAt         DateTime                @default(now())
+  warehouse         Warehouse?              @relation("InventoryDocWarehouse", fields: [warehouseId], references: [id])
+  sourceWarehouse   Warehouse?              @relation("InventoryDocSourceWarehouse", fields: [sourceWarehouseId], references: [id])
+  destWarehouse     Warehouse?              @relation("InventoryDocDestWarehouse", fields: [destWarehouseId], references: [id])
+  fiscalPeriod      FiscalPeriod            @relation(fields: [fiscalPeriodId], references: [id])
+  party             Party?                  @relation(fields: [partyId], references: [id])
+  costCenter        CostCenter?             @relation(fields: [costCenterId], references: [id])
+  project           Project?                @relation(fields: [projectId], references: [id])
+  lines             InventoryDocumentLine[]
+
+  @@unique([documentType, fiscalPeriodId, number])
+}
+
+model InventoryDocumentLine {
+  id                                Int                        @id @default(autoincrement())
+  documentId                        Int
+  rowOrder                          Int                        @default(0)
+  goodsItemId                       Int
+  unitId                            Int
+  quantity                          Decimal                    @db.Decimal(36, 10)
+  systemQuantity                    Decimal?                   @db.Decimal(36, 10)
+  countedQuantity                   Decimal?                   @db.Decimal(36, 10)
+  unitCost                          Decimal                    @default(0) @db.Decimal(28, 10)
+  amount                            Decimal                    @default(0) @db.Decimal(18, 2)
+  description                       String?
+  batchId                           Int?
+  physicalLocationId                Int?
+  sourceSupplyRequestLineId         Int?
+  sourcePurchaseOrderLineId         Int?
+  sourceDeliveryAuthorizationLineId Int?
+  sourceGoodsRequestLineId          Int?
+  sourceSalesOrderLineId            Int?
+  document                          InventoryDocument          @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  goodsItem                         GoodsItem                  @relation(fields: [goodsItemId], references: [id])
+  unit                              UnitOfMeasure              @relation(fields: [unitId], references: [id])
+  batch                             Batch?                     @relation(fields: [batchId], references: [id])
+  physicalLocation                  PhysicalLocation?          @relation(fields: [physicalLocationId], references: [id])
+  sourceSupplyRequestLine           SupplyRequestLine?         @relation("InventoryLineSourceSupplyRequestLine", fields: [sourceSupplyRequestLineId], references: [id])
+  sourcePurchaseOrderLine           PurchaseOrderLine?         @relation("InventoryLineSourcePurchaseOrderLine", fields: [sourcePurchaseOrderLineId], references: [id])
+  sourceDeliveryAuthorizationLine   DeliveryAuthorizationLine? @relation("InventoryLineSourceDeliveryAuthorizationLine", fields: [sourceDeliveryAuthorizationLineId], references: [id])
+  sourceGoodsRequestLine            GoodsRequestLine?          @relation("InventoryLineSourceGoodsRequestLine", fields: [sourceGoodsRequestLineId], references: [id])
+  sourceSalesOrderLine              SalesOrderLine?            @relation("InventoryLineSourceSalesOrderLine", fields: [sourceSalesOrderLineId], references: [id])
+  serials                           InventoryLineSerial[]
+}
+
+// طبق بند ۱۷-۱۹ سند: یک سطح سند می‌تواند چند سریال داشته باشد (نه یک سطر جدا برای هر سریال)
+model InventoryLineSerial {
+  id       Int                   @id @default(autoincrement())
+  lineId   Int
+  serialId Int
+  line     InventoryDocumentLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  serial   Serial                @relation(fields: [serialId], references: [id])
+
+  @@unique([lineId, serialId])
 }
 
 model SalesInvoice {
