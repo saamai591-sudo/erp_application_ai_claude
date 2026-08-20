@@ -95,14 +95,29 @@ const GROUP_LEVEL_TAB_START = 1;
 
 const DIRECTION_FA: Record<string, string> = { IN: "وارده", OUT: "صادره" };
 
-// نگاشت نوع سند (متن فارسی برگشتی از بک‌اند) به مسیر ویرایش، برای دابل‌کلیک روی ردیف گردش
+// نگاشت نوع سند (متن فارسی برگشتی از بک‌اند) به مسیر ویرایش، برای دابل‌کلیک روی ردیف گردش — این ۵ نوع
+// نمای «حسابداری انبار» مجزا هم دارند، پس فقط بخش قابل الحاق به basePath ذخیره می‌شود
 const DOC_TYPE_PATH: Record<string, string> = {
   "موجودی اول دوره": "initial-inventory",
   "رسید انبار خرید": "warehouse-receipts",
-  "حواله انبار": "warehouse-issues",
   "انتقال بین انبارها (خروج)": "warehouse-transfers",
   "انتقال بین انبارها (ورود)": "warehouse-transfers",
   "انبارگردانی / تعدیل موجودی": "warehouse-adjustments",
+};
+
+// طبق stockAnalysis.md بند ۳۴ — این ۱۰ نوع سند جدید برخلاف ۵ نوع بالا نمای «حسابداری انبار» مجزا
+// ندارند (فقط انبارداری)، پس مسیر کامل (نه فقط بخش قابل الحاق به basePath) ذخیره می‌شود
+const DOC_TYPE_FULL_PATH: Record<string, string> = {
+  "مصرف مرکز هزینه": "/center-consumptions",
+  "مصرف پروژه": "/project-consumptions",
+  "مصرف تولید": "/production-consumptions",
+  "برگشت مصرف مرکز هزینه": "/center-consumption-returns",
+  "برگشت مصرف پروژه": "/project-consumption-returns",
+  "برگشت مصرف تولید": "/production-consumption-returns",
+  "برگشت از فروش": "/sales-returns",
+  "برگشت به تامین‌کننده": "/supplier-returns",
+  "رسید تولید": "/production-receipts",
+  "حواله دارایی ثابت": "/fixed-asset-issues",
 };
 
 function infoText(mode: ReviewMode) {
@@ -469,6 +484,11 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
                       <tr
                         key={i}
                         onDoubleClick={() => {
+                          const full = DOC_TYPE_FULL_PATH[r.docType];
+                          if (full) {
+                            openTab(`${full}/${r.docId}/edit`);
+                            return;
+                          }
                           const seg = DOC_TYPE_PATH[r.docType];
                           if (seg) openTab(`${basePath}/${seg}/${r.docId}/edit`);
                         }}

@@ -1,13 +1,18 @@
 import { prisma } from "../lib/prisma";
 
 /**
- * سرویس مرکزی و مشترکِ کنترل موجودی منفی، طبق «مستند عمومی عملیات انبار» (بخش کنترل موجودی منفی):
- * هر سند انباری که پرچم «کنترل موجودی منفی» آن فعال است، باید پیش از قطعی‌کردن/حذف/برگشت از قطعی،
- * این سرویس را فراخوانی کند تا از منفی نشدن موجودی کالا در انبار، از تاریخ سند به بعد، مطمئن شود.
+ * سرویس مرکزی و مشترکِ محاسبه‌ی موجودی + کنترل موجودی منفی، طبق «مستند عمومی عملیات انبار» (بخش کنترل
+ * موجودی منفی): هر سند انباری که پرچم «کنترل موجودی منفی» آن فعال است، باید پیش از قطعی‌کردن/حذف/
+ * برگشت از قطعی، این سرویس را فراخوانی کند تا از منفی نشدن موجودی کالا در انبار، از تاریخ سند به بعد،
+ * مطمئن شود.
  *
- * طبق stockAnalysis.md، هر ۶ نوع سند انبار اکنون روی یک جدول یکپارچه (InventoryDocument/
- * InventoryDocumentLine، به تفکیک documentType) ذخیره می‌شوند؛ این سرویس هم به همان جدول واحد
- * مهاجرت کرده — منطق جمع/تفریق هر نوع (وارده/صادره) دقیقاً همان قبلی مانده، فقط منبع داده عوض شده.
+ * طبق stockAnalysis.md بند ۳۴، انواع سند انبار به مجموعه‌ی کامل عملیات مستند («Purchase Receipt»،
+ * «Sales Return»، «Center/Project/Production Consumption» + برگشت‌های‌شان، «Production Receipt»،
+ * «Fixed Asset Issue»، «Supplier Return»، ...) گسترش یافته؛ به همین دلیل این تابع از حالت دستیِ باز‌نویسی
+ * هر نوع (که برای ۶ نوع اول قابل مدیریت بود) به یک جدول داده‌محور (SIGNED_TYPES) تبدیل شده — هر نوع
+ * سند فقط با علامت (+۱ وارده / -۱ صادره) و فیلد انبار مربوطه‌اش تعریف می‌شود، به‌جز
+ * WAREHOUSE_ADJUSTMENT که خودش امضادار ذخیره می‌شود (adjustmentQuantity قدیم) و WAREHOUSE_TRANSFER که
+ * هم‌زمان دو اثر دارد (کاهش در مبدا + افزایش در مقصد).
  *
  * توجه (محدودیت شناخته‌شده، از فاز اول به ارث رسیده): کنترل موجودی منفی در این پیاده‌سازی فقط موجودی
  * را دقیقاً در تاریخ خود سند بررسی می‌کند، نه برای همه‌ی تاریخ‌های بزرگتر مساوی آن (که متن کامل مستند
@@ -18,11 +23,48 @@ import { prisma } from "../lib/prisma";
 export interface StockExcludeOptions {
   excludeInitialInventoryId?: number;
   excludeWarehouseReceiptId?: number;
-  excludeWarehouseIssueId?: number;
   excludeWarehouseTransferId?: number;
   excludeWarehouseAdjustmentId?: number;
   excludeSalesDeliveryId?: number;
+  excludeSalesReturnId?: number;
+  excludeSupplierReturnId?: number;
+  excludeProductionReceiptId?: number;
+  excludeCenterConsumptionId?: number;
+  excludeProjectConsumptionId?: number;
+  excludeProductionConsumptionId?: number;
+  excludeCenterConsumptionReturnId?: number;
+  excludeProjectConsumptionReturnId?: number;
+  excludeProductionConsumptionReturnId?: number;
+  excludeFixedAssetIssueId?: number;
 }
+
+type WarehouseField = "warehouseId" | "sourceWarehouseId" | "destWarehouseId";
+
+interface SignedTypeRule {
+  documentType: string;
+  sign: 1 | -1;
+  warehouseField: WarehouseField;
+  excludeKey: keyof StockExcludeOptions;
+}
+
+// وارده (+۱) / صادره (-۱) — دقیقاً طبق بند ۳۴ سند stockAnalysis.md
+const SIGNED_TYPES: SignedTypeRule[] = [
+  { documentType: "INITIAL_INVENTORY", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeInitialInventoryId" },
+  { documentType: "WAREHOUSE_RECEIPT", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeWarehouseReceiptId" },
+  { documentType: "SALES_RETURN", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeSalesReturnId" },
+  { documentType: "PRODUCTION_RECEIPT", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeProductionReceiptId" },
+  { documentType: "CENTER_CONSUMPTION_RETURN", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeCenterConsumptionReturnId" },
+  { documentType: "PROJECT_CONSUMPTION_RETURN", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeProjectConsumptionReturnId" },
+  { documentType: "PRODUCTION_CONSUMPTION_RETURN", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeProductionConsumptionReturnId" },
+  { documentType: "WAREHOUSE_TRANSFER", sign: -1, warehouseField: "sourceWarehouseId", excludeKey: "excludeWarehouseTransferId" },
+  { documentType: "WAREHOUSE_TRANSFER", sign: 1, warehouseField: "destWarehouseId", excludeKey: "excludeWarehouseTransferId" },
+  { documentType: "SALES_DELIVERY", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeSalesDeliveryId" },
+  { documentType: "CENTER_CONSUMPTION", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeCenterConsumptionId" },
+  { documentType: "PROJECT_CONSUMPTION", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeProjectConsumptionId" },
+  { documentType: "PRODUCTION_CONSUMPTION", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeProductionConsumptionId" },
+  { documentType: "SUPPLIER_RETURN", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeSupplierReturnId" },
+  { documentType: "FIXED_ASSET_ISSUE", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeFixedAssetIssueId" },
+];
 
 function sum(rows: { quantity: any }[]): number {
   return rows.reduce((s: number, l: any) => s + Number(l.quantity), 0);
@@ -35,73 +77,26 @@ export async function computeStockAsOf(
   asOfDate: Date,
   opts: StockExcludeOptions = {}
 ): Promise<number> {
-  const [initialLines, receiptLines, issueLines, transferOutLines, transferInLines, adjustmentLines, salesDeliveryLines] = await Promise.all([
-    prisma.inventoryDocumentLine.findMany({
-      where: {
-        goodsItemId,
-        document: {
-          documentType: "INITIAL_INVENTORY",
-          warehouseId,
-          status: "FINALIZED",
-          date: { lte: asOfDate },
-          ...(opts.excludeInitialInventoryId ? { NOT: { id: opts.excludeInitialInventoryId } } : {}),
+  const signedQueries = SIGNED_TYPES.map((rule) =>
+    prisma.inventoryDocumentLine
+      .findMany({
+        where: {
+          goodsItemId,
+          document: {
+            documentType: rule.documentType as any,
+            [rule.warehouseField]: warehouseId,
+            status: "FINALIZED",
+            date: { lte: asOfDate },
+            ...(opts[rule.excludeKey] ? { NOT: { id: opts[rule.excludeKey] } } : {}),
+          },
         },
-      },
-      select: { quantity: true },
-    }),
-    prisma.inventoryDocumentLine.findMany({
-      where: {
-        goodsItemId,
-        document: {
-          documentType: "WAREHOUSE_RECEIPT",
-          warehouseId,
-          status: "FINALIZED",
-          date: { lte: asOfDate },
-          ...(opts.excludeWarehouseReceiptId ? { NOT: { id: opts.excludeWarehouseReceiptId } } : {}),
-        },
-      },
-      select: { quantity: true },
-    }),
-    prisma.inventoryDocumentLine.findMany({
-      where: {
-        goodsItemId,
-        document: {
-          documentType: "WAREHOUSE_ISSUE",
-          warehouseId,
-          status: "FINALIZED",
-          date: { lte: asOfDate },
-          ...(opts.excludeWarehouseIssueId ? { NOT: { id: opts.excludeWarehouseIssueId } } : {}),
-        },
-      },
-      select: { quantity: true },
-    }),
-    prisma.inventoryDocumentLine.findMany({
-      where: {
-        goodsItemId,
-        document: {
-          documentType: "WAREHOUSE_TRANSFER",
-          sourceWarehouseId: warehouseId,
-          status: "FINALIZED",
-          date: { lte: asOfDate },
-          ...(opts.excludeWarehouseTransferId ? { NOT: { id: opts.excludeWarehouseTransferId } } : {}),
-        },
-      },
-      select: { quantity: true },
-    }),
-    prisma.inventoryDocumentLine.findMany({
-      where: {
-        goodsItemId,
-        document: {
-          documentType: "WAREHOUSE_TRANSFER",
-          destWarehouseId: warehouseId,
-          status: "FINALIZED",
-          date: { lte: asOfDate },
-          ...(opts.excludeWarehouseTransferId ? { NOT: { id: opts.excludeWarehouseTransferId } } : {}),
-        },
-      },
-      select: { quantity: true },
-    }),
-    prisma.inventoryDocumentLine.findMany({
+        select: { quantity: true },
+      })
+      .then((rows) => rule.sign * sum(rows))
+  );
+
+  const adjustmentQuery = prisma.inventoryDocumentLine
+    .findMany({
       where: {
         goodsItemId,
         document: {
@@ -113,33 +108,12 @@ export async function computeStockAsOf(
         },
       },
       select: { quantity: true },
-    }),
-    prisma.inventoryDocumentLine.findMany({
-      where: {
-        goodsItemId,
-        document: {
-          documentType: "SALES_DELIVERY",
-          warehouseId,
-          status: "FINALIZED",
-          date: { lte: asOfDate },
-          ...(opts.excludeSalesDeliveryId ? { NOT: { id: opts.excludeSalesDeliveryId } } : {}),
-        },
-      },
-      select: { quantity: true },
-    }),
-  ]);
+    })
+    // WAREHOUSE_ADJUSTMENT.quantity در جدول یکپارچه از قبل امضادار ذخیره می‌شود (adjustmentQuantity قدیم)
+    .then((rows) => sum(rows));
 
-  // adjustmentLines.quantity در جدول یکپارچه از قبل امضادار ذخیره می‌شود (adjustmentQuantity قدیم)،
-  // پس مستقیم جمع می‌شود؛ بقیه‌ی انواع مثل قبل بی‌علامت‌اند و جهت‌شان اینجا با +/- اعمال می‌شود.
-  return (
-    sum(initialLines) +
-    sum(receiptLines) -
-    sum(issueLines) -
-    sum(transferOutLines) +
-    sum(transferInLines) +
-    sum(adjustmentLines) -
-    sum(salesDeliveryLines)
-  );
+  const parts = await Promise.all([...signedQueries, adjustmentQuery]);
+  return parts.reduce((s, p) => s + p, 0);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
@@ -15,27 +15,14 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
 
-// این فرآیند («حواله انبار») مستند تحلیل اختصاصی در پروژه ندارد؛ مبنای «درخواست کالا» طبق الگوی
-// «انتخابگر درخواست کالای تحویل شده» در «درخواست کالا.md» است (نگاه کنید به یادداشت‌های
-// backend/src/routes/warehouseIssues.ts). فی/مبلغ در این فاز کاربر ندارد — دقیقاً مثل رسید انبار خرید.
+// «مصرف پروژه» — طبق stockAnalysis.md بند ۳۴/۳۹، جایگزین حواله انبار عمومی قدیم (WAREHOUSE_ISSUE)
+// برای طرف‌مقابل «پروژه» است (نگاه کنید به یادداشت بالای backend/src/routes/projectConsumptions.ts).
 
 type Basis = "NO_BASIS" | "GOODS_REQUEST";
 type DocStatus = "DRAFT" | "FINALIZED" | "VOID";
-type ViewMode = "warehousing" | "accounting";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
-interface CostCenterOption { id: number; detailCode: string; title: string; isActive?: boolean }
 interface ProjectOption { id: number; code: number; title: string; isActive: boolean }
-// طرف مقابل حواله انبار (تفصیل نوع «مرکز هزینه» یا «پروژه») — چون این دو موجودیت جدا هستند اما در یک
-// فیلد واحد قابل انتخابند، برای پیکر مشترک در یک شکل واحد ادغام می‌شوند؛ id رشته‌ای با پیشوند نوع
-// (که فقط سمت کلاینت استفاده می‌شود، هرگز به بک‌اند فرستاده نمی‌شود) یکتایی بین دو مجموعه را تضمین می‌کند
-interface CounterpartyOption {
-  id: string;
-  kind: "COST_CENTER" | "PROJECT";
-  refId: number;
-  code: string;
-  title: string;
-}
 interface GoodsItemRow {
   id: number;
   fullCode: string;
@@ -43,114 +30,33 @@ interface GoodsItemRow {
   mainUnitId: number;
   mainUnit?: { title: string };
   isActive: boolean;
-  kind: string;
   isSerialTracked: boolean;
   isBatchTracked: boolean;
   isExpiryTracked: boolean;
   isLocationTracked: boolean;
 }
+interface PickableLine { id: number; sourceGoodsRequestLineId: number; number: number; date: string; orgUnitTitle: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
 
-interface PickableLine {
-  id: number;
-  sourceGoodsRequestLineId: number;
-  number: number;
-  date: string;
-  orgUnitTitle: string;
-  goodsItemId: number;
-  goodsItemCode: string;
-  goodsItemTitle: string;
-  unitId: number;
-  unitTitle: string;
-  quantity: number;
-  done: number;
-  remaining: number;
-}
-
-interface ListRow {
-  id: number;
-  number: number;
-  date: string;
-  warehouseId: number;
-  warehouseTitle: string;
-  fiscalPeriodTitle: string;
-  basis: Basis;
-  costCenterId: number | null;
-  projectId: number | null;
-  counterpartyTitle: string | null;
-  description: string | null;
-  status: DocStatus;
-  lineCount: number;
-  totalQuantity: number;
-  totalAmount: number;
-}
-
-interface DetailLine {
-  id: number;
-  sourceGoodsRequestLineId: number | null;
-  goodsItemId: number;
-  goodsItemCode: string;
-  goodsItemTitle: string;
-  unitId: number;
-  unitTitle: string;
-  quantity: number;
-  unitCost: number;
-  amount: number;
-  description: string | null;
-  serialNumber: string | null;
-  batchNumber: string | null;
-  expiryDate: string | null;
-  physicalLocation: string | null;
-}
-
-interface Detail {
-  id: number;
-  number: number;
-  date: string;
-  warehouseId: number;
-  warehouseTitle: string;
-  fiscalPeriodTitle: string;
-  basis: Basis;
-  costCenterId: number | null;
-  projectId: number | null;
-  counterpartyTitle: string | null;
-  description: string | null;
-  status: DocStatus;
-  finalizedAt: string | null;
-  lines: DetailLine[];
-}
+interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; basis: Basis; projectId: number | null; projectTitle: string | null; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number }
+interface DetailLine { id: number; sourceGoodsRequestLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitCost: number; amount: number; description: string | null; serialNumber: string | null; batchNumber: string | null; expiryDate: string | null; physicalLocation: string | null }
+interface Detail { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; basis: Basis; projectId: number | null; description: string | null; status: DocStatus; finalizedAt: string | null; lines: DetailLine[] }
 
 const STATUS_FA: Record<DocStatus, string> = { DRAFT: "ثبت", FINALIZED: "قطعی", VOID: "ابطال‌شده" };
 const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", GOODS_REQUEST: "درخواست کالا" };
+const INFO_TEXT = "ثبت مصرف پروژه (خروج کالا از انبار برای مصرف یک پروژه) — بدون مبنا یا بر اساس یک درخواست کالای تایید‌شده از نوع پروژه.";
 
-function infoText(mode: ViewMode) {
-  const base =
-    "ثبت حواله انبار برای کالاهای خارج‌شده از انبار جهت مصرف. مبنا می‌تواند بدون مبنا یا درخواست کالا باشد؛ " +
-    "در حالت دارای مبنا، هر ردیف از یک ردیف تایید‌شده و دارای مانده‌ی درخواست کالا انتخاب می‌شود.";
-  if (mode === "warehousing") {
-    return base + " این نمای «انبارداری» فقط مقدار را ثبت می‌کند. فی و مبلغ در این سند اصلاً وارد نمی‌شود؛ این مقادیر بعداً با یک ماژول قیمت‌گذاری اسناد صادره (آینده) تعیین خواهند شد.";
-  }
-  return base + " این نمای «حسابداری انبار» فقط نمایشی است. فی/مبلغ تا زمانی که ماژول قیمت‌گذاری ساخته شود همیشه صفر خواهد بود.";
-}
-
-export default function WarehouseIssues({ mode }: { mode: ViewMode }) {
+export default function ProjectConsumptions() {
   const location = useLocation();
   const { id } = useParams();
-  const basePath = mode === "warehousing" ? "/warehousing/warehouse-issues" : "/warehouse-accounting/warehouse-issues";
   const isNew = location.pathname.endsWith("/new");
   const isEdit = location.pathname.endsWith("/edit");
-  // در «حسابداری انبار» هرگز امکان ثبت سند جدید نیست — حتی با آدرس مستقیم — و به فهرست هدایت می‌شود.
-  if (isNew && mode === "accounting") return <Navigate to={basePath} replace />;
-  if (isNew) return <WarehouseIssueForm mode={mode} basePath={basePath} />;
-  if (isEdit) return <WarehouseIssueForm mode={mode} basePath={basePath} editId={Number(id)} />;
-  return <WarehouseIssueList mode={mode} basePath={basePath} />;
+  if (isNew) return <ProjectConsumptionForm />;
+  if (isEdit) return <ProjectConsumptionForm editId={Number(id)} />;
+  return <ProjectConsumptionList />;
 }
 
 function CheckIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 function UndoIcon() {
   return (
@@ -161,29 +67,23 @@ function UndoIcon() {
   );
 }
 function PlusIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
+  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
 }
 
-function WarehouseIssueList({ mode, basePath }: { mode: ViewMode; basePath: string }) {
-  const cacheKey = basePath;
+function ProjectConsumptionList() {
+  const cacheKey = "/project-consumptions";
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
     try {
-      setItems(await api.get("/warehouse-issues"));
+      setItems(await api.get("/project-consumptions"));
       setError(null);
     } catch (e) {
       setError((e as ApiError).message);
     }
   }
-
   useEffect(() => {
     if (!hasPersistedState(cacheKey)) reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -195,7 +95,7 @@ function WarehouseIssueList({ mode, basePath }: { mode: ViewMode; basePath: stri
       return;
     }
     try {
-      await api.del(`/warehouse-issues/${row.id}`);
+      await api.del(`/project-consumptions/${row.id}`);
       await reload();
     } catch (e) {
       alert((e as ApiError).message);
@@ -206,82 +106,45 @@ function WarehouseIssueList({ mode, basePath }: { mode: ViewMode; basePath: stri
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint text={infoText(mode)} title="حواله انبار" />
-          {mode === "warehousing" && <NewRecordButton path={`${basePath}/new`} />}
+          <InfoHint text={INFO_TEXT} title="مصرف پروژه" />
+          <NewRecordButton path="/project-consumptions/new" />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
           { header: "انبار", render: (r) => r.warehouseTitle, filterType: "string", filterValue: (r) => r.warehouseTitle },
           { header: "مبنا", render: (r) => BASIS_FA[r.basis], filterType: "string", filterValue: (r) => BASIS_FA[r.basis] },
-          { header: "طرف مقابل", render: (r) => r.counterpartyTitle || "—", filterType: "string", filterValue: (r) => r.counterpartyTitle || "" },
-          { header: "شرح", render: (r) => r.description || "—", filterType: "string", filterValue: (r) => r.description || "" },
+          { header: "پروژه", render: (r) => r.projectTitle || "—", filterType: "string", filterValue: (r) => r.projectTitle || "" },
           { header: "تعداد ردیف", render: (r) => toFaDigits(String(r.lineCount)) },
-          ...(mode === "accounting" ? [{ header: "جمع مبلغ", render: (r: ListRow) => formatAmountFa(r.totalAmount) }] : []),
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`${basePath}/${r.id}/edit`)}
-        onDelete={mode === "warehousing" ? onDelete : undefined}
+        onEdit={(r) => navigate(`/project-consumptions/${r.id}/edit`)}
+        onDelete={onDelete}
       />
     </div>
   );
 }
 
-interface RowState {
-  sourceGoodsRequestLineId: string;
-  sourceNumber: string;
-  goodsItemId: string;
-  goodsItemCode: string;
-  goodsItemTitle: string;
-  unitId: string;
-  unitTitle: string;
-  quantity: string;
-  unitCost: number;
-  amount: number;
-  description: string;
-  serialNumber: string;
-  batchNumber: string;
-  expiryDate: string;
-  physicalLocation: string;
-}
+interface RowState { sourceGoodsRequestLineId: string; sourceNumber: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; description: string; serialNumber: string; batchNumber: string; expiryDate: string; physicalLocation: string }
 
 function emptyRow(): RowState {
-  return {
-    sourceGoodsRequestLineId: "",
-    sourceNumber: "",
-    goodsItemId: "",
-    goodsItemCode: "",
-    goodsItemTitle: "",
-    unitId: "",
-    unitTitle: "",
-    quantity: "",
-    unitCost: 0,
-    amount: 0,
-    description: "",
-    serialNumber: "",
-    batchNumber: "",
-    expiryDate: "",
-    physicalLocation: "",
-  };
+  return { sourceGoodsRequestLineId: "", sourceNumber: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", description: "", serialNumber: "", batchNumber: "", expiryDate: "", physicalLocation: "" };
 }
 
-function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode: ViewMode; basePath: string }) {
+function ProjectConsumptionForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
-  const readOnly = mode === "accounting"; // نمای حسابداری انبار برای این سند کاملاً فقط‌خواندنی است — چیزی برای ویرایش در این فاز وجود ندارد
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
-  const [counterparties, setCounterparties] = useState<CounterpartyOption[]>([]);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
-  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", basis: "NO_BASIS" as Basis, warehouseId: "", counterpartyId: "", description: "" });
+  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", basis: "NO_BASIS" as Basis, warehouseId: "", projectId: "", description: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
   const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; fiscalPeriodTitle: string } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
@@ -290,18 +153,14 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
 
   useEffect(() => {
     async function init() {
-      const [whs, items, costCenters, projects]: [Warehouse[], GoodsItemRow[], CostCenterOption[], ProjectOption[]] = await Promise.all([
+      const [whs, items, projs]: [Warehouse[], GoodsItemRow[], ProjectOption[]] = await Promise.all([
         api.get("/warehouses"),
         api.get("/goods-items?kind=GOODS&docDirection=OUTBOUND&docType=مصرف"),
-        api.get("/cost-centers"),
         api.get("/projects"),
       ]);
       setWarehouses(whs);
       setGoodsItems(items);
-      setCounterparties([
-        ...costCenters.map((c): CounterpartyOption => ({ id: `cc-${c.id}`, kind: "COST_CENTER", refId: c.id, code: c.detailCode, title: c.title })),
-        ...projects.filter((p) => p.isActive).map((p): CounterpartyOption => ({ id: `proj-${p.id}`, kind: "PROJECT", refId: p.id, code: String(p.code), title: p.title })),
-      ]);
+      setProjects(projs);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
         setLoaded(true);
@@ -309,15 +168,9 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
       }
 
       if (editId) {
-        const d: Detail = await api.get(`/warehouse-issues/${editId}`);
+        const d: Detail = await api.get(`/project-consumptions/${editId}`);
         setMeta({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle });
-        setHeader({
-          date: d.date.slice(0, 10),
-          basis: d.basis,
-          warehouseId: String(d.warehouseId),
-          counterpartyId: d.costCenterId ? `cc-${d.costCenterId}` : d.projectId ? `proj-${d.projectId}` : "",
-          description: d.description || "",
-        });
+        setHeader({ date: d.date.slice(0, 10), basis: d.basis, warehouseId: String(d.warehouseId), projectId: d.projectId ? String(d.projectId) : "", description: d.description || "" });
         setRows(
           d.lines.map((l) => ({
             sourceGoodsRequestLineId: l.sourceGoodsRequestLineId ? String(l.sourceGoodsRequestLineId) : "",
@@ -328,8 +181,6 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
             unitId: String(l.unitId),
             unitTitle: l.unitTitle,
             quantity: String(l.quantity),
-            unitCost: l.unitCost,
-            amount: l.amount,
             description: l.description || "",
             serialNumber: l.serialNumber || "",
             batchNumber: l.batchNumber || "",
@@ -338,7 +189,7 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
           }))
         );
       } else {
-        setHeader({ date: "", basis: "NO_BASIS", warehouseId: "", counterpartyId: "", description: "" });
+        setHeader({ date: "", basis: "NO_BASIS", warehouseId: "", projectId: "", description: "" });
         setRows([emptyRow()]);
         setMeta(null);
       }
@@ -354,26 +205,22 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
       return;
     }
     const q = header.date ? `?destDate=${header.date}` : "";
-    api
-      .get(`/warehouse-issues/pickable-goods-request-lines${q}`)
-      .then((rows: PickableLine[]) => setPickableLines(rows))
-      .catch(() => setPickableLines([]));
+    api.get(`/project-consumptions/pickable-goods-request-lines${q}`).then(setPickableLines).catch(() => setPickableLines([]));
   }, [header.basis, header.date]);
 
   const status: DocStatus = meta?.status || "DRAFT";
   const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceGoodsRequestLineId);
-  const coreDisabled = readOnly || (!!editId && status !== "DRAFT");
+  const coreDisabled = !!editId && status !== "DRAFT";
   const headerBasisDisabled = coreDisabled || hasAnyLine;
 
   function updateRow(idx: number, patch: Partial<RowState>) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
 
-  function onSourceLineChange(idx: number, sourceLineId: string) {
-    if (header.basis === "NO_BASIS") return;
-    const src = pickableLines.find((l) => String(l.sourceGoodsRequestLineId) === sourceLineId);
+  function onSourceLineChange(idx: number, sourceGoodsRequestLineId: string) {
+    const src = pickableLines.find((l) => String(l.sourceGoodsRequestLineId) === sourceGoodsRequestLineId);
     updateRow(idx, {
-      sourceGoodsRequestLineId: sourceLineId,
+      sourceGoodsRequestLineId,
       sourceNumber: src ? String(src.number) : "",
       goodsItemId: src ? String(src.goodsItemId) : "",
       goodsItemCode: src ? src.goodsItemCode : "",
@@ -397,17 +244,14 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
   }
 
   const totalQuantity = rows.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
-  const totalAmount = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
 
   function buildBody() {
     const nonEmptyRows = rows.filter((r) => r.goodsItemId || r.sourceGoodsRequestLineId);
-    const counterparty = counterparties.find((c) => c.id === header.counterpartyId);
     return {
       date: header.date,
       basis: header.basis,
       warehouseId: Number(header.warehouseId),
-      costCenterId: counterparty?.kind === "COST_CENTER" ? counterparty.refId : null,
-      projectId: counterparty?.kind === "PROJECT" ? counterparty.refId : null,
+      projectId: header.projectId ? Number(header.projectId) : null,
       description: header.description,
       lines: nonEmptyRows.map((r) => ({
         sourceGoodsRequestLineId: r.sourceGoodsRequestLineId ? Number(r.sourceGoodsRequestLineId) : null,
@@ -425,13 +269,12 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (readOnly) return;
     setError(null);
     if (!header.date) return setError("تاریخ الزامی است");
     if (!header.warehouseId) return setError("انبار الزامی است");
-    if (!header.counterpartyId) return setError("طرف مقابل (مرکز هزینه یا پروژه) الزامی است");
+    if (!header.projectId) return setError("پروژه الزامی است");
     const body = buildBody();
-    if (body.lines.length === 0) return setError("حواله انبار باید حداقل یک ردیف کالا داشته باشد");
+    if (body.lines.length === 0) return setError("سند مصرف پروژه باید حداقل یک ردیف کالا داشته باشد");
     for (const [i, l] of body.lines.entries()) {
       if (header.basis === "GOODS_REQUEST" && !l.sourceGoodsRequestLineId) return setError(`ردیف ${i + 1}: انتخاب ردیف درخواست کالا الزامی است`);
       if (header.basis === "NO_BASIS" && !l.goodsItemId) return setError(`کالا برای ردیف ${i + 1} الزامی است`);
@@ -439,12 +282,12 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
     }
     try {
       if (editId) {
-        await api.put(`/warehouse-issues/${editId}`, body);
+        await api.put(`/project-consumptions/${editId}`, body);
         flash();
       } else {
-        const created = await api.post("/warehouse-issues", body);
+        const created = await api.post("/project-consumptions", body);
         flash();
-        navigate(`${basePath}/${created.id}/edit`);
+        navigate(`/project-consumptions/${created.id}/edit`);
       }
     } catch (err) {
       setError((err as ApiError).message);
@@ -452,10 +295,10 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
   }
 
   async function handleDelete() {
-    if (!editId || readOnly) return;
+    if (!editId) return;
     try {
-      await api.del(`/warehouse-issues/${editId}`);
-      navigate(basePath);
+      await api.del(`/project-consumptions/${editId}`);
+      navigate("/project-consumptions");
     } catch (e) {
       alert((e as ApiError).message);
     }
@@ -464,7 +307,7 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
   async function handleFinalize() {
     if (!editId) return;
     try {
-      await api.post(`/warehouse-issues/${editId}/finalize`, {});
+      await api.post(`/project-consumptions/${editId}/finalize`, {});
       setMeta((prev) => (prev ? { ...prev, status: "FINALIZED" } : prev));
       flash();
     } catch (e) {
@@ -475,7 +318,7 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
   async function handleRevert() {
     if (!editId) return;
     try {
-      await api.post(`/warehouse-issues/${editId}/revert`, {});
+      await api.post(`/project-consumptions/${editId}/revert`, {});
       setMeta((prev) => (prev ? { ...prev, status: "DRAFT" } : prev));
       flash();
     } catch (e) {
@@ -487,28 +330,25 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
 
   const selectedWarehouseStillListed = warehouses.some((w) => String(w.id) === header.warehouseId);
   const warehouseOptions = warehouses.filter((w) => w.isActive || String(w.id) === header.warehouseId);
-  const selectedCounterparty = counterparties.find((c) => c.id === header.counterpartyId);
   const hasSourceColumn = header.basis !== "NO_BASIS";
 
   return (
     <FormPage
-      title={editId ? "ویرایش حواله انبار" : "حواله انبار جدید"}
+      title={editId ? "ویرایش مصرف پروژه" : "مصرف پروژه جدید"}
       description={
-        readOnly
-          ? "این نما («حسابداری انبار») فقط نمایشی است؛ ثبت/ویرایش حواله انبار از نمای «انبارداری» انجام می‌شود."
-          : status === "FINALIZED"
+        status === "FINALIZED"
           ? "این سند «قطعی» شده و دیگر قابل ویرایش مستقیم نیست؛ برای اصلاح، ابتدا «برگشت از قطعی» را بزنید."
           : status === "VOID"
           ? "این سند «ابطال‌شده» است."
           : undefined
       }
-      formId="warehouse-issue-form"
-      closePath={basePath}
-      newPath={mode === "warehousing" ? `${basePath}/new` : undefined}
-      onDelete={!readOnly && editId && status === "DRAFT" ? handleDelete : undefined}
+      formId="project-consumption-form"
+      closePath="/project-consumptions"
+      newPath="/project-consumptions/new"
+      onDelete={editId && status === "DRAFT" ? handleDelete : undefined}
       saveDisabled={coreDisabled}
       extraActions={
-        !readOnly && meta
+        meta
           ? [
               ...(status === "DRAFT" ? [{ label: "قطعی کردن", icon: <CheckIcon />, onClick: handleFinalize }] : []),
               ...(status === "FINALIZED" ? [{ label: "برگشت از قطعی", icon: <UndoIcon />, onClick: handleRevert }] : []),
@@ -517,7 +357,7 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
       }
       wide
     >
-      <form id="warehouse-issue-form" onSubmit={onSubmit}>
+      <form id="project-consumption-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
 
@@ -557,23 +397,13 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
               </select>
             </div>
             <div className="form-field">
-              <label>طرف مقابل</label>
-              <RecordPickerField
-                title="انتخاب طرف مقابل (مرکز هزینه یا پروژه)"
-                disabled={coreDisabled}
-                displayValue={
-                  selectedCounterparty
-                    ? `${toFaDigits(selectedCounterparty.code)} — ${selectedCounterparty.title} (${selectedCounterparty.kind === "COST_CENTER" ? "مرکز هزینه" : "پروژه"})`
-                    : ""
-                }
-                rows={counterparties}
-                columns={[
-                  { header: "کد", render: (c) => toFaDigits(c.code), filterValue: (c) => c.code, width: "90px" },
-                  { header: "نوع", render: (c) => (c.kind === "COST_CENTER" ? "مرکز هزینه" : "پروژه"), filterValue: (c) => (c.kind === "COST_CENTER" ? "مرکز هزینه" : "پروژه"), width: "90px" },
-                  { header: "عنوان", render: (c) => c.title, filterValue: (c) => c.title },
-                ]}
-                onSelect={(c) => setHeader({ ...header, counterpartyId: (c as CounterpartyOption).id })}
-              />
+              <label>پروژه</label>
+              <select value={header.projectId} onChange={(e) => setHeader({ ...header, projectId: e.target.value })} disabled={coreDisabled}>
+                <option value="">انتخاب کنید</option>
+                {projects.filter((p) => p.isActive || String(p.id) === header.projectId).map((p) => (
+                  <option key={p.id} value={p.id}>{toFaDigits(String(p.code))} — {p.title}</option>
+                ))}
+              </select>
             </div>
             <div className="form-field full">
               <label>شرح</label>
@@ -586,14 +416,12 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
             )}
           </div>
 
-          {!readOnly && (
-            <div className="je-lines-toolbar">
-              <span className="je-lines-title">ردیف‌های کالا</span>
-              <button type="button" className="toolbar-icon-btn primary" onClick={addRow} title="ردیف جدید">
-                <PlusIcon />
-              </button>
-            </div>
-          )}
+          <div className="je-lines-toolbar">
+            <span className="je-lines-title">ردیف‌های کالا</span>
+            <button type="button" className="toolbar-icon-btn primary" onClick={addRow} title="ردیف جدید">
+              <PlusIcon />
+            </button>
+          </div>
         </fieldset>
 
         <div className="grid-wrap je-lines-wrap">
@@ -610,17 +438,15 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
                   <th>تاریخ انقضا</th>
                   <th>محل فیزیکی</th>
                   <th>مقدار</th>
-                  {mode === "accounting" && <th>فی واحد</th>}
-                  {mode === "accounting" && <th>مبلغ</th>}
                   <th>شرح</th>
-                  {!readOnly && <th></th>}
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
                   const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
                   const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
-                  const src = header.basis === "GOODS_REQUEST" ? pickableLines.find((l) => String(l.sourceGoodsRequestLineId) === row.sourceGoodsRequestLineId) : undefined;
+                  const src = pickableLines.find((l) => String(l.sourceGoodsRequestLineId) === row.sourceGoodsRequestLineId);
                   const sourceDisplay = src ? `${toFaDigits(String(src.number))} — ${src.goodsItemTitle}` : row.sourceNumber ? toFaDigits(row.sourceNumber) : "";
                   return (
                     <tr key={idx}>
@@ -638,7 +464,7 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
                               { header: "کالا", render: (l) => l.goodsItemTitle, filterValue: (l) => l.goodsItemTitle },
                               { header: "مانده", render: (l) => formatAmountFa(l.remaining), filterValue: (l) => String(l.remaining), width: "90px" },
                             ]}
-                            onSelect={(l) => onSourceLineChange(idx, String((l as PickableLine).sourceGoodsRequestLineId))}
+                            onSelect={(l) => onSourceLineChange(idx, String(l.sourceGoodsRequestLineId))}
                           />
                         </td>
                       )}
@@ -671,18 +497,14 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
                       <td style={{ minWidth: 130 }}>
                         <AmountInput value={row.quantity} onChange={(v) => updateRow(idx, { quantity: v })} allowDecimal placeholder="۰" disabled={coreDisabled} />
                       </td>
-                      {mode === "accounting" && <td style={{ minWidth: 110, color: "var(--ink-soft)" }}>{formatAmountFa(row.unitCost)}</td>}
-                      {mode === "accounting" && <td style={{ minWidth: 120, color: "var(--ink-soft)" }}>{formatAmountFa(row.amount)}</td>}
                       <td style={{ minWidth: 160 }}>
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} disabled={coreDisabled} />
                       </td>
-                      {!readOnly && (
-                        <td>
-                          <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeRow(idx)} disabled={coreDisabled}>
-                            حذف
-                          </button>
-                        </td>
-                      )}
+                      <td>
+                        <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeRow(idx)} disabled={coreDisabled}>
+                          حذف
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -691,10 +513,7 @@ function WarehouseIssueForm({ editId, mode, basePath }: { editId?: number; mode:
           </div>
           <div className="grid-footer je-lines-footer">
             <span className="grid-footer-info">{rows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(rows.length))} ردیف`}</span>
-            <span className="je-lines-totals">
-              جمع مقدار: {formatAmountFa(totalQuantity)}
-              {mode === "accounting" && <> — جمع مبلغ: {formatAmountFa(totalAmount)}</>}
-            </span>
+            <span className="je-lines-totals">جمع مقدار: {formatAmountFa(totalQuantity)}</span>
           </div>
         </div>
       </form>

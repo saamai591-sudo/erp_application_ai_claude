@@ -1701,13 +1701,28 @@ model SalesDeliveryLine {
 // SalesDeliveryLine هستند) عمداً در این فاز اضافه نشده — در همان مرحله‌ی اتصال routeها اضافه می‌شود.
 // =========================================================================
 
+// طبق stockAnalysis.md بند ۳۴ («انواع عملیات انبار») — لیست کامل و مرجع. WAREHOUSE_ISSUE عمومی قدیم
+// (فاز ۲) با سه نوع اختصاصی‌تر مصرف (CENTER/PROJECT/PRODUCTION_CONSUMPTION) جایگزین شده چون بند ۳۴
+// اصلاً چنین نوع عمومی‌ای را نمی‌شناسد؛ WAREHOUSE_ADJUSTMENT (که Inventory Count Surplus/Shortage بند
+// ۳۴ را با یک مقدار امضادار در یک نوع واحد پوشش می‌دهد) از فاز ۲ بدون تغییر مانده چون بند ۴۵ صریحاً
+// می‌گوید «نوع مستقلی به نام Manual Adjustment ایجاد نمی‌شود» و تفکیک آن به دو نوع جدا فایده‌ی
+// رفتاری‌ای اضافه نمی‌کرد.
 enum InventoryDocumentType {
   INITIAL_INVENTORY
-  WAREHOUSE_RECEIPT
-  WAREHOUSE_ISSUE
-  WAREHOUSE_TRANSFER
-  WAREHOUSE_ADJUSTMENT
-  SALES_DELIVERY
+  WAREHOUSE_RECEIPT // Purchase Receipt
+  WAREHOUSE_TRANSFER // Warehouse Transfer
+  WAREHOUSE_ADJUSTMENT // Inventory Count Surplus + Shortage (یک نوع، مقدار امضادار)
+  SALES_DELIVERY // Sales Issue
+  SALES_RETURN
+  SUPPLIER_RETURN
+  PRODUCTION_RECEIPT
+  CENTER_CONSUMPTION
+  PROJECT_CONSUMPTION
+  PRODUCTION_CONSUMPTION
+  CENTER_CONSUMPTION_RETURN
+  PROJECT_CONSUMPTION_RETURN
+  PRODUCTION_CONSUMPTION_RETURN
+  FIXED_ASSET_ISSUE
 }
 
 // اجتماع WarehouseReceiptBasis + WarehouseIssueBasis + SalesDeliveryBasis — هر documentType فقط
@@ -1770,6 +1785,15 @@ model InventoryDocumentLine {
   sourceDeliveryAuthorizationLineId Int?
   sourceGoodsRequestLineId          Int?
   sourceSalesOrderLineId            Int?
+  // طبق بند ۴۰ سند: «هر برگشت باید به خروج/ورود مرتبط خود Reference داشته باشد» + کنترل
+  // ReturnedQuantity <= IssuedQuantity — این ۵ فیلد خودارجاع (self-relation روی همین جدول) دقیقاً
+  // همان قاعده را برای هر ۵ نوع سند «برگشتی» (Sales Return/Supplier Return/۳ نوع Consumption Return)
+  // پیاده می‌کنند؛ بند ۳۴ برای بقیه‌ی انواع چنین ارجاعی نمی‌خواهد.
+  sourceSalesDeliveryLineId         Int?
+  sourceWarehouseReceiptLineId      Int?
+  sourceCenterConsumptionLineId     Int?
+  sourceProjectConsumptionLineId    Int?
+  sourceProductionConsumptionLineId Int?
   document                          InventoryDocument          @relation(fields: [documentId], references: [id], onDelete: Cascade)
   goodsItem                         GoodsItem                  @relation(fields: [goodsItemId], references: [id])
   unit                              UnitOfMeasure              @relation(fields: [unitId], references: [id])
@@ -1780,6 +1804,16 @@ model InventoryDocumentLine {
   sourceDeliveryAuthorizationLine   DeliveryAuthorizationLine? @relation("InventoryLineSourceDeliveryAuthorizationLine", fields: [sourceDeliveryAuthorizationLineId], references: [id])
   sourceGoodsRequestLine            GoodsRequestLine?          @relation("InventoryLineSourceGoodsRequestLine", fields: [sourceGoodsRequestLineId], references: [id])
   sourceSalesOrderLine              SalesOrderLine?            @relation("InventoryLineSourceSalesOrderLine", fields: [sourceSalesOrderLineId], references: [id])
+  sourceSalesDeliveryLine           InventoryDocumentLine?     @relation("InventoryLineSourceSalesDeliveryLine", fields: [sourceSalesDeliveryLineId], references: [id])
+  salesReturnLines                  InventoryDocumentLine[]    @relation("InventoryLineSourceSalesDeliveryLine")
+  sourceWarehouseReceiptLine        InventoryDocumentLine?     @relation("InventoryLineSourceWarehouseReceiptLine", fields: [sourceWarehouseReceiptLineId], references: [id])
+  supplierReturnLines               InventoryDocumentLine[]    @relation("InventoryLineSourceWarehouseReceiptLine")
+  sourceCenterConsumptionLine       InventoryDocumentLine?     @relation("InventoryLineSourceCenterConsumptionLine", fields: [sourceCenterConsumptionLineId], references: [id])
+  centerConsumptionReturnLines      InventoryDocumentLine[]    @relation("InventoryLineSourceCenterConsumptionLine")
+  sourceProjectConsumptionLine      InventoryDocumentLine?     @relation("InventoryLineSourceProjectConsumptionLine", fields: [sourceProjectConsumptionLineId], references: [id])
+  projectConsumptionReturnLines     InventoryDocumentLine[]    @relation("InventoryLineSourceProjectConsumptionLine")
+  sourceProductionConsumptionLine   InventoryDocumentLine?     @relation("InventoryLineSourceProductionConsumptionLine", fields: [sourceProductionConsumptionLineId], references: [id])
+  productionConsumptionReturnLines  InventoryDocumentLine[]    @relation("InventoryLineSourceProductionConsumptionLine")
   serials                           InventoryLineSerial[]
 }
 

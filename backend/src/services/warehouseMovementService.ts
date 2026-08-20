@@ -4,7 +4,7 @@ import { prisma } from "../lib/prisma";
  * سرویس مرکزیِ نرمال‌سازیِ «گردش انبار» برای گزارش «مرور موجودی انبار» (مرور تعدادی/مبلغی).
  *
  * برخلاف warehouseStockService (که فقط یک عدد مانده در یک لحظه برمی‌گرداند)، این سرویس تمام ردیف‌های
- * قطعی‌شده‌ی هر ۶ نوع سند انبار را — تا یک تاریخ مشخص — به یک آرایه‌ی یکدست از «گردش»ها (Movement)
+ * قطعی‌شده‌ی همه‌ی انواع سند انبار (طبق بند ۳۴ stockAnalysis.md) را — تا یک تاریخ مشخص — به یک آرایه‌ی یکدست از «گردش»ها (Movement)
  * تبدیل می‌کند تا گزارش بتواند آن‌ها را بر اساس انبار/کالا/سریال/بچ/تاریخ‌انقضا/محل‌فیزیکی گروه‌بندی و
  * جمع بزند، دقیقاً مثل الگوی «مرور حسابها» (که در آن، خطوط سند حسابداری بر اساس حساب/تفصیل گروه‌بندی
  * می‌شوند).
@@ -62,10 +62,22 @@ export interface MovementFilters {
 const DOC_TYPE_FA: Record<string, string> = {
   INITIAL_INVENTORY: "موجودی اول دوره",
   WAREHOUSE_RECEIPT: "رسید انبار خرید",
-  WAREHOUSE_ISSUE: "حواله انبار",
   WAREHOUSE_ADJUSTMENT: "انبارگردانی / تعدیل موجودی",
   SALES_DELIVERY: "حواله فروش",
+  SALES_RETURN: "برگشت از فروش",
+  SUPPLIER_RETURN: "برگشت به تامین‌کننده",
+  PRODUCTION_RECEIPT: "رسید تولید",
+  CENTER_CONSUMPTION: "مصرف مرکز هزینه",
+  PROJECT_CONSUMPTION: "مصرف پروژه",
+  PRODUCTION_CONSUMPTION: "مصرف تولید",
+  CENTER_CONSUMPTION_RETURN: "برگشت مصرف مرکز هزینه",
+  PROJECT_CONSUMPTION_RETURN: "برگشت مصرف پروژه",
+  PRODUCTION_CONSUMPTION_RETURN: "برگشت مصرف تولید",
+  FIXED_ASSET_ISSUE: "حواله دارایی ثابت",
 };
+
+// دقیقاً همان جهت‌ها/علائم warehouseStockService.SIGNED_TYPES — صادره یعنی OUT
+const OUTBOUND_DOC_TYPES = new Set(["SALES_DELIVERY", "CENTER_CONSUMPTION", "PROJECT_CONSUMPTION", "PRODUCTION_CONSUMPTION", "SUPPLIER_RETURN", "FIXED_ASSET_ISSUE"]);
 
 function lineTrackingWhere(f: MovementFilters) {
   const where: any = {};
@@ -87,7 +99,25 @@ export async function getMovements(f: MovementFilters): Promise<Movement[]> {
       document: {
         status: "FINALIZED",
         date: { lte: f.toDate },
-        documentType: { in: ["INITIAL_INVENTORY", "WAREHOUSE_RECEIPT", "WAREHOUSE_ISSUE", "WAREHOUSE_TRANSFER", "WAREHOUSE_ADJUSTMENT", "SALES_DELIVERY"] },
+        documentType: {
+          in: [
+            "INITIAL_INVENTORY",
+            "WAREHOUSE_RECEIPT",
+            "WAREHOUSE_TRANSFER",
+            "WAREHOUSE_ADJUSTMENT",
+            "SALES_DELIVERY",
+            "SALES_RETURN",
+            "SUPPLIER_RETURN",
+            "PRODUCTION_RECEIPT",
+            "CENTER_CONSUMPTION",
+            "PROJECT_CONSUMPTION",
+            "PRODUCTION_CONSUMPTION",
+            "CENTER_CONSUMPTION_RETURN",
+            "PROJECT_CONSUMPTION_RETURN",
+            "PRODUCTION_CONSUMPTION_RETURN",
+            "FIXED_ASSET_ISSUE",
+          ],
+        },
       },
     },
     include: {
@@ -166,7 +196,7 @@ export async function getMovements(f: MovementFilters): Promise<Movement[]> {
       continue;
     }
 
-    const direction: MovementDirection = doc.documentType === "WAREHOUSE_ISSUE" || doc.documentType === "SALES_DELIVERY" ? "OUT" : "IN";
+    const direction: MovementDirection = OUTBOUND_DOC_TYPES.has(doc.documentType) ? "OUT" : "IN";
     movements.push({
       ...base(l),
       direction,
@@ -177,7 +207,9 @@ export async function getMovements(f: MovementFilters): Promise<Movement[]> {
       docType: DOC_TYPE_FA[doc.documentType],
       docId: doc.id,
       docNumber: doc.number,
-      ...(doc.documentType === "WAREHOUSE_RECEIPT" ? { partyCode: doc.party?.detailCode ?? null, partyTitle: partyTitle(doc.party) } : {}),
+      ...(doc.documentType === "WAREHOUSE_RECEIPT" || doc.documentType === "SUPPLIER_RETURN"
+        ? { partyCode: doc.party?.detailCode ?? null, partyTitle: partyTitle(doc.party) }
+        : {}),
     });
   }
 

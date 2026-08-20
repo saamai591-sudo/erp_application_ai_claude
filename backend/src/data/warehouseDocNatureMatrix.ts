@@ -80,6 +80,14 @@ export const WAREHOUSE_DOC_NATURE_MATRIX: WarehouseDocNatureRule[] = [
   { direction: "INBOUND", type: "دریافت از پیمانکار", allowedGoodsTypes: ["SEMI_FINISHED", "PRODUCT", "FIXED_ASSET", "TRADE_GOODS"] },
   { direction: "INBOUND", type: "کارمزدی", allowedGoodsTypes: ["CONTRACT_GOODS"] },
   { direction: "INBOUND", type: "دوباره کاری", allowedGoodsTypes: ["PRODUCT"] },
+  // ۵ ردیف زیر در مستند مبدا «نوع کالا-ماهیت سند انبار» وجود ندارند (آن مستند فقط ۶ نوع سند اول‌ساخته‌شده
+  // را می‌شناخت) — طبق بند ۳۴ stockAnalysis.md که این ۵ عملیات را هم به فهرست انواع سند انبار اضافه کرد،
+  // با آینه‌ی همان انواع کالای مجازِ عملیاتِ مستقیم متناظرشان تکمیل شدند (یک برگشت نمی‌تواند نوع کالایی
+  // را برگرداند که در عملیات مستقیم مجاز به خروج/ورود نبوده)
+  { direction: "INBOUND", type: "برگشت از فروش", allowedGoodsTypes: ["RAW_MATERIAL", "SEMI_FINISHED", "PRODUCT", "TRADE_GOODS", "SUPPLIES"] },
+  { direction: "INBOUND", type: "برگشت مصرف مرکز هزینه", allowedGoodsTypes: ["RAW_MATERIAL", "TRADE_GOODS", "SUPPLIES"] },
+  { direction: "INBOUND", type: "برگشت مصرف پروژه", allowedGoodsTypes: ["RAW_MATERIAL", "TRADE_GOODS", "SUPPLIES"] },
+  { direction: "INBOUND", type: "برگشت مصرف تولید", allowedGoodsTypes: ["RAW_MATERIAL", "TRADE_GOODS", "SUPPLIES"] },
 
   // ----------------------------------------------------------------- صادره
   { direction: "OUTBOUND", type: "فروش", allowedGoodsTypes: ["RAW_MATERIAL", "SEMI_FINISHED", "PRODUCT", "TRADE_GOODS", "SUPPLIES"] },
@@ -97,6 +105,8 @@ export const WAREHOUSE_DOC_NATURE_MATRIX: WarehouseDocNatureRule[] = [
   { direction: "OUTBOUND", type: "مصرف کارمزدی", allowedGoodsTypes: ["CONTRACT_GOODS"] },
   { direction: "OUTBOUND", type: "مصرف دارایی ثابت", allowedGoodsTypes: ["RAW_MATERIAL", "SEMI_FINISHED", "PRODUCT", "TRADE_GOODS", "SUPPLIES"] },
   { direction: "OUTBOUND", type: "حواله دوباره کاری", allowedGoodsTypes: ["PRODUCT"] },
+  // مثل ۵ ردیف INBOUND بالا — در مستند مبدا نبود، طبق بند ۳۴ اضافه شد
+  { direction: "OUTBOUND", type: "برگشت به تامین‌کننده", allowedGoodsTypes: ["RAW_MATERIAL", "PRODUCT", "FIXED_ASSET", "TRADE_GOODS", "SUPPLIES"] },
 ];
 
 /** برای انتخاب سریع مقادیر معتبر «نوع» به ازای هر ماهیت (مثلاً برای ساخت select در ماژول‌های آینده) */
