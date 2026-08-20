@@ -4,6 +4,7 @@ import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertNoNegativeStockAfterChange } from "../services/warehouseStockService";
 import { isGoodsItemAllowedForDocNature } from "../services/warehouseDocGoodsFilterService";
 import { validateTrackingFields, resolveTrackingRefs, recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
+import { assertWarehouseOpenForDate } from "../services/inventoryClosingService";
 
 // =========================================================================
 // ماژول‌های «انبارداری» / «حسابداری انبار» > ساب‌ماژول: عملیات > رسید انبار خرید
@@ -75,6 +76,7 @@ async function validateWarehouseAndPeriod(warehouseId: number, date: Date) {
   if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
 
   await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
+  await assertWarehouseOpenForDate(warehouseId, date);
 
   return { warehouse, fiscalPeriod };
 }
@@ -493,6 +495,11 @@ router.put("/warehouse-receipts/:id", async (req, res) => {
   const existing = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "WAREHOUSE_RECEIPT" } });
   if (!existing) return res.status(404).json({ error: "رسید انبار یافت نشد" });
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل ویرایش هستند؛ ابتدا از «قطعی» برگردانید" });
+  try {
+    await assertWarehouseOpenForDate(existing.warehouseId!, existing.date);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
 
   if (!body.warehouseId || !body.date) return res.status(400).json({ error: "انبار و تاریخ سند الزامی است" });
   if (!body.basis) return res.status(400).json({ error: "مبنا الزامی است" });
@@ -550,6 +557,11 @@ router.delete("/warehouse-receipts/:id", async (req, res) => {
   const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "WAREHOUSE_RECEIPT" } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «قطعی» برگردانید" });
+  try {
+    await assertWarehouseOpenForDate(d.warehouseId!, d.date);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
   await prisma.inventoryDocument.delete({ where: { id } });
   res.status(204).send();
 });
@@ -586,6 +598,8 @@ router.post("/warehouse-receipts/:id/revert", async (req, res) => {
   if (d.status !== "FINALIZED") return res.status(400).json({ error: "فقط اسناد «قطعی» قابل برگشت هستند" });
 
   try {
+    await assertWarehouseOpenForDate(d.warehouseId!, d.date);
+
     for (const l of d.lines) {
       // eslint-disable-next-line no-await-in-loop
       // توجه: سند در این لحظه هنوز «قطعی» است (پیش‌شرط بالا)، پس قبلاً در محاسبه‌ی موجودی جاری لحاظ

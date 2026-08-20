@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertNoNegativeStockAfterChange } from "../services/warehouseStockService";
 import { validateTrackingFields, resolveTrackingRefs, recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
+import { assertWarehouseOpenForDate } from "../services/inventoryClosingService";
 
 // طبق stockAnalysis.md (فاز ۲): روی جدول یکپارچه‌ی InventoryDocument/InventoryDocumentLine
 // (documentType=INITIAL_INVENTORY) ذخیره می‌شود — نگاه کنید به یادداشت بالای warehouseReceipts.ts.
@@ -83,6 +84,7 @@ async function validateWarehouseAndPeriod(warehouseId: number, date: Date) {
   if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
 
   await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
+  await assertWarehouseOpenForDate(warehouseId, date);
 
   return { warehouse, fiscalPeriod };
 }
@@ -223,6 +225,11 @@ router.put("/:id", async (req, res) => {
   if (!existing) return res.status(404).json({ error: "سند موجودی اول دوره یافت نشد" });
   if (existing.creationType === "SYSTEM") return res.status(400).json({ error: "این سند سیستمی است و از این فرم قابل ویرایش نیست" });
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل ویرایش هستند؛ ابتدا از «قطعی» برگردانید" });
+  try {
+    await assertWarehouseOpenForDate(existing.warehouseId!, existing.date);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
 
   if (!body.warehouseId || !body.date) return res.status(400).json({ error: "انبار و تاریخ سند الزامی است" });
 
@@ -297,6 +304,7 @@ router.put("/:id/accounting", async (req, res) => {
 
   try {
     await assertDateNotConfirmed(prisma, existing.date, existing.fiscalPeriodId);
+    await assertWarehouseOpenForDate(existing.warehouseId!, existing.date);
     const decimalPlaces = await getBaseCurrencyDecimalPlaces();
 
     const existingLineIds = new Set(existing.lines.map((l: any) => l.id));
@@ -334,6 +342,11 @@ router.delete("/:id", async (req, res) => {
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.creationType === "SYSTEM") return res.status(400).json({ error: "این سند سیستمی است و از این فرم قابل حذف نیست" });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «قطعی» برگردانید" });
+  try {
+    await assertWarehouseOpenForDate(d.warehouseId!, d.date);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
   await prisma.inventoryDocument.delete({ where: { id } });
   res.status(204).send();
 });
@@ -374,6 +387,8 @@ router.post("/:id/revert", async (req, res) => {
   if (d.status !== "FINALIZED") return res.status(400).json({ error: "فقط اسناد «قطعی» قابل برگشت هستند" });
 
   try {
+    await assertWarehouseOpenForDate(d.warehouseId!, d.date);
+
     for (const l of d.lines) {
       // eslint-disable-next-line no-await-in-loop
       // توجه: سند در این لحظه هنوز «قطعی» است (پیش‌شرط بالا)، پس قبلاً در محاسبه‌ی موجودی جاری لحاظ

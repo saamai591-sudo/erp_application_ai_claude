@@ -129,6 +129,7 @@ export const MODULES: ModuleGroup[] = [
           { key: "warehousing-warehouse-issues", label: "حواله انبار", list: "/warehousing/warehouse-issues", create: "/warehousing/warehouse-issues/new", icon: "file" },
           { key: "warehousing-warehouse-transfers", label: "انتقال بین انبارها", list: "/warehousing/warehouse-transfers", create: "/warehousing/warehouse-transfers/new", icon: "sitemap" },
           { key: "warehousing-warehouse-adjustments", label: "انبارگردانی / تعدیل موجودی", list: "/warehousing/warehouse-adjustments", create: "/warehousing/warehouse-adjustments/new", icon: "ledger" },
+          { key: "warehousing-inventory-closing", label: "بستن موجودی انبار", list: "/warehousing/inventory-closing", icon: "shield" },
         ],
       },
       {

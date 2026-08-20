@@ -48,6 +48,7 @@ import WarehouseReceipts from "./pages/WarehouseReceipts";
 import WarehouseIssues from "./pages/WarehouseIssues";
 import WarehouseTransfers from "./pages/WarehouseTransfers";
 import WarehouseAdjustments from "./pages/WarehouseAdjustments";
+import InventoryClosing from "./pages/InventoryClosing";
 import GoodsRequests from "./pages/GoodsRequests";
 import SupplyRequests from "./pages/SupplyRequests";
 import Suppliers from "./pages/Suppliers";
@@ -235,6 +236,8 @@ export default function App() {
             <Route path="/warehouse-accounting/warehouse-adjustments" element={<WarehouseAdjustments mode="accounting" />} />
             <Route path="/warehouse-accounting/warehouse-adjustments/new" element={<WarehouseAdjustments mode="accounting" />} />
             <Route path="/warehouse-accounting/warehouse-adjustments/:id/edit" element={<WarehouseAdjustments mode="accounting" />} />
+
+            <Route path="/warehousing/inventory-closing" element={<InventoryClosing />} />
 
             <Route path="/goods-requests" element={<GoodsRequests />} />
             <Route path="/goods-requests/new" element={<GoodsRequests />} />

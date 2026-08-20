@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertNoNegativeStockAfterChange } from "../services/warehouseStockService";
 import { validateTrackingFields, resolveTrackingRefs, recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
+import { assertWarehouseOpenForDate } from "../services/inventoryClosingService";
 
 // =========================================================================
 // ماژول‌های «انبارداری» / «حسابداری انبار» > ساب‌ماژول: عملیات > انتقال بین انبارها
@@ -54,6 +55,7 @@ async function validateWarehousesAndPeriod(sourceWarehouseId: number, destWareho
   if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
 
   await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
+  await Promise.all([assertWarehouseOpenForDate(sourceWarehouseId, date), assertWarehouseOpenForDate(destWarehouseId, date)]);
 
   return { sourceWarehouse, destWarehouse, fiscalPeriod };
 }
@@ -241,6 +243,14 @@ router.put("/warehouse-transfers/:id", async (req, res) => {
   const existing = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "WAREHOUSE_TRANSFER" } });
   if (!existing) return res.status(404).json({ error: "انتقال بین انبار یافت نشد" });
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل ویرایش هستند؛ ابتدا از «قطعی» برگردانید" });
+  try {
+    await Promise.all([
+      assertWarehouseOpenForDate(existing.sourceWarehouseId!, existing.date),
+      assertWarehouseOpenForDate(existing.destWarehouseId!, existing.date),
+    ]);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
 
   if (!body.sourceWarehouseId || !body.destWarehouseId || !body.date) {
     return res.status(400).json({ error: "انبار مبدا، انبار مقصد و تاریخ سند الزامی است" });
@@ -291,6 +301,11 @@ router.delete("/warehouse-transfers/:id", async (req, res) => {
   const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "WAREHOUSE_TRANSFER" } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «قطعی» برگردانید" });
+  try {
+    await Promise.all([assertWarehouseOpenForDate(d.sourceWarehouseId!, d.date), assertWarehouseOpenForDate(d.destWarehouseId!, d.date)]);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
   await prisma.inventoryDocument.delete({ where: { id } });
   res.status(204).send();
 });
@@ -349,6 +364,8 @@ router.post("/warehouse-transfers/:id/revert", async (req, res) => {
   if (d.status !== "FINALIZED") return res.status(400).json({ error: "فقط اسناد «قطعی» قابل برگشت هستند" });
 
   try {
+    await Promise.all([assertWarehouseOpenForDate(d.sourceWarehouseId!, d.date), assertWarehouseOpenForDate(d.destWarehouseId!, d.date)]);
+
     if (d.destWarehouse!.stockControl) {
       for (const l of d.lines) {
         // eslint-disable-next-line no-await-in-loop
