@@ -37,25 +37,27 @@ model RolePermission {
 }
 
 model User {
-  id                       Int               @id @default(autoincrement())
-  code                     Int               @unique
-  mobile                   String            @unique @db.VarChar(10)
+  id                       Int                     @id @default(autoincrement())
+  code                     Int                     @unique
+  mobile                   String                  @unique @db.VarChar(10)
   firstName                String
   lastName                 String
-  isActive                 Boolean           @default(true)
+  isActive                 Boolean                 @default(true)
   passwordHash             String
-  createdAt                DateTime          @default(now())
-  updatedAt                DateTime          @updatedAt
-  hasTransactions          Boolean           @default(false)
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @updatedAt
+  hasTransactions          Boolean                 @default(false)
   partyId                  Int?
-  goodsRequestsApproved    GoodsRequest[]    @relation("GoodsRequestApprover")
-  goodsRequestsReviewed    GoodsRequest[]    @relation("GoodsRequestReviewer")
-  purchaseRequestsApproved PurchaseRequest[] @relation("PurchaseRequestApprover")
-  purchaseRequestsReviewed PurchaseRequest[] @relation("PurchaseRequestReviewer")
-  supplyRequestsApproved   SupplyRequest[]   @relation("SupplyRequestApprover")
-  supplyRequestsReviewed   SupplyRequest[]   @relation("SupplyRequestReviewer")
-  party                    Party?            @relation(fields: [partyId], references: [id])
+  goodsRequestsApproved    GoodsRequest[]          @relation("GoodsRequestApprover")
+  goodsRequestsReviewed    GoodsRequest[]          @relation("GoodsRequestReviewer")
+  purchaseRequestsApproved PurchaseRequest[]       @relation("PurchaseRequestApprover")
+  purchaseRequestsReviewed PurchaseRequest[]       @relation("PurchaseRequestReviewer")
+  supplyRequestsApproved   SupplyRequest[]         @relation("SupplyRequestApprover")
+  supplyRequestsReviewed   SupplyRequest[]         @relation("SupplyRequestReviewer")
+  party                    Party?                  @relation(fields: [partyId], references: [id])
   roles                    UserRole[]
+  inventoryClosings        InventoryClosing[]
+  inventoryClosingAudits   InventoryClosingAudit[]
 }
 
 model UserRole {
@@ -557,30 +559,32 @@ model WarehouseGroup {
 }
 
 model Warehouse {
-  id                         Int                   @id @default(autoincrement())
-  code                       Int                   @unique
-  title                      String                @unique
+  id                         Int                     @id @default(autoincrement())
+  code                       Int                     @unique
+  title                      String                  @unique
   warehouseGroupId           Int
   address                    String?
   phone                      String?
   managerId                  Int?
-  stockControl               Boolean               @default(true)
-  isActive                   Boolean               @default(true)
-  hasTransactions            Boolean               @default(false)
-  createdAt                  DateTime              @default(now())
+  stockControl               Boolean                 @default(true)
+  isActive                   Boolean                 @default(true)
+  hasTransactions            Boolean                 @default(false)
+  createdAt                  DateTime                @default(now())
   initialInventories         InitialInventory[]
   salesDeliveries            SalesDelivery[]
-  manager                    Party?                @relation("WarehouseManager", fields: [managerId], references: [id])
-  warehouseGroup             WarehouseGroup        @relation(fields: [warehouseGroupId], references: [id])
+  manager                    Party?                  @relation("WarehouseManager", fields: [managerId], references: [id])
+  warehouseGroup             WarehouseGroup          @relation(fields: [warehouseGroupId], references: [id])
   warehouseAdjustments       WarehouseAdjustment[]
   warehouseIssues            WarehouseIssue[]
   warehouseReceipts          WarehouseReceipt[]
-  warehouseTransfersAsDest   WarehouseTransfer[]   @relation("WarehouseTransferDest")
-  warehouseTransfersAsSource WarehouseTransfer[]   @relation("WarehouseTransferSource")
+  warehouseTransfersAsDest   WarehouseTransfer[]     @relation("WarehouseTransferDest")
+  warehouseTransfersAsSource WarehouseTransfer[]     @relation("WarehouseTransferSource")
   physicalLocations          PhysicalLocation[]
-  inventoryDocuments         InventoryDocument[]   @relation("InventoryDocWarehouse")
-  inventoryDocsAsSource      InventoryDocument[]   @relation("InventoryDocSourceWarehouse")
-  inventoryDocsAsDest        InventoryDocument[]   @relation("InventoryDocDestWarehouse")
+  inventoryDocuments         InventoryDocument[]     @relation("InventoryDocWarehouse")
+  inventoryDocsAsSource      InventoryDocument[]     @relation("InventoryDocSourceWarehouse")
+  inventoryDocsAsDest        InventoryDocument[]     @relation("InventoryDocDestWarehouse")
+  inventoryClosings          InventoryClosing[]
+  inventoryClosingAudits     InventoryClosingAudit[]
 }
 
 // درخت محل فیزیکی — طبق stockAnalysis.md بند ۲۱: هر انبار درخت محل فیزیکی مستقل خودش را دارد
@@ -599,6 +603,7 @@ model PhysicalLocation {
   parent          PhysicalLocation?       @relation("PhysicalLocationTree", fields: [parentId], references: [id])
   children        PhysicalLocation[]      @relation("PhysicalLocationTree")
   inventoryLines  InventoryDocumentLine[]
+  closingLines    InventoryClosingLine[]
 
   @@unique([warehouseId, parentId, code])
 }
@@ -727,6 +732,7 @@ model GoodsItem {
   batches                       Batch[]
   serials                       Serial[]
   inventoryDocumentLines        InventoryDocumentLine[]
+  inventoryClosingLines         InventoryClosingLine[]
 
   @@unique([goodsGroupId, code])
 }
@@ -762,6 +768,7 @@ model Batch {
   goodsItem             GoodsItem               @relation(fields: [goodsItemId], references: [id])
   supplier              Party?                  @relation("BatchSupplier", fields: [supplierId], references: [id])
   inventoryLines        InventoryDocumentLine[]
+  closingLines          InventoryClosingLine[]
 
   @@unique([goodsItemId, batchNumber])
 }
@@ -770,15 +777,16 @@ model Batch {
 // سریال‌های موجود را برای هر سطر سند انتخاب/مصرف می‌کند (از طریق جدول واسط InventoryLineSerial که
 // در فاز اتصال به اسناد انبار اضافه می‌شود، نه اینجا).
 model Serial {
-  id              Int                   @id @default(autoincrement())
+  id              Int                    @id @default(autoincrement())
   goodsItemId     Int
   serialNumber    String
   description     String?
-  isActive        Boolean               @default(true)
-  hasTransactions Boolean               @default(false)
-  createdAt       DateTime              @default(now())
-  goodsItem       GoodsItem             @relation(fields: [goodsItemId], references: [id])
+  isActive        Boolean                @default(true)
+  hasTransactions Boolean                @default(false)
+  createdAt       DateTime               @default(now())
+  goodsItem       GoodsItem              @relation(fields: [goodsItemId], references: [id])
   lines           InventoryLineSerial[]
+  closingLines    InventoryClosingLine[]
 
   @@unique([goodsItemId, serialNumber])
 }
@@ -1784,6 +1792,60 @@ model InventoryLineSerial {
   serial   Serial                @relation(fields: [serialId], references: [id])
 
   @@unique([lineId, serialId])
+}
+
+// طبق stockAnalysis.md (فاز ۴، بند ۴-۹): بستن موجودی هر انبار مستقل است — هدف Snapshot گرفتن موجودی
+// تا یک تاریخ و جلوگیری از تغییر اسناد آن دوره است، نه غیرفعال‌کردن انبار. آخرین ردیف هر انبار (بر
+// اساس closingDate) همان Closing جاری آن انبار است؛ Rollback یک ردیف Closing جدید با تاریخ قدیمی‌تر
+// اضافه می‌کند (هرگز ردیف قبلی را ویرایش/حذف نمی‌کند) تا تاریخچه حفظ شود (بند ۵۹).
+model InventoryClosing {
+  id          Int                    @id @default(autoincrement())
+  warehouseId Int
+  closingDate DateTime               @db.Date
+  closedAt    DateTime               @default(now())
+  createdById Int?
+  warehouse   Warehouse              @relation(fields: [warehouseId], references: [id])
+  createdBy   User?                  @relation(fields: [createdById], references: [id])
+  lines       InventoryClosingLine[]
+
+  @@index([warehouseId, closingDate])
+}
+
+// بند ۷: Quantity مقدار موجودی واقعی محاسبه‌شده در لحظه‌ی Closing است، به تفکیک تمام Dimensionهای
+// فعال (بند ۸) — PhysicalLocationId/BatchId/SerialId هر کدام فقط وقتی کالا آن Dimension را دارد پر
+// می‌شوند، وگرنه null (دقیقاً مثل خود InventoryDocumentLine).
+model InventoryClosingLine {
+  id                 Int               @id @default(autoincrement())
+  closingId          Int
+  goodsItemId        Int
+  physicalLocationId Int?
+  batchId            Int?
+  serialId           Int?
+  quantity           Decimal           @db.Decimal(36, 10)
+  closing            InventoryClosing  @relation(fields: [closingId], references: [id], onDelete: Cascade)
+  goodsItem          GoodsItem         @relation(fields: [goodsItemId], references: [id])
+  physicalLocation   PhysicalLocation? @relation(fields: [physicalLocationId], references: [id])
+  batch              Batch?            @relation(fields: [batchId], references: [id])
+  serial             Serial?           @relation(fields: [serialId], references: [id])
+}
+
+enum InventoryClosingAction {
+  CLOSE
+  ROLLBACK
+}
+
+// بند ۵۸: تمام عملیات Closing و Rollback باید Audit شوند (بدون امکان ویرایش/حذف — فقط Insert).
+model InventoryClosingAudit {
+  id             Int                    @id @default(autoincrement())
+  action         InventoryClosingAction
+  warehouseId    Int
+  oldClosingDate DateTime?              @db.Date
+  newClosingDate DateTime               @db.Date
+  reason         String?
+  userId         Int?
+  actionAt       DateTime               @default(now())
+  warehouse      Warehouse              @relation(fields: [warehouseId], references: [id])
+  user           User?                  @relation(fields: [userId], references: [id])
 }
 
 model SalesInvoice {
