@@ -32,6 +32,9 @@ import OlapReports from "./pages/OlapReports";
 import UnitsOfMeasure from "./pages/UnitsOfMeasure";
 import WarehouseGroups from "./pages/WarehouseGroups";
 import Warehouses from "./pages/Warehouses";
+import PhysicalLocations from "./pages/PhysicalLocations";
+import Batches from "./pages/Batches";
+import Serials from "./pages/Serials";
 import GoodsGroupLevels from "./pages/GoodsGroupLevels";
 import GoodsGroups from "./pages/GoodsGroups";
 import GoodsAttributes from "./pages/GoodsAttributes";
@@ -164,6 +167,13 @@ export default function App() {
             <Route path="/warehouses" element={<Warehouses />} />
             <Route path="/warehouses/new" element={<Warehouses />} />
             <Route path="/warehouses/:id/edit" element={<Warehouses />} />
+            <Route path="/physical-locations" element={<PhysicalLocations />} />
+            <Route path="/batches" element={<Batches />} />
+            <Route path="/batches/new" element={<Batches />} />
+            <Route path="/batches/:id/edit" element={<Batches />} />
+            <Route path="/serials" element={<Serials />} />
+            <Route path="/serials/new" element={<Serials />} />
+            <Route path="/serials/:id/edit" element={<Serials />} />
             <Route path="/goods-group-levels" element={<GoodsGroupLevels />} />
             <Route path="/goods-group-levels/new" element={<GoodsGroupLevels />} />
             <Route path="/goods-group-levels/:id/edit" element={<GoodsGroupLevels />} />

@@ -104,41 +104,41 @@ model ExchangeRate {
 }
 
 model FiscalPeriod {
-  id                     Int                     @id @default(autoincrement())
-  code                   String                  @unique
-  title                  String                  @unique @db.VarChar(4)
-  fromDate               DateTime                @db.Date
-  toDate                 DateTime                @db.Date
-  hasTransactions        Boolean                 @default(false)
-  createdAt              DateTime                @default(now())
-  accountClosings        AccountClosing[]
-  chequeDeposits         ChequeDeposit[]
-  chequeDepositReturns   ChequeDepositReturn[]
+  id                        Int                        @id @default(autoincrement())
+  code                      String                     @unique
+  title                     String                     @unique @db.VarChar(4)
+  fromDate                  DateTime                   @db.Date
+  toDate                    DateTime                   @db.Date
+  hasTransactions           Boolean                    @default(false)
+  createdAt                 DateTime                   @default(now())
+  accountClosings           AccountClosing[]
+  chequeDeposits            ChequeDeposit[]
+  chequeDepositReturns      ChequeDepositReturn[]
   chequeClearingReceivables ChequeClearingReceivable[]
-  chequeClearingPayables ChequeClearingPayable[]
-  deliveryAuthorizations DeliveryAuthorization[]
-  goodsRequests          GoodsRequest[]
-  initialInventories     InitialInventory[]
-  inquiryAuthorizations  InquiryAuthorization[]
-  inquiryEvaluations     InquiryEvaluation[]
-  journalEntries         JournalEntry[]
-  openingClosingEntries  OpeningClosingEntry[]
-  payments               Payment[]
-  priceInquiries         PriceInquiry[]
-  purchaseInvoices       PurchaseInvoice[]
-  purchaseOrders         PurchaseOrder[]
-  purchasePlannings      PurchasePlanning[]
-  purchaseRequests       PurchaseRequest[]
-  receipts               Receipt[]
-  salesDeliveries        SalesDelivery[]
-  salesInvoices          SalesInvoice[]
-  salesOrders            SalesOrder[]
-  salesQuotes            SalesQuote[]
-  supplyRequests         SupplyRequest[]
-  warehouseAdjustments   WarehouseAdjustment[]
-  warehouseIssues        WarehouseIssue[]
-  warehouseReceipts      WarehouseReceipt[]
-  warehouseTransfers     WarehouseTransfer[]
+  chequeClearingPayables    ChequeClearingPayable[]
+  deliveryAuthorizations    DeliveryAuthorization[]
+  goodsRequests             GoodsRequest[]
+  initialInventories        InitialInventory[]
+  inquiryAuthorizations     InquiryAuthorization[]
+  inquiryEvaluations        InquiryEvaluation[]
+  journalEntries            JournalEntry[]
+  openingClosingEntries     OpeningClosingEntry[]
+  payments                  Payment[]
+  priceInquiries            PriceInquiry[]
+  purchaseInvoices          PurchaseInvoice[]
+  purchaseOrders            PurchaseOrder[]
+  purchasePlannings         PurchasePlanning[]
+  purchaseRequests          PurchaseRequest[]
+  receipts                  Receipt[]
+  salesDeliveries           SalesDelivery[]
+  salesInvoices             SalesInvoice[]
+  salesOrders               SalesOrder[]
+  salesQuotes               SalesQuote[]
+  supplyRequests            SupplyRequest[]
+  warehouseAdjustments      WarehouseAdjustment[]
+  warehouseIssues           WarehouseIssue[]
+  warehouseReceipts         WarehouseReceipt[]
+  warehouseTransfers        WarehouseTransfer[]
 }
 
 model OrgStructure {
@@ -222,6 +222,7 @@ model Party {
   users              User[]
   warehousesManaged  Warehouse[]        @relation("WarehouseManager")
   warehouseReceipts  WarehouseReceipt[]
+  batchesAsSupplier  Batch[]            @relation("BatchSupplier")
 }
 
 model PartyAddress {
@@ -572,6 +573,26 @@ model Warehouse {
   warehouseReceipts          WarehouseReceipt[]
   warehouseTransfersAsDest   WarehouseTransfer[]   @relation("WarehouseTransferDest")
   warehouseTransfersAsSource WarehouseTransfer[]   @relation("WarehouseTransferSource")
+  physicalLocations          PhysicalLocation[]
+}
+
+// درخت محل فیزیکی — طبق stockAnalysis.md بند ۲۱: هر انبار درخت محل فیزیکی مستقل خودش را دارد
+// (کد/عنوان فقط در همان انبار یکتاست، نه سراسری) — دقیقاً همان الگوی درخت GoodsGroup، با یک سطح
+// اسکوپ اضافه (warehouseId) روی ریشه‌ها.
+model PhysicalLocation {
+  id              Int                @id @default(autoincrement())
+  warehouseId     Int
+  parentId        Int?
+  code            String
+  title           String
+  isActive        Boolean            @default(true)
+  hasTransactions Boolean            @default(false)
+  createdAt       DateTime           @default(now())
+  warehouse       Warehouse          @relation(fields: [warehouseId], references: [id])
+  parent          PhysicalLocation?  @relation("PhysicalLocationTree", fields: [parentId], references: [id])
+  children        PhysicalLocation[] @relation("PhysicalLocationTree")
+
+  @@unique([warehouseId, parentId, code])
 }
 
 model GoodsGroupLevel {
@@ -695,6 +716,8 @@ model GoodsItem {
   warehouseIssueLines           WarehouseIssueLine[]
   warehouseReceiptLines         WarehouseReceiptLine[]
   warehouseTransferLines        WarehouseTransferLine[]
+  batches                       Batch[]
+  serials                       Serial[]
 
   @@unique([goodsGroupId, code])
 }
@@ -709,6 +732,50 @@ model GoodsItemAttributeValue {
   item        GoodsAttributeItem @relation(fields: [itemId], references: [id])
 
   @@unique([goodsItemId, attributeId])
+}
+
+// بچ — طبق stockAnalysis.md بند ۱۰-۱۶: Master مستقل و مشترک در کل ERP، نه رشته‌ی آزاد در سطر سند.
+// یکتایی روی (goodsItemId, batchNumber) — یعنی همان شماره بچ برای دو کالای مختلف مجاز است (بند ۱۲).
+// تاریخ انقضا فقط اینجا نگه‌داری می‌شود، نه در سطر سند انبار (بند ۱۳).
+model Batch {
+  id                    Int             @id @default(autoincrement())
+  goodsItemId           Int
+  batchNumber           String
+  productionDate        DateTime?       @db.Date
+  expiryDate            DateTime?       @db.Date
+  sourceType            BatchSourceType @default(MANUAL)
+  supplierId            Int?
+  productionReferenceId Int?
+  description           String?
+  isActive              Boolean         @default(true)
+  hasTransactions       Boolean         @default(false)
+  createdAt             DateTime        @default(now())
+  goodsItem             GoodsItem       @relation(fields: [goodsItemId], references: [id])
+  supplier              Party?          @relation("BatchSupplier", fields: [supplierId], references: [id])
+
+  @@unique([goodsItemId, batchNumber])
+}
+
+// سریال — طبق stockAnalysis.md بند ۱۷-۲۰: Master مستقل، تعریف در ماژول کالا و خدمت؛ انبار فقط
+// سریال‌های موجود را برای هر سطر سند انتخاب/مصرف می‌کند (از طریق جدول واسط InventoryLineSerial که
+// در فاز اتصال به اسناد انبار اضافه می‌شود، نه اینجا).
+model Serial {
+  id              Int       @id @default(autoincrement())
+  goodsItemId     Int
+  serialNumber    String
+  description     String?
+  isActive        Boolean   @default(true)
+  hasTransactions Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  goodsItem       GoodsItem @relation(fields: [goodsItemId], references: [id])
+
+  @@unique([goodsItemId, serialNumber])
+}
+
+enum BatchSourceType {
+  MANUAL
+  PURCHASE
+  PRODUCTION
 }
 
 model AccountingGroup {
@@ -1636,16 +1703,16 @@ model SalesInvoiceLine {
 }
 
 model ChequeItem {
-  id                     Int                     @id @default(autoincrement())
-  direction              ChequeDirection
-  number                 String
-  dueDate                DateTime                @db.Date
-  bankBranchId           Int?
-  ownerBankAccountId     Int?
-  partyId                Int
-  amount                 Decimal                 @db.Decimal(18, 2)
-  currencyId             Int
-  status                 ChequeStatus            @default(IN_HAND)
+  id                      Int                            @id @default(autoincrement())
+  direction               ChequeDirection
+  number                  String
+  dueDate                 DateTime                       @db.Date
+  bankBranchId            Int?
+  ownerBankAccountId      Int?
+  partyId                 Int
+  amount                  Decimal                        @db.Decimal(18, 2)
+  currencyId              Int
+  status                  ChequeStatus                   @default(IN_HAND)
   // شمارنده‌ی نسخه (فاز ۲.۲): با هر رویداد چرخه‌ی عمر (ایجاد، خرج/ظهرنویسی، واگذاری، برگشت از
   // واگذاری، نتیجه وصول/برگشت) یک واحد بالا می‌رود. همان مقدار روی ردیف سندی که آن رویداد را ایجاد
   // کرده (فیلد chequeStep در ۶ جدول ردیف مرتبط) هم ذخیره می‌شود؛ فقط وقتی chequeStep یک ردیف با
@@ -1653,19 +1720,19 @@ model ChequeItem {
   // سند مادر، مستقیماً از همان سند قابل ویرایش/حذف (و افزودن ردیف تازه) است — نگاه کنید به توضیح
   // بالای هرکدام از فایل‌های routes/receipts.ts, payments.ts, chequeDeposits.ts,
   // chequeDepositReturns.ts, chequeClearingReceivable.ts, chequeClearingPayable.ts.
-  step                   Int                     @default(1)
-  description            String?
-  createdAt              DateTime                @default(now())
-  bankBranch             BankBranch?             @relation(fields: [bankBranchId], references: [id])
-  currency               Currency                @relation(fields: [currencyId], references: [id])
-  ownerBankAccount       BankAccount?            @relation(fields: [ownerBankAccountId], references: [id])
-  party                  Party                   @relation(fields: [partyId], references: [id])
-  paymentInstrumentLines PaymentInstrumentLine[]
-  receiptInstrumentLines ReceiptInstrumentLine[]
-  depositLines           ChequeDepositLine[]
-  depositReturnLines     ChequeDepositReturnLine[]
+  step                    Int                            @default(1)
+  description             String?
+  createdAt               DateTime                       @default(now())
+  bankBranch              BankBranch?                    @relation(fields: [bankBranchId], references: [id])
+  currency                Currency                       @relation(fields: [currencyId], references: [id])
+  ownerBankAccount        BankAccount?                   @relation(fields: [ownerBankAccountId], references: [id])
+  party                   Party                          @relation(fields: [partyId], references: [id])
+  paymentInstrumentLines  PaymentInstrumentLine[]
+  receiptInstrumentLines  ReceiptInstrumentLine[]
+  depositLines            ChequeDepositLine[]
+  depositReturnLines      ChequeDepositReturnLine[]
   clearingReceivableLines ChequeClearingReceivableLine[]
-  clearingPayableLines   ChequeClearingPayableLine[]
+  clearingPayableLines    ChequeClearingPayableLine[]
 }
 
 model Receipt {
