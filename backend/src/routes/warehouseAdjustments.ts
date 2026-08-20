@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertNoNegativeStockAfterChange, computeStockAsOf } from "../services/warehouseStockService";
 import { isGoodsItemAllowedForDocNature } from "../services/warehouseDocGoodsFilterService";
-import { validateTrackingFields, trackingFieldsForCreate, recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
+import { validateTrackingFields, resolveTrackingRefs, recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
 
 // =========================================================================
 // ماژول‌های «انبارداری» / «حسابداری انبار» > ساب‌ماژول: عملیات > انبارگردانی / تعدیل موجودی
@@ -14,6 +14,11 @@ import { validateTrackingFields, trackingFieldsForCreate, recomputeGoodsItemHasT
 // اعمال می‌شود (طبق ماتریس نوع کالا-ماهیت سند انبار، «انبارگردانی» چه در جهت وارده چه صادره، دقیقاً
 // همان مجموعه‌ی انواع کالای مجاز را دارد). طبق تصمیم فاز اول کاربر، فی/مبلغ در این فاز کاربر ندارد
 // (unitCost/amount همیشه صفر؛ نمای حسابداری انبار کاملاً فقط‌خواندنی است).
+//
+// طبق stockAnalysis.md (فاز ۲): روی جدول یکپارچه‌ی InventoryDocument/InventoryDocumentLine
+// (documentType=WAREHOUSE_ADJUSTMENT) ذخیره می‌شود. adjustmentQuantity قدیم اکنون همان ستون امضادار
+// quantity در جدول یکپارچه است (چون آن جدول یک ستون quantity مشترک بین همه‌ی انواع سند دارد)؛
+// systemQuantity/countedQuantity برای حفظ اطلاعات ممیزی جداگانه نگه‌داری می‌شوند.
 // =========================================================================
 
 const router = Router();
@@ -126,7 +131,8 @@ router.get("/warehouse-adjustments/current-stock", async (req, res) => {
 });
 
 router.get("/warehouse-adjustments", async (_req, res) => {
-  const items = await prisma.warehouseAdjustment.findMany({
+  const items = await prisma.inventoryDocument.findMany({
+    where: { documentType: "WAREHOUSE_ADJUSTMENT" },
     include: { warehouse: true, fiscalPeriod: true, lines: true },
     orderBy: { id: "desc" },
   });
@@ -141,7 +147,7 @@ router.get("/warehouse-adjustments", async (_req, res) => {
       description: d.description,
       status: d.status,
       lineCount: d.lines.length,
-      totalAdjustmentQuantity: d.lines.reduce((s: number, l: any) => s + Number(l.adjustmentQuantity), 0),
+      totalAdjustmentQuantity: d.lines.reduce((s: number, l: any) => s + Number(l.quantity), 0),
       totalAmount: d.lines.reduce((s: number, l: any) => s + Number(l.amount), 0),
     }))
   );
@@ -149,12 +155,15 @@ router.get("/warehouse-adjustments", async (_req, res) => {
 
 router.get("/warehouse-adjustments/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.warehouseAdjustment.findUnique({
-    where: { id },
+  const d = await prisma.inventoryDocument.findFirst({
+    where: { id, documentType: "WAREHOUSE_ADJUSTMENT" },
     include: {
       warehouse: true,
       fiscalPeriod: true,
-      lines: { include: { goodsItem: true, unit: true }, orderBy: { rowOrder: "asc" } },
+      lines: {
+        include: { goodsItem: true, unit: true, batch: true, physicalLocation: true, serials: { include: { serial: true } } },
+        orderBy: { rowOrder: "asc" },
+      },
     },
   });
   if (!d) return res.status(404).json({ error: "سند انبارگردانی یافت نشد" });
@@ -163,7 +172,7 @@ router.get("/warehouse-adjustments/:id", async (req, res) => {
     number: d.number,
     date: d.date,
     warehouseId: d.warehouseId,
-    warehouseTitle: d.warehouse.title,
+    warehouseTitle: d.warehouse!.title,
     fiscalPeriodId: d.fiscalPeriodId,
     fiscalPeriodTitle: d.fiscalPeriod.title,
     description: d.description,
@@ -178,14 +187,14 @@ router.get("/warehouse-adjustments/:id", async (req, res) => {
       unitTitle: l.unit.title,
       systemQuantity: Number(l.systemQuantity),
       countedQuantity: Number(l.countedQuantity),
-      adjustmentQuantity: Number(l.adjustmentQuantity),
+      adjustmentQuantity: Number(l.quantity),
       unitCost: Number(l.unitCost),
       amount: Number(l.amount),
       description: l.description,
-      serialNumber: l.serialNumber,
-      batchNumber: l.batchNumber,
-      expiryDate: l.expiryDate,
-      physicalLocation: l.physicalLocation,
+      serialNumber: l.serials[0]?.serial.serialNumber ?? null,
+      batchNumber: l.batch?.batchNumber ?? null,
+      expiryDate: l.batch?.expiryDate ?? null,
+      physicalLocation: l.physicalLocation?.title ?? null,
     })),
   });
 });
@@ -198,12 +207,17 @@ router.post("/warehouse-adjustments", async (req, res) => {
     const date = new Date(body.date);
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
     const cleanedLines = await validateLines(warehouse.id, date, body.lines);
+    const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
 
-    const lastNumber = await prisma.warehouseAdjustment.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
+    const lastNumber = await prisma.inventoryDocument.findFirst({
+      where: { documentType: "WAREHOUSE_ADJUSTMENT", fiscalPeriodId: fiscalPeriod.id },
+      orderBy: { number: "desc" },
+    });
     const number = lastNumber ? lastNumber.number + 1 : 1;
 
-    const created = await prisma.warehouseAdjustment.create({
+    const created = await prisma.inventoryDocument.create({
       data: {
+        documentType: "WAREHOUSE_ADJUSTMENT",
         warehouseId: warehouse.id,
         fiscalPeriodId: fiscalPeriod.id,
         number,
@@ -216,12 +230,14 @@ router.post("/warehouse-adjustments", async (req, res) => {
             unitId: l.unitId,
             systemQuantity: l.systemQuantity,
             countedQuantity: l.countedQuantity,
-            adjustmentQuantity: l.adjustmentQuantity,
+            quantity: l.adjustmentQuantity,
             unitCost: 0,
             amount: 0,
             description: l.description,
             rowOrder: idx,
-            ...trackingFieldsForCreate(l),
+            batchId: refs[idx].batchId,
+            physicalLocationId: refs[idx].physicalLocationId,
+            serials: refs[idx].serialId ? { create: [{ serialId: refs[idx].serialId! }] } : undefined,
           })),
         },
       },
@@ -238,7 +254,7 @@ router.put("/warehouse-adjustments/:id", async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as HeaderBody;
 
-  const existing = await prisma.warehouseAdjustment.findUnique({ where: { id } });
+  const existing = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "WAREHOUSE_ADJUSTMENT" } });
   if (!existing) return res.status(404).json({ error: "سند انبارگردانی یافت نشد" });
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل ویرایش هستند؛ ابتدا از «قطعی» برگردانید" });
 
@@ -248,10 +264,11 @@ router.put("/warehouse-adjustments/:id", async (req, res) => {
     const date = new Date(body.date);
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
     const cleanedLines = await validateLines(warehouse.id, date, body.lines, id);
+    const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
 
     await prisma.$transaction([
-      prisma.warehouseAdjustmentLine.deleteMany({ where: { warehouseAdjustmentId: id } }),
-      prisma.warehouseAdjustment.update({
+      prisma.inventoryDocumentLine.deleteMany({ where: { documentId: id } }),
+      prisma.inventoryDocument.update({
         where: { id },
         data: {
           warehouseId: warehouse.id,
@@ -264,12 +281,14 @@ router.put("/warehouse-adjustments/:id", async (req, res) => {
               unitId: l.unitId,
               systemQuantity: l.systemQuantity,
               countedQuantity: l.countedQuantity,
-              adjustmentQuantity: l.adjustmentQuantity,
+              quantity: l.adjustmentQuantity,
               unitCost: 0,
               amount: 0,
               description: l.description,
               rowOrder: idx,
-              ...trackingFieldsForCreate(l),
+              batchId: refs[idx].batchId,
+              physicalLocationId: refs[idx].physicalLocationId,
+              serials: refs[idx].serialId ? { create: [{ serialId: refs[idx].serialId! }] } : undefined,
             })),
           },
         },
@@ -284,10 +303,10 @@ router.put("/warehouse-adjustments/:id", async (req, res) => {
 
 router.delete("/warehouse-adjustments/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.warehouseAdjustment.findUnique({ where: { id } });
+  const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "WAREHOUSE_ADJUSTMENT" } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «قطعی» برگردانید" });
-  await prisma.warehouseAdjustment.delete({ where: { id } });
+  await prisma.inventoryDocument.delete({ where: { id } });
   res.status(204).send();
 });
 
@@ -295,21 +314,24 @@ router.delete("/warehouse-adjustments/:id", async (req, res) => {
 // منفی دارد؛ ردیف‌های مثبت (اضافه) همیشه ایمن هستند.
 router.post("/warehouse-adjustments/:id/finalize", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.warehouseAdjustment.findUnique({ where: { id }, include: { lines: true, warehouse: true } });
+  const d = await prisma.inventoryDocument.findFirst({
+    where: { id, documentType: "WAREHOUSE_ADJUSTMENT" },
+    include: { lines: true, warehouse: true },
+  });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل قطعی‌کردن هستند" });
   if (d.lines.length === 0) return res.status(400).json({ error: "سند باید حداقل یک ردیف کالا داشته باشد" });
 
   try {
-    await validateWarehouseAndPeriod(d.warehouseId, d.date);
+    await validateWarehouseAndPeriod(d.warehouseId!, d.date);
 
-    if (d.warehouse.stockControl) {
+    if (d.warehouse!.stockControl) {
       for (const l of d.lines) {
-        const delta = Number(l.adjustmentQuantity);
+        const delta = Number(l.quantity);
         if (delta < 0) {
           // eslint-disable-next-line no-await-in-loop
           await assertNoNegativeStockAfterChange({
-            warehouseId: d.warehouseId,
+            warehouseId: d.warehouseId!,
             goodsItemId: l.goodsItemId,
             asOfDate: d.date,
             delta,
@@ -320,8 +342,8 @@ router.post("/warehouse-adjustments/:id/finalize", async (req, res) => {
     }
 
     await prisma.$transaction([
-      prisma.warehouseAdjustment.update({ where: { id }, data: { status: "FINALIZED", finalizedAt: new Date() } }),
-      prisma.warehouse.update({ where: { id: d.warehouseId }, data: { hasTransactions: true } }),
+      prisma.inventoryDocument.update({ where: { id }, data: { status: "FINALIZED", finalizedAt: new Date() } }),
+      prisma.warehouse.update({ where: { id: d.warehouseId! }, data: { hasTransactions: true } }),
       ...d.lines.map((l: any) => prisma.goodsItem.update({ where: { id: l.goodsItemId }, data: { hasTransactions: true } })),
     ]);
 
@@ -335,21 +357,24 @@ router.post("/warehouse-adjustments/:id/finalize", async (req, res) => {
 // و ایمن است.
 router.post("/warehouse-adjustments/:id/revert", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.warehouseAdjustment.findUnique({ where: { id }, include: { lines: true, warehouse: true } });
+  const d = await prisma.inventoryDocument.findFirst({
+    where: { id, documentType: "WAREHOUSE_ADJUSTMENT" },
+    include: { lines: true, warehouse: true },
+  });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "FINALIZED") return res.status(400).json({ error: "فقط اسناد «قطعی» قابل برگشت هستند" });
 
   try {
-    if (d.warehouse.stockControl) {
+    if (d.warehouse!.stockControl) {
       for (const l of d.lines) {
-        const delta = -Number(l.adjustmentQuantity);
+        const delta = -Number(l.quantity);
         if (delta < 0) {
           // eslint-disable-next-line no-await-in-loop
           // توجه: سند در این لحظه هنوز «قطعی» است (پیش‌شرط بالا)، پس قبلاً در محاسبه‌ی موجودی جاری
           // لحاظ شده — نباید با excludeWarehouseAdjustmentId دوباره کنار گذاشته شود، وگرنه اثر
           // برگشت دوبار اعمال می‌شود و خطای کاذب «موجودی منفی می‌شود» می‌دهد.
           await assertNoNegativeStockAfterChange({
-            warehouseId: d.warehouseId,
+            warehouseId: d.warehouseId!,
             goodsItemId: l.goodsItemId,
             asOfDate: d.date,
             delta,
@@ -358,9 +383,9 @@ router.post("/warehouse-adjustments/:id/revert", async (req, res) => {
       }
     }
 
-    await prisma.warehouseAdjustment.update({ where: { id }, data: { status: "DRAFT", finalizedAt: null } });
+    await prisma.inventoryDocument.update({ where: { id }, data: { status: "DRAFT", finalizedAt: null } });
     await recomputeGoodsItemHasTransactions(d.lines.map((l: any) => l.goodsItemId));
-    await recomputeWarehouseHasTransactions([d.warehouseId]);
+    await recomputeWarehouseHasTransactions([d.warehouseId!]);
     res.json({ id, status: "DRAFT" });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در برگشت از قطعی" });

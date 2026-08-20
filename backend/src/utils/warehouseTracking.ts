@@ -15,19 +15,12 @@ export interface TrackableLineInput {
  * عملیات انبار دریافت و کنترل می‌شود ... این اطلاعات در ساختار عمومی تمامی اسناد انبار تکرار نمی‌شوند و
  * هر فرآیند صرفاً در صورت نیاز به آن‌ها ارجاع خواهد داد».
  *
- * این تابع مشترک، برای هر ۵ نوع سند انبار (موجودی اول دوره، رسید انبار خرید، حواله انبار، انتقال بین
- * انبارها، انبارگردانی)، اجباری‌بودن فیلدهای ردیابی هر ردیف را بر اساس تیک‌های کالای همان ردیف کنترل
- * می‌کند.
+ * این تابع مشترک، برای هر ۶ نوع سند انبار (موجودی اول دوره، رسید انبار خرید، حواله انبار، انتقال بین
+ * انبارها، انبارگردانی، حواله فروش)، اجباری‌بودن فیلدهای ردیابی هر ردیف را بر اساس تیک‌های کالای همان
+ * ردیف کنترل می‌کند.
  *
- * تصمیم طراحی (چون متن مستندات صراحتاً «اجباری/اختیاری بودن مقدار در سند» را مشخص نکرده، فقط ظرفیت
- * کالا را): وقتی تیک مربوطه روی کالا فعال باشد، درج مقدار در همان ردیف سند اجباری فرض شد — دقیقاً مثل
- * الگوی «کد کالا/واحد سنجش اجباری» در بقیه‌ی فیلدهای ردیف.
- *
- * محدودیت شناخته‌شده (عمداً در این فاز پیاده نشده): این تابع فقط اجباری‌بودن را کنترل می‌کند، نه صحت
- * موجودی آن سریال/بچ/محل مشخص (مثلاً اینکه سریالی که در حواله انبار خارج می‌شود واقعاً قبلاً با رسید
- * وارد شده باشد). کنترل موجودی منفی (`warehouseStockService`) هم در سطح کل کالا در انبار محاسبه می‌شود،
- * نه به تفکیک سریال/بچ/تاریخ‌انقضا/محل — این یک ماژول ردیابی موجودی کامل (که خارج از محدوده‌ی درخواست
- * فعلی است) نیاز دارد.
+ * طبق stockAnalysis.md بند ۱۳: تاریخ انقضا فقط روی Batch نگه‌داری می‌شود، نه مستقل در سطر سند — پس اگر
+ * تاریخ انقضا وارد شده، شماره بچ هم الزامی است (نمی‌شود تاریخ انقضا بدون بچ ثبت کرد).
  */
 export async function validateTrackingFields<T extends TrackableLineInput>(lines: T[]): Promise<void> {
   const goodsItemIds = Array.from(new Set(lines.map((l) => l.goodsItemId).filter(Boolean)));
@@ -45,46 +38,75 @@ export async function validateTrackingFields<T extends TrackableLineInput>(lines
     if (g.isBatchTracked && !l.batchNumber) throw new Error(`شماره بچ ردیف ${idx + 1} (کالای «${g.title}») الزامی است`);
     if (g.isExpiryTracked && !l.expiryDate) throw new Error(`تاریخ انقضای ردیف ${idx + 1} (کالای «${g.title}») الزامی است`);
     if (g.isLocationTracked && !l.physicalLocation) throw new Error(`محل فیزیکی ردیف ${idx + 1} (کالای «${g.title}») الزامی است`);
+    if (l.expiryDate && !l.batchNumber) throw new Error(`برای ثبت تاریخ انقضا در ردیف ${idx + 1}، شماره بچ الزامی است`);
   });
 }
 
-/** فیلدهای ردیابی نرمال‌شده برای ذخیره — رشته‌ی خالی به null تبدیل می‌شود */
-export function trackingFieldsForCreate(l: TrackableLineInput) {
-  return {
-    serialNumber: l.serialNumber || null,
-    batchNumber: l.batchNumber || null,
-    expiryDate: l.expiryDate ? new Date(l.expiryDate) : null,
-    physicalLocation: l.physicalLocation || null,
-  };
+export interface ResolvedTrackingRefs {
+  batchId: number | null;
+  physicalLocationId: number | null;
+  serialId: number | null;
+}
+
+async function findOrCreateBatch(goodsItemId: number, batchNumber: string, expiryDate: string | null): Promise<number> {
+  const existing = await prisma.batch.findUnique({ where: { goodsItemId_batchNumber: { goodsItemId, batchNumber } } });
+  if (existing) return existing.id;
+  const created = await prisma.batch.create({
+    data: { goodsItemId, batchNumber, expiryDate: expiryDate ? new Date(expiryDate) : null, sourceType: "MANUAL" },
+  });
+  return created.id;
+}
+
+async function findOrCreateSerial(goodsItemId: number, serialNumber: string): Promise<number> {
+  const existing = await prisma.serial.findUnique({ where: { goodsItemId_serialNumber: { goodsItemId, serialNumber } } });
+  if (existing) return existing.id;
+  const created = await prisma.serial.create({ data: { goodsItemId, serialNumber } });
+  return created.id;
+}
+
+// محل فیزیکی امروز در فرم‌های سند انبار صرفاً یک متن آزاد است (نه انتخاب از درخت) — به یک شاخه‌ی
+// ریشه‌ی هم‌نام در درخت محل فیزیکی همان انبار نگاشت می‌شود (پیدا بر اساس عنوان، یا ساخت در صورت نبود).
+// طراحی درست‌تر (انتخاب واقعی از درخت) در فاز فرانت‌اند (پیکرهای بچ/سریال/محل) پیاده می‌شود.
+async function findOrCreateRootPhysicalLocation(warehouseId: number, title: string): Promise<number> {
+  const existing = await prisma.physicalLocation.findFirst({ where: { warehouseId, parentId: null, title } });
+  if (existing) return existing.id;
+  const siblings = await prisma.physicalLocation.findMany({ where: { warehouseId, parentId: null }, orderBy: { code: "desc" }, take: 1 });
+  const lastNum = siblings.length ? parseInt(siblings[0].code, 10) || 0 : 0;
+  const created = await prisma.physicalLocation.create({ data: { warehouseId, parentId: null, code: String(lastNum + 1), title } });
+  return created.id;
+}
+
+/** رشته‌های خام سریال/بچ/تاریخ‌انقضا/محل‌فیزیکی هر ردیف را به شناسه‌ی رکورد Master متناظر (پیدا یا
+ * ساخت) تبدیل می‌کند — طبق stockAnalysis.md، این‌ها دیگر رشته‌ی آزاد روی خود سطر سند نیستند */
+export async function resolveTrackingRefs<T extends TrackableLineInput>(lines: T[], warehouseId: number): Promise<ResolvedTrackingRefs[]> {
+  const result: ResolvedTrackingRefs[] = [];
+  for (const l of lines) {
+    const batchId = l.batchNumber ? await findOrCreateBatch(l.goodsItemId, l.batchNumber, l.expiryDate || null) : null;
+    const serialId = l.serialNumber ? await findOrCreateSerial(l.goodsItemId, l.serialNumber) : null;
+    const physicalLocationId = l.physicalLocation ? await findOrCreateRootPhysicalLocation(warehouseId, l.physicalLocation) : null;
+    result.push({ batchId, physicalLocationId, serialId });
+  }
+  return result;
 }
 
 // =========================================================================
-// فیلد GoodsItem.hasTransactions / Warehouse.hasTransactions یک کش ساده است که هر ۶ نوع سند انبار/فروش
+// فیلد GoodsItem.hasTransactions / Warehouse.hasTransactions یک کش ساده است که هر ۶ نوع سند انبار
 // (رسید انبار خرید، حواله انبار، انتقال بین انبارها، انبارگردانی، موجودی اول دوره، حواله فروش) هنگام
 // «قطعی‌کردن» آن را true می‌کنند تا حذف کالا/انبارِ دارای گردش مسدود شود. اما «برگشت از قطعی» فقط وضعیت
 // خودِ سند را به DRAFT برمی‌گرداند و این کش را دست‌نخورده (true) رها می‌کند؛ در نتیجه حتی بعد از برگشت
 // از قطعی و حذف کامل سند، کالا/انبار برای همیشه «دارای گردش» گزارش می‌شود و قابل حذف نیست، هرچند در
 // دیتابیس هیچ سند قطعی‌ای دیگر به آن ارجاع نمی‌دهد. این دو تابع، بعد از هر «برگشت از قطعی»، وضعیت واقعی
-// را با پرس‌وجوی مستقیم بین همه‌ی انواع سند دوباره محاسبه و کش را اصلاح می‌کنند.
+// را با پرس‌وجوی مستقیم بین همه‌ی انواع سند (روی جدول یکپارچه‌ی InventoryDocument) دوباره محاسبه و کش را
+// اصلاح می‌کنند.
 // =========================================================================
 
 export async function recomputeGoodsItemHasTransactions(goodsItemIds: number[]) {
   const ids = Array.from(new Set(goodsItemIds));
   for (const goodsItemId of ids) {
     // eslint-disable-next-line no-await-in-loop
-    const [receipt, issue, transfer, adjustment, initial, delivery] = await Promise.all([
-      prisma.warehouseReceiptLine.findFirst({ where: { goodsItemId, warehouseReceipt: { status: "FINALIZED" } } }),
-      prisma.warehouseIssueLine.findFirst({ where: { goodsItemId, warehouseIssue: { status: "FINALIZED" } } }),
-      prisma.warehouseTransferLine.findFirst({ where: { goodsItemId, warehouseTransfer: { status: "FINALIZED" } } }),
-      prisma.warehouseAdjustmentLine.findFirst({ where: { goodsItemId, warehouseAdjustment: { status: "FINALIZED" } } }),
-      prisma.initialInventoryLine.findFirst({ where: { goodsItemId, initialInventory: { status: "FINALIZED" } } }),
-      prisma.salesDeliveryLine.findFirst({ where: { goodsItemId, salesDelivery: { status: "FINALIZED" } } }),
-    ]);
+    const line = await prisma.inventoryDocumentLine.findFirst({ where: { goodsItemId, document: { status: "FINALIZED" } } });
     // eslint-disable-next-line no-await-in-loop
-    await prisma.goodsItem.update({
-      where: { id: goodsItemId },
-      data: { hasTransactions: !!(receipt || issue || transfer || adjustment || initial || delivery) },
-    });
+    await prisma.goodsItem.update({ where: { id: goodsItemId }, data: { hasTransactions: !!line } });
   }
 }
 
@@ -92,19 +114,12 @@ export async function recomputeWarehouseHasTransactions(warehouseIds: number[]) 
   const ids = Array.from(new Set(warehouseIds));
   for (const warehouseId of ids) {
     // eslint-disable-next-line no-await-in-loop
-    const [receipt, issue, transferOut, transferIn, adjustment, initial, delivery] = await Promise.all([
-      prisma.warehouseReceipt.findFirst({ where: { warehouseId, status: "FINALIZED" } }),
-      prisma.warehouseIssue.findFirst({ where: { warehouseId, status: "FINALIZED" } }),
-      prisma.warehouseTransfer.findFirst({ where: { sourceWarehouseId: warehouseId, status: "FINALIZED" } }),
-      prisma.warehouseTransfer.findFirst({ where: { destWarehouseId: warehouseId, status: "FINALIZED" } }),
-      prisma.warehouseAdjustment.findFirst({ where: { warehouseId, status: "FINALIZED" } }),
-      prisma.initialInventory.findFirst({ where: { warehouseId, status: "FINALIZED" } }),
-      prisma.salesDelivery.findFirst({ where: { warehouseId, status: "FINALIZED" } }),
+    const [asWarehouse, asSource, asDest] = await Promise.all([
+      prisma.inventoryDocument.findFirst({ where: { warehouseId, status: "FINALIZED" } }),
+      prisma.inventoryDocument.findFirst({ where: { sourceWarehouseId: warehouseId, status: "FINALIZED" } }),
+      prisma.inventoryDocument.findFirst({ where: { destWarehouseId: warehouseId, status: "FINALIZED" } }),
     ]);
     // eslint-disable-next-line no-await-in-loop
-    await prisma.warehouse.update({
-      where: { id: warehouseId },
-      data: { hasTransactions: !!(receipt || issue || transferOut || transferIn || adjustment || initial || delivery) },
-    });
+    await prisma.warehouse.update({ where: { id: warehouseId }, data: { hasTransactions: !!(asWarehouse || asSource || asDest) } });
   }
 }

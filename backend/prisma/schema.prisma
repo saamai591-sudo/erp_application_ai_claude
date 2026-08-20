@@ -1714,29 +1714,30 @@ enum InventoryBasis {
 }
 
 model InventoryDocument {
-  id                Int                     @id @default(autoincrement())
+  id                Int                      @id @default(autoincrement())
   documentType      InventoryDocumentType
   warehouseId       Int?
   sourceWarehouseId Int?
   destWarehouseId   Int?
   fiscalPeriodId    Int
   number            Int
-  date              DateTime                @db.Date
+  date              DateTime                 @db.Date
   basis             InventoryBasis?
   partyId           Int?
   costCenterId      Int?
   projectId         Int?
   description       String?
-  status            WarehouseDocStatus      @default(DRAFT)
+  creationType      WarehouseDocCreationType @default(MANUAL)
+  status            WarehouseDocStatus       @default(DRAFT)
   finalizedAt       DateTime?
-  createdAt         DateTime                @default(now())
-  warehouse         Warehouse?              @relation("InventoryDocWarehouse", fields: [warehouseId], references: [id])
-  sourceWarehouse   Warehouse?              @relation("InventoryDocSourceWarehouse", fields: [sourceWarehouseId], references: [id])
-  destWarehouse     Warehouse?              @relation("InventoryDocDestWarehouse", fields: [destWarehouseId], references: [id])
-  fiscalPeriod      FiscalPeriod            @relation(fields: [fiscalPeriodId], references: [id])
-  party             Party?                  @relation(fields: [partyId], references: [id])
-  costCenter        CostCenter?             @relation(fields: [costCenterId], references: [id])
-  project           Project?                @relation(fields: [projectId], references: [id])
+  createdAt         DateTime                 @default(now())
+  warehouse         Warehouse?               @relation("InventoryDocWarehouse", fields: [warehouseId], references: [id])
+  sourceWarehouse   Warehouse?               @relation("InventoryDocSourceWarehouse", fields: [sourceWarehouseId], references: [id])
+  destWarehouse     Warehouse?               @relation("InventoryDocDestWarehouse", fields: [destWarehouseId], references: [id])
+  fiscalPeriod      FiscalPeriod             @relation(fields: [fiscalPeriodId], references: [id])
+  party             Party?                   @relation(fields: [partyId], references: [id])
+  costCenter        CostCenter?              @relation(fields: [costCenterId], references: [id])
+  project           Project?                 @relation(fields: [projectId], references: [id])
   lines             InventoryDocumentLine[]
 
   @@unique([documentType, fiscalPeriodId, number])

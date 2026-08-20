@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertNoNegativeStockAfterChange } from "../services/warehouseStockService";
 import { isGoodsItemAllowedForDocNature } from "../services/warehouseDocGoodsFilterService";
-import { validateTrackingFields, trackingFieldsForCreate, recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
+import { validateTrackingFields, resolveTrackingRefs, recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
 
 // =========================================================================
 // ماژول‌های «انبارداری» / «حسابداری انبار» > ساب‌ماژول: عملیات > رسید انبار خرید
@@ -24,6 +24,13 @@ import { validateTrackingFields, trackingFieldsForCreate, recomputeGoodsItemHasT
 //   پر شوند. تا آن زمان همیشه صفر می‌مانند و این route هرگز مقدار ورودی کاربر برای آن‌ها را نمی‌پذیرد.
 // - اثر بر موجودی: فقط در همین فاز پیاده‌سازی شده (طبق تصمیم کاربر)؛ اتصال به حسابداری/سند دفتر
 //   روزنامه به فاز بعد موکول شده است.
+//
+// طبق stockAnalysis.md (فاز ۲): این سند دیگر جدول اختصاصی WarehouseReceipt/WarehouseReceiptLine
+// ندارد؛ روی جدول یکپارچه‌ی InventoryDocument/InventoryDocumentLine (documentType=WAREHOUSE_RECEIPT)
+// ذخیره می‌شود. batchNumber/serialNumber/physicalLocation دیگر رشته‌ی آزاد نیستند — resolveTrackingRefs
+// آن‌ها را به رکورد Master متناظر (Batch/Serial/PhysicalLocation) پیدا/می‌سازد. قرارداد API (مسیرها،
+// بدنه‌ی درخواست/پاسخ) عمداً دست‌نخورده مانده تا فرانت‌اند فعلی بدون تغییر کار کند؛ جایگزینی ورودی‌های
+// متنی با پیکر واقعی، فاز بعدی (فرانت‌اند) است.
 // =========================================================================
 
 const router = Router();
@@ -75,12 +82,12 @@ async function validateWarehouseAndPeriod(warehouseId: number, date: Date) {
 async function supplyRequestLineRemaining(id: number, excludeReceiptId?: number) {
   const line = await prisma.supplyRequestLine.findUnique({
     where: { id },
-    include: { supplyRequest: true, purchaseRequestLines: true, warehouseReceiptLines: true },
+    include: { supplyRequest: true, purchaseRequestLines: true, inventoryLines: { include: { document: true } } },
   });
   if (!line) return null;
   const usedByPurchaseRequest = line.purchaseRequestLines.reduce((s: number, pl: any) => s + Number(pl.quantity), 0);
-  const directlyReceived = line.warehouseReceiptLines
-    .filter((r: any) => !excludeReceiptId || r.warehouseReceiptId !== excludeReceiptId)
+  const directlyReceived = line.inventoryLines
+    .filter((r: any) => r.document.documentType === "WAREHOUSE_RECEIPT" && (!excludeReceiptId || r.documentId !== excludeReceiptId))
     .reduce((s: number, r: any) => s + Number(r.quantity), 0);
   const remaining = Number(line.quantity) - usedByPurchaseRequest - directlyReceived;
   return { line, remaining };
@@ -89,12 +96,12 @@ async function supplyRequestLineRemaining(id: number, excludeReceiptId?: number)
 async function purchaseOrderLineRemaining(id: number, excludeReceiptId?: number) {
   const line = await prisma.purchaseOrderLine.findUnique({
     where: { id },
-    include: { purchaseOrder: true, deliveryAuthorizationLines: true, warehouseReceiptLines: true },
+    include: { purchaseOrder: true, deliveryAuthorizationLines: true, inventoryLines: { include: { document: true } } },
   });
   if (!line) return null;
   const reservedByDeliveryAuth = line.deliveryAuthorizationLines.reduce((s: number, d: any) => s + Number(d.quantity), 0);
-  const directlyReceived = line.warehouseReceiptLines
-    .filter((r: any) => !excludeReceiptId || r.warehouseReceiptId !== excludeReceiptId)
+  const directlyReceived = line.inventoryLines
+    .filter((r: any) => r.document.documentType === "WAREHOUSE_RECEIPT" && (!excludeReceiptId || r.documentId !== excludeReceiptId))
     .reduce((s: number, r: any) => s + Number(r.quantity), 0);
   const remaining = Number(line.quantity) - reservedByDeliveryAuth - directlyReceived;
   return { line, remaining };
@@ -103,11 +110,11 @@ async function purchaseOrderLineRemaining(id: number, excludeReceiptId?: number)
 async function deliveryAuthorizationLineRemaining(id: number, excludeReceiptId?: number) {
   const line = await prisma.deliveryAuthorizationLine.findUnique({
     where: { id },
-    include: { deliveryAuthorization: true, warehouseReceiptLines: true },
+    include: { deliveryAuthorization: true, inventoryLines: { include: { document: true } } },
   });
   if (!line) return null;
-  const received = line.warehouseReceiptLines
-    .filter((r: any) => !excludeReceiptId || r.warehouseReceiptId !== excludeReceiptId)
+  const received = line.inventoryLines
+    .filter((r: any) => r.document.documentType === "WAREHOUSE_RECEIPT" && (!excludeReceiptId || r.documentId !== excludeReceiptId))
     .reduce((s: number, r: any) => s + Number(r.quantity), 0);
   const remaining = Number(line.quantity) - received;
   return { line, remaining };
@@ -212,13 +219,21 @@ router.get("/warehouse-receipts/pickable-supply-request-lines", async (req, res)
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
   const lines = await prisma.supplyRequestLine.findMany({
     where: { supplyRequest: { status: "APPROVED", route: "PURCHASE", ...(destDate ? { date: { lte: destDate } } : {}) } },
-    include: { supplyRequest: true, goodsItem: true, unit: true, purchaseRequestLines: true, warehouseReceiptLines: true },
+    include: {
+      supplyRequest: true,
+      goodsItem: true,
+      unit: true,
+      purchaseRequestLines: true,
+      inventoryLines: { include: { document: true } },
+    },
     orderBy: { id: "desc" },
   });
   const result = lines
     .map((l: any) => {
       const usedByPurchaseRequest = l.purchaseRequestLines.reduce((s: number, pl: any) => s + Number(pl.quantity), 0);
-      const directlyReceived = l.warehouseReceiptLines.reduce((s: number, r: any) => s + Number(r.quantity), 0);
+      const directlyReceived = l.inventoryLines
+        .filter((r: any) => r.document.documentType === "WAREHOUSE_RECEIPT")
+        .reduce((s: number, r: any) => s + Number(r.quantity), 0);
       const done = usedByPurchaseRequest + directlyReceived;
       const quantity = Number(l.quantity);
       const remaining = quantity - done;
@@ -250,13 +265,21 @@ router.get("/warehouse-receipts/pickable-purchase-order-lines", async (req, res)
   if (partyId && !supplierId) return res.json([]); // طرف مقابل انتخاب‌شده تامین‌کننده نیست ⇒ هیچ سفارش خریدی مطابق نیست
   const lines = await prisma.purchaseOrderLine.findMany({
     where: { purchaseOrder: { status: "APPROVED", ...(supplierId ? { supplierId } : {}), ...(destDate ? { date: { lte: destDate } } : {}) } },
-    include: { purchaseOrder: true, goodsItem: true, unit: true, deliveryAuthorizationLines: true, warehouseReceiptLines: true },
+    include: {
+      purchaseOrder: true,
+      goodsItem: true,
+      unit: true,
+      deliveryAuthorizationLines: true,
+      inventoryLines: { include: { document: true } },
+    },
     orderBy: { id: "desc" },
   });
   const result = lines
     .map((l: any) => {
       const reservedByDeliveryAuth = l.deliveryAuthorizationLines.reduce((s: number, d: any) => s + Number(d.quantity), 0);
-      const directlyReceived = l.warehouseReceiptLines.reduce((s: number, r: any) => s + Number(r.quantity), 0);
+      const directlyReceived = l.inventoryLines
+        .filter((r: any) => r.document.documentType === "WAREHOUSE_RECEIPT")
+        .reduce((s: number, r: any) => s + Number(r.quantity), 0);
       const done = reservedByDeliveryAuth + directlyReceived;
       const quantity = Number(l.quantity);
       const remaining = quantity - done;
@@ -288,12 +311,14 @@ router.get("/warehouse-receipts/pickable-delivery-authorization-lines", async (r
   if (partyId && !supplierId) return res.json([]); // طرف مقابل انتخاب‌شده تامین‌کننده نیست ⇒ هیچ مجوز تحویلی مطابق نیست
   const lines = await prisma.deliveryAuthorizationLine.findMany({
     where: { deliveryAuthorization: { status: "APPROVED", ...(supplierId ? { supplierId } : {}), ...(destDate ? { date: { lte: destDate } } : {}) } },
-    include: { deliveryAuthorization: true, goodsItem: true, unit: true, warehouseReceiptLines: true },
+    include: { deliveryAuthorization: true, goodsItem: true, unit: true, inventoryLines: { include: { document: true } } },
     orderBy: { id: "desc" },
   });
   const result = lines
     .map((l: any) => {
-      const done = l.warehouseReceiptLines.reduce((s: number, r: any) => s + Number(r.quantity), 0);
+      const done = l.inventoryLines
+        .filter((r: any) => r.document.documentType === "WAREHOUSE_RECEIPT")
+        .reduce((s: number, r: any) => s + Number(r.quantity), 0);
       const quantity = Number(l.quantity);
       const remaining = quantity - done;
       return {
@@ -326,7 +351,8 @@ function partyTitle(p: any): string | null {
 }
 
 router.get("/warehouse-receipts", async (_req, res) => {
-  const items = await prisma.warehouseReceipt.findMany({
+  const items = await prisma.inventoryDocument.findMany({
+    where: { documentType: "WAREHOUSE_RECEIPT" },
     include: { warehouse: true, fiscalPeriod: true, lines: true, party: true },
     orderBy: { id: "desc" },
   });
@@ -352,13 +378,16 @@ router.get("/warehouse-receipts", async (_req, res) => {
 
 router.get("/warehouse-receipts/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.warehouseReceipt.findUnique({
-    where: { id },
+  const d = await prisma.inventoryDocument.findFirst({
+    where: { id, documentType: "WAREHOUSE_RECEIPT" },
     include: {
       warehouse: true,
       fiscalPeriod: true,
       party: true,
-      lines: { include: { goodsItem: true, unit: true }, orderBy: { rowOrder: "asc" } },
+      lines: {
+        include: { goodsItem: true, unit: true, batch: true, physicalLocation: true, serials: { include: { serial: true } } },
+        orderBy: { rowOrder: "asc" },
+      },
     },
   });
   if (!d) return res.status(404).json({ error: "رسید انبار یافت نشد" });
@@ -367,7 +396,7 @@ router.get("/warehouse-receipts/:id", async (req, res) => {
     number: d.number,
     date: d.date,
     warehouseId: d.warehouseId,
-    warehouseTitle: d.warehouse.title,
+    warehouseTitle: d.warehouse!.title,
     fiscalPeriodId: d.fiscalPeriodId,
     fiscalPeriodTitle: d.fiscalPeriod.title,
     basis: d.basis,
@@ -390,10 +419,10 @@ router.get("/warehouse-receipts/:id", async (req, res) => {
       unitCost: Number(l.unitCost),
       amount: Number(l.amount),
       description: l.description,
-      serialNumber: l.serialNumber,
-      batchNumber: l.batchNumber,
-      expiryDate: l.expiryDate,
-      physicalLocation: l.physicalLocation,
+      serialNumber: l.serials[0]?.serial.serialNumber ?? null,
+      batchNumber: l.batch?.batchNumber ?? null,
+      expiryDate: l.batch?.expiryDate ?? null,
+      physicalLocation: l.physicalLocation?.title ?? null,
     })),
   });
 });
@@ -411,12 +440,17 @@ router.post("/warehouse-receipts", async (req, res) => {
     const cleanedLines = await validateLines(body.lines, body.basis, partySupplierId);
     const date = new Date(body.date);
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
+    const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
 
-    const lastNumber = await prisma.warehouseReceipt.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
+    const lastNumber = await prisma.inventoryDocument.findFirst({
+      where: { documentType: "WAREHOUSE_RECEIPT", fiscalPeriodId: fiscalPeriod.id },
+      orderBy: { number: "desc" },
+    });
     const number = lastNumber ? lastNumber.number + 1 : 1;
 
-    const created = await prisma.warehouseReceipt.create({
+    const created = await prisma.inventoryDocument.create({
       data: {
+        documentType: "WAREHOUSE_RECEIPT",
         warehouseId: warehouse.id,
         fiscalPeriodId: fiscalPeriod.id,
         number,
@@ -437,7 +471,9 @@ router.post("/warehouse-receipts", async (req, res) => {
             amount: 0,
             description: l.description,
             rowOrder: idx,
-            ...trackingFieldsForCreate(l),
+            batchId: refs[idx].batchId,
+            physicalLocationId: refs[idx].physicalLocationId,
+            serials: refs[idx].serialId ? { create: [{ serialId: refs[idx].serialId! }] } : undefined,
           })),
         },
       },
@@ -454,7 +490,7 @@ router.put("/warehouse-receipts/:id", async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as HeaderBody;
 
-  const existing = await prisma.warehouseReceipt.findUnique({ where: { id } });
+  const existing = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "WAREHOUSE_RECEIPT" } });
   if (!existing) return res.status(404).json({ error: "رسید انبار یافت نشد" });
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل ویرایش هستند؛ ابتدا از «قطعی» برگردانید" });
 
@@ -469,10 +505,11 @@ router.put("/warehouse-receipts/:id", async (req, res) => {
     const cleanedLines = await validateLines(body.lines, body.basis, partySupplierId, id);
     const date = new Date(body.date);
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
+    const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
 
     await prisma.$transaction([
-      prisma.warehouseReceiptLine.deleteMany({ where: { warehouseReceiptId: id } }),
-      prisma.warehouseReceipt.update({
+      prisma.inventoryDocumentLine.deleteMany({ where: { documentId: id } }),
+      prisma.inventoryDocument.update({
         where: { id },
         data: {
           warehouseId: warehouse.id,
@@ -493,7 +530,9 @@ router.put("/warehouse-receipts/:id", async (req, res) => {
               amount: 0,
               description: l.description,
               rowOrder: idx,
-              ...trackingFieldsForCreate(l),
+              batchId: refs[idx].batchId,
+              physicalLocationId: refs[idx].physicalLocationId,
+              serials: refs[idx].serialId ? { create: [{ serialId: refs[idx].serialId! }] } : undefined,
             })),
           },
         },
@@ -508,27 +547,27 @@ router.put("/warehouse-receipts/:id", async (req, res) => {
 
 router.delete("/warehouse-receipts/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.warehouseReceipt.findUnique({ where: { id } });
+  const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "WAREHOUSE_RECEIPT" } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «قطعی» برگردانید" });
-  await prisma.warehouseReceipt.delete({ where: { id } });
+  await prisma.inventoryDocument.delete({ where: { id } });
   res.status(204).send();
 });
 
 // قطعی کردن: از این لحظه سند در موجودی انبار اثر می‌گذارد (طبق مستند عمومی عملیات انبار)
 router.post("/warehouse-receipts/:id/finalize", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.warehouseReceipt.findUnique({ where: { id }, include: { lines: true } });
+  const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "WAREHOUSE_RECEIPT" }, include: { lines: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل قطعی‌کردن هستند" });
   if (d.lines.length === 0) return res.status(400).json({ error: "سند باید حداقل یک ردیف کالا داشته باشد" });
 
   try {
-    await validateWarehouseAndPeriod(d.warehouseId, d.date);
+    await validateWarehouseAndPeriod(d.warehouseId!, d.date);
 
     await prisma.$transaction([
-      prisma.warehouseReceipt.update({ where: { id }, data: { status: "FINALIZED", finalizedAt: new Date() } }),
-      prisma.warehouse.update({ where: { id: d.warehouseId }, data: { hasTransactions: true } }),
+      prisma.inventoryDocument.update({ where: { id }, data: { status: "FINALIZED", finalizedAt: new Date() } }),
+      prisma.warehouse.update({ where: { id: d.warehouseId! }, data: { hasTransactions: true } }),
       ...d.lines.map((l: any) => prisma.goodsItem.update({ where: { id: l.goodsItemId }, data: { hasTransactions: true } })),
     ]);
 
@@ -542,7 +581,7 @@ router.post("/warehouse-receipts/:id/finalize", async (req, res) => {
 // مطمئن شویم موجودی کالا در انبار (از تاریخ سند به بعد) منفی نمی‌شود
 router.post("/warehouse-receipts/:id/revert", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.warehouseReceipt.findUnique({ where: { id }, include: { lines: true } });
+  const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "WAREHOUSE_RECEIPT" }, include: { lines: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "FINALIZED") return res.status(400).json({ error: "فقط اسناد «قطعی» قابل برگشت هستند" });
 
@@ -553,16 +592,16 @@ router.post("/warehouse-receipts/:id/revert", async (req, res) => {
       // شده — نباید با excludeWarehouseReceiptId دوباره از محاسبه کنار گذاشته شود، وگرنه اثر برگشت
       // (کم‌شدن این مقدار) دوبار اعمال می‌شود و خطای کاذب «موجودی منفی می‌شود» می‌دهد.
       await assertNoNegativeStockAfterChange({
-        warehouseId: d.warehouseId,
+        warehouseId: d.warehouseId!,
         goodsItemId: l.goodsItemId,
         asOfDate: d.date,
         delta: -Number(l.quantity),
       });
     }
 
-    await prisma.warehouseReceipt.update({ where: { id }, data: { status: "DRAFT", finalizedAt: null } });
+    await prisma.inventoryDocument.update({ where: { id }, data: { status: "DRAFT", finalizedAt: null } });
     await recomputeGoodsItemHasTransactions(d.lines.map((l: any) => l.goodsItemId));
-    await recomputeWarehouseHasTransactions([d.warehouseId]);
+    await recomputeWarehouseHasTransactions([d.warehouseId!]);
     res.json({ id, status: "DRAFT" });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در برگشت از قطعی" });

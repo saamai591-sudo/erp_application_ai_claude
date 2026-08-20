@@ -18,6 +18,12 @@ import { recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } 
 // - فی/مبلغ در این فاز کاربر ندارد (unitCost/amount همیشه صفر) — دقیقاً مثل رسید انبار خرید.
 // - وضعیت: WarehouseDocStatus (ثبت/قطعی/ابطال) + قطعی‌کردن/برگشت با کنترل موجودی منفی، چون سند صادره
 //   است (مثل حواله انبار مصرف: کنترل موجودی منفی هنگام قطعی‌کردن انجام می‌شود، نه برگشت).
+// - این سند (برخلاف بقیه‌ی ۵ نوع) امروز سریال/بچ/تاریخ‌انقضا/محل‌فیزیکی ندارد — دست‌نخورده مانده؛
+//   افزودن آن (طبق بند ۳۴ سند که «حواله فروش» را هم نوع صادره‌ی ردیابی‌شونده می‌داند) به فاز فرانت‌اند
+//   (پیکرهای بچ/سریال/محل) موکول شده است.
+//
+// طبق stockAnalysis.md (فاز ۲): روی جدول یکپارچه‌ی InventoryDocument/InventoryDocumentLine
+// (documentType=SALES_DELIVERY) ذخیره می‌شود — نگاه کنید به یادداشت بالای warehouseReceipts.ts.
 // =========================================================================
 
 const router = Router();
@@ -54,11 +60,11 @@ async function validateWarehouseAndPeriod(warehouseId: number, date: Date) {
 async function salesOrderLineRemaining(id: number, excludeDeliveryId?: number) {
   const line = await prisma.salesOrderLine.findUnique({
     where: { id },
-    include: { salesOrder: true, salesDeliveryLines: true },
+    include: { salesOrder: true, inventoryLines: { include: { document: true } } },
   });
   if (!line) return null;
-  const done = line.salesDeliveryLines
-    .filter((d: any) => !excludeDeliveryId || d.salesDeliveryId !== excludeDeliveryId)
+  const done = line.inventoryLines
+    .filter((d: any) => d.document.documentType === "SALES_DELIVERY" && (!excludeDeliveryId || d.documentId !== excludeDeliveryId))
     .reduce((s: number, d: any) => s + Number(d.quantity), 0);
   const remaining = Number(line.quantity) - done;
   return { line, remaining };
@@ -124,12 +130,19 @@ router.get("/sales-deliveries/pickable-sales-order-lines", async (req, res) => {
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
   const lines = await prisma.salesOrderLine.findMany({
     where: { salesOrder: { status: "APPROVED", ...(destDate ? { date: { lte: destDate } } : {}) } },
-    include: { salesOrder: { include: { customer: { include: { party: true } } } }, goodsItem: true, unit: true, salesDeliveryLines: true },
+    include: {
+      salesOrder: { include: { customer: { include: { party: true } } } },
+      goodsItem: true,
+      unit: true,
+      inventoryLines: { include: { document: true } },
+    },
     orderBy: { id: "desc" },
   });
   const result = lines
     .map((l: any) => {
-      const done = l.salesDeliveryLines.reduce((s: number, d: any) => s + Number(d.quantity), 0);
+      const done = l.inventoryLines
+        .filter((d: any) => d.document.documentType === "SALES_DELIVERY")
+        .reduce((s: number, d: any) => s + Number(d.quantity), 0);
       const quantity = Number(l.quantity);
       const remaining = quantity - done;
       const party = l.salesOrder.customer.party;
@@ -159,7 +172,8 @@ router.get("/sales-deliveries/pickable-sales-order-lines", async (req, res) => {
 // =========================================================================
 
 router.get("/sales-deliveries", async (_req, res) => {
-  const items = await prisma.salesDelivery.findMany({
+  const items = await prisma.inventoryDocument.findMany({
+    where: { documentType: "SALES_DELIVERY" },
     include: { warehouse: true, fiscalPeriod: true, lines: true },
     orderBy: { id: "desc" },
   });
@@ -182,8 +196,8 @@ router.get("/sales-deliveries", async (_req, res) => {
 
 router.get("/sales-deliveries/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.salesDelivery.findUnique({
-    where: { id },
+  const d = await prisma.inventoryDocument.findFirst({
+    where: { id, documentType: "SALES_DELIVERY" },
     include: {
       warehouse: true,
       fiscalPeriod: true,
@@ -196,7 +210,7 @@ router.get("/sales-deliveries/:id", async (req, res) => {
     number: d.number,
     date: d.date,
     warehouseId: d.warehouseId,
-    warehouseTitle: d.warehouse.title,
+    warehouseTitle: d.warehouse!.title,
     fiscalPeriodId: d.fiscalPeriodId,
     fiscalPeriodTitle: d.fiscalPeriod.title,
     basis: d.basis,
@@ -229,11 +243,15 @@ router.post("/sales-deliveries", async (req, res) => {
     const date = new Date(body.date);
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
 
-    const lastNumber = await prisma.salesDelivery.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
+    const lastNumber = await prisma.inventoryDocument.findFirst({
+      where: { documentType: "SALES_DELIVERY", fiscalPeriodId: fiscalPeriod.id },
+      orderBy: { number: "desc" },
+    });
     const number = lastNumber ? lastNumber.number + 1 : 1;
 
-    const created = await prisma.salesDelivery.create({
+    const created = await prisma.inventoryDocument.create({
       data: {
+        documentType: "SALES_DELIVERY",
         warehouseId: warehouse.id,
         fiscalPeriodId: fiscalPeriod.id,
         number,
@@ -267,7 +285,7 @@ router.put("/sales-deliveries/:id", async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as HeaderBody;
 
-  const existing = await prisma.salesDelivery.findUnique({ where: { id } });
+  const existing = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "SALES_DELIVERY" } });
   if (!existing) return res.status(404).json({ error: "حواله فروش یافت نشد" });
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل ویرایش هستند؛ ابتدا از «قطعی» برگردانید" });
 
@@ -280,8 +298,8 @@ router.put("/sales-deliveries/:id", async (req, res) => {
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
 
     await prisma.$transaction([
-      prisma.salesDeliveryLine.deleteMany({ where: { salesDeliveryId: id } }),
-      prisma.salesDelivery.update({
+      prisma.inventoryDocumentLine.deleteMany({ where: { documentId: id } }),
+      prisma.inventoryDocument.update({
         where: { id },
         data: {
           warehouseId: warehouse.id,
@@ -313,29 +331,29 @@ router.put("/sales-deliveries/:id", async (req, res) => {
 
 router.delete("/sales-deliveries/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.salesDelivery.findUnique({ where: { id } });
+  const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "SALES_DELIVERY" } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «قطعی» برگردانید" });
-  await prisma.salesDelivery.delete({ where: { id } });
+  await prisma.inventoryDocument.delete({ where: { id } });
   res.status(204).send();
 });
 
 // قطعی کردن: سند صادره است — کنترل موجودی منفی همین‌جا انجام می‌شود (مثل حواله انبار مصرف)
 router.post("/sales-deliveries/:id/finalize", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.salesDelivery.findUnique({ where: { id }, include: { lines: true, warehouse: true } });
+  const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "SALES_DELIVERY" }, include: { lines: true, warehouse: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل قطعی‌کردن هستند" });
   if (d.lines.length === 0) return res.status(400).json({ error: "سند باید حداقل یک ردیف کالا داشته باشد" });
 
   try {
-    await validateWarehouseAndPeriod(d.warehouseId, d.date);
+    await validateWarehouseAndPeriod(d.warehouseId!, d.date);
 
-    if (d.warehouse.stockControl) {
+    if (d.warehouse!.stockControl) {
       for (const l of d.lines) {
         // eslint-disable-next-line no-await-in-loop
         await assertNoNegativeStockAfterChange({
-          warehouseId: d.warehouseId,
+          warehouseId: d.warehouseId!,
           goodsItemId: l.goodsItemId,
           asOfDate: d.date,
           delta: -Number(l.quantity),
@@ -345,8 +363,8 @@ router.post("/sales-deliveries/:id/finalize", async (req, res) => {
     }
 
     await prisma.$transaction([
-      prisma.salesDelivery.update({ where: { id }, data: { status: "FINALIZED", finalizedAt: new Date() } }),
-      prisma.warehouse.update({ where: { id: d.warehouseId }, data: { hasTransactions: true } }),
+      prisma.inventoryDocument.update({ where: { id }, data: { status: "FINALIZED", finalizedAt: new Date() } }),
+      prisma.warehouse.update({ where: { id: d.warehouseId! }, data: { hasTransactions: true } }),
       ...d.lines.map((l: any) => prisma.goodsItem.update({ where: { id: l.goodsItemId }, data: { hasTransactions: true } })),
     ]);
 
@@ -359,14 +377,14 @@ router.post("/sales-deliveries/:id/finalize", async (req, res) => {
 // برگشت از قطعی: سند صادره — برگشت یعنی موجودی افزایش پیدا می‌کند، ایمن است
 router.post("/sales-deliveries/:id/revert", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.salesDelivery.findUnique({ where: { id }, include: { lines: true } });
+  const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "SALES_DELIVERY" }, include: { lines: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "FINALIZED") return res.status(400).json({ error: "فقط اسناد «قطعی» قابل برگشت هستند" });
 
   try {
-    await prisma.salesDelivery.update({ where: { id }, data: { status: "DRAFT", finalizedAt: null } });
+    await prisma.inventoryDocument.update({ where: { id }, data: { status: "DRAFT", finalizedAt: null } });
     await recomputeGoodsItemHasTransactions(d.lines.map((l: any) => l.goodsItemId));
-    await recomputeWarehouseHasTransactions([d.warehouseId]);
+    await recomputeWarehouseHasTransactions([d.warehouseId!]);
     res.json({ id, status: "DRAFT" });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در برگشت از قطعی" });

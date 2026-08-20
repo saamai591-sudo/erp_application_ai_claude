@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertNoNegativeStockAfterChange } from "../services/warehouseStockService";
-import { validateTrackingFields, trackingFieldsForCreate, recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
+import { validateTrackingFields, resolveTrackingRefs, recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
 
 // =========================================================================
 // ماژول‌های «انبارداری» / «حسابداری انبار» > ساب‌ماژول: عملیات > انتقال بین انبارها
@@ -12,6 +12,9 @@ import { validateTrackingFields, trackingFieldsForCreate, recomputeGoodsItemHasT
 // به انبار مقصد؛ طبق ماتریس نوع کالا-ماهیت سند انبار، «انتقالی» همه‌ی انواع کالا را در هر دو جهت مجاز
 // می‌داند. طبق تصمیم فاز اول کاربر، فی/مبلغ در این فاز کاربر ندارد (unitCost/amount همیشه صفر؛ نمای
 // حسابداری انبار کاملاً فقط‌خواندنی است).
+//
+// طبق stockAnalysis.md (فاز ۲): روی جدول یکپارچه‌ی InventoryDocument/InventoryDocumentLine
+// (documentType=WAREHOUSE_TRANSFER) ذخیره می‌شود — نگاه کنید به یادداشت بالای warehouseReceipts.ts.
 // =========================================================================
 
 const router = Router();
@@ -107,7 +110,8 @@ async function validateLines(lines: LineInput[]) {
 }
 
 router.get("/warehouse-transfers", async (_req, res) => {
-  const items = await prisma.warehouseTransfer.findMany({
+  const items = await prisma.inventoryDocument.findMany({
+    where: { documentType: "WAREHOUSE_TRANSFER" },
     include: { sourceWarehouse: true, destWarehouse: true, fiscalPeriod: true, lines: true },
     orderBy: { id: "desc" },
   });
@@ -132,13 +136,16 @@ router.get("/warehouse-transfers", async (_req, res) => {
 
 router.get("/warehouse-transfers/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.warehouseTransfer.findUnique({
-    where: { id },
+  const d = await prisma.inventoryDocument.findFirst({
+    where: { id, documentType: "WAREHOUSE_TRANSFER" },
     include: {
       sourceWarehouse: true,
       destWarehouse: true,
       fiscalPeriod: true,
-      lines: { include: { goodsItem: true, unit: true }, orderBy: { rowOrder: "asc" } },
+      lines: {
+        include: { goodsItem: true, unit: true, batch: true, physicalLocation: true, serials: { include: { serial: true } } },
+        orderBy: { rowOrder: "asc" },
+      },
     },
   });
   if (!d) return res.status(404).json({ error: "انتقال بین انبار یافت نشد" });
@@ -147,9 +154,9 @@ router.get("/warehouse-transfers/:id", async (req, res) => {
     number: d.number,
     date: d.date,
     sourceWarehouseId: d.sourceWarehouseId,
-    sourceWarehouseTitle: d.sourceWarehouse.title,
+    sourceWarehouseTitle: d.sourceWarehouse!.title,
     destWarehouseId: d.destWarehouseId,
-    destWarehouseTitle: d.destWarehouse.title,
+    destWarehouseTitle: d.destWarehouse!.title,
     fiscalPeriodId: d.fiscalPeriodId,
     fiscalPeriodTitle: d.fiscalPeriod.title,
     description: d.description,
@@ -166,10 +173,10 @@ router.get("/warehouse-transfers/:id", async (req, res) => {
       unitCost: Number(l.unitCost),
       amount: Number(l.amount),
       description: l.description,
-      serialNumber: l.serialNumber,
-      batchNumber: l.batchNumber,
-      expiryDate: l.expiryDate,
-      physicalLocation: l.physicalLocation,
+      serialNumber: l.serials[0]?.serial.serialNumber ?? null,
+      batchNumber: l.batch?.batchNumber ?? null,
+      expiryDate: l.batch?.expiryDate ?? null,
+      physicalLocation: l.physicalLocation?.title ?? null,
     })),
   });
 });
@@ -184,12 +191,18 @@ router.post("/warehouse-transfers", async (req, res) => {
     const cleanedLines = await validateLines(body.lines);
     const date = new Date(body.date);
     const { sourceWarehouse, destWarehouse, fiscalPeriod } = await validateWarehousesAndPeriod(body.sourceWarehouseId, body.destWarehouseId, date);
+    // محل فیزیکی روی انبار مبدا نگاشت می‌شود (همان‌جایی که کالا از آن برداشته می‌شود)
+    const refs = await resolveTrackingRefs(cleanedLines, sourceWarehouse.id);
 
-    const lastNumber = await prisma.warehouseTransfer.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
+    const lastNumber = await prisma.inventoryDocument.findFirst({
+      where: { documentType: "WAREHOUSE_TRANSFER", fiscalPeriodId: fiscalPeriod.id },
+      orderBy: { number: "desc" },
+    });
     const number = lastNumber ? lastNumber.number + 1 : 1;
 
-    const created = await prisma.warehouseTransfer.create({
+    const created = await prisma.inventoryDocument.create({
       data: {
+        documentType: "WAREHOUSE_TRANSFER",
         sourceWarehouseId: sourceWarehouse.id,
         destWarehouseId: destWarehouse.id,
         fiscalPeriodId: fiscalPeriod.id,
@@ -206,7 +219,9 @@ router.post("/warehouse-transfers", async (req, res) => {
             amount: 0,
             description: l.description,
             rowOrder: idx,
-            ...trackingFieldsForCreate(l),
+            batchId: refs[idx].batchId,
+            physicalLocationId: refs[idx].physicalLocationId,
+            serials: refs[idx].serialId ? { create: [{ serialId: refs[idx].serialId! }] } : undefined,
           })),
         },
       },
@@ -223,7 +238,7 @@ router.put("/warehouse-transfers/:id", async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as HeaderBody;
 
-  const existing = await prisma.warehouseTransfer.findUnique({ where: { id } });
+  const existing = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "WAREHOUSE_TRANSFER" } });
   if (!existing) return res.status(404).json({ error: "انتقال بین انبار یافت نشد" });
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل ویرایش هستند؛ ابتدا از «قطعی» برگردانید" });
 
@@ -235,10 +250,11 @@ router.put("/warehouse-transfers/:id", async (req, res) => {
     const cleanedLines = await validateLines(body.lines);
     const date = new Date(body.date);
     const { sourceWarehouse, destWarehouse, fiscalPeriod } = await validateWarehousesAndPeriod(body.sourceWarehouseId, body.destWarehouseId, date);
+    const refs = await resolveTrackingRefs(cleanedLines, sourceWarehouse.id);
 
     await prisma.$transaction([
-      prisma.warehouseTransferLine.deleteMany({ where: { warehouseTransferId: id } }),
-      prisma.warehouseTransfer.update({
+      prisma.inventoryDocumentLine.deleteMany({ where: { documentId: id } }),
+      prisma.inventoryDocument.update({
         where: { id },
         data: {
           sourceWarehouseId: sourceWarehouse.id,
@@ -255,7 +271,9 @@ router.put("/warehouse-transfers/:id", async (req, res) => {
               amount: 0,
               description: l.description,
               rowOrder: idx,
-              ...trackingFieldsForCreate(l),
+              batchId: refs[idx].batchId,
+              physicalLocationId: refs[idx].physicalLocationId,
+              serials: refs[idx].serialId ? { create: [{ serialId: refs[idx].serialId! }] } : undefined,
             })),
           },
         },
@@ -270,10 +288,10 @@ router.put("/warehouse-transfers/:id", async (req, res) => {
 
 router.delete("/warehouse-transfers/:id", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.warehouseTransfer.findUnique({ where: { id } });
+  const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "WAREHOUSE_TRANSFER" } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «قطعی» برگردانید" });
-  await prisma.warehouseTransfer.delete({ where: { id } });
+  await prisma.inventoryDocument.delete({ where: { id } });
   res.status(204).send();
 });
 
@@ -281,19 +299,22 @@ router.delete("/warehouse-transfers/:id", async (req, res) => {
 // هم‌زمان با افزایش موجودی مقصد (همیشه ایمن) رخ می‌دهد.
 router.post("/warehouse-transfers/:id/finalize", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.warehouseTransfer.findUnique({ where: { id }, include: { lines: true, sourceWarehouse: true } });
+  const d = await prisma.inventoryDocument.findFirst({
+    where: { id, documentType: "WAREHOUSE_TRANSFER" },
+    include: { lines: true, sourceWarehouse: true },
+  });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل قطعی‌کردن هستند" });
   if (d.lines.length === 0) return res.status(400).json({ error: "سند باید حداقل یک ردیف کالا داشته باشد" });
 
   try {
-    await validateWarehousesAndPeriod(d.sourceWarehouseId, d.destWarehouseId, d.date);
+    await validateWarehousesAndPeriod(d.sourceWarehouseId!, d.destWarehouseId!, d.date);
 
-    if (d.sourceWarehouse.stockControl) {
+    if (d.sourceWarehouse!.stockControl) {
       for (const l of d.lines) {
         // eslint-disable-next-line no-await-in-loop
         await assertNoNegativeStockAfterChange({
-          warehouseId: d.sourceWarehouseId,
+          warehouseId: d.sourceWarehouseId!,
           goodsItemId: l.goodsItemId,
           asOfDate: d.date,
           delta: -Number(l.quantity),
@@ -303,9 +324,9 @@ router.post("/warehouse-transfers/:id/finalize", async (req, res) => {
     }
 
     await prisma.$transaction([
-      prisma.warehouseTransfer.update({ where: { id }, data: { status: "FINALIZED", finalizedAt: new Date() } }),
-      prisma.warehouse.update({ where: { id: d.sourceWarehouseId }, data: { hasTransactions: true } }),
-      prisma.warehouse.update({ where: { id: d.destWarehouseId }, data: { hasTransactions: true } }),
+      prisma.inventoryDocument.update({ where: { id }, data: { status: "FINALIZED", finalizedAt: new Date() } }),
+      prisma.warehouse.update({ where: { id: d.sourceWarehouseId! }, data: { hasTransactions: true } }),
+      prisma.warehouse.update({ where: { id: d.destWarehouseId! }, data: { hasTransactions: true } }),
       ...d.lines.map((l: any) => prisma.goodsItem.update({ where: { id: l.goodsItemId }, data: { hasTransactions: true } })),
     ]);
 
@@ -320,19 +341,22 @@ router.post("/warehouse-transfers/:id/finalize", async (req, res) => {
 // منفی روی انبار مقصد لازم است.
 router.post("/warehouse-transfers/:id/revert", async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.warehouseTransfer.findUnique({ where: { id }, include: { lines: true, destWarehouse: true } });
+  const d = await prisma.inventoryDocument.findFirst({
+    where: { id, documentType: "WAREHOUSE_TRANSFER" },
+    include: { lines: true, destWarehouse: true },
+  });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "FINALIZED") return res.status(400).json({ error: "فقط اسناد «قطعی» قابل برگشت هستند" });
 
   try {
-    if (d.destWarehouse.stockControl) {
+    if (d.destWarehouse!.stockControl) {
       for (const l of d.lines) {
         // eslint-disable-next-line no-await-in-loop
         // توجه: سند در این لحظه هنوز «قطعی» است (پیش‌شرط بالا)، پس قبلاً در محاسبه‌ی موجودی جاری
         // انبار مقصد لحاظ شده — نباید با excludeWarehouseTransferId دوباره کنار گذاشته شود، وگرنه
         // اثر برگشت دوبار اعمال می‌شود و خطای کاذب «موجودی منفی می‌شود» می‌دهد.
         await assertNoNegativeStockAfterChange({
-          warehouseId: d.destWarehouseId,
+          warehouseId: d.destWarehouseId!,
           goodsItemId: l.goodsItemId,
           asOfDate: d.date,
           delta: -Number(l.quantity),
@@ -340,9 +364,9 @@ router.post("/warehouse-transfers/:id/revert", async (req, res) => {
       }
     }
 
-    await prisma.warehouseTransfer.update({ where: { id }, data: { status: "DRAFT", finalizedAt: null } });
+    await prisma.inventoryDocument.update({ where: { id }, data: { status: "DRAFT", finalizedAt: null } });
     await recomputeGoodsItemHasTransactions(d.lines.map((l: any) => l.goodsItemId));
-    await recomputeWarehouseHasTransactions([d.sourceWarehouseId, d.destWarehouseId]);
+    await recomputeWarehouseHasTransactions([d.sourceWarehouseId!, d.destWarehouseId!]);
     res.json({ id, status: "DRAFT" });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در برگشت از قطعی" });

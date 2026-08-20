@@ -5,21 +5,14 @@ import { prisma } from "../lib/prisma";
  * هر سند انباری که پرچم «کنترل موجودی منفی» آن فعال است، باید پیش از قطعی‌کردن/حذف/برگشت از قطعی،
  * این سرویس را فراخوانی کند تا از منفی نشدن موجودی کالا در انبار، از تاریخ سند به بعد، مطمئن شود.
  *
- * انواع سند انبار پیاده‌سازی‌شده تا این فاز:
- * - «موجودی اول دوره» (وارده) و «رسید انبار خرید» (وارده) — فاز اول
- * - «حواله انبار» (صادره/مصرف)، «انتقال بین انبارها» (صادره از مبدا + وارده به مقصد)، و
- *   «انبارگردانی/تعدیل موجودی» (تعدیل امضادار) — فاز دوم
- * - «حواله فروش» (صادره/فروش، ماژول فروش) — دقیقاً مثل حواله انبار مصرف، صادره
- *
- * با افزوده شدن انواع دیگر سند انبار در آینده، کافی‌ست گردش آن‌ها هم به تابع computeStockAsOf افزوده
- * شود (وارده: جمع می‌شود؛ صادره: کم می‌شود)؛ فراخوانی‌کننده‌ها (این فایل و امضای
- * assertNoNegativeStockAfterChange) بدون تغییر باقی می‌مانند.
+ * طبق stockAnalysis.md، هر ۶ نوع سند انبار اکنون روی یک جدول یکپارچه (InventoryDocument/
+ * InventoryDocumentLine، به تفکیک documentType) ذخیره می‌شوند؛ این سرویس هم به همان جدول واحد
+ * مهاجرت کرده — منطق جمع/تفریق هر نوع (وارده/صادره) دقیقاً همان قبلی مانده، فقط منبع داده عوض شده.
  *
  * توجه (محدودیت شناخته‌شده، از فاز اول به ارث رسیده): کنترل موجودی منفی در این پیاده‌سازی فقط موجودی
  * را دقیقاً در تاریخ خود سند بررسی می‌کند، نه برای همه‌ی تاریخ‌های بزرگتر مساوی آن (که متن کامل مستند
- * عمومی عملیات انبار می‌خواهد). این ساده‌سازی از پیاده‌سازی فاز اول (موجودی اول دوره/رسید انبار خرید)
- * به ارث رسیده و عمداً برای این سه سند جدید هم حفظ شده تا رفتار یکدست بماند؛ اصلاح کامل آن (اسکن رو به
- * جلو) یک تغییر معماری جداگانه است.
+ * عمومی عملیات انبار می‌خواهد). این ساده‌سازی عمداً حفظ شده تا رفتار یکدست بماند؛ اصلاح کامل آن (اسکن
+ * رو به جلو) یک تغییر معماری جداگانه است.
  */
 
 export interface StockExcludeOptions {
@@ -31,8 +24,8 @@ export interface StockExcludeOptions {
   excludeSalesDeliveryId?: number;
 }
 
-function sum(rows: { quantity?: any; adjustmentQuantity?: any }[], field: "quantity" | "adjustmentQuantity" = "quantity"): number {
-  return rows.reduce((s: number, l: any) => s + Number(l[field]), 0);
+function sum(rows: { quantity: any }[]): number {
+  return rows.reduce((s: number, l: any) => s + Number(l.quantity), 0);
 }
 
 // موجودی کالا در یک انبار، تا (و شامل) یک تاریخ مشخص، بر اساس تمام اسناد انباریِ قطعی‌شده
@@ -43,10 +36,11 @@ export async function computeStockAsOf(
   opts: StockExcludeOptions = {}
 ): Promise<number> {
   const [initialLines, receiptLines, issueLines, transferOutLines, transferInLines, adjustmentLines, salesDeliveryLines] = await Promise.all([
-    prisma.initialInventoryLine.findMany({
+    prisma.inventoryDocumentLine.findMany({
       where: {
         goodsItemId,
-        initialInventory: {
+        document: {
+          documentType: "INITIAL_INVENTORY",
           warehouseId,
           status: "FINALIZED",
           date: { lte: asOfDate },
@@ -55,10 +49,11 @@ export async function computeStockAsOf(
       },
       select: { quantity: true },
     }),
-    prisma.warehouseReceiptLine.findMany({
+    prisma.inventoryDocumentLine.findMany({
       where: {
         goodsItemId,
-        warehouseReceipt: {
+        document: {
+          documentType: "WAREHOUSE_RECEIPT",
           warehouseId,
           status: "FINALIZED",
           date: { lte: asOfDate },
@@ -67,10 +62,11 @@ export async function computeStockAsOf(
       },
       select: { quantity: true },
     }),
-    prisma.warehouseIssueLine.findMany({
+    prisma.inventoryDocumentLine.findMany({
       where: {
         goodsItemId,
-        warehouseIssue: {
+        document: {
+          documentType: "WAREHOUSE_ISSUE",
           warehouseId,
           status: "FINALIZED",
           date: { lte: asOfDate },
@@ -79,10 +75,11 @@ export async function computeStockAsOf(
       },
       select: { quantity: true },
     }),
-    prisma.warehouseTransferLine.findMany({
+    prisma.inventoryDocumentLine.findMany({
       where: {
         goodsItemId,
-        warehouseTransfer: {
+        document: {
+          documentType: "WAREHOUSE_TRANSFER",
           sourceWarehouseId: warehouseId,
           status: "FINALIZED",
           date: { lte: asOfDate },
@@ -91,10 +88,11 @@ export async function computeStockAsOf(
       },
       select: { quantity: true },
     }),
-    prisma.warehouseTransferLine.findMany({
+    prisma.inventoryDocumentLine.findMany({
       where: {
         goodsItemId,
-        warehouseTransfer: {
+        document: {
+          documentType: "WAREHOUSE_TRANSFER",
           destWarehouseId: warehouseId,
           status: "FINALIZED",
           date: { lte: asOfDate },
@@ -103,22 +101,24 @@ export async function computeStockAsOf(
       },
       select: { quantity: true },
     }),
-    prisma.warehouseAdjustmentLine.findMany({
+    prisma.inventoryDocumentLine.findMany({
       where: {
         goodsItemId,
-        warehouseAdjustment: {
+        document: {
+          documentType: "WAREHOUSE_ADJUSTMENT",
           warehouseId,
           status: "FINALIZED",
           date: { lte: asOfDate },
           ...(opts.excludeWarehouseAdjustmentId ? { NOT: { id: opts.excludeWarehouseAdjustmentId } } : {}),
         },
       },
-      select: { adjustmentQuantity: true },
+      select: { quantity: true },
     }),
-    prisma.salesDeliveryLine.findMany({
+    prisma.inventoryDocumentLine.findMany({
       where: {
         goodsItemId,
-        salesDelivery: {
+        document: {
+          documentType: "SALES_DELIVERY",
           warehouseId,
           status: "FINALIZED",
           date: { lte: asOfDate },
@@ -129,13 +129,15 @@ export async function computeStockAsOf(
     }),
   ]);
 
+  // adjustmentLines.quantity در جدول یکپارچه از قبل امضادار ذخیره می‌شود (adjustmentQuantity قدیم)،
+  // پس مستقیم جمع می‌شود؛ بقیه‌ی انواع مثل قبل بی‌علامت‌اند و جهت‌شان اینجا با +/- اعمال می‌شود.
   return (
     sum(initialLines) +
     sum(receiptLines) -
     sum(issueLines) -
     sum(transferOutLines) +
     sum(transferInLines) +
-    sum(adjustmentLines, "adjustmentQuantity") -
+    sum(adjustmentLines) -
     sum(salesDeliveryLines)
   );
 }
