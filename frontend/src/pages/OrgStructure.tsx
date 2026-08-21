@@ -61,6 +61,7 @@ function OrgTree() {
       {error && <div className="alert error">{error}</div>}
       <TreeView
         nodes={items}
+        persistKey="/org-structure"
         onAddRoot={() => navigate("/org-structure/new")}
         onAddChild={openAddChild}
         onEdit={(n) => navigate(`/org-structure/${n.id}/edit`)}

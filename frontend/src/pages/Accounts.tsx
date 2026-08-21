@@ -124,6 +124,7 @@ function AccountsTree() {
       {error && <div className="alert error">{error}</div>}
       <TreeView
         nodes={nodes}
+        persistKey={cacheKey}
         onAddRoot={() => { clearPersistedStateByPrefix("form:/accounts/new"); navigate("/accounts/new"); }}
         onAddChild={(n) => {
           clearPersistedStateByPrefix(`form:/accounts/new?parentId=${n.id}`);

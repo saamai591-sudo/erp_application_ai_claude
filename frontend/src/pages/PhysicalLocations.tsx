@@ -115,7 +115,14 @@ export default function PhysicalLocations() {
       </div>
       {error && <div className="alert error">{error}</div>}
       {warehouseId && (
-        <TreeView nodes={items} onAddRoot={openAddRoot} onAddChild={openAddChild} onEdit={openEdit} onDelete={onDelete} />
+        <TreeView
+          nodes={items}
+          onAddRoot={openAddRoot}
+          onAddChild={openAddChild}
+          onEdit={openEdit}
+          onDelete={onDelete}
+          persistKey={`/physical-locations:${warehouseId}`}
+        />
       )}
 
       {open && (

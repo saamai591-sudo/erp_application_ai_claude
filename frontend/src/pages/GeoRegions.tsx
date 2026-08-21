@@ -66,6 +66,7 @@ function GeoTree() {
       {error && <div className="alert error">{error}</div>}
       <TreeView
         nodes={items}
+        persistKey="/geo-regions"
         onAddRoot={() => navigate("/geo-regions/new")}
         onAddChild={openAddChild}
         onEdit={(n) => navigate(`/geo-regions/${n.id}/edit`)}

@@ -97,6 +97,7 @@ function GroupsTree() {
       {error && <div className="alert error">{error}</div>}
       <TreeView
         nodes={nodes}
+        persistKey={cacheKey}
         // چون فرم گروه کالا نسبتاً پیچیده است (شامل تب ویژگیها)، افزودن شاخه‌ی جدید در یک تب مستقل باز می‌شود
         // تا درخت (یا فرم گروهی که کاربر همین الان در حال مرور/ویرایش آن است) دست‌نخورده در تب خودش باقی بماند
         onAddRoot={() => openTab("/goods-groups/new")}

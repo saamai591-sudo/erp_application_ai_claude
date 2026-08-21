@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { usePersistedState } from "../lib/usePersistedState";
 
 export interface TreeNode {
   id: number;
@@ -6,6 +6,12 @@ export interface TreeNode {
   code: string;
   title: string;
   level?: string;
+}
+
+// مرتب‌سازی بر اساس کد کامل: چون همه‌ی خواهر-برادرها پیشوند والد یکسانی دارند، مرتب‌سازی هر
+// گروه خواهر-برادر فقط بر اساس کد خودشان معادل مرتب‌سازی بر اساس کد کامل است.
+function compareByCode(a: TreeNode, b: TreeNode): number {
+  return a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: "base" });
 }
 
 export function TreeView({
@@ -16,6 +22,7 @@ export function TreeView({
   onEdit,
   onDelete,
   levelLabel,
+  persistKey,
 }: {
   nodes: TreeNode[];
   onAddChild: (parent: TreeNode) => void;
@@ -25,8 +32,19 @@ export function TreeView({
   onEdit?: (node: TreeNode) => void;
   onDelete: (node: TreeNode) => void;
   levelLabel?: (node: TreeNode) => string;
+  /** کلید یکتا (معمولاً همان cacheKey صفحه) برای نگهداری وضعیت باز/بسته‌ی شاخه‌ها بین remount شدن‌های
+   * کامپوننت — مثلاً وقتی کاربر برای ویرایش یک گره به فرم/تب دیگری می‌رود و برمی‌گردد، درخت با همان
+   * شاخه‌های بازشده نمایش داده می‌شود، نه کاملاً جمع‌شده. */
+  persistKey: string;
 }) {
-  const roots = nodes.filter((n) => !n.parentId);
+  const [expandedIds, setExpandedIds] = usePersistedState<number[]>(`${persistKey}:expanded`, []);
+  const expandedSet = new Set(expandedIds);
+
+  function toggle(id: number) {
+    setExpandedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  const roots = nodes.filter((n) => !n.parentId).sort(compareByCode);
 
   return (
     <div className="card" style={{ padding: 14 }}>
@@ -46,6 +64,8 @@ export function TreeView({
           onEdit={onEdit}
           onDelete={onDelete}
           levelLabel={levelLabel}
+          expandedSet={expandedSet}
+          onToggle={toggle}
         />
       ))}
     </div>
@@ -60,6 +80,8 @@ function Node({
   onEdit,
   onDelete,
   levelLabel,
+  expandedSet,
+  onToggle,
 }: {
   node: TreeNode;
   nodes: TreeNode[];
@@ -68,15 +90,17 @@ function Node({
   onEdit?: (node: TreeNode) => void;
   onDelete: (node: TreeNode) => void;
   levelLabel?: (node: TreeNode) => string;
+  expandedSet: Set<number>;
+  onToggle: (id: number) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const children = nodes.filter((n) => n.parentId === node.id);
+  const expanded = expandedSet.has(node.id);
+  const children = nodes.filter((n) => n.parentId === node.id).sort(compareByCode);
   const childAllowed = canAddChild ? canAddChild(node) : true;
 
   return (
     <div className="tree-node">
       <div className="tree-row">
-        <span onClick={() => setExpanded(!expanded)} style={{ width: 14, display: "inline-block", color: "var(--ink-soft)" }}>
+        <span onClick={() => onToggle(node.id)} style={{ width: 14, display: "inline-block", color: "var(--ink-soft)" }}>
           {children.length ? (expanded ? "▾" : "◂") : ""}
         </span>
         <span style={{ color: "var(--ink-soft)", fontSize: 12 }}>{node.code}</span>
@@ -113,6 +137,8 @@ function Node({
               onEdit={onEdit}
               onDelete={onDelete}
               levelLabel={levelLabel}
+              expandedSet={expandedSet}
+              onToggle={onToggle}
             />
           ))}
         </div>
