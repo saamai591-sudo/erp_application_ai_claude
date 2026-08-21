@@ -251,10 +251,7 @@ export function GoodsItemList({ kind }: { kind: ItemKind }) {
                     { key: "barcode", label: "بارکد" },
                     { key: "reorderControl", label: "کنترل نقطه سفارش", hint: "بله / خیر" },
                     { key: "reorderPoint", label: "مقدار نقطه سفارش", hint: "اگر کنترل نقطه سفارش «بله» باشد الزامی است" },
-                    { key: "hasSerialNumber", label: "شماره سریال دارد", hint: "بله / خیر" },
-                    { key: "hasExpiryDate", label: "تاریخ انقضا دارد", hint: "بله / خیر" },
                     { key: "isSerialTracked", label: "سریال‌پذیر", hint: "بله / خیر" },
-                    { key: "isExpiryTracked", label: "تاریخ‌انقضاپذیر", hint: "بله / خیر" },
                     { key: "isBatchTracked", label: "بچ‌پذیر", hint: "بله / خیر" },
                     { key: "isLocationTracked", label: "محل‌پذیر", hint: "بله / خیر" },
                   ] as const)
