@@ -7,6 +7,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
+import { ExcelImportButton } from "../components/ExcelImport";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { toFaDigits } from "../lib/formatAmount";
@@ -72,6 +73,18 @@ function GroupList() {
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={`تعریف گروه حسابداری برای تعیین نحوه صدور سند حسابداری اسناد انبار، خرید و فروش`} title="گروه حسابداری" />
           <NewRecordButton path="/accounting-groups/new" />
+          <ExcelImportButton
+            entityLabel="گروه‌های حسابداری"
+            templateFilename="قالب-گروه-حسابداری"
+            backendEntityType="accounting-group"
+            columns={[
+              { key: "title", label: "عنوان", required: true },
+              { key: "goodsType", label: "نوع کالا", required: true, hint: Object.values(GOODS_TYPE_FA).join(" / ") },
+              { key: "code", label: "کد", hint: "اختیاری — اگر خالی بگذارید خودکار صادر می‌شود" },
+              { key: "isActive", label: "فعال", hint: "بله / خیر — پیش‌فرض بله" },
+            ]}
+            onDone={reload}
+          />
           <RefreshButton onClick={reload} />
           <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>

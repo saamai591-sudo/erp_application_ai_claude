@@ -16,6 +16,17 @@ const NATURE_DETAIL_FA_REVERSE: Record<string, string> = { "دارایی": "ASSE
 const BALANCE_NATURE_FA_REVERSE: Record<string, string> = { "بدهکار": "DEBIT", "بستانکار": "CREDIT" };
 const LEGAL_TYPE_FA_REVERSE: Record<string, string> = { "حقوقی": "LEGAL", "مشارکت خاص": "SPECIAL_PARTNERSHIP", "بانک/موسسه مالی": "BANK" };
 const COST_CENTER_TYPE_FA_REVERSE: Record<string, string> = { "عملیاتی/تولیدی": "OPERATIONAL", "پشتیبانی": "SUPPORT", "خدماتی": "SERVICE", "اداری و تشکیلاتی": "ADMIN" };
+const GOODS_TYPE_FA_REVERSE: Record<string, string> = {
+  "مواد اولیه": "RAW_MATERIAL",
+  "نیمه‌ساخته": "SEMI_FINISHED",
+  "محصول": "PRODUCT",
+  "ملزومات و لوازم": "SUPPLIES",
+  "خدمت": "SERVICE",
+  "کالای کارمزدی": "CONTRACT_GOODS",
+  "ضایعات": "SCRAP",
+  "دارایی ثابت": "FIXED_ASSET",
+  "کالای تجاری": "TRADE_GOODS",
+};
 
 export function registerAllImportProcessors() {
   registerImportEntity("party", {
@@ -185,6 +196,31 @@ export function registerAllImportProcessors() {
         return { ok: true };
       } catch (e: any) {
         return { ok: false, error: e.message || "خطا در ثبت مرکز هزینه" };
+      }
+    },
+  });
+
+  registerImportEntity("accounting-group", {
+    row: async (row) => {
+      try {
+        if (!row.title || !row.goodsType) return { ok: false, error: "عنوان و نوع کالا الزامی است" };
+        const goodsType = GOODS_TYPE_FA_REVERSE[row.goodsType];
+        if (!goodsType) return { ok: false, error: `نوع کالا «${row.goodsType}» نامعتبر است` };
+
+        const dupTitle = await prisma.accountingGroup.findUnique({ where: { title: row.title } });
+        if (dupTitle) return { ok: false, error: "عنوان تکراری است" };
+
+        const finalCode = row.code ? Number(row.code) : await nextSerialNumber(prisma.accountingGroup, "code");
+        const dupCode = await prisma.accountingGroup.findUnique({ where: { code: finalCode } });
+        if (dupCode) return { ok: false, error: "کد تکراری است" };
+
+        await prisma.accountingGroup.create({
+          data: { code: finalCode, title: row.title, goodsType: goodsType as any, isActive: row.isActive !== "خیر" },
+        });
+        return { ok: true };
+      } catch (e: any) {
+        if (e.code === "P2002") return { ok: false, error: "کد یا عنوان تکراری است" };
+        return { ok: false, error: e.message || "خطا در ثبت گروه حسابداری" };
       }
     },
   });
