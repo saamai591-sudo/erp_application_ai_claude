@@ -225,6 +225,31 @@ export function registerAllImportProcessors() {
     },
   });
 
+  registerImportEntity("unit-of-measure", {
+    row: async (row) => {
+      try {
+        if (!row.title) return { ok: false, error: "عنوان الزامی است" };
+        const isWeight = row.isWeight === "بله";
+        if (isWeight && !row.kgEquivalent) return { ok: false, error: "برای واحد وزنی، معادل به کیلوگرم الزامی است" };
+
+        const dupTitle = await prisma.unitOfMeasure.findUnique({ where: { title: row.title } });
+        if (dupTitle) return { ok: false, error: "عنوان تکراری است" };
+
+        const finalCode = row.code ? Number(row.code) : await nextSerialNumber(prisma.unitOfMeasure, "code");
+        const dupCode = await prisma.unitOfMeasure.findUnique({ where: { code: finalCode } });
+        if (dupCode) return { ok: false, error: "کد تکراری است" };
+
+        await prisma.unitOfMeasure.create({
+          data: { code: finalCode, title: row.title, isWeight, kgEquivalent: isWeight ? Number(row.kgEquivalent) : null },
+        });
+        return { ok: true };
+      } catch (e: any) {
+        if (e.code === "P2002") return { ok: false, error: "کد یا عنوان تکراری است" };
+        return { ok: false, error: e.message || "خطا در ثبت واحد سنجش" };
+      }
+    },
+  });
+
   registerImportEntity("currency", {
     row: async (row) => {
       try {

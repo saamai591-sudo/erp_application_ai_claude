@@ -7,6 +7,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
+import { ExcelImportButton } from "../components/ExcelImport";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { toFaDigits } from "../lib/formatAmount";
@@ -60,6 +61,18 @@ function UnitList() {
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={`تعریف واحدهای سنجش جهت استفاده در کالا و خدمت`} title="واحد سنجش" />
           <NewRecordButton path="/units-of-measure/new" />
+          <ExcelImportButton
+            entityLabel="واحدهای سنجش"
+            templateFilename="قالب-واحد-سنجش"
+            backendEntityType="unit-of-measure"
+            columns={[
+              { key: "title", label: "عنوان", required: true },
+              { key: "isWeight", label: "واحد وزنی است؟", hint: "بله / خیر — پیش‌فرض خیر" },
+              { key: "kgEquivalent", label: "معادل به کیلوگرم", hint: "اگر «واحد وزنی است؟» بله باشد الزامی است" },
+              { key: "code", label: "کد", hint: "اختیاری — اگر خالی بگذارید خودکار صادر می‌شود" },
+            ]}
+            onDone={reload}
+          />
           <RefreshButton onClick={reload} />
           <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
