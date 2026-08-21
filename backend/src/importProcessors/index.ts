@@ -251,6 +251,50 @@ export function registerAllImportProcessors() {
     },
   });
 
+  registerImportEntity("warehouse", {
+    row: async (row) => {
+      try {
+        if (!row.title || !row.warehouseGroupTitle) return { ok: false, error: "عنوان و گروه انبار الزامی است" };
+
+        const group = await prisma.warehouseGroup.findFirst({ where: { title: row.warehouseGroupTitle } });
+        if (!group) return { ok: false, error: `گروه انبار «${row.warehouseGroupTitle}» یافت نشد` };
+
+        const dupTitle = await prisma.warehouse.findUnique({ where: { title: row.title } });
+        if (dupTitle) return { ok: false, error: "عنوان تکراری است" };
+
+        let managerId: number | null = null;
+        if (row.managerDetailCode) {
+          const manager = await prisma.party.findFirst({ where: { detailCode: toEnglishDigits(row.managerDetailCode).trim() } });
+          if (!manager || manager.category !== "INDIVIDUAL" || !manager.isActive) {
+            return { ok: false, error: `مسئول انبار با کد تفصیل «${row.managerDetailCode}» یافت نشد یا شخص حقیقی فعال نیست` };
+          }
+          managerId = manager.id;
+        }
+
+        const finalCode = row.code ? Number(toEnglishDigits(row.code)) : await nextSerialNumber(prisma.warehouse, "code");
+        const dupCode = await prisma.warehouse.findUnique({ where: { code: finalCode } });
+        if (dupCode) return { ok: false, error: "کد تکراری است" };
+
+        await prisma.warehouse.create({
+          data: {
+            code: finalCode,
+            title: row.title,
+            warehouseGroupId: group.id,
+            address: row.address?.trim() || null,
+            phone: row.phone?.trim() || null,
+            managerId,
+            stockControl: row.stockControl !== "خیر",
+            isActive: row.isActive !== "خیر",
+          },
+        });
+        return { ok: true };
+      } catch (e: any) {
+        if (e.code === "P2002") return { ok: false, error: "کد یا عنوان تکراری است" };
+        return { ok: false, error: e.message || "خطا در ثبت انبار" };
+      }
+    },
+  });
+
   registerImportEntity("currency", {
     row: async (row) => {
       try {

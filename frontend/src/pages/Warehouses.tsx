@@ -7,6 +7,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
+import { ExcelImportButton } from "../components/ExcelImport";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RecordPickerField } from "../components/RecordPicker";
@@ -81,6 +82,22 @@ function WarehouseList() {
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={`تعریف انبارهای مختلف در سیستم`} title="انبار" />
           <NewRecordButton path="/warehouses/new" />
+          <ExcelImportButton
+            entityLabel="انبارها"
+            templateFilename="قالب-انبار"
+            backendEntityType="warehouse"
+            columns={[
+              { key: "title", label: "عنوان", required: true },
+              { key: "warehouseGroupTitle", label: "عنوان گروه انبار", required: true },
+              { key: "managerDetailCode", label: "کد تفصیل مسئول انبار", hint: "اختیاری — باید طرف‌حساب حقیقی فعال باشد" },
+              { key: "address", label: "آدرس" },
+              { key: "phone", label: "تلفن" },
+              { key: "stockControl", label: "کنترل موجودی", hint: "بله / خیر — پیش‌فرض بله" },
+              { key: "code", label: "کد", hint: "اختیاری — اگر خالی بگذارید خودکار صادر می‌شود" },
+              { key: "isActive", label: "فعال", hint: "بله / خیر — پیش‌فرض بله" },
+            ]}
+            onDone={reload}
+          />
           <RefreshButton onClick={reload} />
           <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
