@@ -4,6 +4,7 @@ import { resolveDetailCode, registerDetailCode, nextSerialNumber } from "../util
 import { computeFullAccountCode, buildAccountByIdMap } from "../utils/accountCode";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { resolveDateString } from "../utils/jalaliDate";
+import { toEnglishDigits } from "../utils/digits";
 import { KIND_FA, computePrefixes, resolveSerial, AttrSelection } from "../routes/goodsItems";
 
 const DETAIL_TYPE_PARTY = 1;
@@ -277,13 +278,15 @@ export function registerAllImportProcessors() {
     row: async (row) => {
       try {
         if (!row.code || !row.title) return { ok: false, error: "کد و عنوان الزامی است" };
+        const code = toEnglishDigits(row.code).trim();
 
         let parentId: number | null = null;
         let level;
         if (row.parentFullCode) {
+          const parentFullCode = toEnglishDigits(row.parentFullCode).trim();
           const allAccounts = await prisma.account.findMany({ select: { id: true, code: true, parentId: true } });
           const byId = buildAccountByIdMap(allAccounts as any);
-          const parent = allAccounts.find((a: any) => computeFullAccountCode(a.id, byId) === row.parentFullCode);
+          const parent = allAccounts.find((a: any) => toEnglishDigits(computeFullAccountCode(a.id, byId)) === parentFullCode);
           if (!parent) return { ok: false, error: `حساب والد با کد کامل «${row.parentFullCode}» یافت نشد` };
           parentId = parent.id;
           const parentFull = await prisma.account.findUnique({ where: { id: parentId }, include: { level: true } });
@@ -294,13 +297,13 @@ export function registerAllImportProcessors() {
           if (!level) return { ok: false, error: "ابتدا سطح گزارشگری (سطح گروه) را تعریف کنید" };
         }
 
-        if (row.code.length !== level.codeLength) {
+        if (code.length !== level.codeLength) {
           return { ok: false, error: `طول کد باید ${level.codeLength} رقم باشد (سطح ${level.title})` };
         }
-        const dup = await prisma.account.findFirst({ where: { parentId, code: row.code } });
+        const dup = await prisma.account.findFirst({ where: { parentId, code } });
         if (dup) return { ok: false, error: "کد در این سطح تکراری است" };
 
-        const data: any = { parentId, levelId: level.id, code: row.code, title: row.title };
+        const data: any = { parentId, levelId: level.id, code, title: row.title };
         if (level.order === 1) {
           if (!row.natureGroup) return { ok: false, error: "ماهیت حساب (سطح گروه) الزامی است" };
           data.natureGroup = NATURE_GROUP_FA_REVERSE[row.natureGroup];
@@ -321,7 +324,8 @@ export function registerAllImportProcessors() {
             ] as const) {
               const value = (row as any)[col];
               if (!value) continue;
-              const match = detailTypes.find((t: any) => String(t.code) === value.trim());
+              const normalizedValue = toEnglishDigits(value).trim();
+              const match = detailTypes.find((t: any) => String(t.code) === normalizedValue);
               if (!match) return { ok: false, error: `نوع تفصیل با کد «${value}» یافت نشد` };
               data[field] = match.id;
             }
@@ -360,13 +364,14 @@ export function registerAllImportProcessors() {
           }
           return parts.join("");
         }
-        const group = allGroups.find((g: any) => g.isLastBranch && fullGroupCode(g) === row.groupFullCode!.trim());
+        const normalizedGroupFullCode = toEnglishDigits(row.groupFullCode!).trim();
+        const group = allGroups.find((g: any) => g.isLastBranch && toEnglishDigits(fullGroupCode(g)) === normalizedGroupFullCode);
         if (!group) return { ok: false, error: `گروه ${label} با کد کامل «${row.groupFullCode}» (شاخه‌ی آخر) یافت نشد` };
 
-        const mainUnit = await prisma.unitOfMeasure.findFirst({ where: { code: Number(row.mainUnitCode) } });
+        const mainUnit = await prisma.unitOfMeasure.findFirst({ where: { code: Number(toEnglishDigits(row.mainUnitCode)) } });
         if (!mainUnit) return { ok: false, error: `واحد اصلی با کد «${row.mainUnitCode}» یافت نشد` };
 
-        const accountingGroup = await prisma.accountingGroup.findFirst({ where: { code: Number(row.accountingGroupCode) } });
+        const accountingGroup = await prisma.accountingGroup.findFirst({ where: { code: Number(toEnglishDigits(row.accountingGroupCode)) } });
         if (!accountingGroup) return { ok: false, error: `گروه حساب با کد «${row.accountingGroupCode}» یافت نشد` };
 
         // ویژگی‌ها (اختیاری): «عنوان ویژگی=عنوان مقدار» به‌ازای هر ویژگی، جدا شده با «،» — مثلاً «رنگ=قرمز،سایز=بزرگ»
@@ -389,29 +394,29 @@ export function registerAllImportProcessors() {
         let weightUnitId: number | null = null;
         let weightRatio: number | null = null;
         if (kind === "GOODS" && !mainUnit.isWeight && row.weightUnitCode) {
-          const weightUnit = await prisma.unitOfMeasure.findFirst({ where: { code: Number(row.weightUnitCode) } });
+          const weightUnit = await prisma.unitOfMeasure.findFirst({ where: { code: Number(toEnglishDigits(row.weightUnitCode)) } });
           if (!weightUnit) return { ok: false, error: `واحد وزنی با کد «${row.weightUnitCode}» یافت نشد` };
           weightUnitId = weightUnit.id;
           if (!row.weightRatio) return { ok: false, error: "نسبت وزنی الزامی است" };
-          weightRatio = Number(row.weightRatio);
+          weightRatio = Number(toEnglishDigits(row.weightRatio));
         }
 
         const isSpecial = row.isSpecial === "بله";
         let taxRate: number | null = null;
         if (isSpecial) {
           if (!row.taxRate) return { ok: false, error: "نرخ مالیات الزامی است" };
-          taxRate = Number(row.taxRate);
+          taxRate = Number(toEnglishDigits(row.taxRate));
         }
 
         const reorderControl = kind === "GOODS" && row.reorderControl === "بله";
         let reorderPoint: number | null = null;
         if (reorderControl) {
           if (!row.reorderPoint) return { ok: false, error: "مقدار نقطه سفارش الزامی است" };
-          reorderPoint = Number(row.reorderPoint);
+          reorderPoint = Number(toEnglishDigits(row.reorderPoint));
         }
 
         const { leaf, codePrefix, titlePrefix, resolvedAttrs } = await computePrefixes(group.id, attrSelections);
-        const serial = await resolveSerial(group.id, row.code || undefined, leaf.childCodeLength!);
+        const serial = await resolveSerial(group.id, row.code ? toEnglishDigits(row.code) : undefined, leaf.childCodeLength!);
         const fullCode = codePrefix + serial;
         const rawTitle = row.title.trim();
         const fullTitle = titlePrefix ? `${titlePrefix}، ${rawTitle}` : rawTitle;
@@ -473,7 +478,8 @@ export function registerAllImportProcessors() {
 
         const lines: IssueLineInput[] = [];
         for (const row of groupRows) {
-          const account = allAccounts.find((a: any) => computeFullAccountCode(a.id, byId) === row.accountCode);
+          const normalizedAccountCode = toEnglishDigits(row.accountCode).trim();
+          const account = allAccounts.find((a: any) => toEnglishDigits(computeFullAccountCode(a.id, byId)) === normalizedAccountCode);
           if (!account) return { ok: false, error: `حساب با کد «${row.accountCode}» یافت نشد` };
           const currency = row.currencyCode ? currencies.find((c: any) => c.code === row.currencyCode) : baseCurrency;
           if (!currency) return { ok: false, error: `ارز «${row.currencyCode}» یافت نشد` };

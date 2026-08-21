@@ -3,11 +3,7 @@ import persian from "react-date-object/calendars/persian";
 import persian_fa from "react-date-object/locales/persian_fa";
 import gregorian from "react-date-object/calendars/gregorian";
 import gregorian_en from "react-date-object/locales/gregorian_en";
-
-const FA_DIGIT_MAP: Record<string, string> = { "۰": "0", "۱": "1", "۲": "2", "۳": "3", "۴": "4", "۵": "5", "۶": "6", "۷": "7", "۸": "8", "۹": "9" };
-function toEnglishDigits(s: string): string {
-  return s.replace(/[۰-۹]/g, (d) => FA_DIGIT_MAP[d] ?? d);
-}
+import { toEnglishDigits } from "./digits";
 
 /**
  * تشخیص خودکار و تبدیل یک رشته تاریخ (شمسی با هر جداکننده و ارقام فارسی/انگلیسی، یا میلادی ایزو)
