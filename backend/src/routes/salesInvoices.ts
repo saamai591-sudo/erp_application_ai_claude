@@ -10,7 +10,7 @@ import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 // - مبنا: بدون مبنا / حواله فروش. برخلاف فاکتور خرید (که هر ردیف رسید انبار خرید را دقیقاً یک‌بار و
 //   کامل مصرف می‌کرد — قید @@unique در schema)، اینجا طبق تصمیم صریح کاربر رابطه «مانده‌ای» است:
 //   مشتری ممکن است طی چند حواله فروش (مثلاً چند مرسوله کوچک) یک فاکتور بگیرد یا برعکس، یک حواله طی
-//   چند فاکتور جداگانه صورتحساب شود — پس sourceSalesDeliveryLineId نال‌پذیر و بدون @@unique است و
+//   چند فاکتور جداگانه صورتحساب شود — پس sourceInventoryLineId نال‌پذیر و بدون @@unique است و
 //   با الگوی استاندارد «باقیمانده» (مثل بقیه‌ی زنجیره خرید/فروش) کنترل می‌شود.
 // - فقط حواله‌های «قطعی»‌شده قابل صورتحساب هستند (حواله در وضعیت ثبت هنوز واقعاً از انبار خارج نشده).
 // - فی/مبلغ برخلاف حواله فروش، اینجا توسط کاربر وارد می‌شود (چه در ردیف بدون مبنا چه در ردیف مبتنی بر
@@ -38,9 +38,9 @@ function partyDisplayName(party: any) {
 }
 
 async function salesDeliveryLineRemaining(id: number, excludeInvoiceId?: number) {
-  const line = await prisma.salesDeliveryLine.findUnique({
-    where: { id },
-    include: { salesDelivery: true, salesInvoiceLines: true },
+  const line = await prisma.inventoryDocumentLine.findFirst({
+    where: { id, document: { documentType: "SALES_DELIVERY" } },
+    include: { document: true, salesInvoiceLines: true },
   });
   if (!line) return null;
   const done = line.salesInvoiceLines
@@ -51,7 +51,7 @@ async function salesDeliveryLineRemaining(id: number, excludeInvoiceId?: number)
 }
 
 interface LineInput {
-  sourceSalesDeliveryLineId?: number | null;
+  sourceInventoryLineId?: number | null;
   goodsItemId?: number | null;
   unitId?: number | null;
   quantity: number;
@@ -64,7 +64,7 @@ async function validateLines(lines: LineInput[], basis: string, excludeInvoiceId
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("فاکتور فروش باید حداقل یک ردیف کالا داشته باشد");
 
   const cleaned: {
-    sourceSalesDeliveryLineId: number | null;
+    sourceInventoryLineId: number | null;
     goodsItemId: number;
     unitId: number;
     quantity: number;
@@ -81,18 +81,18 @@ async function validateLines(lines: LineInput[], basis: string, excludeInvoiceId
     let unitId = l.unitId || 0;
     const unitPrice = Number(l.unitPrice) || 0;
     const amount = Number(l.amount) || 0;
-    let sourceSalesDeliveryLineId: number | null = null;
+    let sourceInventoryLineId: number | null = null;
 
     if (!(unitPrice >= 0)) throw new Error(`فی ردیف ${idx + 1} نامعتبر است`);
     if (!(amount >= 0)) throw new Error(`مبلغ ردیف ${idx + 1} نامعتبر است`);
 
     if (basis === "SALES_DELIVERY") {
-      if (!l.sourceSalesDeliveryLineId) throw new Error(`ردیف ${idx + 1}: انتخاب ردیف حواله فروش الزامی است`);
-      const info = await salesDeliveryLineRemaining(l.sourceSalesDeliveryLineId, excludeInvoiceId);
+      if (!l.sourceInventoryLineId) throw new Error(`ردیف ${idx + 1}: انتخاب ردیف حواله فروش الزامی است`);
+      const info = await salesDeliveryLineRemaining(l.sourceInventoryLineId, excludeInvoiceId);
       if (!info) throw new Error(`ردیف حواله فروش برای ردیف ${idx + 1} یافت نشد`);
-      if (info.line.salesDelivery.status !== "FINALIZED") throw new Error(`حواله فروش ردیف ${idx + 1} هنوز قطعی نشده است`);
+      if (info.line.document.status !== "FINALIZED") throw new Error(`حواله فروش ردیف ${idx + 1} هنوز قطعی نشده است`);
       if (qty > info.remaining) throw new Error(`مقدار ردیف ${idx + 1} از باقیمانده‌ی قابل صورتحساب (${info.remaining}) بیشتر است`);
-      sourceSalesDeliveryLineId = info.line.id;
+      sourceInventoryLineId = info.line.id;
       goodsItemId = info.line.goodsItemId;
       unitId = info.line.unitId;
     } else {
@@ -104,7 +104,7 @@ async function validateLines(lines: LineInput[], basis: string, excludeInvoiceId
     if (item.kind !== "GOODS") throw new Error(`ردیف ${idx + 1}: فقط کالا قابل انتخاب است`);
     if (!unitId) unitId = item.mainUnitId;
 
-    cleaned.push({ sourceSalesDeliveryLineId, goodsItemId, unitId, quantity: qty, unitPrice, amount, description: l.description || null });
+    cleaned.push({ sourceInventoryLineId, goodsItemId, unitId, quantity: qty, unitPrice, amount, description: l.description || null });
   }
   return cleaned;
 }
@@ -115,9 +115,9 @@ async function validateLines(lines: LineInput[], basis: string, excludeInvoiceId
 
 router.get("/sales-invoices/pickable-sales-delivery-lines", async (req, res) => {
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
-  const lines = await prisma.salesDeliveryLine.findMany({
-    where: { salesDelivery: { status: "FINALIZED", ...(destDate ? { date: { lte: destDate } } : {}) } },
-    include: { salesDelivery: true, goodsItem: true, unit: true, salesInvoiceLines: true },
+  const lines = await prisma.inventoryDocumentLine.findMany({
+    where: { document: { documentType: "SALES_DELIVERY", status: "FINALIZED", ...(destDate ? { date: { lte: destDate } } : {}) } },
+    include: { document: true, goodsItem: true, unit: true, salesInvoiceLines: true },
     orderBy: { id: "desc" },
   });
   const result = lines
@@ -127,10 +127,10 @@ router.get("/sales-invoices/pickable-sales-delivery-lines", async (req, res) => 
       const remaining = quantity - done;
       return {
         id: l.id,
-        sourceSalesDeliveryLineId: l.id,
-        salesDeliveryId: l.salesDelivery.id,
-        number: l.salesDelivery.number,
-        date: l.salesDelivery.date,
+        sourceInventoryLineId: l.id,
+        salesDeliveryId: l.document.id,
+        number: l.document.number,
+        date: l.document.date,
         goodsItemId: l.goodsItemId,
         goodsItemCode: l.goodsItem.fullCode,
         goodsItemTitle: l.goodsItem.title,
@@ -204,7 +204,7 @@ router.get("/sales-invoices/:id", async (req, res) => {
     status: d.status,
     lines: d.lines.map((l: any) => ({
       id: l.id,
-      sourceSalesDeliveryLineId: l.sourceSalesDeliveryLineId,
+      sourceInventoryLineId: l.sourceInventoryLineId,
       goodsItemId: l.goodsItemId,
       goodsItemCode: l.goodsItem.fullCode,
       goodsItemTitle: l.goodsItem.title,

@@ -548,7 +548,9 @@ router.put("/sales-orders/:id", async (req, res) => {
 });
 
 async function salesOrderHasDownstreamUsage(salesOrderId: number) {
-  const count = await prisma.salesDeliveryLine.count({ where: { sourceSalesOrderLine: { salesOrderId } } });
+  const count = await prisma.inventoryDocumentLine.count({
+    where: { document: { documentType: "SALES_DELIVERY" }, sourceSalesOrderLine: { salesOrderId } },
+  });
   return count > 0;
 }
 

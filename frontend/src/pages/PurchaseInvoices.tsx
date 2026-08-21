@@ -37,7 +37,7 @@ interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId
 interface ServiceOption { id: number; fullCode: string; title: string; kind: string }
 interface PickableReceiptLine {
   id: number;
-  sourceWarehouseReceiptLineId: number;
+  sourceInventoryLineId: number;
   warehouseReceiptId: number;
   number: number;
   date: string;
@@ -58,7 +58,7 @@ interface ListRow {
   partyId: number; partyTitle: string | null; currencyTitle: string; status: Status; lineCount: number; totalAmount: number;
 }
 interface DetailLine {
-  id: number; sourceWarehouseReceiptLineId: number | null; sourceWarehouseReceiptNumber: number | null;
+  id: number; sourceInventoryLineId: number | null; sourceWarehouseReceiptNumber: number | null;
   goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string;
   quantity: number; unitPrice: number; amount: number; description: string | null;
 }
@@ -136,13 +136,13 @@ function PurchaseInvoiceList() {
 }
 
 interface RowState {
-  sourceWarehouseReceiptLineId: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string;
+  sourceInventoryLineId: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string;
   unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; description: string;
 }
 interface CostRowState { serviceId: string; amount: string; description: string }
 
 function emptyRow(): RowState {
-  return { sourceWarehouseReceiptLineId: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", description: "" };
+  return { sourceInventoryLineId: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", description: "" };
 }
 
 function PurchaseInvoiceForm({ editId }: { editId?: number }) {
@@ -192,7 +192,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
         });
         setRows(
           d.lines.map((l) => ({
-            sourceWarehouseReceiptLineId: l.sourceWarehouseReceiptLineId ? String(l.sourceWarehouseReceiptLineId) : "",
+            sourceInventoryLineId: l.sourceInventoryLineId ? String(l.sourceInventoryLineId) : "",
             goodsItemId: String(l.goodsItemId),
             goodsItemCode: l.goodsItemCode,
             goodsItemTitle: l.goodsItemTitle,
@@ -228,18 +228,18 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
 
   const status: Status = meta?.status || "DRAFT";
   const locked = false; // در این فاز هیچ وضعیت قفل‌کننده‌ای (تایید) وجود ندارد
-  const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceWarehouseReceiptLineId);
+  const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceInventoryLineId);
   const headerDisabled = hasAnyLine;
   const selectedParty = parties.find((p) => String(p.id) === header.partyId);
 
   function updateRow(idx: number, patch: Partial<RowState>) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
-  function onSourceLineChange(idx: number, sourceWarehouseReceiptLineId: string) {
-    const src = pickableLines.find((l) => String(l.sourceWarehouseReceiptLineId) === sourceWarehouseReceiptLineId);
+  function onSourceLineChange(idx: number, sourceInventoryLineId: string) {
+    const src = pickableLines.find((l) => String(l.sourceInventoryLineId) === sourceInventoryLineId);
     if (!src) return;
     updateRow(idx, {
-      sourceWarehouseReceiptLineId,
+      sourceInventoryLineId,
       goodsItemId: String(src.goodsItemId),
       goodsItemCode: src.goodsItemCode,
       goodsItemTitle: src.goodsItemTitle,
@@ -288,7 +288,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   const totalOtherCosts = costRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
 
   function buildBody() {
-    const nonEmptyRows = rows.filter((r) => r.goodsItemId || r.sourceWarehouseReceiptLineId);
+    const nonEmptyRows = rows.filter((r) => r.goodsItemId || r.sourceInventoryLineId);
     return {
       date: header.date,
       vendorInvoiceNumber: header.vendorInvoiceNumber || null,
@@ -297,7 +297,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       currencyId: Number(header.currencyId),
       description: header.description,
       lines: nonEmptyRows.map((r) => ({
-        sourceWarehouseReceiptLineId: r.sourceWarehouseReceiptLineId ? Number(r.sourceWarehouseReceiptLineId) : null,
+        sourceInventoryLineId: r.sourceInventoryLineId ? Number(r.sourceInventoryLineId) : null,
         goodsItemId: r.goodsItemId ? Number(r.goodsItemId) : undefined,
         unitId: r.unitId ? Number(r.unitId) : undefined,
         quantity: Number(r.quantity) || 0,
@@ -316,7 +316,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
     const body = buildBody();
     if (body.lines.length === 0) return setError("فاکتور خرید باید حداقل یک ردیف کالا داشته باشد");
     for (const [i, l] of body.lines.entries()) {
-      if (header.basis === "WAREHOUSE_RECEIPT" && !l.sourceWarehouseReceiptLineId) return setError(`ردیف ${i + 1}: انتخاب ردیف رسید انبار خرید الزامی است`);
+      if (header.basis === "WAREHOUSE_RECEIPT" && !l.sourceInventoryLineId) return setError(`ردیف ${i + 1}: انتخاب ردیف رسید انبار خرید الزامی است`);
       if (header.basis === "NO_BASIS" && !l.goodsItemId) return setError(`کالا برای ردیف ${i + 1} الزامی است`);
       if (!(l.quantity > 0)) return setError(`مقدار ردیف ${i + 1} باید عددی مثبت باشد`);
       if (!(l.unitPrice >= 0)) return setError(`فی ردیف ${i + 1} نامعتبر است`);
@@ -441,7 +441,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                 {rows.map((row, idx) => {
                   const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
                   const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
-                  const src = pickableLines.find((l) => String(l.sourceWarehouseReceiptLineId) === row.sourceWarehouseReceiptLineId);
+                  const src = pickableLines.find((l) => String(l.sourceInventoryLineId) === row.sourceInventoryLineId);
                   return (
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
@@ -456,7 +456,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                               { header: "کالا", render: (l) => l.goodsItemTitle, filterValue: (l) => l.goodsItemTitle },
                               { header: "مقدار", render: (l) => formatAmountFa(l.quantity), filterValue: (l) => String(l.quantity), width: "90px" },
                             ]}
-                            onSelect={(l) => onSourceLineChange(idx, String((l as PickableReceiptLine).sourceWarehouseReceiptLineId))}
+                            onSelect={(l) => onSourceLineChange(idx, String((l as PickableReceiptLine).sourceInventoryLineId))}
                           />
                         </td>
                       )}

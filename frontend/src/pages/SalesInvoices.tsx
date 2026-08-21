@@ -24,14 +24,14 @@ type Basis = "NO_BASIS" | "SALES_DELIVERY";
 interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null } }
 interface CurrencyOption { id: number; code: string; title: string }
 interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean }
-interface PickableLine { id: number; sourceSalesDeliveryLineId: number; salesDeliveryId: number; number: number; date: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
+interface PickableLine { id: number; sourceInventoryLineId: number; salesDeliveryId: number; number: number; date: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
 
 function customerTitle(c: CustomerOption): string {
   return c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim();
 }
 
 interface ListRow { id: number; number: number; date: string; basis: Basis; customerId: number; customerTitle: string; currencyTitle: string; status: "DRAFT"; lineCount: number; totalAmount: number }
-interface DetailLine { id: number; sourceSalesDeliveryLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; description: string | null }
+interface DetailLine { id: number; sourceInventoryLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; description: string | null }
 interface Detail extends ListRow { currencyId: number; description: string | null; lines: DetailLine[] }
 
 const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", SALES_DELIVERY: "حواله فروش" };
@@ -105,10 +105,10 @@ function SalesInvoiceList() {
   );
 }
 
-interface RowState { sourceSalesDeliveryLineId: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; description: string }
+interface RowState { sourceInventoryLineId: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; description: string }
 
 function emptyRow(): RowState {
-  return { sourceSalesDeliveryLineId: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", description: "" };
+  return { sourceInventoryLineId: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", description: "" };
 }
 
 function SalesInvoiceForm({ editId }: { editId?: number }) {
@@ -147,7 +147,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
         setHeader({ date: d.date.slice(0, 10), basis: d.basis, customerId: String(d.customerId), currencyId: String(d.currencyId), description: d.description || "" });
         setRows(
           d.lines.map((l) => ({
-            sourceSalesDeliveryLineId: l.sourceSalesDeliveryLineId ? String(l.sourceSalesDeliveryLineId) : "",
+            sourceInventoryLineId: l.sourceInventoryLineId ? String(l.sourceInventoryLineId) : "",
             goodsItemId: String(l.goodsItemId),
             goodsItemCode: l.goodsItemCode,
             goodsItemTitle: l.goodsItemTitle,
@@ -179,17 +179,17 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     api.get(`/sales-invoices/pickable-sales-delivery-lines${q}`).then(setPickableLines).catch(() => setPickableLines([]));
   }, [header.basis, header.date]);
 
-  const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceSalesDeliveryLineId);
+  const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceInventoryLineId);
   const headerDisabled = hasAnyLine;
 
   function updateRow(idx: number, patch: Partial<RowState>) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
-  function onSourceLineChange(idx: number, sourceSalesDeliveryLineId: string) {
-    const src = pickableLines.find((l) => String(l.sourceSalesDeliveryLineId) === sourceSalesDeliveryLineId);
+  function onSourceLineChange(idx: number, sourceInventoryLineId: string) {
+    const src = pickableLines.find((l) => String(l.sourceInventoryLineId) === sourceInventoryLineId);
     if (!src) return;
     updateRow(idx, {
-      sourceSalesDeliveryLineId,
+      sourceInventoryLineId,
       goodsItemId: String(src.goodsItemId),
       goodsItemCode: src.goodsItemCode,
       goodsItemTitle: src.goodsItemTitle,
@@ -232,7 +232,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   const totalAmount = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
 
   function buildBody() {
-    const nonEmptyRows = rows.filter((r) => r.goodsItemId || r.sourceSalesDeliveryLineId);
+    const nonEmptyRows = rows.filter((r) => r.goodsItemId || r.sourceInventoryLineId);
     return {
       date: header.date,
       basis: header.basis,
@@ -240,7 +240,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
       currencyId: Number(header.currencyId),
       description: header.description,
       lines: nonEmptyRows.map((r) => ({
-        sourceSalesDeliveryLineId: r.sourceSalesDeliveryLineId ? Number(r.sourceSalesDeliveryLineId) : null,
+        sourceInventoryLineId: r.sourceInventoryLineId ? Number(r.sourceInventoryLineId) : null,
         goodsItemId: r.goodsItemId ? Number(r.goodsItemId) : undefined,
         unitId: Number(r.unitId),
         quantity: Number(r.quantity) || 0,
@@ -258,7 +258,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     const body = buildBody();
     if (body.lines.length === 0) return setError("فاکتور فروش باید حداقل یک ردیف کالا داشته باشد");
     for (const [i, l] of body.lines.entries()) {
-      if (header.basis === "SALES_DELIVERY" && !l.sourceSalesDeliveryLineId) return setError(`ردیف ${i + 1}: انتخاب ردیف حواله فروش الزامی است`);
+      if (header.basis === "SALES_DELIVERY" && !l.sourceInventoryLineId) return setError(`ردیف ${i + 1}: انتخاب ردیف حواله فروش الزامی است`);
       if (header.basis === "NO_BASIS" && !l.goodsItemId) return setError(`کالا برای ردیف ${i + 1} الزامی است`);
       if (!(l.quantity > 0)) return setError(`مقدار ردیف ${i + 1} باید عددی مثبت باشد`);
       if (!(l.unitPrice >= 0)) return setError(`فی ردیف ${i + 1} نامعتبر است`);
@@ -375,7 +375,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
                 {rows.map((row, idx) => {
                   const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
                   const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
-                  const src = pickableLines.find((l) => String(l.sourceSalesDeliveryLineId) === row.sourceSalesDeliveryLineId);
+                  const src = pickableLines.find((l) => String(l.sourceInventoryLineId) === row.sourceInventoryLineId);
                   return (
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
@@ -390,7 +390,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
                               { header: "کالا", render: (l) => l.goodsItemTitle, filterValue: (l) => l.goodsItemTitle },
                               { header: "مانده", render: (l) => formatAmountFa(l.remaining), filterValue: (l) => String(l.remaining), width: "90px" },
                             ]}
-                            onSelect={(l) => onSourceLineChange(idx, String(l.sourceSalesDeliveryLineId))}
+                            onSelect={(l) => onSourceLineChange(idx, String(l.sourceInventoryLineId))}
                           />
                         </td>
                       )}

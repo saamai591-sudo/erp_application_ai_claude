@@ -25,7 +25,7 @@ import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 const router = Router();
 
 interface LineInput {
-  sourceWarehouseReceiptLineId?: number | null;
+  sourceInventoryLineId?: number | null;
   goodsItemId?: number | null;
   unitId?: number | null;
   quantity: number;
@@ -65,7 +65,7 @@ async function validateLines(lines: LineInput[], basis: string, partyId: number,
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("فاکتور خرید باید حداقل یک ردیف کالا داشته باشد");
 
   const cleaned: {
-    sourceWarehouseReceiptLineId: number | null;
+    sourceInventoryLineId: number | null;
     goodsItemId: number;
     unitId: number;
     quantity: number;
@@ -78,23 +78,23 @@ async function validateLines(lines: LineInput[], basis: string, partyId: number,
     let goodsItemId = l.goodsItemId || 0;
     let unitId = l.unitId || 0;
     let quantity = Number(l.quantity);
-    let sourceWarehouseReceiptLineId: number | null = null;
+    let sourceInventoryLineId: number | null = null;
 
     if (basis === "WAREHOUSE_RECEIPT") {
-      if (!l.sourceWarehouseReceiptLineId) throw new Error(`ردیف ${idx + 1}: انتخاب ردیف رسید انبار خرید الزامی است`);
-      const source = await prisma.warehouseReceiptLine.findUnique({
-        where: { id: l.sourceWarehouseReceiptLineId },
-        include: { warehouseReceipt: true, purchaseInvoiceLine: true },
+      if (!l.sourceInventoryLineId) throw new Error(`ردیف ${idx + 1}: انتخاب ردیف رسید انبار خرید الزامی است`);
+      const source = await prisma.inventoryDocumentLine.findFirst({
+        where: { id: l.sourceInventoryLineId, document: { documentType: "WAREHOUSE_RECEIPT" } },
+        include: { document: true, purchaseInvoiceLine: true },
       });
       if (!source) throw new Error(`ردیف رسید انبار خرید برای ردیف ${idx + 1} یافت نشد`);
-      if (source.warehouseReceipt.status !== "FINALIZED") throw new Error(`رسید انبار ردیف ${idx + 1} در وضعیت قطعی نیست`);
-      if (source.warehouseReceipt.partyId !== partyId) {
+      if (source.document.status !== "FINALIZED") throw new Error(`رسید انبار ردیف ${idx + 1} در وضعیت قطعی نیست`);
+      if (source.document.partyId !== partyId) {
         throw new Error(`طرف مقابل رسید انبار ردیف ${idx + 1} با طرف مقابل انتخاب‌شده در هدر یکسان نیست`);
       }
       if (source.purchaseInvoiceLine && source.purchaseInvoiceLine.purchaseInvoiceId !== excludeInvoiceId) {
         throw new Error(`ردیف رسید انبار انتخاب‌شده برای ردیف ${idx + 1} قبلاً در فاکتور خرید دیگری استفاده شده است`);
       }
-      sourceWarehouseReceiptLineId = source.id;
+      sourceInventoryLineId = source.id;
       goodsItemId = source.goodsItemId;
       unitId = source.unitId;
       quantity = Number(source.quantity); // مقدار همیشه از رسید مشتق می‌شود؛ کاملاً غیرقابل‌ویرایش، حتی اگر کلاینت مقدار دیگری بفرستد
@@ -114,7 +114,7 @@ async function validateLines(lines: LineInput[], basis: string, partyId: number,
     if (!(unitPrice >= 0)) throw new Error(`فی ردیف ${idx + 1} نامعتبر است`);
     if (!(amount >= 0)) throw new Error(`مبلغ ردیف ${idx + 1} نامعتبر است`);
 
-    cleaned.push({ sourceWarehouseReceiptLineId, goodsItemId, unitId, quantity, unitPrice, amount, description: l.description || null });
+    cleaned.push({ sourceInventoryLineId, goodsItemId, unitId, quantity, unitPrice, amount, description: l.description || null });
   }
   return cleaned;
 }
@@ -142,9 +142,9 @@ router.get("/purchase-invoices/pickable-warehouse-receipt-lines", async (req, re
   const excludeInvoiceId = req.query.excludeInvoiceId ? Number(req.query.excludeInvoiceId) : null;
   if (!partyId) return res.json([]);
 
-  const lines = await prisma.warehouseReceiptLine.findMany({
-    where: { warehouseReceipt: { status: "FINALIZED", partyId } },
-    include: { warehouseReceipt: true, goodsItem: true, unit: true, purchaseInvoiceLine: true },
+  const lines = await prisma.inventoryDocumentLine.findMany({
+    where: { document: { documentType: "WAREHOUSE_RECEIPT", status: "FINALIZED", partyId } },
+    include: { document: true, goodsItem: true, unit: true, purchaseInvoiceLine: true },
     orderBy: { id: "desc" },
   });
 
@@ -152,10 +152,10 @@ router.get("/purchase-invoices/pickable-warehouse-receipt-lines", async (req, re
     .filter((l: any) => !l.purchaseInvoiceLine || l.purchaseInvoiceLine.purchaseInvoiceId === excludeInvoiceId)
     .map((l: any) => ({
       id: l.id,
-      sourceWarehouseReceiptLineId: l.id,
-      warehouseReceiptId: l.warehouseReceipt.id,
-      number: l.warehouseReceipt.number,
-      date: l.warehouseReceipt.date,
+      sourceInventoryLineId: l.id,
+      warehouseReceiptId: l.document.id,
+      number: l.document.number,
+      date: l.document.date,
       goodsItemId: l.goodsItemId,
       goodsItemCode: l.goodsItem.fullCode,
       goodsItemTitle: l.goodsItem.title,
@@ -203,7 +203,7 @@ router.get("/purchase-invoices/:id", async (req, res) => {
       party: true,
       currency: true,
       lines: {
-        include: { goodsItem: true, unit: true, sourceWarehouseReceiptLine: { include: { warehouseReceipt: true } } },
+        include: { goodsItem: true, unit: true, sourceInventoryLine: { include: { document: true } } },
         orderBy: { rowOrder: "asc" },
       },
       otherCostLines: { include: { service: true }, orderBy: { rowOrder: "asc" } },
@@ -224,8 +224,8 @@ router.get("/purchase-invoices/:id", async (req, res) => {
     status: d.status,
     lines: d.lines.map((l: any) => ({
       id: l.id,
-      sourceWarehouseReceiptLineId: l.sourceWarehouseReceiptLineId,
-      sourceWarehouseReceiptNumber: l.sourceWarehouseReceiptLine?.warehouseReceipt.number ?? null,
+      sourceInventoryLineId: l.sourceInventoryLineId,
+      sourceWarehouseReceiptNumber: l.sourceInventoryLine?.document.number ?? null,
       goodsItemId: l.goodsItemId,
       goodsItemCode: l.goodsItem.fullCode,
       goodsItemTitle: l.goodsItem.title,

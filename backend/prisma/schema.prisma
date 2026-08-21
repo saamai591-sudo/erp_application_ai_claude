@@ -1390,7 +1390,6 @@ model WarehouseReceiptLine {
   expiryDate                        DateTime?                  @db.Date
   physicalLocation                  String?
   serialNumber                      String?
-  purchaseInvoiceLine               PurchaseInvoiceLine?
   goodsItem                         GoodsItem                  @relation(fields: [goodsItemId], references: [id])
   sourceDeliveryAuthorizationLine   DeliveryAuthorizationLine? @relation("WarehouseReceiptSourceDeliveryAuthorizationLine", fields: [sourceDeliveryAuthorizationLineId], references: [id])
   sourcePurchaseOrderLine           PurchaseOrderLine?         @relation("WarehouseReceiptSourcePurchaseOrderLine", fields: [sourcePurchaseOrderLineId], references: [id])
@@ -1541,20 +1540,20 @@ model PurchaseInvoice {
 }
 
 model PurchaseInvoiceLine {
-  id                           Int                   @id @default(autoincrement())
-  purchaseInvoiceId            Int
-  rowOrder                     Int                   @default(0)
-  sourceWarehouseReceiptLineId Int?                  @unique
-  goodsItemId                  Int
-  unitId                       Int
-  quantity                     Decimal               @db.Decimal(36, 10)
-  unitPrice                    Decimal               @db.Decimal(36, 10)
-  amount                       Decimal               @db.Decimal(36, 10)
-  description                  String?
-  goodsItem                    GoodsItem             @relation(fields: [goodsItemId], references: [id])
-  purchaseInvoice              PurchaseInvoice       @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
-  sourceWarehouseReceiptLine   WarehouseReceiptLine? @relation(fields: [sourceWarehouseReceiptLineId], references: [id])
-  unit                         UnitOfMeasure         @relation(fields: [unitId], references: [id])
+  id                    Int                    @id @default(autoincrement())
+  purchaseInvoiceId     Int
+  rowOrder              Int                    @default(0)
+  sourceInventoryLineId Int?                   @unique
+  goodsItemId           Int
+  unitId                Int
+  quantity              Decimal                @db.Decimal(36, 10)
+  unitPrice             Decimal                @db.Decimal(36, 10)
+  amount                Decimal                @db.Decimal(36, 10)
+  description           String?
+  goodsItem             GoodsItem              @relation(fields: [goodsItemId], references: [id])
+  purchaseInvoice       PurchaseInvoice        @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  sourceInventoryLine   InventoryDocumentLine? @relation("PurchaseInvoiceSourceInventoryLine", fields: [sourceInventoryLineId], references: [id])
+  unit                  UnitOfMeasure          @relation(fields: [unitId], references: [id])
 }
 
 model PurchaseInvoiceOtherCostLine {
@@ -1673,32 +1672,32 @@ model SalesDelivery {
 }
 
 model SalesDeliveryLine {
-  id                     Int                @id @default(autoincrement())
+  id                     Int             @id @default(autoincrement())
   salesDeliveryId        Int
-  rowOrder               Int                @default(0)
+  rowOrder               Int             @default(0)
   sourceSalesOrderLineId Int?
   goodsItemId            Int
   unitId                 Int
-  quantity               Decimal            @db.Decimal(36, 10)
-  unitCost               Decimal            @default(0) @db.Decimal(28, 10)
-  amount                 Decimal            @default(0) @db.Decimal(18, 2)
+  quantity               Decimal         @db.Decimal(36, 10)
+  unitCost               Decimal         @default(0) @db.Decimal(28, 10)
+  amount                 Decimal         @default(0) @db.Decimal(18, 2)
   description            String?
-  goodsItem              GoodsItem          @relation(fields: [goodsItemId], references: [id])
-  salesDelivery          SalesDelivery      @relation(fields: [salesDeliveryId], references: [id], onDelete: Cascade)
-  sourceSalesOrderLine   SalesOrderLine?    @relation("SalesDeliverySourceSalesOrderLine", fields: [sourceSalesOrderLineId], references: [id])
-  unit                   UnitOfMeasure      @relation(fields: [unitId], references: [id])
-  salesInvoiceLines      SalesInvoiceLine[] @relation("SalesInvoiceSourceSalesDeliveryLine")
+  goodsItem              GoodsItem       @relation(fields: [goodsItemId], references: [id])
+  salesDelivery          SalesDelivery   @relation(fields: [salesDeliveryId], references: [id], onDelete: Cascade)
+  sourceSalesOrderLine   SalesOrderLine? @relation("SalesDeliverySourceSalesOrderLine", fields: [sourceSalesOrderLineId], references: [id])
+  unit                   UnitOfMeasure   @relation(fields: [unitId], references: [id])
 }
 
 // =========================================================================
 // stockAnalysis.md — شمای یکپارچه‌ی اسناد انبار (فاز ۲، بخش افزایشی/additive)
 // طبق تصمیم صریح کاربر: بجای ۶ جدول جداگانه‌ی سند انبار (بالا)، این دو مدل یک جدول واحد برای همه‌ی
 // انواع سند انبار می‌سازند (بند ۲۸-۲۹ و ۶۴ سند). این فاز فقط اسکیمای جدید را اضافه می‌کند — جدول‌های
-// قدیمی (WarehouseReceipt/Issue/Transfer/Adjustment/InitialInventory/SalesDeliveryLine) و
-// route/serviceهای فعلی دست‌نخورده باقی می‌مانند تا مهاجرت داده و اتصال routeها (که کار مخرب‌تری است
-// و باید جداگانه با تایید کاربر انجام شود) کامل شود. تا آن زمان این دو جدول خالی و بلااستفاده‌اند.
-// اتصال دوطرفه‌ی purchaseInvoiceLine/salesInvoiceLines (که امروز روی WarehouseReceiptLine/
-// SalesDeliveryLine هستند) عمداً در این فاز اضافه نشده — در همان مرحله‌ی اتصال routeها اضافه می‌شود.
+// قدیمی (WarehouseReceipt/Issue/Transfer/Adjustment/InitialInventory/SalesDeliveryLine) دست‌نخورده
+// باقی مانده‌اند اما همه‌ی route/serviceهای فعلی از فاز ۲ به بعد از InventoryDocument می‌خوانند/
+// می‌نویسند؛ جدول‌های قدیمی همیشه خالی و بلااستفاده‌اند (کد فقط برای جلوگیری از حذف مخرب نگه داشته
+// شده). اتصال دوطرفه‌ی purchaseInvoiceLine/salesInvoiceLines که قبلاً روی WarehouseReceiptLine/
+// SalesDeliveryLine بود، در فاز پیگیری «رفع خلأ شناخته‌شده» به همین دو فیلد پایین (روی
+// InventoryDocumentLine) منتقل شد.
 // =========================================================================
 
 // طبق stockAnalysis.md بند ۳۴ («انواع عملیات انبار») — لیست کامل و مرجع. WAREHOUSE_ISSUE عمومی قدیم
@@ -1815,6 +1814,8 @@ model InventoryDocumentLine {
   sourceProductionConsumptionLine   InventoryDocumentLine?     @relation("InventoryLineSourceProductionConsumptionLine", fields: [sourceProductionConsumptionLineId], references: [id])
   productionConsumptionReturnLines  InventoryDocumentLine[]    @relation("InventoryLineSourceProductionConsumptionLine")
   serials                           InventoryLineSerial[]
+  purchaseInvoiceLine               PurchaseInvoiceLine?       @relation("PurchaseInvoiceSourceInventoryLine")
+  salesInvoiceLines                 SalesInvoiceLine[]         @relation("SalesInvoiceSourceInventoryLine")
 }
 
 // طبق بند ۱۷-۱۹ سند: یک سطح سند می‌تواند چند سریال داشته باشد (نه یک سطر جدا برای هر سریال)
@@ -1903,20 +1904,20 @@ model SalesInvoice {
 }
 
 model SalesInvoiceLine {
-  id                        Int                @id @default(autoincrement())
-  salesInvoiceId            Int
-  rowOrder                  Int                @default(0)
-  sourceSalesDeliveryLineId Int?
-  goodsItemId               Int
-  unitId                    Int
-  quantity                  Decimal            @db.Decimal(36, 10)
-  unitPrice                 Decimal            @db.Decimal(36, 10)
-  amount                    Decimal            @db.Decimal(36, 10)
-  description               String?
-  goodsItem                 GoodsItem          @relation(fields: [goodsItemId], references: [id])
-  salesInvoice              SalesInvoice       @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
-  sourceSalesDeliveryLine   SalesDeliveryLine? @relation("SalesInvoiceSourceSalesDeliveryLine", fields: [sourceSalesDeliveryLineId], references: [id])
-  unit                      UnitOfMeasure      @relation(fields: [unitId], references: [id])
+  id                    Int                    @id @default(autoincrement())
+  salesInvoiceId        Int
+  rowOrder              Int                    @default(0)
+  sourceInventoryLineId Int?
+  goodsItemId           Int
+  unitId                Int
+  quantity              Decimal                @db.Decimal(36, 10)
+  unitPrice             Decimal                @db.Decimal(36, 10)
+  amount                Decimal                @db.Decimal(36, 10)
+  description           String?
+  goodsItem             GoodsItem              @relation(fields: [goodsItemId], references: [id])
+  salesInvoice          SalesInvoice           @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
+  sourceInventoryLine   InventoryDocumentLine? @relation("SalesInvoiceSourceInventoryLine", fields: [sourceInventoryLineId], references: [id])
+  unit                  UnitOfMeasure          @relation(fields: [unitId], references: [id])
 }
 
 model ChequeItem {
