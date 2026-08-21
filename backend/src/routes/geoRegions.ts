@@ -41,6 +41,9 @@ router.post("/", async (req, res) => {
   const dup = await prisma.geoRegion.findFirst({ where: { parentId: parentId ?? null, code: finalCode } });
   if (dup) return res.status(400).json({ error: "کد در این سطح تکراری است" });
 
+  const dupTitle = await prisma.geoRegion.findFirst({ where: { parentId: parentId ?? null, title } });
+  if (dupTitle) return res.status(400).json({ error: "عنوان در این سطح تکراری است" });
+
   const node = await prisma.geoRegion.create({
     data: { parentId: parentId ?? null, level, code: finalCode, title },
   });
@@ -57,6 +60,10 @@ router.put("/:id", async (req, res) => {
   if (code && code !== node.code) {
     const dup = await prisma.geoRegion.findFirst({ where: { parentId: node.parentId, code, NOT: { id } } });
     if (dup) return res.status(400).json({ error: "کد در این سطح تکراری است" });
+  }
+  if (title && title !== node.title) {
+    const dupTitle = await prisma.geoRegion.findFirst({ where: { parentId: node.parentId, title, NOT: { id } } });
+    if (dupTitle) return res.status(400).json({ error: "عنوان در این سطح تکراری است" });
   }
 
   const updated = await prisma.geoRegion.update({ where: { id }, data: { title, code } });

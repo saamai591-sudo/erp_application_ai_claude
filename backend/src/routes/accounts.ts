@@ -56,6 +56,9 @@ router.post("/", async (req, res) => {
     const dup = await prisma.account.findFirst({ where: { parentId: body.parentId ?? null, code: body.code } });
     if (dup) return res.status(400).json({ error: "کد در این سطح تکراری است" });
 
+    const dupTitle = await prisma.account.findFirst({ where: { parentId: body.parentId ?? null, title: body.title } });
+    if (dupTitle) return res.status(400).json({ error: "عنوان در این سطح تکراری است" });
+
     const data: any = {
       parentId: body.parentId ?? null,
       levelId: level.id,
@@ -114,6 +117,10 @@ router.put("/:id", async (req, res) => {
   if (body.code && body.code !== account.code) {
     const dup = await prisma.account.findFirst({ where: { parentId: account.parentId, code: body.code, NOT: { id } } });
     if (dup) return res.status(400).json({ error: "کد در این سطح تکراری است" });
+  }
+  if (body.title && body.title !== account.title) {
+    const dupTitle = await prisma.account.findFirst({ where: { parentId: account.parentId, title: body.title, NOT: { id } } });
+    if (dupTitle) return res.status(400).json({ error: "عنوان در این سطح تکراری است" });
   }
 
   const data: any = { code: body.code, title: body.title };

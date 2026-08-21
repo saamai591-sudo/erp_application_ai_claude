@@ -44,6 +44,9 @@ router.post("/", async (req, res) => {
   const dup = await prisma.physicalLocation.findFirst({ where: { warehouseId, parentId: parentId ?? null, code: finalCode } });
   if (dup) return res.status(400).json({ error: "کد در این سطح تکراری است" });
 
+  const dupTitle = await prisma.physicalLocation.findFirst({ where: { warehouseId, parentId: parentId ?? null, title } });
+  if (dupTitle) return res.status(400).json({ error: "عنوان در این سطح تکراری است" });
+
   const node = await prisma.physicalLocation.create({
     data: { warehouseId, parentId: parentId ?? null, code: finalCode, title },
   });
@@ -66,6 +69,12 @@ router.put("/:id", async (req, res) => {
       where: { warehouseId: node.warehouseId, parentId: node.parentId, code, NOT: { id } },
     });
     if (dup) return res.status(400).json({ error: "کد در این سطح تکراری است" });
+  }
+  if (title && title !== node.title) {
+    const dupTitle = await prisma.physicalLocation.findFirst({
+      where: { warehouseId: node.warehouseId, parentId: node.parentId, title, NOT: { id } },
+    });
+    if (dupTitle) return res.status(400).json({ error: "عنوان در این سطح تکراری است" });
   }
 
   const updated = await prisma.physicalLocation.update({ where: { id }, data: { title, code } });

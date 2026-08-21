@@ -163,6 +163,9 @@ router.post("/goods-groups", async (req, res) => {
     const dup = await prisma.goodsGroup.findFirst({ where: { parentId, code: body.code } });
     if (dup) return res.status(400).json({ error: "کد در این سطح تکراری است" });
 
+    const dupTitle = await prisma.goodsGroup.findFirst({ where: { parentId, title: body.title } });
+    if (dupTitle) return res.status(400).json({ error: "عنوان در این سطح تکراری است" });
+
     const maxLevel = await prisma.goodsGroupLevel.findFirst({ orderBy: { order: "desc" } });
     const isLastBranch = maxLevel && level.order === maxLevel.order ? true : !!body.isLastBranch;
 
@@ -221,6 +224,10 @@ router.put("/goods-groups/:id", async (req, res) => {
   if (body.code && body.code !== group.code) {
     const dup = await prisma.goodsGroup.findFirst({ where: { parentId: group.parentId, code: body.code, NOT: { id } } });
     if (dup) return res.status(400).json({ error: "کد در این سطح تکراری است" });
+  }
+  if (body.title && body.title !== group.title) {
+    const dupTitle = await prisma.goodsGroup.findFirst({ where: { parentId: group.parentId, title: body.title, NOT: { id } } });
+    if (dupTitle) return res.status(400).json({ error: "عنوان در این سطح تکراری است" });
   }
 
   const maxLevel = await prisma.goodsGroupLevel.findFirst({ orderBy: { order: "desc" } });
