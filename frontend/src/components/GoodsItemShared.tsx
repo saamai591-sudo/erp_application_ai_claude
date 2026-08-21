@@ -637,18 +637,6 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
               <label>مقدار نقطه سفارش</label>
               <input type="number" step="any" value={form.reorderPoint} onChange={(e) => setForm({ ...form, reorderPoint: e.target.value })} />
             </div>
-            <div className="form-field">
-              <label className="checkbox-row">
-                <input type="checkbox" checked={form.hasSerialNumber} onChange={(e) => setForm({ ...form, hasSerialNumber: e.target.checked })} />
-                شماره سریال
-              </label>
-            </div>
-            <div className="form-field">
-              <label className="checkbox-row">
-                <input type="checkbox" checked={form.hasExpiryDate} onChange={(e) => setForm({ ...form, hasExpiryDate: e.target.checked })} />
-                تاریخ انقضا
-              </label>
-            </div>
           </div>
         )}
 
@@ -693,12 +681,6 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
               <label className="checkbox-row">
                 <input type="checkbox" checked={form.isSerialTracked} onChange={(e) => setForm({ ...form, isSerialTracked: e.target.checked })} />
                 سریال پذیر
-              </label>
-            </div>
-            <div className="form-field">
-              <label className="checkbox-row">
-                <input type="checkbox" checked={form.isExpiryTracked} onChange={(e) => setForm({ ...form, isExpiryTracked: e.target.checked })} />
-                تاریخ انقضا
               </label>
             </div>
             <div className="form-field">
