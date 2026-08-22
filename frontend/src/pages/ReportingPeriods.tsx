@@ -13,6 +13,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { InfoHint } from "../components/InfoHint";
 import { toFaDigits } from "../lib/formatAmount";
 import { getSavedFiscalPeriodId } from "../lib/userSettings";
+import { useTabs } from "../lib/TabsContext";
 
 interface Period {
   id: number;
@@ -84,7 +85,7 @@ function PeriodList() {
   const basePath = fiscalPeriodId ? `/reporting-periods?fiscalPeriodId=${fiscalPeriodId}` : "/reporting-periods";
   const { items, loading, error, remove, reload } = useCrud<Period>(basePath);
   const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
-  const navigate = useNavigate();
+  const { openTab } = useTabs();
 
   async function bulkClose(rows: Period[]) {
     const targets = rows.filter((r) => r.status === "OPEN");
@@ -141,7 +142,7 @@ function PeriodList() {
             { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
           ]}
           rows={items}
-          onEdit={(r) => (r.status === "CLOSED" ? alert("دوره بسته قابل ویرایش نیست") : navigate(`/reporting-periods/${r.id}/edit`))}
+          onEdit={(r) => (r.status === "CLOSED" ? alert("دوره بسته قابل ویرایش نیست") : openTab(`/reporting-periods/${r.id}/edit`))}
           onDelete={async (r) => {
             const res = await remove(r.id);
             if (!res.ok) alert(res.error);
@@ -231,16 +232,15 @@ function PeriodEditForm({ editId }: { editId: number }) {
 
   useEffect(() => {
     if (hasPersistedState(`${cacheKey}:toDate`)) return;
-    api.get("/reporting-periods").then((items: Period[]) => {
-      const found = items.find((i) => i.id === editId);
-      if (found) {
+    api
+      .get(`/reporting-periods/${editId}`)
+      .then((found: Period) => {
         setCode(found.code);
         setTitle(found.title);
         setFromDate(found.fromDate.slice(0, 10));
         setToDate(found.toDate.slice(0, 10));
-      }
-      setLoaded(true);
-    });
+      })
+      .finally(() => setLoaded(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
 

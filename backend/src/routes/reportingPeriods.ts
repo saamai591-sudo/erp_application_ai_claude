@@ -16,6 +16,17 @@ async function resolveFiscalPeriod(fiscalPeriodId?: string | number) {
 }
 
 router.get("/", async (req, res) => {
+  // ?all=1 برای مصرف‌کننده‌هایی مثل «قیمت‌گذاری اسناد انبار» که نیاز به انتخاب از میان دوره‌های
+  // گزارشگری همه‌ی دوره‌های مالی دارند (نه فقط دوره مالی جاری کاربر) — چون قیمت‌گذاری کالا اساساً یک
+  // زنجیره‌ی زمانی سرتاسری (فارغ از سال مالی) است، نه محدود به یک دوره مالی
+  if (req.query.all) {
+    const periods = await prisma.reportingPeriod.findMany({
+      orderBy: { fromDate: "asc" },
+      include: { fiscalPeriod: { select: { title: true } } },
+    });
+    return res.json(periods);
+  }
+
   const fp = await resolveFiscalPeriod(req.query.fiscalPeriodId as string | undefined);
   if (!fp) return res.json([]);
   const periods = await prisma.reportingPeriod.findMany({
@@ -23,6 +34,15 @@ router.get("/", async (req, res) => {
     orderBy: { fromDate: "asc" },
   });
   res.json(periods);
+});
+
+// جست‌وجوی مستقیم با id — برخلاف GET / به «دوره مالی جاری» محدود نیست، چون فرم ویرایش باید بتواند
+// دوره‌ای متعلق به هر دوره مالی (نه فقط دوره مالی انتخاب‌شده‌ی کاربر) را باز کند
+router.get("/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const period = await prisma.reportingPeriod.findUnique({ where: { id } });
+  if (!period) return res.status(404).json({ error: "دوره گزارشگری یافت نشد" });
+  res.json(period);
 });
 
 router.post("/", async (req, res) => {

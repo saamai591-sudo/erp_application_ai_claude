@@ -4,7 +4,15 @@ import { InfoHint } from "../components/InfoHint";
 import { GoodsPricingItemPicker, PricingCandidate } from "../components/GoodsPricingItemPicker";
 import { api, ApiError } from "../lib/api";
 
-interface ReportingPeriod { id: number; code: string; title: string; fromDate: string; toDate: string; status: "OPEN" | "CLOSED" }
+interface ReportingPeriod {
+  id: number;
+  code: string;
+  title: string;
+  fromDate: string;
+  toDate: string;
+  status: "OPEN" | "CLOSED";
+  fiscalPeriod: { title: string };
+}
 
 type Operation = "PRICE" | "REVERT";
 
@@ -24,7 +32,10 @@ export default function GoodsPricing() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.get("/reporting-periods").then((items: ReportingPeriod[]) => {
+    // برخلاف فهرست خود دوره‌های گزارشگری (که محدود به دوره مالی جاری کاربر است)، این انتخابگر باید از
+    // میان دوره‌های گزارشگری همه‌ی دوره‌های مالی انتخاب کند — چون قیمت‌گذاری یک کالا در طول زمان، فارغ
+    // از سال مالی، به ترتیب باید انجام شود
+    api.get("/reporting-periods?all=1").then((items: ReportingPeriod[]) => {
       setPeriods(items);
       if (!reportingPeriodId && items.length) {
         const last = [...items].sort((a, b) => (a.toDate < b.toDate ? 1 : -1))[0];
@@ -84,7 +95,7 @@ export default function GoodsPricing() {
           >
             <option value="">انتخاب کنید</option>
             {periods.map((p) => (
-              <option key={p.id} value={p.id}>{p.title}</option>
+              <option key={p.id} value={p.id}>{p.title} ({p.fiscalPeriod.title})</option>
             ))}
           </select>
         </div>
