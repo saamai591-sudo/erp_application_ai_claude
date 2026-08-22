@@ -1913,9 +1913,7 @@ model InventoryClosingAudit {
 }
 
 // طبق مستند «قیمت‌گذاری اسناد انبار» (بند ۱۲): کلید منطقی وضعیت قیمت‌گذاری = ReportingPeriod + Item
-// (بدون انبار). وجود این رکورد یعنی «این کالا در این دوره قیمت‌گذاری شده است»؛ برگشت قیمت‌گذاری صرفاً
-// همین رکورد را حذف می‌کند (که با onDelete: Cascade تمام اصلاحیه‌های همان مرحله را هم حذف می‌کند) —
-// نیازی به Undo دستی مبلغ سندها نیست چون هرگز amount اصلی سند مستقیماً تغییر نمی‌کند (پایین را ببینید).
+// (بدون انبار). وجود این رکورد یعنی «این کالا در این دوره قیمت‌گذاری شده است».
 model GoodsPricingStatus {
   id                Int                      @id @default(autoincrement())
   goodsItemId       Int
@@ -1930,19 +1928,22 @@ model GoodsPricingStatus {
   @@unique([goodsItemId, reportingPeriodId])
 }
 
-// طبق بند ۹ مستند: «مبلغ نهایی = مبلغ اولیه + مجموع اصلاحیه‌ها» — InventoryDocumentLine.amount
-// («مبلغ اولیه») هرگز توسط موتور قیمت‌گذاری تغییر داده نمی‌شود؛ هر اثر قیمت‌گذاری (چه اولین‌بار قیمت‌گذاری
-// یک ردیف صادره، چه اصلاحیه‌ی رسیدی که یک برگشت به تامین‌کننده به آن اثر می‌گذارد) یکسان به‌صورت یک ردیف
-// اینجا ثبت می‌شود. این هم مدل داده را با فرمول/مثال مستند دقیقاً منطبق نگه می‌دارد و هم Rollback (حذف
-// GoodsPricingStatus مربوطه) را بدون نیاز به منطق Undo جداگانه صحیح می‌کند.
+// طبق «موتور قیمت‌گذاری در حالت برگشت»: اگر ردیفی که این اجرا مقدارش را تغییر می‌دهد در همین دوره‌ی
+// در حال قیمت‌گذاری واقع باشد (هنوز توسط هیچ اجرای قبلی قفل نشده)، مقدار جدید مستقیماً روی
+// InventoryDocumentLine.amount/unitCost هم نوشته می‌شود (appliedToLine=true) — چون چیزی آن را قفل
+// نکرده. اما اگر ردیف در دوره‌ای زودتر باشد که قبلاً قیمت‌گذاری شده (قفل‌شده)، آن ستون خام دست‌نخورده
+// می‌ماند و اثر این اجرا فقط همین‌جا (appliedToLine=false) ثبت می‌شود تا در گزارش «اصلاحیه‌های
+// قیمت‌گذاری» دیده شود، نه با بازنویسی مبلغ سند اصلی. Rollback بر همین اساس متقارن عمل می‌کند: فقط
+// اصلاحیه‌های appliedToLine=true را از amount/unitCost کم می‌کند.
 model GoodsPricingAdjustment {
-  id        Int                   @id @default(autoincrement())
-  statusId  Int
-  lineId    Int
-  amount    Decimal               @db.Decimal(18, 2)
-  createdAt DateTime              @default(now())
-  status    GoodsPricingStatus    @relation(fields: [statusId], references: [id], onDelete: Cascade)
-  line      InventoryDocumentLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  id            Int                   @id @default(autoincrement())
+  statusId      Int
+  lineId        Int
+  amount        Decimal               @db.Decimal(18, 2)
+  appliedToLine Boolean               @default(false)
+  createdAt     DateTime              @default(now())
+  status        GoodsPricingStatus    @relation(fields: [statusId], references: [id], onDelete: Cascade)
+  line          InventoryDocumentLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
 }
 
 model SalesInvoice {

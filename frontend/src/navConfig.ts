@@ -177,6 +177,7 @@ export const MODULES: ModuleGroup[] = [
         title: "گزارش",
         items: [
           { key: "accounting-warehouse-review", label: "مرور مبلغی", list: "/warehouse-accounting/warehouse-review", icon: "tree" },
+          { key: "accounting-goods-pricing-corrections", label: "اصلاحیه‌های قیمت‌گذاری", list: "/warehouse-accounting/goods-pricing-corrections", icon: "coin" },
         ],
       },
     ],

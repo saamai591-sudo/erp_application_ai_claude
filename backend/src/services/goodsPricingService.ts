@@ -11,18 +11,24 @@ import { prisma } from "../lib/prisma";
 //   این سرویس کنترل/مسدودسازی خاصی روی صفر بودن آن‌ها اعمال نمی‌کند.
 // - بقیه‌ی انواع (صادره‌ها، برگشت‌ها، انبارگردانی): مبلغ توسط همین موتور و بر اساس میانگین موزون متحرک
 //   محاسبه می‌شود.
-// - SUPPLIER_RETURN علاوه‌بر مقداردهی به مبلغ خودش، مبلغ محاسبه‌شده را از رسید مبنای خودش کم می‌کند
-//   (بند ۱۰ مستند) — چون این کاهش خودش میانگین را عوض می‌کند، محاسبه با یک همگرایی نقطه‌ثابت انجام
-//   می‌شود (برخلاف مستند که فقط یک برگشت را در نظر می‌گیرد، این پیاده‌سازی همه‌ی برگشت‌های تامین‌کننده‌ی
-//   کل کاردکس کالا را هم‌زمان همگرا می‌کند تا برگشت‌های متعدد/زنجیره‌ای هم درست پوشش داده شوند).
 //
-// طبق بند ۹ مستند، هر اثر قیمت‌گذاری (چه اولین قیمت‌گذاری یک ردیف صادره، چه اصلاحیه‌ی یک رسید قدیمی
-// به‌خاطر برگشت جدید) یک ردیف GoodsPricingAdjustment (برای تاریخچه/حسابرسی) ثبت می‌کند — و علاوه‌بر آن
-// (برخلاف نسخه‌ی اول این سرویس) همان مبلغ به‌صورت مستقیم روی ستون amount/unitCost خود
-// InventoryDocumentLine هم نوشته می‌شود؛ چون تمام صفحات نمایش سند (نمای «حسابداری انبار»، فرم خود سند
-// و...) این ستون خام را می‌خوانند، نه جدول اصلاحیه‌ها را — بدون این نوشتن مستقیم، نتیجه‌ی قیمت‌گذاری در
-// هیچ‌کجای برنامه دیده نمی‌شد (دقیقاً همان الگویی که «تایید فاکتور خرید» برای ردیف‌های رسید استفاده
-// می‌کند). Rollback به‌صورت متقارن مقدار همان اصلاحیه‌ها را از amount/unitCost کم می‌کند.
+// طبق مستند «موتور قیمت‌گذاری در حالت برگشت»: وقتی به یک برگشت به تامین‌کننده می‌رسیم که به ردیف رسید
+// مشخصی ارجاع دارد —
+// ۱) اگر برگشت، کل مقدار آن رسید را برمی‌گرداند: مبلغ رسید مستقیماً «ست» (جایگزین، نه کم) می‌شود با
+//    مبلغ تازه‌محاسبه‌شده‌ی برگشت (بر مبنای کاردکس در همان لحظه)، و کاردکس دوباره محاسبه می‌شود؛ این
+//    فرایند تا همگرایی مبلغ برگشت با مبلغ رسید تکرار می‌شود.
+// ۲) اگر برگشت فقط بخشی از مقدار رسید را برمی‌گرداند: رسید به دو «سهم» تقسیم می‌شود — سهم بازگشتی
+//    (متناسب با مقدار برگشتی از مبلغ اصلی رسید، که مثل حالت ۱ در لوپ همگرا می‌شود) و سهم باقیمانده
+//    (ثابت، بقیه‌ی مبلغ اصلی). این تقسیم فقط برای محاسبه‌ی کاردکس است؛ ردیف رسید در دیتابیس هیچ‌وقت
+//    شکسته نمی‌شود — نتیجه‌ی نهایی (سهم باقیمانده + سهم(های) همگراشده‌ی برگشت) در همان یک ردیف نوشته
+//    می‌شود. اگر چند برگشت جداگانه به یک رسید ارجاع داشته باشند، هرکدام سهم بازگشتی مستقل خودشان را
+//    دارند (بر اساس مقدار خودشان) و همه‌ی سهم‌ها هم‌زمان با هم همگرا می‌شوند.
+//
+// قفل بودن دوره: طبق همان مستند، اگر ردیفی که این اجرا مقدارش را عوض می‌کند در دوره‌ی در حال
+// قیمت‌گذاری باشد (هنوز قفل نشده)، مقدار جدید مستقیم روی amount/unitCost خودِ سند نوشته می‌شود. اگر در
+// دوره‌ای زودتر (که طبق کنترل ترتیب، قبلاً قیمت‌گذاری شده) باشد، آن ستون خام دست‌نخورده می‌ماند و اثر
+// فقط به‌صورت یک ردیف GoodsPricingAdjustment (با appliedToLine=false) ثبت می‌شود — قابل مشاهده در
+// گزارش «اصلاحیه‌های قیمت‌گذاری»، بدون بازنویسی مبلغ سند اصلی.
 
 const IN_GIVEN_TYPES = new Set(["INITIAL_INVENTORY", "WAREHOUSE_RECEIPT", "PRODUCTION_RECEIPT"]);
 const IN_COMPUTED_TYPES = new Set(["SALES_RETURN", "CENTER_CONSUMPTION_RETURN", "PROJECT_CONSUMPTION_RETURN", "PRODUCTION_CONSUMPTION_RETURN"]);
@@ -56,23 +62,38 @@ type Line = {
   document: { documentType: string; date: Date };
 };
 
-// یک بار کامل کاردکس را (با یک تخمین فعلی از کاهش رسیدها به‌خاطر برگشت‌های تامین‌کننده) طی می‌کند و
-// مقدار محاسبه‌شده‌ی هر ردیف «موتور-محاسبه» + تخمین جدید کاهش هر رسید را برمی‌گرداند
-function walkKardex(lines: Line[], reductionByReceiptLineId: Map<number, number>, decimalPlaces: number) {
+// یک بار کامل کاردکس را (با یک تخمین فعلی از سهم‌های بازگشتی هر برگشت تامین‌کننده) طی می‌کند
+function walkKardex(
+  lines: Line[],
+  returningLinesByReceipt: Map<number, Line[]>,
+  fixedRemainingAmount: Map<number, number>,
+  returnWorkingValue: Map<number, number>,
+  decimalPlaces: number
+) {
   let runningQty = 0;
   let runningValue = 0;
   const computed = new Map<number, number>();
-  const newReduction = new Map<number, number>();
+  const newReturnWorkingValue = new Map<number, number>();
 
   for (const line of lines) {
     const qty = Number(line.quantity);
     const type = line.document.documentType;
 
     if (IN_GIVEN_TYPES.has(type)) {
-      const reduction = reductionByReceiptLineId.get(line.id) || 0;
-      const value = Number(line.amount) - reduction;
-      runningQty += qty;
-      runningValue += value;
+      const returningLines = returningLinesByReceipt.get(line.id);
+      if (!returningLines || returningLines.length === 0) {
+        runningQty += qty;
+        runningValue += Number(line.amount);
+      } else {
+        const returnedQty = returningLines.reduce((s, r) => s + Number(r.quantity), 0);
+        const remainingQty = qty - returnedQty;
+        runningQty += remainingQty;
+        runningValue += fixedRemainingAmount.get(line.id) || 0;
+        for (const r of returningLines) {
+          runningQty += Number(r.quantity);
+          runningValue += returnWorkingValue.get(r.id) || 0;
+        }
+      }
       continue;
     }
 
@@ -101,15 +122,15 @@ function walkKardex(lines: Line[], reductionByReceiptLineId: Map<number, number>
     computed.set(line.id, amt);
     runningQty -= qty;
     runningValue -= amt;
-    if (type === "SUPPLIER_RETURN" && line.sourceWarehouseReceiptLineId) {
-      newReduction.set(line.sourceWarehouseReceiptLineId, (newReduction.get(line.sourceWarehouseReceiptLineId) || 0) + amt);
+    if (type === "SUPPLIER_RETURN") {
+      newReturnWorkingValue.set(line.id, amt);
     }
   }
 
-  return { computed, newReduction };
+  return { computed, newReturnWorkingValue };
 }
 
-function reductionMapsEqual(a: Map<number, number>, b: Map<number, number>, epsilon: number): boolean {
+function mapsEqual(a: Map<number, number>, b: Map<number, number>, epsilon: number): boolean {
   const keys = new Set([...a.keys(), ...b.keys()]);
   for (const k of keys) {
     if (Math.abs((a.get(k) || 0) - (b.get(k) || 0)) > epsilon) return false;
@@ -190,52 +211,105 @@ export async function priceItem(goodsItemId: number, reportingPeriodId: number, 
     orderBy: [{ document: { date: "asc" } }, { documentId: "asc" }, { rowOrder: "asc" }, { id: "asc" }],
   })) as Line[];
 
-  let reduction = new Map<number, number>();
+  // پیش‌پردازش برگشت‌های تامین‌کننده: برای هر رسیدی که برگشت(های) به آن ارجاع دارند، سهم ثابتِ
+  // «باقیمانده» و سهم اولیه‌ی هر برگشت (متناسب با مقدار خودش از مبلغ اصلی رسید) یک‌بار محاسبه می‌شود؛
+  // این سهم‌ها هرگز در طول همگرایی دوباره از amount اصلی بازمحاسبه نمی‌شوند
+  const returningLinesByReceipt = new Map<number, Line[]>();
+  for (const l of lines) {
+    if (l.document.documentType === "SUPPLIER_RETURN" && l.sourceWarehouseReceiptLineId) {
+      const arr = returningLinesByReceipt.get(l.sourceWarehouseReceiptLineId) || [];
+      arr.push(l);
+      returningLinesByReceipt.set(l.sourceWarehouseReceiptLineId, arr);
+    }
+  }
+  const fixedRemainingAmount = new Map<number, number>();
+  const initialReturnShare = new Map<number, number>();
+  for (const [receiptId, returningLines] of returningLinesByReceipt) {
+    const receipt = lines.find((l) => l.id === receiptId);
+    if (!receipt) continue; // رسید خارج از بازه‌ی این اجرا (نباید معمولاً پیش بیاید)
+    const originalAmount = Number(receipt.amount);
+    const originalQty = Number(receipt.quantity);
+    let sumShares = 0;
+    for (const r of returningLines) {
+      const share = originalQty > 0 ? round((originalAmount * Number(r.quantity)) / originalQty, decimalPlaces) : 0;
+      initialReturnShare.set(r.id, share);
+      sumShares += share;
+    }
+    fixedRemainingAmount.set(receiptId, round(originalAmount - sumShares, decimalPlaces));
+  }
+
+  let returnWorkingValue = new Map<number, number>(initialReturnShare);
   let computed = new Map<number, number>();
   let converged = false;
   for (let i = 0; i < MAX_ITERATIONS; i++) {
-    const result = walkKardex(lines, reduction, decimalPlaces);
+    const result = walkKardex(lines, returningLinesByReceipt, fixedRemainingAmount, returnWorkingValue, decimalPlaces);
     computed = result.computed;
-    if (reductionMapsEqual(result.newReduction, reduction, epsilon)) {
-      reduction = result.newReduction;
+    if (mapsEqual(result.newReturnWorkingValue, returnWorkingValue, epsilon)) {
+      returnWorkingValue = result.newReturnWorkingValue;
       converged = true;
       break;
     }
-    reduction = result.newReduction;
+    returnWorkingValue = result.newReturnWorkingValue;
   }
   if (!converged) throw new Error("محاسبه قیمت‌گذاری همگرا نشد؛ لطفاً اسناد کالا را بررسی کنید");
 
-  // line.amount در این لحظه همان «مبلغ مؤثر فعلی» است (چون هر اجرای قبلی قیمت‌گذاری مستقیماً همین
-  // ستون را به‌روزرسانی کرده)؛ برای هر ردیفی که مقدار تازه‌محاسبه‌شده با آن فرق دارد، هم یک اصلاحیه
-  // (برای تاریخچه) و هم مقدار نهایی ستون amount/unitCost ثبت می‌شود
-  const deltas: { lineId: number; amount: number; newAmount: number; quantity: number }[] = [];
+  // مجموع اصلاحیه‌های قبلیِ ردیف‌های قفل‌شده (برای محاسبه‌ی مبلغ «مؤثر فعلی» آن‌ها) — یک کوئری واحد
+  // به‌جای یک کوئری جداگانه به ازای هر ردیف
+  const lockedLineIds = lines.filter((l) => l.document.date < period.fromDate).map((l) => l.id);
+  const priorAdjustments = lockedLineIds.length
+    ? await prisma.goodsPricingAdjustment.groupBy({
+        by: ["lineId"],
+        where: { lineId: { in: lockedLineIds }, appliedToLine: false },
+        _sum: { amount: true },
+      })
+    : [];
+  const priorAdjMap = new Map(priorAdjustments.map((a) => [a.lineId, Number(a._sum.amount || 0)]));
+
+  // نهایی‌سازی: برای رسیدهایی که برگشت دارند، مبلغ نهایی = سهم ثابت باقیمانده + مجموع سهم‌های
+  // همگراشده‌ی برگشت‌ها؛ برای بقیه‌ی ردیف‌های محاسبه‌شده (صادره/برگشت/انبارگردانی)، از computed
+  const changes: { lineId: number; delta: number; newTotal: number; quantity: number; locked: boolean }[] = [];
   for (const line of lines) {
     let newTotal: number | undefined;
-    if (computed.has(line.id)) {
+    const returningLines = returningLinesByReceipt.get(line.id);
+    if (IN_GIVEN_TYPES.has(line.document.documentType) && returningLines && returningLines.length > 0) {
+      const sumConverged = returningLines.reduce((s, r) => s + (returnWorkingValue.get(r.id) || 0), 0);
+      newTotal = round((fixedRemainingAmount.get(line.id) || 0) + sumConverged, decimalPlaces);
+    } else if (computed.has(line.id)) {
       newTotal = computed.get(line.id)!;
-    } else if (IN_GIVEN_TYPES.has(line.document.documentType) && reduction.has(line.id)) {
-      newTotal = Number(line.amount) - (reduction.get(line.id) || 0);
     }
     if (newTotal === undefined) continue;
-    const delta = round(newTotal - Number(line.amount), decimalPlaces);
-    if (Math.abs(delta) > epsilon) deltas.push({ lineId: line.id, amount: delta, newAmount: newTotal, quantity: Number(line.quantity) });
+
+    // مبلغ «مؤثر فعلی»: اگر ردیف قفل نشده (در همین دوره است)، amount خام همان مقدار مؤثر است (چون
+    // فقط قیمت‌گذاری‌های همین دوره مستقیم می‌نویسند)؛ اگر قفل شده (دوره‌ای زودتر که قبلاً قیمت‌گذاری
+    // شده)، باید مجموع اصلاحیه‌های قبلی هم به amount خام اضافه شود
+    const locked = line.document.date < period.fromDate;
+    const currentEffective = Number(line.amount) + (locked ? priorAdjMap.get(line.id) || 0 : 0);
+
+    const delta = round(newTotal - currentEffective, decimalPlaces);
+    if (Math.abs(delta) > epsilon) {
+      changes.push({ lineId: line.id, delta, newTotal, quantity: Number(line.quantity), locked });
+    }
   }
 
   const status = await prisma.$transaction(async (tx) => {
     const created = await tx.goodsPricingStatus.create({
       data: { goodsItemId, reportingPeriodId, createdById: userId },
     });
-    for (const d of deltas) {
-      await tx.goodsPricingAdjustment.create({ data: { statusId: created.id, lineId: d.lineId, amount: d.amount } });
-      await tx.inventoryDocumentLine.update({
-        where: { id: d.lineId },
-        data: { amount: d.newAmount, unitCost: d.quantity > 0 ? d.newAmount / d.quantity : 0 },
+    for (const c of changes) {
+      await tx.goodsPricingAdjustment.create({
+        data: { statusId: created.id, lineId: c.lineId, amount: c.delta, appliedToLine: !c.locked },
       });
+      if (!c.locked) {
+        await tx.inventoryDocumentLine.update({
+          where: { id: c.lineId },
+          data: { amount: c.newTotal, unitCost: c.quantity > 0 ? c.newTotal / c.quantity : 0 },
+        });
+      }
     }
     return created;
   });
 
-  return { status, adjustmentCount: deltas.length };
+  return { status, adjustmentCount: changes.length };
 }
 
 export async function revertItem(goodsItemId: number, reportingPeriodId: number) {
@@ -262,6 +336,7 @@ export async function revertItem(goodsItemId: number, reportingPeriodId: number)
 
   await prisma.$transaction(async (tx) => {
     for (const adj of adjustments) {
+      if (!adj.appliedToLine) continue; // فقط اصلاحیه‌هایی که مستقیم روی amount نوشته شده بودند باید کم شوند
       const newAmount = round(Number(adj.line.amount) - Number(adj.amount), decimalPlaces);
       const qty = Number(adj.line.quantity);
       await tx.inventoryDocumentLine.update({

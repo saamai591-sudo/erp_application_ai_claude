@@ -73,6 +73,60 @@ router.get("/candidates", async (req, res) => {
   res.json({ items: rows, total, page, pageSize });
 });
 
+const DOC_TYPE_FA: Record<string, string> = {
+  INITIAL_INVENTORY: "موجودی اول دوره",
+  WAREHOUSE_RECEIPT: "رسید انبار خرید",
+  WAREHOUSE_ADJUSTMENT: "انبارگردانی / تعدیل موجودی",
+  SALES_DELIVERY: "حواله فروش",
+  SALES_RETURN: "برگشت از فروش",
+  SUPPLIER_RETURN: "برگشت به تامین‌کننده",
+  PRODUCTION_RECEIPT: "رسید تولید",
+  CENTER_CONSUMPTION: "مصرف مرکز هزینه",
+  PROJECT_CONSUMPTION: "مصرف پروژه",
+  PRODUCTION_CONSUMPTION: "مصرف تولید",
+  CENTER_CONSUMPTION_RETURN: "برگشت مصرف مرکز هزینه",
+  PROJECT_CONSUMPTION_RETURN: "برگشت مصرف پروژه",
+  PRODUCTION_CONSUMPTION_RETURN: "برگشت مصرف تولید",
+  FIXED_ASSET_ISSUE: "حواله دارایی ثابت",
+};
+
+// گزارش «اصلاحیه‌های قیمت‌گذاری» — طبق مستند «موتور قیمت‌گذاری در حالت برگشت»: وقتی ردیفی که یک اجرای
+// قیمت‌گذاری باید مقدارش را عوض کند، در دوره‌ای زودتر و قبلاً قیمت‌گذاری‌شده (قفل) باشد، آن اصلاحیه
+// مستقیم روی amount سند نوشته نمی‌شود — پس تنها راه دیدن آن همین گزارش است
+router.get("/corrections", async (req, res) => {
+  const { goodsItemId, reportingPeriodId } = req.query as { goodsItemId?: string; reportingPeriodId?: string };
+
+  const adjustments = await prisma.goodsPricingAdjustment.findMany({
+    where: {
+      ...(reportingPeriodId ? { status: { reportingPeriodId: Number(reportingPeriodId) } } : {}),
+      ...(goodsItemId ? { status: { goodsItemId: Number(goodsItemId) } } : {}),
+    },
+    include: {
+      status: { include: { goodsItem: true, reportingPeriod: true } },
+      line: { include: { document: true } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 500,
+  });
+
+  res.json(
+    adjustments.map((a) => ({
+      id: a.id,
+      amount: Number(a.amount),
+      appliedToLine: a.appliedToLine,
+      createdAt: a.createdAt,
+      goodsItemId: a.status.goodsItemId,
+      goodsItemTitle: a.status.goodsItem.title,
+      reportingPeriodId: a.status.reportingPeriodId,
+      reportingPeriodTitle: a.status.reportingPeriod.title,
+      documentType: a.line.document.documentType,
+      documentTypeTitle: DOC_TYPE_FA[a.line.document.documentType] || a.line.document.documentType,
+      documentNumber: a.line.document.number,
+      documentDate: a.line.document.date,
+    }))
+  );
+});
+
 router.post("/run", async (req: AuthedRequest, res) => {
   const { reportingPeriodId: rpRaw, operation, goodsItemIds } = req.body as {
     reportingPeriodId: number;
