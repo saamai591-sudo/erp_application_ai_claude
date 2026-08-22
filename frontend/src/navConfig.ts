@@ -49,6 +49,7 @@ export const MODULES: ModuleGroup[] = [
           { key: "bank-accounts", label: "حساب بانکی", list: "/bank-accounts", create: "/bank-accounts/new", icon: "card" },
           { key: "cost-centers", label: "مرکز هزینه", list: "/cost-centers", create: "/cost-centers/new", icon: "briefcase" },
           { key: "org-units", label: "واحد سازمانی", list: "/org-units", create: "/org-units/new", icon: "building" },
+          { key: "reporting-periods", label: "دوره گزارشگری", list: "/reporting-periods", create: "/reporting-periods/new", icon: "calendar" },
         ],
       },
     ],

@@ -9,6 +9,7 @@ import Users from "./pages/Users";
 import Currencies from "./pages/Currencies";
 import ExchangeRates from "./pages/ExchangeRates";
 import FiscalPeriods from "./pages/FiscalPeriods";
+import ReportingPeriods from "./pages/ReportingPeriods";
 import OrgStructure from "./pages/OrgStructure";
 import GeoRegions from "./pages/GeoRegions";
 import DetailTypes from "./pages/DetailTypes";
@@ -111,6 +112,9 @@ export default function App() {
             <Route path="/fiscal-periods" element={<FiscalPeriods />} />
             <Route path="/fiscal-periods/new" element={<FiscalPeriods />} />
             <Route path="/fiscal-periods/:id/edit" element={<FiscalPeriods />} />
+            <Route path="/reporting-periods" element={<ReportingPeriods />} />
+            <Route path="/reporting-periods/new" element={<ReportingPeriods />} />
+            <Route path="/reporting-periods/:id/edit" element={<ReportingPeriods />} />
             <Route path="/org-structure" element={<OrgStructure />} />
             <Route path="/org-structure/new" element={<OrgStructure />} />
             <Route path="/org-structure/:id/edit" element={<OrgStructure />} />

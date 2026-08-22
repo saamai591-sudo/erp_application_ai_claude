@@ -142,6 +142,27 @@ model FiscalPeriod {
   warehouseReceipts         WarehouseReceipt[]
   warehouseTransfers        WarehouseTransfer[]
   inventoryDocuments        InventoryDocument[]
+  reportingPeriods          ReportingPeriod[]
+}
+
+enum ReportingPeriodStatus {
+  OPEN
+  CLOSED
+}
+
+model ReportingPeriod {
+  id             Int                   @id @default(autoincrement())
+  fiscalPeriodId Int
+  code           String
+  title          String
+  fromDate       DateTime              @db.Date
+  toDate         DateTime              @db.Date
+  status         ReportingPeriodStatus @default(OPEN)
+  hasBeenClosed  Boolean               @default(false)
+  createdAt      DateTime              @default(now())
+  fiscalPeriod   FiscalPeriod          @relation(fields: [fiscalPeriodId], references: [id])
+
+  @@unique([fiscalPeriodId, code])
 }
 
 model OrgStructure {
