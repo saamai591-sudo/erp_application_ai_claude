@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
@@ -17,9 +17,12 @@ import { api, ApiError } from "../lib/api";
 
 // «مصرف تولید» — طبق stockAnalysis.md بند ۳۴/۳۹/۴۲؛ این پروژه ماژول «تولید»/«دستور تولید» ندارد، پس
 // این سند همیشه «بدون مبنا» است و طرف‌مقابل ندارد (نگاه کنید به یادداشت بالای
-// backend/src/routes/productionConsumptions.ts).
+// backend/src/routes/productionConsumptions.ts). طبق همان الگوی ۵ نوع سند اصلی، این صفحه هم نمای
+// «انبارداری» (ثبت/ویرایش) و هم نمای فقط‌خواندنی «حسابداری انبار» (نمایش فی/مبلغ) را با یک mode
+// مشترک پوشش می‌دهد.
 
 type DocStatus = "DRAFT" | "FINALIZED" | "VOID";
+type ViewMode = "warehousing" | "accounting";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
 interface GoodsItemRow {
@@ -35,21 +38,28 @@ interface GoodsItemRow {
   isLocationTracked: boolean;
 }
 
-interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number }
+interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number; totalAmount: number }
 interface DetailLine { id: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitCost: number; amount: number; description: string | null; serialNumber: string | null; batchNumber: string | null; expiryDate: string | null; physicalLocation: string | null }
 interface Detail { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; description: string | null; status: DocStatus; finalizedAt: string | null; lines: DetailLine[] }
 
 const STATUS_FA: Record<DocStatus, string> = { DRAFT: "ثبت", FINALIZED: "قطعی", VOID: "ابطال‌شده" };
-const INFO_TEXT = "ثبت مصرف تولید (خروج مواد اولیه از انبار برای مصرف در تولید). این سند همیشه بدون مبنا و بدون طرف‌مقابل است؛ در صورت نیاز، شرح هر ردیف می‌تواند دستور تولید مربوطه را مشخص کند.";
 
-export default function ProductionConsumptions() {
+function infoText(mode: ViewMode) {
+  const base = "ثبت مصرف تولید (خروج مواد اولیه از انبار برای مصرف در تولید). این سند همیشه بدون مبنا و بدون طرف‌مقابل است؛ در صورت نیاز، شرح هر ردیف می‌تواند دستور تولید مربوطه را مشخص کند.";
+  if (mode === "warehousing") return base;
+  return base + " این نمای «حسابداری انبار» فقط نمایشی است؛ ثبت/ویرایش از نمای «انبارداری» انجام می‌شود.";
+}
+
+export default function ProductionConsumptions({ mode }: { mode: ViewMode }) {
   const location = useLocation();
   const { id } = useParams();
+  const basePath = mode === "warehousing" ? "/production-consumptions" : "/warehouse-accounting/production-consumptions";
   const isNew = location.pathname.endsWith("/new");
   const isEdit = location.pathname.endsWith("/edit");
-  if (isNew) return <ProductionConsumptionForm />;
-  if (isEdit) return <ProductionConsumptionForm editId={Number(id)} />;
-  return <ProductionConsumptionList />;
+  if (isNew && mode === "accounting") return <Navigate to={basePath} replace />;
+  if (isNew) return <ProductionConsumptionForm mode={mode} basePath={basePath} />;
+  if (isEdit) return <ProductionConsumptionForm mode={mode} basePath={basePath} editId={Number(id)} />;
+  return <ProductionConsumptionList mode={mode} basePath={basePath} />;
 }
 
 function CheckIcon() {
@@ -67,8 +77,8 @@ function PlusIcon() {
   return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
 }
 
-function ProductionConsumptionList() {
-  const cacheKey = "/production-consumptions";
+function ProductionConsumptionList({ mode, basePath }: { mode: ViewMode; basePath: string }) {
+  const cacheKey = basePath;
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -103,8 +113,8 @@ function ProductionConsumptionList() {
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint text={INFO_TEXT} title="مصرف تولید" />
-          <NewRecordButton path="/production-consumptions/new" />
+          <InfoHint text={infoText(mode)} title="مصرف تولید" />
+          {mode === "warehousing" && <NewRecordButton path={`${basePath}/new`} />}
           <RefreshButton onClick={reload} />
         </div>
       </div>
@@ -116,26 +126,28 @@ function ProductionConsumptionList() {
           { header: "انبار", render: (r) => r.warehouseTitle, filterType: "string", filterValue: (r) => r.warehouseTitle },
           { header: "شرح", render: (r) => r.description || "—", filterType: "string", filterValue: (r) => r.description || "" },
           { header: "تعداد ردیف", render: (r) => toFaDigits(String(r.lineCount)) },
+          ...(mode === "accounting" ? [{ header: "جمع مبلغ", render: (r: ListRow) => formatAmountFa(r.totalAmount) }] : []),
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/production-consumptions/${r.id}/edit`)}
-        onDelete={onDelete}
+        onEdit={(r) => navigate(`${basePath}/${r.id}/edit`)}
+        onDelete={mode === "warehousing" ? onDelete : undefined}
       />
     </div>
   );
 }
 
-interface RowState { goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; description: string; serialNumber: string; batchNumber: string; expiryDate: string; physicalLocation: string }
+interface RowState { goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitCost: number; amount: number; description: string; serialNumber: string; batchNumber: string; expiryDate: string; physicalLocation: string }
 
 function emptyRow(): RowState {
-  return { goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", description: "", serialNumber: "", batchNumber: "", expiryDate: "", physicalLocation: "" };
+  return { goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitCost: 0, amount: 0, description: "", serialNumber: "", batchNumber: "", expiryDate: "", physicalLocation: "" };
 }
 
-function ProductionConsumptionForm({ editId }: { editId?: number }) {
+function ProductionConsumptionForm({ editId, mode, basePath }: { editId?: number; mode: ViewMode; basePath: string }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
+  const readOnly = mode === "accounting";
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", warehouseId: "", description: "" });
@@ -171,6 +183,8 @@ function ProductionConsumptionForm({ editId }: { editId?: number }) {
             unitId: String(l.unitId),
             unitTitle: l.unitTitle,
             quantity: String(l.quantity),
+            unitCost: l.unitCost,
+            amount: l.amount,
             description: l.description || "",
             serialNumber: l.serialNumber || "",
             batchNumber: l.batchNumber || "",
@@ -190,7 +204,7 @@ function ProductionConsumptionForm({ editId }: { editId?: number }) {
   }, [editId]);
 
   const status: DocStatus = meta?.status || "DRAFT";
-  const coreDisabled = !!editId && status !== "DRAFT";
+  const coreDisabled = readOnly || (!!editId && status !== "DRAFT");
 
   function updateRow(idx: number, patch: Partial<RowState>) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -209,6 +223,7 @@ function ProductionConsumptionForm({ editId }: { editId?: number }) {
   }
 
   const totalQuantity = rows.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
+  const totalAmount = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
 
   function buildBody() {
     const nonEmptyRows = rows.filter((r) => r.goodsItemId);
@@ -231,6 +246,7 @@ function ProductionConsumptionForm({ editId }: { editId?: number }) {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (readOnly) return;
     setError(null);
     if (!header.date) return setError("تاریخ الزامی است");
     if (!header.warehouseId) return setError("انبار الزامی است");
@@ -247,7 +263,7 @@ function ProductionConsumptionForm({ editId }: { editId?: number }) {
       } else {
         const created = await api.post("/production-consumptions", body);
         flash();
-        navigate(`/production-consumptions/${created.id}/edit`);
+        navigate(`${basePath}/${created.id}/edit`);
       }
     } catch (err) {
       setError((err as ApiError).message);
@@ -255,10 +271,10 @@ function ProductionConsumptionForm({ editId }: { editId?: number }) {
   }
 
   async function handleDelete() {
-    if (!editId) return;
+    if (!editId || readOnly) return;
     try {
       await api.del(`/production-consumptions/${editId}`);
-      navigate("/production-consumptions");
+      navigate(basePath);
     } catch (e) {
       alert((e as ApiError).message);
     }
@@ -295,19 +311,21 @@ function ProductionConsumptionForm({ editId }: { editId?: number }) {
     <FormPage
       title={editId ? "ویرایش مصرف تولید" : "مصرف تولید جدید"}
       description={
-        status === "FINALIZED"
+        readOnly
+          ? "این نما («حسابداری انبار») فقط نمایشی است؛ ثبت/ویرایش از نمای «انبارداری» انجام می‌شود."
+          : status === "FINALIZED"
           ? "این سند «قطعی» شده و دیگر قابل ویرایش مستقیم نیست؛ برای اصلاح، ابتدا «برگشت از قطعی» را بزنید."
           : status === "VOID"
           ? "این سند «ابطال‌شده» است."
           : undefined
       }
       formId="production-consumption-form"
-      closePath="/production-consumptions"
-      newPath="/production-consumptions/new"
-      onDelete={editId && status === "DRAFT" ? handleDelete : undefined}
+      closePath={basePath}
+      newPath={mode === "warehousing" ? `${basePath}/new` : undefined}
+      onDelete={!readOnly && editId && status === "DRAFT" ? handleDelete : undefined}
       saveDisabled={coreDisabled}
       extraActions={
-        meta
+        !readOnly && meta
           ? [
               ...(status === "DRAFT" ? [{ label: "قطعی کردن", icon: <CheckIcon />, onClick: handleFinalize }] : []),
               ...(status === "FINALIZED" ? [{ label: "برگشت از قطعی", icon: <UndoIcon />, onClick: handleRevert }] : []),
@@ -379,6 +397,8 @@ function ProductionConsumptionForm({ editId }: { editId?: number }) {
                   <th>تاریخ انقضا</th>
                   <th>محل فیزیکی</th>
                   <th>مقدار</th>
+                  {mode === "accounting" && <th>فی واحد</th>}
+                  {mode === "accounting" && <th>مبلغ</th>}
                   <th>شرح</th>
                   <th></th>
                 </tr>
@@ -415,6 +435,8 @@ function ProductionConsumptionForm({ editId }: { editId?: number }) {
                       <td style={{ minWidth: 130 }}>
                         <AmountInput value={row.quantity} onChange={(v) => updateRow(idx, { quantity: v })} allowDecimal placeholder="۰" disabled={coreDisabled} />
                       </td>
+                      {mode === "accounting" && <td style={{ minWidth: 110, color: "var(--ink-soft)" }}>{formatAmountFa(row.unitCost)}</td>}
+                      {mode === "accounting" && <td style={{ minWidth: 120, color: "var(--ink-soft)" }}>{formatAmountFa(row.amount)}</td>}
                       <td style={{ minWidth: 160 }}>
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} disabled={coreDisabled} />
                       </td>
@@ -431,7 +453,10 @@ function ProductionConsumptionForm({ editId }: { editId?: number }) {
           </div>
           <div className="grid-footer je-lines-footer">
             <span className="grid-footer-info">{rows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(rows.length))} ردیف`}</span>
-            <span className="je-lines-totals">جمع مقدار: {formatAmountFa(totalQuantity)}</span>
+            <span className="je-lines-totals">
+              جمع مقدار: {formatAmountFa(totalQuantity)}
+              {mode === "accounting" && <> — جمع مبلغ: {formatAmountFa(totalAmount)}</>}
+            </span>
           </div>
         </div>
       </form>

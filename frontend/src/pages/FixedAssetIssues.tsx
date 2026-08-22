@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
@@ -17,10 +17,13 @@ import { api, ApiError } from "../lib/api";
 
 // «حواله دارایی ثابت» — طبق stockAnalysis.md بند ۳۴/۴۱؛ نگاه کنید به یادداشت بالای
 // backend/src/routes/fixedAssetIssues.ts. بدون طرف‌حساب در سطح سند — اطلاعات تخصصی دارایی در ماژول
-// Fixed Assets (که هنوز ساخته نشده) مدیریت می‌شوند.
+// Fixed Assets (که هنوز ساخته نشده) مدیریت می‌شوند. طبق همان الگوی ۵ نوع سند اصلی، این صفحه هم نمای
+// «انبارداری» (ثبت/ویرایش) و هم نمای فقط‌خواندنی «حسابداری انبار» (نمایش فی/مبلغ) را با یک mode
+// مشترک پوشش می‌دهد.
 
 type Basis = "NO_BASIS" | "GOODS_REQUEST";
 type DocStatus = "DRAFT" | "FINALIZED" | "VOID";
+type ViewMode = "warehousing" | "accounting";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
 interface GoodsItemRow {
@@ -37,22 +40,29 @@ interface GoodsItemRow {
 }
 interface PickableLine { id: number; sourceGoodsRequestLineId: number; number: number; date: string; orgUnitTitle: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
 
-interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; basis: Basis; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number }
+interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; basis: Basis; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number; totalAmount: number }
 interface DetailLine { id: number; sourceGoodsRequestLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitCost: number; amount: number; description: string | null; serialNumber: string | null; batchNumber: string | null; expiryDate: string | null; physicalLocation: string | null }
 interface Detail { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; basis: Basis; description: string | null; status: DocStatus; finalizedAt: string | null; lines: DetailLine[] }
 
 const STATUS_FA: Record<DocStatus, string> = { DRAFT: "ثبت", FINALIZED: "قطعی", VOID: "ابطال‌شده" };
 const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", GOODS_REQUEST: "درخواست کالا" };
-const INFO_TEXT = "ثبت حواله دارایی ثابت (خروج کالای دارایی ثابت از انبار) — بدون مبنا یا بر اساس یک درخواست کالای تایید‌شده از نوع دارایی ثابت.";
 
-export default function FixedAssetIssues() {
+function infoText(mode: ViewMode) {
+  const base = "ثبت حواله دارایی ثابت (خروج کالای دارایی ثابت از انبار) — بدون مبنا یا بر اساس یک درخواست کالای تایید‌شده از نوع دارایی ثابت.";
+  if (mode === "warehousing") return base;
+  return base + " این نمای «حسابداری انبار» فقط نمایشی است؛ ثبت/ویرایش از نمای «انبارداری» انجام می‌شود.";
+}
+
+export default function FixedAssetIssues({ mode }: { mode: ViewMode }) {
   const location = useLocation();
   const { id } = useParams();
+  const basePath = mode === "warehousing" ? "/fixed-asset-issues" : "/warehouse-accounting/fixed-asset-issues";
   const isNew = location.pathname.endsWith("/new");
   const isEdit = location.pathname.endsWith("/edit");
-  if (isNew) return <FixedAssetIssueForm />;
-  if (isEdit) return <FixedAssetIssueForm editId={Number(id)} />;
-  return <FixedAssetIssueList />;
+  if (isNew && mode === "accounting") return <Navigate to={basePath} replace />;
+  if (isNew) return <FixedAssetIssueForm mode={mode} basePath={basePath} />;
+  if (isEdit) return <FixedAssetIssueForm mode={mode} basePath={basePath} editId={Number(id)} />;
+  return <FixedAssetIssueList mode={mode} basePath={basePath} />;
 }
 
 function CheckIcon() {
@@ -70,8 +80,8 @@ function PlusIcon() {
   return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
 }
 
-function FixedAssetIssueList() {
-  const cacheKey = "/fixed-asset-issues";
+function FixedAssetIssueList({ mode, basePath }: { mode: ViewMode; basePath: string }) {
+  const cacheKey = basePath;
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -106,8 +116,8 @@ function FixedAssetIssueList() {
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint text={INFO_TEXT} title="حواله دارایی ثابت" />
-          <NewRecordButton path="/fixed-asset-issues/new" />
+          <InfoHint text={infoText(mode)} title="حواله دارایی ثابت" />
+          {mode === "warehousing" && <NewRecordButton path={`${basePath}/new`} />}
           <RefreshButton onClick={reload} />
         </div>
       </div>
@@ -119,26 +129,28 @@ function FixedAssetIssueList() {
           { header: "انبار", render: (r) => r.warehouseTitle, filterType: "string", filterValue: (r) => r.warehouseTitle },
           { header: "مبنا", render: (r) => BASIS_FA[r.basis], filterType: "string", filterValue: (r) => BASIS_FA[r.basis] },
           { header: "تعداد ردیف", render: (r) => toFaDigits(String(r.lineCount)) },
+          ...(mode === "accounting" ? [{ header: "جمع مبلغ", render: (r: ListRow) => formatAmountFa(r.totalAmount) }] : []),
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/fixed-asset-issues/${r.id}/edit`)}
-        onDelete={onDelete}
+        onEdit={(r) => navigate(`${basePath}/${r.id}/edit`)}
+        onDelete={mode === "warehousing" ? onDelete : undefined}
       />
     </div>
   );
 }
 
-interface RowState { sourceGoodsRequestLineId: string; sourceNumber: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; description: string; serialNumber: string; batchNumber: string; expiryDate: string; physicalLocation: string }
+interface RowState { sourceGoodsRequestLineId: string; sourceNumber: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitCost: number; amount: number; description: string; serialNumber: string; batchNumber: string; expiryDate: string; physicalLocation: string }
 
 function emptyRow(): RowState {
-  return { sourceGoodsRequestLineId: "", sourceNumber: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", description: "", serialNumber: "", batchNumber: "", expiryDate: "", physicalLocation: "" };
+  return { sourceGoodsRequestLineId: "", sourceNumber: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitCost: 0, amount: 0, description: "", serialNumber: "", batchNumber: "", expiryDate: "", physicalLocation: "" };
 }
 
-function FixedAssetIssueForm({ editId }: { editId?: number }) {
+function FixedAssetIssueForm({ editId, mode, basePath }: { editId?: number; mode: ViewMode; basePath: string }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
+  const readOnly = mode === "accounting";
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
@@ -177,6 +189,8 @@ function FixedAssetIssueForm({ editId }: { editId?: number }) {
             unitId: String(l.unitId),
             unitTitle: l.unitTitle,
             quantity: String(l.quantity),
+            unitCost: l.unitCost,
+            amount: l.amount,
             description: l.description || "",
             serialNumber: l.serialNumber || "",
             batchNumber: l.batchNumber || "",
@@ -206,7 +220,7 @@ function FixedAssetIssueForm({ editId }: { editId?: number }) {
 
   const status: DocStatus = meta?.status || "DRAFT";
   const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceGoodsRequestLineId);
-  const coreDisabled = !!editId && status !== "DRAFT";
+  const coreDisabled = readOnly || (!!editId && status !== "DRAFT");
   const headerBasisDisabled = coreDisabled || hasAnyLine;
 
   function updateRow(idx: number, patch: Partial<RowState>) {
@@ -240,6 +254,7 @@ function FixedAssetIssueForm({ editId }: { editId?: number }) {
   }
 
   const totalQuantity = rows.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
+  const totalAmount = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
 
   function buildBody() {
     const nonEmptyRows = rows.filter((r) => r.goodsItemId || r.sourceGoodsRequestLineId);
@@ -264,6 +279,7 @@ function FixedAssetIssueForm({ editId }: { editId?: number }) {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (readOnly) return;
     setError(null);
     if (!header.date) return setError("تاریخ الزامی است");
     if (!header.warehouseId) return setError("انبار الزامی است");
@@ -281,7 +297,7 @@ function FixedAssetIssueForm({ editId }: { editId?: number }) {
       } else {
         const created = await api.post("/fixed-asset-issues", body);
         flash();
-        navigate(`/fixed-asset-issues/${created.id}/edit`);
+        navigate(`${basePath}/${created.id}/edit`);
       }
     } catch (err) {
       setError((err as ApiError).message);
@@ -289,10 +305,10 @@ function FixedAssetIssueForm({ editId }: { editId?: number }) {
   }
 
   async function handleDelete() {
-    if (!editId) return;
+    if (!editId || readOnly) return;
     try {
       await api.del(`/fixed-asset-issues/${editId}`);
-      navigate("/fixed-asset-issues");
+      navigate(basePath);
     } catch (e) {
       alert((e as ApiError).message);
     }
@@ -330,19 +346,21 @@ function FixedAssetIssueForm({ editId }: { editId?: number }) {
     <FormPage
       title={editId ? "ویرایش حواله دارایی ثابت" : "حواله دارایی ثابت جدید"}
       description={
-        status === "FINALIZED"
+        readOnly
+          ? "این نما («حسابداری انبار») فقط نمایشی است؛ ثبت/ویرایش از نمای «انبارداری» انجام می‌شود."
+          : status === "FINALIZED"
           ? "این سند «قطعی» شده و دیگر قابل ویرایش مستقیم نیست؛ برای اصلاح، ابتدا «برگشت از قطعی» را بزنید."
           : status === "VOID"
           ? "این سند «ابطال‌شده» است."
           : undefined
       }
       formId="fixed-asset-issue-form"
-      closePath="/fixed-asset-issues"
-      newPath="/fixed-asset-issues/new"
-      onDelete={editId && status === "DRAFT" ? handleDelete : undefined}
+      closePath={basePath}
+      newPath={mode === "warehousing" ? `${basePath}/new` : undefined}
+      onDelete={!readOnly && editId && status === "DRAFT" ? handleDelete : undefined}
       saveDisabled={coreDisabled}
       extraActions={
-        meta
+        !readOnly && meta
           ? [
               ...(status === "DRAFT" ? [{ label: "قطعی کردن", icon: <CheckIcon />, onClick: handleFinalize }] : []),
               ...(status === "FINALIZED" ? [{ label: "برگشت از قطعی", icon: <UndoIcon />, onClick: handleRevert }] : []),
@@ -423,6 +441,8 @@ function FixedAssetIssueForm({ editId }: { editId?: number }) {
                   <th>تاریخ انقضا</th>
                   <th>محل فیزیکی</th>
                   <th>مقدار</th>
+                  {mode === "accounting" && <th>فی واحد</th>}
+                  {mode === "accounting" && <th>مبلغ</th>}
                   <th>شرح</th>
                   <th></th>
                 </tr>
@@ -482,6 +502,8 @@ function FixedAssetIssueForm({ editId }: { editId?: number }) {
                       <td style={{ minWidth: 130 }}>
                         <AmountInput value={row.quantity} onChange={(v) => updateRow(idx, { quantity: v })} allowDecimal placeholder="۰" disabled={coreDisabled} />
                       </td>
+                      {mode === "accounting" && <td style={{ minWidth: 110, color: "var(--ink-soft)" }}>{formatAmountFa(row.unitCost)}</td>}
+                      {mode === "accounting" && <td style={{ minWidth: 120, color: "var(--ink-soft)" }}>{formatAmountFa(row.amount)}</td>}
                       <td style={{ minWidth: 160 }}>
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} disabled={coreDisabled} />
                       </td>
@@ -498,7 +520,10 @@ function FixedAssetIssueForm({ editId }: { editId?: number }) {
           </div>
           <div className="grid-footer je-lines-footer">
             <span className="grid-footer-info">{rows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(rows.length))} ردیف`}</span>
-            <span className="je-lines-totals">جمع مقدار: {formatAmountFa(totalQuantity)}</span>
+            <span className="je-lines-totals">
+              جمع مقدار: {formatAmountFa(totalQuantity)}
+              {mode === "accounting" && <> — جمع مبلغ: {formatAmountFa(totalAmount)}</>}
+            </span>
           </div>
         </div>
       </form>

@@ -231,36 +231,66 @@ export default function App() {
             <Route path="/warehousing/warehouse-review" element={<WarehouseReview mode="qty" />} />
             <Route path="/warehouse-accounting/warehouse-review" element={<WarehouseReview mode="amount" />} />
 
-            <Route path="/center-consumptions" element={<CenterConsumptions />} />
-            <Route path="/center-consumptions/new" element={<CenterConsumptions />} />
-            <Route path="/center-consumptions/:id/edit" element={<CenterConsumptions />} />
-            <Route path="/project-consumptions" element={<ProjectConsumptions />} />
-            <Route path="/project-consumptions/new" element={<ProjectConsumptions />} />
-            <Route path="/project-consumptions/:id/edit" element={<ProjectConsumptions />} />
-            <Route path="/production-consumptions" element={<ProductionConsumptions />} />
-            <Route path="/production-consumptions/new" element={<ProductionConsumptions />} />
-            <Route path="/production-consumptions/:id/edit" element={<ProductionConsumptions />} />
-            <Route path="/center-consumption-returns" element={<CenterConsumptionReturns />} />
-            <Route path="/center-consumption-returns/new" element={<CenterConsumptionReturns />} />
-            <Route path="/center-consumption-returns/:id/edit" element={<CenterConsumptionReturns />} />
-            <Route path="/project-consumption-returns" element={<ProjectConsumptionReturns />} />
-            <Route path="/project-consumption-returns/new" element={<ProjectConsumptionReturns />} />
-            <Route path="/project-consumption-returns/:id/edit" element={<ProjectConsumptionReturns />} />
-            <Route path="/production-consumption-returns" element={<ProductionConsumptionReturns />} />
-            <Route path="/production-consumption-returns/new" element={<ProductionConsumptionReturns />} />
-            <Route path="/production-consumption-returns/:id/edit" element={<ProductionConsumptionReturns />} />
-            <Route path="/sales-returns" element={<SalesReturns />} />
-            <Route path="/sales-returns/new" element={<SalesReturns />} />
-            <Route path="/sales-returns/:id/edit" element={<SalesReturns />} />
-            <Route path="/supplier-returns" element={<SupplierReturns />} />
-            <Route path="/supplier-returns/new" element={<SupplierReturns />} />
-            <Route path="/supplier-returns/:id/edit" element={<SupplierReturns />} />
-            <Route path="/production-receipts" element={<ProductionReceipts />} />
-            <Route path="/production-receipts/new" element={<ProductionReceipts />} />
-            <Route path="/production-receipts/:id/edit" element={<ProductionReceipts />} />
-            <Route path="/fixed-asset-issues" element={<FixedAssetIssues />} />
-            <Route path="/fixed-asset-issues/new" element={<FixedAssetIssues />} />
-            <Route path="/fixed-asset-issues/:id/edit" element={<FixedAssetIssues />} />
+            <Route path="/center-consumptions" element={<CenterConsumptions mode="warehousing" />} />
+            <Route path="/center-consumptions/new" element={<CenterConsumptions mode="warehousing" />} />
+            <Route path="/center-consumptions/:id/edit" element={<CenterConsumptions mode="warehousing" />} />
+            <Route path="/warehouse-accounting/center-consumptions" element={<CenterConsumptions mode="accounting" />} />
+            <Route path="/warehouse-accounting/center-consumptions/new" element={<CenterConsumptions mode="accounting" />} />
+            <Route path="/warehouse-accounting/center-consumptions/:id/edit" element={<CenterConsumptions mode="accounting" />} />
+            <Route path="/project-consumptions" element={<ProjectConsumptions mode="warehousing" />} />
+            <Route path="/project-consumptions/new" element={<ProjectConsumptions mode="warehousing" />} />
+            <Route path="/project-consumptions/:id/edit" element={<ProjectConsumptions mode="warehousing" />} />
+            <Route path="/warehouse-accounting/project-consumptions" element={<ProjectConsumptions mode="accounting" />} />
+            <Route path="/warehouse-accounting/project-consumptions/new" element={<ProjectConsumptions mode="accounting" />} />
+            <Route path="/warehouse-accounting/project-consumptions/:id/edit" element={<ProjectConsumptions mode="accounting" />} />
+            <Route path="/production-consumptions" element={<ProductionConsumptions mode="warehousing" />} />
+            <Route path="/production-consumptions/new" element={<ProductionConsumptions mode="warehousing" />} />
+            <Route path="/production-consumptions/:id/edit" element={<ProductionConsumptions mode="warehousing" />} />
+            <Route path="/warehouse-accounting/production-consumptions" element={<ProductionConsumptions mode="accounting" />} />
+            <Route path="/warehouse-accounting/production-consumptions/new" element={<ProductionConsumptions mode="accounting" />} />
+            <Route path="/warehouse-accounting/production-consumptions/:id/edit" element={<ProductionConsumptions mode="accounting" />} />
+            <Route path="/center-consumption-returns" element={<CenterConsumptionReturns mode="warehousing" />} />
+            <Route path="/center-consumption-returns/new" element={<CenterConsumptionReturns mode="warehousing" />} />
+            <Route path="/center-consumption-returns/:id/edit" element={<CenterConsumptionReturns mode="warehousing" />} />
+            <Route path="/warehouse-accounting/center-consumption-returns" element={<CenterConsumptionReturns mode="accounting" />} />
+            <Route path="/warehouse-accounting/center-consumption-returns/new" element={<CenterConsumptionReturns mode="accounting" />} />
+            <Route path="/warehouse-accounting/center-consumption-returns/:id/edit" element={<CenterConsumptionReturns mode="accounting" />} />
+            <Route path="/project-consumption-returns" element={<ProjectConsumptionReturns mode="warehousing" />} />
+            <Route path="/project-consumption-returns/new" element={<ProjectConsumptionReturns mode="warehousing" />} />
+            <Route path="/project-consumption-returns/:id/edit" element={<ProjectConsumptionReturns mode="warehousing" />} />
+            <Route path="/warehouse-accounting/project-consumption-returns" element={<ProjectConsumptionReturns mode="accounting" />} />
+            <Route path="/warehouse-accounting/project-consumption-returns/new" element={<ProjectConsumptionReturns mode="accounting" />} />
+            <Route path="/warehouse-accounting/project-consumption-returns/:id/edit" element={<ProjectConsumptionReturns mode="accounting" />} />
+            <Route path="/production-consumption-returns" element={<ProductionConsumptionReturns mode="warehousing" />} />
+            <Route path="/production-consumption-returns/new" element={<ProductionConsumptionReturns mode="warehousing" />} />
+            <Route path="/production-consumption-returns/:id/edit" element={<ProductionConsumptionReturns mode="warehousing" />} />
+            <Route path="/warehouse-accounting/production-consumption-returns" element={<ProductionConsumptionReturns mode="accounting" />} />
+            <Route path="/warehouse-accounting/production-consumption-returns/new" element={<ProductionConsumptionReturns mode="accounting" />} />
+            <Route path="/warehouse-accounting/production-consumption-returns/:id/edit" element={<ProductionConsumptionReturns mode="accounting" />} />
+            <Route path="/sales-returns" element={<SalesReturns mode="warehousing" />} />
+            <Route path="/sales-returns/new" element={<SalesReturns mode="warehousing" />} />
+            <Route path="/sales-returns/:id/edit" element={<SalesReturns mode="warehousing" />} />
+            <Route path="/warehouse-accounting/sales-returns" element={<SalesReturns mode="accounting" />} />
+            <Route path="/warehouse-accounting/sales-returns/new" element={<SalesReturns mode="accounting" />} />
+            <Route path="/warehouse-accounting/sales-returns/:id/edit" element={<SalesReturns mode="accounting" />} />
+            <Route path="/supplier-returns" element={<SupplierReturns mode="warehousing" />} />
+            <Route path="/supplier-returns/new" element={<SupplierReturns mode="warehousing" />} />
+            <Route path="/supplier-returns/:id/edit" element={<SupplierReturns mode="warehousing" />} />
+            <Route path="/warehouse-accounting/supplier-returns" element={<SupplierReturns mode="accounting" />} />
+            <Route path="/warehouse-accounting/supplier-returns/new" element={<SupplierReturns mode="accounting" />} />
+            <Route path="/warehouse-accounting/supplier-returns/:id/edit" element={<SupplierReturns mode="accounting" />} />
+            <Route path="/production-receipts" element={<ProductionReceipts mode="warehousing" />} />
+            <Route path="/production-receipts/new" element={<ProductionReceipts mode="warehousing" />} />
+            <Route path="/production-receipts/:id/edit" element={<ProductionReceipts mode="warehousing" />} />
+            <Route path="/warehouse-accounting/production-receipts" element={<ProductionReceipts mode="accounting" />} />
+            <Route path="/warehouse-accounting/production-receipts/new" element={<ProductionReceipts mode="accounting" />} />
+            <Route path="/warehouse-accounting/production-receipts/:id/edit" element={<ProductionReceipts mode="accounting" />} />
+            <Route path="/fixed-asset-issues" element={<FixedAssetIssues mode="warehousing" />} />
+            <Route path="/fixed-asset-issues/new" element={<FixedAssetIssues mode="warehousing" />} />
+            <Route path="/fixed-asset-issues/:id/edit" element={<FixedAssetIssues mode="warehousing" />} />
+            <Route path="/warehouse-accounting/fixed-asset-issues" element={<FixedAssetIssues mode="accounting" />} />
+            <Route path="/warehouse-accounting/fixed-asset-issues/new" element={<FixedAssetIssues mode="accounting" />} />
+            <Route path="/warehouse-accounting/fixed-asset-issues/:id/edit" element={<FixedAssetIssues mode="accounting" />} />
 
             <Route path="/warehousing/warehouse-transfers" element={<WarehouseTransfers mode="warehousing" />} />
             <Route path="/warehousing/warehouse-transfers/new" element={<WarehouseTransfers mode="warehousing" />} />
