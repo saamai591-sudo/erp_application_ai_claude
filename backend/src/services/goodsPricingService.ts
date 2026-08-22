@@ -265,15 +265,15 @@ export async function priceItem(goodsItemId: number, reportingPeriodId: number, 
     : [];
   const priorAdjMap = new Map(priorAdjustments.map((a) => [a.lineId, Number(a._sum.amount || 0)]));
 
-  // نهایی‌سازی: برای رسیدهایی که برگشت دارند، مبلغ نهایی = سهم ثابت باقیمانده + مجموع سهم‌های
-  // همگراشده‌ی برگشت‌ها؛ برای بقیه‌ی ردیف‌های محاسبه‌شده (صادره/برگشت/انبارگردانی)، از computed
+  // نهایی‌سازی: خودِ رسید هرگز توسط قیمت‌گذاری اصلاح نمی‌شود (همیشه با مبلغ اصلی خودش باقی می‌ماند) —
+  // سهم ثابت باقیمانده و همگرایی لوپ فقط برای محاسبه‌ی درستِ سایر ردیف‌های بین رسید و برگشت (مثلاً
+  // مصرف) به کار می‌روند. مبلغ نهایی خودِ برگشت هم مقدار همگراشده‌ی کاردکس نیست؛ سهم متناسب از مبلغ
+  // اصلی رسید است (همان initialReturnShare). بقیه‌ی ردیف‌های محاسبه‌شده از computed خوانده می‌شوند.
   const changes: { lineId: number; delta: number; newTotal: number; quantity: number; locked: boolean }[] = [];
   for (const line of lines) {
     let newTotal: number | undefined;
-    const returningLines = returningLinesByReceipt.get(line.id);
-    if (IN_GIVEN_TYPES.has(line.document.documentType) && returningLines && returningLines.length > 0) {
-      const sumConverged = returningLines.reduce((s, r) => s + (returnWorkingValue.get(r.id) || 0), 0);
-      newTotal = round((fixedRemainingAmount.get(line.id) || 0) + sumConverged, decimalPlaces);
+    if (line.document.documentType === "SUPPLIER_RETURN" && line.sourceWarehouseReceiptLineId && initialReturnShare.has(line.id)) {
+      newTotal = initialReturnShare.get(line.id)!;
     } else if (computed.has(line.id)) {
       newTotal = computed.get(line.id)!;
     }
