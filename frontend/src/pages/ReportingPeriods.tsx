@@ -12,6 +12,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { InfoHint } from "../components/InfoHint";
 import { toFaDigits } from "../lib/formatAmount";
+import { getSavedFiscalPeriodId } from "../lib/userSettings";
 
 interface Period {
   id: number;
@@ -45,6 +46,29 @@ function UndoIcon() {
   );
 }
 
+// «دوره مالی جاری» یک تنظیم سراسری قابل انتخاب توسط کاربر است (تنظیمات کاربری)، نه لزوماً آخرین دوره
+// مالی تعریف‌شده — دقیقاً همان الگوی resolveFiscalPeriod در JournalEntries.tsx. فقط وقتی کاربر هنوز
+// هیچ دوره‌ای انتخاب نکرده، به آخرین دوره مالی برمی‌گردیم.
+function useCurrentFiscalPeriodId() {
+  const saved = getSavedFiscalPeriodId();
+  const [fiscalPeriodId, setFiscalPeriodId] = useState(saved);
+  const [resolved, setResolved] = useState(!!saved);
+
+  useEffect(() => {
+    if (saved) return;
+    api
+      .get("/fiscal-periods")
+      .then((fps: FiscalPeriod[]) => {
+        const last = [...fps].sort((a, b) => (a.toDate < b.toDate ? 1 : -1))[0];
+        setFiscalPeriodId(last ? String(last.id) : "");
+      })
+      .finally(() => setResolved(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return { fiscalPeriodId, resolved };
+}
+
 export default function ReportingPeriods() {
   const location = useLocation();
   const { id } = useParams();
@@ -56,7 +80,9 @@ export default function ReportingPeriods() {
 }
 
 function PeriodList() {
-  const { items, loading, error, remove, reload } = useCrud<Period>("/reporting-periods");
+  const { fiscalPeriodId, resolved } = useCurrentFiscalPeriodId();
+  const basePath = fiscalPeriodId ? `/reporting-periods?fiscalPeriodId=${fiscalPeriodId}` : "/reporting-periods";
+  const { items, loading, error, remove, reload } = useCrud<Period>(basePath);
   const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
@@ -104,7 +130,7 @@ function PeriodList() {
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
-      {!loading && (
+      {resolved && !loading && (
         <DataTable
           bulkActionsContainer={bulkSlot}
           columns={[
@@ -133,19 +159,23 @@ function PeriodList() {
 function PeriodForm() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { fiscalPeriodId, resolved } = useCurrentFiscalPeriodId();
   const { create } = useCrud<Period>("/reporting-periods");
   const [form, setForm] = usePersistedState(`form:${location.pathname}`, { code: "", title: "", toDate: "" });
   const [formError, setFormError] = useState<string | null>(null);
   const [fromPreview, setFromPreview] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([api.get("/fiscal-periods"), api.get("/reporting-periods")]).then(([fps, periods]: [FiscalPeriod[], Period[]]) => {
-      const lastFp = [...fps].sort((a, b) => (a.toDate < b.toDate ? 1 : -1))[0] || null;
-      if (!lastFp) return;
-      const lastPeriod = [...periods].sort((a, b) => (a.toDate < b.toDate ? 1 : -1))[0];
-      setFromPreview(lastPeriod ? addOneDay(lastPeriod.toDate) : lastFp.fromDate.slice(0, 10));
-    });
-  }, []);
+    if (!resolved || !fiscalPeriodId) return;
+    Promise.all([api.get("/fiscal-periods"), api.get(`/reporting-periods?fiscalPeriodId=${fiscalPeriodId}`)]).then(
+      ([fps, periods]: [FiscalPeriod[], Period[]]) => {
+        const fp = fps.find((f) => String(f.id) === fiscalPeriodId) || null;
+        if (!fp) return;
+        const lastPeriod = [...periods].sort((a, b) => (a.toDate < b.toDate ? 1 : -1))[0];
+        setFromPreview(lastPeriod ? addOneDay(lastPeriod.toDate) : fp.fromDate.slice(0, 10));
+      }
+    );
+  }, [resolved, fiscalPeriodId]);
 
   function addOneDay(iso: string): string {
     const d = new Date(iso.slice(0, 10));
@@ -155,7 +185,7 @@ function PeriodForm() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    const res = await create(form);
+    const res = await create({ ...form, fiscalPeriodId: fiscalPeriodId ? Number(fiscalPeriodId) : undefined });
     if (res.ok && res.data) navigate(`/reporting-periods/${res.data.id}/edit`, { state: { justCreated: true } });
     else setFormError(res.error || "خطا");
   }

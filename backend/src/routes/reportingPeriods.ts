@@ -4,12 +4,19 @@ import { toEnglishDigits } from "../utils/digits";
 
 const router = Router();
 
-async function currentFiscalPeriod() {
+// «دوره مالی جاری» در این اپلیکیشن یک تنظیم سراسری قابل انتخاب توسط کاربر است (ذخیره در
+// localStorage فرانت‌اند، دقیقاً همان الگوی استفاده‌شده در JournalEntries.tsx) — نه صرفاً آخرین دوره
+// مالی تعریف‌شده. فرانت‌اند این شناسه را در پارامتر/بدنه‌ی fiscalPeriodId ارسال می‌کند؛ اینجا فقط در
+// نبود آن (مثلاً کاربری که هنوز هیچ دوره‌ای انتخاب نکرده) به آخرین دوره مالی برمی‌گردیم.
+async function resolveFiscalPeriod(fiscalPeriodId?: string | number) {
+  if (fiscalPeriodId) {
+    return prisma.fiscalPeriod.findUnique({ where: { id: Number(fiscalPeriodId) } });
+  }
   return prisma.fiscalPeriod.findFirst({ orderBy: { toDate: "desc" } });
 }
 
-router.get("/", async (_req, res) => {
-  const fp = await currentFiscalPeriod();
+router.get("/", async (req, res) => {
+  const fp = await resolveFiscalPeriod(req.query.fiscalPeriodId as string | undefined);
   if (!fp) return res.json([]);
   const periods = await prisma.reportingPeriod.findMany({
     where: { fiscalPeriodId: fp.id },
@@ -19,14 +26,19 @@ router.get("/", async (_req, res) => {
 });
 
 router.post("/", async (req, res) => {
-  const { code: rawCode, title, toDate: rawToDate } = req.body as { code: string; title: string; toDate: string };
+  const { code: rawCode, title, toDate: rawToDate, fiscalPeriodId } = req.body as {
+    code: string;
+    title: string;
+    toDate: string;
+    fiscalPeriodId?: number;
+  };
 
   const code = rawCode ? toEnglishDigits(rawCode).trim() : "";
   if (!code) return res.status(400).json({ error: "کد دوره الزامی است" });
   if (!title || !title.trim()) return res.status(400).json({ error: "عنوان دوره الزامی است" });
   if (!rawToDate) return res.status(400).json({ error: "تاریخ پایان الزامی است" });
 
-  const fp = await currentFiscalPeriod();
+  const fp = await resolveFiscalPeriod(fiscalPeriodId);
   if (!fp) return res.status(400).json({ error: "دوره مالی تعریف نشده است" });
 
   const dupCode = await prisma.reportingPeriod.findUnique({ where: { fiscalPeriodId_code: { fiscalPeriodId: fp.id, code } } });
