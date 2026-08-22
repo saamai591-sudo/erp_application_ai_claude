@@ -140,7 +140,6 @@ export const MODULES: ModuleGroup[] = [
           { key: "warehousing-warehouse-transfers", label: "انتقال بین انبارها", list: "/warehousing/warehouse-transfers", create: "/warehousing/warehouse-transfers/new", icon: "sitemap" },
           { key: "warehousing-warehouse-adjustments", label: "انبارگردانی / تعدیل موجودی", list: "/warehousing/warehouse-adjustments", create: "/warehousing/warehouse-adjustments/new", icon: "ledger" },
           { key: "warehousing-inventory-closing", label: "بستن موجودی انبار", list: "/warehousing/inventory-closing", icon: "shield" },
-          { key: "warehousing-goods-pricing", label: "قیمت‌گذاری اسناد انبار", list: "/warehousing/goods-pricing", icon: "coin" },
         ],
       },
       {
@@ -161,6 +160,7 @@ export const MODULES: ModuleGroup[] = [
           { key: "accounting-warehouse-receipts", label: "رسید انبار خرید", list: "/warehouse-accounting/warehouse-receipts", icon: "file" },
           { key: "accounting-warehouse-transfers", label: "انتقال بین انبارها", list: "/warehouse-accounting/warehouse-transfers", icon: "sitemap" },
           { key: "accounting-warehouse-adjustments", label: "انبارگردانی / تعدیل موجودی", list: "/warehouse-accounting/warehouse-adjustments", icon: "ledger" },
+          { key: "accounting-goods-pricing", label: "قیمت‌گذاری اسناد انبار", list: "/warehouse-accounting/goods-pricing", icon: "coin" },
         ],
       },
       {

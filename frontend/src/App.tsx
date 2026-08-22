@@ -116,7 +116,7 @@ export default function App() {
             <Route path="/reporting-periods" element={<ReportingPeriods />} />
             <Route path="/reporting-periods/new" element={<ReportingPeriods />} />
             <Route path="/reporting-periods/:id/edit" element={<ReportingPeriods />} />
-            <Route path="/warehousing/goods-pricing" element={<GoodsPricing />} />
+            <Route path="/warehouse-accounting/goods-pricing" element={<GoodsPricing />} />
             <Route path="/org-structure" element={<OrgStructure />} />
             <Route path="/org-structure/new" element={<OrgStructure />} />
             <Route path="/org-structure/:id/edit" element={<OrgStructure />} />
