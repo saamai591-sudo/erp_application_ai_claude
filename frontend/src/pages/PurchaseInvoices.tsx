@@ -507,7 +507,6 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
               <PlusIcon />
             </button>
           </div>
-        </fieldset>
 
         <div className="grid-wrap je-lines-wrap">
           <div className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
@@ -669,6 +668,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
             <span className="je-lines-totals">جمع هزینه‌های جانبی: {formatAmountFa(totalOtherCosts)}</span>
           </div>
         </div>
+        </fieldset>
       </form>
     </FormPage>
   );
