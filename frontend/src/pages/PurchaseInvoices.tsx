@@ -16,12 +16,13 @@ import { api, ApiError } from "../lib/api";
 import { partyDisplayName } from "./Users";
 
 // این فرآیند («فاکتور خرید») مستند تحلیل اختصاصی در پروژه ندارد؛ ساختار این فرم حاصل تصمیم مشترک با
-// کاربر است (نگاه کنید به یادداشت‌های backend/src/routes/purchaseInvoices.ts و
-// claude/سرویس-زنجیره-تامین-عملیات.md). طبق تصمیم صریح کاربر، در این فاز فقط وضعیت «ثبت» وجود دارد —
-// هیچ دکمه‌ی «تایید» در این فرم نیست.
+// کاربر است (نگاه کنید به یادداشت‌های backend/src/routes/purchaseInvoices.ts). با تایید فاکتور، مبلغ
+// نهایی هر ردیف (فی×مقدار + سهم سرشکن‌شده‌ی هزینه‌های جانبی دارای مبنای سرشکن) روی ردیف رسید انبار
+// خرید مبنا نوشته می‌شود.
 
 type Basis = "NO_BASIS" | "WAREHOUSE_RECEIPT";
-type Status = "DRAFT";
+type Status = "DRAFT" | "APPROVED";
+type AllocationBasis = "VALUE" | "QUANTITY" | "WEIGHT";
 
 interface PartyOption {
   id: number;
@@ -49,9 +50,10 @@ interface PickableReceiptLine {
   quantity: number;
 }
 
-const STATUS_FA: Record<Status, string> = { DRAFT: "ثبت" };
+const STATUS_FA: Record<Status, string> = { DRAFT: "ثبت", APPROVED: "تایید شده" };
 const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", WAREHOUSE_RECEIPT: "رسید انبار خرید" };
-const INFO_TEXT = "ثبت فاکتور خرید دریافتی از تامین‌کننده — بر مبنای رسید(های) انبار خرید قطعی‌شده (هر ردیف رسید فقط یک‌بار و به‌طور کامل فاکتور می‌شود) یا بدون مبنا. هزینه‌های جانبی فاکتور (حمل، بسته‌بندی و ...) در تب «سایر هزینه‌ها» ثبت می‌شوند.";
+const ALLOCATION_BASIS_FA: Record<AllocationBasis, string> = { VALUE: "ارزش", QUANTITY: "مقدار", WEIGHT: "وزن" };
+const INFO_TEXT = "ثبت فاکتور خرید دریافتی از تامین‌کننده — بر مبنای رسید(های) انبار خرید قطعی‌شده (هر ردیف رسید فقط یک‌بار و به‌طور کامل فاکتور می‌شود) یا بدون مبنا. هزینه‌های جانبی فاکتور (حمل، بسته‌بندی و ...) در تب «سایر هزینه‌ها» ثبت می‌شوند. با تایید فاکتور، مبلغ نهایی (فی×مقدار به‌اضافه‌ی سهم هزینه‌های جانبیِ دارای مبنای سرشکن) روی ردیف‌های رسید انبار خرید مبنا نوشته می‌شود.";
 
 interface ListRow {
   id: number; number: number; date: string; vendorInvoiceNumber: string | null; basis: Basis;
@@ -62,8 +64,15 @@ interface DetailLine {
   goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string;
   quantity: number; unitPrice: number; amount: number; description: string | null;
 }
-interface OtherCostDetail { id: number; serviceId: number; serviceTitle: string; amount: number; description: string | null }
-interface Detail extends ListRow { currencyId: number; description: string | null; lines: DetailLine[]; otherCostLines: OtherCostDetail[] }
+interface OtherCostDetail { id: number; serviceId: number; serviceTitle: string; amount: number; allocationBasis: AllocationBasis | null; description: string | null }
+interface Detail extends ListRow {
+  currencyId: number;
+  description: string | null;
+  approverName: string | null;
+  approvedAt: string | null;
+  lines: DetailLine[];
+  otherCostLines: OtherCostDetail[];
+}
 
 export default function PurchaseInvoices() {
   const location = useLocation();
@@ -77,6 +86,21 @@ export default function PurchaseInvoices() {
 
 function PlusIcon() {
   return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
+}
+function CheckIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function UndoIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 function PurchaseInvoiceList() {
@@ -139,7 +163,7 @@ interface RowState {
   sourceInventoryLineId: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string;
   unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; description: string;
 }
-interface CostRowState { serviceId: string; amount: string; description: string }
+interface CostRowState { serviceId: string; amount: string; allocationBasis: AllocationBasis | ""; description: string }
 
 function emptyRow(): RowState {
   return { sourceInventoryLineId: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", description: "" };
@@ -157,7 +181,10 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", vendorInvoiceNumber: "", basis: "NO_BASIS" as Basis, partyId: "", currencyId: "", description: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
   const [costRows, setCostRows] = usePersistedState<CostRowState[]>(`${cacheKey}:costs`, []);
-  const [meta, setMeta] = usePersistedState<{ number: number; status: Status } | null>(`${cacheKey}:meta`, null);
+  const [meta, setMeta] = usePersistedState<{ number: number; status: Status; approverName: string | null; approvedAt: string | null } | null>(
+    `${cacheKey}:meta`,
+    null
+  );
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const { saved, flash } = useSavedFlash();
@@ -181,7 +208,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       }
       if (editId) {
         const d: Detail = await api.get(`/purchase-invoices/${editId}`);
-        setMeta({ number: d.number, status: d.status });
+        setMeta({ number: d.number, status: d.status, approverName: d.approverName, approvedAt: d.approvedAt });
         setHeader({
           date: d.date.slice(0, 10),
           vendorInvoiceNumber: d.vendorInvoiceNumber || "",
@@ -204,7 +231,14 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
             description: l.description || "",
           }))
         );
-        setCostRows(d.otherCostLines.map((l) => ({ serviceId: String(l.serviceId), amount: String(l.amount), description: l.description || "" })));
+        setCostRows(
+          d.otherCostLines.map((l) => ({
+            serviceId: String(l.serviceId),
+            amount: String(l.amount),
+            allocationBasis: l.allocationBasis || "",
+            description: l.description || "",
+          }))
+        );
       } else {
         setHeader({ date: "", vendorInvoiceNumber: "", basis: "NO_BASIS", partyId: "", currencyId: "", description: "" });
         setRows([emptyRow()]);
@@ -227,7 +261,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   }, [header.basis, header.partyId, editId]);
 
   const status: Status = meta?.status || "DRAFT";
-  const locked = false; // در این فاز هیچ وضعیت قفل‌کننده‌ای (تایید) وجود ندارد
+  const locked = status === "APPROVED";
   const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceInventoryLineId);
   const headerDisabled = hasAnyLine;
   const selectedParty = parties.find((p) => String(p.id) === header.partyId);
@@ -278,7 +312,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
     setCostRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
   function addCostRow() {
-    setCostRows((prev) => [...prev, { serviceId: "", amount: "", description: "" }]);
+    setCostRows((prev) => [...prev, { serviceId: "", amount: "", allocationBasis: "", description: "" }]);
   }
   function removeCostRow(idx: number) {
     setCostRows((prev) => prev.filter((_, i) => i !== idx));
@@ -305,7 +339,9 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
         amount: Number(r.amount) || 0,
         description: r.description || null,
       })),
-      otherCostLines: costRows.filter((r) => r.serviceId).map((r) => ({ serviceId: Number(r.serviceId), amount: Number(r.amount) || 0, description: r.description || null })),
+      otherCostLines: costRows
+        .filter((r) => r.serviceId)
+        .map((r) => ({ serviceId: Number(r.serviceId), amount: Number(r.amount) || 0, allocationBasis: r.allocationBasis || null, description: r.description || null })),
     };
   }
 
@@ -345,7 +381,52 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
     }
   }
 
+  async function reloadMetaAndRows() {
+    if (!editId) return;
+    const d: Detail = await api.get(`/purchase-invoices/${editId}`);
+    setMeta({ number: d.number, status: d.status, approverName: d.approverName, approvedAt: d.approvedAt });
+    setRows(
+      d.lines.map((l) => ({
+        sourceInventoryLineId: l.sourceInventoryLineId ? String(l.sourceInventoryLineId) : "",
+        goodsItemId: String(l.goodsItemId),
+        goodsItemCode: l.goodsItemCode,
+        goodsItemTitle: l.goodsItemTitle,
+        unitId: String(l.unitId),
+        unitTitle: l.unitTitle,
+        quantity: String(l.quantity),
+        unitPrice: String(l.unitPrice),
+        amount: String(l.amount),
+        description: l.description || "",
+      }))
+    );
+  }
+
+  async function runAction(action: string, confirmMsg?: string) {
+    if (!editId) return;
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    try {
+      await api.post(`/purchase-invoices/${editId}/${action}`, {});
+      await reloadMetaAndRows();
+      flash();
+    } catch (e) {
+      alert((e as ApiError).message);
+    }
+  }
+
   if (!loaded) return null;
+
+  const extraActions: { label: string; icon: JSX.Element; onClick: () => void }[] = [];
+  if (editId && meta) {
+    if (status === "DRAFT") {
+      extraActions.push({ label: "تایید", icon: <CheckIcon />, onClick: () => runAction("approve") });
+    } else if (status === "APPROVED") {
+      extraActions.push({
+        label: "برگشت از تایید",
+        icon: <UndoIcon />,
+        onClick: () => runAction("unapprove", "با برگشت از تایید، مبلغ ردیف‌های رسید انبار خرید مرتبط صفر می‌شود. ادامه می‌دهید؟"),
+      });
+    }
+  }
 
   return (
     <FormPage
@@ -353,8 +434,9 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       formId="purchase-invoice-form"
       closePath="/purchase-invoices"
       newPath="/purchase-invoices/new"
-      onDelete={editId ? handleDelete : undefined}
+      onDelete={editId && status === "DRAFT" ? handleDelete : undefined}
       saveDisabled={locked}
+      extraActions={extraActions}
       wide
     >
       <form id="purchase-invoice-form" onSubmit={onSubmit}>
@@ -370,6 +452,12 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
               <label>وضعیت</label>
               <div><span className="badge">{STATUS_FA[status]}</span></div>
             </div>
+            {meta?.approverName && (
+              <div className="form-field">
+                <label>تایید کننده</label>
+                <input value={`${meta.approverName}${meta.approvedAt ? " — " + formatJalaliDate(meta.approvedAt) : ""}`} disabled />
+              </div>
+            )}
             <div className="form-field">
               <label>تاریخ</label>
               <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
@@ -525,6 +613,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                   <th>ردیف</th>
                   <th>کد هزینه</th>
                   <th>مبلغ</th>
+                  <th>مبنای سرشکن</th>
                   <th>شرح</th>
                   <th></th>
                 </tr>
@@ -549,6 +638,17 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                       </td>
                       <td style={{ minWidth: 120 }}>
                         <AmountInput value={row.amount} onChange={(v) => updateCostRow(idx, { amount: v })} allowDecimal />
+                      </td>
+                      <td style={{ minWidth: 130 }}>
+                        <select
+                          value={row.allocationBasis}
+                          onChange={(e) => updateCostRow(idx, { allocationBasis: e.target.value as AllocationBasis | "" })}
+                        >
+                          <option value="">سرشکن نشود</option>
+                          {(Object.keys(ALLOCATION_BASIS_FA) as AllocationBasis[]).map((b) => (
+                            <option key={b} value={b}>{ALLOCATION_BASIS_FA[b]}</option>
+                          ))}
+                        </select>
                       </td>
                       <td style={{ minWidth: 140 }}>
                         <input value={row.description} onChange={(e) => updateCostRow(idx, { description: e.target.value })} />

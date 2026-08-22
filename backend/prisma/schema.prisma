@@ -59,6 +59,7 @@ model User {
   inventoryClosings        InventoryClosing[]
   inventoryClosingAudits   InventoryClosingAudit[]
   goodsPricingStatuses     GoodsPricingStatus[]
+  purchaseInvoicesApproved PurchaseInvoice[]       @relation("PurchaseInvoiceApprover")
 }
 
 model UserRole {
@@ -1552,11 +1553,14 @@ model PurchaseInvoice {
   currencyId             Int
   description            String?
   status                 RequestStatus                  @default(DRAFT)
+  approverId             Int?
+  approvedAt             DateTime?
   createdAt              DateTime                       @default(now())
   paymentSettlementLines PaymentSettlementLine[]
   currency               Currency                       @relation(fields: [currencyId], references: [id])
   fiscalPeriod           FiscalPeriod                   @relation(fields: [fiscalPeriodId], references: [id])
   party                  Party                          @relation(fields: [partyId], references: [id])
+  approver               User?                          @relation("PurchaseInvoiceApprover", fields: [approverId], references: [id])
   lines                  PurchaseInvoiceLine[]
   otherCostLines         PurchaseInvoiceOtherCostLine[]
 
