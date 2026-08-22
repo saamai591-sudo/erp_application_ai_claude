@@ -166,16 +166,16 @@ function PeriodForm() {
         {formError && <div className="alert error">{formError}</div>}
         <div className="form-grid">
           <div className="form-field">
-            <label>از تاریخ</label>
-            <JalaliDatePicker value={fromPreview || ""} onChange={() => {}} disabled placeholder="—" />
-          </div>
-          <div className="form-field">
             <label>کد دوره</label>
             <input dir="ltr" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} autoFocus />
           </div>
           <div className="form-field">
             <label>عنوان دوره</label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+          </div>
+          <div className="form-field">
+            <label>از تاریخ</label>
+            <JalaliDatePicker value={fromPreview || ""} onChange={() => {}} disabled placeholder="—" />
           </div>
           <div className="form-field">
             <label>تا تاریخ</label>
