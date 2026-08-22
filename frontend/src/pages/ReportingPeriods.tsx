@@ -136,13 +136,11 @@ function PeriodForm() {
   const { create } = useCrud<Period>("/reporting-periods");
   const [form, setForm] = usePersistedState(`form:${location.pathname}`, { code: "", title: "", toDate: "" });
   const [formError, setFormError] = useState<string | null>(null);
-  const [currentFp, setCurrentFp] = useState<FiscalPeriod | null>(null);
   const [fromPreview, setFromPreview] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([api.get("/fiscal-periods"), api.get("/reporting-periods")]).then(([fps, periods]: [FiscalPeriod[], Period[]]) => {
       const lastFp = [...fps].sort((a, b) => (a.toDate < b.toDate ? 1 : -1))[0] || null;
-      setCurrentFp(lastFp);
       if (!lastFp) return;
       const lastPeriod = [...periods].sort((a, b) => (a.toDate < b.toDate ? 1 : -1))[0];
       setFromPreview(lastPeriod ? addOneDay(lastPeriod.toDate) : lastFp.fromDate.slice(0, 10));
@@ -167,10 +165,6 @@ function PeriodForm() {
       <form id="reporting-period-form" onSubmit={onSubmit}>
         {formError && <div className="alert error">{formError}</div>}
         <div className="form-grid">
-          <div className="form-field">
-            <label>دوره مالی جاری</label>
-            <input dir="ltr" disabled value={currentFp?.title || ""} />
-          </div>
           <div className="form-field">
             <label>از تاریخ</label>
             <JalaliDatePicker value={fromPreview || ""} onChange={() => {}} disabled placeholder="—" />
