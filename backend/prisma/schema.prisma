@@ -58,6 +58,7 @@ model User {
   roles                    UserRole[]
   inventoryClosings        InventoryClosing[]
   inventoryClosingAudits   InventoryClosingAudit[]
+  goodsPricingStatuses     GoodsPricingStatus[]
 }
 
 model UserRole {
@@ -161,6 +162,7 @@ model ReportingPeriod {
   hasBeenClosed  Boolean               @default(false)
   createdAt      DateTime              @default(now())
   fiscalPeriod   FiscalPeriod          @relation(fields: [fiscalPeriodId], references: [id])
+  pricingStatuses GoodsPricingStatus[]
 
   @@unique([fiscalPeriodId, code])
 }
@@ -754,6 +756,7 @@ model GoodsItem {
   serials                       Serial[]
   inventoryDocumentLines        InventoryDocumentLine[]
   inventoryClosingLines         InventoryClosingLine[]
+  pricingStatuses               GoodsPricingStatus[]
 
   @@unique([goodsGroupId, code])
 }
@@ -1837,6 +1840,7 @@ model InventoryDocumentLine {
   serials                           InventoryLineSerial[]
   purchaseInvoiceLine               PurchaseInvoiceLine?       @relation("PurchaseInvoiceSourceInventoryLine")
   salesInvoiceLines                 SalesInvoiceLine[]         @relation("SalesInvoiceSourceInventoryLine")
+  pricingAdjustments                GoodsPricingAdjustment[]
 }
 
 // طبق بند ۱۷-۱۹ سند: یک سطح سند می‌تواند چند سریال داشته باشد (نه یک سطر جدا برای هر سریال)
@@ -1902,6 +1906,39 @@ model InventoryClosingAudit {
   actionAt       DateTime               @default(now())
   warehouse      Warehouse              @relation(fields: [warehouseId], references: [id])
   user           User?                  @relation(fields: [userId], references: [id])
+}
+
+// طبق مستند «قیمت‌گذاری اسناد انبار» (بند ۱۲): کلید منطقی وضعیت قیمت‌گذاری = ReportingPeriod + Item
+// (بدون انبار). وجود این رکورد یعنی «این کالا در این دوره قیمت‌گذاری شده است»؛ برگشت قیمت‌گذاری صرفاً
+// همین رکورد را حذف می‌کند (که با onDelete: Cascade تمام اصلاحیه‌های همان مرحله را هم حذف می‌کند) —
+// نیازی به Undo دستی مبلغ سندها نیست چون هرگز amount اصلی سند مستقیماً تغییر نمی‌کند (پایین را ببینید).
+model GoodsPricingStatus {
+  id                Int                      @id @default(autoincrement())
+  goodsItemId       Int
+  reportingPeriodId Int
+  pricedAt          DateTime                 @default(now())
+  createdById       Int?
+  goodsItem         GoodsItem                @relation(fields: [goodsItemId], references: [id])
+  reportingPeriod   ReportingPeriod          @relation(fields: [reportingPeriodId], references: [id])
+  createdBy         User?                    @relation(fields: [createdById], references: [id])
+  adjustments       GoodsPricingAdjustment[]
+
+  @@unique([goodsItemId, reportingPeriodId])
+}
+
+// طبق بند ۹ مستند: «مبلغ نهایی = مبلغ اولیه + مجموع اصلاحیه‌ها» — InventoryDocumentLine.amount
+// («مبلغ اولیه») هرگز توسط موتور قیمت‌گذاری تغییر داده نمی‌شود؛ هر اثر قیمت‌گذاری (چه اولین‌بار قیمت‌گذاری
+// یک ردیف صادره، چه اصلاحیه‌ی رسیدی که یک برگشت به تامین‌کننده به آن اثر می‌گذارد) یکسان به‌صورت یک ردیف
+// اینجا ثبت می‌شود. این هم مدل داده را با فرمول/مثال مستند دقیقاً منطبق نگه می‌دارد و هم Rollback (حذف
+// GoodsPricingStatus مربوطه) را بدون نیاز به منطق Undo جداگانه صحیح می‌کند.
+model GoodsPricingAdjustment {
+  id        Int                   @id @default(autoincrement())
+  statusId  Int
+  lineId    Int
+  amount    Decimal               @db.Decimal(18, 2)
+  createdAt DateTime              @default(now())
+  status    GoodsPricingStatus    @relation(fields: [statusId], references: [id], onDelete: Cascade)
+  line      InventoryDocumentLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
 }
 
 model SalesInvoice {
