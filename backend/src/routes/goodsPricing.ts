@@ -14,7 +14,6 @@ router.get("/candidates", async (req, res) => {
     operation,
     search,
     accountingGroupId: agRaw,
-    onlyWithFlow: onlyWithFlowRaw,
     page: pageRaw,
     pageSize: pageSizeRaw,
   } = req.query as {
@@ -22,7 +21,6 @@ router.get("/candidates", async (req, res) => {
     operation?: string;
     search?: string;
     accountingGroupId?: string;
-    onlyWithFlow?: string;
     page?: string;
     pageSize?: string;
   };
@@ -47,31 +45,28 @@ router.get("/candidates", async (req, res) => {
   });
   const pricedIds = pricedStatuses.map((s) => s.goodsItemId);
 
-  // فیلتر «فقط کالاهای دارای گردش»: کالاهایی که از ابتدای سال مالی دوره گزارشگری انتخاب‌شده تا پایان
-  // خودِ آن دوره، حداقل یک سند قطعی‌شده‌ی مؤثر در قیمت‌گذاری داشته‌اند
-  let flowIds: number[] | null = null;
-  if (onlyWithFlowRaw === "1" || onlyWithFlowRaw === "true") {
-    const period = await prisma.reportingPeriod.findUnique({ where: { id: reportingPeriodId }, include: { fiscalPeriod: true } });
-    if (!period) return res.status(400).json({ error: "دوره گزارشگری یافت نشد" });
-    const flowLines = await prisma.inventoryDocumentLine.findMany({
-      where: {
-        document: {
-          status: "FINALIZED",
-          documentType: { in: PRICING_DOC_TYPES as any },
-          date: { gte: period.fiscalPeriod.fromDate, lte: period.toDate },
-        },
+  // فقط کالاهایی که از ابتدای سال مالی دوره گزارشگری انتخاب‌شده تا پایان خودِ آن دوره، حداقل یک سند
+  // قطعی‌شده‌ی مؤثر در قیمت‌گذاری داشته‌اند نمایش داده می‌شوند
+  const period = await prisma.reportingPeriod.findUnique({ where: { id: reportingPeriodId }, include: { fiscalPeriod: true } });
+  if (!period) return res.status(400).json({ error: "دوره گزارشگری یافت نشد" });
+  const flowLines = await prisma.inventoryDocumentLine.findMany({
+    where: {
+      document: {
+        status: "FINALIZED",
+        documentType: { in: PRICING_DOC_TYPES as any },
+        date: { gte: period.fiscalPeriod.fromDate, lte: period.toDate },
       },
-      select: { goodsItemId: true },
-      distinct: ["goodsItemId"],
-    });
-    flowIds = flowLines.map((l) => l.goodsItemId);
-  }
+    },
+    select: { goodsItemId: true },
+    distinct: ["goodsItemId"],
+  });
+  const flowIds = flowLines.map((l) => l.goodsItemId);
 
   if (operation === "PRICE") {
     const excluded = pricedIds.length ? pricedIds : [-1];
-    where.id = flowIds ? { notIn: excluded, in: flowIds.length ? flowIds : [-1] } : { notIn: excluded };
+    where.id = { notIn: excluded, in: flowIds.length ? flowIds : [-1] };
   } else {
-    const eligible = flowIds ? pricedIds.filter((id) => flowIds!.includes(id)) : pricedIds;
+    const eligible = pricedIds.filter((id) => flowIds.includes(id));
     where.id = { in: eligible.length ? eligible : [-1] };
   }
 
