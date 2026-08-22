@@ -16,10 +16,13 @@ import { prisma } from "../lib/prisma";
 //   می‌شود (برخلاف مستند که فقط یک برگشت را در نظر می‌گیرد، این پیاده‌سازی همه‌ی برگشت‌های تامین‌کننده‌ی
 //   کل کاردکس کالا را هم‌زمان همگرا می‌کند تا برگشت‌های متعدد/زنجیره‌ای هم درست پوشش داده شوند).
 //
-// طبق بند ۹ مستند: مبلغ اولیه‌ی سند (ستون amount) هرگز مستقیماً تغییر نمی‌کند؛ هر اثر قیمت‌گذاری (چه
-// اولین قیمت‌گذاری یک ردیف صادره، چه اصلاحیه‌ی یک رسید قدیمی به‌خاطر برگشت جدید) به‌صورت یکسان یک ردیف
-// GoodsPricingAdjustment ثبت می‌شود؛ «مبلغ نهایی» همیشه amount + مجموع اصلاحیه‌هاست. این باعث می‌شود
-// Rollback (حذف GoodsPricingStatus) بدون نیاز به منطق Undo جداگانه، خودکار و دقیق باشد.
+// طبق بند ۹ مستند، هر اثر قیمت‌گذاری (چه اولین قیمت‌گذاری یک ردیف صادره، چه اصلاحیه‌ی یک رسید قدیمی
+// به‌خاطر برگشت جدید) یک ردیف GoodsPricingAdjustment (برای تاریخچه/حسابرسی) ثبت می‌کند — و علاوه‌بر آن
+// (برخلاف نسخه‌ی اول این سرویس) همان مبلغ به‌صورت مستقیم روی ستون amount/unitCost خود
+// InventoryDocumentLine هم نوشته می‌شود؛ چون تمام صفحات نمایش سند (نمای «حسابداری انبار»، فرم خود سند
+// و...) این ستون خام را می‌خوانند، نه جدول اصلاحیه‌ها را — بدون این نوشتن مستقیم، نتیجه‌ی قیمت‌گذاری در
+// هیچ‌کجای برنامه دیده نمی‌شد (دقیقاً همان الگویی که «تایید فاکتور خرید» برای ردیف‌های رسید استفاده
+// می‌کند). Rollback به‌صورت متقارن مقدار همان اصلاحیه‌ها را از amount/unitCost کم می‌کند.
 
 const IN_GIVEN_TYPES = new Set(["INITIAL_INVENTORY", "WAREHOUSE_RECEIPT", "PRODUCTION_RECEIPT"]);
 const IN_COMPUTED_TYPES = new Set(["SALES_RETURN", "CENTER_CONSUMPTION_RETURN", "PROJECT_CONSUMPTION_RETURN", "PRODUCTION_CONSUMPTION_RETURN"]);
@@ -202,19 +205,10 @@ export async function priceItem(goodsItemId: number, reportingPeriodId: number, 
   }
   if (!converged) throw new Error("محاسبه قیمت‌گذاری همگرا نشد؛ لطفاً اسناد کالا را بررسی کنید");
 
-  // مقدار «مؤثر فعلی» هر ردیف قبل از این اجرا (amount اولیه + مجموع اصلاحیه‌های قبلی)
-  const lineIds = lines.map((l) => l.id);
-  const priorAdjustments = await prisma.goodsPricingAdjustment.groupBy({
-    by: ["lineId"],
-    where: { lineId: { in: lineIds.length ? lineIds : [-1] } },
-    _sum: { amount: true },
-  });
-  const priorAdjMap = new Map(priorAdjustments.map((a) => [a.lineId, Number(a._sum.amount || 0)]));
-  function currentEffective(line: Line): number {
-    return Number(line.amount) + (priorAdjMap.get(line.id) || 0);
-  }
-
-  const deltas: { lineId: number; amount: number }[] = [];
+  // line.amount در این لحظه همان «مبلغ مؤثر فعلی» است (چون هر اجرای قبلی قیمت‌گذاری مستقیماً همین
+  // ستون را به‌روزرسانی کرده)؛ برای هر ردیفی که مقدار تازه‌محاسبه‌شده با آن فرق دارد، هم یک اصلاحیه
+  // (برای تاریخچه) و هم مقدار نهایی ستون amount/unitCost ثبت می‌شود
+  const deltas: { lineId: number; amount: number; newAmount: number; quantity: number }[] = [];
   for (const line of lines) {
     let newTotal: number | undefined;
     if (computed.has(line.id)) {
@@ -223,17 +217,19 @@ export async function priceItem(goodsItemId: number, reportingPeriodId: number, 
       newTotal = Number(line.amount) - (reduction.get(line.id) || 0);
     }
     if (newTotal === undefined) continue;
-    const delta = round(newTotal - currentEffective(line), decimalPlaces);
-    if (Math.abs(delta) > epsilon) deltas.push({ lineId: line.id, amount: delta });
+    const delta = round(newTotal - Number(line.amount), decimalPlaces);
+    if (Math.abs(delta) > epsilon) deltas.push({ lineId: line.id, amount: delta, newAmount: newTotal, quantity: Number(line.quantity) });
   }
 
   const status = await prisma.$transaction(async (tx) => {
     const created = await tx.goodsPricingStatus.create({
       data: { goodsItemId, reportingPeriodId, createdById: userId },
     });
-    if (deltas.length) {
-      await tx.goodsPricingAdjustment.createMany({
-        data: deltas.map((d) => ({ statusId: created.id, lineId: d.lineId, amount: d.amount })),
+    for (const d of deltas) {
+      await tx.goodsPricingAdjustment.create({ data: { statusId: created.id, lineId: d.lineId, amount: d.amount } });
+      await tx.inventoryDocumentLine.update({
+        where: { id: d.lineId },
+        data: { amount: d.newAmount, unitCost: d.quantity > 0 ? d.newAmount / d.quantity : 0 },
       });
     }
     return created;
@@ -258,5 +254,23 @@ export async function revertItem(goodsItemId: number, reportingPeriodId: number)
     }
   }
 
-  await prisma.goodsPricingStatus.delete({ where: { id: status.id } });
+  const decimalPlaces = await getBaseCurrencyDecimalPlaces();
+  const adjustments = await prisma.goodsPricingAdjustment.findMany({
+    where: { statusId: status.id },
+    include: { line: { select: { id: true, quantity: true, amount: true } } },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    for (const adj of adjustments) {
+      const newAmount = round(Number(adj.line.amount) - Number(adj.amount), decimalPlaces);
+      const qty = Number(adj.line.quantity);
+      await tx.inventoryDocumentLine.update({
+        where: { id: adj.lineId },
+        data: { amount: newAmount, unitCost: qty > 0 ? newAmount / qty : 0 },
+      });
+    }
+    // حذف status، به‌خاطر onDelete: Cascade روی GoodsPricingAdjustment.statusId، خودش اصلاحیه‌های
+    // بالا را هم حذف می‌کند
+    await tx.goodsPricingStatus.delete({ where: { id: status.id } });
+  });
 }
