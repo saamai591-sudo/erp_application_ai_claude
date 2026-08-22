@@ -37,6 +37,7 @@ export function GoodsPricingItemPicker({
 }) {
   const [search, setSearch] = useState("");
   const [accountingGroupId, setAccountingGroupId] = useState("");
+  const [onlyWithFlow, setOnlyWithFlow] = useState(false);
   const [groups, setGroups] = useState<AccountingGroupOption[]>([]);
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<PricingCandidate[]>([]);
@@ -49,6 +50,7 @@ export function GoodsPricingItemPicker({
     setSelectedMap(new Map(initialSelected.map((r) => [r.id, r])));
     setSearch("");
     setAccountingGroupId("");
+    setOnlyWithFlow(false);
     setPage(1);
     api.get("/accounting-groups").then(setGroups);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -65,6 +67,7 @@ export function GoodsPricingItemPicker({
     });
     if (search.trim()) params.set("search", search.trim());
     if (accountingGroupId) params.set("accountingGroupId", accountingGroupId);
+    if (onlyWithFlow) params.set("onlyWithFlow", "1");
     api
       .get(`/goods-pricing/candidates?${params.toString()}`)
       .then((d: { items: PricingCandidate[]; total: number }) => {
@@ -72,7 +75,7 @@ export function GoodsPricingItemPicker({
         setTotal(d.total);
       })
       .finally(() => setLoading(false));
-  }, [open, reportingPeriodId, operation, search, accountingGroupId, page]);
+  }, [open, reportingPeriodId, operation, search, accountingGroupId, onlyWithFlow, page]);
 
   if (!open) return null;
 
@@ -111,6 +114,17 @@ export function GoodsPricingItemPicker({
             <option key={g.id} value={g.id}>{g.title}</option>
           ))}
         </select>
+        <label style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
+          <input
+            type="checkbox"
+            checked={onlyWithFlow}
+            onChange={(e) => {
+              setPage(1);
+              setOnlyWithFlow(e.target.checked);
+            }}
+          />
+          فقط کالاهای دارای گردش از ابتدای سال مالی
+        </label>
       </div>
       <div className="picker-table-wrap">
         <table className="picker-table">

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
-import { priceItem, revertItem, getLastPricedPeriod } from "../services/goodsPricingService";
+import { priceItem, revertItem, getLastPricedPeriod, PRICING_DOC_TYPES } from "../services/goodsPricingService";
 
 const router = Router();
 const MAX_PAGE_SIZE = 100;
@@ -9,11 +9,20 @@ const MAX_PAGE_SIZE = 100;
 // جست‌وجوی سمت سرور کالا برای Dialog انتخاب کالا — طبق مستند: کل کالاهای سیستم یکجا به کلاینت
 // ارسال نمی‌شود، حداکثر ۱۰۰ ردیف در هر صفحه
 router.get("/candidates", async (req, res) => {
-  const { reportingPeriodId: rpRaw, operation, search, accountingGroupId: agRaw, page: pageRaw, pageSize: pageSizeRaw } = req.query as {
+  const {
+    reportingPeriodId: rpRaw,
+    operation,
+    search,
+    accountingGroupId: agRaw,
+    onlyWithFlow: onlyWithFlowRaw,
+    page: pageRaw,
+    pageSize: pageSizeRaw,
+  } = req.query as {
     reportingPeriodId?: string;
     operation?: string;
     search?: string;
     accountingGroupId?: string;
+    onlyWithFlow?: string;
     page?: string;
     pageSize?: string;
   };
@@ -38,10 +47,32 @@ router.get("/candidates", async (req, res) => {
   });
   const pricedIds = pricedStatuses.map((s) => s.goodsItemId);
 
+  // فیلتر «فقط کالاهای دارای گردش»: کالاهایی که از ابتدای سال مالی دوره گزارشگری انتخاب‌شده تا پایان
+  // خودِ آن دوره، حداقل یک سند قطعی‌شده‌ی مؤثر در قیمت‌گذاری داشته‌اند
+  let flowIds: number[] | null = null;
+  if (onlyWithFlowRaw === "1" || onlyWithFlowRaw === "true") {
+    const period = await prisma.reportingPeriod.findUnique({ where: { id: reportingPeriodId }, include: { fiscalPeriod: true } });
+    if (!period) return res.status(400).json({ error: "دوره گزارشگری یافت نشد" });
+    const flowLines = await prisma.inventoryDocumentLine.findMany({
+      where: {
+        document: {
+          status: "FINALIZED",
+          documentType: { in: PRICING_DOC_TYPES as any },
+          date: { gte: period.fiscalPeriod.fromDate, lte: period.toDate },
+        },
+      },
+      select: { goodsItemId: true },
+      distinct: ["goodsItemId"],
+    });
+    flowIds = flowLines.map((l) => l.goodsItemId);
+  }
+
   if (operation === "PRICE") {
-    where.id = { notIn: pricedIds.length ? pricedIds : [-1] };
+    const excluded = pricedIds.length ? pricedIds : [-1];
+    where.id = flowIds ? { notIn: excluded, in: flowIds.length ? flowIds : [-1] } : { notIn: excluded };
   } else {
-    where.id = { in: pricedIds.length ? pricedIds : [-1] };
+    const eligible = flowIds ? pricedIds.filter((id) => flowIds!.includes(id)) : pricedIds;
+    where.id = { in: eligible.length ? eligible : [-1] };
   }
 
   const [total, items] = await Promise.all([
