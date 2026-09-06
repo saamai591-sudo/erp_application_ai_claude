@@ -79,6 +79,7 @@ interface HeaderBody {
   partyId: number;
   purchaseTypeId: number;
   currencyId: number;
+  fxRate?: number;
   description?: string;
   lines: LineInput[];
   otherCostLines?: OtherCostInput[];
@@ -97,7 +98,25 @@ function partyTitle(p: any): string | null {
   return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
 }
 
-async function validateLines(lines: LineInput[], basis: string, partyDetailCode: string, excludeInvoiceId?: number) {
+/** نرخ تبدیل ارز فاکتور را از بدنه‌ی درخواست resolve می‌کند: اگر ارز فاکتور همان ارز مبنا باشد همیشه
+ * ۱ برمی‌گردد (فارغ از هر مقداری که کلاینت فرستاده)؛ در غیر این صورت، نرخ باید توسط کاربر وارد شده
+ * باشد (اجباری، بزرگ‌تر از صفر) — طبق تصمیم صریح کاربر، این نرخ مستقیماً از کاربر گرفته می‌شود، نه از
+ * جدول نرخ ارز (ExchangeRate). */
+function resolveInvoiceFxRate(currencyId: number, baseCurrencyId: number, bodyFxRate: number | undefined): number {
+  if (currencyId === baseCurrencyId) return 1;
+  const fxRate = Number(bodyFxRate);
+  if (!(fxRate > 0)) throw new Error("نرخ ارز الزامی است");
+  return fxRate;
+}
+
+async function validateLines(
+  lines: LineInput[],
+  basis: string,
+  partyDetailCode: string,
+  currency: { baseVolume: number },
+  fxRate: number,
+  excludeInvoiceId?: number
+) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("فاکتور خرید باید حداقل یک ردیف کالا داشته باشد");
 
   const cleaned: {
@@ -108,6 +127,8 @@ async function validateLines(lines: LineInput[], basis: string, partyDetailCode:
     unitPrice: number;
     amount: number;
     discount: number;
+    baseAmount: number;
+    baseDiscount: number;
     vatAmount: number;
     description: string | null;
   }[] = [];
@@ -155,17 +176,36 @@ async function validateLines(lines: LineInput[], basis: string, partyDetailCode:
     const discount = Number(l.discount) || 0;
     if (!(discount >= 0)) throw new Error(`تخفیف ردیف ${idx + 1} نامعتبر است`);
     if (discount > amount) throw new Error(`تخفیف ردیف ${idx + 1} نمی‌تواند از مبلغ ردیف بیشتر باشد`);
-    // طبق تصمیم صریح کاربر: مالیات بر ارزش افزوده = (مبلغ − تخفیف) × نرخ مالیات — نرخ کالای «خاص» در
-    // اولویت است، وگرنه نرخ پیش‌فرض سیستم (utils/vatCalculation.ts، تنها محل این فرمول در کل بک‌اند).
-    // این مقدار محاسبه‌شده فقط پیش‌فرض/پیشنهاد اولیه است — طبق تصمیم صریح کاربر، کاربر باید بتواند بعد
-    // از محاسبه، خودش مقدار مالیات را ویرایش کند؛ پس اگر کلاینت مقدار صریحی فرستاده باشد (که همیشه
-    // می‌فرستد، چون این فیلد در فرم قابل‌ویرایش است)، همان مقدار معتبر ذخیره می‌شود، نه مقدار محاسبه‌شده.
+
+    // مبلغ/تخفیف به ارز مبنا — طبق تصمیم صریح کاربر فقط برای بایگانی و محاسبات (نه نمایش در UI) نگه
+    // داشته می‌شوند؛ همان فرمول baseDebit/baseCredit سرویس مشترک صدور سند (amount × fxRate / baseVolume).
+    const baseAmount = (amount * fxRate) / currency.baseVolume;
+    const baseDiscount = (discount * fxRate) / currency.baseVolume;
+
+    // طبق تصمیم صریح کاربر: مالیات بر ارزش افزوده = (مبلغ − تخفیف) × نرخ مالیات، همیشه به ارز مبنا
+    // محاسبه و نگهداری می‌شود (نه به ارز فاکتور) — نرخ کالای «خاص» در اولویت است، وگرنه نرخ پیش‌فرض
+    // سیستم (utils/vatCalculation.ts، تنها محل این فرمول در کل بک‌اند). این مقدار محاسبه‌شده فقط
+    // پیش‌فرض/پیشنهاد اولیه است — طبق تصمیم صریح کاربر، کاربر باید بتواند بعد از محاسبه، خودش مقدار
+    // مالیات را ویرایش کند؛ پس اگر کلاینت مقدار صریحی فرستاده باشد (که همیشه می‌فرستد، چون این فیلد در
+    // فرم قابل‌ویرایش است)، همان مقدار معتبر ذخیره می‌شود، نه مقدار محاسبه‌شده.
     const vatRatePercent = resolveVatRatePercent(item);
-    const suggestedVatAmount = computeLineVat(amount, discount, vatRatePercent);
+    const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent);
     const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
     if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
 
-    cleaned.push({ sourceInventoryLineId, goodsItemId, unitId, quantity, unitPrice, amount, discount, vatAmount, description: l.description || null });
+    cleaned.push({
+      sourceInventoryLineId,
+      goodsItemId,
+      unitId,
+      quantity,
+      unitPrice,
+      amount,
+      discount,
+      baseAmount,
+      baseDiscount,
+      vatAmount,
+      description: l.description || null,
+    });
   }
   return cleaned;
 }
@@ -276,6 +316,7 @@ router.get("/purchase-invoices/:id", can(`${FORM}.view`), async (req, res) => {
     purchaseTypeTitle: d.purchaseType.title,
     currencyId: d.currencyId,
     currencyTitle: d.currency.title,
+    fxRate: Number(d.fxRate),
     description: d.description,
     status: d.status,
     approverName: d.approver ? `${d.approver.firstName} ${d.approver.lastName}`.trim() : null,
@@ -327,8 +368,11 @@ router.post("/purchase-invoices", can(`${FORM}.create`), async (req, res) => {
     if (!purchaseType) throw new Error("نوع خرید یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
+    const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
+    if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+    const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
-    const cleanedLines = await validateLines(body.lines, body.basis, party.detailCode);
+    const cleanedLines = await validateLines(body.lines, body.basis, party.detailCode, currency, fxRate);
     const cleanedOtherCostLines = await validateOtherCostLines(body.otherCostLines || []);
 
     const lastNumber = await prisma.purchaseInvoice.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
@@ -344,6 +388,7 @@ router.post("/purchase-invoices", can(`${FORM}.create`), async (req, res) => {
         partyId: body.partyId,
         purchaseTypeId: body.purchaseTypeId,
         currencyId: body.currencyId,
+        fxRate,
         description: body.description || null,
         status: "DRAFT",
         lines: { create: cleanedLines.map((l, idx) => ({ ...l, rowOrder: idx })) },
@@ -382,8 +427,11 @@ router.put("/purchase-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
     if (!purchaseType) throw new Error("نوع خرید یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
+    const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
+    if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+    const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
-    const cleanedLines = await validateLines(body.lines, body.basis, party.detailCode, id);
+    const cleanedLines = await validateLines(body.lines, body.basis, party.detailCode, currency, fxRate, id);
     const cleanedOtherCostLines = await validateOtherCostLines(body.otherCostLines || []);
 
     await prisma.$transaction([
@@ -399,6 +447,7 @@ router.put("/purchase-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
           partyId: body.partyId,
           purchaseTypeId: body.purchaseTypeId,
           currencyId: body.currencyId,
+          fxRate,
           description: body.description || null,
           lines: { create: cleanedLines.map((l, idx) => ({ ...l, rowOrder: idx })) },
           otherCostLines: { create: cleanedOtherCostLines.map((l, idx) => ({ ...l, rowOrder: idx })) },
@@ -624,16 +673,9 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
   try {
     const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
     if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
-
-    let fxRate = 1;
-    if (invoice.currencyId !== baseCurrency.id) {
-      const rate = await prisma.exchangeRate.findFirst({
-        where: { currencyId: invoice.currencyId, date: { lte: invoice.date } },
-        orderBy: { date: "desc" },
-      });
-      if (!rate) throw new Error("نرخ ارز فاکتور برای تاریخ سند تعریف نشده است");
-      fxRate = Number(rate.rate);
-    }
+    // نرخ ارز از هدر فاکتور خوانده می‌شود (کاربر در لحظه‌ی ثبت فاکتور وارد کرده)، نه از جدول نرخ ارز —
+    // همان نرخی که baseAmount/baseDiscount ردیف‌ها هم با آن محاسبه شده‌اند (نگاه کنید به validateLines).
+    const fxRate = Number(invoice.fxRate);
 
     const partyDetailCode = invoice.party.detailCode;
     const partyDetailTypeId = await resolveDetailTypeId(partyDetailCode);
@@ -653,20 +695,18 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
       return settings.find((s) => s.accountingGroupId === accountingGroupId && s.accountType === accountType && match(s));
     }
 
-    // مبلغ خام ردیف (به ارز فاکتور) را به ارز مبنا تبدیل می‌کند — دقیقاً همان فرمول داخلی
-    // issueJournalEntry (baseDebit = debit*fxRate/currency.baseVolume)، برای معین‌های غیرارزی که همیشه
-    // باید مقدار «به ارز مبنا»یشان صحیح باشد.
-    const invoiceCurrencyBaseVolume = invoice.currency.baseVolume;
-    const toBaseAmount = (amount: number): number => (amount * fxRate) / invoiceCurrencyBaseVolume;
     const vendorInvoiceNumber = invoice.vendorInvoiceNumber || String(invoice.number);
     const description = `بابت فاکتور خرید ${vendorInvoiceNumber} ${formatJalaliDateForMessage(invoice.date)} ${partyTitle(invoice.party) || ""}`.trim();
 
     const errors: string[] = [];
     const debitLines: IssueLineInput[] = [];
-    const creditByAccount = new Map<number, { amount: number; account: (typeof settings)[number]["account"] }>();
+    const creditByAccount = new Map<number, { amount: number; baseAmount: number; account: (typeof settings)[number]["account"] }>();
+    const vatDebitByAccount = new Map<number, { amount: number; account: (typeof settings)[number]["account"] }>();
 
     for (const line of invoice.lines) {
       const amount = Number(line.amount);
+      const baseAmount = Number(line.baseAmount);
+      const vatAmount = Number(line.vatAmount);
       const goodsItem = line.goodsItem;
 
       let debitSetting: (typeof settings)[number] | undefined;
@@ -695,27 +735,59 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
         continue;
       }
 
+      // ارزش‌افزوده (طبق تصمیم صریح کاربر): فقط اگر ردیف ارزش‌افزوده‌ی بزرگ‌تر از صفر داشته باشد، یک
+      // معین بدهکار اضافه («ارزش‌افزوده خرید» بر مبنای گروه حسابداری کالای ردیف + نوع خرید هدر) به این
+      // ردیف تعلق می‌گیرد؛ بستانکارِ آن همان معین «پرداختنی خرید» بالاست (تجمیع در همان سطل) — کل بدهی
+      // به تامین‌کننده = مبلغ کالا + ارزش‌افزوده.
+      let vatDebitSetting: (typeof settings)[number] | undefined;
+      if (vatAmount > 0) {
+        vatDebitSetting = findSetting(goodsItem.accountingGroupId, "PURCHASE_VAT", (s) => s.purchaseTypeId === invoice.purchaseTypeId);
+        if (!vatDebitSetting) {
+          errors.push(`برای کالای «${goodsItem.title}» و نوع خرید «${invoice.purchaseType.title}»، حساب «ارزش‌افزوده خرید» در حسابداری کالا و خدمت تعریف نشده است`);
+          continue;
+        }
+      }
+
       const debitDetails = resolveAccountDetailFields(debitSetting.account, partyDetailTypeId, partyDetailCode);
       const debitIsCurrency = debitSetting.account.isCurrency;
       debitLines.push({
         accountId: debitSetting.accountId,
         ...debitDetails,
         currencyId: debitIsCurrency ? invoice.currencyId : baseCurrency.id,
-        debit: debitIsCurrency ? amount : toBaseAmount(amount),
+        debit: debitIsCurrency ? amount : baseAmount,
         credit: 0,
         fxRate: debitIsCurrency ? fxRate : 1,
         description,
       });
 
-      const existing = creditByAccount.get(creditSetting.accountId);
-      if (existing) existing.amount += amount;
-      else creditByAccount.set(creditSetting.accountId, { amount, account: creditSetting.account });
+      // بستانکار «پرداختنی خرید»: مبلغ کالا + معادلِ به‌ارزِ‌فاکتورِ ارزش‌افزوده‌ی همین ردیف (اگر داشت) —
+      // ارزش‌افزوده همیشه به ارز مبنا محاسبه شده (بند ۵)، پس برای تجمیع در همین سطل (که به ارز فاکتور
+      // نگه داشته می‌شود) باید معکوسِ فرمول baseAmount اعمال شود: مبنا × baseVolume ÷ fxRate.
+      let creditAmount = amount;
+      let creditBaseAmount = baseAmount;
+      if (vatDebitSetting) {
+        creditAmount += (vatAmount * invoice.currency.baseVolume) / fxRate;
+        creditBaseAmount += vatAmount;
+      }
+      const existingCredit = creditByAccount.get(creditSetting.accountId);
+      if (existingCredit) {
+        existingCredit.amount += creditAmount;
+        existingCredit.baseAmount += creditBaseAmount;
+      } else {
+        creditByAccount.set(creditSetting.accountId, { amount: creditAmount, baseAmount: creditBaseAmount, account: creditSetting.account });
+      }
+
+      if (vatDebitSetting) {
+        const existingVatDebit = vatDebitByAccount.get(vatDebitSetting.accountId);
+        if (existingVatDebit) existingVatDebit.amount += vatAmount;
+        else vatDebitByAccount.set(vatDebitSetting.accountId, { amount: vatAmount, account: vatDebitSetting.account });
+      }
     }
 
     if (errors.length > 0) return res.status(400).json({ error: errors.join("\n") });
 
     const creditLines: IssueLineInput[] = [];
-    for (const { amount, account } of creditByAccount.values()) {
+    for (const { amount, baseAmount, account } of creditByAccount.values()) {
       const creditDetails = resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode);
       const creditIsCurrency = account.isCurrency;
       creditLines.push({
@@ -723,8 +795,25 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
         ...creditDetails,
         currencyId: creditIsCurrency ? invoice.currencyId : baseCurrency.id,
         debit: 0,
-        credit: creditIsCurrency ? amount : toBaseAmount(amount),
+        credit: creditIsCurrency ? amount : baseAmount,
         fxRate: creditIsCurrency ? fxRate : 1,
+        description,
+      });
+    }
+
+    // بدهکار «ارزش‌افزوده خرید»: طبق بند ۵ (ارزش‌افزوده همیشه به ارز مبنا محاسبه/نگهداری می‌شود)، این
+    // معین همیشه با مقدار پایه ثبت می‌شود، صرف‌نظر از ارزی‌بودن خودِ معین — بر خلاف بقیه‌ی معین‌های این
+    // سند که بین ارز فاکتور/ارز مبنا سوییچ می‌کنند.
+    const vatDebitLines: IssueLineInput[] = [];
+    for (const { amount, account } of vatDebitByAccount.values()) {
+      const vatDetails = resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode);
+      vatDebitLines.push({
+        accountId: account.id,
+        ...vatDetails,
+        currencyId: baseCurrency.id,
+        debit: amount,
+        credit: 0,
+        fxRate: 1,
         description,
       });
     }
@@ -738,7 +827,7 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
       description,
       issuingSystem: "PURCHASE",
       isManual: false,
-      lines: [...debitLines, ...creditLines],
+      lines: [...debitLines, ...vatDebitLines, ...creditLines],
       sources: [{ label: `فاکتور خرید شماره ${invoice.number}`, path: `/purchase-invoices/${invoice.id}/edit` }],
     });
 

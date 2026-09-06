@@ -11,13 +11,19 @@ const FORM = findFormPrefix("parties");
 const router = Router();
 
 router.get("/", async (req, res) => {
-  const { category, customersOnly } = req.query as { category?: "INDIVIDUAL" | "LEGAL"; customersOnly?: string };
+  const { category, customersOnly, suppliersOnly } = req.query as {
+    category?: "INDIVIDUAL" | "LEGAL";
+    customersOnly?: string;
+    suppliersOnly?: string;
+  };
   const parties = await prisma.party.findMany({
     where: {
       ...(category ? { category } : {}),
       // برای پیکرهایی مثل «طرف مقابل» حواله فروش که فقط طرف‌حساب‌های ثبت‌شده به‌عنوان «مشتری» باید
       // قابل انتخاب باشند — دقیقاً هم‌الگوی رابطه‌ی یک‌به‌یک Party↔Customer
       ...(customersOnly === "true" ? { customer: { isNot: null } } : {}),
+      // همان الگو برای «طرف مقابل» فاکتور خرید — فقط طرف‌حساب‌های ثبت‌شده به‌عنوان «تامین‌کننده»
+      ...(suppliersOnly === "true" ? { supplier: { isNot: null } } : {}),
     },
     include: { addresses: true, phones: true, bankAccounts: true },
     orderBy: { detailCode: "asc" },

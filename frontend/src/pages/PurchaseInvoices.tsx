@@ -38,7 +38,7 @@ interface PartyOption {
   lastName: string | null;
   name: string | null;
 }
-interface CurrencyOption { id: number; code: string; title: string }
+interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; baseVolume: number }
 interface GoodsItemRow {
   id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean;
   isSpecial: boolean; taxRate: number | string | null;
@@ -63,6 +63,7 @@ interface DetailLine {
 interface OtherCostDetail { id: number; serviceId: number; serviceTitle: string; amount: number; allocationBasis: AllocationBasis | null; description: string | null }
 interface Detail extends ListRow {
   currencyId: number;
+  fxRate: number;
   description: string | null;
   approverName: string | null;
   approvedAt: string | null;
@@ -184,7 +185,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableWarehouseReceiptLine[]>([]);
-  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", vendorInvoiceNumber: "", basis: "NO_BASIS" as Basis, partyId: "", purchaseTypeId: "", currencyId: "", description: "" });
+  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", vendorInvoiceNumber: "", basis: "NO_BASIS" as Basis, partyId: "", purchaseTypeId: "", currencyId: "", fxRate: "", description: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
   const [costRows, setCostRows] = usePersistedState<CostRowState[]>(`${cacheKey}:costs`, []);
   const [meta, setMeta] = usePersistedState<{
@@ -203,7 +204,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   useEffect(() => {
     async function init() {
       const [p, pt, c, g, sv, fp] = await Promise.all([
-        api.get("/parties"),
+        api.get("/parties?suppliersOnly=true"),
         api.get("/purchase-types"),
         api.get("/currencies"),
         api.get("/goods-items?kind=GOODS&docDirection=INBOUND&docType=خرید"),
@@ -238,6 +239,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
           partyId: String(d.partyId),
           purchaseTypeId: String(d.purchaseTypeId),
           currencyId: String(d.currencyId),
+          fxRate: String(d.fxRate),
           description: d.description || "",
         });
         setRows(
@@ -265,7 +267,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
           }))
         );
       } else {
-        setHeader({ date: defaultDocumentDate(fp), vendorInvoiceNumber: "", basis: "NO_BASIS", partyId: "", purchaseTypeId: "", currencyId: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), vendorInvoiceNumber: "", basis: "NO_BASIS", partyId: "", purchaseTypeId: "", currencyId: "", fxRate: "", description: "" });
         setRows([emptyRow()]);
         setCostRows([]);
         setMeta(null);
@@ -296,10 +298,22 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   // ناسازگاری ایجاد می‌کند.
   const headerDisabled = hasAnyLine;
   const selectedParty = parties.find((p) => String(p.id) === header.partyId);
+  const selectedCurrency = currencies.find((c) => String(c.id) === header.currencyId);
+  // ارز فاکتور غیر از ارز مبنا باشد → نرخ ارز الزامی و به کاربر نمایش داده می‌شود؛ اگر ارز مبنا باشد،
+  // فیلد نرخ اصلاً نمایش داده نمی‌شود ولی همیشه ۱ به سرور فرستاده می‌شود (طبق تصمیم صریح کاربر).
+  const needsFxRate = !!selectedCurrency && !selectedCurrency.isBase;
+  // مبلغ/تخفیف ردیف را به ارز مبنا تبدیل می‌کند — دقیقاً همان فرمول سرور (amount × fxRate ÷ baseVolume)
+  // — فقط برای پیش‌نمایش زنده‌ی ارزش‌افزوده در فرم؛ مقدار به‌ارز‌مبنای واقعی صرفاً در بک‌اند محاسبه و
+  // ذخیره می‌شود (طبق تصمیم صریح کاربر، این مبالغ در UI نگهداری نمی‌شوند).
+  function toBaseAmount(amount: number): number {
+    if (!selectedCurrency || selectedCurrency.isBase) return amount;
+    const fxRate = Number(header.fxRate) || 0;
+    return (amount * fxRate) / selectedCurrency.baseVolume;
+  }
 
-  // طبق تصمیم صریح کاربر: تا وقتی فیلدهای الزامی سرصفحه (تاریخ/طرف مقابل/ارز) کامل نشده، ورود اطلاعات
-  // ردیف مجاز نیست — اولین تلاش برای باز کردن انتخابگر کالا/ردیف مبنا باید با پیام خطا رد شود، نه
-  // این‌که فقط بی‌صدا غیرفعال باشد.
+  // طبق تصمیم صریح کاربر: تا وقتی فیلدهای الزامی سرصفحه (تاریخ/طرف مقابل/ارز/نرخ ارز) کامل نشده، ورود
+  // اطلاعات ردیف مجاز نیست — اولین تلاش برای باز کردن انتخابگر کالا/ردیف مبنا باید با پیام خطا رد شود،
+  // نه این‌که فقط بی‌صدا غیرفعال باشد.
   function guardRowEntry(): boolean {
     if (!header.date) {
       setError("تاریخ الزامی است");
@@ -317,6 +331,10 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       setError("ارز الزامی است");
       return false;
     }
+    if (needsFxRate && !(Number(header.fxRate) > 0)) {
+      setError("نرخ ارز الزامی است");
+      return false;
+    }
     setError(null);
     return true;
   }
@@ -324,12 +342,13 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   function updateRow(idx: number, patch: Partial<RowState>) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
-  // مقدار پیشنهادی مالیات بر ارزش افزوده — طبق تصمیم صریح کاربر، این فقط پیش‌فرض اولیه است؛ کاربر بعد
-  // از محاسبه می‌تواند خودش مقدار مالیات را مستقیماً ویرایش کند (دقیقاً هم‌الگوی مبلغ که با تغییر فی/
-  // مقدار دوباره محاسبه می‌شود، ولی خودش هم مستقیماً قابل‌ویرایش است).
+  // مقدار پیشنهادی مالیات بر ارزش افزوده — طبق تصمیم صریح کاربر، همیشه به ارز مبنا محاسبه می‌شود (نه
+  // ارز فاکتور)؛ این فقط پیش‌فرض اولیه است؛ کاربر بعد از محاسبه می‌تواند خودش مقدار مالیات را مستقیماً
+  // ویرایش کند (دقیقاً هم‌الگوی مبلغ که با تغییر فی/مقدار دوباره محاسبه می‌شود، ولی خودش هم مستقیماً
+  // قابل‌ویرایش است).
   function computeSuggestedVat(amount: number, discount: number, goodsItemId: string): string {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
-    return String(computeLineVat(amount, discount, resolveVatRatePercent(item)));
+    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item)));
   }
   function onUnitPriceChange(idx: number, unitPrice: string) {
     const row = rows[idx];
@@ -418,6 +437,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       partyId: Number(header.partyId),
       purchaseTypeId: Number(header.purchaseTypeId),
       currencyId: Number(header.currencyId),
+      fxRate: needsFxRate ? Number(header.fxRate) : 1,
       description: header.description,
       lines: nonEmptyRows.map((r) => ({
         sourceInventoryLineId: r.sourceInventoryLineId ? Number(r.sourceInventoryLineId) : null,
@@ -440,6 +460,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
     if (!header.date || !header.partyId || !header.purchaseTypeId || !header.currencyId) return setError("تاریخ، طرف مقابل، نوع خرید و ارز الزامی است");
+    if (needsFxRate && !(Number(header.fxRate) > 0)) return setError("نرخ ارز الزامی است");
     const dateErr = validateDocumentDate(header.date, fiscalPeriod);
     if (dateErr) return setError(dateErr);
     const body = buildBody();
@@ -626,11 +647,17 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
             </div>
             <div className="form-field">
               <label>ارز<RequiredMark /></label>
-              <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value })} disabled={headerDisabled}>
+              <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value, fxRate: "" })} disabled={headerDisabled}>
                 <option value="">انتخاب کنید</option>
                 {currencies.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
               </select>
             </div>
+            {needsFxRate && (
+              <div className="form-field">
+                <label>نرخ ارز<RequiredMark /></label>
+                <AmountInput value={header.fxRate} onChange={(v) => setHeader({ ...header, fxRate: v })} allowDecimal disabled={headerDisabled} />
+              </div>
+            )}
             <div className="form-field full">
               <label>شرح</label>
               <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={headerDisabled} />
