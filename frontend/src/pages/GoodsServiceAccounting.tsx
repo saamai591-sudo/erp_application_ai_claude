@@ -10,6 +10,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 import { AccountingGroup } from "./AccountingGroups";
 import { WarehouseGroup } from "./WarehouseGroups";
@@ -32,6 +33,49 @@ const SALES_TYPES = new Set(["SALES_VAT", "SALES_RECEIVABLE", "SALES_RETURN", "S
 const INVENTORY_TYPES = new Set(["INVENTORY"]);
 const WAREHOUSE_DOC_TYPES = new Set(["WAREHOUSE_RECEIPT_CREDIT", "WAREHOUSE_ISSUE_DEBIT"]);
 const PURCHASE_TYPES = new Set(["PURCHASE_PAYABLE", "PURCHASE_CONTROL", "PURCHASE_VAT"]);
+
+// دقیقاً هم‌راستا با warehouseMovementService.OUTBOUND_DOC_TYPES (بک‌اند): «بستانکار رسید انبار» یعنی
+// اسناد واردکننده (رسید)، «بدهکار حواله انبار» یعنی اسناد صادرکننده (حواله)
+const WAREHOUSE_DOC_TYPE_FA: Record<string, string> = {
+  INITIAL_INVENTORY: "موجودی اول دوره",
+  WAREHOUSE_RECEIPT: "رسید انبار خرید",
+  WAREHOUSE_TRANSFER_IN: "رسید انتقال",
+  WAREHOUSE_ADJUSTMENT: "اضافات انبارگردانی",
+  SALES_RETURN: "برگشت از فروش",
+  PRODUCTION_RECEIPT: "رسید تولید",
+  CENTER_CONSUMPTION_RETURN: "برگشت مصرف مرکز هزینه",
+  PROJECT_CONSUMPTION_RETURN: "برگشت مصرف پروژه",
+  PRODUCTION_CONSUMPTION_RETURN: "برگشت مصرف تولید",
+  SALES_DELIVERY: "حواله فروش",
+  CENTER_CONSUMPTION: "مصرف مرکز هزینه",
+  PROJECT_CONSUMPTION: "مصرف پروژه",
+  PRODUCTION_CONSUMPTION: "مصرف تولید",
+  SUPPLIER_RETURN: "برگشت به تامین‌کننده",
+  FIXED_ASSET_ISSUE: "حواله دارایی ثابت",
+  WAREHOUSE_TRANSFER_OUT: "حواله انتقالی",
+  INVENTORY_COUNTING_SHORTAGE: "کسری انبارگردانی",
+};
+const WAREHOUSE_RECEIPT_DOC_TYPES = [
+  "INITIAL_INVENTORY",
+  "WAREHOUSE_RECEIPT",
+  "WAREHOUSE_TRANSFER_IN",
+  "WAREHOUSE_ADJUSTMENT",
+  "SALES_RETURN",
+  "PRODUCTION_RECEIPT",
+  "CENTER_CONSUMPTION_RETURN",
+  "PROJECT_CONSUMPTION_RETURN",
+  "PRODUCTION_CONSUMPTION_RETURN",
+];
+const WAREHOUSE_ISSUE_DOC_TYPES = [
+  "SALES_DELIVERY",
+  "CENTER_CONSUMPTION",
+  "PROJECT_CONSUMPTION",
+  "PRODUCTION_CONSUMPTION",
+  "SUPPLIER_RETURN",
+  "FIXED_ASSET_ISSUE",
+  "WAREHOUSE_TRANSFER_OUT",
+  "INVENTORY_COUNTING_SHORTAGE",
+];
 
 interface Level {
   id: number;
@@ -57,7 +101,7 @@ interface GoodsServiceAccountingSetting {
   accountId: number;
   account: AccountRow;
   salesTypeRef: number | null;
-  warehouseDocTypeRef: number | null;
+  warehouseDocType: string | null;
   purchaseTypeRef: number | null;
   hasTransactions: boolean;
 }
@@ -76,7 +120,6 @@ function SettingList() {
   const cacheKey = "/goods-service-accounting";
   const [items, setItems] = usePersistedState<GoodsServiceAccountingSetting[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -103,12 +146,10 @@ function SettingList() {
           <InfoHint text={`تعریف نحوه صدور سند حسابداری اسناد انبار، فروش و تامین کنندگان به تفکیک گروه حسابداری`} title="حسابداری کالا و خدمت" />
           <NewRecordButton path="/goods-service-accounting/new" />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "گروه حسابداری", render: (r) => r.accountingGroup?.title, filterType: "string", filterValue: (r) => r.accountingGroup?.title },
           { header: "نوع حساب", render: (r) => ACCOUNT_TYPE_FA[r.accountType] || r.accountType },
@@ -116,7 +157,7 @@ function SettingList() {
           { header: "معین", render: (r) => (r.account ? `${r.account.code} - ${r.account.title}` : "—") },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/goods-service-accounting/${r.id}/edit`)}
+        edit={{ path: (r) => `/goods-service-accounting/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -129,7 +170,7 @@ const DEFAULT_SETTING_FORM = {
   warehouseGroupId: "",
   accountId: "",
   salesTypeRef: "",
-  warehouseDocTypeRef: "",
+  warehouseDocType: "",
   purchaseTypeRef: "",
 };
 
@@ -173,7 +214,7 @@ function SettingForm({ editId }: { editId?: number }) {
           warehouseGroupId: found.warehouseGroupId ? String(found.warehouseGroupId) : "",
           accountId: String(found.accountId),
           salesTypeRef: found.salesTypeRef != null ? String(found.salesTypeRef) : "",
-          warehouseDocTypeRef: found.warehouseDocTypeRef != null ? String(found.warehouseDocTypeRef) : "",
+          warehouseDocType: found.warehouseDocType || "",
           purchaseTypeRef: found.purchaseTypeRef != null ? String(found.purchaseTypeRef) : "",
         });
       }
@@ -200,6 +241,8 @@ function SettingForm({ editId }: { editId?: number }) {
   const showWarehouseGroup = INVENTORY_TYPES.has(form.accountType);
   const showWarehouseDocType = WAREHOUSE_DOC_TYPES.has(form.accountType);
   const showPurchaseType = PURCHASE_TYPES.has(form.accountType);
+  const warehouseDocTypeOptions =
+    form.accountType === "WAREHOUSE_RECEIPT_CREDIT" ? WAREHOUSE_RECEIPT_DOC_TYPES : WAREHOUSE_ISSUE_DOC_TYPES;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -210,7 +253,7 @@ function SettingForm({ editId }: { editId?: number }) {
       warehouseGroupId: showWarehouseGroup && form.warehouseGroupId ? Number(form.warehouseGroupId) : null,
       accountId: Number(form.accountId),
       salesTypeRef: showSalesType && form.salesTypeRef ? Number(form.salesTypeRef) : null,
-      warehouseDocTypeRef: showWarehouseDocType && form.warehouseDocTypeRef ? Number(form.warehouseDocTypeRef) : null,
+      warehouseDocType: showWarehouseDocType && form.warehouseDocType ? form.warehouseDocType : null,
       purchaseTypeRef: showPurchaseType && form.purchaseTypeRef ? Number(form.purchaseTypeRef) : null,
     };
     try {
@@ -245,7 +288,7 @@ function SettingForm({ editId }: { editId?: number }) {
       description={
         hasTransactions
           ? "این تنظیم برای اسناد صادرشده استفاده شده است و قابل ویرایش نیست"
-          : "فیلدهای «نوع فروش»، «نوع سند انبار» و «نوع خرید» تا پیاده‌سازی ماژولهای فروش/انبار/خرید به‌صورت کد عددی موقت ثبت می‌شوند"
+          : "فیلدهای «نوع فروش» و «نوع خرید» تا پیاده‌سازی ماژولهای فروش/خرید به‌صورت کد عددی موقت ثبت می‌شوند"
       }
       formId="goods-service-accounting-form"
       closePath="/goods-service-accounting"
@@ -258,7 +301,7 @@ function SettingForm({ editId }: { editId?: number }) {
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
-            <label>گروه حسابداری</label>
+            <label>گروه حسابداری<RequiredMark /></label>
             <select
               value={form.accountingGroupId}
               disabled={hasTransactions}
@@ -269,7 +312,7 @@ function SettingForm({ editId }: { editId?: number }) {
             </select>
           </div>
           <div className="form-field">
-            <label>نوع حساب</label>
+            <label>نوع حساب<RequiredMark /></label>
             <select
               value={form.accountType}
               disabled={hasTransactions}
@@ -299,7 +342,7 @@ function SettingForm({ editId }: { editId?: number }) {
             )}
             {showWarehouseGroup && (
               <>
-                <label>گروه انبار</label>
+                <label>گروه انبار<RequiredMark /></label>
                 <select
                   value={form.warehouseGroupId}
                   disabled={hasTransactions}
@@ -312,14 +355,17 @@ function SettingForm({ editId }: { editId?: number }) {
             )}
             {showWarehouseDocType && (
               <>
-                <label>نوع سند انبار <FieldHint label="نوع سند انبار" text="موقت — تا پیاده‌سازی ماژول انبار، این فیلد یک کد عددی ساده است" /></label>
-                <input
-                  type="number"
-                  dir="ltr"
+                <label>نوع سند انبار</label>
+                <select
+                  value={form.warehouseDocType}
                   disabled={hasTransactions}
-                  value={form.warehouseDocTypeRef}
-                  onChange={(e) => setForm({ ...form, warehouseDocTypeRef: e.target.value })}
-                />
+                  onChange={(e) => setForm({ ...form, warehouseDocType: e.target.value })}
+                >
+                  <option value="">انتخاب کنید</option>
+                  {warehouseDocTypeOptions.map((t) => (
+                    <option key={t} value={t}>{WAREHOUSE_DOC_TYPE_FA[t]}</option>
+                  ))}
+                </select>
               </>
             )}
             {showPurchaseType && (
@@ -336,7 +382,7 @@ function SettingForm({ editId }: { editId?: number }) {
             )}
           </div>
           <div className="form-field">
-            <label>معین</label>
+            <label>معین<RequiredMark /></label>
             <RecordPickerField
               title="انتخاب معین"
               displayValue={selectedAccount ? `${toFaDigits(fullCode(selectedAccount))} - ${selectedAccount.title}` : ""}

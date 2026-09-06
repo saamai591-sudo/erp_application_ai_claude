@@ -8,42 +8,73 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Permission {
-  id        Int              @id @default(autoincrement())
-  module    String
-  form      String
-  operation String
-  code      String           @unique
-  roles     RolePermission[]
+// دقیقاً منعکس‌کننده‌ی برگ‌های درخت Registry (backend/src/authz/registry.ts) است — هرگز مستقیم
+// دستی ساخته/ویرایش نمی‌شود؛ فقط syncRegistryToDb() (که در seed و در boot اجرا می‌شود) این جدول را
+// از روی Registry به‌روز نگه می‌دارد. حذف یک Action از Registry باعث حذف ردیف متناظر (و grantهای آن)
+// از این جدول هم می‌شود؛ بنابراین این جدول هرگز «منبع حقیقت» نیست، فقط بازتاب مادی‌شده‌ی آن است.
+model Action {
+  id             Int          @id @default(autoincrement())
+  key            String       @unique
+  kind           ActionKind
+  title          String
+  moduleKey      String
+  moduleTitle    String
+  subModuleKey   String
+  subModuleTitle String
+  formKey        String
+  formTitle      String
+  roles          RoleAction[]
+  users          UserAction[]
+}
+
+enum ActionKind {
+  BASE
+  CUSTOM
 }
 
 model Role {
-  id          Int              @id @default(autoincrement())
-  code        Int              @unique
-  title       String           @unique
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  permissions RolePermission[]
-  users       UserRole[]
+  id        Int          @id @default(autoincrement())
+  code      Int          @unique
+  title     String       @unique
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  actions   RoleAction[]
+  users     UserRole[]
 }
 
-model RolePermission {
-  roleId       Int
-  permissionId Int
-  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+model RoleAction {
+  roleId   Int
+  actionId Int
+  action   Action @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  role     Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
-  @@id([roleId, permissionId])
+  @@id([roleId, actionId])
+}
+
+// اعطای مستقیم یک Action به یک کاربر، مستقل از نقش‌هایش (طبق نیاز صریح: «Roles and/or Users»).
+// مجوزهای نهایی کاربر همیشه اجتماع (union) این جدول و نقش‌های اوست — نگاه کنید به
+// getUserActionKeys در backend/src/authz/guard.ts.
+model UserAction {
+  userId   Int
+  actionId Int
+  action   Action @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, actionId])
 }
 
 model User {
   id                       Int                     @id @default(autoincrement())
   code                     Int                     @unique
-  mobile                   String                  @unique @db.VarChar(10)
+  mobile                   String                  @unique @db.VarChar(11)
   firstName                String
   lastName                 String
   isActive                 Boolean                 @default(true)
   passwordHash             String
+  // مکانیزم متمرکز و توسعه‌پذیر تنظیمات کاربری (فونت/تم/دوره مالی جاری و…): یک شیء JSON آزاد به‌جای
+  // یک ستون جدا به‌ازای هر تنظیم — افزودن یک تنظیم جدید فقط یعنی یک کلید جدید در همین شیء، بدون
+  // نیاز به migration. نگاه کنید به routes/userPreferences.ts و frontend/src/lib/preferences.ts.
+  preferences              Json                    @default("{}")
   createdAt                DateTime                @default(now())
   updatedAt                DateTime                @updatedAt
   hasTransactions          Boolean                 @default(false)
@@ -56,10 +87,11 @@ model User {
   supplyRequestsReviewed   SupplyRequest[]         @relation("SupplyRequestReviewer")
   party                    Party?                  @relation(fields: [partyId], references: [id])
   roles                    UserRole[]
-  inventoryClosings        InventoryClosing[]
-  inventoryClosingAudits   InventoryClosingAudit[]
+  actions                  UserAction[]
+  documentItemAmounts      DocumentItemAmount[]
   goodsPricingStatuses     GoodsPricingStatus[]
   purchaseInvoicesApproved PurchaseInvoice[]       @relation("PurchaseInvoiceApprover")
+  servicePurchaseInvoicesApproved ServicePurchaseInvoice[] @relation("ServicePurchaseInvoiceApprover")
 }
 
 model UserRole {
@@ -89,6 +121,7 @@ model Currency {
   payments         Payment[]
   priceInquiries   PriceInquiry[]
   purchaseInvoices PurchaseInvoice[]
+  servicePurchaseInvoices ServicePurchaseInvoice[]
   purchaseOrders   PurchaseOrder[]
   receipts         Receipt[]
   salesInvoices    SalesInvoice[]
@@ -130,6 +163,7 @@ model FiscalPeriod {
   payments                  Payment[]
   priceInquiries            PriceInquiry[]
   purchaseInvoices          PurchaseInvoice[]
+  servicePurchaseInvoices   ServicePurchaseInvoice[]
   purchaseOrders            PurchaseOrder[]
   purchasePlannings         PurchasePlanning[]
   purchaseRequests          PurchaseRequest[]
@@ -153,17 +187,18 @@ enum ReportingPeriodStatus {
 }
 
 model ReportingPeriod {
-  id             Int                   @id @default(autoincrement())
-  fiscalPeriodId Int
-  code           String
-  title          String
-  fromDate       DateTime              @db.Date
-  toDate         DateTime              @db.Date
-  status         ReportingPeriodStatus @default(OPEN)
-  hasBeenClosed  Boolean               @default(false)
-  createdAt      DateTime              @default(now())
-  fiscalPeriod   FiscalPeriod          @relation(fields: [fiscalPeriodId], references: [id])
+  id              Int                   @id @default(autoincrement())
+  fiscalPeriodId  Int
+  code            String
+  title           String
+  fromDate        DateTime              @db.Date
+  toDate          DateTime              @db.Date
+  status          ReportingPeriodStatus @default(OPEN)
+  hasBeenClosed   Boolean               @default(false)
+  createdAt       DateTime              @default(now())
+  fiscalPeriod    FiscalPeriod          @relation(fields: [fiscalPeriodId], references: [id])
   pricingStatuses GoodsPricingStatus[]
+  pricingFlowWarehouses GoodsPricingFlowWarehouse[]
 
   @@unique([fiscalPeriodId, code])
 }
@@ -218,10 +253,10 @@ model DetailCodeUsage {
 }
 
 model Party {
-  id                 Int                 @id @default(autoincrement())
-  detailCode         String              @unique
+  id                 Int                @id @default(autoincrement())
+  detailCode         String             @unique
   category           PartyCategory
-  nationality        Nationality         @default(LOCAL)
+  nationality        Nationality        @default(LOCAL)
   nationalId         String?
   foreignId          String?
   economicCode       String?
@@ -229,12 +264,12 @@ model Party {
   lastName           String?
   legalType          LegalPartyType?
   name               String?
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  hasTransactions    Boolean             @default(false)
-  isActive           Boolean             @default(true)
-  bankAccountsAsBank BankAccount[]       @relation("BankAccountBankParty")
-  bankBranches       BankBranch[]        @relation("BankParty")
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  hasTransactions    Boolean            @default(false)
+  isActive           Boolean            @default(true)
+  bankAccountsAsBank BankAccount[]      @relation("BankAccountBankParty")
+  bankBranches       BankBranch[]       @relation("BankParty")
   cheques            ChequeItem[]
   customer           Customer?
   goodsRequestLines  GoodsRequestLine[]
@@ -244,13 +279,13 @@ model Party {
   payments           Payment[]
   purchaseExpert     PurchaseExpert?
   purchaseInvoices   PurchaseInvoice[]
+  servicePurchaseInvoices ServicePurchaseInvoice[]
   receipts           Receipt[]
   supplier           Supplier?
   users              User[]
-  warehousesManaged  Warehouse[]         @relation("WarehouseManager")
+  warehousesManaged  Warehouse[]        @relation("WarehouseManager")
   warehouseReceipts  WarehouseReceipt[]
-  batchesAsSupplier  Batch[]             @relation("BatchSupplier")
-  inventoryDocuments InventoryDocument[]
+  batchesAsSupplier  Batch[]            @relation("BatchSupplier")
 }
 
 model PartyAddress {
@@ -328,16 +363,15 @@ model BankAccount {
 }
 
 model CostCenter {
-  id                 Int                 @id @default(autoincrement())
-  detailCode         String              @unique
-  title              String              @unique
-  type               CostCenterType      @default(ADMIN)
-  orgUnitId          Int
-  hasTransactions    Boolean             @default(false)
-  orgUnit            OrgUnit             @relation(fields: [orgUnitId], references: [id])
-  goodsRequestLines  GoodsRequestLine[]
-  warehouseIssues    WarehouseIssue[]
-  inventoryDocuments InventoryDocument[]
+  id                Int                @id @default(autoincrement())
+  detailCode        String             @unique
+  title             String             @unique
+  type              CostCenterType     @default(ADMIN)
+  orgUnitId         Int
+  hasTransactions   Boolean            @default(false)
+  orgUnit           OrgUnit            @relation(fields: [orgUnitId], references: [id])
+  goodsRequestLines GoodsRequestLine[]
+  warehouseIssues   WarehouseIssue[]
 }
 
 model OrgUnit {
@@ -431,6 +465,7 @@ model JournalEntry {
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   issuingSystem       IssuingSystem        @default(ACCOUNTING)
+  documentItemAmounts  DocumentItemAmount[]
   accountClosing      AccountClosing?
   documentType        DocumentType         @relation(fields: [documentTypeId], references: [id])
   fiscalPeriod        FiscalPeriod         @relation(fields: [fiscalPeriodId], references: [id])
@@ -594,6 +629,13 @@ model Warehouse {
   isActive                   Boolean                 @default(true)
   hasTransactions            Boolean                 @default(false)
   createdAt                  DateTime                @default(now())
+  // «تایید انبار» — طبق تصمیم صریح کاربر بدون تاریخچه: تاریخ تایید و Snapshot موجودی مستقیماً روی خود
+  // انبار نگه‌داری می‌شوند و با هر تایید/برگشت از تایید جایگزین می‌شوند، نه اضافه.
+  confirmedDate              DateTime?               @db.Date
+  // تاریخ راه‌اندازی انبار در سیستم — برای انباری که هنوز هیچ‌وقت تایید نشده (confirmedDate=null)، یک
+  // روز قبل از این تاریخ به‌جای «آخرین تاریخ تایید» در نظر گرفته می‌شود (نگاه کنید به
+  // effectiveLastConfirmedDate در services/warehouseConfirmationService.ts).
+  implementationDate         DateTime?               @db.Date
   initialInventories         InitialInventory[]
   salesDeliveries            SalesDelivery[]
   manager                    Party?                  @relation("WarehouseManager", fields: [managerId], references: [id])
@@ -607,8 +649,8 @@ model Warehouse {
   inventoryDocuments         InventoryDocument[]     @relation("InventoryDocWarehouse")
   inventoryDocsAsSource      InventoryDocument[]     @relation("InventoryDocSourceWarehouse")
   inventoryDocsAsDest        InventoryDocument[]     @relation("InventoryDocDestWarehouse")
-  inventoryClosings          InventoryClosing[]
-  inventoryClosingAudits     InventoryClosingAudit[]
+  confirmationLines          WarehouseConfirmationLine[]
+  pricingFlowWarehouses      GoodsPricingFlowWarehouse[]
 }
 
 // درخت محل فیزیکی — طبق stockAnalysis.md بند ۲۱: هر انبار درخت محل فیزیکی مستقل خودش را دارد
@@ -627,7 +669,6 @@ model PhysicalLocation {
   parent          PhysicalLocation?       @relation("PhysicalLocationTree", fields: [parentId], references: [id])
   children        PhysicalLocation[]      @relation("PhysicalLocationTree")
   inventoryLines  InventoryDocumentLine[]
-  closingLines    InventoryClosingLine[]
 
   @@unique([warehouseId, parentId, code])
 }
@@ -684,6 +725,7 @@ model GoodsAttribute {
   itemCodeLength  Int
   hasTransactions Boolean                   @default(false)
   createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @default(now()) @updatedAt
   items           GoodsAttributeItem[]
   groupLinks      GoodsGroupAttribute[]
   itemValues      GoodsItemAttributeValue[]
@@ -715,11 +757,7 @@ model GoodsItem {
   barcode                       String?
   reorderControl                Boolean                        @default(false)
   reorderPoint                  Decimal?                       @db.Decimal(18, 6)
-  hasSerialNumber               Boolean                        @default(false)
-  hasExpiryDate                 Boolean                        @default(false)
-  isSerialTracked               Boolean                        @default(false)
-  isExpiryTracked               Boolean                        @default(false)
-  isBatchTracked                Boolean                        @default(false)
+  trackingMethod                GoodsTrackingMethod            @default(NONE)
   isLocationTracked             Boolean                        @default(false)
   accountingGroupId             Int
   isSpecial                     Boolean                        @default(false)
@@ -727,6 +765,7 @@ model GoodsItem {
   isActive                      Boolean                        @default(true)
   hasTransactions               Boolean                        @default(false)
   createdAt                     DateTime                       @default(now())
+  updatedAt                     DateTime                       @default(now()) @updatedAt
   deliveryAuthorizationLines    DeliveryAuthorizationLine[]
   accountingGroup               AccountingGroup                @relation(fields: [accountingGroupId], references: [id])
   goodsGroup                    GoodsGroup                     @relation(fields: [goodsGroupId], references: [id])
@@ -740,6 +779,7 @@ model GoodsItem {
   purchaseGroupItems            PurchaseGroupGoodsItem[]
   purchaseInvoiceLines          PurchaseInvoiceLine[]
   purchaseInvoiceOtherCostLines PurchaseInvoiceOtherCostLine[]
+  servicePurchaseInvoiceLines   ServicePurchaseInvoiceLine[]
   purchaseOrderLines            PurchaseOrderLine[]
   purchasePlanningStage1Rows    PurchasePlanningStage1Row[]
   purchasePlanningStage2Rows    PurchasePlanningStage2Row[]
@@ -756,8 +796,9 @@ model GoodsItem {
   batches                       Batch[]
   serials                       Serial[]
   inventoryDocumentLines        InventoryDocumentLine[]
-  inventoryClosingLines         InventoryClosingLine[]
+  warehouseConfirmationLines    WarehouseConfirmationLine[]
   pricingStatuses               GoodsPricingStatus[]
+  pricingFlowWarehouses         GoodsPricingFlowWarehouse[]
 
   @@unique([goodsGroupId, code])
 }
@@ -778,22 +819,22 @@ model GoodsItemAttributeValue {
 // یکتایی روی (goodsItemId, batchNumber) — یعنی همان شماره بچ برای دو کالای مختلف مجاز است (بند ۱۲).
 // تاریخ انقضا فقط اینجا نگه‌داری می‌شود، نه در سطر سند انبار (بند ۱۳).
 model Batch {
-  id                    Int                     @id @default(autoincrement())
+  id                    Int                    @id @default(autoincrement())
   goodsItemId           Int
   batchNumber           String
-  productionDate        DateTime?               @db.Date
-  expiryDate            DateTime?               @db.Date
-  sourceType            BatchSourceType         @default(MANUAL)
+  productionDate        DateTime?              @db.Date
+  expiryDate            DateTime?              @db.Date
+  sourceType            BatchSourceType        @default(MANUAL)
   supplierId            Int?
   productionReferenceId Int?
   description           String?
-  isActive              Boolean                 @default(true)
-  hasTransactions       Boolean                 @default(false)
-  createdAt             DateTime                @default(now())
-  goodsItem             GoodsItem               @relation(fields: [goodsItemId], references: [id])
-  supplier              Party?                  @relation("BatchSupplier", fields: [supplierId], references: [id])
-  inventoryLines        InventoryDocumentLine[]
-  closingLines          InventoryClosingLine[]
+  isActive              Boolean                @default(true)
+  hasTransactions       Boolean                @default(false)
+  createdAt             DateTime               @default(now())
+  goodsItem             GoodsItem              @relation(fields: [goodsItemId], references: [id])
+  supplier              Party?                 @relation("BatchSupplier", fields: [supplierId], references: [id])
+  inventoryLines        InventoryLineBatch[]
+  serials               Serial[]
 
   @@unique([goodsItemId, batchNumber])
 }
@@ -801,25 +842,51 @@ model Batch {
 // سریال — طبق stockAnalysis.md بند ۱۷-۲۰: Master مستقل، تعریف در ماژول کالا و خدمت؛ انبار فقط
 // سریال‌های موجود را برای هر سطر سند انتخاب/مصرف می‌کند (از طریق جدول واسط InventoryLineSerial که
 // در فاز اتصال به اسناد انبار اضافه می‌شود، نه اینجا).
+// طبق «اصلاح مدل رهگیری کالا»: برای کالای سریال‌دار، بچ و تاریخ انقضا متعلق به خود سریال هستند (نه
+// ردیف سند)؛ batchId اختیاری است (سریال می‌تواند بدون بچ باشد) و expiryDate مستقل از بچ هم قابل ثبت
+// است (وقتی بچی انتخاب نشده).
+// طبق «انتخاب سریال و بچ»: هر سریال یک چرخه‌ی عمر دارد (تعریف‌شده → رسید‌شده → خارج‌شده) که با
+// قطعی/برگشت‌ازقطعی هر سند انبار مرتبط، خودکار تغییر می‌کند. step دقیقاً هم‌الگوی ChequeItem.step
+// است (نگاه کنید به توضیح بالای آن مدل): با هر رویداد چرخه‌ی عمر یک واحد بالا می‌رود؛ همان مقدار روی
+// ردیف واسط (InventoryLineSerial.serialStep) هم ذخیره می‌شود تا فقط «آخرین رویداد» قابل برگشت باشد.
 model Serial {
   id              Int                    @id @default(autoincrement())
   goodsItemId     Int
   serialNumber    String
+  batchId         Int?
+  expiryDate      DateTime?              @db.Date
+  status          SerialStatus           @default(DEFINED)
+  step            Int                    @default(1)
   description     String?
   isActive        Boolean                @default(true)
   hasTransactions Boolean                @default(false)
   createdAt       DateTime               @default(now())
   goodsItem       GoodsItem              @relation(fields: [goodsItemId], references: [id])
+  batch           Batch?                 @relation(fields: [batchId], references: [id])
   lines           InventoryLineSerial[]
-  closingLines    InventoryClosingLine[]
 
   @@unique([goodsItemId, serialNumber])
+}
+
+enum SerialStatus {
+  DEFINED
+  RECEIVED
+  EXITED
 }
 
 enum BatchSourceType {
   MANUAL
   PURCHASE
   PRODUCTION
+}
+
+// طبق «اصلاح مدل رهگیری کالا»: هر کالا دقیقا یکی از این سه روش را دارد (نه ترکیب مستقل چند تیک) —
+// None یعنی بدون رهگیری بچ/سریال؛ Batch یعنی موجودی بر اساس بچ تفکیک می‌شود؛ Serial یعنی هر واحد
+// کالا یک سریال مستقل دارد (که بچ/تاریخ‌انقضا هم از طریق خود همان سریال مشخص می‌شود، نه مستقل).
+enum GoodsTrackingMethod {
+  NONE
+  BATCH
+  SERIAL
 }
 
 model AccountingGroup {
@@ -841,7 +908,7 @@ model GoodsServiceAccountingSetting {
   warehouseGroupId    Int?
   accountId           Int
   salesTypeRef        Int?
-  warehouseDocTypeRef Int?
+  warehouseDocType    InventoryDocumentType?
   purchaseTypeRef     Int?
   hasTransactions     Boolean          @default(false)
   createdAt           DateTime         @default(now())
@@ -868,7 +935,7 @@ model InitialInventory {
   date           DateTime                 @db.Date
   description    String?
   creationType   WarehouseDocCreationType @default(MANUAL)
-  status         WarehouseDocStatus       @default(DRAFT)
+  status         WarehouseDocStatus       @default(REGISTERED)
   finalizedAt    DateTime?
   createdAt      DateTime                 @default(now())
   fiscalPeriod   FiscalPeriod             @relation(fields: [fiscalPeriodId], references: [id])
@@ -898,14 +965,13 @@ model InitialInventoryLine {
 }
 
 model Project {
-  id                 Int                 @id @default(autoincrement())
-  code               Int                 @unique
-  title              String              @unique
-  isActive           Boolean             @default(true)
-  createdAt          DateTime            @default(now())
-  goodsRequestLines  GoodsRequestLine[]
-  warehouseIssues    WarehouseIssue[]
-  inventoryDocuments InventoryDocument[]
+  id                Int                @id @default(autoincrement())
+  detailCode        String             @unique
+  title             String             @unique
+  isActive          Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  goodsRequestLines GoodsRequestLine[]
+  warehouseIssues   WarehouseIssue[]
 }
 
 model GoodsRequest {
@@ -922,6 +988,7 @@ model GoodsRequest {
   approverId     Int?
   approvedAt     DateTime?
   createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @default(now()) @updatedAt
   approver       User?              @relation("GoodsRequestApprover", fields: [approverId], references: [id])
   fiscalPeriod   FiscalPeriod       @relation(fields: [fiscalPeriodId], references: [id])
   orgUnit        OrgUnit            @relation(fields: [orgUnitId], references: [id])
@@ -971,6 +1038,7 @@ model SupplyRequest {
   approverId     Int?
   approvedAt     DateTime?
   createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @default(now()) @updatedAt
   approver       User?               @relation("SupplyRequestApprover", fields: [approverId], references: [id])
   fiscalPeriod   FiscalPeriod        @relation(fields: [fiscalPeriodId], references: [id])
   orgUnit        OrgUnit             @relation(fields: [orgUnitId], references: [id])
@@ -1096,6 +1164,7 @@ model PurchaseRequest {
   approverId     Int?
   approvedAt     DateTime?
   createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @default(now()) @updatedAt
   approver       User?                 @relation("PurchaseRequestApprover", fields: [approverId], references: [id])
   fiscalPeriod   FiscalPeriod          @relation(fields: [fiscalPeriodId], references: [id])
   orgUnit        OrgUnit               @relation(fields: [orgUnitId], references: [id])
@@ -1134,6 +1203,7 @@ model PurchasePlanning {
   purchaseRouteId           Int?
   allowMultiSupplierPerLine Boolean                     @default(false)
   createdAt                 DateTime                    @default(now())
+  updatedAt                 DateTime                    @default(now()) @updatedAt
   inquiryAuthorization      InquiryAuthorization?
   inquiryEvaluation         InquiryEvaluation?
   priceInquiries            PriceInquiry[]
@@ -1188,6 +1258,7 @@ model InquiryAuthorization {
   description        String?
   status             RequestStatus              @default(DRAFT)
   createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @default(now()) @updatedAt
   fiscalPeriod       FiscalPeriod               @relation(fields: [fiscalPeriodId], references: [id])
   purchasePlanning   PurchasePlanning           @relation(fields: [purchasePlanningId], references: [id])
   lines              InquiryAuthorizationLine[]
@@ -1220,6 +1291,7 @@ model PriceInquiry {
   description         String?
   status              RequestStatus               @default(DRAFT)
   createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @default(now()) @updatedAt
   evaluationQuoteRows InquiryEvaluationQuoteRow[]
   currency            Currency                    @relation(fields: [currencyId], references: [id])
   fiscalPeriod        FiscalPeriod                @relation(fields: [fiscalPeriodId], references: [id])
@@ -1271,6 +1343,7 @@ model InquiryEvaluation {
   description        String?
   status             RequestStatus               @default(DRAFT)
   createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @default(now()) @updatedAt
   fiscalPeriod       FiscalPeriod                @relation(fields: [fiscalPeriodId], references: [id])
   purchasePlanning   PurchasePlanning            @relation(fields: [purchasePlanningId], references: [id])
   itemLines          InquiryEvaluationItemLine[]
@@ -1315,6 +1388,7 @@ model PurchaseOrder {
   description    String?
   status         RequestStatus       @default(DRAFT)
   createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @default(now()) @updatedAt
   currency       Currency            @relation(fields: [currencyId], references: [id])
   fiscalPeriod   FiscalPeriod        @relation(fields: [fiscalPeriodId], references: [id])
   supplier       Supplier            @relation(fields: [supplierId], references: [id])
@@ -1353,6 +1427,7 @@ model DeliveryAuthorization {
   description    String?
   status         RequestStatus               @default(DRAFT)
   createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @default(now()) @updatedAt
   fiscalPeriod   FiscalPeriod                @relation(fields: [fiscalPeriodId], references: [id])
   supplier       Supplier                    @relation(fields: [supplierId], references: [id])
   lines          DeliveryAuthorizationLine[]
@@ -1386,7 +1461,7 @@ model WarehouseReceipt {
   date           DateTime               @db.Date
   basis          WarehouseReceiptBasis
   description    String?
-  status         WarehouseDocStatus     @default(DRAFT)
+  status         WarehouseDocStatus     @default(REGISTERED)
   finalizedAt    DateTime?
   createdAt      DateTime               @default(now())
   partyId        Int?
@@ -1431,7 +1506,7 @@ model WarehouseIssue {
   date           DateTime             @db.Date
   basis          WarehouseIssueBasis
   description    String?
-  status         WarehouseDocStatus   @default(DRAFT)
+  status         WarehouseDocStatus   @default(REGISTERED)
   finalizedAt    DateTime?
   createdAt      DateTime             @default(now())
   costCenterId   Int?
@@ -1474,7 +1549,7 @@ model WarehouseTransfer {
   number            Int
   date              DateTime                @db.Date
   description       String?
-  status            WarehouseDocStatus      @default(DRAFT)
+  status            WarehouseDocStatus      @default(REGISTERED)
   finalizedAt       DateTime?
   createdAt         DateTime                @default(now())
   destWarehouse     Warehouse               @relation("WarehouseTransferDest", fields: [destWarehouseId], references: [id])
@@ -1511,7 +1586,7 @@ model WarehouseAdjustment {
   number         Int
   date           DateTime                  @db.Date
   description    String?
-  status         WarehouseDocStatus        @default(DRAFT)
+  status         WarehouseDocStatus        @default(REGISTERED)
   finalizedAt    DateTime?
   createdAt      DateTime                  @default(now())
   fiscalPeriod   FiscalPeriod              @relation(fields: [fiscalPeriodId], references: [id])
@@ -1556,6 +1631,7 @@ model PurchaseInvoice {
   approverId             Int?
   approvedAt             DateTime?
   createdAt              DateTime                       @default(now())
+  updatedAt              DateTime                       @default(now()) @updatedAt
   paymentSettlementLines PaymentSettlementLine[]
   currency               Currency                       @relation(fields: [currencyId], references: [id])
   fiscalPeriod           FiscalPeriod                   @relation(fields: [fiscalPeriodId], references: [id])
@@ -1577,6 +1653,8 @@ model PurchaseInvoiceLine {
   quantity              Decimal                @db.Decimal(36, 10)
   unitPrice             Decimal                @db.Decimal(36, 10)
   amount                Decimal                @db.Decimal(36, 10)
+  discount              Decimal                @default(0) @db.Decimal(36, 10)
+  vatAmount             Decimal                @default(0) @db.Decimal(36, 10)
   description           String?
   goodsItem             GoodsItem              @relation(fields: [goodsItemId], references: [id])
   purchaseInvoice       PurchaseInvoice        @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
@@ -1594,6 +1672,74 @@ model PurchaseInvoiceOtherCostLine {
   description       String?
   purchaseInvoice   PurchaseInvoice      @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
   service           GoodsItem            @relation(fields: [serviceId], references: [id])
+}
+
+// طبق Documents/ServicePurchaseAndItsRelationToStockReceipt.md: سند «فاکتور خرید خدمات» عمداً از
+// PurchaseInvoice (فاکتور خرید کالا) کاملاً مستقل است — نه فقط طبق تصریح مستند («فاکتور خرید خدمات از
+// فاکتور خرید کالا مستقل باشد»)، بلکه به‌خاطر تفاوت‌های ساختاری واقعی: شماره‌گذاری مستقل (نه سهیم در
+// یک دنباله با فاکتور کالا)، هر ردیف می‌تواند به رسید(های) دلخواه (نه لزوماً رسید(های) همین فاکتور)
+// اشاره کند به‌صورت ۱-به-چند (نه ۱-به-۱ مثل PurchaseInvoiceLine.sourceInventoryLineId)، و اثر تایید
+// («افزودن» یک ردیف Difference-only تازه به DocumentItemAmount) کاملاً متفاوت از اثر تایید فاکتور کالا
+// («جایگزینی» مبلغ نهایی رسید) است. مبنا/روش‌تسهیم عمداً enumهای موجود (PurchaseInvoiceBasis /
+// CostAllocationBasis) را دوباره استفاده می‌کنند تا enum موازی ساخته نشود.
+model ServicePurchaseInvoice {
+  id                  Int                          @id @default(autoincrement())
+  fiscalPeriodId      Int
+  number              Int
+  date                DateTime                     @db.Date
+  vendorInvoiceNumber String?
+  partyId             Int
+  currencyId          Int
+  description         String?
+  status              RequestStatus                @default(DRAFT)
+  approverId          Int?
+  approvedAt          DateTime?
+  createdAt           DateTime                     @default(now())
+  updatedAt           DateTime                     @default(now()) @updatedAt
+  currency            Currency                     @relation(fields: [currencyId], references: [id])
+  fiscalPeriod        FiscalPeriod                 @relation(fields: [fiscalPeriodId], references: [id])
+  party               Party                        @relation(fields: [partyId], references: [id])
+  approver            User?                        @relation("ServicePurchaseInvoiceApprover", fields: [approverId], references: [id])
+  lines               ServicePurchaseInvoiceLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model ServicePurchaseInvoiceLine {
+  id                       Int                                    @id @default(autoincrement())
+  servicePurchaseInvoiceId Int
+  rowOrder                 Int                                    @default(0)
+  serviceId                Int
+  amount                   Decimal                                @db.Decimal(36, 10)
+  // بدون مبنا / رسید انبار — طبق بند ۲ مستند، ساختار باید امکان افزودن مبناهای دیگر (مثل قرارداد) را در
+  // آینده بدهد؛ چون این enum از قبل دقیقاً همین دو مقدار را دارد، دوباره استفاده شده (نه enum تازه).
+  basis                    PurchaseInvoiceBasis                   @default(NO_BASIS)
+  // فقط وقتی basis=WAREHOUSE_RECEIPT پر می‌شود — رسید انبار انتخاب‌شده (سرصفحه، نه یک ردیف خاص)؛ تسهیم
+  // بین همه‌ی ردیف‌های همین رسید انجام می‌شود (نگاه کنید به allocations زیر)
+  sourceReceiptDocumentId  Int?
+  // فقط وقتی basis=WAREHOUSE_RECEIPT پر می‌شود — نسبت مبلغ (VALUE) یا نسبت مقدار (QUANTITY)؛ WEIGHT این
+  // enum برای این فرم معنا/کاربرد ندارد (کنترل در لایه‌ی اعتبارسنجی، نه دیتابیس)
+  allocationMethod         CostAllocationBasis?
+  description              String?
+  servicePurchaseInvoice   ServicePurchaseInvoice                 @relation(fields: [servicePurchaseInvoiceId], references: [id], onDelete: Cascade)
+  service                  GoodsItem                              @relation(fields: [serviceId], references: [id])
+  sourceReceiptDocument    InventoryDocument?                     @relation(fields: [sourceReceiptDocumentId], references: [id])
+  allocations              ServicePurchaseInvoiceLineAllocation[]
+}
+
+// لایه‌ی «Allocation» که مستند صریحاً بین ردیف فاکتور خرید خدمات و AmountLine خواسته (بند ۱۲): هر رکورد
+// یعنی «از مبلغ این ردیف فاکتور خدمات، این‌قدر به این ردیف رسید تخصیص یافته». با تایید فاکتور، به‌ازای
+// هر ردیف اینجا دقیقاً یک DocumentItemAmount (priceType=INBOUND_RELATED_COST) ساخته می‌شود.
+model ServicePurchaseInvoiceLineAllocation {
+  id                           Int                        @id @default(autoincrement())
+  servicePurchaseInvoiceLineId Int
+  inventoryDocumentLineId      Int
+  allocatedAmount              Decimal                    @db.Decimal(36, 10)
+  servicePurchaseInvoiceLine   ServicePurchaseInvoiceLine @relation(fields: [servicePurchaseInvoiceLineId], references: [id], onDelete: Cascade)
+  inventoryDocumentLine        InventoryDocumentLine      @relation(fields: [inventoryDocumentLineId], references: [id])
+  amounts                      DocumentItemAmount[]
+
+  @@unique([servicePurchaseInvoiceLineId, inventoryDocumentLineId])
 }
 
 model Customer {
@@ -1619,6 +1765,7 @@ model SalesQuote {
   description    String?
   status         SalesDocStatus   @default(DRAFT)
   createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @default(now()) @updatedAt
   currency       Currency         @relation(fields: [currencyId], references: [id])
   customer       Customer         @relation(fields: [customerId], references: [id])
   fiscalPeriod   FiscalPeriod     @relation(fields: [fiscalPeriodId], references: [id])
@@ -1654,6 +1801,7 @@ model SalesOrder {
   description    String?
   status         SalesDocStatus   @default(DRAFT)
   createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @default(now()) @updatedAt
   currency       Currency         @relation(fields: [currencyId], references: [id])
   customer       Customer         @relation(fields: [customerId], references: [id])
   fiscalPeriod   FiscalPeriod     @relation(fields: [fiscalPeriodId], references: [id])
@@ -1689,7 +1837,7 @@ model SalesDelivery {
   date           DateTime            @db.Date
   basis          SalesDeliveryBasis
   description    String?
-  status         WarehouseDocStatus  @default(DRAFT)
+  status         WarehouseDocStatus  @default(REGISTERED)
   finalizedAt    DateTime?
   createdAt      DateTime            @default(now())
   fiscalPeriod   FiscalPeriod        @relation(fields: [fiscalPeriodId], references: [id])
@@ -1737,8 +1885,10 @@ model SalesDeliveryLine {
 enum InventoryDocumentType {
   INITIAL_INVENTORY
   WAREHOUSE_RECEIPT // Purchase Receipt
-  WAREHOUSE_TRANSFER // Warehouse Transfer
-  WAREHOUSE_ADJUSTMENT // Inventory Count Surplus + Shortage (یک نوع، مقدار امضادار)
+  WAREHOUSE_TRANSFER_OUT // Warehouse Transfer — sending side (deducts source warehouse)
+  WAREHOUSE_TRANSFER_IN // Warehouse Transfer — receiving side (adds to destination warehouse), references WAREHOUSE_TRANSFER_OUT lines
+  WAREHOUSE_ADJUSTMENT // Inventory Count Surplus (فقط مازاد — کسری در INVENTORY_COUNTING_SHORTAGE ثبت می‌شود)
+  INVENTORY_COUNTING_SHORTAGE // Inventory Count Shortage — سند مستقل، بدون مبنا، بدون تایید حسابداری فردی (فقط تایید انبار دسته‌ای)
   SALES_DELIVERY // Sales Issue
   SALES_RETURN
   SUPPLIER_RETURN
@@ -1761,6 +1911,7 @@ enum InventoryBasis {
   DELIVERY_AUTHORIZATION
   GOODS_REQUEST
   SALES_ORDER
+  WAREHOUSE_TRANSFER_OUT
 }
 
 model InventoryDocument {
@@ -1773,22 +1924,25 @@ model InventoryDocument {
   number            Int
   date              DateTime                 @db.Date
   basis             InventoryBasis?
-  partyId           Int?
-  costCenterId      Int?
-  projectId         Int?
+  // به‌جای سه فیلد جدا (partyId/costCenterId/projectId) که هرکدام به یک جدول متفاوت ارجاع می‌داد، طبق
+  // همان الگوی «کد تفصیل» که در JournalEntryLine (detail1Code/…) و DetailCodeUsage از قبل وجود دارد،
+  // یک فیلد واحد استفاده می‌شود؛ هر نوع سند همیشه دقیقاً یکی از انواع تفصیل (طرف حساب/مرکز هزینه/پروژه)
+  // را ست می‌کند، هرگز بیش از یکی — رزولوشن به موجودیت واقعی از طریق DetailCodeUsage.code انجام می‌شود.
+  detailCode        String?
   description       String?
   creationType      WarehouseDocCreationType @default(MANUAL)
-  status            WarehouseDocStatus       @default(DRAFT)
+  status            WarehouseDocStatus       @default(REGISTERED)
+  // فقط وقتی سند واقعاً Finalized می‌شود پر می‌شود (رسید انبار خرید: با «تایید حسابداری»؛ بقیه‌ی انواع:
+  // با «تایید انبار» دسته‌ای) — دیگر در لحظه‌ی ایجاد سند پر نمی‌شود.
   finalizedAt       DateTime?
   createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @default(now()) @updatedAt
   warehouse         Warehouse?               @relation("InventoryDocWarehouse", fields: [warehouseId], references: [id])
   sourceWarehouse   Warehouse?               @relation("InventoryDocSourceWarehouse", fields: [sourceWarehouseId], references: [id])
   destWarehouse     Warehouse?               @relation("InventoryDocDestWarehouse", fields: [destWarehouseId], references: [id])
   fiscalPeriod      FiscalPeriod             @relation(fields: [fiscalPeriodId], references: [id])
-  party             Party?                   @relation(fields: [partyId], references: [id])
-  costCenter        CostCenter?              @relation(fields: [costCenterId], references: [id])
-  project           Project?                 @relation(fields: [projectId], references: [id])
   lines             InventoryDocumentLine[]
+  servicePurchaseInvoiceLines ServicePurchaseInvoiceLine[]
 
   @@unique([documentType, fiscalPeriodId, number])
 }
@@ -1800,12 +1954,7 @@ model InventoryDocumentLine {
   goodsItemId                       Int
   unitId                            Int
   quantity                          Decimal                    @db.Decimal(36, 10)
-  systemQuantity                    Decimal?                   @db.Decimal(36, 10)
-  countedQuantity                   Decimal?                   @db.Decimal(36, 10)
-  unitCost                          Decimal                    @default(0) @db.Decimal(28, 10)
-  amount                            Decimal                    @default(0) @db.Decimal(18, 2)
   description                       String?
-  batchId                           Int?
   physicalLocationId                Int?
   sourceSupplyRequestLineId         Int?
   sourcePurchaseOrderLineId         Int?
@@ -1821,10 +1970,10 @@ model InventoryDocumentLine {
   sourceCenterConsumptionLineId     Int?
   sourceProjectConsumptionLineId    Int?
   sourceProductionConsumptionLineId Int?
+  sourceWarehouseTransferOutLineId  Int?
   document                          InventoryDocument          @relation(fields: [documentId], references: [id], onDelete: Cascade)
   goodsItem                         GoodsItem                  @relation(fields: [goodsItemId], references: [id])
   unit                              UnitOfMeasure              @relation(fields: [unitId], references: [id])
-  batch                             Batch?                     @relation(fields: [batchId], references: [id])
   physicalLocation                  PhysicalLocation?          @relation(fields: [physicalLocationId], references: [id])
   sourceSupplyRequestLine           SupplyRequestLine?         @relation("InventoryLineSourceSupplyRequestLine", fields: [sourceSupplyRequestLineId], references: [id])
   sourcePurchaseOrderLine           PurchaseOrderLine?         @relation("InventoryLineSourcePurchaseOrderLine", fields: [sourcePurchaseOrderLineId], references: [id])
@@ -1841,109 +1990,149 @@ model InventoryDocumentLine {
   projectConsumptionReturnLines     InventoryDocumentLine[]    @relation("InventoryLineSourceProjectConsumptionLine")
   sourceProductionConsumptionLine   InventoryDocumentLine?     @relation("InventoryLineSourceProductionConsumptionLine", fields: [sourceProductionConsumptionLineId], references: [id])
   productionConsumptionReturnLines  InventoryDocumentLine[]    @relation("InventoryLineSourceProductionConsumptionLine")
+  // بر خلاف ۵ نوع برگشتی بالا (که پیش‌فرض Prisma یعنی ON DELETE SET NULL دارند)، اینجا عمداً Restrict
+  // انتخاب شده: طبق درخواست صریح کاربر، سند «ارسال» که یک سند «دریافت» به آن ارجاع دارد باید کاملاً
+  // قفل باشد (نه فقط ارجاع یتیم شود) — کنترل کامل هم در سطح دیتابیس (این FK) و هم در سطح اپلیکیشن
+  // (warehouseTransferOut.ts: delete/revert/update) اعمال می‌شود.
+  sourceWarehouseTransferOutLine    InventoryDocumentLine?     @relation("InventoryLineSourceWarehouseTransferOutLine", fields: [sourceWarehouseTransferOutLineId], references: [id], onDelete: Restrict)
+  transferInLines                   InventoryDocumentLine[]    @relation("InventoryLineSourceWarehouseTransferOutLine")
   serials                           InventoryLineSerial[]
+  batches                           InventoryLineBatch[]
   purchaseInvoiceLine               PurchaseInvoiceLine?       @relation("PurchaseInvoiceSourceInventoryLine")
   salesInvoiceLines                 SalesInvoiceLine[]         @relation("SalesInvoiceSourceInventoryLine")
-  pricingAdjustments                GoodsPricingAdjustment[]
+  // تاریخچه‌ی append-only مبلغ این ردیف — طبق Documents/WareHouseAmountChanges.md: دیگر هیچ ستون
+  // unitCost/amount خامی روی خودِ این جدول نیست؛ مبلغ فعلی = SUM(DocumentItemAmount.difference) و
+  // فی واحد = آن مجموع ÷ quantity، همیشه محاسبه‌شده، هرگز ذخیره‌شده — نگاه کنید به
+  // services/documentItemAmountService.ts. جایگزین کامل GoodsPricingAdjustment سابق است.
+  amounts                            DocumentItemAmount[]
+  serviceCostAllocations             ServicePurchaseInvoiceLineAllocation[]
 }
 
-// طبق بند ۱۷-۱۹ سند: یک سطح سند می‌تواند چند سریال داشته باشد (نه یک سطر جدا برای هر سریال)
+// طبق بند ۱۷-۱۹ سند: یک سطر سند می‌تواند چند سریال داشته باشد (نه یک سطر جدا برای هر سریال). serialStep
+// دقیقاً هم‌الگوی chequeStep (نگاه کنید به توضیح بالای Serial.step) — مقدار Serial.step را در لحظه‌ی
+// ایجاد همین ارتباط ثبت می‌کند تا فقط «آخرین رویداد» یک سریال قابل برگشت باشد.
 model InventoryLineSerial {
-  id       Int                   @id @default(autoincrement())
-  lineId   Int
-  serialId Int
-  line     InventoryDocumentLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
-  serial   Serial                @relation(fields: [serialId], references: [id])
+  id         Int                   @id @default(autoincrement())
+  lineId     Int
+  serialId   Int
+  serialStep Int
+  line       InventoryDocumentLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  serial     Serial                @relation(fields: [serialId], references: [id])
 
   @@unique([lineId, serialId])
 }
 
-// طبق stockAnalysis.md (فاز ۴، بند ۴-۹): بستن موجودی هر انبار مستقل است — هدف Snapshot گرفتن موجودی
-// تا یک تاریخ و جلوگیری از تغییر اسناد آن دوره است، نه غیرفعال‌کردن انبار. آخرین ردیف هر انبار (بر
-// اساس closingDate) همان Closing جاری آن انبار است؛ Rollback یک ردیف Closing جدید با تاریخ قدیمی‌تر
-// اضافه می‌کند (هرگز ردیف قبلی را ویرایش/حذف نمی‌کند) تا تاریخچه حفظ شود (بند ۵۹).
-model InventoryClosing {
-  id          Int                    @id @default(autoincrement())
+// طبق «انتخاب سریال و بچ»: یک سطر سند می‌تواند چند بچ داشته باشد، هرکدام با تعداد اختصاصی خودش
+// (جمع quantity این ردیف‌ها باید با مقدار سطر سند برابر باشد) — دقیقاً هم‌الگوی InventoryLineSerial،
+// فقط با یک فیلد quantity اضافه؛ جایگزین فیلد اسکالر قبلی InventoryDocumentLine.batchId.
+model InventoryLineBatch {
+  id       Int                   @id @default(autoincrement())
+  lineId   Int
+  batchId  Int
+  quantity Decimal               @db.Decimal(36, 10)
+  line     InventoryDocumentLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  batch    Batch                 @relation(fields: [batchId], references: [id])
+
+  @@unique([lineId, batchId])
+}
+
+// «تایید انبار» / «برگشت از تایید» — طبق سند تایید انبار.md: هدف Snapshot گرفتن موجودی تا یک تاریخ و
+// جلوگیری از تغییر اسناد آن دوره است، نه غیرفعال‌کردن انبار. طبق تصمیم صریح کاربر، بدون تاریخچه —
+// هر انبار دقیقاً یک تاریخ تایید (Warehouse.confirmedDate) و یک Snapshot جاری دارد که با هر تایید/
+// برگشت از تایید، جایگزین (نه اضافه) می‌شود.
+model WarehouseConfirmationLine {
+  id          Int       @id @default(autoincrement())
   warehouseId Int
-  closingDate DateTime               @db.Date
-  closedAt    DateTime               @default(now())
-  createdById Int?
-  warehouse   Warehouse              @relation(fields: [warehouseId], references: [id])
-  createdBy   User?                  @relation(fields: [createdById], references: [id])
-  lines       InventoryClosingLine[]
+  goodsItemId Int
+  quantity    Decimal   @db.Decimal(36, 10)
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  goodsItem   GoodsItem @relation(fields: [goodsItemId], references: [id])
 
-  @@index([warehouseId, closingDate])
-}
-
-// بند ۷: Quantity مقدار موجودی واقعی محاسبه‌شده در لحظه‌ی Closing است، به تفکیک تمام Dimensionهای
-// فعال (بند ۸) — PhysicalLocationId/BatchId/SerialId هر کدام فقط وقتی کالا آن Dimension را دارد پر
-// می‌شوند، وگرنه null (دقیقاً مثل خود InventoryDocumentLine).
-model InventoryClosingLine {
-  id                 Int               @id @default(autoincrement())
-  closingId          Int
-  goodsItemId        Int
-  physicalLocationId Int?
-  batchId            Int?
-  serialId           Int?
-  quantity           Decimal           @db.Decimal(36, 10)
-  closing            InventoryClosing  @relation(fields: [closingId], references: [id], onDelete: Cascade)
-  goodsItem          GoodsItem         @relation(fields: [goodsItemId], references: [id])
-  physicalLocation   PhysicalLocation? @relation(fields: [physicalLocationId], references: [id])
-  batch              Batch?            @relation(fields: [batchId], references: [id])
-  serial             Serial?           @relation(fields: [serialId], references: [id])
-}
-
-enum InventoryClosingAction {
-  CLOSE
-  ROLLBACK
-}
-
-// بند ۵۸: تمام عملیات Closing و Rollback باید Audit شوند (بدون امکان ویرایش/حذف — فقط Insert).
-model InventoryClosingAudit {
-  id             Int                    @id @default(autoincrement())
-  action         InventoryClosingAction
-  warehouseId    Int
-  oldClosingDate DateTime?              @db.Date
-  newClosingDate DateTime               @db.Date
-  reason         String?
-  userId         Int?
-  actionAt       DateTime               @default(now())
-  warehouse      Warehouse              @relation(fields: [warehouseId], references: [id])
-  user           User?                  @relation(fields: [userId], references: [id])
+  @@unique([warehouseId, goodsItemId])
 }
 
 // طبق مستند «قیمت‌گذاری اسناد انبار» (بند ۱۲): کلید منطقی وضعیت قیمت‌گذاری = ReportingPeriod + Item
 // (بدون انبار). وجود این رکورد یعنی «این کالا در این دوره قیمت‌گذاری شده است».
 model GoodsPricingStatus {
-  id                Int                      @id @default(autoincrement())
+  id                Int                  @id @default(autoincrement())
   goodsItemId       Int
   reportingPeriodId Int
-  pricedAt          DateTime                 @default(now())
+  pricedAt          DateTime             @default(now())
   createdById       Int?
-  goodsItem         GoodsItem                @relation(fields: [goodsItemId], references: [id])
-  reportingPeriod   ReportingPeriod          @relation(fields: [reportingPeriodId], references: [id])
-  createdBy         User?                    @relation(fields: [createdById], references: [id])
-  adjustments       GoodsPricingAdjustment[]
+  goodsItem         GoodsItem            @relation(fields: [goodsItemId], references: [id])
+  reportingPeriod   ReportingPeriod      @relation(fields: [reportingPeriodId], references: [id])
+  createdBy         User?                @relation(fields: [createdById], references: [id])
+  // هر ردیف DocumentItemAmount که موتور قیمت‌گذاری در این اجرا نوشته (priceType=ENGINE_PRICING یا
+  // ENGINE_CORRECTION) به همین‌جا وصل است — تنها راهی که revertItem می‌تواند دقیقاً «فقط اثر همین
+  // اجرا» را حذف کند، بدون دست‌زدن به رکوردهای اجراهای دیگر یا مقادیر دستی کاربر.
+  amounts           DocumentItemAmount[]
 
   @@unique([goodsItemId, reportingPeriodId])
 }
 
-// طبق «موتور قیمت‌گذاری در حالت برگشت»: اگر ردیفی که این اجرا مقدارش را تغییر می‌دهد در همین دوره‌ی
-// در حال قیمت‌گذاری واقع باشد (هنوز توسط هیچ اجرای قبلی قفل نشده)، مقدار جدید مستقیماً روی
-// InventoryDocumentLine.amount/unitCost هم نوشته می‌شود (appliedToLine=true) — چون چیزی آن را قفل
-// نکرده. اما اگر ردیف در دوره‌ای زودتر باشد که قبلاً قیمت‌گذاری شده (قفل‌شده)، آن ستون خام دست‌نخورده
-// می‌ماند و اثر این اجرا فقط همین‌جا (appliedToLine=false) ثبت می‌شود تا در گزارش «اصلاحیه‌های
-// قیمت‌گذاری» دیده شود، نه با بازنویسی مبلغ سند اصلی. Rollback بر همین اساس متقارن عمل می‌کند: فقط
-// اصلاحیه‌های appliedToLine=true را از amount/unitCost کم می‌کند.
-model GoodsPricingAdjustment {
-  id            Int                   @id @default(autoincrement())
-  statusId      Int
-  lineId        Int
-  amount        Decimal               @db.Decimal(18, 2)
-  appliedToLine Boolean               @default(false)
-  createdAt     DateTime              @default(now())
-  status        GoodsPricingStatus    @relation(fields: [statusId], references: [id], onDelete: Cascade)
-  line          InventoryDocumentLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+// طبق Documents/WareHouseAmountChanges.md: جایگزین کامل GoodsPricingAdjustment سابق. تاریخچه‌ی
+// append-only مبلغ هر ردیف سند انبار (هر ۱۷ نوع، نه فقط ۴ نوع کاربر-قیمت‌گذار) — هرگز رکورد قبلی
+// overwrite/silently نمی‌شود؛ هر تغییر مبلغ (چه دستی، چه موتور قیمت‌گذاری، چه اثر جانبی تایید فاکتور
+// خرید) یک ردیف تازه اضافه می‌کند. مبلغ فعلی یک ردیف = SUM(difference)، فی واحد = آن مجموع ÷ مقدار —
+// نگاه کنید به services/documentItemAmountService.ts (تنها نقطه‌ی نوشتن/خواندن این جدول).
+enum DocumentAmountPriceType {
+  USER_ENTRY       // مبلغ دستی کاربر (۴ نوع سند کاربر-قیمت‌گذار: موجودی اول دوره/رسید انبار خرید/رسید تولید/اضافات انبارگردانی)
+  ENGINE_PRICING   // موتور قیمت‌گذاری (کاردکس میانگین موزون) — ردیف در دوره‌ی هنوز قفل‌نشده
+  ENGINE_CORRECTION // موتور قیمت‌گذاری روی ردیفی که قبلاً در دوره‌ای زودتر قفل شده بود (اصلاحیه)
+  CROSS_ENTITY     // اثر جانبی تایید/برگشت‌ازتایید فاکتور خرید روی ردیف رسید انبار خرید مرتبط
+  // اثر تایید/برگشت‌ازتایید فاکتور خرید خدمات — طبق Documents/ServicePurchaseAndItsRelationToStockReceipt.md
+  // برخلاف CROSS_ENTITY (که مبلغ نهایی رسید را «جایگزین» می‌کند)، این نوع همیشه فقط «افزوده» می‌شود
+  // (Difference = مبلغ تخصیص‌یافته، هرگز newAmount محاسبه‌شده‌ی مطلق)
+  INBOUND_RELATED_COST
+  MIGRATED         // فقط رکورد یک‌بارِ backfill داده‌های قبل از این مدل
+}
+
+model DocumentItemAmount {
+  id                                     Int                                   @id @default(autoincrement())
+  lineId                                 Int
+  priceType                              DocumentAmountPriceType
+  amount                                 Decimal                               @db.Decimal(18, 2)
+  difference                             Decimal                               @db.Decimal(18, 2)
+  effectiveDate                          DateTime                              @default(now())
+  journalEntryId                         Int?
+  // فقط برای priceType=ENGINE_PRICING/ENGINE_CORRECTION — نگاه کنید به یادداشت amounts روی GoodsPricingStatus
+  goodsPricingStatusId                   Int?
+  // فقط برای priceType=INBOUND_RELATED_COST — ردیابی به ردیف فاکتور خرید خدماتی که این رکورد را ایجاد کرده
+  servicePurchaseInvoiceAllocationId     Int?
+  createdAt                              DateTime                              @default(now())
+  createdById                            Int?
+  line                                   InventoryDocumentLine                 @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  journalEntry                           JournalEntry?                         @relation(fields: [journalEntryId], references: [id])
+  goodsPricingStatus                     GoodsPricingStatus?                   @relation(fields: [goodsPricingStatusId], references: [id], onDelete: Cascade)
+  // onDelete عمداً SetNull است، نه Cascade: این جدول تاریخچه‌ی append-only مبلغ ردیف رسید است (طبق
+  // Documents/WareHouseAmountChanges.md) — حذف بعدیِ فاکتور خرید خدماتِ ایجادکننده (مجاز فقط در وضعیت
+  // «ثبت»، از جمله بعد از یک چرخه‌ی تایید→برگشت‌ازتایید) هرگز نباید رکوردهای این جدول را که به ردیف یک
+  // سند کاملاً دیگر (رسید انبار) متعلق‌اند نابود کند؛ فقط ارجاع ردیابی (کدام فاکتور/تخصیص) پاک می‌شود،
+  // خودِ Amount/Difference برای همیشه باقی می‌ماند.
+  servicePurchaseInvoiceAllocation       ServicePurchaseInvoiceLineAllocation? @relation(fields: [servicePurchaseInvoiceAllocationId], references: [id], onDelete: SetNull)
+  createdBy                              User?                                 @relation(fields: [createdById], references: [id])
+
+  @@index([lineId])
+}
+
+// جدول موقت/کش — نه تاریخچه: طبق تصمیم صریح کاربر، هر بار که «قیمت‌گذاری اسناد انبار» با دکمه‌ی «لود
+// اطلاعات» بارگذاری می‌شود، کل این جدول (نه فقط ردیف‌های همین دوره) پاک و دوباره از صفر پر می‌شود —
+// نگاشت «این کالا، در این دوره، در کدام انبارها گردش (سند مؤثر در قیمت‌گذاری) داشته». هدف: وقتی کاربر
+// ردیف‌ها را انتخاب می‌کند و دکمه‌ی «قیمت‌گذاری» را می‌زند، لایه‌ی اعتبارسنجی (goodsPricingValidation.ts)
+// بتواند انبارهای مرتبط با کالاهای انتخاب‌شده را از همین جدول بخواند، بدون کوئری دوباره‌ی
+// InventoryDocumentLine. این فقط یک بهینه‌سازی «پیش‌بررسیِ سریع» است؛ تضمین نهایی صحت («آیا واقعاً همه‌ی
+// انبارهای مؤثر تایید شده‌اند») همچنان در لحظه‌ی اجرای priceItem/revertItem — با داده‌ی زنده‌ی همان لحظه،
+// نه این کش — انجام می‌شود (نگاه کنید به یادداشت‌های goodsPricingService.ts).
+model GoodsPricingFlowWarehouse {
+  id                Int             @id @default(autoincrement())
+  goodsItemId       Int
+  reportingPeriodId Int
+  warehouseId       Int
+  goodsItem         GoodsItem       @relation(fields: [goodsItemId], references: [id], onDelete: Cascade)
+  reportingPeriod   ReportingPeriod @relation(fields: [reportingPeriodId], references: [id], onDelete: Cascade)
+  warehouse         Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@unique([goodsItemId, reportingPeriodId, warehouseId])
 }
 
 model SalesInvoice {
@@ -1957,6 +2146,7 @@ model SalesInvoice {
   description            String?
   status                 SalesDocStatus          @default(DRAFT)
   createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @default(now()) @updatedAt
   receiptSettlementLines ReceiptSettlementLine[]
   currency               Currency                @relation(fields: [currencyId], references: [id])
   customer               Customer                @relation(fields: [customerId], references: [id])
@@ -2026,6 +2216,7 @@ model Receipt {
   description     String?
   status          TreasuryDocStatus       @default(DRAFT)
   createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @default(now()) @updatedAt
   currency        Currency                @relation(fields: [currencyId], references: [id])
   fiscalPeriod    FiscalPeriod            @relation(fields: [fiscalPeriodId], references: [id])
   party           Party                   @relation(fields: [partyId], references: [id])
@@ -2081,6 +2272,7 @@ model Payment {
   description     String?
   status          TreasuryDocStatus       @default(DRAFT)
   createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @default(now()) @updatedAt
   currency        Currency                @relation(fields: [currencyId], references: [id])
   fiscalPeriod    FiscalPeriod            @relation(fields: [fiscalPeriodId], references: [id])
   party           Party                   @relation(fields: [partyId], references: [id])
@@ -2225,6 +2417,7 @@ enum IssuingSystem {
   ACCOUNTING_EXCEL_IMPORT
   ACCOUNT_CLOSING
   OPENING_CLOSING
+  WAREHOUSE
 }
 
 enum OpeningClosingType {
@@ -2275,10 +2468,13 @@ enum GoodsItemKind {
   SERVICE
 }
 
+// طبق تصمیم صریح کاربر: چرخه‌ی عمر سند انبار برگشت — ثبت (بلافاصله در محاسبات موجودی لحاظ می‌شود) →
+// نهایی (قفل تغییرات مقداری/سرصفحه؛ برای رسید انبار خرید با «تایید حسابداری»، برای بقیه‌ی انواع با
+// «تایید انبار» به‌صورت دسته‌ای). DRAFT/VOID قدیمی هرگز برای InventoryDocument استفاده نشده‌اند (تایید
+// شده با grep کامل کدبیس)، پس بدون خطر حذف شدند.
 enum WarehouseDocStatus {
-  DRAFT
+  REGISTERED
   FINALIZED
-  VOID
 }
 
 enum WarehouseDocCreationType {
@@ -2410,6 +2606,7 @@ model ChequeDeposit {
   description    String?
   status         TreasuryDocStatus   @default(DRAFT)
   createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @default(now()) @updatedAt
   fiscalPeriod   FiscalPeriod        @relation(fields: [fiscalPeriodId], references: [id])
   bankAccount    BankAccount         @relation(fields: [bankAccountId], references: [id])
   lines          ChequeDepositLine[]
@@ -2437,6 +2634,7 @@ model ChequeDepositReturn {
   description    String?
   status         TreasuryDocStatus         @default(DRAFT)
   createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @default(now()) @updatedAt
   fiscalPeriod   FiscalPeriod              @relation(fields: [fiscalPeriodId], references: [id])
   lines          ChequeDepositReturnLine[]
 
@@ -2461,6 +2659,7 @@ model ChequeClearingReceivable {
   description    String?
   status         TreasuryDocStatus              @default(DRAFT)
   createdAt      DateTime                       @default(now())
+  updatedAt      DateTime                       @default(now()) @updatedAt
   fiscalPeriod   FiscalPeriod                   @relation(fields: [fiscalPeriodId], references: [id])
   lines          ChequeClearingReceivableLine[]
 
@@ -2486,6 +2685,7 @@ model ChequeClearingPayable {
   description    String?
   status         TreasuryDocStatus           @default(DRAFT)
   createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @default(now()) @updatedAt
   fiscalPeriod   FiscalPeriod                @relation(fields: [fiscalPeriodId], references: [id])
   lines          ChequeClearingPayableLine[]
 

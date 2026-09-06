@@ -1,6 +1,11 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { nextSerialNumber } from "../utils/coding";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const ACCOUNTING_GROUPS = findFormPrefix("accounting-groups");
+const GOODS_SERVICE_ACCOUNTING = findFormPrefix("goods-service-accounting");
 
 const router = Router();
 
@@ -12,7 +17,7 @@ router.get("/accounting-groups", async (_req, res) => {
   res.json(await prisma.accountingGroup.findMany({ orderBy: { code: "asc" } }));
 });
 
-router.post("/accounting-groups", async (req, res) => {
+router.post("/accounting-groups", can(`${ACCOUNTING_GROUPS}.create`), async (req, res) => {
   const body = req.body as { code?: number; title: string; goodsType: string; isActive?: boolean };
   if (!body.title || !body.goodsType) return res.status(400).json({ error: "عنوان و نوع کالا الزامی است" });
 
@@ -31,7 +36,7 @@ router.post("/accounting-groups", async (req, res) => {
   }
 });
 
-router.put("/accounting-groups/:id", async (req, res) => {
+router.put("/accounting-groups/:id", can(`${ACCOUNTING_GROUPS}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { title?: string; goodsType?: string; isActive?: boolean };
 
@@ -52,7 +57,7 @@ router.put("/accounting-groups/:id", async (req, res) => {
   }
 });
 
-router.delete("/accounting-groups/:id", async (req, res) => {
+router.delete("/accounting-groups/:id", can(`${ACCOUNTING_GROUPS}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const group = await prisma.accountingGroup.findUnique({ where: { id } });
   if (!group) return res.status(404).json({ error: "گروه حسابداری یافت نشد" });
@@ -70,6 +75,36 @@ router.delete("/accounting-groups/:id", async (req, res) => {
 // انواع حسابی که «گروه انبار» را الزامی می‌کنند
 const INVENTORY_TYPES = new Set(["INVENTORY"]);
 
+// انواع سند انبار مجاز برای هر نوع حساب — دقیقاً هم‌راستا با warehouseMovementService.OUTBOUND_DOC_TYPES:
+// «بستانکار رسید انبار» یعنی اسناد واردکننده (رسید)، «بدهکار حواله انبار» یعنی اسناد صادرکننده (حواله)
+const WAREHOUSE_RECEIPT_DOC_TYPES = new Set([
+  "INITIAL_INVENTORY",
+  "WAREHOUSE_RECEIPT",
+  "WAREHOUSE_TRANSFER_IN",
+  "WAREHOUSE_ADJUSTMENT",
+  "SALES_RETURN",
+  "PRODUCTION_RECEIPT",
+  "CENTER_CONSUMPTION_RETURN",
+  "PROJECT_CONSUMPTION_RETURN",
+  "PRODUCTION_CONSUMPTION_RETURN",
+]);
+const WAREHOUSE_ISSUE_DOC_TYPES = new Set([
+  "SALES_DELIVERY",
+  "CENTER_CONSUMPTION",
+  "PROJECT_CONSUMPTION",
+  "PRODUCTION_CONSUMPTION",
+  "SUPPLIER_RETURN",
+  "FIXED_ASSET_ISSUE",
+  "WAREHOUSE_TRANSFER_OUT",
+  "INVENTORY_COUNTING_SHORTAGE",
+]);
+function validWarehouseDocType(accountType: string, warehouseDocType?: string | null): boolean {
+  if (!warehouseDocType) return true;
+  if (accountType === "WAREHOUSE_RECEIPT_CREDIT") return WAREHOUSE_RECEIPT_DOC_TYPES.has(warehouseDocType);
+  if (accountType === "WAREHOUSE_ISSUE_DEBIT") return WAREHOUSE_ISSUE_DOC_TYPES.has(warehouseDocType);
+  return false;
+}
+
 router.get("/goods-service-accounting", async (_req, res) => {
   res.json(
     await prisma.goodsServiceAccountingSetting.findMany({
@@ -83,14 +118,14 @@ router.get("/goods-service-accounting", async (_req, res) => {
   );
 });
 
-router.post("/goods-service-accounting", async (req, res) => {
+router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create`), async (req, res) => {
   const body = req.body as {
     accountingGroupId: number;
     accountType: string;
     warehouseGroupId?: number | null;
     accountId: number;
     salesTypeRef?: number | null;
-    warehouseDocTypeRef?: number | null;
+    warehouseDocType?: string | null;
     purchaseTypeRef?: number | null;
   };
   if (!body.accountingGroupId || !body.accountType || !body.accountId) {
@@ -99,6 +134,10 @@ router.post("/goods-service-accounting", async (req, res) => {
 
   if (INVENTORY_TYPES.has(body.accountType) && !body.warehouseGroupId) {
     return res.status(400).json({ error: "برای این نوع حساب، گروه انبار الزامی است" });
+  }
+
+  if (!validWarehouseDocType(body.accountType, body.warehouseDocType)) {
+    return res.status(400).json({ error: "نوع سند انبار انتخاب‌شده با نوع حساب سازگار نیست" });
   }
 
   try {
@@ -117,7 +156,7 @@ router.post("/goods-service-accounting", async (req, res) => {
         warehouseGroupId: body.warehouseGroupId || null,
         accountId: body.accountId,
         salesTypeRef: body.salesTypeRef || null,
-        warehouseDocTypeRef: body.warehouseDocTypeRef || null,
+        warehouseDocType: (body.warehouseDocType || null) as any,
         purchaseTypeRef: body.purchaseTypeRef || null,
       },
       include: { accountingGroup: true, warehouseGroup: true, account: { include: { level: true } } },
@@ -128,7 +167,7 @@ router.post("/goods-service-accounting", async (req, res) => {
   }
 });
 
-router.put("/goods-service-accounting/:id", async (req, res) => {
+router.put("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as {
     accountingGroupId?: number;
@@ -136,7 +175,7 @@ router.put("/goods-service-accounting/:id", async (req, res) => {
     warehouseGroupId?: number | null;
     accountId?: number;
     salesTypeRef?: number | null;
-    warehouseDocTypeRef?: number | null;
+    warehouseDocType?: string | null;
     purchaseTypeRef?: number | null;
   };
 
@@ -149,6 +188,10 @@ router.put("/goods-service-accounting/:id", async (req, res) => {
   const accountType = body.accountType ?? setting.accountType;
   if (INVENTORY_TYPES.has(accountType) && !(body.warehouseGroupId ?? setting.warehouseGroupId)) {
     return res.status(400).json({ error: "برای این نوع حساب، گروه انبار الزامی است" });
+  }
+
+  if (body.warehouseDocType !== undefined && !validWarehouseDocType(accountType, body.warehouseDocType)) {
+    return res.status(400).json({ error: "نوع سند انبار انتخاب‌شده با نوع حساب سازگار نیست" });
   }
 
   if (body.accountId) {
@@ -167,7 +210,7 @@ router.put("/goods-service-accounting/:id", async (req, res) => {
         warehouseGroupId: body.warehouseGroupId === undefined ? undefined : body.warehouseGroupId || null,
         accountId: body.accountId,
         salesTypeRef: body.salesTypeRef === undefined ? undefined : body.salesTypeRef || null,
-        warehouseDocTypeRef: body.warehouseDocTypeRef === undefined ? undefined : body.warehouseDocTypeRef || null,
+        warehouseDocType: body.warehouseDocType === undefined ? undefined : ((body.warehouseDocType || null) as any),
         purchaseTypeRef: body.purchaseTypeRef === undefined ? undefined : body.purchaseTypeRef || null,
       },
       include: { accountingGroup: true, warehouseGroup: true, account: { include: { level: true } } },
@@ -178,7 +221,7 @@ router.put("/goods-service-accounting/:id", async (req, res) => {
   }
 });
 
-router.delete("/goods-service-accounting/:id", async (req, res) => {
+router.delete("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const setting = await prisma.goodsServiceAccountingSetting.findUnique({ where: { id } });
   if (!setting) return res.status(404).json({ error: "رکورد یافت نشد" });
