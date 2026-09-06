@@ -1,6 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useTabs } from "../lib/TabsContext";
 import { DataTable } from "./DataTable";
 import { FormPage } from "./FormPage";
 import { RefreshButton } from "./RefreshButton";
@@ -92,11 +91,7 @@ interface ItemRow {
   barcode: string | null;
   reorderControl: boolean;
   reorderPoint: string | null;
-  hasSerialNumber: boolean;
-  hasExpiryDate: boolean;
-  isSerialTracked: boolean;
-  isExpiryTracked: boolean;
-  isBatchTracked: boolean;
+  trackingMethod: "NONE" | "BATCH" | "SERIAL";
   isLocationTracked: boolean;
   accountingGroupId: number;
   isSpecial: boolean;
@@ -202,8 +197,6 @@ export function GoodsItemList({ kind }: { kind: ItemKind }) {
   const cacheKey = `/goods-items?kind=${kind}`;
   const [items, setItems] = usePersistedState<ItemRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
-  const { openTab } = useTabs();
 
   function reload() {
     api
@@ -251,8 +244,7 @@ export function GoodsItemList({ kind }: { kind: ItemKind }) {
                     { key: "barcode", label: "بارکد" },
                     { key: "reorderControl", label: "کنترل نقطه سفارش", hint: "بله / خیر" },
                     { key: "reorderPoint", label: "مقدار نقطه سفارش", hint: "اگر کنترل نقطه سفارش «بله» باشد الزامی است" },
-                    { key: "isSerialTracked", label: "سریال‌پذیر", hint: "بله / خیر" },
-                    { key: "isBatchTracked", label: "بچ‌پذیر", hint: "بله / خیر" },
+                    { key: "trackingMethod", label: "روش ردیابی", hint: "بدون ردیابی / بچ / سریال" },
                     { key: "isLocationTracked", label: "محل‌پذیر", hint: "بله / خیر" },
                   ] as const)
                 : []),
@@ -264,12 +256,10 @@ export function GoodsItemList({ kind }: { kind: ItemKind }) {
           />
           <NewRecordButton path={`${basePath}/new`} />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "کد", render: (r) => toFaDigits(r.fullCode), width: "140px", filterType: "string", filterValue: (r) => r.fullCode },
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
@@ -278,7 +268,7 @@ export function GoodsItemList({ kind }: { kind: ItemKind }) {
           { header: "فعال", render: (r) => (r.isActive ? "بله" : "خیر"), width: "70px" },
         ]}
         rows={items}
-        onEdit={(r) => openTab(`${basePath}/${r.id}/edit`)}
+        edit={{ path: (r) => `${basePath}/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -300,11 +290,7 @@ const DEFAULT_FORM = {
   barcode: "",
   reorderControl: false,
   reorderPoint: "",
-  hasSerialNumber: false,
-  hasExpiryDate: false,
-  isSerialTracked: false,
-  isExpiryTracked: false,
-  isBatchTracked: false,
+  trackingMethod: "NONE" as "NONE" | "BATCH" | "SERIAL",
   isLocationTracked: false,
   accountingGroupId: "",
   isSpecial: false,
@@ -371,11 +357,7 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
         barcode: item.barcode ?? "",
         reorderControl: item.reorderControl,
         reorderPoint: item.reorderPoint ?? "",
-        hasSerialNumber: item.hasSerialNumber,
-        hasExpiryDate: item.hasExpiryDate,
-        isSerialTracked: item.isSerialTracked,
-        isExpiryTracked: item.isExpiryTracked,
-        isBatchTracked: item.isBatchTracked,
+        trackingMethod: item.trackingMethod,
         isLocationTracked: item.isLocationTracked,
         accountingGroupId: String(item.accountingGroupId),
         isSpecial: item.isSpecial,
@@ -455,11 +437,7 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
     if (kind === "GOODS") {
       body.reorderControl = form.reorderControl;
       body.reorderPoint = form.reorderControl ? Number(form.reorderPoint) : null;
-      body.hasSerialNumber = form.hasSerialNumber;
-      body.hasExpiryDate = form.hasExpiryDate;
-      body.isSerialTracked = form.isSerialTracked;
-      body.isExpiryTracked = form.isExpiryTracked;
-      body.isBatchTracked = form.isBatchTracked;
+      body.trackingMethod = form.trackingMethod;
       body.isLocationTracked = form.isLocationTracked;
     }
 
@@ -675,16 +653,12 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
         {tab === "tracking" && kind === "GOODS" && (
           <div className="form-grid">
             <div className="form-field">
-              <label className="checkbox-row">
-                <input type="checkbox" checked={form.isSerialTracked} onChange={(e) => setForm({ ...form, isSerialTracked: e.target.checked })} />
-                سریال پذیر
-              </label>
-            </div>
-            <div className="form-field">
-              <label className="checkbox-row">
-                <input type="checkbox" checked={form.isBatchTracked} onChange={(e) => setForm({ ...form, isBatchTracked: e.target.checked })} />
-                بچ (Batch)
-              </label>
+              <label>روش ردیابی</label>
+              <select value={form.trackingMethod} onChange={(e) => setForm({ ...form, trackingMethod: e.target.value as typeof form.trackingMethod })}>
+                <option value="NONE">بدون ردیابی</option>
+                <option value="BATCH">بچ (Batch)</option>
+                <option value="SERIAL">سریال</option>
+              </select>
             </div>
             <div className="form-field">
               <label className="checkbox-row">

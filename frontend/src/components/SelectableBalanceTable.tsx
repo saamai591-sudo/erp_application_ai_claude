@@ -1,6 +1,8 @@
 import { useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { SelectId } from "../lib/useChainedMultiSelect";
 import { toFaDigits } from "../lib/formatAmount";
+import { exportGridToCsv, printGrid, deriveGridName, ExportColumn } from "../lib/gridExport";
 import { ActiveFilter, ColumnFilterType, FilterIcon, FilterPopover, matchesFilter } from "./DataTable";
 
 export interface BalanceTableColumn<T> {
@@ -33,6 +35,26 @@ export interface BalanceTableServerPaging {
   onFiltersChange?: (filters: Record<string, ActiveFilter>) => void;
 }
 
+function ExcelExportIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M14 3v5h5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M8.5 13.5 12 18M12 13.5l-3.5 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PrintIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M6 9V3h12v6" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <rect x="4" y="9" width="16" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M6 14h12v7H6z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function SortIcon({ dir }: { dir: "asc" | "desc" | null }) {
   if (!dir) {
     return (
@@ -52,6 +74,14 @@ function SortIcon({ dir }: { dir: "asc" | "desc" | null }) {
   );
 }
 
+export interface BalanceTableSelectAll {
+  checked: boolean;
+  onChange: () => void;
+  disabled?: boolean;
+  /** برای دیالوگ/راهنمای کوتاه روی چک‌باکس (مثلاً «انتخاب همه») */
+  title?: string;
+}
+
 export function SelectableBalanceTable<T extends { id: SelectId }>({
   rows,
   columns,
@@ -60,6 +90,7 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
   loading,
   emptyText,
   serverPaging,
+  selectAll,
 }: {
   rows: T[];
   columns: BalanceTableColumn<T>[];
@@ -69,6 +100,12 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
   emptyText?: string;
   /** اگر داده شود، مرتب‌سازی/صفحه‌بندی سمت سرور انجام می‌شود (به‌جای پردازش کل rows در مرورگر) */
   serverPaging?: BalanceTableServerPaging;
+  /** چک‌باکس «انتخاب همه» در هدر جدول — طبق تصمیم صریح کاربر، در حالت serverPaging باید کل نتایج
+   * مطابق فیلتر جاری را انتخاب کند (نه فقط صفحه‌ی بارگذاری‌شده)؛ چون این تصمیم/واکشی وابسته به
+   * فیلترها و اندپوینت هر صفحه است، منطق واقعی آن به‌طور کامل به فراخوان‌کننده واگذار شده (این
+   * کامپوننت فقط چک‌باکس را با وضعیت داده‌شده نمایش می‌دهد). اگر داده نشود، آن ستون خالی می‌ماند
+   * (رفتار قبلی، بدون تغییر برای مصرف‌کننده‌های دیگر). */
+  selectAll?: BalanceTableSelectAll;
 }) {
   const [sort, setSort] = useState<{ header: string; dir: "asc" | "desc" } | null>(null);
   const [filters, setFilters] = useState<Record<string, ActiveFilter>>({});
@@ -135,7 +172,18 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
     <table>
       <thead>
         <tr>
-          <th style={{ width: 34 }}></th>
+          <th style={{ width: 34 }}>
+            {selectAll && (
+              <input
+                type="checkbox"
+                checked={selectAll.checked}
+                disabled={selectAll.disabled}
+                title={selectAll.title || "انتخاب همه"}
+                onChange={selectAll.onChange}
+              />
+            )}
+          </th>
+          <th style={{ width: 44 }}>ردیف</th>
           {columns.map((c) => {
             const dir = sort?.header === c.header ? sort.dir : null;
             const hasFilter = !!c.filterType && !!c.filterValue;
@@ -171,12 +219,12 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
       <tbody>
         {sortedRows.length === 0 && (
           <tr>
-            <td colSpan={columns.length + 1} className="empty-state" style={{ border: "none" }}>
+            <td colSpan={columns.length + 2} className="empty-state" style={{ border: "none" }}>
               {emptyText || "رکوردی یافت نشد"}
             </td>
           </tr>
         )}
-        {sortedRows.map((row) => (
+        {sortedRows.map((row, idx) => (
           <tr
             key={row.id}
             className={selected.has(row.id) ? "active-list" : ""}
@@ -186,6 +234,7 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
             <td onClick={(e) => e.stopPropagation()} style={{ textAlign: "center" }}>
               <input type="checkbox" checked={selected.has(row.id)} onChange={() => onToggle(row.id)} />
             </td>
+            <td>{toFaDigits(String(pageStart + idx + 1))}</td>
             {columns.map((c) => (
               <td key={c.header}>{c.render(row)}</td>
             ))}
@@ -226,9 +275,34 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
         )
     );
 
+  // خروجی اکسل/چاپ روی داده‌ی «در دسترس» فعلی: در حالت کلاینتی کل نتیجه‌ی فیلترشده/مرتب‌شده
+  // (sortedRows)، در حالت سرور همان صفحه‌ی جاری (rows) — دقیقاً همان قرارداد DataTable
+  const exportRows = serverPaging ? rows : sortedRows;
+  // دقیقاً هم‌قرارداد DataTable: در حالت سرور exportRows فقط صفحه‌ی جاری است، پس شماره‌ی ردیف باید از
+  // pageStart ادامه پیدا کند تا با شماره‌ی نمایش‌داده‌شده روی صفحه یکی باشد.
+  const exportRowIndexBase = serverPaging ? pageStart : 0;
+  const rowIndexById = new Map(exportRows.map((r, i) => [r.id, exportRowIndexBase + i + 1]));
+  const exportColumns: ExportColumn<T>[] = [{ header: "ردیف", render: (row: T) => rowIndexById.get(row.id) ?? "" }, ...columns];
+  const location = useLocation();
+  const gridName = deriveGridName(location.pathname);
+  const exportToolbar = (
+    <div className="bulk-toolbar">
+      <span className="bulk-toolbar-info">{" "}</span>
+      <div className="bulk-toolbar-actions">
+        <button type="button" className="toolbar-icon-btn" onClick={() => exportGridToCsv(exportColumns, exportRows, gridName)} title="خروجی اکسل">
+          <ExcelExportIcon />
+        </button>
+        <button type="button" className="toolbar-icon-btn" onClick={() => printGrid(exportColumns, exportRows, gridName)} title="چاپ">
+          <PrintIcon />
+        </button>
+      </div>
+    </div>
+  );
+
   if (!serverPaging) {
     return (
       <>
+        {exportToolbar}
         <div className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
           {table}
         </div>
@@ -239,6 +313,7 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
 
   return (
     <div className="grid-wrap">
+      {exportToolbar}
       <div className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
         {table}
       </div>

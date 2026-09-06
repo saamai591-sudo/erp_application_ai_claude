@@ -153,7 +153,6 @@ function OlapList() {
   const cacheKey = "/olap-reports";
   const [items, setItems] = usePersistedState<{ id: number; title: string; updatedAt: string }[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -191,11 +190,10 @@ function OlapList() {
           <InfoHint text="گزارش‌های ماتریسی/نموداری ذخیره‌شده؛ برای ساخت گزارش تازه دکمه‌ی «جدید» را بزنید." title="گزارش تحلیلی" />
           <NewRecordButton path="/olap-reports/new" />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
-      <DataTable bulkActionsContainer={bulkSlot} columns={columns} rows={items} onEdit={(r) => navigate(`/olap-reports/${r.id}/edit`)} onDelete={onDelete} />
+      <DataTable columns={columns} rows={items} edit={{ path: (r) => `/olap-reports/${r.id}/edit` }} onDelete={onDelete} />
     </div>
   );
 }

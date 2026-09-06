@@ -9,12 +9,14 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
 import { partyDisplayName } from "./Users";
+import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 
 type RequestNature = "CENTER_REQUEST" | "PROJECT_REQUEST" | "FIXED_ASSET_REQUEST";
 type RequestStatus = "DRAFT" | "REVIEWED" | "APPROVED" | "REJECTED" | "CLOSED";
@@ -23,7 +25,7 @@ interface RequestTypeOption { id: number; code: number; title: string; nature: R
 interface OrgUnitOption { id: number; code: number; title: string }
 interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; kind: string }
 interface CostCenterOption { id: number; title: string }
-interface ProjectOption { id: number; code: number; title: string; isActive: boolean }
+interface ProjectOption { id: number; detailCode: string; title: string; isActive: boolean }
 interface PartyOption { id: number; detailCode: string; firstName: string | null; lastName: string | null; name: string | null; category: "INDIVIDUAL" | "LEGAL"; isActive: boolean }
 
 interface ListRow {
@@ -138,7 +140,6 @@ function GoodsRequestList() {
   const cacheKey = "/goods-requests";
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -176,12 +177,10 @@ function GoodsRequestList() {
           <InfoHint text={INFO_TEXT} title="درخواست کالا" />
           <NewRecordButton path="/goods-requests/new" />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
@@ -192,7 +191,7 @@ function GoodsRequestList() {
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/goods-requests/${r.id}/edit`)}
+        edit={{ path: (r) => `/goods-requests/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -240,11 +239,12 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [focusedRow, setFocusedRow] = useState<number | null>(null);
+  const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const { saved, flash } = useSavedFlash();
 
   useEffect(() => {
     async function init() {
-      const [types, units, items, ccs, projs, pts]: [RequestTypeOption[], OrgUnitOption[], GoodsItemRow[], CostCenterOption[], ProjectOption[], PartyOption[]] =
+      const [types, units, items, ccs, projs, pts, fp]: [RequestTypeOption[], OrgUnitOption[], GoodsItemRow[], CostCenterOption[], ProjectOption[], PartyOption[], FiscalPeriodRange | null] =
         await Promise.all([
           api.get("/goods-request-types"),
           api.get("/org-units"),
@@ -252,6 +252,7 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
           api.get("/cost-centers"),
           api.get("/projects").catch(() => []),
           api.get("/parties?category=INDIVIDUAL"),
+          fetchSelectedFiscalPeriod(),
         ]);
       setRequestTypes(types);
       setOrgUnits(units);
@@ -259,6 +260,7 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
       setCostCenters(ccs);
       setProjects(projs);
       setParties(pts);
+      setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
         setLoaded(true);
@@ -285,7 +287,7 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
           }))
         );
       } else {
-        setHeader({ requestTypeId: "", orgUnitId: "", date: "", description: "" });
+        setHeader({ requestTypeId: "", orgUnitId: "", date: defaultDocumentDate(fp), description: "" });
         setRows([emptyRow(), emptyRow()]);
         setMeta(null);
       }
@@ -362,6 +364,8 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
     if (!header.requestTypeId) return setError("نوع درخواست الزامی است");
     if (!header.orgUnitId) return setError("واحد سازمانی الزامی است");
     if (!header.date) return setError("تاریخ الزامی است");
+    const dateErr = validateDocumentDate(header.date, fiscalPeriod);
+    if (dateErr) return setError(dateErr);
     const body = buildBody();
     if (body.lines.length === 0) return setError("درخواست باید حداقل یک ردیف کالا داشته باشد");
     for (const [i, l] of body.lines.entries()) {
@@ -479,12 +483,12 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
             <div><span className="badge">{STATUS_FA[status]}</span></div>
           </div>
           <div className="form-field">
-            <label>تاریخ</label>
+            <label>تاریخ<RequiredMark /></label>
             <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
           </div>
           <div className="form-field">
             <label>
-              نوع درخواست
+              نوع درخواست<RequiredMark />
               {hasAnyLine && <FieldHint label="نوع درخواست" text="این درخواست ردیف کالا دارد؛ امکان تغییر نوع وجود ندارد" />}
             </label>
             <select value={header.requestTypeId} onChange={(e) => setHeader({ ...header, requestTypeId: e.target.value })} disabled={requestTypeDisabled}>
@@ -493,7 +497,7 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
             </select>
           </div>
           <div className="form-field">
-            <label>واحد سازمانی</label>
+            <label>واحد سازمانی<RequiredMark /></label>
             <select value={header.orgUnitId} onChange={(e) => setHeader({ ...header, orgUnitId: e.target.value })}>
               <option value="">انتخاب کنید</option>
               {orgUnits.map((u) => <option key={u.id} value={u.id}>{u.title}</option>)}

@@ -56,6 +56,7 @@ export function FormPage({
   extraActions,
   saveDisabled,
   wide,
+  fillHeight,
   children,
 }: {
   title: string;
@@ -74,6 +75,11 @@ export function FormPage({
   saveDisabled?: boolean;
   /** برای فرم‌های عریض (مثل سند حسابداری با جدول ردیف‌ها) سقف عرض ۷۲۰ پیکسل حذف می‌شود */
   wide?: boolean;
+  /** opt-in برای فرم‌هایی که گرید ردیف‌شان باید خودش اسکرول شود و فوتر/بخش زیرِ گرید همیشه بدون اسکرول
+   * دیده شود (مثلاً سند حسابداری) — کارت را به یک ستون flex پرکننده‌ی ارتفاع تبدیل می‌کند تا زنجیره‌ی
+   * flex:1 موجودِ grid-wrap/grid-scroll-area واقعاً اثر کند؛ روی بقیه‌ی فرم‌های wide (که این را نمی‌دهند)
+   * هیچ تاثیری ندارد. */
+  fillHeight?: boolean;
   children: ReactNode;
 }) {
   const navigate = useNavigate();
@@ -140,7 +146,7 @@ export function FormPage({
           )}
         </div>
       </div>
-      <div className="card" style={{ padding: 16, maxWidth: "100%" }}>
+      <div className={`card${fillHeight ? " card-fill-height" : ""}`} style={{ padding: 16, maxWidth: "100%" }}>
         {children}
       </div>
     </div>

@@ -9,6 +9,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { ExcelImportButton } from "../components/ExcelImport";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 
 interface CostCenter { id: number; detailCode: string; title: string; type: string; orgUnitId?: number; orgUnit: { title: string } }
@@ -35,7 +36,6 @@ function CostCenterList() {
   const cacheKey = "/cost-centers";
   const [items, setItems] = usePersistedState<CostCenter[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -74,12 +74,11 @@ function CostCenterList() {
             ]}
             onDone={reload}
           />
-          <RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
+          <RefreshButton onClick={reload} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "کد", render: (r) => toFaDigits(r.detailCode), width: "100px", filterType: "string", filterValue: (r) => r.detailCode },
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
@@ -87,7 +86,7 @@ function CostCenterList() {
           { header: "واحد سازمانی", render: (r) => r.orgUnit?.title, filterType: "string", filterValue: (r) => r.orgUnit?.title },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/cost-centers/${r.id}/edit`)}
+        edit={{ path: (r) => `/cost-centers/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -162,17 +161,17 @@ function CostCenterForm({ editId }: { editId?: number }) {
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
-            <label>عنوان</label>
+            <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
           </div>
           <div className="form-field">
-            <label>نوع</label>
+            <label>نوع<RequiredMark /></label>
             <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
               {Object.entries(TYPE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </div>
           <div className="form-field full">
-            <label>واحد سازمانی</label>
+            <label>واحد سازمانی<RequiredMark /></label>
             <select value={form.orgUnitId} onChange={(e) => setForm({ ...form, orgUnitId: e.target.value })}>
               <option value="">انتخاب کنید</option>
               {orgUnits.map((u) => <option key={u.id} value={u.id}>{u.title}</option>)}

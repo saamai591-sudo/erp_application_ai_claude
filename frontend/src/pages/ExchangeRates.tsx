@@ -13,6 +13,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { Currency } from "./Currencies";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 
 interface Rate { id: number; date: string; rate: string; currency: Currency }
 
@@ -30,7 +31,6 @@ function RateList() {
   const cacheKey = "/exchange-rates";
   const [rates, setRates] = usePersistedState<Rate[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -54,18 +54,17 @@ function RateList() {
   return (
     <div>
       <div className="page-header">
-        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`ثبت روزانه نرخ تسعیر برای ارزهای غیر پایه`} title="نرخ ارز" /><NewRecordButton path="/exchange-rates/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
+        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`ثبت روزانه نرخ تسعیر برای ارزهای غیر پایه`} title="نرخ ارز" /><NewRecordButton path="/exchange-rates/new" /><RefreshButton onClick={reload} /></div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
           { header: "ارز", render: (r) => r.currency.title, filterType: "string", filterValue: (r) => r.currency.title },
           { header: "نرخ", render: (r) => formatAmountFa(r.rate), filterType: "number", filterValue: (r) => r.rate },
         ]}
         rows={rates}
-        onEdit={(r) => navigate(`/exchange-rates/${r.id}/edit`)}
+        edit={{ path: (r) => `/exchange-rates/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -146,11 +145,11 @@ function RateForm({ editId }: { editId?: number }) {
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
-            <label>تاریخ</label>
+            <label>تاریخ<RequiredMark /></label>
             <JalaliDatePicker value={form.date} onChange={(v) => setForm({ ...form, date: v })} placeholder="انتخاب تاریخ" />
           </div>
           <div className="form-field">
-            <label>ارز (بدون ارز پایه)</label>
+            <label>ارز (بدون ارز پایه)<RequiredMark /></label>
             <select disabled={!!editId} value={form.currencyId} onChange={(e) => setForm({ ...form, currencyId: e.target.value })}>
               <option value="">انتخاب کنید</option>
               {currencies.filter((c) => !c.isBase).map((c) => (
@@ -159,7 +158,7 @@ function RateForm({ editId }: { editId?: number }) {
             </select>
           </div>
           <div className="form-field">
-            <label>نرخ ارز</label>
+            <label>نرخ ارز<RequiredMark /></label>
             <AmountInput value={form.rate} onChange={(v) => setForm({ ...form, rate: v })} allowDecimal placeholder="۰" />
           </div>
         </div>

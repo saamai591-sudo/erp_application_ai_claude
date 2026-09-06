@@ -13,6 +13,8 @@ export function RecordPickerField<T extends { id: number | string }>({
   rows,
   columns,
   onSelect,
+  onSelectMultiple,
+  multiSelect,
   onOpen,
   placeholder,
   disabled,
@@ -23,8 +25,17 @@ export function RecordPickerField<T extends { id: number | string }>({
   displayValue: string;
   rows: T[];
   columns: PickerColumn<T>[];
-  onSelect: (row: T) => void;
-  onOpen?: () => void;
+  onSelect?: (row: T) => void;
+  /** فقط در حالت multiSelect استفاده می‌شود — با تایید دیالوگ، همه‌ی ردیف‌های تیک‌خورده یک‌جا برگردانده
+   * می‌شوند (طبق تصمیم صریح کاربر: «انتخابگرهای سطح ردیف» باید امکان انتخاب چندتایی و افزودن یک‌جا به
+   * گرید را داشته باشند) */
+  onSelectMultiple?: (rows: T[]) => void;
+  /** اگر true باشد، دیالوگ به‌جای انتخاب تک‌ردیفی (کلیک=انتخاب، دابل‌کلیک=تایید فوری)، هر ردیف را با
+   * چک‌باکس تیک می‌زند و «تایید» همه‌ی ردیف‌های تیک‌خورده را با onSelectMultiple برمی‌گرداند */
+  multiSelect?: boolean;
+  /** اگر مقدار بازگشتی دقیقاً false باشد، دیالوگ باز نمی‌شود (برای گیت کردن باز شدن انتخابگر پشتِ یک
+   * پیش‌شرط، مثل الزامی‌بودن فیلدهای سرصفحه — نگاه کنید به guardRowEntry در فرم‌های مبنادار) */
+  onOpen?: () => void | boolean;
   placeholder?: string;
   disabled?: boolean;
   title: string;
@@ -41,7 +52,7 @@ export function RecordPickerField<T extends { id: number | string }>({
           className="picker-field"
           disabled={disabled}
           onClick={() => {
-            onOpen?.();
+            if (onOpen?.() === false) return;
             setOpen(true);
           }}
         >
@@ -59,8 +70,13 @@ export function RecordPickerField<T extends { id: number | string }>({
           title={title}
           rows={rows}
           columns={columns}
+          multiSelect={multiSelect}
           onSelect={(row) => {
-            onSelect(row);
+            onSelect?.(row);
+            setOpen(false);
+          }}
+          onSelectMultiple={(selectedRows) => {
+            onSelectMultiple?.(selectedRows);
             setOpen(false);
           }}
           onClose={() => setOpen(false)}
@@ -74,17 +90,22 @@ function RecordPickerDialog<T extends { id: number | string }>({
   title,
   rows,
   columns,
+  multiSelect,
   onSelect,
+  onSelectMultiple,
   onClose,
 }: {
   title: string;
   rows: T[];
   columns: PickerColumn<T>[];
+  multiSelect?: boolean;
   onSelect: (row: T) => void;
+  onSelectMultiple?: (rows: T[]) => void;
   onClose: () => void;
 }) {
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [selectedId, setSelectedId] = useState<string | number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string | number>>(new Set());
   const [sort, setSort] = useState<{ header: string; dir: "asc" | "desc" } | null>(
     columns[0] ? { header: columns[0].header, dir: "asc" } : null
   );
@@ -117,7 +138,33 @@ function RecordPickerDialog<T extends { id: number | string }>({
     });
   }
 
+  function toggleRowSelection(id: string | number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  const allVisibleSelected = filteredRows.length > 0 && filteredRows.every((r) => selectedIds.has(r.id));
+  function toggleAllVisible() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) filteredRows.forEach((r) => next.delete(r.id));
+      else filteredRows.forEach((r) => next.add(r.id));
+      return next;
+    });
+  }
+
   function confirm() {
+    if (multiSelect) {
+      // طبق تصمیم صریح کاربر: انتخاب چندتایی روی همه‌ی rows (نه فقط filteredRows) کار می‌کند تا اگر
+      // کاربر بعد از تیک‌زدن چند ردیف، فیلتر را عوض کند، ردیف‌های قبلاً تیک‌خورده که موقتاً از دید فیلتر
+      // پنهان شده‌اند هم در نتیجه‌ی نهایی حفظ شوند.
+      const selectedRows = rows.filter((r) => selectedIds.has(r.id));
+      if (selectedRows.length > 0) onSelectMultiple?.(selectedRows);
+      return;
+    }
     const row = filteredRows.find((r) => r.id === selectedId);
     if (row) onSelect(row);
   }
@@ -128,6 +175,11 @@ function RecordPickerDialog<T extends { id: number | string }>({
         <table className="picker-table">
           <thead>
             <tr>
+              {multiSelect && (
+                <th style={{ width: 34 }}>
+                  <input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} />
+                </th>
+              )}
               {columns.map((c) => {
                 const dir = sort?.header === c.header ? sort.dir : null;
                 return (
@@ -141,6 +193,7 @@ function RecordPickerDialog<T extends { id: number | string }>({
               })}
             </tr>
             <tr>
+              {multiSelect && <th style={{ width: 34 }}></th>}
               {columns.map((c) => (
                 <th key={c.header} style={{ width: c.width }}>
                   <input
@@ -156,27 +209,40 @@ function RecordPickerDialog<T extends { id: number | string }>({
           <tbody>
             {filteredRows.length === 0 && (
               <tr>
-                <td colSpan={columns.length} className="empty-state" style={{ border: "none" }}>موردی یافت نشد</td>
+                <td colSpan={columns.length + (multiSelect ? 1 : 0)} className="empty-state" style={{ border: "none" }}>موردی یافت نشد</td>
               </tr>
             )}
-            {filteredRows.map((row) => (
-              <tr
-                key={row.id}
-                className={selectedId === row.id ? "active-list" : ""}
-                onClick={() => setSelectedId(row.id)}
-                onDoubleClick={() => onSelect(row)}
-                style={{ cursor: "pointer" }}
-              >
-                {columns.map((c) => (
-                  <td key={c.header}>{c.render(row)}</td>
-                ))}
-              </tr>
-            ))}
+            {filteredRows.map((row) =>
+              multiSelect ? (
+                <tr key={row.id} className={selectedIds.has(row.id) ? "active-list" : ""} onClick={() => toggleRowSelection(row.id)} style={{ cursor: "pointer" }}>
+                  <td>
+                    <input type="checkbox" checked={selectedIds.has(row.id)} onChange={() => toggleRowSelection(row.id)} onClick={(e) => e.stopPropagation()} />
+                  </td>
+                  {columns.map((c) => (
+                    <td key={c.header}>{c.render(row)}</td>
+                  ))}
+                </tr>
+              ) : (
+                <tr
+                  key={row.id}
+                  className={selectedId === row.id ? "active-list" : ""}
+                  onClick={() => setSelectedId(row.id)}
+                  onDoubleClick={() => onSelect(row)}
+                  style={{ cursor: "pointer" }}
+                >
+                  {columns.map((c) => (
+                    <td key={c.header}>{c.render(row)}</td>
+                  ))}
+                </tr>
+              )
+            )}
           </tbody>
         </table>
       </div>
       <div className="actions">
-        <button type="button" className="btn" disabled={selectedId === null} onClick={confirm}>تایید</button>
+        <button type="button" className="btn" disabled={multiSelect ? selectedIds.size === 0 : selectedId === null} onClick={confirm}>
+          {multiSelect && selectedIds.size > 0 ? `تایید (${selectedIds.size})` : "تایید"}
+        </button>
         <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
       </div>
     </Modal>

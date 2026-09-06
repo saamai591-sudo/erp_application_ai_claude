@@ -4,6 +4,7 @@ import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { api } from "../lib/api";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 
 interface StatusResponse {
   fiscalPeriodId: number;
@@ -86,7 +87,7 @@ export default function DocumentConfirmation() {
         )}
         <div className="form-grid" style={{ marginBottom: 16, maxWidth: 700 }}>
           <div className="form-field">
-            <label>تایید تا تاریخ</label>
+            <label>تایید تا تاریخ<RequiredMark /></label>
             <JalaliDatePicker value={date} onChange={onDateChange} />
           </div>
           <div className="form-field">

@@ -8,6 +8,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
@@ -63,7 +64,6 @@ function BatchList() {
   const cacheKey = "/batches";
   const [items, setItems] = usePersistedState<Batch[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -90,12 +90,10 @@ function BatchList() {
           <InfoHint text={`تعریف بچ کالا — بر اساس (کالا، شماره بچ) یکتا؛ تاریخ انقضا فقط اینجا نگه‌داری می‌شود`} title="بچ" />
           <NewRecordButton path="/batches/new" />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "کالا", render: (r) => `${toFaDigits(r.goodsItem.fullCode)} — ${r.goodsItem.title}`, filterType: "string", filterValue: (r) => r.goodsItem.title },
           { header: "شماره بچ", render: (r) => r.batchNumber, filterType: "string", filterValue: (r) => r.batchNumber },
@@ -105,7 +103,7 @@ function BatchList() {
           { header: "فعال", render: (r) => (r.isActive ? "بله" : "خیر"), width: "70px" },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/batches/${r.id}/edit`)}
+        edit={{ path: (r) => `/batches/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -135,7 +133,7 @@ function BatchForm({ editId }: { editId?: number }) {
   const { saved, flash } = useSavedFlash();
 
   useEffect(() => {
-    api.get("/goods-items?kind=GOODS").then(setGoodsItems).catch(() => {});
+    api.get("/goods-items?kind=GOODS&trackingMethod=BATCH").then(setGoodsItems).catch(() => {});
     api.get("/parties").then(setParties).catch(() => {});
   }, []);
 
@@ -232,7 +230,7 @@ function BatchForm({ editId }: { editId?: number }) {
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
-            <label>کالا</label>
+            <label>کالا<RequiredMark /></label>
             <RecordPickerField
               title="انتخاب کالا"
               disabled={!!editId}
@@ -246,7 +244,7 @@ function BatchForm({ editId }: { editId?: number }) {
             />
           </div>
           <div className="form-field">
-            <label>شماره بچ</label>
+            <label>شماره بچ<RequiredMark /></label>
             <div style={{ display: "flex", gap: 6 }}>
               <input value={form.batchNumber} onChange={(e) => setForm({ ...form, batchNumber: e.target.value })} autoFocus style={{ flex: 1 }} />
               <button type="button" className="btn secondary" onClick={suggestNumber}>پیشنهاد</button>

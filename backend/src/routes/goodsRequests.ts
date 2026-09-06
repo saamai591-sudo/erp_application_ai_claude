@@ -2,6 +2,12 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
+import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { assertRecordNotStale } from "../utils/concurrency";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("goods-requests");
 
 // =========================================================================
 // سند «درخواست کالا» — طبق مستند پروژه «درخواست کالا»
@@ -40,6 +46,7 @@ async function validateHeaderRefs(requestTypeId: number, orgUnitId: number) {
 async function resolveFiscalPeriod(date: Date) {
   const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
   if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
+  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
   await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
   return fiscalPeriod;
 }
@@ -106,7 +113,7 @@ async function hasDownstreamUsage(goodsRequestId: number) {
 // که باید ردیف‌های تایید‌شده‌ی درخواست کالا با مانده مثبت را برای انتخاب نمایش دهند.
 // شرط «طرف مقابل آیتم با طرف مقابل فرم مقصد یکسان باشد» چون درخواست کالا در این پیاده‌سازی مفهوم
 // «طرف مقابل سند» ندارد، اعمال نشده (رجوع به مستند claude/سرویس-درخواست-کالا-و-تامین.md).
-router.get("/pickable-lines", async (req, res) => {
+router.get("/pickable-lines", can(`${FORM}.view`), async (req, res) => {
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
 
   const lines = await prisma.goodsRequestLine.findMany({
@@ -150,7 +157,7 @@ router.get("/pickable-lines", async (req, res) => {
   res.json(result);
 });
 
-router.get("/", async (_req, res) => {
+router.get("/", can(`${FORM}.view`), async (_req, res) => {
   const items = await prisma.goodsRequest.findMany({
     include: { requestType: true, orgUnit: true, lines: true },
     orderBy: { id: "desc" },
@@ -172,7 +179,7 @@ router.get("/", async (_req, res) => {
   );
 });
 
-router.get("/:id", async (req, res) => {
+router.get("/:id", can(`${FORM}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.goodsRequest.findUnique({
     where: { id },
@@ -205,6 +212,7 @@ router.get("/:id", async (req, res) => {
     approverId: d.approverId,
     approverName: d.approver ? `${d.approver.firstName} ${d.approver.lastName}`.trim() : null,
     approvedAt: d.approvedAt,
+    updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
       id: l.id,
       goodsItemId: l.goodsItemId,
@@ -226,7 +234,7 @@ router.get("/:id", async (req, res) => {
   });
 });
 
-router.post("/", async (req: AuthedRequest, res) => {
+router.post("/", can(`${FORM}.create`), async (req: AuthedRequest, res) => {
   const body = req.body as HeaderBody;
   if (!body.date || !body.requestTypeId || !body.orgUnitId) {
     return res.status(400).json({ error: "تاریخ، نوع درخواست و واحد سازمانی الزامی است" });
@@ -262,7 +270,7 @@ router.post("/", async (req: AuthedRequest, res) => {
   }
 });
 
-router.put("/:id", async (req: AuthedRequest, res) => {
+router.put("/:id", can(`${FORM}.edit`), async (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const body = req.body as HeaderBody;
 
@@ -287,6 +295,7 @@ router.put("/:id", async (req: AuthedRequest, res) => {
   }
 
   try {
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این درخواست کالا");
     const { requestType, orgUnit } = await validateHeaderRefs(body.requestTypeId, body.orgUnitId);
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
@@ -316,7 +325,7 @@ router.put("/:id", async (req: AuthedRequest, res) => {
 });
 
 // ویرایش مقدار تایید شده/شرح تایید هر ردیف — تنها ویرایش مجاز در وضعیت «بررسی شده»
-router.put("/:id/approved-lines", async (req, res) => {
+router.put("/:id/approved-lines", can(`${FORM}.editApprovedLines`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { lines: { id: number; approvedQuantity: number; approvalDescription?: string | null }[] };
 
@@ -345,7 +354,7 @@ router.put("/:id/approved-lines", async (req, res) => {
   }
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.goodsRequest.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -356,7 +365,7 @@ router.delete("/:id", async (req, res) => {
 });
 
 // بررسی: از ثبت → بررسی‌شده
-router.post("/:id/review", async (req, res) => {
+router.post("/:id/review", can(`${FORM}.review`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.goodsRequest.findUnique({ where: { id }, include: { lines: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -373,7 +382,7 @@ router.post("/:id/review", async (req, res) => {
 });
 
 // برگشت از بررسی: از بررسی‌شده → ثبت
-router.post("/:id/unreview", async (req, res) => {
+router.post("/:id/unreview", can(`${FORM}.unreview`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.goodsRequest.findUnique({ where: { id }, include: { lines: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -387,7 +396,7 @@ router.post("/:id/unreview", async (req, res) => {
 });
 
 // تایید: از ثبت یا بررسی‌شده → تایید
-router.post("/:id/approve", async (req: AuthedRequest, res) => {
+router.post("/:id/approve", can(`${FORM}.approve`), async (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const d = await prisma.goodsRequest.findUnique({ where: { id }, include: { lines: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -415,7 +424,7 @@ router.post("/:id/approve", async (req: AuthedRequest, res) => {
 });
 
 // برگشت از تایید: از تایید → بررسی‌شده (مسدود اگر گردش دارد)
-router.post("/:id/unapprove", async (req, res) => {
+router.post("/:id/unapprove", can(`${FORM}.unapprove`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.goodsRequest.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -427,7 +436,7 @@ router.post("/:id/unapprove", async (req, res) => {
 });
 
 // رد درخواست: از ثبت → رد
-router.post("/:id/reject", async (req, res) => {
+router.post("/:id/reject", can(`${FORM}.reject`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.goodsRequest.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -437,7 +446,7 @@ router.post("/:id/reject", async (req, res) => {
 });
 
 // برگشت از رد: از رد → ثبت
-router.post("/:id/unreject", async (req, res) => {
+router.post("/:id/unreject", can(`${FORM}.unreject`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.goodsRequest.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -447,7 +456,7 @@ router.post("/:id/unreject", async (req, res) => {
 });
 
 // پایان درخواست: از تایید → پایان
-router.post("/:id/close", async (req, res) => {
+router.post("/:id/close", can(`${FORM}.close`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.goodsRequest.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });

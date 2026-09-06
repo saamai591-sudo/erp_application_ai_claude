@@ -1,7 +1,14 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
+import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { recomputeCashBoxHasTransactions, recomputeBankAccountHasTransactions } from "../utils/treasuryTracking";
+import { assertRecordNotStale } from "../utils/concurrency";
+import { withoutFiscalPeriodScope } from "../lib/requestContext";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("payments");
 
 // =========================================================================
 // ماژول «خزانه‌داری» > پرداخت (Payment)
@@ -59,6 +66,7 @@ interface HeaderBody {
 async function resolveFiscalPeriod(date: Date) {
   const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
   if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
+  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
   await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
   return fiscalPeriod;
 }
@@ -157,16 +165,20 @@ function partyDisplay(p: any) {
 // پیکرهای مانده برای انتخاب فاکتور خرید قابل تسویه
 // =========================================================================
 
-router.get("/payments/pickable-purchase-invoices", async (req, res) => {
+router.get("/payments/pickable-purchase-invoices", can(`${FORM}.view`), async (req, res) => {
   const partyId = req.query.partyId ? Number(req.query.partyId) : null;
   const excludePaymentId = req.query.excludePaymentId ? Number(req.query.excludePaymentId) : undefined;
   if (!partyId) return res.json([]);
 
-  const invoices = await prisma.purchaseInvoice.findMany({
-    where: { partyId, status: "APPROVED" },
-    include: { lines: true, otherCostLines: true, paymentSettlementLines: { include: { payment: true } }, currency: true },
-    orderBy: { id: "desc" },
-  });
+  // فاکتور باز ممکن است متعلق به دوره مالی قبلی باشد (هنوز تسویه نشده) — پس عمداً به دوره مالی جاری
+  // محدود نمی‌شود، برخلاف لیست عادی فاکتورهای خرید.
+  const invoices = await withoutFiscalPeriodScope(() =>
+    prisma.purchaseInvoice.findMany({
+      where: { partyId, status: "APPROVED" },
+      include: { lines: true, otherCostLines: true, paymentSettlementLines: { include: { payment: true } }, currency: true },
+      orderBy: { id: "desc" },
+    })
+  );
 
   const result = invoices
     .map((inv: any) => {
@@ -197,7 +209,7 @@ router.get("/payments/pickable-purchase-invoices", async (req, res) => {
 // CRUD + تایید/برگشت از تایید
 // =========================================================================
 
-router.get("/payments", async (_req, res) => {
+router.get("/payments", can(`${FORM}.view`), async (_req, res) => {
   const items = await prisma.payment.findMany({
     include: { party: true, fiscalPeriod: true, currency: true, instrumentLines: true, settlementLines: true },
     orderBy: { id: "desc" },
@@ -219,7 +231,7 @@ router.get("/payments", async (_req, res) => {
   );
 });
 
-router.get("/payments/:id", async (req, res) => {
+router.get("/payments/:id", can(`${FORM}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.payment.findUnique({
     where: { id },
@@ -244,6 +256,7 @@ router.get("/payments/:id", async (req, res) => {
     currencyTitle: d.currency.title,
     description: d.description,
     status: d.status,
+    updatedAt: d.updatedAt,
     instrumentLines: d.instrumentLines.map((l: any) => ({
       id: l.id,
       type: l.type,
@@ -275,7 +288,7 @@ router.get("/payments/:id", async (req, res) => {
   });
 });
 
-router.post("/payments", async (req, res) => {
+router.post("/payments", can(`${FORM}.create`), async (req, res) => {
   const body = req.body as HeaderBody;
   if (!body.date) return res.status(400).json({ error: "تاریخ سند الزامی است" });
   if (!body.partyId) return res.status(400).json({ error: "طرف حساب الزامی است" });
@@ -315,7 +328,7 @@ router.post("/payments", async (req, res) => {
   }
 });
 
-router.put("/payments/:id", async (req, res) => {
+router.put("/payments/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as HeaderBody;
 
@@ -328,6 +341,7 @@ router.put("/payments/:id", async (req, res) => {
   if (!body.currencyId) return res.status(400).json({ error: "ارز الزامی است" });
 
   try {
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سند");
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const party = await prisma.party.findUnique({ where: { id: body.partyId } });
@@ -360,7 +374,7 @@ router.put("/payments/:id", async (req, res) => {
   }
 });
 
-router.delete("/payments/:id", async (req, res) => {
+router.delete("/payments/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.payment.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -369,7 +383,7 @@ router.delete("/payments/:id", async (req, res) => {
   res.status(204).send();
 });
 
-router.post("/payments/:id/approve", async (req, res) => {
+router.post("/payments/:id/approve", can(`${FORM}.approve`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.payment.findUnique({ where: { id }, include: { instrumentLines: true, settlementLines: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -443,7 +457,7 @@ router.post("/payments/:id/approve", async (req, res) => {
   }
 });
 
-router.post("/payments/:id/unapprove", async (req, res) => {
+router.post("/payments/:id/unapprove", can(`${FORM}.unapprove`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.payment.findUnique({
     where: { id },
@@ -491,7 +505,7 @@ router.post("/payments/:id/unapprove", async (req, res) => {
 //     ویرایش درجا (شماره/سررسید/شعبه/حساب صادرکننده/مبلغ) است.
 //   - چک دریافتنیِ خرج‌شده (direction=RECEIVABLE، متعلق به سند دیگری): چون اطلاعات اصلی چک به آن
 //     سند دیگر تعلق دارد، فقط قابل «حذف» (برگشت به در دست) است، نه ویرایش شماره/سررسید/شعبه/مبلغ آن.
-router.put("/payments/:id/edit-approved", async (req, res) => {
+router.put("/payments/:id/edit-approved", can(`${FORM}.editApproved`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { description?: string; instrumentLines: (InstrumentLineInput & { id?: number })[]; settlementLines: SettlementLineInput[] };
 

@@ -128,7 +128,7 @@ function ChequeList() {
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/cheques/${r.id}`)}
+        edit={{ path: (r) => `/cheques/${r.id}` }}
       />
     </div>
   );

@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import { SIGNED_TYPES } from "./warehouseStockService";
 
 /**
  * سرویس مرکزی بچ، طبق stockAnalysis.md بند ۱۶: «تمام ایجاد و Validation مربوط به Batch باید از یک
@@ -68,4 +69,24 @@ export async function validateBatch(goodsItemId: number, batchId: number) {
 export async function generateBatchNumber(goodsItemId: number): Promise<string> {
   const count = await prisma.batch.count({ where: { goodsItemId } });
   return `B${String(count + 1).padStart(4, "0")}`;
+}
+
+/**
+ * موجودی فعلی یک بچ (اطلاعاتی، برای ستون «تعداد» پیکر بچ طبق «انتخاب سریال و بچ») — دقیقا هم‌الگوی
+ * SIGNED_TYPES در warehouseStockService.ts (وارده +۱ / صادره -۱)، فقط به‌جای گروه‌بندی بر اساس انبار،
+ * بر اساس همین بچ (از طریق InventoryLineBatch) جمع می‌شود. مقدار سقف موجودی برای هر بچ کنترل نمی‌شود
+ * (طبق مستند، فقط تجمیع تخصیص‌های یک ردیف باید با مقدار ردیف برابر باشد، نه سقف موجودی بچ).
+ */
+export async function computeBatchAvailableQuantity(batchId: number): Promise<number> {
+  const sums = await Promise.all(
+    SIGNED_TYPES.map((rule) =>
+      prisma.inventoryLineBatch
+        .findMany({
+          where: { batchId, line: { document: { documentType: rule.documentType as any } } },
+          select: { quantity: true },
+        })
+        .then((rows) => rule.sign * rows.reduce((s, r) => s + Number(r.quantity), 0))
+    )
+  );
+  return sums.reduce((s, v) => s + v, 0);
 }

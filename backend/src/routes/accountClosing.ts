@@ -3,6 +3,11 @@ import { prisma } from "../lib/prisma";
 import { resolveDetailTitles } from "../utils/detailValues";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { computeFullAccountCode } from "../utils/accountCode";
+import { formatJalaliDateForMessage } from "../utils/jalaliDate";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("account-closing");
 
 const router = Router();
 
@@ -18,13 +23,33 @@ async function rootNatureGroup(accountId: number, byId: Map<number, any>): Promi
 }
 
 // حسابهای سود و زیانیِ دارای مانده تا تاریخ مشخص‌شده، به تفکیک حساب و تفصیل‌ها
-router.get("/available-lines", async (req, res) => {
+router.get("/available-lines", can(`${FORM}.view`), async (req, res) => {
   const toDate = req.query.toDate as string;
   if (!toDate) return res.status(400).json({ error: "تاریخ مشخص نشده است" });
 
   const date = new Date(toDate);
   const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
   if (!fiscalPeriod) return res.status(400).json({ error: "این تاریخ در هیچ دوره مالی تعریف نشده است" });
+
+  // طبق تصمیم صریح کاربر: پیش از بارگذاری اطلاعات، هر انباری که تا تاریخ پایان دوره‌ی انتخاب‌شده در
+  // سرصفحه راه‌اندازی شده (implementationDate آن قبل از این تاریخ باشد) باید حداقل تا همین تاریخ
+  // «تایید انبار» شده باشد (confirmedDate >= تاریخ پایان دوره)؛ وگرنه مانده‌های حسابداریِ بارگذاری‌شده
+  // ممکن است بر مبنای موجودی/قیمت‌گذاری هنوز نهایی‌نشده‌ی انبار باشند.
+  const unconfirmedWarehouses = await prisma.warehouse.findMany({
+    where: {
+      implementationDate: { not: null, lt: date },
+      OR: [{ confirmedDate: null }, { confirmedDate: { lt: date } }],
+    },
+    select: { title: true, confirmedDate: true },
+  });
+  if (unconfirmedWarehouses.length > 0) {
+    const list = unconfirmedWarehouses
+      .map((w) => `«${w.title}» (${w.confirmedDate ? `تایید تا ${formatJalaliDateForMessage(w.confirmedDate)}` : "هرگز تایید نشده"})`)
+      .join("، ");
+    return res.status(400).json({
+      error: `انبارهای زیر تا تاریخ پایان دوره‌ی انتخاب‌شده تایید نشده‌اند؛ ابتدا باید تا این تاریخ «تایید انبار» شوند: ${list}`,
+    });
+  }
 
   const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
   if (!baseCurrency) return res.status(400).json({ error: "ارز پایه تعریف نشده است" });
@@ -99,7 +124,7 @@ router.get("/available-lines", async (req, res) => {
   res.json(results);
 });
 
-router.get("/", async (_req, res) => {
+router.get("/", can(`${FORM}.view`), async (_req, res) => {
   const items = await prisma.accountClosing.findMany({
     include: { destinationAccount: true, journalEntry: true, lines: true },
     orderBy: { id: "desc" },
@@ -124,7 +149,7 @@ router.get("/", async (_req, res) => {
   );
 });
 
-router.get("/:id", async (req, res) => {
+router.get("/:id", can(`${FORM}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const c = await prisma.accountClosing.findUnique({
     where: { id },
@@ -197,7 +222,7 @@ interface LineInput {
   baseCredit: number;
 }
 
-router.post("/", async (req, res) => {
+router.post("/", can(`${FORM}.create`), async (req, res) => {
   const body = req.body as {
     date: string;
     destinationAccountId: number;
@@ -264,7 +289,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const c = await prisma.accountClosing.findUnique({ where: { id } });
   if (!c) return res.status(404).json({ error: "یافت نشد" });
@@ -274,7 +299,7 @@ router.delete("/:id", async (req, res) => {
 });
 
 // گردش جایگزین: صدور سند حسابداری معکوس‌کننده
-router.post("/:id/issue", async (req, res) => {
+router.post("/:id/issue", can(`${FORM}.issue`), async (req, res) => {
   const id = Number(req.params.id);
   const c = await prisma.accountClosing.findUnique({
     where: { id },
@@ -337,7 +362,7 @@ router.post("/:id/issue", async (req, res) => {
 });
 
 // حذف سند حسابداریِ صادرشده برای این عملیات بستن حسابها (امکان صدور مجدد بعد از حذف)
-router.delete("/:id/journal-entry", async (req, res) => {
+router.delete("/:id/journal-entry", can(`${FORM}.revertIssue`), async (req, res) => {
   const id = Number(req.params.id);
   const c = await prisma.accountClosing.findUnique({ where: { id } });
   if (!c) return res.status(404).json({ error: "سند بستن حسابها یافت نشد" });

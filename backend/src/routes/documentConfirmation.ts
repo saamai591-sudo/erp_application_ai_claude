@@ -1,5 +1,9 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("document-confirmation");
 
 const router = Router();
 
@@ -16,7 +20,7 @@ async function lastConfirmed(fiscalPeriodId: number) {
 }
 
 // وضعیت فعلی: آخرین سند و تاریخ تایید‌شده‌ی دوره مالیِ حاوی تاریخ داده‌شده (پیش‌فرض: امروز)
-router.get("/status", async (req, res) => {
+router.get("/status", can(`${FORM}.view`), async (req, res) => {
   const date = req.query.date as string | undefined;
   const fiscalPeriod = await resolveFiscalPeriod(date);
   if (!fiscalPeriod) return res.status(400).json({ error: "این تاریخ در هیچ دوره مالی تعریف نشده است" });
@@ -61,7 +65,7 @@ async function validate(dateStr: string) {
 }
 
 // بررسی غیربازدارنده: آیا اسنادی در بازه هنوز در وضعیت «ثبت» هستند؟ (برای نمایش هشدار قبل از تایید نهایی)
-router.post("/check", async (req, res) => {
+router.post("/check", can(`${FORM}.view`), async (req, res) => {
   try {
     const { draftCount, totalInRange } = await validate(req.body.date);
     res.json({ ok: true, draftCount, totalInRange });
@@ -72,7 +76,7 @@ router.post("/check", async (req, res) => {
 });
 
 // تایید نهایی: همه اسناد بازه را به وضعیت «تایید» تغییر می‌دهد (صرف‌نظر از وضعیت فعلی‌شان)
-router.post("/confirm", async (req, res) => {
+router.post("/confirm", can(`${FORM}.confirm`), async (req, res) => {
   try {
     const { fiscalPeriod, date } = await validate(req.body.date);
     const result = await prisma.journalEntry.updateMany({

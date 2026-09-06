@@ -1,21 +1,32 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
-import { createBatch, generateBatchNumber, getBatches } from "../services/batchService";
+import { createBatch, generateBatchNumber, getBatches, computeBatchAvailableQuantity } from "../services/batchService";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("batches");
 
 const router = Router();
 
 router.get("/", async (req, res) => {
   const goodsItemId = req.query.goodsItemId ? Number(req.query.goodsItemId) : undefined;
-  res.json(await getBatches({ goodsItemId }));
+  const batches = await getBatches({ goodsItemId });
+  // موجودی فعلی فقط وقتی محاسبه می‌شود که goodsItemId داده شده باشد (یعنی پیکر بچ یک ردیف سند)، نه در
+  // فهرست کامل و بدون فیلتر صفحه‌ی مدیریت بچ‌ها، تا از N+1 غیرضروری جلوگیری شود.
+  if (!goodsItemId) return res.json(batches);
+  const withQuantity = await Promise.all(
+    batches.map(async (b: any) => ({ ...b, availableQuantity: await computeBatchAvailableQuantity(b.id) }))
+  );
+  res.json(withQuantity);
 });
 
-router.get("/suggest-number", async (req, res) => {
+router.get("/suggest-number", can(`${FORM}.create`), async (req, res) => {
   const goodsItemId = Number(req.query.goodsItemId);
   if (!goodsItemId) return res.status(400).json({ error: "کالا الزامی است" });
   res.json({ batchNumber: await generateBatchNumber(goodsItemId) });
 });
 
-router.post("/", async (req, res) => {
+router.post("/", can(`${FORM}.create`), async (req, res) => {
   try {
     const created = await createBatch(req.body);
     res.status(201).json(created);
@@ -25,7 +36,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as {
     batchNumber?: string;
@@ -73,11 +84,12 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
-  const batch = await prisma.batch.findUnique({ where: { id } });
+  const batch = await prisma.batch.findUnique({ where: { id }, include: { _count: { select: { serials: true } } } });
   if (!batch) return res.status(404).json({ error: "بچ یافت نشد" });
   if (batch.hasTransactions) return res.status(400).json({ error: "این بچ گردش دارد و قابل حذف نیست" });
+  if (batch._count.serials > 0) return res.status(400).json({ error: "این بچ به یک یا چند سریال متصل است و قابل حذف نیست" });
   await prisma.batch.delete({ where: { id } });
   res.status(204).send();
 });

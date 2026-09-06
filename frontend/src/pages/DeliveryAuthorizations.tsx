@@ -8,11 +8,13 @@ import { RecordPickerField } from "../components/RecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
+import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 
 type Status = "DRAFT" | "APPROVED";
 type ReceiptType = "INSPECTED" | "TO_BE_INSPECTED";
@@ -105,7 +107,7 @@ function DeliveryAuthorizationList() {
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/delivery-authorizations/${r.id}/edit`)}
+        edit={{ path: (r) => `/delivery-authorizations/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -125,11 +127,14 @@ function DeliveryAuthorizationForm({ editId }: { editId?: number }) {
   const [meta, setMeta] = usePersistedState<{ number: number; status: Status } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const { saved, flash } = useSavedFlash();
 
   useEffect(() => {
     async function init() {
-      setSuppliers((await api.get("/suppliers")).filter((x: any) => x.isActive));
+      const [s, fp] = await Promise.all([api.get("/suppliers"), fetchSelectedFiscalPeriod()]);
+      setSuppliers((s as any[]).filter((x) => x.isActive));
+      setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
         setLoaded(true);
@@ -151,7 +156,7 @@ function DeliveryAuthorizationForm({ editId }: { editId?: number }) {
           }))
         );
       } else {
-        setHeader({ date: "", supplierId: "", deliveryDate: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), supplierId: "", deliveryDate: "", description: "" });
         setRows([{ purchaseOrderLineId: "", goodsItemCode: "", goodsItemTitle: "", unitTitle: "", quantity: "", receiptType: "", description: "" }]);
         setMeta(null);
       }
@@ -199,6 +204,8 @@ function DeliveryAuthorizationForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
     if (!header.date || !header.supplierId || !header.deliveryDate) return setError("تاریخ، تامین کننده و تاریخ تحویل الزامی است");
+    const dateErr = validateDocumentDate(header.date, fiscalPeriod);
+    if (dateErr) return setError(dateErr);
     const lines = rows
       .filter((r) => r.purchaseOrderLineId)
       .map((r) => ({ purchaseOrderLineId: Number(r.purchaseOrderLineId), quantity: Number(r.quantity) || 0, receiptType: r.receiptType, description: r.description || null }));
@@ -276,11 +283,11 @@ function DeliveryAuthorizationForm({ editId }: { editId?: number }) {
               <div><span className="badge">{STATUS_FA[status]}</span></div>
             </div>
             <div className="form-field">
-              <label>تاریخ</label>
+              <label>تاریخ<RequiredMark /></label>
               <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
             </div>
             <div className="form-field">
-              <label>تامین کننده</label>
+              <label>تامین کننده<RequiredMark /></label>
               <RecordPickerField
                 title="انتخاب تامین کننده"
                 disabled={headerDisabled}
@@ -297,7 +304,7 @@ function DeliveryAuthorizationForm({ editId }: { editId?: number }) {
               />
             </div>
             <div className="form-field">
-              <label>تاریخ تحویل</label>
+              <label>تاریخ تحویل<RequiredMark /></label>
               <JalaliDatePicker value={header.deliveryDate} onChange={(v) => setHeader({ ...header, deliveryDate: v })} />
             </div>
             <div className="form-field full">
@@ -335,11 +342,11 @@ function DeliveryAuthorizationForm({ editId }: { editId?: number }) {
                   return (
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
-                      <td style={{ minWidth: 200 }}>
+                      <td style={{ minWidth: 90 }}>
                         <RecordPickerField
                           title="انتخاب ردیف سفارش خرید"
                           disabled={locked}
-                          displayValue={src ? `${toFaDigits(String(src.number))} — ${src.goodsItemTitle}` : ""}
+                          displayValue={src ? `${toFaDigits(String(src.number))}` : ""}
                           rows={pickableLines}
                           columns={[
                             { header: "شماره", render: (l) => toFaDigits(String(l.number)), filterValue: (l) => String(l.number), width: "70px" },
@@ -349,7 +356,7 @@ function DeliveryAuthorizationForm({ editId }: { editId?: number }) {
                           onSelect={(l) => onSourceLineChange(idx, String(l.purchaseOrderLineId))}
                         />
                       </td>
-                      <td style={{ minWidth: 180 }}>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</td>
+                      <td style={{ minWidth: 300 }}>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</td>
                       <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{row.unitTitle || "—"}</td>
                       <td style={{ minWidth: 120 }}>
                         <AmountInput value={row.quantity} onChange={(v) => updateRow(idx, { quantity: v })} allowDecimal disabled={locked} />

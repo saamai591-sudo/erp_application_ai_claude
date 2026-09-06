@@ -1,3 +1,5 @@
+import { formatJalaliDateForMessage } from "./jalaliDate";
+
 /**
  * هر ردیف سند حسابداری باید دقیقاً یکی از مبلغ بدهکار یا بستانکار را داشته باشد (بزرگتر از صفر)،
  * نه هر دو صفر و نه هر دو همزمان مقدار داشته باشند. این تابع باید پیش از هرگونه ایجاد سند
@@ -30,8 +32,7 @@ export async function assertDateNotConfirmed(
     orderBy: { date: "desc" },
   });
   if (lastApproved && date < lastApproved.date) {
-    const d = new Date(lastApproved.date);
-    const iso = d.toISOString().slice(0, 10);
-    throw new Error(`اسناد تا تاریخ ${iso} تایید شده‌اند؛ ثبت سند با تاریخ قبل از آن امکان‌پذیر نیست`);
+    const jalali = formatJalaliDateForMessage(new Date(lastApproved.date));
+    throw new Error(`اسناد تا تاریخ ${jalali} تایید شده‌اند؛ ثبت سند با تاریخ قبل از آن امکان‌پذیر نیست`);
   }
 }

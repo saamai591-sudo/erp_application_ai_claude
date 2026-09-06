@@ -4,6 +4,12 @@ import { resolveDetailTitles } from "../utils/detailValues";
 import { computeFullAccountCode, buildAccountByIdMap } from "../utils/accountCode";
 import { parseFilters, stringWhere, numberWhere, dateWhere, matchesFilterValue } from "../utils/tableFilters";
 import { toJalaliYearMonth } from "../utils/jalaliDate";
+import { can, userHasAction } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+import { AuthedRequest } from "../middleware/auth";
+
+const ACCOUNT_REVIEW = findFormPrefix("account-review");
+const OLAP_REPORTS = findFormPrefix("olap-reports");
 
 const router = Router();
 
@@ -142,7 +148,7 @@ function buildLineWhere(detail1Codes: string[], detail2Codes: string[], detail3C
   return where;
 }
 
-router.get("/trial-balance", async (req, res) => {
+router.get("/trial-balance", can(`${ACCOUNT_REVIEW}.view`), async (req, res) => {
   const q = req.query as any as { levelOrder: string; parentIds?: string; descendantIds?: string; detail1Codes?: string; detail2Codes?: string; detail3Codes?: string } & CommonFilters;
   if (!q.levelOrder) return res.status(400).json({ error: "سطح گزارشگری مشخص نشده است" });
 
@@ -199,7 +205,17 @@ router.get("/trial-balance", async (req, res) => {
 
 const DETAIL_SUMMARY_SORT_FIELDS = new Set(["code", "title", "totalDebit", "totalCredit"]);
 
-router.get("/detail-summary", async (req, res) => {
+// این endpoint هم مرور حسابها (AccountsReview.tsx) و هم گزارش تحلیلی OLAP (OlapReports.tsx، برای
+// انتخابگر slot) را تغذیه می‌کند؛ چون یک route نمی‌تواند دو کلید متفاوت را هم‌زمان به can() بدهد،
+// بررسی مجاز بودن این‌جا به‌صورت دستی (اجتماع دو دسترسی) انجام می‌شود.
+router.get("/detail-summary", async (req: AuthedRequest, res) => {
+  const [canAccountReview, canOlapReports] = await Promise.all([
+    userHasAction(req.user!.id, `${ACCOUNT_REVIEW}.view`),
+    userHasAction(req.user!.id, `${OLAP_REPORTS}.view`),
+  ]);
+  if (!canAccountReview && !canOlapReports) {
+    return res.status(403).json({ error: "دسترسی لازم برای این عملیات را ندارید" });
+  }
   const q = req.query as any as {
     slot: string;
     parentIds?: string;
@@ -299,7 +315,7 @@ router.get("/detail-summary", async (req, res) => {
   res.json({ rows, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
 });
 
-router.get("/ledger", async (req, res) => {
+router.get("/ledger", can(`${ACCOUNT_REVIEW}.view`), async (req, res) => {
   const q = req.query as any as {
     parentIds?: string;
     detail1Codes?: string;
@@ -496,7 +512,7 @@ interface OlapFilters {
 const NO_DETAIL_KEY = "__none__";
 const NO_DETAIL_LABEL = "(بدون تفصیل)";
 
-router.post("/olap-pivot", async (req, res) => {
+router.post("/olap-pivot", can(`${OLAP_REPORTS}.view`), async (req, res) => {
   const body = req.body as { rowDimension?: OlapDimension; colDimension?: OlapDimension | null; measure?: OlapMeasure; filters?: OlapFilters };
   const rowDimension = body.rowDimension;
   const colDimension = body.colDimension || null;

@@ -1,9 +1,19 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
-import { assertNoNegativeStockAfterChange } from "../services/warehouseStockService";
-import { validateTrackingFields, resolveTrackingRefs, recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
-import { assertWarehouseOpenForDate } from "../services/inventoryClosingService";
+import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { validateTrackingFields, resolveTrackingRefs, fetchCurrentSerialSteps, trackingCreateData, trackingResponseFields, recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
+import { assertSafeToReverseEffects, assertSafeToApplyEffects, reverseDocumentEffects, applyDocumentEffects } from "../services/documentEffectsService";
+import { assertWarehouseOpenForDate } from "../services/warehouseConfirmationService";
+import { resolveDetailEntityIds } from "../utils/detailValues";
+import { assertRecordNotStale } from "../utils/concurrency";
+import { AuthedRequest } from "../middleware/auth";
+import { userHasAction, can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+import { getLineAmounts, computeUnitCost } from "../services/documentItemAmountService";
+
+const FORM = findFormPrefix("sales-returns");
+const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
 
 // =========================================================================
 // ماژول «انبارداری» > عملیات > برگشت از فروش (Sales Return)
@@ -12,8 +22,9 @@ import { assertWarehouseOpenForDate } from "../services/inventoryClosingService"
 // (Sales Issue)/§۳۸ (Supplier Return)، هیچ زیربند اختصاصی برایش نیامده. طبق تصمیم («جایی که سند سکوت
 // کرده، بر عهده‌ی خودت»)، دقیقاً هم‌الگوی بند ۴۰ (Consumption Return) طراحی شده: همیشه به یک ردیف
 // حواله فروش قطعی‌شده Reference می‌دهد + کنترل ReturnedQuantity <= IssuedQuantity — چون این قاعده‌ی
-// عمومی «هر برگشت باید ارجاع داشته باشد» منطقاً برای هر نوع برگشتی صادق است، نه فقط مصرف. بدون partyId
-// در سطح سند، دقیقاً هم‌الگوی SalesDelivery (طرف‌حساب واقعی از طریق سند بالادستی زنجیره فروش مشخص است).
+// عمومی «هر برگشت باید ارجاع داشته باشد» منطقاً برای هر نوع برگشتی صادق است، نه فقط مصرف.
+// طرف مقابل (partyId، تفصیل نوع «طرف حساب» — فقط طرف‌حساب‌های مشتری) دقیقاً مثل حواله فروش (که این
+// فیلد بعداً به آن اضافه شد) همیشه دستی انتخاب می‌شود و روی InventoryDocument.detailCode ذخیره می‌شود.
 // =========================================================================
 
 const router = Router();
@@ -22,15 +33,15 @@ interface LineInput {
   sourceSalesDeliveryLineId: number;
   quantity: number;
   description?: string | null;
-  serialNumber?: string | null;
-  batchNumber?: string | null;
-  expiryDate?: string | null;
+  serialIds?: number[];
+  batchAllocations?: { batchId: number; quantity: number }[];
   physicalLocation?: string | null;
 }
 
 interface HeaderBody {
   warehouseId: number;
   date: string;
+  partyId?: number | null;
   description?: string;
   lines: LineInput[];
 }
@@ -42,6 +53,7 @@ async function validateWarehouseAndPeriod(warehouseId: number, date: Date) {
 
   const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
   if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
+  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
 
   await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
   await assertWarehouseOpenForDate(warehouseId, date);
@@ -63,7 +75,7 @@ async function sourceLineRemaining(id: number, excludeId?: number) {
   return { line, remaining };
 }
 
-async function validateLines(warehouseId: number, lines: LineInput[], excludeId?: number) {
+async function validateLines(warehouseId: number, lines: LineInput[], excludeId?: number, existingSerialIds?: Set<number>) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("سند برگشت از فروش باید حداقل یک ردیف کالا داشته باشد");
 
   const cleaned: {
@@ -72,9 +84,9 @@ async function validateLines(warehouseId: number, lines: LineInput[], excludeId?
     unitId: number;
     quantity: number;
     description: string | null;
-    serialNumber: string | null;
-    batchNumber: string | null;
-    expiryDate: string | null;
+    serialIds: number[];
+    batchAllocations: { batchId: number; quantity: number }[];
+    sourceLineId: number;
     physicalLocation: string | null;
   }[] = [];
 
@@ -85,7 +97,6 @@ async function validateLines(warehouseId: number, lines: LineInput[], excludeId?
 
     const info = await sourceLineRemaining(l.sourceSalesDeliveryLineId, excludeId);
     if (!info) throw new Error(`ردیف حواله فروش مبدا برای ردیف ${idx + 1} یافت نشد`);
-    if (info.line.document.status !== "FINALIZED") throw new Error(`حواله فروش ردیف ${idx + 1} هنوز قطعی نشده است`);
     if (info.line.document.warehouseId !== warehouseId) throw new Error(`ردیف ${idx + 1}: انبار باید همان انبار حواله فروش مبدا باشد`);
     if (qty > info.remaining) throw new Error(`مقدار ردیف ${idx + 1} از باقیمانده‌ی قابل برگشت (${info.remaining}) بیشتر است`);
 
@@ -95,20 +106,25 @@ async function validateLines(warehouseId: number, lines: LineInput[], excludeId?
       unitId: info.line.unitId,
       quantity: qty,
       description: l.description || null,
-      serialNumber: l.serialNumber || null,
-      batchNumber: l.batchNumber || null,
-      expiryDate: l.expiryDate || null,
+      serialIds: l.serialIds || [],
+      batchAllocations: l.batchAllocations || [],
+      sourceLineId: info.line.id,
       physicalLocation: l.physicalLocation || null,
     });
   }
-  await validateTrackingFields(cleaned);
+  await validateTrackingFields(cleaned, "SALES_RETURN", existingSerialIds);
   return cleaned;
 }
 
-router.get("/sales-returns/pickable-lines", async (req, res) => {
+function partyTitle(p: any): string | null {
+  if (!p) return null;
+  return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
+}
+
+router.get("/sales-returns/pickable-lines", can(`${FORM}.view`), async (req, res) => {
   const warehouseId = req.query.warehouseId ? Number(req.query.warehouseId) : null;
   const lines = await prisma.inventoryDocumentLine.findMany({
-    where: { document: { documentType: "SALES_DELIVERY", status: "FINALIZED", ...(warehouseId ? { warehouseId } : {}) } },
+    where: { document: { documentType: "SALES_DELIVERY", ...(warehouseId ? { warehouseId } : {}) } },
     include: { document: true, goodsItem: true, unit: true, salesReturnLines: { include: { document: true } } },
     orderBy: { id: "desc" },
   });
@@ -138,31 +154,42 @@ router.get("/sales-returns/pickable-lines", async (req, res) => {
   res.json(result);
 });
 
-router.get("/sales-returns", async (_req, res) => {
+router.get("/sales-returns", can(`${FORM}.view`), async (req: AuthedRequest, res) => {
+  const canViewAccounting = await userHasAction(req.user!.id, VIEW_ACCOUNTING_PERMISSION);
   const items = await prisma.inventoryDocument.findMany({
     where: { documentType: "SALES_RETURN" },
     include: { warehouse: true, fiscalPeriod: true, lines: true },
     orderBy: { id: "desc" },
   });
+  const codeToPartyId = await resolveDetailEntityIds(items.map((d: any) => d.detailCode), "Party");
+  const parties = await prisma.party.findMany({ where: { id: { in: Object.values(codeToPartyId) } } });
+  const partyById = new Map(parties.map((p) => [p.id, p]));
+  const amountByLineId = await getLineAmounts(items.flatMap((d) => d.lines.map((l: any) => l.id)));
   res.json(
-    items.map((d: any) => ({
-      id: d.id,
-      number: d.number,
-      date: d.date,
-      warehouseId: d.warehouseId,
-      warehouseTitle: d.warehouse.title,
-      fiscalPeriodTitle: d.fiscalPeriod.title,
-      description: d.description,
-      status: d.status,
-      lineCount: d.lines.length,
-      totalQuantity: d.lines.reduce((s: number, l: any) => s + Number(l.quantity), 0),
-      totalAmount: d.lines.reduce((s: number, l: any) => s + Number(l.amount), 0),
-    }))
+    items.map((d: any) => {
+      const partyId = d.detailCode ? codeToPartyId[d.detailCode] ?? null : null;
+      return {
+        id: d.id,
+        number: d.number,
+        date: d.date,
+        warehouseId: d.warehouseId,
+        warehouseTitle: d.warehouse.title,
+        fiscalPeriodTitle: d.fiscalPeriod.title,
+        partyId,
+        partyTitle: partyTitle(partyId ? partyById.get(partyId) : null),
+        description: d.description,
+        status: d.status,
+        lineCount: d.lines.length,
+        totalQuantity: d.lines.reduce((s: number, l: any) => s + Number(l.quantity), 0),
+        ...((canViewAccounting && d.status === "FINALIZED") ? { totalAmount: d.lines.reduce((s: number, l: any) => s + Number(amountByLineId.get(l.id) ?? 0), 0) } : {}),
+      };
+    })
   );
 });
 
-router.get("/sales-returns/:id", async (req, res) => {
+router.get("/sales-returns/:id", can(`${FORM}.view`), async (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
+  const canViewAccounting = await userHasAction(req.user!.id, VIEW_ACCOUNTING_PERMISSION);
   const d = await prisma.inventoryDocument.findFirst({
     where: { id, documentType: "SALES_RETURN" },
     include: {
@@ -172,7 +199,7 @@ router.get("/sales-returns/:id", async (req, res) => {
         include: {
           goodsItem: true,
           unit: true,
-          batch: true,
+          batches: { include: { batch: true } },
           physicalLocation: true,
           serials: { include: { serial: true } },
           sourceSalesDeliveryLine: { include: { document: true } },
@@ -182,6 +209,10 @@ router.get("/sales-returns/:id", async (req, res) => {
     },
   });
   if (!d) return res.status(404).json({ error: "سند برگشت از فروش یافت نشد" });
+  const codeToPartyId = await resolveDetailEntityIds([d.detailCode], "Party");
+  const partyId = d.detailCode ? codeToPartyId[d.detailCode] ?? null : null;
+  const party = partyId ? await prisma.party.findUnique({ where: { id: partyId } }) : null;
+  const amountByLineId = await getLineAmounts(d.lines.map((l) => l.id));
   res.json({
     id: d.id,
     number: d.number,
@@ -190,9 +221,12 @@ router.get("/sales-returns/:id", async (req, res) => {
     warehouseTitle: d.warehouse!.title,
     fiscalPeriodId: d.fiscalPeriodId,
     fiscalPeriodTitle: d.fiscalPeriod.title,
+    partyId,
+    partyTitle: partyTitle(party),
     description: d.description,
     status: d.status,
     finalizedAt: d.finalizedAt,
+    updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
       id: l.id,
       sourceSalesDeliveryLineId: l.sourceSalesDeliveryLineId,
@@ -203,26 +237,30 @@ router.get("/sales-returns/:id", async (req, res) => {
       unitId: l.unitId,
       unitTitle: l.unit.title,
       quantity: Number(l.quantity),
-      unitCost: Number(l.unitCost),
-      amount: Number(l.amount),
+      ...((canViewAccounting && d.status === "FINALIZED") ? { unitCost: computeUnitCost(amountByLineId.get(l.id) ?? 0, l.quantity), amount: Number(amountByLineId.get(l.id) ?? 0) } : {}),
       description: l.description,
-      serialNumber: l.serials[0]?.serial.serialNumber ?? null,
-      batchNumber: l.batch?.batchNumber ?? null,
-      expiryDate: l.batch?.expiryDate ?? null,
+      ...trackingResponseFields(l),
       physicalLocation: l.physicalLocation?.title ?? null,
     })),
   });
 });
 
-router.post("/sales-returns", async (req, res) => {
+router.post("/sales-returns", can(`${FORM}.create`), async (req, res) => {
   const body = req.body as HeaderBody;
   if (!body.warehouseId || !body.date) return res.status(400).json({ error: "انبار و تاریخ سند الزامی است" });
+  if (!body.partyId) return res.status(400).json({ error: "طرف مقابل الزامی است" });
 
   try {
+    const party = await prisma.party.findUnique({ where: { id: body.partyId } });
+    if (!party) throw new Error("طرف مقابل یافت نشد");
     const cleanedLines = await validateLines(body.warehouseId, body.lines);
     const date = new Date(body.date);
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
     const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
+    const serialSteps = await fetchCurrentSerialSteps(refs.flatMap((r) => r.serialIds));
+
+    const effectLines = cleanedLines.map((l) => ({ goodsItemId: l.goodsItemId, quantity: l.quantity }));
+    await assertSafeToApplyEffects(prisma, { documentType: "SALES_RETURN", warehouseId: warehouse.id, date }, effectLines, warehouse.stockControl);
 
     const lastNumber = await prisma.inventoryDocument.findFirst({
       where: { documentType: "SALES_RETURN", fiscalPeriodId: fiscalPeriod.id },
@@ -230,31 +268,34 @@ router.post("/sales-returns", async (req, res) => {
     });
     const number = lastNumber ? lastNumber.number + 1 : 1;
 
-    const created = await prisma.inventoryDocument.create({
-      data: {
-        documentType: "SALES_RETURN",
-        warehouseId: warehouse.id,
-        fiscalPeriodId: fiscalPeriod.id,
-        number,
-        date,
-        description: body.description || null,
-        status: "DRAFT",
-        lines: {
-          create: cleanedLines.map((l, idx) => ({
-            sourceSalesDeliveryLineId: l.sourceSalesDeliveryLineId,
-            goodsItemId: l.goodsItemId,
-            unitId: l.unitId,
-            quantity: l.quantity,
-            unitCost: 0,
-            amount: 0,
-            description: l.description,
-            rowOrder: idx,
-            batchId: refs[idx].batchId,
-            physicalLocationId: refs[idx].physicalLocationId,
-            serials: refs[idx].serialId ? { create: [{ serialId: refs[idx].serialId! }] } : undefined,
-          })),
+    // طبق تصمیم کاربر: دیگر مرحله‌ی جداگانه‌ی «قطعی‌کردن» وجود ندارد — همان لحظه‌ی ذخیره، سند اثر واقعی
+    // می‌گذارد (status مستقیم FINALIZED، نه DRAFT).
+    const created = await prisma.$transaction(async (tx) => {
+      const doc = await tx.inventoryDocument.create({
+        data: {
+          documentType: "SALES_RETURN",
+          warehouseId: warehouse.id,
+          fiscalPeriodId: fiscalPeriod.id,
+          number,
+          date,
+          detailCode: party.detailCode,
+          description: body.description || null,
+          status: "REGISTERED",
+          lines: {
+            create: cleanedLines.map((l, idx) => ({
+              sourceSalesDeliveryLineId: l.sourceSalesDeliveryLineId,
+              goodsItemId: l.goodsItemId,
+              unitId: l.unitId,
+              quantity: l.quantity,
+              description: l.description,
+              rowOrder: idx,
+              ...trackingCreateData(refs[idx], serialSteps),
+            })),
+          },
         },
-      },
+      });
+      await applyDocumentEffects(tx, { id: doc.id, documentType: "SALES_RETURN", warehouseId: warehouse.id, date }, effectLines);
+      return doc;
     });
 
     res.status(201).json(created);
@@ -264,35 +305,54 @@ router.post("/sales-returns", async (req, res) => {
   }
 });
 
-router.put("/sales-returns/:id", async (req, res) => {
+router.put("/sales-returns/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as HeaderBody;
 
-  const existing = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "SALES_RETURN" } });
+  const existing = await prisma.inventoryDocument.findFirst({
+    where: { id, documentType: "SALES_RETURN" },
+    include: { lines: { include: { serials: true } }, warehouse: true },
+  });
   if (!existing) return res.status(404).json({ error: "سند برگشت از فروش یافت نشد" });
-  if (existing.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل ویرایش هستند؛ ابتدا از «قطعی» برگردانید" });
-  try {
-    await assertWarehouseOpenForDate(existing.warehouseId!, existing.date);
-  } catch (e: any) {
-    return res.status(400).json({ error: e.message });
-  }
+  if (existing.status === "FINALIZED") return res.status(400).json({ error: "این سند با تایید انبار نهایی شده است و دیگر قابل ویرایش نیست" });
+  const existingSerialIds = new Set(existing.lines.flatMap((l: any) => l.serials.map((s: any) => s.serialId)));
 
   if (!body.warehouseId || !body.date) return res.status(400).json({ error: "انبار و تاریخ سند الزامی است" });
+  if (!body.partyId) return res.status(400).json({ error: "طرف مقابل الزامی است" });
 
   try {
-    const cleanedLines = await validateLines(body.warehouseId, body.lines, id);
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سند");
+    await assertWarehouseOpenForDate(existing.warehouseId!, existing.date);
+
+    // این سند از قبل هم «قطعی» است (دیگر مرحله‌ی جداگانه‌ای برای آن وجود ندارد) — پس ویرایش، به‌جای
+    // «برگشت از قطعی دستی، سپس ویرایش، سپس دوباره قطعی‌کردن»، همین سه‌کار را در یک درخواست و با همان
+    // کنترل‌های ایمنی انجام می‌دهد.
+    const oldEffectLines = existing.lines.map((l: any) => ({ goodsItemId: l.goodsItemId, quantity: Number(l.quantity) }));
+    const oldDoc = { id: existing.id, documentType: existing.documentType, warehouseId: existing.warehouseId!, date: existing.date };
+    await assertSafeToReverseEffects(prisma, oldDoc, oldEffectLines, existing.warehouse!.stockControl);
+
+    const party = await prisma.party.findUnique({ where: { id: body.partyId } });
+    if (!party) throw new Error("طرف مقابل یافت نشد");
+    const cleanedLines = await validateLines(body.warehouseId, body.lines, id, existingSerialIds);
     const date = new Date(body.date);
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
     const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
+    const serialSteps = await fetchCurrentSerialSteps(refs.flatMap((r) => r.serialIds));
 
-    await prisma.$transaction([
-      prisma.inventoryDocumentLine.deleteMany({ where: { documentId: id } }),
-      prisma.inventoryDocument.update({
+    const newEffectLines = cleanedLines.map((l) => ({ goodsItemId: l.goodsItemId, quantity: l.quantity }));
+    // ⚠️ excludeSelfId الزامی است: سطرهای قدیمِ همین سند هنوز در پایگاه‌داده و هنوز «قطعی» هستند.
+    await assertSafeToApplyEffects(prisma, { documentType: "SALES_RETURN", warehouseId: warehouse.id, date }, newEffectLines, warehouse.stockControl, id);
+
+    await prisma.$transaction(async (tx) => {
+      await reverseDocumentEffects(tx, oldDoc);
+      await tx.inventoryDocumentLine.deleteMany({ where: { documentId: id } });
+      await tx.inventoryDocument.update({
         where: { id },
         data: {
           warehouseId: warehouse.id,
           fiscalPeriodId: fiscalPeriod.id,
           date,
+          detailCode: party.detailCode,
           description: body.description || null,
           lines: {
             create: cleanedLines.map((l, idx) => ({
@@ -300,18 +360,18 @@ router.put("/sales-returns/:id", async (req, res) => {
               goodsItemId: l.goodsItemId,
               unitId: l.unitId,
               quantity: l.quantity,
-              unitCost: 0,
-              amount: 0,
               description: l.description,
               rowOrder: idx,
-              batchId: refs[idx].batchId,
-              physicalLocationId: refs[idx].physicalLocationId,
-              serials: refs[idx].serialId ? { create: [{ serialId: refs[idx].serialId! }] } : undefined,
+              ...trackingCreateData(refs[idx], serialSteps),
             })),
           },
         },
-      }),
-    ]);
+      });
+      await applyDocumentEffects(tx, { id, documentType: "SALES_RETURN", warehouseId: warehouse.id, date }, newEffectLines);
+      const goodsItemIds = [...oldEffectLines.map((l) => l.goodsItemId), ...newEffectLines.map((l) => l.goodsItemId)];
+      await recomputeGoodsItemHasTransactions(goodsItemIds, tx);
+      await recomputeWarehouseHasTransactions([existing.warehouseId!, warehouse.id], tx);
+    });
 
     res.json({ id });
   } catch (e: any) {
@@ -319,69 +379,31 @@ router.put("/sales-returns/:id", async (req, res) => {
   }
 });
 
-router.delete("/sales-returns/:id", async (req, res) => {
-  const id = Number(req.params.id);
-  const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "SALES_RETURN" } });
-  if (!d) return res.status(404).json({ error: "یافت نشد" });
-  if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «قطعی» برگردانید" });
-  try {
-    await assertWarehouseOpenForDate(d.warehouseId!, d.date);
-  } catch (e: any) {
-    return res.status(400).json({ error: e.message });
-  }
-  await prisma.inventoryDocument.delete({ where: { id } });
-  res.status(204).send();
-});
-
-router.post("/sales-returns/:id/finalize", async (req, res) => {
-  const id = Number(req.params.id);
-  const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "SALES_RETURN" }, include: { lines: true } });
-  if (!d) return res.status(404).json({ error: "یافت نشد" });
-  if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل قطعی‌کردن هستند" });
-  if (d.lines.length === 0) return res.status(400).json({ error: "سند باید حداقل یک ردیف کالا داشته باشد" });
-
-  try {
-    await validateWarehouseAndPeriod(d.warehouseId!, d.date);
-
-    await prisma.$transaction([
-      prisma.inventoryDocument.update({ where: { id }, data: { status: "FINALIZED", finalizedAt: new Date() } }),
-      prisma.warehouse.update({ where: { id: d.warehouseId! }, data: { hasTransactions: true } }),
-      ...d.lines.map((l: any) => prisma.goodsItem.update({ where: { id: l.goodsItemId }, data: { hasTransactions: true } })),
-    ]);
-
-    res.json({ id, status: "FINALIZED" });
-  } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در قطعی‌کردن سند" });
-  }
-});
-
-router.post("/sales-returns/:id/revert", async (req, res) => {
+router.delete("/sales-returns/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "SALES_RETURN" }, include: { lines: true, warehouse: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
-  if (d.status !== "FINALIZED") return res.status(400).json({ error: "فقط اسناد «قطعی» قابل برگشت هستند" });
+  if (d.status === "FINALIZED") return res.status(400).json({ error: "این سند با تایید انبار نهایی شده است و دیگر قابل حذف نیست" });
 
   try {
     await assertWarehouseOpenForDate(d.warehouseId!, d.date);
 
-    if (d.warehouse!.stockControl) {
-      for (const l of d.lines) {
-        // eslint-disable-next-line no-await-in-loop
-        await assertNoNegativeStockAfterChange({
-          warehouseId: d.warehouseId!,
-          goodsItemId: l.goodsItemId,
-          asOfDate: d.date,
-          delta: -Number(l.quantity),
-        });
-      }
-    }
+    const effectLines = d.lines.map((l: any) => ({ goodsItemId: l.goodsItemId, quantity: Number(l.quantity) }));
+    const doc = { id: d.id, documentType: d.documentType, warehouseId: d.warehouseId!, date: d.date };
+    await assertSafeToReverseEffects(prisma, doc, effectLines, d.warehouse!.stockControl);
 
-    await prisma.inventoryDocument.update({ where: { id }, data: { status: "DRAFT", finalizedAt: null } });
-    await recomputeGoodsItemHasTransactions(d.lines.map((l: any) => l.goodsItemId));
-    await recomputeWarehouseHasTransactions([d.warehouseId!]);
-    res.json({ id, status: "DRAFT" });
+    await prisma.$transaction(async (tx) => {
+      await reverseDocumentEffects(tx, doc);
+      await tx.inventoryDocument.delete({ where: { id } });
+      // این recompute باید بعد از حذف سند اجرا شود، نه قبلش — وگرنه هنوز خودِ همین سند را می‌بیند و
+      // پاسخ اشتباه («هنوز گردش دارد») می‌دهد.
+      await recomputeGoodsItemHasTransactions(effectLines.map((l) => l.goodsItemId), tx);
+      await recomputeWarehouseHasTransactions([d.warehouseId!], tx);
+    });
+
+    res.status(204).send();
   } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در برگشت از قطعی" });
+    res.status(400).json({ error: e.message || "خطا در حذف" });
   }
 });
 

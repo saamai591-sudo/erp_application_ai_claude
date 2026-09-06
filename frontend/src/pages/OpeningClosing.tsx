@@ -8,9 +8,10 @@ import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
-import { useTabs } from "../lib/TabsContext";
 import { api } from "../lib/api";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
+import { useTabs } from "../lib/TabsContext";
 
 interface ListItem {
   id: number;
@@ -42,8 +43,6 @@ function ListView() {
   const cacheKey = "/opening-closing";
   const [items, setItems] = usePersistedState<ListItem[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
-  const { openTab } = useTabs();
 
   async function reload() {
     api.get("/opening-closing").then(setItems).catch((e) => setError(e.message));
@@ -69,11 +68,10 @@ function ListView() {
   return (
     <div>
       <div className="page-header">
-        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`بستن حساب‌های دائمی در پایان دوره مالی و افتتاح مجدد آن‌ها در دوره مالی بعد`} title="افتتاحیه و اختتامیه" /><NewRecordButton path="/opening-closing/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
+        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`بستن حساب‌های دائمی در پایان دوره مالی و افتتاح مجدد آن‌ها در دوره مالی بعد`} title="افتتاحیه و اختتامیه" /><NewRecordButton path="/opening-closing/new" /><RefreshButton onClick={reload} /></div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
@@ -84,7 +82,7 @@ function ListView() {
           { header: "شماره سند", render: (r) => (r.journalEntryNumber ? toFaDigits(String(r.journalEntryNumber)) : "—"), filterType: "number", filterValue: (r) => r.journalEntryNumber ?? undefined },
         ]}
         rows={items}
-        onEdit={(r) => openTab(`/opening-closing/${r.id}`)}
+        edit={{ path: (r) => `/opening-closing/${r.id}` }}
         onDelete={onDelete}
       />
     </div>
@@ -194,7 +192,7 @@ function EntryForm({ viewId }: { viewId?: number }) {
 
       <div className="form-grid" style={{ maxWidth: 600, marginBottom: 16 }}>
         <div className="form-field">
-          <label>تاریخ</label>
+          <label>تاریخ<RequiredMark /></label>
           <JalaliDatePicker value={date} onChange={setDate} disabled={!canEdit} />
         </div>
         <div className="form-field">
@@ -211,7 +209,7 @@ function EntryForm({ viewId }: { viewId?: number }) {
           </div>
         </div>
         <div className="form-field full">
-          <label>شرح</label>
+          <label>شرح<RequiredMark /></label>
           <input value={description} onChange={(e) => setDescription(e.target.value)} disabled={!canEdit} />
         </div>
         {isFinalized && saved.issued && (

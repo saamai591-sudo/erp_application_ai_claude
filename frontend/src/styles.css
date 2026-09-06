@@ -636,52 +636,22 @@ body {
 }
 .amount-input:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; border-color: var(--primary); }
 
-/* درخت دسترسی نقش کاربری */
+/* درخت دسترسی نقش کاربری — والدش (.form-field) یک flex row است؛ بدون flex:1 مثل input/select/textarea
+   (که این قانون را جدا دارند)، این div به‌جای پرشدن کل عرض ردیف، فقط به اندازه‌ی محتوایش جمع می‌شود. */
 .perm-tree {
+  flex: 1;
+  min-width: 0;
   max-height: 420px;
   overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
 }
-.perm-node { margin: 1px 0; }
-.perm-row {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 4px;
-  border-radius: 6px;
-}
-.perm-row:hover { background: var(--bg); }
-.perm-chevron {
-  background: none;
-  border: none;
-  color: var(--ink-soft);
-  cursor: pointer;
-  display: flex;
-  padding: 2px;
-  flex-shrink: 0;
-}
-.perm-label { font-size: 13px; cursor: default; }
-.perm-label-module { font-weight: 700; }
-.perm-label-submodule { color: var(--ink-soft); font-size: 12px; }
-.perm-label-form { font-weight: 500; }
-.perm-level-submodule { margin-right: 20px; }
-.perm-level-form { margin-right: 20px; }
-.perm-ops {
-  margin-right: 44px;
-  display: flex;
-  gap: 16px;
-  padding: 3px 0 6px;
-}
-.perm-op-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--ink-soft);
-  cursor: pointer;
-}
+/* رندر داخلی این درخت اکنون از همان کلاس‌های .tree-node/.tree-row/.tree-children (پایین همین فایل،
+   مشترک با TreeView.tsx) استفاده می‌کند تا رفتار باز/بسته‌شدن و تورفتگی یکسان با درخت‌های پایه باشد. */
+/* بدون این override، قانون عمومی‌تر «.form-field input {flex:1}» (که برای input های متنی نوشته شده)
+   چون این چک‌باکس‌ها هم descendant یک .form-field هستند، آن‌ها را به کل عرض ردیف می‌کشد. */
+.tree-row input[type="checkbox"] { flex: 0 0 auto; width: auto; }
 
 /* فیلتر ستون‌های فهرست */
 .filter-btn {
@@ -819,8 +789,21 @@ body {
 }
 .je-lines-scroll { border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .je-lines-scroll .je-lines-table { border: none; }
-.je-lines-scroll .je-lines-table th { position: sticky; top: 0; z-index: 2; }
-.grid-scroll-area thead th { position: sticky; top: 0; z-index: 2; }
+/* transform روی th باعث می‌شود کروم برای این عنصر یک لایه‌ی ترکیب (compositing layer) جدا بسازد؛ بدون آن،
+   وقتی محتوایی بالای گرید (مثل بنر خطا) ظاهر/پنهان می‌شود و کل گرید روی صفحه جابه‌جا می‌شود، کروم گاهی
+   موقعیت چسبیده‌ی th را به‌درستی رنگ‌آمیزی مجدد نمی‌کند — عنوان ستون‌ها از ردیف‌ها جدا به‌نظر می‌رسد و
+   لبه‌ی یک ردیف از پشت آن دیده می‌شود، هرچند مختصات واقعی‌اش (getBoundingClientRect) درست است. */
+.je-lines-scroll .je-lines-table th { position: sticky; top: 0; z-index: 2; transform: translateZ(0); }
+.grid-scroll-area thead th { position: sticky; top: 0; z-index: 2; transform: translateZ(0); }
+
+/* ریشه‌ی هر صفحه (.content > div) خودش یک ستون flex است، پس je-lines-wrap همیشه یک آیتم flex آن است —
+   حتی وقتی خودش grid-wrap نیست. flex-shrink پیش‌فرض آیتم‌های flex برابر ۱ است؛ یعنی اگر بنر خطا/محتوای
+   دیگری بالای گرید ظاهر شود و مجموع ارتفاع فرزندان از فضای در دسترس .content بیشتر شود، فلکس سعی می‌کند
+   je-lines-wrap را کوچک‌تر از ارتفاع واقعیِ محتوایش (grid-scroll-area با min-height ثابتش) کند؛ چون خودِ
+   wrap کانتینر flex نیست (overflow:visible)، فرزندانش از قاب کوچک‌شده‌ی آن بیرون می‌زنند و هدر چسبان از
+   ردیف‌ها جدا به‌نظر می‌رسد. shrink:0 این را می‌بندد: wrap هرگز کوچک‌تر از محتوای واقعی‌اش نمی‌شود؛
+   در عوض .content خودش کمی بیشتر اسکرول می‌کند، که کاملاً بی‌ضرر است. */
+.je-lines-wrap { flex-shrink: 0; }
 
 .je-lines-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .je-lines-title { font-weight: 600; font-size: 13px; color: var(--ink); }
@@ -839,14 +822,22 @@ body {
 /* بسته‌بندی مشترک گرید + فوتر صفحه‌بندی؛ گرید بالا با گوشه‌های تخت پایین، فوتر پایین با گوشه‌های تخت بالا.
    خود grid-wrap با flex:1 فضای باقیمانده‌ی datatable-root (یا ریشه‌ی صفحه، .content > div) را پر می‌کند و
    grid-scroll-area داخل آن هم با flex:1 کشیده می‌شود؛ نتیجه این‌که grid-footer همیشه ته صفحه می‌ماند، نه فقط
-   بعد از آخرین ردیف. این flex:1ها خارج از یک زمینه‌ی flex-column (مثلاً je-lines-wrap داخل فرم سند حسابداری
-   که والدش flex نیست) بی‌اثرند. */
-.grid-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+   بعد از آخرین ردیف. shrink صفر عمداً است: ریشه‌ی هر صفحه (.content > div) خودش ستون flex است، پس اگر
+   محتوای دیگری (مثلاً بنر خطا) بالای grid-wrap اضافه/حذف شود و مجموع ارتفاع فرزندان از فضای .content
+   بیشتر شود، بدون shrink:0 فلکس سعی می‌کرد grid-wrap را کوچک‌تر از ارتفاع واقعیِ محتوایش کند (که چون خودِ
+   wrap کانتینر overflow:visible است، باعث بیرون‌زدن فرزندان از قاب و جدا به‌نظر رسیدن هدر چسبان می‌شد). */
+.grid-wrap { flex: 1 0 auto; display: flex; flex-direction: column; min-height: 0; }
 .grid-wrap .grid-scroll-area {
   flex: 1;
   border-radius: var(--radius) var(--radius) 0 0;
   border-bottom: none;
   box-shadow: var(--shadow-sm);
+}
+/* گرید صفحه‌ی فهرست (DataTable) — برخلاف je-lines-scroll داخل فرم سند که باید به calc(100vh-300px) محدود
+   بماند، این‌جا max-height آن قید عمومی را خنثی می‌کند تا flex:1 بالا واقعاً بتواند تا کف .content رشد
+   کند؛ در غیر این صورت سقف ثابت، گرید را زودتر متوقف می‌کرد و زیرش فضای خالی صفحه می‌ماند. */
+.datatable-root .grid-scroll-area {
+  max-height: none;
 }
 .grid-footer {
   display: flex;
@@ -860,11 +851,10 @@ body {
   border-radius: 0 0 var(--radius) var(--radius);
   font-size: 12.5px;
   color: var(--ink-soft);
-  /* فوتر همیشه به پایین ناحیه‌ی اسکرول (.content) می‌چسبد؛ کاربر مجبور نیست برای دیدنش
-     تا آخرین ردیف گرید اسکرول کند — چه گرید کوتاه باشد چه بلندتر از صفحه‌ی نمایش */
-  position: sticky;
-  bottom: 0;
-  z-index: 3;
+  /* فوتر یک فرزند flex عادی زیر ناحیه‌ی اسکرول (که خودش flex:1 است) است، نه یک عنصر sticky/جدا —
+     همیشه بلافاصله بعد از آخرین ردیفِ قابل‌مشاهده می‌آید، هرگز رویش نمی‌افتد. قبلاً sticky بود تا با
+     سقفِ ثابتِ grid-scroll-area (که دیگر برای گرید صفحه‌ی فهرست وجود ندارد) به کف بچسبد؛ آن قید همراه
+     max-height حذف شد، پس این sticky دیگر لازم نبود و باعث هم‌پوشانی با ردیف‌های گرید می‌شد. */
   box-shadow: var(--shadow-sm);
 }
 .grid-footer-controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
@@ -881,6 +871,20 @@ body {
 .grid-page-nav { display: flex; align-items: center; gap: 8px; }
 .grid-page-nav .btn { padding: 5px 12px; font-size: 12px; }
 .grid-page-indicator { white-space: nowrap; }
+
+/* opt-in (FormPage fillHeight) برای فرم‌هایی که فوتر/بخش زیرِ گرید باید همیشه بدون اسکرول دیده شود و
+   خودِ گرید اسکرول بخورد — طبق درخواست صریح کاربر برای «سند حسابداری» (JournalEntries.tsx). عمداً یک
+   مسیر کاملاً مجزا از کلاس‌های پایه‌ی je-lines-* / grid-scroll-area است (که ده‌ها فرم سند-ردیفی دیگر هم
+   از همان‌ها استفاده می‌کنند و نباید تحت تاثیر قرار بگیرند): .card/<form> معمولی کانتینر flex نیستند،
+   پس flex:1 موجودِ grid-wrap/grid-scroll-area (که از قبل تعریف شده) بی‌اثر می‌ماند مگر این زنجیره از
+   .card تا خودِ گرید با flex column واقعی وصل شود. ضمناً grid-wrap/je-lines-wrap عمداً flex-shrink:0
+   دارند (برای صفحات فهرست، تا .content به‌جایشان اسکرول کند)؛ اینجا چون .card overflow:hidden است و
+   خودِ گرید باید کوچک شود، این shrink:0 را فقط زیر je-form-fill خنثی می‌کنیم. */
+.card-fill-height { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.je-form-fill { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.je-form-fill .grid-wrap,
+.je-form-fill .je-lines-wrap { flex-shrink: 1; min-height: 0; }
+.je-form-fill .grid-scroll-area { max-height: none; }
 
 .je-breadcrumb {
   margin-top: 8px;
@@ -1250,12 +1254,18 @@ body {
 .topbar button.logout:hover { border-color: var(--danger); color: var(--danger); }
 
 /* ناحیه‌ی واقعی اسکرول صفحه؛ با flex:1 + min-height:0 داخل ستون .main محدود به فضای باقیمانده می‌شود
-   (نه کل صفحه) و به همین دلیل اسکرول گرید داخلی (grid-scroll-area) و فوتر آن همیشه در محدوده‌ی دید باقی می‌مانند */
-.content { flex: 1; min-height: 0; padding: 16px 18px; overflow-y: auto; }
-/* ریشه‌ی هر صفحه (تک-div برگشتی از کامپوننت صفحه) به‌صورت ستونی حداقل به اندازه‌ی کل ارتفاع .content کشیده
-   می‌شود؛ به همین دلیل اگر داخل آن گریدی (grid-wrap، با flex:1) وجود داشته باشد، فوتر صفحه‌بندی‌اش همیشه
-   به پایین صفحه می‌چسبد — چه تعداد ردیفهای گرید کم باشد چه زیاد — نه فقط وقتی محتوا از صفحه بلندتر است */
-.content > div { display: flex; flex-direction: column; min-height: 100%; }
+   (نه کل صفحه). خودش هم یک ستون flex است (نه فقط بلوک) تا فرزندش (.content > div) با flex:1 واقعاً به
+   همین ارتفاعِ محدود مقید بماند — نه این‌که با min-height:100% آزاد باشد از آن فراتر برود. */
+.content { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 16px 18px; overflow-y: auto; }
+/* ریشه‌ی هر صفحه (تک-div برگشتی از کامپوننت صفحه) با flex:1 + min-height:0 دقیقاً به ارتفاعِ محدودِ
+   .content مقید می‌شود (نه صرفاً «حداقل» آن). برای صفحات معمولی (فرم‌ها) که محتوایشان از این ارتفاع
+   بلندتر است، چون overflow پیش‌فرض visible است، محتوا همچنان به‌طور طبیعی از این قاب فراتر می‌رود و
+   خودِ .content (که overflow-y:auto دارد) کل صفحه را اسکرول می‌کند — دقیقاً مثل قبل. اما برای صفحات
+   فهرست (DataTable)، همین مقیدشدن باعث می‌شود grid-wrap/grid-scroll-area داخلش هم واقعاً به فضای
+   باقیمانده محدود بمانند و به‌جای رشد نامحدودِ کل صفحه، خودِ گرید اسکرول داخلی بگیرد — و چون
+   grid-footer یک فرزند flex عادی زیر آن است (نه بخشی از ناحیه‌ی اسکرول‌شونده‌ی گرید)، همیشه زیر گرید و
+   در کف صفحه (بدون اسکرول‌شدن با آن) دیده می‌شود. */
+.content > div { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 
 .tabs-bar {
   display: flex;
@@ -1400,6 +1410,8 @@ tbody tr:hover { background: var(--bg); }
 }
 .modal h3 { margin: 0 0 16px; font-size: 16px; font-weight: 700; }
 .modal .actions { display: flex; justify-content: flex-start; gap: 10px; margin-top: 18px; }
+
+.required-mark { color: var(--danger); font-weight: 700; margin-inline-start: 2px; }
 
 .alert { padding: 10px 14px; border-radius: var(--radius-sm); font-size: 12.5px; margin-bottom: 14px; }
 .alert.error { background: var(--danger-soft); color: var(--danger); border: 1px solid var(--danger-soft); }

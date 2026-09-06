@@ -9,6 +9,8 @@ import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { InfoHint } from "../components/InfoHint";
+import { useTabs } from "../lib/TabsContext";
+import { RequiredMark } from "../components/RequiredMark";
 
 const LEVEL_FA: Record<string, string> = { COUNTRY: "کشور", PROVINCE: "استان", CITY: "شهر" };
 
@@ -25,6 +27,7 @@ export default function GeoRegions() {
 function GeoTree() {
   const { items, error, create, remove, reload } = useCrud<TreeNode>("/geo-regions");
   const navigate = useNavigate();
+  const { openTab } = useTabs();
   const [open, setOpen] = useState(false);
   const [parent, setParent] = useState<TreeNode | null>(null);
   const [title, setTitle] = useState("");
@@ -69,7 +72,7 @@ function GeoTree() {
         persistKey="/geo-regions"
         onAddRoot={() => navigate("/geo-regions/new")}
         onAddChild={openAddChild}
-        onEdit={(n) => navigate(`/geo-regions/${n.id}/edit`)}
+        onEdit={(n) => openTab(`/geo-regions/${n.id}/edit`)}
         onDelete={onDelete}
         levelLabel={(n) => LEVEL_FA[n.level || "COUNTRY"]}
       />
@@ -84,7 +87,7 @@ function GeoTree() {
                 <input dir="ltr" value={code} onChange={(e) => setCode(e.target.value)} />
               </div>
               <div className="form-field">
-                <label>عنوان</label>
+                <label>عنوان<RequiredMark /></label>
                 <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
               </div>
             </div>
@@ -101,6 +104,7 @@ function GeoTree() {
 
 function CountryForm() {
   const navigate = useNavigate();
+  const { openTab } = useTabs();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
   const { create } = useCrud<TreeNode>("/geo-regions");
@@ -125,7 +129,7 @@ function CountryForm() {
             <input dir="ltr" value={code} onChange={(e) => setCode(e.target.value)} />
           </div>
           <div className="form-field">
-            <label>عنوان</label>
+            <label>عنوان<RequiredMark /></label>
             <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
           </div>
         </div>
@@ -136,6 +140,7 @@ function CountryForm() {
 
 function NodeEditForm({ editId }: { editId: number }) {
   const navigate = useNavigate();
+  const { openTab } = useTabs();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
   const [title, setTitle] = usePersistedState(`${cacheKey}:title`, "");
@@ -203,7 +208,7 @@ function NodeEditForm({ editId }: { editId: number }) {
             <input dir="ltr" value={code} onChange={(e) => setCode(e.target.value)} />
           </div>
           <div className="form-field">
-            <label>عنوان</label>
+            <label>عنوان<RequiredMark /></label>
             <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
           </div>
         </div>

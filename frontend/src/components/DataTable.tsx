@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useLocation } from "react-router-dom";
 import { JalaliDatePicker } from "./JalaliDatePicker";
 import { toFaDigits } from "../lib/formatAmount";
+import { useTabs } from "../lib/TabsContext";
+import { usePersistedState } from "../lib/usePersistedState";
+import { exportGridToCsv, printGrid, deriveGridName, ExportColumn } from "../lib/gridExport";
 
 /** اعداد و رشته‌های خالص عددی را به ارقام فارسی تبدیل می‌کند؛ JSX و متن‌های ترکیبی دست‌نخورده می‌مانند */
 function renderCell(value: any): any {
@@ -238,6 +242,26 @@ function CancelSelectionIcon() {
   );
 }
 
+function ExcelExportIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M14 3v5h5" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M8.5 13.5 12 18M12 13.5l-3.5 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PrintIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M6 9V3h12v6" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <rect x="4" y="9" width="16" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M6 14h12v7H6z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 25;
 
@@ -257,40 +281,106 @@ export interface ServerPaging {
   onSortChange?: (sort: { header: string; dir: "asc" | "desc" } | null) => void;
 }
 
+export interface EditAction<T> {
+  /** مسیری که با کلیک «ویرایش» در یک تب جدید (نه بازنویسی تب فهرست) باز می‌شود — نگاه کنید به useTabs().openTab */
+  path: (row: T) => string;
+  /** اگر مشخص شود و برای یک ردیف چیزی غیر از true برگرداند، به‌جای باز کردن تب، همان مقدار به‌عنوان پیام alert نمایش داده می‌شود */
+  guard?: (row: T) => true | string;
+}
+
 export function DataTable<T extends { id: number | string }>({
   columns,
   rows,
-  onEdit,
+  edit,
   onDelete,
   onBulkDelete,
   bulkActions,
   emptyText,
   bulkActionsContainer,
   serverPaging,
+  stateKey,
 }: {
   columns: Column<T>[];
   rows: T[];
-  onEdit?: (row: T) => void;
+  /** اگر مشخص شود، دکمه‌ی «ویرایش» نمایش داده می‌شود و همیشه فرم را در یک تب جدید باز می‌کند (هرگز تب فهرست را بازنویسی نمی‌کند) */
+  edit?: EditAction<T>;
   onDelete?: (row: T) => void;
   /** اگر مشخص نشود ولی onDelete موجود باشد، حذف گروهی با فراخوانی onDelete برای هر ردیف انجام می‌شود */
   onBulkDelete?: (rows: T[]) => void | Promise<void>;
   /** عملیات گروهی سفارشی دیگر (مثل بررسی/برگشت از بررسی) که در همان منوی «عملیات» نمایش داده می‌شوند */
   bulkActions?: { label: (count: number) => string; icon?: any; onClick: (rows: T[]) => void | Promise<void>; danger?: boolean }[];
   emptyText?: string;
-  /** اگر داده شود، نوار عملیات گروهی به‌جای بالای جدول، در این عنصر (معمولاً سرصفحه‌ی صفحه) نمایش داده می‌شود */
+  /** اگر داده شود، نوار عملیات گروهی به‌جای بالای جدول، در این عنصر (معمولاً سرصفحه‌ی صفحه) نمایش داده می‌شود.
+   * اگر داده نشود، خودِ DataTable به‌صورت خودکار نزدیک‌ترین «.header-toolbar» هم‌سطح (زیرِ همان ریشه‌ی
+   * صفحه) را پیدا و در آن ادغام می‌کند — نیازی به سیم‌کشی دستی bulkSlot در هر صفحه نیست؛ فقط اگر صفحه
+   * اصلاً چنین نواری نداشته باشد (پس‌زمینه به حالت قبلی، نوار مستقل بالای گرید) برمی‌گردد. */
   bulkActionsContainer?: HTMLElement | null;
   /** اگر داده شود، صفحه‌بندی/فیلتر/مرتب‌سازی سمت سرور انجام می‌شود (به‌جای پردازش کل rows در مرورگر) */
   serverPaging?: ServerPaging;
+  /** فقط برای صفحاتی که بیش از یک DataTable هم‌زمان با ستون‌های یکسان در یک مسیر دارند (مثلاً «بستن
+   * حسابها»: گرید «حسابهای قابل انتخاب» و «حسابهای انتخاب‌شده» با یک لیست ستون مشترک) لازم است — تا
+   * وضعیت (فیلتر/مرتب‌سازی/صفحه/انتخاب) دو گرید با هم قاطی نشود. در نبود آن، پیش‌فرض خودِ مسیر صفحه
+   * است که برای اکثریت قریب‌به‌اتفاق صفحات (یک گرید در هر مسیر) کافی است. */
+  stateKey?: string;
 }) {
-  const [filters, setFilters] = useState<Record<string, ActiveFilter>>({});
+  const { openTab } = useTabs();
+  const location = useLocation();
+  const gridName = deriveGridName(location.pathname);
+  // کلید پایه‌ی وضعیتِ همین گرید — با پیشوند مسیر صفحه، تا هم با clearPersistedStateByPrefix(مسیر) در
+  // openTab/closeAllTabs (باز کردن یک تب واقعاً جدید) پاک شود، هم توسط clearPersistedState(مسیر) در
+  // refreshTabIfStale (رفرش خودکار به‌خاطر کهنه‌شدن) دست‌نخورده بماند — چون آن فقط دقیقاً همان کلید
+  // بدون این پسوند را پاک می‌کند، نه هر کلیدی که با آن شروع شود.
+  const gridStateBase = `${location.pathname}${stateKey ? `:${stateKey}` : ""}:grid`;
+
+  // فیلتر/مرتب‌سازی/صفحه/تعداد-در-صفحه/انتخاب — دقیقاً همان چیزی که کاربر آخرین بار در همین گرید دیده،
+  // با سوییچ بین تب‌ها (unmount/remount کامل کامپوننت طبق TabsContext) یا رفرش خودکار به‌خاطر کهنه‌شدن
+  // باید دست‌نخورده بماند؛ فقط خودِ rows (که از بیرون داده می‌شود) ممکن است تازه‌سازی شود. طبق تصمیم
+  // صریح کاربر، این یک ویژگی پایه است، نه چیزی که هر صفحه باید جداگانه سیم‌کشی کند.
+  const [filters, setFilters] = usePersistedState<Record<string, ActiveFilter>>(`${gridStateBase}:filters`, {});
+  const [sort, setSort] = usePersistedState<{ header: string; dir: "asc" | "desc" } | null>(`${gridStateBase}:sort`, null);
+  const [page, setPage] = usePersistedState<number>(`${gridStateBase}:page`, 1);
+  const [pageSize, setPageSize] = usePersistedState<number>(`${gridStateBase}:pageSize`, DEFAULT_PAGE_SIZE);
+  const [selected, setSelected] = usePersistedState<Set<number | string>>(`${gridStateBase}:selected`, () => new Set());
+
   const [openFilterFor, setOpenFilterFor] = useState<string | null>(null);
   const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
-  const [selected, setSelected] = useState<Set<number | string>>(new Set());
   const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
-  const [sort, setSort] = useState<{ header: string; dir: "asc" | "desc" } | null>(null);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const filterBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+
+  // اگر صفحه صریحاً bulkActionsContainer نداده باشد، خودمان نزدیک‌ترین «.header-toolbar» را که هم‌سطحِ
+  // ریشه‌ی این DataTable (زیرِ همان div ریشه‌ی صفحه) است پیدا می‌کنیم — طبق قرارداد یکنواخت صفحات فهرست
+  // (<div><div className="page-header"><div className="header-toolbar">...</div></div>{error}<DataTable/></div>)،
+  // این یعنی هر صفحه‌ی جدیدی که همین قرارداد را رعایت کند، بدون هیچ سیم‌کشی دستی (bulkSlot/useState/ref)
+  // به‌صورت خودکار یک نوار ابزار یکپارچه می‌گیرد؛ صفحاتی که این قرارداد را ندارند (یا صریحاً
+  // bulkActionsContainer دیگری داده‌اند) دست‌نخورده می‌مانند.
+  // ref معمولی + useEffect این‌جا کافی نیست: تا وقتی rows خالی است (noRowsAtAll پایین‌تر) اصلاً این div
+  // رندر نمی‌شود، پس اولین بار که بعد از لود داده واقعاً ظاهر می‌شود، وابستگی‌های useEffect عوض نشده‌اند
+  // و دوباره اجرا نمی‌شود. callback ref دقیقاً همان لحظه‌ای که خودِ گره DOM متصل می‌شود فراخوانی می‌شود —
+  // مستقل از این‌که رندر قبلی‌اش اصلاً وجود داشته یا نه.
+  const [autoBulkContainer, setAutoBulkContainer] = useState<HTMLElement | null>(null);
+  const setRootRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node || bulkActionsContainer !== undefined) return;
+      const found = node.parentElement?.querySelector<HTMLElement>(".header-toolbar") ?? null;
+      setAutoBulkContainer(found);
+    },
+    [bulkActionsContainer]
+  );
+  const effectiveBulkContainer = bulkActionsContainer !== undefined ? bulkActionsContainer : autoBulkContainer;
+
+  // ویرایش همیشه در یک تب جدید باز می‌شود، نه با بازنویسی تب فهرست جاری — این تنها مسیر ویرایش در کل
+  // برنامه است، پس این قاعده برای هر فرمی که از DataTable استفاده می‌کند به‌صورت خودکار برقرار است
+  function handleEdit(row: T) {
+    if (!edit) return;
+    if (edit.guard) {
+      const result = edit.guard(row);
+      if (result !== true) {
+        alert(result);
+        return;
+      }
+    }
+    openTab(edit.path(row));
+  }
 
   // در حالت serverPaging، rows همان صفحه‌ی از قبل فیلترشده/مرتب‌شده/صفحه‌بندی‌شده از سرور است؛
   // پردازش محلی فیلتر/مرتب‌سازی/صفحه‌بندی صرفاً برای حالت کلاینتی (بدون serverPaging) اجرا می‌شود
@@ -335,12 +425,21 @@ export function DataTable<T extends { id: number | string }>({
     });
   }
 
-  // با تغییر فیلتر یا مرتب‌سازی، صفحه‌بندی از ابتدا (صفحه ۱) شروع می‌شود (فقط در حالت کلاینتی؛
-  // در حالت سرور، صفحه توسط parent در onFiltersChange/onSortChange مدیریت می‌شود)
+  // با تغییر فیلتر/مرتب‌سازی/تعداد-در-صفحه توسط خودِ کاربر (نه با mount شدنِ کامپوننت — که به‌خاطر
+  // بازیابی وضعیت قبلی از usePersistedState، فیلتر/مرتب‌سازی از همان ابتدا مقدار دارند)، صفحه‌بندی از
+  // ابتدا (صفحه ۱) شروع می‌شود؛ فقط در حالت کلاینتی (در حالت سرور، صفحه توسط parent در
+  // onFiltersChange/onSortChange مدیریت می‌شود). عمداً rows.length از وابستگی‌ها حذف شده: یک رفرش
+  // داده (حذف/ویرایش/سند جدید) نباید کاربر را به صفحه‌ی ۱ برگرداند — اگر صفحه‌ی فعلی از تعداد صفحات
+  // جدید بیشتر شود، همان clamp موجود (Math.min(page, totalPages)) به‌تنهایی کافی است.
+  const skipNextPageReset = useRef(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
+    if (skipNextPageReset.current) {
+      skipNextPageReset.current = false;
+      return;
+    }
     if (!serverPaging) setPage(1);
-  }, [filters, sort, rows.length, pageSize]);
+  }, [filters, sort, pageSize]);
 
   const totalRows = serverPaging ? serverPaging.total : sortedRows.length;
   const effectivePageSize = serverPaging ? serverPaging.pageSize : pageSize;
@@ -416,12 +515,30 @@ export function DataTable<T extends { id: number | string }>({
     return <div className="card empty-state">{emptyText || "هنوز رکوردی ثبت نشده است"}</div>;
   }
 
+  // خروجی اکسل/چاپ همیشه روی داده‌ی «در دسترس» فعلی اجرا می‌شوند: در حالت کلاینتی یعنی کل نتیجه‌ی
+  // فیلترشده/مرتب‌شده (sortedRows، نه فقط صفحه‌ی جاری)، در حالت serverPaging یعنی همان صفحه‌ی جاری از
+  // سرور (rows) — چون این تابع صفحه‌بندی را مدیریت نمی‌کند و فچ «همه‌ی صفحات» را نمی‌داند
+  const exportRows = serverPaging ? rows : sortedRows;
+  // ستون «ردیف» طبق درخواست کاربر پایه/base است (همه‌ی گریدها، از جمله گریدهای آینده، خودکار دارند) —
+  // در حالت کلاینتی exportRows همان کل دیتاست مرتب‌شده است، پس شماره‌گذاری ۱..N ساده کافی است؛ در حالت
+  // serverPaging، exportRows فقط صفحه‌ی جاری است، پس باید از pageStart ادامه پیدا کند تا با شماره‌ی
+  // نمایش‌داده‌شده روی صفحه یکی باشد.
+  const exportRowIndexBase = serverPaging ? pageStart : 0;
+  const rowIndexById = new Map(exportRows.map((r, i) => [r.id, exportRowIndexBase + i + 1]));
+  const exportColumns: ExportColumn<T>[] = [{ header: "ردیف", render: (row: T) => rowIndexById.get(row.id) ?? "" }, ...columns];
+
   const bulkToolbar = (
-    <div className={`bulk-toolbar ${selected.size > 0 ? "active" : ""} ${bulkActionsContainer ? "in-header" : ""}`}>
+    <div className={`bulk-toolbar ${selected.size > 0 ? "active" : ""} ${effectiveBulkContainer ? "in-header" : ""}`}>
       <span className="bulk-toolbar-info">
         {selected.size > 0 ? `${toFaDigits(String(selected.size))} ردیف انتخاب شده` : "\u00A0"}
       </span>
       <div className="bulk-toolbar-actions">
+        <button type="button" className="toolbar-icon-btn" onClick={() => exportGridToCsv(exportColumns, exportRows, gridName)} title="خروجی اکسل">
+          <ExcelExportIcon />
+        </button>
+        <button type="button" className="toolbar-icon-btn" onClick={() => printGrid(exportColumns, exportRows, gridName)} title="چاپ">
+          <PrintIcon />
+        </button>
         {selected.size > 0 && (
           <button type="button" className="toolbar-icon-btn" onClick={() => setSelected(new Set())} title="لغو انتخاب">
             <CancelSelectionIcon />
@@ -470,8 +587,8 @@ export function DataTable<T extends { id: number | string }>({
   );
 
   return (
-    <div className="datatable-root">
-      {bulkActionsContainer ? createPortal(bulkToolbar, bulkActionsContainer) : bulkToolbar}
+    <div className="datatable-root" ref={setRootRef}>
+      {effectiveBulkContainer ? createPortal(bulkToolbar, effectiveBulkContainer) : bulkToolbar}
       <div className="grid-wrap">
       <div className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
         <table>
@@ -480,6 +597,7 @@ export function DataTable<T extends { id: number | string }>({
               <th style={{ width: 34 }}>
                 <input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} />
               </th>
+              <th style={{ width: 44 }}>ردیف</th>
               {columns.map((c) => {
                 const hasFilter = !!c.filterType && !!c.filterValue;
                 const isActive = !!filters[c.header];
@@ -511,30 +629,31 @@ export function DataTable<T extends { id: number | string }>({
                   </th>
                 );
               })}
-              {(onEdit || onDelete) && <th style={{ width: onEdit && onDelete ? 130 : 70 }}></th>}
+              {(edit || onDelete) && <th style={{ width: edit && onDelete ? 130 : 70 }}></th>}
             </tr>
           </thead>
           <tbody>
             {sortedRows.length === 0 && (
               <tr>
-                <td colSpan={columns.length + 2} className="empty-state" style={{ border: "none" }}>
+                <td colSpan={columns.length + 3} className="empty-state" style={{ border: "none" }}>
                   رکوردی مطابق فیلترهای اعمال‌شده یافت نشد
                 </td>
               </tr>
             )}
-            {pageRows.map((row) => (
+            {pageRows.map((row, idx) => (
               <tr key={row.id}>
                 <td>
                   <input type="checkbox" checked={selected.has(row.id)} onChange={() => toggleRow(row.id)} />
                 </td>
+                <td>{toFaDigits(String(pageStart + idx + 1))}</td>
                 {columns.map((c) => (
                   <td key={c.header}>{renderCell(c.render(row))}</td>
                 ))}
-                {(onEdit || onDelete) && (
+                {(edit || onDelete) && (
                   <td>
                     <div style={{ display: "flex", gap: 6 }}>
-                      {onEdit && (
-                        <button className="btn secondary" style={{ padding: "5px 10px", fontSize: 12 }} onClick={() => onEdit(row)}>
+                      {edit && (
+                        <button className="btn secondary" style={{ padding: "5px 10px", fontSize: 12 }} onClick={() => handleEdit(row)}>
                           ویرایش
                         </button>
                       )}

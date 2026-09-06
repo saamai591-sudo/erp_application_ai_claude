@@ -2,6 +2,14 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { nextSerialNumber } from "../utils/coding";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
+import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { assertRecordNotStale } from "../utils/concurrency";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const CUSTOMERS_FORM = findFormPrefix("customers");
+const SALES_QUOTES_FORM = findFormPrefix("sales-quotes");
+const SALES_ORDERS_FORM = findFormPrefix("sales-orders");
 
 // =========================================================================
 // ماژول «فروش» > تنظیمات: مشتری | عملیات: پیش‌فاکتور، سفارش فروش
@@ -21,6 +29,7 @@ const router = Router();
 async function resolveFiscalPeriod(date: Date) {
   const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
   if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
+  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
   await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
   return fiscalPeriod;
 }
@@ -52,7 +61,7 @@ router.get("/customers", async (_req, res) => {
   );
 });
 
-router.post("/customers", async (req, res) => {
+router.post("/customers", can(`${CUSTOMERS_FORM}.create`), async (req, res) => {
   const body = req.body as { code?: number; partyId: number; isActive?: boolean };
   if (!body.partyId) return res.status(400).json({ error: "طرف حساب الزامی است" });
   try {
@@ -71,7 +80,7 @@ router.post("/customers", async (req, res) => {
   }
 });
 
-router.put("/customers/:id", async (req, res) => {
+router.put("/customers/:id", can(`${CUSTOMERS_FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { partyId?: number; isActive?: boolean };
   const existing = await prisma.customer.findUnique({ where: { id } });
@@ -91,7 +100,7 @@ router.put("/customers/:id", async (req, res) => {
   }
 });
 
-router.delete("/customers/:id", async (req, res) => {
+router.delete("/customers/:id", can(`${CUSTOMERS_FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const item = await prisma.customer.findUnique({ where: { id } });
   if (!item) return res.status(404).json({ error: "مشتری یافت نشد" });
@@ -144,7 +153,7 @@ interface SalesQuoteHeaderBody {
   lines: SalesQuoteLineInput[];
 }
 
-router.get("/sales-quotes", async (_req, res) => {
+router.get("/sales-quotes", can(`${SALES_QUOTES_FORM}.view`), async (_req, res) => {
   const items = await prisma.salesQuote.findMany({
     include: { customer: { include: { party: true } }, fiscalPeriod: true, currency: true, lines: true },
     orderBy: { id: "desc" },
@@ -164,7 +173,7 @@ router.get("/sales-quotes", async (_req, res) => {
   );
 });
 
-router.get("/sales-quotes/:id", async (req, res) => {
+router.get("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.salesQuote.findUnique({
     where: { id },
@@ -186,6 +195,7 @@ router.get("/sales-quotes/:id", async (req, res) => {
     fiscalPeriodId: d.fiscalPeriodId,
     description: d.description,
     status: d.status,
+    updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
       id: l.id,
       goodsItemId: l.goodsItemId,
@@ -201,7 +211,7 @@ router.get("/sales-quotes/:id", async (req, res) => {
   });
 });
 
-router.post("/sales-quotes", async (req, res) => {
+router.post("/sales-quotes", can(`${SALES_QUOTES_FORM}.create`), async (req, res) => {
   const body = req.body as SalesQuoteHeaderBody;
   if (!body.date || !body.customerId || !body.currencyId) return res.status(400).json({ error: "تاریخ، مشتری و ارز الزامی است" });
   try {
@@ -233,7 +243,7 @@ router.post("/sales-quotes", async (req, res) => {
   }
 });
 
-router.put("/sales-quotes/:id", async (req, res) => {
+router.put("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as SalesQuoteHeaderBody;
   const existing = await prisma.salesQuote.findUnique({ where: { id } });
@@ -241,6 +251,7 @@ router.put("/sales-quotes/:id", async (req, res) => {
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "ویرایش فقط در حالت ثبت ممکن است" });
   if (!body.date || !body.customerId || !body.currencyId) return res.status(400).json({ error: "تاریخ، مشتری و ارز الزامی است" });
   try {
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این پیش‌فاکتور");
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
@@ -274,7 +285,7 @@ async function salesQuoteHasDownstreamUsage(salesQuoteId: number) {
   return count > 0;
 }
 
-router.delete("/sales-quotes/:id", async (req, res) => {
+router.delete("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.salesQuote.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -284,7 +295,7 @@ router.delete("/sales-quotes/:id", async (req, res) => {
   res.status(204).send();
 });
 
-router.post("/sales-quotes/:id/approve", async (req, res) => {
+router.post("/sales-quotes/:id/approve", can(`${SALES_QUOTES_FORM}.approve`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.salesQuote.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -293,7 +304,7 @@ router.post("/sales-quotes/:id/approve", async (req, res) => {
   res.json({ id, status: "APPROVED" });
 });
 
-router.post("/sales-quotes/:id/unapprove", async (req, res) => {
+router.post("/sales-quotes/:id/unapprove", can(`${SALES_QUOTES_FORM}.unapprove`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.salesQuote.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -366,7 +377,7 @@ async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: stri
   return cleaned;
 }
 
-router.get("/sales-orders/pickable-quote-lines", async (req, res) => {
+router.get("/sales-orders/pickable-quote-lines", can(`${SALES_ORDERS_FORM}.view`), async (req, res) => {
   const customerId = req.query.customerId ? Number(req.query.customerId) : null;
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
 
@@ -417,7 +428,7 @@ interface SalesOrderHeaderBody {
   lines: SalesOrderLineInput[];
 }
 
-router.get("/sales-orders", async (_req, res) => {
+router.get("/sales-orders", can(`${SALES_ORDERS_FORM}.view`), async (_req, res) => {
   const items = await prisma.salesOrder.findMany({
     include: { customer: { include: { party: true } }, fiscalPeriod: true, currency: true, lines: true },
     orderBy: { id: "desc" },
@@ -438,7 +449,7 @@ router.get("/sales-orders", async (_req, res) => {
   );
 });
 
-router.get("/sales-orders/:id", async (req, res) => {
+router.get("/sales-orders/:id", can(`${SALES_ORDERS_FORM}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.salesOrder.findUnique({
     where: { id },
@@ -461,6 +472,7 @@ router.get("/sales-orders/:id", async (req, res) => {
     fiscalPeriodId: d.fiscalPeriodId,
     description: d.description,
     status: d.status,
+    updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
       id: l.id,
       sourceSalesQuoteLineId: l.sourceSalesQuoteLineId,
@@ -477,7 +489,7 @@ router.get("/sales-orders/:id", async (req, res) => {
   });
 });
 
-router.post("/sales-orders", async (req, res) => {
+router.post("/sales-orders", can(`${SALES_ORDERS_FORM}.create`), async (req, res) => {
   const body = req.body as SalesOrderHeaderBody;
   if (!body.date || !body.basis || !body.customerId || !body.currencyId) return res.status(400).json({ error: "تاریخ، مبنا، مشتری و ارز الزامی است" });
   try {
@@ -510,7 +522,7 @@ router.post("/sales-orders", async (req, res) => {
   }
 });
 
-router.put("/sales-orders/:id", async (req, res) => {
+router.put("/sales-orders/:id", can(`${SALES_ORDERS_FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as SalesOrderHeaderBody;
   const existing = await prisma.salesOrder.findUnique({ where: { id } });
@@ -518,6 +530,7 @@ router.put("/sales-orders/:id", async (req, res) => {
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "ویرایش فقط در حالت ثبت ممکن است" });
   if (!body.date || !body.basis || !body.customerId || !body.currencyId) return res.status(400).json({ error: "تاریخ، مبنا، مشتری و ارز الزامی است" });
   try {
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سفارش فروش");
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
@@ -554,7 +567,7 @@ async function salesOrderHasDownstreamUsage(salesOrderId: number) {
   return count > 0;
 }
 
-router.delete("/sales-orders/:id", async (req, res) => {
+router.delete("/sales-orders/:id", can(`${SALES_ORDERS_FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.salesOrder.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -564,7 +577,7 @@ router.delete("/sales-orders/:id", async (req, res) => {
   res.status(204).send();
 });
 
-router.post("/sales-orders/:id/approve", async (req, res) => {
+router.post("/sales-orders/:id/approve", can(`${SALES_ORDERS_FORM}.approve`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.salesOrder.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -573,7 +586,7 @@ router.post("/sales-orders/:id/approve", async (req, res) => {
   res.json({ id, status: "APPROVED" });
 });
 
-router.post("/sales-orders/:id/unapprove", async (req, res) => {
+router.post("/sales-orders/:id/unapprove", can(`${SALES_ORDERS_FORM}.unapprove`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.salesOrder.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });

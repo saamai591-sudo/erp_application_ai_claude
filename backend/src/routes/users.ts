@@ -2,6 +2,10 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { prisma } from "../lib/prisma";
 import { nextSerialNumber } from "../utils/coding";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("users");
 
 const PERSIAN_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
 const ARABIC_DIGITS = "٠١٢٣٤٥٦٧٨٩";
@@ -20,17 +24,17 @@ function toEnglishDigits(value: string): string {
 
 const router = Router();
 
-router.get("/", async (_req, res) => {
+router.get("/", can(`${FORM}.view`), async (_req, res) => {
   const users = await prisma.user.findMany({
-    include: { roles: { include: { role: true } }, party: true },
+    include: { roles: { include: { role: true } }, actions: { include: { action: true } }, party: true },
     orderBy: { code: "asc" },
   });
   res.json(users.map((u: any) => { const { passwordHash, ...rest } = u; return rest; }));
 });
 
-router.post("/", async (req, res) => {
+router.post("/", can(`${FORM}.create`), async (req, res) => {
   // eslint-disable-next-line prefer-const
-  let { code, mobile, firstName, lastName, isActive, password, roleIds, partyId } = req.body as {
+  let { code, mobile, firstName, lastName, isActive, password, roleIds, actionIds, partyId } = req.body as {
     code?: number;
     mobile: string;
     firstName: string;
@@ -38,13 +42,14 @@ router.post("/", async (req, res) => {
     isActive?: boolean;
     password: string;
     roleIds?: number[];
+    actionIds?: number[];
     partyId?: number | null;
   };
 
   mobile = toEnglishDigits(mobile || "");
 
-  if (!mobile || !/^\d{10}$/.test(mobile)) {
-    return res.status(400).json({ error: "شماره همراه باید ۱۰ رقم باشد" });
+  if (!mobile || !/^\d{11}$/.test(mobile)) {
+    return res.status(400).json({ error: "شماره همراه باید ۱۱ رقم باشد" });
   }
   if (!firstName) return res.status(400).json({ error: "نام الزامی است" });
   if (!password || password.length < 6) {
@@ -67,23 +72,25 @@ router.post("/", async (req, res) => {
       passwordHash,
       partyId: partyId || null,
       roles: roleIds ? { create: roleIds.map((roleId) => ({ roleId })) } : undefined,
+      actions: actionIds ? { create: actionIds.map((actionId) => ({ actionId })) } : undefined,
     },
-    include: { roles: { include: { role: true } }, party: true },
+    include: { roles: { include: { role: true } }, actions: { include: { action: true } }, party: true },
   });
 
   const { passwordHash: _, ...safe } = user;
   res.status(201).json(safe);
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
-  const { firstName, lastName, isActive, password, roleIds, partyId } = req.body as {
+  const { firstName, lastName, isActive, password, roleIds, actionIds, partyId } = req.body as {
     firstName?: string;
     lastName?: string;
     isActive?: boolean;
     partyId?: number | null;
     password?: string;
     roleIds?: number[];
+    actionIds?: number[];
   };
 
   const data: any = { firstName, lastName, isActive, partyId: partyId === undefined ? undefined : partyId || null };
@@ -98,18 +105,22 @@ router.put("/:id", async (req, res) => {
     ...(roleIds && roleIds.length
       ? [prisma.userRole.createMany({ data: roleIds.map((roleId) => ({ userId: id, roleId })) })]
       : []),
+    prisma.userAction.deleteMany({ where: { userId: id } }),
+    ...(actionIds && actionIds.length
+      ? [prisma.userAction.createMany({ data: actionIds.map((actionId) => ({ userId: id, actionId })) })]
+      : []),
   ]);
 
   const user = await prisma.user.findUnique({
     where: { id },
-    include: { roles: { include: { role: true } }, party: true },
+    include: { roles: { include: { role: true } }, actions: { include: { action: true } }, party: true },
   });
   if (!user) return res.status(404).json({ error: "کاربر یافت نشد" });
   const { passwordHash, ...safe } = user;
   res.json(safe);
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user) return res.status(404).json({ error: "کاربر یافت نشد" });

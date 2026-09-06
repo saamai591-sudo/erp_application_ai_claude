@@ -4,8 +4,10 @@ import { ChainedTabsBar } from "../components/ChainedTabsBar";
 import { SelectableBalanceTable, BalanceTableColumn } from "../components/SelectableBalanceTable";
 import { RefreshButton } from "../components/RefreshButton";
 import { useChainedMultiSelect, SelectId } from "../lib/useChainedMultiSelect";
+import { getWarehouseReviewSnapshot, setWarehouseReviewSnapshot } from "../lib/warehouseReviewCache";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
+import { toEnglishDigits } from "../lib/digits";
 import { getSavedFiscalPeriodId } from "../lib/userSettings";
 import { useTabs } from "../lib/TabsContext";
 import { api } from "../lib/api";
@@ -24,8 +26,9 @@ import { ColumnFilterType } from "../components/DataTable";
 // انتخاب چند ردیف در تب «کالا» فیلتر تب‌های بعدی/قبلی را اعمال کند (مکانیزم فیلتر زنجیره‌ای موجود،
 // بدون نیاز به منطق جداگانه‌ی بالادست/زیرمجموعه).
 //
-// mode="qty" («مرور تعدادی»، از ماژول انبارداری): فقط ستون‌های تعدادی (مقدار اول دوره/وارده/صادره/مانده).
-// mode="amount" («مرور مبلغی»، از ماژول حسابداری انبار): همان ستون‌های تعدادی + ستون‌های مبلغی معادل
+// mode="qty" («مرور تعدادی»، ساب‌ماژول «گزارش»): فقط ستون‌های تعدادی (مقدار اول دوره/وارده/صادره/مانده).
+// mode="amount" («مرور مبلغی»، همان ساب‌ماژول «گزارش» — ماژول جدای «حسابداری انبار» طبق تصمیم صریح
+// کاربر حذف و ادغام شد): همان ستون‌های تعدادی + ستون‌های مبلغی معادل
 // (طبق درخواست صریح کاربر: «هر جا که مقدار هست در کنارش ستون مبلغ هم باشد»).
 
 type ReviewMode = "qty" | "amount";
@@ -75,6 +78,8 @@ interface LedgerRow {
   docId: number;
   docNumber: number;
   date: string;
+  warehouseCode: number | null;
+  warehouseTitle: string | null;
   goodsItemId: number;
   goodsItemCode: string;
   goodsItemTitle: string;
@@ -84,8 +89,8 @@ interface LedgerRow {
   batchNumber: string | null;
   expiryDate: string | null;
   physicalLocation: string | null;
-  partyCode: string | null;
-  partyTitle: string | null;
+  detailCode: string | null;
+  detailTitle: string | null;
   runningQuantity: number;
   runningAmount: number;
 }
@@ -100,9 +105,9 @@ const DIRECTION_FA: Record<string, string> = { IN: "وارده", OUT: "صادر�
 const DOC_TYPE_PATH: Record<string, string> = {
   "موجودی اول دوره": "initial-inventory",
   "رسید انبار خرید": "warehouse-receipts",
-  "انتقال بین انبارها (خروج)": "warehouse-transfers",
-  "انتقال بین انبارها (ورود)": "warehouse-transfers",
-  "انبارگردانی / تعدیل موجودی": "warehouse-adjustments",
+  "حواله انتقالی": "warehouse-transfer-out",
+  "رسید انتقال": "warehouse-transfer-in",
+  "اضافات انبارگردانی": "warehouse-adjustments",
 };
 
 // طبق stockAnalysis.md بند ۳۴ — این ۱۰ نوع سند جدید برخلاف ۵ نوع بالا نمای «حسابداری انبار» مجزا
@@ -118,6 +123,7 @@ const DOC_TYPE_FULL_PATH: Record<string, string> = {
   "برگشت به تامین‌کننده": "/supplier-returns",
   "رسید تولید": "/production-receipts",
   "حواله دارایی ثابت": "/fixed-asset-issues",
+  "کسری انبارگردانی": "/inventory-counting-shortages",
 };
 
 function infoText(mode: ReviewMode) {
@@ -132,10 +138,22 @@ function infoText(mode: ReviewMode) {
 
 const LEDGER_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
-function amountCol(header: string, field: keyof DimRow): BalanceTableColumn<DimRow> {
+// اسناد صادره (خروج) به فرمت رایج حسابداری برای اعداد منفی نمایش داده می‌شوند: داخل پرانتز و قرمز —
+// dir="ltr" چون در متن راست‌به‌چپ، پرانتز/کاما/ارقام باید به ترتیب چپ‌به‌راست خودشان بمانند
+function formatAccountingAmount(value: number, isOutbound: boolean) {
+  const text = formatAmountFa(Math.abs(value));
+  if (!isOutbound) return text;
+  return (
+    <span dir="ltr" style={{ color: "var(--danger)" }}>
+      ({text})
+    </span>
+  );
+}
+
+function amountCol(header: string, field: keyof DimRow, outbound = false): BalanceTableColumn<DimRow> {
   return {
     header,
-    render: (r) => formatAmountFa((r[field] as number) || 0),
+    render: (r) => formatAccountingAmount((r[field] as number) || 0, outbound),
     sortValue: (r) => (r[field] as number) || 0,
     filterType: "number",
     filterValue: (r) => (r[field] as number) || 0,
@@ -145,23 +163,41 @@ function amountCol(header: string, field: keyof DimRow): BalanceTableColumn<DimR
 export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
   const { openTab } = useTabs();
   const basePath = mode === "qty" ? "/warehousing" : "/warehouse-accounting";
+  const snapshot = getWarehouseReviewSnapshot(mode);
   const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
   const [groupLevels, setGroupLevels] = useState<GroupLevel[]>([]);
   const [levelsLoaded, setLevelsLoaded] = useState(false);
-  const [filters, setFilters] = useState({ fromDate: "", toDate: "" });
-  const [activeTab, setActiveTab] = useState(0);
-  const [tabData, setTabData] = useState<Record<number, DimRow[]>>({});
+  const [filters, setFilters] = useState(snapshot?.filters ?? { fromDate: "", toDate: "" });
+  const [activeTab, setActiveTab] = useState(snapshot?.activeTab ?? 0);
+  const [tabData, setTabData] = useState<Record<number, DimRow[]>>(snapshot?.tabData ?? {});
   const [tabLoading, setTabLoading] = useState(false);
-  const [loadedTabs, setLoadedTabs] = useState<Set<number>>(new Set());
-  const [ledgerRows, setLedgerRows] = useState<LedgerRow[]>([]);
-  const [ledgerPage, setLedgerPage] = useState(1);
-  const [ledgerPageSize, setLedgerPageSize] = useState(25);
-  const [ledgerTotal, setLedgerTotal] = useState(0);
-  const [ledgerTotalPages, setLedgerTotalPages] = useState(1);
+  const [loadedTabs, setLoadedTabs] = useState<Set<number>>(new Set(snapshot?.loadedTabs ?? []));
+  const [ledgerRows, setLedgerRows] = useState<LedgerRow[]>(snapshot?.ledgerRows ?? []);
+  const [ledgerPage, setLedgerPage] = useState(snapshot?.ledgerPage ?? 1);
+  const [ledgerPageSize, setLedgerPageSize] = useState(snapshot?.ledgerPageSize ?? 25);
+  const [ledgerTotal, setLedgerTotal] = useState(snapshot?.ledgerTotal ?? 0);
+  const [ledgerTotalPages, setLedgerTotalPages] = useState(snapshot?.ledgerTotalPages ?? 1);
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const chain = useChainedMultiSelect();
+  const chain = useChainedMultiSelect(snapshot?.chainState);
+
+  // ذخیره‌ی زنده‌ی وضعیت در حافظه‌ی موقت بیرون از چرخه‌ی کامپوننت — دقیقاً هم‌الگوی AccountsReview.tsx —
+  // تا با رفتن به یک تب دیگر (مثلاً باز کردن سند از تب گردش) و بازگشت، وضعیت این صفحه از دست نرود.
+  useEffect(() => {
+    setWarehouseReviewSnapshot(mode, {
+      chainState: { selections: chain.selections, order: chain.order },
+      activeTab,
+      filters,
+      tabData,
+      loadedTabs: Array.from(loadedTabs),
+      ledgerRows,
+      ledgerPage,
+      ledgerPageSize,
+      ledgerTotal,
+      ledgerTotalPages,
+    });
+  }, [mode, chain.selections, chain.order, activeTab, filters, tabData, loadedTabs, ledgerRows, ledgerPage, ledgerPageSize, ledgerTotal, ledgerTotalPages]);
 
   // مرزهای تب‌ها به‌صورت پویا بر اساس تعداد سطوح گروه کالا محاسبه می‌شوند (دقیقاً مثل accountTabCount
   // در AccountsReview.tsx که بر اساس تعداد سطوح گزارشگری محاسبه می‌شود)
@@ -382,8 +418,8 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
     if (mode === "amount") suffix.push(amountCol("مبلغ اول دوره", "openingAmount"));
     suffix.push(amountCol("وارده", "inQuantity"));
     if (mode === "amount") suffix.push(amountCol("مبلغ وارده", "inAmount"));
-    suffix.push(amountCol("صادره", "outQuantity"));
-    if (mode === "amount") suffix.push(amountCol("مبلغ صادره", "outAmount"));
+    suffix.push(amountCol("صادره", "outQuantity", true));
+    if (mode === "amount") suffix.push(amountCol("مبلغ صادره", "outAmount", true));
     suffix.push(amountCol("مانده", "balanceQuantity"));
     if (mode === "amount") suffix.push(amountCol("مانده مبلغی", "balanceAmount"));
 
@@ -398,11 +434,22 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
       p.set("page", "1");
       p.set("pageSize", "100000");
       const data = await api.get(`/warehouse-review/ledger?${p.toString()}`);
-      const header = ["نوع", "نوع سند", "شماره", "تاریخ", "کد کالا", "کالا", "مقدار", ...(mode === "amount" ? ["مبلغ"] : []), "مانده", "کد طرف حساب", "عنوان طرف حساب"];
-      const rows = data.rows.map((r: LedgerRow) => [
-        DIRECTION_FA[r.direction], r.docType, r.docNumber, formatJalaliDate(r.date), r.goodsItemCode, r.goodsItemTitle, r.quantity,
-        ...(mode === "amount" ? [r.amount] : []), r.runningQuantity, r.partyCode || "", r.partyTitle || "",
-      ]);
+      const header = [
+        "نوع", "نوع سند", "شماره", "تاریخ", "کد انبار", "انبار", "کد کالا", "کالا", "مقدار",
+        ...(mode === "amount" ? ["مبلغ"] : []), "مانده",
+        ...(mode === "amount" ? ["مانده مبلغی"] : []), "کد تفصیل", "عنوان تفصیل",
+      ];
+      // مقدار/مبلغ در داده‌ی خام همیشه اندازه‌ی مثبت است (جهت از فیلد نوع/direction معلوم می‌شود)؛ در
+      // نمای تصویری با پرانتز/رنگ قرمز منفی نشان داده می‌شود، ولی CSV رنگ/پرانتز ندارد، پس اینجا باید
+      // واقعاً با علامت منفی صادر شود تا خروجی اکسل هم فرمت حسابداریِ رایج (صادره = منفی) را نشان دهد
+      const rows = data.rows.map((r: LedgerRow) => {
+        const sign = r.direction === "OUT" ? -1 : 1;
+        return [
+          DIRECTION_FA[r.direction], r.docType, r.docNumber, toEnglishDigits(formatJalaliDate(r.date)), r.warehouseCode ?? "", r.warehouseTitle || "", r.goodsItemCode, r.goodsItemTitle, r.quantity * sign,
+          ...(mode === "amount" ? [r.amount * sign] : []), r.runningQuantity,
+          ...(mode === "amount" ? [r.runningAmount] : []), r.detailCode || "", r.detailTitle || "",
+        ];
+      });
       const csv = [header, ...rows].map((row) => row.map((c: any) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
       const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
@@ -449,7 +496,7 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
       )}
 
       {activeTab === LEDGER_TAB && (
-        <div>
+        <div className="datatable-root">
           <div className="ar-ledger-toolbar">
             <span style={{ flex: 1 }} />
             <button type="button" className="btn secondary" onClick={() => window.print()}>چاپ</button>
@@ -467,18 +514,21 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
                       <th>نوع سند</th>
                       <th>شماره</th>
                       <th>تاریخ</th>
+                      <th>کد انبار</th>
+                      <th>انبار</th>
                       <th>کد کالا</th>
                       <th>کالا</th>
                       <th>مقدار</th>
                       {mode === "amount" && <th>مبلغ</th>}
                       <th>مانده در خط</th>
-                      <th>کد طرف حساب</th>
-                      <th>عنوان طرف حساب</th>
+                      {mode === "amount" && <th>مانده مبلغی در خط</th>}
+                      <th>کد تفصیل</th>
+                      <th>عنوان تفصیل</th>
                     </tr>
                   </thead>
                   <tbody>
                     {ledgerRows.length === 0 && (
-                      <tr><td colSpan={mode === "amount" ? 11 : 10} className="empty-state" style={{ border: "none" }}>گردشی یافت نشد</td></tr>
+                      <tr><td colSpan={mode === "amount" ? 14 : 12} className="empty-state" style={{ border: "none" }}>گردشی یافت نشد</td></tr>
                     )}
                     {ledgerRows.map((r, i) => (
                       <tr
@@ -499,13 +549,16 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
                         <td>{r.docType}</td>
                         <td>{toFaDigits(String(r.docNumber))}</td>
                         <td>{formatJalaliDate(r.date)}</td>
+                        <td>{r.warehouseCode != null ? toFaDigits(String(r.warehouseCode)) : "—"}</td>
+                        <td>{r.warehouseTitle || "—"}</td>
                         <td>{toFaDigits(r.goodsItemCode)}</td>
                         <td>{r.goodsItemTitle}</td>
-                        <td>{formatAmountFa(r.quantity)}</td>
-                        {mode === "amount" && <td>{formatAmountFa(r.amount)}</td>}
+                        <td>{formatAccountingAmount(r.quantity, r.direction === "OUT")}</td>
+                        {mode === "amount" && <td>{formatAccountingAmount(r.amount, r.direction === "OUT")}</td>}
                         <td>{formatAmountFa(r.runningQuantity)}</td>
-                        <td>{r.partyCode ? toFaDigits(r.partyCode) : "—"}</td>
-                        <td>{r.partyTitle || "—"}</td>
+                        {mode === "amount" && <td>{formatAmountFa(r.runningAmount)}</td>}
+                        <td>{r.detailCode ? toFaDigits(r.detailCode) : "—"}</td>
+                        <td>{r.detailTitle || "—"}</td>
                       </tr>
                     ))}
                   </tbody>

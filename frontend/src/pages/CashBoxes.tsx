@@ -10,6 +10,7 @@ import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 
 interface CashBox { id: number; detailCode: string; title: string; hasTransactions: boolean }
@@ -26,7 +27,6 @@ export default function CashBoxes() {
 
 function CashBoxList() {
   const { items, loading, error, remove, reload, create } = useCrud<CashBox>("/cash-boxes");
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
   return (
     <div>
@@ -42,19 +42,18 @@ function CashBoxList() {
             ]}
             onDone={reload}
           />
-          <RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
+          <RefreshButton onClick={reload} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       {!loading && (
         <DataTable
-        bulkActionsContainer={bulkSlot}
           columns={[
             { header: "کد", render: (r) => toFaDigits(r.detailCode), width: "120px", filterType: "string", filterValue: (r) => r.detailCode },
             { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
           ]}
           rows={items}
-          onEdit={(r) => navigate(`/cash-boxes/${r.id}/edit`)}
+          edit={{ path: (r) => `/cash-boxes/${r.id}/edit` }}
           onDelete={async (r) => {
             const res = await remove(r.id);
             if (!res.ok) alert(res.error);
@@ -127,7 +126,7 @@ function CashBoxForm({ editId }: { editId?: number }) {
         {formError && <div className="alert error">{formError}</div>}
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-field full">
-          <label>عنوان</label>
+          <label>عنوان<RequiredMark /></label>
           <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
         </div>
       </form>

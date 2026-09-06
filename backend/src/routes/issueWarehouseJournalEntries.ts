@@ -7,6 +7,7 @@ import { parseFilters, stringWhere, numberWhere, dateWhere, FilterSpec } from ".
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { OUTBOUND_DOC_TYPES } from "../services/warehouseMovementService";
+import { resolveAccountDetailFields } from "../utils/detailValues";
 
 const FORM = findFormPrefix("accounting-issue-journal-entries");
 
@@ -165,18 +166,6 @@ router.get("/issue-warehouse-journal-entries/candidates", can(`${FORM}.view`), a
   res.json({ items, total });
 });
 
-function detailFields(
-  account: { detailType1Id: number | null; detailType2Id: number | null; detailType3Id: number | null },
-  detailTypeId: number | null,
-  code: string | null
-): { detail1Code?: string; detail2Code?: string; detail3Code?: string } {
-  if (!code || detailTypeId == null) return {};
-  if (account.detailType1Id === detailTypeId) return { detail1Code: code };
-  if (account.detailType2Id === detailTypeId) return { detail2Code: code };
-  if (account.detailType3Id === detailTypeId) return { detail3Code: code };
-  return {};
-}
-
 // صدور واقعی سند حسابداری — طبق Documents/صدور سند حسابداری.md + تصمیم صریح کاربر (بدون انتخاب
 // ردیف‌به‌ردیف): یک سند واحد برای همه‌ی ردیف‌های مطابق همان فیلترهای «تا تاریخ»/گروه‌های حسابداری/فیلتر
 // ستونی که برای GET /candidates استفاده می‌شود صادر می‌شود (resolveCandidatesWhere مشترک است — یعنی این
@@ -264,8 +253,8 @@ router.post("/issue-warehouse-journal-entries/issue", can(`${FORM}.issue`), asyn
     const detailTypeId = detailCode ? detailTypeByCode.get(detailCode) ?? null : null;
     const description = `بابت ${DOC_TYPE_FA[doc.documentType] ?? doc.documentType} شماره سند ${doc.number} تاریخ سند ${formatJalaliDateForMessage(doc.date)}`;
 
-    const inventoryDetails = detailFields(inventorySetting.account, detailTypeId, detailCode);
-    const contraDetails = detailFields(contraSetting.account, detailTypeId, detailCode);
+    const inventoryDetails = resolveAccountDetailFields(inventorySetting.account, detailTypeId, detailCode);
+    const contraDetails = resolveAccountDetailFields(contraSetting.account, detailTypeId, detailCode);
 
     if (direction === "IN") {
       lines.push({ accountId: inventorySetting.accountId, ...inventoryDetails, currencyId: baseCurrency.id, debit: amount, credit: 0, fxRate: 1, description });

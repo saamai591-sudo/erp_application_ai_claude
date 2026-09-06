@@ -8,6 +8,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 
 export interface GoodsGroupLevel {
@@ -33,7 +34,6 @@ function LevelList() {
   const cacheKey = "/goods-group-levels";
   const [items, setItems] = usePersistedState<GoodsGroupLevel[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -69,12 +69,10 @@ function LevelList() {
           <InfoHint text={`تعریف سطوح درختی گروه‌بندی کالا؛ ترتیب سطوح با دکمه‌های جابجایی قابل تغییر است (تا قبل از داشتن گردش)`} title="سطح گروه کالا" />
           <NewRecordButton path="/goods-group-levels/new" />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "ترتیب", render: (r) => toFaDigits(String(r.order)), width: "70px" },
           {
@@ -111,7 +109,7 @@ function LevelList() {
           { header: "تاثیر در کد کالا", render: (r) => (r.affectsGoodsCode ? "بله" : "خیر"), width: "110px" },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/goods-group-levels/${r.id}/edit`)}
+        edit={{ path: (r) => `/goods-group-levels/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -189,11 +187,11 @@ function LevelForm({ editId }: { editId?: number }) {
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
-            <label>عنوان</label>
+            <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
           </div>
           <div className="form-field">
-            <label>طول کد</label>
+            <label>طول کد<RequiredMark /></label>
             <input type="number" min={1} value={form.codeLength} onChange={(e) => setForm({ ...form, codeLength: Number(e.target.value) })} />
           </div>
           <div className="form-field">

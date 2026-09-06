@@ -1,7 +1,14 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
+import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { recomputeCashBoxHasTransactions, recomputeBankAccountHasTransactions } from "../utils/treasuryTracking";
+import { assertRecordNotStale } from "../utils/concurrency";
+import { withoutFiscalPeriodScope } from "../lib/requestContext";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("receipts");
 
 // =========================================================================
 // ماژول «خزانه‌داری» > دریافت (Receipt)
@@ -64,6 +71,7 @@ interface HeaderBody {
 async function resolveFiscalPeriod(date: Date) {
   const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
   if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
+  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
   await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
   return fiscalPeriod;
 }
@@ -147,7 +155,7 @@ function partyDisplay(p: any) {
 // پیکرهای مانده برای انتخاب فاکتور فروش قابل تسویه
 // =========================================================================
 
-router.get("/receipts/pickable-sales-invoices", async (req, res) => {
+router.get("/receipts/pickable-sales-invoices", can(`${FORM}.view`), async (req, res) => {
   const partyId = req.query.partyId ? Number(req.query.partyId) : null;
   const excludeReceiptId = req.query.excludeReceiptId ? Number(req.query.excludeReceiptId) : undefined;
   if (!partyId) return res.json([]);
@@ -155,11 +163,15 @@ router.get("/receipts/pickable-sales-invoices", async (req, res) => {
   const customer = await prisma.customer.findUnique({ where: { partyId } });
   if (!customer) return res.json([]);
 
-  const invoices = await prisma.salesInvoice.findMany({
-    where: { customerId: customer.id, status: "APPROVED" },
-    include: { lines: true, receiptSettlementLines: { include: { receipt: true } }, currency: true },
-    orderBy: { id: "desc" },
-  });
+  // فاکتور باز ممکن است متعلق به دوره مالی قبلی باشد (هنوز تسویه نشده) — پس عمداً به دوره مالی جاری
+  // محدود نمی‌شود، برخلاف لیست عادی فاکتورهای فروش.
+  const invoices = await withoutFiscalPeriodScope(() =>
+    prisma.salesInvoice.findMany({
+      where: { customerId: customer.id, status: "APPROVED" },
+      include: { lines: true, receiptSettlementLines: { include: { receipt: true } }, currency: true },
+      orderBy: { id: "desc" },
+    })
+  );
 
   const result = invoices
     .map((inv: any) => {
@@ -188,7 +200,7 @@ router.get("/receipts/pickable-sales-invoices", async (req, res) => {
 // CRUD + تایید/برگشت از تایید
 // =========================================================================
 
-router.get("/receipts", async (_req, res) => {
+router.get("/receipts", can(`${FORM}.view`), async (_req, res) => {
   const items = await prisma.receipt.findMany({
     include: { party: true, fiscalPeriod: true, currency: true, instrumentLines: true, settlementLines: true },
     orderBy: { id: "desc" },
@@ -210,7 +222,7 @@ router.get("/receipts", async (_req, res) => {
   );
 });
 
-router.get("/receipts/:id", async (req, res) => {
+router.get("/receipts/:id", can(`${FORM}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.receipt.findUnique({
     where: { id },
@@ -235,6 +247,7 @@ router.get("/receipts/:id", async (req, res) => {
     currencyTitle: d.currency.title,
     description: d.description,
     status: d.status,
+    updatedAt: d.updatedAt,
     instrumentLines: d.instrumentLines.map((l: any) => ({
       id: l.id,
       type: l.type,
@@ -266,7 +279,7 @@ router.get("/receipts/:id", async (req, res) => {
   });
 });
 
-router.post("/receipts", async (req, res) => {
+router.post("/receipts", can(`${FORM}.create`), async (req, res) => {
   const body = req.body as HeaderBody;
   if (!body.date) return res.status(400).json({ error: "تاریخ سند الزامی است" });
   if (!body.partyId) return res.status(400).json({ error: "طرف حساب الزامی است" });
@@ -306,7 +319,7 @@ router.post("/receipts", async (req, res) => {
   }
 });
 
-router.put("/receipts/:id", async (req, res) => {
+router.put("/receipts/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as HeaderBody;
 
@@ -319,6 +332,7 @@ router.put("/receipts/:id", async (req, res) => {
   if (!body.currencyId) return res.status(400).json({ error: "ارز الزامی است" });
 
   try {
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سند");
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const party = await prisma.party.findUnique({ where: { id: body.partyId } });
@@ -351,7 +365,7 @@ router.put("/receipts/:id", async (req, res) => {
   }
 });
 
-router.delete("/receipts/:id", async (req, res) => {
+router.delete("/receipts/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.receipt.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -363,7 +377,7 @@ router.delete("/receipts/:id", async (req, res) => {
 // تایید: از این لحظه چک‌های دریافتی این سند به‌عنوان رکورد مستقل ChequeItem ایجاد می‌شوند و در فهرست
 // مانده‌ی فاکتورهای فروش نیز اثر می‌گذارد (رفتار مشابه «قطعی‌کردن» در اسناد انبار، اما با نام «تایید»
 // طبق تصمیم کاربر برای این ماژول).
-router.post("/receipts/:id/approve", async (req, res) => {
+router.post("/receipts/:id/approve", can(`${FORM}.approve`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.receipt.findUnique({ where: { id }, include: { instrumentLines: true, settlementLines: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -423,7 +437,7 @@ router.post("/receipts/:id/approve", async (req, res) => {
 
 // برگشت از تایید: فقط در صورتی مجاز است که هیچ‌کدام از چک‌های دریافتی این سند از حالت اولیه («در دست»)
 // تغییر نکرده باشند (نه واگذار به وصول، نه وصول‌شده، نه برگشتی، نه خرج‌شده در یک سند پرداخت دیگر).
-router.post("/receipts/:id/unapprove", async (req, res) => {
+router.post("/receipts/:id/unapprove", can(`${FORM}.unapprove`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.receipt.findUnique({
     where: { id },
@@ -463,7 +477,7 @@ router.post("/receipts/:id/unapprove", async (req, res) => {
 // باقی می‌ماند؛ فقط ردیف‌های ابزار «قفل‌نشده» (چک‌هایی که step آن‌ها هنوز با chequeStep این سند
 // برابر است، یا هر ردیف غیرچک) قابل ویرایش/حذف‌اند، و ردیف تازه هم قابل افزودن است. ردیف‌های تسویه
 // هم‌زمان به‌طور کامل جایگزین می‌شوند تا جمعشان با جمع جدید ردیف‌های ابزار برابر بماند.
-router.put("/receipts/:id/edit-approved", async (req, res) => {
+router.put("/receipts/:id/edit-approved", can(`${FORM}.editApproved`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { description?: string; instrumentLines: (InstrumentLineInput & { id?: number })[]; settlementLines: SettlementLineInput[] };
 

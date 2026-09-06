@@ -1,6 +1,12 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
+import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { assertRecordNotStale } from "../utils/concurrency";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("sales-invoices");
 
 // =========================================================================
 // ماژول «فروش» > عملیات > فاکتور فروش نهایی
@@ -24,6 +30,7 @@ const router = Router();
 async function resolveFiscalPeriod(date: Date) {
   const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
   if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
+  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
   await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
   return fiscalPeriod;
 }
@@ -90,7 +97,6 @@ async function validateLines(lines: LineInput[], basis: string, excludeInvoiceId
       if (!l.sourceInventoryLineId) throw new Error(`ردیف ${idx + 1}: انتخاب ردیف حواله فروش الزامی است`);
       const info = await salesDeliveryLineRemaining(l.sourceInventoryLineId, excludeInvoiceId);
       if (!info) throw new Error(`ردیف حواله فروش برای ردیف ${idx + 1} یافت نشد`);
-      if (info.line.document.status !== "FINALIZED") throw new Error(`حواله فروش ردیف ${idx + 1} هنوز قطعی نشده است`);
       if (qty > info.remaining) throw new Error(`مقدار ردیف ${idx + 1} از باقیمانده‌ی قابل صورتحساب (${info.remaining}) بیشتر است`);
       sourceInventoryLineId = info.line.id;
       goodsItemId = info.line.goodsItemId;
@@ -113,10 +119,10 @@ async function validateLines(lines: LineInput[], basis: string, excludeInvoiceId
 // پیکر «باقیمانده» حواله فروش
 // =========================================================================
 
-router.get("/sales-invoices/pickable-sales-delivery-lines", async (req, res) => {
+router.get("/sales-invoices/pickable-sales-delivery-lines", can(`${FORM}.view`), async (req, res) => {
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
   const lines = await prisma.inventoryDocumentLine.findMany({
-    where: { document: { documentType: "SALES_DELIVERY", status: "FINALIZED", ...(destDate ? { date: { lte: destDate } } : {}) } },
+    where: { document: { documentType: "SALES_DELIVERY", ...(destDate ? { date: { lte: destDate } } : {}) } },
     include: { document: true, goodsItem: true, unit: true, salesInvoiceLines: true },
     orderBy: { id: "desc" },
   });
@@ -158,7 +164,7 @@ interface HeaderBody {
   lines: LineInput[];
 }
 
-router.get("/sales-invoices", async (_req, res) => {
+router.get("/sales-invoices", can(`${FORM}.view`), async (_req, res) => {
   const items = await prisma.salesInvoice.findMany({
     include: { customer: { include: { party: true } }, fiscalPeriod: true, currency: true, lines: true },
     orderBy: { id: "desc" },
@@ -179,7 +185,7 @@ router.get("/sales-invoices", async (_req, res) => {
   );
 });
 
-router.get("/sales-invoices/:id", async (req, res) => {
+router.get("/sales-invoices/:id", can(`${FORM}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.salesInvoice.findUnique({
     where: { id },
@@ -202,6 +208,7 @@ router.get("/sales-invoices/:id", async (req, res) => {
     fiscalPeriodId: d.fiscalPeriodId,
     description: d.description,
     status: d.status,
+    updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
       id: l.id,
       sourceInventoryLineId: l.sourceInventoryLineId,
@@ -218,7 +225,7 @@ router.get("/sales-invoices/:id", async (req, res) => {
   });
 });
 
-router.post("/sales-invoices", async (req, res) => {
+router.post("/sales-invoices", can(`${FORM}.create`), async (req, res) => {
   const body = req.body as HeaderBody;
   if (!body.date || !body.basis || !body.customerId || !body.currencyId) return res.status(400).json({ error: "تاریخ، مبنا، مشتری و ارز الزامی است" });
   try {
@@ -251,13 +258,14 @@ router.post("/sales-invoices", async (req, res) => {
   }
 });
 
-router.put("/sales-invoices/:id", async (req, res) => {
+router.put("/sales-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as HeaderBody;
   const existing = await prisma.salesInvoice.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "یافت نشد" });
   if (!body.date || !body.basis || !body.customerId || !body.currencyId) return res.status(400).json({ error: "تاریخ، مبنا، مشتری و ارز الزامی است" });
   try {
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این فاکتور فروش");
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
@@ -287,7 +295,7 @@ router.put("/sales-invoices/:id", async (req, res) => {
   }
 });
 
-router.delete("/sales-invoices/:id", async (req, res) => {
+router.delete("/sales-invoices/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.salesInvoice.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });

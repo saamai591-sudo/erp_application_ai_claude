@@ -7,11 +7,13 @@ import { RecordPickerField } from "../components/RecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
+import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 
 // ماژول «خزانه‌داری» > واگذاری چک به بانک. طبق تصمیم صریح کاربر: چند چک دریافتنی «در دست» با هم به
 // یک حساب بانکی مشخص واگذار می‌شوند. در تایید، وضعیت چک‌ها به «واگذار به وصول» تغییر می‌کند. نگاه
@@ -155,7 +157,7 @@ function ChequeDepositList() {
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/cheque-deposits/${r.id}/edit`)}
+        edit={{ path: (r) => `/cheque-deposits/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -173,6 +175,7 @@ function ChequeDepositForm({ editId }: { editId?: number }) {
   const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; fiscalPeriodTitle: string } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const { saved, flash } = useSavedFlash();
 
   function applyDetail(d: Detail) {
@@ -183,12 +186,14 @@ function ChequeDepositForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [bas, cheques]: [BankAccountOption[], PickableCheque[]] = await Promise.all([
+      const [bas, cheques, fp]: [BankAccountOption[], PickableCheque[], FiscalPeriodRange | null] = await Promise.all([
         api.get("/banking/accounts"),
         api.get("/cheque-deposits/pickable-cheques"),
+        fetchSelectedFiscalPeriod(),
       ]);
       setBankAccounts(bas);
       setPickableCheques(cheques);
+      setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
         setLoaded(true);
@@ -212,7 +217,7 @@ function ChequeDepositForm({ editId }: { editId?: number }) {
         const d: Detail = await api.get(`/cheque-deposits/${editId}`);
         applyDetail(d);
       } else {
-        setHeader({ date: "", bankAccountId: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), bankAccountId: "", description: "" });
         setLines([]);
         setMeta(null);
       }
@@ -267,6 +272,8 @@ function ChequeDepositForm({ editId }: { editId?: number }) {
 
     if (!header.date) return setError("تاریخ الزامی است");
     if (!header.bankAccountId) return setError("حساب بانکی مقصد الزامی است");
+    const dateErr = validateDocumentDate(header.date, fiscalPeriod);
+    if (dateErr) return setError(dateErr);
     if (lines.length === 0) return setError("حداقل یک چک باید انتخاب شود");
     const body = { date: header.date, bankAccountId: Number(header.bankAccountId), description: header.description, chequeItemIds: lines.map((l) => l.chequeItemId) };
     try {
@@ -359,11 +366,11 @@ function ChequeDepositForm({ editId }: { editId?: number }) {
               <div><span className="badge">{STATUS_FA[status]}</span></div>
             </div>
             <div className="form-field">
-              <label>تاریخ سند</label>
+              <label>تاریخ سند<RequiredMark /></label>
               <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
             </div>
             <div className="form-field">
-              <label>حساب بانکی مقصد</label>
+              <label>حساب بانکی مقصد<RequiredMark /></label>
               <select value={header.bankAccountId} onChange={(e) => setHeader({ ...header, bankAccountId: e.target.value })} disabled={coreDisabled}>
                 <option value="">انتخاب کنید</option>
                 {bankAccounts.map((a) => (

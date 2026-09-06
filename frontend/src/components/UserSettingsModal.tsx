@@ -2,29 +2,26 @@ import { useEffect, useState } from "react";
 import { Modal } from "./Modal";
 import { api } from "../lib/api";
 import { useTabs } from "../lib/TabsContext";
-import {
-  FONT_OPTIONS,
-  getSavedFont,
-  applyFont,
-  THEME_OPTIONS,
-  getSavedTheme,
-  applyTheme,
-  getSavedFiscalPeriodId,
-  saveFiscalPeriodId,
-} from "../lib/userSettings";
+import { FONT_OPTIONS, applyFont, THEME_OPTIONS, applyTheme } from "../lib/userSettings";
+import { loadPreferences, savePreferences, getPreference } from "../lib/preferences";
 
 interface FiscalPeriod { id: number; title: string; fromDate: string; toDate: string }
 
 export function UserSettingsModal({ onClose }: { onClose: () => void }) {
   const { closeAllTabs } = useTabs();
   const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
-  const [periodId, setPeriodId] = useState(getSavedFiscalPeriodId());
-  const [fontKey, setFontKey] = useState(getSavedFont());
-  const [themeKey, setThemeKey] = useState(getSavedTheme());
+  const [periodId, setPeriodId] = useState("");
+  const [fontKey, setFontKey] = useState("vazirmatn");
+  const [themeKey, setThemeKey] = useState("default");
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     api.get("/fiscal-periods").then(setPeriods).catch(() => {});
+    loadPreferences().then((p) => {
+      setPeriodId(p.fiscalPeriodId);
+      setFontKey(p.font);
+      setThemeKey(p.theme);
+    });
   }, []);
 
   function handleFontChange(key: string) {
@@ -38,14 +35,14 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
   }
 
   function save() {
-    const periodChanged = periodId !== getSavedFiscalPeriodId();
+    const periodChanged = periodId !== getPreference("fiscalPeriodId");
     if (periodChanged) {
       const proceed = window.confirm("با تغییر دوره مالی، همه فرمهای سیستم بسته می شوند. آیا ادامه می دهید؟");
       if (!proceed) return;
     }
     applyFont(fontKey);
     applyTheme(themeKey);
-    saveFiscalPeriodId(periodId);
+    savePreferences({ font: fontKey, theme: themeKey, fiscalPeriodId: periodId });
     if (periodChanged) {
       closeAllTabs();
       onClose();

@@ -126,7 +126,7 @@ router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create
     accountId: number;
     salesTypeRef?: number | null;
     warehouseDocType?: string | null;
-    purchaseTypeRef?: number | null;
+    purchaseTypeId?: number | null;
   };
   if (!body.accountingGroupId || !body.accountType || !body.accountId) {
     return res.status(400).json({ error: "گروه حسابداری، نوع حساب و معین الزامی است" });
@@ -157,7 +157,7 @@ router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create
         accountId: body.accountId,
         salesTypeRef: body.salesTypeRef || null,
         warehouseDocType: (body.warehouseDocType || null) as any,
-        purchaseTypeRef: body.purchaseTypeRef || null,
+        purchaseTypeId: body.purchaseTypeId || null,
       },
       include: { accountingGroup: true, warehouseGroup: true, account: { include: { level: true } } },
     });
@@ -176,7 +176,7 @@ router.put("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.edi
     accountId?: number;
     salesTypeRef?: number | null;
     warehouseDocType?: string | null;
-    purchaseTypeRef?: number | null;
+    purchaseTypeId?: number | null;
   };
 
   const setting = await prisma.goodsServiceAccountingSetting.findUnique({ where: { id } });
@@ -211,7 +211,7 @@ router.put("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.edi
         accountId: body.accountId,
         salesTypeRef: body.salesTypeRef === undefined ? undefined : body.salesTypeRef || null,
         warehouseDocType: body.warehouseDocType === undefined ? undefined : ((body.warehouseDocType || null) as any),
-        purchaseTypeRef: body.purchaseTypeRef === undefined ? undefined : body.purchaseTypeRef || null,
+        purchaseTypeId: body.purchaseTypeId === undefined ? undefined : body.purchaseTypeId || null,
       },
       include: { accountingGroup: true, warehouseGroup: true, account: { include: { level: true } } },
     });

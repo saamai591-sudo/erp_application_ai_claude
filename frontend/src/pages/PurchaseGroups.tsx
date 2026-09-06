@@ -7,6 +7,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
@@ -104,7 +105,7 @@ function PurchaseGroupList() {
           { header: "فعال", render: (r) => (r.isActive ? "بله" : "خیر"), width: "80px" },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/purchase-groups/${r.id}/edit`)}
+        edit={{ path: (r) => `/purchase-groups/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -238,7 +239,7 @@ function PurchaseGroupForm({ editId }: { editId?: number }) {
             <input dir="ltr" disabled={!!editId} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
           </div>
           <div className="form-field">
-            <label>عنوان</label>
+            <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
           </div>
           <div className="form-field">

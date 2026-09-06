@@ -18,6 +18,9 @@ async function main() {
       case "CostCenter":
         exists = !!(await prisma.costCenter.findUnique({ where: { id: u.entityId } }));
         break;
+      case "Project":
+        exists = !!(await prisma.project.findUnique({ where: { id: u.entityId } }));
+        break;
       case "FiscalPeriod":
         exists = !!(await prisma.fiscalPeriod.findUnique({ where: { id: u.entityId } }));
         break;

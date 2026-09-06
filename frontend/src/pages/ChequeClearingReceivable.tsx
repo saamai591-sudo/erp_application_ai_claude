@@ -7,11 +7,13 @@ import { RecordPickerField } from "../components/RecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
+import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 
 // ماژول «خزانه‌داری» > نتیجه وصول/برگشت چک دریافتنی. طبق تصمیم صریح کاربر: سند دسته‌ای که برای هر
 // چکِ «واگذار به وصول»، نتیجه‌ی نهایی (وصول‌شده یا برگشتی) را جداگانه ثبت می‌کند — چون ممکن است در
@@ -143,7 +145,7 @@ function ChequeClearingReceivableList() {
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/cheque-clearings-receivable/${r.id}/edit`)}
+        edit={{ path: (r) => `/cheque-clearings-receivable/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -160,6 +162,7 @@ function ChequeClearingReceivableForm({ editId }: { editId?: number }) {
   const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; fiscalPeriodTitle: string } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const { saved, flash } = useSavedFlash();
 
   function applyDetail(d: Detail) {
@@ -170,8 +173,12 @@ function ChequeClearingReceivableForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const cheques: PickableCheque[] = await api.get("/cheque-clearings-receivable/pickable-cheques");
+      const [cheques, fp]: [PickableCheque[], FiscalPeriodRange | null] = await Promise.all([
+        api.get("/cheque-clearings-receivable/pickable-cheques"),
+        fetchSelectedFiscalPeriod(),
+      ]);
       setPickableCheques(cheques);
+      setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
         setLoaded(true);
@@ -195,7 +202,7 @@ function ChequeClearingReceivableForm({ editId }: { editId?: number }) {
         const d: Detail = await api.get(`/cheque-clearings-receivable/${editId}`);
         applyDetail(d);
       } else {
-        setHeader({ date: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), description: "" });
         setLines([]);
         setMeta(null);
       }
@@ -248,6 +255,8 @@ function ChequeClearingReceivableForm({ editId }: { editId?: number }) {
     }
 
     if (!header.date) return setError("تاریخ الزامی است");
+    const dateErr = validateDocumentDate(header.date, fiscalPeriod);
+    if (dateErr) return setError(dateErr);
     if (lines.length === 0) return setError("حداقل یک چک باید انتخاب شود");
     const body = { date: header.date, description: header.description, lines: lines.map((l) => ({ chequeItemId: l.chequeItemId, outcome: l.outcome })) };
     try {
@@ -340,7 +349,7 @@ function ChequeClearingReceivableForm({ editId }: { editId?: number }) {
               <div><span className="badge">{STATUS_FA[status]}</span></div>
             </div>
             <div className="form-field">
-              <label>تاریخ سند</label>
+              <label>تاریخ سند<RequiredMark /></label>
               <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
             </div>
             <div className="form-field full">

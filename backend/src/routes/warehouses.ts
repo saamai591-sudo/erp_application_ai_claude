@@ -1,6 +1,11 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { nextSerialNumber } from "../utils/coding";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const WAREHOUSE_GROUPS = findFormPrefix("warehouse-groups");
+const WAREHOUSES = findFormPrefix("warehouses");
 
 const router = Router();
 
@@ -9,7 +14,7 @@ router.get("/warehouse-groups", async (_req, res) => {
   res.json(await prisma.warehouseGroup.findMany({ orderBy: { code: "asc" } }));
 });
 
-router.post("/warehouse-groups", async (req, res) => {
+router.post("/warehouse-groups", can(`${WAREHOUSE_GROUPS}.create`), async (req, res) => {
   const body = req.body as { code?: number; title: string; isActive?: boolean };
   if (!body.title) return res.status(400).json({ error: "عنوان الزامی است" });
 
@@ -28,7 +33,7 @@ router.post("/warehouse-groups", async (req, res) => {
   }
 });
 
-router.put("/warehouse-groups/:id", async (req, res) => {
+router.put("/warehouse-groups/:id", can(`${WAREHOUSE_GROUPS}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { title?: string; isActive?: boolean };
 
@@ -46,7 +51,7 @@ router.put("/warehouse-groups/:id", async (req, res) => {
   }
 });
 
-router.delete("/warehouse-groups/:id", async (req, res) => {
+router.delete("/warehouse-groups/:id", can(`${WAREHOUSE_GROUPS}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const group = await prisma.warehouseGroup.findUnique({ where: { id } });
   if (!group) return res.status(404).json({ error: "گروه انبار یافت نشد" });
@@ -67,7 +72,7 @@ router.get("/warehouses", async (_req, res) => {
   );
 });
 
-router.post("/warehouses", async (req, res) => {
+router.post("/warehouses", can(`${WAREHOUSES}.create`), async (req, res) => {
   const body = req.body as {
     code?: number;
     title: string;
@@ -77,6 +82,7 @@ router.post("/warehouses", async (req, res) => {
     managerId?: number | null;
     stockControl?: boolean;
     isActive?: boolean;
+    implementationDate?: string;
   };
   if (!body.title || !body.warehouseGroupId) return res.status(400).json({ error: "عنوان و گروه انبار الزامی است" });
 
@@ -105,6 +111,7 @@ router.post("/warehouses", async (req, res) => {
         managerId: body.managerId || null,
         stockControl: body.stockControl ?? true,
         isActive: body.isActive ?? true,
+        implementationDate: body.implementationDate ? new Date(body.implementationDate) : null,
       },
     });
     res.status(201).json(created);
@@ -114,7 +121,7 @@ router.post("/warehouses", async (req, res) => {
   }
 });
 
-router.put("/warehouses/:id", async (req, res) => {
+router.put("/warehouses/:id", can(`${WAREHOUSES}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as {
     title?: string;
@@ -124,6 +131,7 @@ router.put("/warehouses/:id", async (req, res) => {
     managerId?: number | null;
     stockControl?: boolean;
     isActive?: boolean;
+    implementationDate?: string | null;
   };
 
   const warehouse = await prisma.warehouse.findUnique({ where: { id } });
@@ -131,6 +139,18 @@ router.put("/warehouses/:id", async (req, res) => {
 
   if (warehouse.hasTransactions && body.warehouseGroupId && body.warehouseGroupId !== warehouse.warehouseGroupId) {
     return res.status(400).json({ error: "این انبار گردش دارد و امکان تغییر گروه انبار وجود ندارد" });
+  }
+
+  // فرانت‌اند این فیلد را روی انبار دارای گردش غیرفعال می‌کند (Warehouses.tsx)؛ این‌جا هم دقیقاً همان
+  // کنترل تکرار می‌شود تا یک درخواست مستقیم API (بدون رد شدن از UI) نتواند تاریخ راه‌اندازی یک انبارِ
+  // دارای اسناد را عوض کند — چون اسناد موجودِ آن انبار قبلاً بر اساس تاریخ راه‌اندازیِ فعلی معتبر
+  // شناخته شده‌اند (assertWarehouseOpenForDate)، تغییرش می‌تواند بی‌سروصدا آن اسناد را نامعتبر کند.
+  if (body.implementationDate !== undefined) {
+    const currentValue = warehouse.implementationDate ? warehouse.implementationDate.toISOString().slice(0, 10) : null;
+    const nextValue = body.implementationDate ? new Date(body.implementationDate).toISOString().slice(0, 10) : null;
+    if (warehouse.hasTransactions && nextValue !== currentValue) {
+      return res.status(400).json({ error: "این انبار گردش دارد و امکان تغییر تاریخ راه‌اندازی وجود ندارد" });
+    }
   }
 
   if (body.title) {
@@ -156,6 +176,7 @@ router.put("/warehouses/:id", async (req, res) => {
         managerId: body.managerId === undefined ? undefined : body.managerId || null,
         stockControl: body.stockControl,
         isActive: body.isActive,
+        implementationDate: body.implementationDate === undefined ? undefined : body.implementationDate ? new Date(body.implementationDate) : null,
       },
     });
     res.json(updated);
@@ -165,7 +186,7 @@ router.put("/warehouses/:id", async (req, res) => {
   }
 });
 
-router.delete("/warehouses/:id", async (req, res) => {
+router.delete("/warehouses/:id", can(`${WAREHOUSES}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const warehouse = await prisma.warehouse.findUnique({ where: { id } });
   if (!warehouse) return res.status(404).json({ error: "انبار یافت نشد" });

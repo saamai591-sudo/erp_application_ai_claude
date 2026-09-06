@@ -11,6 +11,7 @@ import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RecordPickerField } from "../components/RecordPicker";
 import { ExcelImportButton } from "../components/ExcelImport";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 
 interface Branch { id: number; code: number; title: string; bankPartyId?: number; bankParty: { name: string } }
@@ -30,7 +31,6 @@ function BranchList() {
   const cacheKey = "/bank-branches";
   const [branches, setBranches] = usePersistedState<Branch[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -69,19 +69,17 @@ function BranchList() {
           />
           <NewRecordButton path="/bank-branches/new" />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "کد", render: (r) => r.code, width: "80px", filterType: "number", filterValue: (r) => r.code },
           { header: "عنوان شعبه", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
           { header: "بانک", render: (r) => r.bankParty?.name, filterType: "string", filterValue: (r) => r.bankParty?.name },
         ]}
         rows={branches}
-        onEdit={(r) => navigate(`/bank-branches/${r.id}/edit`)}
+        edit={{ path: (r) => `/bank-branches/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -163,7 +161,7 @@ function BranchForm({ editId }: { editId?: number }) {
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
-            <label>بانک <FieldHint label="بانک" text="از بین اشخاص حقوقی با نوع «بانک/موسسه مالی» انتخاب می‌شود" /></label>
+            <label>بانک<RequiredMark /> <FieldHint label="بانک" text="از بین اشخاص حقوقی با نوع «بانک/موسسه مالی» انتخاب می‌شود" /></label>
             <RecordPickerField
               title="انتخاب بانک"
               disabled={!!editId}
@@ -177,7 +175,7 @@ function BranchForm({ editId }: { editId?: number }) {
             />
           </div>
           <div className="form-field">
-            <label>عنوان شعبه</label>
+            <label>عنوان شعبه<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
           </div>
         </div>

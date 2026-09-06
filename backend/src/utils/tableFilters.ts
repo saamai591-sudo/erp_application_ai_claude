@@ -66,11 +66,13 @@ export function dateContainsRange(value: string): { gte: Date; lt: Date } | null
 
 /**
  * نسخه‌ی JS (نه Prisma where) از همان قرارداد فیلتر ستونی — برای مسیرهایی که دیتای موردنظر را قبلاً
- * در حافظه تجمیع کرده‌اند (مثل /reports/detail-summary که خروجی groupBy را دستی aggregate می‌کند) و
- * فیلتر باید روی همان آرایه‌ی نهایی اعمال شود، نه در سطح کوئری دیتابیس. عملگرهای پشتیبانی‌شده دقیقاً
- * همان contains/notContains/eq/gt/lt/empty/notEmpty معادلِ matchesFilter در DataTable.tsx است.
+ * در حافظه تجمیع کرده‌اند (مثل /reports/detail-summary که خروجی groupBy را دستی aggregate می‌کند، یا
+ * /goods-pricing/candidates که فیلد وضعیت/تاریخ محاسبه اصلاً ستون خام دیتابیس نیست) و فیلتر باید روی
+ * همان آرایه‌ی نهایی اعمال شود، نه در سطح کوئری دیتابیس. عملگرهای پشتیبانی‌شده دقیقاً همان
+ * contains/notContains/eq/gt/lt/between/empty/notEmpty معادلِ matchesFilter در DataTable.tsx است.
+ * برای «date»، raw باید رشته میلادی YYYY-MM-DD (یا قابل‌تبدیل به Date) باشد.
  */
-export function matchesFilterValue(raw: string | number | null | undefined, type: "string" | "number", f: FilterSpec): boolean {
+export function matchesFilterValue(raw: string | number | null | undefined, type: "string" | "number" | "date", f: FilterSpec): boolean {
   if (type === "number") {
     const num = raw === null || raw === undefined || raw === "" ? null : Number(raw);
     if (num === null || Number.isNaN(num)) return false;
@@ -79,6 +81,25 @@ export function matchesFilterValue(raw: string | number | null | undefined, type
     if (f.operator === "eq") return num === target;
     if (f.operator === "gt") return num > target;
     if (f.operator === "lt") return num < target;
+    return true;
+  }
+  if (type === "date") {
+    const str = raw === null || raw === undefined ? "" : new Date(raw).toISOString().slice(0, 10);
+    if (f.operator === "empty") return str.trim() === "";
+    if (f.operator === "notEmpty") return str.trim() !== "";
+    if (!str) return false;
+    if (f.operator === "contains" || f.operator === "notContains") {
+      const needle = (f.value ?? "").trim();
+      if (!needle) return true;
+      const has = str.includes(needle);
+      return f.operator === "contains" ? has : !has;
+    }
+    if (f.operator === "gt") return f.value ? str > f.value : true;
+    if (f.operator === "lt") return f.value ? str < f.value : true;
+    if (f.operator === "between") {
+      if (!f.value || !f.value2) return true;
+      return str >= f.value && str <= f.value2;
+    }
     return true;
   }
   const str = (raw ?? "").toString();

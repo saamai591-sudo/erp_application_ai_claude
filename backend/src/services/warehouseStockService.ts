@@ -1,4 +1,4 @@
-import { prisma } from "../lib/prisma";
+import { prisma, Db } from "../lib/prisma";
 
 /**
  * سرویس مرکزی و مشترکِ محاسبه‌ی موجودی + کنترل موجودی منفی، طبق «مستند عمومی عملیات انبار» (بخش کنترل
@@ -11,8 +11,10 @@ import { prisma } from "../lib/prisma";
  * «Fixed Asset Issue»، «Supplier Return»، ...) گسترش یافته؛ به همین دلیل این تابع از حالت دستیِ باز‌نویسی
  * هر نوع (که برای ۶ نوع اول قابل مدیریت بود) به یک جدول داده‌محور (SIGNED_TYPES) تبدیل شده — هر نوع
  * سند فقط با علامت (+۱ وارده / -۱ صادره) و فیلد انبار مربوطه‌اش تعریف می‌شود، به‌جز
- * WAREHOUSE_ADJUSTMENT که خودش امضادار ذخیره می‌شود (adjustmentQuantity قدیم) و WAREHOUSE_TRANSFER که
- * هم‌زمان دو اثر دارد (کاهش در مبدا + افزایش در مقصد).
+ * WAREHOUSE_ADJUSTMENT که خودش امضادار ذخیره می‌شود (adjustmentQuantity قدیم). «انتقال بین انبارها»
+ * به دو سند مستقل تک‌اثره تقسیم شده: WAREHOUSE_TRANSFER_OUT (کاهش در مبدا) و WAREHOUSE_TRANSFER_IN
+ * (افزایش در مقصد، با ارجاع ردیف به ردیف مربوطه‌ی WAREHOUSE_TRANSFER_OUT)؛ دیگر یک سند با دو اثر
+ * هم‌زمان وجود ندارد.
  *
  * توجه (محدودیت شناخته‌شده، از فاز اول به ارث رسیده): کنترل موجودی منفی در این پیاده‌سازی فقط موجودی
  * را دقیقاً در تاریخ خود سند بررسی می‌کند، نه برای همه‌ی تاریخ‌های بزرگتر مساوی آن (که متن کامل مستند
@@ -23,7 +25,8 @@ import { prisma } from "../lib/prisma";
 export interface StockExcludeOptions {
   excludeInitialInventoryId?: number;
   excludeWarehouseReceiptId?: number;
-  excludeWarehouseTransferId?: number;
+  excludeWarehouseTransferOutId?: number;
+  excludeWarehouseTransferInId?: number;
   excludeWarehouseAdjustmentId?: number;
   excludeSalesDeliveryId?: number;
   excludeSalesReturnId?: number;
@@ -36,6 +39,7 @@ export interface StockExcludeOptions {
   excludeProjectConsumptionReturnId?: number;
   excludeProductionConsumptionReturnId?: number;
   excludeFixedAssetIssueId?: number;
+  excludeInventoryCountingShortageId?: number;
 }
 
 type WarehouseField = "warehouseId" | "sourceWarehouseId" | "destWarehouseId";
@@ -48,7 +52,7 @@ interface SignedTypeRule {
 }
 
 // وارده (+۱) / صادره (-۱) — دقیقاً طبق بند ۳۴ سند stockAnalysis.md
-const SIGNED_TYPES: SignedTypeRule[] = [
+export const SIGNED_TYPES: SignedTypeRule[] = [
   { documentType: "INITIAL_INVENTORY", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeInitialInventoryId" },
   { documentType: "WAREHOUSE_RECEIPT", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeWarehouseReceiptId" },
   { documentType: "SALES_RETURN", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeSalesReturnId" },
@@ -56,14 +60,15 @@ const SIGNED_TYPES: SignedTypeRule[] = [
   { documentType: "CENTER_CONSUMPTION_RETURN", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeCenterConsumptionReturnId" },
   { documentType: "PROJECT_CONSUMPTION_RETURN", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeProjectConsumptionReturnId" },
   { documentType: "PRODUCTION_CONSUMPTION_RETURN", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeProductionConsumptionReturnId" },
-  { documentType: "WAREHOUSE_TRANSFER", sign: -1, warehouseField: "sourceWarehouseId", excludeKey: "excludeWarehouseTransferId" },
-  { documentType: "WAREHOUSE_TRANSFER", sign: 1, warehouseField: "destWarehouseId", excludeKey: "excludeWarehouseTransferId" },
+  { documentType: "WAREHOUSE_TRANSFER_OUT", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeWarehouseTransferOutId" },
+  { documentType: "WAREHOUSE_TRANSFER_IN", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeWarehouseTransferInId" },
   { documentType: "SALES_DELIVERY", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeSalesDeliveryId" },
   { documentType: "CENTER_CONSUMPTION", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeCenterConsumptionId" },
   { documentType: "PROJECT_CONSUMPTION", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeProjectConsumptionId" },
   { documentType: "PRODUCTION_CONSUMPTION", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeProductionConsumptionId" },
   { documentType: "SUPPLIER_RETURN", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeSupplierReturnId" },
   { documentType: "FIXED_ASSET_ISSUE", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeFixedAssetIssueId" },
+  { documentType: "INVENTORY_COUNTING_SHORTAGE", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeInventoryCountingShortageId" },
 ];
 
 function sum(rows: { quantity: any }[]): number {
@@ -75,17 +80,17 @@ export async function computeStockAsOf(
   warehouseId: number,
   goodsItemId: number,
   asOfDate: Date,
-  opts: StockExcludeOptions = {}
+  opts: StockExcludeOptions = {},
+  db: Db = prisma
 ): Promise<number> {
   const signedQueries = SIGNED_TYPES.map((rule) =>
-    prisma.inventoryDocumentLine
+    db.inventoryDocumentLine
       .findMany({
         where: {
           goodsItemId,
           document: {
             documentType: rule.documentType as any,
             [rule.warehouseField]: warehouseId,
-            status: "FINALIZED",
             date: { lte: asOfDate },
             ...(opts[rule.excludeKey] ? { NOT: { id: opts[rule.excludeKey] } } : {}),
           },
@@ -95,14 +100,13 @@ export async function computeStockAsOf(
       .then((rows) => rule.sign * sum(rows))
   );
 
-  const adjustmentQuery = prisma.inventoryDocumentLine
+  const adjustmentQuery = db.inventoryDocumentLine
     .findMany({
       where: {
         goodsItemId,
         document: {
           documentType: "WAREHOUSE_ADJUSTMENT",
           warehouseId,
-          status: "FINALIZED",
           date: { lte: asOfDate },
           ...(opts.excludeWarehouseAdjustmentId ? { NOT: { id: opts.excludeWarehouseAdjustmentId } } : {}),
         },
@@ -128,10 +132,11 @@ export async function assertNoNegativeStockAfterChange(
     goodsItemId: number;
     asOfDate: Date;
     delta: number; // تغییر خالص مقدار (منفی برای کاهش/حذف/برگشت از قطعی/قطعی‌کردن سند صادره)
-  }
+  },
+  db: Db = prisma
 ): Promise<void> {
   if (opts.delta >= 0) return;
-  const current = await computeStockAsOf(opts.warehouseId, opts.goodsItemId, opts.asOfDate, opts);
+  const current = await computeStockAsOf(opts.warehouseId, opts.goodsItemId, opts.asOfDate, opts, db);
   if (current + opts.delta < 0) {
     throw new Error("این تغییر باعث منفی شدن موجودی کالا در انبار می‌شود");
   }

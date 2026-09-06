@@ -1,8 +1,12 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { generateDetailCode, registerDetailCode, resolveDetailCode, nextSerialNumber } from "../utils/coding";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
 
 const DETAIL_TYPE_COST_CENTER = 2;
+const ORG_UNITS = findFormPrefix("org-units");
+const COST_CENTERS = findFormPrefix("cost-centers");
 const router = Router();
 
 // ---------- واحد سازمانی ----------
@@ -10,7 +14,7 @@ router.get("/org-units", async (_req, res) => {
   res.json(await prisma.orgUnit.findMany({ include: { orgStructure: true }, orderBy: { code: "asc" } }));
 });
 
-router.post("/org-units", async (req, res) => {
+router.post("/org-units", can(`${ORG_UNITS}.create`), async (req, res) => {
   const { code, title, orgStructureId } = req.body as { code?: number; title: string; orgStructureId: number };
   if (!title || !orgStructureId) return res.status(400).json({ error: "عنوان و ساختار سازمانی الزامی است" });
 
@@ -34,7 +38,7 @@ router.post("/org-units", async (req, res) => {
   }
 });
 
-router.put("/org-units/:id", async (req, res) => {
+router.put("/org-units/:id", can(`${ORG_UNITS}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const { title, orgStructureId } = req.body as { title?: string; orgStructureId?: number };
 
@@ -47,7 +51,7 @@ router.put("/org-units/:id", async (req, res) => {
   res.json(updated);
 });
 
-router.delete("/org-units/:id", async (req, res) => {
+router.delete("/org-units/:id", can(`${ORG_UNITS}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const unit = await prisma.orgUnit.findUnique({ where: { id } });
   if (!unit) return res.status(404).json({ error: "واحد سازمانی یافت نشد" });
@@ -63,7 +67,7 @@ router.get("/cost-centers", async (_req, res) => {
   res.json(await prisma.costCenter.findMany({ include: { orgUnit: true }, orderBy: { detailCode: "asc" } }));
 });
 
-router.post("/cost-centers", async (req, res) => {
+router.post("/cost-centers", can(`${COST_CENTERS}.create`), async (req, res) => {
   const { title, type, orgUnitId, detailCode } = req.body as { title: string; type?: string; orgUnitId: number; detailCode?: string };
   if (!title || !orgUnitId) return res.status(400).json({ error: "عنوان و واحد سازمانی الزامی است" });
 
@@ -82,7 +86,7 @@ router.post("/cost-centers", async (req, res) => {
   }
 });
 
-router.put("/cost-centers/:id", async (req, res) => {
+router.put("/cost-centers/:id", can(`${COST_CENTERS}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const { title, type, orgUnitId } = req.body as { title?: string; type?: string; orgUnitId?: number };
 
@@ -98,7 +102,7 @@ router.put("/cost-centers/:id", async (req, res) => {
   res.json(updated);
 });
 
-router.delete("/cost-centers/:id", async (req, res) => {
+router.delete("/cost-centers/:id", can(`${COST_CENTERS}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const cc = await prisma.costCenter.findUnique({ where: { id } });
   if (!cc) return res.status(404).json({ error: "مرکز هزینه یافت نشد" });

@@ -9,6 +9,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { ExcelImportButton } from "../components/ExcelImport";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 
 interface OrgUnit { id: number; code: number; title: string; orgStructureId?: number; orgStructure: { title: string } }
@@ -28,7 +29,6 @@ function OrgUnitList() {
   const cacheKey = "/org-units";
   const [items, setItems] = usePersistedState<OrgUnit[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -64,19 +64,18 @@ function OrgUnitList() {
             ]}
             onDone={reload}
           />
-          <RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
+          <RefreshButton onClick={reload} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "کد", render: (r) => toFaDigits(String(r.code)), width: "80px", filterType: "number", filterValue: (r) => r.code },
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
           { header: "شاخه ساختار سازمانی", render: (r) => r.orgStructure?.title, filterType: "string", filterValue: (r) => r.orgStructure?.title },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/org-units/${r.id}/edit`)}
+        edit={{ path: (r) => `/org-units/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -154,11 +153,11 @@ function OrgUnitForm({ editId }: { editId?: number }) {
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
-            <label>عنوان</label>
+            <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
           </div>
           <div className="form-field">
-            <label>شاخه ساختار سازمانی (برگ)</label>
+            <label>شاخه ساختار سازمانی (برگ)<RequiredMark /></label>
             <select value={form.orgStructureId} onChange={(e) => setForm({ ...form, orgStructureId: e.target.value })}>
               <option value="">انتخاب کنید</option>
               {leafNodes.map((n) => <option key={n.id} value={n.id}>{n.title}</option>)}

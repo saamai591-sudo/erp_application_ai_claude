@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
@@ -9,18 +9,25 @@ import { TrackingCells } from "../components/TrackingCells";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
-import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
+import { usePermissions } from "../lib/usePermissions";
+import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
+import { useDocumentForm } from "../lib/useDocumentForm";
 
-// این فرآیند («انتقال بین انبارها») مستند تحلیل اختصاصی در پروژه ندارد؛ بدون مبنا — نگاه کنید به
-// یادداشت‌های backend/src/routes/warehouseTransfers.ts. فی/مبلغ در این فاز کاربر ندارد — دقیقاً مثل
-// رسید انبار خرید/حواله انبار.
+// «انتقال بین انبارها» به دو سند مستقل تقسیم شده — این صفحه («حواله انتقالی») فقط طرف ارسال (خروج از
+// انبار مبدا) را پوشش می‌دهد. با قطعی‌کردن این سند، فقط موجودی انبار مبدا کم می‌شود؛ کالا تا زمانی که
+// طرف مقابل با سند مستقل «رسید انتقال» (صفحه‌ی WarehouseTransferIn) آن را دریافت نکند، در موجودی انبار
+// مقصد ظاهر نمی‌شود. این فرآیند مستند تحلیل اختصاصی در پروژه ندارد؛ بدون مبنا — نگاه کنید به
+// یادداشت‌های backend/src/routes/warehouseTransferOut.ts. طبق تصمیم معماری «ادغام نمای انبارداری/
+// حسابداری انبار»: این فرم دیگر دو مسیر/دو مود جدا ندارد — یک نمای واحد است که ستون‌های مبلغی بر اساس
+// مجوز کاربر نمایش/عدم‌نمایش داده می‌شوند.
+const VIEW_ACCOUNTING_PERMISSION = "inventory.outbound-issues.warehousing-warehouse-transfer-out.viewAccounting";
 
-type DocStatus = "DRAFT" | "FINALIZED" | "VOID";
-type ViewMode = "warehousing" | "accounting";
+type DocStatus = "REGISTERED" | "FINALIZED";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
 interface GoodsItemRow {
@@ -31,9 +38,7 @@ interface GoodsItemRow {
   mainUnit?: { title: string };
   isActive: boolean;
   kind: string;
-  isSerialTracked: boolean;
-  isBatchTracked: boolean;
-  isExpiryTracked: boolean;
+  trackingMethod: "NONE" | "BATCH" | "SERIAL";
   isLocationTracked: boolean;
 }
 
@@ -41,8 +46,8 @@ interface ListRow {
   id: number;
   number: number;
   date: string;
-  sourceWarehouseId: number;
-  sourceWarehouseTitle: string;
+  warehouseId: number;
+  warehouseTitle: string;
   destWarehouseId: number;
   destWarehouseTitle: string;
   fiscalPeriodTitle: string;
@@ -50,7 +55,7 @@ interface ListRow {
   status: DocStatus;
   lineCount: number;
   totalQuantity: number;
-  totalAmount: number;
+  totalAmount?: number;
 }
 
 interface DetailLine {
@@ -61,12 +66,11 @@ interface DetailLine {
   unitId: number;
   unitTitle: string;
   quantity: number;
-  unitCost: number;
-  amount: number;
+  unitCost?: number;
+  amount?: number;
   description: string | null;
-  serialNumber: string | null;
-  batchNumber: string | null;
-  expiryDate: string | null;
+  serialIds: number[];
+  batchAllocations: { batchId: number; batchNumber: string; expiryDate: string | null; quantity: number }[];
   physicalLocation: string | null;
 }
 
@@ -74,54 +78,33 @@ interface Detail {
   id: number;
   number: number;
   date: string;
-  sourceWarehouseId: number;
-  sourceWarehouseTitle: string;
+  warehouseId: number;
+  warehouseTitle: string;
   destWarehouseId: number;
   destWarehouseTitle: string;
   fiscalPeriodTitle: string;
   description: string | null;
   status: DocStatus;
   finalizedAt: string | null;
+  usedBy: { id: number; number: number }[];
   lines: DetailLine[];
 }
 
-const STATUS_FA: Record<DocStatus, string> = { DRAFT: "ثبت", FINALIZED: "قطعی", VOID: "ابطال‌شده" };
+const STATUS_FA: Record<DocStatus, string> = { REGISTERED: "ثبت‌شده", FINALIZED: "تایید انبار شده" };
+const INFO_TEXT =
+  "ثبت طرف ارسال انتقال کالا از این انبار به یک انبار مقصد؛ بدون مبنا. با ذخیره، فقط موجودی انبار مبدا کم می‌شود — افزایش موجودی انبار مقصد با سند جداگانه‌ی «رسید انتقال» و در برابر همین سند ثبت می‌شود.";
 
-function infoText(mode: ViewMode) {
-  const base = "ثبت انتقال کالا از یک انبار به انبار دیگر؛ بدون مبنا. با قطعی‌کردن، موجودی انبار مبدا کم و موجودی انبار مقصد اضافه می‌شود.";
-  if (mode === "warehousing") {
-    return base + " این نمای «انبارداری» فقط مقدار را ثبت می‌کند. فی و مبلغ در این سند اصلاً وارد نمی‌شود؛ این مقادیر بعداً با یک ماژول قیمت‌گذاری اسناد صادره (آینده) تعیین خواهند شد.";
-  }
-  return base + " این نمای «حسابداری انبار» فقط نمایشی است. فی/مبلغ تا زمانی که ماژول قیمت‌گذاری ساخته شود همیشه صفر خواهد بود.";
-}
-
-export default function WarehouseTransfers({ mode }: { mode: ViewMode }) {
+export default function WarehouseTransferOut() {
   const location = useLocation();
   const { id } = useParams();
-  const basePath = mode === "warehousing" ? "/warehousing/warehouse-transfers" : "/warehouse-accounting/warehouse-transfers";
+  const basePath = "/warehousing/warehouse-transfer-out";
   const isNew = location.pathname.endsWith("/new");
   const isEdit = location.pathname.endsWith("/edit");
-  if (isNew && mode === "accounting") return <Navigate to={basePath} replace />;
-  if (isNew) return <WarehouseTransferForm mode={mode} basePath={basePath} />;
-  if (isEdit) return <WarehouseTransferForm mode={mode} basePath={basePath} editId={Number(id)} />;
-  return <WarehouseTransferList mode={mode} basePath={basePath} />;
+  if (isNew) return <WarehouseTransferOutForm basePath={basePath} />;
+  if (isEdit) return <WarehouseTransferOutForm basePath={basePath} editId={Number(id)} />;
+  return <WarehouseTransferOutList basePath={basePath} />;
 }
 
-function CheckIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function UndoIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 function PlusIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
@@ -130,16 +113,16 @@ function PlusIcon() {
   );
 }
 
-function WarehouseTransferList({ mode, basePath }: { mode: ViewMode; basePath: string }) {
+function WarehouseTransferOutList({ basePath }: { basePath: string }) {
   const cacheKey = basePath;
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
-  const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
+  const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
 
   async function reload() {
     try {
-      setItems(await api.get("/warehouse-transfers"));
+      setItems(await api.get("/warehouse-transfer-out"));
       setError(null);
     } catch (e) {
       setError((e as ApiError).message);
@@ -152,15 +135,11 @@ function WarehouseTransferList({ mode, basePath }: { mode: ViewMode; basePath: s
   }, []);
 
   async function onDelete(row: ListRow) {
-    if (row.status !== "DRAFT") {
-      alert("فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «قطعی» برگردانید");
-      return;
-    }
     try {
-      await api.del(`/warehouse-transfers/${row.id}`);
+      await api.del(`/warehouse-transfer-out/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      setError((e as ApiError).message);
     }
   }
 
@@ -168,28 +147,26 @@ function WarehouseTransferList({ mode, basePath }: { mode: ViewMode; basePath: s
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint text={infoText(mode)} title="انتقال بین انبارها" />
-          {mode === "warehousing" && <NewRecordButton path={`${basePath}/new`} />}
+          <InfoHint text={INFO_TEXT} title="حواله انتقالی" />
+          <NewRecordButton path={`${basePath}/new`} />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
-          { header: "انبار مبدا", render: (r) => r.sourceWarehouseTitle, filterType: "string", filterValue: (r) => r.sourceWarehouseTitle },
+          { header: "انبار مبدا", render: (r) => r.warehouseTitle, filterType: "string", filterValue: (r) => r.warehouseTitle },
           { header: "انبار مقصد", render: (r) => r.destWarehouseTitle, filterType: "string", filterValue: (r) => r.destWarehouseTitle },
           { header: "شرح", render: (r) => r.description || "—", filterType: "string", filterValue: (r) => r.description || "" },
           { header: "تعداد ردیف", render: (r) => toFaDigits(String(r.lineCount)) },
-          ...(mode === "accounting" ? [{ header: "جمع مبلغ", render: (r: ListRow) => formatAmountFa(r.totalAmount) }] : []),
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
+          ...(canViewAccounting ? [{ header: "جمع مبلغ", render: (r: ListRow) => (r.totalAmount != null ? formatAmountFa(r.totalAmount) : "—") }] : []),
         ]}
         rows={items}
-        onEdit={(r) => navigate(`${basePath}/${r.id}/edit`)}
-        onDelete={mode === "warehousing" ? onDelete : undefined}
+        edit={{ path: (r) => `${basePath}/${r.id}/edit` }}
+        onDelete={onDelete}
       />
     </div>
   );
@@ -202,9 +179,8 @@ interface RowState {
   unitCost: number;
   amount: number;
   description: string;
-  serialNumber: string;
-  batchNumber: string;
-  expiryDate: string;
+  serialIds: string[];
+  batchAllocations: { batchId: string; quantity: string }[];
   physicalLocation: string;
 }
 
@@ -216,77 +192,66 @@ function emptyRow(): RowState {
     unitCost: 0,
     amount: 0,
     description: "",
-    serialNumber: "",
-    batchNumber: "",
-    expiryDate: "",
+    serialIds: [],
+    batchAllocations: [],
     physicalLocation: "",
   };
 }
 
-function WarehouseTransferForm({ editId, mode, basePath }: { editId?: number; mode: ViewMode; basePath: string }) {
+function WarehouseTransferOutForm({ editId, basePath }: { editId?: number; basePath: string }) {
   const navigate = useNavigate();
-  const location = useLocation();
-  const cacheKey = `form:${location.pathname}`;
-  const readOnly = mode === "accounting";
+  const { hasPermission } = usePermissions();
+  const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
-  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", sourceWarehouseId: "", destWarehouseId: "", description: "" });
-  const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
-  const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; fiscalPeriodTitle: string } | null>(`${cacheKey}:meta`, null);
-  const [error, setError] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const { saved, flash } = useSavedFlash();
 
-  useEffect(() => {
-    async function init() {
+  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, saved, submit, remove } = useDocumentForm<
+    { date: string; warehouseId: string; destWarehouseId: string; description: string },
+    RowState,
+    Detail
+  >({
+    endpoint: "warehouse-transfer-out",
+    editId,
+    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), warehouseId: "", destWarehouseId: "", description: "" }),
+    emptyRows: () => [emptyRow()],
+    mapDetailToHeader: (d) => ({
+      date: d.date.slice(0, 10),
+      warehouseId: String(d.warehouseId),
+      destWarehouseId: String(d.destWarehouseId),
+      description: d.description || "",
+    }),
+    mapDetailToRows: (d) =>
+      d.lines.map((l) => ({
+        goodsItemId: String(l.goodsItemId),
+        unitId: String(l.unitId),
+        quantity: String(l.quantity),
+        unitCost: l.unitCost ?? 0,
+        amount: l.amount ?? 0,
+        description: l.description || "",
+        serialIds: l.serialIds.map(String),
+        batchAllocations: l.batchAllocations.map((a) => ({ batchId: String(a.batchId), quantity: String(a.quantity) })),
+        physicalLocation: l.physicalLocation || "",
+      })),
+    mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle, usedBy: d.usedBy }),
+    loadExtra: async () => {
       const [whs, items]: [Warehouse[], GoodsItemRow[]] = await Promise.all([
         api.get("/warehouses"),
         api.get("/goods-items?kind=GOODS&docDirection=OUTBOUND&docType=انتقالی"),
       ]);
       setWarehouses(whs);
       setGoodsItems(items);
+    },
+  });
 
-      if (hasPersistedState(`${cacheKey}:header`)) {
-        setLoaded(true);
-        return;
-      }
-
-      if (editId) {
-        const d: Detail = await api.get(`/warehouse-transfers/${editId}`);
-        setMeta({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle });
-        setHeader({
-          date: d.date.slice(0, 10),
-          sourceWarehouseId: String(d.sourceWarehouseId),
-          destWarehouseId: String(d.destWarehouseId),
-          description: d.description || "",
-        });
-        setRows(
-          d.lines.map((l) => ({
-            goodsItemId: String(l.goodsItemId),
-            unitId: String(l.unitId),
-            quantity: String(l.quantity),
-            unitCost: l.unitCost,
-            amount: l.amount,
-            description: l.description || "",
-            serialNumber: l.serialNumber || "",
-            batchNumber: l.batchNumber || "",
-            expiryDate: l.expiryDate ? l.expiryDate.slice(0, 10) : "",
-            physicalLocation: l.physicalLocation || "",
-          }))
-        );
-      } else {
-        setHeader({ date: "", sourceWarehouseId: "", destWarehouseId: "", description: "" });
-        setRows([emptyRow()]);
-        setMeta(null);
-      }
-      setLoaded(true);
-    }
-    init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editId]);
-
-  const status: DocStatus = meta?.status || "DRAFT";
-  const coreDisabled = readOnly || (!!editId && status !== "DRAFT");
+  const usedBy = meta?.usedBy ?? [];
+  // طبق درخواست صریح کاربر: سندی که یک سند «دریافت» (چه پیش‌نویس چه قطعی) به آن ارجاع دارد، «قفل»
+  // است و دیگر قابل ویرایش/حذف نیست — این قفل مستقل از قطعی/غیرقطعی بودن سند است و باید صریحاً همین‌جا
+  // فرم را غیرفعال کند؛ بک‌اند هم دقیقاً همین کنترل را قبل از هر نوشتنی اجرا می‌کند.
+  const isLocked = usedBy.length > 0;
+  const isFinalized = meta?.status === "FINALIZED";
+  // طبق تصمیم صریح کاربر: فیلدهای مبلغی تا وقتی سند Finalized نشده، اصلاً نمایش داده نمی‌شوند.
+  const showAmount = canViewAccounting && isFinalized;
+  const coreDisabled = isFinalized || isLocked;
 
   function updateRow(idx: number, patch: Partial<RowState>) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -311,7 +276,7 @@ function WarehouseTransferForm({ editId, mode, basePath }: { editId?: number; mo
     const nonEmptyRows = rows.filter((r) => r.goodsItemId);
     return {
       date: header.date,
-      sourceWarehouseId: Number(header.sourceWarehouseId),
+      warehouseId: Number(header.warehouseId),
       destWarehouseId: Number(header.destWarehouseId),
       description: header.description,
       lines: nonEmptyRows.map((r) => ({
@@ -319,108 +284,66 @@ function WarehouseTransferForm({ editId, mode, basePath }: { editId?: number; mo
         unitId: Number(r.unitId),
         quantity: Number(r.quantity) || 0,
         description: r.description || null,
-        serialNumber: r.serialNumber || null,
-        batchNumber: r.batchNumber || null,
-        expiryDate: r.expiryDate || null,
+        serialIds: r.serialIds.map(Number),
+        batchAllocations: r.batchAllocations.filter((a) => a.batchId).map((a) => ({ batchId: Number(a.batchId), quantity: Number(a.quantity) || 0 })),
         physicalLocation: r.physicalLocation || null,
       })),
     };
   }
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (readOnly) return;
-    setError(null);
-    if (!header.date) return setError("تاریخ الزامی است");
-    if (!header.sourceWarehouseId) return setError("انبار مبدا الزامی است");
-    if (!header.destWarehouseId) return setError("انبار مقصد الزامی است");
-    if (header.sourceWarehouseId === header.destWarehouseId) return setError("انبار مبدا و مقصد نمی‌توانند یکسان باشند");
-    const body = buildBody();
-    if (body.lines.length === 0) return setError("انتقال بین انبار باید حداقل یک ردیف کالا داشته باشد");
-    for (const [i, l] of body.lines.entries()) {
-      if (!(l.quantity > 0)) return setError(`مقدار ردیف ${i + 1} باید عددی مثبت باشد`);
-    }
-    try {
-      if (editId) {
-        await api.put(`/warehouse-transfers/${editId}`, body);
-        flash();
-      } else {
-        const created = await api.post("/warehouse-transfers", body);
-        flash();
-        navigate(`${basePath}/${created.id}/edit`);
-      }
-    } catch (err) {
-      setError((err as ApiError).message);
-    }
+  function onSubmit(e: FormEvent) {
+    return submit(e, {
+      buildBody,
+      validateBody: (body) => {
+        if (!header.warehouseId) return "انبار مبدا الزامی است";
+        if (!header.destWarehouseId) return "انبار مقصد الزامی است";
+        if (header.warehouseId === header.destWarehouseId) return "انبار مبدا و مقصد نمی‌توانند یکسان باشند";
+        if (body.lines.length === 0) return "سند حواله انتقالی باید حداقل یک ردیف کالا داشته باشد";
+        for (const [i, l] of body.lines.entries()) {
+          if (!(l.quantity > 0)) return `مقدار ردیف ${i + 1} باید عددی مثبت باشد`;
+        }
+        return null;
+      },
+      afterCreate: (created) => navigate(`${basePath}/${created.id}/edit`),
+    });
   }
 
   async function handleDelete() {
-    if (!editId || readOnly) return;
-    try {
-      await api.del(`/warehouse-transfers/${editId}`);
-      navigate(basePath);
-    } catch (e) {
-      alert((e as ApiError).message);
-    }
-  }
-
-  async function handleFinalize() {
-    if (!editId) return;
-    try {
-      await api.post(`/warehouse-transfers/${editId}/finalize`, {});
-      setMeta((prev) => (prev ? { ...prev, status: "FINALIZED" } : prev));
-      flash();
-    } catch (e) {
-      alert((e as ApiError).message);
-    }
-  }
-
-  async function handleRevert() {
-    if (!editId) return;
-    try {
-      await api.post(`/warehouse-transfers/${editId}/revert`, {});
-      setMeta((prev) => (prev ? { ...prev, status: "DRAFT" } : prev));
-      flash();
-    } catch (e) {
-      alert((e as ApiError).message);
-    }
+    await remove(() => navigate(basePath));
   }
 
   if (!loaded) return null;
 
-  const sourceOptions = warehouses.filter((w) => w.isActive || String(w.id) === header.sourceWarehouseId);
+  const sourceOptions = warehouses.filter((w) => w.isActive || String(w.id) === header.warehouseId);
   const destOptions = warehouses.filter((w) => w.isActive || String(w.id) === header.destWarehouseId);
 
   return (
     <FormPage
-      title={editId ? "ویرایش انتقال بین انبار" : "انتقال بین انبار جدید"}
+      title={editId ? "ویرایش حواله انتقالی" : "حواله انتقالی جدید"}
       description={
-        readOnly
-          ? "این نما («حسابداری انبار») فقط نمایشی است؛ ثبت/ویرایش انتقال بین انبار از نمای «انبارداری» انجام می‌شود."
-          : status === "FINALIZED"
-          ? "این سند «قطعی» شده و دیگر قابل ویرایش مستقیم نیست؛ برای اصلاح، ابتدا «برگشت از قطعی» را بزنید."
-          : status === "VOID"
-          ? "این سند «ابطال‌شده» است."
+        isFinalized
+          ? "این سند «تایید انبار» شده است؛ سرصفحه، مقدار و کالای ردیف‌ها دیگر قابل ویرایش نیستند."
+          : isLocked
+          ? `این سند توسط سند(های) «رسید انتقال» شماره ${usedBy.map((u: { number: number }) => toFaDigits(String(u.number))).join("، ")} استفاده شده و قفل است؛ دیگر قابل ویرایش یا حذف نیست. برای اصلاح، ابتدا آن سند(ها) را حذف کنید.`
           : undefined
       }
-      formId="warehouse-transfer-form"
+      formId="warehouse-transfer-out-form"
       closePath={basePath}
-      newPath={mode === "warehousing" ? `${basePath}/new` : undefined}
-      onDelete={!readOnly && editId && status === "DRAFT" ? handleDelete : undefined}
+      newPath={`${basePath}/new`}
+      onDelete={editId && !coreDisabled ? handleDelete : undefined}
       saveDisabled={coreDisabled}
-      extraActions={
-        !readOnly && meta
-          ? [
-              ...(status === "DRAFT" ? [{ label: "قطعی کردن", icon: <CheckIcon />, onClick: handleFinalize }] : []),
-              ...(status === "FINALIZED" ? [{ label: "برگشت از قطعی", icon: <UndoIcon />, onClick: handleRevert }] : []),
-            ]
-          : []
-      }
       wide
     >
-      <form id="warehouse-transfer-form" onSubmit={onSubmit}>
+      <form id="warehouse-transfer-out-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
+
+        {meta && (
+          <div className="form-field" style={{ maxWidth: 220, marginBottom: 8 }}>
+            <label>وضعیت</label>
+            <div><span className="badge">{STATUS_FA[meta.status]}</span></div>
+          </div>
+        )}
 
         <fieldset disabled={coreDisabled} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
@@ -433,16 +356,12 @@ function WarehouseTransferForm({ editId, mode, basePath }: { editId?: number; mo
               <input value={meta?.fiscalPeriodTitle ?? "بر اساس تاریخ سند"} disabled />
             </div>
             <div className="form-field">
-              <label>وضعیت</label>
-              <div><span className="badge">{STATUS_FA[status]}</span></div>
-            </div>
-            <div className="form-field">
-              <label>تاریخ سند</label>
+              <label>تاریخ سند<RequiredMark /></label>
               <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={coreDisabled} />
             </div>
             <div className="form-field">
-              <label>انبار مبدا</label>
-              <select value={header.sourceWarehouseId} onChange={(e) => setHeader({ ...header, sourceWarehouseId: e.target.value })} disabled={coreDisabled}>
+              <label>انبار مبدا<RequiredMark /></label>
+              <select value={header.warehouseId} onChange={(e) => setHeader({ ...header, warehouseId: e.target.value })} disabled={coreDisabled}>
                 <option value="">انتخاب کنید</option>
                 {sourceOptions.map((w) => (
                   <option key={w.id} value={w.id}>{w.title}{!w.isActive ? " (غیرفعال)" : ""}</option>
@@ -450,7 +369,7 @@ function WarehouseTransferForm({ editId, mode, basePath }: { editId?: number; mo
               </select>
             </div>
             <div className="form-field">
-              <label>انبار مقصد</label>
+              <label>انبار مقصد<RequiredMark /></label>
               <select value={header.destWarehouseId} onChange={(e) => setHeader({ ...header, destWarehouseId: e.target.value })} disabled={coreDisabled}>
                 <option value="">انتخاب کنید</option>
                 {destOptions.map((w) => (
@@ -462,14 +381,14 @@ function WarehouseTransferForm({ editId, mode, basePath }: { editId?: number; mo
               <label>شرح</label>
               <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={coreDisabled} />
             </div>
-            {header.sourceWarehouseId && header.destWarehouseId && header.sourceWarehouseId === header.destWarehouseId && (
+            {header.warehouseId && header.destWarehouseId && header.warehouseId === header.destWarehouseId && (
               <div className="form-field full">
                 <span style={{ fontSize: 11, color: "var(--danger, #c0392b)" }}>انبار مبدا و مقصد نمی‌توانند یکسان باشند</span>
               </div>
             )}
           </div>
 
-          {!readOnly && (
+          {!coreDisabled && (
             <div className="je-lines-toolbar">
               <span className="je-lines-title">ردیف‌های کالا</span>
               <button type="button" className="toolbar-icon-btn primary" onClick={addRow} title="ردیف جدید">
@@ -487,15 +406,13 @@ function WarehouseTransferForm({ editId, mode, basePath }: { editId?: number; mo
                   <th>ردیف</th>
                   <th>کالا</th>
                   <th>واحد</th>
-                  <th>سریال</th>
-                  <th>شماره بچ</th>
-                  <th>تاریخ انقضا</th>
+                  <th>ردیابی</th>
                   <th>محل فیزیکی</th>
                   <th>مقدار</th>
-                  {mode === "accounting" && <th>فی واحد</th>}
-                  {mode === "accounting" && <th>مبلغ</th>}
+                  {showAmount && <th>فی واحد</th>}
+                  {showAmount && <th>مبلغ</th>}
                   <th>شرح</th>
-                  {!readOnly && <th></th>}
+                  {!coreDisabled && <th></th>}
                 </tr>
               </thead>
               <tbody>
@@ -522,7 +439,9 @@ function WarehouseTransferForm({ editId, mode, basePath }: { editId?: number; mo
                       <TrackingCells
                         goodsItemId={row.goodsItemId ? Number(row.goodsItemId) : null}
                         item={item}
-                        warehouseId={header.sourceWarehouseId ? Number(header.sourceWarehouseId) : null}
+                        warehouseId={header.warehouseId ? Number(header.warehouseId) : null}
+                        documentType="WAREHOUSE_TRANSFER_OUT"
+                        quantity={Number(row.quantity) || 0}
                         value={row}
                         onChange={(patch) => updateRow(idx, patch)}
                         disabled={coreDisabled}
@@ -530,12 +449,12 @@ function WarehouseTransferForm({ editId, mode, basePath }: { editId?: number; mo
                       <td style={{ minWidth: 130 }}>
                         <AmountInput value={row.quantity} onChange={(v) => updateRow(idx, { quantity: v })} allowDecimal placeholder="۰" disabled={coreDisabled} />
                       </td>
-                      {mode === "accounting" && <td style={{ minWidth: 110, color: "var(--ink-soft)" }}>{formatAmountFa(row.unitCost)}</td>}
-                      {mode === "accounting" && <td style={{ minWidth: 120, color: "var(--ink-soft)" }}>{formatAmountFa(row.amount)}</td>}
+                      {showAmount && <td style={{ minWidth: 110, color: "var(--ink-soft)" }}>{formatAmountFa(row.unitCost)}</td>}
+                      {showAmount && <td style={{ minWidth: 120, color: "var(--ink-soft)" }}>{formatAmountFa(row.amount)}</td>}
                       <td style={{ minWidth: 160 }}>
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} disabled={coreDisabled} />
                       </td>
-                      {!readOnly && (
+                      {!coreDisabled && (
                         <td>
                           <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeRow(idx)} disabled={coreDisabled}>
                             حذف
@@ -552,7 +471,7 @@ function WarehouseTransferForm({ editId, mode, basePath }: { editId?: number; mo
             <span className="grid-footer-info">{rows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(rows.length))} ردیف`}</span>
             <span className="je-lines-totals">
               جمع مقدار: {formatAmountFa(totalQuantity)}
-              {mode === "accounting" && <> — جمع مبلغ: {formatAmountFa(totalAmount)}</>}
+              {showAmount && <> — جمع مبلغ: {formatAmountFa(totalAmount)}</>}
             </span>
           </div>
         </div>

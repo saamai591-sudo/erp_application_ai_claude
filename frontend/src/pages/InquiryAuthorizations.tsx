@@ -7,11 +7,13 @@ import { RecordPickerField } from "../components/RecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
+import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 
 type Status = "DRAFT" | "APPROVED";
 
@@ -102,7 +104,7 @@ function InquiryAuthorizationList() {
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/inquiry-authorizations/${r.id}/edit`)}
+        edit={{ path: (r) => `/inquiry-authorizations/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -122,13 +124,15 @@ function InquiryAuthorizationForm({ editId }: { editId?: number }) {
   const [meta, setMeta] = usePersistedState<{ number: number; status: Status } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const { saved, flash } = useSavedFlash();
 
   useEffect(() => {
     async function init() {
-      const [p, s] = await Promise.all([api.get("/purchase-plannings/pickable?purpose=inquiry-authorization"), api.get("/suppliers")]);
+      const [p, s, fp] = await Promise.all([api.get("/purchase-plannings/pickable?purpose=inquiry-authorization"), api.get("/suppliers"), fetchSelectedFiscalPeriod()]);
       setPlannings(p);
       setSuppliers((s as any[]).filter((x) => x.isActive));
+      setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
         setLoaded(true);
@@ -140,7 +144,7 @@ function InquiryAuthorizationForm({ editId }: { editId?: number }) {
         setHeader({ date: d.date.slice(0, 10), purchasePlanningId: String(d.purchasePlanningId), description: d.description || "" });
         setRows(d.lines.map((l) => ({ supplierId: String(l.supplierId), description: l.description || "" })));
       } else {
-        setHeader({ date: "", purchasePlanningId: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), purchasePlanningId: "", description: "" });
         setRows([{ supplierId: "", description: "" }]);
         setMeta(null);
       }
@@ -167,6 +171,8 @@ function InquiryAuthorizationForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
     if (!header.date) return setError("تاریخ الزامی است");
+    const dateErr = validateDocumentDate(header.date, fiscalPeriod);
+    if (dateErr) return setError(dateErr);
     if (!header.purchasePlanningId) return setError("برنامه ریزی خرید الزامی است");
     const lines = rows.filter((r) => r.supplierId).map((r) => ({ supplierId: Number(r.supplierId), description: r.description || null }));
     if (lines.length === 0) return setError("حداقل یک تامین کننده باید انتخاب شود");
@@ -239,11 +245,11 @@ function InquiryAuthorizationForm({ editId }: { editId?: number }) {
               <div><span className="badge">{STATUS_FA[status]}</span></div>
             </div>
             <div className="form-field">
-              <label>تاریخ</label>
+              <label>تاریخ<RequiredMark /></label>
               <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
             </div>
             <div className="form-field">
-              <label>برنامه ریزی خرید</label>
+              <label>برنامه ریزی خرید<RequiredMark /></label>
               <RecordPickerField
                 title="انتخاب برنامه ریزی خرید"
                 disabled={locked || !!editId}

@@ -236,12 +236,13 @@ export function ExcelImportButton({
 
   function downloadResult() {
     if (!rows) return;
-    const header = [...columns.map((c) => c.label), "وضعیت", "دلیل"];
-    const data = rows.map((r) => [
-      ...columns.map((c) => r.data[c.key] ?? ""),
-      r.status === "ok" ? "موفق" : "ناموفق",
-      r.status === "error" ? r.error || "" : "",
-    ]);
+    // طبق درخواست صریح کاربر: فایل نتیجه فقط ردیف‌های ناموفق را نشان می‌دهد، نه همه‌ی ردیف‌ها — تا کاربر
+    // مجبور نباشد در یک فایل بزرگ پر از ردیف‌های «موفق» دنبال چند ردیف مشکل‌دار بگردد؛ همین فایل را
+    // می‌تواند بعد از اصلاح، دوباره Import کند.
+    const header = [...columns.map((c) => c.label), "دلیل"];
+    const data = rows
+      .filter((r) => r.status === "error")
+      .map((r) => [...columns.map((c) => r.data[c.key] ?? ""), r.error || ""]);
     const ws = XLSX.utils.aoa_to_sheet([header, ...data]);
     ws["!cols"] = header.map(() => ({ wch: 22 }));
     const wb = XLSX.utils.book_new();
@@ -369,9 +370,9 @@ export function ExcelImportButton({
                 <button type="button" className="btn secondary" onClick={reset} disabled={importing}>
                   انتخاب فایل دیگر
                 </button>
-                {done && (
+                {done && rows?.some((r) => r.status === "error") && (
                   <button type="button" className="btn secondary" onClick={downloadResult}>
-                    دانلود فایل نتیجه (اکسل)
+                    موارد دریافت نشده
                   </button>
                 )}
                 {done && (

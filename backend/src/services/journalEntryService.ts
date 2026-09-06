@@ -1,7 +1,7 @@
 import { prisma } from "../lib/prisma";
 import { assertLineHasAmount, assertDateNotConfirmed } from "../utils/journalEntryValidation";
 
-export type IssuingSystemType = "ACCOUNTING" | "ACCOUNTING_EXCEL_IMPORT" | "ACCOUNT_CLOSING" | "OPENING_CLOSING" | "WAREHOUSE";
+export type IssuingSystemType = "ACCOUNTING" | "ACCOUNTING_EXCEL_IMPORT" | "ACCOUNT_CLOSING" | "OPENING_CLOSING" | "WAREHOUSE" | "PURCHASE";
 
 export interface IssueLineInput {
   accountId: number;

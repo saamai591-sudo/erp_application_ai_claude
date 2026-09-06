@@ -43,3 +43,13 @@ export function toJalaliYearMonth(date: Date): { year: number; month: number } {
   const j = new DateObject({ date, calendar: gregorian, locale: gregorian_en }).convert(persian, persian_fa);
   return { year: j.year, month: j.month.number };
 }
+
+/**
+ * تاریخ میلادی را به رشته‌ی شمسی YYYY/MM/DD (ارقام انگلیسی، هم‌الگوی بقیه‌ی اعداد داخل پیام‌های خطای
+ * بک‌اند) تبدیل می‌کند — برای نمایش تاریخ داخل پیام‌های خطای کاربرپسند (کاربر تاریخ میلادی خام را
+ * نمی‌فهمد؛ همیشه با تاریخ شمسی کار می‌کند).
+ */
+export function formatJalaliDateForMessage(date: Date): string {
+  const j = new DateObject({ date, calendar: gregorian, locale: gregorian_en }).convert(persian, persian_fa);
+  return `${String(j.year).padStart(4, "0")}/${String(j.month.number).padStart(2, "0")}/${String(j.day).padStart(2, "0")}`;
+}

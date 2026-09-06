@@ -1,3 +1,5 @@
+import { getPreference } from "./preferences";
+
 export interface FontOption {
   key: string;
   label: string;
@@ -25,30 +27,26 @@ export const THEME_OPTIONS: ThemeOption[] = [
   { key: "blue", label: "آبی (Blue Opal)", swatch: ["#eef6f8", "#0e7a90", "#2dd4bf"] },
 ];
 
-const FONT_KEY = "app.font";
-const THEME_KEY = "app.theme";
-const FISCAL_PERIOD_KEY = "app.fiscalPeriodId";
-
+// این فایل دیگر خودش جایی برای ذخیره‌سازی نیست — فقط یک لایه‌ی نازک روی preferences.ts (که مقدار
+// واقعی را از بک‌اند/کاربر می‌خواند) به‌علاوه‌ی اعمال آن روی DOM. طبق نیاز صریح «تنظیمات باید سمت
+// کاربر در بک‌اند ذخیره شود و در هر مرورگر/سیستمی با ورود کاربر خودکار بارگذاری شود» — نه
+// localStorage/sessionStorage. ذخیره‌سازی واقعی با savePreferences (در preferences.ts) انجام می‌شود؛
+// این توابع فقط DOM را برای پیش‌نمایش زنده به‌روز می‌کنند.
 export function getSavedFont(): string {
-  return localStorage.getItem(FONT_KEY) || "vazirmatn";
+  return getPreference("font");
 }
 
 export function applyFont(fontKey: string) {
   const option = FONT_OPTIONS.find((f) => f.key === fontKey) || FONT_OPTIONS[0];
   document.documentElement.style.setProperty("--app-font", `"${option.family}"`);
-  localStorage.setItem(FONT_KEY, option.key);
 }
 
 export function getSavedFiscalPeriodId(): string {
-  return localStorage.getItem(FISCAL_PERIOD_KEY) || "";
-}
-
-export function saveFiscalPeriodId(id: string) {
-  localStorage.setItem(FISCAL_PERIOD_KEY, id);
+  return getPreference("fiscalPeriodId");
 }
 
 export function getSavedTheme(): string {
-  return localStorage.getItem(THEME_KEY) || "default";
+  return getPreference("theme");
 }
 
 export function applyTheme(themeKey: string) {
@@ -57,5 +55,4 @@ export function applyTheme(themeKey: string) {
   } else {
     document.documentElement.setAttribute("data-theme", themeKey);
   }
-  localStorage.setItem(THEME_KEY, themeKey);
 }

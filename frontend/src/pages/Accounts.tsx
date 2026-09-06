@@ -8,6 +8,8 @@ import { usePersistedState, hasPersistedState, clearPersistedStateByPrefix } fro
 import { RefreshButton } from "../components/RefreshButton";
 import { ExcelImportButton } from "../components/ExcelImport";
 import { InfoHint } from "../components/InfoHint";
+import { useTabs } from "../lib/TabsContext";
+import { RequiredMark } from "../components/RequiredMark";
 
 interface Level { id: number; order: number; title: string; codeLength: number }
 interface DetailType { id: number; title: string }
@@ -48,6 +50,7 @@ function AccountsTree() {
   const [accounts, setAccounts] = usePersistedState<AccountRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const { openTab } = useTabs();
 
   async function reload() {
     api.get("/accounts").then(setAccounts).catch((e) => setError(e.message));
@@ -130,7 +133,7 @@ function AccountsTree() {
           clearPersistedStateByPrefix(`form:/accounts/new?parentId=${n.id}`);
           navigate(`/accounts/new?parentId=${n.id}`);
         }}
-        onEdit={(n) => navigate(`/accounts/${n.id}/edit`)}
+        onEdit={(n) => openTab(`/accounts/${n.id}/edit`)}
         onDelete={onDelete}
         levelLabel={(n) => n.level || ""}
       />
@@ -140,6 +143,7 @@ function AccountsTree() {
 
 function AccountForm({ editId, parentId }: { editId?: number; parentId?: number }) {
   const navigate = useNavigate();
+  const { openTab } = useTabs();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}${location.search}`;
   const [levels, setLevels] = useState<Level[]>([]);
@@ -269,17 +273,17 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
-            <label>کد (طول {currentLevel.codeLength} رقم)</label>
+            <label>کد (طول {currentLevel.codeLength} رقم)<RequiredMark /></label>
             <input dir="ltr" maxLength={currentLevel.codeLength} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
           </div>
           <div className="form-field">
-            <label>عنوان</label>
+            <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
           </div>
 
           {currentLevel.order === 1 && (
             <div className="form-field">
-              <label>ماهیت حساب</label>
+              <label>ماهیت حساب<RequiredMark /></label>
               <select value={form.natureGroup} onChange={(e) => setForm({ ...form, natureGroup: e.target.value })}>
                 {Object.entries(NATURE_GROUP_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
@@ -288,7 +292,7 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
 
           {currentLevel.order === 2 && (
             <div className="form-field">
-              <label>ماهیت حساب</label>
+              <label>ماهیت حساب<RequiredMark /></label>
               <select value={form.natureDetail} onChange={(e) => setForm({ ...form, natureDetail: e.target.value })}>
                 {Object.entries(NATURE_DETAIL_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
@@ -298,7 +302,7 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
           {currentLevel.order >= 3 && (
             <>
               <div className="form-field">
-                <label>ماهیت مانده</label>
+                <label>ماهیت مانده<RequiredMark /></label>
                 <select value={form.balanceNature} onChange={(e) => setForm({ ...form, balanceNature: e.target.value })}>
                   {Object.entries(BALANCE_NATURE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>

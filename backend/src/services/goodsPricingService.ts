@@ -1,16 +1,46 @@
 import { prisma } from "../lib/prisma";
+import { getLineAmounts, setLineAmount } from "./documentItemAmountService";
 
-// طبق مستند «قیمت‌گذاری اسناد انبار»: قیمت‌گذاری در سطح کالا انجام می‌شود (انبار بخشی از کلید نیست) و
-// کل تاریخچه‌ی اسناد قطعی‌شده‌ی کالا (در تمام انبارها) را از ابتدا تا پایان دوره‌ی گزارشگری انتخاب‌شده
-// پردازش می‌کند. طبقه‌بندی جهت هر نوع سند دقیقاً همان جدول SIGNED_TYPES موجود در
-// warehouseStockService.ts است (WAREHOUSE_TRANSFER چون در سطح کالا خالص صفر است نادیده گرفته می‌شود).
+// طبق مستند «قیمت‌گذاری اسناد انبار»: وضعیت/قفل قیمت‌گذاری (GoodsPricingStatus) در سطح کالا+دوره است
+// (انبار بخشی از کلید آن جدول نیست) — یعنی یک اجرای priceItem همه‌ی انبارهای کالا را با هم قیمت‌گذاری
+// و قفل می‌کند. اما خودِ محاسبه‌ی کاردکس (میانگین موزون متحرک) باید جدا برای هر انبار انجام شود، نه
+// یک‌جا برای کل کالا در همه‌ی انبارها — طبق تأیید صریح کاربر و تأیید موتور مرجع (Documents/
+// pricingAlghoritm.sql: کاردکس با partition by Position اجرا می‌شود، و Position از روی
+// Selected.stuffid + Selected.StockID ساخته می‌شود — یعنی کلید کاردکس (کالا، انبار) است، نه فقط کالا؛
+// نگاه کنید به @ConditionalInnerJoin که صریحاً "Selected.StockID = p.StockID" شرط می‌کند). مخلوط کردن
+// موجودی چند انبار در یک میانگین واحد اشتباه است — یک صادره از انبار X فقط باید بر اساس ورودی‌های خودِ
+// انبار X میانگین‌گیری شود، نه ورودی‌های سایر انبارها با فی متفاوت. به همین دلیل walkKardex به‌جای دو
+// متغیر runningQty/runningValue سراسری، یک وضعیت جدا به ازای هر warehouseId نگه می‌دارد (نگاه کنید به
+// getState) و هر ردیف فقط وضعیت انبارِ خودِ سندش را می‌خواند/به‌روزرسانی می‌کند؛ ترتیب پردازش هنوز
+// سراسری (بر اساس تاریخ در کل کالا) است، چون بعضی روابط (مثل WAREHOUSE_TRANSFER_IN که به ردیف
+// WAREHOUSE_TRANSFER_OUT در انبار مبدا ارجاع می‌دهد) بین‌انباری هستند.
+//
+// طبقه‌بندی جهت هر نوع سند دقیقاً همان جدول SIGNED_TYPES موجود در warehouseStockService.ts است.
+//
+// انتقال بین انبارها (WAREHOUSE_TRANSFER_OUT/IN): برخلاف تصور اولیه («چون در سطح کالا خالص صفر است
+// نادیده گرفته می‌شود»)، طبق موتور مرجع (Documents/pricingAlghoritm.sql، بخش «انتقالی» —
+// DocumentType=5) این دو باید قیمت‌گذاری شوند، نه نادیده گرفته شوند: صفر بودن خالص فقط در مجموع کل
+// تاریخچه درست است، نه در هر لحظه — چون سند ارسال و سند دریافت اغلب تاریخ (و گاهی دوره‌ی گزارشگری)
+// متفاوتی دارند، در فاصله‌ی بین آن دو تاریخ کالا واقعاً «در راه» است و باید به همین صورت (خروج در تاریخ
+// ارسال، ورود در تاریخ دریافت) در کاردکس جاری کالا لحاظ شود. رفتار:
+// - WAREHOUSE_TRANSFER_OUT دقیقاً مثل بقیه‌ی OUT_COMPUTED_TYPES است (فی میانگین موزون در همان لحظه × مقدار).
+// - WAREHOUSE_TRANSFER_IN بر خلاف بقیه‌ی انواع ورودی، فی میانگین جاری خودش را نمی‌گیرد؛ مبلغش سهم
+//   متناسب (بر اساس مقدار) از مبلغ همان ردیف WAREHOUSE_TRANSFER_OUT است که ارجاع می‌دهد (تا کالا با
+//   همان بهایی که از انبار مبدا خارج شده، وارد انبار مقصد شود) — دقیقاً معادل
+//   COALESCE(pt.Amount, oi.Price, CardexFee*Quantity) در موتور مرجع، با این تفاوت که چون این پروژه
+//   ترتیب تاریخ سند ارسال <= سند دریافت را از قبل در سطح اپلیکیشن اجباری کرده (نگاه کنید به
+//   warehouseTransferIn.ts)، ردیف OUT همیشه زودتر از IN در همین کاردکس پردازش و مبلغش «شناخته‌شده»
+//   است — نیازی به COALESCE/fallback یا لوپ همگرایی جداگانه (مثل برگشت تامین‌کننده) نیست.
 //
 // منبع مبلغ:
-// - INITIAL_INVENTORY / WAREHOUSE_RECEIPT / PRODUCTION_RECEIPT: مبلغ «داده‌شده» (ستون amount سند) —
-//   طبق تصمیم صریح کاربر، فرض می‌شود این دو نوع سند مبلغ واقعی خواهند داشت (حتی اگر امروز صفر باشد)؛
-//   این سرویس کنترل/مسدودسازی خاصی روی صفر بودن آن‌ها اعمال نمی‌کند.
-// - بقیه‌ی انواع (صادره‌ها، برگشت‌ها، انبارگردانی): مبلغ توسط همین موتور و بر اساس میانگین موزون متحرک
-//   محاسبه می‌شود.
+// - INITIAL_INVENTORY / WAREHOUSE_RECEIPT / PRODUCTION_RECEIPT / WAREHOUSE_ADJUSTMENT (اضافات
+//   انبارگردانی): مبلغ «داده‌شده» (ستون amount سند) — طبق تصمیم صریح کاربر، این چهار نوع سند باید
+//   توسط خودِ کاربر قیمت‌گذاری شوند (نه موتور)؛ لایه‌ی اعتبارسنجی جداگانه (goodsPricingValidation.ts)
+//   پیش از اجرا بررسی می‌کند که amount این‌ها صفر نمانده باشد — این سرویس خودش کنترل/مسدودسازی خاصی
+//   روی صفر بودن آن‌ها اعمال نمی‌کند (فرض بر این است که لایه‌ی اعتبارسنجی قبلاً همه‌چیز را تایید کرده).
+// - بقیه‌ی انواع (صادره‌ها، برگشت‌ها، انتقالی): مبلغ توسط همین موتور محاسبه می‌شود — صادره‌ها و
+//   WAREHOUSE_TRANSFER_OUT بر اساس میانگین موزون متحرک، WAREHOUSE_TRANSFER_IN بر اساس سهم متناسب از
+//   ردیف ارسال مرتبط (بالا توضیح داده شد).
 //
 // طبق مستند «موتور قیمت‌گذاری در حالت برگشت»: وقتی به یک برگشت به تامین‌کننده می‌رسیم که به ردیف رسید
 // مشخصی ارجاع دارد —
@@ -24,22 +54,63 @@ import { prisma } from "../lib/prisma";
 //    می‌شود. اگر چند برگشت جداگانه به یک رسید ارجاع داشته باشند، هرکدام سهم بازگشتی مستقل خودشان را
 //    دارند (بر اساس مقدار خودشان) و همه‌ی سهم‌ها هم‌زمان با هم همگرا می‌شوند.
 //
-// قفل بودن دوره: طبق همان مستند، اگر ردیفی که این اجرا مقدارش را عوض می‌کند در دوره‌ی در حال
-// قیمت‌گذاری باشد (هنوز قفل نشده)، مقدار جدید مستقیم روی amount/unitCost خودِ سند نوشته می‌شود. اگر در
-// دوره‌ای زودتر (که طبق کنترل ترتیب، قبلاً قیمت‌گذاری شده) باشد، آن ستون خام دست‌نخورده می‌ماند و اثر
-// فقط به‌صورت یک ردیف GoodsPricingAdjustment (با appliedToLine=false) ثبت می‌شود — قابل مشاهده در
-// گزارش «اصلاحیه‌های قیمت‌گذاری»، بدون بازنویسی مبلغ سند اصلی.
+// قفل بودن دوره (طبق Documents/WareHouseAmountChanges.md، این بخش کاملاً بازنویسی شده): چون دیگر هیچ
+// ستون خام amount/unitCost ای روی خودِ سند نیست (فقط تاریخچه‌ی DocumentItemAmount)، مفهوم «overwrite
+// نکردن ردیف قفل‌شده» دیگر لازم نیست — هر تغییر، قفل باشد یا نه، فقط یک رکورد تازه‌ی DocumentItemAmount
+// اضافه می‌کند (هرگز رکورد قبلی را دست نمی‌زند). «قفل بودن» فقط برای برچسب‌گذاریِ گزارشی به کار می‌رود:
+// اگر ردیف در دوره‌ی در حال قیمت‌گذاری باشد priceType=ENGINE_PRICING، اگر در دوره‌ای زودتر (قبلاً
+// قیمت‌گذاری‌شده) باشد priceType=ENGINE_CORRECTION — دقیقاً همان تمایزی که قبلاً appliedToLine در
+// GoodsPricingAdjustment (اکنون بازنشسته) نشان می‌داد، و گزارش «اصلاحیه‌های قیمت‌گذاری» حالا با فیلتر
+// priceType=ENGINE_CORRECTION روی همین جدول کار می‌کند (نگاه کنید به routes/goodsPricing.ts).
 
-const IN_GIVEN_TYPES = new Set(["INITIAL_INVENTORY", "WAREHOUSE_RECEIPT", "PRODUCTION_RECEIPT"]);
+// طبق تصمیم صریح کاربر: «اضافات انبارگردانی» (WAREHOUSE_ADJUSTMENT) هم باید توسط کاربر قیمت‌گذاری شود
+// (نه موتور) — دقیقاً مثل رسید انبار خرید/رسید تولید/موجودی اول دوره. این سند فقط برای مقدار مثبت
+// (مازاد) استفاده می‌شود؛ کسری انبارگردانی نوع سند کاملاً جدایی دارد (INVENTORY_COUNTING_SHORTAGE، در
+// OUT_COMPUTED_TYPES، همچنان توسط موتور محاسبه می‌شود).
+// این چهار نوع سند («اسنادی که باید توسط کاربر قیمت‌گذاری شوند») از goodsPricingValidation.ts هم برای
+// بررسی «آیا مبلغ این‌ها صفر مانده» استفاده می‌شود — به همین دلیل به‌جای ماندن در حالت private، با یک
+// نام صریح‌تر (USER_PRICED_TYPES) هم export می‌شود.
+const IN_GIVEN_TYPES = new Set(["INITIAL_INVENTORY", "WAREHOUSE_RECEIPT", "PRODUCTION_RECEIPT", "WAREHOUSE_ADJUSTMENT"]);
+export const USER_PRICED_TYPES = IN_GIVEN_TYPES;
 const IN_COMPUTED_TYPES = new Set(["SALES_RETURN", "CENTER_CONSUMPTION_RETURN", "PROJECT_CONSUMPTION_RETURN", "PRODUCTION_CONSUMPTION_RETURN"]);
-const OUT_COMPUTED_TYPES = new Set(["SALES_DELIVERY", "CENTER_CONSUMPTION", "PROJECT_CONSUMPTION", "PRODUCTION_CONSUMPTION", "FIXED_ASSET_ISSUE"]);
+const OUT_COMPUTED_TYPES = new Set([
+  "SALES_DELIVERY",
+  "CENTER_CONSUMPTION",
+  "PROJECT_CONSUMPTION",
+  "PRODUCTION_CONSUMPTION",
+  "FIXED_ASSET_ISSUE",
+  "WAREHOUSE_TRANSFER_OUT",
+  "INVENTORY_COUNTING_SHORTAGE",
+]);
 export const PRICING_DOC_TYPES = [
   ...IN_GIVEN_TYPES,
   ...IN_COMPUTED_TYPES,
   ...OUT_COMPUTED_TYPES,
   "SUPPLIER_RETURN",
-  "WAREHOUSE_ADJUSTMENT",
+  "WAREHOUSE_TRANSFER_IN",
 ];
+
+// عنوان فارسی هر نوع سند انبار — هم در گزارش «اصلاحیه‌های قیمت‌گذاری» (goodsPricing.ts) و هم در پیام‌های
+// لایه‌ی اعتبارسنجی (goodsPricingValidation.ts) استفاده می‌شود؛ یک‌جا نگه داشته می‌شود تا دو کپی از هم
+// جدا نشوند.
+export const DOC_TYPE_FA: Record<string, string> = {
+  INITIAL_INVENTORY: "موجودی اول دوره",
+  WAREHOUSE_RECEIPT: "رسید انبار خرید",
+  WAREHOUSE_ADJUSTMENT: "اضافات انبارگردانی",
+  SALES_DELIVERY: "حواله فروش",
+  SALES_RETURN: "برگشت از فروش",
+  SUPPLIER_RETURN: "برگشت به تامین‌کننده",
+  PRODUCTION_RECEIPT: "رسید تولید",
+  CENTER_CONSUMPTION: "مصرف مرکز هزینه",
+  PROJECT_CONSUMPTION: "مصرف پروژه",
+  PRODUCTION_CONSUMPTION: "مصرف تولید",
+  CENTER_CONSUMPTION_RETURN: "برگشت مصرف مرکز هزینه",
+  PROJECT_CONSUMPTION_RETURN: "برگشت مصرف پروژه",
+  PRODUCTION_CONSUMPTION_RETURN: "برگشت مصرف تولید",
+  FIXED_ASSET_ISSUE: "حواله دارایی ثابت",
+  INVENTORY_COUNTING_SHORTAGE: "کسری انبارگردانی",
+  WAREHOUSE_TRANSFER_IN: "رسید انتقال",
+};
 
 const MAX_ITERATIONS = 25;
 
@@ -59,7 +130,8 @@ type Line = {
   quantity: any;
   amount: any;
   sourceWarehouseReceiptLineId: number | null;
-  document: { documentType: string; date: Date };
+  sourceWarehouseTransferOutLineId: number | null;
+  document: { documentType: string; date: Date; warehouseId: number };
 };
 
 // یک بار کامل کاردکس را (با یک تخمین فعلی از سهم‌های بازگشتی هر برگشت تامین‌کننده) طی می‌کند
@@ -70,58 +142,77 @@ function walkKardex(
   returnWorkingValue: Map<number, number>,
   decimalPlaces: number
 ) {
-  let runningQty = 0;
-  let runningValue = 0;
+  // کاردکس به ازای هر انبار جدا نگه داشته می‌شود (نگاه کنید به یادداشت بالای فایل)؛ ترتیب پردازش
+  // ردیف‌ها هنوز سراسری (بر اساس تاریخ) است، فقط انباشت qty/value هر ردیف در وضعیت انبارِ خودش می‌رود
+  const state = new Map<number, { qty: number; value: number }>();
+  function getState(warehouseId: number) {
+    let s = state.get(warehouseId);
+    if (!s) {
+      s = { qty: 0, value: 0 };
+      state.set(warehouseId, s);
+    }
+    return s;
+  }
+
   const computed = new Map<number, number>();
   const newReturnWorkingValue = new Map<number, number>();
+  const linesById = new Map<number, Line>(lines.map((l) => [l.id, l]));
 
   for (const line of lines) {
     const qty = Number(line.quantity);
     const type = line.document.documentType;
+    const s = getState(line.document.warehouseId);
 
     if (IN_GIVEN_TYPES.has(type)) {
       const returningLines = returningLinesByReceipt.get(line.id);
       if (!returningLines || returningLines.length === 0) {
-        runningQty += qty;
-        runningValue += Number(line.amount);
+        s.qty += qty;
+        s.value += Number(line.amount);
       } else {
-        const returnedQty = returningLines.reduce((s, r) => s + Number(r.quantity), 0);
+        const returnedQty = returningLines.reduce((sum, r) => sum + Number(r.quantity), 0);
         const remainingQty = qty - returnedQty;
-        runningQty += remainingQty;
-        runningValue += fixedRemainingAmount.get(line.id) || 0;
+        s.qty += remainingQty;
+        s.value += fixedRemainingAmount.get(line.id) || 0;
         for (const r of returningLines) {
-          runningQty += Number(r.quantity);
-          runningValue += returnWorkingValue.get(r.id) || 0;
+          s.qty += Number(r.quantity);
+          s.value += returnWorkingValue.get(r.id) || 0;
         }
       }
       continue;
     }
 
-    if (type === "WAREHOUSE_ADJUSTMENT") {
-      // qty خودش امضادار است (مثبت=مازاد/ورود، منفی=کسری/خروج)
-      const avgCost = runningQty > 0 ? runningValue / runningQty : 0;
-      const amt = round(qty * avgCost, decimalPlaces);
+    if (type === "WAREHOUSE_TRANSFER_IN") {
+      // بر خلاف بقیه‌ی ورودی‌ها، فی میانگین جاری کاردکس (انبار مقصد) را نمی‌گیرد؛ سهم متناسب (بر اساس
+      // مقدار) از مبلغِ همان ردیف WAREHOUSE_TRANSFER_OUT مرتبط (در انبار مبدا، کاردکس مستقل خودش) است
+      // — همیشه قبلاً در همین کاردکس محاسبه شده، چون ترتیب تاریخ ارسال<=دریافت در سطح اپلیکیشن اجباری
+      // است (نگاه کنید به یادداشت بالای فایل). فقط qty/value انبار مقصد (s، همین ردیف) به‌روزرسانی
+      // می‌شود؛ انبار مبدا با ردیف OUT خودش (که در محاسبه‌ی خودش، از وضعیت انبار مبدا کم شده) قبلاً
+      // به‌روزرسانی شده است.
+      const outLine = line.sourceWarehouseTransferOutLineId ? linesById.get(line.sourceWarehouseTransferOutLineId) : undefined;
+      const outQty = outLine ? Number(outLine.quantity) : 0;
+      const outAmount = outLine ? computed.get(outLine.id) || 0 : 0;
+      const amt = outQty > 0 ? round((outAmount * qty) / outQty, decimalPlaces) : 0;
       computed.set(line.id, amt);
-      runningQty += qty;
-      runningValue += amt;
+      s.qty += qty;
+      s.value += amt;
       continue;
     }
 
     if (IN_COMPUTED_TYPES.has(type)) {
-      const avgCost = runningQty > 0 ? runningValue / runningQty : 0;
+      const avgCost = s.qty > 0 ? s.value / s.qty : 0;
       const amt = round(qty * avgCost, decimalPlaces);
       computed.set(line.id, amt);
-      runningQty += qty;
-      runningValue += amt;
+      s.qty += qty;
+      s.value += amt;
       continue;
     }
 
     // OUT_COMPUTED_TYPES + SUPPLIER_RETURN
-    const avgCost = runningQty > 0 ? runningValue / runningQty : 0;
+    const avgCost = s.qty > 0 ? s.value / s.qty : 0;
     const amt = round(qty * avgCost, decimalPlaces);
     computed.set(line.id, amt);
-    runningQty -= qty;
-    runningValue -= amt;
+    s.qty -= qty;
+    s.value -= amt;
     if (type === "SUPPLIER_RETURN") {
       newReturnWorkingValue.set(line.id, amt);
     }
@@ -138,7 +229,7 @@ function mapsEqual(a: Map<number, number>, b: Map<number, number>, epsilon: numb
   return true;
 }
 
-async function findPredecessorPeriod(reportingPeriodId: number) {
+export async function findPredecessorPeriod(reportingPeriodId: number) {
   const period = await prisma.reportingPeriod.findUnique({ where: { id: reportingPeriodId } });
   if (!period) throw new Error("دوره گزارشگری یافت نشد");
   const predecessor = await prisma.reportingPeriod.findFirst({
@@ -167,15 +258,6 @@ export async function getPricingStatusMap(goodsItemIds: number[], reportingPerio
   return new Set(rows.map((r) => r.goodsItemId));
 }
 
-export async function getLastPricedPeriod(goodsItemId: number) {
-  const last = await prisma.goodsPricingStatus.findFirst({
-    where: { goodsItemId },
-    orderBy: { reportingPeriod: { toDate: "desc" } },
-    include: { reportingPeriod: true },
-  });
-  return last?.reportingPeriod || null;
-}
-
 export async function priceItem(goodsItemId: number, reportingPeriodId: number, userId?: number) {
   const { period, predecessor } = await findPredecessorPeriod(reportingPeriodId);
 
@@ -196,20 +278,24 @@ export async function priceItem(goodsItemId: number, reportingPeriodId: number, 
   const decimalPlaces = await getBaseCurrencyDecimalPlaces();
   const epsilon = Math.pow(10, -decimalPlaces) / 2;
 
-  const lines = (await prisma.inventoryDocumentLine.findMany({
+  const rawLines = await prisma.inventoryDocumentLine.findMany({
     where: {
       goodsItemId,
-      document: { status: "FINALIZED", date: { lte: period.toDate }, documentType: { in: PRICING_DOC_TYPES as any } },
+      document: { date: { lte: period.toDate }, documentType: { in: PRICING_DOC_TYPES as any } },
     },
     select: {
       id: true,
       quantity: true,
-      amount: true,
       sourceWarehouseReceiptLineId: true,
-      document: { select: { documentType: true, date: true } },
+      sourceWarehouseTransferOutLineId: true,
+      document: { select: { documentType: true, date: true, warehouseId: true } },
     },
     orderBy: [{ document: { date: "asc" } }, { documentId: "asc" }, { rowOrder: "asc" }, { id: "asc" }],
-  })) as Line[];
+  });
+  // مبلغ فعلی هر ردیف دیگر ستون خام نیست — طبق Documents/WareHouseAmountChanges.md، SUM(Difference)
+  // تاریخچه‌ی همان ردیف است؛ یک کوئری batched برای همه‌ی ردیف‌های این اجرا، نه یک کوئری جدا به ازای هرکدام.
+  const currentAmounts = await getLineAmounts(rawLines.map((l) => l.id));
+  const lines = rawLines.map((l) => ({ ...l, amount: Number(currentAmounts.get(l.id) ?? 0) })) as Line[];
 
   // پیش‌پردازش برگشت‌های تامین‌کننده: برای هر رسیدی که برگشت(های) به آن ارجاع دارند، سهم ثابتِ
   // «باقیمانده» و سهم اولیه‌ی هر برگشت (متناسب با مقدار خودش از مبلغ اصلی رسید) یک‌بار محاسبه می‌شود؛
@@ -253,18 +339,6 @@ export async function priceItem(goodsItemId: number, reportingPeriodId: number, 
   }
   if (!converged) throw new Error("محاسبه قیمت‌گذاری همگرا نشد؛ لطفاً اسناد کالا را بررسی کنید");
 
-  // مجموع اصلاحیه‌های قبلیِ ردیف‌های قفل‌شده (برای محاسبه‌ی مبلغ «مؤثر فعلی» آن‌ها) — یک کوئری واحد
-  // به‌جای یک کوئری جداگانه به ازای هر ردیف
-  const lockedLineIds = lines.filter((l) => l.document.date < period.fromDate).map((l) => l.id);
-  const priorAdjustments = lockedLineIds.length
-    ? await prisma.goodsPricingAdjustment.groupBy({
-        by: ["lineId"],
-        where: { lineId: { in: lockedLineIds }, appliedToLine: false },
-        _sum: { amount: true },
-      })
-    : [];
-  const priorAdjMap = new Map(priorAdjustments.map((a) => [a.lineId, Number(a._sum.amount || 0)]));
-
   // نهایی‌سازی: خودِ رسید هرگز توسط قیمت‌گذاری اصلاح نمی‌شود (همیشه با مبلغ اصلی خودش باقی می‌ماند) —
   // سهم ثابت باقیمانده و همگرایی لوپ فقط برای محاسبه‌ی درستِ سایر ردیف‌های بین رسید و برگشت (مثلاً
   // مصرف) به کار می‌روند. مبلغ نهایی خودِ برگشت هم مقدار همگراشده‌ی کاردکس نیست؛ سهم متناسب از مبلغ
@@ -279,11 +353,10 @@ export async function priceItem(goodsItemId: number, reportingPeriodId: number, 
     }
     if (newTotal === undefined) continue;
 
-    // مبلغ «مؤثر فعلی»: اگر ردیف قفل نشده (در همین دوره است)، amount خام همان مقدار مؤثر است (چون
-    // فقط قیمت‌گذاری‌های همین دوره مستقیم می‌نویسند)؛ اگر قفل شده (دوره‌ای زودتر که قبلاً قیمت‌گذاری
-    // شده)، باید مجموع اصلاحیه‌های قبلی هم به amount خام اضافه شود
+    // مبلغ «مؤثر فعلی» دیگر نیازی به شاخه‌ی قفل/غیرقفل ندارد — line.amount همین حالا SUM(Difference)ی
+    // کامل تاریخچه‌ی ردیف است (شامل هر اصلاحیه‌ی قبلی، مهم نیست در چه اجرایی نوشته شده)
     const locked = line.document.date < period.fromDate;
-    const currentEffective = Number(line.amount) + (locked ? priorAdjMap.get(line.id) || 0 : 0);
+    const currentEffective = Number(line.amount);
 
     const delta = round(newTotal - currentEffective, decimalPlaces);
     if (Math.abs(delta) > epsilon) {
@@ -296,15 +369,14 @@ export async function priceItem(goodsItemId: number, reportingPeriodId: number, 
       data: { goodsItemId, reportingPeriodId, createdById: userId },
     });
     for (const c of changes) {
-      await tx.goodsPricingAdjustment.create({
-        data: { statusId: created.id, lineId: c.lineId, amount: c.delta, appliedToLine: !c.locked },
+      await setLineAmount(tx, {
+        lineId: c.lineId,
+        newAmount: c.newTotal,
+        priceType: c.locked ? "ENGINE_CORRECTION" : "ENGINE_PRICING",
+        effectiveDate: period.toDate,
+        goodsPricingStatusId: created.id,
+        createdById: userId ?? null,
       });
-      if (!c.locked) {
-        await tx.inventoryDocumentLine.update({
-          where: { id: c.lineId },
-          data: { amount: c.newTotal, unitCost: c.quantity > 0 ? c.newTotal / c.quantity : 0 },
-        });
-      }
     }
     return created;
   });
@@ -328,24 +400,12 @@ export async function revertItem(goodsItemId: number, reportingPeriodId: number)
     }
   }
 
-  const decimalPlaces = await getBaseCurrencyDecimalPlaces();
-  const adjustments = await prisma.goodsPricingAdjustment.findMany({
-    where: { statusId: status.id },
-    include: { line: { select: { id: true, quantity: true, amount: true } } },
-  });
-
+  // برخلاف قبل (که یک «کم‌کردن دلتا» دستی روی ستون خام لازم بود)، الان کافی است دقیقاً همان رکوردهای
+  // DocumentItemAmount ای که این اجرا اضافه کرده بود حذف شوند — SUM(Difference) هر ردیف خودکار به
+  // مقدار پیش از این اجرا برمی‌گردد. safe به‌خاطر بررسی «ابتدا باید دوره‌ی بعدی برگشت بخورد» بالا: هیچ
+  // اجرای دیگری بعد از این یکی، روی همین کالا لایه‌ای اضافه نکرده است.
   await prisma.$transaction(async (tx) => {
-    for (const adj of adjustments) {
-      if (!adj.appliedToLine) continue; // فقط اصلاحیه‌هایی که مستقیم روی amount نوشته شده بودند باید کم شوند
-      const newAmount = round(Number(adj.line.amount) - Number(adj.amount), decimalPlaces);
-      const qty = Number(adj.line.quantity);
-      await tx.inventoryDocumentLine.update({
-        where: { id: adj.lineId },
-        data: { amount: newAmount, unitCost: qty > 0 ? newAmount / qty : 0 },
-      });
-    }
-    // حذف status، به‌خاطر onDelete: Cascade روی GoodsPricingAdjustment.statusId، خودش اصلاحیه‌های
-    // بالا را هم حذف می‌کند
+    await tx.documentItemAmount.deleteMany({ where: { goodsPricingStatusId: status.id } });
     await tx.goodsPricingStatus.delete({ where: { id: status.id } });
   });
 }

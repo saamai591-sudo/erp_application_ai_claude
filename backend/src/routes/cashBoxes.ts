@@ -1,15 +1,18 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { generateDetailCode, registerDetailCode, resolveDetailCode } from "../utils/coding";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
 
 const DETAIL_TYPE_CASHBOX = 3;
+const FORM = findFormPrefix("cash-boxes");
 const router = Router();
 
 router.get("/", async (_req, res) => {
   res.json(await prisma.cashBox.findMany({ orderBy: { detailCode: "asc" } }));
 });
 
-router.post("/", async (req, res) => {
+router.post("/", can(`${FORM}.create`), async (req, res) => {
   const { title, detailCode } = req.body as { title: string; detailCode?: string };
   if (!title) return res.status(400).json({ error: "عنوان الزامی است" });
 
@@ -26,7 +29,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const { title } = req.body as { title: string };
   if (!title) return res.status(400).json({ error: "عنوان الزامی است" });
@@ -38,7 +41,7 @@ router.put("/:id", async (req, res) => {
   res.json(updated);
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const cashBox = await prisma.cashBox.findUnique({ where: { id } });
   if (!cashBox) return res.status(404).json({ error: "صندوق یافت نشد" });

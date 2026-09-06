@@ -10,6 +10,7 @@ import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 
 export interface Currency {
@@ -34,7 +35,6 @@ export default function Currencies() {
 
 function CurrencyList() {
   const { items, loading, error, remove, reload, create } = useCrud<Currency>("/currencies");
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
   return (
     <div>
@@ -51,13 +51,12 @@ function CurrencyList() {
             ]}
             onDone={reload}
           />
-          <RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
+          <RefreshButton onClick={reload} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       {!loading && (
         <DataTable
-        bulkActionsContainer={bulkSlot}
           columns={[
             { header: "کد", render: (r) => toFaDigits(r.code), width: "80px", filterType: "string", filterValue: (r) => r.code },
             { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
@@ -66,7 +65,7 @@ function CurrencyList() {
             { header: "جهت تسعیر", render: (r) => (r.isBase ? "—" : r.rateDirection === "TO_BASE" ? "به ارز پایه" : "از ارز پایه") },
           ]}
           rows={items}
-          onEdit={(r) => navigate(`/currencies/${r.id}/edit`)}
+          edit={{ path: (r) => `/currencies/${r.id}/edit` }}
           onDelete={async (r) => {
             const res = await remove(r.id);
             if (!res.ok) alert(res.error);
@@ -156,11 +155,11 @@ function CurrencyForm({ editId }: { editId?: number }) {
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
-            <label>کد</label>
+            <label>کد<RequiredMark /></label>
             <input dir="ltr" disabled={!!editId} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
           </div>
           <div className="form-field">
-            <label>عنوان</label>
+            <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
           </div>
           <div className="form-field">
@@ -176,7 +175,7 @@ function CurrencyForm({ editId }: { editId?: number }) {
           {!form.isBase && (
             <>
               <div className="form-field">
-                <label>جهت تسعیر</label>
+                <label>جهت تسعیر<RequiredMark /></label>
                 <select value={form.rateDirection} onChange={(e) => setForm({ ...form, rateDirection: e.target.value })}>
                   <option value="TO_BASE">ثبت نرخ از ارز جاری به ارز پایه</option>
                   <option value="FROM_BASE">ثبت نرخ از ارز پایه به ارز جاری</option>

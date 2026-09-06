@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "InventoryDocumentType" ADD VALUE 'INVENTORY_COUNTING_SHORTAGE';

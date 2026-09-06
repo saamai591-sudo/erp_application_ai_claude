@@ -1,6 +1,10 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { getDetailOptions } from "../utils/detailValues";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("detail-types");
 
 const router = Router();
 
@@ -33,6 +37,9 @@ async function cleanupOrphans(_req: any, res: any) {
       case "CostCenter":
         exists = !!(await prisma.costCenter.findUnique({ where: { id: u.entityId } }));
         break;
+      case "Project":
+        exists = !!(await prisma.project.findUnique({ where: { id: u.entityId } }));
+        break;
       case "FiscalPeriod":
         exists = !!(await prisma.fiscalPeriod.findUnique({ where: { id: u.entityId } }));
         break;
@@ -48,12 +55,12 @@ async function cleanupOrphans(_req: any, res: any) {
 }
 
 // هم GET (برای اجرا با باز کردن لینک در مرورگر) و هم POST پشتیبانی می‌شود
-router.get("/cleanup-orphans", cleanupOrphans);
-router.post("/cleanup-orphans", cleanupOrphans);
+router.get("/cleanup-orphans", can(`${FORM}.cleanupOrphans`), cleanupOrphans);
+router.post("/cleanup-orphans", can(`${FORM}.cleanupOrphans`), cleanupOrphans);
 
 // طول کد، شماره شروع، شماره پایان قابل ویرایش‌اند؛ کد و عنوان قابل ویرایش نیستند.
 // اگر از این نوع تفصیل رکوردی صادر شده باشد، شماره شروع و طول کد دیگر قابل تغییر نیست.
-router.put("/:id", async (req, res) => {
+router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const { codeLength, startNumber, endNumber } = req.body as {
     codeLength?: number;

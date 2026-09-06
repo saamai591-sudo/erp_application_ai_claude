@@ -9,6 +9,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 
 interface AttributeItem {
@@ -39,7 +40,6 @@ function AttributeList() {
   const cacheKey = "/goods-attributes";
   const [items, setItems] = usePersistedState<GoodsAttribute[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -66,12 +66,10 @@ function AttributeList() {
           <InfoHint text={`تعریف ویژگیهای اضافی برای گروه‌های کالا؛ هر ویژگی فهرستی از آیتمهای مجاز دارد`} title="ویژگی کالا خدمت" />
           <NewRecordButton path="/goods-attributes/new" />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "کد", render: (r) => toFaDigits(String(r.code)), width: "70px", filterType: "number", filterValue: (r) => r.code },
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
@@ -79,7 +77,7 @@ function AttributeList() {
           { header: "تعداد آیتم", render: (r) => toFaDigits(String(r.items?.length || 0)), width: "90px" },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/goods-attributes/${r.id}/edit`)}
+        edit={{ path: (r) => `/goods-attributes/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -180,11 +178,11 @@ function AttributeForm({ editId }: { editId?: number }) {
             <input dir="ltr" disabled={!!editId} value={header.code} onChange={(e) => setHeader({ ...header, code: e.target.value })} />
           </div>
           <div className="form-field">
-            <label>عنوان</label>
+            <label>عنوان<RequiredMark /></label>
             <input value={header.title} onChange={(e) => setHeader({ ...header, title: e.target.value })} autoFocus />
           </div>
           <div className="form-field">
-            <label>طول کد آیتم (بین ۱ تا ۸)</label>
+            <label>طول کد آیتم (بین ۱ تا ۸)<RequiredMark /></label>
             <input
               type="number"
               min={1}

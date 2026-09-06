@@ -2,6 +2,13 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { nextSerialNumber } from "../utils/coding";
 import { getAllowedGoodsTypes } from "../data/warehouseDocNatureMatrix";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const SUPPLIERS_FORM = findFormPrefix("suppliers");
+const PURCHASE_GROUPS_FORM = findFormPrefix("purchase-groups");
+const PURCHASE_EXPERTS_FORM = findFormPrefix("purchase-experts");
+const PURCHASE_ROUTES_FORM = findFormPrefix("purchase-routes");
 
 // =========================================================================
 // ماژول «زنجیره تامین» > تنظیمات: مسیر خرید، تامین‌کننده، گروه خرید، کارشناس خرید
@@ -17,7 +24,7 @@ router.get("/purchase-routes", async (_req, res) => {
   res.json(await prisma.purchaseRoute.findMany({ orderBy: { code: "asc" } }));
 });
 
-router.post("/purchase-routes", async (req, res) => {
+router.post("/purchase-routes", can(`${PURCHASE_ROUTES_FORM}.create`), async (req, res) => {
   const body = req.body as { code?: number; title: string; nature: string; isActive?: boolean };
   if (!body.title) return res.status(400).json({ error: "عنوان الزامی است" });
   if (!body.nature) return res.status(400).json({ error: "ماهیت الزامی است" });
@@ -37,7 +44,7 @@ router.post("/purchase-routes", async (req, res) => {
   }
 });
 
-router.put("/purchase-routes/:id", async (req, res) => {
+router.put("/purchase-routes/:id", can(`${PURCHASE_ROUTES_FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { title?: string; nature?: string; isActive?: boolean };
 
@@ -57,7 +64,7 @@ router.put("/purchase-routes/:id", async (req, res) => {
   }
 });
 
-router.delete("/purchase-routes/:id", async (req, res) => {
+router.delete("/purchase-routes/:id", can(`${PURCHASE_ROUTES_FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const item = await prisma.purchaseRoute.findUnique({ where: { id } });
   if (!item) return res.status(404).json({ error: "مسیر خرید یافت نشد" });
@@ -96,7 +103,7 @@ async function setSupplierGroups(tx: any, supplierId: number, groupIds: number[]
   }
 }
 
-router.post("/suppliers", async (req, res) => {
+router.post("/suppliers", can(`${SUPPLIERS_FORM}.create`), async (req, res) => {
   const body = req.body as { code?: number; partyId: number; isActive?: boolean; groupIds?: number[] };
   if (!body.partyId) return res.status(400).json({ error: "طرف حساب الزامی است" });
 
@@ -126,7 +133,7 @@ router.post("/suppliers", async (req, res) => {
   }
 });
 
-router.put("/suppliers/:id", async (req, res) => {
+router.put("/suppliers/:id", can(`${SUPPLIERS_FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { partyId?: number; isActive?: boolean; groupIds?: number[] };
 
@@ -159,7 +166,7 @@ router.put("/suppliers/:id", async (req, res) => {
   }
 });
 
-router.delete("/suppliers/:id", async (req, res) => {
+router.delete("/suppliers/:id", can(`${SUPPLIERS_FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const item = await prisma.supplier.findUnique({ where: { id } });
   if (!item) return res.status(404).json({ error: "تامین‌کننده یافت نشد" });
@@ -239,7 +246,7 @@ async function validateGroupGoodsItems(goodsItemIds: number[]) {
   }
 }
 
-router.post("/purchase-groups", async (req, res) => {
+router.post("/purchase-groups", can(`${PURCHASE_GROUPS_FORM}.create`), async (req, res) => {
   const body = req.body as { code?: number; title: string; isActive?: boolean; supplierIds?: number[]; goodsItemIds?: number[] };
   if (!body.title) return res.status(400).json({ error: "عنوان الزامی است" });
 
@@ -269,7 +276,7 @@ router.post("/purchase-groups", async (req, res) => {
   }
 });
 
-router.put("/purchase-groups/:id", async (req, res) => {
+router.put("/purchase-groups/:id", can(`${PURCHASE_GROUPS_FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { title?: string; isActive?: boolean; supplierIds?: number[]; goodsItemIds?: number[] };
 
@@ -303,7 +310,7 @@ router.put("/purchase-groups/:id", async (req, res) => {
   }
 });
 
-router.delete("/purchase-groups/:id", async (req, res) => {
+router.delete("/purchase-groups/:id", can(`${PURCHASE_GROUPS_FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const item = await prisma.purchaseGroup.findUnique({ where: { id } });
   if (!item) return res.status(404).json({ error: "گروه خرید یافت نشد" });
@@ -342,7 +349,7 @@ async function setExpertGroups(tx: any, purchaseExpertId: number, groupIds: numb
   }
 }
 
-router.post("/purchase-experts", async (req, res) => {
+router.post("/purchase-experts", can(`${PURCHASE_EXPERTS_FORM}.create`), async (req, res) => {
   const body = req.body as { code?: number; partyId: number; isActive?: boolean; groupIds?: number[] };
   if (!body.partyId) return res.status(400).json({ error: "طرف حساب الزامی است" });
 
@@ -374,7 +381,7 @@ router.post("/purchase-experts", async (req, res) => {
   }
 });
 
-router.put("/purchase-experts/:id", async (req, res) => {
+router.put("/purchase-experts/:id", can(`${PURCHASE_EXPERTS_FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { partyId?: number; isActive?: boolean; groupIds?: number[] };
 
@@ -412,7 +419,7 @@ router.put("/purchase-experts/:id", async (req, res) => {
   }
 });
 
-router.delete("/purchase-experts/:id", async (req, res) => {
+router.delete("/purchase-experts/:id", can(`${PURCHASE_EXPERTS_FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const item = await prisma.purchaseExpert.findUnique({ where: { id } });
   if (!item) return res.status(404).json({ error: "کارشناس خرید یافت نشد" });

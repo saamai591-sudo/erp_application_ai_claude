@@ -120,64 +120,71 @@ export const MODULES: ModuleGroup[] = [
     ],
   },
   {
-    title: "انبارداری",
+    title: "مدیریت موجودی و انبار",
     subModules: [
       {
-        title: "عملیات",
+        // اسناد وارده (طبق همان طبقه‌بندی جهت IN/OUT که warehouseMovementService.OUTBOUND_DOC_TYPES
+        // به‌عنوان مرجع واحد این تفکیک استفاده می‌کند)
+        title: "رسید انبار",
         items: [
           { key: "warehousing-initial-inventory", label: "موجودی اول دوره", list: "/warehousing/initial-inventory", create: "/warehousing/initial-inventory/new", icon: "ledger" },
           { key: "warehousing-warehouse-receipts", label: "رسید انبار خرید", list: "/warehousing/warehouse-receipts", create: "/warehousing/warehouse-receipts/new", icon: "file" },
+          { key: "production-receipts", label: "رسید تولید", list: "/production-receipts", create: "/production-receipts/new", icon: "file" },
+          { key: "warehousing-warehouse-transfer-in", label: "رسید انتقال", list: "/warehousing/warehouse-transfer-in", create: "/warehousing/warehouse-transfer-in/new", icon: "sitemap" },
+          // طبق تصمیم صریح کاربر: این سند از این پس فقط مازاد را می‌پذیرد و دقیقاً هم‌الگوی بقیه‌ی این
+          // ساب‌ماژول (تایید حسابداری فردی) کار می‌کند — پس به‌جای «عملیات»، اینجا جایش طبیعی‌تر است.
+          { key: "warehousing-warehouse-adjustments", label: "اضافات انبارگردانی", list: "/warehousing/warehouse-adjustments", create: "/warehousing/warehouse-adjustments/new", icon: "ledger" },
+        ],
+      },
+      {
+        // اسناد صادره
+        title: "حواله انبار",
+        items: [
           { key: "center-consumptions", label: "مصرف مرکز هزینه", list: "/center-consumptions", create: "/center-consumptions/new", icon: "file" },
           { key: "project-consumptions", label: "مصرف پروژه", list: "/project-consumptions", create: "/project-consumptions/new", icon: "file" },
           { key: "production-consumptions", label: "مصرف تولید", list: "/production-consumptions", create: "/production-consumptions/new", icon: "file" },
+          { key: "fixed-asset-issues", label: "حواله دارایی ثابت", list: "/fixed-asset-issues", create: "/fixed-asset-issues/new", icon: "file" },
+          { key: "warehousing-warehouse-transfer-out", label: "حواله انتقالی", list: "/warehousing/warehouse-transfer-out", create: "/warehousing/warehouse-transfer-out/new", icon: "sitemap" },
+          // همان صفحه/مسیر ماژول «فروش» (بدون نسخه‌ی انبارداری/حسابداری انبار جدا) — فقط میان‌بر است
+          { key: "sales-deliveries", label: "حواله فروش", list: "/sales-deliveries", create: "/sales-deliveries/new", icon: "ledger" },
+          { key: "inventory-counting-shortages", label: "کسری انبارگردانی", list: "/inventory-counting-shortages", create: "/inventory-counting-shortages/new", icon: "file" },
+        ],
+      },
+      {
+        title: "برگشت رسید",
+        items: [
+          { key: "supplier-returns", label: "برگشت به تامین‌کننده", list: "/supplier-returns", create: "/supplier-returns/new", icon: "file" },
+        ],
+      },
+      {
+        title: "برگشت حواله",
+        items: [
           { key: "center-consumption-returns", label: "برگشت مصرف مرکز هزینه", list: "/center-consumption-returns", create: "/center-consumption-returns/new", icon: "file" },
           { key: "project-consumption-returns", label: "برگشت مصرف پروژه", list: "/project-consumption-returns", create: "/project-consumption-returns/new", icon: "file" },
           { key: "production-consumption-returns", label: "برگشت مصرف تولید", list: "/production-consumption-returns", create: "/production-consumption-returns/new", icon: "file" },
           { key: "sales-returns", label: "برگشت از فروش", list: "/sales-returns", create: "/sales-returns/new", icon: "file" },
-          { key: "supplier-returns", label: "برگشت به تامین‌کننده", list: "/supplier-returns", create: "/supplier-returns/new", icon: "file" },
-          { key: "production-receipts", label: "رسید تولید", list: "/production-receipts", create: "/production-receipts/new", icon: "file" },
-          { key: "fixed-asset-issues", label: "حواله دارایی ثابت", list: "/fixed-asset-issues", create: "/fixed-asset-issues/new", icon: "file" },
-          { key: "warehousing-warehouse-transfers", label: "انتقال بین انبارها", list: "/warehousing/warehouse-transfers", create: "/warehousing/warehouse-transfers/new", icon: "sitemap" },
-          { key: "warehousing-warehouse-adjustments", label: "انبارگردانی / تعدیل موجودی", list: "/warehousing/warehouse-adjustments", create: "/warehousing/warehouse-adjustments/new", icon: "ledger" },
-          { key: "warehousing-inventory-closing", label: "بستن موجودی انبار", list: "/warehousing/inventory-closing", icon: "shield" },
+        ],
+      },
+      {
+        title: "عملیات",
+        items: [
+          { key: "warehousing-warehouse-confirmation", label: "تایید انبار", list: "/warehousing/warehouse-confirmation", icon: "shield" },
+        ],
+      },
+      {
+        // طبق تصمیم صریح کاربر: ماژول مستقل «حسابداری انبار» حذف و به‌عنوان یک ساب‌ماژول همین ماژول
+        // ادغام شد (هم‌راستا با اینکه صفحات خودشان از قبل نمای انبارداری/حسابداری انبار را ادغام کرده‌اند)
+        title: "حسابداری انبار",
+        items: [
+          { key: "accounting-goods-pricing", label: "قیمت‌گذاری اسناد انبار", list: "/warehouse-accounting/goods-pricing", icon: "coin" },
+          { key: "accounting-issue-journal-entries", label: "صدور سند حسابداری", list: "/warehouse-accounting/issue-journal-entries", icon: "coin" },
         ],
       },
       {
         title: "گزارش",
         items: [
           { key: "warehousing-warehouse-review", label: "مرور تعدادی", list: "/warehousing/warehouse-review", icon: "tree" },
-        ],
-      },
-    ],
-  },
-  {
-    title: "حسابداری انبار",
-    subModules: [
-      {
-        title: "عملیات",
-        items: [
-          { key: "accounting-initial-inventory", label: "موجودی اول دوره", list: "/warehouse-accounting/initial-inventory", icon: "ledger" },
-          { key: "accounting-warehouse-receipts", label: "رسید انبار خرید", list: "/warehouse-accounting/warehouse-receipts", icon: "file" },
-          { key: "accounting-warehouse-transfers", label: "انتقال بین انبارها", list: "/warehouse-accounting/warehouse-transfers", icon: "sitemap" },
-          { key: "accounting-warehouse-adjustments", label: "انبارگردانی / تعدیل موجودی", list: "/warehouse-accounting/warehouse-adjustments", icon: "ledger" },
-          { key: "accounting-center-consumptions", label: "مصرف مرکز هزینه", list: "/warehouse-accounting/center-consumptions", icon: "file" },
-          { key: "accounting-project-consumptions", label: "مصرف پروژه", list: "/warehouse-accounting/project-consumptions", icon: "file" },
-          { key: "accounting-production-consumptions", label: "مصرف تولید", list: "/warehouse-accounting/production-consumptions", icon: "file" },
-          { key: "accounting-center-consumption-returns", label: "برگشت مصرف مرکز هزینه", list: "/warehouse-accounting/center-consumption-returns", icon: "file" },
-          { key: "accounting-project-consumption-returns", label: "برگشت مصرف پروژه", list: "/warehouse-accounting/project-consumption-returns", icon: "file" },
-          { key: "accounting-production-consumption-returns", label: "برگشت مصرف تولید", list: "/warehouse-accounting/production-consumption-returns", icon: "file" },
-          { key: "accounting-sales-returns", label: "برگشت از فروش", list: "/warehouse-accounting/sales-returns", icon: "file" },
-          { key: "accounting-supplier-returns", label: "برگشت به تامین‌کننده", list: "/warehouse-accounting/supplier-returns", icon: "file" },
-          { key: "accounting-production-receipts", label: "رسید تولید", list: "/warehouse-accounting/production-receipts", icon: "file" },
-          { key: "accounting-fixed-asset-issues", label: "حواله دارایی ثابت", list: "/warehouse-accounting/fixed-asset-issues", icon: "file" },
-          { key: "accounting-goods-pricing", label: "قیمت‌گذاری اسناد انبار", list: "/warehouse-accounting/goods-pricing", icon: "coin" },
-        ],
-      },
-      {
-        title: "گزارش",
-        items: [
           { key: "accounting-warehouse-review", label: "مرور مبلغی", list: "/warehouse-accounting/warehouse-review", icon: "tree" },
-          { key: "accounting-goods-pricing-corrections", label: "اصلاحیه‌های قیمت‌گذاری", list: "/warehouse-accounting/goods-pricing-corrections", icon: "coin" },
         ],
       },
     ],
@@ -192,6 +199,7 @@ export const MODULES: ModuleGroup[] = [
           { key: "purchase-groups", label: "گروه خرید", list: "/purchase-groups", create: "/purchase-groups/new", icon: "sitemap" },
           { key: "purchase-experts", label: "کارشناس خرید", list: "/purchase-experts", create: "/purchase-experts/new", icon: "user" },
           { key: "purchase-routes", label: "مسیر خرید", list: "/purchase-routes", create: "/purchase-routes/new", icon: "tag" },
+          { key: "purchase-types", label: "نوع خرید", list: "/purchase-types", create: "/purchase-types/new", icon: "tag" },
         ],
       },
       {
@@ -205,6 +213,7 @@ export const MODULES: ModuleGroup[] = [
           { key: "purchase-orders", label: "سفارش خرید", list: "/purchase-orders", create: "/purchase-orders/new", icon: "file" },
           { key: "delivery-authorizations", label: "مجوز تحویل", list: "/delivery-authorizations", create: "/delivery-authorizations/new", icon: "shield" },
           { key: "purchase-invoices", label: "فاکتور خرید", list: "/purchase-invoices", create: "/purchase-invoices/new", icon: "ledger" },
+          { key: "service-purchase-invoices", label: "فاکتور خرید خدمات", list: "/service-purchase-invoices", create: "/service-purchase-invoices/new", icon: "ledger" },
         ],
       },
     ],
@@ -247,3 +256,34 @@ export const MODULES: ModuleGroup[] = [
     ],
   },
 ];
+
+// نگاشت کلید آیتم منو → کلید فرم در Registry بک‌اند (authz/registry.ts) — فقط برای مواردی لازم است
+// که یک فرم واحد بک‌اند (یک جدول/مسیر مشترک) به عمد زیر دو آیتم منوی جدا نمایش داده می‌شود (مثلاً
+// «شخص حقیقی»/«شخص حقوقی» هر دو روی Party هستند، یا «کالا»/«خدمت» هر دو روی GoodsItem). در بقیه‌ی
+// موارد، کلید آیتم منو دقیقاً همان کلید فرم است (چون Registry عمداً همین کلیدها را از این فایل قرض
+// گرفته) و نیازی به نگاشت جداگانه نیست.
+const NAV_KEY_TO_FORM_KEY: Record<string, string> = {
+  "party-individual": "parties",
+  "party-legal": "parties",
+  goods: "goods-items",
+  services: "goods-items",
+};
+
+export function navItemFormKey(item: NavItem): string {
+  return NAV_KEY_TO_FORM_KEY[item.key] ?? item.key;
+}
+
+/**
+ * منو را بر اساس دسترسی واقعی کاربر جاری فیلتر می‌کند: یک آیتم فقط وقتی نشان داده می‌شود که کاربر
+ * دسترسی «مشاهده» فرم متناظرش را داشته باشد؛ یک ساب‌ماژول/ماژول فقط وقتی نشان داده می‌شود که حداقل
+ * یک آیتم قابل‌مشاهده زیرش باقی مانده باشد. این تنها جایی است که منو بر اساس دسترسی فیلتر می‌شود —
+ * خودِ Layout.tsx هیچ منطق دسترسی‌ای ندارد، فقط همین تابع را صدا می‌زند.
+ */
+export function filterModulesByAccess(hasFormView: (formKey: string) => boolean): ModuleGroup[] {
+  return MODULES.map((mod) => ({
+    ...mod,
+    subModules: mod.subModules
+      .map((sub) => ({ ...sub, items: sub.items.filter((item) => hasFormView(navItemFormKey(item))) }))
+      .filter((sub) => sub.items.length > 0),
+  })).filter((mod) => mod.subModules.length > 0);
+}

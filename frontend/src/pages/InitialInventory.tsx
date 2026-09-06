@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
@@ -8,12 +8,25 @@ import { RecordPickerField } from "../components/RecordPicker";
 import { TrackingCells } from "../components/TrackingCells";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
+import { ExcelImportButton } from "../components/ExcelImport";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
-import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
+import { usePermissions } from "../lib/usePermissions";
+import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
+import { useDocumentForm } from "../lib/useDocumentForm";
+
+// طبق تصمیم معماری «ادغام نمای انبارداری/حسابداری انبار»: این فرم دیگر دو مسیر/دو مود جدا ندارد —
+// یک نمای واحد است که ستون‌های مبلغی بر اساس مجوز کاربر نمایش داده می‌شوند، نه بر اساس مسیر URL. دقیقاً
+// هم‌الگوی رسید انبار خرید/رسید تولید: کاربر ابتدا «تایید حسابداری» را می‌زند (که سرصفحه/مقدار را قفل
+// می‌کند) و بعد از آن فی/مبلغ را وارد می‌کند؛ تا وقتی Finalized نشده، فیلدهای مبلغی اصلاً نمایش داده
+// نمی‌شوند، حتی برای کاربر دارای دسترسی «مشاهده اطلاعات حسابداری».
+const VIEW_ACCOUNTING_PERMISSION = "inventory.inbound-receipts.warehousing-initial-inventory.viewAccounting";
+const CONFIRM_PERMISSION = "inventory.inbound-receipts.warehousing-initial-inventory.accountingConfirm";
+const REVERT_PERMISSION = "inventory.inbound-receipts.warehousing-initial-inventory.accountingConfirmRevert";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
 interface UnitOfMeasure { id: number; code: number; title: string }
@@ -24,9 +37,7 @@ interface GoodsItemRow {
   mainUnitId: number;
   isActive: boolean;
   kind: string;
-  isSerialTracked: boolean;
-  isBatchTracked: boolean;
-  isExpiryTracked: boolean;
+  trackingMethod: "NONE" | "BATCH" | "SERIAL";
   isLocationTracked: boolean;
 }
 
@@ -39,10 +50,10 @@ interface ListRow {
   fiscalPeriodTitle: string;
   description: string | null;
   creationType: "MANUAL" | "SYSTEM";
-  status: "DRAFT" | "FINALIZED" | "VOID";
+  status: "REGISTERED" | "FINALIZED";
   lineCount: number;
   totalQuantity: number;
-  totalAmount: number;
+  totalAmount?: number;
 }
 
 interface DetailLine {
@@ -53,11 +64,10 @@ interface DetailLine {
   unitId: number;
   unitTitle: string;
   quantity: number;
-  unitCost: number;
-  amount: number;
-  serialNumber: string | null;
-  batchNumber: string | null;
-  expiryDate: string | null;
+  unitCost?: number;
+  amount?: number;
+  serialIds: number[];
+  batchAllocations: { batchId: number; batchNumber: string; expiryDate: string | null; quantity: number }[];
   physicalLocation: string | null;
 }
 
@@ -71,63 +81,31 @@ interface Detail {
   fiscalPeriodTitle: string;
   description: string | null;
   creationType: "MANUAL" | "SYSTEM";
-  status: "DRAFT" | "FINALIZED" | "VOID";
+  status: "REGISTERED" | "FINALIZED";
   finalizedAt: string | null;
   lines: DetailLine[];
 }
 
-const STATUS_FA: Record<string, string> = { DRAFT: "ثبت", FINALIZED: "قطعی", VOID: "ابطال‌شده" };
 const CREATION_TYPE_FA: Record<string, string> = { MANUAL: "دستی", SYSTEM: "سیستمی" };
+const STATUS_FA: Record<"REGISTERED" | "FINALIZED", string> = { REGISTERED: "ثبت‌شده", FINALIZED: "تایید حسابداری شده" };
 
-type ViewMode = "warehousing" | "accounting";
+const INFO_TEXT =
+  "ثبت موجودی اول دوره برای راه‌اندازی اولیه سیستم؛ برای هر انبار حداکثر یک سند در هر دوره مالی مجاز است. " +
+  "سند از همان لحظه‌ی ذخیره در موجودی انبار اثر می‌گذارد. مقدار هر ردیف مستقیماً توسط شما وارد می‌شود. فی/مبلغ فقط پس از " +
+  "«تایید حسابداری» و برای کاربر دارای دسترسی مشاهده اطلاعات حسابداری وارد/نمایش داده می‌شود؛ مبلغ = مقدار × فی است — " +
+  "اگر مبلغ را ویرایش کنید، فی واحد به‌طور خودکار بازمحاسبه می‌شود.";
 
-function infoText(mode: ViewMode) {
-  const base =
-    "ثبت موجودی اول دوره برای راه‌اندازی اولیه سیستم؛ برای هر انبار حداکثر یک سند در هر دوره مالی مجاز است. " +
-    "سند تا زمانی که «قطعی» نشده در موجودی انبار اثری ندارد؛ پس از «قطعی کردن» دیگر قابل ویرایش مستقیم نیست " +
-    "(برای اصلاح، ابتدا «برگشت از قطعی» را بزنید). مقدار هر ردیف مستقیماً توسط شما وارد می‌شود.";
-  if (mode === "warehousing") {
-    return base + " این نمای «انبارداری» فقط مقدار را ثبت می‌کند؛ ثبت فی و مبلغ از نمای «حسابداری انبار» انجام می‌شود.";
-  }
-  return (
-    base +
-    " مقدار هرگز از فی/مبلغ محاسبه نمی‌شود؛ مبلغ = مقدار × فی است — اگر مبلغ را ویرایش کنید، فی واحد به‌طور خودکار بازمحاسبه می‌شود."
-  );
-}
-
-// این کامپوننت زیر دو ماژول جدا در منو سوار می‌شود («انبارداری» و «حسابداری انبار»)، هر دو روی همان
-// entity/API مشترک (سند موجودی اول دوره) کار می‌کنند؛ فقط نمایش/ویرایش‌پذیری فیلدهای مبلغی («فی واحد»،
-// «مبلغ») بر اساس mode فرق می‌کند. نمای «انبارداری» اصلاً این دو فیلد را نشان نمی‌دهد (نه حتی به‌صورت
-// فقط-خواندنی)؛ نمای «حسابداری انبار» دقیقاً همان فرم انبارداری را با این دو فیلد اضافه‌شده نمایش می‌دهد.
-export default function InitialInventory({ mode }: { mode: ViewMode }) {
+export default function InitialInventory() {
   const location = useLocation();
   const { id } = useParams();
-  const basePath = mode === "warehousing" ? "/warehousing/initial-inventory" : "/warehouse-accounting/initial-inventory";
+  const basePath = "/warehousing/initial-inventory";
   const isNew = location.pathname.endsWith("/new");
   const isEdit = location.pathname.endsWith("/edit");
-  // در «حسابداری انبار» هرگز امکان ثبت سند جدید نیست (فقط از فهرست باز می‌شود)؛ حتی اگر کاربر مستقیماً
-  // آدرس «/new» را وارد کند، به فهرست هدایت می‌شود.
-  if (isNew && mode === "accounting") return <Navigate to={basePath} replace />;
-  if (isNew) return <InitialInventoryForm mode={mode} basePath={basePath} />;
-  if (isEdit) return <InitialInventoryForm mode={mode} basePath={basePath} editId={Number(id)} />;
-  return <InitialInventoryList mode={mode} basePath={basePath} />;
+  if (isNew) return <InitialInventoryForm basePath={basePath} />;
+  if (isEdit) return <InitialInventoryForm basePath={basePath} editId={Number(id)} />;
+  return <InitialInventoryList basePath={basePath} />;
 }
 
-function CheckIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-function UndoIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 function PlusIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
@@ -136,12 +114,12 @@ function PlusIcon() {
   );
 }
 
-function InitialInventoryList({ mode, basePath }: { mode: ViewMode; basePath: string }) {
+function InitialInventoryList({ basePath }: { basePath: string }) {
   const cacheKey = basePath;
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
-  const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
+  const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
 
   async function reload() {
     try {
@@ -159,15 +137,15 @@ function InitialInventoryList({ mode, basePath }: { mode: ViewMode; basePath: st
   }, []);
 
   async function onDelete(row: ListRow) {
-    if (row.status !== "DRAFT") {
-      alert("فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «قطعی» برگردانید");
+    if (row.creationType === "SYSTEM") {
+      setError("این سند سیستمی است و از این فرم قابل حذف نیست");
       return;
     }
     try {
       await api.del(`/initial-inventories/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      setError((e as ApiError).message);
     }
   }
 
@@ -175,15 +153,60 @@ function InitialInventoryList({ mode, basePath }: { mode: ViewMode; basePath: st
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint text={infoText(mode)} title="موجودی اول دوره" />
-          {mode === "warehousing" && <NewRecordButton path={`${basePath}/new`} />}
+          <InfoHint text={INFO_TEXT} title="موجودی اول دوره" />
+          <NewRecordButton path={`${basePath}/new`} />
+          <ExcelImportButton
+              entityLabel="موجودی اول دوره"
+              templateFilename="قالب-موجودی-اول-دوره"
+              backendEntityType="initial-inventory"
+              columns={[
+                { key: "documentGroup", label: "شماره گروه سند", required: true, hint: "ردیف‌هایی با کد انبار، تاریخ و این شماره یکسان، یک سند می‌شوند" },
+                { key: "warehouseCode", label: "کد انبار", required: true },
+                { key: "date", label: "تاریخ", required: true, hint: "شمسی (مثلاً 1405/05/06) یا میلادی" },
+                { key: "description", label: "شرح سند" },
+                { key: "goodsItemCode", label: "کد کالا" },
+                { key: "goodsItemOldCode", label: "کد کالا (سیستم قدیم)", hint: "برای مهاجرت از سیستم قبلی؛ دقیقاً یکی از این دو ستون باید در هر ردیف پر باشد" },
+                { key: "quantity", label: "مقدار", required: true },
+                { key: "serialNumber", label: "سریال" },
+                { key: "batchNumber", label: "شماره بچ" },
+                { key: "expiryDate", label: "تاریخ انقضا" },
+                { key: "physicalLocation", label: "محل فیزیکی" },
+                { key: "lineDescription", label: "شرح ردیف" },
+              ]}
+              onDone={reload}
+            />
+          {canViewAccounting && (
+            // طبق طرح جدید («تایید اول، سپس فی») این ورود اکسل فقط روی اسنادی کار می‌کند که از قبل
+            // «تایید حسابداری» شده‌اند — دقیقاً هم‌الگوی دکمه‌ی «ذخیره فی/مبلغ» که دیگر با فرم معمول
+            // (بعد از تایید حسابداری) جایگزین شده. برای مهاجرت داده، ترتیب کار: ۱) ورود مقدار (این
+            // دکمه یا فرم دستی)، ۲) تایید حسابداری هر سند از فرم، ۳) این ورود اکسل برای ثبت فی/مبلغ.
+            <ExcelImportButton
+              entityLabel="فی/مبلغ موجودی اول دوره (فقط برای اسناد تایید حسابداری‌شده)"
+              templateFilename="قالب-فی-موجودی-اول-دوره"
+              backendEntityType="initial-inventory-cost"
+              columns={[
+                { key: "documentGroup", label: "شماره گروه سند", required: true, hint: "ردیف‌هایی با کد انبار، تاریخ و این شماره یکسان، یک رویداد اصلاح فی می‌شوند" },
+                { key: "warehouseCode", label: "کد انبار", required: true, hint: "برای یافتن سند موجودی اول دوره‌ی موجود با این انبار و تاریخ" },
+                { key: "date", label: "تاریخ", required: true, hint: "شمسی (مثلاً 1405/05/06) یا میلادی" },
+                { key: "description", label: "شرح سند" },
+                { key: "goodsItemCode", label: "کد کالا" },
+                { key: "goodsItemOldCode", label: "کد کالا (سیستم قدیم)", hint: "برای مهاجرت از سیستم قبلی؛ دقیقاً یکی از این دو ستون باید در هر ردیف پر باشد" },
+                { key: "quantity", label: "مقدار", hint: "فقط برای تطبیق با ردیف سند موجود؛ مقدار سند تغییر نمی‌کند" },
+                { key: "amount", label: "مبلغ", hint: "فی واحد به‌طور خودکار از روی مبلغ ÷ مقدار محاسبه می‌شود" },
+                { key: "serialNumber", label: "سریال" },
+                { key: "batchNumber", label: "شماره بچ" },
+                { key: "expiryDate", label: "تاریخ انقضا" },
+                { key: "physicalLocation", label: "محل فیزیکی" },
+                { key: "lineDescription", label: "شرح ردیف" },
+              ]}
+              onDone={reload}
+            />
+          )}
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "شماره", render: (r) => r.number, width: "70px", filterType: "number", filterValue: (r) => r.number },
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
@@ -192,12 +215,12 @@ function InitialInventoryList({ mode, basePath }: { mode: ViewMode; basePath: st
           { header: "شرح", render: (r) => r.description || "—", filterType: "string", filterValue: (r) => r.description || "" },
           { header: "نوع ایجاد", render: (r) => CREATION_TYPE_FA[r.creationType], filterType: "string", filterValue: (r) => CREATION_TYPE_FA[r.creationType] },
           { header: "تعداد ردیف", render: (r) => r.lineCount },
-          ...(mode === "accounting" ? [{ header: "جمع مبلغ", render: (r: ListRow) => formatAmountFa(r.totalAmount) }] : []),
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
+          ...(canViewAccounting ? [{ header: "جمع مبلغ", render: (r: ListRow) => (r.totalAmount != null ? formatAmountFa(r.totalAmount) : "—") }] : []),
         ]}
         rows={items}
-        onEdit={(r) => navigate(`${basePath}/${r.id}/edit`)}
-        onDelete={mode === "warehousing" ? onDelete : undefined}
+        edit={{ path: (r) => `${basePath}/${r.id}/edit` }}
+        onDelete={onDelete}
       />
     </div>
   );
@@ -210,14 +233,13 @@ interface RowState {
   quantity: string;
   unitCost: string;
   amount: string;
-  serialNumber: string;
-  batchNumber: string;
-  expiryDate: string;
+  serialIds: string[];
+  batchAllocations: { batchId: string; quantity: string }[];
   physicalLocation: string;
 }
 
 function emptyRow(): RowState {
-  return { goodsItemId: "", unitId: "", quantity: "", unitCost: "", amount: "", serialNumber: "", batchNumber: "", expiryDate: "", physicalLocation: "" };
+  return { goodsItemId: "", unitId: "", quantity: "", unitCost: "", amount: "", serialIds: [], batchAllocations: [], physicalLocation: "" };
 }
 
 // طبق بند ۳-۴ «مستند عمومی عملیات انبار»: مبلغ باید بر اساس تعداد ارقام اعشار «ارز پایه» گرد شود، نه
@@ -239,29 +261,46 @@ function recomputeUnitCostFromAmount(row: RowState): RowState {
   return { ...row, unitCost: String(amount / qty) };
 }
 
-function InitialInventoryForm({ editId, mode, basePath }: { editId?: number; mode: ViewMode; basePath: string }) {
+function mapRows(d: Detail): RowState[] {
+  return d.lines.map((l) => ({
+    id: l.id,
+    goodsItemId: String(l.goodsItemId),
+    unitId: String(l.unitId),
+    quantity: String(l.quantity),
+    unitCost: l.unitCost != null ? String(l.unitCost) : "",
+    amount: l.amount != null ? String(l.amount) : "",
+    serialIds: l.serialIds.map(String),
+    batchAllocations: l.batchAllocations.map((a) => ({ batchId: String(a.batchId), quantity: String(a.quantity) })),
+    physicalLocation: l.physicalLocation || "",
+  }));
+}
+
+function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath: string }) {
   const navigate = useNavigate();
-  const location = useLocation();
-  const cacheKey = `form:${location.pathname}`;
+  const { hasPermission } = usePermissions();
+  const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
+  const canConfirm = hasPermission(CONFIRM_PERMISSION);
+  const canRevert = hasPermission(REVERT_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [units, setUnits] = useState<UnitOfMeasure[]>([]);
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [baseDecimalPlaces, setBaseDecimalPlaces] = useState(2);
-  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { warehouseId: "", date: "", description: "" });
-  const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
-  const [meta, setMeta] = usePersistedState<{
-    number: number;
-    status: "DRAFT" | "FINALIZED" | "VOID";
-    creationType: "MANUAL" | "SYSTEM";
-    fiscalPeriodTitle: string;
-  } | null>(`${cacheKey}:meta`, null);
-  const [error, setError] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
   const [focusedRow, setFocusedRow] = useState<number | null>(null);
-  const { saved, flash } = useSavedFlash();
 
-  useEffect(() => {
-    async function init() {
+  const { header, setHeader, rows, setRows, meta, setMeta, fiscalPeriod, error, setError, loaded, saved, flash, submit, remove } = useDocumentForm<
+    { warehouseId: string; date: string; description: string },
+    RowState,
+    Detail
+  >({
+    endpoint: "initial-inventories",
+    editId,
+    emptyHeader: (fp) => ({ warehouseId: "", date: defaultDocumentDate(fp), description: "" }),
+    emptyRows: () => [emptyRow(), emptyRow()],
+    mapDetailToHeader: (d) => ({ warehouseId: String(d.warehouseId), date: d.date.slice(0, 10), description: d.description || "" }),
+    mapDetailToRows: mapRows,
+    mapDetailToMeta: (d) => ({ number: d.number, status: d.status, creationType: d.creationType, fiscalPeriodTitle: d.fiscalPeriodTitle }),
+    dateField: "date",
+    loadExtra: async () => {
       const [whs, unitsList, items, currencies]: [Warehouse[], UnitOfMeasure[], GoodsItemRow[], { isBase: boolean; decimalPlaces: number }[]] = await Promise.all([
         api.get("/warehouses"),
         api.get("/units-of-measure"),
@@ -273,52 +312,20 @@ function InitialInventoryForm({ editId, mode, basePath }: { editId?: number; mod
       setGoodsItems(items);
       const baseCurrency = currencies.find((c) => c.isBase);
       if (baseCurrency) setBaseDecimalPlaces(baseCurrency.decimalPlaces);
+    },
+  });
 
-      if (hasPersistedState(`${cacheKey}:header`)) {
-        setLoaded(true);
-        return;
-      }
-
-      if (editId) {
-        const d: Detail = await api.get(`/initial-inventories/${editId}`);
-        setMeta({ number: d.number, status: d.status, creationType: d.creationType, fiscalPeriodTitle: d.fiscalPeriodTitle });
-        setHeader({ warehouseId: String(d.warehouseId), date: d.date.slice(0, 10), description: d.description || "" });
-        setRows(
-          d.lines.map((l) => ({
-            id: l.id,
-            goodsItemId: String(l.goodsItemId),
-            unitId: String(l.unitId),
-            quantity: String(l.quantity),
-            unitCost: l.unitCost ? String(l.unitCost) : "",
-            amount: l.amount ? String(l.amount) : "",
-            serialNumber: l.serialNumber || "",
-            batchNumber: l.batchNumber || "",
-            expiryDate: l.expiryDate ? l.expiryDate.slice(0, 10) : "",
-            physicalLocation: l.physicalLocation || "",
-          }))
-        );
-      } else {
-        setHeader({ warehouseId: "", date: "", description: "" });
-        setRows([emptyRow(), emptyRow()]);
-        setMeta(null);
-      }
-      setLoaded(true);
-    }
-    init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editId]);
-
-  // «انبارداری»: سند پس از قطعی‌شدن (یا اگر سیستمی/ابطال‌شده باشد) دیگر قابل ویرایش نیست.
-  const isReadOnly = !!editId && (meta?.status === "FINALIZED" || meta?.status === "VOID" || meta?.creationType === "SYSTEM");
-
-  // «حسابداری انبار»: طبق تصمیم کاربر، این نما هرگز امکان ثبت سند جدید یا تغییر مقدار/کالا/واحد/انبار/
-  // تاریخ را ندارد؛ این فیلدها همیشه فقط‌خواندنی هستند (صرف‌نظر از وضعیت سند). فقط فی/مبلغ قابل ویرایش‌اند،
-  // و آن هم فقط زمانی که سند سیستمی یا ابطال‌شده نباشد (برخلاف مقدار، فی می‌تواند حتی روی سند «قطعی»
-  // هم ثبت شود، چون قیمت‌گذاری معمولاً بعد از قطعی‌شدن رسید/موجودی انجام می‌شود).
+  // طبق طرح جدید چرخه‌ی عمر سند («ثبت‌شده → تایید حسابداری‌شده»): مقدار/کالا/واحد/انبار/تاریخ فقط تا
+  // وقتی سند «تایید حسابداری» نشده (یا سیستمی نباشد) قابل ویرایش‌اند؛ بعد از تایید حسابداری، فقط فی/
+  // مبلغ (برای کاربر دارای دسترسی مشاهده اطلاعات حسابداری) قابل ویرایش می‌ماند — دقیقاً هم‌الگوی رسید
+  // انبار خرید/رسید تولید.
   const isSystemDoc = meta?.creationType === "SYSTEM";
-  const isVoidDoc = meta?.status === "VOID";
-  const nonMoneyReadOnly = mode === "accounting" ? true : isReadOnly;
-  const moneyEditable = mode === "accounting" && !!editId && !isSystemDoc && !isVoidDoc;
+  const isFinalized = meta?.status === "FINALIZED";
+  const nonMoneyReadOnly = !!editId && (isFinalized || isSystemDoc);
+  const moneyEditable = isFinalized && canViewAccounting && !isSystemDoc;
+  // طبق تصمیم صریح کاربر: فیلدهای مبلغی تا وقتی سند Finalized نشده، اصلاً نمایش داده نمی‌شوند — حتی
+  // برای کاربر دارای دسترسی «مشاهده اطلاعات حسابداری».
+  const showAmount = canViewAccounting && isFinalized;
 
   function updateRow(idx: number, patch: Partial<RowState>) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -360,84 +367,69 @@ function InitialInventoryForm({ editId, mode, basePath }: { editId?: number; mod
         unitId: Number(r.unitId),
         quantity: Number(r.quantity) || 0,
         unitCost: Number(r.unitCost) || 0,
-        serialNumber: r.serialNumber || null,
-        batchNumber: r.batchNumber || null,
-        expiryDate: r.expiryDate || null,
+        serialIds: r.serialIds.map(Number),
+        batchAllocations: r.batchAllocations.filter((a) => a.batchId).map((a) => ({ batchId: Number(a.batchId), quantity: Number(a.quantity) || 0 })),
         physicalLocation: r.physicalLocation || null,
       })),
     };
   }
 
   async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-
-    // «حسابداری انبار»: هرگز سند جدید ثبت نمی‌شود؛ فقط فی/مبلغ ردیف‌های موجود از این فرم به یک مسیر
-    // اختصاصی (که مقدار/کالا/واحد/انبار/تاریخ را دست‌نخورده می‌گذارد) ارسال می‌شود.
-    if (mode === "accounting") {
-      if (!editId) return setError("امکان ثبت سند جدید از حسابداری انبار وجود ندارد");
-      const lines = rows.filter((r) => r.id != null).map((r) => ({ id: r.id as number, unitCost: Number(r.unitCost) || 0 }));
-      if (lines.length === 0) return setError("سند باید حداقل یک ردیف کالا داشته باشد");
-      try {
-        await api.put(`/initial-inventories/${editId}/accounting`, { lines });
-        flash();
-      } catch (err) {
-        setError((err as ApiError).message);
-      }
-      return;
-    }
-
-    if (!header.warehouseId) return setError("انبار الزامی است");
-    if (!header.date) return setError("تاریخ سند الزامی است");
-    const body = buildBody();
-    if (body.lines.length === 0) return setError("سند باید حداقل یک ردیف کالا داشته باشد");
-    for (const [i, l] of body.lines.entries()) {
-      if (!l.unitId) return setError(`واحد سنجش ردیف ${i + 1} الزامی است`);
-      if (!(l.quantity > 0)) return setError(`مقدار ردیف ${i + 1} باید عددی مثبت باشد`);
-    }
-    try {
-      if (editId) {
-        await api.put(`/initial-inventories/${editId}`, body);
-        flash();
-      } else {
-        const created = await api.post("/initial-inventories", body);
-        flash();
-        navigate(`${basePath}/${created.id}/edit`);
-      }
-    } catch (err) {
-      setError((err as ApiError).message);
-    }
+    return submit(e, {
+      buildBody,
+      validateBody: (body) => {
+        if (!header.warehouseId) return "انبار الزامی است";
+        if (body.lines.length === 0) return "سند باید حداقل یک ردیف کالا داشته باشد";
+        for (const [i, l] of body.lines.entries()) {
+          if (!l.unitId) return `واحد سنجش ردیف ${i + 1} الزامی است`;
+          if (!(l.quantity > 0)) return `مقدار ردیف ${i + 1} باید عددی مثبت باشد`;
+          const item = goodsItems.find((g) => g.id === l.goodsItemId);
+          if (item?.trackingMethod === "SERIAL" && l.serialIds.length !== l.quantity) {
+            return `ردیف ${i + 1}: تعداد سریال‌های انتخاب‌شده باید با مقدار ردیف برابر باشد`;
+          }
+          if (item?.trackingMethod === "BATCH") {
+            const sum = l.batchAllocations.reduce((s: number, a: any) => s + a.quantity, 0);
+            if (Math.abs(sum - l.quantity) > 1e-9) return `ردیف ${i + 1}: مجموع مقدار بچ‌های انتخاب‌شده باید با مقدار ردیف برابر باشد`;
+          }
+        }
+        return null;
+      },
+      afterCreate: (created) => navigate(`${basePath}/${created.id}/edit`),
+    });
   }
 
   async function handleDelete() {
+    await remove(() => navigate(basePath));
+  }
+
+  async function reloadDetail() {
     if (!editId) return;
+    const d: Detail = await api.get(`/initial-inventories/${editId}`);
+    setMeta({ number: d.number, status: d.status, creationType: d.creationType, fiscalPeriodTitle: d.fiscalPeriodTitle });
+    setRows(mapRows(d));
+  }
+
+  async function handleAccountingConfirm() {
+    if (!window.confirm("این سند تایید حسابداری شود؟ پس از تایید، سرصفحه و مقدار ردیف‌ها دیگر قابل ویرایش نخواهند بود.")) return;
+    setError(null);
     try {
-      await api.del(`/initial-inventories/${editId}`);
-      navigate(basePath);
+      await api.post(`/initial-inventories/${editId}/accounting-confirm`);
+      await reloadDetail();
+      flash();
     } catch (e) {
-      alert((e as ApiError).message);
+      setError((e as ApiError).message);
     }
   }
 
-  async function handleFinalize() {
-    if (!editId) return;
+  async function handleAccountingConfirmRevert() {
+    if (!window.confirm("تایید حسابداری این سند برگشت بخورد؟ مقادیر فی/مبلغ قبلاً واردشده پاک نمی‌شوند.")) return;
+    setError(null);
     try {
-      await api.post(`/initial-inventories/${editId}/finalize`, {});
-      setMeta((prev) => (prev ? { ...prev, status: "FINALIZED" } : prev));
+      await api.post(`/initial-inventories/${editId}/accounting-confirm-revert`);
+      await reloadDetail();
       flash();
     } catch (e) {
-      alert((e as ApiError).message);
-    }
-  }
-
-  async function handleRevert() {
-    if (!editId) return;
-    try {
-      await api.post(`/initial-inventories/${editId}/revert`, {});
-      setMeta((prev) => (prev ? { ...prev, status: "DRAFT" } : prev));
-      flash();
-    } catch (e) {
-      alert((e as ApiError).message);
+      setError((e as ApiError).message);
     }
   }
 
@@ -446,37 +438,30 @@ function InitialInventoryForm({ editId, mode, basePath }: { editId?: number; mod
   const selectedWarehouseStillListed = warehouses.some((w) => String(w.id) === header.warehouseId);
   const warehouseOptions = warehouses.filter((w) => w.isActive || String(w.id) === header.warehouseId);
 
+  const extraActions = [];
+  if (editId && !isSystemDoc && !isFinalized && canConfirm) {
+    extraActions.push({ label: "تایید حسابداری", onClick: handleAccountingConfirm });
+  }
+  if (editId && !isSystemDoc && isFinalized && canRevert) {
+    extraActions.push({ label: "برگشت از تایید حسابداری", onClick: handleAccountingConfirmRevert });
+  }
+
   return (
     <FormPage
       title={editId ? "ویرایش موجودی اول دوره" : "موجودی اول دوره جدید"}
       description={
-        mode === "accounting"
-          ? isSystemDoc
-            ? "این سند به‌صورت سیستمی صادر شده و از این فرم قابل ویرایش نیست."
-            : isVoidDoc
-            ? "این سند «ابطال‌شده» است."
-            : "در «حسابداری انبار» فقط فی/مبلغ قابل ویرایش است؛ مقدار و سایر مشخصات سند از این نما قابل تغییر نیستند."
-          : isReadOnly
-          ? meta?.creationType === "SYSTEM"
-            ? "این سند به‌صورت سیستمی صادر شده و از این فرم قابل ویرایش نیست."
-            : meta?.status === "FINALIZED"
-            ? "این سند «قطعی» شده و دیگر قابل ویرایش مستقیم نیست؛ برای اصلاح، ابتدا «برگشت از قطعی» را بزنید."
-            : "این سند «ابطال‌شده» است."
+        isSystemDoc
+          ? "این سند به‌صورت سیستمی صادر شده و از این فرم قابل ویرایش نیست."
+          : isFinalized
+          ? "این سند تایید حسابداری شده است؛ سرصفحه، مقدار و کالای ردیف‌ها دیگر قابل ویرایش نیستند."
           : undefined
       }
       formId="initial-inventory-form"
       closePath={basePath}
-      newPath={mode === "warehousing" ? `${basePath}/new` : undefined}
-      onDelete={mode === "warehousing" && editId && meta?.status === "DRAFT" ? handleDelete : undefined}
-      saveDisabled={mode === "accounting" ? !moneyEditable : isReadOnly}
-      extraActions={
-        mode === "warehousing" && meta
-          ? [
-              ...(meta.status === "DRAFT" ? [{ label: "قطعی کردن", icon: <CheckIcon />, onClick: handleFinalize }] : []),
-              ...(meta.status === "FINALIZED" ? [{ label: "برگشت از قطعی", icon: <UndoIcon />, onClick: handleRevert }] : []),
-            ]
-          : []
-      }
+      newPath={`${basePath}/new`}
+      onDelete={editId && !nonMoneyReadOnly ? handleDelete : undefined}
+      extraActions={extraActions}
+      saveDisabled={nonMoneyReadOnly && !moneyEditable}
       wide
     >
       <form id="initial-inventory-form" onSubmit={onSubmit}>
@@ -494,15 +479,17 @@ function InitialInventoryForm({ editId, mode, basePath }: { editId?: number; mod
             <input value={meta?.fiscalPeriodTitle ?? "بر اساس تاریخ سند"} disabled />
           </div>
           <div className="form-field">
-            <label>وضعیت</label>
-            <div><span className="badge">{STATUS_FA[meta?.status || "DRAFT"]}</span></div>
-          </div>
-          <div className="form-field">
             <label>نوع ایجاد سند</label>
             <input value={CREATION_TYPE_FA[meta?.creationType || "MANUAL"]} disabled title="در این فاز فقط امکان ثبت دستی موجودی اول دوره فراهم است" />
           </div>
+          {meta && (
+            <div className="form-field">
+              <label>وضعیت</label>
+              <div><span className="badge">{STATUS_FA[meta.status]}</span></div>
+            </div>
+          )}
           <div className="form-field">
-            <label>انبار</label>
+            <label>انبار<RequiredMark /></label>
             <select value={header.warehouseId} onChange={(e) => setHeader({ ...header, warehouseId: e.target.value })} disabled={nonMoneyReadOnly}>
               <option value="">انتخاب کنید</option>
               {warehouseOptions.map((w) => (
@@ -511,7 +498,7 @@ function InitialInventoryForm({ editId, mode, basePath }: { editId?: number; mod
             </select>
           </div>
           <div className="form-field">
-            <label>تاریخ سند</label>
+            <label>تاریخ سند<RequiredMark /></label>
             <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={nonMoneyReadOnly} />
           </div>
           <div className="form-field full">
@@ -527,7 +514,7 @@ function InitialInventoryForm({ editId, mode, basePath }: { editId?: number; mod
 
         <div className="je-lines-toolbar">
           <span className="je-lines-title">ردیف‌های کالا</span>
-          {mode === "warehousing" && (
+          {!nonMoneyReadOnly && (
             <button type="button" className="toolbar-icon-btn primary" onClick={addRow} title="ردیف جدید">
               <PlusIcon />
             </button>
@@ -536,7 +523,6 @@ function InitialInventoryForm({ editId, mode, basePath }: { editId?: number; mod
         </fieldset>
 
         <div className="grid-wrap je-lines-wrap">
-        <fieldset disabled={mode === "warehousing" ? isReadOnly : false} style={{ border: 0, padding: 0, margin: 0 }}>
         <div className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
           <table className="je-lines-table">
             <thead>
@@ -544,14 +530,12 @@ function InitialInventoryForm({ editId, mode, basePath }: { editId?: number; mod
                 <th>ردیف</th>
                 <th>کالا</th>
                 <th>واحد سنجش</th>
-                <th>سریال</th>
-                <th>شماره بچ</th>
-                <th>تاریخ انقضا</th>
+                <th>ردیابی</th>
                 <th>محل فیزیکی</th>
                 <th>مقدار</th>
-                {mode === "accounting" && <th>فی واحد</th>}
-                {mode === "accounting" && <th>مبلغ</th>}
-                {mode === "warehousing" && <th></th>}
+                {showAmount && <th>فی واحد</th>}
+                {showAmount && <th>مبلغ</th>}
+                {!nonMoneyReadOnly && <th></th>}
               </tr>
             </thead>
             <tbody>
@@ -575,16 +559,15 @@ function InitialInventoryForm({ editId, mode, basePath }: { editId?: number; mod
                         disabled={nonMoneyReadOnly}
                       />
                     </td>
-                    <td style={{ minWidth: 110 }}>
-                      <select value={row.unitId} onChange={(e) => updateRow(idx, { unitId: e.target.value })} disabled={nonMoneyReadOnly}>
-                        <option value="">—</option>
-                        {units.map((u) => <option key={u.id} value={u.id}>{u.title}</option>)}
-                      </select>
+                    <td style={{ minWidth: 110, color: "var(--ink-soft)" }}>
+                      {units.find((u) => u.id === item?.mainUnitId)?.title || "—"}
                     </td>
                     <TrackingCells
                       goodsItemId={row.goodsItemId ? Number(row.goodsItemId) : null}
                       item={item}
                       warehouseId={header.warehouseId ? Number(header.warehouseId) : null}
+                      documentType="INITIAL_INVENTORY"
+                      quantity={Number(row.quantity) || 0}
                       value={row}
                       onChange={(patch) => updateRow(idx, patch)}
                       disabled={nonMoneyReadOnly}
@@ -592,17 +575,17 @@ function InitialInventoryForm({ editId, mode, basePath }: { editId?: number; mod
                     <td style={{ minWidth: 130 }}>
                       <AmountInput value={row.quantity} onChange={(v) => onQuantityChange(idx, v)} allowDecimal placeholder="۰" disabled={nonMoneyReadOnly} />
                     </td>
-                    {mode === "accounting" && (
+                    {showAmount && (
                       <td style={{ minWidth: 130 }}>
                         <AmountInput value={row.unitCost} onChange={(v) => onUnitCostChange(idx, v)} allowDecimal placeholder="۰" disabled={!moneyEditable} />
                       </td>
                     )}
-                    {mode === "accounting" && (
+                    {showAmount && (
                       <td style={{ minWidth: 140 }}>
                         <AmountInput value={row.amount} onChange={(v) => onAmountChange(idx, v)} allowDecimal placeholder="۰" disabled={!moneyEditable} />
                       </td>
                     )}
-                    {mode === "warehousing" && (
+                    {!nonMoneyReadOnly && (
                       <td>
                         <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeRow(idx)} disabled={nonMoneyReadOnly}>
                           حذف
@@ -615,7 +598,6 @@ function InitialInventoryForm({ editId, mode, basePath }: { editId?: number; mod
             </tbody>
           </table>
         </div>
-        </fieldset>
 
         <div className="grid-footer je-lines-footer">
           <span className="grid-footer-info">
@@ -623,7 +605,7 @@ function InitialInventoryForm({ editId, mode, basePath }: { editId?: number; mod
           </span>
           <span className="je-lines-totals">
             جمع مقدار: {formatAmountFa(totalQuantity)}
-            {mode === "accounting" && <> — جمع مبلغ: {formatAmountFa(totalAmount)}</>}
+            {showAmount && <> — جمع مبلغ: {formatAmountFa(totalAmount)}</>}
           </span>
         </div>
         </div>

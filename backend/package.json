@@ -10,7 +10,11 @@
     "prisma:generate": "prisma generate",
     "seed": "tsx prisma/seed.ts",
     "cleanup-orphans": "tsx src/scripts/cleanupOrphans.ts",
-    "recompute-has-transactions": "tsx src/scripts/recomputeHasTransactions.ts"
+    "recompute-has-transactions": "tsx src/scripts/recomputeHasTransactions.ts",
+    "backup-goods-technical-spec": "tsx src/scripts/backupGoodsTechnicalSpec.ts",
+    "backfill-old-goods-code": "tsx src/scripts/backfillOldGoodsCode.ts",
+    "restore-goods-technical-spec": "tsx src/scripts/restoreGoodsTechnicalSpec.ts",
+    "delete-goods-without-transactions": "tsx src/scripts/deleteGoodsItemsWithoutTransactions.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.19.1",

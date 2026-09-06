@@ -17,6 +17,8 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
+import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 
 interface DocType { id: number; title: string; isSystem: boolean; systemKey: string | null }
 interface Level { id: number; order: number; title: string }
@@ -109,7 +111,6 @@ function EntryList() {
   const [fiscalPeriodId, setFiscalPeriodId] = useState<string>("");
   const [fiscalPeriodResolved, setFiscalPeriodResolved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   // شناسه‌ی دوره مالی فعال فقط یک‌بار در ابتدا مشخص می‌شود (از تنظیمات کاربر یا آخرین دوره)
@@ -188,10 +189,6 @@ function EntryList() {
     setPage(1);
   }
 
-  function guardEditable(_row: Entry, action: () => void) {
-    action();
-  }
-
   function guardDraft(row: Entry, action: () => void) {
     if (row.status !== "DRAFT") {
       alert("فقط اسناد در وضعیت «ثبت» قابل حذف هستند");
@@ -268,12 +265,11 @@ function EntryList() {
             ]}
             onDone={reload}
           />
-          <RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
+          <RefreshButton onClick={reload} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "شماره", render: (r) => r.number, width: "70px", filterType: "number", filterValue: (r) => r.number },
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
@@ -287,7 +283,7 @@ function EntryList() {
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
-        onEdit={(r) => guardEditable(r, () => navigate(`/journal-entries/${r.id}/edit`))}
+        edit={{ path: (r) => `/journal-entries/${r.id}/edit` }}
         onDelete={onDelete}
         bulkActions={[
           { label: (n) => `بررسی (${toFaDigits(String(n))})`, icon: <CheckIcon />, onClick: bulkReview },
@@ -390,6 +386,7 @@ function EntryForm({ editId }: { editId?: number }) {
   const [focusedRow, setFocusedRow] = useState<number | null>(null);
   const [linesPage, setLinesPage] = useState(1);
   const [linesPageSize, setLinesPageSize] = useState(DEFAULT_LINES_PAGE_SIZE);
+  const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
 
   const baseCurrency = currencies.find((c) => c.isBase);
   const parentIds = new Set(accounts.map((a) => a.parentId).filter((x): x is number => x !== null));
@@ -458,16 +455,18 @@ function EntryForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [accs, currs, docs, lvls]: [AccountRow[], Currency[], DocType[], Level[]] = await Promise.all([
+      const [accs, currs, docs, lvls, fp]: [AccountRow[], Currency[], DocType[], Level[], FiscalPeriodRange | null] = await Promise.all([
         api.get("/accounts"),
         api.get("/currencies"),
         api.get("/document-types"),
         api.get("/reporting-levels"),
+        fetchSelectedFiscalPeriod(),
       ]);
       setAccounts(accs);
       setCurrencies(currs);
       setDocTypes(docs);
       setLevels(lvls);
+      setFiscalPeriod(fp);
 
       // اگر هدر/ردیف‌های سند قبلاً (با سوییچ تب) بازیابی شده‌اند، فرم را دوباره از سرور بازنویسی نکن؛
       // فقط گزینه‌های دراپ‌داون تفصیلی مربوط به حساب‌های همین ردیف‌ها را بازسازی کن
@@ -534,9 +533,7 @@ function EntryForm({ editId }: { editId?: number }) {
           setDetailOptions((prev) => ({ ...prev, [dtId]: options }));
         }
       } else {
-        const today = new Date();
-        const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-        setHeader({ date: todayIso, documentTypeId: operationalType ? String(operationalType.id) : "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), documentTypeId: operationalType ? String(operationalType.id) : "", description: "" });
         setRows([emptyRow(baseId), emptyRow(baseId)]);
         setEntryMeta(null);
       }
@@ -599,6 +596,9 @@ function EntryForm({ editId }: { editId?: number }) {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!header.date) return setError("تاریخ سند الزامی است");
+    const dateErr = validateDocumentDate(header.date, fiscalPeriod);
+    if (dateErr) return setError(dateErr);
     const emptyDescRow = rows.findIndex((r) => r.accountId && !r.description.trim());
     if (emptyDescRow !== -1) {
       setError(`شرح ردیف ${emptyDescRow + 1} الزامی است`);
@@ -714,8 +714,9 @@ function EntryForm({ editId }: { editId?: number }) {
           : []
       }
       wide
+      fillHeight
     >
-      <form id="journal-entry-form" onSubmit={onSubmit}>
+      <form id="journal-entry-form" onSubmit={onSubmit} className="je-form-fill">
         {error && <div className="alert error">{error}</div>}
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         {entryMeta?.sources && entryMeta.sources.length > 0 && (
@@ -734,7 +735,7 @@ function EntryForm({ editId }: { editId?: number }) {
           </div>
         )}
 
-        <fieldset disabled={isReadOnly} style={{ border: 0, padding: 0, margin: 0 }}>
+        <fieldset disabled={isReadOnly} style={{ border: 0, padding: 0, margin: 0, flexShrink: 0 }}>
         <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
           <div className="form-field">
             <label>شماره سند</label>
@@ -749,11 +750,11 @@ function EntryForm({ editId }: { editId?: number }) {
             <div><span className="badge">{STATUS_FA[entryMeta?.status || "DRAFT"] || entryMeta?.status}</span></div>
           </div>
           <div className="form-field">
-            <label>تاریخ سند</label>
+            <label>تاریخ سند<RequiredMark /></label>
             <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
           </div>
           <div className="form-field">
-            <label>نوع سند</label>
+            <label>نوع سند<RequiredMark /></label>
             <select value={header.documentTypeId} onChange={(e) => setHeader({ ...header, documentTypeId: e.target.value })} disabled={isReadOnly}>
               <option value="">انتخاب کنید</option>
               {docTypes
@@ -776,7 +777,12 @@ function EntryForm({ editId }: { editId?: number }) {
         </fieldset>
 
         <div className="grid-wrap je-lines-wrap">
-        <fieldset disabled={isReadOnly} style={{ border: 0, padding: 0, margin: 0 }}>
+        {/* display:contents: بدون این، fieldset یک باکس معمولی (غیر-flex) بین grid-wrap و
+            grid-scroll-area می‌ماند و flex:1 خودِ grid-scroll-area (از قاعده‌ی مشترک .grid-wrap
+            .grid-scroll-area) بی‌اثر می‌شود چون پدر مستقیمش دیگر grid-wrap نیست؛ contents یعنی fieldset
+            جعبه‌ی رندر خودش را ندارد و grid-scroll-area عملاً فرزند مستقیم grid-wrap حساب می‌شود، در حالی
+            که غیرفعال‌سازی HTML خودِ fieldset (disabled) دست‌نخورده باقی می‌ماند. */}
+        <fieldset disabled={isReadOnly} style={{ border: 0, padding: 0, margin: 0, display: "contents" }}>
         <div className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
           <table className="je-lines-table">
             <thead>
@@ -975,7 +981,7 @@ function EntryForm({ editId }: { editId?: number }) {
         </div>
 
         {focusedRow !== null && rows[focusedRow]?.accountId && (
-          <div className="je-breadcrumb">
+          <div className="je-breadcrumb" style={{ flexShrink: 0 }}>
             <div><b>حساب:</b> {accountTitlePath(rows[focusedRow].accountId)}</div>
             <div><b>حساب تفصیل:</b> {detailTitlePath(rows[focusedRow])}</div>
           </div>

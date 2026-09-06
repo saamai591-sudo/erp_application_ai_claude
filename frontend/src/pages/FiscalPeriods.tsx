@@ -11,6 +11,7 @@ import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { digitsOnly } from "../lib/digits";
 import { toFaDigits } from "../lib/formatAmount";
 
@@ -28,19 +29,17 @@ export default function FiscalPeriods() {
 
 function PeriodList() {
   const { items, loading, error, remove, reload } = useCrud<Period>("/fiscal-periods");
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
   const lastPeriod = [...items].sort((a, b) => (a.toDate < b.toDate ? 1 : -1))[0];
 
   return (
     <div>
       <div className="page-header">
-        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`هر دوره باید ادامه‌ی بدون فاصله‌ی دوره‌ی قبلی باشد؛ فقط تا‌تاریخ آخرین دوره قابل ویرایش است`} title="دوره مالی" /><NewRecordButton path="/fiscal-periods/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
+        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`هر دوره باید ادامه‌ی بدون فاصله‌ی دوره‌ی قبلی باشد؛ فقط تا‌تاریخ آخرین دوره قابل ویرایش است`} title="دوره مالی" /><NewRecordButton path="/fiscal-periods/new" /><RefreshButton onClick={reload} /></div>
       </div>
       {error && <div className="alert error">{error}</div>}
       {!loading && (
         <DataTable
-        bulkActionsContainer={bulkSlot}
           columns={[
             { header: "کد", render: (r) => toFaDigits(r.code), width: "100px", filterType: "string", filterValue: (r) => r.code },
             { header: "عنوان", render: (r) => r.title, width: "100px", filterType: "string", filterValue: (r) => r.title },
@@ -49,7 +48,11 @@ function PeriodList() {
             { header: "وضعیت", render: (r) => (lastPeriod?.id === r.id ? <span className="badge">دوره جاری/آخرین</span> : "بسته") },
           ]}
           rows={items}
-          onEdit={lastPeriod ? (r) => (r.id === lastPeriod.id ? navigate(`/fiscal-periods/${r.id}/edit`) : alert("فقط تا‌تاریخ آخرین دوره مالی قابل ویرایش است")) : undefined}
+          edit={
+            lastPeriod
+              ? { path: (r) => `/fiscal-periods/${r.id}/edit`, guard: (r) => r.id === lastPeriod.id || "فقط تا‌تاریخ آخرین دوره مالی قابل ویرایش است" }
+              : undefined
+          }
           onDelete={async (r) => {
             const res = await remove(r.id);
             if (!res.ok) alert(res.error);
@@ -80,16 +83,16 @@ function PeriodForm() {
         {formError && <div className="alert error">{formError}</div>}
         <div className="form-grid">
           <div className="form-field">
-            <label>عنوان (عدد ۴ رقمی)</label>
+            <label>عنوان (عدد ۴ رقمی)<RequiredMark /></label>
             <input dir="ltr" value={form.title} onChange={(e) => setForm({ ...form, title: digitsOnly(e.target.value).slice(0, 4) })} />
           </div>
           <div />
           <div className="form-field">
-            <label>از تاریخ</label>
+            <label>از تاریخ<RequiredMark /></label>
             <JalaliDatePicker value={form.fromDate} onChange={(v) => setForm({ ...form, fromDate: v })} placeholder="انتخاب تاریخ" />
           </div>
           <div className="form-field">
-            <label>تا تاریخ</label>
+            <label>تا تاریخ<RequiredMark /></label>
             <JalaliDatePicker value={form.toDate} onChange={(v) => setForm({ ...form, toDate: v })} placeholder="انتخاب تاریخ" />
           </div>
         </div>
@@ -170,7 +173,7 @@ function PeriodEditForm({ editId }: { editId: number }) {
             <JalaliDatePicker value={fromDate} onChange={() => {}} disabled placeholder="انتخاب تاریخ" />
           </div>
           <div className="form-field">
-            <label>تا تاریخ</label>
+            <label>تا تاریخ<RequiredMark /></label>
             <JalaliDatePicker value={toDate} onChange={setToDate} placeholder="انتخاب تاریخ" />
           </div>
         </div>

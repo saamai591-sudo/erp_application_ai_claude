@@ -8,12 +8,14 @@ import { RecordPickerField } from "../components/RecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
 import { partyDisplayName } from "./Users";
+import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 
 // ماژول «خزانه‌داری» > پرداخت. مشابه Receipts.tsx (نگاه کنید به یادداشت‌های آن فایل)، با یک تفاوت
 // اصلی: ردیف ابزار «چک» می‌تواند یا صدور چک پرداختنی تازه باشد یا «خرج‌کردن» یک چک دریافتنی موجود
@@ -133,7 +135,6 @@ function PaymentList() {
   const cacheKey = "/payments";
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -170,12 +171,10 @@ function PaymentList() {
           <InfoHint text={infoText()} title="پرداخت" />
           <NewRecordButton path="/payments/new" />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
@@ -186,7 +185,7 @@ function PaymentList() {
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/payments/${r.id}/edit`)}
+        edit={{ path: (r) => `/payments/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -262,6 +261,7 @@ function PaymentForm({ editId }: { editId?: number }) {
   const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; fiscalPeriodTitle: string } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const { saved, flash } = useSavedFlash();
 
   function applyDetail(d: Detail) {
@@ -299,13 +299,14 @@ function PaymentForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [ps, cs, cbs, bas, bbs, cheques]: [PartyOption[], CurrencyOption[], CashBoxOption[], BankAccountOption[], BankBranchOption[], PickableCheque[]] = await Promise.all([
+      const [ps, cs, cbs, bas, bbs, cheques, fp]: [PartyOption[], CurrencyOption[], CashBoxOption[], BankAccountOption[], BankBranchOption[], PickableCheque[], FiscalPeriodRange | null] = await Promise.all([
         api.get("/parties"),
         api.get("/currencies"),
         api.get("/cash-boxes"),
         api.get("/banking/accounts"),
         api.get("/banking/branches"),
         api.get("/cheques/pickable-receivable"),
+        fetchSelectedFiscalPeriod(),
       ]);
       setParties(ps);
       setCurrencies(cs);
@@ -313,6 +314,7 @@ function PaymentForm({ editId }: { editId?: number }) {
       setBankAccounts(bas);
       setBankBranches(bbs);
       setPickableCheques(cheques);
+      setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
         setLoaded(true);
@@ -338,7 +340,7 @@ function PaymentForm({ editId }: { editId?: number }) {
         const d: Detail = await api.get(`/payments/${editId}`);
         applyDetail(d);
       } else {
-        setHeader({ date: "", partyId: "", partyDisplay: "", currencyId: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), partyId: "", partyDisplay: "", currencyId: "", description: "" });
         setInstrumentRows([emptyInstrumentRow()]);
         setSettlementRows([emptySettlementRow()]);
         setMeta(null);
@@ -480,6 +482,8 @@ function PaymentForm({ editId }: { editId?: number }) {
     if (!header.date) return setError("تاریخ الزامی است");
     if (!header.partyId) return setError("طرف حساب الزامی است");
     if (!header.currencyId) return setError("ارز الزامی است");
+    const dateErr = validateDocumentDate(header.date, fiscalPeriod);
+    if (dateErr) return setError(dateErr);
     const body = buildBody();
     if (body.instrumentLines.length === 0) return setError("حداقل یک ردیف ابزار پرداخت الزامی است");
     if (body.settlementLines.length === 0) return setError("حداقل یک ردیف تسویه الزامی است");
@@ -572,11 +576,11 @@ function PaymentForm({ editId }: { editId?: number }) {
               <div><span className="badge">{STATUS_FA[status]}</span></div>
             </div>
             <div className="form-field">
-              <label>تاریخ سند</label>
+              <label>تاریخ سند<RequiredMark /></label>
               <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
             </div>
             <div className="form-field">
-              <label>طرف حساب</label>
+              <label>طرف حساب<RequiredMark /></label>
               <RecordPickerField
                 title="انتخاب طرف حساب"
                 disabled={coreDisabled}
@@ -590,7 +594,7 @@ function PaymentForm({ editId }: { editId?: number }) {
               />
             </div>
             <div className="form-field">
-              <label>ارز</label>
+              <label>ارز<RequiredMark /></label>
               <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value })} disabled={coreDisabled}>
                 <option value="">انتخاب کنید</option>
                 {currencies.map((c) => (

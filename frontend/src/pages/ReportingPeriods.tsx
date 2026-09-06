@@ -13,7 +13,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { InfoHint } from "../components/InfoHint";
 import { toFaDigits } from "../lib/formatAmount";
 import { getSavedFiscalPeriodId } from "../lib/userSettings";
-import { useTabs } from "../lib/TabsContext";
+import { RequiredMark } from "../components/RequiredMark";
 
 interface Period {
   id: number;
@@ -84,8 +84,6 @@ function PeriodList() {
   const { fiscalPeriodId, resolved } = useCurrentFiscalPeriodId();
   const basePath = fiscalPeriodId ? `/reporting-periods?fiscalPeriodId=${fiscalPeriodId}` : "/reporting-periods";
   const { items, loading, error, remove, reload } = useCrud<Period>(basePath);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
-  const { openTab } = useTabs();
 
   async function bulkClose(rows: Period[]) {
     const targets = rows.filter((r) => r.status === "OPEN");
@@ -127,13 +125,11 @@ function PeriodList() {
           <InfoHint text={`لیست فقط دوره‌های گزارشگری مربوط به دوره مالی جاری را نمایش می‌دهد`} title="دوره گزارشگری" />
           <NewRecordButton path="/reporting-periods/new" />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       {resolved && !loading && (
         <DataTable
-          bulkActionsContainer={bulkSlot}
           columns={[
             { header: "کد", render: (r) => r.code, width: "90px", filterType: "string", filterValue: (r) => r.code },
             { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
@@ -142,7 +138,7 @@ function PeriodList() {
             { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
           ]}
           rows={items}
-          onEdit={(r) => (r.status === "CLOSED" ? alert("دوره بسته قابل ویرایش نیست") : openTab(`/reporting-periods/${r.id}/edit`))}
+          edit={{ path: (r) => `/reporting-periods/${r.id}/edit`, guard: (r) => r.status !== "CLOSED" || "دوره بسته قابل ویرایش نیست" }}
           onDelete={async (r) => {
             const res = await remove(r.id);
             if (!res.ok) alert(res.error);
@@ -197,11 +193,11 @@ function PeriodForm() {
         {formError && <div className="alert error">{formError}</div>}
         <div className="form-grid">
           <div className="form-field">
-            <label>کد دوره</label>
+            <label>کد دوره<RequiredMark /></label>
             <input dir="ltr" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} autoFocus />
           </div>
           <div className="form-field">
-            <label>عنوان دوره</label>
+            <label>عنوان دوره<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
           </div>
           <div className="form-field">
@@ -209,7 +205,7 @@ function PeriodForm() {
             <JalaliDatePicker value={fromPreview || ""} onChange={() => {}} disabled placeholder="—" />
           </div>
           <div className="form-field">
-            <label>تا تاریخ</label>
+            <label>تا تاریخ<RequiredMark /></label>
             <JalaliDatePicker value={form.toDate} onChange={(v) => setForm({ ...form, toDate: v })} placeholder="انتخاب تاریخ" />
           </div>
         </div>
@@ -287,11 +283,11 @@ function PeriodEditForm({ editId }: { editId: number }) {
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
-            <label>کد دوره</label>
+            <label>کد دوره<RequiredMark /></label>
             <input dir="ltr" value={code} onChange={(e) => setCode(e.target.value)} />
           </div>
           <div className="form-field">
-            <label>عنوان دوره</label>
+            <label>عنوان دوره<RequiredMark /></label>
             <input value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
           <div className="form-field">
@@ -299,7 +295,7 @@ function PeriodEditForm({ editId }: { editId: number }) {
             <JalaliDatePicker value={fromDate} onChange={() => {}} disabled placeholder="انتخاب تاریخ" />
           </div>
           <div className="form-field">
-            <label>تا تاریخ</label>
+            <label>تا تاریخ<RequiredMark /></label>
             <JalaliDatePicker value={toDate} onChange={setToDate} placeholder="انتخاب تاریخ" />
           </div>
         </div>

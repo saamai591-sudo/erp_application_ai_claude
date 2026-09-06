@@ -10,6 +10,7 @@ import { NewRecordButton } from "../components/NewRecordButton";
 import { ExcelImportButton } from "../components/ExcelImport";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 
 interface UnitOfMeasure {
@@ -35,7 +36,6 @@ function UnitList() {
   const cacheKey = "/units-of-measure";
   const [items, setItems] = usePersistedState<UnitOfMeasure[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -74,12 +74,10 @@ function UnitList() {
             onDone={reload}
           />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "کد", render: (r) => toFaDigits(String(r.code)), width: "80px", filterType: "number", filterValue: (r) => r.code },
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
@@ -87,7 +85,7 @@ function UnitList() {
           { header: "معادل به کیلوگرم", render: (r) => (r.kgEquivalent ? toFaDigits(r.kgEquivalent) : "—"), width: "130px" },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/units-of-measure/${r.id}/edit`)}
+        edit={{ path: (r) => `/units-of-measure/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -180,7 +178,7 @@ function UnitForm({ editId }: { editId?: number }) {
             <input dir="ltr" disabled={!!editId} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
           </div>
           <div className="form-field">
-            <label>عنوان</label>
+            <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
           </div>
           <div className="form-field">
@@ -190,7 +188,7 @@ function UnitForm({ editId }: { editId?: number }) {
             </label>
           </div>
           <div className={`form-field ${form.isWeight ? "" : "form-field-hidden"}`}>
-            <label>معادل به کیلوگرم</label>
+            <label>معادل به کیلوگرم<RequiredMark /></label>
             <input type="number" step="any" value={form.kgEquivalent} onChange={(e) => setForm({ ...form, kgEquivalent: e.target.value })} />
           </div>
         </div>

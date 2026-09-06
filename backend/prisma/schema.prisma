@@ -472,6 +472,7 @@ model JournalEntry {
   lines               JournalEntryLine[]
   sources             JournalEntrySource[]
   openingClosingEntry OpeningClosingEntry?
+  purchaseInvoice     PurchaseInvoice?
 
   @@unique([fiscalPeriodId, number])
 }
@@ -909,12 +910,13 @@ model GoodsServiceAccountingSetting {
   accountId           Int
   salesTypeRef        Int?
   warehouseDocType    InventoryDocumentType?
-  purchaseTypeRef     Int?
+  purchaseTypeId      Int?
   hasTransactions     Boolean          @default(false)
   createdAt           DateTime         @default(now())
   account             Account          @relation(fields: [accountId], references: [id])
   accountingGroup     AccountingGroup  @relation(fields: [accountingGroupId], references: [id])
   warehouseGroup      WarehouseGroup?  @relation(fields: [warehouseGroupId], references: [id])
+  purchaseType        PurchaseType?    @relation(fields: [purchaseTypeId], references: [id])
 }
 
 model GoodsRequestType {
@@ -1088,6 +1090,17 @@ model PurchaseGroup {
   goodsItems        PurchaseGroupGoodsItem[]
   suppliers         PurchaseGroupSupplier[]
   purchasePlannings PurchasePlanning[]
+}
+
+model PurchaseType {
+  id                             Int                              @id @default(autoincrement())
+  code                           Int                              @unique
+  title                          String                           @unique
+  nature                         PurchaseNature
+  hasTransactions                Boolean                          @default(false)
+  createdAt                      DateTime                         @default(now())
+  purchaseInvoices               PurchaseInvoice[]
+  goodsServiceAccountingSettings GoodsServiceAccountingSetting[]
 }
 
 model Supplier {
@@ -1625,18 +1638,22 @@ model PurchaseInvoice {
   vendorInvoiceNumber    String?
   basis                  PurchaseInvoiceBasis
   partyId                Int
+  purchaseTypeId         Int
   currencyId             Int
   description            String?
   status                 RequestStatus                  @default(DRAFT)
   approverId             Int?
   approvedAt             DateTime?
+  journalEntryId         Int?                           @unique
   createdAt              DateTime                       @default(now())
   updatedAt              DateTime                       @default(now()) @updatedAt
   paymentSettlementLines PaymentSettlementLine[]
   currency               Currency                       @relation(fields: [currencyId], references: [id])
   fiscalPeriod           FiscalPeriod                   @relation(fields: [fiscalPeriodId], references: [id])
   party                  Party                          @relation(fields: [partyId], references: [id])
+  purchaseType           PurchaseType                   @relation(fields: [purchaseTypeId], references: [id])
   approver               User?                          @relation("PurchaseInvoiceApprover", fields: [approverId], references: [id])
+  journalEntry           JournalEntry?                  @relation(fields: [journalEntryId], references: [id])
   lines                  PurchaseInvoiceLine[]
   otherCostLines         PurchaseInvoiceOtherCostLine[]
 
@@ -2418,6 +2435,7 @@ enum IssuingSystem {
   ACCOUNT_CLOSING
   OPENING_CLOSING
   WAREHOUSE
+  PURCHASE
 }
 
 enum OpeningClosingType {
@@ -2543,6 +2561,11 @@ enum CostAllocationBasis {
 enum PurchaseInvoiceBasis {
   NO_BASIS
   WAREHOUSE_RECEIPT
+}
+
+enum PurchaseNature {
+  IMPORTED
+  DOMESTIC
 }
 
 enum PaymentInstrumentType {

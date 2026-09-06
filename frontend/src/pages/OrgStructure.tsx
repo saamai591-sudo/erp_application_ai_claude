@@ -10,6 +10,8 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
+import { useTabs } from "../lib/TabsContext";
+import { RequiredMark } from "../components/RequiredMark";
 
 export default function OrgStructure() {
   const location = useLocation();
@@ -24,6 +26,7 @@ export default function OrgStructure() {
 function OrgTree() {
   const { items, error, create, remove, reload } = useCrud<TreeNode>("/org-structure");
   const navigate = useNavigate();
+  const { openTab } = useTabs();
   const [open, setOpen] = useState(false);
   const [parent, setParent] = useState<TreeNode | null>(null);
   const [title, setTitle] = useState("");
@@ -64,7 +67,7 @@ function OrgTree() {
         persistKey="/org-structure"
         onAddRoot={() => navigate("/org-structure/new")}
         onAddChild={openAddChild}
-        onEdit={(n) => navigate(`/org-structure/${n.id}/edit`)}
+        onEdit={(n) => openTab(`/org-structure/${n.id}/edit`)}
         onDelete={onDelete}
       />
 
@@ -78,7 +81,7 @@ function OrgTree() {
                 <input dir="ltr" value={code} onChange={(e) => setCode(e.target.value)} />
               </div>
               <div className="form-field">
-                <label>عنوان</label>
+                <label>عنوان<RequiredMark /></label>
                 <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
               </div>
             </div>
@@ -95,6 +98,7 @@ function OrgTree() {
 
 function RootForm() {
   const navigate = useNavigate();
+  const { openTab } = useTabs();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
   const { create } = useCrud<TreeNode>("/org-structure");
@@ -125,7 +129,7 @@ function RootForm() {
             <input dir="ltr" value={code} onChange={(e) => setCode(e.target.value)} />
           </div>
           <div className="form-field">
-            <label>عنوان</label>
+            <label>عنوان<RequiredMark /></label>
             <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
           </div>
         </div>
@@ -136,6 +140,7 @@ function RootForm() {
 
 function NodeEditForm({ editId }: { editId: number }) {
   const navigate = useNavigate();
+  const { openTab } = useTabs();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
   const [title, setTitle] = usePersistedState(`${cacheKey}:title`, "");
@@ -203,7 +208,7 @@ function NodeEditForm({ editId }: { editId: number }) {
             <input dir="ltr" value={code} onChange={(e) => setCode(e.target.value)} />
           </div>
           <div className="form-field">
-            <label>عنوان</label>
+            <label>عنوان<RequiredMark /></label>
             <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
           </div>
         </div>

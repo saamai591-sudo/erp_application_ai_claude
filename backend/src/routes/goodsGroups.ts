@@ -1,6 +1,11 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { nextSerialNumber } from "../utils/coding";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const GOODS_GROUP_LEVELS = findFormPrefix("goods-group-levels");
+const GOODS_GROUPS = findFormPrefix("goods-groups");
 
 const router = Router();
 
@@ -12,7 +17,7 @@ router.get("/goods-group-levels", async (_req, res) => {
   res.json(await prisma.goodsGroupLevel.findMany({ orderBy: { order: "asc" } }));
 });
 
-router.post("/goods-group-levels", async (req, res) => {
+router.post("/goods-group-levels", can(`${GOODS_GROUP_LEVELS}.create`), async (req, res) => {
   const body = req.body as { title: string; codeLength: number; affectsGoodsCode?: boolean };
   if (!body.title || !body.codeLength) return res.status(400).json({ error: "عنوان و طول کد الزامی است" });
 
@@ -33,7 +38,7 @@ router.post("/goods-group-levels", async (req, res) => {
   }
 });
 
-router.put("/goods-group-levels/:id", async (req, res) => {
+router.put("/goods-group-levels/:id", can(`${GOODS_GROUP_LEVELS}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { title?: string; codeLength?: number; affectsGoodsCode?: boolean };
 
@@ -49,7 +54,7 @@ router.put("/goods-group-levels/:id", async (req, res) => {
   res.json(updated);
 });
 
-router.delete("/goods-group-levels/:id", async (req, res) => {
+router.delete("/goods-group-levels/:id", can(`${GOODS_GROUP_LEVELS}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const level = await prisma.goodsGroupLevel.findUnique({ where: { id } });
   if (!level) return res.status(404).json({ error: "سطح گروه کالا یافت نشد" });
@@ -65,7 +70,7 @@ router.delete("/goods-group-levels/:id", async (req, res) => {
 });
 
 // گردش جایگزین: تغییر ترتیب — فقط تا قبل از داشتن گردش (استفاده در گروه کالا) مجاز است
-router.post("/goods-group-levels/:id/move", async (req, res) => {
+router.post("/goods-group-levels/:id/move", can(`${GOODS_GROUP_LEVELS}.reorder`), async (req, res) => {
   const id = Number(req.params.id);
   const { direction } = req.body as { direction: "up" | "down" };
   const level = await prisma.goodsGroupLevel.findUnique({ where: { id } });
@@ -131,7 +136,7 @@ function validateAttributes(attrs: any[] | undefined) {
   }));
 }
 
-router.post("/goods-groups", async (req, res) => {
+router.post("/goods-groups", can(`${GOODS_GROUPS}.create`), async (req, res) => {
   const body = req.body as {
     parentId?: number | null;
     code: string;
@@ -196,7 +201,7 @@ router.post("/goods-groups", async (req, res) => {
   }
 });
 
-router.put("/goods-groups/:id", async (req, res) => {
+router.put("/goods-groups/:id", can(`${GOODS_GROUPS}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as {
     code?: string;
@@ -277,7 +282,7 @@ router.put("/goods-groups/:id", async (req, res) => {
   }
 });
 
-router.delete("/goods-groups/:id", async (req, res) => {
+router.delete("/goods-groups/:id", can(`${GOODS_GROUPS}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const group = await prisma.goodsGroup.findUnique({ where: { id } });
   if (!group) return res.status(404).json({ error: "گروه کالا یافت نشد" });

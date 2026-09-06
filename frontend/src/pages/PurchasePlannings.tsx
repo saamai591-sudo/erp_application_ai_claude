@@ -8,11 +8,13 @@ import { RecordPickerField } from "../components/RecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
+import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 
 type Status = "DRAFT" | "APPROVED" | "CLOSED";
 
@@ -113,7 +115,7 @@ function PurchasePlanningList() {
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/purchase-plannings/${r.id}/edit`)}
+        edit={{ path: (r) => `/purchase-plannings/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -139,14 +141,16 @@ function PurchasePlanningForm({ editId }: { editId?: number }) {
   const [meta, setMeta] = usePersistedState<{ number: number; status: Status } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const { saved, flash } = useSavedFlash();
 
   useEffect(() => {
     async function init() {
-      const [pg, pe, pr] = await Promise.all([api.get("/purchase-groups"), api.get("/purchase-experts"), api.get("/purchase-routes")]);
+      const [pg, pe, pr, fp] = await Promise.all([api.get("/purchase-groups"), api.get("/purchase-experts"), api.get("/purchase-routes"), fetchSelectedFiscalPeriod()]);
       setPurchaseGroups(pg);
       setPurchaseExperts(pe);
       setPurchaseRoutes(pr);
+      setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
         setLoaded(true);
@@ -181,7 +185,7 @@ function PurchasePlanningForm({ editId }: { editId?: number }) {
         setStage3({ purchaseExpertId: d.purchaseExpertId ? String(d.purchaseExpertId) : "", purchaseRouteId: d.purchaseRouteId ? String(d.purchaseRouteId) : "", allowMultiSupplierPerLine: d.allowMultiSupplierPerLine });
         setStep(1);
       } else {
-        setHeader({ date: "", neededDate: "", purchaseGroupId: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), neededDate: "", purchaseGroupId: "", description: "" });
         setStage1Rows([{ purchaseRequestLineId: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitTitle: "", quantity: "", description: "" }]);
         setStage2Rows([]);
         setStage3({ purchaseExpertId: "", purchaseRouteId: "", allowMultiSupplierPerLine: false });
@@ -268,6 +272,8 @@ function PurchasePlanningForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
     if (!header.date) return setError("تاریخ الزامی است");
+    const dateErr = validateDocumentDate(header.date, fiscalPeriod);
+    if (dateErr) return setError(dateErr);
     if (!header.purchaseGroupId) return setError("گروه خرید الزامی است");
     if (!stage3.purchaseExpertId) return setError("کارشناس خرید الزامی است");
     if (!stage3.purchaseRouteId) return setError("مسیر تامین الزامی است");
@@ -381,7 +387,7 @@ function PurchasePlanningForm({ editId }: { editId?: number }) {
                   <div><span className="badge">{STATUS_FA[status]}</span></div>
                 </div>
                 <div className="form-field">
-                  <label>تاریخ</label>
+                  <label>تاریخ<RequiredMark /></label>
                   <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
                 </div>
                 <div className="form-field">
@@ -389,7 +395,7 @@ function PurchasePlanningForm({ editId }: { editId?: number }) {
                   <JalaliDatePicker value={header.neededDate} onChange={(v) => setHeader({ ...header, neededDate: v })} />
                 </div>
                 <div className="form-field">
-                  <label>گروه خرید</label>
+                  <label>گروه خرید<RequiredMark /></label>
                   <select value={header.purchaseGroupId} onChange={(e) => setHeader({ ...header, purchaseGroupId: e.target.value })} disabled={!!editId}>
                     <option value="">انتخاب کنید</option>
                     {purchaseGroups.filter((g) => g.isActive).map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
@@ -427,11 +433,11 @@ function PurchasePlanningForm({ editId }: { editId?: number }) {
                         return (
                           <tr key={idx}>
                             <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
-                            <td style={{ minWidth: 200 }}>
+                            <td style={{ minWidth: 90 }}>
                               <RecordPickerField
                                 title="انتخاب ردیف درخواست خرید"
                                 disabled={!header.purchaseGroupId}
-                                displayValue={src ? `${toFaDigits(String(src.number))} — ${src.goodsItemTitle}` : ""}
+                                displayValue={src ? `${toFaDigits(String(src.number))}` : ""}
                                 rows={pickableLines}
                                 columns={[
                                   { header: "شماره", render: (l) => toFaDigits(String(l.number)), filterValue: (l) => String(l.number), width: "70px" },
@@ -441,7 +447,7 @@ function PurchasePlanningForm({ editId }: { editId?: number }) {
                                 onSelect={(l) => onSourceLineChange(idx, String(l.purchaseRequestLineId))}
                               />
                             </td>
-                            <td style={{ minWidth: 180 }}>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</td>
+                            <td style={{ minWidth: 300 }}>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</td>
                             <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{row.unitTitle || "—"}</td>
                             <td style={{ minWidth: 120 }}>
                               <AmountInput value={row.quantity} onChange={(v) => updateStage1Row(idx, { quantity: v })} allowDecimal />
@@ -522,7 +528,7 @@ function PurchasePlanningForm({ editId }: { editId?: number }) {
             <>
               <div className="form-grid">
                 <div className="form-field">
-                  <label>کارشناس خرید</label>
+                  <label>کارشناس خرید<RequiredMark /></label>
                   <RecordPickerField
                     title="انتخاب کارشناس خرید"
                     displayValue={(() => {
@@ -538,7 +544,7 @@ function PurchasePlanningForm({ editId }: { editId?: number }) {
                   />
                 </div>
                 <div className="form-field">
-                  <label>مسیر تامین</label>
+                  <label>مسیر تامین<RequiredMark /></label>
                   <RecordPickerField
                     title="انتخاب مسیر تامین"
                     displayValue={(() => {

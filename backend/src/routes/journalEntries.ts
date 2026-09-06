@@ -3,6 +3,12 @@ import { prisma } from "../lib/prisma";
 import { resolveDetailTitles } from "../utils/detailValues";
 import { assertLineHasAmount } from "../utils/journalEntryValidation";
 import { issueJournalEntry } from "../services/journalEntryService";
+import { assertRecordNotStale } from "../utils/concurrency";
+import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("journal-entries");
 
 const router = Router();
 
@@ -136,7 +142,7 @@ function dateWhere(f: FilterSpec): any {
   return undefined;
 }
 
-router.get("/", async (req, res) => {
+router.get("/", can(`${FORM}.view`), async (req, res) => {
   const { fiscalPeriodId, page: pageRaw, pageSize: pageSizeRaw, sortField, sortDir, filters: filtersRaw } = req.query as {
     fiscalPeriodId?: string;
     page?: string;
@@ -232,7 +238,7 @@ router.get("/", async (req, res) => {
   res.json({ rows, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
 });
 
-router.get("/:id", async (req, res) => {
+router.get("/:id", can(`${FORM}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const entry = await prisma.journalEntry.findUnique({
     where: { id },
@@ -259,7 +265,7 @@ router.get("/:id", async (req, res) => {
   });
 });
 
-router.post("/", async (req, res) => {
+router.post("/", can(`${FORM}.create`), async (req, res) => {
   const body = req.body as {
     date: string;
     documentTypeId: number;
@@ -285,6 +291,10 @@ router.post("/", async (req, res) => {
       await validateAccountForLine(line.accountId, line.description, line.currencyId, baseCurrency.id, line.detail1Code, line.detail2Code, line.detail3Code);
     }
 
+    const entryDate = new Date(body.date);
+    const entryPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: entryDate }, toDate: { gte: entryDate } } });
+    if (entryPeriod) await assertWithinCurrentFiscalPeriod(entryPeriod.id);
+
     const created = await issueJournalEntry({
       date: new Date(body.date),
       documentTypeId: body.documentTypeId,
@@ -300,7 +310,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as {
     date: string;
@@ -317,6 +327,7 @@ router.put("/:id", async (req, res) => {
   if (!Array.isArray(body.lines) || body.lines.length === 0) return res.status(400).json({ error: "سند باید حداقل یک ردیف داشته باشد" });
 
   try {
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سند");
     const docType = await prisma.documentType.findUnique({ where: { id: body.documentTypeId } });
     if (!docType) return res.status(400).json({ error: "نوع سند نامعتبر است" });
     if (docType.isSystem && docType.systemKey !== "OPERATIONAL") {
@@ -329,6 +340,7 @@ router.put("/:id", async (req, res) => {
     const date = new Date(body.date);
     const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
     if (!fiscalPeriod) return res.status(400).json({ error: "این تاریخ در هیچ دوره مالی تعریف نشده است" });
+    await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
 
     const computedLines = [];
     let totalDebit = 0;
@@ -387,7 +399,7 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const entry = await prisma.journalEntry.findUnique({ where: { id } });
   if (!entry) return res.status(404).json({ error: "سند یافت نشد" });
@@ -397,7 +409,7 @@ router.delete("/:id", async (req, res) => {
   res.status(204).send();
 });
 
-router.put("/:id/review", async (req, res) => {
+router.put("/:id/review", can(`${FORM}.review`), async (req, res) => {
   const id = Number(req.params.id);
   const entry = await prisma.journalEntry.findUnique({ where: { id } });
   if (!entry) return res.status(404).json({ error: "سند یافت نشد" });
@@ -406,7 +418,7 @@ router.put("/:id/review", async (req, res) => {
   res.json(updated);
 });
 
-router.put("/:id/unreview", async (req, res) => {
+router.put("/:id/unreview", can(`${FORM}.unreview`), async (req, res) => {
   const id = Number(req.params.id);
   const entry = await prisma.journalEntry.findUnique({ where: { id } });
   if (!entry) return res.status(404).json({ error: "سند یافت نشد" });

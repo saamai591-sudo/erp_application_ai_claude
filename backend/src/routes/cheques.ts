@@ -1,5 +1,9 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("cheques");
 
 // =========================================================================
 // ماژول «خزانه‌داری» > چک‌ها (ChequeItem)
@@ -68,7 +72,7 @@ function chequeSummary(c: any) {
   };
 }
 
-router.get("/cheques", async (req, res) => {
+router.get("/cheques", can(`${FORM}.view`), async (req, res) => {
   const direction = req.query.direction as string | undefined;
   const status = req.query.status as string | undefined;
   const items = await prisma.chequeItem.findMany({
@@ -83,7 +87,7 @@ router.get("/cheques", async (req, res) => {
 });
 
 // چک‌های دریافتنی «در دست» — قابل انتخاب برای خرج‌کردن به‌عنوان ابزار پرداخت در یک سند پرداخت جدید
-router.get("/cheques/pickable-receivable", async (_req, res) => {
+router.get("/cheques/pickable-receivable", can(`${FORM}.view`), async (_req, res) => {
   const items = await prisma.chequeItem.findMany({
     where: { direction: "RECEIVABLE", status: "IN_HAND" },
     include: { bankBranch: true, party: true, currency: true },
@@ -92,7 +96,7 @@ router.get("/cheques/pickable-receivable", async (_req, res) => {
   res.json(items.map(chequeSummary));
 });
 
-router.get("/cheques/:id", async (req, res) => {
+router.get("/cheques/:id", can(`${FORM}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const c = await prisma.chequeItem.findUnique({
     where: { id },
@@ -121,7 +125,7 @@ router.get("/cheques/:id", async (req, res) => {
   });
 });
 
-router.post("/cheques/:id/transition", async (req, res) => {
+router.post("/cheques/:id/transition", can(`${FORM}.transition`), async (req, res) => {
   const id = Number(req.params.id);
   const toStatus = String(req.body?.toStatus || "");
 

@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Outlet, Navigate } from "react-router-dom";
 import { useAuth } from "../lib/AuthContext";
 import { useTabs } from "../lib/TabsContext";
-import { MODULES } from "../navConfig";
+import { filterModulesByAccess } from "../navConfig";
+import { usePermissions } from "../lib/usePermissions";
 import { TabsBar } from "./TabsBar";
 import { UserSettingsModal } from "./UserSettingsModal";
-import { getSavedFont, applyFont, getSavedTheme, applyTheme } from "../lib/userSettings";
+import { applyFont, applyTheme } from "../lib/userSettings";
+import { loadPreferences } from "../lib/preferences";
 
 
 /** رنگ اختصاصی هر ماژول اصلی (بر اساس عنوان ماژول در navConfig) */
@@ -23,6 +25,8 @@ const SUBMODULE_ICON: Record<string, string> = {
   "تعریف ساختار": "layers",
   "گزارش": "chart",
   "تنظیمات": "sliders",
+  "رسید انبار": "box",
+  "حواله انبار": "warehouse",
 };
 
 function ChevronIcon({ open }: { open: boolean }) {
@@ -282,16 +286,29 @@ function PowerIconFilled() {
 
 export default function Layout() {
   const { user, logout, loading } = useAuth();
-  const { openTab, activeTabId, tabs } = useTabs();
+  const { openTab, activeTabId, tabs, refreshNonce } = useTabs();
+  const { hasFormView, loading: permissionsLoading } = usePermissions();
   // آکاردئون: در هر لحظه فقط یک ماژول و یک ساب‌ماژول باز است (به‌صورت پیش‌فرض همه بسته‌اند)
   const [openModule, setOpenModule] = useState<string | null>(null);
   const [openSubModule, setOpenSubModule] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
-    applyFont(getSavedFont());
-    applyTheme(getSavedTheme());
+    // تنظیمات کاربر (فونت/تم/…) سمت بک‌اند ذخیره شده‌اند (preferences.ts) — این‌جا یک‌بار بعد از ورود
+    // کاربر واکشی و روی DOM اعمال می‌شوند، صرف‌نظر از این‌که کاربر قبلاً از همین مرورگر/سیستم وارد شده یا نه.
+    loadPreferences().then((prefs) => {
+      applyFont(prefs.font);
+      applyTheme(prefs.theme);
+    });
   }, []);
+
+  // فقط فرم‌هایی که کاربر جاری واقعاً دسترسی «مشاهده» دارد در منو نشان داده می‌شوند — نگاه کنید به
+  // filterModulesByAccess در navConfig.ts. تا وقتی مجوزها هنوز واکشی نشده، منو خالی نشان داده می‌شود
+  // (نه همه‌ی فرم‌ها) تا حتی برای یک لحظه هم آیتم‌های غیرمجاز فلش نزنند.
+  const visibleModules = useMemo(
+    () => (permissionsLoading ? [] : filterModulesByAccess(hasFormView)),
+    [permissionsLoading, hasFormView]
+  );
 
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
@@ -314,7 +331,7 @@ export default function Layout() {
     <div className="app-shell">
       <aside className="sidebar">
         <h1>حسابداری ERP</h1>
-        {MODULES.map((mod) => {
+        {visibleModules.map((mod) => {
           const modOpen = openModule === mod.title;
           return (
             <div key={mod.title} className="nav-module">
@@ -395,7 +412,11 @@ export default function Layout() {
               می‌گیرد (دقیقاً همان رفتاری که در توضیح usePersistedState قصد شده بود). ناوبری‌های navigate()
               ساده‌ی داخل همان تب (مثل ویرایش از فهرست) activeTabId را عوض نمی‌کنند، پس رفتار فعلی آن‌ها
               (بدون remount) دست‌نخورده می‌ماند. */}
-          <Outlet key={activeTabId || "no-tab"} />
+          {/* refreshNonce: وقتی کاربر روی تبی کلیک می‌کند که «کهنه» تشخیص داده شده (نگاه کنید به
+              TabsContext.maybeRefreshOnVisit/listInvalidation.ts)، حتی اگر همان تب از قبل هم فعال
+              بوده باشد (activeTabId عوض نمی‌شود)، این عدد بالا می‌رود تا کلید Outlet هرحال تغییر کند و
+              remount واقعی (پس واکشی دوباره‌ی فهرست) رخ بدهد. */}
+          <Outlet key={`${activeTabId || "no-tab"}:${refreshNonce}`} />
         </div>
       </div>
       {settingsOpen && <UserSettingsModal onClose={() => setSettingsOpen(false)} />}

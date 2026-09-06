@@ -7,23 +7,40 @@ import { AmountInput } from "../components/AmountInput";
 import { RecordPickerField } from "../components/RecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
+import { ExcelImportButton } from "../components/ExcelImport";
 import { InfoHint } from "../components/InfoHint";
 import { TrackingCells } from "../components/TrackingCells";
+import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
-import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
+import { usePermissions } from "../lib/usePermissions";
+import { partyDisplayName } from "./Users";
+import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
+import { useDocumentForm } from "../lib/useDocumentForm";
 
 // «حواله فروش» (مجوز خروج از انبار برای فروش) — سند واقعی حرکت انبار، جدا از حواله انبار مصرفی
 // موجود؛ ساختارش دقیقاً مطابق الگوی «رسید انبار خرید» است (رجوع کنید به یادداشت بالای
-// backend/src/routes/salesDeliveries.ts). طبق تصمیم صریح کاربر «مانده‌ای» است و بدون partyId در سطح
-// سند. فی/مبلغ در این فاز کاربر ندارد (همیشه صفر).
+// backend/src/routes/salesDeliveries.ts). طبق تصمیم صریح کاربر «مانده‌ای» است. طرف مقابل (تفصیل نوع
+// «طرف حساب») دقیقاً مثل رسید انبار خرید همیشه دستی انتخاب می‌شود، چه حواله مبنا داشته باشد چه نه.
+// فی/مبلغ اینجا هرگز توسط کاربر وارد نمی‌شود — توسط موتور کاردکس (قیمت‌گذاری میانگین موزون) محاسبه
+// می‌شود؛ فقط برای کاربر دارای دسترسی «مشاهده اطلاعات حسابداری» به‌صورت فقط‌خواندنی نمایش داده می‌شود.
+const VIEW_ACCOUNTING_PERMISSION = "sales.operations.sales-deliveries.viewAccounting";
 
 type Basis = "NO_BASIS" | "SALES_ORDER";
-type DocStatus = "DRAFT" | "FINALIZED" | "VOID";
+type DocStatus = "REGISTERED" | "FINALIZED";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
+interface PartyOption {
+  id: number;
+  detailCode: string;
+  category: "INDIVIDUAL" | "LEGAL";
+  isActive: boolean;
+  firstName: string | null;
+  lastName: string | null;
+  name: string | null;
+}
 interface GoodsItemRow {
   id: number;
   fullCode: string;
@@ -31,14 +48,12 @@ interface GoodsItemRow {
   mainUnitId: number;
   mainUnit?: { title: string };
   isActive: boolean;
-  isSerialTracked: boolean;
-  isBatchTracked: boolean;
-  isExpiryTracked: boolean;
+  trackingMethod: "NONE" | "BATCH" | "SERIAL";
   isLocationTracked: boolean;
 }
 interface PickableLine { id: number; sourceSalesOrderLineId: number; salesOrderId: number; number: number; date: string; customerTitle: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
 
-interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; basis: Basis; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number }
+interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; basis: Basis; partyId: number | null; partyTitle: string | null; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number; totalAmount?: number }
 interface DetailLine {
   id: number;
   sourceSalesOrderLineId: number | null;
@@ -48,19 +63,18 @@ interface DetailLine {
   unitId: number;
   unitTitle: string;
   quantity: number;
-  unitCost: number;
-  amount: number;
+  unitCost?: number;
+  amount?: number;
   description: string | null;
-  serialNumber: string | null;
-  batchNumber: string | null;
-  expiryDate: string | null;
+  serialIds: number[];
+  batchAllocations: { batchId: number; batchNumber: string; expiryDate: string | null; quantity: number }[];
   physicalLocation: string | null;
 }
-interface Detail { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; basis: Basis; description: string | null; status: DocStatus; finalizedAt: string | null; lines: DetailLine[] }
+interface Detail { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; basis: Basis; partyId: number | null; partyTitle: string | null; description: string | null; status: DocStatus; finalizedAt: string | null; lines: DetailLine[] }
 
-const STATUS_FA: Record<DocStatus, string> = { DRAFT: "ثبت", FINALIZED: "قطعی", VOID: "ابطال‌شده" };
 const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", SALES_ORDER: "سفارش فروش" };
-const INFO_TEXT = "ثبت حواله فروش (مجوز خروج از انبار) برای تحویل کالا به مشتری — بدون مبنا یا بر اساس یک سفارش فروش تایید‌شده. فی/مبلغ در این سند وارد نمی‌شود.";
+const STATUS_FA: Record<DocStatus, string> = { REGISTERED: "ثبت‌شده", FINALIZED: "تایید انبار شده" };
+const INFO_TEXT = "ثبت حواله فروش (مجوز خروج از انبار) برای تحویل کالا به مشتری — بدون مبنا یا بر اساس یک سفارش فروش تایید‌شده. فی/مبلغ توسط موتور کاردکس محاسبه می‌شود، نه توسط کاربر.";
 
 export default function SalesDeliveries() {
   const location = useLocation();
@@ -72,17 +86,6 @@ export default function SalesDeliveries() {
   return <SalesDeliveryList />;
 }
 
-function CheckIcon() {
-  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-}
-function UndoIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 function PlusIcon() {
   return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
 }
@@ -91,7 +94,8 @@ function SalesDeliveryList() {
   const cacheKey = "/sales-deliveries";
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
+  const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
 
   async function reload() {
     try {
@@ -107,15 +111,11 @@ function SalesDeliveryList() {
   }, []);
 
   async function onDelete(row: ListRow) {
-    if (row.status !== "DRAFT") {
-      alert("فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «قطعی» برگردانید");
-      return;
-    }
     try {
       await api.del(`/sales-deliveries/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      setError((e as ApiError).message);
     }
   }
 
@@ -125,6 +125,28 @@ function SalesDeliveryList() {
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={INFO_TEXT} title="حواله فروش" />
           <NewRecordButton path="/sales-deliveries/new" />
+          <ExcelImportButton
+            entityLabel="حواله فروش"
+            templateFilename="قالب-حواله-فروش"
+            backendEntityType="sales-delivery"
+            allowDuplicateOption
+            columns={[
+              { key: "warehouseCode", label: "کد انبار", required: true },
+              { key: "date", label: "تاریخ", required: true, hint: "شمسی (مثلاً 1405/05/06) یا میلادی" },
+              { key: "number", label: "شماره سند", required: true, hint: "همان شماره‌ی سند در سیستم قبلی؛ هم برای گروه‌بندی ردیف‌های یک سند (با کد انبار و تاریخ) و هم به‌عنوان شماره‌ی نهایی سند استفاده می‌شود — باید در این دوره مالی یکتا باشد" },
+              { key: "partyDetailCode", label: "کد تفصیل طرف مقابل", required: true },
+              { key: "description", label: "شرح سند" },
+              { key: "goodsItemCode", label: "کد کالا" },
+              { key: "goodsItemOldCode", label: "کد کالا (سیستم قدیم)", hint: "برای مهاجرت از سیستم قبلی؛ دقیقاً یکی از این دو ستون باید در هر ردیف پر باشد" },
+              { key: "quantity", label: "مقدار", required: true },
+              { key: "serialNumber", label: "سریال" },
+              { key: "batchNumber", label: "شماره بچ" },
+              { key: "expiryDate", label: "تاریخ انقضا" },
+              { key: "physicalLocation", label: "محل فیزیکی" },
+              { key: "lineDescription", label: "شرح ردیف" },
+            ]}
+            onDone={reload}
+          />
           <RefreshButton onClick={reload} />
         </div>
       </div>
@@ -135,11 +157,13 @@ function SalesDeliveryList() {
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
           { header: "انبار", render: (r) => r.warehouseTitle, filterType: "string", filterValue: (r) => r.warehouseTitle },
           { header: "مبنا", render: (r) => BASIS_FA[r.basis], filterType: "string", filterValue: (r) => BASIS_FA[r.basis] },
+          { header: "طرف مقابل", render: (r) => r.partyTitle || "—", filterType: "string", filterValue: (r) => r.partyTitle || "" },
           { header: "تعداد ردیف", render: (r) => toFaDigits(String(r.lineCount)) },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
+          ...(canViewAccounting ? [{ header: "جمع مبلغ", render: (r: ListRow) => (r.totalAmount != null ? formatAmountFa(r.totalAmount) : "—") }] : []),
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/sales-deliveries/${r.id}/edit`)}
+        edit={{ path: (r) => `/sales-deliveries/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -155,10 +179,11 @@ interface RowState {
   unitId: string;
   unitTitle: string;
   quantity: string;
+  unitCost: string;
+  amount: string;
   description: string;
-  serialNumber: string;
-  batchNumber: string;
-  expiryDate: string;
+  serialIds: string[];
+  batchAllocations: { batchId: string; quantity: string }[];
   physicalLocation: string;
 }
 
@@ -172,73 +197,63 @@ function emptyRow(): RowState {
     unitId: "",
     unitTitle: "",
     quantity: "",
+    unitCost: "",
+    amount: "",
     description: "",
-    serialNumber: "",
-    batchNumber: "",
-    expiryDate: "",
+    serialIds: [],
+    batchAllocations: [],
     physicalLocation: "",
   };
 }
 
 function SalesDeliveryForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
-  const location = useLocation();
-  const cacheKey = `form:${location.pathname}`;
+  const { hasPermission } = usePermissions();
+  const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
+  const [parties, setParties] = useState<PartyOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
-  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", basis: "NO_BASIS" as Basis, warehouseId: "", description: "" });
-  const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
-  const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; fiscalPeriodTitle: string } | null>(`${cacheKey}:meta`, null);
-  const [error, setError] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const { saved, flash } = useSavedFlash();
 
-  useEffect(() => {
-    async function init() {
-      const [whs, items]: [Warehouse[], GoodsItemRow[]] = await Promise.all([
+  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, saved, submit, remove } = useDocumentForm<
+    { date: string; basis: Basis; warehouseId: string; partyId: string; description: string },
+    RowState,
+    Detail
+  >({
+    endpoint: "sales-deliveries",
+    editId,
+    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), basis: "NO_BASIS", warehouseId: "", partyId: "", description: "" }),
+    emptyRows: () => [emptyRow()],
+    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), basis: d.basis, warehouseId: String(d.warehouseId), partyId: d.partyId ? String(d.partyId) : "", description: d.description || "" }),
+    mapDetailToRows: (d) =>
+      d.lines.map((l) => ({
+        sourceSalesOrderLineId: l.sourceSalesOrderLineId ? String(l.sourceSalesOrderLineId) : "",
+        sourceNumber: "",
+        goodsItemId: String(l.goodsItemId),
+        goodsItemCode: l.goodsItemCode,
+        goodsItemTitle: l.goodsItemTitle,
+        unitId: String(l.unitId),
+        unitTitle: l.unitTitle,
+        quantity: String(l.quantity),
+        unitCost: l.unitCost != null ? String(l.unitCost) : "",
+        amount: l.amount != null ? String(l.amount) : "",
+        description: l.description || "",
+        serialIds: l.serialIds.map(String),
+        batchAllocations: l.batchAllocations.map((a) => ({ batchId: String(a.batchId), quantity: String(a.quantity) })),
+        physicalLocation: l.physicalLocation || "",
+      })),
+    mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
+    loadExtra: async () => {
+      const [whs, items, partyList]: [Warehouse[], GoodsItemRow[], PartyOption[]] = await Promise.all([
         api.get("/warehouses"),
         api.get("/goods-items?kind=GOODS&docDirection=OUTBOUND&docType=فروش"),
+        api.get("/parties?customersOnly=true"),
       ]);
       setWarehouses(whs);
       setGoodsItems(items);
-
-      if (hasPersistedState(`${cacheKey}:header`)) {
-        setLoaded(true);
-        return;
-      }
-
-      if (editId) {
-        const d: Detail = await api.get(`/sales-deliveries/${editId}`);
-        setMeta({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle });
-        setHeader({ date: d.date.slice(0, 10), basis: d.basis, warehouseId: String(d.warehouseId), description: d.description || "" });
-        setRows(
-          d.lines.map((l) => ({
-            sourceSalesOrderLineId: l.sourceSalesOrderLineId ? String(l.sourceSalesOrderLineId) : "",
-            sourceNumber: "",
-            goodsItemId: String(l.goodsItemId),
-            goodsItemCode: l.goodsItemCode,
-            goodsItemTitle: l.goodsItemTitle,
-            unitId: String(l.unitId),
-            unitTitle: l.unitTitle,
-            quantity: String(l.quantity),
-            description: l.description || "",
-            serialNumber: l.serialNumber || "",
-            batchNumber: l.batchNumber || "",
-            expiryDate: l.expiryDate ? l.expiryDate.slice(0, 10) : "",
-            physicalLocation: l.physicalLocation || "",
-          }))
-        );
-      } else {
-        setHeader({ date: "", basis: "NO_BASIS", warehouseId: "", description: "" });
-        setRows([emptyRow()]);
-        setMeta(null);
-      }
-      setLoaded(true);
-    }
-    init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editId]);
+      setParties(partyList);
+    },
+  });
 
   useEffect(() => {
     if (header.basis === "NO_BASIS") {
@@ -249,10 +264,37 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
     api.get(`/sales-deliveries/pickable-sales-order-lines${q}`).then(setPickableLines).catch(() => setPickableLines([]));
   }, [header.basis, header.date]);
 
-  const status: DocStatus = meta?.status || "DRAFT";
   const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceSalesOrderLineId);
-  const coreDisabled = !!editId && status !== "DRAFT";
-  const headerBasisDisabled = coreDisabled || hasAnyLine;
+  // طبق طرح جدید چرخه‌ی عمر سند: بعد از «تایید انبار» (که فقط از طریق «تایید انبار» دسته‌ای اتفاق
+  // می‌افتد، نه اقدامی مستقل روی خودِ این سند)، سرصفحه/مقدار/کالای ردیف‌ها قفل می‌شود — نگاه کنید به
+  // شاخه‌ی status==="FINALIZED" در PUT/DELETE بک‌اند.
+  const isFinalized = meta?.status === "FINALIZED";
+  // طبق تصمیم صریح کاربر: فیلدهای مبلغی تا وقتی سند Finalized نشده، اصلاً نمایش داده نمی‌شوند.
+  const showAmount = canViewAccounting && isFinalized;
+  const coreDisabled = isFinalized;
+  // طبق تصمیم صریح کاربر: به‌محض این‌که یک ردیف انتخاب/وارد شده باشد، کل سرصفحه (انبار/تاریخ/مبنا/
+  // طرف مقابل/شرح) قفل می‌شود — چون ردیف‌ها بر اساس سرصفحه انتخاب و ثبت شده‌اند و تغییر بعدی سرصفحه
+  // ناسازگاری ایجاد می‌کند؛ این جدا از قفل coreDisabled (که مخصوص Finalized شدن سند است) است.
+  const headerDisabled = coreDisabled || hasAnyLine;
+
+  // طبق تصمیم صریح کاربر: تا وقتی فیلدهای الزامی سرصفحه (تاریخ/انبار/طرف مقابل) کامل نشده، ورود
+  // اطلاعات ردیف مجاز نیست — اولین تلاش برای باز کردن انتخابگر کالا/ردیف مبنا باید با پیام خطا رد شود.
+  function guardRowEntry(): boolean {
+    if (!header.date) {
+      setError("تاریخ الزامی است");
+      return false;
+    }
+    if (!header.warehouseId) {
+      setError("انبار الزامی است");
+      return false;
+    }
+    if (!header.partyId) {
+      setError("طرف مقابل الزامی است");
+      return false;
+    }
+    setError(null);
+    return true;
+  }
 
   function updateRow(idx: number, patch: Partial<RowState>) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -285,6 +327,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
   }
 
   const totalQuantity = rows.reduce((s, r) => s + (Number(r.quantity) || 0), 0);
+  const totalAmount = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
 
   function buildBody() {
     const nonEmptyRows = rows.filter((r) => r.goodsItemId || r.sourceSalesOrderLineId);
@@ -292,6 +335,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
       date: header.date,
       basis: header.basis,
       warehouseId: Number(header.warehouseId),
+      partyId: header.partyId ? Number(header.partyId) : null,
       description: header.description,
       lines: nonEmptyRows.map((r) => ({
         sourceSalesOrderLineId: r.sourceSalesOrderLineId ? Number(r.sourceSalesOrderLineId) : null,
@@ -299,70 +343,33 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
         unitId: Number(r.unitId),
         quantity: Number(r.quantity) || 0,
         description: r.description || null,
-        serialNumber: r.serialNumber || null,
-        batchNumber: r.batchNumber || null,
-        expiryDate: r.expiryDate || null,
+        serialIds: r.serialIds.map(Number),
+        batchAllocations: r.batchAllocations.filter((a) => a.batchId).map((a) => ({ batchId: Number(a.batchId), quantity: Number(a.quantity) || 0 })),
         physicalLocation: r.physicalLocation || null,
       })),
     };
   }
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    if (!header.date) return setError("تاریخ الزامی است");
-    if (!header.warehouseId) return setError("انبار الزامی است");
-    const body = buildBody();
-    if (body.lines.length === 0) return setError("حواله فروش باید حداقل یک ردیف کالا داشته باشد");
-    for (const [i, l] of body.lines.entries()) {
-      if (header.basis === "SALES_ORDER" && !l.sourceSalesOrderLineId) return setError(`ردیف ${i + 1}: انتخاب ردیف سفارش فروش الزامی است`);
-      if (header.basis === "NO_BASIS" && !l.goodsItemId) return setError(`کالا برای ردیف ${i + 1} الزامی است`);
-      if (!(l.quantity > 0)) return setError(`مقدار ردیف ${i + 1} باید عددی مثبت باشد`);
-    }
-    try {
-      if (editId) {
-        await api.put(`/sales-deliveries/${editId}`, body);
-        flash();
-      } else {
-        const created = await api.post("/sales-deliveries", body);
-        flash();
-        navigate(`/sales-deliveries/${created.id}/edit`);
-      }
-    } catch (err) {
-      setError((err as ApiError).message);
-    }
+  function onSubmit(e: FormEvent) {
+    return submit(e, {
+      buildBody,
+      validateBody: (body) => {
+        if (!header.warehouseId) return "انبار الزامی است";
+        if (!header.partyId) return "طرف مقابل الزامی است";
+        if (body.lines.length === 0) return "حواله فروش باید حداقل یک ردیف کالا داشته باشد";
+        for (const [i, l] of body.lines.entries()) {
+          if (header.basis === "SALES_ORDER" && !l.sourceSalesOrderLineId) return `ردیف ${i + 1}: انتخاب ردیف سفارش فروش الزامی است`;
+          if (header.basis === "NO_BASIS" && !l.goodsItemId) return `کالا برای ردیف ${i + 1} الزامی است`;
+          if (!(l.quantity > 0)) return `مقدار ردیف ${i + 1} باید عددی مثبت باشد`;
+        }
+        return null;
+      },
+      afterCreate: (created) => navigate(`/sales-deliveries/${created.id}/edit`),
+    });
   }
 
   async function handleDelete() {
-    if (!editId) return;
-    try {
-      await api.del(`/sales-deliveries/${editId}`);
-      navigate("/sales-deliveries");
-    } catch (e) {
-      alert((e as ApiError).message);
-    }
-  }
-
-  async function handleFinalize() {
-    if (!editId) return;
-    try {
-      await api.post(`/sales-deliveries/${editId}/finalize`, {});
-      setMeta((prev) => (prev ? { ...prev, status: "FINALIZED" } : prev));
-      flash();
-    } catch (e) {
-      alert((e as ApiError).message);
-    }
-  }
-
-  async function handleRevert() {
-    if (!editId) return;
-    try {
-      await api.post(`/sales-deliveries/${editId}/revert`, {});
-      setMeta((prev) => (prev ? { ...prev, status: "DRAFT" } : prev));
-      flash();
-    } catch (e) {
-      alert((e as ApiError).message);
-    }
+    await remove(() => navigate("/sales-deliveries"));
   }
 
   if (!loaded) return null;
@@ -370,35 +377,29 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
   const selectedWarehouseStillListed = warehouses.some((w) => String(w.id) === header.warehouseId);
   const warehouseOptions = warehouses.filter((w) => w.isActive || String(w.id) === header.warehouseId);
   const hasSourceColumn = header.basis !== "NO_BASIS";
+  const selectedParty = parties.find((p) => String(p.id) === header.partyId);
 
   return (
     <FormPage
       title={editId ? "ویرایش حواله فروش" : "حواله فروش جدید"}
-      description={
-        status === "FINALIZED"
-          ? "این سند «قطعی» شده و دیگر قابل ویرایش مستقیم نیست؛ برای اصلاح، ابتدا «برگشت از قطعی» را بزنید."
-          : status === "VOID"
-          ? "این سند «ابطال‌شده» است."
-          : undefined
-      }
+      description={isFinalized ? "این سند «تایید انبار» شده است؛ سرصفحه، مقدار و کالای ردیف‌ها دیگر قابل ویرایش نیستند." : undefined}
       formId="sales-delivery-form"
       closePath="/sales-deliveries"
       newPath="/sales-deliveries/new"
-      onDelete={editId && status === "DRAFT" ? handleDelete : undefined}
+      onDelete={editId && !coreDisabled ? handleDelete : undefined}
       saveDisabled={coreDisabled}
-      extraActions={
-        meta
-          ? [
-              ...(status === "DRAFT" ? [{ label: "قطعی کردن", icon: <CheckIcon />, onClick: handleFinalize }] : []),
-              ...(status === "FINALIZED" ? [{ label: "برگشت از قطعی", icon: <UndoIcon />, onClick: handleRevert }] : []),
-            ]
-          : []
-      }
       wide
     >
       <form id="sales-delivery-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
+
+        {meta && (
+          <div className="form-field" style={{ maxWidth: 220, marginBottom: 8 }}>
+            <label>وضعیت</label>
+            <div><span className="badge">{STATUS_FA[meta.status]}</span></div>
+          </div>
+        )}
 
         <fieldset disabled={coreDisabled} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
@@ -411,12 +412,8 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
               <input value={meta?.fiscalPeriodTitle ?? "بر اساس تاریخ سند"} disabled />
             </div>
             <div className="form-field">
-              <label>وضعیت</label>
-              <div><span className="badge">{STATUS_FA[status]}</span></div>
-            </div>
-            <div className="form-field">
-              <label>انبار</label>
-              <select value={header.warehouseId} onChange={(e) => setHeader({ ...header, warehouseId: e.target.value })} disabled={coreDisabled}>
+              <label>انبار<RequiredMark /></label>
+              <select value={header.warehouseId} onChange={(e) => setHeader({ ...header, warehouseId: e.target.value })} disabled={headerDisabled}>
                 <option value="">انتخاب کنید</option>
                 {warehouseOptions.map((w) => (
                   <option key={w.id} value={w.id}>{w.title}{!w.isActive ? " (غیرفعال)" : ""}</option>
@@ -424,20 +421,37 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
               </select>
             </div>
             <div className="form-field">
-              <label>تاریخ سند</label>
-              <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
+              <label>تاریخ سند<RequiredMark /></label>
+              <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={headerDisabled} />
             </div>
             <div className="form-field">
-              <label>مبنا</label>
-              <select value={header.basis} onChange={(e) => setHeader({ ...header, basis: e.target.value as Basis })} disabled={headerBasisDisabled}>
+              <label>مبنا<RequiredMark /></label>
+              <select value={header.basis} onChange={(e) => setHeader({ ...header, basis: e.target.value as Basis })} disabled={headerDisabled}>
                 {(Object.keys(BASIS_FA) as Basis[]).map((b) => (
                   <option key={b} value={b}>{BASIS_FA[b]}</option>
                 ))}
               </select>
             </div>
+            <div className="form-field">
+              <label>طرف مقابل<RequiredMark /></label>
+              <RecordPickerField
+                title="انتخاب طرف مقابل"
+                disabled={headerDisabled}
+                displayValue={
+                  selectedParty ? `${toFaDigits(selectedParty.detailCode)} — ${partyDisplayName(selectedParty)}` : ""
+                }
+                rows={parties.filter((p) => p.isActive || String(p.id) === header.partyId)}
+                columns={[
+                  { header: "کد", render: (p) => toFaDigits(p.detailCode), filterValue: (p) => p.detailCode, width: "90px" },
+                  { header: "نوع", render: (p) => (p.category === "LEGAL" ? "حقوقی" : "حقیقی"), filterValue: (p) => (p.category === "LEGAL" ? "حقوقی" : "حقیقی"), width: "80px" },
+                  { header: "نام", render: (p) => partyDisplayName(p), filterValue: (p) => partyDisplayName(p) },
+                ]}
+                onSelect={(p) => setHeader({ ...header, partyId: String((p as PartyOption).id) })}
+              />
+            </div>
             <div className="form-field full">
               <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={coreDisabled} />
+              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={headerDisabled} />
             </div>
             {!selectedWarehouseStillListed && header.warehouseId && (
               <div className="form-field full">
@@ -448,9 +462,11 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
 
           <div className="je-lines-toolbar">
             <span className="je-lines-title">ردیف‌های کالا</span>
-            <button type="button" className="toolbar-icon-btn primary" onClick={addRow} title="ردیف جدید">
-              <PlusIcon />
-            </button>
+            {!coreDisabled && (
+              <button type="button" className="toolbar-icon-btn primary" onClick={addRow} title="ردیف جدید">
+                <PlusIcon />
+              </button>
+            )}
           </div>
         </fieldset>
 
@@ -463,13 +479,13 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                   {hasSourceColumn && <th>سفارش فروش مبدا</th>}
                   <th>کالا</th>
                   <th>واحد</th>
-                  <th>سریال</th>
-                  <th>شماره بچ</th>
-                  <th>تاریخ انقضا</th>
+                  <th>ردیابی</th>
                   <th>محل فیزیکی</th>
                   <th>مقدار</th>
+                  {showAmount && <th>فی واحد</th>}
+                  {showAmount && <th>مبلغ</th>}
                   <th>شرح</th>
-                  <th></th>
+                  {!coreDisabled && <th></th>}
                 </tr>
               </thead>
               <tbody>
@@ -477,12 +493,12 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                   const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
                   const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
                   const src = pickableLines.find((l) => String(l.sourceSalesOrderLineId) === row.sourceSalesOrderLineId);
-                  const sourceDisplay = src ? `${toFaDigits(String(src.number))} — ${src.goodsItemTitle}` : row.sourceNumber ? toFaDigits(row.sourceNumber) : "";
+                  const sourceDisplay = src ? `${toFaDigits(String(src.number))}` : row.sourceNumber ? toFaDigits(row.sourceNumber) : "";
                   return (
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                       {hasSourceColumn && (
-                        <td style={{ minWidth: 220 }}>
+                        <td style={{ minWidth: 90 }}>
                           <RecordPickerField
                             title="انتخاب ردیف سفارش فروش"
                             disabled={coreDisabled}
@@ -494,11 +510,12 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                               { header: "کالا", render: (l) => l.goodsItemTitle, filterValue: (l) => l.goodsItemTitle },
                               { header: "مانده", render: (l) => formatAmountFa(l.remaining), filterValue: (l) => String(l.remaining), width: "90px" },
                             ]}
+                            onOpen={guardRowEntry}
                             onSelect={(l) => onSourceLineChange(idx, String(l.sourceSalesOrderLineId))}
                           />
                         </td>
                       )}
-                      <td style={{ minWidth: 200 }}>
+                      <td style={{ minWidth: 320 }}>
                         {hasSourceColumn ? (
                           <span>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</span>
                         ) : (
@@ -511,6 +528,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                               { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
                               { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
                             ]}
+                            onOpen={guardRowEntry}
                             onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
                           />
                         )}
@@ -520,6 +538,8 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                         goodsItemId={row.goodsItemId ? Number(row.goodsItemId) : null}
                         item={item}
                         warehouseId={header.warehouseId ? Number(header.warehouseId) : null}
+                        documentType="SALES_DELIVERY"
+                        quantity={Number(row.quantity) || 0}
                         value={row}
                         onChange={(patch) => updateRow(idx, patch)}
                         disabled={coreDisabled}
@@ -527,14 +547,18 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                       <td style={{ minWidth: 130 }}>
                         <AmountInput value={row.quantity} onChange={(v) => updateRow(idx, { quantity: v })} allowDecimal placeholder="۰" disabled={coreDisabled} />
                       </td>
+                      {showAmount && <td style={{ minWidth: 110, color: "var(--ink-soft)" }}>{formatAmountFa(row.unitCost || "0")}</td>}
+                      {showAmount && <td style={{ minWidth: 120, color: "var(--ink-soft)" }}>{formatAmountFa(row.amount || "0")}</td>}
                       <td style={{ minWidth: 160 }}>
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} disabled={coreDisabled} />
                       </td>
-                      <td>
-                        <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeRow(idx)} disabled={coreDisabled}>
-                          حذف
-                        </button>
-                      </td>
+                      {!coreDisabled && (
+                        <td>
+                          <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeRow(idx)} disabled={coreDisabled}>
+                            حذف
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -543,7 +567,10 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
           </div>
           <div className="grid-footer je-lines-footer">
             <span className="grid-footer-info">{rows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(rows.length))} ردیف`}</span>
-            <span className="je-lines-totals">جمع مقدار: {formatAmountFa(totalQuantity)}</span>
+            <span className="je-lines-totals">
+              جمع مقدار: {formatAmountFa(totalQuantity)}
+              {showAmount && <> — جمع مبلغ: {formatAmountFa(totalAmount)}</>}
+            </span>
           </div>
         </div>
       </form>

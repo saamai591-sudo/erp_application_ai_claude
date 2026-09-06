@@ -1,0 +1,28 @@
+-- AlterEnum
+BEGIN;
+CREATE TYPE "WarehouseDocStatus_new" AS ENUM ('REGISTERED', 'FINALIZED');
+ALTER TABLE "InitialInventory" ALTER COLUMN "status" DROP DEFAULT;
+ALTER TABLE "InventoryDocument" ALTER COLUMN "status" DROP DEFAULT;
+ALTER TABLE "SalesDelivery" ALTER COLUMN "status" DROP DEFAULT;
+ALTER TABLE "WarehouseAdjustment" ALTER COLUMN "status" DROP DEFAULT;
+ALTER TABLE "WarehouseIssue" ALTER COLUMN "status" DROP DEFAULT;
+ALTER TABLE "WarehouseReceipt" ALTER COLUMN "status" DROP DEFAULT;
+ALTER TABLE "WarehouseTransfer" ALTER COLUMN "status" DROP DEFAULT;
+ALTER TABLE "InitialInventory" ALTER COLUMN "status" TYPE "WarehouseDocStatus_new" USING ("status"::text::"WarehouseDocStatus_new");
+ALTER TABLE "WarehouseReceipt" ALTER COLUMN "status" TYPE "WarehouseDocStatus_new" USING ("status"::text::"WarehouseDocStatus_new");
+ALTER TABLE "WarehouseIssue" ALTER COLUMN "status" TYPE "WarehouseDocStatus_new" USING ("status"::text::"WarehouseDocStatus_new");
+ALTER TABLE "WarehouseTransfer" ALTER COLUMN "status" TYPE "WarehouseDocStatus_new" USING ("status"::text::"WarehouseDocStatus_new");
+ALTER TABLE "WarehouseAdjustment" ALTER COLUMN "status" TYPE "WarehouseDocStatus_new" USING ("status"::text::"WarehouseDocStatus_new");
+ALTER TABLE "SalesDelivery" ALTER COLUMN "status" TYPE "WarehouseDocStatus_new" USING ("status"::text::"WarehouseDocStatus_new");
+ALTER TABLE "InventoryDocument" ALTER COLUMN "status" TYPE "WarehouseDocStatus_new" USING ("status"::text::"WarehouseDocStatus_new");
+ALTER TYPE "WarehouseDocStatus" RENAME TO "WarehouseDocStatus_old";
+ALTER TYPE "WarehouseDocStatus_new" RENAME TO "WarehouseDocStatus";
+DROP TYPE "WarehouseDocStatus_old";
+ALTER TABLE "InitialInventory" ALTER COLUMN "status" SET DEFAULT 'REGISTERED';
+ALTER TABLE "InventoryDocument" ALTER COLUMN "status" SET DEFAULT 'REGISTERED';
+ALTER TABLE "SalesDelivery" ALTER COLUMN "status" SET DEFAULT 'REGISTERED';
+ALTER TABLE "WarehouseAdjustment" ALTER COLUMN "status" SET DEFAULT 'REGISTERED';
+ALTER TABLE "WarehouseIssue" ALTER COLUMN "status" SET DEFAULT 'REGISTERED';
+ALTER TABLE "WarehouseReceipt" ALTER COLUMN "status" SET DEFAULT 'REGISTERED';
+ALTER TABLE "WarehouseTransfer" ALTER COLUMN "status" SET DEFAULT 'REGISTERED';
+COMMIT;

@@ -9,6 +9,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 
 const NATURE_FA: Record<string, string> = {
@@ -39,7 +40,6 @@ function RequestTypeList() {
   const cacheKey = "/goods-request-types";
   const [items, setItems] = usePersistedState<GoodsRequestType[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -66,19 +66,17 @@ function RequestTypeList() {
           <InfoHint text={`تعریف انواع درخواست کالا در سیستم`} title="نوع درخواست کالا" />
           <NewRecordButton path="/goods-request-types/new" />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "کد", render: (r) => toFaDigits(String(r.code)), width: "80px", filterType: "number", filterValue: (r) => r.code },
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
           { header: "ماهیت", render: (r) => NATURE_FA[r.nature] || r.nature, width: "140px" },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/goods-request-types/${r.id}/edit`)}
+        edit={{ path: (r) => `/goods-request-types/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -163,7 +161,7 @@ function RequestTypeForm({ editId }: { editId?: number }) {
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
-            <label>عنوان</label>
+            <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
           </div>
           <div className="form-field">

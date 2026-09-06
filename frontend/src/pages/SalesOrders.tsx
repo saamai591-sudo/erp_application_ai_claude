@@ -8,11 +8,13 @@ import { RecordPickerField } from "../components/RecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
+import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 
 // «سفارش فروش» (تایید مشتری) — مرحله دوم زنجیره فروش. مبنا: بدون مبنا / پیش‌فاکتور. طبق تصمیم
 // صریح کاربر، «مانده‌ای» فقط برای حواله فروش/فاکتور فروش لازم است؛ اینجا (مثل سفارش خرید از استعلام
@@ -111,7 +113,7 @@ function SalesOrderList() {
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/sales-orders/${r.id}/edit`)}
+        edit={{ path: (r) => `/sales-orders/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -137,18 +139,21 @@ function SalesOrderForm({ editId }: { editId?: number }) {
   const [meta, setMeta] = usePersistedState<{ number: number; status: Status } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const { saved, flash } = useSavedFlash();
 
   useEffect(() => {
     async function init() {
-      const [cu, c, g] = await Promise.all([
+      const [cu, c, g, fp] = await Promise.all([
         api.get("/customers"),
         api.get("/currencies"),
         api.get("/goods-items?kind=GOODS&docDirection=OUTBOUND&docType=فروش"),
+        fetchSelectedFiscalPeriod(),
       ]);
       setCustomers((cu as any[]).filter((x) => x.isActive));
       setCurrencies(c);
       setGoodsItems(g);
+      setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
         setLoaded(true);
@@ -173,7 +178,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
           }))
         );
       } else {
-        setHeader({ date: "", basis: "NO_BASIS", customerId: "", currencyId: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), basis: "NO_BASIS", customerId: "", currencyId: "", description: "" });
         setRows([emptyRow()]);
         setMeta(null);
       }
@@ -195,7 +200,29 @@ function SalesOrderForm({ editId }: { editId?: number }) {
   const status: Status = meta?.status || "DRAFT";
   const locked = status !== "DRAFT";
   const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceSalesQuoteLineId);
+  // طبق تصمیم صریح کاربر: به‌محض این‌که یک ردیف انتخاب/وارد شده باشد، کل سرصفحه قفل می‌شود — چون
+  // ردیف‌ها بر اساس سرصفحه (مشتری/تاریخ) انتخاب و ثبت شده‌اند و تغییر بعدی سرصفحه ناسازگاری ایجاد
+  // می‌کند.
   const headerDisabled = locked || hasAnyLine;
+
+  // طبق تصمیم صریح کاربر: تا وقتی فیلدهای الزامی سرصفحه (تاریخ/مشتری/ارز) کامل نشده، ورود اطلاعات
+  // ردیف مجاز نیست — اولین تلاش برای باز کردن انتخابگر کالا/ردیف پیش‌فاکتور باید با پیام خطا رد شود.
+  function guardRowEntry(): boolean {
+    if (!header.date) {
+      setError("تاریخ الزامی است");
+      return false;
+    }
+    if (!header.customerId) {
+      setError("مشتری الزامی است");
+      return false;
+    }
+    if (!header.currencyId) {
+      setError("ارز الزامی است");
+      return false;
+    }
+    setError(null);
+    return true;
+  }
 
   function updateRow(idx: number, patch: Partial<RowState>) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -274,6 +301,8 @@ function SalesOrderForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
     if (!header.date || !header.customerId || !header.currencyId) return setError("تاریخ، مشتری و ارز الزامی است");
+    const dateErr = validateDocumentDate(header.date, fiscalPeriod);
+    if (dateErr) return setError(dateErr);
     const body = buildBody();
     if (body.lines.length === 0) return setError("سفارش فروش باید حداقل یک ردیف کالا داشته باشد");
     for (const [i, l] of body.lines.entries()) {
@@ -349,18 +378,18 @@ function SalesOrderForm({ editId }: { editId?: number }) {
               <div><span className="badge">{STATUS_FA[status]}</span></div>
             </div>
             <div className="form-field">
-              <label>تاریخ</label>
-              <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
+              <label>تاریخ<RequiredMark /></label>
+              <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={headerDisabled} />
             </div>
             <div className="form-field">
-              <label>مبنا</label>
+              <label>مبنا<RequiredMark /></label>
               <select value={header.basis} onChange={(e) => setHeader({ ...header, basis: e.target.value as Basis })} disabled={headerDisabled}>
                 <option value="NO_BASIS">{BASIS_FA.NO_BASIS}</option>
                 <option value="QUOTE">{BASIS_FA.QUOTE}</option>
               </select>
             </div>
             <div className="form-field">
-              <label>مشتری</label>
+              <label>مشتری<RequiredMark /></label>
               <RecordPickerField
                 title="انتخاب مشتری"
                 disabled={headerDisabled}
@@ -377,7 +406,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
               />
             </div>
             <div className="form-field">
-              <label>ارز</label>
+              <label>ارز<RequiredMark /></label>
               <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value })} disabled={headerDisabled}>
                 <option value="">انتخاب کنید</option>
                 {currencies.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
@@ -422,22 +451,23 @@ function SalesOrderForm({ editId }: { editId?: number }) {
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                       {header.basis === "QUOTE" && (
-                        <td style={{ minWidth: 200 }}>
+                        <td style={{ minWidth: 90 }}>
                           <RecordPickerField
                             title="انتخاب ردیف پیش‌فاکتور"
                             disabled={locked}
-                            displayValue={src ? `${toFaDigits(String(src.number))} — ${src.goodsItemTitle}` : ""}
+                            displayValue={src ? `${toFaDigits(String(src.number))}` : ""}
                             rows={pickableLines}
                             columns={[
                               { header: "شماره", render: (l) => toFaDigits(String(l.number)), filterValue: (l) => String(l.number), width: "70px" },
                               { header: "کالا", render: (l) => l.goodsItemTitle, filterValue: (l) => l.goodsItemTitle },
                               { header: "مانده", render: (l) => formatAmountFa(l.remaining), filterValue: (l) => String(l.remaining), width: "90px" },
                             ]}
+                            onOpen={guardRowEntry}
                             onSelect={(l) => onSourceLineChange(idx, String(l.sourceSalesQuoteLineId))}
                           />
                         </td>
                       )}
-                      <td style={{ minWidth: 200 }}>
+                      <td style={{ minWidth: 320 }}>
                         {header.basis === "QUOTE" ? (
                           <span>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</span>
                         ) : (
@@ -450,6 +480,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
                               { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
                               { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
                             ]}
+                            onOpen={guardRowEntry}
                             onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
                           />
                         )}

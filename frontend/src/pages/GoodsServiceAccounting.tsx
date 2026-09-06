@@ -14,6 +14,7 @@ import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 import { AccountingGroup } from "./AccountingGroups";
 import { WarehouseGroup } from "./WarehouseGroups";
+import { PurchaseType } from "./PurchaseTypes";
 
 const ACCOUNT_TYPE_FA: Record<string, string> = {
   SALES_VAT: "ارزش افزوده فروش",
@@ -102,7 +103,7 @@ interface GoodsServiceAccountingSetting {
   account: AccountRow;
   salesTypeRef: number | null;
   warehouseDocType: string | null;
-  purchaseTypeRef: number | null;
+  purchaseTypeId: number | null;
   hasTransactions: boolean;
 }
 
@@ -171,7 +172,7 @@ const DEFAULT_SETTING_FORM = {
   accountId: "",
   salesTypeRef: "",
   warehouseDocType: "",
-  purchaseTypeRef: "",
+  purchaseTypeId: "",
 };
 
 function SettingForm({ editId }: { editId?: number }) {
@@ -180,6 +181,7 @@ function SettingForm({ editId }: { editId?: number }) {
   const cacheKey = `form:${location.pathname}:form`;
   const [accountingGroups, setAccountingGroups] = useState<AccountingGroup[]>([]);
   const [warehouseGroups, setWarehouseGroups] = useState<WarehouseGroup[]>([]);
+  const [purchaseTypes, setPurchaseTypes] = useState<PurchaseType[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [hasTransactions, setHasTransactions] = useState(false);
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_SETTING_FORM);
@@ -190,6 +192,7 @@ function SettingForm({ editId }: { editId?: number }) {
   useEffect(() => {
     api.get("/accounting-groups").then((g: AccountingGroup[]) => setAccountingGroups(g.filter((x) => x.isActive)));
     api.get("/warehouse-groups").then((g: WarehouseGroup[]) => setWarehouseGroups(g.filter((x) => x.isActive)));
+    api.get("/purchase-types").then(setPurchaseTypes);
     api.get("/accounts").then(setAccounts);
   }, []);
 
@@ -215,7 +218,7 @@ function SettingForm({ editId }: { editId?: number }) {
           accountId: String(found.accountId),
           salesTypeRef: found.salesTypeRef != null ? String(found.salesTypeRef) : "",
           warehouseDocType: found.warehouseDocType || "",
-          purchaseTypeRef: found.purchaseTypeRef != null ? String(found.purchaseTypeRef) : "",
+          purchaseTypeId: found.purchaseTypeId != null ? String(found.purchaseTypeId) : "",
         });
       }
       setLoaded(true);
@@ -254,7 +257,7 @@ function SettingForm({ editId }: { editId?: number }) {
       accountId: Number(form.accountId),
       salesTypeRef: showSalesType && form.salesTypeRef ? Number(form.salesTypeRef) : null,
       warehouseDocType: showWarehouseDocType && form.warehouseDocType ? form.warehouseDocType : null,
-      purchaseTypeRef: showPurchaseType && form.purchaseTypeRef ? Number(form.purchaseTypeRef) : null,
+      purchaseTypeId: showPurchaseType && form.purchaseTypeId ? Number(form.purchaseTypeId) : null,
     };
     try {
       if (editId) {
@@ -288,7 +291,7 @@ function SettingForm({ editId }: { editId?: number }) {
       description={
         hasTransactions
           ? "این تنظیم برای اسناد صادرشده استفاده شده است و قابل ویرایش نیست"
-          : "فیلدهای «نوع فروش» و «نوع خرید» تا پیاده‌سازی ماژولهای فروش/خرید به‌صورت کد عددی موقت ثبت می‌شوند"
+          : "فیلد «نوع فروش» تا پیاده‌سازی ماژول فروش به‌صورت کد عددی موقت ثبت می‌شود"
       }
       formId="goods-service-accounting-form"
       closePath="/goods-service-accounting"
@@ -370,14 +373,15 @@ function SettingForm({ editId }: { editId?: number }) {
             )}
             {showPurchaseType && (
               <>
-                <label>نوع خرید <FieldHint label="نوع خرید" text="موقت — تا پیاده‌سازی ماژول خرید، این فیلد یک کد عددی ساده است" /></label>
-                <input
-                  type="number"
-                  dir="ltr"
+                <label>نوع خرید<RequiredMark /></label>
+                <select
+                  value={form.purchaseTypeId}
                   disabled={hasTransactions}
-                  value={form.purchaseTypeRef}
-                  onChange={(e) => setForm({ ...form, purchaseTypeRef: e.target.value })}
-                />
+                  onChange={(e) => setForm({ ...form, purchaseTypeId: e.target.value })}
+                >
+                  <option value="">انتخاب کنید</option>
+                  {purchaseTypes.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+                </select>
               </>
             )}
           </div>

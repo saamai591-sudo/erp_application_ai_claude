@@ -8,12 +8,14 @@ import { RecordPickerField } from "../components/RecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { useAuth } from "../lib/AuthContext";
 import { api, ApiError } from "../lib/api";
+import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 
 type Status = "DRAFT" | "APPROVED" | "REJECTED";
 
@@ -119,7 +121,7 @@ function PriceInquiryList() {
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/price-inquiries/${r.id}/edit`)}
+        edit={{ path: (r) => `/price-inquiries/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -144,18 +146,21 @@ function PriceInquiryForm({ editId }: { editId?: number }) {
   const [meta, setMeta] = usePersistedState<{ number: number; status: Status } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const { saved, flash } = useSavedFlash();
 
   useEffect(() => {
     async function init() {
-      const [p, c, sv] = await Promise.all([
+      const [p, c, sv, fp] = await Promise.all([
         api.get(`/purchase-plannings/pickable?purpose=price-inquiry&userId=${user?.id || ""}`),
         api.get("/currencies"),
         api.get("/goods-items?kind=SERVICE"),
+        fetchSelectedFiscalPeriod(),
       ]);
       setPlannings(p);
       setCurrencies(c);
       setServices(sv);
+      setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
         setLoaded(true);
@@ -187,7 +192,7 @@ function PriceInquiryForm({ editId }: { editId?: number }) {
         );
         setCostRows(d.otherCostLines.map((l) => ({ serviceId: String(l.serviceId), amount: String(l.amount), description: l.description || "" })));
       } else {
-        setHeader({ date: "", purchasePlanningId: "", supplierId: "", validUntil: "", currencyId: "", paymentDeadline: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), purchasePlanningId: "", supplierId: "", validUntil: "", currencyId: "", paymentDeadline: "", description: "" });
         setItemRows([]);
         setCostRows([]);
         setMeta(null);
@@ -253,6 +258,8 @@ function PriceInquiryForm({ editId }: { editId?: number }) {
     if (!header.date || !header.purchasePlanningId || !header.supplierId || !header.validUntil || !header.currencyId) {
       return setError("تاریخ، برنامه ریزی خرید، تامین کننده، تاریخ اعتبار و ارز الزامی است");
     }
+    const dateErr = validateDocumentDate(header.date, fiscalPeriod);
+    if (dateErr) return setError(dateErr);
     if (itemRows.length === 0) return setError("ابتدا دکمه «لود اطلاعات» را بزنید");
     for (const [i, r] of itemRows.entries()) {
       if (!(Number(r.unitPrice) > 0)) return setError(`فی ردیف ${i + 1} باید عددی مثبت باشد`);
@@ -337,11 +344,11 @@ function PriceInquiryForm({ editId }: { editId?: number }) {
               <div><span className="badge">{STATUS_FA[status]}</span></div>
             </div>
             <div className="form-field">
-              <label>تاریخ</label>
+              <label>تاریخ<RequiredMark /></label>
               <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
             </div>
             <div className="form-field">
-              <label>برنامه ریزی خرید</label>
+              <label>برنامه ریزی خرید<RequiredMark /></label>
               <RecordPickerField
                 title="انتخاب برنامه ریزی خرید"
                 disabled={isDataLoaded}
@@ -358,7 +365,7 @@ function PriceInquiryForm({ editId }: { editId?: number }) {
               />
             </div>
             <div className="form-field">
-              <label>تامین کننده</label>
+              <label>تامین کننده<RequiredMark /></label>
               <RecordPickerField
                 title="انتخاب تامین کننده"
                 disabled={isDataLoaded || !header.purchasePlanningId}
@@ -375,11 +382,11 @@ function PriceInquiryForm({ editId }: { editId?: number }) {
               />
             </div>
             <div className="form-field">
-              <label>تاریخ اعتبار</label>
+              <label>تاریخ اعتبار<RequiredMark /></label>
               <JalaliDatePicker value={header.validUntil} onChange={(v) => setHeader({ ...header, validUntil: v })} />
             </div>
             <div className="form-field">
-              <label>ارز</label>
+              <label>ارز<RequiredMark /></label>
               <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value })}>
                 <option value="">انتخاب کنید</option>
                 {currencies.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}

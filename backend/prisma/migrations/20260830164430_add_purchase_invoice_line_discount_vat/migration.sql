@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "PurchaseInvoiceLine" ADD COLUMN     "discount" DECIMAL(36,10) NOT NULL DEFAULT 0,
+ADD COLUMN     "vatAmount" DECIMAL(36,10) NOT NULL DEFAULT 0;

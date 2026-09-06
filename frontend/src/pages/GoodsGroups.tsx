@@ -8,6 +8,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { RefreshButton } from "../components/RefreshButton";
 import { InfoHint } from "../components/InfoHint";
 import { toFaDigits } from "../lib/formatAmount";
+import { RequiredMark } from "../components/RequiredMark";
 import { useTabs } from "../lib/TabsContext";
 import { GoodsGroupLevel } from "./GoodsGroupLevels";
 import { GoodsAttribute } from "./GoodsAttributes";
@@ -317,11 +318,11 @@ function GroupForm({ editId, parentId }: { editId?: number; parentId?: number })
               <input disabled value={currentLevel.title} title="سطح بر اساس جایگاه این گروه در درخت به‌صورت خودکار تعیین می‌شود و قابل تغییر نیست" />
             </div>
             <div className="form-field">
-              <label>کد (حداکثر {toFaDigits(String(currentLevel.codeLength))} کاراکتر)</label>
+              <label>کد (حداکثر {toFaDigits(String(currentLevel.codeLength))} کاراکتر)<RequiredMark /></label>
               <input dir="ltr" maxLength={currentLevel.codeLength} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
             </div>
             <div className="form-field">
-              <label>عنوان</label>
+              <label>عنوان<RequiredMark /></label>
               <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
             </div>
             <div className="form-field">
@@ -347,7 +348,7 @@ function GroupForm({ editId, parentId }: { editId?: number; parentId?: number })
               </label>
             </div>
             <div className={`form-field ${isLastBranch ? "" : "form-field-hidden"}`}>
-              <label>طول کد کالاهای زیرمجموعه (بین ۱ تا ۱۵)</label>
+              <label>طول کد کالاهای زیرمجموعه (بین ۱ تا ۱۵)<RequiredMark /></label>
               <input
                 type="number"
                 min={1}

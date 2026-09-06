@@ -8,11 +8,13 @@ import { RecordPickerField } from "../components/RecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
+import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 
 // «پیش‌فاکتور» — بالاترین سند زنجیره فروش (پیش‌فاکتور > سفارش فروش > حواله فروش > فاکتور فروش)؛ این
 // ماژول هیچ مستند تحلیل اختصاصی در پروژه ندارد (رجوع کنید به یادداشت بالای schema.prisma و
@@ -107,7 +109,7 @@ function SalesQuoteList() {
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/sales-quotes/${r.id}/edit`)}
+        edit={{ path: (r) => `/sales-quotes/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -132,18 +134,21 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
   const [meta, setMeta] = usePersistedState<{ number: number; status: Status } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const { saved, flash } = useSavedFlash();
 
   useEffect(() => {
     async function init() {
-      const [cu, c, g] = await Promise.all([
+      const [cu, c, g, fp] = await Promise.all([
         api.get("/customers"),
         api.get("/currencies"),
         api.get("/goods-items?kind=GOODS&docDirection=OUTBOUND&docType=فروش"),
+        fetchSelectedFiscalPeriod(),
       ]);
       setCustomers((cu as any[]).filter((x) => x.isActive));
       setCurrencies(c);
       setGoodsItems(g);
+      setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
         setLoaded(true);
@@ -167,7 +172,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
           }))
         );
       } else {
-        setHeader({ date: "", customerId: "", currencyId: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), customerId: "", currencyId: "", description: "" });
         setRows([emptyRow()]);
         setMeta(null);
       }
@@ -238,6 +243,8 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
     if (!header.date || !header.customerId || !header.currencyId) return setError("تاریخ، مشتری و ارز الزامی است");
+    const dateErr = validateDocumentDate(header.date, fiscalPeriod);
+    if (dateErr) return setError(dateErr);
     const body = buildBody();
     if (body.lines.length === 0) return setError("پیش‌فاکتور باید حداقل یک ردیف کالا داشته باشد");
     for (const [i, l] of body.lines.entries()) {
@@ -311,11 +318,11 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
               <div><span className="badge">{STATUS_FA[status]}</span></div>
             </div>
             <div className="form-field">
-              <label>تاریخ</label>
+              <label>تاریخ<RequiredMark /></label>
               <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
             </div>
             <div className="form-field">
-              <label>مشتری</label>
+              <label>مشتری<RequiredMark /></label>
               <RecordPickerField
                 title="انتخاب مشتری"
                 displayValue={(() => {
@@ -331,7 +338,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
               />
             </div>
             <div className="form-field">
-              <label>ارز</label>
+              <label>ارز<RequiredMark /></label>
               <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value })}>
                 <option value="">انتخاب کنید</option>
                 {currencies.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}

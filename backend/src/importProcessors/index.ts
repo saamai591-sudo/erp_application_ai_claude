@@ -6,6 +6,14 @@ import { issueJournalEntry, IssueLineInput } from "../services/journalEntryServi
 import { resolveDateString } from "../utils/jalaliDate";
 import { toEnglishDigits } from "../utils/digits";
 import { KIND_FA, computePrefixes, resolveSerial, AttrSelection } from "../routes/goodsItems";
+import { createInitialInventory, updateInitialInventoryAccounting } from "../routes/initialInventory";
+import { createProductionReceipt } from "../routes/productionReceipts";
+import { createWarehouseReceipt } from "../routes/warehouseReceipts";
+import { createProductionConsumption } from "../routes/productionConsumptions";
+import { createSalesDelivery } from "../routes/salesDeliveries";
+import { createCenterConsumption } from "../routes/centerConsumptions";
+import { createWarehouseAdjustment } from "../routes/warehouseAdjustments";
+import { createInventoryCountingShortage } from "../routes/inventoryCountingShortages";
 
 const DETAIL_TYPE_PARTY = 1;
 const DETAIL_TYPE_COST_CENTER = 2;
@@ -17,6 +25,7 @@ const NATURE_DETAIL_FA_REVERSE: Record<string, string> = { "دارایی": "ASSE
 const BALANCE_NATURE_FA_REVERSE: Record<string, string> = { "بدهکار": "DEBIT", "بستانکار": "CREDIT" };
 const LEGAL_TYPE_FA_REVERSE: Record<string, string> = { "حقوقی": "LEGAL", "مشارکت خاص": "SPECIAL_PARTNERSHIP", "بانک/موسسه مالی": "BANK" };
 const COST_CENTER_TYPE_FA_REVERSE: Record<string, string> = { "عملیاتی/تولیدی": "OPERATIONAL", "پشتیبانی": "SUPPORT", "خدماتی": "SERVICE", "اداری و تشکیلاتی": "ADMIN" };
+const TRACKING_METHOD_FA_REVERSE: Record<string, string> = { "بدون ردیابی": "NONE", "بچ": "BATCH", "سریال": "SERIAL" };
 const GOODS_TYPE_FA_REVERSE: Record<string, string> = {
   "مواد اولیه": "RAW_MATERIAL",
   "نیمه‌ساخته": "SEMI_FINISHED",
@@ -28,6 +37,197 @@ const GOODS_TYPE_FA_REVERSE: Record<string, string> = {
   "دارایی ثابت": "FIXED_ASSET",
   "کالای تجاری": "TRADE_GOODS",
 };
+
+// وقتی یک کالای سریال‌دار مثلاً ۱۰۰۰ سریال دارد، هر سریال یک ردیف اکسل جداست (نمی‌شود ۱۰۰۰ سریال را در
+// یک سلول نوشت)، اما تبدیل بی‌قید‌وشرط هر ردیف به یک سطر سند جداگانه یعنی سند نهایی ۱۰۰۰ سطر می‌شود —
+// روی گرید/محاسبه‌ی موجودی/اسنپ‌شات تایید انبار و... کند است. این تابع ردیف‌های خام (هرکدام حداکثر یک
+// بچ/سریال) را بر اساس (کالا+واحد+محل‌فیزیکی) با هم ادغام می‌کند: مقدار جمع می‌شود، سریال‌ها/بچ‌ها روی
+// همان یک سطر تجمیع می‌شوند (بچ‌های تکراری هم جمع می‌شوند، چون InventoryLineBatch یکتای lineId+batchId
+// است)، و چون یک سطر فقط یک «فی» دارد، فی نهایی میانگین موزون (بر مبنای مقدار) ردیف‌های همان گروه است —
+// نه انتخاب یکی و نه رد کردن ستون فی، چون میانگین موزون همان مقدار ریاضی درستی است که با ادغام از دست
+// نمی‌رود. محل‌فیزیکی و واحد عمداً بخشی از کلید گروه‌بندی‌اند (نه فقط کالا) چون یک سطر فقط یک مقدار برای
+// هرکدام دارد و ادغام مقادیر متفاوتِ این دو، برخلاف فی، از نظر معنایی نادرست است (نمی‌شود «میانگین» دو
+// محل فیزیکی گرفت).
+function mergeLinesByItem(rawLines: any[]): any[] {
+  const groups = new Map<string, any[]>();
+  const order: string[] = [];
+  for (const line of rawLines) {
+    const key = `${line.goodsItemId}__${line.unitId}__${line.physicalLocation || ""}`;
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      order.push(key);
+    }
+    groups.get(key)!.push(line);
+  }
+  return order.map((key) => {
+    const rows = groups.get(key)!;
+    const first = rows[0];
+    const quantity = rows.reduce((s, r) => s + r.quantity, 0);
+    const costWeightSum = rows.reduce((s, r) => s + r.quantity * r.unitCost, 0);
+    const unitCost = quantity > 0 ? costWeightSum / quantity : 0;
+    const serialIds = rows.flatMap((r) => r.serialIds as number[]);
+    const batchQuantityByBatchId = new Map<number, number>();
+    for (const r of rows) {
+      for (const a of r.batchAllocations as { batchId: number; quantity: number }[]) {
+        batchQuantityByBatchId.set(a.batchId, (batchQuantityByBatchId.get(a.batchId) || 0) + a.quantity);
+      }
+    }
+    return {
+      goodsItemId: first.goodsItemId,
+      unitId: first.unitId,
+      quantity,
+      unitCost,
+      description: rows.find((r) => r.description)?.description ?? null,
+      serialIds,
+      batchAllocations: Array.from(batchQuantityByBatchId.entries()).map(([batchId, batchQuantity]) => ({ batchId, quantity: batchQuantity })),
+      physicalLocation: first.physicalLocation,
+    };
+  });
+}
+
+// «موجودی اول دوره» و «رسید تولید» ساختار ردیف اکسل یکسانی دارند (کد انبار/تاریخ/شرح در سطح سند —
+// تکرارشده روی هر ردیف، دقیقاً هم‌الگوی groupByKey ترکیبی «حساب+تاریخ» در journal-entry — به‌علاوه
+// کد کالا/واحد/مقدار/فی/بچ/سریال/تاریخ‌انقضا/محل‌فیزیکی در سطح ردیف)، پس یک تابع مشترک هر دو گروه را
+// به بدنه‌ی قابل‌قبول createInitialInventory/createProductionReceipt تبدیل می‌کند.
+// groupByItem فعلاً فقط برای «موجودی اول دوره» روشن است (طبق تصمیم صریح کاربر: اول همین‌جا تایید شود،
+// بعد به «رسید تولید» و بقیه هم تعمیم داده می‌شود) — تا آن زمان رسید تولید با رفتار قبلی (هر ردیف اکسل =
+// یک سطر سند) دست‌نخورده می‌ماند.
+// موقت — مهاجرت داده‌ی «موجودی اول دوره» از سیستم قبلی: چون کد کالا در سیستم جدید عوض شده، اکسل خروجی
+// سیستم قبلی دیگر با fullCode فعلی مطابقت ندارد. ستون «کد کالا (سیستم قدیم)» به‌جای «کد کالا» پر می‌شود
+// و روی technicalSpec (که موقتاً با کد قدیم پر شده) جستجو می‌شود، نه fullCode. دقیقاً یکی از این دو ستون
+// باید پر باشد تا ابهامی نباشد (اگر هر دو خالی/پر باشند خطا می‌دهیم) — چون بعد از تغییر کلی کدها، ممکن
+// است کد قدیمِ یک کالا با fullCode فعلیِ یک کالای کاملاً متفاوت یکی باشد؛ جستجوی کورکورانه (اول fullCode
+// بعد technicalSpec) می‌توانست بی‌سروصدا کالای اشتباه را برگرداند.
+async function resolveGoodsItemByCode(row: Record<string, string>, idx: number): Promise<{ item: any } | { error: string }> {
+  const newCode = toEnglishDigits(row.goodsItemCode || "").trim();
+  const oldCode = toEnglishDigits(row.goodsItemOldCode || "").trim();
+  if (newCode && oldCode) return { error: `ردیف ${idx + 1}: فقط یکی از «کد کالا» یا «کد کالا (سیستم قدیم)» باید پر باشد` };
+  if (!newCode && !oldCode) return { error: `ردیف ${idx + 1}: «کد کالا» یا «کد کالا (سیستم قدیم)» باید پر باشد` };
+  const item = newCode
+    ? await prisma.goodsItem.findFirst({ where: { fullCode: newCode } })
+    : await prisma.goodsItem.findFirst({ where: { technicalSpec: oldCode } });
+  if (!item) return { error: `ردیف ${idx + 1}: کالا با کد «${newCode || oldCode}» یافت نشد` };
+  return { item };
+}
+
+async function resolveWarehouseDocGroup(
+  groupRows: Record<string, string>[],
+  opts: { groupByItem?: boolean; requireParty?: boolean; requireCostCenter?: boolean; requireNumber?: boolean } = {}
+): Promise<
+  | {
+      warehouseId: number;
+      date: string;
+      description?: string;
+      partyId?: number;
+      costCenterId?: number;
+      /** detailCode طرف مقابل/مرکز هزینه (هرکدام که resolve شده) — برای isDuplicateInventoryDocGroup، بدون نیاز به fetch دوباره */
+      detailCode?: string;
+      number?: number;
+      lines: any[];
+    }
+  | { error: string }
+> {
+  const first = groupRows[0];
+  const warehouseCode = toEnglishDigits(first.warehouseCode || "").trim();
+  const warehouse = await prisma.warehouse.findFirst({ where: { code: Number(warehouseCode) } });
+  if (!warehouse) return { error: `انبار با کد «${first.warehouseCode}» یافت نشد` };
+
+  // فقط برای «رسید انبار خرید» و «رسید تولید» — طبق تصمیم صریح کاربر، هنگام مهاجرت از سیستم قبلی، شماره
+  // سند نباید خودکار بازتولید شود؛ همان مقدار ستون «شماره سند» عیناً حفظ می‌شود (نگاه کنید به
+  // createWarehouseReceipt/createProductionReceipt برای بررسی تکراری‌نبودنش). چون همین شماره برای
+  // گروه‌بندی ردیف‌ها هم استفاده می‌شود (groupByKey)، اگر این ستون در یک ردیف خالی بماند، «required:true»
+  // در قالب اکسل فقط وجود خودِ ستون را چک می‌کند نه خالی‌نبودن هر سلول — پس بدون این بررسی صریح، چند
+  // ردیف با شماره‌ی خالی که تصادفاً انبار+تاریخ یکسان دارند، اشتباهاً زیر یک سند ادغام می‌شدند. برای
+  // initial-inventory/production-receiptِ قدیمی (که requireNumber نمی‌فرستند) این فیلد اصلاً خوانده
+  // نمی‌شود، پس بی‌تاثیر می‌ماند.
+  const rawNumber = toEnglishDigits(first.number || "").trim();
+  if (opts.requireNumber && !rawNumber) return { error: "شماره سند الزامی است" };
+  const number = rawNumber ? Number(rawNumber) : undefined;
+
+  // فقط برای «رسید انبار خرید» — طرف مقابل (خودِ Import عمداً فقط بدون‌مبنا را پوشش می‌دهد، طبق تصمیم
+  // صریح کاربر، نه رسیدهای متصل به سفارش‌خرید/مجوزتحویل/درخواست‌تامین، که هر ردیفشان باید به یک سطر
+  // مبنای مشخص و باقیمانده‌ی آن گره بخورد — کاری که در قالب اکسل به‌سختی و مستعد خطا قابل انجام است).
+  let partyId: number | undefined;
+  let detailCode: string | undefined;
+  if (opts.requireParty) {
+    const partyDetailCode = toEnglishDigits(first.partyDetailCode || "").trim();
+    if (!partyDetailCode) return { error: "کد تفصیل طرف مقابل الزامی است" };
+    const party = await prisma.party.findFirst({ where: { detailCode: partyDetailCode } });
+    if (!party) return { error: `طرف مقابل با کد تفصیل «${first.partyDetailCode}» یافت نشد` };
+    partyId = party.id;
+    detailCode = party.detailCode;
+  }
+
+  // فقط برای «مصرف تولید» — مرکز هزینه (دقیقاً هم‌الگوی طرف مقابل در «رسید انبار خرید»)
+  let costCenterId: number | undefined;
+  if (opts.requireCostCenter) {
+    const costCenterDetailCode = toEnglishDigits(first.costCenterDetailCode || "").trim();
+    if (!costCenterDetailCode) return { error: "کد تفصیل مرکز هزینه الزامی است" };
+    const costCenter = await prisma.costCenter.findFirst({ where: { detailCode: costCenterDetailCode } });
+    if (!costCenter) return { error: `مرکز هزینه با کد تفصیل «${first.costCenterDetailCode}» یافت نشد` };
+    costCenterId = costCenter.id;
+    detailCode = costCenter.detailCode;
+  }
+
+  const lines: any[] = [];
+  for (const [idx, row] of groupRows.entries()) {
+    const resolvedItem = await resolveGoodsItemByCode(row, idx);
+    if ("error" in resolvedItem) return { error: resolvedItem.error };
+    const item = resolvedItem.item;
+
+    let unitId = item.mainUnitId;
+    if (row.unitTitle && row.unitTitle.trim()) {
+      const unit = await prisma.unitOfMeasure.findFirst({ where: { title: row.unitTitle.trim() } });
+      if (!unit) return { error: `ردیف ${idx + 1}: واحد سنجش «${row.unitTitle}» یافت نشد` };
+      unitId = unit.id;
+    }
+
+    // برخلاف قبل، بچ/سریال دیگر با متن ردیف find-or-create نمی‌شوند (طبق «اصلاح مدل رهگیری کالا»)؛
+    // چون نمی‌شود شناسه‌ی خام دیتابیس را در اکسل تایپ کرد، اینجا فقط با (کالا، شماره) در Master
+    // از‌قبل‌موجود جستجو می‌شود و اگر نبود خطا می‌دهد.
+    let batchId: number | null = null;
+    if (row.batchNumber && row.batchNumber.trim()) {
+      const batch = await prisma.batch.findUnique({ where: { goodsItemId_batchNumber: { goodsItemId: item.id, batchNumber: row.batchNumber.trim() } } });
+      if (!batch) return { error: `ردیف ${idx + 1}: بچ «${row.batchNumber}» برای این کالا یافت نشد` };
+      batchId = batch.id;
+    }
+    let serialId: number | null = null;
+    if (row.serialNumber && row.serialNumber.trim()) {
+      const serial = await prisma.serial.findUnique({ where: { goodsItemId_serialNumber: { goodsItemId: item.id, serialNumber: row.serialNumber.trim() } } });
+      if (!serial) return { error: `ردیف ${idx + 1}: سریال «${row.serialNumber}» برای این کالا یافت نشد` };
+      serialId = serial.id;
+    }
+
+    const quantity = Number(toEnglishDigits(row.quantity || "")) || 0;
+    // «رسید تولید» هنوز ستون «فی» مستقیم دارد (پابرجا برای سازگاری با قبل)؛ اما «موجودی اول دوره» طبق
+    // تصمیم کاربر دیگر ستون فی ندارد و به‌جایش (وقتی ستون مبلغ در قالب باشد) مبلغ می‌گیرد و فی را از
+    // مبلغ÷مقدار می‌سازد — دقیقاً هم‌الگوی initial-inventory-cost. اگر مبلغ ستون این ردیف خالی/غایب
+    // باشد (قالب اصلی انبارداری، بدون ستون مبلغ)، به فی مستقیم (اگر بود) برمی‌گردد.
+    const rowAmount = row.amount ? Number(toEnglishDigits(row.amount)) : null;
+    const unitCost = rowAmount != null && quantity > 0 ? rowAmount / quantity : Number(toEnglishDigits(row.unitCost || "")) || 0;
+    lines.push({
+      goodsItemId: item.id,
+      unitId,
+      quantity,
+      unitCost,
+      description: row.lineDescription || null,
+      serialIds: serialId ? [serialId] : [],
+      batchAllocations: batchId ? [{ batchId, quantity }] : [],
+      physicalLocation: row.physicalLocation || null,
+    });
+  }
+
+  return {
+    warehouseId: warehouse.id,
+    date: resolveDateString(first.date),
+    description: first.description || undefined,
+    partyId,
+    costCenterId,
+    detailCode,
+    number,
+    lines: opts.groupByItem ? mergeLinesByItem(lines) : lines,
+  };
+}
 
 export function registerAllImportProcessors() {
   registerImportEntity("party", {
@@ -480,11 +680,7 @@ export function registerAllImportProcessors() {
             barcode: row.barcode?.trim() || null,
             reorderControl,
             reorderPoint,
-            hasSerialNumber: false,
-            hasExpiryDate: false,
-            isSerialTracked: kind === "GOODS" && row.isSerialTracked === "بله",
-            isExpiryTracked: false,
-            isBatchTracked: kind === "GOODS" && row.isBatchTracked === "بله",
+            trackingMethod: kind === "GOODS" ? (TRACKING_METHOD_FA_REVERSE[row.trackingMethod] as any) || "NONE" : "NONE",
             isLocationTracked: kind === "GOODS" && row.isLocationTracked === "بله",
             accountingGroupId: accountingGroup.id,
             isSpecial,
@@ -554,4 +750,311 @@ export function registerAllImportProcessors() {
       }
     },
   });
+
+  registerImportEntity("initial-inventory", {
+    // کلید گروه‌بندی «کد انبار + شماره گروه سند + تاریخ» است. توجه: چون هر انبار در هر دوره مالی حداکثر
+    // یک سند موجودی اول دوره می‌تواند داشته باشد (نگاه کنید به بررسی «dup» در createInitialInventory)،
+    // صرفاً کد انبار+تاریخ همیشه برای گروه‌بندی کافی بوده؛ «شماره گروه سند» فقط برای هم‌الگو بودن با
+    // journal-entry و مرجع/کنترل صریح‌تر کاربر روی گروه‌بندی ردیف‌ها اضافه شده، نه برای رفع ابهام گروه‌بندی.
+    groupByKey: (row) => `${row.warehouseCode || ""}__${row.documentGroup || ""}__${row.date || ""}`,
+    group: async (groupRows) => {
+      try {
+        const resolved = await resolveWarehouseDocGroup(groupRows, { groupByItem: true });
+        if ("error" in resolved) return { ok: false, error: resolved.error };
+        await createInitialInventory(resolved as any);
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت سند" };
+      }
+    },
+  });
+
+  // «حسابداری انبار»: برخلاف حالت بالا، اینجا سند جدید ساخته نمی‌شود — فقط فی/مبلغ ردیف‌های یک سند
+  // «موجودی اول دوره» از قبل موجود (که با کد انبار+تاریخ پیدا می‌شود) به‌روزرسانی می‌شود، دقیقاً با همان
+  // منطق فرم دستی حسابداری انبار (updateInitialInventoryAccounting در initialInventory.ts).
+  registerImportEntity("initial-inventory-cost", {
+    // «شماره گروه سند» این‌جا برای پیدا کردن سند نقشی ندارد (هر انبار در هر دوره مالی حداکثر یک سند
+    // موجودی اول دوره دارد، پس کد انبار+تاریخ به‌تنهایی کافی است)، فقط برای هم‌الگو بودن ستون‌های قالب
+    // اکسل با «موجودی اول دوره» اضافه شده — تا کاربر بتواند ردیف‌های یک رویداد اصلاح فی را از رویداد بعدی
+    // (مثلاً هفته‌ی بعد، هنوز همان انبار/تاریخ) در همان فایل جدا نگه دارد؛ هر گروه میانگین‌موزون خودش را
+    // جدا محاسبه می‌کند، پس اگر دو گروه به یک سطر اشاره کنند، گروه پردازش‌شده‌ی بعدی همان last-write است.
+    groupByKey: (row) => `${row.warehouseCode || ""}__${row.documentGroup || ""}__${row.date || ""}`,
+    group: async (groupRows) => {
+      try {
+        const first = groupRows[0];
+        const warehouseCode = toEnglishDigits(first.warehouseCode || "").trim();
+        const warehouse = await prisma.warehouse.findFirst({ where: { code: Number(warehouseCode) } });
+        if (!warehouse) return { ok: false, error: `انبار با کد «${first.warehouseCode}» یافت نشد` };
+
+        const date = resolveDateString(first.date);
+        const docs = await prisma.inventoryDocument.findMany({
+          where: { documentType: "INITIAL_INVENTORY", warehouseId: warehouse.id, date: new Date(date) },
+          include: { lines: { include: { serials: true, batches: true } } },
+        });
+        if (docs.length === 0) return { ok: false, error: "سند موجودی اول دوره‌ای با این کد انبار و تاریخ یافت نشد" };
+        if (docs.length > 1) return { ok: false, error: "بیش از یک سند موجودی اول دوره با این کد انبار و تاریخ موجود است؛ امکان تشخیص خودکار سند وجود ندارد" };
+        const doc = docs[0];
+
+        // از وقتی «موجودی اول دوره» ردیف‌های اکسل را بر اساس کالا ادغام می‌کند (mergeLinesByItem)، یک
+        // سطر سند می‌تواند چند بچ/سریال داشته باشد؛ پس این‌جا هم دیگر با اندیس ۰ (l.batches[0]) تطبیق
+        // داده نمی‌شود (فقط اولین بچ/سریال را می‌دید)، بلکه با .some در کل آرایه‌ی بچ‌ها/سریال‌های همان
+        // سطر جستجو می‌شود. همچنین چون «فی» ملک کل سطر است نه یک بچ/سریال خاص، وقتی چند ردیف اکسل به یک
+        // سطر ادغام‌شده اشاره کنند (چند بچ/سریال از یک سطر)، مبلغ/مقدار آن‌ها تجمیع و در پایان یک فیِ
+        // میانگین‌موزون برای کل سطر محاسبه می‌شود — دقیقاً هم‌الگوی mergeLinesByItem، نه last-write-wins.
+        const accByLineId = new Map<number, { qty: number; amount: number }>();
+        for (const [idx, row] of groupRows.entries()) {
+          const resolvedItem = await resolveGoodsItemByCode(row, idx);
+          if ("error" in resolvedItem) return { ok: false, error: resolvedItem.error };
+          const item = resolvedItem.item;
+
+          // برخلاف resolveWarehouseDocGroup، اینجا نبودِ بچ/سریال متناظر خطا نیست (ردیف ممکن است اصلا
+          // بچ/سریال نداشته باشد)؛ فقط اگر خودِ ستون پر شده و بچ/سریالی با آن پیدا نشود خطا می‌دهیم.
+          let expectedBatchId: number | null = null;
+          if (row.batchNumber && row.batchNumber.trim()) {
+            const batch = await prisma.batch.findUnique({ where: { goodsItemId_batchNumber: { goodsItemId: item.id, batchNumber: row.batchNumber.trim() } } });
+            if (!batch) return { ok: false, error: `ردیف ${idx + 1}: بچ «${row.batchNumber}» برای این کالا یافت نشد` };
+            expectedBatchId = batch.id;
+          }
+          let expectedSerialId: number | null = null;
+          if (row.serialNumber && row.serialNumber.trim()) {
+            const serial = await prisma.serial.findUnique({ where: { goodsItemId_serialNumber: { goodsItemId: item.id, serialNumber: row.serialNumber.trim() } } });
+            if (!serial) return { ok: false, error: `ردیف ${idx + 1}: سریال «${row.serialNumber}» برای این کالا یافت نشد` };
+            expectedSerialId = serial.id;
+          }
+
+          const line = doc.lines.find(
+            (l: any) =>
+              l.goodsItemId === item.id &&
+              (expectedBatchId === null || l.batches.some((b: any) => b.batchId === expectedBatchId)) &&
+              (expectedSerialId === null || l.serials.some((s: any) => s.serialId === expectedSerialId))
+          );
+          if (!line) return { ok: false, error: `ردیف ${idx + 1}: ردیفی با این کالا/سریال/بچ در سند یافت نشد` };
+
+          // مقدار مرجع برای اعتبارسنجی/محاسبه، مقدار همان بچ/سریال خاص است (نه کل مقدار سطر ادغام‌شده)؛
+          // سریال همیشه مقدار ۱ دارد، بچ مقدار اختصاصی خودش را در همان سطر دارد.
+          let allocationQuantity: number;
+          if (expectedBatchId !== null) {
+            allocationQuantity = Number(line.batches.find((b: any) => b.batchId === expectedBatchId)!.quantity);
+          } else if (expectedSerialId !== null) {
+            allocationQuantity = 1;
+          } else {
+            allocationQuantity = Number(line.quantity);
+          }
+
+          const enteredQty = row.quantity ? Number(toEnglishDigits(row.quantity)) : null;
+          if (enteredQty != null && Math.abs(enteredQty - allocationQuantity) > 1e-9) {
+            return { ok: false, error: `ردیف ${idx + 1}: مقدار وارد شده (${row.quantity}) با مقدار این بچ/سریال در سند (${allocationQuantity}) مطابقت ندارد` };
+          }
+
+          // ستون «فی» عمداً در این ورودی وجود ندارد (طبق تصمیم کاربر) — دقیقاً مثل فرم دستی «حسابداری
+          // انبار» که کاربر فقط مبلغ را وارد می‌کند و فی از تقسیم مبلغ بر مقدار به‌دست می‌آید
+          // (recomputeUnitCostFromAmount در InitialInventory.tsx)، نه برعکس.
+          const rowAmount = Number(toEnglishDigits(row.amount || "")) || 0;
+
+          const acc = accByLineId.get(line.id) || { qty: 0, amount: 0 };
+          acc.qty += allocationQuantity;
+          acc.amount += rowAmount;
+          accByLineId.set(line.id, acc);
+        }
+
+        const updates = Array.from(accByLineId.entries()).map(([id, acc]) => ({
+          id,
+          unitCost: acc.qty > 0 ? acc.amount / acc.qty : 0,
+        }));
+        await updateInitialInventoryAccounting(doc.id, updates);
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت فی/مبلغ" };
+      }
+    },
+  });
+
+  registerImportEntity("production-receipt", {
+    // طبق تصمیم صریح کاربر (هم‌الگوی «رسید انبار خرید»): «شماره سند» هم برای گروه‌بندی ردیف‌ها و هم
+    // به‌عنوان شماره‌ی نهایی سند استفاده می‌شود — ستون جدای «شماره گروه» لازم نیست. طبق تصمیم صریح کاربر،
+    // این سند هم یک «مرکز هزینه» الزامی دارد (دقیقاً هم‌الگوی «مصرف تولید»).
+    groupByKey: (row) => `${row.warehouseCode || ""}__${row.number || ""}__${row.date || ""}`,
+    group: async (groupRows, ctx) => {
+      try {
+        const resolved = await resolveWarehouseDocGroup(groupRows, { requireCostCenter: true, requireNumber: true });
+        if ("error" in resolved) return { ok: false, error: resolved.error };
+        if (!ctx.allowDuplicates) {
+          const isDup = await isDuplicateInventoryDocGroup("PRODUCTION_RECEIPT", resolved.warehouseId, resolved.date, resolved.detailCode, resolved.lines);
+          if (isDup) return { ok: false, error: "رسیدی با همین انبار، تاریخ، مرکز هزینه و اقلام از قبل ثبت شده است" };
+        }
+        await createProductionReceipt(resolved as any);
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت سند" };
+      }
+    },
+  });
+
+
+  // «رسید انبار خرید» — فقط انبارداری (بدون فی/مبلغ، دقیقاً مثل فرم دستی که هرگز این دو را از کاربر
+  // نمی‌گیرد) و فقط بدون‌مبنا (طبق تصمیم صریح کاربر؛ رسید‌های متصل به سفارش‌خرید/مجوزتحویل/درخواست‌تامین
+  // از این Import پشتیبانی نمی‌شوند، چون هر ردیفشان باید به یک سطر مبنای مشخص گره بخورد).
+  registerImportEntity("warehouse-receipt", {
+    // طبق تصمیم صریح کاربر: به‌جای دو شماره‌ی جدا («شماره گروه سند» فقط برای گروه‌بندی + «شماره سند»
+    // برای شماره‌ی نهایی)، همان «شماره سند» واقعی هم برای گروه‌بندی ردیف‌ها استفاده می‌شود — چون به هر
+    // حال باید در دوره مالی یکتا باشد (createWarehouseReceipt این را چک می‌کند)، همین یکتایی برای
+    // گروه‌بندی درست هم کافی است.
+    groupByKey: (row) => `${row.warehouseCode || ""}__${row.number || ""}__${row.date || ""}`,
+    group: async (groupRows, ctx) => {
+      try {
+        const resolved = await resolveWarehouseDocGroup(groupRows, { requireParty: true, requireNumber: true });
+        if ("error" in resolved) return { ok: false, error: resolved.error };
+        // برخلاف «موجودی اول دوره» که یک قانون سخت («حداکثر یک سند در هر دوره مالی») این کار را خودکار
+        // انجام می‌دهد، رسید انبار خرید ذاتاً می‌تواند چندین‌بار برای یک انبار/تامین‌کننده ثبت شود — پس
+        // اجرای دوباره‌ی همان فایل Import (مثلاً چون بار قبل نیمه‌کاره خطا خورده بود) هیچ مانع طبیعی‌ای
+        // نداشت و منجر به ثبت دوبرابر می‌شد. طبق همان قرارداد allowDuplicates که در Import «طرف‌حساب»
+        // هم استفاده شده: پیش‌فرض، رسیدی با همان انبار/تاریخ/طرف‌مقابل/اقلامِ عیناً یکسان رد می‌شود؛
+        // کاربر با تیک «ردیف‌های مشابه هم ثبت شوند» می‌تواند صراحتاً override کند.
+        if (!ctx.allowDuplicates) {
+          const isDup = await isDuplicateInventoryDocGroup("WAREHOUSE_RECEIPT", resolved.warehouseId, resolved.date, resolved.detailCode, resolved.lines);
+          if (isDup) return { ok: false, error: "رسیدی با همین انبار، تاریخ، طرف مقابل و اقلام از قبل ثبت شده است" };
+        }
+        await createWarehouseReceipt({ ...resolved, partyDetailCode: resolved.detailCode, basis: "NO_BASIS" } as any);
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت سند" };
+      }
+    },
+  });
+
+  // «مصرف تولید» — فقط انبارداری (بدون فی/مبلغ) و همیشه بدون‌مبنا (این سند اصلاً مفهوم مبنا ندارد)؛
+  // برخلاف «رسید انبار خرید»/«رسید تولید»، این یکی یک «مرکز هزینه» الزامی دارد (طبق تصمیم صریح کاربر
+  // برای تخصیص بهای تمام‌شده در فاز بعدی)، دقیقاً هم‌الگوی طرف مقابل در «رسید انبار خرید».
+  registerImportEntity("production-consumption", {
+    groupByKey: (row) => `${row.warehouseCode || ""}__${row.number || ""}__${row.date || ""}`,
+    group: async (groupRows, ctx) => {
+      try {
+        const resolved = await resolveWarehouseDocGroup(groupRows, { requireCostCenter: true, requireNumber: true });
+        if ("error" in resolved) return { ok: false, error: resolved.error };
+        if (!ctx.allowDuplicates) {
+          const isDup = await isDuplicateInventoryDocGroup("PRODUCTION_CONSUMPTION", resolved.warehouseId, resolved.date, resolved.detailCode, resolved.lines);
+          if (isDup) return { ok: false, error: "مصرفی با همین انبار، تاریخ، مرکز هزینه و اقلام از قبل ثبت شده است" };
+        }
+        await createProductionConsumption(resolved as any);
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت سند" };
+      }
+    },
+  });
+
+  // «حواله فروش» (تحویل کالا به مشتری) — فقط انبارداری (بدون فی/مبلغ) و فقط بدون‌مبنا، دقیقاً هم‌الگوی
+  // «رسید انبار خرید» (خودِ createSalesDelivery/validateLines طرف مقابل را فقط طرف‌حساب معتبر می‌خواهد؛
+  // بحث تخصیص «فقط مشتری» مثل رسید انبار خرید/تامین‌کننده در این سند اصلاً به‌عنوان قید backend وجود
+  // ندارد، پس این Import هم چیزی فراتر از فرم دستی تحمیل نمی‌کند).
+  registerImportEntity("sales-delivery", {
+    groupByKey: (row) => `${row.warehouseCode || ""}__${row.number || ""}__${row.date || ""}`,
+    group: async (groupRows, ctx) => {
+      try {
+        const resolved = await resolveWarehouseDocGroup(groupRows, { requireParty: true, requireNumber: true });
+        if ("error" in resolved) return { ok: false, error: resolved.error };
+        if (!ctx.allowDuplicates) {
+          const isDup = await isDuplicateInventoryDocGroup("SALES_DELIVERY", resolved.warehouseId, resolved.date, resolved.detailCode, resolved.lines);
+          if (isDup) return { ok: false, error: "حواله‌ای با همین انبار، تاریخ، طرف مقابل و اقلام از قبل ثبت شده است" };
+        }
+        await createSalesDelivery({ ...resolved, basis: "NO_BASIS" } as any);
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت سند" };
+      }
+    },
+  });
+
+  // «مصرف مرکز هزینه» — فقط انبارداری (بدون فی/مبلغ) و فقط بدون‌مبنا (دقیقاً هم‌الگوی «مصرف تولید»)
+  registerImportEntity("center-consumption", {
+    groupByKey: (row) => `${row.warehouseCode || ""}__${row.number || ""}__${row.date || ""}`,
+    group: async (groupRows, ctx) => {
+      try {
+        const resolved = await resolveWarehouseDocGroup(groupRows, { requireCostCenter: true, requireNumber: true });
+        if ("error" in resolved) return { ok: false, error: resolved.error };
+        if (!ctx.allowDuplicates) {
+          const isDup = await isDuplicateInventoryDocGroup("CENTER_CONSUMPTION", resolved.warehouseId, resolved.date, resolved.detailCode, resolved.lines);
+          if (isDup) return { ok: false, error: "مصرفی با همین انبار، تاریخ، مرکز هزینه و اقلام از قبل ثبت شده است" };
+        }
+        await createCenterConsumption({ ...resolved, basis: "NO_BASIS" } as any);
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت سند" };
+      }
+    },
+  });
+
+  // «اضافات انبارگردانی» — فقط انبارداری (بدون فی/مبلغ، فی فقط بعد از «تایید حسابداری» دستی وارد
+  // می‌شود، دقیقاً هم‌الگوی «رسید تولید»)، بدون مبنا و بدون طرف‌حساب/مرکز هزینه.
+  registerImportEntity("warehouse-adjustment", {
+    groupByKey: (row) => `${row.warehouseCode || ""}__${row.number || ""}__${row.date || ""}`,
+    group: async (groupRows, ctx) => {
+      try {
+        const resolved = await resolveWarehouseDocGroup(groupRows, { requireNumber: true });
+        if ("error" in resolved) return { ok: false, error: resolved.error };
+        if (!ctx.allowDuplicates) {
+          const isDup = await isDuplicateInventoryDocGroup("WAREHOUSE_ADJUSTMENT", resolved.warehouseId, resolved.date, undefined, resolved.lines);
+          if (isDup) return { ok: false, error: "سندی با همین انبار، تاریخ و اقلام از قبل ثبت شده است" };
+        }
+        await createWarehouseAdjustment(resolved as any);
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت سند" };
+      }
+    },
+  });
+
+  // «کسری انبارگردانی» — فقط انبارداری (بدون فی/مبلغ، بدون مبنا و بدون طرف‌حساب/مرکز هزینه)؛ این سند
+  // «تایید حسابداری» فردی ندارد، فی/مبلغ فقط با «تایید انبار» دسته‌ای وارد می‌شود.
+  registerImportEntity("inventory-counting-shortage", {
+    groupByKey: (row) => `${row.warehouseCode || ""}__${row.number || ""}__${row.date || ""}`,
+    group: async (groupRows, ctx) => {
+      try {
+        const resolved = await resolveWarehouseDocGroup(groupRows, { requireNumber: true });
+        if ("error" in resolved) return { ok: false, error: resolved.error };
+        if (!ctx.allowDuplicates) {
+          const isDup = await isDuplicateInventoryDocGroup("INVENTORY_COUNTING_SHORTAGE", resolved.warehouseId, resolved.date, undefined, resolved.lines);
+          if (isDup) return { ok: false, error: "سندی با همین انبار، تاریخ و اقلام از قبل ثبت شده است" };
+        }
+        await createInventoryCountingShortage(resolved as any);
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت سند" };
+      }
+    },
+  });
+}
+
+// مشترک بین «رسید انبار خرید» (detailCode از طرف مقابل)، «مصرف تولید» (detailCode از مرکز هزینه) و
+// «رسید تولید» (detailCode ندارد) — یک سند از همان نوع با همان انبار/تاریخ/(تفصیل اگر داشت)/مجموعه‌ی
+// دقیقاً یکسانِ اقلام، تکراری در نظر گرفته می‌شود. تفصیل (اگر ماهیت سند دارد) از قبل توسط فراخوان
+// resolve شده و مستقیم به‌عنوان detailCode داده می‌شود — این تابع خودش نمی‌داند طرف مقابل است یا مرکز
+// هزینه، فقط رشته‌ی detailCode را می‌بیند.
+async function isDuplicateInventoryDocGroup(
+  documentType:
+    | "WAREHOUSE_RECEIPT"
+    | "PRODUCTION_RECEIPT"
+    | "PRODUCTION_CONSUMPTION"
+    | "SALES_DELIVERY"
+    | "CENTER_CONSUMPTION"
+    | "WAREHOUSE_ADJUSTMENT"
+    | "INVENTORY_COUNTING_SHORTAGE",
+  warehouseId: number,
+  dateStr: string,
+  detailCode: string | undefined,
+  lines: { goodsItemId: number; quantity: number }[]
+): Promise<boolean> {
+  const candidates = await prisma.inventoryDocument.findMany({
+    where: { documentType, warehouseId, date: new Date(dateStr), ...(detailCode ? { detailCode } : {}) },
+    include: { lines: { select: { goodsItemId: true, quantity: true } } },
+  });
+  if (!candidates.length) return false;
+
+  const signature = (rows: { goodsItemId: number; quantity: any }[]) =>
+    rows
+      .map((r) => `${r.goodsItemId}:${Number(r.quantity)}`)
+      .sort()
+      .join("|");
+  const incoming = signature(lines);
+  return candidates.some((c) => signature(c.lines) === incoming);
 }

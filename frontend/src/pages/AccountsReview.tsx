@@ -58,6 +58,8 @@ const ISSUING_SYSTEM_FA: Record<string, string> = {
   ACCOUNTING_EXCEL_IMPORT: "حسابداری (ورود از اکسل)",
   ACCOUNT_CLOSING: "بستن حسابها",
   OPENING_CLOSING: "افتتاحیه و اختتامیه",
+  WAREHOUSE: "اسناد انبار",
+  PURCHASE: "فاکتور خرید",
 };
 const DETAIL_SLOTS = [1, 2, 3] as const;
 
@@ -615,7 +617,7 @@ export default function AccountsReview() {
       )}
 
       {activeTab === ledgerTabIndex && (
-        <div>
+        <div className="datatable-root">
           <div className="ar-ledger-toolbar">
             <label className="checkbox-row">
               <input type="checkbox" checked={showRunningBalance} onChange={(e) => setShowRunningBalance(e.target.checked)} />

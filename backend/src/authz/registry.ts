@@ -357,6 +357,7 @@ export const REGISTRY: ModuleDef[] = [
           { key: "purchase-groups", title: "گروه خرید", baseActions: CRUD },
           { key: "purchase-experts", title: "کارشناس خرید", baseActions: CRUD },
           { key: "purchase-routes", title: "مسیر خرید", baseActions: CRUD },
+          { key: "purchase-types", title: "نوع خرید", baseActions: CRUD },
         ],
       },
       {
@@ -388,7 +389,16 @@ export const REGISTRY: ModuleDef[] = [
           },
           { key: "purchase-orders", title: "سفارش خرید", baseActions: CRUD, actions: APPROVE_UNAPPROVE },
           { key: "delivery-authorizations", title: "مجوز تحویل", baseActions: CRUD, actions: APPROVE_UNAPPROVE },
-          { key: "purchase-invoices", title: "فاکتور خرید", baseActions: CRUD, actions: APPROVE_UNAPPROVE },
+          {
+            key: "purchase-invoices",
+            title: "فاکتور خرید",
+            baseActions: CRUD,
+            actions: [
+              ...APPROVE_UNAPPROVE,
+              { key: "issueJournalEntry", title: "صدور سند حسابداری" },
+              { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
+            ],
+          },
           { key: "service-purchase-invoices", title: "فاکتور خرید خدمات", baseActions: CRUD, actions: APPROVE_UNAPPROVE },
         ],
       },

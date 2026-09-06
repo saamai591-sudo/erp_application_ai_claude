@@ -9,6 +9,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 
 export interface WarehouseGroup {
@@ -33,7 +34,6 @@ function GroupList() {
   const cacheKey = "/warehouse-groups";
   const [items, setItems] = usePersistedState<WarehouseGroup[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -60,19 +60,17 @@ function GroupList() {
           <InfoHint text={`گروهبندی انبارها (مثلا داخلی/امانی)`} title="گروه انبار" />
           <NewRecordButton path="/warehouse-groups/new" />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "کد", render: (r) => toFaDigits(String(r.code)), width: "80px", filterType: "number", filterValue: (r) => r.code },
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
           { header: "فعال", render: (r) => (r.isActive ? "بله" : "خیر"), width: "80px" },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/warehouse-groups/${r.id}/edit`)}
+        edit={{ path: (r) => `/warehouse-groups/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -154,7 +152,7 @@ function GroupForm({ editId }: { editId?: number }) {
             <input dir="ltr" disabled={!!editId} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
           </div>
           <div className="form-field">
-            <label>عنوان</label>
+            <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
           </div>
           <div className="form-field">

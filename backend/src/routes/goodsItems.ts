@@ -1,6 +1,11 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { getAllowedGoodsTypes } from "../data/warehouseDocNatureMatrix";
+import { assertRecordNotStale } from "../utils/concurrency";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("goods-items");
 
 const router = Router();
 
@@ -88,6 +93,7 @@ export async function resolveSerial(goodsGroupId: number, explicitCode: string |
 
 router.get("/goods-items", async (req, res) => {
   const kind = req.query.kind as string | undefined;
+  const trackingMethod = req.query.trackingMethod as string | undefined;
 
   // فیلتر اختیاری بر اساس ماهیت/نوع سند انبار (طبق مستند «نوع کالا-ماهیت سند انبار»):
   // وقتی ماژول‌های آینده‌ی سند انبار (رسید انبار، حواله انبار، ...) بخواهند فقط کالاهای
@@ -104,6 +110,7 @@ router.get("/goods-items", async (req, res) => {
   const items = await prisma.goodsItem.findMany({
     where: {
       ...(kind ? { kind: kind as any } : {}),
+      ...(trackingMethod ? { trackingMethod: trackingMethod as any } : {}),
       ...(allowedGoodsTypesFilter || {}),
     },
     include: {
@@ -146,11 +153,7 @@ interface ItemBody {
   barcode?: string;
   reorderControl?: boolean;
   reorderPoint?: number | null;
-  hasSerialNumber?: boolean;
-  hasExpiryDate?: boolean;
-  isSerialTracked?: boolean;
-  isExpiryTracked?: boolean;
-  isBatchTracked?: boolean;
+  trackingMethod?: "NONE" | "BATCH" | "SERIAL";
   isLocationTracked?: boolean;
   accountingGroupId: number;
   isSpecial?: boolean;
@@ -159,7 +162,7 @@ interface ItemBody {
   attributes?: AttrSelection[];
 }
 
-router.post("/goods-items", async (req, res) => {
+router.post("/goods-items", can(`${FORM}.create`), async (req, res) => {
   const body = req.body as ItemBody;
 
   if (!body.kind || !["GOODS", "SERVICE"].includes(body.kind)) return res.status(400).json({ error: "نوع نامعتبر است" });
@@ -218,11 +221,7 @@ router.post("/goods-items", async (req, res) => {
         barcode: body.barcode?.trim() || null,
         reorderControl,
         reorderPoint,
-        hasSerialNumber: body.kind === "GOODS" ? !!body.hasSerialNumber : false,
-        hasExpiryDate: body.kind === "GOODS" ? !!body.hasExpiryDate : false,
-        isSerialTracked: body.kind === "GOODS" ? !!body.isSerialTracked : false,
-        isExpiryTracked: body.kind === "GOODS" ? !!body.isExpiryTracked : false,
-        isBatchTracked: body.kind === "GOODS" ? !!body.isBatchTracked : false,
+        trackingMethod: body.kind === "GOODS" ? body.trackingMethod ?? "NONE" : "NONE",
         isLocationTracked: body.kind === "GOODS" ? !!body.isLocationTracked : false,
         accountingGroupId: body.accountingGroupId,
         isSpecial,
@@ -245,7 +244,7 @@ router.post("/goods-items", async (req, res) => {
   }
 });
 
-router.put("/goods-items/:id", async (req, res) => {
+router.put("/goods-items/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as Partial<ItemBody>;
 
@@ -258,6 +257,7 @@ router.put("/goods-items/:id", async (req, res) => {
   }
 
   try {
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, `این ${label}`);
     const mainUnitId = body.mainUnitId ?? existing.mainUnitId;
     const mainUnit = await prisma.unitOfMeasure.findUnique({ where: { id: mainUnitId } });
     if (!mainUnit) return res.status(400).json({ error: "واحد اصلی نامعتبر است" });
@@ -324,11 +324,7 @@ router.put("/goods-items/:id", async (req, res) => {
         barcode: body.barcode !== undefined ? body.barcode.trim() || null : undefined,
         reorderControl,
         reorderPoint,
-        hasSerialNumber: existing.kind === "GOODS" ? body.hasSerialNumber ?? existing.hasSerialNumber : false,
-        hasExpiryDate: existing.kind === "GOODS" ? body.hasExpiryDate ?? existing.hasExpiryDate : false,
-        isSerialTracked: existing.kind === "GOODS" ? body.isSerialTracked ?? existing.isSerialTracked : false,
-        isExpiryTracked: existing.kind === "GOODS" ? body.isExpiryTracked ?? existing.isExpiryTracked : false,
-        isBatchTracked: existing.kind === "GOODS" ? body.isBatchTracked ?? existing.isBatchTracked : false,
+        trackingMethod: existing.kind === "GOODS" ? body.trackingMethod ?? existing.trackingMethod : "NONE",
         isLocationTracked: existing.kind === "GOODS" ? body.isLocationTracked ?? existing.isLocationTracked : false,
         accountingGroupId: body.accountingGroupId ?? existing.accountingGroupId,
         isSpecial,
@@ -352,7 +348,7 @@ router.put("/goods-items/:id", async (req, res) => {
   }
 });
 
-router.delete("/goods-items/:id", async (req, res) => {
+router.delete("/goods-items/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const item = await prisma.goodsItem.findUnique({ where: { id } });
   if (!item) return res.status(404).json({ error: "یافت نشد" });

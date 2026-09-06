@@ -5,15 +5,20 @@ import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
 import { RecordPickerField } from "../components/RecordPicker";
+import { WarehouseReceiptLineSelector, PickableWarehouseReceiptLine } from "../components/WarehouseReceiptLineSelector";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
 import { partyDisplayName } from "./Users";
+import { PurchaseType } from "./PurchaseTypes";
+import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
+import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
 
 // این فرآیند («فاکتور خرید») مستند تحلیل اختصاصی در پروژه ندارد؛ ساختار این فرم حاصل تصمیم مشترک با
 // کاربر است (نگاه کنید به یادداشت‌های backend/src/routes/purchaseInvoices.ts). با تایید فاکتور، مبلغ
@@ -34,21 +39,11 @@ interface PartyOption {
   name: string | null;
 }
 interface CurrencyOption { id: number; code: string; title: string }
-interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean }
-interface ServiceOption { id: number; fullCode: string; title: string; kind: string }
-interface PickableReceiptLine {
-  id: number;
-  sourceInventoryLineId: number;
-  warehouseReceiptId: number;
-  number: number;
-  date: string;
-  goodsItemId: number;
-  goodsItemCode: string;
-  goodsItemTitle: string;
-  unitId: number;
-  unitTitle: string;
-  quantity: number;
+interface GoodsItemRow {
+  id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean;
+  isSpecial: boolean; taxRate: number | string | null;
 }
+interface ServiceOption { id: number; fullCode: string; title: string; kind: string }
 
 const STATUS_FA: Record<Status, string> = { DRAFT: "ثبت", APPROVED: "تایید شده" };
 const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", WAREHOUSE_RECEIPT: "رسید انبار خرید" };
@@ -57,12 +52,13 @@ const INFO_TEXT = "ثبت فاکتور خرید دریافتی از تامین�
 
 interface ListRow {
   id: number; number: number; date: string; vendorInvoiceNumber: string | null; basis: Basis;
-  partyId: number; partyTitle: string | null; currencyTitle: string; status: Status; lineCount: number; totalAmount: number;
+  partyId: number; partyTitle: string | null; purchaseTypeId: number; purchaseTypeTitle: string | null;
+  currencyTitle: string; status: Status; lineCount: number; totalAmount: number;
 }
 interface DetailLine {
   id: number; sourceInventoryLineId: number | null; sourceWarehouseReceiptNumber: number | null;
   goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string;
-  quantity: number; unitPrice: number; amount: number; description: string | null;
+  quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null;
 }
 interface OtherCostDetail { id: number; serviceId: number; serviceTitle: string; amount: number; allocationBasis: AllocationBasis | null; description: string | null }
 interface Detail extends ListRow {
@@ -70,6 +66,8 @@ interface Detail extends ListRow {
   description: string | null;
   approverName: string | null;
   approvedAt: string | null;
+  journalEntryId: number | null;
+  journalEntryReferenceNumber: number | null;
   lines: DetailLine[];
   otherCostLines: OtherCostDetail[];
 }
@@ -148,11 +146,12 @@ function PurchaseInvoiceList() {
           { header: "شماره فاکتور فروشنده", render: (r) => r.vendorInvoiceNumber ? toFaDigits(r.vendorInvoiceNumber) : "—", filterType: "string", filterValue: (r) => r.vendorInvoiceNumber || "" },
           { header: "مبنا", render: (r) => BASIS_FA[r.basis], filterType: "string", filterValue: (r) => BASIS_FA[r.basis] },
           { header: "طرف مقابل", render: (r) => r.partyTitle || "—", filterType: "string", filterValue: (r) => r.partyTitle || "" },
+          { header: "نوع خرید", render: (r) => r.purchaseTypeTitle || "—", filterType: "string", filterValue: (r) => r.purchaseTypeTitle || "" },
           { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount) },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/purchase-invoices/${r.id}/edit`)}
+        edit={{ path: (r) => `/purchase-invoices/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -161,12 +160,12 @@ function PurchaseInvoiceList() {
 
 interface RowState {
   sourceInventoryLineId: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string;
-  unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; description: string;
+  unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; discount: string; vatAmount: string; description: string;
 }
 interface CostRowState { serviceId: string; amount: string; allocationBasis: AllocationBasis | ""; description: string }
 
 function emptyRow(): RowState {
-  return { sourceInventoryLineId: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", description: "" };
+  return { sourceInventoryLineId: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "" };
 }
 
 function PurchaseInvoiceForm({ editId }: { editId?: number }) {
@@ -174,33 +173,43 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
   const [parties, setParties] = useState<PartyOption[]>([]);
+  const [purchaseTypes, setPurchaseTypes] = useState<PurchaseType[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [services, setServices] = useState<ServiceOption[]>([]);
-  const [pickableLines, setPickableLines] = useState<PickableReceiptLine[]>([]);
-  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", vendorInvoiceNumber: "", basis: "NO_BASIS" as Basis, partyId: "", currencyId: "", description: "" });
+  const [pickableLines, setPickableLines] = useState<PickableWarehouseReceiptLine[]>([]);
+  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", vendorInvoiceNumber: "", basis: "NO_BASIS" as Basis, partyId: "", purchaseTypeId: "", currencyId: "", description: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
   const [costRows, setCostRows] = usePersistedState<CostRowState[]>(`${cacheKey}:costs`, []);
-  const [meta, setMeta] = usePersistedState<{ number: number; status: Status; approverName: string | null; approvedAt: string | null } | null>(
-    `${cacheKey}:meta`,
-    null
-  );
+  const [meta, setMeta] = usePersistedState<{
+    number: number;
+    status: Status;
+    approverName: string | null;
+    approvedAt: string | null;
+    journalEntryId: number | null;
+    journalEntryReferenceNumber: number | null;
+  } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const { saved, flash } = useSavedFlash();
 
   useEffect(() => {
     async function init() {
-      const [p, c, g, sv] = await Promise.all([
+      const [p, pt, c, g, sv, fp] = await Promise.all([
         api.get("/parties"),
+        api.get("/purchase-types"),
         api.get("/currencies"),
         api.get("/goods-items?kind=GOODS&docDirection=INBOUND&docType=خرید"),
         api.get("/goods-items?kind=SERVICE"),
+        fetchSelectedFiscalPeriod(),
       ]);
       setParties(p);
+      setPurchaseTypes(pt);
       setCurrencies(c);
       setGoodsItems(g);
       setServices(sv);
+      setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
         setLoaded(true);
@@ -208,12 +217,20 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       }
       if (editId) {
         const d: Detail = await api.get(`/purchase-invoices/${editId}`);
-        setMeta({ number: d.number, status: d.status, approverName: d.approverName, approvedAt: d.approvedAt });
+        setMeta({
+          number: d.number,
+          status: d.status,
+          approverName: d.approverName,
+          approvedAt: d.approvedAt,
+          journalEntryId: d.journalEntryId,
+          journalEntryReferenceNumber: d.journalEntryReferenceNumber,
+        });
         setHeader({
           date: d.date.slice(0, 10),
           vendorInvoiceNumber: d.vendorInvoiceNumber || "",
           basis: d.basis,
           partyId: String(d.partyId),
+          purchaseTypeId: String(d.purchaseTypeId),
           currencyId: String(d.currencyId),
           description: d.description || "",
         });
@@ -228,6 +245,8 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
             quantity: String(l.quantity),
             unitPrice: String(l.unitPrice),
             amount: String(l.amount),
+            discount: String(l.discount || 0),
+            vatAmount: String(l.vatAmount || 0),
             description: l.description || "",
           }))
         );
@@ -240,7 +259,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
           }))
         );
       } else {
-        setHeader({ date: "", vendorInvoiceNumber: "", basis: "NO_BASIS", partyId: "", currencyId: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), vendorInvoiceNumber: "", basis: "NO_BASIS", partyId: "", purchaseTypeId: "", currencyId: "", description: "" });
         setRows([emptyRow()]);
         setCostRows([]);
         setMeta(null);
@@ -252,55 +271,116 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   }, [editId]);
 
   useEffect(() => {
-    if (header.basis !== "WAREHOUSE_RECEIPT" || !header.partyId) {
+    if (header.basis !== "WAREHOUSE_RECEIPT" || !header.partyId || !header.date) {
       setPickableLines([]);
       return;
     }
     const q = editId ? `&excludeInvoiceId=${editId}` : "";
-    api.get(`/purchase-invoices/pickable-warehouse-receipt-lines?partyId=${header.partyId}${q}`).then(setPickableLines).catch(() => setPickableLines([]));
-  }, [header.basis, header.partyId, editId]);
+    api
+      .get(`/purchase-invoices/pickable-warehouse-receipt-lines?partyId=${header.partyId}&date=${header.date}${q}`)
+      .then(setPickableLines)
+      .catch(() => setPickableLines([]));
+  }, [header.basis, header.partyId, header.date, editId]);
 
   const status: Status = meta?.status || "DRAFT";
   const locked = status === "APPROVED";
   const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceInventoryLineId);
+  // طبق تصمیم صریح کاربر: به‌محض این‌که یک ردیف انتخاب/وارد شده باشد، کل سرصفحه (از جمله تاریخ) قفل
+  // می‌شود — چون ردیف‌ها بر اساس سرصفحه (طرف مقابل/تاریخ) انتخاب و ثبت شده‌اند و تغییر بعدی سرصفحه
+  // ناسازگاری ایجاد می‌کند.
   const headerDisabled = hasAnyLine;
   const selectedParty = parties.find((p) => String(p.id) === header.partyId);
+
+  // طبق تصمیم صریح کاربر: تا وقتی فیلدهای الزامی سرصفحه (تاریخ/طرف مقابل/ارز) کامل نشده، ورود اطلاعات
+  // ردیف مجاز نیست — اولین تلاش برای باز کردن انتخابگر کالا/ردیف مبنا باید با پیام خطا رد شود، نه
+  // این‌که فقط بی‌صدا غیرفعال باشد.
+  function guardRowEntry(): boolean {
+    if (!header.date) {
+      setError("تاریخ الزامی است");
+      return false;
+    }
+    if (!header.partyId) {
+      setError("طرف مقابل الزامی است");
+      return false;
+    }
+    if (!header.purchaseTypeId) {
+      setError("نوع خرید الزامی است");
+      return false;
+    }
+    if (!header.currencyId) {
+      setError("ارز الزامی است");
+      return false;
+    }
+    setError(null);
+    return true;
+  }
 
   function updateRow(idx: number, patch: Partial<RowState>) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
-  function onSourceLineChange(idx: number, sourceInventoryLineId: string) {
-    const src = pickableLines.find((l) => String(l.sourceInventoryLineId) === sourceInventoryLineId);
-    if (!src) return;
-    updateRow(idx, {
-      sourceInventoryLineId,
-      goodsItemId: String(src.goodsItemId),
-      goodsItemCode: src.goodsItemCode,
-      goodsItemTitle: src.goodsItemTitle,
-      unitId: String(src.unitId),
-      unitTitle: src.unitTitle,
-      quantity: String(src.quantity), // مقدار کاملاً از رسید مشتق می‌شود و قابل‌ویرایش نیست
-    });
+  // مقدار پیشنهادی مالیات بر ارزش افزوده — طبق تصمیم صریح کاربر، این فقط پیش‌فرض اولیه است؛ کاربر بعد
+  // از محاسبه می‌تواند خودش مقدار مالیات را مستقیماً ویرایش کند (دقیقاً هم‌الگوی مبلغ که با تغییر فی/
+  // مقدار دوباره محاسبه می‌شود، ولی خودش هم مستقیماً قابل‌ویرایش است).
+  function computeSuggestedVat(amount: number, discount: number, goodsItemId: string): string {
+    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    return String(computeLineVat(amount, discount, resolveVatRatePercent(item)));
   }
   function onUnitPriceChange(idx: number, unitPrice: string) {
     const row = rows[idx];
     const amount = Math.round(Number(unitPrice) * (Number(row.quantity) || 0) * 100) / 100;
-    updateRow(idx, { unitPrice, amount: String(amount) });
+    updateRow(idx, { unitPrice, amount: String(amount), vatAmount: computeSuggestedVat(amount, Number(row.discount) || 0, row.goodsItemId) });
   }
   function onAmountChange(idx: number, amount: string) {
     const row = rows[idx];
     const qty = Number(row.quantity) || 0;
     const unitPrice = qty > 0 ? Math.round((Number(amount) / qty) * 10000) / 10000 : 0;
-    updateRow(idx, { amount, unitPrice: String(unitPrice) });
+    updateRow(idx, { amount, unitPrice: String(unitPrice), vatAmount: computeSuggestedVat(Number(amount) || 0, Number(row.discount) || 0, row.goodsItemId) });
   }
-  function onGoodsItemChange(idx: number, goodsItemId: string) {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
-    updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "" });
+  function onDiscountChange(idx: number, discount: string) {
+    const row = rows[idx];
+    updateRow(idx, { discount, vatAmount: computeSuggestedVat(Number(row.amount) || 0, Number(discount) || 0, row.goodsItemId) });
+  }
+  // طبق تصمیم صریح کاربر: انتخابگرهای سطح ردیف باید امکان انتخاب چندتایی داشته باشند — با تایید، ردیف
+  // جاری (idx) با اولین مورد جایگزین و بقیه بلافاصله بعد از آن به گرید اضافه می‌شوند.
+  function onSourceLinesSelected(idx: number, selected: PickableWarehouseReceiptLine[]) {
+    if (selected.length === 0) return;
+    const newRows = selected.map(
+      (src): RowState => ({
+        sourceInventoryLineId: String(src.id),
+        goodsItemId: String(src.goodsItemId),
+        goodsItemCode: src.goodsItemCode,
+        goodsItemTitle: src.goodsItemTitle,
+        unitId: String(src.unitId),
+        unitTitle: src.unitTitle,
+        quantity: String(src.quantity),
+        unitPrice: "",
+        amount: "",
+        discount: "",
+        vatAmount: "",
+        description: "",
+      })
+    );
+    setRows((prev) => {
+      const next = [...prev];
+      next.splice(idx, 1, ...newRows);
+      return next;
+    });
+  }
+  function onGoodsItemsSelected(idx: number, selected: GoodsItemRow[]) {
+    if (selected.length === 0) return;
+    const newRows = selected.map(
+      (item): RowState => ({ ...emptyRow(), goodsItemId: String(item.id), unitId: String(item.mainUnitId) })
+    );
+    setRows((prev) => {
+      const next = [...prev];
+      next.splice(idx, 1, ...newRows);
+      return next;
+    });
   }
   function onQuantityChange(idx: number, quantity: string) {
     const row = rows[idx];
     const amount = Math.round((Number(row.unitPrice) || 0) * (Number(quantity) || 0) * 100) / 100;
-    updateRow(idx, { quantity, amount: String(amount) });
+    updateRow(idx, { quantity, amount: String(amount), vatAmount: computeSuggestedVat(amount, Number(row.discount) || 0, row.goodsItemId) });
   }
   function addRow() {
     setRows((prev) => [...prev, emptyRow()]);
@@ -319,6 +399,8 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   }
 
   const totalAmount = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const totalDiscount = rows.reduce((s, r) => s + (Number(r.discount) || 0), 0);
+  const totalVat = rows.reduce((s, r) => s + (Number(r.vatAmount) || 0), 0);
   const totalOtherCosts = costRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
 
   function buildBody() {
@@ -328,6 +410,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       vendorInvoiceNumber: header.vendorInvoiceNumber || null,
       basis: header.basis,
       partyId: Number(header.partyId),
+      purchaseTypeId: Number(header.purchaseTypeId),
       currencyId: Number(header.currencyId),
       description: header.description,
       lines: nonEmptyRows.map((r) => ({
@@ -337,6 +420,8 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
         quantity: Number(r.quantity) || 0,
         unitPrice: Number(r.unitPrice) || 0,
         amount: Number(r.amount) || 0,
+        discount: Number(r.discount) || 0,
+        vatAmount: Number(r.vatAmount) || 0,
         description: r.description || null,
       })),
       otherCostLines: costRows
@@ -348,7 +433,9 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!header.date || !header.partyId || !header.currencyId) return setError("تاریخ، طرف مقابل و ارز الزامی است");
+    if (!header.date || !header.partyId || !header.purchaseTypeId || !header.currencyId) return setError("تاریخ، طرف مقابل، نوع خرید و ارز الزامی است");
+    const dateErr = validateDocumentDate(header.date, fiscalPeriod);
+    if (dateErr) return setError(dateErr);
     const body = buildBody();
     if (body.lines.length === 0) return setError("فاکتور خرید باید حداقل یک ردیف کالا داشته باشد");
     for (const [i, l] of body.lines.entries()) {
@@ -384,7 +471,14 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   async function reloadMetaAndRows() {
     if (!editId) return;
     const d: Detail = await api.get(`/purchase-invoices/${editId}`);
-    setMeta({ number: d.number, status: d.status, approverName: d.approverName, approvedAt: d.approvedAt });
+    setMeta({
+          number: d.number,
+          status: d.status,
+          approverName: d.approverName,
+          approvedAt: d.approvedAt,
+          journalEntryId: d.journalEntryId,
+          journalEntryReferenceNumber: d.journalEntryReferenceNumber,
+        });
     setRows(
       d.lines.map((l) => ({
         sourceInventoryLineId: l.sourceInventoryLineId ? String(l.sourceInventoryLineId) : "",
@@ -396,6 +490,8 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
         quantity: String(l.quantity),
         unitPrice: String(l.unitPrice),
         amount: String(l.amount),
+        discount: String(l.discount || 0),
+        vatAmount: String(l.vatAmount || 0),
         description: l.description || "",
       }))
     );
@@ -413,6 +509,18 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
     }
   }
 
+  async function runDeleteAction(path: string, confirmMsg?: string) {
+    if (!editId) return;
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    try {
+      await api.del(`/purchase-invoices/${editId}/${path}`);
+      await reloadMetaAndRows();
+      flash();
+    } catch (e) {
+      alert((e as ApiError).message);
+    }
+  }
+
   if (!loaded) return null;
 
   const extraActions: { label: string; icon: JSX.Element; onClick: () => void }[] = [];
@@ -420,11 +528,20 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
     if (status === "DRAFT") {
       extraActions.push({ label: "تایید", icon: <CheckIcon />, onClick: () => runAction("approve") });
     } else if (status === "APPROVED") {
-      extraActions.push({
-        label: "برگشت از تایید",
-        icon: <UndoIcon />,
-        onClick: () => runAction("unapprove", "با برگشت از تایید، مبلغ ردیف‌های رسید انبار خرید مرتبط صفر می‌شود. ادامه می‌دهید؟"),
-      });
+      if (!meta.journalEntryId) {
+        extraActions.push({
+          label: "برگشت از تایید",
+          icon: <UndoIcon />,
+          onClick: () => runAction("unapprove", "با برگشت از تایید، مبلغ ردیف‌های رسید انبار خرید مرتبط صفر می‌شود. ادامه می‌دهید؟"),
+        });
+        extraActions.push({ label: "صدور سند حسابداری", icon: <PlusIcon />, onClick: () => runAction("issue-journal-entry") });
+      } else {
+        extraActions.push({
+          label: "حذف سند حسابداری",
+          icon: <UndoIcon />,
+          onClick: () => runDeleteAction("journal-entry", "سند حسابداری صادرشده حذف می‌شود. ادامه می‌دهید؟"),
+        });
+      }
     }
   }
 
@@ -458,13 +575,19 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                 <input value={`${meta.approverName}${meta.approvedAt ? " — " + formatJalaliDate(meta.approvedAt) : ""}`} disabled />
               </div>
             )}
+            {meta?.journalEntryReferenceNumber && (
+              <div className="form-field">
+                <label>سند حسابداری</label>
+                <input dir="ltr" value={toFaDigits(String(meta.journalEntryReferenceNumber))} disabled />
+              </div>
+            )}
             <div className="form-field">
-              <label>تاریخ</label>
-              <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
+              <label>تاریخ<RequiredMark /></label>
+              <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={headerDisabled} />
             </div>
             <div className="form-field">
               <label>شماره فاکتور فروشنده</label>
-              <input value={header.vendorInvoiceNumber} onChange={(e) => setHeader({ ...header, vendorInvoiceNumber: e.target.value })} />
+              <input value={header.vendorInvoiceNumber} onChange={(e) => setHeader({ ...header, vendorInvoiceNumber: e.target.value })} disabled={headerDisabled} />
             </div>
             <div className="form-field">
               <label>مبنا</label>
@@ -474,7 +597,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
               </select>
             </div>
             <div className="form-field">
-              <label>طرف مقابل</label>
+              <label>طرف مقابل<RequiredMark /></label>
               <RecordPickerField
                 title="انتخاب طرف مقابل"
                 disabled={headerDisabled}
@@ -489,7 +612,14 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
               />
             </div>
             <div className="form-field">
-              <label>ارز</label>
+              <label>نوع خرید<RequiredMark /></label>
+              <select value={header.purchaseTypeId} onChange={(e) => setHeader({ ...header, purchaseTypeId: e.target.value })} disabled={headerDisabled}>
+                <option value="">انتخاب کنید</option>
+                {purchaseTypes.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+              </select>
+            </div>
+            <div className="form-field">
+              <label>ارز<RequiredMark /></label>
               <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value })} disabled={headerDisabled}>
                 <option value="">انتخاب کنید</option>
                 {currencies.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
@@ -497,7 +627,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
             </div>
             <div className="form-field full">
               <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} />
+              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={headerDisabled} />
             </div>
           </div>
 
@@ -520,6 +650,8 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                   <th>مقدار</th>
                   <th>فی</th>
                   <th>مبلغ</th>
+                  <th>تخفیف</th>
+                  <th>مالیات بر ارزش افزوده</th>
                   <th>شرح</th>
                   <th></th>
                 </tr>
@@ -528,26 +660,21 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                 {rows.map((row, idx) => {
                   const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
                   const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
-                  const src = pickableLines.find((l) => String(l.sourceInventoryLineId) === row.sourceInventoryLineId);
+                  const src = pickableLines.find((l) => String(l.id) === row.sourceInventoryLineId);
                   return (
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                       {header.basis === "WAREHOUSE_RECEIPT" && (
-                        <td style={{ minWidth: 200 }}>
-                          <RecordPickerField
-                            title="انتخاب ردیف رسید انبار خرید"
-                            displayValue={src ? `${toFaDigits(String(src.number))} — ${src.goodsItemTitle}` : ""}
+                        <td style={{ minWidth: 90 }}>
+                          <WarehouseReceiptLineSelector
+                            displayValue={src ? `${toFaDigits(String(src.number))}` : ""}
                             rows={pickableLines}
-                            columns={[
-                              { header: "شماره", render: (l) => toFaDigits(String(l.number)), filterValue: (l) => String(l.number), width: "70px" },
-                              { header: "کالا", render: (l) => l.goodsItemTitle, filterValue: (l) => l.goodsItemTitle },
-                              { header: "مقدار", render: (l) => formatAmountFa(l.quantity), filterValue: (l) => String(l.quantity), width: "90px" },
-                            ]}
-                            onSelect={(l) => onSourceLineChange(idx, String((l as PickableReceiptLine).sourceInventoryLineId))}
+                            onOpen={guardRowEntry}
+                            onSelectMultiple={(selected) => onSourceLinesSelected(idx, selected)}
                           />
                         </td>
                       )}
-                      <td style={{ minWidth: 200 }}>
+                      <td style={{ minWidth: 320 }}>
                         {header.basis === "WAREHOUSE_RECEIPT" ? (
                           <span>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</span>
                         ) : (
@@ -559,7 +686,9 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                               { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
                               { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
                             ]}
-                            onSelect={(g) => onGoodsItemChange(idx, String((g as GoodsItemRow).id))}
+                            multiSelect
+                            onOpen={guardRowEntry}
+                            onSelectMultiple={(selected) => onGoodsItemsSelected(idx, selected as GoodsItemRow[])}
                           />
                         )}
                       </td>
@@ -578,6 +707,15 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                       <td style={{ minWidth: 120 }}>
                         <AmountInput value={row.amount} onChange={(v) => onAmountChange(idx, v)} allowDecimal />
                       </td>
+                      <td style={{ minWidth: 120 }}>
+                        <AmountInput value={row.discount} onChange={(v) => onDiscountChange(idx, v)} allowDecimal placeholder="۰" />
+                      </td>
+                      <td style={{ minWidth: 120 }}>
+                        {/* طبق تصمیم صریح کاربر: بعد از محاسبه‌ی خودکار مالیات، کاربر باید بتواند خودش
+                        مقدار را ویرایش کند — دوباره محاسبه‌شدنش با تغییر مبلغ/تخفیف، مثل مبلغ خودش که
+                        با تغییر فی/مقدار دوباره محاسبه می‌شود ولی مستقیماً هم قابل‌ویرایش است */}
+                        <AmountInput value={row.vatAmount} onChange={(v) => updateRow(idx, { vatAmount: v })} allowDecimal placeholder="۰" />
+                      </td>
                       <td style={{ minWidth: 140 }}>
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} />
                       </td>
@@ -594,7 +732,9 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
           </div>
           <div className="grid-footer je-lines-footer">
             <span className="grid-footer-info">{rows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(rows.length))} ردیف`}</span>
-            <span className="je-lines-totals">جمع مبلغ اقلام: {formatAmountFa(totalAmount)}</span>
+            <span className="je-lines-totals">
+              جمع مبلغ اقلام: {formatAmountFa(totalAmount)} — جمع تخفیف: {formatAmountFa(totalDiscount)} — جمع مالیات بر ارزش افزوده: {formatAmountFa(totalVat)}
+            </span>
           </div>
         </div>
 

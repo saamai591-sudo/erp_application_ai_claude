@@ -4,6 +4,7 @@ import { TreeView, TreeNode } from "../components/TreeView";
 import { RefreshButton } from "../components/RefreshButton";
 import { api, ApiError } from "../lib/api";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 
 interface WarehouseOption {
   id: number;
@@ -135,7 +136,7 @@ export default function PhysicalLocations() {
                 <input dir="ltr" value={code} onChange={(e) => setCode(e.target.value)} />
               </div>
               <div className="form-field">
-                <label>عنوان</label>
+                <label>عنوان<RequiredMark /></label>
                 <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
               </div>
             </div>

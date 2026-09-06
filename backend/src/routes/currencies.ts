@@ -1,5 +1,10 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const CURRENCIES = findFormPrefix("currencies");
+const RATES = findFormPrefix("rates");
 
 const router = Router();
 
@@ -8,7 +13,7 @@ router.get("/", async (_req, res) => {
   res.json(currencies);
 });
 
-router.post("/", async (req, res) => {
+router.post("/", can(`${CURRENCIES}.create`), async (req, res) => {
   const { code, title, decimalPlaces, isBase, rateDirection, baseVolume } = req.body as {
     code: string;
     title: string;
@@ -49,7 +54,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", can(`${CURRENCIES}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const currency = await prisma.currency.findUnique({ where: { id } });
   if (!currency) return res.status(404).json({ error: "ارز یافت نشد" });
@@ -77,7 +82,7 @@ router.put("/:id", async (req, res) => {
   res.json(updated);
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", can(`${CURRENCIES}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const currency = await prisma.currency.findUnique({ where: { id } });
   if (!currency) return res.status(404).json({ error: "ارز یافت نشد" });
@@ -97,7 +102,7 @@ router.get("/rates", async (_req, res) => {
   res.json(rates);
 });
 
-router.post("/rates", async (req, res) => {
+router.post("/rates", can(`${RATES}.create`), async (req, res) => {
   const { date, currencyId, rate } = req.body as { date: string; currencyId: number; rate: number };
   if (!date || !currencyId || rate === undefined) {
     return res.status(400).json({ error: "تاریخ، ارز و نرخ الزامی است" });
@@ -129,7 +134,7 @@ router.post("/rates", async (req, res) => {
   res.status(201).json({ ...created, hint });
 });
 
-router.delete("/rates/:id", async (req, res) => {
+router.delete("/rates/:id", can(`${RATES}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const rate = await prisma.exchangeRate.findUnique({ where: { id } });
   if (!rate) return res.status(404).json({ error: "نرخ ارز یافت نشد" });

@@ -1,8 +1,13 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { generateDetailCode, registerDetailCode, nextSerialNumber } from "../utils/coding";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
 
 const DETAIL_TYPE_BANK_ACCOUNT = 4;
+const BANK_ACCOUNT_TYPES = findFormPrefix("bank-account-types");
+const BANK_BRANCHES = findFormPrefix("bank-branches");
+const BANK_ACCOUNTS = findFormPrefix("bank-accounts");
 const router = Router();
 
 // ---------- نوع حساب بانکی ----------
@@ -10,7 +15,7 @@ router.get("/account-types", async (_req, res) => {
   res.json(await prisma.bankAccountType.findMany({ orderBy: { code: "asc" } }));
 });
 
-router.post("/account-types", async (req, res) => {
+router.post("/account-types", can(`${BANK_ACCOUNT_TYPES}.create`), async (req, res) => {
   const { code, title, hasChequeBook } = req.body as { code?: number; title: string; hasChequeBook?: boolean };
   if (!title) return res.status(400).json({ error: "عنوان الزامی است" });
 
@@ -24,7 +29,7 @@ router.post("/account-types", async (req, res) => {
   res.status(201).json(created);
 });
 
-router.put("/account-types/:id", async (req, res) => {
+router.put("/account-types/:id", can(`${BANK_ACCOUNT_TYPES}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const { title, hasChequeBook } = req.body as { title?: string; hasChequeBook?: boolean };
   if (title) {
@@ -35,7 +40,7 @@ router.put("/account-types/:id", async (req, res) => {
   res.json(updated);
 });
 
-router.delete("/account-types/:id", async (req, res) => {
+router.delete("/account-types/:id", can(`${BANK_ACCOUNT_TYPES}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const inUse = await prisma.bankAccount.findFirst({ where: { accountTypeId: id } });
   if (inUse) return res.status(400).json({ error: "این نوع حساب بانکی استفاده شده و قابل حذف نیست" });
@@ -55,7 +60,7 @@ router.get("/branches", async (_req, res) => {
   res.json(await prisma.bankBranch.findMany({ include: { bankParty: true }, orderBy: { code: "asc" } }));
 });
 
-router.post("/branches", async (req, res) => {
+router.post("/branches", can(`${BANK_BRANCHES}.create`), async (req, res) => {
   const { code, title, bankPartyId } = req.body as { code?: number; title: string; bankPartyId: number };
   if (!title || !bankPartyId) return res.status(400).json({ error: "عنوان و بانک الزامی است" });
 
@@ -79,7 +84,7 @@ router.post("/branches", async (req, res) => {
   res.status(201).json(created);
 });
 
-router.put("/branches/:id", async (req, res) => {
+router.put("/branches/:id", can(`${BANK_BRANCHES}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const { title } = req.body as { title?: string };
   if (title) {
@@ -90,7 +95,7 @@ router.put("/branches/:id", async (req, res) => {
   res.json(updated);
 });
 
-router.delete("/branches/:id", async (req, res) => {
+router.delete("/branches/:id", can(`${BANK_BRANCHES}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const branch = await prisma.bankBranch.findUnique({ where: { id } });
   if (!branch) return res.status(404).json({ error: "شعبه بانک یافت نشد" });
@@ -118,7 +123,7 @@ router.get("/accounts", async (_req, res) => {
   );
 });
 
-router.post("/accounts", async (req, res) => {
+router.post("/accounts", can(`${BANK_ACCOUNTS}.create`), async (req, res) => {
   const { accountTypeId, bankBranchId, accountNumber, currencyId } = req.body as {
     accountTypeId: number;
     bankBranchId: number;
@@ -158,7 +163,7 @@ router.post("/accounts", async (req, res) => {
   res.status(201).json(created);
 });
 
-router.put("/accounts/:id", async (req, res) => {
+router.put("/accounts/:id", can(`${BANK_ACCOUNTS}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const { accountTypeId, accountNumber, currencyId } = req.body as {
     accountTypeId?: number;
@@ -183,7 +188,7 @@ router.put("/accounts/:id", async (req, res) => {
   res.json(updated);
 });
 
-router.delete("/accounts/:id", async (req, res) => {
+router.delete("/accounts/:id", can(`${BANK_ACCOUNTS}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const account = await prisma.bankAccount.findUnique({ where: { id } });
   if (!account) return res.status(404).json({ error: "حساب بانکی یافت نشد" });

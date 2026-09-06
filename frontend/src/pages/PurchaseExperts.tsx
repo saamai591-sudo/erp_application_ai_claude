@@ -7,6 +7,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
@@ -94,7 +95,7 @@ function PurchaseExpertList() {
           { header: "فعال", render: (r) => (r.isActive ? "بله" : "خیر"), width: "80px" },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/purchase-experts/${r.id}/edit`)}
+        edit={{ path: (r) => `/purchase-experts/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -216,6 +217,7 @@ function PurchaseExpertForm({ editId }: { editId?: number }) {
           <div className="form-field">
             <label>
               عنوان
+              <RequiredMark />
               {hasTransactions && <FieldHint label="عنوان" text="این کارشناس خرید گردش دارد و طرف حساب آن قابل تغییر نیست" />}
             </label>
             <RecordPickerField

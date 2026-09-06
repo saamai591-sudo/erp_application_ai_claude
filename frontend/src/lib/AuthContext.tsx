@@ -1,5 +1,8 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useState, ReactNode } from "react";
 import { api } from "./api";
+import { clearPermissionsCache } from "./usePermissions";
+import { setAuthToken } from "./authToken";
+import { resetPreferencesCache } from "./preferences";
 
 interface AuthUser {
   id: number;
@@ -18,25 +21,25 @@ interface AuthCtx {
 const Ctx = createContext<AuthCtx | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  // عمداً هیچ تلاشی برای بازیابی نشست قبلی از localStorage/sessionStorage انجام نمی‌شود — طبق نیاز
+  // صریح، هر تب باید یک نشست کاملاً مستقل داشته باشد و رفرش صفحه باید نشست را بی‌اعتبار کند؛ توکن فقط
+  // در حافظه‌ی همین تب (authToken.ts) نگه داشته می‌شود، نه در چیزی که بین تب‌ها مشترک باشد یا از رفرش
+  // جان سالم به در ببرد. پس loading همیشه false است و user همیشه با null شروع می‌شود.
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const raw = localStorage.getItem("user");
-    if (raw) setUser(JSON.parse(raw));
-    setLoading(false);
-  }, []);
+  const loading = false;
 
   async function login(mobile: string, password: string) {
     const data = await api.post("/auth/login", { mobile, password });
-    localStorage.setItem("token", data.token);
-    localStorage.setItem("user", JSON.stringify(data.user));
+    setAuthToken(data.token);
+    clearPermissionsCache();
+    resetPreferencesCache();
     setUser(data.user);
   }
 
   function logout() {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+    setAuthToken(null);
+    clearPermissionsCache();
+    resetPreferencesCache();
     setUser(null);
   }
 

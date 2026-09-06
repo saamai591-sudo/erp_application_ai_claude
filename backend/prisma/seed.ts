@@ -49,6 +49,7 @@ async function main() {
     { code: 3, title: "بستن حسابها", systemKey: "CLOSING_ACCOUNTS" },
     { code: 4, title: "اختتامیه", systemKey: "CLOSING" },
     { code: 7, title: "اسناد انبار", systemKey: "WAREHOUSE_DOCUMENTS" },
+    { code: 8, title: "فاکتور خرید", systemKey: "PURCHASE_INVOICE" },
   ];
   for (const dt of documentTypes) {
     await prisma.documentType.upsert({

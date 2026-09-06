@@ -1,6 +1,11 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { nextSerialNumber } from "../utils/coding";
+import { assertRecordNotStale } from "../utils/concurrency";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("goods-attributes");
 
 const router = Router();
 
@@ -42,7 +47,7 @@ router.get("/:id", async (req, res) => {
   res.json(attribute);
 });
 
-router.post("/", async (req, res) => {
+router.post("/", can(`${FORM}.create`), async (req, res) => {
   const body = req.body as { code?: number; title: string; itemCodeLength: number; items: ItemInput[] };
   if (!body.title) return res.status(400).json({ error: "عنوان الزامی است" });
   if (!body.itemCodeLength || body.itemCodeLength < 1 || body.itemCodeLength > 8) {
@@ -72,12 +77,17 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { title?: string; itemCodeLength?: number; items?: ItemInput[] };
 
   const attribute = await prisma.goodsAttribute.findUnique({ where: { id } });
   if (!attribute) return res.status(404).json({ error: "ویژگی کالا یافت نشد" });
+  try {
+    assertRecordNotStale(attribute.updatedAt, req.body.updatedAt, "این ویژگی کالا");
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
 
   const itemCodeLength = body.itemCodeLength ?? attribute.itemCodeLength;
   if (itemCodeLength < 1 || itemCodeLength > 8) {
@@ -106,7 +116,7 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const attribute = await prisma.goodsAttribute.findUnique({ where: { id } });
   if (!attribute) return res.status(404).json({ error: "ویژگی کالا یافت نشد" });

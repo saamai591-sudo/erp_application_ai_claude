@@ -1,5 +1,9 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("org-structure");
 
 const router = Router();
 
@@ -8,7 +12,7 @@ router.get("/", async (_req, res) => {
   res.json(nodes);
 });
 
-router.post("/", async (req, res) => {
+router.post("/", can(`${FORM}.create`), async (req, res) => {
   const { parentId, code, title } = req.body as { parentId?: number | null; code?: string; title: string };
   if (!title) return res.status(400).json({ error: "عنوان الزامی است" });
 
@@ -35,7 +39,7 @@ router.post("/", async (req, res) => {
   res.status(201).json(node);
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const { title, code } = req.body as { title?: string; code?: string };
 
@@ -55,7 +59,7 @@ router.put("/:id", async (req, res) => {
   res.json(updated);
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const children = await prisma.orgStructure.findFirst({ where: { parentId: id } });
   const usedByOrgUnit = await prisma.orgUnit.findFirst({ where: { orgStructureId: id } });

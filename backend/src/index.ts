@@ -2,8 +2,12 @@ import "express-async-errors";
 import express from "express";
 import cors from "cors";
 import { requireAuth } from "./middleware/auth";
+import { fiscalScopeContext } from "./middleware/fiscalScope";
+import { syncRegistryToDb } from "./authz/sync";
 
 import authRoutes from "./routes/auth";
+import authzRoutes from "./routes/authz";
+import userPreferencesRoutes from "./routes/userPreferences";
 import roleRoutes from "./routes/roles";
 import userRoutes from "./routes/users";
 import currencyRoutes from "./routes/currencies";
@@ -33,10 +37,12 @@ import warehousesRoutes from "./routes/warehouses";
 import batchesRoutes from "./routes/batches";
 import serialsRoutes from "./routes/serials";
 import physicalLocationsRoutes from "./routes/physicalLocations";
-import inventoryClosingsRoutes from "./routes/inventoryClosings";
+import warehouseConfirmationsRoutes from "./routes/warehouseConfirmations";
 import goodsGroupsRoutes from "./routes/goodsGroups";
 import goodsAttributesRoutes from "./routes/goodsAttributes";
 import goodsAccountingRoutes from "./routes/goodsAccounting";
+import issueWarehouseJournalEntriesRoutes from "./routes/issueWarehouseJournalEntries";
+import detailSelectorRoutes from "./routes/detailSelector";
 import goodsRequestTypeRoutes from "./routes/goodsRequestTypes";
 import goodsItemsRoutes from "./routes/goodsItems";
 import initialInventoryRoutes from "./routes/initialInventory";
@@ -44,14 +50,17 @@ import projectsRoutes from "./routes/projects";
 import goodsRequestsRoutes from "./routes/goodsRequests";
 import supplyRequestsRoutes from "./routes/supplyRequests";
 import purchaseChainRoutes from "./routes/purchaseChain";
+import purchaseTypesRoutes from "./routes/purchaseTypes";
 import purchaseOperationsRoutes from "./routes/purchaseOperations";
 import salesOperationsRoutes from "./routes/salesOperations";
 import salesDeliveriesRoutes from "./routes/salesDeliveries";
 import salesInvoicesRoutes from "./routes/salesInvoices";
 import purchaseInvoicesRoutes from "./routes/purchaseInvoices";
+import servicePurchaseInvoicesRoutes from "./routes/servicePurchaseInvoices";
 import warehouseReviewRoutes from "./routes/warehouseReview";
 import warehouseReceiptsRoutes from "./routes/warehouseReceipts";
-import warehouseTransfersRoutes from "./routes/warehouseTransfers";
+import warehouseTransferOutRoutes from "./routes/warehouseTransferOut";
+import warehouseTransferInRoutes from "./routes/warehouseTransferIn";
 import salesReturnsRoutes from "./routes/salesReturns";
 import supplierReturnsRoutes from "./routes/supplierReturns";
 import productionReceiptsRoutes from "./routes/productionReceipts";
@@ -63,6 +72,7 @@ import projectConsumptionReturnsRoutes from "./routes/projectConsumptionReturns"
 import productionConsumptionReturnsRoutes from "./routes/productionConsumptionReturns";
 import fixedAssetIssuesRoutes from "./routes/fixedAssetIssues";
 import warehouseAdjustmentsRoutes from "./routes/warehouseAdjustments";
+import inventoryCountingShortagesRoutes from "./routes/inventoryCountingShortages";
 import receiptsRoutes from "./routes/receipts";
 import paymentsRoutes from "./routes/payments";
 import chequesRoutes from "./routes/cheques";
@@ -95,6 +105,12 @@ app.use("/api/auth", authRoutes);
 
 // همه مسیرهای زیر نیازمند احراز هویت هستند
 app.use("/api", requireAuth);
+// دوره مالی جاری (هدر x-fiscal-period-id) را در RequestContext می‌گذارد تا lib/prisma.ts بتواند
+// خودکار لیست موجودیت‌های دارای fiscalPeriodId را به همان دوره محدود کند — نگاه کنید به
+// middleware/fiscalScope.ts و lib/requestContext.ts.
+app.use("/api", fiscalScopeContext);
+app.use("/api", authzRoutes);
+app.use("/api", userPreferencesRoutes);
 app.use("/api/roles", roleRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/currencies", currencyRoutes);
@@ -123,10 +139,12 @@ app.use("/api", warehousesRoutes);
 app.use("/api/batches", batchesRoutes);
 app.use("/api/serials", serialsRoutes);
 app.use("/api/physical-locations", physicalLocationsRoutes);
-app.use("/api", inventoryClosingsRoutes);
+app.use("/api", warehouseConfirmationsRoutes);
 app.use("/api", goodsGroupsRoutes);
 app.use("/api/goods-attributes", goodsAttributesRoutes);
 app.use("/api", goodsAccountingRoutes);
+app.use("/api", issueWarehouseJournalEntriesRoutes);
+app.use("/api", detailSelectorRoutes);
 app.use("/api/goods-request-types", goodsRequestTypeRoutes);
 app.use("/api", goodsItemsRoutes);
 app.use("/api/initial-inventories", initialInventoryRoutes);
@@ -134,14 +152,17 @@ app.use("/api/projects", projectsRoutes);
 app.use("/api/goods-requests", goodsRequestsRoutes);
 app.use("/api/supply-requests", supplyRequestsRoutes);
 app.use("/api", purchaseChainRoutes);
+app.use("/api", purchaseTypesRoutes);
 app.use("/api", purchaseOperationsRoutes);
 app.use("/api", salesOperationsRoutes);
 app.use("/api", salesDeliveriesRoutes);
 app.use("/api", salesInvoicesRoutes);
 app.use("/api", purchaseInvoicesRoutes);
+app.use("/api", servicePurchaseInvoicesRoutes);
 app.use("/api", warehouseReviewRoutes);
 app.use("/api", warehouseReceiptsRoutes);
-app.use("/api", warehouseTransfersRoutes);
+app.use("/api", warehouseTransferOutRoutes);
+app.use("/api", warehouseTransferInRoutes);
 app.use("/api", warehouseAdjustmentsRoutes);
 app.use("/api", salesReturnsRoutes);
 app.use("/api", supplierReturnsRoutes);
@@ -153,6 +174,7 @@ app.use("/api", centerConsumptionReturnsRoutes);
 app.use("/api", projectConsumptionReturnsRoutes);
 app.use("/api", productionConsumptionReturnsRoutes);
 app.use("/api", fixedAssetIssuesRoutes);
+app.use("/api", inventoryCountingShortagesRoutes);
 app.use("/api", receiptsRoutes);
 app.use("/api", paymentsRoutes);
 app.use("/api", chequesRoutes);
@@ -179,6 +201,15 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 });
 
 const port = process.env.PORT ? Number(process.env.PORT) : 4000;
-app.listen(port, () => {
-  console.log(`Backend listening on port ${port}`);
-});
+// همگام‌سازی Registry با جدول Action در هر بار بالا آمدن سرور (نه فقط seed) — یعنی افزودن/حذف یک
+// Action در registry.ts، بدون نیاز به اجرای دستیِ seed، در همان اولین ری‌استارت بعدی اعمال می‌شود.
+syncRegistryToDb()
+  .then(() => {
+    app.listen(port, () => {
+      console.log(`Backend listening on port ${port}`);
+    });
+  })
+  .catch((err) => {
+    console.error("خطا در همگام‌سازی Registry با دیتابیس:", err);
+    process.exit(1);
+  });

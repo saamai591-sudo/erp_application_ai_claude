@@ -2,7 +2,11 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
+import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { getAllowedGoodsTypes } from "../data/warehouseDocNatureMatrix";
+import { assertRecordNotStale } from "../utils/concurrency";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
 
 // =========================================================================
 // ماژول «زنجیره تامین» > ساب‌ماژول: عملیات
@@ -10,11 +14,20 @@ import { getAllowedGoodsTypes } from "../data/warehouseDocNatureMatrix";
 // تحلیل مستندات) در claude/سرویس-زنجیره-تامین-عملیات.md مستند شده است.
 // =========================================================================
 
+const PURCHASE_REQUESTS = findFormPrefix("purchase-requests");
+const PURCHASE_PLANNINGS = findFormPrefix("purchase-plannings");
+const INQUIRY_AUTHORIZATIONS = findFormPrefix("inquiry-authorizations");
+const PRICE_INQUIRIES = findFormPrefix("price-inquiries");
+const INQUIRY_EVALUATIONS = findFormPrefix("inquiry-evaluations");
+const PURCHASE_ORDERS = findFormPrefix("purchase-orders");
+const DELIVERY_AUTHORIZATIONS = findFormPrefix("delivery-authorizations");
+
 const router = Router();
 
 async function resolveFiscalPeriod(date: Date) {
   const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
   if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
+  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
   await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
   return fiscalPeriod;
 }
@@ -84,7 +97,7 @@ async function purchaseRequestHasDownstreamUsage(purchaseRequestId: number) {
   return count > 0;
 }
 
-router.get("/purchase-requests/pickable-lines", async (req, res) => {
+router.get("/purchase-requests/pickable-lines", can(`${PURCHASE_REQUESTS}.view`), async (req, res) => {
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
   const purchaseGroupId = req.query.purchaseGroupId ? Number(req.query.purchaseGroupId) : null;
 
@@ -127,7 +140,7 @@ router.get("/purchase-requests/pickable-lines", async (req, res) => {
   res.json(result);
 });
 
-router.get("/purchase-requests", async (_req, res) => {
+router.get("/purchase-requests", can(`${PURCHASE_REQUESTS}.view`), async (_req, res) => {
   const items = await prisma.purchaseRequest.findMany({ include: { orgUnit: true, lines: true }, orderBy: { id: "desc" } });
   res.json(
     items.map((d: any) => ({
@@ -144,7 +157,7 @@ router.get("/purchase-requests", async (_req, res) => {
   );
 });
 
-router.get("/purchase-requests/:id", async (req, res) => {
+router.get("/purchase-requests/:id", can(`${PURCHASE_REQUESTS}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchaseRequest.findUnique({
     where: { id },
@@ -170,6 +183,7 @@ router.get("/purchase-requests/:id", async (req, res) => {
     approverId: d.approverId,
     approverName: d.approver ? `${d.approver.firstName} ${d.approver.lastName}`.trim() : null,
     approvedAt: d.approvedAt,
+    updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
       id: l.id,
       sourceSupplyRequestLineId: l.sourceSupplyRequestLineId,
@@ -185,7 +199,7 @@ router.get("/purchase-requests/:id", async (req, res) => {
   });
 });
 
-router.post("/purchase-requests", async (req: AuthedRequest, res) => {
+router.post("/purchase-requests", can(`${PURCHASE_REQUESTS}.create`), async (req: AuthedRequest, res) => {
   const body = req.body as { date: string; basis: string; orgUnitId: number; description?: string; lines: PurchaseRequestLineInput[] };
   if (!body.date || !body.basis || !body.orgUnitId) return res.status(400).json({ error: "تاریخ، مبنا و واحد سازمانی الزامی است" });
   try {
@@ -214,7 +228,7 @@ router.post("/purchase-requests", async (req: AuthedRequest, res) => {
   }
 });
 
-router.put("/purchase-requests/:id", async (req, res) => {
+router.put("/purchase-requests/:id", can(`${PURCHASE_REQUESTS}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { date: string; basis: string; orgUnitId: number; description?: string; lines: PurchaseRequestLineInput[] };
   const existing = await prisma.purchaseRequest.findUnique({ where: { id } });
@@ -223,6 +237,7 @@ router.put("/purchase-requests/:id", async (req, res) => {
   if (await purchaseRequestHasDownstreamUsage(id)) return res.status(400).json({ error: "این درخواست گردش دارد و قابل ویرایش نیست" });
 
   try {
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این درخواست خرید");
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const orgUnit = await prisma.orgUnit.findUnique({ where: { id: body.orgUnitId } });
@@ -249,7 +264,7 @@ router.put("/purchase-requests/:id", async (req, res) => {
   }
 });
 
-router.delete("/purchase-requests/:id", async (req, res) => {
+router.delete("/purchase-requests/:id", can(`${PURCHASE_REQUESTS}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchaseRequest.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -259,7 +274,7 @@ router.delete("/purchase-requests/:id", async (req, res) => {
   res.status(204).send();
 });
 
-router.post("/purchase-requests/:id/review", async (req, res) => {
+router.post("/purchase-requests/:id/review", can(`${PURCHASE_REQUESTS}.review`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchaseRequest.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -268,7 +283,7 @@ router.post("/purchase-requests/:id/review", async (req, res) => {
   res.json({ id, status: "REVIEWED" });
 });
 
-router.post("/purchase-requests/:id/unreview", async (req, res) => {
+router.post("/purchase-requests/:id/unreview", can(`${PURCHASE_REQUESTS}.unreview`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchaseRequest.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -277,7 +292,7 @@ router.post("/purchase-requests/:id/unreview", async (req, res) => {
   res.json({ id, status: "DRAFT" });
 });
 
-router.post("/purchase-requests/:id/approve", async (req: AuthedRequest, res) => {
+router.post("/purchase-requests/:id/approve", can(`${PURCHASE_REQUESTS}.approve`), async (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchaseRequest.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -286,7 +301,7 @@ router.post("/purchase-requests/:id/approve", async (req: AuthedRequest, res) =>
   res.json({ id, status: "APPROVED" });
 });
 
-router.post("/purchase-requests/:id/unapprove", async (req, res) => {
+router.post("/purchase-requests/:id/unapprove", can(`${PURCHASE_REQUESTS}.unapprove`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchaseRequest.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -296,7 +311,7 @@ router.post("/purchase-requests/:id/unapprove", async (req, res) => {
   res.json({ id, status: "DRAFT" });
 });
 
-router.post("/purchase-requests/:id/reject", async (req, res) => {
+router.post("/purchase-requests/:id/reject", can(`${PURCHASE_REQUESTS}.reject`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchaseRequest.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -305,7 +320,7 @@ router.post("/purchase-requests/:id/reject", async (req, res) => {
   res.json({ id, status: "REJECTED" });
 });
 
-router.post("/purchase-requests/:id/unreject", async (req, res) => {
+router.post("/purchase-requests/:id/unreject", can(`${PURCHASE_REQUESTS}.unreject`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchaseRequest.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -314,7 +329,7 @@ router.post("/purchase-requests/:id/unreject", async (req, res) => {
   res.json({ id, status: "DRAFT" });
 });
 
-router.post("/purchase-requests/:id/close", async (req, res) => {
+router.post("/purchase-requests/:id/close", can(`${PURCHASE_REQUESTS}.close`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchaseRequest.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -380,7 +395,7 @@ async function buildPlanningStages(purchaseGroupId: number, stage1Input: Plannin
   return { stage1Rows, aggregated: Object.values(byGoods) };
 }
 
-router.get("/purchase-plannings", async (_req, res) => {
+router.get("/purchase-plannings", can(`${PURCHASE_PLANNINGS}.view`), async (_req, res) => {
   const items = await prisma.purchasePlanning.findMany({
     include: { purchaseGroup: true, purchaseExpert: { include: { party: true } }, purchaseRoute: true, stage1Rows: true },
     orderBy: { id: "desc" },
@@ -401,7 +416,7 @@ router.get("/purchase-plannings", async (_req, res) => {
 });
 
 // انتخابگر برنامه ریزی خرید: برای مجوز استعلام / استعلام قیمت / ارزیابی استعلام
-router.get("/purchase-plannings/pickable", async (req, res) => {
+router.get("/purchase-plannings/pickable", can(`${PURCHASE_PLANNINGS}.view`), async (req, res) => {
   const purpose = req.query.purpose as string | undefined; // "inquiry-authorization" | "price-inquiry" | "inquiry-evaluation"
   const meId = req.query.userId ? Number(req.query.userId) : null;
 
@@ -447,7 +462,7 @@ router.get("/purchase-plannings/pickable", async (req, res) => {
   );
 });
 
-router.get("/purchase-plannings/:id", async (req, res) => {
+router.get("/purchase-plannings/:id", can(`${PURCHASE_PLANNINGS}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchasePlanning.findUnique({
     where: { id },
@@ -475,6 +490,7 @@ router.get("/purchase-plannings/:id", async (req, res) => {
     purchaseRouteTitle: d.purchaseRoute?.title ?? null,
     purchaseRouteNature: d.purchaseRoute?.nature ?? null,
     allowMultiSupplierPerLine: d.allowMultiSupplierPerLine,
+    updatedAt: d.updatedAt,
     stage1Rows: d.stage1Rows.map((r: any) => ({
       id: r.id,
       purchaseRequestLineId: r.purchaseRequestLineId,
@@ -501,7 +517,7 @@ router.get("/purchase-plannings/:id", async (req, res) => {
   });
 });
 
-router.post("/purchase-plannings", async (req, res) => {
+router.post("/purchase-plannings", can(`${PURCHASE_PLANNINGS}.create`), async (req, res) => {
   const body = req.body as {
     date: string;
     neededDate?: string | null;
@@ -560,7 +576,7 @@ router.post("/purchase-plannings", async (req, res) => {
   }
 });
 
-router.put("/purchase-plannings/:id", async (req, res) => {
+router.put("/purchase-plannings/:id", can(`${PURCHASE_PLANNINGS}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as {
     date: string;
@@ -579,6 +595,7 @@ router.put("/purchase-plannings/:id", async (req, res) => {
   if (await planningHasDownstreamUsage(id)) return res.status(400).json({ error: "این فرم گردش دارد و قابل ویرایش نیست" });
 
   try {
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این برنامه ریزی خرید");
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const purchaseGroup = await prisma.purchaseGroup.findUnique({ where: { id: body.purchaseGroupId } });
@@ -624,7 +641,7 @@ router.put("/purchase-plannings/:id", async (req, res) => {
   }
 });
 
-router.delete("/purchase-plannings/:id", async (req, res) => {
+router.delete("/purchase-plannings/:id", can(`${PURCHASE_PLANNINGS}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchasePlanning.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -634,7 +651,7 @@ router.delete("/purchase-plannings/:id", async (req, res) => {
   res.status(204).send();
 });
 
-router.post("/purchase-plannings/:id/approve", async (req, res) => {
+router.post("/purchase-plannings/:id/approve", can(`${PURCHASE_PLANNINGS}.approve`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchasePlanning.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -643,7 +660,7 @@ router.post("/purchase-plannings/:id/approve", async (req, res) => {
   res.json({ id, status: "APPROVED" });
 });
 
-router.post("/purchase-plannings/:id/unapprove", async (req, res) => {
+router.post("/purchase-plannings/:id/unapprove", can(`${PURCHASE_PLANNINGS}.unapprove`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchasePlanning.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -653,7 +670,7 @@ router.post("/purchase-plannings/:id/unapprove", async (req, res) => {
   res.json({ id, status: "DRAFT" });
 });
 
-router.post("/purchase-plannings/:id/close", async (req, res) => {
+router.post("/purchase-plannings/:id/close", can(`${PURCHASE_PLANNINGS}.close`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchasePlanning.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -686,7 +703,7 @@ async function validateSupplierLines(lines: SupplierLineInput[]) {
   return cleaned;
 }
 
-router.get("/inquiry-authorizations", async (_req, res) => {
+router.get("/inquiry-authorizations", can(`${INQUIRY_AUTHORIZATIONS}.view`), async (_req, res) => {
   const items = await prisma.inquiryAuthorization.findMany({ include: { purchasePlanning: true, lines: true }, orderBy: { id: "desc" } });
   res.json(
     items.map((d: any) => ({
@@ -702,7 +719,7 @@ router.get("/inquiry-authorizations", async (_req, res) => {
   );
 });
 
-router.get("/inquiry-authorizations/:id", async (req, res) => {
+router.get("/inquiry-authorizations/:id", can(`${INQUIRY_AUTHORIZATIONS}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.inquiryAuthorization.findUnique({
     where: { id },
@@ -717,6 +734,7 @@ router.get("/inquiry-authorizations/:id", async (req, res) => {
     purchasePlanningNumber: d.purchasePlanning.number,
     description: d.description,
     status: d.status,
+    updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
       id: l.id,
       supplierId: l.supplierId,
@@ -727,7 +745,7 @@ router.get("/inquiry-authorizations/:id", async (req, res) => {
   });
 });
 
-router.post("/inquiry-authorizations", async (req, res) => {
+router.post("/inquiry-authorizations", can(`${INQUIRY_AUTHORIZATIONS}.create`), async (req, res) => {
   const body = req.body as { date: string; purchasePlanningId: number; description?: string; lines: SupplierLineInput[] };
   if (!body.date || !body.purchasePlanningId) return res.status(400).json({ error: "تاریخ و برنامه ریزی خرید الزامی است" });
   try {
@@ -759,13 +777,14 @@ router.post("/inquiry-authorizations", async (req, res) => {
   }
 });
 
-router.put("/inquiry-authorizations/:id", async (req, res) => {
+router.put("/inquiry-authorizations/:id", can(`${INQUIRY_AUTHORIZATIONS}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { date: string; description?: string; lines: SupplierLineInput[] };
   const existing = await prisma.inquiryAuthorization.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "یافت نشد" });
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "ویرایش فقط در حالت ثبت ممکن است" });
   try {
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این مجوز استعلام");
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const lines = await validateSupplierLines(body.lines);
@@ -787,7 +806,7 @@ router.put("/inquiry-authorizations/:id", async (req, res) => {
   }
 });
 
-router.delete("/inquiry-authorizations/:id", async (req, res) => {
+router.delete("/inquiry-authorizations/:id", can(`${INQUIRY_AUTHORIZATIONS}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.inquiryAuthorization.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -796,7 +815,7 @@ router.delete("/inquiry-authorizations/:id", async (req, res) => {
   res.status(204).send();
 });
 
-router.post("/inquiry-authorizations/:id/approve", async (req, res) => {
+router.post("/inquiry-authorizations/:id/approve", can(`${INQUIRY_AUTHORIZATIONS}.approve`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.inquiryAuthorization.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -805,7 +824,7 @@ router.post("/inquiry-authorizations/:id/approve", async (req, res) => {
   res.json({ id, status: "APPROVED" });
 });
 
-router.post("/inquiry-authorizations/:id/unapprove", async (req, res) => {
+router.post("/inquiry-authorizations/:id/unapprove", can(`${INQUIRY_AUTHORIZATIONS}.unapprove`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.inquiryAuthorization.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -826,7 +845,7 @@ async function priceInquiryHasDownstreamUsage(priceInquiryId: number) {
 }
 
 // انتخابگر تامین‌کننده برای استعلام قیمت: بسته به ماهیت مسیر تامین برنامه ریزی خرید
-router.get("/price-inquiries/pickable-suppliers", async (req, res) => {
+router.get("/price-inquiries/pickable-suppliers", can(`${PRICE_INQUIRIES}.view`), async (req, res) => {
   const purchasePlanningId = Number(req.query.purchasePlanningId);
   const planning = await prisma.purchasePlanning.findUnique({ where: { id: purchasePlanningId }, include: { purchaseRoute: true, inquiryAuthorization: { include: { lines: true } } } });
   if (!planning) return res.status(404).json({ error: "برنامه ریزی خرید یافت نشد" });
@@ -840,7 +859,7 @@ router.get("/price-inquiries/pickable-suppliers", async (req, res) => {
   res.json(suppliers);
 });
 
-router.get("/price-inquiries", async (_req, res) => {
+router.get("/price-inquiries", can(`${PRICE_INQUIRIES}.view`), async (_req, res) => {
   const items = await prisma.priceInquiry.findMany({
     include: { purchasePlanning: true, supplier: { include: { party: true } }, currency: true, itemLines: true, otherCostLines: true },
     orderBy: { id: "desc" },
@@ -864,7 +883,7 @@ router.get("/price-inquiries", async (_req, res) => {
   );
 });
 
-router.get("/price-inquiries/:id", async (req, res) => {
+router.get("/price-inquiries/:id", can(`${PRICE_INQUIRIES}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.priceInquiry.findUnique({
     where: { id },
@@ -891,6 +910,7 @@ router.get("/price-inquiries/:id", async (req, res) => {
     paymentDeadline: d.paymentDeadline,
     description: d.description,
     status: d.status,
+    updatedAt: d.updatedAt,
     itemLines: d.itemLines.map((l: any) => ({
       id: l.id,
       planningStage2RowId: l.planningStage2RowId,
@@ -927,7 +947,7 @@ interface PriceInquiryOtherCostInput {
   description?: string | null;
 }
 
-router.post("/price-inquiries", async (req, res) => {
+router.post("/price-inquiries", can(`${PRICE_INQUIRIES}.create`), async (req, res) => {
   const body = req.body as {
     date: string;
     purchasePlanningId: number;
@@ -1006,7 +1026,7 @@ router.post("/price-inquiries", async (req, res) => {
   }
 });
 
-router.put("/price-inquiries/:id", async (req, res) => {
+router.put("/price-inquiries/:id", can(`${PRICE_INQUIRIES}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as {
     date: string;
@@ -1023,6 +1043,7 @@ router.put("/price-inquiries/:id", async (req, res) => {
   if (await priceInquiryHasDownstreamUsage(id)) return res.status(400).json({ error: "این فرم گردش دارد و قابل ویرایش نیست" });
 
   try {
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این استعلام قیمت");
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
@@ -1076,7 +1097,7 @@ router.put("/price-inquiries/:id", async (req, res) => {
   }
 });
 
-router.delete("/price-inquiries/:id", async (req, res) => {
+router.delete("/price-inquiries/:id", can(`${PRICE_INQUIRIES}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.priceInquiry.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -1087,7 +1108,7 @@ router.delete("/price-inquiries/:id", async (req, res) => {
 });
 
 // بررسی استعلام: طبق مستند، تایید در صورتی که همه ردیف‌ها مبلغ داشته باشند و تاریخ تحویل <= تاریخ مورد نیاز برنامه ریزی خرید
-router.post("/price-inquiries/:id/check", async (req, res) => {
+router.post("/price-inquiries/:id/check", can(`${PRICE_INQUIRIES}.check`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.priceInquiry.findUnique({ where: { id }, include: { itemLines: true, purchasePlanning: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -1101,7 +1122,7 @@ router.post("/price-inquiries/:id/check", async (req, res) => {
   res.json({ id, status: newStatus });
 });
 
-router.post("/price-inquiries/:id/uncheck", async (req, res) => {
+router.post("/price-inquiries/:id/uncheck", can(`${PRICE_INQUIRIES}.uncheck`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.priceInquiry.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -1162,14 +1183,14 @@ async function buildEvaluationPreview(purchasePlanningId: number) {
   };
 }
 
-router.get("/inquiry-evaluations/preview", async (req, res) => {
+router.get("/inquiry-evaluations/preview", can(`${INQUIRY_EVALUATIONS}.view`), async (req, res) => {
   const purchasePlanningId = Number(req.query.purchasePlanningId);
   const planning = await prisma.purchasePlanning.findUnique({ where: { id: purchasePlanningId } });
   if (!planning) return res.status(404).json({ error: "برنامه ریزی خرید یافت نشد" });
   res.json(await buildEvaluationPreview(purchasePlanningId));
 });
 
-router.get("/inquiry-evaluations", async (_req, res) => {
+router.get("/inquiry-evaluations", can(`${INQUIRY_EVALUATIONS}.view`), async (_req, res) => {
   const items = await prisma.inquiryEvaluation.findMany({ include: { purchasePlanning: true, itemLines: true }, orderBy: { id: "desc" } });
   res.json(
     items.map((d: any) => ({
@@ -1186,7 +1207,7 @@ router.get("/inquiry-evaluations", async (_req, res) => {
   );
 });
 
-router.get("/inquiry-evaluations/:id", async (req, res) => {
+router.get("/inquiry-evaluations/:id", can(`${INQUIRY_EVALUATIONS}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.inquiryEvaluation.findUnique({
     where: { id },
@@ -1208,6 +1229,7 @@ router.get("/inquiry-evaluations/:id", async (req, res) => {
     purchasePlanningNumber: d.purchasePlanning.number,
     description: d.description,
     status: d.status,
+    updatedAt: d.updatedAt,
     quoteRows: d.quoteRows.map((q: any) => ({
       priceInquiryId: q.priceInquiryId,
       priceInquiryNumber: q.priceInquiry.number,
@@ -1234,7 +1256,7 @@ router.get("/inquiry-evaluations/:id", async (req, res) => {
   });
 });
 
-router.post("/inquiry-evaluations", async (req, res) => {
+router.post("/inquiry-evaluations", can(`${INQUIRY_EVALUATIONS}.create`), async (req, res) => {
   const body = req.body as {
     date: string;
     purchasePlanningId: number;
@@ -1283,7 +1305,7 @@ router.post("/inquiry-evaluations", async (req, res) => {
   }
 });
 
-router.put("/inquiry-evaluations/:id", async (req, res) => {
+router.put("/inquiry-evaluations/:id", can(`${INQUIRY_EVALUATIONS}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { date: string; description?: string; itemApprovals?: Record<string, { approved?: boolean; description?: string | null }> };
   const existing = await prisma.inquiryEvaluation.findUnique({ where: { id }, include: { itemLines: true } });
@@ -1291,6 +1313,7 @@ router.put("/inquiry-evaluations/:id", async (req, res) => {
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "ویرایش فقط در حالت ثبت ممکن است" });
 
   try {
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این ارزیابی استعلام");
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const approvals = body.itemApprovals || {};
@@ -1313,7 +1336,7 @@ router.put("/inquiry-evaluations/:id", async (req, res) => {
   }
 });
 
-router.delete("/inquiry-evaluations/:id", async (req, res) => {
+router.delete("/inquiry-evaluations/:id", can(`${INQUIRY_EVALUATIONS}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.inquiryEvaluation.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -1325,7 +1348,7 @@ router.delete("/inquiry-evaluations/:id", async (req, res) => {
 // تایید استعلام قیمت: همه ردیف‌های یک استعلام قیمت خاص را تایید می‌کند. اگر برنامه ریزی خرید
 // اجازه‌ی خرید هر ردیف از تامین‌کننده‌های متفاوت را نداده باشد (طبق مستند)، این یعنی انتخاب انحصاری
 // است؛ پس ابتدا تیک همه ردیف‌های این ارزیابی برداشته می‌شود.
-router.put("/inquiry-evaluations/:id/approve-quote", async (req, res) => {
+router.put("/inquiry-evaluations/:id/approve-quote", can(`${INQUIRY_EVALUATIONS}.approveQuote`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { priceInquiryId: number };
   const d = await prisma.inquiryEvaluation.findUnique({
@@ -1347,7 +1370,7 @@ router.put("/inquiry-evaluations/:id/approve-quote", async (req, res) => {
   res.json({ id, status: d.status });
 });
 
-router.post("/inquiry-evaluations/:id/approve", async (req, res) => {
+router.post("/inquiry-evaluations/:id/approve", can(`${INQUIRY_EVALUATIONS}.approve`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.inquiryEvaluation.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -1356,7 +1379,7 @@ router.post("/inquiry-evaluations/:id/approve", async (req, res) => {
   res.json({ id, status: "APPROVED" });
 });
 
-router.post("/inquiry-evaluations/:id/unapprove", async (req, res) => {
+router.post("/inquiry-evaluations/:id/unapprove", can(`${INQUIRY_EVALUATIONS}.unapprove`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.inquiryEvaluation.findUnique({ where: { id }, include: { itemLines: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -1380,7 +1403,7 @@ async function purchaseOrderHasDownstreamUsage(purchaseOrderId: number) {
 // انتخابگر ردیف استعلام قیمت برای سفارش خرید بدون استعلام قیمت مستقیم (طبق مستند): استعلام قیمت‌های
 // تایید‌شده که ماهیت مسیر تامین برنامه ریزی خریدشان بدون تشریفات/انحصاری باشد، یا ردیف‌های تایید‌شده
 // در ارزیابی استعلام (وقتی ماهیت استعلام است). مانده > صفر.
-router.get("/purchase-orders/pickable-item-lines", async (req, res) => {
+router.get("/purchase-orders/pickable-item-lines", can(`${PURCHASE_ORDERS}.view`), async (req, res) => {
   const supplierId = req.query.supplierId ? Number(req.query.supplierId) : null;
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
 
@@ -1435,7 +1458,7 @@ router.get("/purchase-orders/pickable-item-lines", async (req, res) => {
   res.json(result);
 });
 
-router.get("/purchase-orders", async (_req, res) => {
+router.get("/purchase-orders", can(`${PURCHASE_ORDERS}.view`), async (_req, res) => {
   const items = await prisma.purchaseOrder.findMany({ include: { supplier: { include: { party: true } }, currency: true, lines: true }, orderBy: { id: "desc" } });
   res.json(
     items.map((d: any) => ({
@@ -1454,7 +1477,7 @@ router.get("/purchase-orders", async (_req, res) => {
   );
 });
 
-router.get("/purchase-orders/:id", async (req, res) => {
+router.get("/purchase-orders/:id", can(`${PURCHASE_ORDERS}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchaseOrder.findUnique({
     where: { id },
@@ -1476,6 +1499,7 @@ router.get("/purchase-orders/:id", async (req, res) => {
     currencyTitle: d.currency.title,
     description: d.description,
     status: d.status,
+    updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
       id: l.id,
       priceInquiryItemLineId: l.priceInquiryItemLineId,
@@ -1540,7 +1564,7 @@ async function validatePurchaseOrderLines(lines: PurchaseOrderLineInput[], basis
   return cleaned;
 }
 
-router.post("/purchase-orders", async (req, res) => {
+router.post("/purchase-orders", can(`${PURCHASE_ORDERS}.create`), async (req, res) => {
   const body = req.body as { date: string; basis: string; supplierId: number; currencyId: number; description?: string; lines: PurchaseOrderLineInput[] };
   if (!body.date || !body.basis || !body.supplierId || !body.currencyId) return res.status(400).json({ error: "تاریخ، مبنا، تامین کننده و ارز الزامی است" });
   try {
@@ -1572,13 +1596,14 @@ router.post("/purchase-orders", async (req, res) => {
   }
 });
 
-router.put("/purchase-orders/:id", async (req, res) => {
+router.put("/purchase-orders/:id", can(`${PURCHASE_ORDERS}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { date: string; basis: string; supplierId: number; currencyId: number; description?: string; lines: PurchaseOrderLineInput[] };
   const existing = await prisma.purchaseOrder.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "یافت نشد" });
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "ویرایش فقط در حالت ثبت ممکن است" });
   try {
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سفارش خرید");
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const supplier = await prisma.supplier.findUnique({ where: { id: body.supplierId } });
@@ -1608,7 +1633,7 @@ router.put("/purchase-orders/:id", async (req, res) => {
   }
 });
 
-router.delete("/purchase-orders/:id", async (req, res) => {
+router.delete("/purchase-orders/:id", can(`${PURCHASE_ORDERS}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchaseOrder.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -1618,7 +1643,7 @@ router.delete("/purchase-orders/:id", async (req, res) => {
   res.status(204).send();
 });
 
-router.post("/purchase-orders/:id/approve", async (req, res) => {
+router.post("/purchase-orders/:id/approve", can(`${PURCHASE_ORDERS}.approve`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchaseOrder.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -1627,7 +1652,7 @@ router.post("/purchase-orders/:id/approve", async (req, res) => {
   res.json({ id, status: "APPROVED" });
 });
 
-router.post("/purchase-orders/:id/unapprove", async (req, res) => {
+router.post("/purchase-orders/:id/unapprove", can(`${PURCHASE_ORDERS}.unapprove`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.purchaseOrder.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -1647,7 +1672,7 @@ async function deliveryAuthHasDownstreamUsage(_deliveryAuthorizationId: number) 
   return false;
 }
 
-router.get("/delivery-authorizations/pickable-order-lines", async (req, res) => {
+router.get("/delivery-authorizations/pickable-order-lines", can(`${DELIVERY_AUTHORIZATIONS}.view`), async (req, res) => {
   const supplierId = Number(req.query.supplierId);
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
 
@@ -1688,7 +1713,7 @@ router.get("/delivery-authorizations/pickable-order-lines", async (req, res) => 
   res.json(result);
 });
 
-router.get("/delivery-authorizations", async (_req, res) => {
+router.get("/delivery-authorizations", can(`${DELIVERY_AUTHORIZATIONS}.view`), async (_req, res) => {
   const items = await prisma.deliveryAuthorization.findMany({ include: { supplier: { include: { party: true } }, lines: true }, orderBy: { id: "desc" } });
   res.json(
     items.map((d: any) => ({
@@ -1704,7 +1729,7 @@ router.get("/delivery-authorizations", async (_req, res) => {
   );
 });
 
-router.get("/delivery-authorizations/:id", async (req, res) => {
+router.get("/delivery-authorizations/:id", can(`${DELIVERY_AUTHORIZATIONS}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.deliveryAuthorization.findUnique({
     where: { id },
@@ -1720,6 +1745,7 @@ router.get("/delivery-authorizations/:id", async (req, res) => {
     deliveryDate: d.deliveryDate,
     description: d.description,
     status: d.status,
+    updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
       id: l.id,
       purchaseOrderLineId: l.purchaseOrderLineId,
@@ -1765,7 +1791,7 @@ async function validateDeliveryAuthLines(lines: DeliveryAuthLineInput[]) {
   return cleaned;
 }
 
-router.post("/delivery-authorizations", async (req, res) => {
+router.post("/delivery-authorizations", can(`${DELIVERY_AUTHORIZATIONS}.create`), async (req, res) => {
   const body = req.body as { date: string; supplierId: number; deliveryDate: string; description?: string; lines: DeliveryAuthLineInput[] };
   if (!body.date || !body.supplierId || !body.deliveryDate) return res.status(400).json({ error: "تاریخ، تامین کننده و تاریخ تحویل الزامی است" });
   try {
@@ -1794,13 +1820,14 @@ router.post("/delivery-authorizations", async (req, res) => {
   }
 });
 
-router.put("/delivery-authorizations/:id", async (req, res) => {
+router.put("/delivery-authorizations/:id", can(`${DELIVERY_AUTHORIZATIONS}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { date: string; supplierId: number; deliveryDate: string; description?: string; lines: DeliveryAuthLineInput[] };
   const existing = await prisma.deliveryAuthorization.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "یافت نشد" });
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "ویرایش فقط در حالت ثبت ممکن است" });
   try {
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این مجوز تحویل");
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const supplier = await prisma.supplier.findUnique({ where: { id: body.supplierId } });
@@ -1827,7 +1854,7 @@ router.put("/delivery-authorizations/:id", async (req, res) => {
   }
 });
 
-router.delete("/delivery-authorizations/:id", async (req, res) => {
+router.delete("/delivery-authorizations/:id", can(`${DELIVERY_AUTHORIZATIONS}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.deliveryAuthorization.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -1836,7 +1863,7 @@ router.delete("/delivery-authorizations/:id", async (req, res) => {
   res.status(204).send();
 });
 
-router.post("/delivery-authorizations/:id/approve", async (req, res) => {
+router.post("/delivery-authorizations/:id/approve", can(`${DELIVERY_AUTHORIZATIONS}.approve`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.deliveryAuthorization.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -1845,7 +1872,7 @@ router.post("/delivery-authorizations/:id/approve", async (req, res) => {
   res.json({ id, status: "APPROVED" });
 });
 
-router.post("/delivery-authorizations/:id/unapprove", async (req, res) => {
+router.post("/delivery-authorizations/:id/unapprove", can(`${DELIVERY_AUTHORIZATIONS}.unapprove`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.deliveryAuthorization.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });

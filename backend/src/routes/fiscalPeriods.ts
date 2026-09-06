@@ -1,8 +1,11 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { generateDetailCode, registerDetailCode } from "../utils/coding";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
 
 const DETAIL_TYPE_FISCAL_PERIOD = 7;
+const FORM = findFormPrefix("periods");
 
 const router = Router();
 
@@ -11,7 +14,7 @@ router.get("/", async (_req, res) => {
   res.json(periods);
 });
 
-router.post("/", async (req, res) => {
+router.post("/", can(`${FORM}.create`), async (req, res) => {
   const { title, fromDate, toDate } = req.body as { title: string; fromDate: string; toDate: string };
 
   if (!title || !/^\d{4}$/.test(title)) {
@@ -44,7 +47,7 @@ router.post("/", async (req, res) => {
 });
 
 // فقط تا تاریخ آخرین دوره مالی تعریف شده قابل ویرایش است
-router.put("/:id", async (req, res) => {
+router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const { toDate } = req.body as { toDate: string };
 
@@ -65,7 +68,7 @@ router.put("/:id", async (req, res) => {
   res.json(updated);
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const period = await prisma.fiscalPeriod.findUnique({ where: { id } });
   if (!period) return res.status(404).json({ error: "دوره مالی یافت نشد" });

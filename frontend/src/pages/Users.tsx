@@ -12,7 +12,9 @@ import { digitsOnly } from "../lib/digits";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RecordPickerField } from "../components/RecordPicker";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
+import { PermissionTree, TreeModule } from "../components/PermissionTree";
 
 interface Role { id: number; title: string }
 
@@ -38,6 +40,7 @@ interface UserRow {
   lastName: string;
   isActive: boolean;
   roles: { role: Role }[];
+  actions: { action: { id: number } }[];
   partyId: number | null;
   party: PartyOption | null;
 }
@@ -54,17 +57,15 @@ export default function Users() {
 
 function UserList() {
   const { items, loading, error, remove, reload } = useCrud<UserRow>("/users");
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
   return (
     <div>
       <div className="page-header">
-        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف کاربران سیستم و تخصیص نقش کاربری`} title="کاربر" /><NewRecordButton path="/users/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
+        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف کاربران سیستم و تخصیص نقش کاربری`} title="کاربر" /><NewRecordButton path="/users/new" /><RefreshButton onClick={reload} /></div>
       </div>
       {error && <div className="alert error">{error}</div>}
       {!loading && (
         <DataTable
-        bulkActionsContainer={bulkSlot}
           columns={[
             { header: "کد", render: (r) => toFaDigits(String(r.code)), width: "70px", filterType: "number", filterValue: (r) => r.code },
             { header: "شماره همراه", render: (r) => r.mobile, filterType: "string", filterValue: (r) => r.mobile },
@@ -74,7 +75,7 @@ function UserList() {
             { header: "وضعیت", render: (r) => <span className="badge">{r.isActive ? "فعال" : "غیرفعال"}</span>, filterType: "string", filterValue: (r) => (r.isActive ? "فعال" : "غیرفعال") },
           ]}
           rows={items}
-          onEdit={(r) => navigate(`/users/${r.id}/edit`)}
+          edit={{ path: (r) => `/users/${r.id}/edit` }}
           onDelete={async (r) => {
             const res = await remove(r.id);
             if (!res.ok) alert(res.error);
@@ -92,14 +93,17 @@ function UserForm({ editId }: { editId?: number }) {
   const { create } = useCrud<UserRow>("/users");
   const [roles, setRoles] = useState<Role[]>([]);
   const [parties, setParties] = useState<PartyOption[]>([]);
+  const [tree, setTree] = useState<TreeModule[]>([]);
   const [form, setForm] = usePersistedState(`${cacheKey}:form`, { mobile: "", firstName: "", lastName: "", password: "", isActive: true, partyId: "" });
   const [roleIds, setRoleIds] = usePersistedState<Set<number>>(`${cacheKey}:roleIds`, new Set());
+  const [actionIds, setActionIds] = usePersistedState<Set<number>>(`${cacheKey}:actionIds`, new Set());
   const [formError, setFormError] = useState<string | null>(null);
   const { saved, flash } = useSavedFlash();
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(`${cacheKey}:form`));
 
   useEffect(() => {
     api.get("/roles").then(setRoles).catch(() => {});
+    api.get("/authz/tree").then(setTree).catch(() => {});
     // طرف حساب: هر دو نوع حقیقی و حقوقی مجازند (طبق تصمیم پروژه)
     api.get("/parties").then((p: PartyOption[]) => setParties(p.filter((x) => x.isActive))).catch(() => {});
   }, []);
@@ -118,6 +122,7 @@ function UserForm({ editId }: { editId?: number }) {
           partyId: found.partyId ? String(found.partyId) : "",
         });
         setRoleIds(new Set(found.roles.map((r) => r.role.id)));
+        setActionIds(new Set(found.actions.map((a) => a.action.id)));
       }
       setLoaded(true);
     });
@@ -125,6 +130,17 @@ function UserForm({ editId }: { editId?: number }) {
   }, [editId]);
 
   const selectedParty = parties.find((p) => String(p.id) === form.partyId);
+
+  function toggleActionIds(ids: number[]) {
+    const count = ids.filter((id) => actionIds.has(id)).length;
+    const allChecked = ids.length > 0 && count === ids.length;
+    setActionIds((prev) => {
+      const next = new Set(prev);
+      if (allChecked) ids.forEach((id) => next.delete(id));
+      else ids.forEach((id) => next.add(id));
+      return next;
+    });
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -136,6 +152,7 @@ function UserForm({ editId }: { editId?: number }) {
           isActive: form.isActive,
           partyId: form.partyId ? Number(form.partyId) : null,
           roleIds: Array.from(roleIds),
+          actionIds: Array.from(actionIds),
         };
         if (form.password) body.password = form.password;
         await api.put(`/users/${editId}`, body);
@@ -144,7 +161,12 @@ function UserForm({ editId }: { editId?: number }) {
         setFormError((err as ApiError).message);
       }
     } else {
-      const res = await create({ ...form, partyId: form.partyId ? Number(form.partyId) : null, roleIds: Array.from(roleIds) });
+      const res = await create({
+        ...form,
+        partyId: form.partyId ? Number(form.partyId) : null,
+        roleIds: Array.from(roleIds),
+        actionIds: Array.from(actionIds),
+      });
       if (res.ok && res.data) {
         flash();
         navigate(`/users/${res.data.id}/edit`);
@@ -172,25 +194,34 @@ function UserForm({ editId }: { editId?: number }) {
       newPath="/users/new"
       onDelete={editId ? handleDelete : undefined}
     >
-      <form id="user-form" onSubmit={onSubmit}>
+      <form id="user-form" onSubmit={onSubmit} autoComplete="off">
         {formError && <div className="alert error">{formError}</div>}
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
-            <label>شماره همراه (۱۰ رقم)</label>
+            <label>شماره همراه (۱۱ رقم)<RequiredMark /></label>
             <input
               dir="ltr"
               disabled={!!editId}
               value={form.mobile}
-              onChange={(e) => setForm({ ...form, mobile: digitsOnly(e.target.value).slice(0, 10) })}
+              onChange={(e) => setForm({ ...form, mobile: digitsOnly(e.target.value).slice(0, 11) })}
+              autoComplete="off"
+              name="user-mobile"
             />
           </div>
           <div className="form-field">
-            <label>رمز عبور {editId && "(خالی = بدون تغییر)"}</label>
-            <input dir="ltr" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+            <label>رمز عبور {editId ? "(خالی = بدون تغییر)" : <RequiredMark />}</label>
+            <input
+              dir="ltr"
+              type="password"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              autoComplete="new-password"
+              name="user-password"
+            />
           </div>
           <div className="form-field">
-            <label>نام</label>
+            <label>نام<RequiredMark /></label>
             <input value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} />
           </div>
           <div className="form-field">
@@ -241,6 +272,16 @@ function UserForm({ editId }: { editId?: number }) {
                 </label>
               ))}
             </div>
+          </div>
+          <div className="form-field full">
+            <label>
+              دسترسی‌های مستقیم (مستقل از نقش){" "}
+              <FieldHint
+                label="دسترسی مستقیم"
+                text="این دسترسی‌ها علاوه‌بر دسترسی‌های نقش‌های بالا به کاربر داده می‌شود — نیازی نیست نقش جدا فقط برای یک استثنا ساخته شود"
+              />
+            </label>
+            <PermissionTree tree={tree} checked={actionIds} onToggle={toggleActionIds} persistKey={`${cacheKey}:permTree`} />
           </div>
         </div>
       </form>

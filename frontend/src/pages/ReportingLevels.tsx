@@ -9,6 +9,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
+import { RequiredMark } from "../components/RequiredMark";
 
 interface Level { id: number; order: number; title: string; codeLength: number; hasAccounts: boolean }
 
@@ -26,7 +27,6 @@ function LevelList() {
   const cacheKey = "/reporting-levels";
   const [items, setItems] = usePersistedState<Level[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -49,18 +49,17 @@ function LevelList() {
   return (
     <div>
       <div className="page-header">
-        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف سطوح درختی سرفصل حسابها (گروه، کل، معین، جزء) با ترتیب اجباری و طول کد هر سطح`} title="سطح گزارشگری" /><NewRecordButton path="/reporting-levels/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
+        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف سطوح درختی سرفصل حسابها (گروه، کل، معین، جزء) با ترتیب اجباری و طول کد هر سطح`} title="سطح گزارشگری" /><NewRecordButton path="/reporting-levels/new" /><RefreshButton onClick={reload} /></div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "ترتیب", render: (r) => r.order, width: "70px", filterType: "number", filterValue: (r) => r.order },
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
           { header: "طول کد", render: (r) => r.codeLength, width: "90px", filterType: "number", filterValue: (r) => r.codeLength },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/reporting-levels/${r.id}/edit`)}
+        edit={{ path: (r) => `/reporting-levels/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -146,12 +145,12 @@ function LevelForm({ editId }: { editId?: number }) {
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
-            <label>عنوان</label>
+            <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
           </div>
           <div className="form-field">
             <label>
-              طول کد
+              طول کد<RequiredMark />
               {hasAccounts && <FieldHint text="این سطح حساب تعریف‌شده دارد؛ چون کد آن حساب‌ها بر اساس همین طول ساخته شده، طول کد دیگر قابل تغییر نیست." />}
             </label>
             <input

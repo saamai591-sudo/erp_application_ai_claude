@@ -64,7 +64,6 @@ export function PartyList({ category, title, description }: { category: "INDIVID
   const [items, setItems] = usePersistedState<Party[]>(cacheKey, []);
   const [loading, setLoading] = useState(!hasPersistedState(cacheKey));
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
   const basePath = category === "INDIVIDUAL" ? "/parties/individual" : "/parties/legal";
 
@@ -127,13 +126,12 @@ export function PartyList({ category, title, description }: { category: "INDIVID
             allowDuplicateOption
             onDone={reload}
           />
-          <RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
+          <RefreshButton onClick={reload} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       {!loading && (
         <DataTable
-        bulkActionsContainer={bulkSlot}
           columns={[
             { header: "کد", render: (r) => r.detailCode, width: "100px", filterType: "string", filterValue: (r) => r.detailCode },
             ...(category === "LEGAL"
@@ -144,7 +142,7 @@ export function PartyList({ category, title, description }: { category: "INDIVID
             { header: "کد ملی / اقتصادی", render: (r) => r.nationalId || r.economicCode || "—", filterType: "string", filterValue: (r) => r.nationalId || r.economicCode || "" },
           ]}
           rows={items}
-          onEdit={(r) => navigate(`${basePath}/${r.id}/edit`)}
+          edit={{ path: (r) => `${basePath}/${r.id}/edit` }}
           onDelete={onDelete}
         />
       )}

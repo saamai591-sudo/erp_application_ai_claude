@@ -1,10 +1,20 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
-import { assertNoNegativeStockAfterChange } from "../services/warehouseStockService";
+import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { isGoodsItemAllowedForDocNature } from "../services/warehouseDocGoodsFilterService";
-import { validateTrackingFields, resolveTrackingRefs, recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
-import { assertWarehouseOpenForDate } from "../services/inventoryClosingService";
+import { validateTrackingFields, resolveTrackingRefs, fetchCurrentSerialSteps, trackingCreateData, trackingResponseFields, recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
+import { assertSafeToReverseEffects, assertSafeToApplyEffects, reverseDocumentEffects, applyDocumentEffects } from "../services/documentEffectsService";
+import { assertWarehouseOpenForDate } from "../services/warehouseConfirmationService";
+import { resolveDetailEntityIds } from "../utils/detailValues";
+import { assertRecordNotStale } from "../utils/concurrency";
+import { AuthedRequest } from "../middleware/auth";
+import { userHasAction, can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+import { getLineAmounts, computeUnitCost } from "../services/documentItemAmountService";
+
+const FORM = findFormPrefix("project-consumptions");
+const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
 
 // =========================================================================
 // ماژول «انبارداری» > عملیات > مصرف پروژه (Project Consumption)
@@ -22,9 +32,8 @@ interface LineInput {
   unitId?: number | null;
   quantity: number;
   description?: string | null;
-  serialNumber?: string | null;
-  batchNumber?: string | null;
-  expiryDate?: string | null;
+  serialIds?: number[];
+  batchAllocations?: { batchId: number; quantity: number }[];
   physicalLocation?: string | null;
 }
 
@@ -44,6 +53,7 @@ async function validateWarehouseAndPeriod(warehouseId: number, date: Date) {
 
   const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
   if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
+  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
 
   await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
   await assertWarehouseOpenForDate(warehouseId, date);
@@ -66,7 +76,7 @@ async function goodsRequestLineRemaining(id: number, excludeId?: number) {
   return { line, remaining };
 }
 
-async function validateLines(lines: LineInput[], basis: string, excludeId?: number) {
+async function validateLines(lines: LineInput[], basis: string, excludeId?: number, existingSerialIds?: Set<number>) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("سند مصرف پروژه باید حداقل یک ردیف کالا داشته باشد");
 
   const cleaned: {
@@ -75,9 +85,8 @@ async function validateLines(lines: LineInput[], basis: string, excludeId?: numb
     unitId: number;
     quantity: number;
     description: string | null;
-    serialNumber: string | null;
-    batchNumber: string | null;
-    expiryDate: string | null;
+    serialIds: number[];
+    batchAllocations: { batchId: number; quantity: number }[];
     physicalLocation: string | null;
   }[] = [];
 
@@ -116,13 +125,12 @@ async function validateLines(lines: LineInput[], basis: string, excludeId?: numb
       unitId,
       quantity: qty,
       description: l.description || null,
-      serialNumber: l.serialNumber || null,
-      batchNumber: l.batchNumber || null,
-      expiryDate: l.expiryDate || null,
+      serialIds: l.serialIds || [],
+      batchAllocations: l.batchAllocations || [],
       physicalLocation: l.physicalLocation || null,
     });
   }
-  await validateTrackingFields(cleaned);
+  await validateTrackingFields(cleaned, "PROJECT_CONSUMPTION", existingSerialIds);
   return cleaned;
 }
 
@@ -130,7 +138,7 @@ async function validateLines(lines: LineInput[], basis: string, excludeId?: numb
 // پیکر «باقیمانده» درخواست کالا (فقط نوع پروژه)
 // =========================================================================
 
-router.get("/project-consumptions/pickable-goods-request-lines", async (req, res) => {
+router.get("/project-consumptions/pickable-goods-request-lines", can(`${FORM}.view`), async (req, res) => {
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
   const lines = await prisma.goodsRequestLine.findMany({
     where: {
@@ -176,47 +184,59 @@ router.get("/project-consumptions/pickable-goods-request-lines", async (req, res
 // CRUD + قطعی‌کردن/برگشت
 // =========================================================================
 
-router.get("/project-consumptions", async (_req, res) => {
+router.get("/project-consumptions", can(`${FORM}.view`), async (req: AuthedRequest, res) => {
+  const canViewAccounting = await userHasAction(req.user!.id, VIEW_ACCOUNTING_PERMISSION);
   const items = await prisma.inventoryDocument.findMany({
     where: { documentType: "PROJECT_CONSUMPTION" },
-    include: { warehouse: true, fiscalPeriod: true, lines: true, project: true },
+    include: { warehouse: true, fiscalPeriod: true, lines: true },
     orderBy: { id: "desc" },
   });
+  const codeToProjectId = await resolveDetailEntityIds(items.map((d: any) => d.detailCode), "Project");
+  const projects = await prisma.project.findMany({ where: { id: { in: Object.values(codeToProjectId) } } });
+  const projectById = new Map(projects.map((p) => [p.id, p]));
+  const amountByLineId = await getLineAmounts(items.flatMap((d: any) => d.lines.map((l: any) => l.id)));
   res.json(
-    items.map((d: any) => ({
-      id: d.id,
-      number: d.number,
-      date: d.date,
-      warehouseId: d.warehouseId,
-      warehouseTitle: d.warehouse.title,
-      fiscalPeriodTitle: d.fiscalPeriod.title,
-      basis: d.basis,
-      projectId: d.projectId,
-      projectTitle: d.project?.title ?? null,
-      description: d.description,
-      status: d.status,
-      lineCount: d.lines.length,
-      totalQuantity: d.lines.reduce((s: number, l: any) => s + Number(l.quantity), 0),
-      totalAmount: d.lines.reduce((s: number, l: any) => s + Number(l.amount), 0),
-    }))
+    items.map((d: any) => {
+      const projectId = d.detailCode ? codeToProjectId[d.detailCode] ?? null : null;
+      return {
+        id: d.id,
+        number: d.number,
+        date: d.date,
+        warehouseId: d.warehouseId,
+        warehouseTitle: d.warehouse.title,
+        fiscalPeriodTitle: d.fiscalPeriod.title,
+        basis: d.basis,
+        projectId,
+        projectTitle: projectId ? projectById.get(projectId)?.title ?? null : null,
+        description: d.description,
+        status: d.status,
+        lineCount: d.lines.length,
+        totalQuantity: d.lines.reduce((s: number, l: any) => s + Number(l.quantity), 0),
+        ...((canViewAccounting && d.status === "FINALIZED") ? { totalAmount: d.lines.reduce((s: number, l: any) => s + Number(amountByLineId.get(l.id) ?? 0), 0) } : {}),
+      };
+    })
   );
 });
 
-router.get("/project-consumptions/:id", async (req, res) => {
+router.get("/project-consumptions/:id", can(`${FORM}.view`), async (req: AuthedRequest, res) => {
   const id = Number(req.params.id);
+  const canViewAccounting = await userHasAction(req.user!.id, VIEW_ACCOUNTING_PERMISSION);
   const d = await prisma.inventoryDocument.findFirst({
     where: { id, documentType: "PROJECT_CONSUMPTION" },
     include: {
       warehouse: true,
       fiscalPeriod: true,
-      project: true,
       lines: {
-        include: { goodsItem: true, unit: true, batch: true, physicalLocation: true, serials: { include: { serial: true } } },
+        include: { goodsItem: true, unit: true, batches: { include: { batch: true } }, physicalLocation: true, serials: { include: { serial: true } } },
         orderBy: { rowOrder: "asc" },
       },
     },
   });
   if (!d) return res.status(404).json({ error: "سند مصرف پروژه یافت نشد" });
+  const codeToProjectId = await resolveDetailEntityIds([d.detailCode], "Project");
+  const projectId = d.detailCode ? codeToProjectId[d.detailCode] ?? null : null;
+  const project = projectId ? await prisma.project.findUnique({ where: { id: projectId } }) : null;
+  const amountByLineId = await getLineAmounts(d.lines.map((l) => l.id));
   res.json({
     id: d.id,
     number: d.number,
@@ -226,11 +246,12 @@ router.get("/project-consumptions/:id", async (req, res) => {
     fiscalPeriodId: d.fiscalPeriodId,
     fiscalPeriodTitle: d.fiscalPeriod.title,
     basis: d.basis,
-    projectId: d.projectId,
-    projectTitle: d.project?.title ?? null,
+    projectId,
+    projectTitle: project?.title ?? null,
     description: d.description,
     status: d.status,
     finalizedAt: d.finalizedAt,
+    updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
       id: l.id,
       sourceGoodsRequestLineId: l.sourceGoodsRequestLineId,
@@ -240,18 +261,15 @@ router.get("/project-consumptions/:id", async (req, res) => {
       unitId: l.unitId,
       unitTitle: l.unit.title,
       quantity: Number(l.quantity),
-      unitCost: Number(l.unitCost),
-      amount: Number(l.amount),
+      ...((canViewAccounting && d.status === "FINALIZED") ? { unitCost: computeUnitCost(amountByLineId.get(l.id) ?? 0, l.quantity), amount: Number(amountByLineId.get(l.id) ?? 0) } : {}),
       description: l.description,
-      serialNumber: l.serials[0]?.serial.serialNumber ?? null,
-      batchNumber: l.batch?.batchNumber ?? null,
-      expiryDate: l.batch?.expiryDate ?? null,
+      ...trackingResponseFields(l),
       physicalLocation: l.physicalLocation?.title ?? null,
     })),
   });
 });
 
-router.post("/project-consumptions", async (req, res) => {
+router.post("/project-consumptions", can(`${FORM}.create`), async (req, res) => {
   const body = req.body as HeaderBody;
   if (!body.warehouseId || !body.date) return res.status(400).json({ error: "انبار و تاریخ سند الزامی است" });
   if (!body.basis) return res.status(400).json({ error: "مبنا الزامی است" });
@@ -264,6 +282,10 @@ router.post("/project-consumptions", async (req, res) => {
     const date = new Date(body.date);
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
     const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
+    const serialSteps = await fetchCurrentSerialSteps(refs.flatMap((r) => r.serialIds));
+
+    const effectLines = cleanedLines.map((l) => ({ goodsItemId: l.goodsItemId, quantity: l.quantity }));
+    await assertSafeToApplyEffects(prisma, { documentType: "PROJECT_CONSUMPTION", warehouseId: warehouse.id, date }, effectLines, warehouse.stockControl);
 
     const lastNumber = await prisma.inventoryDocument.findFirst({
       where: { documentType: "PROJECT_CONSUMPTION", fiscalPeriodId: fiscalPeriod.id },
@@ -271,33 +293,33 @@ router.post("/project-consumptions", async (req, res) => {
     });
     const number = lastNumber ? lastNumber.number + 1 : 1;
 
-    const created = await prisma.inventoryDocument.create({
-      data: {
-        documentType: "PROJECT_CONSUMPTION",
-        warehouseId: warehouse.id,
-        fiscalPeriodId: fiscalPeriod.id,
-        number,
-        date,
-        basis: body.basis,
-        projectId: body.projectId,
-        description: body.description || null,
-        status: "DRAFT",
-        lines: {
-          create: cleanedLines.map((l, idx) => ({
-            sourceGoodsRequestLineId: l.sourceGoodsRequestLineId,
-            goodsItemId: l.goodsItemId,
-            unitId: l.unitId,
-            quantity: l.quantity,
-            unitCost: 0,
-            amount: 0,
-            description: l.description,
-            rowOrder: idx,
-            batchId: refs[idx].batchId,
-            physicalLocationId: refs[idx].physicalLocationId,
-            serials: refs[idx].serialId ? { create: [{ serialId: refs[idx].serialId! }] } : undefined,
-          })),
+    const created = await prisma.$transaction(async (tx) => {
+      const doc = await tx.inventoryDocument.create({
+        data: {
+          documentType: "PROJECT_CONSUMPTION",
+          warehouseId: warehouse.id,
+          fiscalPeriodId: fiscalPeriod.id,
+          number,
+          date,
+          basis: body.basis,
+          detailCode: p.detailCode,
+          description: body.description || null,
+          status: "REGISTERED",
+          lines: {
+            create: cleanedLines.map((l, idx) => ({
+              sourceGoodsRequestLineId: l.sourceGoodsRequestLineId,
+              goodsItemId: l.goodsItemId,
+              unitId: l.unitId,
+              quantity: l.quantity,
+              description: l.description,
+              rowOrder: idx,
+              ...trackingCreateData(refs[idx], serialSteps),
+            })),
+          },
         },
-      },
+      });
+      await applyDocumentEffects(tx, { id: doc.id, documentType: "PROJECT_CONSUMPTION", warehouseId: warehouse.id, date }, effectLines);
+      return doc;
     });
 
     res.status(201).json(created);
@@ -307,41 +329,52 @@ router.post("/project-consumptions", async (req, res) => {
   }
 });
 
-router.put("/project-consumptions/:id", async (req, res) => {
+router.put("/project-consumptions/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as HeaderBody;
 
-  const existing = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "PROJECT_CONSUMPTION" } });
+  const existing = await prisma.inventoryDocument.findFirst({
+    where: { id, documentType: "PROJECT_CONSUMPTION" },
+    include: { lines: { include: { serials: true } }, warehouse: true },
+  });
   if (!existing) return res.status(404).json({ error: "سند مصرف پروژه یافت نشد" });
-  if (existing.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل ویرایش هستند؛ ابتدا از «قطعی» برگردانید" });
-  try {
-    await assertWarehouseOpenForDate(existing.warehouseId!, existing.date);
-  } catch (e: any) {
-    return res.status(400).json({ error: e.message });
-  }
+  if (existing.status === "FINALIZED") return res.status(400).json({ error: "این سند با تایید انبار نهایی شده است و دیگر قابل ویرایش نیست" });
+  const existingSerialIds = new Set(existing.lines.flatMap((l: any) => l.serials.map((s: any) => s.serialId)));
 
   if (!body.warehouseId || !body.date) return res.status(400).json({ error: "انبار و تاریخ سند الزامی است" });
   if (!body.basis) return res.status(400).json({ error: "مبنا الزامی است" });
   if (!body.projectId) return res.status(400).json({ error: "پروژه الزامی است" });
 
   try {
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سند");
+    await assertWarehouseOpenForDate(existing.warehouseId!, existing.date);
+
+    const oldEffectLines = existing.lines.map((l: any) => ({ goodsItemId: l.goodsItemId, quantity: Number(l.quantity) }));
+    const oldDoc = { id: existing.id, documentType: existing.documentType, warehouseId: existing.warehouseId!, date: existing.date };
+    await assertSafeToReverseEffects(prisma, oldDoc, oldEffectLines, existing.warehouse!.stockControl);
+
     const p = await prisma.project.findUnique({ where: { id: body.projectId } });
     if (!p) throw new Error("پروژه یافت نشد");
-    const cleanedLines = await validateLines(body.lines, body.basis, id);
+    const cleanedLines = await validateLines(body.lines, body.basis, id, existingSerialIds);
     const date = new Date(body.date);
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
     const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
+    const serialSteps = await fetchCurrentSerialSteps(refs.flatMap((r) => r.serialIds));
 
-    await prisma.$transaction([
-      prisma.inventoryDocumentLine.deleteMany({ where: { documentId: id } }),
-      prisma.inventoryDocument.update({
+    const newEffectLines = cleanedLines.map((l) => ({ goodsItemId: l.goodsItemId, quantity: l.quantity }));
+    await assertSafeToApplyEffects(prisma, { documentType: "PROJECT_CONSUMPTION", warehouseId: warehouse.id, date }, newEffectLines, warehouse.stockControl, id);
+
+    await prisma.$transaction(async (tx) => {
+      await reverseDocumentEffects(tx, oldDoc);
+      await tx.inventoryDocumentLine.deleteMany({ where: { documentId: id } });
+      await tx.inventoryDocument.update({
         where: { id },
         data: {
           warehouseId: warehouse.id,
           fiscalPeriodId: fiscalPeriod.id,
           date,
           basis: body.basis,
-          projectId: body.projectId,
+          detailCode: p.detailCode,
           description: body.description || null,
           lines: {
             create: cleanedLines.map((l, idx) => ({
@@ -349,18 +382,18 @@ router.put("/project-consumptions/:id", async (req, res) => {
               goodsItemId: l.goodsItemId,
               unitId: l.unitId,
               quantity: l.quantity,
-              unitCost: 0,
-              amount: 0,
               description: l.description,
               rowOrder: idx,
-              batchId: refs[idx].batchId,
-              physicalLocationId: refs[idx].physicalLocationId,
-              serials: refs[idx].serialId ? { create: [{ serialId: refs[idx].serialId! }] } : undefined,
+              ...trackingCreateData(refs[idx], serialSteps),
             })),
           },
         },
-      }),
-    ]);
+      });
+      await applyDocumentEffects(tx, { id, documentType: "PROJECT_CONSUMPTION", warehouseId: warehouse.id, date }, newEffectLines);
+      const goodsItemIds = [...oldEffectLines.map((l) => l.goodsItemId), ...newEffectLines.map((l) => l.goodsItemId)];
+      await recomputeGoodsItemHasTransactions(goodsItemIds, tx);
+      await recomputeWarehouseHasTransactions([existing.warehouseId!, warehouse.id], tx);
+    });
 
     res.json({ id });
   } catch (e: any) {
@@ -368,71 +401,29 @@ router.put("/project-consumptions/:id", async (req, res) => {
   }
 });
 
-router.delete("/project-consumptions/:id", async (req, res) => {
-  const id = Number(req.params.id);
-  const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "PROJECT_CONSUMPTION" } });
-  if (!d) return res.status(404).json({ error: "یافت نشد" });
-  if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «قطعی» برگردانید" });
-  try {
-    await assertWarehouseOpenForDate(d.warehouseId!, d.date);
-  } catch (e: any) {
-    return res.status(400).json({ error: e.message });
-  }
-  await prisma.inventoryDocument.delete({ where: { id } });
-  res.status(204).send();
-});
-
-// قطعی کردن: سند صادره است — کنترل موجودی منفی همین‌جا انجام می‌شود
-router.post("/project-consumptions/:id/finalize", async (req, res) => {
+router.delete("/project-consumptions/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "PROJECT_CONSUMPTION" }, include: { lines: true, warehouse: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
-  if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل قطعی‌کردن هستند" });
-  if (d.lines.length === 0) return res.status(400).json({ error: "سند باید حداقل یک ردیف کالا داشته باشد" });
-
-  try {
-    await validateWarehouseAndPeriod(d.warehouseId!, d.date);
-
-    if (d.warehouse!.stockControl) {
-      for (const l of d.lines) {
-        // eslint-disable-next-line no-await-in-loop
-        await assertNoNegativeStockAfterChange({
-          warehouseId: d.warehouseId!,
-          goodsItemId: l.goodsItemId,
-          asOfDate: d.date,
-          delta: -Number(l.quantity),
-          excludeProjectConsumptionId: d.id,
-        });
-      }
-    }
-
-    await prisma.$transaction([
-      prisma.inventoryDocument.update({ where: { id }, data: { status: "FINALIZED", finalizedAt: new Date() } }),
-      prisma.warehouse.update({ where: { id: d.warehouseId! }, data: { hasTransactions: true } }),
-      ...d.lines.map((l: any) => prisma.goodsItem.update({ where: { id: l.goodsItemId }, data: { hasTransactions: true } })),
-    ]);
-
-    res.json({ id, status: "FINALIZED" });
-  } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در قطعی‌کردن سند" });
-  }
-});
-
-// برگشت از قطعی: سند صادره — برگشت یعنی موجودی افزایش پیدا می‌کند، ایمن است
-router.post("/project-consumptions/:id/revert", async (req, res) => {
-  const id = Number(req.params.id);
-  const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "PROJECT_CONSUMPTION" }, include: { lines: true } });
-  if (!d) return res.status(404).json({ error: "یافت نشد" });
-  if (d.status !== "FINALIZED") return res.status(400).json({ error: "فقط اسناد «قطعی» قابل برگشت هستند" });
+  if (d.status === "FINALIZED") return res.status(400).json({ error: "این سند با تایید انبار نهایی شده است و دیگر قابل حذف نیست" });
 
   try {
     await assertWarehouseOpenForDate(d.warehouseId!, d.date);
-    await prisma.inventoryDocument.update({ where: { id }, data: { status: "DRAFT", finalizedAt: null } });
-    await recomputeGoodsItemHasTransactions(d.lines.map((l: any) => l.goodsItemId));
-    await recomputeWarehouseHasTransactions([d.warehouseId!]);
-    res.json({ id, status: "DRAFT" });
+
+    const effectLines = d.lines.map((l: any) => ({ goodsItemId: l.goodsItemId, quantity: Number(l.quantity) }));
+    const doc = { id: d.id, documentType: d.documentType, warehouseId: d.warehouseId!, date: d.date };
+    await assertSafeToReverseEffects(prisma, doc, effectLines, d.warehouse!.stockControl);
+
+    await prisma.$transaction(async (tx) => {
+      await reverseDocumentEffects(tx, doc);
+      await tx.inventoryDocument.delete({ where: { id } });
+      await recomputeGoodsItemHasTransactions(effectLines.map((l) => l.goodsItemId), tx);
+      await recomputeWarehouseHasTransactions([d.warehouseId!], tx);
+    });
+
+    res.status(204).send();
   } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در برگشت از قطعی" });
+    res.status(400).json({ error: e.message || "خطا در حذف" });
   }
 });
 

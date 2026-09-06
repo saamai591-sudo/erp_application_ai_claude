@@ -7,6 +7,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
@@ -85,7 +86,7 @@ function CustomerList() {
           { header: "فعال", render: (r) => (r.isActive ? "بله" : "خیر"), width: "80px" },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/customers/${r.id}/edit`)}
+        edit={{ path: (r) => `/customers/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -181,6 +182,7 @@ function CustomerForm({ editId }: { editId?: number }) {
           <div className="form-field">
             <label>
               طرف حساب
+              <RequiredMark />
               {hasTransactions && <FieldHint label="طرف حساب" text="این مشتری گردش دارد و طرف حساب آن قابل تغییر نیست" />}
             </label>
             <RecordPickerField

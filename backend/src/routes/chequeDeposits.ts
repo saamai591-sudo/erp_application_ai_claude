@@ -1,7 +1,13 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
+import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { recomputeBankAccountHasTransactions } from "../utils/treasuryTracking";
+import { assertRecordNotStale } from "../utils/concurrency";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("cheque-deposits");
 
 // =========================================================================
 // ماژول «خزانه‌داری» > واگذاری چک به بانک (ChequeDeposit)
@@ -29,6 +35,7 @@ interface HeaderBody {
 async function resolveFiscalPeriod(date: Date) {
   const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
   if (!fiscalPeriod) throw new Error("این تاریخ در هیچ دوره مالی تعریف نشده است");
+  await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
   await assertDateNotConfirmed(prisma, date, fiscalPeriod.id);
   return fiscalPeriod;
 }
@@ -50,7 +57,7 @@ async function validateChequeIds(chequeItemIds: number[]) {
   return unique;
 }
 
-router.get("/cheque-deposits/pickable-cheques", async (_req, res) => {
+router.get("/cheque-deposits/pickable-cheques", can(`${FORM}.view`), async (_req, res) => {
   const items = await prisma.chequeItem.findMany({
     where: { direction: "RECEIVABLE", status: "IN_HAND" },
     include: { party: true, currency: true },
@@ -68,7 +75,7 @@ router.get("/cheque-deposits/pickable-cheques", async (_req, res) => {
   );
 });
 
-router.get("/cheque-deposits", async (_req, res) => {
+router.get("/cheque-deposits", can(`${FORM}.view`), async (_req, res) => {
   const items = await prisma.chequeDeposit.findMany({
     include: { bankAccount: { include: { bankBranch: true } }, fiscalPeriod: true, lines: true },
     orderBy: { id: "desc" },
@@ -88,7 +95,7 @@ router.get("/cheque-deposits", async (_req, res) => {
   );
 });
 
-router.get("/cheque-deposits/:id", async (req, res) => {
+router.get("/cheque-deposits/:id", can(`${FORM}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.chequeDeposit.findUnique({
     where: { id },
@@ -109,6 +116,7 @@ router.get("/cheque-deposits/:id", async (req, res) => {
     fiscalPeriodTitle: d.fiscalPeriod.title,
     description: d.description,
     status: d.status,
+    updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
       id: l.id,
       chequeItemId: l.chequeItemId,
@@ -124,7 +132,7 @@ router.get("/cheque-deposits/:id", async (req, res) => {
   });
 });
 
-router.post("/cheque-deposits", async (req, res) => {
+router.post("/cheque-deposits", can(`${FORM}.create`), async (req, res) => {
   const body = req.body as HeaderBody;
   if (!body.date) return res.status(400).json({ error: "تاریخ سند الزامی است" });
   if (!body.bankAccountId) return res.status(400).json({ error: "حساب بانکی مقصد الزامی است" });
@@ -159,7 +167,7 @@ router.post("/cheque-deposits", async (req, res) => {
   }
 });
 
-router.put("/cheque-deposits/:id", async (req, res) => {
+router.put("/cheque-deposits/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as HeaderBody;
 
@@ -171,6 +179,7 @@ router.put("/cheque-deposits/:id", async (req, res) => {
   if (!body.bankAccountId) return res.status(400).json({ error: "حساب بانکی مقصد الزامی است" });
 
   try {
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سند");
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const bankAccount = await prisma.bankAccount.findUnique({ where: { id: body.bankAccountId } });
@@ -198,7 +207,7 @@ router.put("/cheque-deposits/:id", async (req, res) => {
   }
 });
 
-router.delete("/cheque-deposits/:id", async (req, res) => {
+router.delete("/cheque-deposits/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.chequeDeposit.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -207,7 +216,7 @@ router.delete("/cheque-deposits/:id", async (req, res) => {
   res.status(204).send();
 });
 
-router.post("/cheque-deposits/:id/approve", async (req, res) => {
+router.post("/cheque-deposits/:id/approve", can(`${FORM}.approve`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.chequeDeposit.findUnique({ where: { id }, include: { lines: { include: { chequeItem: true } } } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -242,7 +251,7 @@ router.post("/cheque-deposits/:id/approve", async (req, res) => {
 
 // برگشت از تایید فقط در صورتی مجاز است که هیچ‌کدام از چک‌های این واگذاری از وضعیت «واگذار به وصول»
 // خارج نشده باشند (نه با سند «برگشت از واگذاری»، نه با سند «نتیجه وصول/برگشت»).
-router.post("/cheque-deposits/:id/unapprove", async (req, res) => {
+router.post("/cheque-deposits/:id/unapprove", can(`${FORM}.unapprove`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.chequeDeposit.findUnique({ where: { id }, include: { lines: { include: { chequeItem: true } } } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
@@ -273,7 +282,7 @@ router.post("/cheque-deposits/:id/unapprove", async (req, res) => {
 // اصلاح جزئی سند «تایید»شده («سند نیمه‌باز» — نگاه کنید به توضیح بالای فایل). سند در وضعیت APPROVED
 // باقی می‌ماند؛ چک‌های step-مطابق قابل حذف‌اند (برمی‌گردند به IN_HAND) و چک‌های جدید IN_HAND هم قابل
 // افزودن‌اند (می‌روند به IN_COLLECTION). چک‌های «قفل» (step دیگر مطابق نیست) دست‌نخورده می‌مانند.
-router.put("/cheque-deposits/:id/edit-approved", async (req, res) => {
+router.put("/cheque-deposits/:id/edit-approved", can(`${FORM}.editApproved`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { chequeItemIds: number[] };
 

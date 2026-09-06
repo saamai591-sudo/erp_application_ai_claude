@@ -1,5 +1,9 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("reporting-levels");
 
 const router = Router();
 
@@ -17,7 +21,7 @@ router.get("/", async (_req, res) => {
   res.json(levels.map((l: any) => ({ ...l, hasAccounts: (countByLevel.get(l.id) || 0) > 0 })));
 });
 
-router.post("/", async (req, res) => {
+router.post("/", can(`${FORM}.create`), async (req, res) => {
   const { title, codeLength } = req.body as { title: string; codeLength: number };
   if (!title || !codeLength) return res.status(400).json({ error: "عنوان و طول کد الزامی است" });
   if (!isValidCodeLength(codeLength)) return res.status(400).json({ error: "طول کد باید عدد صحیح مثبت باشد" });
@@ -32,7 +36,7 @@ router.post("/", async (req, res) => {
   res.status(201).json(created);
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const { title, codeLength } = req.body as { title?: string; codeLength?: number };
   if (codeLength !== undefined && !isValidCodeLength(codeLength)) {
@@ -58,7 +62,7 @@ router.put("/:id", async (req, res) => {
   res.json(updated);
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const level = await prisma.reportingLevel.findUnique({ where: { id } });
   if (!level) return res.status(404).json({ error: "سطح گزارشگری یافت نشد" });

@@ -1,6 +1,11 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { toEnglishDigits } from "../utils/digits";
+import { withoutFiscalPeriodScope } from "../lib/requestContext";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("reporting-periods");
 
 const router = Router();
 
@@ -20,10 +25,12 @@ router.get("/", async (req, res) => {
   // گزارشگری همه‌ی دوره‌های مالی دارند (نه فقط دوره مالی جاری کاربر) — چون قیمت‌گذاری کالا اساساً یک
   // زنجیره‌ی زمانی سرتاسری (فارغ از سال مالی) است، نه محدود به یک دوره مالی
   if (req.query.all) {
-    const periods = await prisma.reportingPeriod.findMany({
-      orderBy: { fromDate: "asc" },
-      include: { fiscalPeriod: { select: { title: true } } },
-    });
+    const periods = await withoutFiscalPeriodScope(() =>
+      prisma.reportingPeriod.findMany({
+        orderBy: { fromDate: "asc" },
+        include: { fiscalPeriod: { select: { title: true } } },
+      })
+    );
     return res.json(periods);
   }
 
@@ -45,7 +52,7 @@ router.get("/:id", async (req, res) => {
   res.json(period);
 });
 
-router.post("/", async (req, res) => {
+router.post("/", can(`${FORM}.create`), async (req, res) => {
   const { code: rawCode, title, toDate: rawToDate, fiscalPeriodId } = req.body as {
     code: string;
     title: string;
@@ -85,7 +92,7 @@ router.post("/", async (req, res) => {
   res.status(201).json(period);
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const { code: rawCode, title, toDate: rawToDate } = req.body as { code?: string; title?: string; toDate: string };
 
@@ -131,7 +138,7 @@ router.put("/:id", async (req, res) => {
   res.json(updated);
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const period = await prisma.reportingPeriod.findUnique({ where: { id } });
   if (!period) return res.status(404).json({ error: "دوره گزارشگری یافت نشد" });
@@ -142,7 +149,7 @@ router.delete("/:id", async (req, res) => {
   res.status(204).send();
 });
 
-router.put("/:id/close", async (req, res) => {
+router.put("/:id/close", can(`${FORM}.closePeriod`), async (req, res) => {
   const id = Number(req.params.id);
   const period = await prisma.reportingPeriod.findUnique({ where: { id } });
   if (!period) return res.status(404).json({ error: "دوره گزارشگری یافت نشد" });
@@ -155,7 +162,7 @@ router.put("/:id/close", async (req, res) => {
   res.json(updated);
 });
 
-router.put("/:id/reopen", async (req, res) => {
+router.put("/:id/reopen", can(`${FORM}.reopenPeriod`), async (req, res) => {
   const id = Number(req.params.id);
   const period = await prisma.reportingPeriod.findUnique({ where: { id } });
   if (!period) return res.status(404).json({ error: "دوره گزارشگری یافت نشد" });

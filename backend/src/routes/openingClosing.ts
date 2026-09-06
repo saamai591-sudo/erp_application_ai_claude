@@ -2,10 +2,22 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { computeFullAccountCode } from "../utils/accountCode";
+import { getRequestContext } from "../lib/requestContext";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+const FORM = findFormPrefix("opening-closing");
 
 const router = Router();
 
+// همان قرارداد resolveFiscalPeriod در routes/reportingPeriods.ts — نگاه کنید به توضیح مشابه در
+// services/warehouseConfirmationService.ts برای علت این تغییر (قبلاً انتخاب صریح کاربر را نادیده می‌گرفت).
 async function currentFiscalPeriod() {
+  const ctx = getRequestContext();
+  if (ctx?.fiscalPeriodId) {
+    const period = await prisma.fiscalPeriod.findUnique({ where: { id: ctx.fiscalPeriodId } });
+    if (period) return period;
+  }
   return prisma.fiscalPeriod.findFirst({ orderBy: { toDate: "desc" } });
 }
 
@@ -20,7 +32,7 @@ async function rootNatureGroup(accountId: number, byId: Map<number, any>): Promi
   return null;
 }
 
-router.get("/", async (_req, res) => {
+router.get("/", can(`${FORM}.view`), async (_req, res) => {
   const items = await prisma.openingClosingEntry.findMany({
     include: { fiscalPeriod: true, journalEntry: true },
     orderBy: { id: "desc" },
@@ -42,7 +54,7 @@ router.get("/", async (_req, res) => {
   );
 });
 
-router.get("/:id", async (req, res) => {
+router.get("/:id", can(`${FORM}.view`), async (req, res) => {
   const id = Number(req.params.id);
   const e = await prisma.openingClosingEntry.findUnique({
     where: { id },
@@ -65,7 +77,7 @@ router.get("/:id", async (req, res) => {
   });
 });
 
-router.post("/", async (req, res) => {
+router.post("/", can(`${FORM}.create`), async (req, res) => {
   const body = req.body as { date: string; type: "OPENING" | "CLOSING"; description: string };
   if (!body.date || !body.type) return res.status(400).json({ error: "تاریخ و نوع الزامی است" });
   if (!body.description || !body.description.trim()) return res.status(400).json({ error: "شرح الزامی است" });
@@ -95,7 +107,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const e = await prisma.openingClosingEntry.findUnique({ where: { id }, include: { fiscalPeriod: true } });
   if (!e) return res.status(404).json({ error: "رکورد یافت نشد" });
@@ -118,7 +130,7 @@ router.delete("/:id", async (req, res) => {
 });
 
 // حذف سند حسابداریِ صادرشده برای این رکورد افتتاحیه/اختتامیه (امکان صدور مجدد بعد از حذف)
-router.delete("/:id/journal-entry", async (req, res) => {
+router.delete("/:id/journal-entry", can(`${FORM}.revertIssue`), async (req, res) => {
   const id = Number(req.params.id);
   const e = await prisma.openingClosingEntry.findUnique({ where: { id } });
   if (!e) return res.status(404).json({ error: "رکورد یافت نشد" });
@@ -135,7 +147,7 @@ router.delete("/:id/journal-entry", async (req, res) => {
   }
 });
 
-router.post("/:id/issue", async (req, res) => {
+router.post("/:id/issue", can(`${FORM}.issue`), async (req, res) => {
   const id = Number(req.params.id);
   const e = await prisma.openingClosingEntry.findUnique({ where: { id }, include: { fiscalPeriod: true } });
   if (!e) return res.status(404).json({ error: "رکورد یافت نشد" });

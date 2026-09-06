@@ -9,6 +9,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { ExcelImportButton } from "../components/ExcelImport";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 
 interface AccountType { id: number; title: string }
@@ -37,7 +38,6 @@ function AccountList() {
   const cacheKey = "/bank-accounts";
   const [accounts, setAccounts] = usePersistedState<Account[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -78,12 +78,10 @@ function AccountList() {
           />
           <NewRecordButton path="/bank-accounts/new" />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "کد", render: (r) => toFaDigits(r.detailCode), width: "100px", filterType: "string", filterValue: (r) => r.detailCode },
           { header: "نوع حساب", render: (r) => r.accountType?.title, filterType: "string", filterValue: (r) => r.accountType?.title },
@@ -91,7 +89,7 @@ function AccountList() {
           { header: "شماره حساب", render: (r) => r.accountNumber, filterType: "string", filterValue: (r) => r.accountNumber },
         ]}
         rows={accounts}
-        onEdit={(r) => navigate(`/bank-accounts/${r.id}/edit`)}
+        edit={{ path: (r) => `/bank-accounts/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -179,21 +177,21 @@ function AccountForm({ editId }: { editId?: number }) {
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
-            <label>نوع حساب</label>
+            <label>نوع حساب<RequiredMark /></label>
             <select value={form.accountTypeId} onChange={(e) => setForm({ ...form, accountTypeId: e.target.value })}>
               <option value="">انتخاب کنید</option>
               {types.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
             </select>
           </div>
           <div className="form-field">
-            <label>شعبه بانک</label>
+            <label>شعبه بانک<RequiredMark /></label>
             <select disabled={!!editId} value={form.bankBranchId} onChange={(e) => setForm({ ...form, bankBranchId: e.target.value })}>
               <option value="">انتخاب کنید</option>
               {branches.map((b) => <option key={b.id} value={b.id}>{b.bankParty?.name} - {b.title}</option>)}
             </select>
           </div>
           <div className="form-field full">
-            <label>شماره حساب</label>
+            <label>شماره حساب<RequiredMark /></label>
             <input dir="ltr" value={form.accountNumber} onChange={(e) => setForm({ ...form, accountNumber: e.target.value })} />
           </div>
         </div>

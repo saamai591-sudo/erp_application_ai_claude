@@ -8,6 +8,7 @@ import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 
 interface AccountType { id: number; code: number; title: string; hasChequeBook: boolean }
@@ -26,7 +27,6 @@ function AccountTypeList() {
   const cacheKey = "/bank-account-types";
   const [types, setTypes] = usePersistedState<AccountType[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -50,18 +50,17 @@ function AccountTypeList() {
   return (
     <div>
       <div className="page-header">
-        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف انواع حساب بانکی (جاری، پس‌انداز و ...)`} title="نوع حساب بانکی" /><NewRecordButton path="/bank-account-types/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
+        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف انواع حساب بانکی (جاری، پس‌انداز و ...)`} title="نوع حساب بانکی" /><NewRecordButton path="/bank-account-types/new" /><RefreshButton onClick={reload} /></div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "کد", render: (r) => toFaDigits(String(r.code)), width: "80px", filterType: "number", filterValue: (r) => r.code },
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
           { header: "دسته چک", render: (r) => (r.hasChequeBook ? "دارد" : "ندارد"), filterType: "string", filterValue: (r) => (r.hasChequeBook ? "دارد" : "ندارد") },
         ]}
         rows={types}
-        onEdit={(r) => navigate(`/bank-account-types/${r.id}/edit`)}
+        edit={{ path: (r) => `/bank-account-types/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -128,7 +127,7 @@ function AccountTypeForm({ editId }: { editId?: number }) {
         {error && <div className="alert error">{error}</div>}
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-field full" style={{ marginBottom: 12 }}>
-          <label>عنوان</label>
+          <label>عنوان<RequiredMark /></label>
           <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
         </div>
         <label className="checkbox-row">

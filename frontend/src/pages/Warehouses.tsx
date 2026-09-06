@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
+import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
@@ -11,6 +12,7 @@ import { ExcelImportButton } from "../components/ExcelImport";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RecordPickerField } from "../components/RecordPicker";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 import { WarehouseGroup } from "./WarehouseGroups";
 
@@ -40,6 +42,7 @@ interface Warehouse {
   stockControl: boolean;
   isActive: boolean;
   hasTransactions: boolean;
+  implementationDate: string | null;
 }
 
 export default function Warehouses() {
@@ -56,7 +59,6 @@ function WarehouseList() {
   const cacheKey = "/warehouses";
   const [items, setItems] = usePersistedState<Warehouse[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -99,12 +101,10 @@ function WarehouseList() {
             onDone={reload}
           />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "کد", render: (r) => toFaDigits(String(r.code)), width: "80px", filterType: "number", filterValue: (r) => r.code },
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
@@ -114,7 +114,7 @@ function WarehouseList() {
           { header: "فعال", render: (r) => (r.isActive ? "بله" : "خیر"), width: "80px" },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/warehouses/${r.id}/edit`)}
+        edit={{ path: (r) => `/warehouses/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -130,6 +130,7 @@ const DEFAULT_WAREHOUSE_FORM = {
   managerId: "",
   stockControl: true,
   isActive: true,
+  implementationDate: "",
 };
 
 function WarehouseForm({ editId }: { editId?: number }) {
@@ -177,6 +178,7 @@ function WarehouseForm({ editId }: { editId?: number }) {
           managerId: found.managerId ? String(found.managerId) : "",
           stockControl: found.stockControl,
           isActive: found.isActive,
+          implementationDate: found.implementationDate ? found.implementationDate.slice(0, 10) : "",
         });
       }
       setLoaded(true);
@@ -196,6 +198,7 @@ function WarehouseForm({ editId }: { editId?: number }) {
       managerId: form.managerId ? Number(form.managerId) : null,
       stockControl: form.stockControl,
       isActive: form.isActive,
+      implementationDate: form.implementationDate || null,
     };
     try {
       if (editId) {
@@ -240,12 +243,12 @@ function WarehouseForm({ editId }: { editId?: number }) {
             <input dir="ltr" disabled={!!editId} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
           </div>
           <div className="form-field">
-            <label>عنوان</label>
+            <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
           </div>
           <div className="form-field">
             <label>
-              گروه انبار
+              گروه انبار<RequiredMark />
               {hasTransactions && <FieldHint label="گروه انبار" text="این انبار گردش دارد و گروه آن قابل تغییر نیست" />}
             </label>
             <select
@@ -279,6 +282,25 @@ function WarehouseForm({ editId }: { editId?: number }) {
           <div className="form-field">
             <label>تلفن (اختیاری)</label>
             <input dir="ltr" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          </div>
+          <div className="form-field">
+            <label>
+              تاریخ راه‌اندازی
+              {hasTransactions ? (
+                <FieldHint label="تاریخ راه‌اندازی" text="این انبار گردش دارد و تاریخ راه‌اندازی آن قابل تغییر نیست" />
+              ) : (
+                <FieldHint
+                  label="تاریخ راه‌اندازی"
+                  text="اختیاری — تا وقتی این انبار هیچ‌وقت تایید نشده، یک روز قبل از این تاریخ به‌جای «آخرین تاریخ تایید» در «تایید انبار» در نظر گرفته می‌شود"
+                />
+              )}
+            </label>
+            <JalaliDatePicker
+              value={form.implementationDate}
+              onChange={(v) => setForm({ ...form, implementationDate: v })}
+              placeholder="انتخاب تاریخ"
+              disabled={hasTransactions}
+            />
           </div>
           <div className="form-field">
             <label className="checkbox-row">

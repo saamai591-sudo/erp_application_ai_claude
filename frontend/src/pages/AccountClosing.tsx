@@ -10,9 +10,10 @@ import { RecordPickerField } from "../components/RecordPicker";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
-import { useTabs } from "../lib/TabsContext";
 import { api } from "../lib/api";
 import { InfoHint } from "../components/InfoHint";
+import { useTabs } from "../lib/TabsContext";
+import { RequiredMark } from "../components/RequiredMark";
 
 interface AccountRow {
   id: number;
@@ -97,8 +98,6 @@ function ClosingList() {
   const cacheKey = "/account-closing";
   const [items, setItems] = usePersistedState<ClosingListItem[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
-  const { openTab } = useTabs();
 
   async function reload() {
     api.get("/account-closing").then(setItems).catch((e) => setError(e.message));
@@ -124,11 +123,10 @@ function ClosingList() {
   return (
     <div>
       <div className="page-header">
-        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`بستن حسابهای سود و زیانیِ دارای مانده در پایان دوره مالی، با صدور خودکار سند حسابداری معکوس‌کننده`} title="بستن حسابها" /><NewRecordButton path="/account-closing/new" /><RefreshButton onClick={reload} /><div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} /></div>
+        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`بستن حسابهای سود و زیانیِ دارای مانده در پایان دوره مالی، با صدور خودکار سند حسابداری معکوس‌کننده`} title="بستن حسابها" /><NewRecordButton path="/account-closing/new" /><RefreshButton onClick={reload} /></div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "شماره", render: (r) => r.number, width: "70px", filterType: "number", filterValue: (r) => r.number },
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
@@ -140,7 +138,7 @@ function ClosingList() {
           { header: "شماره عطف سند", render: (r) => (r.journalEntryReferenceNumber ? toFaDigits(String(r.journalEntryReferenceNumber)) : "—"), filterType: "number", filterValue: (r) => r.journalEntryReferenceNumber ?? undefined },
         ]}
         rows={items}
-        onEdit={(r) => openTab(`/account-closing/${r.id}`)}
+        edit={{ path: (r) => `/account-closing/${r.id}` }}
         onDelete={onDelete}
       />
     </div>
@@ -393,7 +391,7 @@ function ClosingWizard({ viewId }: { viewId?: number }) {
             <div>
               <div className="form-grid" style={{ marginBottom: 14, maxWidth: 500 }}>
                 <div className="form-field">
-                  <label>تاریخ</label>
+                  <label>تاریخ<RequiredMark /></label>
                   <JalaliDatePicker value={date} onChange={setDate} />
                 </div>
                 <div className="form-field">
@@ -406,6 +404,7 @@ function ClosingWizard({ viewId }: { viewId?: number }) {
 
               <p style={{ fontSize: 12.5, color: "var(--ink-soft)", margin: "0 0 6px" }}>حسابهای سود و زیانی دارای مانده</p>
               <DataTable
+                stateKey="available"
                 columns={lineColumns}
                 rows={availableRows}
                 emptyText="رکوردی برای نمایش نیست — تاریخ را وارد و «بارگذاری اطلاعات» را بزنید"
@@ -423,6 +422,7 @@ function ClosingWizard({ viewId }: { viewId?: number }) {
 
               <p style={{ fontSize: 12.5, color: "var(--ink-soft)", margin: "16px 0 6px" }}>حسابهای انتخاب‌شده برای بستن</p>
               <DataTable
+                stateKey="selected"
                 columns={lineColumns}
                 rows={selectedRows}
                 emptyText="هنوز حسابی انتخاب نشده"
@@ -434,14 +434,14 @@ function ClosingWizard({ viewId }: { viewId?: number }) {
           {activeStep === 1 && (
             <div>
               <p style={{ fontSize: 12.5, color: "var(--ink-soft)", margin: "0 0 6px" }}>حسابهای انتخاب‌شده (فقط نمایشی)</p>
-              <DataTable columns={lineColumns} rows={selectedRows} emptyText="هنوز حسابی انتخاب نشده" />
+              <DataTable stateKey="selected" columns={lineColumns} rows={selectedRows} emptyText="هنوز حسابی انتخاب نشده" />
             </div>
           )}
 
           {activeStep === 2 && (
             <div className="form-grid" style={{ maxWidth: 700 }}>
               <div className="form-field">
-                <label>حساب</label>
+                <label>حساب<RequiredMark /></label>
                 <RecordPickerField
                   title="انتخاب حساب مقصد"
                   displayValue={destAccount ? toFaDigits(fullCode(destAccount)) : ""}
@@ -499,7 +499,7 @@ function ClosingWizard({ viewId }: { viewId?: number }) {
                 ) : <input disabled value="—" />}
               </div>
               <div className="form-field full">
-                <label>شرح</label>
+                <label>شرح<RequiredMark /></label>
                 <input value={description} onChange={(e) => setDescription(e.target.value)} />
               </div>
               <div className="form-field"><label>بدهکار</label><input disabled dir="ltr" value={formatAmountFa(totalDebit)} /></div>

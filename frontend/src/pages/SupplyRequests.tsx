@@ -8,11 +8,13 @@ import { RecordPickerField } from "../components/RecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
+import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 
 type SupplyBasis = "FROM_GOODS_REQUEST" | "NO_BASIS";
 type SupplyRoute = "TRANSFER" | "PURCHASE";
@@ -144,7 +146,6 @@ function SupplyRequestList() {
   const cacheKey = "/supply-requests";
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -182,12 +183,10 @@ function SupplyRequestList() {
           <InfoHint text={INFO_TEXT} title="درخواست تامین" />
           <NewRecordButton path="/supply-requests/new" />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
@@ -199,7 +198,7 @@ function SupplyRequestList() {
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/supply-requests/${r.id}/edit`)}
+        edit={{ path: (r) => `/supply-requests/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -255,16 +254,19 @@ function SupplyRequestForm({ editId }: { editId?: number }) {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [focusedRow, setFocusedRow] = useState<number | null>(null);
+  const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const { saved, flash } = useSavedFlash();
 
   useEffect(() => {
     async function init() {
-      const [units, items]: [OrgUnitOption[], GoodsItemRow[]] = await Promise.all([
+      const [units, items, fp]: [OrgUnitOption[], GoodsItemRow[], FiscalPeriodRange | null] = await Promise.all([
         api.get("/org-units"),
         api.get("/goods-items?kind=GOODS"),
+        fetchSelectedFiscalPeriod(),
       ]);
       setOrgUnits(units);
       setGoodsItems(items);
+      setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
         setLoaded(true);
@@ -291,7 +293,7 @@ function SupplyRequestForm({ editId }: { editId?: number }) {
           }))
         );
       } else {
-        setHeader({ date: "", basis: "NO_BASIS", route: "", orgUnitId: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), basis: "NO_BASIS", route: "", orgUnitId: "", description: "" });
         setRows([emptyRow()]);
         setMeta(null);
       }
@@ -315,6 +317,26 @@ function SupplyRequestForm({ editId }: { editId?: number }) {
   const coreDisabled = isFullyLocked || status === "REVIEWED"; // این سند «مقدار تایید شده» مجزا ندارد
   const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceGoodsRequestLineId);
   const headerDisabled = coreDisabled || hasAnyLine; // کنترل ۳: با درج آیتم، ویرایش هدر ممنوع است
+
+  // طبق تصمیم صریح کاربر: تا وقتی فیلدهای الزامی سرصفحه (تاریخ/مسیر تامین/واحد سازمانی) کامل نشده،
+  // ورود اطلاعات ردیف مجاز نیست — اولین تلاش برای باز کردن انتخابگر کالا/درخواست کالا باید با پیام
+  // خطا رد شود (کنترل ۱).
+  function guardRowEntry(): boolean {
+    if (!header.date) {
+      setError("تاریخ الزامی است");
+      return false;
+    }
+    if (!header.route) {
+      setError("مسیر تامین الزامی است");
+      return false;
+    }
+    if (!header.orgUnitId) {
+      setError("واحد سازمانی الزامی است");
+      return false;
+    }
+    setError(null);
+    return true;
+  }
 
   function updateRow(idx: number, patch: Partial<RowState>) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -374,6 +396,8 @@ function SupplyRequestForm({ editId }: { editId?: number }) {
     if (!header.date) return setError("تاریخ الزامی است");
     if (!header.route) return setError("مسیر تامین الزامی است");
     if (!header.orgUnitId) return setError("واحد سازمانی الزامی است");
+    const dateErr = validateDocumentDate(header.date, fiscalPeriod);
+    if (dateErr) return setError(dateErr);
     const body = buildBody();
     if (body.lines.length === 0) return setError("درخواست تامین باید حداقل یک ردیف کالا داشته باشد");
     for (const [i, l] of body.lines.entries()) {
@@ -470,8 +494,8 @@ function SupplyRequestForm({ editId }: { editId?: number }) {
             <div><span className="badge">{STATUS_FA[status]}</span></div>
           </div>
           <div className="form-field">
-            <label>تاریخ</label>
-            <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
+            <label>تاریخ<RequiredMark /></label>
+            <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={headerDisabled} />
           </div>
           <div className="form-field">
             <label>مبنا</label>
@@ -481,7 +505,7 @@ function SupplyRequestForm({ editId }: { editId?: number }) {
             </select>
           </div>
           <div className="form-field">
-            <label>مسیر تامین</label>
+            <label>مسیر تامین<RequiredMark /></label>
             <select value={header.route} onChange={(e) => setHeader({ ...header, route: e.target.value as SupplyRoute })} disabled={headerDisabled}>
               <option value="">انتخاب کنید</option>
               <option value="TRANSFER">{ROUTE_FA.TRANSFER}</option>
@@ -489,7 +513,7 @@ function SupplyRequestForm({ editId }: { editId?: number }) {
             </select>
           </div>
           <div className="form-field">
-            <label>واحد سازمانی</label>
+            <label>واحد سازمانی<RequiredMark /></label>
             <select value={header.orgUnitId} onChange={(e) => setHeader({ ...header, orgUnitId: e.target.value })} disabled={headerDisabled}>
               <option value="">انتخاب کنید</option>
               {orgUnits.map((u) => <option key={u.id} value={u.id}>{u.title}</option>)}
@@ -552,7 +576,7 @@ function SupplyRequestForm({ editId }: { editId?: number }) {
                   <tr key={idx} onClick={() => setFocusedRow(idx)} className={focusedRow === idx ? "active-list" : ""}>
                     <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                     {header.basis === "FROM_GOODS_REQUEST" && (
-                      <td style={{ minWidth: 220 }}>
+                      <td style={{ minWidth: 90 }}>
                         <RecordPickerField
                           title="انتخاب ردیف درخواست کالا"
                           disabled={coreDisabled}
@@ -565,12 +589,15 @@ function SupplyRequestForm({ editId }: { editId?: number }) {
                             { header: "واحد سازمانی", render: (l) => l.orgUnitTitle, filterValue: (l) => l.orgUnitTitle },
                             { header: "مانده", render: (l) => formatAmountFa(l.remaining), filterValue: (l) => String(l.remaining), width: "90px" },
                           ]}
-                          onOpen={() => setFocusedRow(idx)}
+                          onOpen={() => {
+                            setFocusedRow(idx);
+                            return guardRowEntry();
+                          }}
                           onSelect={(l) => onSourceLineChange(idx, String(l.goodsRequestLineId))}
                         />
                       </td>
                     )}
-                    <td style={{ minWidth: 200 }}>
+                    <td style={{ minWidth: 320 }}>
                       {header.basis === "FROM_GOODS_REQUEST" ? (
                         <span>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</span>
                       ) : (
@@ -583,7 +610,10 @@ function SupplyRequestForm({ editId }: { editId?: number }) {
                             { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
                             { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
                           ]}
-                          onOpen={() => setFocusedRow(idx)}
+                          onOpen={() => {
+                            setFocusedRow(idx);
+                            return guardRowEntry();
+                          }}
                           onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
                         />
                       )}

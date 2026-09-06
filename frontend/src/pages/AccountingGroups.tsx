@@ -10,6 +10,7 @@ import { NewRecordButton } from "../components/NewRecordButton";
 import { ExcelImportButton } from "../components/ExcelImport";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
+import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 
 export const GOODS_TYPE_FA: Record<string, string> = {
@@ -47,7 +48,6 @@ function GroupList() {
   const cacheKey = "/accounting-groups";
   const [items, setItems] = usePersistedState<AccountingGroup[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
-  const [bulkSlot, setBulkSlot] = useState<HTMLDivElement | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
@@ -86,12 +86,10 @@ function GroupList() {
             onDone={reload}
           />
           <RefreshButton onClick={reload} />
-          <div ref={setBulkSlot} className="bulk-slot" style={{ display: "flex" }} />
         </div>
       </div>
       {error && <div className="alert error">{error}</div>}
       <DataTable
-        bulkActionsContainer={bulkSlot}
         columns={[
           { header: "کد", render: (r) => toFaDigits(String(r.code)), width: "80px", filterType: "number", filterValue: (r) => r.code },
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
@@ -99,7 +97,7 @@ function GroupList() {
           { header: "فعال", render: (r) => (r.isActive ? "بله" : "خیر"), width: "80px" },
         ]}
         rows={items}
-        onEdit={(r) => navigate(`/accounting-groups/${r.id}/edit`)}
+        edit={{ path: (r) => `/accounting-groups/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -185,11 +183,11 @@ function GroupForm({ editId }: { editId?: number }) {
             <input dir="ltr" disabled={!!editId} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
           </div>
           <div className="form-field">
-            <label>عنوان</label>
+            <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
           </div>
           <div className="form-field">
-            <label>نوع کالا</label>
+            <label>نوع کالا<RequiredMark /></label>
             <select value={form.goodsType} onChange={(e) => setForm({ ...form, goodsType: e.target.value })}>
               {Object.entries(GOODS_TYPE_FA).map(([k, v]) => (
                 <option key={k} value={k}>{v}</option>

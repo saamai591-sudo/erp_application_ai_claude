@@ -160,6 +160,8 @@ export function MultiRecordPickerField<T extends { id: number | string }>({
   getLabel,
   placeholder,
   onOpen,
+  disabled,
+  selectedAsGrid,
 }: {
   title: string;
   rows: T[];
@@ -169,23 +171,30 @@ export function MultiRecordPickerField<T extends { id: number | string }>({
   getLabel: (row: T) => string;
   placeholder?: string;
   onOpen?: () => void;
+  disabled?: boolean;
+  /** به‌جای فهرست تراشه‌ای (chip) خلاصه، موارد انتخاب‌شده را به‌صورت یک گرید/جدول با همان ستون‌های
+   * `columns` نمایش می‌دهد — برای مواردی که هر مورد چند فیلد مرتبط دارد (مثل سریال: بچ/تاریخ انقضا) و
+   * نمایش تراشه‌ای فقط برچسب اصلی را نشان می‌دهد. */
+  selectedAsGrid?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
-      <button
-        type="button"
-        className="picker-field"
-        onClick={() => {
-          onOpen?.();
-          setOpen(true);
-        }}
-      >
-        <span>{selected.length ? `${selected.length} مورد انتخاب‌شده` : <span className="picker-placeholder">{placeholder || "افزودن..."}</span>}</span>
-        <AddIcon />
-      </button>
-      {open && (
+      {!disabled && (
+        <button
+          type="button"
+          className="picker-field"
+          onClick={() => {
+            onOpen?.();
+            setOpen(true);
+          }}
+        >
+          <span>{selected.length ? `${selected.length} مورد انتخاب‌شده` : <span className="picker-placeholder">{placeholder || "افزودن..."}</span>}</span>
+          <AddIcon />
+        </button>
+      )}
+      {open && !disabled && (
         <MultiPickerDialog
           title={title}
           rows={rows}
@@ -195,17 +204,60 @@ export function MultiRecordPickerField<T extends { id: number | string }>({
           onClose={() => setOpen(false)}
         />
       )}
-      {selected.length > 0 && (
-        <div className="chip-list">
-          {selected.map((s) => (
-            <span key={s.id} className="chip">
-              {getLabel(s)}
-              <button type="button" onClick={() => onChange(selected.filter((x) => x.id !== s.id))}>
-                <ChipRemoveIcon />
-              </button>
-            </span>
-          ))}
-        </div>
+      {selected.length > 0 ? (
+        selectedAsGrid ? (
+          <div className="picker-table-wrap" style={{ marginTop: 6 }}>
+            <table className="picker-table">
+              <thead>
+                <tr>
+                  {columns.map((c) => (
+                    <th key={c.header} style={{ width: c.width }}>
+                      {c.header}
+                    </th>
+                  ))}
+                  {!disabled && <th style={{ width: 30 }}></th>}
+                </tr>
+              </thead>
+              <tbody>
+                {selected.map((s) => (
+                  <tr key={s.id}>
+                    {columns.map((c) => (
+                      <td key={c.header}>{c.render(s)}</td>
+                    ))}
+                    {!disabled && (
+                      <td style={{ textAlign: "center" }}>
+                        <button
+                          type="button"
+                          className="btn danger"
+                          style={{ padding: "2px 6px", fontSize: 11 }}
+                          onClick={() => onChange(selected.filter((x) => x.id !== s.id))}
+                          title="حذف"
+                        >
+                          ×
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="chip-list">
+            {selected.map((s) => (
+              <span key={s.id} className="chip">
+                {getLabel(s)}
+                {!disabled && (
+                  <button type="button" onClick={() => onChange(selected.filter((x) => x.id !== s.id))}>
+                    <ChipRemoveIcon />
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
+        )
+      ) : (
+        disabled && <span className="picker-placeholder">موردی انتخاب نشده</span>
       )}
     </div>
   );
