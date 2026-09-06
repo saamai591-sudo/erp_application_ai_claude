@@ -220,7 +220,7 @@ router.get("/purchase-invoices/pickable-warehouse-receipt-lines", can(`${FORM}.v
 
 router.get("/purchase-invoices", can(`${FORM}.view`), async (_req, res) => {
   const items = await prisma.purchaseInvoice.findMany({
-    include: { party: true, purchaseType: true, currency: true, lines: true, otherCostLines: true },
+    include: { party: true, purchaseType: true, currency: true, journalEntry: true, lines: true, otherCostLines: true },
     orderBy: { id: "desc" },
   });
   res.json(
@@ -237,6 +237,7 @@ router.get("/purchase-invoices", can(`${FORM}.view`), async (_req, res) => {
       currencyId: d.currencyId,
       currencyTitle: d.currency.title,
       status: d.status,
+      journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
       lineCount: d.lines.length,
       totalAmount:
         d.lines.reduce((s: number, l: any) => s + Number(l.amount), 0) +
