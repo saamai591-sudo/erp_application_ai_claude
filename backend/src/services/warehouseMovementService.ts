@@ -51,6 +51,11 @@ export interface Movement {
   // طریق ردیف سند ارسالِ مرجع).
   detailCode: string | null;
   detailTitle: string | null;
+  // موجودی اول دوره همیشه نشان‌دهنده‌ی مانده‌ی آغازین است، نه گردش دوره — صرف‌نظر از اینکه تاریخ سند
+  // دقیقاً کجای بازه‌ی گزارش باشد. warehouseReview.ts از این پرچم استفاده می‌کند تا این نوع سند را حتی
+  // وقتی تاریخش دقیقاً برابر fromDate است (رایج‌ترین حالت — اول دوره مالی) هم در سطر «اول دوره» بگذارد،
+  // نه «وارده» (که با مقایسه‌ی صرفِ تاریخ رخ می‌داد).
+  isOpeningBalance: boolean;
 }
 
 export interface MovementFilters {
@@ -191,6 +196,7 @@ export async function getMovements(f: MovementFilters): Promise<Movement[]> {
       warehouseTitle: warehouse?.title ?? null,
       detailCode,
       detailTitle,
+      isOpeningBalance: doc.documentType === "INITIAL_INVENTORY",
     };
   };
 

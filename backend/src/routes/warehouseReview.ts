@@ -1,6 +1,53 @@
 import { Router } from "express";
+import { NextFunction, Response } from "express";
 import { prisma } from "../lib/prisma";
 import { getMovements, Movement } from "../services/warehouseMovementService";
+import { userHasAction } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+import { AuthedRequest } from "../middleware/auth";
+
+// این ماژول یک entity/API مشترک بین دو فرم منوی جدا است: «مرور تعدادی» (زیر ماژول انبارداری) و «مرور
+// مبلغی» (زیر ماژول حسابداری انبار) — نگاه کنید به یادداشت بالای فایل. پاسخ هر endpoint همیشه هم
+// مقدار هم مبلغ را برمی‌گرداند و هیچ query param ای (نه mode، نه هیچ سیگنال دیگری) این دو نما را از
+// هم تفکیک نمی‌کند؛ بک‌اند راهی برای تشخیص «این درخواست برای کدام فرم است» ندارد. به همین دلیل، طبق
+// تصمیم صریح، دسترسی به‌صورت اجتماع (OR) دو فرم بررسی می‌شود: کافی است کاربر حداقل یکیِ این دو
+// «مشاهده» را داشته باشد.
+const QTY_REVIEW_FORM = findFormPrefix("warehousing-warehouse-review");
+const AMOUNT_REVIEW_FORM = findFormPrefix("accounting-warehouse-review");
+
+// نوع درخواستی که middleware زیر آن را غنی می‌کند: علاوه‌بر رد کردن کاربر بدون هیچ‌کدام از دو
+// دسترسی، مشخص می‌کند آیا این کاربر مجاز به دیدن ستون‌های «مبلغی» (مرور مبلغی) هست یا نه — دقیقاً
+// همان الگوی «مشاهده اطلاعات حسابداری» که در بقیه‌ی اسناد انبار استفاده می‌شود؛ اینجا هم مقدار
+// همیشه برمی‌گردد، مبلغ فقط با این دسترسی مجزا.
+interface AuthedRequestWithAmount extends AuthedRequest {
+  canViewAmount?: boolean;
+}
+
+async function canViewWarehouseReview(req: AuthedRequestWithAmount, res: Response, next: NextFunction) {
+  if (!req.user) return res.status(401).json({ error: "توکن احراز هویت ارسال نشده است" });
+  const [hasQtyView, hasAmountView] = await Promise.all([
+    userHasAction(req.user.id, `${QTY_REVIEW_FORM}.view`),
+    userHasAction(req.user.id, `${AMOUNT_REVIEW_FORM}.view`),
+  ]);
+  if (!hasQtyView && !hasAmountView) return res.status(403).json({ error: "دسترسی لازم برای این عملیات را ندارید" });
+  req.canViewAmount = hasAmountView;
+  next();
+}
+
+const BUCKET_AMOUNT_KEYS = ["openingAmount", "inAmount", "outAmount", "balanceAmount"] as const;
+const LEDGER_AMOUNT_KEYS = ["amount", "runningAmount"] as const;
+
+/** فیلدهای مبلغی را از هر ردیف حذف می‌کند وقتی کاربر دسترسی «مرور مبلغی» را نداشته باشد — دقیقاً
+ * همان اصل «فیلدهای مبلغی اصلاً در پاسخ برنمی‌گردند، نه فقط در UI مخفی می‌شوند» که در سایر اسناد
+ * انبار (initialInventory.ts و…) رعایت شده است. */
+function redactAmounts<T extends Record<string, any>>(rows: T[], canViewAmount: boolean, keys: readonly string[]): T[] {
+  if (canViewAmount) return rows;
+  return rows.map((r) => {
+    const clone = { ...r };
+    for (const k of keys) delete clone[k];
+    return clone;
+  });
+}
 
 // =========================================================================
 // ماژول‌های «انبارداری» (مرور تعدادی) / «حسابداری انبار» (مرور مبلغی) > ساب‌ماژول: گزارش
@@ -97,7 +144,11 @@ function buildRows(
     if (key === null) continue;
     if (!rows.has(key)) rows.set(key, { opening: emptyBucket(), in: emptyBucket(), out: emptyBucket(), meta: rowMeta(key, m) });
     const row = rows.get(key)!;
-    if (m.date < fromDate) {
+    // موجودی اول دوره معمولاً دقیقاً روی fromDate ثبت می‌شود (اول دوره مالی) — با مقایسه‌ی صرفِ «<»
+    // چنین سندی به‌جای «اول دوره» در سطر «وارده» می‌افتاد؛ isOpeningBalance این مرز را برای همین نوع
+    // سند به «<=» تبدیل می‌کند، بدون تغییر رفتار بقیه‌ی انواع سند.
+    const isOpening = m.isOpeningBalance ? m.date <= fromDate : m.date < fromDate;
+    if (isOpening) {
       if (m.direction === "IN") {
         row.opening.qty += m.quantity;
         row.opening.amount += m.amount;
@@ -128,7 +179,7 @@ function buildRows(
     .filter((r) => r.openingQuantity !== 0 || r.inQuantity !== 0 || r.outQuantity !== 0 || r.openingAmount !== 0 || r.inAmount !== 0 || r.outAmount !== 0);
 }
 
-router.get("/warehouse-review/warehouses", async (req, res) => {
+router.get("/warehouse-review/warehouses", canViewWarehouseReview, async (req: AuthedRequestWithAmount, res) => {
   try {
     const f = parseFilters(req.query as CommonQuery);
     const movements = await getMovements(movementFiltersFrom(f));
@@ -144,7 +195,7 @@ router.get("/warehouse-review/warehouses", async (req, res) => {
         return { warehouseId: m.warehouseId, warehouseCode: w?.code ?? null, warehouseTitle: w?.title ?? `#${m.warehouseId}` };
       }
     );
-    res.json(rows);
+    res.json(redactAmounts(rows, !!req.canViewAmount, BUCKET_AMOUNT_KEYS));
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
   }
@@ -201,7 +252,7 @@ function fullGoodsGroupCode(groupId: number, groupById: Map<number, GoodsGroupNo
   return parts.join("");
 }
 
-router.get("/warehouse-review/goods-group-level", async (req, res) => {
+router.get("/warehouse-review/goods-group-level", canViewWarehouseReview, async (req: AuthedRequestWithAmount, res) => {
   try {
     const q = req.query as CommonQuery & { levelOrder?: string };
     if (!q.levelOrder) return res.status(400).json({ error: "سطح گروه کالا مشخص نشده است" });
@@ -223,7 +274,8 @@ router.get("/warehouse-review/goods-group-level", async (req, res) => {
       if (!rows.has(key)) rows.set(key, { opening: emptyBucket(), in: emptyBucket(), out: emptyBucket(), groupId: ancestorId, itemIds: new Set() });
       const row = rows.get(key)!;
       row.itemIds.add(m.goodsItemId);
-      if (m.date < f.fromDate) {
+      const isOpening = m.isOpeningBalance ? m.date <= f.fromDate : m.date < f.fromDate;
+      if (isOpening) {
         if (m.direction === "IN") {
           row.opening.qty += m.quantity;
           row.opening.amount += m.amount;
@@ -259,13 +311,13 @@ router.get("/warehouse-review/goods-group-level", async (req, res) => {
       })
       .filter((r) => r.openingQuantity !== 0 || r.inQuantity !== 0 || r.outQuantity !== 0 || r.openingAmount !== 0 || r.inAmount !== 0 || r.outAmount !== 0);
 
-    res.json(result);
+    res.json(redactAmounts(result, !!req.canViewAmount, BUCKET_AMOUNT_KEYS));
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
   }
 });
 
-router.get("/warehouse-review/goods-items", async (req, res) => {
+router.get("/warehouse-review/goods-items", canViewWarehouseReview, async (req: AuthedRequestWithAmount, res) => {
   try {
     const f = parseFilters(req.query as CommonQuery);
     const movements = await getMovements(movementFiltersFrom(f));
@@ -276,13 +328,13 @@ router.get("/warehouse-review/goods-items", async (req, res) => {
       (m) => String(m.goodsItemId),
       (_key, m) => ({ goodsItemId: m.goodsItemId, goodsItemCode: m.goodsItemCode, goodsItemTitle: m.goodsItemTitle })
     );
-    res.json(rows);
+    res.json(redactAmounts(rows, !!req.canViewAmount, BUCKET_AMOUNT_KEYS));
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
   }
 });
 
-router.get("/warehouse-review/goods-expiry", async (req, res) => {
+router.get("/warehouse-review/goods-expiry", canViewWarehouseReview, async (req: AuthedRequestWithAmount, res) => {
   try {
     const f = parseFilters(req.query as CommonQuery);
     const movements = await getMovements(movementFiltersFrom(f));
@@ -298,13 +350,13 @@ router.get("/warehouse-review/goods-expiry", async (req, res) => {
         expiryDate: m.expiryDate,
       })
     );
-    res.json(rows);
+    res.json(redactAmounts(rows, !!req.canViewAmount, BUCKET_AMOUNT_KEYS));
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
   }
 });
 
-router.get("/warehouse-review/goods-serial", async (req, res) => {
+router.get("/warehouse-review/goods-serial", canViewWarehouseReview, async (req: AuthedRequestWithAmount, res) => {
   try {
     const f = parseFilters(req.query as CommonQuery);
     const movements = await getMovements(movementFiltersFrom(f));
@@ -320,13 +372,13 @@ router.get("/warehouse-review/goods-serial", async (req, res) => {
         serialNumber: m.serialNumber,
       })
     );
-    res.json(rows);
+    res.json(redactAmounts(rows, !!req.canViewAmount, BUCKET_AMOUNT_KEYS));
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
   }
 });
 
-router.get("/warehouse-review/goods-batch", async (req, res) => {
+router.get("/warehouse-review/goods-batch", canViewWarehouseReview, async (req: AuthedRequestWithAmount, res) => {
   try {
     const f = parseFilters(req.query as CommonQuery);
     const movements = await getMovements(movementFiltersFrom(f));
@@ -342,13 +394,13 @@ router.get("/warehouse-review/goods-batch", async (req, res) => {
         batchNumber: m.batchNumber,
       })
     );
-    res.json(rows);
+    res.json(redactAmounts(rows, !!req.canViewAmount, BUCKET_AMOUNT_KEYS));
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
   }
 });
 
-router.get("/warehouse-review/goods-location", async (req, res) => {
+router.get("/warehouse-review/goods-location", canViewWarehouseReview, async (req: AuthedRequestWithAmount, res) => {
   try {
     const f = parseFilters(req.query as CommonQuery);
     const movements = await getMovements(movementFiltersFrom(f));
@@ -364,7 +416,7 @@ router.get("/warehouse-review/goods-location", async (req, res) => {
         physicalLocation: m.physicalLocation,
       })
     );
-    res.json(rows);
+    res.json(redactAmounts(rows, !!req.canViewAmount, BUCKET_AMOUNT_KEYS));
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
   }
@@ -372,14 +424,21 @@ router.get("/warehouse-review/goods-location", async (req, res) => {
 
 // تب «گردش»: فهرست تخت گردش‌ها با مانده‌ی تراکمی در خط (بر اساس تمام گردش‌های منطبق با فیلترها، نه
 // فقط بازه‌ی جاری — دقیقاً مثل «مرور حسابها»)؛ صفحه‌بندی و مرتب‌سازی در حافظه انجام می‌شود.
-router.get("/warehouse-review/ledger", async (req, res) => {
+router.get("/warehouse-review/ledger", canViewWarehouseReview, async (req: AuthedRequestWithAmount, res) => {
   try {
     const f = parseFilters(req.query as CommonQuery);
     const page = Math.max(1, parseInt((req.query.page as string) || "1", 10));
     const pageSize = Math.min(1000, Math.max(1, parseInt((req.query.pageSize as string) || "100", 10)));
 
     const movements = await getMovements(movementFiltersFrom(f));
-    const sorted = [...movements].sort((a, b) => a.date.getTime() - b.date.getTime() || a.docNumber - b.docNumber || a.lineId - b.lineId);
+    // ترتیب پیش‌فرض تب «گردش»: تاریخ، سپس در تاریخ یکسان وارده قبل از صادره (طبق درخواست کاربر)
+    const sorted = [...movements].sort(
+      (a, b) =>
+        a.date.getTime() - b.date.getTime() ||
+        (a.direction === b.direction ? 0 : a.direction === "IN" ? -1 : 1) ||
+        a.docNumber - b.docNumber ||
+        a.lineId - b.lineId
+    );
 
     let cumQty = 0;
     let cumAmount = 0;
@@ -392,6 +451,8 @@ router.get("/warehouse-review/ledger", async (req, res) => {
         docId: m.docId,
         docNumber: m.docNumber,
         date: m.date,
+        warehouseCode: m.warehouseCode,
+        warehouseTitle: m.warehouseTitle,
         goodsItemId: m.goodsItemId,
         goodsItemCode: m.goodsItemCode,
         goodsItemTitle: m.goodsItemTitle,
@@ -401,8 +462,8 @@ router.get("/warehouse-review/ledger", async (req, res) => {
         batchNumber: m.batchNumber,
         expiryDate: m.expiryDate,
         physicalLocation: m.physicalLocation,
-        partyCode: m.partyCode,
-        partyTitle: m.partyTitle,
+        detailCode: m.detailCode,
+        detailTitle: m.detailTitle,
         runningQuantity: cumQty,
         runningAmount: cumAmount,
       };
@@ -411,7 +472,7 @@ router.get("/warehouse-review/ledger", async (req, res) => {
     const inRange = withRunning.filter((m) => m.date >= f.fromDate && m.date <= f.toDate);
     const total = inRange.length;
     const start = (page - 1) * pageSize;
-    const rows = inRange.slice(start, start + pageSize);
+    const rows = redactAmounts(inRange.slice(start, start + pageSize), !!req.canViewAmount, LEDGER_AMOUNT_KEYS);
 
     res.json({ rows, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
   } catch (e: any) {
