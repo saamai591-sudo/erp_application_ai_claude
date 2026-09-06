@@ -177,7 +177,7 @@ export const MODULES: ModuleGroup[] = [
         title: "حسابداری انبار",
         items: [
           { key: "accounting-goods-pricing", label: "قیمت‌گذاری اسناد انبار", list: "/warehouse-accounting/goods-pricing", icon: "coin" },
-          { key: "accounting-issue-journal-entries", label: "صدور سند حسابداری", list: "/warehouse-accounting/issue-journal-entries", icon: "coin" },
+          { key: "accounting-issue-journal-entries", label: "صدور سند حسابداری", list: "/warehouse-accounting/issue-journal-entries", create: "/warehouse-accounting/issue-journal-entries/new", icon: "coin" },
         ],
       },
       {

@@ -912,7 +912,7 @@ function EntryForm({ editId }: { editId?: number }) {
                           </button>
                         </div>
                       ) : (
-                        <input dir="ltr" value={row.debit ? formatAmountFa(row.debit) : ""} disabled />
+                        <input dir="rtl" value={row.debit ? formatAmountFa(row.debit) : ""} disabled />
                       )}
                     </td>
                     {/* بستانکار ارزی */}
@@ -925,7 +925,7 @@ function EntryForm({ editId }: { editId?: number }) {
                           </button>
                         </div>
                       ) : (
-                        <input dir="ltr" value={row.credit ? formatAmountFa(row.credit) : ""} disabled />
+                        <input dir="rtl" value={row.credit ? formatAmountFa(row.credit) : ""} disabled />
                       )}
                     </td>
 

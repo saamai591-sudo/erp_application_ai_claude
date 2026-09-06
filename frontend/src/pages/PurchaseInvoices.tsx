@@ -14,6 +14,7 @@ import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
 import { partyDisplayName } from "./Users";
 import { PurchaseType } from "./PurchaseTypes";
@@ -101,6 +102,14 @@ function UndoIcon() {
     </svg>
   );
 }
+function EyeIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
 
 function PurchaseInvoiceList() {
   const cacheKey = "/purchase-invoices";
@@ -177,6 +186,7 @@ function emptyRow(): RowState {
 
 function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
+  const { openTab } = useTabs();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
   const [parties, setParties] = useState<PartyOption[]>([]);
@@ -563,6 +573,11 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
         });
         extraActions.push({ label: "صدور سند حسابداری", icon: <PlusIcon />, onClick: () => runAction("issue-journal-entry") });
       } else {
+        extraActions.push({
+          label: "مشاهده سند حسابداری",
+          icon: <EyeIcon />,
+          onClick: () => openTab(`/journal-entries/${meta.journalEntryId}/edit`),
+        });
         extraActions.push({
           label: "حذف سند حسابداری",
           icon: <UndoIcon />,

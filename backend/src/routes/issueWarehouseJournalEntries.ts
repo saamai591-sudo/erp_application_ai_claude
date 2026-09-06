@@ -286,15 +286,103 @@ router.post("/issue-warehouse-journal-entries/issue", can(`${FORM}.issue`), asyn
       data: { journalEntryId: entry.id },
     });
 
+    // طبق تصمیم صریح کاربر: این فرم دیگر صرفاً یک فرم واسط نیست — هر بار صدور موفق، یک ردیف هدر اینجا
+    // ذخیره می‌شود تا بعداً بتوان همان سند را از فهرست همین فرم مشاهده/حذف کرد.
+    const lastNumber = await prisma.warehouseJournalEntryIssuance.findFirst({
+      where: { fiscalPeriodId: resolved.fiscalPeriod.id },
+      orderBy: { number: "desc" },
+    });
+    const issuance = await prisma.warehouseJournalEntryIssuance.create({
+      data: {
+        fiscalPeriodId: resolved.fiscalPeriod.id,
+        number: lastNumber ? lastNumber.number + 1 : 1,
+        toDate: toDateDay,
+        accountingGroupIds: (req.body as CandidatesQueryInput).accountingGroupIds || null,
+        rowCount: validRows.length,
+        journalEntryId: entry.id,
+      },
+    });
+
     res.json({
+      id: issuance.id,
+      number: issuance.number,
       journalEntryId: entry.id,
-      number: entry.number,
       referenceNumber: entry.referenceNumber,
       rowCount: validRows.length,
       lineCount: lines.length,
     });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در صدور سند" });
+  }
+});
+
+// =========================================================================
+// فهرست/مشاهده/حذف هدرهای صدورشده — طبق تصمیم صریح کاربر: این فرم دیگر صرفاً یک فرم واسط بی‌سابقه
+// نیست؛ هر صدور موفق یک ردیف هدر ذخیره می‌کند (بالا) که از همین‌جا قابل مشاهده/حذف سند است.
+// =========================================================================
+
+router.get("/issue-warehouse-journal-entries", can(`${FORM}.view`), async (_req, res) => {
+  const items = await prisma.warehouseJournalEntryIssuance.findMany({
+    include: { journalEntry: true },
+    orderBy: { id: "desc" },
+  });
+  res.json(
+    items.map((i: any) => ({
+      id: i.id,
+      number: i.number,
+      toDate: i.toDate,
+      rowCount: i.rowCount,
+      journalEntryId: i.journalEntryId,
+      journalEntryReferenceNumber: i.journalEntry?.referenceNumber ?? null,
+      createdAt: i.createdAt,
+    }))
+  );
+});
+
+router.get("/issue-warehouse-journal-entries/:id(\\d+)", can(`${FORM}.view`), async (req, res) => {
+  const id = Number(req.params.id);
+  const i = await prisma.warehouseJournalEntryIssuance.findUnique({ where: { id }, include: { journalEntry: true } });
+  if (!i) return res.status(404).json({ error: "یافت نشد" });
+
+  const groupIds = (i.accountingGroupIds ?? "")
+    .split(",")
+    .map((s) => Number(s))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  const groups = groupIds.length ? await prisma.accountingGroup.findMany({ where: { id: { in: groupIds } } }) : [];
+
+  res.json({
+    id: i.id,
+    number: i.number,
+    toDate: i.toDate,
+    accountingGroupIds: i.accountingGroupIds,
+    accountingGroupTitles: groups.map((g) => g.title),
+    rowCount: i.rowCount,
+    journalEntryId: i.journalEntryId,
+    journalEntryReferenceNumber: i.journalEntry?.referenceNumber ?? null,
+    journalEntryNumber: i.journalEntry?.number ?? null,
+    journalEntryStatus: i.journalEntry?.status ?? null,
+    createdAt: i.createdAt,
+  });
+});
+
+router.delete("/issue-warehouse-journal-entries/:id(\\d+)", can(`${FORM}.delete`), async (req, res) => {
+  const id = Number(req.params.id);
+  const i = await prisma.warehouseJournalEntryIssuance.findUnique({ where: { id } });
+  if (!i) return res.status(404).json({ error: "یافت نشد" });
+  if (!i.journalEntryId) return res.status(400).json({ error: "برای این مورد سندی صادر نشده است" });
+
+  try {
+    await prisma.$transaction([
+      prisma.documentItemAmount.updateMany({
+        where: { journalEntryId: i.journalEntryId },
+        data: { journalEntryId: null },
+      }),
+      prisma.warehouseJournalEntryIssuance.delete({ where: { id } }),
+      prisma.journalEntry.delete({ where: { id: i.journalEntryId } }),
+    ]);
+    res.status(204).send();
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در حذف سند" });
   }
 });
 

@@ -330,7 +330,7 @@ export const REGISTRY: ModuleDef[] = [
           {
             key: "accounting-issue-journal-entries",
             title: "صدور سند حسابداری",
-            baseActions: ["view"],
+            baseActions: ["view", "delete"],
             actions: [{ key: "issue", title: "صدور سند" }],
           },
         ],

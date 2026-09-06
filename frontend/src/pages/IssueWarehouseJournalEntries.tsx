@@ -1,10 +1,16 @@
-import { useRef, useState } from "react";
-import { FilterIcon, FilterPopover, ActiveFilter, ColumnFilterType } from "../components/DataTable";
+import { useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { DataTable, FilterIcon, FilterPopover, ActiveFilter, ColumnFilterType } from "../components/DataTable";
+import { FormPage } from "../components/FormPage";
 import { MultiRecordPickerField } from "../components/MultiRecordPicker";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { InfoHint } from "../components/InfoHint";
 import { Modal } from "../components/Modal";
 import { RequiredMark } from "../components/RequiredMark";
+import { RefreshButton } from "../components/RefreshButton";
+import { NewRecordButton } from "../components/NewRecordButton";
+import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
 import { formatJalaliDate } from "../lib/formatDate";
 import { toFaDigits, formatAmountFa } from "../lib/formatAmount";
@@ -14,6 +20,8 @@ import { toFaDigits, formatAmountFa } from "../lib/formatAmount";
 // حسابداری» همیشه روی همه‌ی ردیف‌های مطابق فیلترهای جاری (نه فقط صفحه‌ی جاری) عمل می‌کند؛ هر ردیف دو خط
 // (بدهکار+بستانکار) در یک سند واحد تولید می‌کند؛ حساب‌ها از تنظیمات «حسابداری کالا و خدمت» خوانده
 // می‌شوند (routes/issueWarehouseJournalEntries.ts).
+// طبق تصمیم صریح کاربر: این فرم دیگر صرفاً یک فرم واسط بی‌سابقه نیست — هر صدور موفق یک ردیف هدر
+// (WarehouseJournalEntryIssuance) ذخیره می‌کند که از فهرست همین فرم قابل مشاهده/حذف سند است.
 
 interface AccountingGroupOption {
   id: number;
@@ -43,6 +51,23 @@ interface ColDef {
   width?: string;
 }
 
+interface IssuanceListItem {
+  id: number;
+  number: number;
+  toDate: string;
+  rowCount: number;
+  journalEntryId: number | null;
+  journalEntryReferenceNumber: number | null;
+  createdAt: string;
+}
+
+interface IssuanceDetail extends IssuanceListItem {
+  accountingGroupIds: string | null;
+  accountingGroupTitles: string[];
+  journalEntryNumber: number | null;
+  journalEntryStatus: string | null;
+}
+
 const PAGE_SIZE = 25;
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
@@ -62,6 +87,138 @@ const INFO_TEXT =
   "اطلاعات همیشه از اولین روز سال مالیِ تاریخ انتخاب‌شده تا خودِ آن تاریخ لود می‌شود؛ ردیف‌هایی که قبلاً برایشان سند حسابداری صادر شده، یا مربوط به فاکتور خرید/هزینه‌های مرتبط با ورود کالا هستند (که سندشان جداگانه صادر می‌شود)، یا از نوع موجودی اول دوره/انتقال بین انبار هستند، در این فهرست نمی‌آیند.";
 
 export default function IssueWarehouseJournalEntries() {
+  const location = useLocation();
+  const { id } = useParams();
+  const isNew = location.pathname.endsWith("/new");
+  if (isNew) return <IssueForm />;
+  if (id) return <IssuanceView viewId={Number(id)} />;
+  return <IssuanceList />;
+}
+
+function IssuanceList() {
+  const cacheKey = "/warehouse-accounting/issue-journal-entries";
+  const [items, setItems] = usePersistedState<IssuanceListItem[]>(cacheKey, []);
+  const [error, setError] = useState<string | null>(null);
+
+  async function reload() {
+    api.get("/issue-warehouse-journal-entries").then(setItems).catch((e) => setError(e.message));
+  }
+  useEffect(() => {
+    if (!hasPersistedState(cacheKey)) reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function onDelete() {
+    alert("این رکورد سند صادرشده دارد؛ ابتدا از داخل فرم، «حذف سند» را بزنید.");
+  }
+
+  return (
+    <div>
+      <div className="page-header">
+        <div className="header-toolbar" style={{ gap: 4 }}>
+          <InfoHint text={INFO_TEXT} title="صدور سند حسابداری اسناد انبار" />
+          <NewRecordButton path="/warehouse-accounting/issue-journal-entries/new" />
+          <RefreshButton onClick={reload} />
+        </div>
+      </div>
+      {error && <div className="alert error">{error}</div>}
+      <DataTable
+        columns={[
+          { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
+          { header: "تا تاریخ", render: (r) => formatJalaliDate(r.toDate), filterType: "date", filterValue: (r) => r.toDate.slice(0, 10) },
+          { header: "تعداد ردیف", render: (r) => toFaDigits(String(r.rowCount)), filterType: "number", filterValue: (r) => r.rowCount },
+          {
+            header: "شماره عطف سند",
+            render: (r) => (r.journalEntryReferenceNumber ? toFaDigits(String(r.journalEntryReferenceNumber)) : "—"),
+            filterType: "number",
+            filterValue: (r) => r.journalEntryReferenceNumber ?? undefined,
+          },
+          { header: "تاریخ ثبت", render: (r) => formatJalaliDate(r.createdAt), filterType: "date", filterValue: (r) => r.createdAt.slice(0, 10) },
+        ]}
+        rows={items}
+        edit={{ path: (r) => `/warehouse-accounting/issue-journal-entries/${r.id}` }}
+        onDelete={onDelete}
+      />
+    </div>
+  );
+}
+
+function IssuanceView({ viewId }: { viewId: number }) {
+  const { openTab } = useTabs();
+  const navigate = useNavigate();
+  const [item, setItem] = useState<IssuanceDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.get(`/issue-warehouse-journal-entries/${viewId}`).then(setItem).catch((e) => setError(e.message));
+  }, [viewId]);
+
+  function handleViewJournalEntry() {
+    if (!item?.journalEntryId) return;
+    openTab(`/journal-entries/${item.journalEntryId}/edit`);
+  }
+
+  async function handleDeleteJournalEntry() {
+    if (!item) return;
+    if (!window.confirm("سند حسابداری صادرشده حذف می‌شود. ادامه می‌دهید؟")) return;
+    setError(null);
+    try {
+      await api.del(`/issue-warehouse-journal-entries/${item.id}`);
+      navigate("/warehouse-accounting/issue-journal-entries");
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
+  return (
+    <FormPage
+      title="مشاهده صدور سند حسابداری"
+      closePath="/warehouse-accounting/issue-journal-entries"
+      newPath="/warehouse-accounting/issue-journal-entries/new"
+      extraActions={
+        item?.journalEntryId
+          ? [
+              { label: "مشاهده سند حسابداری", onClick: handleViewJournalEntry },
+              { label: "حذف سند حسابداری", onClick: handleDeleteJournalEntry },
+            ]
+          : []
+      }
+    >
+      {error && <div className="alert error">{error}</div>}
+      {item && (
+        <div className="form-grid" style={{ maxWidth: 600 }}>
+          <div className="form-field">
+            <label>شماره</label>
+            <input disabled dir="rtl" value={toFaDigits(String(item.number))} />
+          </div>
+          <div className="form-field">
+            <label>تا تاریخ</label>
+            <input disabled dir="rtl" value={formatJalaliDate(item.toDate)} />
+          </div>
+          <div className="form-field full">
+            <label>گروه‌های حسابداری</label>
+            <input disabled dir="rtl" value={item.accountingGroupTitles.length ? item.accountingGroupTitles.join("، ") : "همه گروه‌ها"} />
+          </div>
+          <div className="form-field">
+            <label>تعداد ردیف پردازش‌شده</label>
+            <input disabled dir="rtl" value={toFaDigits(String(item.rowCount))} />
+          </div>
+          <div className="form-field">
+            <label>شماره عطف سند حسابداری</label>
+            <input disabled dir="rtl" value={item.journalEntryReferenceNumber ? toFaDigits(String(item.journalEntryReferenceNumber)) : "—"} />
+          </div>
+          <div className="form-field">
+            <label>تاریخ ثبت</label>
+            <input disabled dir="rtl" value={formatJalaliDate(item.createdAt)} />
+          </div>
+        </div>
+      )}
+    </FormPage>
+  );
+}
+
+function IssueForm() {
+  const navigate = useNavigate();
   const [toDate, setToDate] = useState("");
   const [accountingGroups, setAccountingGroups] = useState<AccountingGroupOption[]>([]);
   const [selectedGroups, setSelectedGroups] = useState<AccountingGroupOption[]>([]);
@@ -80,7 +237,6 @@ export default function IssueWarehouseJournalEntries() {
   const filterBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   const [issuing, setIssuing] = useState(false);
-  const [resultDialog, setResultDialog] = useState<string[] | null>(null);
   const [errorDialog, setErrorDialog] = useState<string | null>(null);
 
   function ensureGroupsLoaded() {
@@ -121,7 +277,6 @@ export default function IssueWarehouseJournalEntries() {
 
   async function loadData() {
     if (!toDate) return;
-    setResultDialog(null);
     await fetchPage(1);
     setLoaded(true);
   }
@@ -152,15 +307,8 @@ export default function IssueWarehouseJournalEntries() {
     if (total === 0) return;
     setIssuing(true);
     try {
-      const result: { journalEntryId: number; referenceNumber: number; rowCount: number } = await api.post(
-        "/issue-warehouse-journal-entries/issue",
-        buildFilterQuery()
-      );
-      setResultDialog([
-        `سند حسابداری با شماره عطف ${toFaDigits(String(result.referenceNumber))} صادر شد.`,
-        `${toFaDigits(String(result.rowCount))} ردیف پردازش شد.`,
-      ]);
-      await fetchPage(1);
+      const result: { id: number } = await api.post("/issue-warehouse-journal-entries/issue", buildFilterQuery());
+      navigate(`/warehouse-accounting/issue-journal-entries/${result.id}`);
     } catch (e) {
       setErrorDialog((e as ApiError).message);
     } finally {
@@ -171,7 +319,7 @@ export default function IssueWarehouseJournalEntries() {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
-    <div>
+    <FormPage title="صدور سند حسابداری" closePath="/warehouse-accounting/issue-journal-entries" wide>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={INFO_TEXT} title="صدور سند حسابداری اسناد انبار" />
@@ -313,21 +461,7 @@ export default function IssueWarehouseJournalEntries() {
                   />
                 )
             )}
-
         </>
-      )}
-
-      {resultDialog && (
-        <Modal title="نتیجه" onClose={() => setResultDialog(null)}>
-          {resultDialog.map((m, i) => (
-            <p key={i}>{m}</p>
-          ))}
-          <div className="actions">
-            <button type="button" className="btn" onClick={() => setResultDialog(null)}>
-              بستن
-            </button>
-          </div>
-        </Modal>
       )}
 
       {errorDialog && (
@@ -340,6 +474,6 @@ export default function IssueWarehouseJournalEntries() {
           </div>
         </Modal>
       )}
-    </div>
+    </FormPage>
   );
 }

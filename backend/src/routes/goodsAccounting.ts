@@ -111,6 +111,7 @@ router.get("/goods-service-accounting", async (_req, res) => {
       include: {
         accountingGroup: true,
         warehouseGroup: true,
+        purchaseType: true,
         account: { include: { level: true } },
       },
       orderBy: { id: "asc" },

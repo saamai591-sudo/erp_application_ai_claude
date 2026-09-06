@@ -123,6 +123,8 @@ export default function App() {
             <Route path="/reporting-periods/:id/edit" element={<ReportingPeriods />} />
             <Route path="/warehouse-accounting/goods-pricing" element={<GoodsPricing />} />
             <Route path="/warehouse-accounting/issue-journal-entries" element={<IssueWarehouseJournalEntries />} />
+            <Route path="/warehouse-accounting/issue-journal-entries/new" element={<IssueWarehouseJournalEntries />} />
+            <Route path="/warehouse-accounting/issue-journal-entries/:id" element={<IssueWarehouseJournalEntries />} />
             <Route path="/org-structure" element={<OrgStructure />} />
             <Route path="/org-structure/new" element={<OrgStructure />} />
             <Route path="/org-structure/:id/edit" element={<OrgStructure />} />

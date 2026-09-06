@@ -179,6 +179,7 @@ model FiscalPeriod {
   warehouseTransfers        WarehouseTransfer[]
   inventoryDocuments        InventoryDocument[]
   reportingPeriods          ReportingPeriod[]
+  warehouseJournalEntryIssuances WarehouseJournalEntryIssuance[]
 }
 
 enum ReportingPeriodStatus {
@@ -473,6 +474,28 @@ model JournalEntry {
   sources             JournalEntrySource[]
   openingClosingEntry OpeningClosingEntry?
   purchaseInvoice     PurchaseInvoice?
+  warehouseJournalEntryIssuance WarehouseJournalEntryIssuance?
+
+  @@unique([fiscalPeriodId, number])
+}
+
+/// هر بار که کاربر از فرم «صدور سند حسابداری» (اسناد انبار) با انتخاب «تا تاریخ»/گروه‌های حسابداری، سند
+/// صادر می‌کند، یک ردیف هدر اینجا ذخیره می‌شود (طبق تصمیم صریح کاربر: این فرم دیگر صرفاً یک فرم واسط
+/// بی‌سابقه نیست) — تا بشود بعداً همان سند را از همین‌جا مشاهده/حذف کرد؛ ردیف‌های واقعی از
+/// DocumentItemAmount (با همان معیار toDate/accountingGroupIds) دوباره محاسبه می‌شوند، نه اینکه اینجا
+/// تکرار شوند.
+model WarehouseJournalEntryIssuance {
+  id                 Int           @id @default(autoincrement())
+  fiscalPeriodId     Int
+  number             Int
+  toDate             DateTime      @db.Date
+  /// شناسه‌ی گروه‌های حسابداری انتخاب‌شده، جدا شده با کاما؛ null یعنی «همه‌ی گروه‌ها»
+  accountingGroupIds String?
+  rowCount           Int
+  journalEntryId     Int?          @unique
+  createdAt          DateTime      @default(now())
+  fiscalPeriod       FiscalPeriod  @relation(fields: [fiscalPeriodId], references: [id])
+  journalEntry       JournalEntry? @relation(fields: [journalEntryId], references: [id])
 
   @@unique([fiscalPeriodId, number])
 }

@@ -1134,7 +1134,7 @@ body {
   direction: ltr;
 }
 .fx-cell { display: flex; align-items: center; gap: 4px; justify-content: space-between; }
-.fx-value { flex: 1; text-align: left; direction: ltr; color: var(--ink-soft); font-size: 12px; }
+.fx-value { flex: 1; text-align: right; direction: rtl; color: var(--ink-soft); font-size: 12px; }
 .fx-icon-btn {
   background: none;
   border: none;
@@ -1229,6 +1229,7 @@ body {
   font-size: 12.5px;
   cursor: pointer;
   color: var(--ink);
+  white-space: nowrap;
 }
 .toolbar-menu-item:hover { background: var(--bg); }
 .toolbar-menu-item.danger { color: var(--danger); }

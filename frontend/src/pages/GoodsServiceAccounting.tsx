@@ -104,6 +104,7 @@ interface GoodsServiceAccountingSetting {
   salesTypeRef: number | null;
   warehouseDocType: string | null;
   purchaseTypeId: number | null;
+  purchaseType: PurchaseType | null;
   hasTransactions: boolean;
 }
 
@@ -155,6 +156,10 @@ function SettingList() {
           { header: "گروه حسابداری", render: (r) => r.accountingGroup?.title, filterType: "string", filterValue: (r) => r.accountingGroup?.title },
           { header: "نوع حساب", render: (r) => ACCOUNT_TYPE_FA[r.accountType] || r.accountType },
           { header: "گروه انبار", render: (r) => r.warehouseGroup?.title || "—" },
+          {
+            header: "نوع سند / نوع خرید",
+            render: (r) => (r.warehouseDocType ? WAREHOUSE_DOC_TYPE_FA[r.warehouseDocType] || r.warehouseDocType : r.purchaseType?.title || "—"),
+          },
           { header: "معین", render: (r) => (r.account ? `${r.account.code} - ${r.account.title}` : "—") },
         ]}
         rows={items}
