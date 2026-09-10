@@ -1,8 +1,10 @@
-import { useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
 import { SelectId } from "../lib/useChainedMultiSelect";
-import { toFaDigits } from "../lib/formatAmount";
+import { toFaDigits, formatAmountFa } from "../lib/formatAmount";
 import { exportGridToCsv, printGrid, deriveGridName, ExportColumn } from "../lib/gridExport";
+import { useAutoPortalTarget } from "../lib/useAutoPortalTarget";
 import { ActiveFilter, ColumnFilterType, FilterIcon, FilterPopover, matchesFilter } from "./DataTable";
 
 export interface BalanceTableColumn<T> {
@@ -15,6 +17,11 @@ export interface BalanceTableColumn<T> {
   filterType?: ColumnFilterType;
   /** مقدار خام برای اعمال فیلتر؛ اگر ندهید از filterValue استفاده نمی‌شود و آیکن فیلتر نمایش داده نمی‌شود */
   filterValue?: (row: T) => string | number | null | undefined;
+  /** طبق تصمیم صریح کاربر: فقط ستون‌های عددیِ اعشاری/غیرصحیح (جمع بدهکار/بستانکار، مانده و...) باید در
+   * ردیف «جمع» پای گرید جمع زده شوند — دقیقاً هم‌قرارداد DataTable */
+  decimal?: boolean;
+  /** مقدار خام برای محاسبه‌ی جمع (فقط وقتی decimal=true)؛ اگر ندهید از filterValue استفاده می‌شود */
+  totalValue?: (row: T) => string | number | null | undefined;
 }
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -91,6 +98,11 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
   emptyText,
   serverPaging,
   selectAll,
+  stateKey,
+  restoreFilters,
+  restoreSort,
+  onFiltersChange,
+  onSortChange,
 }: {
   rows: T[];
   columns: BalanceTableColumn<T>[];
@@ -106,6 +118,32 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
    * کامپوننت فقط چک‌باکس را با وضعیت داده‌شده نمایش می‌دهد). اگر داده نشود، آن ستون خالی می‌ماند
    * (رفتار قبلی، بدون تغییر برای مصرف‌کننده‌های دیگر). */
   selectAll?: BalanceTableSelectAll;
+  /**
+   * طبق تصمیم صریح کاربر: وقتی یک صفحه‌ی Review (مرور حسابها/مرور تعدادی-مبلغی) یک نمونه‌ی واحد از
+   * این کامپوننت را برای چند تب زنجیره‌ای مختلف به‌کار می‌برد (تا سوییچ بین تب‌ها remount کامل نشود و
+   * موقعیت اسکرول/فوکوس از دست نرود)، فیلتر/مرتب‌سازیِ محلی این کامپوننت (که فقط با نام ستون هدر
+   * کلید می‌خورد) نباید بین تب‌هایی که ستون هم‌نامِ معنای متفاوتی دارند نشت کند — مثلاً فیلترِ «عنوان
+   * شامل...» روی تب «کالا» (نام کالا) نباید وقتی کاربر به تب «انبار» سوییچ می‌کند هم‌چنان روی «عنوان»
+   * (نام انبار) اعمال بماند و آن را به‌اشتباه خالی نشان دهد. با تغییر stateKey (مثلاً شماره‌ی تب جاری)،
+   * فیلتر/مرتب‌سازی محلی خودکار پاک می‌شود؛ اگر stateKey ثابت بماند (رندر مجدد همان تب)، دست‌نخورده
+   * می‌ماند.
+   */
+  stateKey?: string | number;
+  /** فقط وقتی stateKey عوض شود مصرف می‌شوند — برای تب‌هایی که فیلتر/مرتب‌سازی واقعی‌شان بیرون از این
+   * کامپوننت (سمت فراخوان‌کننده، مثل detailQuery[tab] در AccountsReview) نگه‌داری می‌شود، تا برگشتن
+   * به آن تب، state محلی (که فقط برای نمایش آیکن فیلتر/جهت مرتب‌سازی است) را با مقدار واقعی هم‌گام
+   * کند به‌جای پاک کردن؛ اگر ندهید، با تغییر stateKey خالی می‌شود (تب‌های فیلتر-محلی مثل تب‌های
+   * انبار/کالای مرور تعدادی-مبلغی و تب‌های مانده‌ی مرور حسابها). */
+  restoreFilters?: Record<string, ActiveFilter>;
+  restoreSort?: { header: string; dir: "asc" | "desc" } | null;
+  /** طبق تصمیم صریح کاربر: برای تب‌های فیلتر-محلی (بدون serverPaging)، فراخوان‌کننده باید فیلتر/
+   * مرتب‌سازیِ هر تب را در حافظه‌ی خودش (کلیدشده با شماره‌ی تب) نگه دارد تا با برگشتن به آن تب،
+   * از طریق restoreFilters/restoreSort برگردانده شود — وگرنه با هر سوییچ تب (که stateKey را عوض
+   * می‌کند تا نشتِ فیلتر بین تب‌ها جلوگیری شود، طبق stateKey بالا) فیلتر/مرتب‌سازیِ همان تب هم پاک
+   * می‌شد. این callbackها مستقل از serverPaging.onFiltersChange/onSortChange هستند (که فقط برای
+   * تب‌های سرور-صفحه‌بندی‌شده به‌کار می‌روند) تا تب‌های کاملاً کلاینتی هم بتوانند وضعیتشان را حفظ کنند. */
+  onFiltersChange?: (filters: Record<string, ActiveFilter>) => void;
+  onSortChange?: (sort: { header: string; dir: "asc" | "desc" } | null) => void;
 }) {
   const [sort, setSort] = useState<{ header: string; dir: "asc" | "desc" } | null>(null);
   const [filters, setFilters] = useState<Record<string, ActiveFilter>>({});
@@ -113,12 +151,60 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
   const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
   const filterBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
+  // طبق تصمیم صریح کاربر (با دو تصویر مرجع: WareHouseReview.png و lessrowsreview.png): ردیف «جمع»
+  // باید (۱) دقیقاً زیر هر ستون بیاید (نه یک لیست افقی برچسب:مقدار)، و هم‌زمان (۲) همیشه بالای
+  // صفحه‌بندی/تعداد-در-صفحه بماند — چه گرید اسکرول عمودی داشته باشد چه فقط یک ردیف — یعنی هرگز داخل
+  // ناحیه‌ی اسکرول‌شونده نرود و هرگز به وسط صفحه (بلافاصله زیر آخرین ردیف واقعی) نچسبد. یک <tfoot> در
+  // خودِ جدول (طبق یک تصمیم قدیمی‌تر که در styles.css مستند است) این دومی را نقض می‌کند: وقتی ردیف‌ها کم
+  // باشند، tfoot بلافاصله بعد از آخرین ردیف می‌آید، نه ته کادر گرید. راه‌حل: یک جدول کاملاً جدا و مستقل،
+  // بیرون از ناحیه‌ی اسکرول‌شونده (پس همیشه در جریان عادی فلکس، ته کادر می‌ماند)، با ستون‌هایی که
+  // عرضشان از روی عرض واقعیِ ستون‌های <thead> جدول اصلی اندازه‌گیری و کپی می‌شود (چون عرض ستون‌ها
+  // خودکار/بر مبنای محتواست، نه ثابت) تا زیر هر ستون دقیقاً هم‌ترازش بماند؛ و چون این یک جدول واقعاً
+  // مجزاست، اسکرول افقی‌اش با اسکرول افقی ناحیه‌ی اصلی هم‌گام می‌شود (در ادامه، رویداد scroll).
+  const theadRowRef = useRef<HTMLTableRowElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement | null>(null);
+  const footerScrollRef = useRef<HTMLDivElement>(null);
+  const [colWidths, setColWidths] = useState<number[]>([]);
+
+  useLayoutEffect(() => {
+    function measure() {
+      const ths = theadRowRef.current?.querySelectorAll("th");
+      if (!ths || ths.length === 0) return;
+      setColWidths(Array.from(ths).map((th) => th.getBoundingClientRect().width));
+    }
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [columns, sort, filters, rows]);
+
+  function syncFooterScroll() {
+    if (scrollAreaRef.current && footerScrollRef.current) {
+      footerScrollRef.current.scrollLeft = scrollAreaRef.current.scrollLeft;
+    }
+  }
+
+  // طبق تصمیم صریح کاربر: با تغییر stateKey (سوییچ به تب دیگر) فیلتر/مرتب‌سازی محلی این نمونه‌ی
+  // مشترک باید هم‌گام شود، نه فقط برای رندر جاری — یک افکت معمولی (نه جهش state حین رندر) عمداً
+  // انتخاب شده چون جهش یک ref حین رندر با فراخوانی مضاعف تابع رندر در React StrictMode (که فقط تابع
+  // رندر را دوباره صدا می‌زند، نه اثرات را) ناسازگار است: فراخوانی دومِ StrictMode مقدار state هنوز
+  // قدیمیِ closure را می‌بیند ولی prevStateKey.current را از قبل جهش‌یافته، پس reset را نادیده
+  // می‌گیرد و مقدار قدیمی دوباره ظاهر می‌شود. افکت این مشکل را ندارد چون هر بار کامل (نه نصفه‌کاره)
+  // با آخرین state واقعی اجرا می‌شود.
+  useEffect(() => {
+    setFilters(restoreFilters ?? {});
+    setSort(restoreSort ?? null);
+    setOpenFilterFor(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stateKey]);
+
   function toggleSort(col: BalanceTableColumn<T>) {
     if (!col.sortValue) return;
     setSort((prev) => {
       const next: { header: string; dir: "asc" | "desc" } | null =
         !prev || prev.header !== col.header ? { header: col.header, dir: "asc" } : prev.dir === "asc" ? { header: col.header, dir: "desc" } : null;
       serverPaging?.onSortChange?.(next);
+      onSortChange?.(next);
       return next;
     });
   }
@@ -166,12 +252,27 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
   const pageStart = serverPaging ? (serverPaging.page - 1) * pageSize : 0;
   const totalPages = serverPaging ? Math.max(1, Math.ceil(serverPaging.total / serverPaging.pageSize)) : 1;
 
+  // جمع ستون‌های decimal روی ردیف‌های «در دسترس/نمایش‌داده‌شده» فعلی (sortedRows) — در حالت سرور همان
+  // صفحه‌ی جاری است، در حالت کلاینتی کل نتیجه‌ی فیلترشده (این کامپوننت خودش صفحه‌بندی کلاینتی ندارد)؛
+  // دقیقاً هم‌منطق DataTable.
+  const columnTotals: (number | null)[] = columns.map((c) => {
+    const accessor = c.totalValue || c.filterValue;
+    if (!c.decimal || !accessor) return null;
+    let sum = 0;
+    for (const row of sortedRows) {
+      const n = Number(accessor(row));
+      if (!Number.isNaN(n)) sum += n;
+    }
+    return Math.round(sum * 1e6) / 1e6;
+  });
+  const hasColumnTotals = columnTotals.some((t) => t !== null);
+
   const table = showLoadingState ? (
     <div className="empty-state">در حال بارگذاری...</div>
   ) : (
     <table>
       <thead>
-        <tr>
+        <tr ref={theadRowRef}>
           <th style={{ width: 34 }}>
             {selectAll && (
               <input
@@ -244,6 +345,30 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
     </table>
   );
 
+  function renderTotalsBar(standalone: boolean) {
+    if (!hasColumnTotals || sortedRows.length === 0 || showLoadingState) return null;
+    const totalWidth = colWidths.length ? colWidths.reduce((s, w) => s + w, 0) : undefined;
+    return (
+      <div className={`grid-footer-totals${standalone ? " grid-footer-totals-standalone" : ""}`}>
+        <div className="grid-footer-totals-scroll" ref={footerScrollRef}>
+          <table style={{ tableLayout: "fixed", width: totalWidth }}>
+            <tbody>
+              <tr>
+                <td style={{ width: colWidths[0] }} />
+                <td style={{ width: colWidths[1] }}>جمع</td>
+                {columns.map((c, i) => (
+                  <td key={c.header} style={{ width: colWidths[i + 2] }}>
+                    {columnTotals[i] !== null ? formatAmountFa(columnTotals[i]!) : ""}
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
   const filterPopover = openFilterFor &&
     columns.map(
       (c) =>
@@ -259,6 +384,7 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
               setFilters((prev) => {
                 const next = { ...prev, [c.header]: f };
                 serverPaging?.onFiltersChange?.(next);
+                onFiltersChange?.(next);
                 return next;
               })
             }
@@ -267,6 +393,7 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
                 const next = { ...prev };
                 delete next[c.header];
                 serverPaging?.onFiltersChange?.(next);
+                onFiltersChange?.(next);
                 return next;
               })
             }
@@ -285,8 +412,13 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
   const exportColumns: ExportColumn<T>[] = [{ header: "ردیف", render: (row: T) => rowIndexById.get(row.id) ?? "" }, ...columns];
   const location = useLocation();
   const gridName = deriveGridName(location.pathname);
+  // طبق تصمیم صریح کاربر: این آیکن‌ها به‌جای یک ردیف مستقل بالای گرید، در خودِ نوار عنوان تب‌ها
+  // (ChainedTabsBar) نمایش داده شوند تا یک ردیف ارتفاع صرفه‌جویی شود — دقیقاً هم‌الگوی مکانیزم موجود
+  // «.header-toolbar» در DataTable.tsx، اما مقصدش «.ar-tabs-actions» است؛ نگاه کنید به
+  // lib/useAutoPortalTarget.ts. اگر چنین نواری پیدا نشود، به همان رفتار قبلی (ردیف مستقل بالای گرید) برمی‌گردد.
+  const { ref: rootRef, target: tabsActionsTarget } = useAutoPortalTarget<HTMLDivElement>(".ar-tabs-actions");
   const exportToolbar = (
-    <div className="bulk-toolbar">
+    <div className={`bulk-toolbar ${tabsActionsTarget ? "in-tabs" : ""}`}>
       <span className="bulk-toolbar-info">{" "}</span>
       <div className="bulk-toolbar-actions">
         <button type="button" className="toolbar-icon-btn" onClick={() => exportGridToCsv(exportColumns, exportRows, gridName)} title="خروجی اکسل">
@@ -298,25 +430,28 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
       </div>
     </div>
   );
+  const exportToolbarNode = tabsActionsTarget ? createPortal(exportToolbar, tabsActionsTarget) : exportToolbar;
 
   if (!serverPaging) {
     return (
-      <>
-        {exportToolbar}
-        <div className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
+      <div ref={rootRef} className="grid-wrap-standalone">
+        {exportToolbarNode}
+        <div ref={scrollAreaRef} className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }} onScroll={syncFooterScroll}>
           {table}
         </div>
+        {renderTotalsBar(true)}
         {filterPopover}
-      </>
+      </div>
     );
   }
 
   return (
-    <div className="grid-wrap">
-      {exportToolbar}
-      <div className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
+    <div ref={rootRef} className="grid-wrap">
+      {exportToolbarNode}
+      <div ref={scrollAreaRef} className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }} onScroll={syncFooterScroll}>
         {table}
       </div>
+      {renderTotalsBar(false)}
       <div className="grid-footer">
         <span className="grid-footer-info">
           {serverPaging.loading

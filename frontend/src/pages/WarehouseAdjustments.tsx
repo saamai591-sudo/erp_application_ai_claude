@@ -180,9 +180,9 @@ function WarehouseAdjustmentList({ basePath }: { basePath: string }) {
           { header: "انبار", render: (r) => r.warehouseTitle, filterType: "string", filterValue: (r) => r.warehouseTitle },
           { header: "شرح", render: (r) => r.description || "—", filterType: "string", filterValue: (r) => r.description || "" },
           { header: "تعداد ردیف", render: (r) => toFaDigits(String(r.lineCount)) },
-          { header: "جمع مقدار", render: (r) => formatAmountFa(r.totalQuantity) },
+          { header: "جمع مقدار", render: (r) => formatAmountFa(r.totalQuantity), filterType: "number", filterValue: (r) => r.totalQuantity, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
-          ...(canViewAccounting ? [{ header: "جمع مبلغ", render: (r: ListRow) => (r.totalAmount != null ? formatAmountFa(r.totalAmount) : "—") }] : []),
+          ...(canViewAccounting ? [{ header: "جمع مبلغ", render: (r: ListRow) => (r.totalAmount != null ? formatAmountFa(r.totalAmount) : "—"), filterType: "number" as const, filterValue: (r: ListRow) => r.totalAmount ?? undefined, decimal: true }] : []),
         ]}
         rows={items}
         edit={{ path: (r) => `${basePath}/${r.id}/edit` }}

@@ -8,6 +8,7 @@ import { issueJournalEntry, IssueLineInput } from "../services/journalEntryServi
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { OUTBOUND_DOC_TYPES } from "../services/warehouseMovementService";
 import { resolveAccountDetailFields } from "../utils/detailValues";
+import { sendBulkError } from "../lib/bulkError";
 
 const FORM = findFormPrefix("accounting-issue-journal-entries");
 
@@ -42,16 +43,59 @@ function enumKeysMatching(map: Record<string, string>, f: FilterSpec | undefined
   return f.operator === "notContains" ? Object.keys(map).filter((k) => !keys.includes(k)) : keys;
 }
 
+const CANDIDATE_INCLUDE = {
+  line: {
+    include: {
+      document: { select: { date: true, documentType: true, number: true } },
+      goodsItem: { select: { fullCode: true, title: true, accountingGroup: { select: { title: true } } } },
+    },
+  },
+} as const;
+
+function mapCandidateRow(r: any) {
+  return {
+    id: r.id,
+    documentDate: r.line.document.date,
+    accountingDate: r.effectiveDate,
+    documentType: r.line.document.documentType,
+    documentTypeTitle: DOC_TYPE_FA[r.line.document.documentType] ?? r.line.document.documentType,
+    documentNumber: r.line.document.number,
+    itemCode: r.line.goodsItem.fullCode,
+    itemTitle: r.line.goodsItem.title,
+    accountingGroupTitle: r.line.goodsItem.accountingGroup.title,
+    priceType: r.priceType,
+    priceTypeTitle: PRICE_TYPE_FA[r.priceType] ?? r.priceType,
+    amount: Number(r.difference),
+  };
+}
+
 interface CandidatesQueryInput {
   toDate?: string;
   accountingGroupIds?: string;
   filters?: string;
 }
 
-// منطق مشترک ساخت where بین GET /candidates (صفحه‌بندی‌شده) و POST /issue (بدون صفحه‌بندی — همه‌ی
-// ردیف‌های مطابق همین فیلترها یک‌جا صادر می‌شوند، طبق تصمیم صریح کاربر: انتخاب ردیف به‌ردیف حذف شد،
-// «صدور سند حسابداری» یعنی همه‌ی ردیف‌های همین گرید/فیلتر). بازه‌ی لود همیشه از اول سال مالیِ تاریخِ
-// انتخاب‌شده تا خودِ آن تاریخ است؛ فیلد «از تاریخ» وجود ندارد.
+// ستون‌های فیلترپذیر مشترک بین پیش‌نمایش (candidates) و فهرست ردیف‌های ذخیره‌شده‌ی یک فرم (lines) — یک‌جا
+// parse می‌شوند تا هر دو اندپوینت دقیقاً همان معنای فیلتر ستونی را داشته باشند.
+function parseColumnFilters(filtersRaw?: string) {
+  const colFilters = parseFilters(filtersRaw);
+  return {
+    documentDate: colFilters.documentDate ? dateWhere(colFilters.documentDate) : undefined,
+    documentNumber: colFilters.documentNumber ? numberWhere(colFilters.documentNumber) : undefined,
+    documentTypeKeys: enumKeysMatching(DOC_TYPE_FA, colFilters.documentTypeTitle),
+    itemCode: colFilters.itemCode ? stringWhere(colFilters.itemCode) : undefined,
+    itemTitle: colFilters.itemTitle ? stringWhere(colFilters.itemTitle) : undefined,
+    accountingGroupTitle: colFilters.accountingGroupTitle ? stringWhere(colFilters.accountingGroupTitle) : undefined,
+    accountingDate: colFilters.accountingDate ? dateWhere(colFilters.accountingDate) : undefined,
+    amount: colFilters.amount ? numberWhere(colFilters.amount) : undefined,
+    priceTypeKeys: enumKeysMatching(PRICE_TYPE_FA, colFilters.priceTypeTitle),
+  };
+}
+
+// منطق مشترک ساخت where بین GET /candidates (پیش‌نمایش فرم تازه) و ذخیره/به‌روزرسانی یک پیش‌نویس (POST/PUT
+// — بازه‌ی لود همیشه از اول سال مالیِ تاریخِ انتخاب‌شده تا خودِ آن تاریخ است؛ فیلد «از تاریخ» وجود ندارد.
+// warehouseJournalEntryIssuanceId=null یعنی «هنوز داخل هیچ فرم صدور سندی ذخیره نشده» — طبق تصمیم صریح
+// کاربر (۱۴۰۵/۰۶/۱۶) هر ردیف فقط می‌تواند همزمان متعلق به یک فرم باشد.
 async function resolveCandidatesWhere(q: CandidatesQueryInput): Promise<{ error: string } | { where: any; fiscalPeriod: { id: number; fromDate: Date }; toDateDay: Date; toDate: Date }> {
   if (!q.toDate) return { error: "تاریخ الزامی است" };
   const toDateDay = new Date(`${q.toDate}T00:00:00.000Z`);
@@ -63,7 +107,7 @@ async function resolveCandidatesWhere(q: CandidatesQueryInput): Promise<{ error:
   const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: toDateDay }, toDate: { gte: toDateDay } } });
   if (!fiscalPeriod) return { error: "این تاریخ در هیچ دوره مالی تعریف نشده است" };
 
-  const colFilters = parseFilters(q.filters);
+  const cf = parseColumnFilters(q.filters);
 
   const accountingGroupIds = (q.accountingGroupIds ?? "")
     .split(",")
@@ -79,43 +123,31 @@ async function resolveCandidatesWhere(q: CandidatesQueryInput): Promise<{ error:
     lineWhere.goodsItem = { accountingGroupId: { in: accountingGroupIds } };
   }
 
-  const docDateFilter = colFilters.documentDate ? dateWhere(colFilters.documentDate) : undefined;
-  if (docDateFilter) lineWhere.document.date = docDateFilter;
-
-  const docNumberFilter = colFilters.documentNumber ? numberWhere(colFilters.documentNumber) : undefined;
-  if (docNumberFilter) lineWhere.document.number = docNumberFilter;
-
-  const docTypeKeys = enumKeysMatching(DOC_TYPE_FA, colFilters.documentTypeTitle);
-  if (docTypeKeys) {
-    lineWhere.document.documentType = { in: docTypeKeys.filter((k) => !EXCLUDED_DOC_TYPES.includes(k as any)) as any };
+  if (cf.documentDate) lineWhere.document.date = cf.documentDate;
+  if (cf.documentNumber) lineWhere.document.number = cf.documentNumber;
+  if (cf.documentTypeKeys) {
+    lineWhere.document.documentType = { in: cf.documentTypeKeys.filter((k) => !EXCLUDED_DOC_TYPES.includes(k as any)) as any };
   }
-
-  const itemCodeFilter = colFilters.itemCode ? stringWhere(colFilters.itemCode) : undefined;
-  const itemTitleFilter = colFilters.itemTitle ? stringWhere(colFilters.itemTitle) : undefined;
-  if (itemCodeFilter || itemTitleFilter) {
+  if (cf.itemCode || cf.itemTitle || cf.accountingGroupTitle) {
     lineWhere.goodsItem = {
       ...(lineWhere.goodsItem ?? {}),
-      ...(itemCodeFilter ? { fullCode: itemCodeFilter } : {}),
-      ...(itemTitleFilter ? { title: itemTitleFilter } : {}),
+      ...(cf.itemCode ? { fullCode: cf.itemCode } : {}),
+      ...(cf.itemTitle ? { title: cf.itemTitle } : {}),
+      ...(cf.accountingGroupTitle ? { accountingGroup: { title: cf.accountingGroupTitle } } : {}),
     };
   }
 
   const where: any = {
     effectiveDate: { gt: fiscalPeriod.fromDate, lte: toDate },
-    journalEntryId: null,
+    warehouseJournalEntryIssuanceId: null,
     priceType: { notIn: EXCLUDED_PRICE_TYPES as any },
     line: lineWhere,
   };
 
-  const accountingDateFilter = colFilters.accountingDate ? dateWhere(colFilters.accountingDate) : undefined;
-  if (accountingDateFilter) where.effectiveDate = { ...where.effectiveDate, ...accountingDateFilter };
-
-  const amountFilter = colFilters.amount ? numberWhere(colFilters.amount) : undefined;
-  if (amountFilter) where.difference = amountFilter;
-
-  const priceTypeKeys = enumKeysMatching(PRICE_TYPE_FA, colFilters.priceTypeTitle);
-  if (priceTypeKeys) {
-    where.priceType = { in: priceTypeKeys.filter((k) => !EXCLUDED_PRICE_TYPES.includes(k as any)) as any };
+  if (cf.accountingDate) where.effectiveDate = { ...where.effectiveDate, ...cf.accountingDate };
+  if (cf.amount) where.difference = cf.amount;
+  if (cf.priceTypeKeys) {
+    where.priceType = { in: cf.priceTypeKeys.filter((k) => !EXCLUDED_PRICE_TYPES.includes(k as any)) as any };
   }
 
   return { where, fiscalPeriod, toDateDay, toDate };
@@ -135,62 +167,124 @@ router.get("/issue-warehouse-journal-entries/candidates", can(`${FORM}.view`), a
     prisma.documentItemAmount.count({ where }),
     prisma.documentItemAmount.findMany({
       where,
-      include: {
-        line: {
-          include: {
-            document: { select: { date: true, documentType: true, number: true } },
-            goodsItem: { select: { fullCode: true, title: true } },
-          },
-        },
-      },
+      include: CANDIDATE_INCLUDE,
       orderBy: [{ effectiveDate: "asc" }, { id: "asc" }],
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),
   ]);
 
-  const items = rows.map((r: any) => ({
-    id: r.id,
-    documentDate: r.line.document.date,
-    accountingDate: r.effectiveDate,
-    documentType: r.line.document.documentType,
-    documentTypeTitle: DOC_TYPE_FA[r.line.document.documentType] ?? r.line.document.documentType,
-    documentNumber: r.line.document.number,
-    itemCode: r.line.goodsItem.fullCode,
-    itemTitle: r.line.goodsItem.title,
-    priceType: r.priceType,
-    priceTypeTitle: PRICE_TYPE_FA[r.priceType] ?? r.priceType,
-    amount: Number(r.difference),
-  }));
-
-  res.json({ items, total });
+  res.json({ items: rows.map(mapCandidateRow), total });
 });
 
-// صدور واقعی سند حسابداری — طبق Documents/صدور سند حسابداری.md + تصمیم صریح کاربر (بدون انتخاب
-// ردیف‌به‌ردیف): یک سند واحد برای همه‌ی ردیف‌های مطابق همان فیلترهای «تا تاریخ»/گروه‌های حسابداری/فیلتر
-// ستونی که برای GET /candidates استفاده می‌شود صادر می‌شود (resolveCandidatesWhere مشترک است — یعنی این
-// اندپوینت هرگز به فهرست ids از سمت کلاینت متکی نیست، خودش دوباره همان کوئریِ کامل را می‌زند). هر ردیف
-// دقیقاً دو خط تولید می‌کند (بدهکار+بستانکار). حساب معین «موجودی کالا» بر مبنای (گروه حسابداری کالای
-// ردیف + گروه انبارِ انبار سند) از تنظیمات «حسابداری کالا و خدمت» خوانده می‌شود؛ حساب طرف مقابل
-// («بستانکار رسید انبار» برای ردیف‌های ورودی به انبار، «بدهکار حواله انبار» برای ردیف‌های خروجی) بر
-// مبنای همان گروه حسابداری + warehouseDocType برابر نوع سند ردیف. تفصیل۱/۲/۳ فقط وقتی روی هرکدام از این
-// دو معین ست می‌شود که آن معین، در یکی از سه اسلات خودش (detailType1/2/3Id)، به نوع تفصیلِ کدِ تفصیل سند
-// (InventoryDocument.detailCode — طرف حساب/مرکز هزینه/پروژه، بسته به نوع سند) وصل باشد.
-router.post("/issue-warehouse-journal-entries/issue", can(`${FORM}.issue`), async (req, res) => {
+// =========================================================================
+// ذخیره (پیش‌نویس) — طبق تصمیم صریح کاربر (۱۴۰۵/۰۶/۱۶): این فرم دیگر مستقیماً از فیلتر به صدور نمی‌رود؛
+// اول باید «ذخیره» شود (ردیف‌های مطابق فیلتر جاری با warehouseJournalEntryIssuanceId به این هدر قفل
+// می‌شوند)، فقط بعد از آن دکمه‌ی «صدور سند حسابداری» فعال می‌شود. تا وقتی صادر نشده، ذخیره‌ی دوباره (PUT)
+// مجاز است و قفل قبلی را آزاد و از نو محاسبه می‌کند.
+// =========================================================================
+
+router.post("/issue-warehouse-journal-entries", can(`${FORM}.create`), async (req, res) => {
+  const resolved = await resolveCandidatesWhere(req.body as CandidatesQueryInput);
+  if ("error" in resolved) return res.status(400).json({ error: resolved.error });
+  const { where, fiscalPeriod, toDateDay } = resolved;
+
+  const matched = await prisma.documentItemAmount.findMany({ where, select: { id: true } });
+  if (matched.length === 0) return res.status(400).json({ error: "موردی برای ذخیره یافت نشد" });
+
+  try {
+    const issuance = await prisma.$transaction(async (tx: any) => {
+      const lastNumber = await tx.warehouseJournalEntryIssuance.findFirst({
+        where: { fiscalPeriodId: fiscalPeriod.id },
+        orderBy: { number: "desc" },
+      });
+      const created = await tx.warehouseJournalEntryIssuance.create({
+        data: {
+          fiscalPeriodId: fiscalPeriod.id,
+          number: lastNumber ? lastNumber.number + 1 : 1,
+          toDate: toDateDay,
+          accountingGroupIds: (req.body as CandidatesQueryInput).accountingGroupIds || null,
+          rowCount: matched.length,
+          status: "DRAFT",
+        },
+      });
+      await tx.documentItemAmount.updateMany({
+        where: { id: { in: matched.map((r: { id: number }) => r.id) } },
+        data: { warehouseJournalEntryIssuanceId: created.id },
+      });
+      return created;
+    });
+
+    res.json({ id: issuance.id });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در ذخیره" });
+  }
+});
+
+router.put("/issue-warehouse-journal-entries/:id(\\d+)", can(`${FORM}.edit`), async (req, res) => {
+  const id = Number(req.params.id);
+  const existing = await prisma.warehouseJournalEntryIssuance.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ error: "یافت نشد" });
+  if (existing.status !== "DRAFT") return res.status(400).json({ error: "این مورد قبلا صادر شده و قابل ویرایش نیست" });
+
   const resolved = await resolveCandidatesWhere(req.body as CandidatesQueryInput);
   if ("error" in resolved) return res.status(400).json({ error: resolved.error });
   const { where, toDateDay } = resolved;
+
+  try {
+    await prisma.$transaction(async (tx: any) => {
+      // ابتدا قفل فعلی همین پیش‌نویس آزاد می‌شود تا اگر فیلتر جدید همان ردیف‌های قبلی را هم دربر بگیرد،
+      // به‌اشتباه به‌عنوان «متعلق به فرم دیگر» مستثنی نشوند.
+      await tx.documentItemAmount.updateMany({ where: { warehouseJournalEntryIssuanceId: id }, data: { warehouseJournalEntryIssuanceId: null } });
+
+      const matched = await tx.documentItemAmount.findMany({ where, select: { id: true } });
+      if (matched.length === 0) throw new Error("موردی برای ذخیره یافت نشد");
+
+      await tx.documentItemAmount.updateMany({
+        where: { id: { in: matched.map((r: { id: number }) => r.id) } },
+        data: { warehouseJournalEntryIssuanceId: id },
+      });
+      await tx.warehouseJournalEntryIssuance.update({
+        where: { id },
+        data: {
+          toDate: toDateDay,
+          accountingGroupIds: (req.body as CandidatesQueryInput).accountingGroupIds || null,
+          rowCount: matched.length,
+        },
+      });
+    });
+
+    res.json({ id });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در ذخیره" });
+  }
+});
+
+// صدور واقعی سند حسابداری — دقیقاً روی همان ردیف‌هایی عمل می‌کند که با «ذخیره» به این هدر قفل شده‌اند
+// (warehouseJournalEntryIssuanceId=id)، نه یک کوئری تازه بر مبنای فیلتر — طبق تصمیم صریح کاربر
+// (۱۴۰۵/۰۶/۱۶: «برای اینکه سیستم بتواند تشخیص دهد این رکوردها متعلق به این فرم هستند»). هر ردیف دقیقاً دو
+// خط تولید می‌کند (بدهکار+بستانکار). حساب معین «موجودی کالا» بر مبنای (گروه حسابداری کالای ردیف + گروه
+// انبارِ انبار سند) از تنظیمات «حسابداری کالا و خدمت» خوانده می‌شود؛ حساب طرف مقابل («بستانکار رسید انبار»
+// برای ردیف‌های ورودی به انبار، «بدهکار حواله انبار» برای ردیف‌های خروجی) بر مبنای همان گروه حسابداری +
+// warehouseDocType برابر نوع سند ردیف. تفصیل۱/۲/۳ فقط وقتی روی هرکدام از این دو معین ست می‌شود که آن معین،
+// در یکی از سه اسلات خودش (detailType1/2/3Id)، به نوع تفصیلِ کدِ تفصیل سند (InventoryDocument.detailCode —
+// طرف حساب/مرکز هزینه/پروژه، بسته به نوع سند) وصل باشد.
+router.post("/issue-warehouse-journal-entries/:id(\\d+)/issue", can(`${FORM}.issue`), async (req, res) => {
+  const id = Number(req.params.id);
+  const issuance = await prisma.warehouseJournalEntryIssuance.findUnique({ where: { id } });
+  if (!issuance) return res.status(404).json({ error: "یافت نشد" });
+  if (issuance.status !== "DRAFT") return res.status(400).json({ error: "این مورد قبلا صادر شده است" });
 
   const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
   if (!baseCurrency) return res.status(400).json({ error: "ارز پایه تعریف نشده است" });
 
   const validRows = await prisma.documentItemAmount.findMany({
-    where,
+    where: { warehouseJournalEntryIssuanceId: id },
     include: {
       line: {
         include: {
           document: true,
-          goodsItem: { select: { id: true, title: true, accountingGroupId: true } },
+          goodsItem: { select: { id: true, fullCode: true, title: true, accountingGroupId: true } },
         },
       },
     },
@@ -199,7 +293,9 @@ router.post("/issue-warehouse-journal-entries/issue", can(`${FORM}.issue`), asyn
 
   if (validRows.length === 0) return res.status(400).json({ error: "موردی برای صدور یافت نشد" });
 
-  const errors: string[] = [];
+  // طبق فرمت استاندارد خطای عملیات دسته‌ای (lib/bulkError.ts): هر شکست، یک ردیف ساختاریافته با ستون‌های
+  // قابل‌نمایش/دانلود (نه یک رشته‌ی از‌قبل‌فرمت‌شده) — تا فرانت‌اند بتواند آن‌ها را در قالب اکسل دانلودپذیر نشان دهد
+  const errors: { itemCode: string; itemTitle: string; documentType: string; documentNumber: number; reason: string }[] = [];
   const warehouseIds = Array.from(new Set(validRows.map((r) => r.line.document.warehouseId).filter((x): x is number => !!x)));
   const warehouses = await prisma.warehouse.findMany({ where: { id: { in: warehouseIds } } });
   const warehouseGroupById = new Map(warehouses.map((w) => [w.id, w.warehouseGroupId]));
@@ -214,8 +310,6 @@ router.post("/issue-warehouse-journal-entries/issue", can(`${FORM}.issue`), asyn
   const usages = await prisma.detailCodeUsage.findMany({ where: { code: { in: detailCodes } } });
   const detailTypeByCode = new Map(usages.map((u) => [u.code, u.detailTypeId]));
 
-  // این تابع فقط داخل همین درخواست معنا دارد؛ چون errors بالا پیش از این نقطه، در صورت غیرخالی بودن،
-  // قبلاً پاسخ 400 برگردانده — از اینجا به بعد errors دوباره از صفر برای خطاهای «تنظیمات ناقص» پر می‌شود.
   function findSetting(accountingGroupId: number, accountType: string, match: (s: (typeof settings)[number]) => boolean) {
     return settings.find((s) => s.accountingGroupId === accountingGroupId && s.accountType === accountType && match(s));
   }
@@ -237,14 +331,26 @@ router.post("/issue-warehouse-journal-entries/issue", can(`${FORM}.issue`), asyn
       (s) => s.warehouseDocType === doc.documentType
     );
 
+    const docTypeTitle = DOC_TYPE_FA[doc.documentType] ?? doc.documentType;
     if (!inventorySetting) {
-      errors.push(`برای کالای «${goodsItem.title}»، حساب «موجودی کالا» در حسابداری کالا و خدمت تعریف نشده است`);
+      errors.push({
+        itemCode: goodsItem.fullCode,
+        itemTitle: goodsItem.title,
+        documentType: docTypeTitle,
+        documentNumber: doc.number,
+        reason: "حساب «موجودی کالا» در حسابداری کالا و خدمت تعریف نشده است",
+      });
       continue;
     }
     if (!contraSetting) {
       const natureTitle = direction === "IN" ? "بستانکار رسید انبار" : "بدهکار حواله انبار";
-      const docTypeTitle = DOC_TYPE_FA[doc.documentType] ?? doc.documentType;
-      errors.push(`برای کالای «${goodsItem.title}» و نوع سند «${docTypeTitle}»، حساب «${natureTitle}» در حسابداری کالا و خدمت تعریف نشده است`);
+      errors.push({
+        itemCode: goodsItem.fullCode,
+        itemTitle: goodsItem.title,
+        documentType: docTypeTitle,
+        documentNumber: doc.number,
+        reason: `حساب «${natureTitle}» در حسابداری کالا و خدمت تعریف نشده است`,
+      });
       continue;
     }
 
@@ -265,51 +371,42 @@ router.post("/issue-warehouse-journal-entries/issue", can(`${FORM}.issue`), asyn
     }
   }
 
-  if (errors.length > 0) return res.status(400).json({ error: errors.join("\n") });
+  if (errors.length > 0) {
+    return sendBulkError(res, 400, `${errors.length} ردیف قادر به صدور نبودند؛ برای مشاهده‌ی علت هر مورد، جزئیات خطا را دانلود کنید.`, errors);
+  }
 
   try {
     const docType = await prisma.documentType.findFirst({ where: { systemKey: "WAREHOUSE_DOCUMENTS" } });
     if (!docType) return res.status(400).json({ error: "نوع سند «اسناد انبار» در سیستم تعریف نشده است" });
 
     const entry = await issueJournalEntry({
-      date: toDateDay,
+      date: issuance.toDate,
       documentTypeId: docType.id,
-      description: `سند حسابداری اسناد انبار تا تاریخ ${formatJalaliDateForMessage(toDateDay)}`,
+      description: `سند حسابداری اسناد انبار تا تاریخ ${formatJalaliDateForMessage(issuance.toDate)}`,
       issuingSystem: "WAREHOUSE",
       isManual: false,
       lines,
       sources: [{ label: "صدور سند حسابداری اسناد انبار", path: "/warehouse-accounting/issue-journal-entries" }],
     });
 
-    await prisma.documentItemAmount.updateMany({
-      where: { id: { in: validRows.map((r) => r.id) } },
-      data: { journalEntryId: entry.id },
-    });
-
-    // طبق تصمیم صریح کاربر: این فرم دیگر صرفاً یک فرم واسط نیست — هر بار صدور موفق، یک ردیف هدر اینجا
-    // ذخیره می‌شود تا بعداً بتوان همان سند را از فهرست همین فرم مشاهده/حذف کرد.
-    const lastNumber = await prisma.warehouseJournalEntryIssuance.findFirst({
-      where: { fiscalPeriodId: resolved.fiscalPeriod.id },
-      orderBy: { number: "desc" },
-    });
-    const issuance = await prisma.warehouseJournalEntryIssuance.create({
-      data: {
-        fiscalPeriodId: resolved.fiscalPeriod.id,
-        number: lastNumber ? lastNumber.number + 1 : 1,
-        toDate: toDateDay,
-        accountingGroupIds: (req.body as CandidatesQueryInput).accountingGroupIds || null,
-        rowCount: validRows.length,
-        journalEntryId: entry.id,
-      },
-    });
+    await prisma.$transaction([
+      prisma.documentItemAmount.updateMany({
+        where: { id: { in: validRows.map((r) => r.id) } },
+        data: { journalEntryId: entry.id },
+      }),
+      prisma.warehouseJournalEntryIssuance.update({
+        where: { id },
+        data: { journalEntryId: entry.id, status: "ISSUED" },
+      }),
+    ]);
 
     res.json({
-      id: issuance.id,
-      number: issuance.number,
+      id,
       journalEntryId: entry.id,
       referenceNumber: entry.referenceNumber,
       rowCount: validRows.length,
       lineCount: lines.length,
+      message: entry.message,
     });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در صدور سند" });
@@ -317,8 +414,8 @@ router.post("/issue-warehouse-journal-entries/issue", can(`${FORM}.issue`), asyn
 });
 
 // =========================================================================
-// فهرست/مشاهده/حذف هدرهای صدورشده — طبق تصمیم صریح کاربر: این فرم دیگر صرفاً یک فرم واسط بی‌سابقه
-// نیست؛ هر صدور موفق یک ردیف هدر ذخیره می‌کند (بالا) که از همین‌جا قابل مشاهده/حذف سند است.
+// فهرست/مشاهده/ردیف‌ها/حذف — طبق تصمیم صریح کاربر: این فرم دیگر صرفاً یک فرم واسط بی‌سابقه نیست؛ هر
+// «ذخیره» یک ردیف هدر ثبت می‌کند که ردیف‌های قفل‌شده‌ی خودش را دارد و از همین‌جا قابل ویرایش/صدور/حذف است.
 // =========================================================================
 
 router.get("/issue-warehouse-journal-entries", can(`${FORM}.view`), async (_req, res) => {
@@ -331,6 +428,7 @@ router.get("/issue-warehouse-journal-entries", can(`${FORM}.view`), async (_req,
       id: i.id,
       number: i.number,
       toDate: i.toDate,
+      status: i.status,
       rowCount: i.rowCount,
       journalEntryId: i.journalEntryId,
       journalEntryReferenceNumber: i.journalEntry?.referenceNumber ?? null,
@@ -354,6 +452,7 @@ router.get("/issue-warehouse-journal-entries/:id(\\d+)", can(`${FORM}.view`), as
     id: i.id,
     number: i.number,
     toDate: i.toDate,
+    status: i.status,
     accountingGroupIds: i.accountingGroupIds,
     accountingGroupTitles: groups.map((g) => g.title),
     rowCount: i.rowCount,
@@ -365,7 +464,55 @@ router.get("/issue-warehouse-journal-entries/:id(\\d+)", can(`${FORM}.view`), as
   });
 });
 
-router.delete("/issue-warehouse-journal-entries/:id(\\d+)", can(`${FORM}.delete`), async (req, res) => {
+// ردیف‌های ذخیره‌شده‌ی همین هدر (چه پیش‌نویس چه صادرشده) — طبق تصمیم صریح کاربر: بازکردن فرم برای ویرایش
+// باید دقیقاً همان مواردی را نشان دهد که قبلاً لود/ذخیره شده‌اند، نه یک کوئری تازه‌ی candidates.
+router.get("/issue-warehouse-journal-entries/:id(\\d+)/lines", can(`${FORM}.view`), async (req, res) => {
+  const id = Number(req.params.id);
+  const { page: pageRaw, pageSize: pageSizeRaw, filters } = req.query as { page?: string; pageSize?: string; filters?: string };
+  const cf = parseColumnFilters(filters);
+
+  const lineWhere: any = {};
+  if (cf.documentDate || cf.documentNumber || cf.documentTypeKeys) {
+    lineWhere.document = {
+      ...(cf.documentDate ? { date: cf.documentDate } : {}),
+      ...(cf.documentNumber ? { number: cf.documentNumber } : {}),
+      ...(cf.documentTypeKeys ? { documentType: { in: cf.documentTypeKeys } } : {}),
+    };
+  }
+  if (cf.itemCode || cf.itemTitle || cf.accountingGroupTitle) {
+    lineWhere.goodsItem = {
+      ...(cf.itemCode ? { fullCode: cf.itemCode } : {}),
+      ...(cf.itemTitle ? { title: cf.itemTitle } : {}),
+      ...(cf.accountingGroupTitle ? { accountingGroup: { title: cf.accountingGroupTitle } } : {}),
+    };
+  }
+
+  const where: any = { warehouseJournalEntryIssuanceId: id };
+  if (Object.keys(lineWhere).length > 0) where.line = lineWhere;
+  if (cf.accountingDate) where.effectiveDate = cf.accountingDate;
+  if (cf.amount) where.difference = cf.amount;
+  if (cf.priceTypeKeys) where.priceType = { in: cf.priceTypeKeys };
+
+  const page = Math.max(1, parseInt(pageRaw as string, 10) || 1);
+  const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, parseInt(pageSizeRaw as string, 10) || 25));
+
+  const [total, rows] = await Promise.all([
+    prisma.documentItemAmount.count({ where }),
+    prisma.documentItemAmount.findMany({
+      where,
+      include: CANDIDATE_INCLUDE,
+      orderBy: [{ effectiveDate: "asc" }, { id: "asc" }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
+
+  res.json({ items: rows.map(mapCandidateRow), total });
+});
+
+// حذف فقط سند حسابداری صادرشده — ردیف‌های قفل‌شده و خودِ هدر باقی می‌مانند (برمی‌گردد به وضعیت پیش‌نویس)
+// تا کاربر بتواند دوباره ویرایش/صدور کند؛ دقیقاً هم‌الگوی «حذف سند حسابداری» در فاکتور خرید.
+router.delete("/issue-warehouse-journal-entries/:id(\\d+)/journal-entry", can(`${FORM}.revertJournalEntry`), async (req, res) => {
   const id = Number(req.params.id);
   const i = await prisma.warehouseJournalEntryIssuance.findUnique({ where: { id } });
   if (!i) return res.status(404).json({ error: "یافت نشد" });
@@ -374,16 +521,30 @@ router.delete("/issue-warehouse-journal-entries/:id(\\d+)", can(`${FORM}.delete`
   try {
     await prisma.$transaction([
       prisma.documentItemAmount.updateMany({
-        where: { journalEntryId: i.journalEntryId },
+        where: { warehouseJournalEntryIssuanceId: id },
         data: { journalEntryId: null },
       }),
-      prisma.warehouseJournalEntryIssuance.delete({ where: { id } }),
+      prisma.warehouseJournalEntryIssuance.update({ where: { id }, data: { journalEntryId: null, status: "DRAFT" } }),
       prisma.journalEntry.delete({ where: { id: i.journalEntryId } }),
     ]);
     res.status(204).send();
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در حذف سند" });
   }
+});
+
+// حذف کامل هدر — فقط تا وقتی هنوز صادر نشده (پیش‌نویس)؛ برای موارد صادرشده اول باید سند حسابداری حذف شود.
+router.delete("/issue-warehouse-journal-entries/:id(\\d+)", can(`${FORM}.delete`), async (req, res) => {
+  const id = Number(req.params.id);
+  const i = await prisma.warehouseJournalEntryIssuance.findUnique({ where: { id } });
+  if (!i) return res.status(404).json({ error: "یافت نشد" });
+  if (i.status !== "DRAFT") return res.status(400).json({ error: "این مورد سند حسابداری صادرشده دارد؛ ابتدا از داخل فرم، «حذف سند حسابداری» را بزنید" });
+
+  await prisma.$transaction([
+    prisma.documentItemAmount.updateMany({ where: { warehouseJournalEntryIssuanceId: id }, data: { warehouseJournalEntryIssuanceId: null } }),
+    prisma.warehouseJournalEntryIssuance.delete({ where: { id } }),
+  ]);
+  res.status(204).send();
 });
 
 export default router;

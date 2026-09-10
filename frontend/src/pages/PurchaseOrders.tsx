@@ -105,7 +105,7 @@ function PurchaseOrderList() {
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
           { header: "مبنا", render: (r) => BASIS_FA[r.basis], filterType: "string", filterValue: (r) => BASIS_FA[r.basis] },
           { header: "تامین کننده", render: (r) => r.supplierTitle, filterType: "string", filterValue: (r) => r.supplierTitle },
-          { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount) },
+          { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}

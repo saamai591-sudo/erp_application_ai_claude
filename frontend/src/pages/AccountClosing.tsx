@@ -73,10 +73,10 @@ const lineColumns = [
   { header: "تفصیل ۱", render: (r: LineRow) => r.detail1Title || "—", filterType: "string" as const, filterValue: (r: LineRow) => r.detail1Title || "" },
   { header: "تفصیل ۲", render: (r: LineRow) => r.detail2Title || "—", filterType: "string" as const, filterValue: (r: LineRow) => r.detail2Title || "" },
   { header: "تفصیل ۳", render: (r: LineRow) => r.detail3Title || "—", filterType: "string" as const, filterValue: (r: LineRow) => r.detail3Title || "" },
-  { header: "بدهکار", render: (r: LineRow) => (r.debit ? formatAmountFa(r.debit) : "—"), filterType: "number" as const, filterValue: (r: LineRow) => r.debit },
-  { header: "بستانکار", render: (r: LineRow) => (r.credit ? formatAmountFa(r.credit) : "—"), filterType: "number" as const, filterValue: (r: LineRow) => r.credit },
-  { header: "بدهکار ارزی", render: (r: LineRow) => (r.debitFx ? formatAmountFa(r.debitFx) : "—"), filterType: "number" as const, filterValue: (r: LineRow) => r.debitFx },
-  { header: "بستانکار ارزی", render: (r: LineRow) => (r.creditFx ? formatAmountFa(r.creditFx) : "—"), filterType: "number" as const, filterValue: (r: LineRow) => r.creditFx },
+  { header: "بدهکار", render: (r: LineRow) => (r.debit ? formatAmountFa(r.debit) : "—"), filterType: "number" as const, filterValue: (r: LineRow) => r.debit, decimal: true },
+  { header: "بستانکار", render: (r: LineRow) => (r.credit ? formatAmountFa(r.credit) : "—"), filterType: "number" as const, filterValue: (r: LineRow) => r.credit, decimal: true },
+  { header: "بدهکار ارزی", render: (r: LineRow) => (r.debitFx ? formatAmountFa(r.debitFx) : "—"), filterType: "number" as const, filterValue: (r: LineRow) => r.debitFx, decimal: true },
+  { header: "بستانکار ارزی", render: (r: LineRow) => (r.creditFx ? formatAmountFa(r.creditFx) : "—"), filterType: "number" as const, filterValue: (r: LineRow) => r.creditFx, decimal: true },
 ];
 
 const STEPS: WizardStepDef[] = [
@@ -132,8 +132,8 @@ function ClosingList() {
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
           { header: "حساب مقصد", render: (r) => `${r.destinationAccount.code} - ${r.destinationAccount.title}`, filterType: "string", filterValue: (r) => r.destinationAccount.title },
           { header: "شرح", render: (r) => r.description, filterType: "string", filterValue: (r) => r.description },
-          { header: "جمع بدهکار", render: (r) => formatAmountFa(r.totalDebit), filterType: "number", filterValue: (r) => r.totalDebit },
-          { header: "جمع بستانکار", render: (r) => formatAmountFa(r.totalCredit), filterType: "number", filterValue: (r) => r.totalCredit },
+          { header: "جمع بدهکار", render: (r) => formatAmountFa(r.totalDebit), filterType: "number", filterValue: (r) => r.totalDebit, decimal: true },
+          { header: "جمع بستانکار", render: (r) => formatAmountFa(r.totalCredit), filterType: "number", filterValue: (r) => r.totalCredit, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{r.issued ? "سند صادر شده" : "صادر نشده"}</span>, filterType: "string", filterValue: (r) => (r.issued ? "سند صادر شده" : "صادر نشده") },
           { header: "شماره عطف سند", render: (r) => (r.journalEntryReferenceNumber ? toFaDigits(String(r.journalEntryReferenceNumber)) : "—"), filterType: "number", filterValue: (r) => r.journalEntryReferenceNumber ?? undefined },
         ]}

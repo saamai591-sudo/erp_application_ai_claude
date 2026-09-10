@@ -4,9 +4,14 @@ import { AuthedRequest } from "../middleware/auth";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
+import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmount, getLineAmounts, setLineAmount, enrichLinesWithAmount } from "../services/documentItemAmountService";
+import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
+import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
+import { formatJalaliDateForMessage } from "../utils/jalaliDate";
+import { toBaseCurrencyAmount, fromBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConversion";
 
 const FORM = findFormPrefix("service-purchase-invoices");
 
@@ -37,6 +42,20 @@ const FORM = findFormPrefix("service-purchase-invoices");
 //   -allocatedAmount اضافه می‌کند؛ اگر موتور قیمت‌گذاری بین این دو نقطه روی دوره‌ای قفل‌شده اجرا شده
 //   باشد، اجرای بعدی موتور خودش این تغییر را با ENGINE_CORRECTION اصلاح می‌کند (دقیقاً همان مکانیزمی که
 //   WareHouseAmountChanges.md برایش طراحی شده) — پس هیچ Guard اضافه‌ای لازم نیست.
+//
+// - نرخ ارز/ارزش‌افزوده/سند حسابداری: طبق تصمیم صریح کاربر، دقیقاً هم‌معماری PurchaseInvoice (فاکتور
+//   خرید کالا) پیاده شده‌اند — هدر «نوع خرید» + fxRate دستی (نه از جدول نرخ ارز)، هر ردیف baseAmount/
+//   baseDiscount/vatAmount (طبق utils/vatCalculation.ts، فقط برای بایگانی/محاسبه، در UI/پاسخ API
+//   نمی‌آیند). دو تفاوت ساختاری آگاهانه در «صدور سند حسابداری» (طبق تصمیم صریح کاربر):
+//     ۱) بدهکارِ ردیف «بدون مبنا»: چون هیچ کالای انباری درگیر نیست، از همان accountType «کنترل خرید»
+//        استفاده می‌شود ولی کلید آن گروه حسابداریِ خودِ ردیف خدمت است (نه یک کالا).
+//     ۲) بدهکارِ ردیف «رسید انبار»: چون یک ردیف فاکتور خدمات می‌تواند بین چند ردیف رسید (با کالا/گروه
+//        حسابداری/انبار متفاوت) تسهیم شود، بدهکار «موجودی کالا» به‌ازای هر تخصیص (allocation) جدا
+//        محاسبه می‌شود (کلید: گروه حسابداری کالای همان تخصیص + گروه انبار رسید آن)، نه یک ردیف در سطح
+//        کل خط فاکتور — این دقیقاً همان چیزی است که اثر INBOUND_RELATED_COST واقعاً انجام می‌دهد (افزودن
+//        به ارزش موجودیِ همان کالای مشخص). بستانکار «پرداختنی خرید» و بدهکار «ارزش‌افزوده خرید» در هر دو
+//        حالت با گروه حسابداریِ خودِ ردیف خدمت کلید می‌خورند (نه تفکیک به‌ازای تخصیص) چون این دو معین
+//        بدهی/مالیات مربوط به «چه خدمتی خریداری شده» است، نه «این هزینه روی کدام کالا نشست».
 // =========================================================================
 
 const router = Router();
@@ -48,6 +67,8 @@ interface AllocationInput {
 interface LineInput {
   serviceId: number;
   amount: number;
+  discount?: number;
+  vatAmount?: number;
   basis?: "NO_BASIS" | "WAREHOUSE_RECEIPT";
   sourceReceiptDocumentId?: number | null;
   allocationMethod?: "VALUE" | "QUANTITY" | null;
@@ -58,7 +79,9 @@ interface HeaderBody {
   date: string;
   vendorInvoiceNumber?: string | null;
   partyId: number;
+  purchaseTypeId: number;
   currencyId: number;
+  fxRate?: number;
   description?: string;
   lines: LineInput[];
 }
@@ -87,14 +110,28 @@ function round(value: number, decimalPlaces: number): number {
   return Math.round(value * factor) / factor;
 }
 
+/** نرخ تبدیل ارز فاکتور را از بدنه‌ی درخواست resolve می‌کند — دقیقاً هم‌الگوی
+ * purchaseInvoices.ts#resolveInvoiceFxRate: اگر ارز فاکتور همان ارز مبنا باشد همیشه ۱ برمی‌گردد، وگرنه
+ * نرخ باید توسط کاربر وارد شده باشد (اجباری، بزرگ‌تر از صفر)، نه از جدول نرخ ارز. */
+function resolveInvoiceFxRate(currencyId: number, baseCurrencyId: number, bodyFxRate: number | undefined): number {
+  if (currencyId === baseCurrencyId) return 1;
+  const fxRate = Number(bodyFxRate);
+  if (!(fxRate > 0)) throw new Error("نرخ ارز الزامی است");
+  return fxRate;
+}
+
 const ALLOCATION_METHODS = new Set(["VALUE", "QUANTITY"]);
 
-async function validateLines(lines: LineInput[]) {
+async function validateLines(lines: LineInput[], currency: ConversionCurrency, fxRate: number) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("فاکتور خرید خدمات باید حداقل یک ردیف داشته باشد");
 
   const cleaned: {
     serviceId: number;
     amount: number;
+    discount: number;
+    baseAmount: number;
+    baseDiscount: number;
+    vatAmount: number;
     basis: "NO_BASIS" | "WAREHOUSE_RECEIPT";
     sourceReceiptDocumentId: number | null;
     allocationMethod: "VALUE" | "QUANTITY" | null;
@@ -109,9 +146,35 @@ async function validateLines(lines: LineInput[]) {
     const amount = Number(l.amount) || 0;
     if (!(amount >= 0)) throw new Error(`مبلغ ردیف ${idx + 1} نامعتبر است`);
 
+    const discount = Number(l.discount) || 0;
+    if (!(discount >= 0)) throw new Error(`تخفیف ردیف ${idx + 1} نامعتبر است`);
+    if (discount > amount) throw new Error(`تخفیف ردیف ${idx + 1} نمی‌تواند از مبلغ ردیف بیشتر باشد`);
+
+    // مبلغ/تخفیف به ارز مبنا و ارزش‌افزوده — دقیقاً هم‌الگوی purchaseInvoices.ts#validateLines: فقط برای
+    // بایگانی/محاسبه نگه داشته می‌شوند (نه نمایش در UI)، و کاربر می‌تواند مقدار پیشنهادی مالیات را
+    // ویرایش کند (اگر کلاینت صریحاً مقداری فرستاده باشد، همان معتبر است، نه مقدار محاسبه‌شده).
+    const baseAmount = toBaseCurrencyAmount(amount, fxRate, currency);
+    const baseDiscount = toBaseCurrencyAmount(discount, fxRate, currency);
+    const vatRatePercent = resolveVatRatePercent(service);
+    const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent);
+    const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
+    if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
+
     const basis: "NO_BASIS" | "WAREHOUSE_RECEIPT" = l.basis === "WAREHOUSE_RECEIPT" ? "WAREHOUSE_RECEIPT" : "NO_BASIS";
     if (basis === "NO_BASIS") {
-      cleaned.push({ serviceId: l.serviceId, amount, basis, sourceReceiptDocumentId: null, allocationMethod: null, description: l.description || null, allocations: [] });
+      cleaned.push({
+        serviceId: l.serviceId,
+        amount,
+        discount,
+        baseAmount,
+        baseDiscount,
+        vatAmount,
+        basis,
+        sourceReceiptDocumentId: null,
+        allocationMethod: null,
+        description: l.description || null,
+        allocations: [],
+      });
       continue;
     }
 
@@ -138,6 +201,10 @@ async function validateLines(lines: LineInput[]) {
     cleaned.push({
       serviceId: l.serviceId,
       amount,
+      discount,
+      baseAmount,
+      baseDiscount,
+      vatAmount,
       basis,
       sourceReceiptDocumentId: l.sourceReceiptDocumentId,
       allocationMethod: l.allocationMethod || null,
@@ -188,7 +255,7 @@ router.get("/service-purchase-invoices/receipt-lines/:documentId", can(`${FORM}.
 
 router.get("/service-purchase-invoices", can(`${FORM}.view`), async (_req, res) => {
   const items = await prisma.servicePurchaseInvoice.findMany({
-    include: { party: true, currency: true, lines: true },
+    include: { party: true, purchaseType: true, currency: true, journalEntry: true, lines: true },
     orderBy: { id: "desc" },
   });
   res.json(
@@ -199,9 +266,12 @@ router.get("/service-purchase-invoices", can(`${FORM}.view`), async (_req, res) 
       vendorInvoiceNumber: d.vendorInvoiceNumber,
       partyId: d.partyId,
       partyTitle: partyTitle(d.party),
+      purchaseTypeId: d.purchaseTypeId,
+      purchaseTypeTitle: d.purchaseType.title,
       currencyId: d.currencyId,
       currencyTitle: d.currency.title,
       status: d.status,
+      journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
       lineCount: d.lines.length,
       totalAmount: d.lines.reduce((s: number, l: any) => s + Number(l.amount), 0),
     }))
@@ -214,8 +284,10 @@ router.get("/service-purchase-invoices/:id", can(`${FORM}.view`), async (req, re
     where: { id },
     include: {
       party: true,
+      purchaseType: true,
       currency: true,
       approver: true,
+      journalEntry: true,
       lines: {
         include: {
           service: true,
@@ -234,12 +306,17 @@ router.get("/service-purchase-invoices/:id", can(`${FORM}.view`), async (req, re
     vendorInvoiceNumber: d.vendorInvoiceNumber,
     partyId: d.partyId,
     partyTitle: partyTitle(d.party),
+    purchaseTypeId: d.purchaseTypeId,
+    purchaseTypeTitle: d.purchaseType.title,
     currencyId: d.currencyId,
     currencyTitle: d.currency.title,
+    fxRate: Number(d.fxRate),
     description: d.description,
     status: d.status,
     approverName: d.approver ? `${d.approver.firstName} ${d.approver.lastName}`.trim() : null,
     approvedAt: d.approvedAt,
+    journalEntryId: d.journalEntryId,
+    journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
     updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
       id: l.id,
@@ -247,6 +324,8 @@ router.get("/service-purchase-invoices/:id", can(`${FORM}.view`), async (req, re
       serviceCode: l.service.fullCode,
       serviceTitle: l.service.title,
       amount: Number(l.amount),
+      discount: Number(l.discount),
+      vatAmount: Number(l.vatAmount),
       basis: l.basis,
       sourceReceiptDocumentId: l.sourceReceiptDocumentId,
       sourceReceiptNumber: l.sourceReceiptDocument?.number ?? null,
@@ -268,6 +347,7 @@ router.post("/service-purchase-invoices", can(`${FORM}.create`), async (req, res
   const body = req.body as HeaderBody;
   if (!body.date) return res.status(400).json({ error: "تاریخ الزامی است" });
   if (!body.partyId) return res.status(400).json({ error: "طرف مقابل الزامی است" });
+  if (!body.purchaseTypeId) return res.status(400).json({ error: "نوع خرید الزامی است" });
   if (!body.currencyId) return res.status(400).json({ error: "ارز الزامی است" });
 
   try {
@@ -275,10 +355,15 @@ router.post("/service-purchase-invoices", can(`${FORM}.create`), async (req, res
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const party = await prisma.party.findUnique({ where: { id: body.partyId } });
     if (!party) throw new Error("طرف مقابل یافت نشد");
+    const purchaseType = await prisma.purchaseType.findUnique({ where: { id: body.purchaseTypeId } });
+    if (!purchaseType) throw new Error("نوع خرید یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
+    const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
+    if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+    const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
-    const cleanedLines = await validateLines(body.lines);
+    const cleanedLines = await validateLines(body.lines, currency, fxRate);
 
     const lastNumber = await prisma.servicePurchaseInvoice.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
     const number = lastNumber ? lastNumber.number + 1 : 1;
@@ -290,7 +375,9 @@ router.post("/service-purchase-invoices", can(`${FORM}.create`), async (req, res
         date,
         vendorInvoiceNumber: body.vendorInvoiceNumber || null,
         partyId: body.partyId,
+        purchaseTypeId: body.purchaseTypeId,
         currencyId: body.currencyId,
+        fxRate,
         description: body.description || null,
         status: "DRAFT",
         lines: {
@@ -298,6 +385,10 @@ router.post("/service-purchase-invoices", can(`${FORM}.create`), async (req, res
             rowOrder: idx,
             serviceId: l.serviceId,
             amount: l.amount,
+            discount: l.discount,
+            baseAmount: l.baseAmount,
+            baseDiscount: l.baseDiscount,
+            vatAmount: l.vatAmount,
             basis: l.basis,
             sourceReceiptDocumentId: l.sourceReceiptDocumentId,
             allocationMethod: l.allocationMethod,
@@ -325,6 +416,7 @@ router.put("/service-purchase-invoices/:id", can(`${FORM}.edit`), async (req, re
 
   if (!body.date) return res.status(400).json({ error: "تاریخ الزامی است" });
   if (!body.partyId) return res.status(400).json({ error: "طرف مقابل الزامی است" });
+  if (!body.purchaseTypeId) return res.status(400).json({ error: "نوع خرید الزامی است" });
   if (!body.currencyId) return res.status(400).json({ error: "ارز الزامی است" });
 
   try {
@@ -333,10 +425,15 @@ router.put("/service-purchase-invoices/:id", can(`${FORM}.edit`), async (req, re
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const party = await prisma.party.findUnique({ where: { id: body.partyId } });
     if (!party) throw new Error("طرف مقابل یافت نشد");
+    const purchaseType = await prisma.purchaseType.findUnique({ where: { id: body.purchaseTypeId } });
+    if (!purchaseType) throw new Error("نوع خرید یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
+    const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
+    if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+    const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
-    const cleanedLines = await validateLines(body.lines);
+    const cleanedLines = await validateLines(body.lines, currency, fxRate);
 
     await prisma.$transaction([
       prisma.servicePurchaseInvoiceLine.deleteMany({ where: { servicePurchaseInvoiceId: id } }),
@@ -347,13 +444,19 @@ router.put("/service-purchase-invoices/:id", can(`${FORM}.edit`), async (req, re
           date,
           vendorInvoiceNumber: body.vendorInvoiceNumber || null,
           partyId: body.partyId,
+          purchaseTypeId: body.purchaseTypeId,
           currencyId: body.currencyId,
+          fxRate,
           description: body.description || null,
           lines: {
             create: cleanedLines.map((l, idx) => ({
               rowOrder: idx,
               serviceId: l.serviceId,
               amount: l.amount,
+              discount: l.discount,
+              baseAmount: l.baseAmount,
+              baseDiscount: l.baseDiscount,
+              vatAmount: l.vatAmount,
               basis: l.basis,
               sourceReceiptDocumentId: l.sourceReceiptDocumentId,
               allocationMethod: l.allocationMethod,
@@ -390,6 +493,7 @@ router.post("/service-purchase-invoices/:id/approve", can(`${FORM}.approve`), as
   const invoice = await prisma.servicePurchaseInvoice.findUnique({
     where: { id },
     include: {
+      currency: true,
       lines: {
         include: { allocations: true, sourceReceiptDocument: { include: { lines: true } } },
       },
@@ -400,6 +504,7 @@ router.post("/service-purchase-invoices/:id/approve", can(`${FORM}.approve`), as
 
   try {
     const decimalPlaces = await getBaseCurrencyDecimalPlaces();
+    const fxRate = Number(invoice.fxRate);
 
     // طبق بند ۹ مستند: برای هر ردیف مبنادار «رسید انبار»، رسید/روش تسهیم/تسهیم معتبر و برابری دقیق مجموع
     // باید بررسی شود — این‌جا (و فقط این‌جا + کلیک «تایید» داخل Dialog سمت فرانت‌اند)، نه در زمان ثبت.
@@ -430,9 +535,13 @@ router.post("/service-purchase-invoices/:id/approve", can(`${FORM}.approve`), as
         if (line.basis !== "WAREHOUSE_RECEIPT") continue;
         for (const a of line.allocations) {
           const current = await getLineAmount(a.inventoryDocumentLineId, tx);
+          // ردیف رسید انبار همیشه به ارز مبنا (ریال) ارزش‌گذاری می‌شود، در حالی که allocatedAmount به
+          // ارز فاکتور خدمات است (طبق تصمیم صریح کاربر، فقط بعد از افزودن fxRate/ارز به این فرم، این
+          // تبدیل لازم شد؛ پیش‌تر که فرم فقط ارز مبنا را می‌شناخت، جمع مستقیم درست بود).
+          const allocatedBaseAmount = round(toBaseCurrencyAmount(Number(a.allocatedAmount), fxRate, invoice.currency), decimalPlaces);
           await setLineAmount(tx, {
             lineId: a.inventoryDocumentLineId,
-            newAmount: Number(current) + Number(a.allocatedAmount),
+            newAmount: Number(current) + allocatedBaseAmount,
             priceType: "INBOUND_RELATED_COST",
             servicePurchaseInvoiceAllocationId: a.id,
             createdById: req.user?.id ?? null,
@@ -455,19 +564,26 @@ router.post("/service-purchase-invoices/:id/unapprove", can(`${FORM}.unapprove`)
   const id = Number(req.params.id);
   const invoice = await prisma.servicePurchaseInvoice.findUnique({
     where: { id },
-    include: { lines: { include: { allocations: true } } },
+    include: { currency: true, lines: { include: { allocations: true } } },
   });
   if (!invoice) return res.status(404).json({ error: "فاکتور خرید خدمات یافت نشد" });
   if (invoice.status !== "APPROVED") return res.status(400).json({ error: "فقط فاکتورهای در وضعیت «تایید» قابل برگشت هستند" });
+  if (invoice.journalEntryId) {
+    return res.status(400).json({ error: "برای این فاکتور سند حسابداری صادر شده؛ ابتدا سند حسابداری را حذف کنید" });
+  }
+
+  const decimalPlaces = await getBaseCurrencyDecimalPlaces();
+  const fxRate = Number(invoice.fxRate);
 
   await prisma.$transaction(async (tx) => {
     for (const line of invoice.lines) {
       if (line.basis !== "WAREHOUSE_RECEIPT") continue;
       for (const a of line.allocations) {
         const current = await getLineAmount(a.inventoryDocumentLineId, tx);
+        const allocatedBaseAmount = round(toBaseCurrencyAmount(Number(a.allocatedAmount), fxRate, invoice.currency), decimalPlaces);
         await setLineAmount(tx, {
           lineId: a.inventoryDocumentLineId,
-          newAmount: Number(current) - Number(a.allocatedAmount),
+          newAmount: Number(current) - allocatedBaseAmount,
           priceType: "INBOUND_RELATED_COST",
           servicePurchaseInvoiceAllocationId: a.id,
           createdById: req.user?.id ?? null,
@@ -478,6 +594,255 @@ router.post("/service-purchase-invoices/:id/unapprove", can(`${FORM}.unapprove`)
   });
 
   res.json({ id, status: "DRAFT" });
+});
+
+// =========================================================================
+// صدور سند حسابداری — دقیقاً هم‌معماری purchaseInvoices.ts، با دو تفاوت آگاهانه (نگاه کنید به یادداشت
+// بالای فایل): بدهکار ردیف «بدون مبنا» با گروه حسابداریِ خودِ ردیف خدمت کلید می‌خورد (نه یک کالا)، و
+// بدهکار ردیف «رسید انبار» به‌ازای هر تخصیص (allocation) جدا محاسبه می‌شود (نه یک ردیف در سطح کل خط).
+// بستانکار «پرداختنی خرید» تجمیع در سطح معین است (نه یک خط به ازای هر ردیف فاکتور) — دقیقاً مثل کالا.
+// =========================================================================
+
+router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournalEntry`), async (req, res) => {
+  const id = Number(req.params.id);
+  const invoice = await prisma.servicePurchaseInvoice.findUnique({
+    where: { id },
+    include: {
+      party: true,
+      purchaseType: true,
+      currency: true,
+      lines: {
+        include: {
+          service: true,
+          allocations: { include: { inventoryDocumentLine: { include: { goodsItem: true, document: true } } } },
+        },
+        orderBy: { rowOrder: "asc" },
+      },
+    },
+  });
+  if (!invoice) return res.status(404).json({ error: "فاکتور خرید خدمات یافت نشد" });
+  if (invoice.status !== "APPROVED") return res.status(400).json({ error: "فقط فاکتورهای در وضعیت «تایید» قابل صدور سند حسابداری هستند" });
+  if (invoice.journalEntryId) return res.status(400).json({ error: "قبلاً برای این فاکتور سند حسابداری صادر شده است" });
+
+  try {
+    const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
+    if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+    const fxRate = Number(invoice.fxRate);
+
+    const partyDetailCode = invoice.party.detailCode;
+    const partyDetailTypeId = await resolveDetailTypeId(partyDetailCode);
+
+    const warehouseIds = Array.from(
+      new Set(
+        invoice.lines.flatMap((l) => l.allocations.map((a) => a.inventoryDocumentLine.document.warehouseId).filter((x): x is number => !!x))
+      )
+    );
+    const warehouses = await prisma.warehouse.findMany({ where: { id: { in: warehouseIds } } });
+    const warehouseGroupById = new Map(warehouses.map((w) => [w.id, w.warehouseGroupId]));
+
+    const accountingGroupIds = Array.from(
+      new Set([
+        ...invoice.lines.map((l) => l.service.accountingGroupId),
+        ...invoice.lines.flatMap((l) => l.allocations.map((a) => a.inventoryDocumentLine.goodsItem.accountingGroupId)),
+      ])
+    );
+    const settings = await prisma.goodsServiceAccountingSetting.findMany({
+      where: { accountingGroupId: { in: accountingGroupIds } },
+      include: { account: true },
+    });
+    function findSetting(accountingGroupId: number, accountType: string, match: (s: (typeof settings)[number]) => boolean) {
+      return settings.find((s) => s.accountingGroupId === accountingGroupId && s.accountType === accountType && match(s));
+    }
+
+    const vendorInvoiceNumber = invoice.vendorInvoiceNumber || String(invoice.number);
+    const description = `بابت فاکتور خرید خدمات ${vendorInvoiceNumber} ${formatJalaliDateForMessage(invoice.date)} ${partyTitle(invoice.party) || ""}`.trim();
+
+    const errors: string[] = [];
+    const debitLines: IssueLineInput[] = [];
+    const creditByAccount = new Map<number, { amount: number; baseAmount: number; account: (typeof settings)[number]["account"] }>();
+    const vatDebitByAccount = new Map<number, { amount: number; account: (typeof settings)[number]["account"] }>();
+    const allocationIds: number[] = [];
+
+    for (const line of invoice.lines) {
+      const amount = Number(line.amount);
+      const baseAmount = Number(line.baseAmount);
+      const vatAmount = Number(line.vatAmount);
+      const service = line.service;
+
+      if (line.basis === "WAREHOUSE_RECEIPT") {
+        if (line.allocations.length === 0) {
+          errors.push(`برای ردیف خدمت «${service.title}» تسهیمی ثبت نشده است`);
+          continue;
+        }
+        let hasAllocationError = false;
+        for (const a of line.allocations) {
+          allocationIds.push(a.id);
+          const goodsItem = a.inventoryDocumentLine.goodsItem;
+          const warehouseId = a.inventoryDocumentLine.document.warehouseId ?? null;
+          const warehouseGroupId = warehouseId != null ? warehouseGroupById.get(warehouseId) ?? null : null;
+          const debitSetting =
+            warehouseGroupId != null
+              ? findSetting(goodsItem.accountingGroupId, "INVENTORY", (s) => s.warehouseGroupId === warehouseGroupId)
+              : undefined;
+          if (!debitSetting) {
+            errors.push(`برای کالای «${goodsItem.title}»، حساب «موجودی کالا» در حسابداری کالا و خدمت تعریف نشده است`);
+            hasAllocationError = true;
+            continue;
+          }
+          const allocatedAmount = Number(a.allocatedAmount);
+          // گرد کردن دقیقاً هم‌الگوی نوشتن مبلغ روی ردیف رسید در approve — تا مبلغ بدهکار «موجودی کالا»
+          // اینجا با همان مبلغی که واقعاً به ارزش موجودی افزوده شده یکی باشد.
+          const allocatedBaseAmount = round(toBaseCurrencyAmount(allocatedAmount, fxRate, invoice.currency), baseCurrency.decimalPlaces);
+          const debitDetails = resolveAccountDetailFields(debitSetting.account, partyDetailTypeId, partyDetailCode);
+          const debitIsCurrency = debitSetting.account.isCurrency;
+          debitLines.push({
+            accountId: debitSetting.accountId,
+            ...debitDetails,
+            currencyId: debitIsCurrency ? invoice.currencyId : baseCurrency.id,
+            debit: debitIsCurrency ? allocatedAmount : allocatedBaseAmount,
+            credit: 0,
+            fxRate: debitIsCurrency ? fxRate : 1,
+            description,
+          });
+        }
+        if (hasAllocationError) continue;
+      } else {
+        const debitSetting = findSetting(service.accountingGroupId, "PURCHASE_CONTROL", (s) => s.purchaseTypeId === invoice.purchaseTypeId);
+        if (!debitSetting) {
+          errors.push(`برای خدمت «${service.title}» و نوع خرید «${invoice.purchaseType.title}»، حساب «کنترل خرید» در حسابداری کالا و خدمت تعریف نشده است`);
+          continue;
+        }
+        const debitDetails = resolveAccountDetailFields(debitSetting.account, partyDetailTypeId, partyDetailCode);
+        const debitIsCurrency = debitSetting.account.isCurrency;
+        debitLines.push({
+          accountId: debitSetting.accountId,
+          ...debitDetails,
+          currencyId: debitIsCurrency ? invoice.currencyId : baseCurrency.id,
+          debit: debitIsCurrency ? amount : baseAmount,
+          credit: 0,
+          fxRate: debitIsCurrency ? fxRate : 1,
+          description,
+        });
+      }
+
+      const creditSetting = findSetting(service.accountingGroupId, "PURCHASE_PAYABLE", (s) => s.purchaseTypeId === invoice.purchaseTypeId);
+      if (!creditSetting) {
+        errors.push(`برای خدمت «${service.title}» و نوع خرید «${invoice.purchaseType.title}»، حساب «پرداختنی خرید» در حسابداری کالا و خدمت تعریف نشده است`);
+        continue;
+      }
+
+      let vatDebitSetting: (typeof settings)[number] | undefined;
+      if (vatAmount > 0) {
+        vatDebitSetting = findSetting(service.accountingGroupId, "PURCHASE_VAT", (s) => s.purchaseTypeId === invoice.purchaseTypeId);
+        if (!vatDebitSetting) {
+          errors.push(`برای خدمت «${service.title}» و نوع خرید «${invoice.purchaseType.title}»، حساب «ارزش‌افزوده خرید» در حسابداری کالا و خدمت تعریف نشده است`);
+          continue;
+        }
+      }
+
+      let creditAmount = amount;
+      let creditBaseAmount = baseAmount;
+      if (vatDebitSetting) {
+        creditAmount += fromBaseCurrencyAmount(vatAmount, fxRate, invoice.currency);
+        creditBaseAmount += vatAmount;
+      }
+      const existingCredit = creditByAccount.get(creditSetting.accountId);
+      if (existingCredit) {
+        existingCredit.amount += creditAmount;
+        existingCredit.baseAmount += creditBaseAmount;
+      } else {
+        creditByAccount.set(creditSetting.accountId, { amount: creditAmount, baseAmount: creditBaseAmount, account: creditSetting.account });
+      }
+
+      if (vatDebitSetting) {
+        const existingVatDebit = vatDebitByAccount.get(vatDebitSetting.accountId);
+        if (existingVatDebit) existingVatDebit.amount += vatAmount;
+        else vatDebitByAccount.set(vatDebitSetting.accountId, { amount: vatAmount, account: vatDebitSetting.account });
+      }
+    }
+
+    if (errors.length > 0) return res.status(400).json({ error: errors.join("\n") });
+
+    const creditLines: IssueLineInput[] = [];
+    for (const { amount, baseAmount, account } of creditByAccount.values()) {
+      const creditDetails = resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode);
+      const creditIsCurrency = account.isCurrency;
+      creditLines.push({
+        accountId: account.id,
+        ...creditDetails,
+        currencyId: creditIsCurrency ? invoice.currencyId : baseCurrency.id,
+        debit: 0,
+        credit: creditIsCurrency ? amount : baseAmount,
+        fxRate: creditIsCurrency ? fxRate : 1,
+        description,
+      });
+    }
+
+    const vatDebitLines: IssueLineInput[] = [];
+    for (const { amount, account } of vatDebitByAccount.values()) {
+      const vatDetails = resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode);
+      vatDebitLines.push({
+        accountId: account.id,
+        ...vatDetails,
+        currencyId: baseCurrency.id,
+        debit: amount,
+        credit: 0,
+        fxRate: 1,
+        description,
+      });
+    }
+
+    const docType = await prisma.documentType.findFirst({ where: { systemKey: "SERVICE_PURCHASE_INVOICE" } });
+    if (!docType) return res.status(400).json({ error: "نوع سند «فاکتور خرید خدمات» در سیستم تعریف نشده است" });
+
+    const entry = await issueJournalEntry({
+      date: invoice.date,
+      documentTypeId: docType.id,
+      description,
+      issuingSystem: "PURCHASE",
+      isManual: false,
+      lines: [...debitLines, ...vatDebitLines, ...creditLines],
+      sources: [{ label: `فاکتور خرید خدمات شماره ${invoice.number}`, path: `/service-purchase-invoices/${invoice.id}/edit` }],
+    });
+
+    await prisma.servicePurchaseInvoice.update({ where: { id }, data: { journalEntryId: entry.id } });
+
+    if (allocationIds.length > 0) {
+      await prisma.documentItemAmount.updateMany({
+        where: { servicePurchaseInvoiceAllocationId: { in: allocationIds }, priceType: "INBOUND_RELATED_COST" },
+        data: { journalEntryId: entry.id },
+      });
+    }
+
+    res.json({ journalEntryId: entry.id, number: entry.number, referenceNumber: entry.referenceNumber, message: entry.message });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در صدور سند حسابداری" });
+  }
+});
+
+router.delete("/service-purchase-invoices/:id/journal-entry", can(`${FORM}.revertJournalEntry`), async (req, res) => {
+  const id = Number(req.params.id);
+  const invoice = await prisma.servicePurchaseInvoice.findUnique({
+    where: { id },
+    include: { lines: { include: { allocations: true } } },
+  });
+  if (!invoice) return res.status(404).json({ error: "فاکتور خرید خدمات یافت نشد" });
+  if (!invoice.journalEntryId) return res.status(400).json({ error: "برای این فاکتور سندی صادر نشده است" });
+
+  const allocationIds = invoice.lines.flatMap((l) => l.allocations.map((a) => a.id));
+  try {
+    await prisma.$transaction([
+      prisma.documentItemAmount.updateMany({
+        where: { servicePurchaseInvoiceAllocationId: { in: allocationIds }, priceType: "INBOUND_RELATED_COST", journalEntryId: invoice.journalEntryId },
+        data: { journalEntryId: null },
+      }),
+      prisma.servicePurchaseInvoice.update({ where: { id }, data: { journalEntryId: null } }),
+      prisma.journalEntry.delete({ where: { id: invoice.journalEntryId } }),
+    ]);
+    res.status(204).send();
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در حذف سند حسابداری" });
+  }
 });
 
 export default router;

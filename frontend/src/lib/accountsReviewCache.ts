@@ -1,5 +1,7 @@
 import { SelectId } from "./useChainedMultiSelect";
 import { ActiveFilter } from "../components/DataTable";
+import { registerReviewReportCache } from "./reviewReportCache";
+import { TabViewState } from "./useReviewTabLoader";
 
 export interface DetailQueryState {
   page: number;
@@ -21,6 +23,8 @@ export interface AccountsReviewSnapshot {
     referenceTo: string;
   };
   tabData: Record<number, any[]>;
+  /** فقط برای تب‌های مانده (گروه/کل/معین/تفصیلی — کلاینتی، بدون serverPaging)، به تفکیک تب: فیلتر/مرتب‌سازیِ محلی */
+  balanceViewState?: Record<number, TabViewState>;
   /** فقط برای تب‌های تفصیل (که سمت سرور صفحه‌بندی می‌شوند)، به تفکیک تب: صفحه/تعداد در صفحه/مرتب‌سازی درخواستی (fetch trigger) */
   detailQuery: Record<number, DetailQueryState>;
   /** تعداد کل رکورد هر تب تفصیل — جدا از detailQuery نگه داشته می‌شود تا به‌روزرسانی‌اش باعث fetch مجدد نشود */
@@ -46,3 +50,5 @@ export function setAccountsReviewSnapshot(snapshot: AccountsReviewSnapshot) {
 export function clearAccountsReviewSnapshot() {
   cached = null;
 }
+
+registerReviewReportCache("/account-review", clearAccountsReviewSnapshot);

@@ -145,7 +145,10 @@ export const MODULES: ModuleGroup[] = [
           { key: "production-consumptions", label: "مصرف تولید", list: "/production-consumptions", create: "/production-consumptions/new", icon: "file" },
           { key: "fixed-asset-issues", label: "حواله دارایی ثابت", list: "/fixed-asset-issues", create: "/fixed-asset-issues/new", icon: "file" },
           { key: "warehousing-warehouse-transfer-out", label: "حواله انتقالی", list: "/warehousing/warehouse-transfer-out", create: "/warehousing/warehouse-transfer-out/new", icon: "sitemap" },
-          // همان صفحه/مسیر ماژول «فروش» (بدون نسخه‌ی انبارداری/حسابداری انبار جدا) — فقط میان‌بر است
+          // طبق تصمیم صریح کاربر (۱۴۰۵/۰۶/۱۸): این سند (حواله فروش) عیناً همان سند/مسیری است که قبلاً هم
+          // زیر ماژول «فروش» و هم اینجا نمایش داده می‌شد؛ چون فقط یک سند واقعی وجود دارد و اجرای فیزیکی آن
+          // کار انبار است، میان‌بر تکراری‌اش از ماژول «فروش» حذف شد و فقط همین‌جا (انبار) باقی می‌ماند —
+          // نگاه کنید به project_sales_delivery_request_deferred.md.
           { key: "sales-deliveries", label: "حواله فروش", list: "/sales-deliveries", create: "/sales-deliveries/new", icon: "ledger" },
           { key: "inventory-counting-shortages", label: "کسری انبارگردانی", list: "/inventory-counting-shortages", create: "/inventory-counting-shortages/new", icon: "file" },
         ],
@@ -225,6 +228,8 @@ export const MODULES: ModuleGroup[] = [
         title: "تنظیمات",
         items: [
           { key: "customers", label: "مشتری", list: "/customers", create: "/customers/new", icon: "building" },
+          { key: "sales-types", label: "نوع فروش", list: "/sales-types", create: "/sales-types/new", icon: "tag" },
+          { key: "sales-centers", label: "مرکز فروش", list: "/sales-centers", create: "/sales-centers/new", icon: "briefcase" },
         ],
       },
       {
@@ -232,9 +237,12 @@ export const MODULES: ModuleGroup[] = [
         items: [
           { key: "sales-quotes", label: "پیش‌فاکتور", list: "/sales-quotes", create: "/sales-quotes/new", icon: "file" },
           { key: "sales-orders", label: "سفارش فروش", list: "/sales-orders", create: "/sales-orders/new", icon: "file" },
-          { key: "sales-deliveries", label: "حواله فروش", list: "/sales-deliveries", create: "/sales-deliveries/new", icon: "ledger" },
           { key: "sales-invoices", label: "فاکتور فروش", list: "/sales-invoices", create: "/sales-invoices/new", icon: "ledger" },
         ],
+      },
+      {
+        title: "گزارش",
+        items: [{ key: "sales-review", label: "مرور فروش", list: "/sales-review", icon: "tree" }],
       },
     ],
   },

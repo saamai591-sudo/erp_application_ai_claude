@@ -146,7 +146,7 @@ export async function getMovements(f: MovementFilters): Promise<Movement[]> {
       goodsItem: true,
       batches: { include: { batch: true } },
       physicalLocation: true,
-      serials: { include: { serial: { include: { batch: true } } } },
+      serials: { include: { serial: true } },
       document: true,
       sourceWarehouseTransferOutLine: { include: { document: true } },
     },
@@ -189,8 +189,8 @@ export async function getMovements(f: MovementFilters): Promise<Movement[]> {
       goodsItemTitle: l.goodsItem.title,
       lineId: l.id,
       serialNumber: l.serials[0]?.serial.serialNumber ?? null,
-      batchNumber: l.batches[0]?.batch.batchNumber ?? l.serials[0]?.serial.batch?.batchNumber ?? null,
-      expiryDate: l.batches[0]?.batch.expiryDate ?? l.serials[0]?.serial.batch?.expiryDate ?? l.serials[0]?.serial.expiryDate ?? null,
+      batchNumber: l.batches[0]?.batch.batchNumber ?? l.serials[0]?.serial.batch ?? null,
+      expiryDate: l.batches[0]?.batch.expiryDate ?? l.serials[0]?.serial.expiryDate ?? null,
       physicalLocation: l.physicalLocation?.title ?? null,
       warehouseCode: warehouse?.code ?? null,
       warehouseTitle: warehouse?.title ?? null,
@@ -266,7 +266,7 @@ function splitAmounts(total: number, weights: number[]): number[] {
 function trackingUnits(l: {
   quantity: any;
   amount: any;
-  serials: { serial: { serialNumber: string; batch: { batchNumber: string; expiryDate: Date | null } | null; expiryDate: Date | null } }[];
+  serials: { serial: { serialNumber: string; batch: string | null; expiryDate: Date | null } }[];
   batches: { quantity: any; batch: { batchNumber: string; expiryDate: Date | null } }[];
 }): { quantity: number; amount: number; serialNumber: string | null; batchNumber: string | null; expiryDate: Date | null }[] {
   const totalAmount = Number(l.amount);
@@ -276,8 +276,8 @@ function trackingUnits(l: {
       quantity: 1,
       amount: amounts[i],
       serialNumber: s.serial.serialNumber,
-      batchNumber: s.serial.batch?.batchNumber ?? null,
-      expiryDate: s.serial.batch?.expiryDate ?? s.serial.expiryDate ?? null,
+      batchNumber: s.serial.batch ?? null,
+      expiryDate: s.serial.expiryDate ?? null,
     }));
   }
   if (l.batches.length > 0) {

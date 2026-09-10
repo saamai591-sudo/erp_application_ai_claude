@@ -11,9 +11,15 @@ const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostna
 
 export class ApiError extends Error {
   warning?: boolean;
-  constructor(message: string, warning?: boolean) {
+  /** فرمت استاندارد خطای عملیات دسته‌ای (bulk) — وقتی بک‌اند به‌جای یک پیام تکی، فهرست ساختاریافته‌ای
+   * از شکست‌های مستقل هر آیتم را در details برمی‌گرداند (نگاه کنید به backend/src/lib/bulkError.ts)،
+   * این‌جا هم عیناً حمل می‌شود تا BulkErrorDialog بتواند دکمه‌ی «دانلود جزئیات خطا (اکسل)» را نشان دهد.
+   * برای بقیه‌ی خطاها (اکثریت قریب‌به‌اتفاق) این فیلد همیشه undefined می‌ماند — رفتار قبلی دست‌نخورده است. */
+  details?: Record<string, unknown>[];
+  constructor(message: string, warning?: boolean, details?: Record<string, unknown>[]) {
     super(message);
     this.warning = warning;
+    this.details = details;
   }
 }
 
@@ -38,7 +44,7 @@ async function request(path: string, options: RequestInit = {}) {
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    throw new ApiError(data.error || "خطای ناشناخته رخ داد", data.warning);
+    throw new ApiError(data.error || "خطای ناشناخته رخ داد", data.warning, data.details);
   }
   return data;
 }

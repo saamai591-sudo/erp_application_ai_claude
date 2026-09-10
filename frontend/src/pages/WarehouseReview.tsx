@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { ChainedTabsBar } from "../components/ChainedTabsBar";
 import { SelectableBalanceTable, BalanceTableColumn } from "../components/SelectableBalanceTable";
@@ -8,10 +8,12 @@ import { getWarehouseReviewSnapshot, setWarehouseReviewSnapshot } from "../lib/w
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { toEnglishDigits } from "../lib/digits";
-import { getSavedFiscalPeriodId } from "../lib/userSettings";
+import { resolveReviewDateRange, FiscalPeriodRange } from "../lib/fiscalYearDefaultDate";
+import { useReviewTabLoader, useReviewTabActivation, useReviewTabViewState, serializeForDepsKey } from "../lib/useReviewTabLoader";
 import { useTabs } from "../lib/TabsContext";
 import { api } from "../lib/api";
 import { InfoHint } from "../components/InfoHint";
+import { ExcelExportIcon, PrintIcon } from "../components/GridExportIcons";
 import { ColumnFilterType } from "../components/DataTable";
 
 // گزارش «مرور موجودی انبار» — با همان فرمت «مرور حسابها» (ChainedTabsBar + useChainedMultiSelect):
@@ -32,13 +34,6 @@ import { ColumnFilterType } from "../components/DataTable";
 // (طبق درخواست صریح کاربر: «هر جا که مقدار هست در کنارش ستون مبلغ هم باشد»).
 
 type ReviewMode = "qty" | "amount";
-
-interface FiscalPeriod {
-  id: number;
-  title: string;
-  fromDate: string;
-  toDate: string;
-}
 
 interface GroupLevel {
   id: number;
@@ -157,6 +152,7 @@ function amountCol(header: string, field: keyof DimRow, outbound = false): Balan
     sortValue: (r) => (r[field] as number) || 0,
     filterType: "number",
     filterValue: (r) => (r[field] as number) || 0,
+    decimal: true,
   };
 }
 
@@ -164,23 +160,22 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
   const { openTab } = useTabs();
   const basePath = mode === "qty" ? "/warehousing" : "/warehouse-accounting";
   const snapshot = getWarehouseReviewSnapshot(mode);
-  const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
+  const [periods, setPeriods] = useState<FiscalPeriodRange[]>([]);
   const [groupLevels, setGroupLevels] = useState<GroupLevel[]>([]);
   const [levelsLoaded, setLevelsLoaded] = useState(false);
   const [filters, setFilters] = useState(snapshot?.filters ?? { fromDate: "", toDate: "" });
   const [activeTab, setActiveTab] = useState(snapshot?.activeTab ?? 0);
   const [tabData, setTabData] = useState<Record<number, DimRow[]>>(snapshot?.tabData ?? {});
-  const [tabLoading, setTabLoading] = useState(false);
-  const [loadedTabs, setLoadedTabs] = useState<Set<number>>(new Set(snapshot?.loadedTabs ?? []));
+  const tabLoader = useReviewTabLoader(snapshot?.loadedTabs ?? []);
   const [ledgerRows, setLedgerRows] = useState<LedgerRow[]>(snapshot?.ledgerRows ?? []);
   const [ledgerPage, setLedgerPage] = useState(snapshot?.ledgerPage ?? 1);
   const [ledgerPageSize, setLedgerPageSize] = useState(snapshot?.ledgerPageSize ?? 25);
   const [ledgerTotal, setLedgerTotal] = useState(snapshot?.ledgerTotal ?? 0);
   const [ledgerTotalPages, setLedgerTotalPages] = useState(snapshot?.ledgerTotalPages ?? 1);
-  const [ledgerLoading, setLedgerLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const chain = useChainedMultiSelect(snapshot?.chainState);
+  const tabView = useReviewTabViewState(activeTab, snapshot?.dimViewState ?? {});
 
   // ذخیره‌ی زنده‌ی وضعیت در حافظه‌ی موقت بیرون از چرخه‌ی کامپوننت — دقیقاً هم‌الگوی AccountsReview.tsx —
   // تا با رفتن به یک تب دیگر (مثلاً باز کردن سند از تب گردش) و بازگشت، وضعیت این صفحه از دست نرود.
@@ -190,14 +185,15 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
       activeTab,
       filters,
       tabData,
-      loadedTabs: Array.from(loadedTabs),
+      dimViewState: tabView.viewState,
+      loadedTabs: Array.from(tabLoader.loadedTabs),
       ledgerRows,
       ledgerPage,
       ledgerPageSize,
       ledgerTotal,
       ledgerTotalPages,
     });
-  }, [mode, chain.selections, chain.order, activeTab, filters, tabData, loadedTabs, ledgerRows, ledgerPage, ledgerPageSize, ledgerTotal, ledgerTotalPages]);
+  }, [mode, chain.selections, chain.order, activeTab, filters, tabData, tabView.viewState, tabLoader.loadedTabs, ledgerRows, ledgerPage, ledgerPageSize, ledgerTotal, ledgerTotalPages]);
 
   // مرزهای تب‌ها به‌صورت پویا بر اساس تعداد سطوح گروه کالا محاسبه می‌شوند (دقیقاً مثل accountTabCount
   // در AccountsReview.tsx که بر اساس تعداد سطوح گزارشگری محاسبه می‌شود)
@@ -234,24 +230,16 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
     return "";
   }
 
-  function defaultDateRange(periodsList: FiscalPeriod[]) {
-    const savedId = getSavedFiscalPeriodId();
-    const current =
-      (savedId && periodsList.find((p) => String(p.id) === savedId)) ||
-      [...periodsList].sort((a, b) => (a.toDate < b.toDate ? 1 : -1))[0];
-    return current ? { fromDate: current.fromDate.slice(0, 10), toDate: current.toDate.slice(0, 10) } : { fromDate: "", toDate: "" };
-  }
-
   useEffect(() => {
     async function init() {
-      const [per, lvls]: [FiscalPeriod[], GroupLevel[]] = await Promise.all([
+      const [per, lvls]: [FiscalPeriodRange[], GroupLevel[]] = await Promise.all([
         api.get("/fiscal-periods"),
         api.get("/goods-group-levels"),
       ]);
       setPeriods(per);
       setGroupLevels(lvls);
       setLevelsLoaded(true);
-      setFilters((prev) => (prev.fromDate ? prev : defaultDateRange(per)));
+      setFilters((prev) => (prev.fromDate ? prev : resolveReviewDateRange(per)));
     }
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -305,61 +293,59 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
   }
 
   async function loadDimTab(tabIndex: number) {
-    setTabLoading(true);
-    setError(null);
-    try {
-      const p = buildParams(tabIndex);
-      if (isGroupLevelTab(tabIndex)) {
-        const level = groupLevels[tabIndex - GROUP_LEVEL_TAB_START];
-        if (level) p.set("levelOrder", String(level.order));
-      }
-      const data = await api.get(`${dimEndpoint(tabIndex)}?${p.toString()}`);
-      setTabData((prev) => ({ ...prev, [tabIndex]: data }));
-      setLoadedTabs((prev) => new Set(prev).add(tabIndex));
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setTabLoading(false);
-    }
+    await tabLoader.run(
+      tabIndex,
+      async (isStale) => {
+        const p = buildParams(tabIndex);
+        if (isGroupLevelTab(tabIndex)) {
+          const level = groupLevels[tabIndex - GROUP_LEVEL_TAB_START];
+          if (level) p.set("levelOrder", String(level.order));
+        }
+        const data = await api.get(`${dimEndpoint(tabIndex)}?${p.toString()}`);
+        if (isStale()) return; // یک fetch تازه‌تر برای همین تب در راه است/رسیده — این پاسخ دیرآمده نادیده گرفته می‌شود
+        setTabData((prev) => ({ ...prev, [tabIndex]: data }));
+      },
+      setError
+    );
   }
 
   async function loadLedger(page = 1, pageSize = ledgerPageSize) {
-    setLedgerLoading(true);
-    setError(null);
-    try {
-      const p = buildParams(LEDGER_TAB);
-      p.set("page", String(page));
-      p.set("pageSize", String(pageSize));
-      const data = await api.get(`/warehouse-review/ledger?${p.toString()}`);
-      setLedgerRows(data.rows);
-      setLedgerPage(data.page);
-      setLedgerPageSize(data.pageSize);
-      setLedgerTotal(data.total);
-      setLedgerTotalPages(data.totalPages);
-      setLoadedTabs((prev) => new Set(prev).add(LEDGER_TAB));
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLedgerLoading(false);
-    }
+    await tabLoader.run(
+      LEDGER_TAB,
+      async (isStale) => {
+        const p = buildParams(LEDGER_TAB);
+        p.set("page", String(page));
+        p.set("pageSize", String(pageSize));
+        const data = await api.get(`/warehouse-review/ledger?${p.toString()}`);
+        if (isStale()) return;
+        setLedgerRows(data.rows);
+        setLedgerPage(data.page);
+        setLedgerPageSize(data.pageSize);
+        setLedgerTotal(data.total);
+        setLedgerTotalPages(data.totalPages);
+      },
+      setError
+    );
   }
 
   function changeLedgerPageSize(size: number) {
     loadLedger(1, size);
   }
 
-  const skippedInitialFetch = useRef(false);
-
-  useEffect(() => {
-    if (!levelsLoaded || !filters.fromDate) return;
-    if (!skippedInitialFetch.current) {
-      skippedInitialFetch.current = true;
-      if (loadedTabs.has(activeTab)) return;
-    }
-    if (activeTab === LEDGER_TAB) loadLedger();
-    else loadDimTab(activeTab);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, chain.selections, chain.order, filters, levelsLoaded, groupLevels]);
+  const activationDepsKey = useMemo(
+    () => serializeForDepsKey({ selections: chain.selections, order: chain.order, filters, groupLevels }),
+    [chain.selections, chain.order, filters, groupLevels]
+  );
+  useReviewTabActivation(
+    levelsLoaded && !!filters.fromDate,
+    activeTab,
+    tabLoader.loadedTabs,
+    (tab) => {
+      if (tab === LEDGER_TAB) loadLedger();
+      else loadDimTab(tab);
+    },
+    activationDepsKey
+  );
 
   function refreshCurrentTab() {
     if (activeTab === LEDGER_TAB) loadLedger();
@@ -373,16 +359,19 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
   function resetAll() {
     chain.reset();
     setTabData({});
+    tabView.reset();
     setLedgerRows([]);
     setLedgerPage(1);
-    setLoadedTabs(new Set());
+    tabLoader.resetLoaded();
     setActiveTab(0);
   }
 
-  function clearEverything() {
-    resetAll();
-    setFilters(defaultDateRange(periods));
-  }
+  // دکمه‌ی «حذف همه فیلترها» — طبق اصلاح صریح کاربر (۱۴۰۵/۰۶/۱۹): انتخاب یک ردیف در یک تب هم خودش یک
+  // «فیلتر» زنجیره‌ای است، نه چیزی جدا از فیلترهای ستونی گرید — پس با این دکمه هم باید پاک شود (و
+  // کاربر به اولین تب برگردد). این دقیقاً همان resetAll موجود است (که فقط بازه‌ی تاریخ بالای گزارش را
+  // دست‌نخورده می‌گذارد، چون آن با تغییر واقعی‌اش از طریق خودِ فیلد تاریخ بازنشانی می‌شود، نه این دکمه)
+  // — نیازی به یک تابع جدای تکراری نیست. نگاه کنید به یادداشت مشابه در AccountsReview.tsx#clearFilters
+  // (که آن‌جا چون فیلترهای اضافی گردش هم دارد، از resetAll خودش کمی بیشتر است).
 
   const tabDefs = TAB_LABELS.map((label, idx) => ({
     key: `wr-${idx}`,
@@ -427,6 +416,12 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, mode, groupLevels]);
 
+  // جمع مقدار/مبلغ روی «صفحه‌ی جاری» گردش (سرور صفحه‌بندی می‌کند) — با علامت جهت (صادره منفی)، چون این
+  // یک ستون واحد با هر دو جهت مخلوط است (برخلاف تب‌های دیگر که وارده/صادره ستون جداگانه دارند)، پس جمع
+  // بدون علامت بی‌معنا بود؛ «مانده در خط» عمداً جمع زده نمی‌شود (مقدار تجمعی/لحظه‌ای، نه جمع‌پذیر).
+  const ledgerQuantityTotal = ledgerRows.reduce((s, r) => s + (r.direction === "OUT" ? -1 : 1) * (Number(r.quantity) || 0), 0);
+  const ledgerAmountTotal = ledgerRows.reduce((s, r) => s + (r.direction === "OUT" ? -1 : 1) * (Number(r.amount) || 0), 0);
+
   async function exportLedgerCsv() {
     setError(null);
     try {
@@ -465,13 +460,6 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
 
   return (
     <div>
-      <div className="page-header">
-        <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint text={infoText(mode)} title={mode === "qty" ? "مرور تعدادی" : "مرور مبلغی"} />
-          <RefreshButton onClick={refreshCurrentTab} title="رفرش تب جاری" />
-        </div>
-      </div>
-
       {error && <div className="alert error">{error}</div>}
 
       <div className="card ar-filters">
@@ -484,27 +472,52 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
             <label>تا تاریخ</label>
             <JalaliDatePicker value={filters.toDate} onChange={(v) => { setFilters((p) => ({ ...p, toDate: v })); resetAll(); }} />
           </div>
-          <span style={{ flex: 1 }} />
-          <button type="button" className="btn secondary" onClick={clearEverything}>حذف همه فیلترها</button>
         </div>
       </div>
 
-      <ChainedTabsBar tabs={tabDefs} activeIndex={activeTab} onChange={setActiveTab} />
+      <ChainedTabsBar
+        tabs={tabDefs}
+        activeIndex={activeTab}
+        onChange={setActiveTab}
+        actions={
+          <>
+            <InfoHint text={infoText(mode)} title={mode === "qty" ? "مرور تعدادی" : "مرور مبلغی"} />
+            <RefreshButton onClick={refreshCurrentTab} title="رفرش تب جاری" />
+            {activeTab === LEDGER_TAB && (
+              <>
+                <button type="button" className="toolbar-icon-btn" onClick={exportLedgerCsv} title="خروجی اکسل">
+                  <ExcelExportIcon />
+                </button>
+                <button type="button" className="toolbar-icon-btn" onClick={() => window.print()} title="چاپ">
+                  <PrintIcon />
+                </button>
+              </>
+            )}
+          </>
+        }
+        onClearFilters={resetAll}
+      />
 
       {activeTab !== LEDGER_TAB && (
-        <SelectableBalanceTable rows={tabData[activeTab] || []} columns={columns} selected={chain.get(activeTab)} onToggle={onToggleRow} loading={tabLoading} />
+        <SelectableBalanceTable
+          stateKey={activeTab}
+          rows={tabData[activeTab] || []}
+          columns={columns}
+          selected={chain.get(activeTab)}
+          onToggle={onToggleRow}
+          loading={tabLoader.loading}
+          restoreFilters={tabView.restoreFilters}
+          restoreSort={tabView.restoreSort}
+          onFiltersChange={tabView.onFiltersChange}
+          onSortChange={tabView.onSortChange}
+        />
       )}
 
       {activeTab === LEDGER_TAB && (
         <div className="datatable-root">
-          <div className="ar-ledger-toolbar">
-            <span style={{ flex: 1 }} />
-            <button type="button" className="btn secondary" onClick={() => window.print()}>چاپ</button>
-            <button type="button" className="btn secondary" onClick={exportLedgerCsv}>خروجی اکسل (CSV)</button>
-          </div>
           <div className="grid-wrap">
             <div className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
-              {ledgerLoading && ledgerRows.length === 0 ? (
+              {tabLoader.loading && ledgerRows.length === 0 ? (
                 <div className="empty-state">در حال بارگذاری...</div>
               ) : (
                 <table>
@@ -565,9 +578,15 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
                 </table>
               )}
             </div>
+            {ledgerRows.length > 0 && (
+              <div className="grid-footer-totals">
+                <span className="grid-footer-totals-item"><b>مقدار:</b> {formatAmountFa(ledgerQuantityTotal)}</span>
+                {mode === "amount" && <span className="grid-footer-totals-item"><b>مبلغ:</b> {formatAmountFa(ledgerAmountTotal)}</span>}
+              </div>
+            )}
             <div className="grid-footer">
               <span className="grid-footer-info">
-                {ledgerLoading
+                {tabLoader.loading
                   ? "در حال بارگذاری..."
                   : ledgerTotal === 0
                   ? "بدون رکورد"
@@ -583,11 +602,11 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
                   </select>
                 </label>
                 <div className="grid-page-nav">
-                  <button type="button" className="btn secondary" disabled={ledgerPage <= 1 || ledgerLoading} onClick={() => loadLedger(1)}>ابتدا</button>
-                  <button type="button" className="btn secondary" disabled={ledgerPage <= 1 || ledgerLoading} onClick={() => loadLedger(ledgerPage - 1)}>قبلی</button>
+                  <button type="button" className="btn secondary" disabled={ledgerPage <= 1 || tabLoader.loading} onClick={() => loadLedger(1)}>ابتدا</button>
+                  <button type="button" className="btn secondary" disabled={ledgerPage <= 1 || tabLoader.loading} onClick={() => loadLedger(ledgerPage - 1)}>قبلی</button>
                   <span className="grid-page-indicator">صفحه {toFaDigits(String(ledgerPage))} از {toFaDigits(String(ledgerTotalPages))}</span>
-                  <button type="button" className="btn secondary" disabled={ledgerPage >= ledgerTotalPages || ledgerLoading} onClick={() => loadLedger(ledgerPage + 1)}>بعدی</button>
-                  <button type="button" className="btn secondary" disabled={ledgerPage >= ledgerTotalPages || ledgerLoading} onClick={() => loadLedger(ledgerTotalPages)}>انتها</button>
+                  <button type="button" className="btn secondary" disabled={ledgerPage >= ledgerTotalPages || tabLoader.loading} onClick={() => loadLedger(ledgerPage + 1)}>بعدی</button>
+                  <button type="button" className="btn secondary" disabled={ledgerPage >= ledgerTotalPages || tabLoader.loading} onClick={() => loadLedger(ledgerTotalPages)}>انتها</button>
                 </div>
               </div>
             </div>

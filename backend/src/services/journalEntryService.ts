@@ -1,7 +1,8 @@
 import { prisma } from "../lib/prisma";
 import { assertLineHasAmount, assertDateNotConfirmed } from "../utils/journalEntryValidation";
+import { toBaseCurrencyAmount } from "../utils/currencyConversion";
 
-export type IssuingSystemType = "ACCOUNTING" | "ACCOUNTING_EXCEL_IMPORT" | "ACCOUNT_CLOSING" | "OPENING_CLOSING" | "WAREHOUSE" | "PURCHASE";
+export type IssuingSystemType = "ACCOUNTING" | "ACCOUNTING_EXCEL_IMPORT" | "ACCOUNT_CLOSING" | "OPENING_CLOSING" | "WAREHOUSE" | "PURCHASE" | "SALES";
 
 export interface IssueLineInput {
   accountId: number;
@@ -39,7 +40,15 @@ export interface IssueJournalEntryResult {
   number: number;
   referenceNumber: number;
   dailyNumber: number;
+  /** پیام موفقیت استاندارد صدور سند — طبق تصمیم صریح کاربر، چون این تابع «نقطه‌ی مرکزی و یکتای صدور
+   * سند حسابداری در کل سیستم» است، این پیام هم باید فقط همین‌جا یک‌بار تعریف شود، نه در هر صفحه‌ی
+   * فراخواننده (که قبلاً همه‌جا با flash() عمومیِ «تغییرات ذخیره شد» جایگزین می‌شد — درست برای
+   * ذخیره‌ی یک پیش‌نویس، غلط برای صدور واقعی سند). هر مسیر/صفحه‌ای که این تابع را صدا می‌زند باید
+   * دقیقاً همین مقدار را (نه یک رشته‌ی جدید) در پاسخ موفقیتش برگرداند/نمایش دهد. */
+  message: string;
 }
+
+export const JOURNAL_ENTRY_ISSUED_MESSAGE = "سند با موفقیت صادر شد";
 
 /**
  * نقطه‌ی مرکزی و یکتای صدور سند حسابداری در کل سیستم.
@@ -73,8 +82,19 @@ export async function issueJournalEntry(opts: IssueJournalEntryOptions): Promise
   let totalDebit = 0;
   let totalCredit = 0;
   for (const [idx, line] of opts.lines.entries()) {
-    const debit = Number(line.debit) || 0;
-    const credit = Number(line.credit) || 0;
+    let debit = Number(line.debit) || 0;
+    let credit = Number(line.credit) || 0;
+    // قاعده‌ی عمومی سطح پایه (طبق Documents/SaleInvoiceVoucher.md، ولی مخصوص فاکتور فروش نیست — باید
+    // در همه‌ی محل‌های صدور سند حسابداری در کل سیستم اعمال شود، برای همین اینجا در نقطه‌ی مرکزی و یکتای
+    // صدور سند پیاده شده، نه در یک فراخواننده‌ی خاص): اگر ردیفی قرار بوده بدهکار باشد ولی مبلغ محاسبه‌شده
+    // منفی درآمده، جهت آن معکوس و مقدار مثبت در بستانکار ثبت می‌شود (و برعکس).
+    if (debit < 0) {
+      credit += -debit;
+      debit = 0;
+    } else if (credit < 0) {
+      debit += -credit;
+      credit = 0;
+    }
     assertLineHasAmount(debit, credit, `ردیف ${idx + 1}`);
 
     const currency = await prisma.currency.findUnique({ where: { id: line.currencyId } });
@@ -84,8 +104,8 @@ export async function issueJournalEntry(opts: IssueJournalEntryOptions): Promise
     const fxRate = isBaseLine ? 1 : Number(line.fxRate) || 0;
     if (!isBaseLine && fxRate <= 0) throw new Error(`نرخ تبدیل ارز برای ردیف ${idx + 1} (ارزی) الزامی است`);
 
-    const baseDebit = (debit * fxRate) / currency.baseVolume;
-    const baseCredit = (credit * fxRate) / currency.baseVolume;
+    const baseDebit = isBaseLine ? debit : toBaseCurrencyAmount(debit, fxRate, currency);
+    const baseCredit = isBaseLine ? credit : toBaseCurrencyAmount(credit, fxRate, currency);
     totalDebit += baseDebit;
     totalCredit += baseCredit;
 
@@ -152,5 +172,11 @@ export async function issueJournalEntry(opts: IssueJournalEntryOptions): Promise
     });
   }
 
-  return { id: entry.id, number: entry.number, referenceNumber: entry.referenceNumber, dailyNumber: entry.dailyNumber };
+  return {
+    id: entry.id,
+    number: entry.number,
+    referenceNumber: entry.referenceNumber,
+    dailyNumber: entry.dailyNumber,
+    message: JOURNAL_ENTRY_ISSUED_MESSAGE,
+  };
 }

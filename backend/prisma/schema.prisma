@@ -386,6 +386,29 @@ model OrgUnit {
   orgStructure     OrgStructure      @relation(fields: [orgStructureId], references: [id])
   purchaseRequests PurchaseRequest[]
   supplyRequests   SupplyRequest[]
+  // طبق تصمیم صریح کاربر: این فیلد فقط برای الزام schema-level پریزما (هر رابطه باید روی هر دو طرف
+  // فیلد داشته باشد، وگرنه validate خطای P1012 می‌دهد) نگه داشته شده — عمداً در هیچ route/پاسخ/صفحه‌ی
+  // مربوط به واحد سازمانی استفاده نمی‌شود؛ ارجاع واقعی همیشه از سمت SalesCenter است، نه برعکس.
+  salesCenters     SalesCenter[]
+}
+
+// «مرکز فروش» — موجودیت عملیاتی فروش، وابسته به یک واحد سازمانی، برای شناسایی مرکز فروش مسئول یک سند
+// فروش. یک واحد سازمانی می‌تواند چندین مرکز فروش داشته باشد (۱ به چند)؛ دقیقاً هم‌الگوی WarehouseGroup/
+// PurchaseType/SalesType (کد ساده‌ی سریالی، نه کد تفصیل — برخلاف CostCenter که بخشی از رجیستری
+// DetailCodeUsage است، این‌جا چنین اشتراکی خواسته نشده).
+model SalesCenter {
+  id                 Int      @id @default(autoincrement())
+  code               Int      @unique
+  title              String   @unique
+  description        String?
+  organizationUnitId Int
+  isActive           Boolean  @default(true)
+  hasTransactions    Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  organizationUnit   OrgUnit  @relation(fields: [organizationUnitId], references: [id])
+  salesQuotes        SalesQuote[]
+  salesOrders        SalesOrder[]
+  salesInvoices      SalesInvoice[]
 }
 
 model CashBox {
@@ -474,30 +497,39 @@ model JournalEntry {
   sources             JournalEntrySource[]
   openingClosingEntry OpeningClosingEntry?
   purchaseInvoice     PurchaseInvoice?
+  servicePurchaseInvoice ServicePurchaseInvoice?
+  salesInvoice        SalesInvoice?
   warehouseJournalEntryIssuance WarehouseJournalEntryIssuance?
 
   @@unique([fiscalPeriodId, number])
 }
 
-/// هر بار که کاربر از فرم «صدور سند حسابداری» (اسناد انبار) با انتخاب «تا تاریخ»/گروه‌های حسابداری، سند
-/// صادر می‌کند، یک ردیف هدر اینجا ذخیره می‌شود (طبق تصمیم صریح کاربر: این فرم دیگر صرفاً یک فرم واسط
-/// بی‌سابقه نیست) — تا بشود بعداً همان سند را از همین‌جا مشاهده/حذف کرد؛ ردیف‌های واقعی از
-/// DocumentItemAmount (با همان معیار toDate/accountingGroupIds) دوباره محاسبه می‌شوند، نه اینکه اینجا
-/// تکرار شوند.
+/// طبق تصمیم صریح کاربر (۱۴۰۵/۰۶/۱۶): این فرم اکنون یک چرخه‌ی ذخیره→صدور واقعی دارد، دقیقاً هم‌الگوی
+/// فاکتور خرید (DRAFT→APPROVED). با زدن «ذخیره»، ردیف‌های DocumentItemAmount مطابق فیلتر جاری از طریق
+/// warehouseJournalEntryIssuanceId به همین هدر «قفل» می‌شوند (دیگر در پیش‌نمایش/candidates یک فرم دیگر
+/// ظاهر نمی‌شوند) — تا وقتی سند صادر نشده، ذخیره‌ی دوباره مجاز است (قفل قبلی آزاد و دوباره محاسبه می‌شود).
+/// با زدن «صدور سند حسابداری» دقیقاً همان ردیف‌های قفل‌شده (نه یک کوئری تازه) صاحب سند می‌شوند.
 model WarehouseJournalEntryIssuance {
-  id                 Int           @id @default(autoincrement())
+  id                 Int                                @id @default(autoincrement())
   fiscalPeriodId     Int
   number             Int
-  toDate             DateTime      @db.Date
+  toDate             DateTime                           @db.Date
   /// شناسه‌ی گروه‌های حسابداری انتخاب‌شده، جدا شده با کاما؛ null یعنی «همه‌ی گروه‌ها»
   accountingGroupIds String?
   rowCount           Int
-  journalEntryId     Int?          @unique
-  createdAt          DateTime      @default(now())
-  fiscalPeriod       FiscalPeriod  @relation(fields: [fiscalPeriodId], references: [id])
-  journalEntry       JournalEntry? @relation(fields: [journalEntryId], references: [id])
+  status             WarehouseJournalEntryIssuanceStatus @default(DRAFT)
+  journalEntryId     Int?                               @unique
+  createdAt          DateTime                           @default(now())
+  fiscalPeriod       FiscalPeriod                       @relation(fields: [fiscalPeriodId], references: [id])
+  journalEntry       JournalEntry?                      @relation(fields: [journalEntryId], references: [id])
+  documentItemAmounts DocumentItemAmount[]
 
   @@unique([fiscalPeriodId, number])
+}
+
+enum WarehouseJournalEntryIssuanceStatus {
+  DRAFT
+  ISSUED
 }
 
 model JournalEntrySource {
@@ -858,7 +890,6 @@ model Batch {
   goodsItem             GoodsItem              @relation(fields: [goodsItemId], references: [id])
   supplier              Party?                 @relation("BatchSupplier", fields: [supplierId], references: [id])
   inventoryLines        InventoryLineBatch[]
-  serials               Serial[]
 
   @@unique([goodsItemId, batchNumber])
 }
@@ -867,8 +898,8 @@ model Batch {
 // سریال‌های موجود را برای هر سطر سند انتخاب/مصرف می‌کند (از طریق جدول واسط InventoryLineSerial که
 // در فاز اتصال به اسناد انبار اضافه می‌شود، نه اینجا).
 // طبق «اصلاح مدل رهگیری کالا»: برای کالای سریال‌دار، بچ و تاریخ انقضا متعلق به خود سریال هستند (نه
-// ردیف سند)؛ batchId اختیاری است (سریال می‌تواند بدون بچ باشد) و expiryDate مستقل از بچ هم قابل ثبت
-// است (وقتی بچی انتخاب نشده).
+// ردیف سند). طبق تصمیم صریح کاربر (۲۰۲۶/۰۹/۰۷)، batch دیگر FK به جدول Batch نیست — یک فیلد متنی آزاد
+// و کاملا مستقل روی خودِ سریال است (نه یک رکورد Master مشترک)؛ expiryDate هم مستقل و همیشه قابل ثبت است.
 // طبق «انتخاب سریال و بچ»: هر سریال یک چرخه‌ی عمر دارد (تعریف‌شده → رسید‌شده → خارج‌شده) که با
 // قطعی/برگشت‌ازقطعی هر سند انبار مرتبط، خودکار تغییر می‌کند. step دقیقاً هم‌الگوی ChequeItem.step
 // است (نگاه کنید به توضیح بالای آن مدل): با هر رویداد چرخه‌ی عمر یک واحد بالا می‌رود؛ همان مقدار روی
@@ -877,7 +908,7 @@ model Serial {
   id              Int                    @id @default(autoincrement())
   goodsItemId     Int
   serialNumber    String
-  batchId         Int?
+  batch           String?
   expiryDate      DateTime?              @db.Date
   status          SerialStatus           @default(DEFINED)
   step            Int                    @default(1)
@@ -886,7 +917,6 @@ model Serial {
   hasTransactions Boolean                @default(false)
   createdAt       DateTime               @default(now())
   goodsItem       GoodsItem              @relation(fields: [goodsItemId], references: [id])
-  batch           Batch?                 @relation(fields: [batchId], references: [id])
   lines           InventoryLineSerial[]
 
   @@unique([goodsItemId, serialNumber])
@@ -931,7 +961,7 @@ model GoodsServiceAccountingSetting {
   accountType         GoodsAccountType
   warehouseGroupId    Int?
   accountId           Int
-  salesTypeRef        Int?
+  salesTypeId         Int?
   warehouseDocType    InventoryDocumentType?
   purchaseTypeId      Int?
   hasTransactions     Boolean          @default(false)
@@ -940,6 +970,7 @@ model GoodsServiceAccountingSetting {
   accountingGroup     AccountingGroup  @relation(fields: [accountingGroupId], references: [id])
   warehouseGroup      WarehouseGroup?  @relation(fields: [warehouseGroupId], references: [id])
   purchaseType        PurchaseType?    @relation(fields: [purchaseTypeId], references: [id])
+  salesType           SalesType?       @relation(fields: [salesTypeId], references: [id])
 }
 
 model GoodsRequestType {
@@ -1123,6 +1154,21 @@ model PurchaseType {
   hasTransactions                Boolean                          @default(false)
   createdAt                      DateTime                         @default(now())
   purchaseInvoices               PurchaseInvoice[]
+  servicePurchaseInvoices        ServicePurchaseInvoice[]
+  goodsServiceAccountingSettings GoodsServiceAccountingSetting[]
+}
+
+/// دقیقاً هم‌الگوی PurchaseType — طبق تصمیم صریح کاربر (۱۴۰۵/۰۶/۱۷).
+model SalesType {
+  id                             Int                              @id @default(autoincrement())
+  code                           Int                              @unique
+  title                          String                           @unique
+  nature                         SalesNature
+  hasTransactions                Boolean                          @default(false)
+  createdAt                      DateTime                         @default(now())
+  salesInvoices                  SalesInvoice[]
+  salesQuotes                    SalesQuote[]
+  salesOrders                    SalesOrder[]
   goodsServiceAccountingSettings GoodsServiceAccountingSetting[]
 }
 
@@ -1738,17 +1784,24 @@ model ServicePurchaseInvoice {
   date                DateTime                     @db.Date
   vendorInvoiceNumber String?
   partyId             Int
+  purchaseTypeId      Int
   currencyId          Int
+  /// نرخ تبدیل ارز فاکتور به ارز مبنا — دقیقاً هم‌الگوی PurchaseInvoice.fxRate (کاربر وارد می‌کند، نه از
+  /// جدول نرخ ارز؛ اگر ارز فاکتور همان ارز مبنا باشد همیشه ۱ ذخیره می‌شود).
+  fxRate              Decimal                      @default(1) @db.Decimal(18, 6)
   description         String?
   status              RequestStatus                @default(DRAFT)
   approverId          Int?
   approvedAt          DateTime?
+  journalEntryId      Int?                         @unique
   createdAt           DateTime                     @default(now())
   updatedAt           DateTime                     @default(now()) @updatedAt
   currency            Currency                     @relation(fields: [currencyId], references: [id])
   fiscalPeriod        FiscalPeriod                 @relation(fields: [fiscalPeriodId], references: [id])
   party               Party                        @relation(fields: [partyId], references: [id])
+  purchaseType        PurchaseType                 @relation(fields: [purchaseTypeId], references: [id])
   approver            User?                        @relation("ServicePurchaseInvoiceApprover", fields: [approverId], references: [id])
+  journalEntry        JournalEntry?                @relation(fields: [journalEntryId], references: [id])
   lines               ServicePurchaseInvoiceLine[]
 
   @@unique([fiscalPeriodId, number])
@@ -1760,6 +1813,12 @@ model ServicePurchaseInvoiceLine {
   rowOrder                 Int                                    @default(0)
   serviceId                Int
   amount                   Decimal                                @db.Decimal(36, 10)
+  discount                 Decimal                                @default(0) @db.Decimal(36, 10)
+  /// amount/discount به ارز مبنا — دقیقاً هم‌الگوی PurchaseInvoiceLine.baseAmount/baseDiscount: فقط برای
+  /// بایگانی/محاسبات (از جمله ارزش‌افزوده) نگه داشته می‌شود، در UI/پاسخ API نمی‌آید، با هر ذخیره بازمحاسبه می‌شود.
+  baseAmount               Decimal                                @db.Decimal(36, 10)
+  baseDiscount             Decimal                                @default(0) @db.Decimal(36, 10)
+  vatAmount                Decimal                                @default(0) @db.Decimal(36, 10)
   // بدون مبنا / رسید انبار — طبق بند ۲ مستند، ساختار باید امکان افزودن مبناهای دیگر (مثل قرارداد) را در
   // آینده بدهد؛ چون این enum از قبل دقیقاً همین دو مقدار را دارد، دوباره استفاده شده (نه enum تازه).
   basis                    PurchaseInvoiceBasis                   @default(NO_BASIS)
@@ -1810,6 +1869,8 @@ model SalesQuote {
   number         Int
   date           DateTime         @db.Date
   customerId     Int
+  salesTypeId    Int
+  salesCenterId  Int
   currencyId     Int
   description    String?
   status         SalesDocStatus   @default(DRAFT)
@@ -1817,6 +1878,8 @@ model SalesQuote {
   updatedAt      DateTime         @default(now()) @updatedAt
   currency       Currency         @relation(fields: [currencyId], references: [id])
   customer       Customer         @relation(fields: [customerId], references: [id])
+  salesType      SalesType        @relation(fields: [salesTypeId], references: [id])
+  salesCenter    SalesCenter      @relation(fields: [salesCenterId], references: [id])
   fiscalPeriod   FiscalPeriod     @relation(fields: [fiscalPeriodId], references: [id])
   lines          SalesQuoteLine[]
 
@@ -1832,6 +1895,10 @@ model SalesQuoteLine {
   quantity        Decimal          @db.Decimal(36, 10)
   unitPrice       Decimal          @db.Decimal(36, 10)
   amount          Decimal          @db.Decimal(36, 10)
+  /// مالیات بر ارزش‌افزوده‌ی این ردیف — طبق تصمیم صریح کاربر، برخلاف فاکتور خرید/فاکتور فروش (که همیشه
+  /// به ارز مبنا محاسبه می‌شود)، اینجا همیشه به همان ارز هدر (amount) محاسبه/ذخیره می‌شود، چون
+  /// پیش‌فاکتور اصلاً fxRate/تبدیل‌ارز ندارد (سندی صرفاً اطلاعاتی، بدون اثر حسابداری).
+  vatAmount       Decimal          @default(0) @db.Decimal(36, 10)
   description     String?
   salesOrderLines SalesOrderLine[] @relation("SalesOrderSourceSalesQuoteLine")
   goodsItem       GoodsItem        @relation(fields: [goodsItemId], references: [id])
@@ -1846,6 +1913,8 @@ model SalesOrder {
   date           DateTime         @db.Date
   basis          SalesOrderBasis
   customerId     Int
+  salesTypeId    Int
+  salesCenterId  Int
   currencyId     Int
   description    String?
   status         SalesDocStatus   @default(DRAFT)
@@ -1853,6 +1922,8 @@ model SalesOrder {
   updatedAt      DateTime         @default(now()) @updatedAt
   currency       Currency         @relation(fields: [currencyId], references: [id])
   customer       Customer         @relation(fields: [customerId], references: [id])
+  salesType      SalesType        @relation(fields: [salesTypeId], references: [id])
+  salesCenter    SalesCenter      @relation(fields: [salesCenterId], references: [id])
   fiscalPeriod   FiscalPeriod     @relation(fields: [fiscalPeriodId], references: [id])
   lines          SalesOrderLine[]
 
@@ -1869,6 +1940,9 @@ model SalesOrderLine {
   quantity               Decimal                 @db.Decimal(36, 10)
   unitPrice              Decimal                 @db.Decimal(36, 10)
   amount                 Decimal                 @db.Decimal(36, 10)
+  /// طبق تصمیم صریح کاربر، هم‌الگوی SalesQuoteLine.vatAmount: همیشه به همان ارز هدر محاسبه/ذخیره
+  /// می‌شود، نه ارز مبنا — این فرم هم fxRate ندارد.
+  vatAmount              Decimal                 @default(0) @db.Decimal(36, 10)
   description            String?
   salesDeliveryLines     SalesDeliveryLine[]     @relation("SalesDeliverySourceSalesOrderLine")
   goodsItem              GoodsItem               @relation(fields: [goodsItemId], references: [id])
@@ -2144,6 +2218,11 @@ model DocumentItemAmount {
   difference                             Decimal                               @db.Decimal(18, 2)
   effectiveDate                          DateTime                              @default(now())
   journalEntryId                         Int?
+  // فقط تا وقتی این ردیف داخل فرم «صدور سند حسابداری» (اسناد انبار) ذخیره شده — چه هنوز صادر نشده (پیش‌نویس)
+  // چه صادرشده — تا آن فرم بتواند دقیقاً همان ردیف‌های ذخیره‌شده‌ی خودش را (نه یک کوئری تازه) بازیابی/صادر
+  // کند؛ با حذف کامل آن پیش‌نویس (قبل از صدور) این فیلد دوباره null می‌شود (SetNull، نه Cascade — طبق
+  // Documents/WareHouseAmountChanges.md این جدول append-only است، خودِ ردیف هرگز حذف نمی‌شود).
+  warehouseJournalEntryIssuanceId        Int?
   // فقط برای priceType=ENGINE_PRICING/ENGINE_CORRECTION — نگاه کنید به یادداشت amounts روی GoodsPricingStatus
   goodsPricingStatusId                   Int?
   // فقط برای priceType=INBOUND_RELATED_COST — ردیابی به ردیف فاکتور خرید خدماتی که این رکورد را ایجاد کرده
@@ -2152,6 +2231,7 @@ model DocumentItemAmount {
   createdById                            Int?
   line                                   InventoryDocumentLine                 @relation(fields: [lineId], references: [id], onDelete: Cascade)
   journalEntry                           JournalEntry?                         @relation(fields: [journalEntryId], references: [id])
+  warehouseJournalEntryIssuance          WarehouseJournalEntryIssuance?        @relation(fields: [warehouseJournalEntryIssuanceId], references: [id], onDelete: SetNull)
   goodsPricingStatus                     GoodsPricingStatus?                   @relation(fields: [goodsPricingStatusId], references: [id], onDelete: Cascade)
   // onDelete عمداً SetNull است، نه Cascade: این جدول تاریخچه‌ی append-only مبلغ ردیف رسید است (طبق
   // Documents/WareHouseAmountChanges.md) — حذف بعدیِ فاکتور خرید خدماتِ ایجادکننده (مجاز فقط در وضعیت
@@ -2162,6 +2242,7 @@ model DocumentItemAmount {
   createdBy                              User?                                 @relation(fields: [createdById], references: [id])
 
   @@index([lineId])
+  @@index([warehouseJournalEntryIssuanceId])
 }
 
 // جدول موقت/کش — نه تاریخچه: طبق تصمیم صریح کاربر، هر بار که «قیمت‌گذاری اسناد انبار» با دکمه‌ی «لود
@@ -2191,15 +2272,24 @@ model SalesInvoice {
   date                   DateTime                @db.Date
   basis                  SalesInvoiceBasis
   customerId             Int
+  salesTypeId            Int
+  salesCenterId          Int
   currencyId             Int
+  /// نرخ تبدیل ارز فاکتور به ارز مبنا — دقیقاً هم‌الگوی PurchaseInvoice.fxRate (کاربر وارد می‌کند، نه از
+  /// جدول نرخ ارز؛ اگر ارز فاکتور همان ارز مبنا باشد همیشه ۱ ذخیره می‌شود).
+  fxRate                 Decimal                 @default(1) @db.Decimal(18, 6)
   description            String?
   status                 SalesDocStatus          @default(DRAFT)
+  journalEntryId         Int?                    @unique
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @default(now()) @updatedAt
   receiptSettlementLines ReceiptSettlementLine[]
   currency               Currency                @relation(fields: [currencyId], references: [id])
   customer               Customer                @relation(fields: [customerId], references: [id])
+  salesType              SalesType               @relation(fields: [salesTypeId], references: [id])
+  salesCenter            SalesCenter             @relation(fields: [salesCenterId], references: [id])
   fiscalPeriod           FiscalPeriod            @relation(fields: [fiscalPeriodId], references: [id])
+  journalEntry           JournalEntry?           @relation(fields: [journalEntryId], references: [id])
   lines                  SalesInvoiceLine[]
 
   @@unique([fiscalPeriodId, number])
@@ -2215,6 +2305,13 @@ model SalesInvoiceLine {
   quantity              Decimal                @db.Decimal(36, 10)
   unitPrice             Decimal                @db.Decimal(36, 10)
   amount                Decimal                @db.Decimal(36, 10)
+  discount              Decimal                @default(0) @db.Decimal(36, 10)
+  /// amount/discount به ارز مبنا — دقیقاً هم‌الگوی PurchaseInvoiceLine.baseAmount/baseDiscount: فقط برای
+  /// بایگانی/محاسبات (از جمله ارزش‌افزوده که همیشه به ارز مبنا محاسبه می‌شود) نگه داشته می‌شود؛ در UI
+  /// نگهداری نمی‌شود و در پاسخ API هم برنمی‌گردد، با هر ذخیره‌ی فاکتور بازمحاسبه می‌شود.
+  baseAmount            Decimal                @db.Decimal(36, 10)
+  baseDiscount          Decimal                @default(0) @db.Decimal(36, 10)
+  vatAmount             Decimal                @default(0) @db.Decimal(36, 10)
   description           String?
   goodsItem             GoodsItem              @relation(fields: [goodsItemId], references: [id])
   salesInvoice          SalesInvoice           @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
@@ -2468,6 +2565,7 @@ enum IssuingSystem {
   OPENING_CLOSING
   WAREHOUSE
   PURCHASE
+  SALES
 }
 
 enum OpeningClosingType {
@@ -2598,6 +2696,11 @@ enum PurchaseInvoiceBasis {
 enum PurchaseNature {
   IMPORTED
   DOMESTIC
+}
+
+enum SalesNature {
+  DOMESTIC
+  EXPORT
 }
 
 enum PaymentInstrumentType {

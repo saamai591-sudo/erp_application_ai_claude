@@ -330,8 +330,11 @@ export const REGISTRY: ModuleDef[] = [
           {
             key: "accounting-issue-journal-entries",
             title: "صدور سند حسابداری",
-            baseActions: ["view", "delete"],
-            actions: [{ key: "issue", title: "صدور سند" }],
+            baseActions: CRUD,
+            actions: [
+              { key: "issue", title: "صدور سند" },
+              { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
+            ],
           },
         ],
       },
@@ -399,7 +402,16 @@ export const REGISTRY: ModuleDef[] = [
               { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
             ],
           },
-          { key: "service-purchase-invoices", title: "فاکتور خرید خدمات", baseActions: CRUD, actions: APPROVE_UNAPPROVE },
+          {
+            key: "service-purchase-invoices",
+            title: "فاکتور خرید خدمات",
+            baseActions: CRUD,
+            actions: [
+              ...APPROVE_UNAPPROVE,
+              { key: "issueJournalEntry", title: "صدور سند حسابداری" },
+              { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
+            ],
+          },
         ],
       },
     ],
@@ -411,7 +423,11 @@ export const REGISTRY: ModuleDef[] = [
       {
         key: "config",
         title: "تنظیمات",
-        forms: [{ key: "customers", title: "مشتری", baseActions: CRUD }],
+        forms: [
+          { key: "customers", title: "مشتری", baseActions: CRUD },
+          { key: "sales-types", title: "نوع فروش", baseActions: CRUD },
+          { key: "sales-centers", title: "مرکز فروش", baseActions: CRUD },
+        ],
       },
       {
         key: "operations",
@@ -420,8 +436,21 @@ export const REGISTRY: ModuleDef[] = [
           { key: "sales-quotes", title: "پیش‌فاکتور", baseActions: CRUD, actions: APPROVE_UNAPPROVE },
           { key: "sales-orders", title: "سفارش فروش", baseActions: CRUD, actions: APPROVE_UNAPPROVE },
           { key: "sales-deliveries", title: "حواله فروش", baseActions: CRUD, actions: [VIEW_ACCOUNTING] },
-          { key: "sales-invoices", title: "فاکتور فروش", baseActions: CRUD },
+          {
+            key: "sales-invoices",
+            title: "فاکتور فروش",
+            baseActions: CRUD,
+            actions: [
+              { key: "issueJournalEntry", title: "صدور سند حسابداری" },
+              { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
+            ],
+          },
         ],
+      },
+      {
+        key: "reports",
+        title: "گزارش",
+        forms: [{ key: "sales-review", title: "مرور فروش", baseActions: ["view"] }],
       },
     ],
   },

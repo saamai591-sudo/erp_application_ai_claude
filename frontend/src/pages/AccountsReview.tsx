@@ -7,16 +7,17 @@ import { RefreshButton } from "../components/RefreshButton";
 import { useChainedMultiSelect, SelectId } from "../lib/useChainedMultiSelect";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
-import { getSavedFiscalPeriodId } from "../lib/userSettings";
+import { resolveReviewDateRange, FiscalPeriodRange } from "../lib/fiscalYearDefaultDate";
+import { useReviewTabLoader, useReviewTabActivation, useReviewTabViewState, serializeForDepsKey } from "../lib/useReviewTabLoader";
 import { useTabs } from "../lib/TabsContext";
 import { getAccountsReviewSnapshot, setAccountsReviewSnapshot, DetailQueryState } from "../lib/accountsReviewCache";
 import { api } from "../lib/api";
 import { InfoHint } from "../components/InfoHint";
+import { ExcelExportIcon, PrintIcon } from "../components/GridExportIcons";
 import { FilterIcon, SortIcon, FilterPopover, ActiveFilter, ColumnFilterType } from "../components/DataTable";
 
 interface Level { id: number; order: number; title: string }
 interface DocType { id: number; title: string; systemKey: string | null }
-interface FiscalPeriod { id: number; title: string; fromDate: string; toDate: string }
 interface BalanceRow {
   id: SelectId;
   code: string;
@@ -42,15 +43,6 @@ interface LedgerRow {
   runningBalanceNature: "DEBIT" | "CREDIT";
 }
 
-function ClearFilterIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-      <path d="M3 5h13M3 12h7M3 19h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M17 15l5 5M22 15l-5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 const STATUS_FA: Record<string, string> = { DRAFT: "ثبت", REVIEW: "بررسی", APPROVED: "تایید" };
 const NATURE_FA: Record<string, string> = { DEBIT: "بدهکار", CREDIT: "بستانکار" };
 const ISSUING_SYSTEM_FA: Record<string, string> = {
@@ -66,14 +58,16 @@ const DETAIL_SLOTS = [1, 2, 3] as const;
 const balanceColumns = [
   { header: "کد", render: (r: BalanceRow) => toFaDigits(r.code), width: "110px", sortValue: (r: BalanceRow) => r.code, filterType: "string" as ColumnFilterType, filterValue: (r: BalanceRow) => r.code },
   { header: "عنوان", render: (r: BalanceRow) => r.title, sortValue: (r: BalanceRow) => r.title, filterType: "string" as ColumnFilterType, filterValue: (r: BalanceRow) => r.title },
-  { header: "جمع بدهکار", render: (r: BalanceRow) => formatAmountFa(r.totalDebit), sortValue: (r: BalanceRow) => r.totalDebit, filterType: "number" as ColumnFilterType, filterValue: (r: BalanceRow) => r.totalDebit },
-  { header: "جمع بستانکار", render: (r: BalanceRow) => formatAmountFa(r.totalCredit), sortValue: (r: BalanceRow) => r.totalCredit, filterType: "number" as ColumnFilterType, filterValue: (r: BalanceRow) => r.totalCredit },
+  { header: "جمع بدهکار", render: (r: BalanceRow) => formatAmountFa(r.totalDebit), sortValue: (r: BalanceRow) => r.totalDebit, filterType: "number" as ColumnFilterType, filterValue: (r: BalanceRow) => r.totalDebit, decimal: true },
+  { header: "جمع بستانکار", render: (r: BalanceRow) => formatAmountFa(r.totalCredit), sortValue: (r: BalanceRow) => r.totalCredit, filterType: "number" as ColumnFilterType, filterValue: (r: BalanceRow) => r.totalCredit, decimal: true },
   {
     header: "مانده بدهکار",
     render: (r: BalanceRow) => (r.balanceNature === "DEBIT" && r.balance ? formatAmountFa(r.balance) : "—"),
     sortValue: (r: BalanceRow) => (r.balanceNature === "DEBIT" ? r.balance : 0),
     filterType: "number" as ColumnFilterType,
     filterValue: (r: BalanceRow) => (r.balanceNature === "DEBIT" ? r.balance : 0),
+    decimal: true,
+    totalValue: (r: BalanceRow) => (r.balanceNature === "DEBIT" ? r.balance : 0),
   },
   {
     header: "مانده بستانکار",
@@ -81,14 +75,19 @@ const balanceColumns = [
     sortValue: (r: BalanceRow) => (r.balanceNature === "CREDIT" ? r.balance : 0),
     filterType: "number" as ColumnFilterType,
     filterValue: (r: BalanceRow) => (r.balanceNature === "CREDIT" ? r.balance : 0),
+    decimal: true,
+    totalValue: (r: BalanceRow) => (r.balanceNature === "CREDIT" ? r.balance : 0),
   },
 ];
 
 // نسخه‌ی ستون‌های تب‌های تفصیل: مثل balanceColumns ولی «مانده بدهکار»/«مانده بستانکار» فاقد sortValue/filterValue هستند
 // چون این دو، نمایش تفکیک‌شده‌ی یک مقدار محاسبه‌شده (balance/balanceNature) هستند و سمت سرور قابل مرتب‌سازی/فیلتر نیستند
 // (مرتب‌سازی و فیلتر واقعی روی «جمع بدهکار»/«جمع بستانکار» که مقادیر مستقیم دیتابیس هستند، همچنان کاملاً پشتیبانی می‌شود)
+// — decimal/totalValue عمداً حفظ می‌شوند: جمع پای گرید کاملاً سمت کلاینت است، به فیلتر/مرتب‌سازی سمت سرور نیازی ندارد.
 const detailBalanceColumns = balanceColumns.map((c) =>
-  c.header === "مانده بدهکار" || c.header === "مانده بستانکار" ? { header: c.header, render: c.render, width: (c as any).width } : c
+  c.header === "مانده بدهکار" || c.header === "مانده بستانکار"
+    ? { header: c.header, render: c.render, width: (c as any).width, decimal: (c as any).decimal, totalValue: (c as any).totalValue }
+    : c
 );
 
 // نگاشت عنوان فارسی ستون به نام فیلد سمت سرور (route بک‌اند /reports/detail-summary)
@@ -125,7 +124,7 @@ export default function AccountsReview() {
   const [docTypes, setDocTypes] = useState<DocType[]>([]);
   const [activeTab, setActiveTab] = useState(snapshot?.activeTab ?? 0);
   const [tabData, setTabData] = useState<Record<number, BalanceRow[]>>(snapshot?.tabData ?? {});
-  const [tabLoading, setTabLoading] = useState(false);
+  const tabLoader = useReviewTabLoader(snapshot?.loadedTabs ?? []);
   const [ledgerRows, setLedgerRows] = useState<LedgerRow[]>(snapshot?.ledgerRows ?? []);
   const [ledgerPage, setLedgerPage] = useState(1);
   const [ledgerPageSize, setLedgerPageSize] = useState(snapshot?.ledgerPageSize ?? 25);
@@ -133,8 +132,6 @@ export default function AccountsReview() {
   const [ledgerTotalPages, setLedgerTotalPages] = useState(1);
   const [detailQuery, setDetailQuery] = useState<Record<number, DetailQueryState>>(snapshot?.detailQuery ?? {});
   const [detailTotal, setDetailTotal] = useState<Record<number, number>>(snapshot?.detailTotal ?? {});
-  const [loadedTabs, setLoadedTabs] = useState<Set<number>>(new Set(snapshot?.loadedTabs ?? []));
-  const [ledgerLoading, setLedgerLoading] = useState(false);
   const [ledgerSort, setLedgerSort] = useState<{ header: string; dir: "asc" | "desc" } | null>(snapshot?.ledgerSort ?? null);
   const [ledgerFilters, setLedgerFilters] = useState<Record<string, ActiveFilter>>(snapshot?.ledgerFilters ?? {});
   const [openLedgerFilterFor, setOpenLedgerFilterFor] = useState<string | null>(null);
@@ -160,16 +157,9 @@ export default function AccountsReview() {
   const detailTabStart = accountTabCount;
   const ledgerTabIndex = accountTabCount + 3;
 
-  const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
+  const [periods, setPeriods] = useState<FiscalPeriodRange[]>([]);
   const chain = useChainedMultiSelect(snapshot?.chainState);
-
-  function defaultDateRange(periodsList: FiscalPeriod[]) {
-    const savedId = getSavedFiscalPeriodId();
-    const current =
-      (savedId && periodsList.find((p) => String(p.id) === savedId)) ||
-      [...periodsList].sort((a, b) => (a.toDate < b.toDate ? 1 : -1))[0];
-    return current ? { fromDate: current.fromDate.slice(0, 10), toDate: current.toDate.slice(0, 10) } : { fromDate: "", toDate: "" };
-  }
+  const tabView = useReviewTabViewState(activeTab, snapshot?.balanceViewState ?? {});
 
   // ذخیره‌ی زنده‌ی وضعیت در حافظه‌ی موقت بیرون از چرخه‌ی کامپوننت،
   // تا با رفتن به یک تب دیگر (مثلاً باز کردن سند از تب گردش) و بازگشت، وضعیت این صفحه از دست نرود.
@@ -181,19 +171,20 @@ export default function AccountsReview() {
       activeTab,
       filters,
       tabData,
+      balanceViewState: tabView.viewState,
       detailQuery,
       detailTotal,
       ledgerRows,
       ledgerPageSize,
       ledgerSort,
       ledgerFilters,
-      loadedTabs: Array.from(loadedTabs),
+      loadedTabs: Array.from(tabLoader.loadedTabs),
     });
-  }, [chain.selections, chain.order, activeTab, filters, tabData, detailQuery, detailTotal, ledgerRows, ledgerPageSize, ledgerSort, ledgerFilters, loadedTabs]);
+  }, [chain.selections, chain.order, activeTab, filters, tabData, tabView.viewState, detailQuery, detailTotal, ledgerRows, ledgerPageSize, ledgerSort, ledgerFilters, tabLoader.loadedTabs]);
 
   useEffect(() => {
     async function init() {
-      const [lvls, docs, per]: [Level[], DocType[], FiscalPeriod[]] = await Promise.all([
+      const [lvls, docs, per]: [Level[], DocType[], FiscalPeriodRange[]] = await Promise.all([
         api.get("/reporting-levels"),
         api.get("/document-types"),
         api.get("/fiscal-periods"),
@@ -201,16 +192,19 @@ export default function AccountsReview() {
       setLevels(lvls);
       setDocTypes(docs);
       setPeriods(per);
-      // اگر بازه‌ی تاریخ از قبل (از حافظه‌ی موقت) موجود نیست، پیش‌فرض دوره مالی جاری را ست کن
-      // و نوع سند «عملیاتی» را به‌صورت پیش‌فرض تیک بزن
-      const operational = docs.find((d) => d.systemKey === "OPERATIONAL");
+      // اگر بازه‌ی تاریخ از قبل (از حافظه‌ی موقت) موجود نیست، پیش‌فرض دوره مالی جاری را ست کن و همه‌ی
+      // انواع سند را پیش‌فرض تیک بزن — طبق تصمیم صریح کاربر، به‌جز «بستن حسابها» (اختتامیه‌ی سود و زیان)
+      // و «اختتامیه» (اختتامیه‌ی سال مالی) که نباید پیش‌فرض تیک باشند؛ هر نوع سند تازه‌ای که بعداً اضافه
+      // شود هم باید خودکار پیش‌فرض تیک باشد، پس این یک لیست سفید نیست بلکه استثنا روی همه است.
+      const excludedByDefault = new Set(["CLOSING_ACCOUNTS", "CLOSING"]);
+      const defaultDocTypeIds = new Set(docs.filter((d) => !excludedByDefault.has(d.systemKey || "")).map((d) => d.id));
       setFilters((prev) =>
         prev.fromDate
           ? prev
           : {
               ...prev,
-              ...defaultDateRange(per),
-              documentTypeIds: operational ? new Set([operational.id]) : prev.documentTypeIds,
+              ...resolveReviewDateRange(per),
+              documentTypeIds: defaultDocTypeIds,
             }
       );
     }
@@ -271,68 +265,64 @@ export default function AccountsReview() {
   }
 
   async function loadAccountTab(tabIndex: number) {
-    setTabLoading(true);
-    setError(null);
-    try {
-      const level = levels[tabIndex];
-      const p = new URLSearchParams(filterParams);
-      p.set("levelOrder", String(level.order));
-      const { parentIds, descendantIds } = accountConstraints(tabIndex);
-      if (parentIds.length) p.set("parentIds", parentIds.join(","));
-      if (descendantIds.length) p.set("descendantIds", descendantIds.join(","));
-      const details = detailConstraints(tabIndex);
-      DETAIL_SLOTS.forEach((slot) => {
-        if (details[slot].length) p.set(`detail${slot}Codes`, details[slot].join(","));
-      });
-      const data = await api.get(`/reports/trial-balance?${p.toString()}`);
-      setTabData((prev) => ({ ...prev, [tabIndex]: data }));
-      setLoadedTabs((prev) => new Set(prev).add(tabIndex));
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setTabLoading(false);
-    }
+    await tabLoader.run(
+      tabIndex,
+      async (isStale) => {
+        const level = levels[tabIndex];
+        const p = new URLSearchParams(filterParams);
+        p.set("levelOrder", String(level.order));
+        const { parentIds, descendantIds } = accountConstraints(tabIndex);
+        if (parentIds.length) p.set("parentIds", parentIds.join(","));
+        if (descendantIds.length) p.set("descendantIds", descendantIds.join(","));
+        const details = detailConstraints(tabIndex);
+        DETAIL_SLOTS.forEach((slot) => {
+          if (details[slot].length) p.set(`detail${slot}Codes`, details[slot].join(","));
+        });
+        const data = await api.get(`/reports/trial-balance?${p.toString()}`);
+        if (isStale()) return; // یک fetch تازه‌تر برای همین تب در راه است/رسیده — این پاسخ دیرآمده نادیده گرفته می‌شود
+        setTabData((prev) => ({ ...prev, [tabIndex]: data }));
+      },
+      setError
+    );
   }
 
   async function loadDetailTab(tabIndex: number, slot: 1 | 2 | 3) {
-    setTabLoading(true);
-    setError(null);
-    try {
-      const q = detailQuery[tabIndex] ?? DEFAULT_DETAIL_QUERY;
-      const p = new URLSearchParams(filterParams);
-      p.set("slot", String(slot));
-      const { parentIds } = accountConstraints(tabIndex);
-      if (parentIds.length) p.set("parentIds", parentIds.join(","));
-      const details = detailConstraints(tabIndex);
-      DETAIL_SLOTS.forEach((s) => {
-        if (s !== slot && details[s].length) p.set(`detail${s}Codes`, details[s].join(","));
-      });
-      p.set("page", String(q.page));
-      p.set("pageSize", String(q.pageSize));
-      if (q.sort) {
-        const field = DETAIL_SORT_FIELD_MAP[q.sort.header];
-        if (field) {
-          p.set("sortField", field);
-          p.set("sortDir", q.sort.dir);
+    await tabLoader.run(
+      tabIndex,
+      async (isStale) => {
+        const q = detailQuery[tabIndex] ?? DEFAULT_DETAIL_QUERY;
+        const p = new URLSearchParams(filterParams);
+        p.set("slot", String(slot));
+        const { parentIds } = accountConstraints(tabIndex);
+        if (parentIds.length) p.set("parentIds", parentIds.join(","));
+        const details = detailConstraints(tabIndex);
+        DETAIL_SLOTS.forEach((s) => {
+          if (s !== slot && details[s].length) p.set(`detail${s}Codes`, details[s].join(","));
+        });
+        p.set("page", String(q.page));
+        p.set("pageSize", String(q.pageSize));
+        if (q.sort) {
+          const field = DETAIL_SORT_FIELD_MAP[q.sort.header];
+          if (field) {
+            p.set("sortField", field);
+            p.set("sortDir", q.sort.dir);
+          }
         }
-      }
-      if (q.filters && Object.keys(q.filters).length) {
-        const mapped: Record<string, ActiveFilter> = {};
-        for (const [header, f] of Object.entries(q.filters)) {
-          const field = DETAIL_SORT_FIELD_MAP[header];
-          if (field) mapped[field] = f;
+        if (q.filters && Object.keys(q.filters).length) {
+          const mapped: Record<string, ActiveFilter> = {};
+          for (const [header, f] of Object.entries(q.filters)) {
+            const field = DETAIL_SORT_FIELD_MAP[header];
+            if (field) mapped[field] = f;
+          }
+          if (Object.keys(mapped).length) p.set("filters", JSON.stringify(mapped));
         }
-        if (Object.keys(mapped).length) p.set("filters", JSON.stringify(mapped));
-      }
-      const data = await api.get(`/reports/detail-summary?${p.toString()}`);
-      setTabData((prev) => ({ ...prev, [tabIndex]: data.rows }));
-      setDetailTotal((prev) => ({ ...prev, [tabIndex]: data.total }));
-      setLoadedTabs((prev) => new Set(prev).add(tabIndex));
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setTabLoading(false);
-    }
+        const data = await api.get(`/reports/detail-summary?${p.toString()}`);
+        if (isStale()) return;
+        setTabData((prev) => ({ ...prev, [tabIndex]: data.rows }));
+        setDetailTotal((prev) => ({ ...prev, [tabIndex]: data.total }));
+      },
+      setError
+    );
   }
 
   /** تغییر صفحه/تعداد در صفحه/مرتب‌سازیِ تب تفصیل جاری — به‌روزرسانی detailQuery باعث fetch مجدد (از طریق useEffect اصلی) می‌شود */
@@ -341,45 +331,43 @@ export default function AccountsReview() {
   }
 
   async function loadLedger(page = 1, pageSize = ledgerPageSize, sort = ledgerSort, colFilters = ledgerFilters) {
-    setLedgerLoading(true);
-    setError(null);
-    try {
-      const p = new URLSearchParams(filterParams);
-      const { parentIds } = accountConstraints(ledgerTabIndex);
-      if (parentIds.length) p.set("parentIds", parentIds.join(","));
-      const details = detailConstraints(ledgerTabIndex);
-      DETAIL_SLOTS.forEach((slot) => {
-        if (details[slot].length) p.set(`detail${slot}Codes`, details[slot].join(","));
-      });
-      p.set("page", String(page));
-      p.set("pageSize", String(pageSize));
-      if (sort) {
-        const field = LEDGER_SORT_FIELD_MAP[sort.header];
-        if (field) {
-          p.set("sortField", field);
-          p.set("sortDir", sort.dir);
+    await tabLoader.run(
+      ledgerTabIndex,
+      async (isStale) => {
+        const p = new URLSearchParams(filterParams);
+        const { parentIds } = accountConstraints(ledgerTabIndex);
+        if (parentIds.length) p.set("parentIds", parentIds.join(","));
+        const details = detailConstraints(ledgerTabIndex);
+        DETAIL_SLOTS.forEach((slot) => {
+          if (details[slot].length) p.set(`detail${slot}Codes`, details[slot].join(","));
+        });
+        p.set("page", String(page));
+        p.set("pageSize", String(pageSize));
+        if (sort) {
+          const field = LEDGER_SORT_FIELD_MAP[sort.header];
+          if (field) {
+            p.set("sortField", field);
+            p.set("sortDir", sort.dir);
+          }
         }
-      }
-      if (Object.keys(colFilters).length) {
-        const serverFilters: Record<string, ActiveFilter> = {};
-        for (const [header, f] of Object.entries(colFilters)) {
-          const field = LEDGER_SORT_FIELD_MAP[header];
-          if (field) serverFilters[field] = f;
+        if (Object.keys(colFilters).length) {
+          const serverFilters: Record<string, ActiveFilter> = {};
+          for (const [header, f] of Object.entries(colFilters)) {
+            const field = LEDGER_SORT_FIELD_MAP[header];
+            if (field) serverFilters[field] = f;
+          }
+          if (Object.keys(serverFilters).length) p.set("filters", JSON.stringify(serverFilters));
         }
-        if (Object.keys(serverFilters).length) p.set("filters", JSON.stringify(serverFilters));
-      }
-      const data = await api.get(`/reports/ledger?${p.toString()}`);
-      setLedgerRows(data.rows);
-      setLedgerPage(data.page);
-      setLedgerPageSize(data.pageSize);
-      setLedgerTotal(data.total);
-      setLedgerTotalPages(data.totalPages);
-      setLoadedTabs((prev) => new Set(prev).add(ledgerTabIndex));
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLedgerLoading(false);
-    }
+        const data = await api.get(`/reports/ledger?${p.toString()}`);
+        if (isStale()) return;
+        setLedgerRows(data.rows);
+        setLedgerPage(data.page);
+        setLedgerPageSize(data.pageSize);
+        setLedgerTotal(data.total);
+        setLedgerTotalPages(data.totalPages);
+      },
+      setError
+    );
   }
 
   function changeLedgerPageSize(size: number) {
@@ -392,6 +380,12 @@ export default function AccountsReview() {
     setLedgerSort(next);
     loadLedger(1, ledgerPageSize, next, ledgerFilters);
   }
+
+  // جمع بدهکار/بستانکار روی «صفحه‌ی جاری» ledgerRows (سرور صفحه‌بندی می‌کند) — طبق تصمیم صریح کاربر برای
+  // ستون‌های decimal پای هر گرید؛ «مانده در خط» عمداً جمع زده نمی‌شود چون یک مقدار تجمعی/لحظه‌ای است، نه
+  // یک مقدار جمع‌پذیر (جمع چند «مانده‌ی لحظه‌ای» متوالی معنای حسابداری ندارد).
+  const ledgerDebitTotal = ledgerRows.reduce((s, r) => s + (Number(r.debit) || 0), 0);
+  const ledgerCreditTotal = ledgerRows.reduce((s, r) => s + (Number(r.credit) || 0), 0);
 
   function openLedgerFilter(header: string) {
     const btn = ledgerFilterBtnRefs.current[header];
@@ -415,22 +409,28 @@ export default function AccountsReview() {
     loadLedger(1, ledgerPageSize, ledgerSort, next);
   }
 
-  const skippedInitialFetch = useRef(false);
-
-  useEffect(() => {
-    if (levels.length === 0 || !filters.fromDate) return;
-
-    // فقط در اولین اجرای واقعی بعد از mount: اگر داده‌ی این تب قبلاً (با سوییچ تب) کش شده، دوباره از سرور نگیر
-    if (!skippedInitialFetch.current) {
-      skippedInitialFetch.current = true;
-      if (loadedTabs.has(activeTab)) return;
-    }
-
-    if (activeTab < accountTabCount) loadAccountTab(activeTab);
-    else if (activeTab < ledgerTabIndex) loadDetailTab(activeTab, (activeTab - detailTabStart + 1) as 1 | 2 | 3);
-    else loadLedger();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, levels, chain.selections, chain.order, filterParams, detailQuery[activeTab]]);
+  const activationDepsKey = useMemo(
+    () =>
+      serializeForDepsKey({
+        levels,
+        selections: chain.selections,
+        order: chain.order,
+        filterParams: filterParams.toString(),
+        detailQuery: detailQuery[activeTab],
+      }),
+    [levels, chain.selections, chain.order, filterParams, detailQuery, activeTab]
+  );
+  useReviewTabActivation(
+    levels.length > 0 && !!filters.fromDate,
+    activeTab,
+    tabLoader.loadedTabs,
+    (tab) => {
+      if (tab < accountTabCount) loadAccountTab(tab);
+      else if (tab < ledgerTabIndex) loadDetailTab(tab, (tab - detailTabStart + 1) as 1 | 2 | 3);
+      else loadLedger();
+    },
+    activationDepsKey
+  );
 
   /** رفرش دستی تب فعلی — فقط داده‌ی همان تب را دوباره از سرور می‌گیرد، به فیلترها/انتخاب‌ها دست نمی‌زند */
   function refreshCurrentTab() {
@@ -446,33 +446,37 @@ export default function AccountsReview() {
   function resetAll() {
     chain.reset();
     setTabData({});
+    tabView.reset();
     setDetailQuery({});
     setDetailTotal({});
     setLedgerPage(1);
-    setLoadedTabs(new Set());
+    tabLoader.resetLoaded();
     setActiveTab(0);
   }
 
-  /** پاک کردن کامل همه‌ی فیلترها (انتخاب‌های تب‌ها + بازه تاریخ + فیلترهای پیشرفته) — انگار صفحه از اول باز شده */
-  function clearEverything() {
+  /** دکمه‌ی «حذف همه فیلترها» — طبق اصلاح صریح کاربر (۱۴۰۵/۰۶/۱۹): انتخاب یک ردیف در یک تب (که فیلتر
+   * تب‌های بعدی/قبلی زنجیره را تعیین می‌کند) هم خودش دقیقاً یک «فیلتر» است، نه چیزی جدا — نسخه‌ی قبلی
+   * این تابع اشتباهاً چیزی جز فیلترهای ستونی گرید را دست‌نخورده می‌گذاشت (از جمله انتخاب‌های زنجیره‌ای)،
+   * که باعث می‌شد مثلاً انتخاب یک ردیف در تب «گروه» با این دکمه پاک نشود. تنها استثنای واقعی همان چیزی
+   * است که از اول گفته شده بود: فیلترهای «بالای گزارش» (بازه تاریخ، و دیالوگ فیلتر پیشرفته شامل انواع
+   * سند/محدوده‌ی شماره سند/عطف) — این‌ها با resetAll (که با تغییر واقعی‌شان صدا زده می‌شود) بازنشانی
+   * می‌شوند، نه با این دکمه. همه‌چیز دیگر (انتخاب‌های زنجیره‌ای تب‌ها، فیلتر/مرتب‌سازی ستونی سه‌گانه‌ی
+   * tabView/detailQuery/ledgerFilters، دادهٔ بارگذاری‌شده، و بازگشت به اولین تب) پاک می‌شود — دقیقاً
+   * هم‌الگوی resetAll، فقط بدون setFilters. */
+  function clearFilters() {
     chain.reset();
     setTabData({});
+    tabView.reset();
     setDetailQuery({});
     setDetailTotal({});
     setLedgerRows([]);
     setLedgerPage(1);
     setLedgerTotal(0);
     setLedgerTotalPages(1);
-    setLoadedTabs(new Set());
+    setLedgerFilters({});
+    setLedgerSort(null);
+    tabLoader.resetLoaded();
     setActiveTab(0);
-    setFilters({
-      ...defaultDateRange(periods),
-      documentTypeIds: new Set<number>(),
-      numberFrom: "",
-      numberTo: "",
-      referenceFrom: "",
-      referenceTo: "",
-    });
   }
 
   function toggleDocType(id: number) {
@@ -526,15 +530,6 @@ export default function AccountsReview() {
 
   return (
     <div>
-      <div className="page-header ar-header">
-        <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`گزارش سلسله‌مراتبی مانده‌ی حساب‌ها — در هر تب چندین ردیف قابل انتخاب است؛ فقط حساب‌های دارای گردش در بازه نمایش داده می‌شوند`} title="مرور حسابها" />
-          <RefreshButton onClick={refreshCurrentTab} title="رفرش تب جاری" />
-          <button type="button" className="toolbar-icon-btn" onClick={clearEverything} title="حذف همه فیلترها">
-            <ClearFilterIcon />
-          </button>
-        </div>
-      </div>
-
       {error && <div className="alert error">{error}</div>}
 
       <div className="card ar-filters">
@@ -584,30 +579,59 @@ export default function AccountsReview() {
         </AdvancedFilterDialog>
       )}
 
-      <ChainedTabsBar tabs={tabDefs} activeIndex={activeTab} onChange={setActiveTab} />
+      <ChainedTabsBar
+        tabs={tabDefs}
+        activeIndex={activeTab}
+        onChange={setActiveTab}
+        actions={
+          <>
+            <InfoHint text={`گزارش سلسله‌مراتبی مانده‌ی حساب‌ها — در هر تب چندین ردیف قابل انتخاب است؛ فقط حساب‌های دارای گردش در بازه نمایش داده می‌شوند`} title="مرور حسابها" />
+            <RefreshButton onClick={refreshCurrentTab} title="رفرش تب جاری" />
+            {activeTab === ledgerTabIndex && (
+              <>
+                <button type="button" className="toolbar-icon-btn" onClick={exportLedgerCsv} title="خروجی اکسل">
+                  <ExcelExportIcon />
+                </button>
+                <button type="button" className="toolbar-icon-btn" onClick={() => window.print()} title="چاپ">
+                  <PrintIcon />
+                </button>
+              </>
+            )}
+          </>
+        }
+        onClearFilters={clearFilters}
+      />
 
       {activeTab < detailTabStart && (
         <SelectableBalanceTable
+          stateKey={activeTab}
           rows={tabData[activeTab] || []}
           columns={balanceColumns}
           selected={chain.get(activeTab)}
           onToggle={onToggleRow}
-          loading={tabLoading}
+          loading={tabLoader.loading}
+          restoreFilters={tabView.restoreFilters}
+          restoreSort={tabView.restoreSort}
+          onFiltersChange={tabView.onFiltersChange}
+          onSortChange={tabView.onSortChange}
         />
       )}
 
       {activeTab >= detailTabStart && activeTab < ledgerTabIndex && (
         <SelectableBalanceTable
+          stateKey={activeTab}
+          restoreFilters={(detailQuery[activeTab] ?? DEFAULT_DETAIL_QUERY).filters}
+          restoreSort={(detailQuery[activeTab] ?? DEFAULT_DETAIL_QUERY).sort}
           rows={tabData[activeTab] || []}
           columns={detailBalanceColumns}
           selected={chain.get(activeTab)}
           onToggle={onToggleRow}
-          loading={tabLoading}
+          loading={tabLoader.loading}
           serverPaging={{
             page: (detailQuery[activeTab] ?? DEFAULT_DETAIL_QUERY).page,
             pageSize: (detailQuery[activeTab] ?? DEFAULT_DETAIL_QUERY).pageSize,
             total: detailTotal[activeTab] ?? 0,
-            loading: tabLoading,
+            loading: tabLoader.loading,
             onPageChange: (page) => updateDetailQuery(activeTab, { page }),
             onPageSizeChange: (pageSize) => updateDetailQuery(activeTab, { pageSize, page: 1 }),
             onSortChange: (sort) => updateDetailQuery(activeTab, { sort, page: 1 }),
@@ -623,13 +647,10 @@ export default function AccountsReview() {
               <input type="checkbox" checked={showRunningBalance} onChange={(e) => setShowRunningBalance(e.target.checked)} />
               مانده در خط
             </label>
-            <span style={{ flex: 1 }} />
-            <button type="button" className="btn secondary" onClick={() => window.print()}>چاپ</button>
-            <button type="button" className="btn secondary" onClick={exportLedgerCsv}>خروجی اکسل (CSV)</button>
           </div>
           <div className="grid-wrap">
           <div className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
-            {ledgerLoading && ledgerRows.length === 0 ? (
+            {tabLoader.loading && ledgerRows.length === 0 ? (
               <div className="empty-state">در حال بارگذاری...</div>
             ) : (
               <table>
@@ -693,9 +714,15 @@ export default function AccountsReview() {
               </table>
             )}
           </div>
+          {ledgerRows.length > 0 && (
+            <div className="grid-footer-totals">
+              <span className="grid-footer-totals-item"><b>بدهکار:</b> {formatAmountFa(ledgerDebitTotal)}</span>
+              <span className="grid-footer-totals-item"><b>بستانکار:</b> {formatAmountFa(ledgerCreditTotal)}</span>
+            </div>
+          )}
           <div className="grid-footer">
             <span className="grid-footer-info">
-              {ledgerLoading
+              {tabLoader.loading
                 ? "در حال بارگذاری..."
                 : ledgerTotal === 0
                 ? "بدون رکورد"
@@ -711,13 +738,13 @@ export default function AccountsReview() {
                 </select>
               </label>
               <div className="grid-page-nav">
-                <button type="button" className="btn secondary" disabled={ledgerPage <= 1 || ledgerLoading} onClick={() => loadLedger(1)}>ابتدا</button>
-                <button type="button" className="btn secondary" disabled={ledgerPage <= 1 || ledgerLoading} onClick={() => loadLedger(ledgerPage - 1)}>قبلی</button>
+                <button type="button" className="btn secondary" disabled={ledgerPage <= 1 || tabLoader.loading} onClick={() => loadLedger(1)}>ابتدا</button>
+                <button type="button" className="btn secondary" disabled={ledgerPage <= 1 || tabLoader.loading} onClick={() => loadLedger(ledgerPage - 1)}>قبلی</button>
                 <span className="grid-page-indicator">
                   صفحه {toFaDigits(String(ledgerPage))} از {toFaDigits(String(ledgerTotalPages))}
                 </span>
-                <button type="button" className="btn secondary" disabled={ledgerPage >= ledgerTotalPages || ledgerLoading} onClick={() => loadLedger(ledgerPage + 1)}>بعدی</button>
-                <button type="button" className="btn secondary" disabled={ledgerPage >= ledgerTotalPages || ledgerLoading} onClick={() => loadLedger(ledgerTotalPages)}>انتها</button>
+                <button type="button" className="btn secondary" disabled={ledgerPage >= ledgerTotalPages || tabLoader.loading} onClick={() => loadLedger(ledgerPage + 1)}>بعدی</button>
+                <button type="button" className="btn secondary" disabled={ledgerPage >= ledgerTotalPages || tabLoader.loading} onClick={() => loadLedger(ledgerTotalPages)}>انتها</button>
               </div>
             </div>
           </div>

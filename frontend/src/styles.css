@@ -725,6 +725,16 @@ body {
 }
 .bulk-toolbar.in-header.active { background: none; }
 .bulk-toolbar.in-header .bulk-toolbar-info { display: none; }
+/* همان تیمار «in-header» برای وقتی این نوار داخل .ar-tabs-actions (نوار عنوان تب‌های Review) پورتال
+   می‌شود — نگاه کنید به SelectableBalanceTable.tsx و lib/useAutoPortalTarget.ts */
+.bulk-toolbar.in-tabs {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-bottom: 0;
+}
+.bulk-toolbar.in-tabs.active { background: none; }
+.bulk-toolbar.in-tabs .bulk-toolbar-info { display: none; }
 .bulk-toolbar-actions { display: flex; align-items: center; gap: 10px; }
 .toolbar-menu-item:disabled { color: var(--line-strong); cursor: not-allowed; }
 .toolbar-menu-item:disabled:hover { background: none; }
@@ -858,6 +868,46 @@ body {
   box-shadow: var(--shadow-sm);
 }
 .grid-footer-controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+
+/* نوار «جمع» ستون‌های decimal — طبق تصمیم صریح کاربر (با دو تصویر مرجع)، دقیقاً زیر هر ستون می‌نشیند
+   (نه یک لیست افقی برچسب:مقدار)، اما همچنان بیرون از ناحیه‌ی اسکرول‌شونده‌ی گرید است — بین
+   grid-scroll-area (که خودش border-bottom ندارد) و grid-footer (که border-radius پایین را دارد) — تا
+   حتی وقتی ردیف‌ها کم باشند، این نوار وسط صفحه (بلافاصله زیر آخرین ردیف) نیفتد، بلکه همیشه ته کادر
+   گرید/بالای صفحه‌بندی بماند. برای همین بدون گردی گوشه و فقط با یک border کامل کشیده شده تا خط
+   جداکننده‌ی هر دو طرف یکتا بماند (نه دوتایی). عرض هر <td> این جدولِ کاملاً مجزا از عرض واقعیِ ستون‌های
+   <thead> جدول اصلی اندازه‌گیری و کپی می‌شود (نگاه کنید به colWidths در SelectableBalanceTable.tsx)،
+   چون ستون‌ها عرض خودکار/بر مبنای محتوا دارند نه ثابت. */
+.grid-footer-totals {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-bottom: none;
+  font-size: 12.5px;
+  color: var(--ink);
+  overflow: hidden;
+}
+/* overflow-x:hidden عمداً (نه auto): اسکرول افقی این نوار کاملاً برنامه‌ای است (هم‌گام با اسکرول افقی
+   grid-scroll-area، از طریق syncFooterScroll) — کاربر نباید مستقیماً و جدا از خودِ گرید آن را اسکرول کند */
+.grid-footer-totals-scroll { overflow-x: hidden; }
+.grid-footer-totals table { margin: 0; }
+.grid-footer-totals td { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.grid-footer-totals tbody tr:last-child td { border-bottom: none; }
+/* وقتی این نوار آخرین عنصر است (بدون grid-footer صفحه‌بندی زیرش، مثل SelectableBalanceTable در حالت
+   کلاینتی بدون serverPaging)، باید خودش قاب را ببندد: کران پایین کامل + گردی گوشه‌ی پایین */
+.grid-footer-totals-standalone { border-bottom: 1px solid var(--line); border-radius: 0 0 var(--radius) var(--radius); }
+
+/* طبق تصمیم صریح کاربر: نوار «جمع» باید مثل یک page footer همیشه ته صفحه بنشیند، نه فقط ته کادر
+   min-height-ثابتِ گرید — حتی وقتی هیچ صفحه‌بندی سرور (grid-footer) هم در کار نباشد (تب‌های کلاینتی
+   SelectableBalanceTable). قبلاً فقط مسیر serverPaging این رفتار را داشت، چون فقط آن یکی درون
+   .grid-wrap (که flex:1 دارد و باعث می‌شود grid-scroll-area با flex:1 خودش تمام فضای باقیمانده‌ی صفحه
+   را بگیرد و «جمع» را به‌جای وسط صفحه به ته آن براند) پیچیده می‌شد. مسیر کلاینتی (بدون serverPaging)
+   قبلاً یک Fragment ساده بود (بدون هیچ container ای که فضای باقیمانده را بگیرد)، پس با تعداد ردیف کم،
+   کل بلوک (گرید کوتاه + جمع) فقط ارتفاع طبیعی خودش را می‌گرفت و «جمع» درست زیر آن (وسط صفحه) می‌ماند،
+   نه ته صفحه. کلاس جدید (نه خودِ .grid-wrap) عمداً است: .grid-wrap .grid-scroll-area border/radius را
+   هم تغییر می‌دهد (چون فرض می‌کند حتماً یک grid-footer صفحه‌بندی زیرش می‌آید)، در حالی که این‌جا وقتی
+   ستون decimal ای نباشد (renderTotalsBar چیزی برنمی‌گرداند)، grid-scroll-area باید کادر کامل خودش
+   (چهار گوشه‌ی گرد) را حفظ کند — پس فقط flex:1 اضافه می‌شود، نه بقیه‌ی قواعد .grid-wrap. */
+.grid-wrap-standalone { flex: 1 0 auto; display: flex; flex-direction: column; min-height: 0; }
+.grid-wrap-standalone .grid-scroll-area { flex: 1; }
 .grid-page-size { display: flex; align-items: center; gap: 6px; }
 .grid-page-size select {
   padding: 4px 6px;
@@ -1077,13 +1127,37 @@ body {
 
 /* گزارش مرور حسابها */
 .ar-filters { padding: 8px 14px; margin-bottom: 10px; }
-.ar-tabs {
+.ar-tabs-row {
   display: flex;
-  gap: 2px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-bottom: 10px;
   border-bottom: 1px solid var(--line);
-  overflow-x: auto;
 }
+.ar-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* روی صفحه‌های تنگ، به‌جای بریدن/اسکرول‌شدن نامرئیِ تب‌ها (که چند تب اول مثل «انبار»/«شاخه اصلی گروه»
+   را از دید کاربر پنهان می‌کرد)، تب‌ها به سطر بعد می‌روند — هیچ تبی هرگز واقعاً از دسترس خارج نمی‌شود */
+.ar-tabs-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding-bottom: 4px;
+  margin-inline-start: auto;
+}
+.ar-tabs-actions:empty { display: none; }
+/* «حذف همه فیلترها» باید همیشه اولین آیکن از سمت چپ باشد (صفحه dir=rtl است، پس محور اصلی از راست به
+   چپ چیده می‌شود؛ order بزرگ‌تر از پیش‌فرض ۰ی بقیه‌ی آیکن‌ها آن را به انتهای محور یعنی چپ‌ترین نقطه
+   می‌راند) — مستقل از این‌که آیکن‌های چاپ/اکسل (پورتال‌شده از SelectableBalanceTable) در چه لحظه‌ای به
+   DOM اضافه می‌شوند، چون این با order کنترل می‌شود، نه ترتیب واقعی DOM. */
+.ar-tabs-actions .ar-clear-filters-btn { order: 10; }
 .ar-tab {
   background: none;
   border: none;
@@ -1319,8 +1393,6 @@ body {
 /* عنوان صفحه در این بخش تکرار نمی‌شود چون همان عنوان در تب بالای صفحه دیده می‌شود؛ فقط نوار آیکن‌ها
    می‌ماند و با flex-end همان‌جایی می‌نشیند که قبلا (کنار عنوان) می‌نشست */
 .page-header { display: flex; align-items: center; justify-content: flex-end; margin-bottom: 12px; }
-/* هدر گزارش مرور حسابها — چگالی بیشتر (فاصله‌ی کمتر) نسبت به هدر فرم‌های معمولی */
-.ar-header { margin-bottom: 4px; }
 
 .btn {
   background: var(--primary);

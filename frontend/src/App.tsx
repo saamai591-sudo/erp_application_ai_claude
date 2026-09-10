@@ -78,10 +78,13 @@ import InquiryEvaluations from "./pages/InquiryEvaluations";
 import PurchaseOrders from "./pages/PurchaseOrders";
 import DeliveryAuthorizations from "./pages/DeliveryAuthorizations";
 import Customers from "./pages/Customers";
+import SalesTypes from "./pages/SalesTypes";
+import SalesCenters from "./pages/SalesCenters";
 import SalesQuotes from "./pages/SalesQuotes";
 import SalesOrders from "./pages/SalesOrders";
 import SalesDeliveries from "./pages/SalesDeliveries";
 import SalesInvoices from "./pages/SalesInvoices";
+import SalesReview from "./pages/SalesReview";
 import PurchaseInvoices from "./pages/PurchaseInvoices";
 import ServicePurchaseInvoices from "./pages/ServicePurchaseInvoices";
 import WarehouseReview from "./pages/WarehouseReview";
@@ -124,7 +127,7 @@ export default function App() {
             <Route path="/warehouse-accounting/goods-pricing" element={<GoodsPricing />} />
             <Route path="/warehouse-accounting/issue-journal-entries" element={<IssueWarehouseJournalEntries />} />
             <Route path="/warehouse-accounting/issue-journal-entries/new" element={<IssueWarehouseJournalEntries />} />
-            <Route path="/warehouse-accounting/issue-journal-entries/:id" element={<IssueWarehouseJournalEntries />} />
+            <Route path="/warehouse-accounting/issue-journal-entries/:id/edit" element={<IssueWarehouseJournalEntries />} />
             <Route path="/org-structure" element={<OrgStructure />} />
             <Route path="/org-structure/new" element={<OrgStructure />} />
             <Route path="/org-structure/:id/edit" element={<OrgStructure />} />
@@ -334,6 +337,12 @@ export default function App() {
             <Route path="/customers" element={<Customers />} />
             <Route path="/customers/new" element={<Customers />} />
             <Route path="/customers/:id/edit" element={<Customers />} />
+            <Route path="/sales-types" element={<SalesTypes />} />
+            <Route path="/sales-types/new" element={<SalesTypes />} />
+            <Route path="/sales-types/:id/edit" element={<SalesTypes />} />
+            <Route path="/sales-centers" element={<SalesCenters />} />
+            <Route path="/sales-centers/new" element={<SalesCenters />} />
+            <Route path="/sales-centers/:id/edit" element={<SalesCenters />} />
             <Route path="/sales-quotes" element={<SalesQuotes />} />
             <Route path="/sales-quotes/new" element={<SalesQuotes />} />
             <Route path="/sales-quotes/:id/edit" element={<SalesQuotes />} />
@@ -346,6 +355,7 @@ export default function App() {
             <Route path="/sales-invoices" element={<SalesInvoices />} />
             <Route path="/sales-invoices/new" element={<SalesInvoices />} />
             <Route path="/sales-invoices/:id/edit" element={<SalesInvoices />} />
+            <Route path="/sales-review" element={<SalesReview />} />
 
             <Route path="/receipts" element={<Receipts />} />
             <Route path="/receipts/new" element={<Receipts />} />

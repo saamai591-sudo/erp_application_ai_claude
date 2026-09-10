@@ -86,10 +86,9 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
 
 router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
-  const batch = await prisma.batch.findUnique({ where: { id }, include: { _count: { select: { serials: true } } } });
+  const batch = await prisma.batch.findUnique({ where: { id } });
   if (!batch) return res.status(404).json({ error: "بچ یافت نشد" });
   if (batch.hasTransactions) return res.status(400).json({ error: "این بچ گردش دارد و قابل حذف نیست" });
-  if (batch._count.serials > 0) return res.status(400).json({ error: "این بچ به یک یا چند سریال متصل است و قابل حذف نیست" });
   await prisma.batch.delete({ where: { id } });
   res.status(204).send();
 });

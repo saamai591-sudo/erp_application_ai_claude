@@ -117,7 +117,7 @@ function PriceInquiryList() {
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
           { header: "برنامه ریزی خرید", render: (r) => toFaDigits(String(r.purchasePlanningNumber)), filterType: "string", filterValue: (r) => String(r.purchasePlanningNumber) },
           { header: "تامین کننده", render: (r) => r.supplierTitle, filterType: "string", filterValue: (r) => r.supplierTitle },
-          { header: "مبلغ", render: (r) => formatAmountFa(r.amount + r.otherCosts) },
+          { header: "مبلغ", render: (r) => formatAmountFa(r.amount + r.otherCosts), filterType: "number", filterValue: (r) => r.amount + r.otherCosts, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}

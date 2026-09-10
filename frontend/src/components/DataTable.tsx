@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
 import { JalaliDatePicker } from "./JalaliDatePicker";
-import { toFaDigits } from "../lib/formatAmount";
+import { toFaDigits, formatAmountFa } from "../lib/formatAmount";
 import { useTabs } from "../lib/TabsContext";
 import { usePersistedState } from "../lib/usePersistedState";
 import { exportGridToCsv, printGrid, deriveGridName, ExportColumn } from "../lib/gridExport";
@@ -26,6 +26,19 @@ export interface Column<T> {
   filterValue?: (row: T) => string | number | null | undefined;
   /** مقدار خام برای مرتب‌سازی؛ اگر مشخص نشود از filterValue استفاده می‌شود */
   sortValue?: (row: T) => string | number | null | undefined;
+  /**
+   * طبق تصمیم صریح کاربر: فقط ستون‌های عددیِ اعشاری/غیرصحیح (مبلغ، فی، تخفیف، مالیات، نرخ، مانده و...)
+   * باید در ردیف «جمع» پای گرید جمع زده شوند — نه ستون‌های صحیح مثل شماره سند/کد/شناسه/شماره ردیف/شماره
+   * عطف، حتی اگر filterType آن‌ها هم "number" باشد.
+   */
+  decimal?: boolean;
+  /**
+   * مقدار خام برای محاسبه‌ی جمع ردیف «جمع» (فقط وقتی decimal=true)؛ اگر مشخص نشود از filterValue استفاده
+   * می‌شود. جدا از filterValue تعریف شده چون بعضی ستون‌های محاسبه‌شده (مثلاً جمع بدهکار/بستانکار سند در
+   * فهرستی که serverPaging دارد) عمداً filterValue/filterType ندارند — فیلتر/مرتب‌سازی این ستون‌ها سمت
+   * سرور پشتیبانی نمی‌شود، اما باید بتوان همچنان جمعشان را روی همان صفحه‌ی فعلی نمایش داد.
+   */
+  totalValue?: (row: T) => string | number | null | undefined;
 }
 
 export interface ActiveFilter {
@@ -448,6 +461,21 @@ export function DataTable<T extends { id: number | string }>({
   const pageStart = (currentPage - 1) * effectivePageSize;
   const pageRows = serverPaging ? sortedRows : sortedRows.slice(pageStart, pageStart + pageSize);
 
+  // جمع ستون‌های decimal روی «صفحه‌ی جاری» (pageRows) — نه کل دیتاست — طبق تصمیم صریح کاربر؛ با تغییر
+  // rows/فیلتر/صفحه/تعداد-در-صفحه، pageRows خودش دوباره محاسبه می‌شود، پس این جمع هم خودکار به‌روز است.
+  const columnTotals: (number | null)[] = columns.map((c) => {
+    const accessor = c.totalValue || c.filterValue;
+    if (!c.decimal || !accessor) return null;
+    let sum = 0;
+    for (const row of pageRows) {
+      const raw = accessor(row);
+      const n = Number(raw);
+      if (!Number.isNaN(n)) sum += n;
+    }
+    return Math.round(sum * 1e6) / 1e6;
+  });
+  const hasColumnTotals = columnTotals.some((t) => t !== null);
+
   function goToPage(p: number) {
     const clamped = Math.max(1, Math.min(p, totalPages));
     if (serverPaging) serverPaging.onPageChange(clamped);
@@ -670,6 +698,18 @@ export function DataTable<T extends { id: number | string }>({
           </tbody>
         </table>
       </div>
+      {hasColumnTotals && sortedRows.length > 0 && (
+        <div className="grid-footer-totals">
+          {columns.map(
+            (c, i) =>
+              columnTotals[i] !== null && (
+                <span key={c.header} className="grid-footer-totals-item">
+                  <b>{c.header}:</b> {formatAmountFa(columnTotals[i]!)}
+                </span>
+              )
+          )}
+        </div>
+      )}
       <div className="grid-footer">
         <span className="grid-footer-info">
           {serverPaging?.loading

@@ -14,13 +14,20 @@ import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
 import { partyDisplayName } from "./Users";
+import { PurchaseType } from "./PurchaseTypes";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
+import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
+import { toBaseCurrencyAmount } from "../lib/currencyConversion";
 
 // طبق Documents/ServicePurchaseAndItsRelationToStockReceipt.md — این فرم عمداً از فاکتور خرید کالا
 // (PurchaseInvoices.tsx) مستقل است. با تایید فاکتور، به‌ازای هر ردیف تسهیم‌شده، یک AmountLine
 // (نوع «هزینه‌های مرتبط با ورود کالا») به ردیف رسید انبار مربوطه افزوده می‌شود.
+//
+// طبق تصمیم صریح کاربر: نرخ ارز/ارزش‌افزوده/صدور سند حسابداری دقیقاً هم‌معماری فاکتور خرید کالا پیاده
+// شده‌اند (نگاه کنید به یادداشت بالای backend/src/routes/servicePurchaseInvoices.ts).
 
 type Basis = "NO_BASIS" | "WAREHOUSE_RECEIPT";
 type Status = "DRAFT" | "APPROVED";
@@ -53,25 +60,33 @@ interface PartyOption {
   id: number; detailCode: string; category: "INDIVIDUAL" | "LEGAL"; isActive: boolean;
   firstName: string | null; lastName: string | null; name: string | null;
 }
-interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; decimalPlaces: number }
-interface ServiceOption { id: number; fullCode: string; title: string; kind: string }
+interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; decimalPlaces: number; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null }
+interface ServiceOption { id: number; fullCode: string; title: string; kind: string; isSpecial: boolean; taxRate: number | string | null }
 interface ReceiptOption { id: number; number: number; date: string; warehouseTitle: string }
 interface ReceiptLine { id: number; goodsItemCode: string; goodsItemTitle: string; unitTitle: string; quantity: number; amount: number }
 
 interface ListRow {
   id: number; number: number; date: string; vendorInvoiceNumber: string | null;
-  partyId: number; partyTitle: string | null; currencyTitle: string; status: Status; lineCount: number; totalAmount: number;
+  partyId: number; partyTitle: string | null; purchaseTypeId: number; purchaseTypeTitle: string | null;
+  currencyTitle: string; status: Status; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number;
 }
 interface AllocationDetail {
   inventoryDocumentLineId: number; goodsItemCode: string; goodsItemTitle: string; unitTitle: string; quantity: number; allocatedAmount: number;
 }
 interface DetailLine {
-  id: number; serviceId: number; serviceCode: string; serviceTitle: string; amount: number; basis: Basis;
+  id: number; serviceId: number; serviceCode: string; serviceTitle: string; amount: number; discount: number; vatAmount: number; basis: Basis;
   sourceReceiptDocumentId: number | null; sourceReceiptNumber: number | null; allocationMethod: AllocationMethod | null;
   description: string | null; allocations: AllocationDetail[];
 }
 interface Detail extends ListRow {
-  currencyId: number; description: string | null; approverName: string | null; approvedAt: string | null; lines: DetailLine[];
+  currencyId: number;
+  fxRate: number;
+  description: string | null;
+  approverName: string | null;
+  approvedAt: string | null;
+  journalEntryId: number | null;
+  journalEntryReferenceNumber: number | null;
+  lines: DetailLine[];
 }
 
 export default function ServicePurchaseInvoices() {
@@ -99,6 +114,14 @@ function UndoIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
       <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function EyeIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
 }
@@ -146,8 +169,15 @@ function ServicePurchaseInvoiceList() {
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
           { header: "شماره فاکتور فروشنده", render: (r) => (r.vendorInvoiceNumber ? toFaDigits(r.vendorInvoiceNumber) : "—"), filterType: "string", filterValue: (r) => r.vendorInvoiceNumber || "" },
           { header: "طرف مقابل", render: (r) => r.partyTitle || "—", filterType: "string", filterValue: (r) => r.partyTitle || "" },
-          { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount) },
+          { header: "نوع خرید", render: (r) => r.purchaseTypeTitle || "—", filterType: "string", filterValue: (r) => r.purchaseTypeTitle || "" },
+          { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
+          {
+            header: "شماره عطف سند",
+            render: (r) => (r.journalEntryReferenceNumber ? toFaDigits(String(r.journalEntryReferenceNumber)) : "—"),
+            filterType: "number",
+            filterValue: (r) => r.journalEntryReferenceNumber ?? undefined,
+          },
         ]}
         rows={items}
         edit={{ path: (r) => `/service-purchase-invoices/${r.id}/edit` }}
@@ -159,7 +189,7 @@ function ServicePurchaseInvoiceList() {
 
 interface RowState {
   serviceId: string; serviceCode: string; serviceTitle: string;
-  amount: string;
+  amount: string; discount: string; vatAmount: string;
   basis: Basis;
   sourceReceiptDocumentId: string; sourceReceiptNumber: string;
   allocationMethod: AllocationMethod | "";
@@ -168,23 +198,37 @@ interface RowState {
 }
 
 function emptyRow(): RowState {
-  return { serviceId: "", serviceCode: "", serviceTitle: "", amount: "", basis: "NO_BASIS", sourceReceiptDocumentId: "", sourceReceiptNumber: "", allocationMethod: "", description: "", allocations: [] };
+  return {
+    serviceId: "", serviceCode: "", serviceTitle: "",
+    amount: "", discount: "", vatAmount: "",
+    basis: "NO_BASIS",
+    sourceReceiptDocumentId: "", sourceReceiptNumber: "",
+    allocationMethod: "", description: "", allocations: [],
+  };
 }
 
 function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
+  const { openTab } = useTabs();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
   const [parties, setParties] = useState<PartyOption[]>([]);
+  const [purchaseTypes, setPurchaseTypes] = useState<PurchaseType[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [receipts, setReceipts] = useState<ReceiptOption[]>([]);
-  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", vendorInvoiceNumber: "", partyId: "", currencyId: "", description: "" });
+  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, {
+    date: "", vendorInvoiceNumber: "", partyId: "", purchaseTypeId: "", currencyId: "", fxRate: "", description: "",
+  });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
-  const [meta, setMeta] = usePersistedState<{ number: number; status: Status; approverName: string | null; approvedAt: string | null } | null>(
-    `${cacheKey}:meta`,
-    null
-  );
+  const [meta, setMeta] = usePersistedState<{
+    number: number;
+    status: Status;
+    approverName: string | null;
+    approvedAt: string | null;
+    journalEntryId: number | null;
+    journalEntryReferenceNumber: number | null;
+  } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
@@ -193,14 +237,16 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [p, c, sv, rc, fp] = await Promise.all([
-        api.get("/parties"),
+      const [p, pt, c, sv, rc, fp] = await Promise.all([
+        api.get("/parties?suppliersOnly=true"),
+        api.get("/purchase-types"),
         api.get("/currencies"),
         api.get("/goods-items?kind=SERVICE"),
         api.get("/service-purchase-invoices/pickable-receipts"),
         fetchSelectedFiscalPeriod(),
       ]);
       setParties(p);
+      setPurchaseTypes(pt);
       setCurrencies(c);
       setServices(sv);
       setReceipts(rc);
@@ -212,12 +258,21 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
       }
       if (editId) {
         const d: Detail = await api.get(`/service-purchase-invoices/${editId}`);
-        setMeta({ number: d.number, status: d.status, approverName: d.approverName, approvedAt: d.approvedAt });
+        setMeta({
+          number: d.number,
+          status: d.status,
+          approverName: d.approverName,
+          approvedAt: d.approvedAt,
+          journalEntryId: d.journalEntryId,
+          journalEntryReferenceNumber: d.journalEntryReferenceNumber,
+        });
         setHeader({
           date: d.date.slice(0, 10),
           vendorInvoiceNumber: d.vendorInvoiceNumber || "",
           partyId: String(d.partyId),
+          purchaseTypeId: String(d.purchaseTypeId),
           currencyId: String(d.currencyId),
+          fxRate: String(d.fxRate),
           description: d.description || "",
         });
         setRows(
@@ -226,6 +281,8 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
             serviceCode: l.serviceCode,
             serviceTitle: l.serviceTitle,
             amount: String(l.amount),
+            discount: String(l.discount || 0),
+            vatAmount: String(l.vatAmount || 0),
             basis: l.basis,
             sourceReceiptDocumentId: l.sourceReceiptDocumentId ? String(l.sourceReceiptDocumentId) : "",
             sourceReceiptNumber: l.sourceReceiptNumber ? String(l.sourceReceiptNumber) : "",
@@ -235,7 +292,7 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
           }))
         );
       } else {
-        setHeader({ date: defaultDocumentDate(fp), vendorInvoiceNumber: "", partyId: "", currencyId: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), vendorInvoiceNumber: "", partyId: "", purchaseTypeId: "", currencyId: "", fxRate: "", description: "" });
         setRows([emptyRow()]);
         setMeta(null);
       }
@@ -250,6 +307,16 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
   const baseCurrency = currencies.find((c) => c.isBase);
   const decimalPlaces = baseCurrency?.decimalPlaces ?? 2;
   const selectedParty = parties.find((p) => String(p.id) === header.partyId);
+  const selectedCurrency = currencies.find((c) => String(c.id) === header.currencyId);
+  // ارز فاکتور غیر از ارز مبنا باشد → نرخ ارز الزامی و به کاربر نمایش داده می‌شود؛ دقیقاً هم‌الگوی
+  // PurchaseInvoices.tsx.
+  const needsFxRate = !!selectedCurrency && !selectedCurrency.isBase;
+  function toBaseAmount(amount: number): number {
+    if (!selectedCurrency || selectedCurrency.isBase) return amount;
+    const fxRate = Number(header.fxRate) || 0;
+    if (!(fxRate > 0)) return 0;
+    return toBaseCurrencyAmount(amount, fxRate, selectedCurrency);
+  }
 
   function guardRowEntry(): boolean {
     if (!header.date) {
@@ -260,8 +327,16 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
       setError("طرف مقابل الزامی است");
       return false;
     }
+    if (!header.purchaseTypeId) {
+      setError("نوع خرید الزامی است");
+      return false;
+    }
     if (!header.currencyId) {
       setError("ارز الزامی است");
+      return false;
+    }
+    if (needsFxRate && !(Number(header.fxRate) > 0)) {
+      setError("نرخ ارز الزامی است");
       return false;
     }
     setError(null);
@@ -276,6 +351,13 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
   }
   function removeRow(idx: number) {
     setRows((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  // مقدار پیشنهادی مالیات بر ارزش افزوده — همیشه به ارز مبنا محاسبه می‌شود (نه ارز فاکتور)؛ فقط پیش‌فرض
+  // اولیه است، کاربر می‌تواند بعداً خودش مقدار را ویرایش کند — دقیقاً هم‌الگوی PurchaseInvoices.tsx.
+  function computeSuggestedVat(amount: number, discount: number, serviceId: string): string {
+    const svc = services.find((s) => String(s.id) === serviceId);
+    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(svc)));
   }
 
   async function onBasisChange(idx: number, basis: Basis) {
@@ -337,15 +419,21 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
 
   function onLineAmountChange(idx: number, amount: string) {
     const row = rows[idx];
+    const vatAmount = computeSuggestedVat(Number(amount) || 0, Number(row.discount) || 0, row.serviceId);
     if (row.basis === "WAREHOUSE_RECEIPT" && row.allocationMethod && row.sourceReceiptDocumentId) {
-      onReceiptAmountChanged(idx, amount, row.allocationMethod);
+      onReceiptAmountChanged(idx, amount, row.allocationMethod, vatAmount);
     } else {
-      updateRow(idx, { amount });
+      updateRow(idx, { amount, vatAmount });
     }
   }
 
-  async function onReceiptAmountChanged(idx: number, amount: string, method: AllocationMethod) {
-    updateRow(idx, { amount });
+  function onDiscountChange(idx: number, discount: string) {
+    const row = rows[idx];
+    updateRow(idx, { discount, vatAmount: computeSuggestedVat(Number(row.amount) || 0, Number(discount) || 0, row.serviceId) });
+  }
+
+  async function onReceiptAmountChanged(idx: number, amount: string, method: AllocationMethod, vatAmount: string) {
+    updateRow(idx, { amount, vatAmount });
     const row = rows[idx];
     if (!row.sourceReceiptDocumentId) return;
     const lines: ReceiptLine[] = await api.get(`/service-purchase-invoices/receipt-lines/${row.sourceReceiptDocumentId}`);
@@ -355,10 +443,12 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
       inventoryDocumentLineId: l.id, goodsItemCode: l.goodsItemCode, goodsItemTitle: l.goodsItemTitle,
       unitTitle: l.unitTitle, quantity: l.quantity, allocatedAmount: shares[i],
     }));
-    updateRow(idx, { amount, allocations });
+    updateRow(idx, { amount, vatAmount, allocations });
   }
 
   const totalAmount = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const totalDiscount = rows.reduce((s, r) => s + (Number(r.discount) || 0), 0);
+  const totalVat = rows.reduce((s, r) => s + (Number(r.vatAmount) || 0), 0);
 
   function buildBody() {
     const nonEmptyRows = rows.filter((r) => r.serviceId);
@@ -366,11 +456,15 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
       date: header.date,
       vendorInvoiceNumber: header.vendorInvoiceNumber || null,
       partyId: Number(header.partyId),
+      purchaseTypeId: Number(header.purchaseTypeId),
       currencyId: Number(header.currencyId),
+      fxRate: needsFxRate ? Number(header.fxRate) : 1,
       description: header.description,
       lines: nonEmptyRows.map((r) => ({
         serviceId: Number(r.serviceId),
         amount: Number(r.amount) || 0,
+        discount: Number(r.discount) || 0,
+        vatAmount: Number(r.vatAmount) || 0,
         basis: r.basis,
         sourceReceiptDocumentId: r.basis === "WAREHOUSE_RECEIPT" && r.sourceReceiptDocumentId ? Number(r.sourceReceiptDocumentId) : null,
         allocationMethod: r.basis === "WAREHOUSE_RECEIPT" && r.allocationMethod ? r.allocationMethod : null,
@@ -386,7 +480,8 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!header.date || !header.partyId || !header.currencyId) return setError("تاریخ، طرف مقابل و ارز الزامی است");
+    if (!header.date || !header.partyId || !header.purchaseTypeId || !header.currencyId) return setError("تاریخ، طرف مقابل، نوع خرید و ارز الزامی است");
+    if (needsFxRate && !(Number(header.fxRate) > 0)) return setError("نرخ ارز الزامی است");
     const dateErr = validateDocumentDate(header.date, fiscalPeriod);
     if (dateErr) return setError(dateErr);
     const body = buildBody();
@@ -423,10 +518,18 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
   async function reloadMetaAndRows() {
     if (!editId) return;
     const d: Detail = await api.get(`/service-purchase-invoices/${editId}`);
-    setMeta({ number: d.number, status: d.status, approverName: d.approverName, approvedAt: d.approvedAt });
+    setMeta({
+      number: d.number,
+      status: d.status,
+      approverName: d.approverName,
+      approvedAt: d.approvedAt,
+      journalEntryId: d.journalEntryId,
+      journalEntryReferenceNumber: d.journalEntryReferenceNumber,
+    });
     setRows(
       d.lines.map((l) => ({
-        serviceId: String(l.serviceId), serviceCode: l.serviceCode, serviceTitle: l.serviceTitle, amount: String(l.amount),
+        serviceId: String(l.serviceId), serviceCode: l.serviceCode, serviceTitle: l.serviceTitle,
+        amount: String(l.amount), discount: String(l.discount || 0), vatAmount: String(l.vatAmount || 0),
         basis: l.basis, sourceReceiptDocumentId: l.sourceReceiptDocumentId ? String(l.sourceReceiptDocumentId) : "",
         sourceReceiptNumber: l.sourceReceiptNumber ? String(l.sourceReceiptNumber) : "", allocationMethod: l.allocationMethod || "",
         description: l.description || "", allocations: l.allocations.map((a) => ({ ...a })),
@@ -438,7 +541,19 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
     if (!editId) return;
     if (confirmMsg && !window.confirm(confirmMsg)) return;
     try {
-      await api.post(`/service-purchase-invoices/${editId}/${action}`, {});
+      const result: { message?: string } = await api.post(`/service-purchase-invoices/${editId}/${action}`, {});
+      await reloadMetaAndRows();
+      flash(result?.message);
+    } catch (e) {
+      alert((e as ApiError).message);
+    }
+  }
+
+  async function runDeleteAction(path: string, confirmMsg?: string) {
+    if (!editId) return;
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    try {
+      await api.del(`/service-purchase-invoices/${editId}/${path}`);
       await reloadMetaAndRows();
       flash();
     } catch (e) {
@@ -453,11 +568,25 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
     if (status === "DRAFT") {
       extraActions.push({ label: "تایید", icon: <CheckIcon />, onClick: () => runAction("approve") });
     } else if (status === "APPROVED") {
-      extraActions.push({
-        label: "برگشت از تایید",
-        icon: <UndoIcon />,
-        onClick: () => runAction("unapprove", "با برگشت از تایید، هزینه‌های تخصیص‌یافته از ردیف‌های رسید انبار مرتبط کسر می‌شود. ادامه می‌دهید؟"),
-      });
+      if (!meta.journalEntryId) {
+        extraActions.push({
+          label: "برگشت از تایید",
+          icon: <UndoIcon />,
+          onClick: () => runAction("unapprove", "با برگشت از تایید، هزینه‌های تخصیص‌یافته از ردیف‌های رسید انبار مرتبط کسر می‌شود. ادامه می‌دهید؟"),
+        });
+        extraActions.push({ label: "صدور سند حسابداری", icon: <PlusIcon />, onClick: () => runAction("issue-journal-entry") });
+      } else {
+        extraActions.push({
+          label: "مشاهده سند حسابداری",
+          icon: <EyeIcon />,
+          onClick: () => openTab(`/journal-entries/${meta.journalEntryId}/edit`),
+        });
+        extraActions.push({
+          label: "حذف سند حسابداری",
+          icon: <UndoIcon />,
+          onClick: () => runDeleteAction("journal-entry", "سند حسابداری صادرشده حذف می‌شود. ادامه می‌دهید؟"),
+        });
+      }
     }
   }
 
@@ -474,7 +603,7 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
     >
       <form id="service-purchase-invoice-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
+        {saved && <div className="alert warn">{saved}</div>}
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
             <div className="form-field">
@@ -489,6 +618,12 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
               <div className="form-field">
                 <label>تایید کننده</label>
                 <input value={`${meta.approverName}${meta.approvedAt ? " — " + formatJalaliDate(meta.approvedAt) : ""}`} disabled />
+              </div>
+            )}
+            {meta?.journalEntryReferenceNumber && (
+              <div className="form-field">
+                <label>سند حسابداری</label>
+                <input dir="ltr" value={toFaDigits(String(meta.journalEntryReferenceNumber))} disabled />
               </div>
             )}
             <div className="form-field">
@@ -514,12 +649,25 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
               />
             </div>
             <div className="form-field">
+              <label>نوع خرید<RequiredMark /></label>
+              <select value={header.purchaseTypeId} onChange={(e) => setHeader({ ...header, purchaseTypeId: e.target.value })}>
+                <option value="">انتخاب کنید</option>
+                {purchaseTypes.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+              </select>
+            </div>
+            <div className="form-field">
               <label>ارز<RequiredMark /></label>
-              <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value })}>
+              <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value, fxRate: "" })}>
                 <option value="">انتخاب کنید</option>
                 {currencies.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
               </select>
             </div>
+            {needsFxRate && (
+              <div className="form-field">
+                <label>نرخ ارز<RequiredMark /></label>
+                <AmountInput value={header.fxRate} onChange={(v) => setHeader({ ...header, fxRate: v })} allowDecimal />
+              </div>
+            )}
             <div className="form-field full">
               <label>شرح</label>
               <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} />
@@ -541,6 +689,8 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
                     <th>ردیف</th>
                     <th>خدمت</th>
                     <th>مبلغ</th>
+                    <th>تخفیف</th>
+                    <th>مالیات بر ارزش افزوده</th>
                     <th>مبنا</th>
                     <th>رسید انبار</th>
                     <th>روش تسهیم</th>
@@ -572,6 +722,12 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
                         </td>
                         <td style={{ minWidth: 120 }}>
                           <AmountInput value={row.amount} onChange={(v) => onLineAmountChange(idx, v)} allowDecimal />
+                        </td>
+                        <td style={{ minWidth: 120 }}>
+                          <AmountInput value={row.discount} onChange={(v) => onDiscountChange(idx, v)} allowDecimal placeholder="۰" />
+                        </td>
+                        <td style={{ minWidth: 120 }}>
+                          <AmountInput value={row.vatAmount} onChange={(v) => updateRow(idx, { vatAmount: v })} allowDecimal placeholder="۰" />
                         </td>
                         <td style={{ minWidth: 110 }}>
                           <select value={row.basis} onChange={(e) => onBasisChange(idx, e.target.value as Basis)}>
@@ -633,7 +789,9 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
             </div>
             <div className="grid-footer je-lines-footer">
               <span className="grid-footer-info">{rows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(rows.length))} ردیف`}</span>
-              <span className="je-lines-totals">جمع مبلغ اقلام: {formatAmountFa(totalAmount)}</span>
+              <span className="je-lines-totals">
+                جمع مبلغ اقلام: {formatAmountFa(totalAmount)} — جمع تخفیف: {formatAmountFa(totalDiscount)} — جمع مالیات بر ارزش افزوده: {formatAmountFa(totalVat)}
+              </span>
             </div>
           </div>
         </fieldset>

@@ -12,6 +12,7 @@ import { setLineAmount, deleteLatestLineAmount } from "../services/documentItemA
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
+import { toBaseCurrencyAmount, fromBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConversion";
 
 const FORM = findFormPrefix("purchase-invoices");
 
@@ -113,7 +114,7 @@ async function validateLines(
   lines: LineInput[],
   basis: string,
   partyDetailCode: string,
-  currency: { baseVolume: number },
+  currency: ConversionCurrency,
   fxRate: number,
   excludeInvoiceId?: number
 ) {
@@ -178,9 +179,10 @@ async function validateLines(
     if (discount > amount) throw new Error(`تخفیف ردیف ${idx + 1} نمی‌تواند از مبلغ ردیف بیشتر باشد`);
 
     // مبلغ/تخفیف به ارز مبنا — طبق تصمیم صریح کاربر فقط برای بایگانی و محاسبات (نه نمایش در UI) نگه
-    // داشته می‌شوند؛ همان فرمول baseDebit/baseCredit سرویس مشترک صدور سند (amount × fxRate / baseVolume).
-    const baseAmount = (amount * fxRate) / currency.baseVolume;
-    const baseDiscount = (discount * fxRate) / currency.baseVolume;
+    // داشته می‌شوند؛ طبق Documents/تبدیل ارز.md (utils/currencyConversion.ts)، فرمول به روش ثبت نرخ ارز
+    // (Currency.rateDirection) بستگی دارد، نه همیشه fxRate/baseVolume.
+    const baseAmount = toBaseCurrencyAmount(amount, fxRate, currency);
+    const baseDiscount = toBaseCurrencyAmount(discount, fxRate, currency);
 
     // طبق تصمیم صریح کاربر: مالیات بر ارزش افزوده = (مبلغ − تخفیف) × نرخ مالیات، همیشه به ارز مبنا
     // محاسبه و نگهداری می‌شود (نه به ارز فاکتور) — نرخ کالای «خاص» در اولویت است، وگرنه نرخ پیش‌فرض
@@ -762,11 +764,11 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
 
       // بستانکار «پرداختنی خرید»: مبلغ کالا + معادلِ به‌ارزِ‌فاکتورِ ارزش‌افزوده‌ی همین ردیف (اگر داشت) —
       // ارزش‌افزوده همیشه به ارز مبنا محاسبه شده (بند ۵)، پس برای تجمیع در همین سطل (که به ارز فاکتور
-      // نگه داشته می‌شود) باید معکوسِ فرمول baseAmount اعمال شود: مبنا × baseVolume ÷ fxRate.
+      // نگه داشته می‌شود) باید معکوسِ فرمول baseAmount اعمال شود (fromBaseCurrencyAmount).
       let creditAmount = amount;
       let creditBaseAmount = baseAmount;
       if (vatDebitSetting) {
-        creditAmount += (vatAmount * invoice.currency.baseVolume) / fxRate;
+        creditAmount += fromBaseCurrencyAmount(vatAmount, fxRate, invoice.currency);
         creditBaseAmount += vatAmount;
       }
       const existingCredit = creditByAccount.get(creditSetting.accountId);
@@ -841,7 +843,7 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
       });
     }
 
-    res.json({ journalEntryId: entry.id, number: entry.number, referenceNumber: entry.referenceNumber });
+    res.json({ journalEntryId: entry.id, number: entry.number, referenceNumber: entry.referenceNumber, message: entry.message });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در صدور سند حسابداری" });
   }

@@ -112,6 +112,7 @@ router.get("/goods-service-accounting", async (_req, res) => {
         accountingGroup: true,
         warehouseGroup: true,
         purchaseType: true,
+        salesType: true,
         account: { include: { level: true } },
       },
       orderBy: { id: "asc" },
@@ -125,7 +126,7 @@ router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create
     accountType: string;
     warehouseGroupId?: number | null;
     accountId: number;
-    salesTypeRef?: number | null;
+    salesTypeId?: number | null;
     warehouseDocType?: string | null;
     purchaseTypeId?: number | null;
   };
@@ -156,11 +157,11 @@ router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create
         accountType: body.accountType as any,
         warehouseGroupId: body.warehouseGroupId || null,
         accountId: body.accountId,
-        salesTypeRef: body.salesTypeRef || null,
+        salesTypeId: body.salesTypeId || null,
         warehouseDocType: (body.warehouseDocType || null) as any,
         purchaseTypeId: body.purchaseTypeId || null,
       },
-      include: { accountingGroup: true, warehouseGroup: true, account: { include: { level: true } } },
+      include: { accountingGroup: true, warehouseGroup: true, purchaseType: true, salesType: true, account: { include: { level: true } } },
     });
     res.status(201).json(created);
   } catch (e: any) {
@@ -175,7 +176,7 @@ router.put("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.edi
     accountType?: string;
     warehouseGroupId?: number | null;
     accountId?: number;
-    salesTypeRef?: number | null;
+    salesTypeId?: number | null;
     warehouseDocType?: string | null;
     purchaseTypeId?: number | null;
   };
@@ -210,11 +211,11 @@ router.put("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.edi
         accountType: body.accountType as any,
         warehouseGroupId: body.warehouseGroupId === undefined ? undefined : body.warehouseGroupId || null,
         accountId: body.accountId,
-        salesTypeRef: body.salesTypeRef === undefined ? undefined : body.salesTypeRef || null,
+        salesTypeId: body.salesTypeId === undefined ? undefined : body.salesTypeId || null,
         warehouseDocType: body.warehouseDocType === undefined ? undefined : ((body.warehouseDocType || null) as any),
         purchaseTypeId: body.purchaseTypeId === undefined ? undefined : body.purchaseTypeId || null,
       },
-      include: { accountingGroup: true, warehouseGroup: true, account: { include: { level: true } } },
+      include: { accountingGroup: true, warehouseGroup: true, purchaseType: true, salesType: true, account: { include: { level: true } } },
     });
     res.json(updated);
   } catch (e: any) {

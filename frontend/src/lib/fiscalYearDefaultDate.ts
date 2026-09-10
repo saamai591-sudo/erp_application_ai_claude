@@ -29,6 +29,19 @@ export function fetchSelectedFiscalPeriod(): Promise<FiscalPeriodRange | null> {
 }
 
 /**
+ * بازه‌ی پیش‌فرض «از تاریخ»/«تا تاریخ» گزارش‌های Review (مرور حسابها، مرور تعدادی/مبلغی انبار و هر
+ * گزارش Review آینده‌ای) — تنها محل این محاسبه؛ قبلاً هر گزارش نسخه‌ی محلی خودش را از این تابع داشت که
+ * باعث شد یکی (مرور تعدادی/مبلغی) به‌خاطر یک race در بارگذاری تنظیمات کاربر (نگاه کنید به
+ * Layout.tsx's preferencesLoading gate) گاهی دوره مالی اشتباه پیش‌فرض بگیرد و دیگری (مرور حسابها) نه —
+ * صرفاً به این خاطر که یکی زودتر از resolve شدن تنظیمات مانت می‌شد. حالا که آن race در ریشه (Layout)
+ * بسته شده، همه‌ی گزارش‌های Review باید از همین یک تابع استفاده کنند تا رفتارشان هرگز دوباره واگرا نشود.
+ */
+export function resolveReviewDateRange(periods: FiscalPeriodRange[]): { fromDate: string; toDate: string } {
+  const current = resolveSelectedFiscalPeriod(periods);
+  return current ? { fromDate: current.fromDate.slice(0, 10), toDate: current.toDate.slice(0, 10) } : { fromDate: "", toDate: "" };
+}
+
+/**
  * قانون پیش‌فرض تاریخ سند (طبق تصمیم کاربر): اگر تاریخ امروز (فقط تاریخ، نه ساعت) در بازه‌ی دوره مالی
  * انتخاب‌شده باشد، همان روز به‌عنوان پیش‌فرض تاریخ سند برگردانده می‌شود؛ در غیر این صورت (یا وقتی هیچ
  * دوره مالی‌ای یافت نشد) خالی می‌ماند تا کاربر خودش وارد کند.

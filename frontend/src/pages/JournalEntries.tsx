@@ -277,9 +277,10 @@ function EntryList() {
           { header: "نوع سند", render: (r) => r.documentType?.title, filterType: "string", filterValue: (r) => r.documentType?.title },
           { header: "شرح", render: (r) => r.description || "—", filterType: "string", filterValue: (r) => r.description || "" },
           // این دو ستون مقدار محاسبه‌شده (جمع ردیف‌های سند) هستند؛ فیلتر/مرتب‌سازی سمت سرور برایشان
-          // پشتیبانی نمی‌شود، پس عمداً بدون filterType/filterValue تعریف شده‌اند (فقط نمایش مقدار همان صفحه)
-          { header: "جمع بدهکار", render: (r) => formatAmountFa(r.totalDebit) },
-          { header: "جمع بستانکار", render: (r) => formatAmountFa(r.totalCredit) },
+          // پشتیبانی نمی‌شود، پس عمداً بدون filterType/filterValue تعریف شده‌اند (فقط نمایش مقدار همان
+          // صفحه) — totalValue برای جمع پای گرید کافی است، بدون فعال‌کردن آیکن فیلتر
+          { header: "جمع بدهکار", render: (r) => formatAmountFa(r.totalDebit), decimal: true, totalValue: (r) => r.totalDebit },
+          { header: "جمع بستانکار", render: (r) => formatAmountFa(r.totalCredit), decimal: true, totalValue: (r) => r.totalCredit },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
@@ -644,7 +645,7 @@ function EntryForm({ editId }: { editId?: number }) {
         flash();
       } else {
         const created = await api.post("/journal-entries", body);
-        flash();
+        flash(created.message);
         navigate(`/journal-entries/${created.id}/edit`);
       }
     } catch (err) {
@@ -718,7 +719,7 @@ function EntryForm({ editId }: { editId?: number }) {
     >
       <form id="journal-entry-form" onSubmit={onSubmit} className="je-form-fill">
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
+        {saved && <div className="alert warn">{saved}</div>}
         {entryMeta?.sources && entryMeta.sources.length > 0 && (
           <div className="je-meta-strip" style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: "10px 14px", background: "#f8f9fb", border: "1px solid var(--line)", borderRadius: 8, marginBottom: 14 }}>
             <b>اسناد مبدا:</b>

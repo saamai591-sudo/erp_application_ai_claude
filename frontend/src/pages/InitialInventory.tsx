@@ -216,7 +216,7 @@ function InitialInventoryList({ basePath }: { basePath: string }) {
           { header: "نوع ایجاد", render: (r) => CREATION_TYPE_FA[r.creationType], filterType: "string", filterValue: (r) => CREATION_TYPE_FA[r.creationType] },
           { header: "تعداد ردیف", render: (r) => r.lineCount },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
-          ...(canViewAccounting ? [{ header: "جمع مبلغ", render: (r: ListRow) => (r.totalAmount != null ? formatAmountFa(r.totalAmount) : "—") }] : []),
+          ...(canViewAccounting ? [{ header: "جمع مبلغ", render: (r: ListRow) => (r.totalAmount != null ? formatAmountFa(r.totalAmount) : "—"), filterType: "number" as const, filterValue: (r: ListRow) => r.totalAmount ?? undefined, decimal: true }] : []),
         ]}
         rows={items}
         edit={{ path: (r) => `${basePath}/${r.id}/edit` }}

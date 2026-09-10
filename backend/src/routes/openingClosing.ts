@@ -265,7 +265,7 @@ async function issueClosing(e: { id: number; fiscalPeriodId: number; description
   });
 
   await prisma.openingClosingEntry.update({ where: { id: e.id }, data: { journalEntryId: entry.id } });
-  return { journalEntryId: entry.id };
+  return { journalEntryId: entry.id, message: entry.message };
 }
 
 async function issueOpening(e: {
@@ -317,7 +317,7 @@ async function issueOpening(e: {
   });
 
   await prisma.openingClosingEntry.update({ where: { id: e.id }, data: { journalEntryId: entry.id } });
-  return { journalEntryId: entry.id };
+  return { journalEntryId: entry.id, message: entry.message };
 }
 
 export default router;

@@ -20,6 +20,7 @@ import { partyDisplayName } from "./Users";
 import { PurchaseType } from "./PurchaseTypes";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
+import { toBaseCurrencyAmount } from "../lib/currencyConversion";
 
 // این فرآیند («فاکتور خرید») مستند تحلیل اختصاصی در پروژه ندارد؛ ساختار این فرم حاصل تصمیم مشترک با
 // کاربر است (نگاه کنید به یادداشت‌های backend/src/routes/purchaseInvoices.ts). با تایید فاکتور، مبلغ
@@ -39,7 +40,7 @@ interface PartyOption {
   lastName: string | null;
   name: string | null;
 }
-interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; baseVolume: number }
+interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null }
 interface GoodsItemRow {
   id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean;
   isSpecial: boolean; taxRate: number | string | null;
@@ -157,7 +158,7 @@ function PurchaseInvoiceList() {
           { header: "مبنا", render: (r) => BASIS_FA[r.basis], filterType: "string", filterValue: (r) => BASIS_FA[r.basis] },
           { header: "طرف مقابل", render: (r) => r.partyTitle || "—", filterType: "string", filterValue: (r) => r.partyTitle || "" },
           { header: "نوع خرید", render: (r) => r.purchaseTypeTitle || "—", filterType: "string", filterValue: (r) => r.purchaseTypeTitle || "" },
-          { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount) },
+          { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
           {
             header: "شماره عطف سند",
@@ -312,13 +313,14 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   // ارز فاکتور غیر از ارز مبنا باشد → نرخ ارز الزامی و به کاربر نمایش داده می‌شود؛ اگر ارز مبنا باشد،
   // فیلد نرخ اصلاً نمایش داده نمی‌شود ولی همیشه ۱ به سرور فرستاده می‌شود (طبق تصمیم صریح کاربر).
   const needsFxRate = !!selectedCurrency && !selectedCurrency.isBase;
-  // مبلغ/تخفیف ردیف را به ارز مبنا تبدیل می‌کند — دقیقاً همان فرمول سرور (amount × fxRate ÷ baseVolume)
-  // — فقط برای پیش‌نمایش زنده‌ی ارزش‌افزوده در فرم؛ مقدار به‌ارز‌مبنای واقعی صرفاً در بک‌اند محاسبه و
-  // ذخیره می‌شود (طبق تصمیم صریح کاربر، این مبالغ در UI نگهداری نمی‌شوند).
+  // مبلغ/تخفیف ردیف را به ارز مبنا تبدیل می‌کند — دقیقاً همان فرمول سرور (lib/currencyConversion.ts،
+  // وابسته به روش ثبت نرخ ارز) — فقط برای پیش‌نمایش زنده‌ی ارزش‌افزوده در فرم؛ مقدار به‌ارز‌مبنای واقعی
+  // صرفاً در بک‌اند محاسبه و ذخیره می‌شود (طبق تصمیم صریح کاربر، این مبالغ در UI نگهداری نمی‌شوند).
   function toBaseAmount(amount: number): number {
     if (!selectedCurrency || selectedCurrency.isBase) return amount;
     const fxRate = Number(header.fxRate) || 0;
-    return (amount * fxRate) / selectedCurrency.baseVolume;
+    if (!(fxRate > 0)) return 0;
+    return toBaseCurrencyAmount(amount, fxRate, selectedCurrency);
   }
 
   // طبق تصمیم صریح کاربر: تا وقتی فیلدهای الزامی سرصفحه (تاریخ/طرف مقابل/ارز/نرخ ارز) کامل نشده، ورود
@@ -538,9 +540,9 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
     if (!editId) return;
     if (confirmMsg && !window.confirm(confirmMsg)) return;
     try {
-      await api.post(`/purchase-invoices/${editId}/${action}`, {});
+      const result: { message?: string } = await api.post(`/purchase-invoices/${editId}/${action}`, {});
       await reloadMetaAndRows();
-      flash();
+      flash(result?.message);
     } catch (e) {
       alert((e as ApiError).message);
     }
@@ -600,7 +602,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
     >
       <form id="purchase-invoice-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
+        {saved && <div className="alert warn">{saved}</div>}
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
             <div className="form-field">

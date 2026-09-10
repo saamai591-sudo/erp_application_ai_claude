@@ -4,6 +4,7 @@ import { nextSerialNumber } from "../utils/coding";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
+import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 
@@ -119,12 +120,17 @@ interface SalesQuoteLineInput {
   quantity: number;
   unitPrice: number;
   amount: number;
+  vatAmount?: number;
   description?: string | null;
 }
 
+// طبق تصمیم صریح کاربر (۱۴۰۵/۰۶/۲۰): مالیات بر ارزش‌افزوده در این فرم برخلاف فاکتور خرید/فاکتور فروش
+// همیشه به همان ارز هدر (نه ارز مبنا) محاسبه/ذخیره می‌شود — چون پیش‌فاکتور اصلاً fxRate ندارد (سندی
+// صرفاً اطلاعاتی، بدون اثر حسابداری)، پس نیازی به تبدیل به ارز مبنا هم نیست؛ amount همان‌جا که هست
+// (به ارز هدر) مستقیماً در فرمول مشترک utils/vatCalculation.ts به کار می‌رود.
 async function validateSalesQuoteLines(lines: SalesQuoteLineInput[]) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("پیش‌فاکتور باید حداقل یک ردیف کالا داشته باشد");
-  const cleaned: { goodsItemId: number; unitId: number; quantity: number; unitPrice: number; amount: number; description: string | null }[] = [];
+  const cleaned: { goodsItemId: number; unitId: number; quantity: number; unitPrice: number; amount: number; vatAmount: number; description: string | null }[] = [];
   for (const [idx, l] of lines.entries()) {
     const qty = Number(l.quantity);
     if (!(qty > 0)) throw new Error(`مقدار ردیف ${idx + 1} باید عددی مثبت باشد`);
@@ -140,7 +146,12 @@ async function validateSalesQuoteLines(lines: SalesQuoteLineInput[]) {
     if (!item.isActive) throw new Error(`کالای ردیف ${idx + 1} غیرفعال است`);
     const unitId = l.unitId || item.mainUnitId;
 
-    cleaned.push({ goodsItemId: l.goodsItemId, unitId, quantity: qty, unitPrice, amount, description: l.description || null });
+    const vatRatePercent = resolveVatRatePercent(item);
+    const suggestedVatAmount = computeLineVat(amount, 0, vatRatePercent);
+    const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
+    if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
+
+    cleaned.push({ goodsItemId: l.goodsItemId, unitId, quantity: qty, unitPrice, amount, vatAmount, description: l.description || null });
   }
   return cleaned;
 }
@@ -148,6 +159,8 @@ async function validateSalesQuoteLines(lines: SalesQuoteLineInput[]) {
 interface SalesQuoteHeaderBody {
   date: string;
   customerId: number;
+  salesTypeId: number;
+  salesCenterId: number;
   currencyId: number;
   description?: string;
   lines: SalesQuoteLineInput[];
@@ -155,7 +168,7 @@ interface SalesQuoteHeaderBody {
 
 router.get("/sales-quotes", can(`${SALES_QUOTES_FORM}.view`), async (_req, res) => {
   const items = await prisma.salesQuote.findMany({
-    include: { customer: { include: { party: true } }, fiscalPeriod: true, currency: true, lines: true },
+    include: { customer: { include: { party: true } }, salesType: true, salesCenter: true, fiscalPeriod: true, currency: true, lines: true },
     orderBy: { id: "desc" },
   });
   res.json(
@@ -165,6 +178,10 @@ router.get("/sales-quotes", can(`${SALES_QUOTES_FORM}.view`), async (_req, res) 
       date: d.date,
       customerId: d.customerId,
       customerTitle: partyDisplayName(d.customer.party),
+      salesTypeId: d.salesTypeId,
+      salesTypeTitle: d.salesType.title,
+      salesCenterId: d.salesCenterId,
+      salesCenterTitle: d.salesCenter.title,
       currencyTitle: d.currency.title,
       status: d.status,
       lineCount: d.lines.length,
@@ -179,6 +196,8 @@ router.get("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.view`), async (req, re
     where: { id },
     include: {
       customer: { include: { party: true } },
+      salesType: true,
+      salesCenter: true,
       fiscalPeriod: true,
       currency: true,
       lines: { include: { goodsItem: true, unit: true }, orderBy: { rowOrder: "asc" } },
@@ -191,6 +210,10 @@ router.get("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.view`), async (req, re
     date: d.date,
     customerId: d.customerId,
     customerTitle: partyDisplayName(d.customer.party),
+    salesTypeId: d.salesTypeId,
+    salesTypeTitle: d.salesType.title,
+    salesCenterId: d.salesCenterId,
+    salesCenterTitle: d.salesCenter.title,
     currencyId: d.currencyId,
     fiscalPeriodId: d.fiscalPeriodId,
     description: d.description,
@@ -206,6 +229,7 @@ router.get("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.view`), async (req, re
       quantity: Number(l.quantity),
       unitPrice: Number(l.unitPrice),
       amount: Number(l.amount),
+      vatAmount: Number(l.vatAmount),
       description: l.description,
     })),
   });
@@ -213,12 +237,18 @@ router.get("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.view`), async (req, re
 
 router.post("/sales-quotes", can(`${SALES_QUOTES_FORM}.create`), async (req, res) => {
   const body = req.body as SalesQuoteHeaderBody;
-  if (!body.date || !body.customerId || !body.currencyId) return res.status(400).json({ error: "تاریخ، مشتری و ارز الزامی است" });
+  if (!body.date || !body.customerId || !body.salesTypeId || !body.salesCenterId || !body.currencyId) {
+    return res.status(400).json({ error: "تاریخ، مشتری، نوع فروش، مرکز فروش و ارز الزامی است" });
+  }
   try {
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
     if (!customer) throw new Error("مشتری یافت نشد");
+    const salesType = await prisma.salesType.findUnique({ where: { id: body.salesTypeId } });
+    if (!salesType) throw new Error("نوع فروش یافت نشد");
+    const salesCenter = await prisma.salesCenter.findUnique({ where: { id: body.salesCenterId } });
+    if (!salesCenter) throw new Error("مرکز فروش یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
     const lines = await validateSalesQuoteLines(body.lines);
@@ -230,6 +260,8 @@ router.post("/sales-quotes", can(`${SALES_QUOTES_FORM}.create`), async (req, res
         number,
         date,
         customerId: body.customerId,
+        salesTypeId: body.salesTypeId,
+        salesCenterId: body.salesCenterId,
         currencyId: body.currencyId,
         description: body.description || null,
         status: "DRAFT",
@@ -249,13 +281,19 @@ router.put("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.edit`), async (req, re
   const existing = await prisma.salesQuote.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "یافت نشد" });
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "ویرایش فقط در حالت ثبت ممکن است" });
-  if (!body.date || !body.customerId || !body.currencyId) return res.status(400).json({ error: "تاریخ، مشتری و ارز الزامی است" });
+  if (!body.date || !body.customerId || !body.salesTypeId || !body.salesCenterId || !body.currencyId) {
+    return res.status(400).json({ error: "تاریخ، مشتری، نوع فروش، مرکز فروش و ارز الزامی است" });
+  }
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این پیش‌فاکتور");
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
     if (!customer) throw new Error("مشتری یافت نشد");
+    const salesType = await prisma.salesType.findUnique({ where: { id: body.salesTypeId } });
+    if (!salesType) throw new Error("نوع فروش یافت نشد");
+    const salesCenter = await prisma.salesCenter.findUnique({ where: { id: body.salesCenterId } });
+    if (!salesCenter) throw new Error("مرکز فروش یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
     const lines = await validateSalesQuoteLines(body.lines);
@@ -268,6 +306,8 @@ router.put("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.edit`), async (req, re
           fiscalPeriodId: fiscalPeriod.id,
           date,
           customerId: body.customerId,
+          salesTypeId: body.salesTypeId,
+          salesCenterId: body.salesCenterId,
           currencyId: body.currencyId,
           description: body.description || null,
           lines: { create: lines.map((l, idx) => ({ ...l, rowOrder: idx })) },
@@ -325,9 +365,12 @@ interface SalesOrderLineInput {
   quantity: number;
   unitPrice: number;
   amount: number;
+  vatAmount?: number;
   description?: string | null;
 }
 
+// طبق تصمیم صریح کاربر (۱۴۰۵/۰۶/۲۰، هم‌الگوی SalesQuote): مالیات بر ارزش‌افزوده همیشه به همان ارز هدر
+// محاسبه/ذخیره می‌شود (نه ارز مبنا)، چون این فرم اصلاً fxRate ندارد.
 async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: string) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("سفارش فروش باید حداقل یک ردیف کالا داشته باشد");
   const cleaned: {
@@ -337,6 +380,7 @@ async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: stri
     quantity: number;
     unitPrice: number;
     amount: number;
+    vatAmount: number;
     description: string | null;
   }[] = [];
 
@@ -372,20 +416,30 @@ async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: stri
     if (!item.isActive) throw new Error(`کالای ردیف ${idx + 1} غیرفعال است`);
     if (!unitId) unitId = item.mainUnitId;
 
-    cleaned.push({ sourceSalesQuoteLineId, goodsItemId, unitId, quantity: qty, unitPrice, amount, description: l.description || null });
+    const vatRatePercent = resolveVatRatePercent(item);
+    const suggestedVatAmount = computeLineVat(amount, 0, vatRatePercent);
+    const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
+    if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
+
+    cleaned.push({ sourceSalesQuoteLineId, goodsItemId, unitId, quantity: qty, unitPrice, amount, vatAmount, description: l.description || null });
   }
   return cleaned;
 }
 
 router.get("/sales-orders/pickable-quote-lines", can(`${SALES_ORDERS_FORM}.view`), async (req, res) => {
   const customerId = req.query.customerId ? Number(req.query.customerId) : null;
+  const currencyId = req.query.currencyId ? Number(req.query.currencyId) : null;
+  const salesCenterId = req.query.salesCenterId ? Number(req.query.salesCenterId) : null;
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
+  const excludeOrderId = req.query.excludeOrderId ? Number(req.query.excludeOrderId) : null;
 
   const lines = await prisma.salesQuoteLine.findMany({
     where: {
       salesQuote: {
         status: "APPROVED",
         ...(customerId ? { customerId } : {}),
+        ...(currencyId ? { currencyId } : {}),
+        ...(salesCenterId ? { salesCenterId } : {}),
         ...(destDate ? { date: { lte: destDate } } : {}),
       },
     },
@@ -395,7 +449,12 @@ router.get("/sales-orders/pickable-quote-lines", can(`${SALES_ORDERS_FORM}.view`
 
   const result = lines
     .map((l: any) => {
-      const done = l.salesOrderLines.reduce((s: number, o: any) => s + Number(o.quantity), 0);
+      // مصرف همین سفارش (در حال ویرایش) نباید در «مانده» لحاظ شود، وگرنه ردیفی که کل مانده‌اش را همین
+      // سفارش قبلاً گرفته، از فهرست انتخابگر حذف می‌شود و در حالت ویرایش، ردیف پیش‌فاکتور قبلاً
+      // انتخاب‌شده در گرید نمایش داده نمی‌شود — دقیقاً هم‌الگوی purchaseInvoices.ts/salesInvoices.ts.
+      const done = l.salesOrderLines
+        .filter((o: any) => !excludeOrderId || o.salesOrderId !== excludeOrderId)
+        .reduce((s: number, o: any) => s + Number(o.quantity), 0);
       const quantity = Number(l.quantity);
       const remaining = quantity - done;
       return {
@@ -423,6 +482,8 @@ interface SalesOrderHeaderBody {
   date: string;
   basis: "NO_BASIS" | "QUOTE";
   customerId: number;
+  salesTypeId: number;
+  salesCenterId: number;
   currencyId: number;
   description?: string;
   lines: SalesOrderLineInput[];
@@ -430,7 +491,7 @@ interface SalesOrderHeaderBody {
 
 router.get("/sales-orders", can(`${SALES_ORDERS_FORM}.view`), async (_req, res) => {
   const items = await prisma.salesOrder.findMany({
-    include: { customer: { include: { party: true } }, fiscalPeriod: true, currency: true, lines: true },
+    include: { customer: { include: { party: true } }, salesType: true, salesCenter: true, fiscalPeriod: true, currency: true, lines: true },
     orderBy: { id: "desc" },
   });
   res.json(
@@ -441,6 +502,10 @@ router.get("/sales-orders", can(`${SALES_ORDERS_FORM}.view`), async (_req, res) 
       basis: d.basis,
       customerId: d.customerId,
       customerTitle: partyDisplayName(d.customer.party),
+      salesTypeId: d.salesTypeId,
+      salesTypeTitle: d.salesType.title,
+      salesCenterId: d.salesCenterId,
+      salesCenterTitle: d.salesCenter.title,
       currencyTitle: d.currency.title,
       status: d.status,
       lineCount: d.lines.length,
@@ -455,6 +520,8 @@ router.get("/sales-orders/:id", can(`${SALES_ORDERS_FORM}.view`), async (req, re
     where: { id },
     include: {
       customer: { include: { party: true } },
+      salesType: true,
+      salesCenter: true,
       fiscalPeriod: true,
       currency: true,
       lines: { include: { goodsItem: true, unit: true }, orderBy: { rowOrder: "asc" } },
@@ -468,6 +535,10 @@ router.get("/sales-orders/:id", can(`${SALES_ORDERS_FORM}.view`), async (req, re
     basis: d.basis,
     customerId: d.customerId,
     customerTitle: partyDisplayName(d.customer.party),
+    salesTypeId: d.salesTypeId,
+    salesTypeTitle: d.salesType.title,
+    salesCenterId: d.salesCenterId,
+    salesCenterTitle: d.salesCenter.title,
     currencyId: d.currencyId,
     fiscalPeriodId: d.fiscalPeriodId,
     description: d.description,
@@ -484,6 +555,7 @@ router.get("/sales-orders/:id", can(`${SALES_ORDERS_FORM}.view`), async (req, re
       quantity: Number(l.quantity),
       unitPrice: Number(l.unitPrice),
       amount: Number(l.amount),
+      vatAmount: Number(l.vatAmount),
       description: l.description,
     })),
   });
@@ -491,12 +563,18 @@ router.get("/sales-orders/:id", can(`${SALES_ORDERS_FORM}.view`), async (req, re
 
 router.post("/sales-orders", can(`${SALES_ORDERS_FORM}.create`), async (req, res) => {
   const body = req.body as SalesOrderHeaderBody;
-  if (!body.date || !body.basis || !body.customerId || !body.currencyId) return res.status(400).json({ error: "تاریخ، مبنا، مشتری و ارز الزامی است" });
+  if (!body.date || !body.basis || !body.customerId || !body.salesTypeId || !body.salesCenterId || !body.currencyId) {
+    return res.status(400).json({ error: "تاریخ، مبنا، مشتری، نوع فروش، مرکز فروش و ارز الزامی است" });
+  }
   try {
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
     if (!customer) throw new Error("مشتری یافت نشد");
+    const salesType = await prisma.salesType.findUnique({ where: { id: body.salesTypeId } });
+    if (!salesType) throw new Error("نوع فروش یافت نشد");
+    const salesCenter = await prisma.salesCenter.findUnique({ where: { id: body.salesCenterId } });
+    if (!salesCenter) throw new Error("مرکز فروش یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
     const lines = await validateSalesOrderLines(body.lines, body.basis);
@@ -509,6 +587,8 @@ router.post("/sales-orders", can(`${SALES_ORDERS_FORM}.create`), async (req, res
         date,
         basis: body.basis,
         customerId: body.customerId,
+        salesTypeId: body.salesTypeId,
+        salesCenterId: body.salesCenterId,
         currencyId: body.currencyId,
         description: body.description || null,
         status: "DRAFT",
@@ -528,13 +608,19 @@ router.put("/sales-orders/:id", can(`${SALES_ORDERS_FORM}.edit`), async (req, re
   const existing = await prisma.salesOrder.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "یافت نشد" });
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "ویرایش فقط در حالت ثبت ممکن است" });
-  if (!body.date || !body.basis || !body.customerId || !body.currencyId) return res.status(400).json({ error: "تاریخ، مبنا، مشتری و ارز الزامی است" });
+  if (!body.date || !body.basis || !body.customerId || !body.salesTypeId || !body.salesCenterId || !body.currencyId) {
+    return res.status(400).json({ error: "تاریخ، مبنا، مشتری، نوع فروش، مرکز فروش و ارز الزامی است" });
+  }
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سفارش فروش");
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
     const customer = await prisma.customer.findUnique({ where: { id: body.customerId } });
     if (!customer) throw new Error("مشتری یافت نشد");
+    const salesType = await prisma.salesType.findUnique({ where: { id: body.salesTypeId } });
+    if (!salesType) throw new Error("نوع فروش یافت نشد");
+    const salesCenter = await prisma.salesCenter.findUnique({ where: { id: body.salesCenterId } });
+    if (!salesCenter) throw new Error("مرکز فروش یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
     const lines = await validateSalesOrderLines(body.lines, body.basis);
@@ -548,6 +634,8 @@ router.put("/sales-orders/:id", can(`${SALES_ORDERS_FORM}.edit`), async (req, re
           date,
           basis: body.basis,
           customerId: body.customerId,
+          salesTypeId: body.salesTypeId,
+          salesCenterId: body.salesCenterId,
           currencyId: body.currencyId,
           description: body.description || null,
           lines: { create: lines.map((l, idx) => ({ ...l, rowOrder: idx })) },

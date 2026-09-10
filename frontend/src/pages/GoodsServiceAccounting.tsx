@@ -9,12 +9,12 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
-import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 import { AccountingGroup } from "./AccountingGroups";
 import { WarehouseGroup } from "./WarehouseGroups";
 import { PurchaseType } from "./PurchaseTypes";
+import { SalesType } from "./SalesTypes";
 
 const ACCOUNT_TYPE_FA: Record<string, string> = {
   SALES_VAT: "ارزش افزوده فروش",
@@ -56,8 +56,11 @@ const WAREHOUSE_DOC_TYPE_FA: Record<string, string> = {
   WAREHOUSE_TRANSFER_OUT: "حواله انتقالی",
   INVENTORY_COUNTING_SHORTAGE: "کسری انبارگردانی",
 };
+// طبق تصمیم صریح کاربر: «موجودی اول دوره» هرگز سند حسابداری صادر نمی‌کند (نگاه کنید به
+// issueWarehouseJournalEntries.ts's EXCLUDED_DOC_TYPES)، پس در این پیکر تنظیم حساب هم گزینه‌ای برایش
+// معنا ندارد — WAREHOUSE_DOC_TYPE_FA عمداً نگه داشته شده (برای نمایش صحیحِ رکوردهای قدیمی اگر روزی
+// وجود داشته باشند)، فقط از فهرست انتخاب‌پذیر حذف شده است.
 const WAREHOUSE_RECEIPT_DOC_TYPES = [
-  "INITIAL_INVENTORY",
   "WAREHOUSE_RECEIPT",
   "WAREHOUSE_TRANSFER_IN",
   "WAREHOUSE_ADJUSTMENT",
@@ -101,7 +104,8 @@ interface GoodsServiceAccountingSetting {
   warehouseGroup: WarehouseGroup | null;
   accountId: number;
   account: AccountRow;
-  salesTypeRef: number | null;
+  salesTypeId: number | null;
+  salesType: SalesType | null;
   warehouseDocType: string | null;
   purchaseTypeId: number | null;
   purchaseType: PurchaseType | null;
@@ -157,8 +161,11 @@ function SettingList() {
           { header: "نوع حساب", render: (r) => ACCOUNT_TYPE_FA[r.accountType] || r.accountType },
           { header: "گروه انبار", render: (r) => r.warehouseGroup?.title || "—" },
           {
-            header: "نوع سند / نوع خرید",
-            render: (r) => (r.warehouseDocType ? WAREHOUSE_DOC_TYPE_FA[r.warehouseDocType] || r.warehouseDocType : r.purchaseType?.title || "—"),
+            header: "نوع سند / نوع خرید / نوع فروش",
+            render: (r) =>
+              r.warehouseDocType
+                ? WAREHOUSE_DOC_TYPE_FA[r.warehouseDocType] || r.warehouseDocType
+                : r.purchaseType?.title || r.salesType?.title || "—",
           },
           { header: "معین", render: (r) => (r.account ? `${r.account.code} - ${r.account.title}` : "—") },
         ]}
@@ -175,7 +182,7 @@ const DEFAULT_SETTING_FORM = {
   accountType: "",
   warehouseGroupId: "",
   accountId: "",
-  salesTypeRef: "",
+  salesTypeId: "",
   warehouseDocType: "",
   purchaseTypeId: "",
 };
@@ -187,6 +194,7 @@ function SettingForm({ editId }: { editId?: number }) {
   const [accountingGroups, setAccountingGroups] = useState<AccountingGroup[]>([]);
   const [warehouseGroups, setWarehouseGroups] = useState<WarehouseGroup[]>([]);
   const [purchaseTypes, setPurchaseTypes] = useState<PurchaseType[]>([]);
+  const [salesTypes, setSalesTypes] = useState<SalesType[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [hasTransactions, setHasTransactions] = useState(false);
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_SETTING_FORM);
@@ -198,6 +206,7 @@ function SettingForm({ editId }: { editId?: number }) {
     api.get("/accounting-groups").then((g: AccountingGroup[]) => setAccountingGroups(g.filter((x) => x.isActive)));
     api.get("/warehouse-groups").then((g: WarehouseGroup[]) => setWarehouseGroups(g.filter((x) => x.isActive)));
     api.get("/purchase-types").then(setPurchaseTypes);
+    api.get("/sales-types").then(setSalesTypes);
     api.get("/accounts").then(setAccounts);
   }, []);
 
@@ -221,7 +230,7 @@ function SettingForm({ editId }: { editId?: number }) {
           accountType: found.accountType,
           warehouseGroupId: found.warehouseGroupId ? String(found.warehouseGroupId) : "",
           accountId: String(found.accountId),
-          salesTypeRef: found.salesTypeRef != null ? String(found.salesTypeRef) : "",
+          salesTypeId: found.salesTypeId != null ? String(found.salesTypeId) : "",
           warehouseDocType: found.warehouseDocType || "",
           purchaseTypeId: found.purchaseTypeId != null ? String(found.purchaseTypeId) : "",
         });
@@ -260,7 +269,7 @@ function SettingForm({ editId }: { editId?: number }) {
       accountType: form.accountType,
       warehouseGroupId: showWarehouseGroup && form.warehouseGroupId ? Number(form.warehouseGroupId) : null,
       accountId: Number(form.accountId),
-      salesTypeRef: showSalesType && form.salesTypeRef ? Number(form.salesTypeRef) : null,
+      salesTypeId: showSalesType && form.salesTypeId ? Number(form.salesTypeId) : null,
       warehouseDocType: showWarehouseDocType && form.warehouseDocType ? form.warehouseDocType : null,
       purchaseTypeId: showPurchaseType && form.purchaseTypeId ? Number(form.purchaseTypeId) : null,
     };
@@ -293,11 +302,7 @@ function SettingForm({ editId }: { editId?: number }) {
   return (
     <FormPage
       title={editId ? "ویرایش حسابداری کالا و خدمت" : "حسابداری کالا و خدمت جدید"}
-      description={
-        hasTransactions
-          ? "این تنظیم برای اسناد صادرشده استفاده شده است و قابل ویرایش نیست"
-          : "فیلد «نوع فروش» تا پیاده‌سازی ماژول فروش به‌صورت کد عددی موقت ثبت می‌شود"
-      }
+      description={hasTransactions ? "این تنظیم برای اسناد صادرشده استفاده شده است و قابل ویرایش نیست" : undefined}
       formId="goods-service-accounting-form"
       closePath="/goods-service-accounting"
       newPath="/goods-service-accounting/new"
@@ -338,14 +343,15 @@ function SettingForm({ editId }: { editId?: number }) {
           <div className={`form-field ${showSalesType || showWarehouseGroup || showWarehouseDocType || showPurchaseType ? "" : "form-field-hidden"}`}>
             {showSalesType && (
               <>
-                <label>نوع فروش <FieldHint label="نوع فروش" text="موقت — تا پیاده‌سازی ماژول فروش، این فیلد یک کد عددی ساده است" /></label>
-                <input
-                  type="number"
-                  dir="ltr"
+                <label>نوع فروش<RequiredMark /></label>
+                <select
+                  value={form.salesTypeId}
                   disabled={hasTransactions}
-                  value={form.salesTypeRef}
-                  onChange={(e) => setForm({ ...form, salesTypeRef: e.target.value })}
-                />
+                  onChange={(e) => setForm({ ...form, salesTypeId: e.target.value })}
+                >
+                  <option value="">انتخاب کنید</option>
+                  {salesTypes.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+                </select>
               </>
             )}
             {showWarehouseGroup && (

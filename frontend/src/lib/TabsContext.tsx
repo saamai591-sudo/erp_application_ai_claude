@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getTitleForPath } from "./tabTitle";
-import { clearAccountsReviewSnapshot } from "./accountsReviewCache";
+import { clearReviewReportCacheForPath, clearAllReviewReportCaches } from "./reviewReportCache";
 import { clearPersistedStateByPrefix } from "./usePersistedState";
 import { refreshTabIfStale } from "./listInvalidation";
 
@@ -94,7 +94,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     const base = path.split("?")[0];
     clearPersistedStateByPrefix(`form:${base}`);
     clearPersistedStateByPrefix(base);
-    if (base.startsWith("/account-review")) clearAccountsReviewSnapshot();
+    clearReviewReportCacheForPath(base);
 
     const tab: Tab = { id: nextId(), path, title: getTitleForPath(path) };
     setTabs((prev) => [...prev, tab]);
@@ -113,7 +113,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   function closeTab(id: string) {
     setTabs((prev) => {
       const closed = prev.find((t) => t.id === id);
-      if (closed?.path.startsWith("/account-review")) clearAccountsReviewSnapshot();
+      if (closed) clearReviewReportCacheForPath(closed.path);
 
       const idx = prev.findIndex((t) => t.id === id);
       const next = prev.filter((t) => t.id !== id);
@@ -134,9 +134,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
 
   /** بستن همه‌ی تب‌های باز (مثلاً وقتی کاربر دوره مالی جاری را عوض می‌کند، تا هیچ فرمی با اطلاعات کش‌شده‌ی دوره‌ی قبلی باز نماند) */
   function closeAllTabs() {
-    tabs.forEach((t) => {
-      if (t.path.startsWith("/account-review")) clearAccountsReviewSnapshot();
-    });
+    clearAllReviewReportCaches();
     clearPersistedStateByPrefix("");
     setTabs([]);
     setActiveTabId(null);

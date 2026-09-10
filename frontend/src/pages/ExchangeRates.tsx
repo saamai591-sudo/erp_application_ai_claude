@@ -61,7 +61,7 @@ function RateList() {
         columns={[
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
           { header: "ارز", render: (r) => r.currency.title, filterType: "string", filterValue: (r) => r.currency.title },
-          { header: "نرخ", render: (r) => formatAmountFa(r.rate), filterType: "number", filterValue: (r) => r.rate },
+          { header: "نرخ", render: (r) => formatAmountFa(r.rate), filterType: "number", filterValue: (r) => r.rate, decimal: true },
         ]}
         rows={rates}
         edit={{ path: (r) => `/exchange-rates/${r.id}/edit` }}

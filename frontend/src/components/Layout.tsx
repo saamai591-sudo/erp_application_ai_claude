@@ -292,6 +292,14 @@ export default function Layout() {
   const [openModule, setOpenModule] = useState<string | null>(null);
   const [openSubModule, setOpenSubModule] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // طبق تصمیم صریح کاربر (ریشه‌ی باگ پیش‌فرض بازه‌ی تاریخ در گزارش‌های Review): تا وقتی این fetch تمام
+  // نشده، getPreference("fiscalPeriodId") (و هر تنظیم دیگری) مقدار DEFAULTS خالی را برمی‌گرداند — نه
+  // مقدار واقعی ذخیره‌شده‌ی کاربر. صفحاتی که این مقدار را در افکت mount خودشان synchronous می‌خوانند
+  // (مثل محاسبه‌ی پیش‌فرض «از تاریخ/تا تاریخ» بر مبنای دوره مالی انتخابی) دچار یک race واقعی می‌شدند:
+  // اگر آن صفحه زودتر از resolve این fetch مانت می‌شد، پیش‌فرض اشتباه (آخرین دوره مالی به‌جای دوره مالی
+  // واقعاً انتخاب‌شده) محاسبه می‌شد. راه‌حل ریشه‌ای این نیست که هر مصرف‌کننده جداگانه صبر کند، بلکه این
+  // است که کل درخت صفحات (Outlet) اصلاً تا آماده‌شدن تنظیمات مانت نشود — دقیقاً هم‌الگوی گیت loading زیر.
+  const [preferencesLoading, setPreferencesLoading] = useState(true);
 
   useEffect(() => {
     // تنظیمات کاربر (فونت/تم/…) سمت بک‌اند ذخیره شده‌اند (preferences.ts) — این‌جا یک‌بار بعد از ورود
@@ -299,6 +307,7 @@ export default function Layout() {
     loadPreferences().then((prefs) => {
       applyFont(prefs.font);
       applyTheme(prefs.theme);
+      setPreferencesLoading(false);
     });
   }, []);
 
@@ -312,6 +321,7 @@ export default function Layout() {
 
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
+  if (preferencesLoading) return null;
 
   const activePath = tabs.find((t) => t.id === activeTabId)?.path;
 

@@ -29,7 +29,7 @@ interface SerialOption {
   serialNumber: string;
   expiryDate: string | null;
   isActive: boolean;
-  batch: { batchNumber: string; expiryDate: string | null } | null;
+  batch: string | null;
 }
 interface LocationOption {
   id: number;
@@ -223,11 +223,11 @@ export function TrackingCells({
                       rows={serials}
                       columns={[
                         { header: "سریال", render: (s) => toFaDigits(s.serialNumber), filterValue: (s) => s.serialNumber },
-                        { header: "بچ", render: (s) => (s.batch ? toFaDigits(s.batch.batchNumber) : "—"), filterValue: (s) => s.batch?.batchNumber || "" },
+                        { header: "بچ", render: (s) => (s.batch ? toFaDigits(s.batch) : "—"), filterValue: (s) => s.batch || "" },
                         {
                           header: "تاریخ انقضا",
-                          render: (s) => (s.batch?.expiryDate || s.expiryDate ? toFaDigits((s.batch?.expiryDate || s.expiryDate)!.slice(0, 10)) : "—"),
-                          filterValue: (s) => s.batch?.expiryDate || s.expiryDate || "",
+                          render: (s) => (s.expiryDate ? toFaDigits(s.expiryDate.slice(0, 10)) : "—"),
+                          filterValue: (s) => s.expiryDate || "",
                         },
                       ]}
                       selected={selectedSerials}

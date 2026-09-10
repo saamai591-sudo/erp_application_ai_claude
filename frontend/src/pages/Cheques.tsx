@@ -123,7 +123,7 @@ function ChequeList() {
           { header: "سررسید", render: (r) => formatJalaliDate(r.dueDate), filterType: "date", filterValue: (r) => r.dueDate.slice(0, 10) },
           { header: "طرف حساب", render: (r) => r.partyDisplay, filterType: "string", filterValue: (r) => r.partyDisplay },
           { header: "شعبه بانک", render: (r) => r.bankBranchTitle || "—", filterType: "string", filterValue: (r) => r.bankBranchTitle || "" },
-          { header: "مبلغ", render: (r) => formatAmountFa(r.amount) },
+          { header: "مبلغ", render: (r) => formatAmountFa(r.amount), filterType: "number", filterValue: (r) => r.amount, decimal: true },
           { header: "ارز", render: (r) => r.currencyTitle, filterType: "string", filterValue: (r) => r.currencyTitle },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}

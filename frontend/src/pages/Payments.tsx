@@ -181,7 +181,7 @@ function PaymentList() {
           { header: "طرف حساب", render: (r) => r.partyDisplay, filterType: "string", filterValue: (r) => r.partyDisplay },
           { header: "ارز", render: (r) => r.currencyTitle, filterType: "string", filterValue: (r) => r.currencyTitle },
           { header: "شرح", render: (r) => r.description || "—", filterType: "string", filterValue: (r) => r.description || "" },
-          { header: "جمع مبلغ", render: (r) => formatAmountFa(r.totalAmount) },
+          { header: "جمع مبلغ", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}

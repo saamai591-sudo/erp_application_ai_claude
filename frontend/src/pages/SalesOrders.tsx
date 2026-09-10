@@ -14,26 +14,33 @@ import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
+import { SalesType } from "./SalesTypes";
+import { SalesCenter } from "./SalesCenters";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
+import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
 
 // «سفارش فروش» (تایید مشتری) — مرحله دوم زنجیره فروش. مبنا: بدون مبنا / پیش‌فاکتور. طبق تصمیم
 // صریح کاربر، «مانده‌ای» فقط برای حواله فروش/فاکتور فروش لازم است؛ اینجا (مثل سفارش خرید از استعلام
 // قیمت) ردیف پیش‌فاکتور مستقیماً کپی می‌شود.
+//
+// طبق تصمیم صریح کاربر (۱۴۰۵/۰۶/۲۰، هم‌الگوی SalesQuote): هدر «نوع فروش» (الزامی) و مالیات بر ارزش
+// افزوده روی ردیف‌ها اضافه شد — همیشه به همان ارز هدر محاسبه می‌شود (نه ارز مبنا)، چون این فرم هم
+// fxRate ندارد.
 
 type Basis = "NO_BASIS" | "QUOTE";
 type Status = "DRAFT" | "APPROVED";
 
 interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null } }
 interface CurrencyOption { id: number; code: string; title: string }
-interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean }
+interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
 interface PickableQuoteLine { id: number; sourceSalesQuoteLineId: number; salesQuoteId: number; number: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; unitPrice: number; quantity: number; done: number; remaining: number }
 
 function customerTitle(c: CustomerOption): string {
   return c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim();
 }
 
-interface ListRow { id: number; number: number; date: string; basis: Basis; customerId: number; customerTitle: string; currencyTitle: string; status: Status; lineCount: number; totalAmount: number }
-interface DetailLine { id: number; sourceSalesQuoteLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; description: string | null }
+interface ListRow { id: number; number: number; date: string; basis: Basis; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: Status; lineCount: number; totalAmount: number }
+interface DetailLine { id: number; sourceSalesQuoteLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; vatAmount: number; description: string | null }
 interface Detail extends ListRow { currencyId: number; description: string | null; lines: DetailLine[] }
 
 const STATUS_FA: Record<Status, string> = { DRAFT: "ثبت", APPROVED: "تایید" };
@@ -109,7 +116,9 @@ function SalesOrderList() {
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
           { header: "مبنا", render: (r) => BASIS_FA[r.basis], filterType: "string", filterValue: (r) => BASIS_FA[r.basis] },
           { header: "مشتری", render: (r) => r.customerTitle, filterType: "string", filterValue: (r) => r.customerTitle },
-          { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount) },
+          { header: "نوع فروش", render: (r) => r.salesTypeTitle || "—", filterType: "string", filterValue: (r) => r.salesTypeTitle || "" },
+          { header: "مرکز فروش", render: (r) => r.salesCenterTitle || "—", filterType: "string", filterValue: (r) => r.salesCenterTitle || "" },
+          { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
@@ -120,10 +129,10 @@ function SalesOrderList() {
   );
 }
 
-interface RowState { sourceSalesQuoteLineId: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; description: string }
+interface RowState { sourceSalesQuoteLineId: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; vatAmount: string; description: string }
 
 function emptyRow(): RowState {
-  return { sourceSalesQuoteLineId: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", description: "" };
+  return { sourceSalesQuoteLineId: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", vatAmount: "", description: "" };
 }
 
 function SalesOrderForm({ editId }: { editId?: number }) {
@@ -131,10 +140,12 @@ function SalesOrderForm({ editId }: { editId?: number }) {
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  const [salesTypes, setSalesTypes] = useState<SalesType[]>([]);
+  const [salesCenters, setSalesCenters] = useState<SalesCenter[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableQuoteLine[]>([]);
-  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", basis: "NO_BASIS" as Basis, customerId: "", currencyId: "", description: "" });
+  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", basis: "NO_BASIS" as Basis, customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", description: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
   const [meta, setMeta] = usePersistedState<{ number: number; status: Status } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
@@ -144,13 +155,17 @@ function SalesOrderForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [cu, c, g, fp] = await Promise.all([
+      const [cu, st, sc, c, g, fp] = await Promise.all([
         api.get("/customers"),
+        api.get("/sales-types"),
+        api.get("/sales-centers"),
         api.get("/currencies"),
         api.get("/goods-items?kind=GOODS&docDirection=OUTBOUND&docType=فروش"),
         fetchSelectedFiscalPeriod(),
       ]);
       setCustomers((cu as any[]).filter((x) => x.isActive));
+      setSalesTypes(st);
+      setSalesCenters((sc as any[]).filter((x) => x.isActive));
       setCurrencies(c);
       setGoodsItems(g);
       setFiscalPeriod(fp);
@@ -162,7 +177,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
       if (editId) {
         const d: Detail = await api.get(`/sales-orders/${editId}`);
         setMeta({ number: d.number, status: d.status });
-        setHeader({ date: d.date.slice(0, 10), basis: d.basis, customerId: String(d.customerId), currencyId: String(d.currencyId), description: d.description || "" });
+        setHeader({ date: d.date.slice(0, 10), basis: d.basis, customerId: String(d.customerId), salesTypeId: String(d.salesTypeId), salesCenterId: String(d.salesCenterId), currencyId: String(d.currencyId), description: d.description || "" });
         setRows(
           d.lines.map((l) => ({
             sourceSalesQuoteLineId: l.sourceSalesQuoteLineId ? String(l.sourceSalesQuoteLineId) : "",
@@ -174,11 +189,12 @@ function SalesOrderForm({ editId }: { editId?: number }) {
             quantity: String(l.quantity),
             unitPrice: String(l.unitPrice),
             amount: String(l.amount),
+            vatAmount: String(l.vatAmount || 0),
             description: l.description || "",
           }))
         );
       } else {
-        setHeader({ date: defaultDocumentDate(fp), basis: "NO_BASIS", customerId: "", currencyId: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), basis: "NO_BASIS", customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", description: "" });
         setRows([emptyRow()]);
         setMeta(null);
       }
@@ -189,13 +205,15 @@ function SalesOrderForm({ editId }: { editId?: number }) {
   }, [editId]);
 
   useEffect(() => {
-    if (header.basis !== "QUOTE" || !header.customerId) {
+    if (header.basis !== "QUOTE" || !header.customerId || !header.currencyId || !header.salesCenterId) {
       setPickableLines([]);
       return;
     }
-    const q = header.date ? `&destDate=${header.date}` : "";
-    api.get(`/sales-orders/pickable-quote-lines?customerId=${header.customerId}${q}`).then(setPickableLines).catch(() => setPickableLines([]));
-  }, [header.basis, header.customerId, header.date]);
+    const params = new URLSearchParams({ customerId: header.customerId, currencyId: header.currencyId, salesCenterId: header.salesCenterId });
+    if (header.date) params.set("destDate", header.date);
+    if (editId) params.set("excludeOrderId", String(editId));
+    api.get(`/sales-orders/pickable-quote-lines?${params.toString()}`).then(setPickableLines).catch(() => setPickableLines([]));
+  }, [header.basis, header.customerId, header.currencyId, header.salesCenterId, header.date, editId]);
 
   const status: Status = meta?.status || "DRAFT";
   const locked = status !== "DRAFT";
@@ -227,11 +245,19 @@ function SalesOrderForm({ editId }: { editId?: number }) {
   function updateRow(idx: number, patch: Partial<RowState>) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
+  // مقدار پیشنهادی مالیات بر ارزش افزوده — طبق تصمیم صریح کاربر، همیشه به همان ارز هدر محاسبه می‌شود
+  // (نه ارز مبنا، چون این فرم fxRate ندارد)؛ فقط پیش‌فرض اولیه است، کاربر می‌تواند بعداً خودش مقدار را
+  // ویرایش کند — دقیقاً هم‌الگوی SalesQuotes.tsx.
+  function computeSuggestedVat(amount: number, goodsItemId: string): string {
+    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    return String(computeLineVat(amount, 0, resolveVatRatePercent(item)));
+  }
   function onSourceLineChange(idx: number, sourceSalesQuoteLineId: string) {
     const src = pickableLines.find((l) => String(l.sourceSalesQuoteLineId) === sourceSalesQuoteLineId);
     if (!src) return;
     const quantity = src.remaining;
     const unitPrice = Number(src.unitPrice);
+    const amount = Math.round(unitPrice * quantity * 100) / 100;
     updateRow(idx, {
       sourceSalesQuoteLineId,
       goodsItemId: String(src.goodsItemId),
@@ -241,14 +267,15 @@ function SalesOrderForm({ editId }: { editId?: number }) {
       unitTitle: src.unitTitle,
       quantity: String(quantity),
       unitPrice: String(unitPrice),
-      amount: String(Math.round(unitPrice * quantity * 100) / 100),
+      amount: String(amount),
+      vatAmount: computeSuggestedVat(amount, String(src.goodsItemId)),
     });
   }
   function onQuantityChange(idx: number, quantity: string) {
     const row = rows[idx];
     if (row.unitPrice) {
       const amount = Math.round(Number(row.unitPrice) * (Number(quantity) || 0) * 100) / 100;
-      updateRow(idx, { quantity, amount: String(amount) });
+      updateRow(idx, { quantity, amount: String(amount), vatAmount: computeSuggestedVat(amount, row.goodsItemId) });
     } else {
       updateRow(idx, { quantity });
     }
@@ -256,13 +283,13 @@ function SalesOrderForm({ editId }: { editId?: number }) {
   function onUnitPriceChange(idx: number, unitPrice: string) {
     const row = rows[idx];
     const amount = Math.round(Number(unitPrice) * (Number(row.quantity) || 0) * 100) / 100;
-    updateRow(idx, { unitPrice, amount: String(amount) });
+    updateRow(idx, { unitPrice, amount: String(amount), vatAmount: computeSuggestedVat(amount, row.goodsItemId) });
   }
   function onAmountChange(idx: number, amount: string) {
     const row = rows[idx];
     const qty = Number(row.quantity) || 0;
     const unitPrice = qty > 0 ? Math.round((Number(amount) / qty) * 10000) / 10000 : 0;
-    updateRow(idx, { amount, unitPrice: String(unitPrice) });
+    updateRow(idx, { amount, unitPrice: String(unitPrice), vatAmount: computeSuggestedVat(Number(amount) || 0, row.goodsItemId) });
   }
   function onGoodsItemChange(idx: number, goodsItemId: string) {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
@@ -276,6 +303,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
   }
 
   const totalAmount = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const totalVat = rows.reduce((s, r) => s + (Number(r.vatAmount) || 0), 0);
 
   function buildBody() {
     const nonEmptyRows = rows.filter((r) => r.goodsItemId || r.sourceSalesQuoteLineId);
@@ -283,6 +311,8 @@ function SalesOrderForm({ editId }: { editId?: number }) {
       date: header.date,
       basis: header.basis,
       customerId: Number(header.customerId),
+      salesTypeId: Number(header.salesTypeId),
+      salesCenterId: Number(header.salesCenterId),
       currencyId: Number(header.currencyId),
       description: header.description,
       lines: nonEmptyRows.map((r) => ({
@@ -292,6 +322,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
         quantity: Number(r.quantity) || 0,
         unitPrice: Number(r.unitPrice) || 0,
         amount: Number(r.amount) || 0,
+        vatAmount: Number(r.vatAmount) || 0,
         description: r.description || null,
       })),
     };
@@ -300,7 +331,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!header.date || !header.customerId || !header.currencyId) return setError("تاریخ، مشتری و ارز الزامی است");
+    if (!header.date || !header.customerId || !header.salesTypeId || !header.salesCenterId || !header.currencyId) return setError("تاریخ، مشتری، نوع فروش، مرکز فروش و ارز الزامی است");
     const dateErr = validateDocumentDate(header.date, fiscalPeriod);
     if (dateErr) return setError(dateErr);
     const body = buildBody();
@@ -406,6 +437,20 @@ function SalesOrderForm({ editId }: { editId?: number }) {
               />
             </div>
             <div className="form-field">
+              <label>نوع فروش<RequiredMark /></label>
+              <select value={header.salesTypeId} onChange={(e) => setHeader({ ...header, salesTypeId: e.target.value })} disabled={headerDisabled}>
+                <option value="">انتخاب کنید</option>
+                {salesTypes.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+              </select>
+            </div>
+            <div className="form-field">
+              <label>مرکز فروش<RequiredMark /></label>
+              <select value={header.salesCenterId} onChange={(e) => setHeader({ ...header, salesCenterId: e.target.value })} disabled={headerDisabled}>
+                <option value="">انتخاب کنید</option>
+                {salesCenters.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+              </select>
+            </div>
+            <div className="form-field">
               <label>ارز<RequiredMark /></label>
               <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value })} disabled={headerDisabled}>
                 <option value="">انتخاب کنید</option>
@@ -438,6 +483,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
                   <th>مقدار</th>
                   <th>فی</th>
                   <th>مبلغ</th>
+                  <th>مالیات بر ارزش افزوده</th>
                   <th>شرح</th>
                   <th></th>
                 </tr>
@@ -495,6 +541,9 @@ function SalesOrderForm({ editId }: { editId?: number }) {
                       <td style={{ minWidth: 120 }}>
                         <AmountInput value={row.amount} onChange={(v) => onAmountChange(idx, v)} allowDecimal disabled={locked || header.basis === "QUOTE"} />
                       </td>
+                      <td style={{ minWidth: 120 }}>
+                        <AmountInput value={row.vatAmount} onChange={(v) => updateRow(idx, { vatAmount: v })} allowDecimal placeholder="۰" disabled={locked} />
+                      </td>
                       <td style={{ minWidth: 140 }}>
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} disabled={locked} />
                       </td>
@@ -511,7 +560,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
           </div>
           <div className="grid-footer je-lines-footer">
             <span className="grid-footer-info">{rows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(rows.length))} ردیف`}</span>
-            <span className="je-lines-totals">جمع مبلغ: {formatAmountFa(totalAmount)}</span>
+            <span className="je-lines-totals">جمع مبلغ: {formatAmountFa(totalAmount)} — جمع مالیات بر ارزش افزوده: {formatAmountFa(totalVat)}</span>
           </div>
         </div>
       </form>
