@@ -21,25 +21,18 @@ import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, vali
 import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
 import { toBaseCurrencyAmount } from "../lib/currencyConversion";
 
-// «فاکتور فروش نهایی» — آخرین سند زنجیره فروش. مبنا: بدون مبنا / حواله فروش. برخلاف فاکتور خرید
-// (که هر ردیف رسید انبار خرید را دقیقاً یک‌بار و کامل مصرف می‌کرد)، اینجا طبق تصمیم صریح کاربر رابطه
-// «مانده‌ای» است (مشتری ممکن است طی چند حواله یک فاکتور بگیرد). فقط ثبت در این فاز — بدون اکشن تایید
-// (رجوع کنید به یادداشت بالای backend/src/routes/salesInvoices.ts).
-//
-// طبق تصمیم صریح کاربر (۱۴۰۵/۰۶/۱۷): نوع فروش/نرخ ارز/ارزش‌افزوده دقیقاً هم‌معماری فاکتور خرید پیاده
-// شده‌اند (نگاه کنید به PurchaseInvoices.tsx) — هدر «نوع فروش» + fxRate (فقط وقتی ارز فاکتور غیر از ارز
-// مبنا باشد نمایش داده می‌شود)، هر ردیف تخفیف/ارزش‌افزوده (که همیشه به ارز مبنا محاسبه می‌شود).
-//
-// طبق Documents/SaleInvoiceVoucher.md و تصمیم صریح کاربر (۱۴۰۵/۰۶/۱۸): چون این سند اصلاً وضعیت «تایید»
-// ندارد، «صدور سند حسابداری» مستقیماً از همان وضعیت «ثبت» انجام می‌شود (نه پس از یک تایید جدا، برخلاف
-// فاکتور خرید/فاکتور خرید خدمات) — با صدور سند، فرم قفل می‌شود.
+// «فاکتور برگشت از فروش» — طبق تصمیم صریح کاربر، دقیقاً هم‌ساختار/هم‌رفتار فاکتور فروش
+// (SalesInvoices.tsx)، با جایگزینی «حواله فروش» با «برگشت از فروش» (سند انبار SALES_RETURN — نگاه
+// کنید به routes/salesReturns.ts که در این کار دست‌نخورده می‌ماند، فقط از آن خوانده می‌شود). مبنا/ارز/
+// تخفیف/ارزش‌افزوده/عدم وجود اکشن تایید همه دقیقاً هم‌الگوی فاکتور فروش‌اند — نگاه کنید به یادداشت بالای
+// backend/src/routes/salesReturnInvoices.ts برای جزئیات کامل، به‌خصوص تفاوت تنها (جهت سند حسابداری).
 
-type Basis = "NO_BASIS" | "SALES_DELIVERY";
+type Basis = "NO_BASIS" | "SALES_RETURN";
 
 interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null } }
 interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; decimalPlaces: number; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null }
 interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
-interface PickableLine { id: number; sourceInventoryLineId: number; salesDeliveryId: number; number: number; date: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
+interface PickableLine { id: number; sourceInventoryLineId: number; salesReturnId: number; number: number; date: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
 
 function customerTitle(c: CustomerOption): string {
   return c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim();
@@ -49,17 +42,17 @@ interface ListRow { id: number; number: number; date: string; basis: Basis; cust
 interface DetailLine { id: number; sourceInventoryLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null }
 interface Detail extends ListRow { currencyId: number; fxRate: number; description: string | null; journalEntryId: number | null; journalEntryReferenceNumber: number | null; lines: DetailLine[] }
 
-const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", SALES_DELIVERY: "حواله فروش" };
-const INFO_TEXT = "ثبت فاکتور فروش نهایی برای مشتری — بدون مبنا یا بر اساس یک یا چند حواله فروش «قطعی»‌شده. در این فاز فقط ثبت می‌شود (بدون اکشن تایید).";
+const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", SALES_RETURN: "برگشت از فروش" };
+const INFO_TEXT = "ثبت فاکتور برگشت از فروش برای مشتری — بدون مبنا یا بر اساس یک یا چند سند «برگشت از فروش» انبار. در این فاز فقط ثبت می‌شود (بدون اکشن تایید). سند حسابداری آن دقیقاً هم‌منطق فاکتور فروش است، با بدهکار/بستانکار برعکس.";
 
-export default function SalesInvoices() {
+export default function SalesReturnInvoices() {
   const location = useLocation();
   const { id } = useParams();
   const isNew = location.pathname.endsWith("/new");
   const isEdit = location.pathname.endsWith("/edit");
-  if (isNew) return <SalesInvoiceForm />;
-  if (isEdit) return <SalesInvoiceForm editId={Number(id)} />;
-  return <SalesInvoiceList />;
+  if (isNew) return <SalesReturnInvoiceForm />;
+  if (isEdit) return <SalesReturnInvoiceForm editId={Number(id)} />;
+  return <SalesReturnInvoiceList />;
 }
 
 function PlusIcon() {
@@ -82,15 +75,15 @@ function EyeIcon() {
   );
 }
 
-function SalesInvoiceList() {
-  const cacheKey = "/sales-invoices";
+function SalesReturnInvoiceList() {
+  const cacheKey = "/sales-return-invoices";
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
   async function reload() {
     try {
-      setItems(await api.get("/sales-invoices"));
+      setItems(await api.get("/sales-return-invoices"));
       setError(null);
     } catch (e) {
       setError((e as ApiError).message);
@@ -103,7 +96,7 @@ function SalesInvoiceList() {
 
   async function onDelete(row: ListRow) {
     try {
-      await api.del(`/sales-invoices/${row.id}`);
+      await api.del(`/sales-return-invoices/${row.id}`);
       await reload();
     } catch (e) {
       alert((e as ApiError).message);
@@ -114,8 +107,8 @@ function SalesInvoiceList() {
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint text={INFO_TEXT} title="فاکتور فروش" />
-          <NewRecordButton path="/sales-invoices/new" />
+          <InfoHint text={INFO_TEXT} title="فاکتور برگشت از فروش" />
+          <NewRecordButton path="/sales-return-invoices/new" />
           <RefreshButton onClick={reload} />
         </div>
       </div>
@@ -137,7 +130,7 @@ function SalesInvoiceList() {
           },
         ]}
         rows={items}
-        edit={{ path: (r) => `/sales-invoices/${r.id}/edit` }}
+        edit={{ path: (r) => `/sales-return-invoices/${r.id}/edit` }}
         onDelete={onDelete}
       />
     </div>
@@ -150,7 +143,7 @@ function emptyRow(): RowState {
   return { sourceInventoryLineId: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "" };
 }
 
-function SalesInvoiceForm({ editId }: { editId?: number }) {
+function SalesReturnInvoiceForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const { openTab } = useTabs();
   const location = useLocation();
@@ -194,7 +187,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
         return;
       }
       if (editId) {
-        const d: Detail = await api.get(`/sales-invoices/${editId}`);
+        const d: Detail = await api.get(`/sales-return-invoices/${editId}`);
         setMeta({ number: d.number, journalEntryId: d.journalEntryId, journalEntryReferenceNumber: d.journalEntryReferenceNumber });
         setHeader({
           date: d.date.slice(0, 10),
@@ -234,33 +227,25 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   }, [editId]);
 
   useEffect(() => {
-    if (header.basis !== "SALES_DELIVERY") {
+    if (header.basis !== "SALES_RETURN") {
       setPickableLines([]);
       return;
     }
     const params = new URLSearchParams();
     if (header.date) params.set("destDate", header.date);
     if (editId) params.set("excludeInvoiceId", String(editId));
-    api.get(`/sales-invoices/pickable-sales-delivery-lines?${params.toString()}`).then(setPickableLines).catch(() => setPickableLines([]));
+    api.get(`/sales-return-invoices/pickable-sales-return-lines?${params.toString()}`).then(setPickableLines).catch(() => setPickableLines([]));
   }, [header.basis, header.date, editId]);
 
-  // با صدور سند حسابداری، کل فرم (سرصفحه + ردیف‌ها) قفل می‌شود — دقیقاً هم‌الگوی PurchaseInvoices.tsx
-  // (آن‌جا شرط قفل «تایید+صدور سند» بود، اینجا چون تاییدی وجود ندارد، فقط «صدور سند»).
+  // با صدور سند حسابداری، کل فرم (سرصفحه + ردیف‌ها) قفل می‌شود — دقیقاً هم‌الگوی SalesInvoices.tsx.
   const locked = !!meta?.journalEntryId;
   const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceInventoryLineId);
-  // طبق تصمیم صریح کاربر: به‌محض این‌که یک ردیف انتخاب/وارد شده باشد، کل سرصفحه (از جمله تاریخ) قفل
-  // می‌شود — چون ردیف‌ها بر اساس سرصفحه (مشتری/تاریخ) انتخاب و ثبت شده‌اند و تغییر بعدی سرصفحه
-  // ناسازگاری ایجاد می‌کند.
+  // طبق تصمیم صریح کاربر (هم‌الگوی SalesInvoices.tsx): به‌محض این‌که یک ردیف انتخاب/وارد شده باشد، کل
+  // سرصفحه (از جمله تاریخ) قفل می‌شود.
   const headerDisabled = locked || hasAnyLine;
   const selectedCurrency = currencies.find((c) => String(c.id) === header.currencyId);
   const baseCurrency = currencies.find((c) => c.isBase);
-  // ارز فاکتور غیر از ارز مبنا باشد → نرخ ارز الزامی و به کاربر نمایش داده می‌شود؛ اگر ارز مبنا باشد،
-  // فیلد نرخ اصلاً نمایش داده نمی‌شود ولی همیشه ۱ به سرور فرستاده می‌شود — دقیقاً هم‌الگوی
-  // PurchaseInvoices.tsx.
   const needsFxRate = !!selectedCurrency && !selectedCurrency.isBase;
-  // مبلغ/تخفیف ردیف را به ارز مبنا تبدیل می‌کند — دقیقاً همان فرمول سرور (lib/currencyConversion.ts) —
-  // فقط برای پیش‌نمایش زنده‌ی ارزش‌افزوده در فرم؛ مقدار به‌ارز‌مبنای واقعی صرفاً در بک‌اند محاسبه و
-  // ذخیره می‌شود.
   function toBaseAmount(amount: number): number {
     if (!selectedCurrency || selectedCurrency.isBase) return amount;
     if (!baseCurrency) return 0;
@@ -269,8 +254,6 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     return toBaseCurrencyAmount(amount, fxRate, selectedCurrency, baseCurrency);
   }
 
-  // طبق تصمیم صریح کاربر: تا وقتی فیلدهای الزامی سرصفحه (تاریخ/مشتری/نوع فروش/ارز/نرخ ارز) کامل نشده،
-  // ورود اطلاعات ردیف مجاز نیست — اولین تلاش برای باز کردن انتخابگر کالا/ردیف مبنا باید با پیام خطا رد شود.
   function guardRowEntry(): boolean {
     if (!header.date) {
       setError("تاریخ الزامی است");
@@ -303,9 +286,6 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   function updateRow(idx: number, patch: Partial<RowState>) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
-  // مقدار پیشنهادی مالیات بر ارزش افزوده — طبق تصمیم صریح کاربر، همیشه به ارز مبنا محاسبه می‌شود (نه
-  // ارز فاکتور)؛ این فقط پیش‌فرض اولیه است؛ کاربر بعد از محاسبه می‌تواند خودش مقدار مالیات را مستقیماً
-  // ویرایش کند — دقیقاً هم‌الگوی PurchaseInvoices.tsx.
   function computeSuggestedVat(amount: number, discount: number, goodsItemId: string): string {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
     return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item)));
@@ -395,21 +375,21 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     const dateErr = validateDocumentDate(header.date, fiscalPeriod);
     if (dateErr) return setError(dateErr);
     const body = buildBody();
-    if (body.lines.length === 0) return setError("فاکتور فروش باید حداقل یک ردیف کالا داشته باشد");
+    if (body.lines.length === 0) return setError("فاکتور برگشت از فروش باید حداقل یک ردیف کالا داشته باشد");
     for (const [i, l] of body.lines.entries()) {
-      if (header.basis === "SALES_DELIVERY" && !l.sourceInventoryLineId) return setError(`ردیف ${i + 1}: انتخاب ردیف حواله فروش الزامی است`);
+      if (header.basis === "SALES_RETURN" && !l.sourceInventoryLineId) return setError(`ردیف ${i + 1}: انتخاب ردیف برگشت از فروش الزامی است`);
       if (header.basis === "NO_BASIS" && !l.goodsItemId) return setError(`کالا برای ردیف ${i + 1} الزامی است`);
       if (!(l.quantity > 0)) return setError(`مقدار ردیف ${i + 1} باید عددی مثبت باشد`);
       if (!(l.unitPrice >= 0)) return setError(`فی ردیف ${i + 1} نامعتبر است`);
     }
     try {
       if (editId) {
-        await api.put(`/sales-invoices/${editId}`, body);
+        await api.put(`/sales-return-invoices/${editId}`, body);
         flash();
       } else {
-        const created = await api.post("/sales-invoices", body);
+        const created = await api.post("/sales-return-invoices", body);
         flash();
-        navigate(`/sales-invoices/${created.id}/edit`);
+        navigate(`/sales-return-invoices/${created.id}/edit`);
       }
     } catch (err) {
       setError((err as ApiError).message);
@@ -419,8 +399,8 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   async function handleDelete() {
     if (!editId) return;
     try {
-      await api.del(`/sales-invoices/${editId}`);
-      navigate("/sales-invoices");
+      await api.del(`/sales-return-invoices/${editId}`);
+      navigate("/sales-return-invoices");
     } catch (e) {
       alert((e as ApiError).message);
     }
@@ -428,14 +408,14 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
 
   async function reloadMeta() {
     if (!editId) return;
-    const d: Detail = await api.get(`/sales-invoices/${editId}`);
+    const d: Detail = await api.get(`/sales-return-invoices/${editId}`);
     setMeta({ number: d.number, journalEntryId: d.journalEntryId, journalEntryReferenceNumber: d.journalEntryReferenceNumber });
   }
 
   async function runAction(action: string) {
     if (!editId) return;
     try {
-      const result: { message?: string } = await api.post(`/sales-invoices/${editId}/${action}`, {});
+      const result: { message?: string } = await api.post(`/sales-return-invoices/${editId}/${action}`, {});
       await reloadMeta();
       flash(result?.message);
     } catch (e) {
@@ -447,7 +427,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     if (!editId) return;
     if (confirmMsg && !window.confirm(confirmMsg)) return;
     try {
-      await api.del(`/sales-invoices/${editId}/${path}`);
+      await api.del(`/sales-return-invoices/${editId}/${path}`);
       await reloadMeta();
       flash();
     } catch (e) {
@@ -477,17 +457,17 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
 
   return (
     <FormPage
-      title={editId ? "ویرایش فاکتور فروش" : "فاکتور فروش جدید"}
-      description={locked ? "برای این فاکتور سند حسابداری صادر شده است؛ دیگر قابل ویرایش نیست." : "در این فاز فاکتور فروش فقط ثبت می‌شود و اکشن تایید ندارد."}
-      formId="sales-invoice-form"
-      closePath="/sales-invoices"
-      newPath="/sales-invoices/new"
+      title={editId ? "ویرایش فاکتور برگشت از فروش" : "فاکتور برگشت از فروش جدید"}
+      description={locked ? "برای این فاکتور سند حسابداری صادر شده است؛ دیگر قابل ویرایش نیست." : "در این فاز فاکتور برگشت از فروش فقط ثبت می‌شود و اکشن تایید ندارد."}
+      formId="sales-return-invoice-form"
+      closePath="/sales-return-invoices"
+      newPath="/sales-return-invoices/new"
       onDelete={editId && !locked ? handleDelete : undefined}
       saveDisabled={locked}
       extraActions={extraActions}
       wide
     >
-      <form id="sales-invoice-form" onSubmit={onSubmit}>
+      <form id="sales-return-invoice-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
         {saved && <div className="alert warn">{saved}</div>}
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
@@ -510,7 +490,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
             <label>مبنا<RequiredMark /></label>
             <select value={header.basis} onChange={(e) => setHeader({ ...header, basis: e.target.value as Basis })} disabled={headerDisabled}>
               <option value="NO_BASIS">{BASIS_FA.NO_BASIS}</option>
-              <option value="SALES_DELIVERY">{BASIS_FA.SALES_DELIVERY}</option>
+              <option value="SALES_RETURN">{BASIS_FA.SALES_RETURN}</option>
             </select>
           </div>
           <div className="form-field">
@@ -576,7 +556,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
               <thead>
                 <tr>
                   <th>ردیف</th>
-                  {header.basis === "SALES_DELIVERY" && <th>حواله فروش مبدا</th>}
+                  {header.basis === "SALES_RETURN" && <th>برگشت از فروش مبدا</th>}
                   <th>کالا</th>
                   <th>واحد</th>
                   <th>مقدار</th>
@@ -596,10 +576,10 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
                   return (
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
-                      {header.basis === "SALES_DELIVERY" && (
+                      {header.basis === "SALES_RETURN" && (
                         <td style={{ minWidth: 90 }}>
                           <RecordPickerField
-                            title="انتخاب ردیف حواله فروش"
+                            title="انتخاب ردیف برگشت از فروش"
                             displayValue={src ? `${toFaDigits(String(src.number))}` : ""}
                             rows={pickableLines}
                             columns={[
@@ -613,7 +593,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
                         </td>
                       )}
                       <td style={{ minWidth: 320 }}>
-                        {header.basis === "SALES_DELIVERY" ? (
+                        {header.basis === "SALES_RETURN" ? (
                           <span>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</span>
                         ) : (
                           <RecordPickerField

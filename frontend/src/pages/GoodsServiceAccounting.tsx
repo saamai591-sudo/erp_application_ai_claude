@@ -34,6 +34,9 @@ const SALES_TYPES = new Set(["SALES_VAT", "SALES_RECEIVABLE", "SALES_RETURN", "S
 const INVENTORY_TYPES = new Set(["INVENTORY"]);
 const WAREHOUSE_DOC_TYPES = new Set(["WAREHOUSE_RECEIPT_CREDIT", "WAREHOUSE_ISSUE_DEBIT"]);
 const PURCHASE_TYPES = new Set(["PURCHASE_PAYABLE", "PURCHASE_CONTROL", "PURCHASE_VAT"]);
+// طبق تصمیم صریح کاربر: این دو نوع حساب دیگر بر اساس «گروه حسابداری» تفکیک نمی‌شوند — فیلد گروه
+// حسابداری برایشان کاملاً از فرم/فهرست حذف می‌شود (نه فقط غیرفعال)، فقط بر اساس نوع فروش/نوع خرید.
+const GROUPLESS_TYPES = new Set(["SALES_RECEIVABLE", "PURCHASE_PAYABLE"]);
 
 // دقیقاً هم‌راستا با warehouseMovementService.OUTBOUND_DOC_TYPES (بک‌اند): «بستانکار رسید انبار» یعنی
 // اسناد واردکننده (رسید)، «بدهکار حواله انبار» یعنی اسناد صادرکننده (حواله)
@@ -97,8 +100,8 @@ interface AccountRow {
 
 interface GoodsServiceAccountingSetting {
   id: number;
-  accountingGroupId: number;
-  accountingGroup: AccountingGroup;
+  accountingGroupId: number | null;
+  accountingGroup: AccountingGroup | null;
   accountType: string;
   warehouseGroupId: number | null;
   warehouseGroup: WarehouseGroup | null;
@@ -157,7 +160,7 @@ function SettingList() {
       {error && <div className="alert error">{error}</div>}
       <DataTable
         columns={[
-          { header: "گروه حسابداری", render: (r) => r.accountingGroup?.title, filterType: "string", filterValue: (r) => r.accountingGroup?.title },
+          { header: "گروه حسابداری", render: (r) => r.accountingGroup?.title || "—", filterType: "string", filterValue: (r) => r.accountingGroup?.title || "" },
           { header: "نوع حساب", render: (r) => ACCOUNT_TYPE_FA[r.accountType] || r.accountType },
           { header: "گروه انبار", render: (r) => r.warehouseGroup?.title || "—" },
           {
@@ -226,7 +229,7 @@ function SettingForm({ editId }: { editId?: number }) {
       if (found) {
         setHasTransactions(found.hasTransactions);
         setForm({
-          accountingGroupId: String(found.accountingGroupId),
+          accountingGroupId: found.accountingGroupId != null ? String(found.accountingGroupId) : "",
           accountType: found.accountType,
           warehouseGroupId: found.warehouseGroupId ? String(found.warehouseGroupId) : "",
           accountId: String(found.accountId),
@@ -258,6 +261,7 @@ function SettingForm({ editId }: { editId?: number }) {
   const showWarehouseGroup = INVENTORY_TYPES.has(form.accountType);
   const showWarehouseDocType = WAREHOUSE_DOC_TYPES.has(form.accountType);
   const showPurchaseType = PURCHASE_TYPES.has(form.accountType);
+  const showAccountingGroup = !GROUPLESS_TYPES.has(form.accountType);
   const warehouseDocTypeOptions =
     form.accountType === "WAREHOUSE_RECEIPT_CREDIT" ? WAREHOUSE_RECEIPT_DOC_TYPES : WAREHOUSE_ISSUE_DOC_TYPES;
 
@@ -265,7 +269,7 @@ function SettingForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
     const body = {
-      accountingGroupId: Number(form.accountingGroupId),
+      accountingGroupId: showAccountingGroup ? Number(form.accountingGroupId) : null,
       accountType: form.accountType,
       warehouseGroupId: showWarehouseGroup && form.warehouseGroupId ? Number(form.warehouseGroupId) : null,
       accountId: Number(form.accountId),
@@ -313,17 +317,19 @@ function SettingForm({ editId }: { editId?: number }) {
         {error && <div className="alert error">{error}</div>}
         {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
-          <div className="form-field">
-            <label>گروه حسابداری<RequiredMark /></label>
-            <select
-              value={form.accountingGroupId}
-              disabled={hasTransactions}
-              onChange={(e) => setForm({ ...form, accountingGroupId: e.target.value })}
-            >
-              <option value="">انتخاب کنید</option>
-              {accountingGroups.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
-            </select>
-          </div>
+          {showAccountingGroup && (
+            <div className="form-field">
+              <label>گروه حسابداری<RequiredMark /></label>
+              <select
+                value={form.accountingGroupId}
+                disabled={hasTransactions}
+                onChange={(e) => setForm({ ...form, accountingGroupId: e.target.value })}
+              >
+                <option value="">انتخاب کنید</option>
+                {accountingGroups.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
+              </select>
+            </div>
+          )}
           <div className="form-field">
             <label>نوع حساب<RequiredMark /></label>
             <select

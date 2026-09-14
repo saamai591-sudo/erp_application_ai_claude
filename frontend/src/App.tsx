@@ -80,10 +80,12 @@ import DeliveryAuthorizations from "./pages/DeliveryAuthorizations";
 import Customers from "./pages/Customers";
 import SalesTypes from "./pages/SalesTypes";
 import SalesCenters from "./pages/SalesCenters";
+import ReceiptTypes from "./pages/ReceiptTypes";
 import SalesQuotes from "./pages/SalesQuotes";
 import SalesOrders from "./pages/SalesOrders";
 import SalesDeliveries from "./pages/SalesDeliveries";
 import SalesInvoices from "./pages/SalesInvoices";
+import SalesReturnInvoices from "./pages/SalesReturnInvoices";
 import SalesReview from "./pages/SalesReview";
 import PurchaseInvoices from "./pages/PurchaseInvoices";
 import ServicePurchaseInvoices from "./pages/ServicePurchaseInvoices";
@@ -343,6 +345,9 @@ export default function App() {
             <Route path="/sales-centers" element={<SalesCenters />} />
             <Route path="/sales-centers/new" element={<SalesCenters />} />
             <Route path="/sales-centers/:id/edit" element={<SalesCenters />} />
+            <Route path="/receipt-types" element={<ReceiptTypes />} />
+            <Route path="/receipt-types/new" element={<ReceiptTypes />} />
+            <Route path="/receipt-types/:id/edit" element={<ReceiptTypes />} />
             <Route path="/sales-quotes" element={<SalesQuotes />} />
             <Route path="/sales-quotes/new" element={<SalesQuotes />} />
             <Route path="/sales-quotes/:id/edit" element={<SalesQuotes />} />
@@ -355,6 +360,9 @@ export default function App() {
             <Route path="/sales-invoices" element={<SalesInvoices />} />
             <Route path="/sales-invoices/new" element={<SalesInvoices />} />
             <Route path="/sales-invoices/:id/edit" element={<SalesInvoices />} />
+            <Route path="/sales-return-invoices" element={<SalesReturnInvoices />} />
+            <Route path="/sales-return-invoices/new" element={<SalesReturnInvoices />} />
+            <Route path="/sales-return-invoices/:id/edit" element={<SalesReturnInvoices />} />
             <Route path="/sales-review" element={<SalesReview />} />
 
             <Route path="/receipts" element={<Receipts />} />

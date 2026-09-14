@@ -459,6 +459,7 @@ router.get("/ledger", can(`${ACCOUNT_REVIEW}.view`), async (req, res) => {
     const credit = Number(l.baseCredit);
     running += debit - credit;
     return {
+      id: l.id,
       journalEntryId: l.journalEntryId,
       number: l.journalEntry.number,
       referenceNumber: l.journalEntry.referenceNumber,

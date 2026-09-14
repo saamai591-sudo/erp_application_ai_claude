@@ -445,6 +445,15 @@ export const REGISTRY: ModuleDef[] = [
               { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
             ],
           },
+          {
+            key: "sales-return-invoices",
+            title: "فاکتور برگشت از فروش",
+            baseActions: CRUD,
+            actions: [
+              { key: "issueJournalEntry", title: "صدور سند حسابداری" },
+              { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
+            ],
+          },
         ],
       },
       {
@@ -458,6 +467,11 @@ export const REGISTRY: ModuleDef[] = [
     key: "treasury",
     title: "خزانه‌داری",
     subModules: [
+      {
+        key: "settings",
+        title: "تنظیمات",
+        forms: [{ key: "receipt-types", title: "نوع دریافت", baseActions: CRUD }],
+      },
       {
         key: "operations",
         title: "عملیات",

@@ -117,7 +117,7 @@ router.delete("/branches/:id", can(`${BANK_BRANCHES}.delete`), async (req, res) 
 router.get("/accounts", async (_req, res) => {
   res.json(
     await prisma.bankAccount.findMany({
-      include: { accountType: true, bankBranch: { include: { bankParty: true } } },
+      include: { accountType: true, bankBranch: { include: { bankParty: true } }, currency: true },
       orderBy: { detailCode: "asc" },
     })
   );

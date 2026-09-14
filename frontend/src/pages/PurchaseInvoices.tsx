@@ -6,6 +6,7 @@ import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
 import { RecordPickerField } from "../components/RecordPicker";
 import { WarehouseReceiptLineSelector, PickableWarehouseReceiptLine } from "../components/WarehouseReceiptLineSelector";
+import { PurchaseCostAllocationDialog, AllocationDetail } from "../components/PurchaseCostAllocationDialog";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
@@ -21,15 +22,19 @@ import { PurchaseType } from "./PurchaseTypes";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
 import { toBaseCurrencyAmount } from "../lib/currencyConversion";
+import { round, allocateProportionally } from "../lib/costAllocation";
 
 // این فرآیند («فاکتور خرید») مستند تحلیل اختصاصی در پروژه ندارد؛ ساختار این فرم حاصل تصمیم مشترک با
 // کاربر است (نگاه کنید به یادداشت‌های backend/src/routes/purchaseInvoices.ts). با تایید فاکتور، مبلغ
-// نهایی هر ردیف (فی×مقدار + سهم سرشکن‌شده‌ی هزینه‌های جانبی دارای مبنای سرشکن) روی ردیف رسید انبار
-// خرید مبنا نوشته می‌شود.
+// ردیف‌های خودِ فاکتور (فی×مقدار، بدون هیچ سرشکنی) روی ردیف رسید انبار خرید مبنا نوشته می‌شود. تب «سایر
+// هزینه‌ها» طبق تصمیم صریح کاربر دقیقاً همان جدول/منطق فاکتور خرید خدمات (ServicePurchaseInvoices.tsx)
+// را به اشتراک می‌گذارد — نگاه کنید به یادداشت بالای آن فایل و backend/src/routes/purchaseInvoices.ts.
 
 type Basis = "NO_BASIS" | "WAREHOUSE_RECEIPT";
 type Status = "DRAFT" | "APPROVED";
-type AllocationBasis = "VALUE" | "QUANTITY" | "WEIGHT";
+type AllocationMethod = "VALUE" | "QUANTITY";
+const ALLOCATION_METHOD_FA: Record<AllocationMethod, string> = { VALUE: "نسبت مبلغ", QUANTITY: "نسبت مقدار" };
+const COST_BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", WAREHOUSE_RECEIPT: "رسید انبار" };
 
 interface PartyOption {
   id: number;
@@ -40,17 +45,18 @@ interface PartyOption {
   lastName: string | null;
   name: string | null;
 }
-interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null }
+interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; decimalPlaces: number; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null }
 interface GoodsItemRow {
   id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean;
   isSpecial: boolean; taxRate: number | string | null;
 }
-interface ServiceOption { id: number; fullCode: string; title: string; kind: string }
+interface ServiceOption { id: number; fullCode: string; title: string; kind: string; isSpecial: boolean; taxRate: number | string | null }
+interface ReceiptOption { id: number; number: number; date: string; warehouseTitle: string }
+interface ReceiptLine { id: number; goodsItemCode: string; goodsItemTitle: string; unitTitle: string; quantity: number; amount: number }
 
 const STATUS_FA: Record<Status, string> = { DRAFT: "ثبت", APPROVED: "تایید شده" };
 const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", WAREHOUSE_RECEIPT: "رسید انبار خرید" };
-const ALLOCATION_BASIS_FA: Record<AllocationBasis, string> = { VALUE: "ارزش", QUANTITY: "مقدار", WEIGHT: "وزن" };
-const INFO_TEXT = "ثبت فاکتور خرید دریافتی از تامین‌کننده — بر مبنای رسید(های) انبار خرید قطعی‌شده (هر ردیف رسید فقط یک‌بار و به‌طور کامل فاکتور می‌شود) یا بدون مبنا. هزینه‌های جانبی فاکتور (حمل، بسته‌بندی و ...) در تب «سایر هزینه‌ها» ثبت می‌شوند. با تایید فاکتور، مبلغ نهایی (فی×مقدار به‌اضافه‌ی سهم هزینه‌های جانبیِ دارای مبنای سرشکن) روی ردیف‌های رسید انبار خرید مبنا نوشته می‌شود.";
+const INFO_TEXT = "ثبت فاکتور خرید دریافتی از تامین‌کننده — بر مبنای رسید(های) انبار خرید قطعی‌شده (هر ردیف رسید فقط یک‌بار و به‌طور کامل فاکتور می‌شود) یا بدون مبنا. هزینه‌های جانبی فاکتور (حمل، بسته‌بندی و ...) در تب «سایر هزینه‌ها» ثبت می‌شوند — دقیقاً مثل فاکتور خرید خدمات، هر ردیف می‌تواند به رسید انبار دلخواهی (نه لزوماً رسید مبنای همین فاکتور) تسهیم شود. با تایید فاکتور، مبلغ ردیف‌های خودِ فاکتور روی ردیف‌های رسید انبار خرید مبنا نوشته می‌شود و جدا از آن، مبلغ تخصیص‌یافته‌ی هر ردیف «سایر هزینه‌ها» به ردیف رسید مربوطه افزوده می‌شود.";
 
 interface ListRow {
   id: number; number: number; date: string; vendorInvoiceNumber: string | null; basis: Basis;
@@ -62,7 +68,11 @@ interface DetailLine {
   goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string;
   quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null;
 }
-interface OtherCostDetail { id: number; serviceId: number; serviceTitle: string; amount: number; allocationBasis: AllocationBasis | null; description: string | null }
+interface OtherCostDetail {
+  id: number; serviceId: number; serviceCode: string; serviceTitle: string; amount: number; discount: number; vatAmount: number; basis: Basis;
+  sourceReceiptDocumentId: number | null; sourceReceiptNumber: number | null; allocationMethod: AllocationMethod | null;
+  description: string | null; allocations: AllocationDetail[];
+}
 interface Detail extends ListRow {
   currencyId: number;
   fxRate: number;
@@ -179,10 +189,27 @@ interface RowState {
   sourceInventoryLineId: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string;
   unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; discount: string; vatAmount: string; description: string;
 }
-interface CostRowState { serviceId: string; amount: string; allocationBasis: AllocationBasis | ""; description: string }
+interface CostRowState {
+  serviceId: string; serviceCode: string; serviceTitle: string;
+  amount: string; discount: string; vatAmount: string;
+  basis: Basis;
+  sourceReceiptDocumentId: string; sourceReceiptNumber: string;
+  allocationMethod: AllocationMethod | "";
+  description: string;
+  allocations: AllocationDetail[];
+}
 
 function emptyRow(): RowState {
   return { sourceInventoryLineId: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "" };
+}
+function emptyCostRow(): CostRowState {
+  return {
+    serviceId: "", serviceCode: "", serviceTitle: "",
+    amount: "", discount: "", vatAmount: "",
+    basis: "NO_BASIS",
+    sourceReceiptDocumentId: "", sourceReceiptNumber: "",
+    allocationMethod: "", description: "", allocations: [],
+  };
 }
 
 function PurchaseInvoiceForm({ editId }: { editId?: number }) {
@@ -196,9 +223,12 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableWarehouseReceiptLine[]>([]);
+  const [receipts, setReceipts] = useState<ReceiptOption[]>([]);
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", vendorInvoiceNumber: "", basis: "NO_BASIS" as Basis, partyId: "", purchaseTypeId: "", currencyId: "", fxRate: "", description: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
   const [costRows, setCostRows] = usePersistedState<CostRowState[]>(`${cacheKey}:costs`, []);
+  const [activeSection, setActiveSection] = useState<"items" | "otherCosts">("items");
+  const [allocationDialogIdx, setAllocationDialogIdx] = useState<number | null>(null);
   const [meta, setMeta] = usePersistedState<{
     number: number;
     status: Status;
@@ -214,12 +244,13 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [p, pt, c, g, sv, fp] = await Promise.all([
+      const [p, pt, c, g, sv, rc, fp] = await Promise.all([
         api.get("/parties?suppliersOnly=true"),
         api.get("/purchase-types"),
         api.get("/currencies"),
         api.get("/goods-items?kind=GOODS&docDirection=INBOUND&docType=خرید"),
         api.get("/goods-items?kind=SERVICE"),
+        api.get("/purchase-invoices/pickable-receipts"),
         fetchSelectedFiscalPeriod(),
       ]);
       setParties(p);
@@ -227,6 +258,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       setCurrencies(c);
       setGoodsItems(g);
       setServices(sv);
+      setReceipts(rc);
       setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
@@ -272,9 +304,17 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
         setCostRows(
           d.otherCostLines.map((l) => ({
             serviceId: String(l.serviceId),
+            serviceCode: l.serviceCode,
+            serviceTitle: l.serviceTitle,
             amount: String(l.amount),
-            allocationBasis: l.allocationBasis || "",
+            discount: String(l.discount || 0),
+            vatAmount: String(l.vatAmount || 0),
+            basis: l.basis,
+            sourceReceiptDocumentId: l.sourceReceiptDocumentId ? String(l.sourceReceiptDocumentId) : "",
+            sourceReceiptNumber: l.sourceReceiptNumber ? String(l.sourceReceiptNumber) : "",
+            allocationMethod: l.allocationMethod || "",
             description: l.description || "",
+            allocations: l.allocations.map((a) => ({ ...a })),
           }))
         );
       } else {
@@ -308,6 +348,8 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   // می‌شود — چون ردیف‌ها بر اساس سرصفحه (طرف مقابل/تاریخ) انتخاب و ثبت شده‌اند و تغییر بعدی سرصفحه
   // ناسازگاری ایجاد می‌کند.
   const headerDisabled = hasAnyLine;
+  const baseCurrency = currencies.find((c) => c.isBase);
+  const decimalPlaces = baseCurrency?.decimalPlaces ?? 2;
   const selectedParty = parties.find((p) => String(p.id) === header.partyId);
   const selectedCurrency = currencies.find((c) => String(c.id) === header.currencyId);
   // ارز فاکتور غیر از ارز مبنا باشد → نرخ ارز الزامی و به کاربر نمایش داده می‌شود؛ اگر ارز مبنا باشد،
@@ -318,9 +360,10 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   // صرفاً در بک‌اند محاسبه و ذخیره می‌شود (طبق تصمیم صریح کاربر، این مبالغ در UI نگهداری نمی‌شوند).
   function toBaseAmount(amount: number): number {
     if (!selectedCurrency || selectedCurrency.isBase) return amount;
+    if (!baseCurrency) return 0;
     const fxRate = Number(header.fxRate) || 0;
     if (!(fxRate > 0)) return 0;
-    return toBaseCurrencyAmount(amount, fxRate, selectedCurrency);
+    return toBaseCurrencyAmount(amount, fxRate, selectedCurrency, baseCurrency);
   }
 
   // طبق تصمیم صریح کاربر: تا وقتی فیلدهای الزامی سرصفحه (تاریخ/طرف مقابل/ارز/نرخ ارز) کامل نشده، ورود
@@ -429,16 +472,107 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
     setCostRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
   function addCostRow() {
-    setCostRows((prev) => [...prev, { serviceId: "", amount: "", allocationBasis: "", description: "" }]);
+    setCostRows((prev) => [...prev, emptyCostRow()]);
   }
   function removeCostRow(idx: number) {
     setCostRows((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  // تب «سایر هزینه‌ها» — دقیقاً هم‌الگوی ServicePurchaseInvoices.tsx (همان جدول/منطق بک‌اند مشترک است).
+  function computeSuggestedVatForCost(amount: number, discount: number, serviceId: string): string {
+    const svc = services.find((s) => String(s.id) === serviceId);
+    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(svc)));
+  }
+
+  async function onCostBasisChange(idx: number, basis: Basis) {
+    if (basis === "NO_BASIS") {
+      updateCostRow(idx, { basis, sourceReceiptDocumentId: "", sourceReceiptNumber: "", allocationMethod: "", allocations: [] });
+    } else {
+      updateCostRow(idx, { basis });
+    }
+  }
+
+  async function onCostReceiptSelected(idx: number, receipt: ReceiptOption) {
+    const row = costRows[idx];
+    const lines: ReceiptLine[] = await api.get(`/purchase-invoices/receipt-lines/${receipt.id}`);
+    let allocations: AllocationDetail[] = lines.map((l) => ({
+      inventoryDocumentLineId: l.id,
+      goodsItemCode: l.goodsItemCode,
+      goodsItemTitle: l.goodsItemTitle,
+      unitTitle: l.unitTitle,
+      quantity: l.quantity,
+      allocatedAmount: l.amount, // موقتاً وزن (مبلغ ردیف رسید)، تسهیم واقعی پایین بازنویسی می‌شود
+    }));
+    if (row.allocationMethod) {
+      const weights = allocations.map((a, i) => (row.allocationMethod === "QUANTITY" ? lines[i].quantity : lines[i].amount));
+      const shares = allocateProportionally(Number(row.amount) || 0, weights, decimalPlaces);
+      allocations = allocations.map((a, i) => ({ ...a, allocatedAmount: shares[i] }));
+    } else {
+      allocations = allocations.map((a) => ({ ...a, allocatedAmount: 0 }));
+    }
+    updateCostRow(idx, { sourceReceiptDocumentId: String(receipt.id), sourceReceiptNumber: String(receipt.number), allocations });
+  }
+
+  function onCostMethodChange(idx: number, method: AllocationMethod | "") {
+    const row = costRows[idx];
+    if (!method || !row.sourceReceiptDocumentId) {
+      updateCostRow(idx, { allocationMethod: method });
+      return;
+    }
+    onCostReceiptSelectedForMethod(idx, method);
+  }
+
+  async function onCostReceiptSelectedForMethod(idx: number, method: AllocationMethod) {
+    const row = costRows[idx];
+    if (!row.sourceReceiptDocumentId) {
+      updateCostRow(idx, { allocationMethod: method });
+      return;
+    }
+    const lines: ReceiptLine[] = await api.get(`/purchase-invoices/receipt-lines/${row.sourceReceiptDocumentId}`);
+    const weights = lines.map((l) => (method === "QUANTITY" ? l.quantity : l.amount));
+    const shares = allocateProportionally(Number(row.amount) || 0, weights, decimalPlaces);
+    const allocations: AllocationDetail[] = lines.map((l, i) => ({
+      inventoryDocumentLineId: l.id, goodsItemCode: l.goodsItemCode, goodsItemTitle: l.goodsItemTitle,
+      unitTitle: l.unitTitle, quantity: l.quantity, allocatedAmount: shares[i],
+    }));
+    updateCostRow(idx, { allocationMethod: method, allocations });
+  }
+
+  function onCostAmountChange(idx: number, amount: string) {
+    const row = costRows[idx];
+    const vatAmount = computeSuggestedVatForCost(Number(amount) || 0, Number(row.discount) || 0, row.serviceId);
+    if (row.basis === "WAREHOUSE_RECEIPT" && row.allocationMethod && row.sourceReceiptDocumentId) {
+      onCostReceiptAmountChanged(idx, amount, row.allocationMethod, vatAmount);
+    } else {
+      updateCostRow(idx, { amount, vatAmount });
+    }
+  }
+
+  function onCostDiscountChange(idx: number, discount: string) {
+    const row = costRows[idx];
+    updateCostRow(idx, { discount, vatAmount: computeSuggestedVatForCost(Number(row.amount) || 0, Number(discount) || 0, row.serviceId) });
+  }
+
+  async function onCostReceiptAmountChanged(idx: number, amount: string, method: AllocationMethod, vatAmount: string) {
+    updateCostRow(idx, { amount, vatAmount });
+    const row = costRows[idx];
+    if (!row.sourceReceiptDocumentId) return;
+    const lines: ReceiptLine[] = await api.get(`/purchase-invoices/receipt-lines/${row.sourceReceiptDocumentId}`);
+    const weights = lines.map((l) => (method === "QUANTITY" ? l.quantity : l.amount));
+    const shares = allocateProportionally(Number(amount) || 0, weights, decimalPlaces);
+    const allocations: AllocationDetail[] = lines.map((l, i) => ({
+      inventoryDocumentLineId: l.id, goodsItemCode: l.goodsItemCode, goodsItemTitle: l.goodsItemTitle,
+      unitTitle: l.unitTitle, quantity: l.quantity, allocatedAmount: shares[i],
+    }));
+    updateCostRow(idx, { amount, vatAmount, allocations });
   }
 
   const totalAmount = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
   const totalDiscount = rows.reduce((s, r) => s + (Number(r.discount) || 0), 0);
   const totalVat = rows.reduce((s, r) => s + (Number(r.vatAmount) || 0), 0);
   const totalOtherCosts = costRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const totalOtherCostsDiscount = costRows.reduce((s, r) => s + (Number(r.discount) || 0), 0);
+  const totalOtherCostsVat = costRows.reduce((s, r) => s + (Number(r.vatAmount) || 0), 0);
 
   function buildBody() {
     const nonEmptyRows = rows.filter((r) => r.goodsItemId || r.sourceInventoryLineId);
@@ -464,7 +598,20 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       })),
       otherCostLines: costRows
         .filter((r) => r.serviceId)
-        .map((r) => ({ serviceId: Number(r.serviceId), amount: Number(r.amount) || 0, allocationBasis: r.allocationBasis || null, description: r.description || null })),
+        .map((r) => ({
+          serviceId: Number(r.serviceId),
+          amount: Number(r.amount) || 0,
+          discount: Number(r.discount) || 0,
+          vatAmount: Number(r.vatAmount) || 0,
+          basis: r.basis,
+          sourceReceiptDocumentId: r.basis === "WAREHOUSE_RECEIPT" && r.sourceReceiptDocumentId ? Number(r.sourceReceiptDocumentId) : null,
+          allocationMethod: r.basis === "WAREHOUSE_RECEIPT" && r.allocationMethod ? r.allocationMethod : null,
+          allocations:
+            r.basis === "WAREHOUSE_RECEIPT"
+              ? r.allocations.filter((a) => Number(a.allocatedAmount)).map((a) => ({ inventoryDocumentLineId: a.inventoryDocumentLineId, allocatedAmount: Number(a.allocatedAmount) || 0 }))
+              : [],
+          description: r.description || null,
+        })),
     };
   }
 
@@ -482,6 +629,10 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       if (header.basis === "NO_BASIS" && !l.goodsItemId) return setError(`کالا برای ردیف ${i + 1} الزامی است`);
       if (!(l.quantity > 0)) return setError(`مقدار ردیف ${i + 1} باید عددی مثبت باشد`);
       if (!(l.unitPrice >= 0)) return setError(`فی ردیف ${i + 1} نامعتبر است`);
+    }
+    for (const [i, l] of body.otherCostLines.entries()) {
+      if (!(l.amount >= 0)) return setError(`مبلغ ردیف ${i + 1} سایر هزینه‌ها نامعتبر است`);
+      if (l.basis === "WAREHOUSE_RECEIPT" && !l.sourceReceiptDocumentId) return setError(`سایر هزینه‌ها ردیف ${i + 1}: انتخاب رسید انبار الزامی است`);
     }
     try {
       if (editId) {
@@ -534,6 +685,22 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
         description: l.description || "",
       }))
     );
+    setCostRows(
+      d.otherCostLines.map((l) => ({
+        serviceId: String(l.serviceId),
+        serviceCode: l.serviceCode,
+        serviceTitle: l.serviceTitle,
+        amount: String(l.amount),
+        discount: String(l.discount || 0),
+        vatAmount: String(l.vatAmount || 0),
+        basis: l.basis,
+        sourceReceiptDocumentId: l.sourceReceiptDocumentId ? String(l.sourceReceiptDocumentId) : "",
+        sourceReceiptNumber: l.sourceReceiptNumber ? String(l.sourceReceiptNumber) : "",
+        allocationMethod: l.allocationMethod || "",
+        description: l.description || "",
+        allocations: l.allocations.map((a) => ({ ...a })),
+      }))
+    );
   }
 
   async function runAction(action: string, confirmMsg?: string) {
@@ -571,7 +738,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
         extraActions.push({
           label: "برگشت از تایید",
           icon: <UndoIcon />,
-          onClick: () => runAction("unapprove", "با برگشت از تایید، مبلغ ردیف‌های رسید انبار خرید مرتبط صفر می‌شود. ادامه می‌دهید؟"),
+          onClick: () => runAction("unapprove", "با برگشت از تایید، مبلغ ردیف‌های رسید انبار خرید مرتبط صفر می‌شود و هزینه‌های تخصیص‌یافته‌ی «سایر هزینه‌ها» از ردیف‌های رسید انبار مرتبط کسر می‌شود. ادامه می‌دهید؟"),
         });
         extraActions.push({ label: "صدور سند حسابداری", icon: <PlusIcon />, onClick: () => runAction("issue-journal-entry") });
       } else {
@@ -681,6 +848,21 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
             </div>
           </div>
 
+          <div className="ar-tabs-row">
+            <div className="ar-tabs">
+              <button type="button" className={`ar-tab ${activeSection === "items" ? "active" : ""}`} onClick={() => setActiveSection("items")}>
+                اقلام
+                {rows.length > 0 && <span className="badge">{toFaDigits(String(rows.length))}</span>}
+              </button>
+              <button type="button" className={`ar-tab ${activeSection === "otherCosts" ? "active" : ""}`} onClick={() => setActiveSection("otherCosts")}>
+                سایر هزینه‌ها
+                {costRows.length > 0 && <span className="badge">{toFaDigits(String(costRows.length))}</span>}
+              </button>
+            </div>
+          </div>
+
+          {activeSection === "items" && (
+          <>
           <div className="je-lines-toolbar">
             <span className="je-lines-title">اقلام</span>
             <button type="button" className="toolbar-icon-btn primary" onClick={addRow} title="ردیف جدید">
@@ -787,8 +969,12 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
             </span>
           </div>
         </div>
+          </>
+          )}
 
-        <div className="je-lines-toolbar" style={{ marginTop: 16 }}>
+          {activeSection === "otherCosts" && (
+          <>
+        <div className="je-lines-toolbar">
           <span className="je-lines-title">سایر هزینه‌ها</span>
           <button type="button" className="toolbar-icon-btn primary" onClick={addCostRow} title="ردیف جدید">
             <PlusIcon />
@@ -802,7 +988,11 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                   <th>ردیف</th>
                   <th>کد هزینه</th>
                   <th>مبلغ</th>
-                  <th>مبنای سرشکن</th>
+                  <th>تخفیف</th>
+                  <th>مالیات بر ارزش افزوده</th>
+                  <th>مبنا</th>
+                  <th>رسید انبار</th>
+                  <th>روش تسهیم</th>
                   <th>شرح</th>
                   <th></th>
                 </tr>
@@ -810,6 +1000,9 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
               <tbody>
                 {costRows.map((row, idx) => {
                   const svc = services.find((s) => String(s.id) === row.serviceId);
+                  const receipt = receipts.find((r) => String(r.id) === row.sourceReceiptDocumentId);
+                  const allocatedSum = round(row.allocations.reduce((s, a) => s + (Number(a.allocatedAmount) || 0), 0), decimalPlaces);
+                  const balanced = row.basis !== "WAREHOUSE_RECEIPT" || !row.sourceReceiptDocumentId || allocatedSum === round(Number(row.amount) || 0, decimalPlaces);
                   return (
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
@@ -819,25 +1012,65 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                           displayValue={svc ? `${toFaDigits(svc.fullCode)} — ${svc.title}` : ""}
                           rows={services}
                           columns={[
-                            { header: "کد", render: (s) => toFaDigits(s.fullCode), filterValue: (s) => s.fullCode, width: "110px" },
-                            { header: "عنوان", render: (s) => s.title, filterValue: (s) => s.title },
+                            { header: "کد", render: (s) => toFaDigits((s as ServiceOption).fullCode), filterValue: (s) => (s as ServiceOption).fullCode, width: "110px" },
+                            { header: "عنوان", render: (s) => (s as ServiceOption).title, filterValue: (s) => (s as ServiceOption).title },
                           ]}
+                          onOpen={guardRowEntry}
                           onSelect={(s) => updateCostRow(idx, { serviceId: String((s as ServiceOption).id) })}
                         />
                       </td>
                       <td style={{ minWidth: 120 }}>
-                        <AmountInput value={row.amount} onChange={(v) => updateCostRow(idx, { amount: v })} allowDecimal />
+                        <AmountInput value={row.amount} onChange={(v) => onCostAmountChange(idx, v)} allowDecimal />
+                      </td>
+                      <td style={{ minWidth: 120 }}>
+                        <AmountInput value={row.discount} onChange={(v) => onCostDiscountChange(idx, v)} allowDecimal placeholder="۰" />
+                      </td>
+                      <td style={{ minWidth: 120 }}>
+                        <AmountInput value={row.vatAmount} onChange={(v) => updateCostRow(idx, { vatAmount: v })} allowDecimal placeholder="۰" />
+                      </td>
+                      <td style={{ minWidth: 110 }}>
+                        <select value={row.basis} onChange={(e) => onCostBasisChange(idx, e.target.value as Basis)}>
+                          <option value="NO_BASIS">{COST_BASIS_FA.NO_BASIS}</option>
+                          <option value="WAREHOUSE_RECEIPT">{COST_BASIS_FA.WAREHOUSE_RECEIPT}</option>
+                        </select>
                       </td>
                       <td style={{ minWidth: 130 }}>
-                        <select
-                          value={row.allocationBasis}
-                          onChange={(e) => updateCostRow(idx, { allocationBasis: e.target.value as AllocationBasis | "" })}
-                        >
-                          <option value="">سرشکن نشود</option>
-                          {(Object.keys(ALLOCATION_BASIS_FA) as AllocationBasis[]).map((b) => (
-                            <option key={b} value={b}>{ALLOCATION_BASIS_FA[b]}</option>
-                          ))}
-                        </select>
+                        {row.basis === "WAREHOUSE_RECEIPT" && (
+                          <RecordPickerField
+                            title="انتخاب رسید انبار"
+                            displayValue={receipt ? toFaDigits(String(receipt.number)) : (row.sourceReceiptNumber ? toFaDigits(row.sourceReceiptNumber) : "")}
+                            rows={receipts}
+                            columns={[
+                              { header: "شماره", render: (r) => toFaDigits(String((r as ReceiptOption).number)), filterValue: (r) => String((r as ReceiptOption).number), width: "80px" },
+                              { header: "تاریخ", render: (r) => formatJalaliDate((r as ReceiptOption).date), filterValue: (r) => (r as ReceiptOption).date.slice(0, 10), width: "100px" },
+                              { header: "انبار", render: (r) => (r as ReceiptOption).warehouseTitle, filterValue: (r) => (r as ReceiptOption).warehouseTitle },
+                            ]}
+                            onSelect={(r) => onCostReceiptSelected(idx, r as ReceiptOption)}
+                          />
+                        )}
+                      </td>
+                      <td style={{ minWidth: 150 }}>
+                        {row.basis === "WAREHOUSE_RECEIPT" && (
+                          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                            <select value={row.allocationMethod} onChange={(e) => onCostMethodChange(idx, e.target.value as AllocationMethod | "")}>
+                              <option value="">انتخاب کنید</option>
+                              {(Object.keys(ALLOCATION_METHOD_FA) as AllocationMethod[]).map((m) => (
+                                <option key={m} value={m}>{ALLOCATION_METHOD_FA[m]}</option>
+                              ))}
+                            </select>
+                            {row.sourceReceiptDocumentId && (
+                              <button
+                                type="button"
+                                className="btn secondary"
+                                style={{ padding: "5px 8px", fontSize: 11, whiteSpace: "nowrap" }}
+                                onClick={() => setAllocationDialogIdx(idx)}
+                                title="مشاهده و ویرایش تسهیم"
+                              >
+                                تسهیم{!balanced ? " ⚠" : ""}
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td style={{ minWidth: 140 }}>
                         <input value={row.description} onChange={(e) => updateCostRow(idx, { description: e.target.value })} />
@@ -855,11 +1088,31 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
           </div>
           <div className="grid-footer je-lines-footer">
             <span className="grid-footer-info">{costRows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(costRows.length))} ردیف`}</span>
-            <span className="je-lines-totals">جمع هزینه‌های جانبی: {formatAmountFa(totalOtherCosts)}</span>
+            <span className="je-lines-totals">
+              جمع مبلغ سایر هزینه‌ها: {formatAmountFa(totalOtherCosts)} — جمع تخفیف: {formatAmountFa(totalOtherCostsDiscount)} — جمع مالیات بر ارزش افزوده: {formatAmountFa(totalOtherCostsVat)}
+            </span>
           </div>
         </div>
+          </>
+          )}
         </fieldset>
       </form>
+
+      {allocationDialogIdx !== null && (
+        <PurchaseCostAllocationDialog
+          serviceTitle={(() => {
+            const r = costRows[allocationDialogIdx];
+            const svc = services.find((s) => String(s.id) === r.serviceId);
+            return svc ? svc.title : "";
+          })()}
+          receiptNumber={Number(costRows[allocationDialogIdx].sourceReceiptNumber) || 0}
+          lineAmount={Number(costRows[allocationDialogIdx].amount) || 0}
+          rows={costRows[allocationDialogIdx].allocations}
+          decimalPlaces={decimalPlaces}
+          onApply={(next) => updateCostRow(allocationDialogIdx, { allocations: next })}
+          onClose={() => setAllocationDialogIdx(null)}
+        />
+      )}
     </FormPage>
   );
 }

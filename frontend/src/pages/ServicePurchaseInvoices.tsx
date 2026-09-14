@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
-import { Modal } from "../components/Modal";
+import { PurchaseCostAllocationDialog, AllocationDetail } from "../components/PurchaseCostAllocationDialog";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
 import { RecordPickerField } from "../components/RecordPicker";
@@ -21,6 +21,7 @@ import { PurchaseType } from "./PurchaseTypes";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
 import { toBaseCurrencyAmount } from "../lib/currencyConversion";
+import { round, allocateProportionally } from "../lib/costAllocation";
 
 // طبق Documents/ServicePurchaseAndItsRelationToStockReceipt.md — این فرم عمداً از فاکتور خرید کالا
 // (PurchaseInvoices.tsx) مستقل است. با تایید فاکتور، به‌ازای هر ردیف تسهیم‌شده، یک AmountLine
@@ -39,23 +40,6 @@ const ALLOCATION_METHOD_FA: Record<AllocationMethod, string> = { VALUE: "نسب�
 const INFO_TEXT =
   "ثبت هزینه‌های مرتبط با ورود کالا (حمل، تخلیه، جرثقیل، بازرسی، کنترل کیفیت و ...) که از طریق ردیف‌های این فاکتور به ردیف‌های یک رسید انبار تخصیص می‌یابند. برای هر ردیف با مبنای «رسید انبار»، سیستم تسهیم اولیه را بین ردیف‌های رسید انتخاب‌شده محاسبه می‌کند؛ کاربر می‌تواند نتیجه را از طریق دکمه‌ی «تسهیم» اصلاح کند. اجرای این عملیات الزامی نیست. با تایید فاکتور، مبلغ تخصیص‌یافته به هر ردیف رسید، به‌عنوان هزینه‌ی مرتبط با ورود کالا به آن ردیف افزوده می‌شود.";
 
-function round(value: number, decimalPlaces: number): number {
-  const factor = Math.pow(10, decimalPlaces);
-  return Math.round(value * factor) / factor;
-}
-function allocateProportionally(total: number, weights: number[], decimalPlaces: number): number[] {
-  const sum = weights.reduce((s, w) => s + w, 0);
-  if (sum <= 0) return weights.map(() => 0);
-  const shares = weights.map((w) => round((total * w) / sum, decimalPlaces));
-  const allocated = shares.reduce((s, v) => s + v, 0);
-  const remainder = round(total - allocated, decimalPlaces);
-  if (remainder !== 0) {
-    const lastPositiveIdx = weights.map((w, i) => (w > 0 ? i : -1)).filter((i) => i >= 0).pop();
-    if (lastPositiveIdx !== undefined) shares[lastPositiveIdx] = round(shares[lastPositiveIdx] + remainder, decimalPlaces);
-  }
-  return shares;
-}
-
 interface PartyOption {
   id: number; detailCode: string; category: "INDIVIDUAL" | "LEGAL"; isActive: boolean;
   firstName: string | null; lastName: string | null; name: string | null;
@@ -69,9 +53,6 @@ interface ListRow {
   id: number; number: number; date: string; vendorInvoiceNumber: string | null;
   partyId: number; partyTitle: string | null; purchaseTypeId: number; purchaseTypeTitle: string | null;
   currencyTitle: string; status: Status; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number;
-}
-interface AllocationDetail {
-  inventoryDocumentLineId: number; goodsItemCode: string; goodsItemTitle: string; unitTitle: string; quantity: number; allocatedAmount: number;
 }
 interface DetailLine {
   id: number; serviceId: number; serviceCode: string; serviceTitle: string; amount: number; discount: number; vatAmount: number; basis: Basis;
@@ -313,9 +294,10 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
   const needsFxRate = !!selectedCurrency && !selectedCurrency.isBase;
   function toBaseAmount(amount: number): number {
     if (!selectedCurrency || selectedCurrency.isBase) return amount;
+    if (!baseCurrency) return 0;
     const fxRate = Number(header.fxRate) || 0;
     if (!(fxRate > 0)) return 0;
-    return toBaseCurrencyAmount(amount, fxRate, selectedCurrency);
+    return toBaseCurrencyAmount(amount, fxRate, selectedCurrency, baseCurrency);
   }
 
   function guardRowEntry(): boolean {
@@ -798,7 +780,7 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
       </form>
 
       {allocationDialogIdx !== null && (
-        <AllocationDialog
+        <PurchaseCostAllocationDialog
           serviceTitle={(() => {
             const r = rows[allocationDialogIdx];
             const svc = services.find((s) => String(s.id) === r.serviceId);
@@ -813,78 +795,5 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
         />
       )}
     </FormPage>
-  );
-}
-
-function AllocationDialog({
-  serviceTitle,
-  receiptNumber,
-  lineAmount,
-  rows,
-  decimalPlaces,
-  onApply,
-  onClose,
-}: {
-  serviceTitle: string;
-  receiptNumber: number;
-  lineAmount: number;
-  rows: AllocationDetail[];
-  decimalPlaces: number;
-  onApply: (rows: AllocationDetail[]) => void;
-  onClose: () => void;
-}) {
-  const [local, setLocal] = useState<AllocationDetail[]>(rows.map((r) => ({ ...r })));
-  const sum = round(local.reduce((s, r) => s + (Number(r.allocatedAmount) || 0), 0), decimalPlaces);
-  const target = round(lineAmount, decimalPlaces);
-  const balanced = sum === target;
-
-  function updateLocal(idx: number, v: string) {
-    setLocal((prev) => prev.map((r, i) => (i === idx ? { ...r, allocatedAmount: Number(v) || 0 } : r)));
-  }
-  function apply() {
-    if (!balanced) return;
-    onApply(local);
-    onClose();
-  }
-
-  return (
-    <Modal title={`مشاهده و ویرایش تسهیم — ${serviceTitle} (رسید انبار ${toFaDigits(String(receiptNumber))})`} onClose={onClose}>
-      <div className="grid-wrap je-lines-wrap">
-        <div className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto", maxHeight: 320, overflowY: "auto" }}>
-          <table className="je-lines-table">
-            <thead>
-              <tr>
-                <th>کالا</th>
-                <th>مقدار</th>
-                <th>مبلغ تسهیم‌شده</th>
-              </tr>
-            </thead>
-            <tbody>
-              {local.map((r, idx) => (
-                <tr key={r.inventoryDocumentLineId}>
-                  <td style={{ minWidth: 220 }}>{toFaDigits(r.goodsItemCode)} — {r.goodsItemTitle}</td>
-                  <td style={{ minWidth: 100 }}>{formatAmountFa(r.quantity)} {r.unitTitle}</td>
-                  <td style={{ minWidth: 140 }}>
-                    <AmountInput value={String(r.allocatedAmount)} onChange={(v) => updateLocal(idx, v)} allowDecimal />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <div style={{ marginTop: 10, fontSize: 13 }}>
-        جمع تسهیم‌شده: {formatAmountFa(sum)} — مبلغ ردیف فاکتور: {formatAmountFa(target)}
-      </div>
-      {!balanced && (
-        <div className="alert error" style={{ marginTop: 6 }}>
-          تسهیم به‌درستی انجام نشده است. مجموع مبالغ تسهیم‌شده باید برابر مبلغ ردیف فاکتور باشد.
-        </div>
-      )}
-      <div className="actions" style={{ marginTop: 12 }}>
-        <button type="button" className="btn" onClick={apply} disabled={!balanced}>تایید</button>
-        <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
-      </div>
-    </Modal>
   );
 }

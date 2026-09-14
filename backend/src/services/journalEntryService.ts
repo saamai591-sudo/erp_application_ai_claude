@@ -104,8 +104,8 @@ export async function issueJournalEntry(opts: IssueJournalEntryOptions): Promise
     const fxRate = isBaseLine ? 1 : Number(line.fxRate) || 0;
     if (!isBaseLine && fxRate <= 0) throw new Error(`نرخ تبدیل ارز برای ردیف ${idx + 1} (ارزی) الزامی است`);
 
-    const baseDebit = isBaseLine ? debit : toBaseCurrencyAmount(debit, fxRate, currency);
-    const baseCredit = isBaseLine ? credit : toBaseCurrencyAmount(credit, fxRate, currency);
+    const baseDebit = isBaseLine ? debit : toBaseCurrencyAmount(debit, fxRate, currency, baseCurrency);
+    const baseCredit = isBaseLine ? credit : toBaseCurrencyAmount(credit, fxRate, currency, baseCurrency);
     totalDebit += baseDebit;
     totalCredit += baseCredit;
 

@@ -5,6 +5,8 @@ import { getMovements, Movement } from "../services/warehouseMovementService";
 import { userHasAction } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { AuthedRequest } from "../middleware/auth";
+import { applyServerFilterSort, ServerColumnDef } from "../utils/tableFilters";
+import { loadGoodsGroupTree, ancestorGroupAtLevel, fullGoodsGroupCode } from "../utils/goodsGroupTree";
 
 // این ماژول یک entity/API مشترک بین دو فرم منوی جدا است: «مرور تعدادی» (زیر ماژول انبارداری) و «مرور
 // مبلغی» (زیر ماژول حسابداری انبار) — نگاه کنید به یادداشت بالای فایل. پاسخ هر endpoint همیشه هم
@@ -117,6 +119,57 @@ function movementFiltersFrom(f: ReturnType<typeof parseFilters>) {
   };
 }
 
+const LEDGER_DIRECTION_FA: Record<string, string> = { IN: "وارده", OUT: "صادره" };
+
+interface LedgerRow {
+  id: number;
+  direction: string;
+  docType: string;
+  docId: number;
+  docNumber: number;
+  date: Date;
+  warehouseCode: number | null;
+  warehouseTitle: string | null;
+  goodsItemId: number;
+  goodsItemCode: string;
+  goodsItemTitle: string;
+  quantity: number;
+  amount: number;
+  serialNumber: string | null;
+  batchNumber: string | null;
+  expiryDate: Date | null;
+  physicalLocation: string | null;
+  detailCode: string | null;
+  detailTitle: string | null;
+  runningQuantity: number;
+  runningAmount: number;
+}
+
+/** ستون‌های قابل فیلتر/مرتب‌سازی تب «گردش» — دقیقاً هم‌الگوی LEDGER_COLUMNS در AccountsReview.tsx/
+ * routes/reports.ts، فقط این‌جا سمت حافظه (applyServerFilterSort) به‌جای Prisma where. ستون «مبلغ»
+ * فقط وقتی کاربر دسترسی «مرور مبلغی» دارد اضافه می‌شود — وگرنه فیلتر کردن روی مبلغ می‌توانست مقداری
+ * از آن را (با آزمون‌وخطای «بزرگ‌تر از X»/«کوچک‌تر از X») به کاربر بدون دسترسی نشت بدهد، دقیقاً همان
+ * اصلی که redactAmounts برای خودِ فیلدهای پاسخ رعایت می‌کند. مانده‌ی تجمعی (runningQuantity/Amount)
+ * عمداً اینجا نیست — یک مقدار وابسته به ترتیب پردازش است، نه یک مقدار مستقیم قابل فیلتر.
+ */
+function ledgerColumnDefs(canViewAmount: boolean): Record<string, ServerColumnDef<LedgerRow>> {
+  const defs: Record<string, ServerColumnDef<LedgerRow>> = {
+    direction: { type: "string", get: (r) => LEDGER_DIRECTION_FA[r.direction] ?? r.direction },
+    docType: { type: "string", get: (r) => r.docType },
+    docNumber: { type: "number", get: (r) => r.docNumber },
+    date: { type: "date", get: (r) => r.date },
+    warehouseCode: { type: "number", get: (r) => r.warehouseCode },
+    warehouseTitle: { type: "string", get: (r) => r.warehouseTitle },
+    goodsItemCode: { type: "string", get: (r) => r.goodsItemCode },
+    goodsItemTitle: { type: "string", get: (r) => r.goodsItemTitle },
+    quantity: { type: "number", get: (r) => r.quantity },
+    detailCode: { type: "string", get: (r) => r.detailCode },
+    detailTitle: { type: "string", get: (r) => r.detailTitle },
+  };
+  if (canViewAmount) defs.amount = { type: "number", get: (r) => r.amount };
+  return defs;
+}
+
 interface Bucket {
   qty: number;
   amount: number;
@@ -202,55 +255,10 @@ router.get("/warehouse-review/warehouses", canViewWarehouseReview, async (req: A
 });
 
 // =========================================================================
-// تب‌های «سطح گروه کالا» — یک endpoint پارامتری (levelOrder)، مشابه /reports/trial-balance
+// تب‌های «سطح گروه کالا» — یک endpoint پارامتری (levelOrder)، مشابه /reports/trial-balance؛ کمک‌توابع
+// درخت گروه کالا (loadGoodsGroupTree/ancestorGroupAtLevel/fullGoodsGroupCode) در utils/goodsGroupTree.ts
+// مشترک هستند (هم اینجا، هم routes/salesReview.ts).
 // =========================================================================
-
-interface GoodsGroupNode {
-  id: number;
-  parentId: number | null;
-  levelId: number;
-  code: string;
-}
-interface GoodsGroupLevelMeta {
-  id: number;
-  order: number;
-  title: string;
-  affectsGoodsCode: boolean;
-}
-
-async function loadGoodsGroupTree() {
-  const [groups, levels, items] = await Promise.all([
-    prisma.goodsGroup.findMany({ select: { id: true, parentId: true, levelId: true, code: true, title: true } }),
-    prisma.goodsGroupLevel.findMany({ select: { id: true, order: true, title: true, affectsGoodsCode: true } }),
-    prisma.goodsItem.findMany({ select: { id: true, goodsGroupId: true } }),
-  ]);
-  const groupById = new Map<number, (typeof groups)[number]>(groups.map((g: any) => [g.id, g]));
-  const levelById = new Map<number, GoodsGroupLevelMeta>(levels.map((l: any) => [l.id, l]));
-  const itemGroupById = new Map<number, number>(items.map((i: any) => [i.id, i.goodsGroupId]));
-  return { groupById, levelById, itemGroupById };
-}
-
-/** از یک گروه کالا (در هر عمقی)، به سمت بالا می‌رود تا گره‌ی هم‌سطح با targetLevelId را پیدا کند */
-function ancestorGroupAtLevel(groupId: number, targetLevelId: number, groupById: Map<number, GoodsGroupNode>): number | null {
-  let cur: GoodsGroupNode | undefined = groupById.get(groupId);
-  while (cur) {
-    if (cur.levelId === targetLevelId) return cur.id;
-    cur = cur.parentId != null ? groupById.get(cur.parentId) : undefined;
-  }
-  return null;
-}
-
-/** کد کامل یک گره‌ی گروه کالا با پیمایش زنجیره‌ی والدها (فقط سطوحی که «تاثیر در کد کالا» دارند) — دقیقاً همان منطق computePrefixes در routes/goodsItems.ts */
-function fullGoodsGroupCode(groupId: number, groupById: Map<number, GoodsGroupNode>, levelById: Map<number, GoodsGroupLevelMeta>): string {
-  const parts: string[] = [];
-  let cur: GoodsGroupNode | undefined = groupById.get(groupId);
-  while (cur) {
-    const level = levelById.get(cur.levelId);
-    if (!level || level.affectsGoodsCode) parts.unshift(cur.code);
-    cur = cur.parentId != null ? groupById.get(cur.parentId) : undefined;
-  }
-  return parts.join("");
-}
 
 router.get("/warehouse-review/goods-group-level", canViewWarehouseReview, async (req: AuthedRequestWithAmount, res) => {
   try {
@@ -446,6 +454,7 @@ router.get("/warehouse-review/ledger", canViewWarehouseReview, async (req: Authe
       cumQty += m.direction === "IN" ? m.quantity : -m.quantity;
       cumAmount += m.direction === "IN" ? m.amount : -m.amount;
       return {
+        id: m.lineId,
         direction: m.direction,
         docType: m.docType,
         docId: m.docId,
@@ -470,9 +479,16 @@ router.get("/warehouse-review/ledger", canViewWarehouseReview, async (req: Authe
     });
 
     const inRange = withRunning.filter((m) => m.date >= f.fromDate && m.date <= f.toDate);
-    const total = inRange.length;
+    const filteredSorted = applyServerFilterSort(
+      inRange,
+      ledgerColumnDefs(!!req.canViewAmount),
+      req.query.filters,
+      req.query.sortField as string | undefined,
+      req.query.sortDir as string | undefined
+    );
+    const total = filteredSorted.length;
     const start = (page - 1) * pageSize;
-    const rows = redactAmounts(inRange.slice(start, start + pageSize), !!req.canViewAmount, LEDGER_AMOUNT_KEYS);
+    const rows = redactAmounts(filteredSorted.slice(start, start + pageSize), !!req.canViewAmount, LEDGER_AMOUNT_KEYS);
 
     res.json({ rows, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
   } catch (e: any) {

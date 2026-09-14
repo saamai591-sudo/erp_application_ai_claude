@@ -1,6 +1,7 @@
 import { SelectId } from "./useChainedMultiSelect";
 import { registerReviewReportCache } from "./reviewReportCache";
 import { TabViewState } from "./useReviewTabLoader";
+import { ActiveFilter } from "../components/DataTable";
 
 export interface SalesReviewSnapshot {
   chainState: { selections: Record<number, Set<SelectId>>; order: number[] };
@@ -14,6 +15,8 @@ export interface SalesReviewSnapshot {
   ledgerPageSize: number;
   ledgerTotal: number;
   ledgerTotalPages: number;
+  ledgerSort?: { header: string; dir: "asc" | "desc" } | null;
+  ledgerFilters?: Record<string, ActiveFilter>;
 }
 
 // دقیقاً هم‌الگوی warehouseReviewCache.ts — یک نمونه‌ی واحد (این گزارش برخلاف مرور انبار، دو نما/mode ندارد).

@@ -11,17 +11,19 @@ import { getLineAmount, getLineAmounts, setLineAmount, enrichLinesWithAmount } f
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
-import { toBaseCurrencyAmount, fromBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConversion";
+import { toBaseCurrencyAmount, fromBaseCurrencyAmount, roundToCurrencyDecimals, ConversionCurrency } from "../utils/currencyConversion";
 
 const FORM = findFormPrefix("service-purchase-invoices");
 
 // =========================================================================
 // ماژول «زنجیره تامین» > ساب‌ماژول: عملیات > فاکتور خرید خدمات (ServicePurchaseInvoice)
 //
-// طبق Documents/ServicePurchaseAndItsRelationToStockReceipt.md — این سند عمداً از فاکتور خرید کالا
-// (PurchaseInvoice) کاملاً مستقل است: شماره‌گذاری مستقل، هر ردیف به رسید انبار دلخواه (نه لزوماً رسید
-// همین فاکتور) به‌صورت ۱-به-چند وصل می‌شود، و اثر تایید («افزودن» یک AmountLine تازه) با اثر تایید
-// فاکتور کالا («جایگزینی» مبلغ نهایی) کاملاً متفاوت است.
+// طبق Documents/ServicePurchaseAndItsRelationToStockReceipt.md — سرصفحه/شماره‌گذاری این سند از فاکتور
+// خرید کالا (PurchaseInvoice) کاملاً مستقل است. اما مدل ردیف‌ها (PurchaseCostLine + PurchaseCostAllocation)
+// طبق تصمیم صریح کاربر با تب «سایر هزینه‌ها»ی فاکتور خرید کالا مشترک است (نگاه کنید به
+// purchaseInvoices.ts) — هر ردیف به رسید انبار دلخواه (نه لزوماً رسید همین فاکتور) به‌صورت ۱-به-چند وصل
+// می‌شود، و اثر تایید («افزودن» یک AmountLine تازه) با اثر تایید ردیف‌های خودِ فاکتور کالا (PurchaseInvoiceLine؛
+// «جایگزینی» مبلغ نهایی) کاملاً متفاوت است.
 //
 // - مبنای هر ردیف: بدون مبنا / رسید انبار (enum مشترک با PurchaseInvoiceBasis — برای امکان افزودن
 //   مبناهای دیگر مثل قرارداد در آینده، طبق بند ۲ مستند).
@@ -99,15 +101,10 @@ function partyTitle(p: any): string | null {
   return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
 }
 
-async function getBaseCurrencyDecimalPlaces(): Promise<number> {
+async function getBaseCurrency() {
   const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
   if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است؛ ابتدا یک ارز را به‌عنوان ارز پایه مشخص کنید");
-  return baseCurrency.decimalPlaces;
-}
-
-function round(value: number, decimalPlaces: number): number {
-  const factor = Math.pow(10, decimalPlaces);
-  return Math.round(value * factor) / factor;
+  return baseCurrency;
 }
 
 /** نرخ تبدیل ارز فاکتور را از بدنه‌ی درخواست resolve می‌کند — دقیقاً هم‌الگوی
@@ -122,7 +119,7 @@ function resolveInvoiceFxRate(currencyId: number, baseCurrencyId: number, bodyFx
 
 const ALLOCATION_METHODS = new Set(["VALUE", "QUANTITY"]);
 
-async function validateLines(lines: LineInput[], currency: ConversionCurrency, fxRate: number) {
+async function validateLines(lines: LineInput[], currency: ConversionCurrency, fxRate: number, baseCurrency: ConversionCurrency) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("فاکتور خرید خدمات باید حداقل یک ردیف داشته باشد");
 
   const cleaned: {
@@ -153,8 +150,8 @@ async function validateLines(lines: LineInput[], currency: ConversionCurrency, f
     // مبلغ/تخفیف به ارز مبنا و ارزش‌افزوده — دقیقاً هم‌الگوی purchaseInvoices.ts#validateLines: فقط برای
     // بایگانی/محاسبه نگه داشته می‌شوند (نه نمایش در UI)، و کاربر می‌تواند مقدار پیشنهادی مالیات را
     // ویرایش کند (اگر کلاینت صریحاً مقداری فرستاده باشد، همان معتبر است، نه مقدار محاسبه‌شده).
-    const baseAmount = toBaseCurrencyAmount(amount, fxRate, currency);
-    const baseDiscount = toBaseCurrencyAmount(discount, fxRate, currency);
+    const baseAmount = toBaseCurrencyAmount(amount, fxRate, currency, baseCurrency);
+    const baseDiscount = toBaseCurrencyAmount(discount, fxRate, currency, baseCurrency);
     const vatRatePercent = resolveVatRatePercent(service);
     const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent);
     const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
@@ -363,7 +360,7 @@ router.post("/service-purchase-invoices", can(`${FORM}.create`), async (req, res
     if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
     const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
-    const cleanedLines = await validateLines(body.lines, currency, fxRate);
+    const cleanedLines = await validateLines(body.lines, currency, fxRate, baseCurrency);
 
     const lastNumber = await prisma.servicePurchaseInvoice.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
     const number = lastNumber ? lastNumber.number + 1 : 1;
@@ -433,10 +430,10 @@ router.put("/service-purchase-invoices/:id", can(`${FORM}.edit`), async (req, re
     if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
     const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
-    const cleanedLines = await validateLines(body.lines, currency, fxRate);
+    const cleanedLines = await validateLines(body.lines, currency, fxRate, baseCurrency);
 
     await prisma.$transaction([
-      prisma.servicePurchaseInvoiceLine.deleteMany({ where: { servicePurchaseInvoiceId: id } }),
+      prisma.purchaseCostLine.deleteMany({ where: { servicePurchaseInvoiceId: id } }),
       prisma.servicePurchaseInvoice.update({
         where: { id },
         data: {
@@ -503,7 +500,7 @@ router.post("/service-purchase-invoices/:id/approve", can(`${FORM}.approve`), as
   if (invoice.status !== "DRAFT") return res.status(400).json({ error: "فقط فاکتورهای در وضعیت «ثبت» قابل تایید هستند" });
 
   try {
-    const decimalPlaces = await getBaseCurrencyDecimalPlaces();
+    const baseCurrency = await getBaseCurrency();
     const fxRate = Number(invoice.fxRate);
 
     // طبق بند ۹ مستند: برای هر ردیف مبنادار «رسید انبار»، رسید/روش تسهیم/تسهیم معتبر و برابری دقیق مجموع
@@ -515,8 +512,8 @@ router.post("/service-purchase-invoices/:id/approve", can(`${FORM}.approve`), as
       }
       if (!line.allocationMethod) throw new Error(`ردیف ${idx + 1}: روش تسهیم مشخص نیست`);
 
-      const sumAllocated = round(line.allocations.reduce((s, a) => s + Number(a.allocatedAmount), 0), decimalPlaces);
-      if (sumAllocated !== round(Number(line.amount), decimalPlaces)) {
+      const sumAllocated = roundToCurrencyDecimals(line.allocations.reduce((s, a) => s + Number(a.allocatedAmount), 0), baseCurrency.decimalPlaces);
+      if (sumAllocated !== roundToCurrencyDecimals(Number(line.amount), baseCurrency.decimalPlaces)) {
         if (line.allocationMethod === "VALUE") {
           const lineAmounts = await getLineAmounts(line.sourceReceiptDocument.lines.map((rl) => rl.id));
           const hasInvalidAmount = line.sourceReceiptDocument.lines.some((rl) => Number(lineAmounts.get(rl.id) ?? 0) <= 0);
@@ -538,12 +535,12 @@ router.post("/service-purchase-invoices/:id/approve", can(`${FORM}.approve`), as
           // ردیف رسید انبار همیشه به ارز مبنا (ریال) ارزش‌گذاری می‌شود، در حالی که allocatedAmount به
           // ارز فاکتور خدمات است (طبق تصمیم صریح کاربر، فقط بعد از افزودن fxRate/ارز به این فرم، این
           // تبدیل لازم شد؛ پیش‌تر که فرم فقط ارز مبنا را می‌شناخت، جمع مستقیم درست بود).
-          const allocatedBaseAmount = round(toBaseCurrencyAmount(Number(a.allocatedAmount), fxRate, invoice.currency), decimalPlaces);
+          const allocatedBaseAmount = toBaseCurrencyAmount(Number(a.allocatedAmount), fxRate, invoice.currency, baseCurrency);
           await setLineAmount(tx, {
             lineId: a.inventoryDocumentLineId,
             newAmount: Number(current) + allocatedBaseAmount,
             priceType: "INBOUND_RELATED_COST",
-            servicePurchaseInvoiceAllocationId: a.id,
+            purchaseCostAllocationId: a.id,
             createdById: req.user?.id ?? null,
           });
         }
@@ -572,7 +569,7 @@ router.post("/service-purchase-invoices/:id/unapprove", can(`${FORM}.unapprove`)
     return res.status(400).json({ error: "برای این فاکتور سند حسابداری صادر شده؛ ابتدا سند حسابداری را حذف کنید" });
   }
 
-  const decimalPlaces = await getBaseCurrencyDecimalPlaces();
+  const baseCurrency = await getBaseCurrency();
   const fxRate = Number(invoice.fxRate);
 
   await prisma.$transaction(async (tx) => {
@@ -580,12 +577,12 @@ router.post("/service-purchase-invoices/:id/unapprove", can(`${FORM}.unapprove`)
       if (line.basis !== "WAREHOUSE_RECEIPT") continue;
       for (const a of line.allocations) {
         const current = await getLineAmount(a.inventoryDocumentLineId, tx);
-        const allocatedBaseAmount = round(toBaseCurrencyAmount(Number(a.allocatedAmount), fxRate, invoice.currency), decimalPlaces);
+        const allocatedBaseAmount = toBaseCurrencyAmount(Number(a.allocatedAmount), fxRate, invoice.currency, baseCurrency);
         await setLineAmount(tx, {
           lineId: a.inventoryDocumentLineId,
           newAmount: Number(current) - allocatedBaseAmount,
           priceType: "INBOUND_RELATED_COST",
-          servicePurchaseInvoiceAllocationId: a.id,
+          purchaseCostAllocationId: a.id,
           createdById: req.user?.id ?? null,
         });
       }
@@ -646,12 +643,17 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
         ...invoice.lines.flatMap((l) => l.allocations.map((a) => a.inventoryDocumentLine.goodsItem.accountingGroupId)),
       ])
     );
+    // طبق تصمیم صریح کاربر: «پرداختنی خرید» دیگر به گروه حسابداری وابسته نیست (فقط نوع خرید) — دقیقاً
+    // هم‌الگوی purchaseInvoices.ts.
     const settings = await prisma.goodsServiceAccountingSetting.findMany({
-      where: { accountingGroupId: { in: accountingGroupIds } },
+      where: { OR: [{ accountingGroupId: { in: accountingGroupIds } }, { accountType: "PURCHASE_PAYABLE" }] },
       include: { account: true },
     });
     function findSetting(accountingGroupId: number, accountType: string, match: (s: (typeof settings)[number]) => boolean) {
       return settings.find((s) => s.accountingGroupId === accountingGroupId && s.accountType === accountType && match(s));
+    }
+    function findPayableSetting(match: (s: (typeof settings)[number]) => boolean) {
+      return settings.find((s) => s.accountType === "PURCHASE_PAYABLE" && match(s));
     }
 
     const vendorInvoiceNumber = invoice.vendorInvoiceNumber || String(invoice.number);
@@ -663,7 +665,13 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
     const vatDebitByAccount = new Map<number, { amount: number; account: (typeof settings)[number]["account"] }>();
     const allocationIds: number[] = [];
 
+    const payableSetting = findPayableSetting((s) => s.purchaseTypeId === invoice.purchaseTypeId);
+    if (!payableSetting) {
+      errors.push(`برای نوع خرید «${invoice.purchaseType.title}»، حساب «پرداختنی خرید» در حسابداری کالا و خدمت تعریف نشده است`);
+    }
+
     for (const line of invoice.lines) {
+      if (!payableSetting) break;
       const amount = Number(line.amount);
       const baseAmount = Number(line.baseAmount);
       const vatAmount = Number(line.vatAmount);
@@ -692,7 +700,7 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
           const allocatedAmount = Number(a.allocatedAmount);
           // گرد کردن دقیقاً هم‌الگوی نوشتن مبلغ روی ردیف رسید در approve — تا مبلغ بدهکار «موجودی کالا»
           // اینجا با همان مبلغی که واقعاً به ارزش موجودی افزوده شده یکی باشد.
-          const allocatedBaseAmount = round(toBaseCurrencyAmount(allocatedAmount, fxRate, invoice.currency), baseCurrency.decimalPlaces);
+          const allocatedBaseAmount = toBaseCurrencyAmount(allocatedAmount, fxRate, invoice.currency, baseCurrency);
           const debitDetails = resolveAccountDetailFields(debitSetting.account, partyDetailTypeId, partyDetailCode);
           const debitIsCurrency = debitSetting.account.isCurrency;
           debitLines.push({
@@ -725,12 +733,6 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
         });
       }
 
-      const creditSetting = findSetting(service.accountingGroupId, "PURCHASE_PAYABLE", (s) => s.purchaseTypeId === invoice.purchaseTypeId);
-      if (!creditSetting) {
-        errors.push(`برای خدمت «${service.title}» و نوع خرید «${invoice.purchaseType.title}»، حساب «پرداختنی خرید» در حسابداری کالا و خدمت تعریف نشده است`);
-        continue;
-      }
-
       let vatDebitSetting: (typeof settings)[number] | undefined;
       if (vatAmount > 0) {
         vatDebitSetting = findSetting(service.accountingGroupId, "PURCHASE_VAT", (s) => s.purchaseTypeId === invoice.purchaseTypeId);
@@ -746,12 +748,12 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
         creditAmount += fromBaseCurrencyAmount(vatAmount, fxRate, invoice.currency);
         creditBaseAmount += vatAmount;
       }
-      const existingCredit = creditByAccount.get(creditSetting.accountId);
+      const existingCredit = creditByAccount.get(payableSetting.accountId);
       if (existingCredit) {
         existingCredit.amount += creditAmount;
         existingCredit.baseAmount += creditBaseAmount;
       } else {
-        creditByAccount.set(creditSetting.accountId, { amount: creditAmount, baseAmount: creditBaseAmount, account: creditSetting.account });
+        creditByAccount.set(payableSetting.accountId, { amount: creditAmount, baseAmount: creditBaseAmount, account: payableSetting.account });
       }
 
       if (vatDebitSetting) {
@@ -809,7 +811,7 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
 
     if (allocationIds.length > 0) {
       await prisma.documentItemAmount.updateMany({
-        where: { servicePurchaseInvoiceAllocationId: { in: allocationIds }, priceType: "INBOUND_RELATED_COST" },
+        where: { purchaseCostAllocationId: { in: allocationIds }, priceType: "INBOUND_RELATED_COST" },
         data: { journalEntryId: entry.id },
       });
     }
@@ -833,7 +835,7 @@ router.delete("/service-purchase-invoices/:id/journal-entry", can(`${FORM}.rever
   try {
     await prisma.$transaction([
       prisma.documentItemAmount.updateMany({
-        where: { servicePurchaseInvoiceAllocationId: { in: allocationIds }, priceType: "INBOUND_RELATED_COST", journalEntryId: invoice.journalEntryId },
+        where: { purchaseCostAllocationId: { in: allocationIds }, priceType: "INBOUND_RELATED_COST", journalEntryId: invoice.journalEntryId },
         data: { journalEntryId: null },
       }),
       prisma.servicePurchaseInvoice.update({ where: { id }, data: { journalEntryId: null } }),

@@ -7,14 +7,12 @@ import { useChainedMultiSelect, SelectId } from "../lib/useChainedMultiSelect";
 import { getWarehouseReviewSnapshot, setWarehouseReviewSnapshot } from "../lib/warehouseReviewCache";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
-import { toEnglishDigits } from "../lib/digits";
 import { resolveReviewDateRange, FiscalPeriodRange } from "../lib/fiscalYearDefaultDate";
 import { useReviewTabLoader, useReviewTabActivation, useReviewTabViewState, serializeForDepsKey } from "../lib/useReviewTabLoader";
 import { useTabs } from "../lib/TabsContext";
 import { api } from "../lib/api";
 import { InfoHint } from "../components/InfoHint";
-import { ExcelExportIcon, PrintIcon } from "../components/GridExportIcons";
-import { ColumnFilterType } from "../components/DataTable";
+import { ColumnFilterType, ActiveFilter } from "../components/DataTable";
 
 // گزارش «مرور موجودی انبار» — با همان فرمت «مرور حسابها» (ChainedTabsBar + useChainedMultiSelect):
 // تب‌های زنجیره‌ای که هر تب، انتخاب‌های تب‌های «پیش‌تر لمس‌شده» را به‌عنوان فیلتر اعمال می‌کند (دقیقاً
@@ -68,6 +66,7 @@ interface DimRow {
 }
 
 interface LedgerRow {
+  id: number;
   direction: "IN" | "OUT";
   docType: string;
   docId: number;
@@ -131,8 +130,6 @@ function infoText(mode: ReviewMode) {
     : base + " این گزارش («مرور مبلغی») مقدار و مبلغ معادل هر ردیف را با هم نشان می‌دهد.";
 }
 
-const LEDGER_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
-
 // اسناد صادره (خروج) به فرمت رایج حسابداری برای اعداد منفی نمایش داده می‌شوند: داخل پرانتز و قرمز —
 // dir="ltr" چون در متن راست‌به‌چپ، پرانتز/کاما/ارقام باید به ترتیب چپ‌به‌راست خودشان بمانند
 function formatAccountingAmount(value: number, isOutbound: boolean) {
@@ -156,6 +153,58 @@ function amountCol(header: string, field: keyof DimRow, outbound = false): Balan
   };
 }
 
+// ستون‌های تب «گردش» — دقیقاً هم‌الگوی LEDGER_COLUMNS در AccountsReview.tsx/SalesReview.tsx، فقط ستون‌های
+// مبلغی فقط در mode="amount" اضافه می‌شوند. کلیدها (field) باید دقیقاً با ledgerColumnDefs در
+// backend/src/routes/warehouseReview.ts یکی باشند. مقدار/مبلغ یک ستون واحد با هر دو جهت مخلوط‌اند (نه
+// وارده/صادره‌ی جدا، برخلاف تب‌های دیگر) — totalValue علامت‌دار (صادره منفی) برمی‌گرداند تا جمع پای
+// گرید هم همان معنای حسابداری قبلی را داشته باشد، در حالی که filterValue همچنان اندازه‌ی مثبت خام است.
+function ledgerColumns(mode: ReviewMode): (BalanceTableColumn<LedgerRow> & { field: string })[] {
+  const cols: (BalanceTableColumn<LedgerRow> & { field: string })[] = [
+    { header: "نوع", field: "direction", render: (r) => <span className="badge">{DIRECTION_FA[r.direction]}</span>, sortValue: (r) => DIRECTION_FA[r.direction], filterType: "string", filterValue: (r) => DIRECTION_FA[r.direction] },
+    { header: "نوع سند", field: "docType", render: (r) => r.docType, sortValue: (r) => r.docType, filterType: "string", filterValue: (r) => r.docType },
+    { header: "شماره", field: "docNumber", render: (r) => toFaDigits(String(r.docNumber)), sortValue: (r) => r.docNumber, filterType: "number", filterValue: (r) => r.docNumber },
+    { header: "تاریخ", field: "date", render: (r) => formatJalaliDate(r.date), sortValue: (r) => r.date, filterType: "date", filterValue: (r) => r.date?.slice(0, 10) },
+    { header: "کد انبار", field: "warehouseCode", render: (r) => (r.warehouseCode != null ? toFaDigits(String(r.warehouseCode)) : "—"), sortValue: (r) => r.warehouseCode ?? 0, filterType: "number", filterValue: (r) => r.warehouseCode },
+    { header: "انبار", field: "warehouseTitle", render: (r) => r.warehouseTitle || "—", sortValue: (r) => r.warehouseTitle || "", filterType: "string", filterValue: (r) => r.warehouseTitle || "" },
+    { header: "کد کالا", field: "goodsItemCode", render: (r) => toFaDigits(r.goodsItemCode), sortValue: (r) => r.goodsItemCode, filterType: "string", filterValue: (r) => r.goodsItemCode },
+    { header: "کالا", field: "goodsItemTitle", render: (r) => r.goodsItemTitle, sortValue: (r) => r.goodsItemTitle, filterType: "string", filterValue: (r) => r.goodsItemTitle },
+    {
+      header: "مقدار",
+      field: "quantity",
+      render: (r) => formatAccountingAmount(r.quantity, r.direction === "OUT"),
+      sortValue: (r) => r.quantity,
+      filterType: "number",
+      filterValue: (r) => r.quantity,
+      decimal: true,
+      totalValue: (r) => (r.direction === "OUT" ? -r.quantity : r.quantity),
+    },
+  ];
+  if (mode === "amount") {
+    cols.push({
+      header: "مبلغ",
+      field: "amount",
+      render: (r) => formatAccountingAmount(r.amount, r.direction === "OUT"),
+      sortValue: (r) => r.amount,
+      filterType: "number",
+      filterValue: (r) => r.amount,
+      decimal: true,
+      totalValue: (r) => (r.direction === "OUT" ? -r.amount : r.amount),
+    });
+  }
+  // «مانده در خط» عمداً بدون sortValue/filterType است — یک مقدار تجمعی وابسته به ترتیب پردازش سرور
+  // است، نه یک مقدار مستقیم قابل فیلتر/مرتب‌سازی (دقیقاً هم‌قرارداد LEDGER_COLUMNS در AccountsReview.tsx).
+  cols.push({ header: "مانده در خط", field: "runningQuantity", render: (r) => formatAmountFa(r.runningQuantity) });
+  if (mode === "amount") {
+    cols.push({ header: "مانده مبلغی در خط", field: "runningAmount", render: (r) => formatAmountFa(r.runningAmount) });
+  }
+  cols.push(
+    { header: "کد تفصیل", field: "detailCode", render: (r) => (r.detailCode ? toFaDigits(r.detailCode) : "—"), sortValue: (r) => r.detailCode || "", filterType: "string", filterValue: (r) => r.detailCode || "" },
+    { header: "عنوان تفصیل", field: "detailTitle", render: (r) => r.detailTitle || "—", sortValue: (r) => r.detailTitle || "", filterType: "string", filterValue: (r) => r.detailTitle || "" }
+  );
+  return cols;
+}
+const LEDGER_SORT_FIELD_MAP: Record<string, string> = Object.fromEntries(ledgerColumns("amount").map((c) => [c.header, c.field]));
+
 export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
   const { openTab } = useTabs();
   const basePath = mode === "qty" ? "/warehousing" : "/warehouse-accounting";
@@ -172,6 +221,8 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
   const [ledgerPageSize, setLedgerPageSize] = useState(snapshot?.ledgerPageSize ?? 25);
   const [ledgerTotal, setLedgerTotal] = useState(snapshot?.ledgerTotal ?? 0);
   const [ledgerTotalPages, setLedgerTotalPages] = useState(snapshot?.ledgerTotalPages ?? 1);
+  const [ledgerSort, setLedgerSort] = useState<{ header: string; dir: "asc" | "desc" } | null>(snapshot?.ledgerSort ?? null);
+  const [ledgerFilters, setLedgerFilters] = useState<Record<string, ActiveFilter>>(snapshot?.ledgerFilters ?? {});
   const [error, setError] = useState<string | null>(null);
 
   const chain = useChainedMultiSelect(snapshot?.chainState);
@@ -192,8 +243,10 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
       ledgerPageSize,
       ledgerTotal,
       ledgerTotalPages,
+      ledgerSort,
+      ledgerFilters,
     });
-  }, [mode, chain.selections, chain.order, activeTab, filters, tabData, tabView.viewState, tabLoader.loadedTabs, ledgerRows, ledgerPage, ledgerPageSize, ledgerTotal, ledgerTotalPages]);
+  }, [mode, chain.selections, chain.order, activeTab, filters, tabData, tabView.viewState, tabLoader.loadedTabs, ledgerRows, ledgerPage, ledgerPageSize, ledgerTotal, ledgerTotalPages, ledgerSort, ledgerFilters]);
 
   // مرزهای تب‌ها به‌صورت پویا بر اساس تعداد سطوح گروه کالا محاسبه می‌شوند (دقیقاً مثل accountTabCount
   // در AccountsReview.tsx که بر اساس تعداد سطوح گزارشگری محاسبه می‌شود)
@@ -309,13 +362,28 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
     );
   }
 
-  async function loadLedger(page = 1, pageSize = ledgerPageSize) {
+  async function loadLedger(page = 1, pageSize = ledgerPageSize, sort = ledgerSort, colFilters = ledgerFilters) {
     await tabLoader.run(
       LEDGER_TAB,
       async (isStale) => {
         const p = buildParams(LEDGER_TAB);
         p.set("page", String(page));
         p.set("pageSize", String(pageSize));
+        if (sort) {
+          const field = LEDGER_SORT_FIELD_MAP[sort.header];
+          if (field) {
+            p.set("sortField", field);
+            p.set("sortDir", sort.dir);
+          }
+        }
+        if (Object.keys(colFilters).length) {
+          const serverFilters: Record<string, ActiveFilter> = {};
+          for (const [header, f] of Object.entries(colFilters)) {
+            const field = LEDGER_SORT_FIELD_MAP[header];
+            if (field) serverFilters[field] = f;
+          }
+          if (Object.keys(serverFilters).length) p.set("filters", JSON.stringify(serverFilters));
+        }
         const data = await api.get(`/warehouse-review/ledger?${p.toString()}`);
         if (isStale()) return;
         setLedgerRows(data.rows);
@@ -329,7 +397,17 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
   }
 
   function changeLedgerPageSize(size: number) {
-    loadLedger(1, size);
+    loadLedger(1, size, ledgerSort, ledgerFilters);
+  }
+
+  function onLedgerSortChange(sort: { header: string; dir: "asc" | "desc" } | null) {
+    setLedgerSort(sort);
+    loadLedger(1, ledgerPageSize, sort, ledgerFilters);
+  }
+
+  function onLedgerFiltersChange(f: Record<string, ActiveFilter>) {
+    setLedgerFilters(f);
+    loadLedger(1, ledgerPageSize, ledgerSort, f);
   }
 
   const activationDepsKey = useMemo(
@@ -362,6 +440,8 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
     tabView.reset();
     setLedgerRows([]);
     setLedgerPage(1);
+    setLedgerSort(null);
+    setLedgerFilters({});
     tabLoader.resetLoaded();
     setActiveTab(0);
   }
@@ -416,47 +496,7 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, mode, groupLevels]);
 
-  // جمع مقدار/مبلغ روی «صفحه‌ی جاری» گردش (سرور صفحه‌بندی می‌کند) — با علامت جهت (صادره منفی)، چون این
-  // یک ستون واحد با هر دو جهت مخلوط است (برخلاف تب‌های دیگر که وارده/صادره ستون جداگانه دارند)، پس جمع
-  // بدون علامت بی‌معنا بود؛ «مانده در خط» عمداً جمع زده نمی‌شود (مقدار تجمعی/لحظه‌ای، نه جمع‌پذیر).
-  const ledgerQuantityTotal = ledgerRows.reduce((s, r) => s + (r.direction === "OUT" ? -1 : 1) * (Number(r.quantity) || 0), 0);
-  const ledgerAmountTotal = ledgerRows.reduce((s, r) => s + (r.direction === "OUT" ? -1 : 1) * (Number(r.amount) || 0), 0);
-
-  async function exportLedgerCsv() {
-    setError(null);
-    try {
-      const p = buildParams(LEDGER_TAB);
-      p.set("page", "1");
-      p.set("pageSize", "100000");
-      const data = await api.get(`/warehouse-review/ledger?${p.toString()}`);
-      const header = [
-        "نوع", "نوع سند", "شماره", "تاریخ", "کد انبار", "انبار", "کد کالا", "کالا", "مقدار",
-        ...(mode === "amount" ? ["مبلغ"] : []), "مانده",
-        ...(mode === "amount" ? ["مانده مبلغی"] : []), "کد تفصیل", "عنوان تفصیل",
-      ];
-      // مقدار/مبلغ در داده‌ی خام همیشه اندازه‌ی مثبت است (جهت از فیلد نوع/direction معلوم می‌شود)؛ در
-      // نمای تصویری با پرانتز/رنگ قرمز منفی نشان داده می‌شود، ولی CSV رنگ/پرانتز ندارد، پس اینجا باید
-      // واقعاً با علامت منفی صادر شود تا خروجی اکسل هم فرمت حسابداریِ رایج (صادره = منفی) را نشان دهد
-      const rows = data.rows.map((r: LedgerRow) => {
-        const sign = r.direction === "OUT" ? -1 : 1;
-        return [
-          DIRECTION_FA[r.direction], r.docType, r.docNumber, toEnglishDigits(formatJalaliDate(r.date)), r.warehouseCode ?? "", r.warehouseTitle || "", r.goodsItemCode, r.goodsItemTitle, r.quantity * sign,
-          ...(mode === "amount" ? [r.amount * sign] : []), r.runningQuantity,
-          ...(mode === "amount" ? [r.runningAmount] : []), r.detailCode || "", r.detailTitle || "",
-        ];
-      });
-      const csv = [header, ...rows].map((row) => row.map((c: any) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
-      const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "گردش-موجودی-انبار.csv";
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e: any) {
-      setError(e.message);
-    }
-  }
+  const ledgerCols = useMemo(() => ledgerColumns(mode), [mode]);
 
   return (
     <div>
@@ -483,16 +523,6 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
           <>
             <InfoHint text={infoText(mode)} title={mode === "qty" ? "مرور تعدادی" : "مرور مبلغی"} />
             <RefreshButton onClick={refreshCurrentTab} title="رفرش تب جاری" />
-            {activeTab === LEDGER_TAB && (
-              <>
-                <button type="button" className="toolbar-icon-btn" onClick={exportLedgerCsv} title="خروجی اکسل">
-                  <ExcelExportIcon />
-                </button>
-                <button type="button" className="toolbar-icon-btn" onClick={() => window.print()} title="چاپ">
-                  <PrintIcon />
-                </button>
-              </>
-            )}
           </>
         }
         onClearFilters={resetAll}
@@ -514,104 +544,35 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
       )}
 
       {activeTab === LEDGER_TAB && (
-        <div className="datatable-root">
-          <div className="grid-wrap">
-            <div className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
-              {tabLoader.loading && ledgerRows.length === 0 ? (
-                <div className="empty-state">در حال بارگذاری...</div>
-              ) : (
-                <table>
-                  <thead>
-                    <tr>
-                      <th>نوع</th>
-                      <th>نوع سند</th>
-                      <th>شماره</th>
-                      <th>تاریخ</th>
-                      <th>کد انبار</th>
-                      <th>انبار</th>
-                      <th>کد کالا</th>
-                      <th>کالا</th>
-                      <th>مقدار</th>
-                      {mode === "amount" && <th>مبلغ</th>}
-                      <th>مانده در خط</th>
-                      {mode === "amount" && <th>مانده مبلغی در خط</th>}
-                      <th>کد تفصیل</th>
-                      <th>عنوان تفصیل</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ledgerRows.length === 0 && (
-                      <tr><td colSpan={mode === "amount" ? 14 : 12} className="empty-state" style={{ border: "none" }}>گردشی یافت نشد</td></tr>
-                    )}
-                    {ledgerRows.map((r, i) => (
-                      <tr
-                        key={i}
-                        onDoubleClick={() => {
-                          const full = DOC_TYPE_FULL_PATH[r.docType];
-                          if (full) {
-                            openTab(`${full}/${r.docId}/edit`);
-                            return;
-                          }
-                          const seg = DOC_TYPE_PATH[r.docType];
-                          if (seg) openTab(`${basePath}/${seg}/${r.docId}/edit`);
-                        }}
-                        style={{ cursor: "pointer" }}
-                        title="دابل‌کلیک برای باز کردن سند"
-                      >
-                        <td><span className="badge">{DIRECTION_FA[r.direction]}</span></td>
-                        <td>{r.docType}</td>
-                        <td>{toFaDigits(String(r.docNumber))}</td>
-                        <td>{formatJalaliDate(r.date)}</td>
-                        <td>{r.warehouseCode != null ? toFaDigits(String(r.warehouseCode)) : "—"}</td>
-                        <td>{r.warehouseTitle || "—"}</td>
-                        <td>{toFaDigits(r.goodsItemCode)}</td>
-                        <td>{r.goodsItemTitle}</td>
-                        <td>{formatAccountingAmount(r.quantity, r.direction === "OUT")}</td>
-                        {mode === "amount" && <td>{formatAccountingAmount(r.amount, r.direction === "OUT")}</td>}
-                        <td>{formatAmountFa(r.runningQuantity)}</td>
-                        {mode === "amount" && <td>{formatAmountFa(r.runningAmount)}</td>}
-                        <td>{r.detailCode ? toFaDigits(r.detailCode) : "—"}</td>
-                        <td>{r.detailTitle || "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-            {ledgerRows.length > 0 && (
-              <div className="grid-footer-totals">
-                <span className="grid-footer-totals-item"><b>مقدار:</b> {formatAmountFa(ledgerQuantityTotal)}</span>
-                {mode === "amount" && <span className="grid-footer-totals-item"><b>مبلغ:</b> {formatAmountFa(ledgerAmountTotal)}</span>}
-              </div>
-            )}
-            <div className="grid-footer">
-              <span className="grid-footer-info">
-                {tabLoader.loading
-                  ? "در حال بارگذاری..."
-                  : ledgerTotal === 0
-                  ? "بدون رکورد"
-                  : `نمایش ${toFaDigits(String((ledgerPage - 1) * ledgerPageSize + 1))} تا ${toFaDigits(String(Math.min(ledgerPage * ledgerPageSize, ledgerTotal)))} از ${toFaDigits(String(ledgerTotal))} رکورد`}
-              </span>
-              <div className="grid-footer-controls">
-                <label className="grid-page-size">
-                  تعداد در صفحه
-                  <select value={ledgerPageSize} onChange={(e) => changeLedgerPageSize(Number(e.target.value))}>
-                    {LEDGER_PAGE_SIZE_OPTIONS.map((n) => (
-                      <option key={n} value={n}>{toFaDigits(String(n))}</option>
-                    ))}
-                  </select>
-                </label>
-                <div className="grid-page-nav">
-                  <button type="button" className="btn secondary" disabled={ledgerPage <= 1 || tabLoader.loading} onClick={() => loadLedger(1)}>ابتدا</button>
-                  <button type="button" className="btn secondary" disabled={ledgerPage <= 1 || tabLoader.loading} onClick={() => loadLedger(ledgerPage - 1)}>قبلی</button>
-                  <span className="grid-page-indicator">صفحه {toFaDigits(String(ledgerPage))} از {toFaDigits(String(ledgerTotalPages))}</span>
-                  <button type="button" className="btn secondary" disabled={ledgerPage >= ledgerTotalPages || tabLoader.loading} onClick={() => loadLedger(ledgerPage + 1)}>بعدی</button>
-                  <button type="button" className="btn secondary" disabled={ledgerPage >= ledgerTotalPages || tabLoader.loading} onClick={() => loadLedger(ledgerTotalPages)}>انتها</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <SelectableBalanceTable
+          stateKey={LEDGER_TAB}
+          rows={ledgerRows}
+          columns={ledgerCols}
+          selectable={false}
+          onRowDoubleClick={(r) => {
+            const full = DOC_TYPE_FULL_PATH[r.docType];
+            if (full) {
+              openTab(`${full}/${r.docId}/edit`);
+              return;
+            }
+            const seg = DOC_TYPE_PATH[r.docType];
+            if (seg) openTab(`${basePath}/${seg}/${r.docId}/edit`);
+          }}
+          loading={tabLoader.loading}
+          emptyText="گردشی یافت نشد"
+          restoreFilters={ledgerFilters}
+          restoreSort={ledgerSort}
+          serverPaging={{
+            page: ledgerPage,
+            pageSize: ledgerPageSize,
+            total: ledgerTotal,
+            loading: tabLoader.loading,
+            onPageChange: (page) => loadLedger(page),
+            onPageSizeChange: changeLedgerPageSize,
+            onSortChange: onLedgerSortChange,
+            onFiltersChange: onLedgerFiltersChange,
+          }}
+        />
       )}
     </div>
   );

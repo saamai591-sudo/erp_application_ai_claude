@@ -50,7 +50,7 @@ export async function setLineAmount(
     effectiveDate?: Date;
     journalEntryId?: number | null;
     goodsPricingStatusId?: number | null;
-    servicePurchaseInvoiceAllocationId?: number | null;
+    purchaseCostAllocationId?: number | null;
     createdById?: number | null;
   }
 ): Promise<{ difference: number; amount: number }> {
@@ -65,7 +65,7 @@ export async function setLineAmount(
       effectiveDate: params.effectiveDate ?? new Date(),
       journalEntryId: params.journalEntryId ?? null,
       goodsPricingStatusId: params.goodsPricingStatusId ?? null,
-      servicePurchaseInvoiceAllocationId: params.servicePurchaseInvoiceAllocationId ?? null,
+      purchaseCostAllocationId: params.purchaseCostAllocationId ?? null,
       createdById: params.createdById ?? null,
     },
   });

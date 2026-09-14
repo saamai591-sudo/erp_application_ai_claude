@@ -52,6 +52,7 @@ async function main() {
     { code: 8, title: "فاکتور خرید", systemKey: "PURCHASE_INVOICE" },
     { code: 9, title: "فاکتور خرید خدمات", systemKey: "SERVICE_PURCHASE_INVOICE" },
     { code: 10, title: "فاکتور فروش", systemKey: "SALES_INVOICE" },
+    { code: 11, title: "فاکتور برگشت از فروش", systemKey: "SALES_RETURN_INVOICE" },
   ];
   for (const dt of documentTypes) {
     await prisma.documentType.upsert({

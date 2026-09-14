@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { ChainedTabsBar } from "../components/ChainedTabsBar";
-import { SelectableBalanceTable } from "../components/SelectableBalanceTable";
+import { SelectableBalanceTable, BalanceTableColumn } from "../components/SelectableBalanceTable";
 import { AdvancedFilterDialog, AdvancedFilterButton } from "../components/AdvancedFilterDialog";
 import { RefreshButton } from "../components/RefreshButton";
 import { useChainedMultiSelect, SelectId } from "../lib/useChainedMultiSelect";
@@ -13,8 +13,7 @@ import { useTabs } from "../lib/TabsContext";
 import { getAccountsReviewSnapshot, setAccountsReviewSnapshot, DetailQueryState } from "../lib/accountsReviewCache";
 import { api } from "../lib/api";
 import { InfoHint } from "../components/InfoHint";
-import { ExcelExportIcon, PrintIcon } from "../components/GridExportIcons";
-import { FilterIcon, SortIcon, FilterPopover, ActiveFilter, ColumnFilterType } from "../components/DataTable";
+import { ActiveFilter, ColumnFilterType } from "../components/DataTable";
 
 interface Level { id: number; order: number; title: string }
 interface DocType { id: number; title: string; systemKey: string | null }
@@ -29,6 +28,7 @@ interface BalanceRow {
   balanceNature: "DEBIT" | "CREDIT";
 }
 interface LedgerRow {
+  id: number;
   journalEntryId: number;
   number: number;
   referenceNumber: number;
@@ -44,7 +44,6 @@ interface LedgerRow {
 }
 
 const STATUS_FA: Record<string, string> = { DRAFT: "ثبت", REVIEW: "بررسی", APPROVED: "تایید" };
-const NATURE_FA: Record<string, string> = { DEBIT: "بدهکار", CREDIT: "بستانکار" };
 const ISSUING_SYSTEM_FA: Record<string, string> = {
   ACCOUNTING: "حسابداری",
   ACCOUNTING_EXCEL_IMPORT: "حسابداری (ورود از اکسل)",
@@ -99,23 +98,33 @@ const DETAIL_SORT_FIELD_MAP: Record<string, string> = {
 };
 
 const DEFAULT_DETAIL_QUERY: DetailQueryState = { page: 1, pageSize: 25, sort: null, filters: {} };
-const LEDGER_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
-// ستون‌های قابل مرتب‌سازی/فیلتر تب «گردش» — سمت سرور اعمال می‌شود (دقیقاً مثل تب‌های تفصیل بالا و
-// فهرست اسناد حسابداری)؛ ستون‌های «مانده بدهکار/بستانکار» عمداً اینجا نیستند چون یک مقدار تجمعیِ
-// وابسته به ترتیب پردازش ردیف‌هاست، نه یک مقدار مستقیم قابل فیلتر.
-const LEDGER_COLUMNS: { header: string; field: string; filterType: ColumnFilterType }[] = [
-  { header: "شماره سند", field: "number", filterType: "number" },
-  { header: "شماره عطف", field: "referenceNumber", filterType: "number" },
-  { header: "تاریخ", field: "date", filterType: "date" },
-  { header: "نوع سند", field: "documentType", filterType: "string" },
-  { header: "سیستم", field: "issuingSystem", filterType: "string" },
-  { header: "وضعیت", field: "status", filterType: "string" },
-  { header: "شرح", field: "description", filterType: "string" },
-  { header: "بدهکار", field: "debit", filterType: "number" },
-  { header: "بستانکار", field: "credit", filterType: "number" },
-];
-const LEDGER_SORT_FIELD_MAP: Record<string, string> = Object.fromEntries(LEDGER_COLUMNS.map((c) => [c.header, c.field]));
+// ستون‌های تب «گردش» — دقیقاً هم‌الگوی balanceColumns/detailBalanceColumns بالا، حالا از طریق
+// SelectableBalanceTable (به‌جای <table> دستی قبلی) رندر می‌شوند. کلیدها (field) باید دقیقاً با
+// LEDGER_COLUMNS در backend/src/routes/reports.ts یکی باشند. «مانده بدهکار/بستانکار» عمداً بدون
+// sortValue/filterType‌اند — یک مقدار تجمعیِ وابسته به ترتیب پردازش سرور است، نه مقدار مستقیم قابل
+// فیلتر (نگاه کنید به یادداشت مشابه در warehouseReview.ts#ledgerColumnDefs).
+function ledgerColumns(showRunningBalance: boolean): (BalanceTableColumn<LedgerRow> & { field: string })[] {
+  const cols: (BalanceTableColumn<LedgerRow> & { field: string })[] = [
+    { header: "شماره سند", field: "number", render: (r) => toFaDigits(String(r.number)), sortValue: (r) => r.number, filterType: "number", filterValue: (r) => r.number },
+    { header: "شماره عطف", field: "referenceNumber", render: (r) => toFaDigits(String(r.referenceNumber)), sortValue: (r) => r.referenceNumber, filterType: "number", filterValue: (r) => r.referenceNumber },
+    { header: "تاریخ", field: "date", render: (r) => formatJalaliDate(r.date), sortValue: (r) => r.date, filterType: "date", filterValue: (r) => r.date?.slice(0, 10) },
+    { header: "نوع سند", field: "documentType", render: (r) => r.documentType, sortValue: (r) => r.documentType, filterType: "string", filterValue: (r) => r.documentType },
+    { header: "سیستم", field: "issuingSystem", render: (r) => ISSUING_SYSTEM_FA[r.issuingSystem] || r.issuingSystem, sortValue: (r) => ISSUING_SYSTEM_FA[r.issuingSystem] || r.issuingSystem, filterType: "string", filterValue: (r) => ISSUING_SYSTEM_FA[r.issuingSystem] || r.issuingSystem },
+    { header: "وضعیت", field: "status", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, sortValue: (r) => STATUS_FA[r.status] || r.status, filterType: "string", filterValue: (r) => STATUS_FA[r.status] || r.status },
+    { header: "شرح", field: "description", render: (r) => r.description || "—", sortValue: (r) => r.description || "", filterType: "string", filterValue: (r) => r.description || "" },
+    { header: "بدهکار", field: "debit", render: (r) => (r.debit ? formatAmountFa(r.debit) : "—"), sortValue: (r) => r.debit, filterType: "number", filterValue: (r) => r.debit, decimal: true },
+    { header: "بستانکار", field: "credit", render: (r) => (r.credit ? formatAmountFa(r.credit) : "—"), sortValue: (r) => r.credit, filterType: "number", filterValue: (r) => r.credit, decimal: true },
+  ];
+  if (showRunningBalance) {
+    cols.push(
+      { header: "مانده بدهکار", field: "runningBalanceDebit", render: (r) => (r.runningBalanceNature === "DEBIT" && r.runningBalance ? formatAmountFa(r.runningBalance) : "—") },
+      { header: "مانده بستانکار", field: "runningBalanceCredit", render: (r) => (r.runningBalanceNature === "CREDIT" && r.runningBalance ? formatAmountFa(r.runningBalance) : "—") }
+    );
+  }
+  return cols;
+}
+const LEDGER_SORT_FIELD_MAP: Record<string, string> = Object.fromEntries(ledgerColumns(false).map((c) => [c.header, c.field]));
 
 export default function AccountsReview() {
   const { openTab } = useTabs();
@@ -134,9 +143,6 @@ export default function AccountsReview() {
   const [detailTotal, setDetailTotal] = useState<Record<number, number>>(snapshot?.detailTotal ?? {});
   const [ledgerSort, setLedgerSort] = useState<{ header: string; dir: "asc" | "desc" } | null>(snapshot?.ledgerSort ?? null);
   const [ledgerFilters, setLedgerFilters] = useState<Record<string, ActiveFilter>>(snapshot?.ledgerFilters ?? {});
-  const [openLedgerFilterFor, setOpenLedgerFilterFor] = useState<string | null>(null);
-  const [ledgerPopoverPos, setLedgerPopoverPos] = useState({ top: 0, left: 0 });
-  const ledgerFilterBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [showRunningBalance, setShowRunningBalance] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -374,39 +380,14 @@ export default function AccountsReview() {
     loadLedger(1, size);
   }
 
-  function toggleLedgerSort(header: string) {
-    const next: { header: string; dir: "asc" | "desc" } | null =
-      !ledgerSort || ledgerSort.header !== header ? { header, dir: "asc" } : ledgerSort.dir === "asc" ? { header, dir: "desc" } : null;
-    setLedgerSort(next);
-    loadLedger(1, ledgerPageSize, next, ledgerFilters);
+  function onLedgerSortChange(sort: { header: string; dir: "asc" | "desc" } | null) {
+    setLedgerSort(sort);
+    loadLedger(1, ledgerPageSize, sort, ledgerFilters);
   }
 
-  // جمع بدهکار/بستانکار روی «صفحه‌ی جاری» ledgerRows (سرور صفحه‌بندی می‌کند) — طبق تصمیم صریح کاربر برای
-  // ستون‌های decimal پای هر گرید؛ «مانده در خط» عمداً جمع زده نمی‌شود چون یک مقدار تجمعی/لحظه‌ای است، نه
-  // یک مقدار جمع‌پذیر (جمع چند «مانده‌ی لحظه‌ای» متوالی معنای حسابداری ندارد).
-  const ledgerDebitTotal = ledgerRows.reduce((s, r) => s + (Number(r.debit) || 0), 0);
-  const ledgerCreditTotal = ledgerRows.reduce((s, r) => s + (Number(r.credit) || 0), 0);
-
-  function openLedgerFilter(header: string) {
-    const btn = ledgerFilterBtnRefs.current[header];
-    if (btn) {
-      const rect = btn.getBoundingClientRect();
-      setLedgerPopoverPos({ top: rect.bottom + 4, left: Math.max(8, rect.right - 220) });
-    }
-    setOpenLedgerFilterFor(openLedgerFilterFor === header ? null : header);
-  }
-
-  function applyLedgerFilter(header: string, f: ActiveFilter) {
-    const next = { ...ledgerFilters, [header]: f };
-    setLedgerFilters(next);
-    loadLedger(1, ledgerPageSize, ledgerSort, next);
-  }
-
-  function clearLedgerFilter(header: string) {
-    const next = { ...ledgerFilters };
-    delete next[header];
-    setLedgerFilters(next);
-    loadLedger(1, ledgerPageSize, ledgerSort, next);
+  function onLedgerFiltersChange(f: Record<string, ActiveFilter>) {
+    setLedgerFilters(f);
+    loadLedger(1, ledgerPageSize, ledgerSort, f);
   }
 
   const activationDepsKey = useMemo(
@@ -488,37 +469,6 @@ export default function AccountsReview() {
     resetAll();
   }
 
-  async function exportLedgerCsv() {
-    setError(null);
-    try {
-      const p = new URLSearchParams(filterParams);
-      const { parentIds } = accountConstraints(ledgerTabIndex);
-      if (parentIds.length) p.set("parentIds", parentIds.join(","));
-      const details = detailConstraints(ledgerTabIndex);
-      DETAIL_SLOTS.forEach((slot) => {
-        if (details[slot].length) p.set(`detail${slot}Codes`, details[slot].join(","));
-      });
-      p.set("page", "1");
-      p.set("pageSize", "100000");
-      const data = await api.get(`/reports/ledger?${p.toString()}`);
-      const header = ["شماره سند", "شماره عطف", "تاریخ", "نوع سند", "سیستم", "بدهکار", "بستانکار", "مانده", "شرح"];
-      const rows = data.rows.map((r: LedgerRow) => [
-        r.number, r.referenceNumber, formatJalaliDate(r.date), r.documentType, ISSUING_SYSTEM_FA[r.issuingSystem] || r.issuingSystem,
-        r.debit, r.credit, `${r.runningBalance} ${NATURE_FA[r.runningBalanceNature]}`, r.description || "",
-      ]);
-      const csv = [header, ...rows].map((row) => row.map((c: any) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
-      const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "گردش-حساب.csv";
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e: any) {
-      setError(e.message);
-    }
-  }
-
   const extraFilterCount =
     filters.documentTypeIds.size + (filters.numberFrom ? 1 : 0) + (filters.numberTo ? 1 : 0) + (filters.referenceFrom ? 1 : 0) + (filters.referenceTo ? 1 : 0);
 
@@ -527,6 +477,8 @@ export default function AccountsReview() {
     ...DETAIL_SLOTS.map((slot) => ({ key: `detail-${slot}`, label: `تفصیل ${toFaDigits(String(slot))}`, count: chain.get(detailTabStart + slot - 1).size })),
     { key: "ledger", label: "گردش", count: 0 },
   ];
+
+  const ledgerCols = useMemo(() => ledgerColumns(showRunningBalance), [showRunningBalance]);
 
   return (
     <div>
@@ -587,16 +539,6 @@ export default function AccountsReview() {
           <>
             <InfoHint text={`گزارش سلسله‌مراتبی مانده‌ی حساب‌ها — در هر تب چندین ردیف قابل انتخاب است؛ فقط حساب‌های دارای گردش در بازه نمایش داده می‌شوند`} title="مرور حسابها" />
             <RefreshButton onClick={refreshCurrentTab} title="رفرش تب جاری" />
-            {activeTab === ledgerTabIndex && (
-              <>
-                <button type="button" className="toolbar-icon-btn" onClick={exportLedgerCsv} title="خروجی اکسل">
-                  <ExcelExportIcon />
-                </button>
-                <button type="button" className="toolbar-icon-btn" onClick={() => window.print()} title="چاپ">
-                  <PrintIcon />
-                </button>
-              </>
-            )}
           </>
         }
         onClearFilters={clearFilters}
@@ -641,132 +583,36 @@ export default function AccountsReview() {
       )}
 
       {activeTab === ledgerTabIndex && (
-        <div className="datatable-root">
+        <>
           <div className="ar-ledger-toolbar">
             <label className="checkbox-row">
               <input type="checkbox" checked={showRunningBalance} onChange={(e) => setShowRunningBalance(e.target.checked)} />
               مانده در خط
             </label>
           </div>
-          <div className="grid-wrap">
-          <div className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
-            {tabLoader.loading && ledgerRows.length === 0 ? (
-              <div className="empty-state">در حال بارگذاری...</div>
-            ) : (
-              <table>
-                <thead>
-                  <tr>
-                    {LEDGER_COLUMNS.map((c) => {
-                      const sortDir = ledgerSort?.header === c.header ? ledgerSort.dir : null;
-                      const isFilterActive = !!ledgerFilters[c.header];
-                      return (
-                        <th key={c.header}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                            <span
-                              onClick={() => toggleLedgerSort(c.header)}
-                              style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}
-                              title="مرتب‌سازی"
-                            >
-                              {c.header}
-                              <SortIcon dir={sortDir} />
-                            </span>
-                            <button
-                              ref={(el) => (ledgerFilterBtnRefs.current[c.header] = el)}
-                              type="button"
-                              className={`filter-btn ${isFilterActive ? "active" : ""}`}
-                              onClick={() => openLedgerFilter(c.header)}
-                              title="فیلتر"
-                            >
-                              <FilterIcon active={isFilterActive} />
-                            </button>
-                          </div>
-                        </th>
-                      );
-                    })}
-                    {showRunningBalance && <th>مانده بدهکار</th>}
-                    {showRunningBalance && <th>مانده بستانکار</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {ledgerRows.length === 0 && (
-                    <tr><td colSpan={showRunningBalance ? 11 : 9} className="empty-state" style={{ border: "none" }}>گردشی یافت نشد</td></tr>
-                  )}
-                  {ledgerRows.map((r, i) => (
-                    <tr key={i} onDoubleClick={() => openTab(`/journal-entries/${r.journalEntryId}/edit`)} style={{ cursor: "pointer" }} title="دابل‌کلیک برای باز کردن سند">
-                      <td>{toFaDigits(String(r.number))}</td>
-                      <td>{toFaDigits(String(r.referenceNumber))}</td>
-                      <td>{formatJalaliDate(r.date)}</td>
-                      <td>{r.documentType}</td>
-                      <td>{ISSUING_SYSTEM_FA[r.issuingSystem] || r.issuingSystem}</td>
-                      <td><span className="badge">{STATUS_FA[r.status]}</span></td>
-                      <td>{r.description || "—"}</td>
-                      <td>{r.debit ? formatAmountFa(r.debit) : "—"}</td>
-                      <td>{r.credit ? formatAmountFa(r.credit) : "—"}</td>
-                      {showRunningBalance && (
-                        <td>{r.runningBalanceNature === "DEBIT" && r.runningBalance ? formatAmountFa(r.runningBalance) : "—"}</td>
-                      )}
-                      {showRunningBalance && (
-                        <td>{r.runningBalanceNature === "CREDIT" && r.runningBalance ? formatAmountFa(r.runningBalance) : "—"}</td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-          {ledgerRows.length > 0 && (
-            <div className="grid-footer-totals">
-              <span className="grid-footer-totals-item"><b>بدهکار:</b> {formatAmountFa(ledgerDebitTotal)}</span>
-              <span className="grid-footer-totals-item"><b>بستانکار:</b> {formatAmountFa(ledgerCreditTotal)}</span>
-            </div>
-          )}
-          <div className="grid-footer">
-            <span className="grid-footer-info">
-              {tabLoader.loading
-                ? "در حال بارگذاری..."
-                : ledgerTotal === 0
-                ? "بدون رکورد"
-                : `نمایش ${toFaDigits(String((ledgerPage - 1) * ledgerPageSize + 1))} تا ${toFaDigits(String(Math.min(ledgerPage * ledgerPageSize, ledgerTotal)))} از ${toFaDigits(String(ledgerTotal))} رکورد`}
-            </span>
-            <div className="grid-footer-controls">
-              <label className="grid-page-size">
-                تعداد در صفحه
-                <select value={ledgerPageSize} onChange={(e) => changeLedgerPageSize(Number(e.target.value))}>
-                  {LEDGER_PAGE_SIZE_OPTIONS.map((n) => (
-                    <option key={n} value={n}>{toFaDigits(String(n))}</option>
-                  ))}
-                </select>
-              </label>
-              <div className="grid-page-nav">
-                <button type="button" className="btn secondary" disabled={ledgerPage <= 1 || tabLoader.loading} onClick={() => loadLedger(1)}>ابتدا</button>
-                <button type="button" className="btn secondary" disabled={ledgerPage <= 1 || tabLoader.loading} onClick={() => loadLedger(ledgerPage - 1)}>قبلی</button>
-                <span className="grid-page-indicator">
-                  صفحه {toFaDigits(String(ledgerPage))} از {toFaDigits(String(ledgerTotalPages))}
-                </span>
-                <button type="button" className="btn secondary" disabled={ledgerPage >= ledgerTotalPages || tabLoader.loading} onClick={() => loadLedger(ledgerPage + 1)}>بعدی</button>
-                <button type="button" className="btn secondary" disabled={ledgerPage >= ledgerTotalPages || tabLoader.loading} onClick={() => loadLedger(ledgerTotalPages)}>انتها</button>
-              </div>
-            </div>
-          </div>
-          </div>
-        </div>
+          <SelectableBalanceTable
+            stateKey={ledgerTabIndex}
+            rows={ledgerRows}
+            columns={ledgerCols}
+            selectable={false}
+            onRowDoubleClick={(r) => openTab(`/journal-entries/${r.journalEntryId}/edit`)}
+            loading={tabLoader.loading}
+            emptyText="گردشی یافت نشد"
+            restoreFilters={ledgerFilters}
+            restoreSort={ledgerSort}
+            serverPaging={{
+              page: ledgerPage,
+              pageSize: ledgerPageSize,
+              total: ledgerTotal,
+              loading: tabLoader.loading,
+              onPageChange: (page) => loadLedger(page),
+              onPageSizeChange: changeLedgerPageSize,
+              onSortChange: onLedgerSortChange,
+              onFiltersChange: onLedgerFiltersChange,
+            }}
+          />
+        </>
       )}
-
-      {openLedgerFilterFor &&
-        LEDGER_COLUMNS.map(
-          (c) =>
-            c.header === openLedgerFilterFor && (
-              <FilterPopover
-                key={c.header}
-                type={c.filterType}
-                active={ledgerFilters[c.header] ?? null}
-                position={ledgerPopoverPos}
-                onApply={(f) => applyLedgerFilter(c.header, f)}
-                onClear={() => clearLedgerFilter(c.header)}
-                onClose={() => setOpenLedgerFilterFor(null)}
-              />
-            )
-        )}
     </div>
   );
 }

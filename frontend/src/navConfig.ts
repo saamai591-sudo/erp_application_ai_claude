@@ -238,6 +238,7 @@ export const MODULES: ModuleGroup[] = [
           { key: "sales-quotes", label: "پیش‌فاکتور", list: "/sales-quotes", create: "/sales-quotes/new", icon: "file" },
           { key: "sales-orders", label: "سفارش فروش", list: "/sales-orders", create: "/sales-orders/new", icon: "file" },
           { key: "sales-invoices", label: "فاکتور فروش", list: "/sales-invoices", create: "/sales-invoices/new", icon: "ledger" },
+          { key: "sales-return-invoices", label: "فاکتور برگشت از فروش", list: "/sales-return-invoices", create: "/sales-return-invoices/new", icon: "ledger" },
         ],
       },
       {
@@ -249,6 +250,12 @@ export const MODULES: ModuleGroup[] = [
   {
     title: "خزانه‌داری",
     subModules: [
+      {
+        title: "تنظیمات",
+        items: [
+          { key: "receipt-types", label: "نوع دریافت", list: "/receipt-types", create: "/receipt-types/new", icon: "tag" },
+        ],
+      },
       {
         title: "عملیات",
         items: [

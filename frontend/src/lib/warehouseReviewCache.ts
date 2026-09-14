@@ -1,6 +1,7 @@
 import { SelectId } from "./useChainedMultiSelect";
 import { registerReviewReportCache } from "./reviewReportCache";
 import { TabViewState } from "./useReviewTabLoader";
+import { ActiveFilter } from "../components/DataTable";
 
 export interface WarehouseReviewSnapshot {
   chainState: { selections: Record<number, Set<SelectId>>; order: number[] };
@@ -14,6 +15,8 @@ export interface WarehouseReviewSnapshot {
   ledgerPageSize: number;
   ledgerTotal: number;
   ledgerTotalPages: number;
+  ledgerSort?: { header: string; dir: "asc" | "desc" } | null;
+  ledgerFilters?: Record<string, ActiveFilter>;
 }
 
 // دو نمای «مرور تعدادی»/«مرور مبلغی» یک کامپوننت مشترک‌اند اما دو گزارش مستقل — کش هرکدام جدا نگه

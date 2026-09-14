@@ -89,11 +89,16 @@ export interface BalanceTableSelectAll {
   title?: string;
 }
 
+const EMPTY_SELECTION = new Set<SelectId>();
+function NOOP_TOGGLE() {}
+
 export function SelectableBalanceTable<T extends { id: SelectId }>({
   rows,
   columns,
-  selected,
-  onToggle,
+  selected = EMPTY_SELECTION,
+  onToggle = NOOP_TOGGLE,
+  selectable = true,
+  onRowDoubleClick,
   loading,
   emptyText,
   serverPaging,
@@ -106,8 +111,16 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
 }: {
   rows: T[];
   columns: BalanceTableColumn<T>[];
-  selected: Set<SelectId>;
-  onToggle: (id: SelectId) => void;
+  /** طبق تصمیم صریح کاربر: تب «گردش» هر سه گزارش Review باید هم‌الگوی بقیه‌ی تب‌ها فیلتر/مرتب‌سازی
+   * ستونی داشته باشد، بدون این‌که یک ردیفش قابل «انتخاب زنجیره‌ای» باشد (گردش، برخلاف تب‌های دیگر،
+   * روی تب‌های بعدی اثر نمی‌گذارد) — selectable=false ستون چک‌باکس را کلاً از UI حذف می‌کند (نه فقط
+   * غیرفعال) و کلیک روی ردیف دیگر چیزی toggle نمی‌کند. پیش‌فرض true تا مصرف‌کننده‌های موجود دست‌نخورده بمانند. */
+  selectable?: boolean;
+  /** فقط وقتی selectable=false معنا دارد — دابل‌کلیک روی ردیف برای باز کردن سند مبدا (دقیقاً همان
+   * رفتار قبلیِ هر سه تب گردش، که قبل از این تغییر با یک <table> دستی پیاده شده بود). */
+  onRowDoubleClick?: (row: T) => void;
+  selected?: Set<SelectId>;
+  onToggle?: (id: SelectId) => void;
   loading?: boolean;
   emptyText?: string;
   /** اگر داده شود، مرتب‌سازی/صفحه‌بندی سمت سرور انجام می‌شود (به‌جای پردازش کل rows در مرورگر) */
@@ -273,17 +286,19 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
     <table>
       <thead>
         <tr ref={theadRowRef}>
-          <th style={{ width: 34 }}>
-            {selectAll && (
-              <input
-                type="checkbox"
-                checked={selectAll.checked}
-                disabled={selectAll.disabled}
-                title={selectAll.title || "انتخاب همه"}
-                onChange={selectAll.onChange}
-              />
-            )}
-          </th>
+          {selectable && (
+            <th style={{ width: 34 }}>
+              {selectAll && (
+                <input
+                  type="checkbox"
+                  checked={selectAll.checked}
+                  disabled={selectAll.disabled}
+                  title={selectAll.title || "انتخاب همه"}
+                  onChange={selectAll.onChange}
+                />
+              )}
+            </th>
+          )}
           <th style={{ width: 44 }}>ردیف</th>
           {columns.map((c) => {
             const dir = sort?.header === c.header ? sort.dir : null;
@@ -320,7 +335,7 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
       <tbody>
         {sortedRows.length === 0 && (
           <tr>
-            <td colSpan={columns.length + 2} className="empty-state" style={{ border: "none" }}>
+            <td colSpan={columns.length + (selectable ? 2 : 1)} className="empty-state" style={{ border: "none" }}>
               {emptyText || "رکوردی یافت نشد"}
             </td>
           </tr>
@@ -328,13 +343,17 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
         {sortedRows.map((row, idx) => (
           <tr
             key={row.id}
-            className={selected.has(row.id) ? "active-list" : ""}
-            style={{ cursor: "pointer" }}
-            onClick={() => onToggle(row.id)}
+            className={selectable && selected.has(row.id) ? "active-list" : ""}
+            style={{ cursor: selectable || onRowDoubleClick ? "pointer" : undefined }}
+            onClick={selectable ? () => onToggle(row.id) : undefined}
+            onDoubleClick={onRowDoubleClick ? () => onRowDoubleClick(row) : undefined}
+            title={!selectable && onRowDoubleClick ? "دابل‌کلیک برای باز کردن سند" : undefined}
           >
-            <td onClick={(e) => e.stopPropagation()} style={{ textAlign: "center" }}>
-              <input type="checkbox" checked={selected.has(row.id)} onChange={() => onToggle(row.id)} />
-            </td>
+            {selectable && (
+              <td onClick={(e) => e.stopPropagation()} style={{ textAlign: "center" }}>
+                <input type="checkbox" checked={selected.has(row.id)} onChange={() => onToggle(row.id)} />
+              </td>
+            )}
             <td>{toFaDigits(String(pageStart + idx + 1))}</td>
             {columns.map((c) => (
               <td key={c.header}>{c.render(row)}</td>

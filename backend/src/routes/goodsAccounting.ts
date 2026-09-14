@@ -75,6 +75,11 @@ router.delete("/accounting-groups/:id", can(`${ACCOUNTING_GROUPS}.delete`), asyn
 // انواع حسابی که «گروه انبار» را الزامی می‌کنند
 const INVENTORY_TYPES = new Set(["INVENTORY"]);
 
+// طبق تصمیم صریح کاربر: این دو نوع حساب دیگر بر اساس «گروه حسابداری» تفکیک نمی‌شوند — فقط بر اساس نوع
+// فروش/نوع خرید. «گروه حسابداری» برایشان کاملاً حذف شده (نه فقط اختیاری) — همیشه null ذخیره می‌شود،
+// حتی اگر کلاینت مقداری برایش بفرستد؛ در عوض نوع فروش/نوع خرید برایشان الزامی است.
+const GROUPLESS_TYPES = new Set(["SALES_RECEIVABLE", "PURCHASE_PAYABLE"]);
+
 // انواع سند انبار مجاز برای هر نوع حساب — دقیقاً هم‌راستا با warehouseMovementService.OUTBOUND_DOC_TYPES:
 // «بستانکار رسید انبار» یعنی اسناد واردکننده (رسید)، «بدهکار حواله انبار» یعنی اسناد صادرکننده (حواله)
 const WAREHOUSE_RECEIPT_DOC_TYPES = new Set([
@@ -122,7 +127,7 @@ router.get("/goods-service-accounting", async (_req, res) => {
 
 router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create`), async (req, res) => {
   const body = req.body as {
-    accountingGroupId: number;
+    accountingGroupId?: number | null;
     accountType: string;
     warehouseGroupId?: number | null;
     accountId: number;
@@ -130,8 +135,18 @@ router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create
     warehouseDocType?: string | null;
     purchaseTypeId?: number | null;
   };
-  if (!body.accountingGroupId || !body.accountType || !body.accountId) {
-    return res.status(400).json({ error: "گروه حسابداری، نوع حساب و معین الزامی است" });
+  if (!body.accountType || !body.accountId) {
+    return res.status(400).json({ error: "نوع حساب و معین الزامی است" });
+  }
+  const groupless = GROUPLESS_TYPES.has(body.accountType);
+  if (!groupless && !body.accountingGroupId) {
+    return res.status(400).json({ error: "گروه حسابداری الزامی است" });
+  }
+  if (body.accountType === "SALES_RECEIVABLE" && !body.salesTypeId) {
+    return res.status(400).json({ error: "نوع فروش الزامی است" });
+  }
+  if (body.accountType === "PURCHASE_PAYABLE" && !body.purchaseTypeId) {
+    return res.status(400).json({ error: "نوع خرید الزامی است" });
   }
 
   if (INVENTORY_TYPES.has(body.accountType) && !body.warehouseGroupId) {
@@ -143,8 +158,11 @@ router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create
   }
 
   try {
-    const group = await prisma.accountingGroup.findUnique({ where: { id: body.accountingGroupId } });
-    if (!group) return res.status(404).json({ error: "گروه حسابداری یافت نشد" });
+    if (!groupless) {
+      // طبق بررسی الزامی‌بودن بالا، اینجا body.accountingGroupId قطعاً مقداردهی شده است.
+      const group = await prisma.accountingGroup.findUnique({ where: { id: body.accountingGroupId! } });
+      if (!group) return res.status(404).json({ error: "گروه حسابداری یافت نشد" });
+    }
 
     const account = await prisma.account.findUnique({ where: { id: body.accountId }, include: { level: true } });
     if (!account || account.level.title !== "معین") {
@@ -153,7 +171,7 @@ router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create
 
     const created = await prisma.goodsServiceAccountingSetting.create({
       data: {
-        accountingGroupId: body.accountingGroupId,
+        accountingGroupId: groupless ? null : body.accountingGroupId,
         accountType: body.accountType as any,
         warehouseGroupId: body.warehouseGroupId || null,
         accountId: body.accountId,
@@ -188,6 +206,17 @@ router.put("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.edi
   }
 
   const accountType = body.accountType ?? setting.accountType;
+  const groupless = GROUPLESS_TYPES.has(accountType);
+  if (!groupless && !(body.accountingGroupId ?? setting.accountingGroupId)) {
+    return res.status(400).json({ error: "گروه حسابداری الزامی است" });
+  }
+  if (accountType === "SALES_RECEIVABLE" && !(body.salesTypeId ?? setting.salesTypeId)) {
+    return res.status(400).json({ error: "نوع فروش الزامی است" });
+  }
+  if (accountType === "PURCHASE_PAYABLE" && !(body.purchaseTypeId ?? setting.purchaseTypeId)) {
+    return res.status(400).json({ error: "نوع خرید الزامی است" });
+  }
+
   if (INVENTORY_TYPES.has(accountType) && !(body.warehouseGroupId ?? setting.warehouseGroupId)) {
     return res.status(400).json({ error: "برای این نوع حساب، گروه انبار الزامی است" });
   }
@@ -207,7 +236,7 @@ router.put("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.edi
     const updated = await prisma.goodsServiceAccountingSetting.update({
       where: { id },
       data: {
-        accountingGroupId: body.accountingGroupId,
+        accountingGroupId: groupless ? null : body.accountingGroupId,
         accountType: body.accountType as any,
         warehouseGroupId: body.warehouseGroupId === undefined ? undefined : body.warehouseGroupId || null,
         accountId: body.accountId,

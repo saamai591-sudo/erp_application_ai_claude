@@ -112,6 +112,46 @@ export function matchesFilterValue(raw: string | number | null | undefined, type
   return true;
 }
 
+export interface ServerColumnDef<T> {
+  type: "string" | "number" | "date";
+  /** مقدار خام قابل‌فیلتر/مرتب‌سازی این ستون برای یک ردیف — اگر مقدار نمایش‌داده‌شده با مقدار خام فرق
+   * دارد (مثل برچسب فارسی یک enum)، همان مقدار نمایشی را برگردانید تا فیلتر روی همان چیزی که کاربر
+   * می‌بیند اعمال شود (دقیقاً هم‌قرارداد matchesFilterValue بالا). */
+  get: (row: T) => string | number | Date | null | undefined;
+}
+
+/**
+ * نسخه‌ی «کل-آرایه، در حافظه» از همان فیلتر/مرتب‌سازی ستونی سروری که routes/reports.ts#/ledger با
+ * Prisma `where`/`orderBy` واقعی پیاده می‌کند — برای مسیرهایی که دیتای موردنظر را قبلاً در حافظه
+ * تجمیع کرده‌اند (مثل warehouseReview.ts/salesReview.ts's ledger که از یک سرویس in-memory
+ * (Movement[]/SaleLine[]) می‌آید، نه یک کوئری مستقیم دیتابیس) و صفحه‌بندی هم در همان حافظه انجام
+ * می‌شود. columns با همان کلیدهایی که فرانت‌اند در query param «sortField»/«filters» می‌فرستد کلید
+ * می‌خورد (دقیقاً هم‌الگوی LEDGER_SORT_FIELD_MAP در AccountsReview.tsx).
+ */
+export function applyServerFilterSort<T>(rows: T[], columns: Record<string, ServerColumnDef<T>>, filtersRaw: unknown, sortField?: string, sortDir?: string): T[] {
+  const filters = parseFilters(filtersRaw);
+  let result = rows;
+  for (const [key, f] of Object.entries(filters)) {
+    const col = columns[key];
+    if (!col) continue;
+    result = result.filter((row) => matchesFilterValue(col.get(row) as any, col.type, f));
+  }
+  if (sortField && columns[sortField]) {
+    const col = columns[sortField];
+    const dir = sortDir === "asc" ? 1 : -1;
+    result = [...result].sort((a, b) => {
+      const av = col.get(a);
+      const bv = col.get(b);
+      if (av === null || av === undefined) return 1;
+      if (bv === null || bv === undefined) return -1;
+      if (col.type === "date") return ((av as Date).valueOf() - (bv as Date).valueOf()) * dir;
+      if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
+      return String(av).localeCompare(String(bv), "fa") * dir;
+    });
+  }
+  return result;
+}
+
 export function dateWhere(f: FilterSpec): any {
   if (f.operator === "empty" || f.operator === "notEmpty") return undefined;
   if (f.operator === "gt" && f.value) return { gt: new Date(`${f.value}T00:00:00.000Z`) };
