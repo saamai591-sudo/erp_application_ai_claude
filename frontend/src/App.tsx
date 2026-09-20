@@ -83,6 +83,7 @@ import SalesCenters from "./pages/SalesCenters";
 import ReceiptTypes from "./pages/ReceiptTypes";
 import PaymentTypes from "./pages/PaymentTypes";
 import { ReceivableChequeTypes, PayableChequeTypes } from "./pages/ChequeTypes";
+import TreasuryAccountSettings from "./pages/TreasuryAccountSettings";
 import SalesQuotes from "./pages/SalesQuotes";
 import SalesOrders from "./pages/SalesOrders";
 import SalesDeliveries from "./pages/SalesDeliveries";
@@ -359,6 +360,9 @@ export default function App() {
             <Route path="/payable-cheque-types" element={<PayableChequeTypes />} />
             <Route path="/payable-cheque-types/new" element={<PayableChequeTypes />} />
             <Route path="/payable-cheque-types/:id/edit" element={<PayableChequeTypes />} />
+            <Route path="/treasury-account-settings" element={<TreasuryAccountSettings />} />
+            <Route path="/treasury-account-settings/new" element={<TreasuryAccountSettings />} />
+            <Route path="/treasury-account-settings/:id/edit" element={<TreasuryAccountSettings />} />
             <Route path="/sales-quotes" element={<SalesQuotes />} />
             <Route path="/sales-quotes/new" element={<SalesQuotes />} />
             <Route path="/sales-quotes/:id/edit" element={<SalesQuotes />} />

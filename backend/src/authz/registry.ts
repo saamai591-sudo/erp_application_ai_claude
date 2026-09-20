@@ -475,6 +475,7 @@ export const REGISTRY: ModuleDef[] = [
           { key: "payment-types", title: "نوع پرداخت", baseActions: CRUD },
           { key: "receivable-cheque-types", title: "نوع چک دریافتی", baseActions: CRUD },
           { key: "payable-cheque-types", title: "نوع چک پرداختی", baseActions: CRUD },
+          { key: "treasury-account-settings", title: "تعیین حسابهای معین", baseActions: CRUD },
         ],
       },
       {

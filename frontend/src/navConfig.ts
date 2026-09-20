@@ -257,6 +257,7 @@ export const MODULES: ModuleGroup[] = [
           { key: "payment-types", label: "نوع پرداخت", list: "/payment-types", create: "/payment-types/new", icon: "tag" },
           { key: "receivable-cheque-types", label: "نوع چک دریافتی", list: "/receivable-cheque-types", create: "/receivable-cheque-types/new", icon: "tag" },
           { key: "payable-cheque-types", label: "نوع چک پرداختی", list: "/payable-cheque-types", create: "/payable-cheque-types/new", icon: "tag" },
+          { key: "treasury-account-settings", label: "تعیین حسابهای معین", list: "/treasury-account-settings", create: "/treasury-account-settings/new", icon: "ledger" },
         ],
       },
       {
