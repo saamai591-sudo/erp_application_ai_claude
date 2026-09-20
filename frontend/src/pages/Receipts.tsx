@@ -756,6 +756,9 @@ function ReceiptForm({ editId }: { editId?: number }) {
         {error && <div className="alert error">{error}</div>}
         {saved && <div className="alert warn">{saved}</div>}
 
+        {/* بعد از صدور سند حسابداری، همه‌ی اطلاعات سند (هدر، ردیف‌های ابزار، موضوعات دریافت، شرح) قفل است */}
+        <fieldset disabled={jeLocked} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+
         <fieldset disabled={coreDisabled} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
             <div className="form-field">
@@ -806,7 +809,12 @@ function ReceiptForm({ editId }: { editId?: number }) {
           </div>
         </div>
 
-        {isApprovedSemiOpen && (
+        {jeLocked && (
+          <div className="alert warn" style={{ marginBottom: 12 }}>
+            برای این سند دریافت سند حسابداری صادر شده است؛ همه‌ی اطلاعات سند قفل است. برای هر تغییری ابتدا سند حسابداری را حذف کنید.
+          </div>
+        )}
+        {isApprovedSemiOpen && !jeLocked && (
           <div className="alert warn" style={{ marginBottom: 12 }}>
             این سند «تایید» شده است. ردیف‌های ابزار قفل‌نشده (چک‌هایی که هنوز واگذار/وصول نشده‌اند، یا ردیف‌های غیرچک) و کل ردیف‌های موضوعات دریافت
             مستقیماً قابل ویرایش/افزودن/حذف‌اند، بدون نیاز به «برگشت از تایید». ردیف‌های قفل‌شده (علامت‌خورده با «قفل») فقط قابل مشاهده‌اند.
@@ -1040,6 +1048,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
             </span>
           </div>
         </div>
+        </fieldset>
       </form>
     </FormPage>
   );

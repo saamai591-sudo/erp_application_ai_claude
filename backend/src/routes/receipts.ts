@@ -628,6 +628,7 @@ router.put("/receipts/:id", can(`${FORM}.edit`), async (req, res) => {
 
   const existing = await prisma.receipt.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "سند دریافت یافت نشد" });
+  if (existing.journalEntryId) return res.status(400).json({ error: "برای این سند دریافت، سند حسابداری صادر شده؛ ابتدا سند حسابداری را حذف کنید" });
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل ویرایش هستند؛ ابتدا از «تایید» برگردانید" });
 
   if (!body.date) return res.status(400).json({ error: "تاریخ سند الزامی است" });
@@ -678,6 +679,7 @@ router.delete("/receipts/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.receipt.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
+  if (d.journalEntryId) return res.status(400).json({ error: "برای این سند دریافت، سند حسابداری صادر شده؛ ابتدا سند حسابداری را حذف کنید" });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «تایید» برگردانید" });
   await prisma.receipt.delete({ where: { id } });
   res.status(204).send();
