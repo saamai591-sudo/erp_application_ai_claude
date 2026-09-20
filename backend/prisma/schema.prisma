@@ -470,6 +470,7 @@ model Account {
   goodsServiceAccountingSettings GoodsServiceAccountingSetting[]
   lines                          JournalEntryLine[]
   receiptTypes                   ReceiptType[]
+  paymentTypes                   PaymentType[]
 
   @@unique([parentId, code])
 }
@@ -1203,6 +1204,24 @@ model ReceiptType {
   createdAt       DateTime         @default(now())
   account         Account?         @relation(fields: [accountId], references: [id])
   receiptSettlementLines ReceiptSettlementLine[]
+}
+
+// مستر «نوع پرداخت» — هم‌الگوی ReceiptType برای فرم پرداخت (اعلامیه پرداخت): nature تعیین می‌کند این پرداخت
+// اساساً چه ماهیتی دارد و basisType تعیین می‌کند بر چه سندی مبتنی است (نگاه کنید به ALLOWED_BASIS_TYPES در
+// routes/paymentTypes.ts، تنها محل این قاعده). accountId (معین حسابداری) فقط برای basisType=NONE پر می‌شود؛
+// برای بقیه‌ی مقادیر همیشه null است.
+model PaymentType {
+  id                     Int                     @id @default(autoincrement())
+  code                   Int                     @unique
+  title                  String                  @unique
+  nature                 PaymentNature
+  basisType              PaymentBasisType
+  accountId              Int?
+  isActive               Boolean                 @default(true)
+  hasTransactions        Boolean                 @default(false)
+  createdAt              DateTime                @default(now())
+  account                Account?                @relation(fields: [accountId], references: [id])
+  paymentSettlementLines PaymentSettlementLine[]
 }
 
 model Supplier {
@@ -2578,9 +2597,12 @@ model PaymentSettlementLine {
   id                Int              @id @default(autoincrement())
   paymentId         Int
   rowOrder          Int              @default(0)
+  // اختیاری فقط برای ردیف‌های قدیمی پیش از معرفی «نوع پرداخت»؛ ردیف تازه/ویرایش‌شده همیشه نوع دارد.
+  paymentTypeId     Int?
   purchaseInvoiceId Int?
   amount            Decimal          @db.Decimal(18, 2)
   description       String?
+  paymentType       PaymentType?     @relation(fields: [paymentTypeId], references: [id])
   payment           Payment          @relation(fields: [paymentId], references: [id], onDelete: Cascade)
   purchaseInvoice   PurchaseInvoice? @relation(fields: [purchaseInvoiceId], references: [id])
 }
@@ -2846,6 +2868,22 @@ enum ReceiptBasisType {
   PURCHASE_INVOICE
   SALES_ORDER
   PROFORMA_INVOICE
+}
+
+// هم‌الگوی ReceiptNature. فعلاً فرم پرداخت فقط «فاکتور خرید» را به‌عنوان مبنا تسویه می‌کند، پس
+// PaymentBasisType هم فقط همین را دارد؛ مبناهای دیگر (فاکتور فروش، سفارش) با پشتیبانی فرم اضافه می‌شوند.
+enum PaymentNature {
+  SUPPLIER_PAYMENT
+  ADVANCE_PAYMENT
+  CUSTOMER_PAYMENT
+  OTHER_PAYMENT
+  PURCHASE_VAT
+  SALES_VAT
+}
+
+enum PaymentBasisType {
+  NONE
+  PURCHASE_INVOICE
 }
 
 enum PaymentInstrumentType {

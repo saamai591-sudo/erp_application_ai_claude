@@ -254,6 +254,7 @@ export const MODULES: ModuleGroup[] = [
         title: "تنظیمات",
         items: [
           { key: "receipt-types", label: "نوع دریافت", list: "/receipt-types", create: "/receipt-types/new", icon: "tag" },
+          { key: "payment-types", label: "نوع پرداخت", list: "/payment-types", create: "/payment-types/new", icon: "tag" },
         ],
       },
       {

@@ -68,8 +68,10 @@ interface DetailInstrumentLine {
   posTerminal: string | null;
   description: string | null;
 }
+interface PaymentTypeOption { id: number; title: string; nature: string; basisType: string; isActive: boolean }
 interface DetailSettlementLine {
   id: number;
+  paymentTypeId: number | null;
   purchaseInvoiceId: number | null;
   purchaseInvoiceNumber?: number;
   amount: number;
@@ -235,13 +237,14 @@ function isRowLocked(row: InstrumentRowState, semiOpen: boolean) {
 }
 
 interface SettlementRowState {
+  paymentTypeId: string;
   purchaseInvoiceId: string;
   invoiceDisplay: string;
   amount: string;
   description: string;
 }
 function emptySettlementRow(): SettlementRowState {
-  return { purchaseInvoiceId: "", invoiceDisplay: "", amount: "", description: "" };
+  return { paymentTypeId: "", purchaseInvoiceId: "", invoiceDisplay: "", amount: "", description: "" };
 }
 
 function PaymentForm({ editId }: { editId?: number }) {
@@ -254,6 +257,7 @@ function PaymentForm({ editId }: { editId?: number }) {
   const [bankAccounts, setBankAccounts] = useState<BankAccountOption[]>([]);
   const [bankBranches, setBankBranches] = useState<BankBranchOption[]>([]);
   const [pickableCheques, setPickableCheques] = useState<PickableCheque[]>([]);
+  const [paymentTypes, setPaymentTypes] = useState<PaymentTypeOption[]>([]);
   const [pickableInvoices, setPickableInvoices] = useState<PickableInvoice[]>([]);
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", partyId: "", partyDisplay: "", currencyId: "", description: "" });
   const [instrumentRows, setInstrumentRows] = usePersistedState<InstrumentRowState[]>(`${cacheKey}:instrumentRows`, []);
@@ -289,6 +293,7 @@ function PaymentForm({ editId }: { editId?: number }) {
     );
     setSettlementRows(
       d.settlementLines.map((l) => ({
+        paymentTypeId: l.paymentTypeId ? String(l.paymentTypeId) : "",
         purchaseInvoiceId: l.purchaseInvoiceId ? String(l.purchaseInvoiceId) : "",
         invoiceDisplay: l.purchaseInvoiceNumber ? toFaDigits(String(l.purchaseInvoiceNumber)) : "",
         amount: String(l.amount),
@@ -299,7 +304,7 @@ function PaymentForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [ps, cs, cbs, bas, bbs, cheques, fp]: [PartyOption[], CurrencyOption[], CashBoxOption[], BankAccountOption[], BankBranchOption[], PickableCheque[], FiscalPeriodRange | null] = await Promise.all([
+      const [ps, cs, cbs, bas, bbs, cheques, fp, pts]: [PartyOption[], CurrencyOption[], CashBoxOption[], BankAccountOption[], BankBranchOption[], PickableCheque[], FiscalPeriodRange | null, PaymentTypeOption[]] = await Promise.all([
         api.get("/parties"),
         api.get("/currencies"),
         api.get("/cash-boxes"),
@@ -307,7 +312,9 @@ function PaymentForm({ editId }: { editId?: number }) {
         api.get("/banking/branches"),
         api.get("/cheques/pickable-receivable"),
         fetchSelectedFiscalPeriod(),
+        api.get("/payment-types"),
       ]);
+      setPaymentTypes(pts.filter((t) => t.isActive));
       setParties(ps);
       setCurrencies(cs);
       setCashBoxes(cbs);
@@ -420,7 +427,8 @@ function PaymentForm({ editId }: { editId?: number }) {
       settlementLines: settlementRows
         .filter((r) => Number(r.amount) > 0)
         .map((r) => ({
-          purchaseInvoiceId: r.purchaseInvoiceId ? Number(r.purchaseInvoiceId) : null,
+          paymentTypeId: r.paymentTypeId ? Number(r.paymentTypeId) : (null as unknown as number),
+          purchaseInvoiceId: paymentTypes.find((t) => String(t.id) === r.paymentTypeId)?.basisType === "PURCHASE_INVOICE" && r.purchaseInvoiceId ? Number(r.purchaseInvoiceId) : null,
           amount: Number(r.amount) || 0,
           description: r.description || null,
         })),
@@ -453,7 +461,8 @@ function PaymentForm({ editId }: { editId?: number }) {
       settlementLines: settlementRows
         .filter((r) => Number(r.amount) > 0)
         .map((r) => ({
-          purchaseInvoiceId: r.purchaseInvoiceId ? Number(r.purchaseInvoiceId) : null,
+          paymentTypeId: r.paymentTypeId ? Number(r.paymentTypeId) : (null as unknown as number),
+          purchaseInvoiceId: paymentTypes.find((t) => String(t.id) === r.paymentTypeId)?.basisType === "PURCHASE_INVOICE" && r.purchaseInvoiceId ? Number(r.purchaseInvoiceId) : null,
           amount: Number(r.amount) || 0,
           description: r.description || null,
         })),
@@ -467,6 +476,7 @@ function PaymentForm({ editId }: { editId?: number }) {
     if (isApprovedSemiOpen) {
       const body = buildApprovedEditBody();
       if (body.settlementLines.length === 0) return setError("حداقل یک ردیف تسویه الزامی است");
+      if (body.settlementLines.some((l) => !l.paymentTypeId)) return setError("نوع پرداخت در همه‌ی ردیف‌های تسویه الزامی است");
       if (Math.abs(instrumentTotal - settlementTotal) > 0.001) return setError("مجموع ردیف‌های تسویه باید با مجموع ردیف‌های ابزار پرداخت برابر باشد");
       try {
         await api.put(`/payments/${editId}/edit-approved`, body);
@@ -487,6 +497,7 @@ function PaymentForm({ editId }: { editId?: number }) {
     const body = buildBody();
     if (body.instrumentLines.length === 0) return setError("حداقل یک ردیف ابزار پرداخت الزامی است");
     if (body.settlementLines.length === 0) return setError("حداقل یک ردیف تسویه الزامی است");
+    if (body.settlementLines.some((l) => !l.paymentTypeId)) return setError("نوع پرداخت در همه‌ی ردیف‌های تسویه الزامی است");
     if (Math.abs(instrumentTotal - settlementTotal) > 0.001) return setError("مجموع ردیف‌های تسویه باید با مجموع ردیف‌های ابزار پرداخت برابر باشد");
     try {
       if (editId) {
@@ -788,7 +799,8 @@ function PaymentForm({ editId }: { editId?: number }) {
               <thead>
                 <tr>
                   <th>ردیف</th>
-                  <th>فاکتور خرید (اختیاری)</th>
+                  <th>نوع پرداخت</th>
+                  <th>فاکتور خرید</th>
                   <th>مبلغ</th>
                   <th>شرح</th>
                   <th></th>
@@ -798,11 +810,29 @@ function PaymentForm({ editId }: { editId?: number }) {
                 {settlementRows.map((row, idx) => (
                   <tr key={idx}>
                     <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
+                    <td style={{ minWidth: 180 }}>
+                      <select
+                        value={row.paymentTypeId}
+                        onChange={(e) => {
+                          const pt = paymentTypes.find((t) => String(t.id) === e.target.value);
+                          const keepInvoice = pt?.basisType === "PURCHASE_INVOICE";
+                          updateSettlementRow(idx, {
+                            paymentTypeId: e.target.value,
+                            ...(keepInvoice ? {} : { purchaseInvoiceId: "", invoiceDisplay: "" }),
+                          });
+                        }}
+                      >
+                        <option value="">انتخاب کنید</option>
+                        {paymentTypes.map((t) => (
+                          <option key={t.id} value={t.id}>{t.title}</option>
+                        ))}
+                      </select>
+                    </td>
                     <td style={{ minWidth: 220 }}>
                       <RecordPickerField
                         title="انتخاب فاکتور خرید"
-                        disabled={!header.partyId}
-                        placeholder="بابت حساب (عمومی)"
+                        disabled={!header.partyId || paymentTypes.find((t) => String(t.id) === row.paymentTypeId)?.basisType !== "PURCHASE_INVOICE"}
+                        placeholder="بدون مبنا"
                         displayValue={row.invoiceDisplay}
                         rows={pickableInvoices}
                         columns={[

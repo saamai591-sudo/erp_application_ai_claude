@@ -81,6 +81,7 @@ import Customers from "./pages/Customers";
 import SalesTypes from "./pages/SalesTypes";
 import SalesCenters from "./pages/SalesCenters";
 import ReceiptTypes from "./pages/ReceiptTypes";
+import PaymentTypes from "./pages/PaymentTypes";
 import SalesQuotes from "./pages/SalesQuotes";
 import SalesOrders from "./pages/SalesOrders";
 import SalesDeliveries from "./pages/SalesDeliveries";
@@ -348,6 +349,9 @@ export default function App() {
             <Route path="/receipt-types" element={<ReceiptTypes />} />
             <Route path="/receipt-types/new" element={<ReceiptTypes />} />
             <Route path="/receipt-types/:id/edit" element={<ReceiptTypes />} />
+            <Route path="/payment-types" element={<PaymentTypes />} />
+            <Route path="/payment-types/new" element={<PaymentTypes />} />
+            <Route path="/payment-types/:id/edit" element={<PaymentTypes />} />
             <Route path="/sales-quotes" element={<SalesQuotes />} />
             <Route path="/sales-quotes/new" element={<SalesQuotes />} />
             <Route path="/sales-quotes/:id/edit" element={<SalesQuotes />} />

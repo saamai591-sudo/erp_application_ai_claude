@@ -470,7 +470,10 @@ export const REGISTRY: ModuleDef[] = [
       {
         key: "settings",
         title: "تنظیمات",
-        forms: [{ key: "receipt-types", title: "نوع دریافت", baseActions: CRUD }],
+        forms: [
+          { key: "receipt-types", title: "نوع دریافت", baseActions: CRUD },
+          { key: "payment-types", title: "نوع پرداخت", baseActions: CRUD },
+        ],
       },
       {
         key: "operations",

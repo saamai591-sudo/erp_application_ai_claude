@@ -49,6 +49,7 @@ interface InstrumentLineInput {
 }
 
 interface SettlementLineInput {
+  paymentTypeId: number;
   purchaseInvoiceId?: number | null;
   amount: number;
   description?: string | null;
@@ -141,20 +142,34 @@ async function validateSettlementLines(lines: SettlementLineInput[], instrumentT
     const amount = Number(l.amount);
     if (!(amount > 0)) throw new Error(`مبلغ ردیف تسویه ${idx + 1} باید عددی مثبت باشد`);
     sum += amount;
-    if (l.purchaseInvoiceId) {
+
+    if (!l.paymentTypeId) throw new Error(`ردیف تسویه ${idx + 1}: نوع پرداخت الزامی است`);
+    const paymentType = await prisma.paymentType.findUnique({ where: { id: l.paymentTypeId } });
+    if (!paymentType || !paymentType.isActive) throw new Error(`ردیف تسویه ${idx + 1}: نوع پرداخت یافت نشد یا غیرفعال است`);
+
+    // مبنا کاملاً از روی نوع پرداخت تعیین می‌شود: «بدون مبنا» هرگز فاکتور ذخیره نمی‌کند (حتی اگر کلاینت بفرستد).
+    if (paymentType.basisType === "NONE") {
+      cleaned.push({ paymentTypeId: paymentType.id, purchaseInvoiceId: null, amount, description: l.description || null });
+      continue;
+    }
+    if (!l.purchaseInvoiceId) throw new Error(`ردیف تسویه ${idx + 1}: انتخاب فاکتور خرید برای نوع پرداخت «${paymentType.title}» الزامی است`);
+    {
       const info = await purchaseInvoiceRemaining(l.purchaseInvoiceId, excludePaymentId);
       if (!info) throw new Error(`فاکتور خرید ردیف تسویه ${idx + 1} یافت نشد`);
       if (info.invoice.status !== "APPROVED") throw new Error(`فاکتور خرید ردیف تسویه ${idx + 1} در وضعیت تایید نیست`);
       if (amount > info.remaining) throw new Error(`مبلغ ردیف تسویه ${idx + 1} از مانده‌ی قابل تسویه‌ی فاکتور (${info.remaining}) بیشتر است`);
-      cleaned.push({ purchaseInvoiceId: l.purchaseInvoiceId, amount, description: l.description || null });
-    } else {
-      cleaned.push({ purchaseInvoiceId: null, amount, description: l.description || null });
+      cleaned.push({ paymentTypeId: paymentType.id, purchaseInvoiceId: l.purchaseInvoiceId, amount, description: l.description || null });
     }
   }
   if (Math.abs(sum - instrumentTotal) > 0.001) {
     throw new Error("مجموع مبلغ ردیف‌های تسویه باید با مجموع مبلغ ردیف‌های ابزار پرداخت برابر باشد");
   }
   return cleaned;
+}
+
+async function markPaymentTypesUsed(lines: { paymentTypeId: number }[]) {
+  const ids = [...new Set(lines.map((l) => l.paymentTypeId))];
+  if (ids.length) await prisma.paymentType.updateMany({ where: { id: { in: ids } }, data: { hasTransactions: true } });
 }
 
 function partyDisplay(p: any) {
@@ -240,7 +255,7 @@ router.get("/payments/:id", can(`${FORM}.view`), async (req, res) => {
       fiscalPeriod: true,
       currency: true,
       instrumentLines: { include: { cashBox: true, bankAccount: true, chequeBankBranch: true, chequeItem: true }, orderBy: { rowOrder: "asc" } },
-      settlementLines: { include: { purchaseInvoice: true }, orderBy: { rowOrder: "asc" } },
+      settlementLines: { include: { purchaseInvoice: true, paymentType: true }, orderBy: { rowOrder: "asc" } },
     },
   });
   if (!d) return res.status(404).json({ error: "سند پرداخت یافت نشد" });
@@ -280,6 +295,8 @@ router.get("/payments/:id", can(`${FORM}.view`), async (req, res) => {
     })),
     settlementLines: d.settlementLines.map((l: any) => ({
       id: l.id,
+      paymentTypeId: l.paymentTypeId,
+      paymentTypeTitle: l.paymentType?.title,
       purchaseInvoiceId: l.purchaseInvoiceId,
       purchaseInvoiceNumber: l.purchaseInvoice?.number,
       amount: Number(l.amount),
@@ -321,6 +338,7 @@ router.post("/payments", can(`${FORM}.create`), async (req, res) => {
       },
     });
 
+    await markPaymentTypesUsed(settlementLines);
     res.status(201).json(created);
   } catch (e: any) {
     if (e.code === "P2002") return res.status(400).json({ error: "شماره سند تکراری است" });
@@ -368,6 +386,7 @@ router.put("/payments/:id", can(`${FORM}.edit`), async (req, res) => {
       }),
     ]);
 
+    await markPaymentTypesUsed(settlementLines);
     res.json({ id });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در ذخیره" });
@@ -736,6 +755,7 @@ router.put("/payments/:id/edit-approved", can(`${FORM}.editApproved`), async (re
       }
     });
 
+    await markPaymentTypesUsed(settlementLines);
     res.json({ id });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در ذخیره" });
