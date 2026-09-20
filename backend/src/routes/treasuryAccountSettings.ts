@@ -37,7 +37,11 @@ const TARGET_LABEL: Record<string, string> = {
   paymentTypeId: "موضوع پرداخت",
 };
 
-const TARGET_EXISTS: Record<string, (id: number) => Promise<unknown>> = {
+// موضوع دریافت/پرداختی که مبنایش فاکتور است، معین را از خودِ سند مبنا می‌گیرد (دریافتنی فروش/پرداختنی خرید
+// در حسابداری کالا و خدمت)، پس نباید اینجا معین جدا داشته باشد — هم در UI نمایش داده نمی‌شود و هم سرور رد می‌کند.
+const BASIS_FROM_DOCUMENT = new Set(["SALES_INVOICE", "PURCHASE_INVOICE"]);
+
+const TARGET_EXISTS: Record<string, (id: number) => Promise<any>> = {
   bankAccountId: (id) => prisma.bankAccount.findUnique({ where: { id } }),
   cashBoxId: (id) => prisma.cashBox.findUnique({ where: { id } }),
   receivableChequeTypeId: (id) => prisma.receivableChequeType.findUnique({ where: { id } }),
@@ -80,7 +84,13 @@ async function buildData(b: Body, excludeId?: number) {
   }
   if (!b.accountId) throw new Error("انتخاب حساب معین الزامی است");
 
-  if (field && !(await TARGET_EXISTS[field](targetId!))) throw new Error(`${TARGET_LABEL[field]} یافت نشد`);
+  if (field) {
+    const target = await TARGET_EXISTS[field](targetId!);
+    if (!target) throw new Error(`${TARGET_LABEL[field]} یافت نشد`);
+    if ((field === "receiptTypeId" || field === "paymentTypeId") && BASIS_FROM_DOCUMENT.has(target.basisType)) {
+      throw new Error(`معین این ${TARGET_LABEL[field]} از سند مبنا تعیین می‌شود و نیازی به تعیین در اینجا نیست`);
+    }
+  }
   // همان قاعده‌ی «حساب قابل ثبت در سند حسابداری» (routes/journalEntries.ts#validateAccountForLine): آخرین سطح
   // درخت حساب‌ها — سطح ۳ به بعد و بدون زیرحساب — نه لزوماً سطح «معین».
   const account = await prisma.account.findUnique({ where: { id: b.accountId }, include: { level: true } });
