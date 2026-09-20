@@ -82,6 +82,7 @@ import SalesTypes from "./pages/SalesTypes";
 import SalesCenters from "./pages/SalesCenters";
 import ReceiptTypes from "./pages/ReceiptTypes";
 import PaymentTypes from "./pages/PaymentTypes";
+import { ReceivableChequeTypes, PayableChequeTypes } from "./pages/ChequeTypes";
 import SalesQuotes from "./pages/SalesQuotes";
 import SalesOrders from "./pages/SalesOrders";
 import SalesDeliveries from "./pages/SalesDeliveries";
@@ -352,6 +353,12 @@ export default function App() {
             <Route path="/payment-types" element={<PaymentTypes />} />
             <Route path="/payment-types/new" element={<PaymentTypes />} />
             <Route path="/payment-types/:id/edit" element={<PaymentTypes />} />
+            <Route path="/receivable-cheque-types" element={<ReceivableChequeTypes />} />
+            <Route path="/receivable-cheque-types/new" element={<ReceivableChequeTypes />} />
+            <Route path="/receivable-cheque-types/:id/edit" element={<ReceivableChequeTypes />} />
+            <Route path="/payable-cheque-types" element={<PayableChequeTypes />} />
+            <Route path="/payable-cheque-types/new" element={<PayableChequeTypes />} />
+            <Route path="/payable-cheque-types/:id/edit" element={<PayableChequeTypes />} />
             <Route path="/sales-quotes" element={<SalesQuotes />} />
             <Route path="/sales-quotes/new" element={<SalesQuotes />} />
             <Route path="/sales-quotes/:id/edit" element={<SalesQuotes />} />

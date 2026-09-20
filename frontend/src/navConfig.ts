@@ -255,6 +255,8 @@ export const MODULES: ModuleGroup[] = [
         items: [
           { key: "receipt-types", label: "نوع دریافت", list: "/receipt-types", create: "/receipt-types/new", icon: "tag" },
           { key: "payment-types", label: "نوع پرداخت", list: "/payment-types", create: "/payment-types/new", icon: "tag" },
+          { key: "receivable-cheque-types", label: "نوع چک دریافتی", list: "/receivable-cheque-types", create: "/receivable-cheque-types/new", icon: "tag" },
+          { key: "payable-cheque-types", label: "نوع چک پرداختی", list: "/payable-cheque-types", create: "/payable-cheque-types/new", icon: "tag" },
         ],
       },
       {

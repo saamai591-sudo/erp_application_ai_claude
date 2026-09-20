@@ -1224,6 +1224,23 @@ model PaymentType {
   paymentSettlementLines PaymentSettlementLine[]
 }
 
+// طبق Documents/نوع چک دریافتی و پرداختی.md — دو مستر ساده‌ی تنظیمات خزانه‌داری: کد (خودکار: آخرین کد + ۱)
+// و عنوان یکتا. «نوع چک پرداختی» علاوه بر آن گزینه‌ی «چک روز» (isSameDay) دارد.
+model ReceivableChequeType {
+  id        Int      @id @default(autoincrement())
+  code      Int      @unique
+  title     String   @unique
+  createdAt DateTime @default(now())
+}
+
+model PayableChequeType {
+  id        Int      @id @default(autoincrement())
+  code      Int      @unique
+  title     String   @unique
+  isSameDay Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
 model Supplier {
   id                        Int                        @id @default(autoincrement())
   code                      Int                        @unique
