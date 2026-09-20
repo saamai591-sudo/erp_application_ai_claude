@@ -19,6 +19,7 @@ export function getTitleForPath(pathname: string): string {
   const found = findNavItem(pathname);
   if (!found) return "صفحه";
   if (found.kind === "list") return found.item.label;
-  if (found.kind === "new") return `${found.item.label} جدید`;
+  // فرم‌هایی که در navConfig مسیر create ندارند (مثل تعریف حسابها) هم مسیر /new دارند؛ آن‌ها نباید «ویرایش» نمایش داده شوند
+  if (found.kind === "new" || pathname.endsWith("/new")) return `${found.item.label} جدید`;
   return `ویرایش ${found.item.label}`;
 }

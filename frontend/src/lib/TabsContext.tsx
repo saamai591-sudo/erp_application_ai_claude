@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, ReactNode } fro
 import { useLocation, useNavigate } from "react-router-dom";
 import { getTitleForPath } from "./tabTitle";
 import { clearReviewReportCacheForPath, clearAllReviewReportCaches } from "./reviewReportCache";
-import { clearPersistedStateByPrefix } from "./usePersistedState";
+import { clearPersistedStateByPrefix, clearPersistedStateFamily } from "./usePersistedState";
 import { refreshTabIfStale } from "./listInvalidation";
 
 export interface Tab {
@@ -34,8 +34,27 @@ function nextId() {
 
 // طبق تصمیم صریح کاربر: رفرش خودکار فقط برای تب‌های «فهرست» است، هرگز برای فرم‌ها — تا یک فرم نیمه‌کاره
 // با تغییر یک Resource نامرتبط، ناخواسته پاک نشود (کاربر باید همیشه بتواند بی‌دغدغه فرم باز نگه دارد).
+// مسیر تب همیشه «مسیر + query» است (مثلاً /accounts/new?parentId=5)؛ اگر query نگه داشته نشود، برگشتن به تب
+// فرمِ زیرمجموعه به فرم دیگری (ریشه) می‌رود و حالت/داده‌ی فرم عوض می‌شود.
+function pathOnly(path: string): string {
+  return path.split("?")[0];
+}
+
+function isFormShapedPath(path: string): boolean {
+  const base = pathOnly(path);
+  return base.endsWith("/new") || base.endsWith("/edit");
+}
+
 function isListShapedPath(path: string): boolean {
-  return !path.endsWith("/new") && !path.endsWith("/edit");
+  return !isFormShapedPath(path);
+}
+
+// کشِ فرم‌ها با کلید `form:<مسیر>` (گاهی با query، گاهی بدون آن — بسته به صفحه) و پسوندهایی مثل :form/:header
+// ذخیره می‌شود. فقط همین «خانواده»‌ی دقیق پاک می‌شود، نه هر کلیدی که همین رشته را به‌عنوان پیشوند دارد.
+function clearFormState(path: string) {
+  clearPersistedStateFamily(`form:${path}`);
+  const base = pathOnly(path);
+  if (base !== path) clearPersistedStateFamily(`form:${base}`);
 }
 
 export function TabsProvider({ children }: { children: ReactNode }) {
@@ -50,7 +69,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
    * زمان آخرین دیدنش تغییر کرده)، کشش را پاک می‌کند و برای اجبار به remount (حتی اگر همین الان هم تب
    * فعال بوده باشد) refreshNonce را بالا می‌برد. */
   function maybeRefreshOnVisit(path: string) {
-    if (isListShapedPath(path) && refreshTabIfStale(path)) {
+    if (isListShapedPath(path) && refreshTabIfStale(pathOnly(path))) {
       setRefreshNonce((n) => n + 1);
     }
   }
@@ -60,43 +79,77 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     if (initialized.current) return;
     initialized.current = true;
     if (location.pathname !== "/") {
-      const tab: Tab = { id: nextId(), path: location.pathname, title: getTitleForPath(location.pathname) };
+      const fullPath = location.pathname + location.search;
+      const tab: Tab = { id: nextId(), path: fullPath, title: getTitleForPath(pathOnly(fullPath)) };
       setTabs([tab]);
       setActiveTabId(tab.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const currentFullPath = location.pathname + location.search;
+
   // هماهنگ‌سازی: وقتی ناوبری داخلی (نه از طریق openTab) مسیر را عوض می‌کند،
   // تب فعال همان تب به‌روزرسانی می‌شود (نه ساخت تب جدید). این حالت شامل navigate() مستقیمی هم می‌شود که
   // فرم‌ها بعد از ذخیره/حذف به لیست خودشان می‌زنند (مثلاً handleDelete در PurchaseInvoices.tsx) — چون آن
   // navigate() از switchTab/closeTab رد نمی‌شود، اگر اینجا maybeRefreshOnVisit صدا زده نشود، لیست مقصد
   // (اگر از قبل کش‌شده بود) کهنه می‌ماند و رکورد حذف/ویرایش‌شده را نشان نمی‌دهد.
+  //
+  // قاعده‌ی پایه: اگر تب فعال یک «فهرست» است و ناوبری داخلی (navigate/Link در هر صفحه‌ای) به یک «فرم»
+  // (/new یا /edit) می‌رود، فرم هرگز جای فهرست را نمی‌گیرد؛ در یک تب تازه باز می‌شود و تب فهرست دست‌نخورده
+  // می‌ماند — یعنی رفتار «باز شدن فرم در تب جدید» برای همه‌ی صفحات (حاضر و آینده) یکسان است و نیازی نیست
+  // هر صفحه جداگانه openTab صدا بزند. اگر همان فرم قبلاً در تبی باز است، به همان تب (با حالت فعلی‌اش) می‌رویم.
   useEffect(() => {
     if (!initialized.current) return;
     const active = tabs.find((t) => t.id === activeTabId);
-    if (active && active.path !== location.pathname) {
-      maybeRefreshOnVisit(location.pathname);
+    if (active && active.path !== currentFullPath) {
+      if (isListShapedPath(active.path) && isFormShapedPath(currentFullPath)) {
+        const existing = tabs.find((t) => t.path === currentFullPath);
+        if (existing) {
+          setActiveTabId(existing.id);
+        } else {
+          clearFormState(currentFullPath);
+          const tab: Tab = { id: nextId(), path: currentFullPath, title: getTitleForPath(pathOnly(currentFullPath)) };
+          setTabs((prev) => [...prev, tab]);
+          setActiveTabId(tab.id);
+        }
+        return;
+      }
+      maybeRefreshOnVisit(currentFullPath);
     }
     setTabs((prev) =>
       prev.map((t) =>
-        t.id === activeTabId && t.path !== location.pathname
-          ? { ...t, path: location.pathname, title: getTitleForPath(location.pathname) }
+        t.id === activeTabId && t.path !== currentFullPath
+          ? { ...t, path: currentFullPath, title: getTitleForPath(pathOnly(currentFullPath)) }
           : t
       )
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname]);
+  }, [location.pathname, location.search]);
 
   function openTab(path: string) {
     // هر بار که از منو (یا هرجای دیگر) یک تب جدید باز می‌شود، هیچ داده‌ی کش‌شده‌ای خوانده نشود؛
     // فرم/فهرست همیشه تازه از سرور واکشی شود. فقط سوییچ بین تب‌های از قبل بازشده (switchTab) کش را حفظ می‌کند.
-    const base = path.split("?")[0];
-    clearPersistedStateByPrefix(`form:${base}`);
-    clearPersistedStateByPrefix(base);
+    const base = pathOnly(path);
+
+    // فرمی که همین الان (با همین مسیر و query) در یک تب باز است، دوباره ساخته نمی‌شود: دو تب با یک کلید کش
+    // مشترک، حالت همدیگر را خراب می‌کنند. به همان تب می‌رویم و حالت نیمه‌کاره‌اش دست‌نخورده می‌ماند.
+    if (isFormShapedPath(path)) {
+      const existing = tabs.find((t) => t.path === path);
+      if (existing) {
+        setActiveTabId(existing.id);
+        navigate(existing.path);
+        return;
+      }
+    }
+
+    // فقط «خانواده‌ی دقیق» کلیدِ همین مسیر پاک می‌شود (نه هر کلیدی که پیشوند مشترک دارد) — قبلاً باز کردن تب
+    // «/accounts» همه‌ی فرم‌های /accounts/new و /accounts/:id/edit را هم پاک می‌کرد.
+    clearFormState(path);
+    clearPersistedStateFamily(base);
     clearReviewReportCacheForPath(base);
 
-    const tab: Tab = { id: nextId(), path, title: getTitleForPath(path) };
+    const tab: Tab = { id: nextId(), path, title: getTitleForPath(base) };
     setTabs((prev) => [...prev, tab]);
     setActiveTabId(tab.id);
     navigate(path);
@@ -113,7 +166,11 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   function closeTab(id: string) {
     setTabs((prev) => {
       const closed = prev.find((t) => t.id === id);
-      if (closed) clearReviewReportCacheForPath(closed.path);
+      if (closed) {
+        clearReviewReportCacheForPath(pathOnly(closed.path));
+        // فرمِ بسته‌شده کشش را با خودش می‌برد؛ فرم دیگری تحت تاثیر قرار نمی‌گیرد (clearFormState فقط خانواده‌ی دقیق را پاک می‌کند)
+        if (isFormShapedPath(closed.path)) clearFormState(closed.path);
+      }
 
       const idx = prev.findIndex((t) => t.id === id);
       const next = prev.filter((t) => t.id !== id);

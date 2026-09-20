@@ -323,7 +323,8 @@ export default function Layout() {
   if (!user) return <Navigate to="/login" replace />;
   if (preferencesLoading) return null;
 
-  const activePath = tabs.find((t) => t.id === activeTabId)?.path;
+  // مسیر تب شامل query هم هست (مثلاً /accounts/new?parentId=5)؛ برای تشخیص آیتم فعال منو فقط بخش مسیر مهم است
+  const activePath = tabs.find((t) => t.id === activeTabId)?.path.split("?")[0];
 
   function toggleModule(title: string) {
     setOpenModule((prev) => {

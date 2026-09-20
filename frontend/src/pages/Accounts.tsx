@@ -4,7 +4,7 @@ import { TreeView, TreeNode } from "../components/TreeView";
 import { FormPage } from "../components/FormPage";
 import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
-import { usePersistedState, hasPersistedState, clearPersistedStateByPrefix } from "../lib/usePersistedState";
+import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { RefreshButton } from "../components/RefreshButton";
 import { ExcelImportButton } from "../components/ExcelImport";
 import { InfoHint } from "../components/InfoHint";
@@ -128,11 +128,8 @@ function AccountsTree() {
       <TreeView
         nodes={nodes}
         persistKey={cacheKey}
-        onAddRoot={() => { clearPersistedStateByPrefix("form:/accounts/new"); navigate("/accounts/new"); }}
-        onAddChild={(n) => {
-          clearPersistedStateByPrefix(`form:/accounts/new?parentId=${n.id}`);
-          navigate(`/accounts/new?parentId=${n.id}`);
-        }}
+        onAddRoot={() => openTab("/accounts/new")}
+        onAddChild={(n) => openTab(`/accounts/new?parentId=${n.id}`)}
         onEdit={(n) => openTab(`/accounts/${n.id}/edit`)}
         onDelete={onDelete}
         levelLabel={(n) => n.level || ""}

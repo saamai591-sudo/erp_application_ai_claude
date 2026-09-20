@@ -40,6 +40,16 @@ export function clearPersistedStateByPrefix(prefix: string) {
   }
 }
 
+/** پاک کردن دقیقاً «خانواده‌ی» یک کلید: خودِ کلید و کلیدهای زیرمجموعه‌اش که با «کلید:» شروع می‌شوند
+ * (مثل `form:/x/new:form`, `form:/x/new:header`). برخلاف clearPersistedStateByPrefix، کلیدهای صرفاً هم‌پیشوند
+ * (مثلاً `form:/accounts/new?parentId=5` وقتی `form:/accounts` پاک می‌شود، یا parentId=55 وقتی parentId=5
+ * پاک می‌شود) را پاک نمی‌کند — تا باز/بستن یک تب، حالت فرمِ نیمه‌کاره‌ی تبی دیگر را خراب نکند. */
+export function clearPersistedStateFamily(key: string) {
+  for (const k of Array.from(store.keys())) {
+    if (k === key || k.startsWith(key + ":")) store.delete(k);
+  }
+}
+
 /** پاک کردن مقدار کش‌شده‌ی یک کلید (برای پیاده‌سازی دکمه‌ی «رفرش») */
 export function clearPersistedState(key: string) {
   store.delete(key);
