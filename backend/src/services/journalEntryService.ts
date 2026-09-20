@@ -2,7 +2,7 @@ import { prisma } from "../lib/prisma";
 import { assertLineHasAmount, assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { toBaseCurrencyAmount } from "../utils/currencyConversion";
 
-export type IssuingSystemType = "ACCOUNTING" | "ACCOUNTING_EXCEL_IMPORT" | "ACCOUNT_CLOSING" | "OPENING_CLOSING" | "WAREHOUSE" | "PURCHASE" | "SALES";
+export type IssuingSystemType = "ACCOUNTING" | "ACCOUNTING_EXCEL_IMPORT" | "ACCOUNT_CLOSING" | "OPENING_CLOSING" | "WAREHOUSE" | "PURCHASE" | "SALES" | "TREASURY";
 
 export interface IssueLineInput {
   accountId: number;

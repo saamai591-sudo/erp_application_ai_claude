@@ -482,7 +482,16 @@ export const REGISTRY: ModuleDef[] = [
         key: "operations",
         title: "عملیات",
         forms: [
-          { key: "receipts", title: "دریافت", baseActions: CRUD, actions: APPROVE_UNAPPROVE_EDIT },
+          {
+            key: "receipts",
+            title: "دریافت",
+            baseActions: CRUD,
+            actions: [
+              ...APPROVE_UNAPPROVE_EDIT,
+              { key: "issueJournalEntry", title: "صدور سند حسابداری" },
+              { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
+            ],
+          },
           { key: "payments", title: "پرداخت", baseActions: CRUD, actions: APPROVE_UNAPPROVE_EDIT },
           {
             key: "cheques",

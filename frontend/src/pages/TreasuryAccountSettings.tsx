@@ -24,11 +24,13 @@ const ACCOUNT_TYPE_FA: Record<string, string> = {
   PAYABLE_CHEQUE: "چک پرداختی",
   RECEIPT_SUBJECT: "موضوع دریافت",
   PAYMENT_SUBJECT: "موضوع پرداخت",
+  FX_GAIN_LOSS: "سود و زیان تسعیر ارز",
 };
 
 type TargetField = "bankAccountId" | "cashBoxId" | "receivableChequeTypeId" | "payableChequeTypeId" | "receiptTypeId" | "paymentTypeId";
 
-const TARGET_FIELD: Record<string, TargetField> = {
+// FX_GAIN_LOSS هیچ فیلد هدفی ندارد (فقط یک معین کلی، بدون انتخاب مورد)
+const TARGET_FIELD: Record<string, TargetField | null> = {
   BANK_ACCOUNT: "bankAccountId",
   BANK_FEE: "bankAccountId",
   CASH_BOX: "cashBoxId",
@@ -36,6 +38,7 @@ const TARGET_FIELD: Record<string, TargetField> = {
   PAYABLE_CHEQUE: "payableChequeTypeId",
   RECEIPT_SUBJECT: "receiptTypeId",
   PAYMENT_SUBJECT: "paymentTypeId",
+  FX_GAIN_LOSS: null,
 };
 
 const TARGET_LABEL: Record<TargetField, string> = {
@@ -176,7 +179,8 @@ function SettingForm({ editId }: { editId?: number }) {
     api.get("/treasury-account-settings").then((items: Setting[]) => {
       const found = items.find((i) => i.id === editId);
       if (found) {
-        const target = found[TARGET_FIELD[found.accountType]];
+        const tf = TARGET_FIELD[found.accountType];
+        const target = tf ? found[tf] : null;
         setForm({ accountType: found.accountType, targetId: target != null ? String(target) : "", accountId: String(found.accountId) });
       }
       setLoaded(true);
@@ -220,10 +224,10 @@ function SettingForm({ editId }: { editId?: number }) {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!form.accountType || !field) return setError("نوع حساب الزامی است");
-    if (!form.targetId) return setError(`انتخاب ${TARGET_LABEL[field]} الزامی است`);
+    if (!form.accountType) return setError("نوع حساب الزامی است");
+    if (field && !form.targetId) return setError(`انتخاب ${TARGET_LABEL[field]} الزامی است`);
     if (!form.accountId) return setError("انتخاب حساب معین الزامی است");
-    const body = { accountType: form.accountType, [field]: Number(form.targetId), accountId: Number(form.accountId) };
+    const body = { accountType: form.accountType, ...(field ? { [field]: Number(form.targetId) } : {}), accountId: Number(form.accountId) };
     try {
       if (editId) {
         await api.put(`/treasury-account-settings/${editId}`, body);

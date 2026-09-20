@@ -22,6 +22,7 @@ const LEDGER_ISSUING_SYSTEM_FA: Record<string, string> = {
   ACCOUNTING_EXCEL_IMPORT: "حسابداری (ورود از اکسل)",
   ACCOUNT_CLOSING: "بستن حسابها",
   OPENING_CLOSING: "افتتاحیه و اختتامیه",
+  TREASURY: "خزانه‌داری",
 };
 
 interface CommonFilters {

@@ -45,6 +45,7 @@ Last refreshed: 2026-09-20 (branch `master`; main branch for PRs is `main`).
 - Soft "warning" pattern: HTTP 409 with `{error, warning:true}`; client re-sends with `confirmDuplicate: true`.
 - Errors are returned as `{ error: "Persian message" }`. Business rules go inside handlers; `can()` only checks permission.
 - Warehouse documents have a status lifecycle, confirmation, date-lock (`assertDateNotConfirmed`, `assertWarehouseOpenForDate`), serial/batch tracking, pricing engine (see docs), and separate JE issuance from warehouse documents.
+- Treasury: masters live in خزانه‌داری > تنظیمات (receipt/payment types, received/payable cheque types, "تعیین حسابهای معین" = TreasuryAccountSetting mapping bank account / cash box / cheque type / receipt-payment subject / FX_GAIN_LOSS to a last-level account). Receipt journal entry = manual "issue" action on an APPROVED receipt (`services/receiptJournalEntryService.ts`, issuingSystem TREASURY, doc type RECEIPT): debit per instrument row, credit per settlement row by basis, FX gain/loss on one FX_GAIN_LOSS account; the receipt is locked (no unapprove/edit-approved) until the entry is deleted. Payment form has no journal entry yet.
 - Purchase/sales invoices issue journal entries; purchase cost lines are unified/shared; receivable/payable accounts can be groupless; receipt types drive receipt settlement (موضوعات دریافت).
 
 ## Documentation in repo

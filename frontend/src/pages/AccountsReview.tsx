@@ -51,6 +51,7 @@ const ISSUING_SYSTEM_FA: Record<string, string> = {
   OPENING_CLOSING: "افتتاحیه و اختتامیه",
   WAREHOUSE: "اسناد انبار",
   PURCHASE: "فاکتور خرید",
+  TREASURY: "خزانه‌داری",
 };
 const DETAIL_SLOTS = [1, 2, 3] as const;
 

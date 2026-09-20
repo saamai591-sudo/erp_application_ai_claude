@@ -6,6 +6,7 @@ import { recomputeCashBoxHasTransactions, recomputeBankAccountHasTransactions } 
 import { assertRecordNotStale } from "../utils/concurrency";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, ConversionCurrency } from "../utils/currencyConversion";
+import { issueReceiptJournalEntry, revertReceiptJournalEntry } from "../services/receiptJournalEntryService";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 
@@ -19,7 +20,9 @@ const FORM = findFormPrefix("receipts");
 // - تسویه می‌تواند «عمومی» (بابت حساب طرف حساب، بدون ارجاع به فاکتور) یا «عطف به فاکتور فروش»
 //   باشد؛ حتی می‌تواند ترکیبی از هر دو در یک سند باشد. مجموع مبلغ ردیف‌های تسویه باید همیشه با
 //   مجموع مبلغ ردیف‌های ابزار برابر باشد.
-// - فعلاً بدون سند حسابداری خودکار (طبق تصمیم صریح کاربر؛ می‌تواند در فاز بعد اضافه شود).
+// - سند حسابداری: اکشن دستی «صدور سند حسابداری» روی سند «تایید»شده (نگاه کنید به
+//   services/receiptJournalEntryService.ts)؛ تا وقتی سند صادر شده، «برگشت از تایید» و «ویرایش سند
+//   تاییدشده» مسدودند و ابتدا باید سند حسابداری حذف شود (هم‌الگوی فاکتور فروش).
 // - گردش وضعیت ساده: ثبت (DRAFT) / تایید (APPROVED) — مشابه SalesDocStatus.
 // - چک: طبق تصمیم کاربر، چک به‌عنوان موجودیت مستقل «ChequeItem» با چرخه‌ی عمر خودش مدل شده
 //   (routes/cheques.ts و routes/chequeDeposits.ts و ...). ردیف ابزار «چک» در سند دریافت، همیشه
@@ -466,7 +469,7 @@ function partyDisplay(p: any) {
 
 router.get("/receipts", can(`${FORM}.view`), async (_req, res) => {
   const items = await prisma.receipt.findMany({
-    include: { party: true, fiscalPeriod: true, instrumentLines: true, settlementLines: true },
+    include: { party: true, fiscalPeriod: true, instrumentLines: true, settlementLines: true, journalEntry: true },
     orderBy: { id: "desc" },
   });
   res.json(
@@ -479,6 +482,8 @@ router.get("/receipts", can(`${FORM}.view`), async (_req, res) => {
       fiscalPeriodTitle: d.fiscalPeriod.title,
       description: d.description,
       status: d.status,
+      journalEntryId: d.journalEntryId,
+      journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
       totalBaseAmount: d.instrumentLines.reduce((s: number, l: any) => s + Number(l.baseAmount), 0),
     }))
   );
@@ -491,6 +496,7 @@ router.get("/receipts/:id", can(`${FORM}.view`), async (req, res) => {
     include: {
       party: true,
       fiscalPeriod: true,
+      journalEntry: true,
       instrumentLines: { include: { currency: true, cashBox: true, bankAccount: true, chequeBankBranch: true, chequeItem: true }, orderBy: { rowOrder: "asc" } },
       settlementLines: {
         include: { receiptType: true, party: true, currency: true, salesInvoice: true, purchaseInvoice: true, salesOrder: true, salesQuote: true },
@@ -509,6 +515,8 @@ router.get("/receipts/:id", can(`${FORM}.view`), async (req, res) => {
     fiscalPeriodTitle: d.fiscalPeriod.title,
     description: d.description,
     status: d.status,
+    journalEntryId: d.journalEntryId,
+    journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
     updatedAt: d.updatedAt,
     instrumentLines: d.instrumentLines.map((l: any) => ({
       id: l.id,
@@ -773,6 +781,7 @@ router.post("/receipts/:id/unapprove", can(`${FORM}.unapprove`), async (req, res
   });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "APPROVED") return res.status(400).json({ error: "فقط اسناد «تایید»شده قابل برگشت هستند" });
+  if (d.journalEntryId) return res.status(400).json({ error: "برای این سند دریافت، سند حسابداری صادر شده؛ ابتدا سند حسابداری را حذف کنید" });
 
   const touchedCheque = d.instrumentLines.find((l: any) => l.chequeItem && l.chequeItem.step !== l.chequeStep);
   if (touchedCheque) {
@@ -818,6 +827,9 @@ router.put("/receipts/:id/edit-approved", can(`${FORM}.editApproved`), async (re
   if (!existing) return res.status(404).json({ error: "سند دریافت یافت نشد" });
   if (existing.status !== "APPROVED") {
     return res.status(400).json({ error: "این مسیر فقط برای اصلاح جزئی اسناد «تایید»شده است" });
+  }
+  if (existing.journalEntryId) {
+    return res.status(400).json({ error: "برای این سند دریافت، سند حسابداری صادر شده؛ ابتدا سند حسابداری را حذف کنید" });
   }
 
   try {
@@ -956,6 +968,24 @@ router.put("/receipts/:id/edit-approved", can(`${FORM}.editApproved`), async (re
     res.json({ id });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در ذخیره" });
+  }
+});
+
+router.post("/receipts/:id/issue-journal-entry", can(`${FORM}.issueJournalEntry`), async (req, res) => {
+  try {
+    const entry = await issueReceiptJournalEntry(Number(req.params.id));
+    res.json({ journalEntryId: entry.id, number: entry.number, referenceNumber: entry.referenceNumber, message: entry.message });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در صدور سند حسابداری" });
+  }
+});
+
+router.delete("/receipts/:id/journal-entry", can(`${FORM}.revertJournalEntry`), async (req, res) => {
+  try {
+    await revertReceiptJournalEntry(Number(req.params.id));
+    res.status(204).send();
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در حذف سند حسابداری" });
   }
 });
 

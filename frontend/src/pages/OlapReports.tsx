@@ -111,6 +111,7 @@ const ISSUING_SYSTEM_OPTIONS = [
   { value: "ACCOUNTING_EXCEL_IMPORT", label: "حسابداری (ورود از اکسل)" },
   { value: "ACCOUNT_CLOSING", label: "بستن حسابها" },
   { value: "OPENING_CLOSING", label: "افتتاحیه و اختتامیه" },
+  { value: "TREASURY", label: "خزانه‌داری" },
 ];
 
 const CHART_COLORS = ["#0f766e", "#059669", "#2563eb", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#65a30d"];

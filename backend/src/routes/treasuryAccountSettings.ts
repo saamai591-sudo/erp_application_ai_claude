@@ -11,11 +11,13 @@ import { findFormPrefix } from "../authz/registry";
 // آن را دارد). دقیقاً همان یک فیلد هدف ذخیره می‌شود و بقیه همیشه null‌اند (حتی اگر کلاینت بفرستد).
 // «حساب بانکی» و «کارمزد بانکی» هر دو از فیلد bankAccountId استفاده می‌کنند و با accountType از هم جدا
 // می‌شوند. برای هر (نوع حساب، مورد) فقط یک معین مجاز است.
+// FX_GAIN_LOSS («سود و زیان تسعیر ارز») هیچ مورد هدفی ندارد (مقدار TARGET_FIELD آن null است) و کلاً فقط
+// یک رکورد از آن مجاز است؛ در صدور سند رسید دریافت، سود روی آن بستانکار و زیان روی آن بدهکار می‌شود.
 // =========================================================================
 
 const FORM = findFormPrefix("treasury-account-settings");
 
-const TARGET_FIELD: Record<string, string> = {
+const TARGET_FIELD: Record<string, string | null> = {
   BANK_ACCOUNT: "bankAccountId",
   BANK_FEE: "bankAccountId",
   CASH_BOX: "cashBoxId",
@@ -23,6 +25,7 @@ const TARGET_FIELD: Record<string, string> = {
   PAYABLE_CHEQUE: "payableChequeTypeId",
   RECEIPT_SUBJECT: "receiptTypeId",
   PAYMENT_SUBJECT: "paymentTypeId",
+  FX_GAIN_LOSS: null,
 };
 
 const TARGET_LABEL: Record<string, string> = {
@@ -67,14 +70,17 @@ interface Body {
 // اعتبارسنجی مشترک POST/PUT روی مقدار «نهایی» (بدنه‌ی ادغام‌شده با رکورد موجود) و ساخت داده‌ی قابل ذخیره
 async function buildData(b: Body, excludeId?: number) {
   const accountType = b.accountType;
-  if (!accountType || !TARGET_FIELD[accountType]) throw new Error("نوع حساب الزامی/نامعتبر است");
+  if (!accountType || !(accountType in TARGET_FIELD)) throw new Error("نوع حساب الزامی/نامعتبر است");
   const field = TARGET_FIELD[accountType];
-  const label = TARGET_LABEL[field];
-  const targetId = (b as any)[field] as number | null | undefined;
-  if (!targetId) throw new Error(`برای این نوع حساب، انتخاب ${label} الزامی است`);
+  let targetId: number | null | undefined = null;
+  if (field) {
+    const label = TARGET_LABEL[field];
+    targetId = (b as any)[field] as number | null | undefined;
+    if (!targetId) throw new Error(`برای این نوع حساب، انتخاب ${label} الزامی است`);
+  }
   if (!b.accountId) throw new Error("انتخاب حساب معین الزامی است");
 
-  if (!(await TARGET_EXISTS[field](targetId))) throw new Error(`${label} یافت نشد`);
+  if (field && !(await TARGET_EXISTS[field](targetId!))) throw new Error(`${TARGET_LABEL[field]} یافت نشد`);
   // همان قاعده‌ی «حساب قابل ثبت در سند حسابداری» (routes/journalEntries.ts#validateAccountForLine): آخرین سطح
   // درخت حساب‌ها — سطح ۳ به بعد و بدون زیرحساب — نه لزوماً سطح «معین».
   const account = await prisma.account.findUnique({ where: { id: b.accountId }, include: { level: true } });
@@ -85,9 +91,9 @@ async function buildData(b: Body, excludeId?: number) {
   }
 
   const dup = await prisma.treasuryAccountSetting.findFirst({
-    where: { accountType: accountType as any, [field]: targetId, ...(excludeId ? { NOT: { id: excludeId } } : {}) },
+    where: { accountType: accountType as any, ...(field ? { [field]: targetId } : {}), ...(excludeId ? { NOT: { id: excludeId } } : {}) },
   });
-  if (dup) throw new Error("برای این نوع حساب و این مورد، قبلاً معین تعیین شده است");
+  if (dup) throw new Error(field ? "برای این نوع حساب و این مورد، قبلاً معین تعیین شده است" : "برای این نوع حساب قبلاً معین تعیین شده است");
 
   const data: Record<string, unknown> = { accountType, accountId: b.accountId };
   for (const f of Object.keys(TARGET_LABEL)) data[f] = f === field ? targetId : null;

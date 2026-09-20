@@ -511,6 +511,7 @@ model JournalEntry {
   purchaseInvoice     PurchaseInvoice?
   servicePurchaseInvoice ServicePurchaseInvoice?
   salesInvoice        SalesInvoice?
+  receipt             Receipt?
   salesReturnInvoice  SalesReturnInvoice?
   warehouseJournalEntryIssuance WarehouseJournalEntryIssuance?
 
@@ -1287,6 +1288,7 @@ enum TreasuryAccountType {
   PAYABLE_CHEQUE
   RECEIPT_SUBJECT
   PAYMENT_SUBJECT
+  FX_GAIN_LOSS
 }
 
 model Supplier {
@@ -2537,6 +2539,8 @@ model Receipt {
   partyId         Int
   description     String?
   status          TreasuryDocStatus       @default(DRAFT)
+  journalEntryId  Int?                    @unique
+  journalEntry    JournalEntry?           @relation(fields: [journalEntryId], references: [id])
   createdAt       DateTime                @default(now())
   updatedAt       DateTime                @default(now()) @updatedAt
   fiscalPeriod    FiscalPeriod            @relation(fields: [fiscalPeriodId], references: [id])
@@ -2782,6 +2786,7 @@ enum IssuingSystem {
   WAREHOUSE
   PURCHASE
   SALES
+  TREASURY
 }
 
 enum OpeningClosingType {

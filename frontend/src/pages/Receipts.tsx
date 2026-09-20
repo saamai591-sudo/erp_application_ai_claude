@@ -14,6 +14,7 @@ import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
 import { partyDisplayName } from "./Users";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
@@ -59,6 +60,7 @@ interface ListRow {
   fiscalPeriodTitle: string;
   description: string | null;
   status: DocStatus;
+  journalEntryReferenceNumber: number | null;
   totalBaseAmount: number;
 }
 
@@ -116,6 +118,8 @@ interface Detail {
   fiscalPeriodTitle: string;
   description: string | null;
   status: DocStatus;
+  journalEntryId: number | null;
+  journalEntryReferenceNumber: number | null;
   instrumentLines: DetailInstrumentLine[];
   settlementLines: DetailSettlementLine[];
 }
@@ -158,6 +162,15 @@ function PlusIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
       <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
 }
@@ -213,6 +226,7 @@ function ReceiptList() {
           { header: "شرح", render: (r) => r.description || "—", filterType: "string", filterValue: (r) => r.description || "" },
           { header: "جمع (ارز پایه)", render: (r) => formatAmountFa(r.totalBaseAmount), filterType: "number", filterValue: (r) => r.totalBaseAmount, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
+          { header: "سند حسابداری", render: (r) => (r.journalEntryReferenceNumber ? toFaDigits(String(r.journalEntryReferenceNumber)) : "—"), width: "110px", filterType: "number", filterValue: (r) => r.journalEntryReferenceNumber ?? undefined },
         ]}
         rows={items}
         edit={{ path: (r) => `/receipts/${r.id}/edit` }}
@@ -299,6 +313,7 @@ function emptySettlementRow(instrumentClientKey: string, instrumentLabel: string
 }
 
 function ReceiptForm({ editId }: { editId?: number }) {
+  const { openTab } = useTabs();
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
@@ -314,7 +329,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", partyId: "", partyDisplay: "", description: "" });
   const [instrumentRows, setInstrumentRows] = usePersistedState<InstrumentRowState[]>(`${cacheKey}:instrumentRows`, []);
   const [settlementRows, setSettlementRows] = usePersistedState<SettlementRowState[]>(`${cacheKey}:settlementRows`, []);
-  const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; fiscalPeriodTitle: string } | null>(`${cacheKey}:meta`, null);
+  const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; fiscalPeriodTitle: string; journalEntryId: number | null; journalEntryReferenceNumber: number | null } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
@@ -323,7 +338,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
   const baseCurrency = currencies.find((c) => c.isBase);
 
   function applyDetail(d: Detail) {
-    setMeta({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle });
+    setMeta({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle, journalEntryId: d.journalEntryId ?? null, journalEntryReferenceNumber: d.journalEntryReferenceNumber ?? null });
     setHeader({ date: d.date.slice(0, 10), partyId: String(d.partyId), partyDisplay: d.partyDisplay, description: d.description || "" });
     setInstrumentRows(
       d.instrumentLines.map((l) => ({
@@ -409,7 +424,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
         if (editId) {
           try {
             const d: Detail = await api.get(`/receipts/${editId}`);
-            setMeta((prev) => (prev ? { ...prev, status: d.status } : prev));
+            setMeta((prev) => (prev ? { ...prev, status: d.status, journalEntryId: d.journalEntryId ?? null, journalEntryReferenceNumber: d.journalEntryReferenceNumber ?? null } : prev));
             const stepById = new Map(d.instrumentLines.map((l) => [l.id, { chequeStep: l.chequeStep, chequeItemStep: l.chequeItemStep }]));
             setInstrumentRows((prev) => prev.map((r) => (r.id && stepById.has(r.id) ? { ...r, ...stepById.get(r.id)! } : r)));
           } catch {
@@ -442,6 +457,8 @@ function ReceiptForm({ editId }: { editId?: number }) {
   // همه‌ی ردیف‌های تسویه قابل ویرایش/افزودن/حذف‌اند و ذخیره از طریق PUT /receipts/:id/edit-approved
   // انجام می‌شود، نه PUT /receipts/:id معمولی.
   const isApprovedSemiOpen = !!editId && status === "APPROVED";
+  // بعد از صدور سند حسابداری، سند دریافت کاملاً قفل است (هم‌الگوی فاکتور فروش) تا سند حسابداری با آن هم‌خوان بماند
+  const jeLocked = !!meta?.journalEntryId;
 
   function instrumentLabel(row: InstrumentRowState, idx: number) {
     return `ردیف ${toFaDigits(String(idx + 1))} - ${TYPE_FA[row.type]}`;
@@ -660,6 +677,26 @@ function ReceiptForm({ editId }: { editId?: number }) {
     }
   }
 
+  async function runJournalAction(method: "post" | "del") {
+    if (!editId) return;
+    try {
+      if (method === "post") {
+        const result: { message?: string } = await api.post(`/receipts/${editId}/issue-journal-entry`, {});
+        const d: Detail = await api.get(`/receipts/${editId}`);
+        applyDetail(d);
+        flash(result?.message);
+      } else {
+        if (!window.confirm("سند حسابداری صادرشده حذف می‌شود. ادامه می‌دهید؟")) return;
+        await api.del(`/receipts/${editId}/journal-entry`);
+        const d: Detail = await api.get(`/receipts/${editId}`);
+        applyDetail(d);
+        flash();
+      }
+    } catch (e) {
+      alert((e as ApiError).message);
+    }
+  }
+
   if (!loaded || !baseCurrency) return null;
 
   // مانده‌ی واقعی هر ردیف اقلام دریافت در انتخابگر «بارگذاری از اقلام دریافت»: مبلغ کامل قلم منهای
@@ -692,17 +729,24 @@ function ReceiptForm({ editId }: { editId?: number }) {
   return (
     <FormPage
       title={editId ? "ویرایش سند دریافت" : "سند دریافت جدید"}
-      description={status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/طرف حساب دیگر قابل تغییر نیستند، اما شرح، ردیف‌های ابزار قفل‌نشده و ردیف‌های موضوعات دریافت مستقیماً قابل ویرایش‌اند." : undefined}
+      description={jeLocked ? "برای این سند دریافت سند حسابداری صادر شده است؛ برای هر تغییری ابتدا سند حسابداری را حذف کنید." : status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/طرف حساب دیگر قابل تغییر نیستند، اما شرح، ردیف‌های ابزار قفل‌نشده و ردیف‌های موضوعات دریافت مستقیماً قابل ویرایش‌اند." : undefined}
       formId="receipt-form"
       closePath="/receipts"
       newPath="/receipts/new"
       onDelete={!editId || status === "DRAFT" ? handleDelete : undefined}
-      saveDisabled={false}
+      saveDisabled={jeLocked}
       extraActions={
         meta
           ? [
               ...(status === "DRAFT" ? [{ label: "تایید", icon: <CheckIcon />, onClick: handleApprove }] : []),
-              ...(status === "APPROVED" ? [{ label: "برگشت از تایید", icon: <UndoIcon />, onClick: handleUnapprove }] : []),
+              ...(status === "APPROVED" && !jeLocked ? [{ label: "برگشت از تایید", icon: <UndoIcon />, onClick: handleUnapprove }] : []),
+              ...(status === "APPROVED" && !jeLocked ? [{ label: "صدور سند حسابداری", icon: <PlusIcon />, onClick: () => runJournalAction("post") }] : []),
+              ...(jeLocked
+                ? [
+                    { label: "مشاهده سند حسابداری", icon: <EyeIcon />, onClick: () => openTab(`/journal-entries/${meta?.journalEntryId}/edit`) },
+                    { label: "حذف سند حسابداری", icon: <UndoIcon />, onClick: () => runJournalAction("del") },
+                  ]
+                : []),
             ]
           : []
       }
@@ -710,7 +754,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
     >
       <form id="receipt-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
+        {saved && <div className="alert warn">{saved}</div>}
 
         <fieldset disabled={coreDisabled} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
@@ -726,6 +770,12 @@ function ReceiptForm({ editId }: { editId?: number }) {
               <label>وضعیت</label>
               <div><span className="badge">{STATUS_FA[status]}</span></div>
             </div>
+            {meta?.journalEntryReferenceNumber && (
+              <div className="form-field">
+                <label>سند حسابداری</label>
+                <input dir="ltr" value={toFaDigits(String(meta.journalEntryReferenceNumber))} disabled />
+              </div>
+            )}
             <div className="form-field">
               <label>تاریخ سند<RequiredMark /></label>
               <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
