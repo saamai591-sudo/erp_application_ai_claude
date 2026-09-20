@@ -68,6 +68,7 @@ interface InstrumentLineInput {
   chequeNumber?: string | null;
   chequeDueDate?: string | null;
   chequeBankBranchId?: number | null;
+  chequeTypeId?: number | null;
   posTerminal?: string | null;
   description?: string | null;
 }
@@ -157,6 +158,9 @@ async function cleanOneInstrumentLine(l: InstrumentLineInput, idx: number, baseC
     if (!l.chequeDueDate) throw new Error(`ردیف ${idx + 1}: تاریخ سررسید چک الزامی است`);
     // طبق سند: چک همیشه با ارز پایه ثبت می‌شود
     currencyId = baseCurrency.id;
+    if (!l.chequeTypeId) throw new Error(`ردیف ${idx + 1}: نوع چک الزامی است`);
+    const chequeType = await prisma.receivableChequeType.findUnique({ where: { id: l.chequeTypeId } });
+    if (!chequeType) throw new Error(`ردیف ${idx + 1}: نوع چک دریافتی یافت نشد`);
   } else {
     throw new Error(`ردیف ${idx + 1}: نوع ابزار نامعتبر است`);
   }
@@ -179,6 +183,7 @@ async function cleanOneInstrumentLine(l: InstrumentLineInput, idx: number, baseC
     chequeNumber: l.type === "CHEQUE" ? l.chequeNumber! : null,
     chequeDueDate: l.type === "CHEQUE" ? new Date(l.chequeDueDate!) : null,
     chequeBankBranchId: l.type === "CHEQUE" ? l.chequeBankBranchId || null : null,
+    chequeTypeId: l.type === "CHEQUE" ? l.chequeTypeId || null : null,
     posTerminal: l.type === "POS" ? l.posTerminal || null : null,
     description: l.description || null,
   };
@@ -521,6 +526,7 @@ router.get("/receipts/:id", can(`${FORM}.view`), async (req, res) => {
       chequeDueDate: l.chequeDueDate,
       chequeBankBranchId: l.chequeBankBranchId,
       chequeBankBranchTitle: l.chequeBankBranch?.title,
+      chequeTypeId: l.chequeTypeId,
       chequeItemId: l.chequeItemId,
       // برای این‌که فرانت‌اند بتواند تشخیص دهد این ردیف «قفل» است یا قابل ویرایش/حذف در سند
       // تایید‌شده (نگاه کنید به توضیح بالای فایل).

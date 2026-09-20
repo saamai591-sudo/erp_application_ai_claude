@@ -1231,6 +1231,7 @@ model ReceivableChequeType {
   code      Int      @unique
   title     String   @unique
   createdAt DateTime @default(now())
+  receiptInstrumentLines ReceiptInstrumentLine[]
 }
 
 model PayableChequeType {
@@ -2520,6 +2521,8 @@ model ReceiptInstrumentLine {
   chequeNumber       String?
   chequeDueDate      DateTime?               @db.Date
   chequeBankBranchId Int?
+  // نوع چک دریافتی (مستر ReceivableChequeType) — فقط برای ردیف نوع CHEQUE (در API الزامی است)؛ در دیتابیس nullable است چون ردیف‌های قدیمی نوع ندارند.
+  chequeTypeId       Int?
   // فقط برای ردیف نوع CHEQUE، در لحظه‌ی تایید سند برابر step همان لحظه‌ی ChequeItem پر می‌شود
   // (نگاه کنید به توضیح بالای ChequeItem.step).
   chequeStep         Int?
@@ -2530,6 +2533,7 @@ model ReceiptInstrumentLine {
   cashBox            CashBox?                @relation(fields: [cashBoxId], references: [id])
   chequeBankBranch   BankBranch?             @relation("ReceiptInstrumentChequeBankBranch", fields: [chequeBankBranchId], references: [id])
   chequeItem         ChequeItem?             @relation(fields: [chequeItemId], references: [id])
+  chequeType         ReceivableChequeType?   @relation(fields: [chequeTypeId], references: [id], onDelete: Restrict)
   receipt            Receipt                 @relation(fields: [receiptId], references: [id], onDelete: Cascade)
   settlementLines    ReceiptSettlementLine[]
 }

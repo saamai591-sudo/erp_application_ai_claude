@@ -42,6 +42,7 @@ interface CurrencyOption { id: number; code: string; title: string; isBase: bool
 interface CashBoxOption { id: number; title: string }
 interface BankAccountOption { id: number; accountNumber: string; detailCode: string; bankBranch: { title: string }; currencyId: number | null; currency: { title: string } | null }
 interface BankBranchOption { id: number; title: string }
+interface ChequeTypeOption { id: number; code: number; title: string }
 interface ReceiptTypeOption { id: number; title: string; nature: ReceiptNature; basisType: ReceiptBasisType; isActive: boolean }
 interface BasisCandidate { id: number; number: number; date: string; currencyId: number; currencyTitle: string; fxRate: number; total: number; applied: number; remaining: number }
 interface PickableInvoice extends BasisCandidate { salesInvoiceId: number }
@@ -74,6 +75,7 @@ interface DetailInstrumentLine {
   chequeNumber: string | null;
   chequeDueDate: string | null;
   chequeBankBranchId: number | null;
+  chequeTypeId: number | null;
   chequeItemId: number | null;
   // برای تشخیص ردیف «قفل» (فاز ۲.۲ — سند نیمه‌باز): اگر chequeStep با chequeItemStep برابر نباشد،
   // یعنی از زمان این سند، اتفاق دیگری (واگذاری/وصول/...) برای این چک افتاده و این ردیف دیگر
@@ -235,6 +237,7 @@ interface InstrumentRowState {
   chequeNumber: string;
   chequeDueDate: string;
   chequeBankBranchId: string;
+  chequeTypeId: string;
   posTerminal: string;
   description: string;
   // فقط برای ردیف‌های موجود (id دار) که از سرور آمده‌اند؛ برای تشخیص «قفل» بودن ردیف در سند
@@ -249,7 +252,7 @@ function nextClientKey() {
   return `new-${Date.now()}-${clientKeySeq}`;
 }
 function emptyInstrumentRow(): InstrumentRowState {
-  return { clientKey: nextClientKey(), type: "CASH", amount: "", currencyId: "", fxRate: "", cashBoxId: "", bankAccountId: "", referenceNumber: "", chequeNumber: "", chequeDueDate: "", chequeBankBranchId: "", posTerminal: "", description: "" };
+  return { clientKey: nextClientKey(), type: "CASH", amount: "", currencyId: "", fxRate: "", cashBoxId: "", bankAccountId: "", referenceNumber: "", chequeNumber: "", chequeDueDate: "", chequeBankBranchId: "", chequeTypeId: "", posTerminal: "", description: "" };
 }
 // ردیف از سند «تایید»شده «قفل» است اگر یک چک به آن وصل باشد و step آن چک دیگر با chequeStep همین
 // ردیف برابر نباشد — یعنی اتفاق دیگری (واگذاری/وصول/...) بعد از این سند برای آن چک افتاده است.
@@ -304,6 +307,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
   const [cashBoxes, setCashBoxes] = useState<CashBoxOption[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccountOption[]>([]);
   const [bankBranches, setBankBranches] = useState<BankBranchOption[]>([]);
+  const [chequeTypes, setChequeTypes] = useState<ChequeTypeOption[]>([]);
   const [receiptTypes, setReceiptTypes] = useState<ReceiptTypeOption[]>([]);
   const [customerPartyIds, setCustomerPartyIds] = useState<Set<number>>(new Set());
   const [supplierPartyIds, setSupplierPartyIds] = useState<Set<number>>(new Set());
@@ -335,6 +339,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
         chequeNumber: l.chequeNumber || "",
         chequeDueDate: l.chequeDueDate ? l.chequeDueDate.slice(0, 10) : "",
         chequeBankBranchId: l.chequeBankBranchId ? String(l.chequeBankBranchId) : "",
+        chequeTypeId: l.chequeTypeId ? String(l.chequeTypeId) : "",
         posTerminal: l.posTerminal || "",
         description: l.description || "",
         chequeItemId: l.chequeItemId,
@@ -368,9 +373,9 @@ function ReceiptForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [ps, cs, cbs, bas, bbs, rts, customers, suppliers, fp]: [
+      const [ps, cs, cbs, bas, bbs, rts, customers, suppliers, fp, cts]: [
         PartyOption[], CurrencyOption[], CashBoxOption[], BankAccountOption[], BankBranchOption[],
-        ReceiptTypeOption[], { partyId: number }[], { partyId: number }[], FiscalPeriodRange | null
+        ReceiptTypeOption[], { partyId: number }[], { partyId: number }[], FiscalPeriodRange | null, ChequeTypeOption[]
       ] = await Promise.all([
         api.get("/parties"),
         api.get("/currencies"),
@@ -381,7 +386,9 @@ function ReceiptForm({ editId }: { editId?: number }) {
         api.get("/customers"),
         api.get("/suppliers"),
         fetchSelectedFiscalPeriod(),
+        api.get("/receivable-cheque-types"),
       ]);
+      setChequeTypes(cts);
       setParties(ps);
       setCurrencies(cs);
       setCashBoxes(cbs);
@@ -497,6 +504,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
     ]);
   }
 
+  const hasChequeRow = instrumentRows.some((r) => r.type === "CHEQUE");
   const instrumentBaseTotal = !baseCurrency
     ? 0
     : roundToCurrencyDecimals(
@@ -533,6 +541,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
         chequeNumber: r.chequeNumber || null,
         chequeDueDate: r.chequeDueDate || null,
         chequeBankBranchId: r.chequeBankBranchId ? Number(r.chequeBankBranchId) : null,
+        chequeTypeId: r.type === "CHEQUE" && r.chequeTypeId ? Number(r.chequeTypeId) : null,
         posTerminal: r.posTerminal || null,
         description: r.description || null,
       }));
@@ -576,6 +585,9 @@ function ReceiptForm({ editId }: { editId?: number }) {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+
+    const missingChequeType = instrumentRows.some((r) => r.type === "CHEQUE" && Number(r.amount) > 0 && !r.chequeTypeId && !isRowLocked(r, isApprovedSemiOpen));
+    if (missingChequeType) return setError("نوع چک در همه‌ی ردیف‌های چک الزامی است");
 
     if (isApprovedSemiOpen) {
       const body = buildApprovedEditBody();
@@ -765,6 +777,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
                 <tr>
                   <th>ردیف</th>
                   <th>نوع</th>
+                  {hasChequeRow && <th>نوع چک<RequiredMark /></th>}
                   <th>مبلغ</th>
                   <th>ارز</th>
                   <th>نرخ ارز</th>
@@ -800,6 +813,18 @@ function ReceiptForm({ editId }: { editId?: number }) {
                           ))}
                         </select>
                       </td>
+                      {hasChequeRow && (
+                        <td style={{ minWidth: 150 }}>
+                          {row.type === "CHEQUE" && (
+                            <select value={row.chequeTypeId} onChange={(e) => updateInstrumentRow(idx, { chequeTypeId: e.target.value })} disabled={locked}>
+                              <option value="">انتخاب نوع چک</option>
+                              {chequeTypes.map((t) => (
+                                <option key={t.id} value={t.id}>{t.title}</option>
+                              ))}
+                            </select>
+                          )}
+                        </td>
+                      )}
                       <td style={{ minWidth: 130 }}>
                         <AmountInput value={row.amount} onChange={(v) => updateInstrumentRow(idx, { amount: v })} allowDecimal placeholder="۰" disabled={locked} />
                       </td>
