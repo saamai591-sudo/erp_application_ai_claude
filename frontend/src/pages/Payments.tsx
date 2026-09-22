@@ -38,7 +38,6 @@ interface PartyOption { id: number; detailCode: string; category: "INDIVIDUAL" |
 interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null; decimalPlaces: number }
 interface CashBoxOption { id: number; title: string }
 interface BankAccountOption { id: number; accountNumber: string; detailCode: string; bankBranch: { title: string }; currencyId: number | null; currency: { title: string } | null; accountType: { hasChequeBook: boolean } }
-interface BankBranchOption { id: number; title: string }
 interface ChequeTypeOption { id: number; code: number; title: string }
 interface PaymentTypeOption { id: number; title: string; nature: PaymentNature; basisType: PaymentBasisType; isActive: boolean }
 interface PickableCheque { id: number; number: string; dueDate: string; amount: number; partyDisplay: string; currencyTitle: string }
@@ -328,7 +327,6 @@ function PaymentForm({ editId }: { editId?: number }) {
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
   const [cashBoxes, setCashBoxes] = useState<CashBoxOption[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccountOption[]>([]);
-  const [bankBranches, setBankBranches] = useState<BankBranchOption[]>([]);
   const [chequeTypes, setChequeTypes] = useState<ChequeTypeOption[]>([]);
   const [pickableCheques, setPickableCheques] = useState<PickableCheque[]>([]);
   const [pickableChequeBookLeaves, setPickableChequeBookLeaves] = useState<PickableChequeBookLeaf[]>([]);
@@ -401,15 +399,14 @@ function PaymentForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [ps, cs, cbs, bas, bbs, rts, customers, suppliers, fp, cts, pcs, pbl]: [
-        PartyOption[], CurrencyOption[], CashBoxOption[], BankAccountOption[], BankBranchOption[],
+      const [ps, cs, cbs, bas, rts, customers, suppliers, fp, cts, pcs, pbl]: [
+        PartyOption[], CurrencyOption[], CashBoxOption[], BankAccountOption[],
         PaymentTypeOption[], { partyId: number }[], { partyId: number }[], FiscalPeriodRange | null, ChequeTypeOption[], PickableCheque[], PickableChequeBookLeaf[]
       ] = await Promise.all([
         api.get("/parties"),
         api.get("/currencies"),
         api.get("/cash-boxes"),
         api.get("/banking/accounts"),
-        api.get("/banking/branches"),
         api.get("/payment-types"),
         api.get("/customers"),
         api.get("/suppliers"),
@@ -425,7 +422,6 @@ function PaymentForm({ editId }: { editId?: number }) {
       setCurrencies(cs);
       setCashBoxes(cbs);
       setBankAccounts(bas);
-      setBankBranches(bbs);
       setPaymentTypes(rts.filter((t) => t.isActive));
       setCustomerPartyIds(new Set(customers.map((c) => c.partyId)));
       setSupplierPartyIds(new Set(suppliers.map((s) => s.partyId)));
@@ -626,13 +622,12 @@ function PaymentForm({ editId }: { editId?: number }) {
     if (missingChequeType) return setError("نوع چک در همه‌ی ردیف‌های صدور چک الزامی است");
     const missingSpendCheque = instrumentRows.some((r) => r.type === "CHEQUE" && r.chequeMode === "SPEND" && !r.chequeItemId && !isRowLocked(r, isApprovedSemiOpen));
     if (missingSpendCheque) return setError("چک دریافتنی برای خرج‌کردن در ردیف‌های مربوطه انتخاب نشده است");
-    // طبق Documents/دسته چک.md: برای حساب بانکیِ «دارای دسته چک»، انتخاب برگه از دسته چک الزامی است
-    const missingChequeLeaf = instrumentRows.some((r) => {
-      if (r.type !== "CHEQUE" || r.chequeMode !== "NEW" || !(Number(r.amount) > 0) || isRowLocked(r, isApprovedSemiOpen)) return false;
-      const account = bankAccounts.find((a) => String(a.id) === r.bankAccountId);
-      return !!account?.accountType.hasChequeBook && !r.chequeBookLeafId;
-    });
-    if (missingChequeLeaf) return setError("انتخاب برگه چک از دسته چک برای حساب بانکیِ دارای دسته چک الزامی است");
+    // طبق درخواست کاربر: برای صدور چک جدید، ابتدا حساب بانکی (فقط از نوع دارای دسته چک) و سپس برگه‌ی
+    // چک از همان دسته چک انتخاب می‌شود — شماره چک دیگر آزادانه تایپ نمی‌شود.
+    const missingChequeBankAccount = instrumentRows.some((r) => r.type === "CHEQUE" && r.chequeMode === "NEW" && Number(r.amount) > 0 && !r.bankAccountId && !isRowLocked(r, isApprovedSemiOpen));
+    if (missingChequeBankAccount) return setError("حساب بانکی صادرکننده در همه‌ی ردیف‌های صدور چک الزامی است");
+    const missingChequeLeaf = instrumentRows.some((r) => r.type === "CHEQUE" && r.chequeMode === "NEW" && Number(r.amount) > 0 && !r.chequeBookLeafId && !isRowLocked(r, isApprovedSemiOpen));
+    if (missingChequeLeaf) return setError("انتخاب برگه چک از دسته چک در همه‌ی ردیف‌های صدور چک الزامی است");
 
     if (isApprovedSemiOpen) {
       const body = buildApprovedEditBody();
@@ -989,40 +984,10 @@ function PaymentForm({ editId }: { editId?: number }) {
                               </label>
                             </div>
                             {row.chequeMode === "NEW" ? (
+                              // طبق درخواست کاربر: حساب بانکی همیشه اولین فیلد است (باید پیش از هر اطلاعات دیگر چک
+                              // انتخاب شود)، فقط حساب‌های بانکیِ نوعِ «دارای دسته چک» نمایش داده می‌شوند، شماره چک
+                              // همیشه از دسته چک انتخاب می‌شود (نه تایپ آزاد)، و شعبه بانک کاملاً حذف شده است.
                               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                {bankAccount?.accountType.hasChequeBook ? (
-                                  <div style={{ width: 160 }}>
-                                    <RecordPickerField
-                                      title="انتخاب برگه چک"
-                                      placeholder="انتخاب برگه از دسته چک"
-                                      disabled={locked}
-                                      displayValue={row.chequeBookLeafDisplay}
-                                      rows={pickableChequeBookLeaves.filter((l) => l.bankAccountId === Number(row.bankAccountId))}
-                                      columns={[
-                                        { header: "سری", render: (l) => l.series, filterValue: (l) => l.series, width: "80px" },
-                                        { header: "شماره", render: (l) => toFaDigits(l.number), filterValue: (l) => l.number },
-                                      ]}
-                                      onSelect={(l) =>
-                                        updateInstrumentRow(idx, {
-                                          chequeBookLeafId: String((l as PickableChequeBookLeaf).id),
-                                          chequeBookLeafDisplay: `${(l as PickableChequeBookLeaf).series} - ${(l as PickableChequeBookLeaf).number}`,
-                                          chequeNumber: (l as PickableChequeBookLeaf).number,
-                                        })
-                                      }
-                                    />
-                                  </div>
-                                ) : (
-                                  <input placeholder="شماره چک" value={row.chequeNumber} onChange={(e) => updateInstrumentRow(idx, { chequeNumber: e.target.value })} disabled={locked} style={{ width: 110 }} />
-                                )}
-                                <div style={{ width: 140 }}>
-                                  <JalaliDatePicker value={row.chequeDueDate} onChange={(v) => updateInstrumentRow(idx, { chequeDueDate: v })} />
-                                </div>
-                                <select value={row.chequeBankBranchId} onChange={(e) => updateInstrumentRow(idx, { chequeBankBranchId: e.target.value })} disabled={locked} style={{ flex: "1 1 140px" }}>
-                                  <option value="">شعبه بانک (اختیاری)</option>
-                                  {bankBranches.map((b) => (
-                                    <option key={b.id} value={b.id}>{b.title}</option>
-                                  ))}
-                                </select>
                                 <select
                                   value={row.bankAccountId}
                                   onChange={(e) =>
@@ -1038,10 +1003,33 @@ function PaymentForm({ editId }: { editId?: number }) {
                                   style={{ flex: "1 1 160px" }}
                                 >
                                   <option value="">حساب بانکی صادرکننده</option>
-                                  {bankAccounts.map((a) => (
+                                  {bankAccounts.filter((a) => a.accountType.hasChequeBook).map((a) => (
                                     <option key={a.id} value={a.id}>{a.accountNumber} — {a.bankBranch.title}</option>
                                   ))}
                                 </select>
+                                <div style={{ width: 160 }}>
+                                  <RecordPickerField
+                                    title="انتخاب برگه چک"
+                                    placeholder={row.bankAccountId ? "انتخاب برگه از دسته چک" : "ابتدا حساب بانکی را انتخاب کنید"}
+                                    disabled={locked || !row.bankAccountId}
+                                    displayValue={row.chequeBookLeafDisplay}
+                                    rows={pickableChequeBookLeaves.filter((l) => l.bankAccountId === Number(row.bankAccountId))}
+                                    columns={[
+                                      { header: "سری", render: (l) => l.series, filterValue: (l) => l.series, width: "80px" },
+                                      { header: "شماره", render: (l) => toFaDigits(l.number), filterValue: (l) => l.number },
+                                    ]}
+                                    onSelect={(l) =>
+                                      updateInstrumentRow(idx, {
+                                        chequeBookLeafId: String((l as PickableChequeBookLeaf).id),
+                                        chequeBookLeafDisplay: `${(l as PickableChequeBookLeaf).series} - ${(l as PickableChequeBookLeaf).number}`,
+                                        chequeNumber: (l as PickableChequeBookLeaf).number,
+                                      })
+                                    }
+                                  />
+                                </div>
+                                <div style={{ width: 140 }}>
+                                  <JalaliDatePicker value={row.chequeDueDate} onChange={(v) => updateInstrumentRow(idx, { chequeDueDate: v })} />
+                                </div>
                               </div>
                             ) : (
                               <RecordPickerField
