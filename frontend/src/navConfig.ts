@@ -258,6 +258,7 @@ export const MODULES: ModuleGroup[] = [
           { key: "receivable-cheque-types", label: "نوع چک دریافتی", list: "/receivable-cheque-types", create: "/receivable-cheque-types/new", icon: "tag" },
           { key: "payable-cheque-types", label: "نوع چک پرداختی", list: "/payable-cheque-types", create: "/payable-cheque-types/new", icon: "tag" },
           { key: "treasury-account-settings", label: "تعیین حسابهای معین", list: "/treasury-account-settings", create: "/treasury-account-settings/new", icon: "ledger" },
+          { key: "cheque-book-leaves", label: "دسته چک", list: "/cheque-book-leaves", create: "/cheque-book-leaves/new", icon: "tag" },
         ],
       },
       {

@@ -30,15 +30,17 @@ const NATURE_FA: Record<string, string> = {
 const BASIS_TYPE_FA: Record<string, string> = {
   NONE: "بدون مبنا",
   PURCHASE_INVOICE: "فاکتور خرید",
+  SALES_INVOICE: "فاکتور فروش",
+  PURCHASE_ORDER: "سفارش خرید",
 };
 
 const ALLOWED_BASIS_TYPES: Record<string, string[]> = {
   SUPPLIER_PAYMENT: ["NONE", "PURCHASE_INVOICE"],
-  ADVANCE_PAYMENT: ["NONE"],
-  CUSTOMER_PAYMENT: ["NONE"],
+  ADVANCE_PAYMENT: ["NONE", "PURCHASE_ORDER"],
+  CUSTOMER_PAYMENT: ["NONE", "SALES_INVOICE"],
   OTHER_PAYMENT: ["NONE"],
   PURCHASE_VAT: ["NONE", "PURCHASE_INVOICE"],
-  SALES_VAT: ["NONE"],
+  SALES_VAT: ["NONE", "SALES_INVOICE"],
 };
 
 interface Level { id: number; title: string }

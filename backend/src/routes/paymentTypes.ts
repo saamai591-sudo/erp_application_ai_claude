@@ -13,8 +13,9 @@ const FORM = findFormPrefix("payment-types");
 // دو فیلد کلیدی: nature («این پرداخت اساساً چه ماهیتی دارد» — به تامین‌کننده/پیش‌پرداخت/به مشتری/به
 // سایر/ارزش‌افزوده خرید/ارزش‌افزوده فروش) و basisType («این پرداخت بر چه سندی مبتنی است»). مقادیر
 // basisType مجاز به nature بستگی دارد — ALLOWED_BASIS_TYPES زیر تنها محل این قاعده است (فرانت‌اند در
-// PaymentTypes.tsx نسخه‌ی هم‌راستای آن را دارد). فعلاً فرم پرداخت فقط «فاکتور خرید» را تسویه می‌کند، پس
-// مبنای دیگری (فاکتور فروش/سفارش) تعریف نشده؛ با پشتیبانی فرم به enum و همین جدول اضافه می‌شود.
+// PaymentTypes.tsx نسخه‌ی هم‌راستای آن را دارد). مبناها هم‌الگوی «نوع دریافت»اند: پرداخت به تأمین‌کننده و
+// ارزش‌افزوده خرید → فاکتور خرید؛ پیش‌پرداخت → سفارش خرید؛ پرداخت به مشتری (استرداد) و ارزش‌افزوده فروش →
+// فاکتور فروش.
 //
 // accountId (معین حسابداری) فقط برای basisType=NONE معنا دارد: در آن حالت الزامی است؛ برای بقیه‌ی
 // basisType ها سرور هرگز آن را ذخیره نمی‌کند (حتی اگر کلاینت مقداری بفرستد).
@@ -22,11 +23,11 @@ const FORM = findFormPrefix("payment-types");
 
 const ALLOWED_BASIS_TYPES: Record<string, string[]> = {
   SUPPLIER_PAYMENT: ["NONE", "PURCHASE_INVOICE"],
-  ADVANCE_PAYMENT: ["NONE"],
-  CUSTOMER_PAYMENT: ["NONE"],
+  ADVANCE_PAYMENT: ["NONE", "PURCHASE_ORDER"],
+  CUSTOMER_PAYMENT: ["NONE", "SALES_INVOICE"],
   OTHER_PAYMENT: ["NONE"],
   PURCHASE_VAT: ["NONE", "PURCHASE_INVOICE"],
-  SALES_VAT: ["NONE"],
+  SALES_VAT: ["NONE", "SALES_INVOICE"],
 };
 
 const router = Router();

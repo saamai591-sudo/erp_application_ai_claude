@@ -750,6 +750,7 @@ router.post("/receipts/:id/approve", can(`${FORM}.approve`), async (req, res) =>
               currencyId: l.currencyId,
               status: "IN_HAND",
               step: 1,
+              receivableChequeTypeId: l.chequeTypeId,
               description: l.description,
             },
           });
@@ -884,6 +885,9 @@ router.put("/receipts/:id/edit-approved", can(`${FORM}.editApproved`), async (re
     const settlementLines = await validateSubjectLines(body.settlementLines, instrumentByKey, baseCurrency, id);
 
     await prisma.$transaction(async (tx: any) => {
+      // ردیف‌های تسویه به ردیف‌های اقلام ارجاع می‌دهند (FK محدودکننده) — پس قبل از حذف ردیف‌های اقلام پاک می‌شوند
+      // و در انتها با کلیدهای نهایی دوباره ساخته می‌شوند.
+      await tx.receiptSettlementLine.deleteMany({ where: { receiptId: id } });
       for (const l of toDelete) {
         // eslint-disable-next-line no-await-in-loop
         if (l.chequeItemId) await tx.chequeItem.delete({ where: { id: l.chequeItemId } });
@@ -904,6 +908,7 @@ router.put("/receipts/:id/edit-approved", can(`${FORM}.editApproved`), async (re
               dueDate: u.data.chequeDueDate,
               bankBranchId: u.data.chequeBankBranchId,
               amount: u.data.amount,
+              receivableChequeTypeId: u.data.chequeTypeId,
               description: u.data.description,
             },
           });
@@ -933,6 +938,7 @@ router.put("/receipts/:id/edit-approved", can(`${FORM}.editApproved`), async (re
               currencyId: data.currencyId,
               status: "IN_HAND",
               step: 1,
+              receivableChequeTypeId: data.chequeTypeId,
               description: data.description,
             },
           });
@@ -955,7 +961,6 @@ router.put("/receipts/:id/edit-approved", can(`${FORM}.editApproved`), async (re
         }
       }
 
-      await tx.receiptSettlementLine.deleteMany({ where: { receiptId: id } });
       for (const [idx, l] of settlementLines.entries()) {
         const { instrumentClientKey, ...data } = l;
         const instrumentLineId = newKeyToId.get(instrumentClientKey) ?? Number(instrumentClientKey);

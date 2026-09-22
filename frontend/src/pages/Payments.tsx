@@ -5,6 +5,7 @@ import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
 import { RecordPickerField } from "../components/RecordPicker";
+import { Modal } from "../components/Modal";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
@@ -13,27 +14,42 @@ import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
 import { partyDisplayName } from "./Users";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
+import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, roundToCurrencyDecimals } from "../lib/currencyConversion";
 
-// ماژول «خزانه‌داری» > پرداخت. مشابه Receipts.tsx (نگاه کنید به یادداشت‌های آن فایل)، با یک تفاوت
-// اصلی: ردیف ابزار «چک» می‌تواند یا صدور چک پرداختنی تازه باشد یا «خرج‌کردن» یک چک دریافتنی موجود
-// (که قبلاً از طریق یک سند دریافت دیگر وارد سیستم شده). نگاه کنید به backend/src/routes/payments.ts.
+// ماژول «خزانه‌داری» > پرداخت / اعلامیه پرداخت — هم‌الگوی Receipts.tsx (نگاه کنید به یادداشت‌های آن فایل و
+// backend/src/routes/payments.ts): چهار ابزار (نقد/حواله بانکی/چک/پوز) با ارز و نرخ ارز مستقل هر ردیف، «موضوعات
+// پرداخت» (نوع پرداخت/طرف حساب/سند مبنا/ارز/نرخ/تسعیر مستقل هر ردیف) که با یک کلید موقت سمت-کلاینت («قلم») به ردیف
+// ابزار ارجاع می‌دهند، و سند حسابداری با اکشن دستی. تفاوت اصلی: ردیف ابزار «چک» می‌تواند یا صدور چک پرداختنی تازه
+// (با نوع چک پرداختی) باشد یا «خرج‌کردن» یک چک دریافتنی موجود (که قبلاً از یک سند دریافت وارد سیستم شده).
 
 type InstrumentType = "CASH" | "BANK_TRANSFER" | "CHEQUE" | "POS";
 type DocStatus = "DRAFT" | "APPROVED";
+type PaymentNature = "SUPPLIER_PAYMENT" | "ADVANCE_PAYMENT" | "CUSTOMER_PAYMENT" | "OTHER_PAYMENT" | "PURCHASE_VAT" | "SALES_VAT";
+type PaymentBasisType = "NONE" | "PURCHASE_INVOICE" | "SALES_INVOICE" | "PURCHASE_ORDER";
 
 const TYPE_FA: Record<InstrumentType, string> = { CASH: "نقد", BANK_TRANSFER: "حواله/انتقال بانکی", CHEQUE: "چک", POS: "پوز/درگاه" };
 const STATUS_FA: Record<DocStatus, string> = { DRAFT: "ثبت", APPROVED: "تایید" };
 
 interface PartyOption { id: number; detailCode: string; category: "INDIVIDUAL" | "LEGAL"; isActive: boolean; firstName: string | null; lastName: string | null; name: string | null }
-interface CurrencyOption { id: number; code: string; title: string }
+interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null; decimalPlaces: number }
 interface CashBoxOption { id: number; title: string }
-interface BankAccountOption { id: number; accountNumber: string; detailCode: string; bankBranch: { title: string } }
+interface BankAccountOption { id: number; accountNumber: string; detailCode: string; bankBranch: { title: string }; currencyId: number | null; currency: { title: string } | null; accountType: { hasChequeBook: boolean } }
 interface BankBranchOption { id: number; title: string }
-interface PickableInvoice { id: number; purchaseInvoiceId: number; number: number; date: string; total: number; applied: number; remaining: number }
+interface ChequeTypeOption { id: number; code: number; title: string }
+interface PaymentTypeOption { id: number; title: string; nature: PaymentNature; basisType: PaymentBasisType; isActive: boolean }
 interface PickableCheque { id: number; number: string; dueDate: string; amount: number; partyDisplay: string; currencyTitle: string }
+// برگه‌ی «خام» دسته چک (Documents/دسته چک.md) — برای ردیف «صدور چک تازه» وقتی حساب بانکی صادرکننده از
+// نوعِ «دارای دسته چک» باشد؛ نگاه کنید به backend/src/routes/chequeBookLeaves.ts و routes/payments.ts.
+interface PickableChequeBookLeaf { id: number; bankAccountId: number; series: string; number: string }
+interface BasisCandidate { id: number; number: number; date: string; currencyId: number; currencyTitle: string; fxRate: number; total: number; applied: number; remaining: number }
+interface PickableInvoice extends BasisCandidate { salesInvoiceId: number }
+
+// تبدیل ارز/گرد کردن اعشار: از lib/currencyConversion.ts (تنها محل مشترک این فرمول‌ها در فرانت‌اند،
+// هم‌الگوی PurchaseInvoices.tsx/SalesInvoices.tsx/...) ایمپورت می‌شود، نه پیاده‌سازی محلی جدا.
 
 interface ListRow {
   id: number;
@@ -42,39 +58,57 @@ interface ListRow {
   partyId: number;
   partyDisplay: string;
   fiscalPeriodTitle: string;
-  currencyId: number;
-  currencyTitle: string;
   description: string | null;
   status: DocStatus;
-  totalAmount: number;
+  journalEntryReferenceNumber: number | null;
+  totalBaseAmount: number;
 }
 
 interface DetailInstrumentLine {
   id: number;
   type: InstrumentType;
   amount: number;
+  currencyId: number;
+  currencyTitle: string;
+  fxRate: number;
   cashBoxId: number | null;
   bankAccountId: number | null;
   referenceNumber: string | null;
-  chequeItemId: number | null;
-  chequeItemNumber?: string;
-  // برای تشخیص ردیف «قفل» (فاز ۲.۲ — سند نیمه‌باز): نگاه کنید به توضیح مشابه در Receipts.tsx و
-  // backend/src/routes/payments.ts.
-  chequeStep: number | null;
-  chequeItemStep: number | null;
   chequeNumber: string | null;
   chequeDueDate: string | null;
   chequeBankBranchId: number | null;
+  payableChequeTypeId: number | null;
+  bankAccountHasChequeBook: boolean;
+  chequeBookLeafId: number | null;
+  chequeBookLeafDisplay: string | null;
+  chequeItemId: number | null;
+  chequeItemNumber?: string;
+  // برای تشخیص ردیف «قفل» (فاز ۲.۲ — سند نیمه‌باز): اگر chequeStep با chequeItemStep برابر نباشد،
+  // یعنی از زمان این سند، اتفاق دیگری (واگذاری/وصول/...) برای این چک افتاده و این ردیف دیگر
+  // قابل ویرایش/حذف از «ویرایش سند تایید‌شده» نیست. نگاه کنید به backend/src/routes/payments.ts.
+  chequeStep: number | null;
+  chequeItemStep: number | null;
   posTerminal: string | null;
   description: string | null;
 }
-interface PaymentTypeOption { id: number; title: string; nature: string; basisType: string; isActive: boolean }
 interface DetailSettlementLine {
   id: number;
-  paymentTypeId: number | null;
+  instrumentLineId: number;
+  paymentTypeId: number;
+  paymentTypeTitle: string;
+  partyId: number;
+  partyDisplay: string;
+  salesInvoiceId: number | null;
+  salesInvoiceNumber?: number;
   purchaseInvoiceId: number | null;
   purchaseInvoiceNumber?: number;
+  purchaseOrderId: number | null;
+  purchaseOrderNumber?: number;
+  currencyId: number;
+  currencyTitle: string;
+  fxRate: number;
   amount: number;
+  exchangeGainLoss: number;
   description: string | null;
 }
 interface Detail {
@@ -84,19 +118,20 @@ interface Detail {
   partyId: number;
   partyDisplay: string;
   fiscalPeriodTitle: string;
-  currencyId: number;
-  currencyTitle: string;
   description: string | null;
   status: DocStatus;
+  journalEntryId: number | null;
+  journalEntryReferenceNumber: number | null;
   instrumentLines: DetailInstrumentLine[];
   settlementLines: DetailSettlementLine[];
 }
 
 function infoText() {
   return (
-    "ثبت پرداخت وجه به یک طرف حساب از طریق نقد، حواله/انتقال بانکی، چک یا پوز. تسویه می‌تواند بابت حساب طرف " +
-    "(عمومی) یا عطف به یک فاکتور خرید مشخص باشد. ردیف «چک» می‌تواند صدور یک چک پرداختنی تازه باشد یا خرج‌کردن " +
-    "یک چک دریافتنی موجود که قبلاً از یک سند دریافت دیگر وارد سیستم شده. فعلاً هیچ سند حسابداری خودکاری صادر نمی‌شود."
+    "ثبت پرداخت وجه به یک طرف حساب از طریق نقد، حواله/انتقال بانکی، چک یا پوز. ردیف «چک» می‌تواند صدور یک چک " +
+    "پرداختنی تازه (با نوع چک) یا خرج‌کردن یک چک دریافتنی موجود باشد. هر ردیف موضوعات پرداخت به یک نوع پرداخت، " +
+    "طرف حساب، و در صورت نیاز یک سند مبنا (فاکتور خرید/فروش، سفارش خرید) وصل می‌شود؛ هر ردیف ابزار پرداخت باید " +
+    "دقیقاً توسط ردیف‌های موضوعات پرداختِ مرتبط با آن تسویه شود. سند حسابداری با اکشن «صدور سند حسابداری» صادر می‌شود."
   );
 }
 
@@ -129,6 +164,15 @@ function PlusIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
       <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
 }
@@ -181,10 +225,10 @@ function PaymentList() {
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
           { header: "طرف حساب", render: (r) => r.partyDisplay, filterType: "string", filterValue: (r) => r.partyDisplay },
-          { header: "ارز", render: (r) => r.currencyTitle, filterType: "string", filterValue: (r) => r.currencyTitle },
           { header: "شرح", render: (r) => r.description || "—", filterType: "string", filterValue: (r) => r.description || "" },
-          { header: "جمع مبلغ", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
+          { header: "جمع (ارز پایه)", render: (r) => formatAmountFa(r.totalBaseAmount), filterType: "number", filterValue: (r) => r.totalBaseAmount, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
+          { header: "سند حسابداری", render: (r) => (r.journalEntryReferenceNumber ? toFaDigits(String(r.journalEntryReferenceNumber)) : "—"), width: "110px", filterType: "number", filterValue: (r) => r.journalEntryReferenceNumber ?? undefined },
         ]}
         rows={items}
         edit={{ path: (r) => `/payments/${r.id}/edit` }}
@@ -196,58 +240,87 @@ function PaymentList() {
 
 interface InstrumentRowState {
   id?: number;
+  // کلید موقت داخلی برای ارجاع «قلم» از ردیف‌های موضوعات پرداخت — برای ردیف‌های موجود همیشه
+  // String(id) است؛ برای ردیف‌های تازه یک رشته‌ی یکتای تولیدشده در فرانت.
+  clientKey: string;
   type: InstrumentType;
   amount: string;
+  currencyId: string;
+  fxRate: string;
   cashBoxId: string;
   bankAccountId: string;
   referenceNumber: string;
-  chequeMode: "NEW" | "SPEND";
-  chequeItemId: string;
-  chequeItemDisplay: string;
   chequeNumber: string;
   chequeDueDate: string;
   chequeBankBranchId: string;
+  payableChequeTypeId: string;
+  // برگه‌ی دسته چکِ انتخاب‌شده — فقط وقتی حساب بانکیِ ردیف «دارای دسته چک» باشد (نگاه کنید به
+  // Documents/دسته چک.md)؛ در آن حالت شماره چک آزادانه تایپ نمی‌شود، از این برگه می‌آید.
+  chequeBookLeafId: string;
+  chequeBookLeafDisplay: string;
+  // «صدور چک جدید» (NEW) یا «خرج‌کردن چک دریافتنی موجود» (SPEND) — فقط برای ردیف نوع چک؛ نگاه کنید به backend/src/routes/payments.ts
+  chequeMode: "NEW" | "SPEND";
+  chequeItemId: string;
+  chequeItemDisplay: string;
   posTerminal: string;
   description: string;
-  // فقط برای ردیف‌های موجود (id دار) — برای تشخیص «قفل» بودن ردیف در سند «تایید»شده.
+  // فقط برای ردیف‌های موجود (id دار) که از سرور آمده‌اند؛ برای تشخیص «قفل» بودن ردیف در سند
+  // «تایید»شده استفاده می‌شود (نگاه کنید به DetailInstrumentLine).
   chequeStep?: number | null;
   chequeItemStep?: number | null;
 }
-function emptyInstrumentRow(): InstrumentRowState {
-  return {
-    type: "CASH",
-    amount: "",
-    cashBoxId: "",
-    bankAccountId: "",
-    referenceNumber: "",
-    chequeMode: "NEW",
-    chequeItemId: "",
-    chequeItemDisplay: "",
-    chequeNumber: "",
-    chequeDueDate: "",
-    chequeBankBranchId: "",
-    posTerminal: "",
-    description: "",
-  };
+let clientKeySeq = 0;
+function nextClientKey() {
+  clientKeySeq += 1;
+  return `new-${Date.now()}-${clientKeySeq}`;
 }
-// مشابه isRowLocked در Receipts.tsx: ردیف چک «قفل» است اگر step فعلی چک با chequeStep همین ردیف
-// برابر نباشد (یعنی از زمان این سند، اتفاق دیگری برای آن چک افتاده — واگذاری/وصول/خرج در سند دیگر).
+function emptyInstrumentRow(): InstrumentRowState {
+  return { clientKey: nextClientKey(), type: "CASH", amount: "", currencyId: "", fxRate: "", cashBoxId: "", bankAccountId: "", referenceNumber: "", chequeNumber: "", chequeDueDate: "", chequeBankBranchId: "", payableChequeTypeId: "", chequeBookLeafId: "", chequeBookLeafDisplay: "", chequeMode: "NEW", chequeItemId: "", chequeItemDisplay: "", posTerminal: "", description: "" };
+}
+// ردیف از سند «تایید»شده «قفل» است اگر یک چک به آن وصل باشد و step آن چک دیگر با chequeStep همین
+// ردیف برابر نباشد — یعنی اتفاق دیگری (واگذاری/وصول/...) بعد از این سند برای آن چک افتاده است.
 function isRowLocked(row: InstrumentRowState, semiOpen: boolean) {
   return semiOpen && !!row.id && !!row.chequeItemId && row.chequeStep !== row.chequeItemStep;
 }
 
+const BASIS_FIELD: Record<Exclude<PaymentBasisType, "NONE">, "purchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
+  PURCHASE_INVOICE: "purchaseInvoiceId",
+  SALES_INVOICE: "salesInvoiceId",
+  PURCHASE_ORDER: "purchaseOrderId",
+};
+
 interface SettlementRowState {
+  instrumentClientKey: string;
+  instrumentLabel: string;
   paymentTypeId: string;
+  partyId: string;
+  partyDisplay: string;
+  salesInvoiceId: string;
   purchaseInvoiceId: string;
-  invoiceDisplay: string;
+  purchaseOrderId: string;
+  basisDisplay: string;
+  currencyId: string;
+  fxRate: string;
   amount: string;
   description: string;
+  // طبق «مستندات تغییرات رسید دریافت.md» بند ۴: تسعیر باید فقط در یک نقطه (تایید مودال ارزی، یا صفر
+  // برای مبنای ارز پایه) محاسبه و اینجا ذخیره شود — هرگز به‌صورت مشتق‌شده‌ی زنده در JSX از amount/fxRate
+  // بازمحاسبه نشود. (قفل‌بودن نرخ/مبلغ در گرید نیازی به فیلد جدا ندارد — از روی «ارز غیرپایه + مبنا
+  // ست‌شده» مشتق می‌شود، نگاه کنید به isForeignLocked در SettlementRowFields.)
+  exchangeGainLoss: number;
 }
-function emptySettlementRow(): SettlementRowState {
-  return { paymentTypeId: "", purchaseInvoiceId: "", invoiceDisplay: "", amount: "", description: "" };
+// طبق بند ۲ سند: ارز به‌صورت پیش‌فرض از ارز قلم پرداخت مقداردهی شود.
+function emptySettlementRow(instrumentClientKey: string, instrumentLabel: string, instrumentCurrencyId: string): SettlementRowState {
+  return {
+    instrumentClientKey, instrumentLabel, paymentTypeId: "", partyId: "", partyDisplay: "",
+    salesInvoiceId: "", purchaseInvoiceId: "", purchaseOrderId: "", basisDisplay: "",
+    currencyId: instrumentCurrencyId, fxRate: "", amount: "", description: "",
+    exchangeGainLoss: 0,
+  };
 }
 
 function PaymentForm({ editId }: { editId?: number }) {
+  const { openTab } = useTabs();
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
@@ -256,84 +329,119 @@ function PaymentForm({ editId }: { editId?: number }) {
   const [cashBoxes, setCashBoxes] = useState<CashBoxOption[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccountOption[]>([]);
   const [bankBranches, setBankBranches] = useState<BankBranchOption[]>([]);
+  const [chequeTypes, setChequeTypes] = useState<ChequeTypeOption[]>([]);
   const [pickableCheques, setPickableCheques] = useState<PickableCheque[]>([]);
+  const [pickableChequeBookLeaves, setPickableChequeBookLeaves] = useState<PickableChequeBookLeaf[]>([]);
   const [paymentTypes, setPaymentTypes] = useState<PaymentTypeOption[]>([]);
-  const [pickableInvoices, setPickableInvoices] = useState<PickableInvoice[]>([]);
-  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", partyId: "", partyDisplay: "", currencyId: "", description: "" });
+  const [customerPartyIds, setCustomerPartyIds] = useState<Set<number>>(new Set());
+  const [supplierPartyIds, setSupplierPartyIds] = useState<Set<number>>(new Set());
+  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", partyId: "", partyDisplay: "", description: "" });
   const [instrumentRows, setInstrumentRows] = usePersistedState<InstrumentRowState[]>(`${cacheKey}:instrumentRows`, []);
   const [settlementRows, setSettlementRows] = usePersistedState<SettlementRowState[]>(`${cacheKey}:settlementRows`, []);
-  const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; fiscalPeriodTitle: string } | null>(`${cacheKey}:meta`, null);
+  const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; fiscalPeriodTitle: string; journalEntryId: number | null; journalEntryReferenceNumber: number | null } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const { saved, flash } = useSavedFlash();
 
+  const baseCurrency = currencies.find((c) => c.isBase);
+
   function applyDetail(d: Detail) {
-    setMeta({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle });
-    setHeader({ date: d.date.slice(0, 10), partyId: String(d.partyId), partyDisplay: d.partyDisplay, currencyId: String(d.currencyId), description: d.description || "" });
+    setMeta({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle, journalEntryId: d.journalEntryId ?? null, journalEntryReferenceNumber: d.journalEntryReferenceNumber ?? null });
+    setHeader({ date: d.date.slice(0, 10), partyId: String(d.partyId), partyDisplay: d.partyDisplay, description: d.description || "" });
     setInstrumentRows(
       d.instrumentLines.map((l) => ({
         id: l.id,
+        clientKey: String(l.id),
         type: l.type,
         amount: String(l.amount),
+        currencyId: String(l.currencyId),
+        fxRate: String(l.fxRate),
         cashBoxId: l.cashBoxId ? String(l.cashBoxId) : "",
         bankAccountId: l.bankAccountId ? String(l.bankAccountId) : "",
         referenceNumber: l.referenceNumber || "",
-        chequeMode: l.chequeItemId && !l.chequeNumber ? "SPEND" : "NEW",
-        chequeItemId: l.chequeItemId ? String(l.chequeItemId) : "",
-        chequeItemDisplay: l.chequeItemNumber ? toFaDigits(l.chequeItemNumber) : "",
         chequeNumber: l.chequeNumber || "",
         chequeDueDate: l.chequeDueDate ? l.chequeDueDate.slice(0, 10) : "",
         chequeBankBranchId: l.chequeBankBranchId ? String(l.chequeBankBranchId) : "",
+        payableChequeTypeId: l.payableChequeTypeId ? String(l.payableChequeTypeId) : "",
+        chequeBookLeafId: l.chequeBookLeafId ? String(l.chequeBookLeafId) : "",
+        chequeBookLeafDisplay: l.chequeBookLeafDisplay ? toFaDigits(l.chequeBookLeafDisplay) : "",
+        // ردیف چکی که چک دریافتنیِ موجودی به آن وصل است ولی شماره‌ی چک تازه ندارد = «خرج‌کردن»
+        chequeMode: l.chequeItemId && !l.chequeNumber ? "SPEND" : "NEW",
+        chequeItemId: l.chequeItemId ? String(l.chequeItemId) : "",
+        chequeItemDisplay: l.chequeItemNumber ? toFaDigits(l.chequeItemNumber) : "",
         posTerminal: l.posTerminal || "",
         description: l.description || "",
         chequeStep: l.chequeStep,
         chequeItemStep: l.chequeItemStep,
       }))
     );
+    const instrumentIndexById = new Map(d.instrumentLines.map((l, i) => [l.id, i]));
     setSettlementRows(
       d.settlementLines.map((l) => ({
-        paymentTypeId: l.paymentTypeId ? String(l.paymentTypeId) : "",
+        instrumentClientKey: String(l.instrumentLineId),
+        instrumentLabel: instrumentIndexById.has(l.instrumentLineId)
+          ? `ردیف ${toFaDigits(String(instrumentIndexById.get(l.instrumentLineId)! + 1))} - ${TYPE_FA[d.instrumentLines[instrumentIndexById.get(l.instrumentLineId)!].type]}`
+          : "",
+        paymentTypeId: String(l.paymentTypeId),
+        partyId: String(l.partyId),
+        partyDisplay: l.partyDisplay,
+        salesInvoiceId: l.salesInvoiceId ? String(l.salesInvoiceId) : "",
         purchaseInvoiceId: l.purchaseInvoiceId ? String(l.purchaseInvoiceId) : "",
-        invoiceDisplay: l.purchaseInvoiceNumber ? toFaDigits(String(l.purchaseInvoiceNumber)) : "",
+        purchaseOrderId: l.purchaseOrderId ? String(l.purchaseOrderId) : "",
+        basisDisplay: toFaDigits(String(l.salesInvoiceNumber ?? l.purchaseInvoiceNumber ?? l.purchaseOrderNumber ?? "")),
+        currencyId: String(l.currencyId),
+        fxRate: String(l.fxRate),
         amount: String(l.amount),
         description: l.description || "",
+        exchangeGainLoss: l.exchangeGainLoss,
       }))
     );
   }
 
   useEffect(() => {
     async function init() {
-      const [ps, cs, cbs, bas, bbs, cheques, fp, pts]: [PartyOption[], CurrencyOption[], CashBoxOption[], BankAccountOption[], BankBranchOption[], PickableCheque[], FiscalPeriodRange | null, PaymentTypeOption[]] = await Promise.all([
+      const [ps, cs, cbs, bas, bbs, rts, customers, suppliers, fp, cts, pcs, pbl]: [
+        PartyOption[], CurrencyOption[], CashBoxOption[], BankAccountOption[], BankBranchOption[],
+        PaymentTypeOption[], { partyId: number }[], { partyId: number }[], FiscalPeriodRange | null, ChequeTypeOption[], PickableCheque[], PickableChequeBookLeaf[]
+      ] = await Promise.all([
         api.get("/parties"),
         api.get("/currencies"),
         api.get("/cash-boxes"),
         api.get("/banking/accounts"),
         api.get("/banking/branches"),
-        api.get("/cheques/pickable-receivable"),
-        fetchSelectedFiscalPeriod(),
         api.get("/payment-types"),
+        api.get("/customers"),
+        api.get("/suppliers"),
+        fetchSelectedFiscalPeriod(),
+        api.get("/payable-cheque-types"),
+        api.get("/cheques/pickable-receivable"),
+        api.get("/cheque-book-leaves/pickable"),
       ]);
-      setPaymentTypes(pts.filter((t) => t.isActive));
+      setChequeTypes(cts);
+      setPickableCheques(pcs);
+      setPickableChequeBookLeaves(pbl);
       setParties(ps);
       setCurrencies(cs);
       setCashBoxes(cbs);
       setBankAccounts(bas);
       setBankBranches(bbs);
-      setPickableCheques(cheques);
+      setPaymentTypes(rts.filter((t) => t.isActive));
+      setCustomerPartyIds(new Set(customers.map((c) => c.partyId)));
+      setSupplierPartyIds(new Set(suppliers.map((s) => s.partyId)));
       setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
         setLoaded(true);
         // این تب می‌تواند مدت‌ها باز مانده باشد (سوییچ بین تب‌ها مقدار کش‌شده را حفظ می‌کند —
         // نگاه کنید به usePersistedState) و در همین فاصله چک یکی از ردیف‌ها از طریق سند دیگری
-        // جابه‌جا شده باشد. بدون این بازخوانی، chequeItemStep کش‌شده قدیمی می‌ماند و isRowLocked
-        // ردیف را اشتباهاً «قفل‌نشده» تشخیص می‌دهد. فقط وضعیت سند و step ردیف‌های چکی را از سرور
-        // تازه می‌کنیم؛ بقیه‌ی ورودی‌های کاربر دست‌نخورده می‌ماند.
+        // (واگذاری به بانک/برگشت/نتیجه‌ی وصول) جابه‌جا شده باشد. بدون این بازخوانی، chequeItemStep
+        // کش‌شده قدیمی می‌ماند و isRowLocked ردیف را اشتباهاً «قفل‌نشده» تشخیص می‌دهد. فقط وضعیت
+        // سند و step ردیف‌های چکی را از سرور تازه می‌کنیم؛ بقیه‌ی ورودی‌های کاربر دست‌نخورده می‌ماند.
         if (editId) {
           try {
             const d: Detail = await api.get(`/payments/${editId}`);
-            setMeta((prev) => (prev ? { ...prev, status: d.status } : prev));
+            setMeta((prev) => (prev ? { ...prev, status: d.status, journalEntryId: d.journalEntryId ?? null, journalEntryReferenceNumber: d.journalEntryReferenceNumber ?? null } : prev));
             const stepById = new Map(d.instrumentLines.map((l) => [l.id, { chequeStep: l.chequeStep, chequeItemStep: l.chequeItemStep }]));
             setInstrumentRows((prev) => prev.map((r) => (r.id && stepById.has(r.id) ? { ...r, ...stepById.get(r.id)! } : r)));
           } catch {
@@ -347,9 +455,9 @@ function PaymentForm({ editId }: { editId?: number }) {
         const d: Detail = await api.get(`/payments/${editId}`);
         applyDetail(d);
       } else {
-        setHeader({ date: defaultDocumentDate(fp), partyId: "", partyDisplay: "", currencyId: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), partyId: "", partyDisplay: "", description: "" });
         setInstrumentRows([emptyInstrumentRow()]);
-        setSettlementRows([emptySettlementRow()]);
+        setSettlementRows([]);
         setMeta(null);
       }
       setLoaded(true);
@@ -358,28 +466,41 @@ function PaymentForm({ editId }: { editId?: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
 
-  useEffect(() => {
-    if (!header.partyId) {
-      setPickableInvoices([]);
-      return;
-    }
-    const excl = editId ? `&excludePaymentId=${editId}` : "";
-    api
-      .get(`/payments/pickable-purchase-invoices?partyId=${header.partyId}${excl}`)
-      .then((rows: PickableInvoice[]) => setPickableInvoices(rows))
-      .catch(() => setPickableInvoices([]));
-  }, [header.partyId, editId]);
-
   const status: DocStatus = meta?.status || "DRAFT";
-  // فقط فیلدهای هدر (تاریخ/طرف حساب/ارز) با این معیار قفل می‌شوند.
+  // فقط فیلدهای هدر (تاریخ/طرف حساب) با این معیار قفل می‌شوند — این‌ها هرگز از طریق
+  // «ویرایش سند تایید‌شده» قابل تغییر نیستند (فقط شرح، ردیف‌های ابزار قفل‌نشده، و ردیف‌های تسویه).
   const coreDisabled = !!editId && status !== "DRAFT";
-  // فاز ۲.۲ — سند نیمه‌باز: نگاه کنید به توضیح مشابه در Receipts.tsx.
+  // فاز ۲.۲ — سند نیمه‌باز: در وضعیت «تایید»، سند دیگر کاملاً قفل نیست؛ ردیف‌های ابزار قفل‌نشده و
+  // همه‌ی ردیف‌های تسویه قابل ویرایش/افزودن/حذف‌اند و ذخیره از طریق PUT /payments/:id/edit-approved
+  // انجام می‌شود، نه PUT /payments/:id معمولی.
   const isApprovedSemiOpen = !!editId && status === "APPROVED";
+  // بعد از صدور سند حسابداری، سند پرداخت کاملاً قفل است (هم‌الگوی فاکتور فروش) تا سند حسابداری با آن هم‌خوان بماند
+  const jeLocked = !!meta?.journalEntryId;
+
+  function instrumentLabel(row: InstrumentRowState, idx: number) {
+    return `ردیف ${toFaDigits(String(idx + 1))} - ${TYPE_FA[row.type]}`;
+  }
+
+  // طبق تصمیم صریح کاربر: تا وقتی فیلدهای الزامی سرصفحه (تاریخ/طرف حساب) کامل نشده، افزودن ردیف مجاز
+  // نیست — اولین تلاش باید با پیام خطا رد شود، نه این‌که فقط بی‌صدا غیرفعال باشد (هم‌الگوی
+  // guardRowEntry در فرم‌های مبنادار دیگر، مثل PurchaseInvoices.tsx).
+  function guardHeaderComplete(): boolean {
+    if (!header.date) {
+      setError("تاریخ سند الزامی است");
+      return false;
+    }
+    if (!header.partyId) {
+      setError("طرف حساب الزامی است");
+      return false;
+    }
+    return true;
+  }
 
   function updateInstrumentRow(idx: number, patch: Partial<InstrumentRowState>) {
     setInstrumentRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
   function addInstrumentRow() {
+    if (!guardHeaderComplete()) return;
     setInstrumentRows((prev) => [...prev, emptyInstrumentRow()]);
   }
   function removeInstrumentRow(idx: number) {
@@ -393,79 +514,107 @@ function PaymentForm({ editId }: { editId?: number }) {
   function updateSettlementRow(idx: number, patch: Partial<SettlementRowState>) {
     setSettlementRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
-  function addSettlementRow() {
-    setSettlementRows((prev) => [...prev, emptySettlementRow()]);
-  }
   function removeSettlementRow(idx: number) {
     setSettlementRows((prev) => prev.filter((_, i) => i !== idx));
   }
-
-  const instrumentTotal = instrumentRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-  const settlementTotal = settlementRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-
-  function buildBody() {
-    return {
-      date: header.date,
-      partyId: Number(header.partyId),
-      currencyId: Number(header.currencyId),
-      description: header.description,
-      instrumentLines: instrumentRows
-        .filter((r) => Number(r.amount) > 0)
-        .map((r) => ({
-          type: r.type,
-          amount: Number(r.amount) || 0,
-          cashBoxId: r.cashBoxId ? Number(r.cashBoxId) : null,
-          bankAccountId: r.type === "CHEQUE" && r.chequeMode === "SPEND" ? null : r.bankAccountId ? Number(r.bankAccountId) : null,
-          referenceNumber: r.referenceNumber || null,
-          chequeItemId: r.type === "CHEQUE" && r.chequeMode === "SPEND" ? Number(r.chequeItemId) : null,
-          chequeNumber: r.type === "CHEQUE" && r.chequeMode === "NEW" ? r.chequeNumber || null : null,
-          chequeDueDate: r.type === "CHEQUE" && r.chequeMode === "NEW" ? r.chequeDueDate || null : null,
-          chequeBankBranchId: r.type === "CHEQUE" && r.chequeMode === "NEW" ? (r.chequeBankBranchId ? Number(r.chequeBankBranchId) : null) : null,
-          posTerminal: r.posTerminal || null,
-          description: r.description || null,
-        })),
-      settlementLines: settlementRows
-        .filter((r) => Number(r.amount) > 0)
-        .map((r) => ({
-          paymentTypeId: r.paymentTypeId ? Number(r.paymentTypeId) : (null as unknown as number),
-          purchaseInvoiceId: paymentTypes.find((t) => String(t.id) === r.paymentTypeId)?.basisType === "PURCHASE_INVOICE" && r.purchaseInvoiceId ? Number(r.purchaseInvoiceId) : null,
-          amount: Number(r.amount) || 0,
-          description: r.description || null,
-        })),
-    };
+  // طبق «مستندات تغییرات رسید دریافت.md» بند ۳ (حالت ارز پایه): انتخاب چندگانه‌ی سند مبنا در یک ردیف،
+  // این ردیف را با اولین مورد پر می‌کند و به‌ازای هر مورد اضافه، یک ردیف تازه‌ی هم‌شکل بلافاصله بعد از
+  // آن درج می‌کند — هم‌الگوی «بارگذاری از ابزار پرداخت».
+  function onApplyBasisSelection(idx: number, thisRowPatch: Partial<SettlementRowState>, additionalRows: SettlementRowState[]) {
+    setSettlementRows((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], ...thisRowPatch };
+      if (additionalRows.length) next.splice(idx + 1, 0, ...additionalRows);
+      return next;
+    });
   }
 
-  // بدنه‌ی درخواست PUT /payments/:id/edit-approved (سند نیمه‌باز): مشابه buildBody اما فقط ردیف‌های
-  // ابزار «قفل‌نشده» را می‌فرستد (با id برای ردیف‌های موجود) و ردیف‌های قفل‌شده اصلاً در درخواست
-  // حاضر نیستند — سرور خودش آن‌ها را حفظ می‌کند.
+  // «بارگذاری از ابزار پرداخت»: انتخاب چندگانه‌ی ردیف‌های ابزار پرداخت جاری، و افزودن یک ردیف
+  // موضوعات پرداخت خالی به‌ازای هر ردیف انتخاب‌شده (طبق تصمیم کاربر برای این بخش سند)
+  function loadFromInstruments(rows: (InstrumentRowState & { idx: number })[]) {
+    setSettlementRows((prev) => [
+      ...prev,
+      ...rows.map((r) => emptySettlementRow(r.clientKey, instrumentLabel(r, r.idx), r.currencyId)),
+    ]);
+  }
+
+  // ستون «نوع چک» فقط وقتی لازم است که حداقل یک ردیف «صدور چک جدید» وجود داشته باشد (چک خرج‌شده نوع خودش را دارد)
+  const hasChequeRow = instrumentRows.some((r) => r.type === "CHEQUE" && r.chequeMode === "NEW");
+  const instrumentBaseTotal = !baseCurrency
+    ? 0
+    : roundToCurrencyDecimals(
+        instrumentRows.reduce((s, r) => {
+          const currency = currencies.find((c) => String(c.id) === r.currencyId);
+          if (!currency || !r.amount || !r.fxRate) return s;
+          return s + toBaseCurrencyAmount(Number(r.amount) || 0, Number(r.fxRate) || 1, currency, baseCurrency);
+        }, 0),
+        baseCurrency.decimalPlaces
+      );
+  const settlementBaseTotal = !baseCurrency
+    ? 0
+    : roundToCurrencyDecimals(
+        settlementRows.reduce((s, r) => {
+          const currency = currencies.find((c) => String(c.id) === r.currencyId);
+          if (!currency || !r.amount || !r.fxRate) return s;
+          return s + toBaseCurrencyAmount(Number(r.amount) || 0, Number(r.fxRate) || 1, currency, baseCurrency);
+        }, 0),
+        baseCurrency.decimalPlaces
+      );
+
+  function buildInstrumentLinesPayload() {
+    return instrumentRows
+      .filter((r) => Number(r.amount) > 0)
+      .map((r) => ({
+        clientKey: r.clientKey,
+        type: r.type,
+        amount: Number(r.amount) || 0,
+        currencyId: r.currencyId ? Number(r.currencyId) : undefined,
+        fxRate: r.fxRate ? Number(r.fxRate) : undefined,
+        cashBoxId: r.cashBoxId ? Number(r.cashBoxId) : null,
+        bankAccountId: r.type === "CHEQUE" && r.chequeMode === "SPEND" ? null : r.bankAccountId ? Number(r.bankAccountId) : null,
+        referenceNumber: r.referenceNumber || null,
+        chequeItemId: r.type === "CHEQUE" && r.chequeMode === "SPEND" && r.chequeItemId ? Number(r.chequeItemId) : null,
+        chequeNumber: r.type === "CHEQUE" && r.chequeMode === "NEW" ? r.chequeNumber || null : null,
+        chequeDueDate: r.type === "CHEQUE" && r.chequeMode === "NEW" ? r.chequeDueDate || null : null,
+        chequeBankBranchId: r.type === "CHEQUE" && r.chequeMode === "NEW" && r.chequeBankBranchId ? Number(r.chequeBankBranchId) : null,
+        payableChequeTypeId: r.type === "CHEQUE" && r.chequeMode === "NEW" && r.payableChequeTypeId ? Number(r.payableChequeTypeId) : null,
+        chequeBookLeafId: r.type === "CHEQUE" && r.chequeMode === "NEW" && r.chequeBookLeafId ? Number(r.chequeBookLeafId) : null,
+        posTerminal: r.posTerminal || null,
+        description: r.description || null,
+      }));
+  }
+  function buildSettlementLinesPayload() {
+    return settlementRows
+      .filter((r) => Number(r.amount) > 0)
+      .map((r) => ({
+        paymentTypeId: Number(r.paymentTypeId),
+        instrumentClientKey: r.instrumentClientKey,
+        partyId: Number(r.partyId),
+        salesInvoiceId: r.salesInvoiceId ? Number(r.salesInvoiceId) : null,
+        purchaseInvoiceId: r.purchaseInvoiceId ? Number(r.purchaseInvoiceId) : null,
+        purchaseOrderId: r.purchaseOrderId ? Number(r.purchaseOrderId) : null,
+        currencyId: r.currencyId ? Number(r.currencyId) : undefined,
+        fxRate: r.fxRate ? Number(r.fxRate) : undefined,
+        amount: Number(r.amount) || 0,
+        description: r.description || null,
+      }));
+  }
+
+  function buildBody() {
+    return { date: header.date, partyId: Number(header.partyId), description: header.description, instrumentLines: buildInstrumentLinesPayload(), settlementLines: buildSettlementLinesPayload() };
+  }
+
+  // بدنه‌ی درخواست PUT /payments/:id/edit-approved (سند نیمه‌باز): فقط شرح، ردیف‌های ابزار
+  // «قفل‌نشده» (موجود یا تازه)، و کل ردیف‌های تسویه ارسال می‌شود. ردیف‌های قفل‌شده اصلاً نباید در
+  // درخواست حاضر باشند — سرور خودش آن‌ها را حفظ می‌کند (نگاه کنید به توضیح بالای فایل بک‌اند).
   function buildApprovedEditBody() {
     return {
       description: header.description,
       instrumentLines: instrumentRows
         .filter((r) => !isRowLocked(r, isApprovedSemiOpen))
         .filter((r) => Number(r.amount) > 0)
-        .map((r) => ({
-          id: r.id,
-          type: r.type,
-          amount: Number(r.amount) || 0,
-          cashBoxId: r.cashBoxId ? Number(r.cashBoxId) : null,
-          bankAccountId: r.type === "CHEQUE" && r.chequeMode === "SPEND" ? null : r.bankAccountId ? Number(r.bankAccountId) : null,
-          referenceNumber: r.referenceNumber || null,
-          chequeItemId: r.type === "CHEQUE" && r.chequeMode === "SPEND" ? Number(r.chequeItemId) : null,
-          chequeNumber: r.type === "CHEQUE" && r.chequeMode === "NEW" ? r.chequeNumber || null : null,
-          chequeDueDate: r.type === "CHEQUE" && r.chequeMode === "NEW" ? r.chequeDueDate || null : null,
-          chequeBankBranchId: r.type === "CHEQUE" && r.chequeMode === "NEW" ? (r.chequeBankBranchId ? Number(r.chequeBankBranchId) : null) : null,
-          posTerminal: r.posTerminal || null,
-          description: r.description || null,
-        })),
-      settlementLines: settlementRows
-        .filter((r) => Number(r.amount) > 0)
-        .map((r) => ({
-          paymentTypeId: r.paymentTypeId ? Number(r.paymentTypeId) : (null as unknown as number),
-          purchaseInvoiceId: paymentTypes.find((t) => String(t.id) === r.paymentTypeId)?.basisType === "PURCHASE_INVOICE" && r.purchaseInvoiceId ? Number(r.purchaseInvoiceId) : null,
-          amount: Number(r.amount) || 0,
-          description: r.description || null,
-        })),
+        .map((r) => ({ ...buildInstrumentLinesPayload().find((x) => x.clientKey === r.clientKey)!, id: r.id })),
+      settlementLines: buildSettlementLinesPayload(),
     };
   }
 
@@ -473,11 +622,22 @@ function PaymentForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
 
+    const missingChequeType = instrumentRows.some((r) => r.type === "CHEQUE" && r.chequeMode === "NEW" && Number(r.amount) > 0 && !r.payableChequeTypeId && !isRowLocked(r, isApprovedSemiOpen));
+    if (missingChequeType) return setError("نوع چک در همه‌ی ردیف‌های صدور چک الزامی است");
+    const missingSpendCheque = instrumentRows.some((r) => r.type === "CHEQUE" && r.chequeMode === "SPEND" && !r.chequeItemId && !isRowLocked(r, isApprovedSemiOpen));
+    if (missingSpendCheque) return setError("چک دریافتنی برای خرج‌کردن در ردیف‌های مربوطه انتخاب نشده است");
+    // طبق Documents/دسته چک.md: برای حساب بانکیِ «دارای دسته چک»، انتخاب برگه از دسته چک الزامی است
+    const missingChequeLeaf = instrumentRows.some((r) => {
+      if (r.type !== "CHEQUE" || r.chequeMode !== "NEW" || !(Number(r.amount) > 0) || isRowLocked(r, isApprovedSemiOpen)) return false;
+      const account = bankAccounts.find((a) => String(a.id) === r.bankAccountId);
+      return !!account?.accountType.hasChequeBook && !r.chequeBookLeafId;
+    });
+    if (missingChequeLeaf) return setError("انتخاب برگه چک از دسته چک برای حساب بانکیِ دارای دسته چک الزامی است");
+
     if (isApprovedSemiOpen) {
       const body = buildApprovedEditBody();
-      if (body.settlementLines.length === 0) return setError("حداقل یک ردیف تسویه الزامی است");
-      if (body.settlementLines.some((l) => !l.paymentTypeId)) return setError("نوع پرداخت در همه‌ی ردیف‌های تسویه الزامی است");
-      if (Math.abs(instrumentTotal - settlementTotal) > 0.001) return setError("مجموع ردیف‌های تسویه باید با مجموع ردیف‌های ابزار پرداخت برابر باشد");
+      if (body.settlementLines.length === 0) return setError("حداقل یک ردیف موضوعات پرداخت الزامی است");
+      if (Math.abs(instrumentBaseTotal - settlementBaseTotal) > 0.001) return setError("مجموع ردیف‌های موضوعات پرداخت (به ارز پایه) باید با مجموع ردیف‌های ابزار پرداخت برابر باشد");
       try {
         await api.put(`/payments/${editId}/edit-approved`, body);
         const d: Detail = await api.get(`/payments/${editId}`);
@@ -491,14 +651,12 @@ function PaymentForm({ editId }: { editId?: number }) {
 
     if (!header.date) return setError("تاریخ الزامی است");
     if (!header.partyId) return setError("طرف حساب الزامی است");
-    if (!header.currencyId) return setError("ارز الزامی است");
     const dateErr = validateDocumentDate(header.date, fiscalPeriod);
     if (dateErr) return setError(dateErr);
     const body = buildBody();
     if (body.instrumentLines.length === 0) return setError("حداقل یک ردیف ابزار پرداخت الزامی است");
-    if (body.settlementLines.length === 0) return setError("حداقل یک ردیف تسویه الزامی است");
-    if (body.settlementLines.some((l) => !l.paymentTypeId)) return setError("نوع پرداخت در همه‌ی ردیف‌های تسویه الزامی است");
-    if (Math.abs(instrumentTotal - settlementTotal) > 0.001) return setError("مجموع ردیف‌های تسویه باید با مجموع ردیف‌های ابزار پرداخت برابر باشد");
+    if (body.settlementLines.length === 0) return setError("حداقل یک ردیف موضوعات پرداخت الزامی است");
+    if (Math.abs(instrumentBaseTotal - settlementBaseTotal) > 0.001) return setError("مجموع ردیف‌های موضوعات پرداخت (به ارز پایه) باید با مجموع ردیف‌های ابزار پرداخت برابر باشد");
     try {
       if (editId) {
         await api.put(`/payments/${editId}`, body);
@@ -547,22 +705,76 @@ function PaymentForm({ editId }: { editId?: number }) {
     }
   }
 
-  if (!loaded) return null;
+  async function runJournalAction(method: "post" | "del") {
+    if (!editId) return;
+    try {
+      if (method === "post") {
+        const result: { message?: string } = await api.post(`/payments/${editId}/issue-journal-entry`, {});
+        const d: Detail = await api.get(`/payments/${editId}`);
+        applyDetail(d);
+        flash(result?.message);
+      } else {
+        if (!window.confirm("سند حسابداری صادرشده حذف می‌شود. ادامه می‌دهید؟")) return;
+        await api.del(`/payments/${editId}/journal-entry`);
+        const d: Detail = await api.get(`/payments/${editId}`);
+        applyDetail(d);
+        flash();
+      }
+    } catch (e) {
+      alert((e as ApiError).message);
+    }
+  }
+
+  if (!loaded || !baseCurrency) return null;
+
+  // مانده‌ی واقعی هر ردیف ابزار پرداخت در انتخابگر «بارگذاری از ابزار پرداخت»: مبلغ کامل قلم منهای
+  // مجموع (به ارز پایه) آنچه از قبل به همان قلم در ردیف‌های موضوعات پرداخت فعلیِ فرم تخصیص یافته —
+  // همان منطق instrumentRemainingBaseCapacity، اما بدون استثنای هیچ ردیفی (اینجا برای انتخابِ ردیفِ
+  // تازه است، نه ویرایش ردیف موجود).
+  const instrumentPickerRows = instrumentRows
+    .map((r, idx) => ({ ...r, idx }))
+    .filter((r) => Number(r.amount) > 0)
+    .map((r) => {
+      const currency = currencies.find((c) => String(c.id) === r.currencyId);
+      if (!currency) return { ...r, remainingAmount: Number(r.amount) || 0 };
+      const fullBase = toBaseCurrencyAmount(Number(r.amount) || 0, Number(r.fxRate) || 1, currency, baseCurrency);
+      const allocatedBase = settlementRows.reduce((sum, sr) => {
+        if (sr.instrumentClientKey !== r.clientKey) return sum;
+        const srAmount = Number(sr.amount) || 0;
+        if (!srAmount) return sum;
+        const srCurrency = currencies.find((c) => String(c.id) === sr.currencyId);
+        if (!srCurrency) return sum;
+        return sum + toBaseCurrencyAmount(srAmount, Number(sr.fxRate) || 1, srCurrency, baseCurrency);
+      }, 0);
+      const remainingBase = Math.max(0, roundToCurrencyDecimals(fullBase - allocatedBase, baseCurrency.decimalPlaces));
+      const remainingAmount = roundToCurrencyDecimals(
+        fromBaseCurrencyAmount(remainingBase, Number(r.fxRate) || 1, currency),
+        currency.decimalPlaces
+      );
+      return { ...r, remainingAmount };
+    });
 
   return (
     <FormPage
       title={editId ? "ویرایش سند پرداخت" : "سند پرداخت جدید"}
-      description={status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/طرف حساب/ارز دیگر قابل تغییر نیستند، اما شرح، ردیف‌های ابزار قفل‌نشده و ردیف‌های تسویه مستقیماً قابل ویرایش‌اند." : undefined}
+      description={jeLocked ? "برای این سند پرداخت سند حسابداری صادر شده است؛ برای هر تغییری ابتدا سند حسابداری را حذف کنید." : status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/طرف حساب دیگر قابل تغییر نیستند، اما شرح، ردیف‌های ابزار قفل‌نشده و ردیف‌های موضوعات پرداخت مستقیماً قابل ویرایش‌اند." : undefined}
       formId="payment-form"
       closePath="/payments"
       newPath="/payments/new"
       onDelete={!editId || status === "DRAFT" ? handleDelete : undefined}
-      saveDisabled={false}
+      saveDisabled={jeLocked}
       extraActions={
         meta
           ? [
               ...(status === "DRAFT" ? [{ label: "تایید", icon: <CheckIcon />, onClick: handleApprove }] : []),
-              ...(status === "APPROVED" ? [{ label: "برگشت از تایید", icon: <UndoIcon />, onClick: handleUnapprove }] : []),
+              ...(status === "APPROVED" && !jeLocked ? [{ label: "برگشت از تایید", icon: <UndoIcon />, onClick: handleUnapprove }] : []),
+              ...(status === "APPROVED" && !jeLocked ? [{ label: "صدور سند حسابداری", icon: <PlusIcon />, onClick: () => runJournalAction("post") }] : []),
+              ...(jeLocked
+                ? [
+                    { label: "مشاهده سند حسابداری", icon: <EyeIcon />, onClick: () => openTab(`/journal-entries/${meta?.journalEntryId}/edit`) },
+                    { label: "حذف سند حسابداری", icon: <UndoIcon />, onClick: () => runJournalAction("del") },
+                  ]
+                : []),
             ]
           : []
       }
@@ -570,7 +782,10 @@ function PaymentForm({ editId }: { editId?: number }) {
     >
       <form id="payment-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
+        {saved && <div className="alert warn">{saved}</div>}
+
+        {/* بعد از صدور سند حسابداری، همه‌ی اطلاعات سند (هدر، ردیف‌های ابزار، موضوعات پرداخت، شرح) قفل است */}
+        <fieldset disabled={jeLocked} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
 
         <fieldset disabled={coreDisabled} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
@@ -586,6 +801,12 @@ function PaymentForm({ editId }: { editId?: number }) {
               <label>وضعیت</label>
               <div><span className="badge">{STATUS_FA[status]}</span></div>
             </div>
+            {meta?.journalEntryReferenceNumber && (
+              <div className="form-field">
+                <label>سند حسابداری</label>
+                <input dir="ltr" value={toFaDigits(String(meta.journalEntryReferenceNumber))} disabled />
+              </div>
+            )}
             <div className="form-field">
               <label>تاریخ سند<RequiredMark /></label>
               <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
@@ -604,20 +825,11 @@ function PaymentForm({ editId }: { editId?: number }) {
                 onSelect={(p) => setHeader({ ...header, partyId: String(p.id), partyDisplay: partyDisplayName(p) })}
               />
             </div>
-            <div className="form-field">
-              <label>ارز<RequiredMark /></label>
-              <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value })} disabled={coreDisabled}>
-                <option value="">انتخاب کنید</option>
-                {currencies.map((c) => (
-                  <option key={c.id} value={c.id}>{c.title}</option>
-                ))}
-              </select>
-            </div>
           </div>
         </fieldset>
 
-        {/* شرح، برخلاف بقیه‌ی فیلدهای هدر، حتی در سند «تایید»شده هم قابل ویرایش است — نگاه کنید به
-            توضیح مشابه در Receipts.tsx. */}
+        {/* شرح، برخلاف بقیه‌ی فیلدهای هدر، حتی در سند «تایید»شده هم قابل ویرایش است (بخشی از
+            PUT /payments/:id/edit-approved) — به همین دلیل بیرون از fieldset قفل‌شونده قرار دارد. */}
         <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
           <div className="form-field full">
             <label>شرح</label>
@@ -625,11 +837,15 @@ function PaymentForm({ editId }: { editId?: number }) {
           </div>
         </div>
 
-        {isApprovedSemiOpen && (
+        {jeLocked && (
           <div className="alert warn" style={{ marginBottom: 12 }}>
-            این سند «تایید» شده است. ردیف‌های ابزار قفل‌نشده (چک‌هایی که هنوز واگذار/وصول/برگشت نشده‌اند، یا ردیف‌های غیرچک) و کل ردیف‌های تسویه
-            مستقیماً قابل ویرایش/افزودن/حذف‌اند، بدون نیاز به «برگشت از تایید». ردیف‌های قفل‌شده (علامت‌خورده با «قفل») فقط قابل مشاهده‌اند. برای چک
-            دریافتنیِ خرج‌شده‌ی متعلق به سند دیگر، فقط شرح قابل تغییر است.
+            برای این سند پرداخت سند حسابداری صادر شده است؛ همه‌ی اطلاعات سند قفل است. برای هر تغییری ابتدا سند حسابداری را حذف کنید.
+          </div>
+        )}
+        {isApprovedSemiOpen && !jeLocked && (
+          <div className="alert warn" style={{ marginBottom: 12 }}>
+            این سند «تایید» شده است. ردیف‌های ابزار قفل‌نشده (چک‌هایی که هنوز واگذار/وصول نشده‌اند، یا ردیف‌های غیرچک) و کل ردیف‌های موضوعات پرداخت
+            مستقیماً قابل ویرایش/افزودن/حذف‌اند، بدون نیاز به «برگشت از تایید». ردیف‌های قفل‌شده (علامت‌خورده با «قفل») فقط قابل مشاهده‌اند.
           </div>
         )}
 
@@ -647,7 +863,10 @@ function PaymentForm({ editId }: { editId?: number }) {
                 <tr>
                   <th>ردیف</th>
                   <th>نوع</th>
+                  {hasChequeRow && <th>نوع چک<RequiredMark /></th>}
                   <th>مبلغ</th>
+                  <th>ارز</th>
+                  <th>نرخ ارز</th>
                   <th>جزئیات</th>
                   <th>شرح</th>
                   <th></th>
@@ -656,34 +875,68 @@ function PaymentForm({ editId }: { editId?: number }) {
               <tbody>
                 {instrumentRows.map((row, idx) => {
                   const locked = isRowLocked(row, isApprovedSemiOpen);
-                  const existingRow = isApprovedSemiOpen && !!row.id;
-                  // نوع ابزار و حالت چک (صدور تازه/خرج‌کردن موجود) یک ردیف موجود، حتی اگر قفل نباشد،
-                  // در «ویرایش سند تایید‌شده» قابل تغییر نیست.
-                  const typeDisabled = locked || existingRow;
-                  // چک دریافتنیِ خرج‌شده که متعلق به همین سند است ولی اطلاعات اصلی‌اش به سند دریافت
-                  // دیگری تعلق دارد: فقط شرح قابل تغییر است؛ انتخاب چک دیگر برای یک ردیف موجود معنا
-                  // ندارد (سرور هم آن را نادیده می‌گیرد).
-                  const spendPickerDisabled = locked || existingRow;
+                  // نوع ابزار یک ردیف موجود، حتی اگر قفل نباشد، در «ویرایش سند تایید‌شده» قابل تغییر
+                  // نیست (طبق قرارداد بک‌اند)؛ فقط ردیف‌های تازه (بدون id) نوعشان آزاد است.
+                  const typeDisabled = locked || (isApprovedSemiOpen && !!row.id);
+                  // چک دریافتنیِ خرج‌شده متعلق به سند دیگری است: انتخاب چک و مبلغ آن در یک ردیف موجود قابل تغییر نیست
+                  const spendPickerDisabled = locked || (isApprovedSemiOpen && !!row.id);
+                  const isSpendRow = row.type === "CHEQUE" && row.chequeMode === "SPEND";
+                  const bankAccount = bankAccounts.find((a) => String(a.id) === row.bankAccountId);
+                  const isBaseCurrencyRow = !row.currencyId || Number(row.currencyId) === baseCurrency.id;
                   return (
-                    <tr key={idx} style={locked ? { opacity: 0.65 } : undefined}>
+                    <tr key={row.clientKey} style={locked ? { opacity: 0.65 } : undefined}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                       <td style={{ minWidth: 140 }}>
-                        <select value={row.type} onChange={(e) => updateInstrumentRow(idx, { type: e.target.value as InstrumentType })} disabled={typeDisabled}>
+                        <select
+                          value={row.type}
+                          onChange={(e) => {
+                            const type = e.target.value as InstrumentType;
+                            // طبق سند: چک همیشه با ارز پایه؛ حواله/پوز از ارز حساب بانکی (تا انتخاب حساب، خالی)
+                            const currencyId = type === "CHEQUE" ? String(baseCurrency.id) : type === "CASH" ? row.currencyId : "";
+                            updateInstrumentRow(idx, { type, currencyId, fxRate: type === "CHEQUE" ? "1" : row.fxRate });
+                          }}
+                          disabled={typeDisabled}
+                        >
                           {(Object.keys(TYPE_FA) as InstrumentType[]).map((t) => (
                             <option key={t} value={t}>{TYPE_FA[t]}</option>
                           ))}
                         </select>
                       </td>
+                      {hasChequeRow && (
+                        <td style={{ minWidth: 150 }}>
+                          {row.type === "CHEQUE" && row.chequeMode === "NEW" && (
+                            <select value={row.payableChequeTypeId} onChange={(e) => updateInstrumentRow(idx, { payableChequeTypeId: e.target.value })} disabled={locked}>
+                              <option value="">انتخاب نوع چک</option>
+                              {chequeTypes.map((t) => (
+                                <option key={t.id} value={t.id}>{t.title}</option>
+                              ))}
+                            </select>
+                          )}
+                        </td>
+                      )}
                       <td style={{ minWidth: 130 }}>
-                        <AmountInput
-                          value={row.amount}
-                          onChange={(v) => updateInstrumentRow(idx, { amount: v })}
-                          allowDecimal
-                          placeholder="۰"
-                          disabled={locked || (row.type === "CHEQUE" && row.chequeMode === "SPEND")}
-                        />
+                        <AmountInput value={row.amount} onChange={(v) => updateInstrumentRow(idx, { amount: v })} allowDecimal placeholder="۰" disabled={locked || isSpendRow} />
                       </td>
-                      <td style={{ minWidth: 340 }}>
+                      <td style={{ minWidth: 130 }}>
+                        {row.type === "CASH" && (
+                          <select value={row.currencyId} onChange={(e) => updateInstrumentRow(idx, { currencyId: e.target.value, fxRate: Number(e.target.value) === baseCurrency.id ? "1" : row.fxRate })} disabled={locked}>
+                            <option value="">انتخاب ارز</option>
+                            {currencies.map((c) => (
+                              <option key={c.id} value={c.id}>{c.title}</option>
+                            ))}
+                          </select>
+                        )}
+                        {row.type === "CHEQUE" && <span>{baseCurrency.title}</span>}
+                        {(row.type === "BANK_TRANSFER" || row.type === "POS") && <span>{bankAccount?.currency?.title || "—"}</span>}
+                      </td>
+                      <td style={{ minWidth: 100 }}>
+                        {isBaseCurrencyRow ? (
+                          <input dir="ltr" value={toFaDigits("1")} disabled />
+                        ) : (
+                          <AmountInput value={row.fxRate} onChange={(v) => updateInstrumentRow(idx, { fxRate: v })} allowDecimal placeholder="نرخ ارز" disabled={locked} />
+                        )}
+                      </td>
+                      <td style={{ minWidth: 320 }}>
                         {row.type === "CASH" && (
                           <select value={row.cashBoxId} onChange={(e) => updateInstrumentRow(idx, { cashBoxId: e.target.value })} disabled={locked}>
                             <option value="">انتخاب صندوق</option>
@@ -694,7 +947,16 @@ function PaymentForm({ editId }: { editId?: number }) {
                         )}
                         {(row.type === "BANK_TRANSFER" || row.type === "POS") && (
                           <div style={{ display: "flex", gap: 6 }}>
-                            <select value={row.bankAccountId} onChange={(e) => updateInstrumentRow(idx, { bankAccountId: e.target.value })} disabled={locked} style={{ flex: 1 }}>
+                            <select
+                              value={row.bankAccountId}
+                              onChange={(e) => {
+                                const acc = bankAccounts.find((a) => String(a.id) === e.target.value);
+                                const currencyId = acc?.currencyId ? String(acc.currencyId) : "";
+                                updateInstrumentRow(idx, { bankAccountId: e.target.value, currencyId, fxRate: acc?.currencyId === baseCurrency.id ? "1" : row.fxRate });
+                              }}
+                              disabled={locked}
+                              style={{ flex: 1 }}
+                            >
                               <option value="">انتخاب حساب بانکی</option>
                               {bankAccounts.map((a) => (
                                 <option key={a.id} value={a.id}>{a.accountNumber} — {a.bankBranch.title}</option>
@@ -717,13 +979,41 @@ function PaymentForm({ editId }: { editId?: number }) {
                                 صدور چک جدید
                               </label>
                               <label style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                                <input type="radio" checked={row.chequeMode === "SPEND"} onChange={() => updateInstrumentRow(idx, { chequeMode: "SPEND", chequeNumber: "", chequeDueDate: "", chequeBankBranchId: "" })} disabled={typeDisabled} />
+                                <input
+                                  type="radio"
+                                  checked={row.chequeMode === "SPEND"}
+                                  onChange={() => updateInstrumentRow(idx, { chequeMode: "SPEND", chequeNumber: "", chequeDueDate: "", chequeBankBranchId: "", bankAccountId: "", payableChequeTypeId: "" })}
+                                  disabled={typeDisabled}
+                                />
                                 خرج‌کردن چک دریافتنی موجود
                               </label>
                             </div>
                             {row.chequeMode === "NEW" ? (
                               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                <input placeholder="شماره چک" value={row.chequeNumber} onChange={(e) => updateInstrumentRow(idx, { chequeNumber: e.target.value })} disabled={locked} style={{ width: 110 }} />
+                                {bankAccount?.accountType.hasChequeBook ? (
+                                  <div style={{ width: 160 }}>
+                                    <RecordPickerField
+                                      title="انتخاب برگه چک"
+                                      placeholder="انتخاب برگه از دسته چک"
+                                      disabled={locked}
+                                      displayValue={row.chequeBookLeafDisplay}
+                                      rows={pickableChequeBookLeaves.filter((l) => l.bankAccountId === Number(row.bankAccountId))}
+                                      columns={[
+                                        { header: "سری", render: (l) => l.series, filterValue: (l) => l.series, width: "80px" },
+                                        { header: "شماره", render: (l) => toFaDigits(l.number), filterValue: (l) => l.number },
+                                      ]}
+                                      onSelect={(l) =>
+                                        updateInstrumentRow(idx, {
+                                          chequeBookLeafId: String((l as PickableChequeBookLeaf).id),
+                                          chequeBookLeafDisplay: `${(l as PickableChequeBookLeaf).series} - ${(l as PickableChequeBookLeaf).number}`,
+                                          chequeNumber: (l as PickableChequeBookLeaf).number,
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                ) : (
+                                  <input placeholder="شماره چک" value={row.chequeNumber} onChange={(e) => updateInstrumentRow(idx, { chequeNumber: e.target.value })} disabled={locked} style={{ width: 110 }} />
+                                )}
                                 <div style={{ width: 140 }}>
                                   <JalaliDatePicker value={row.chequeDueDate} onChange={(v) => updateInstrumentRow(idx, { chequeDueDate: v })} />
                                 </div>
@@ -733,7 +1023,20 @@ function PaymentForm({ editId }: { editId?: number }) {
                                     <option key={b.id} value={b.id}>{b.title}</option>
                                   ))}
                                 </select>
-                                <select value={row.bankAccountId} onChange={(e) => updateInstrumentRow(idx, { bankAccountId: e.target.value })} disabled={locked} style={{ flex: "1 1 160px" }}>
+                                <select
+                                  value={row.bankAccountId}
+                                  onChange={(e) =>
+                                    updateInstrumentRow(idx, {
+                                      bankAccountId: e.target.value,
+                                      // با تغییر حساب بانکی صادرکننده، برگه‌ی دسته چک/شماره‌ی قبلی دیگر معتبر نیست
+                                      chequeBookLeafId: "",
+                                      chequeBookLeafDisplay: "",
+                                      chequeNumber: "",
+                                    })
+                                  }
+                                  disabled={locked}
+                                  style={{ flex: "1 1 160px" }}
+                                >
                                   <option value="">حساب بانکی صادرکننده</option>
                                   {bankAccounts.map((a) => (
                                     <option key={a.id} value={a.id}>{a.accountNumber} — {a.bankBranch.title}</option>
@@ -756,6 +1059,8 @@ function PaymentForm({ editId }: { editId?: number }) {
                                     chequeItemId: String((c as PickableCheque).id),
                                     chequeItemDisplay: (c as PickableCheque).number,
                                     amount: String((c as PickableCheque).amount),
+                                    currencyId: String(baseCurrency.id),
+                                    fxRate: "1",
                                   })
                                 }
                               />
@@ -768,7 +1073,7 @@ function PaymentForm({ editId }: { editId?: number }) {
                       </td>
                       <td>
                         {locked ? (
-                          <span className="badge" title="این چک از زمان این سند تغییر کرده (واگذار/وصول/برگشت/...) و فقط از همان سند مربوطه قابل اصلاح است">قفل</span>
+                          <span className="badge" title="این چک از زمان این سند تغییر کرده (واگذار/وصول/...) و فقط از همان سند مربوطه قابل اصلاح است">قفل</span>
                         ) : (
                           <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeInstrumentRow(idx)}>
                             حذف
@@ -783,15 +1088,26 @@ function PaymentForm({ editId }: { editId?: number }) {
           </div>
           <div className="grid-footer je-lines-footer">
             <span className="grid-footer-info">{instrumentRows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(instrumentRows.length))} ردیف`}</span>
-            <span className="je-lines-totals">جمع ابزار پرداخت: {formatAmountFa(instrumentTotal)}</span>
+            <span className="je-lines-totals">جمع ابزار پرداخت (ارز پایه): {formatAmountFa(instrumentBaseTotal)}</span>
           </div>
         </div>
 
         <div className="je-lines-toolbar" style={{ marginTop: 16 }}>
-          <span className="je-lines-title">ردیف‌های تسویه</span>
-          <button type="button" className="toolbar-icon-btn primary" onClick={addSettlementRow} title="ردیف جدید">
-            <PlusIcon />
-          </button>
+          <span className="je-lines-title">ردیف‌های موضوعات پرداخت</span>
+          <RecordPickerField
+            title="انتخاب ردیف‌های ابزار پرداخت برای بارگذاری"
+            displayValue=""
+            placeholder="بارگذاری از ابزار پرداخت"
+            rows={instrumentPickerRows}
+            multiSelect
+            columns={[
+              { header: "ردیف", render: (r: any) => toFaDigits(String(r.idx + 1)), filterValue: (r: any) => String(r.idx + 1), width: "60px" },
+              { header: "نوع", render: (r: any) => TYPE_FA[r.type as InstrumentType], filterValue: (r: any) => TYPE_FA[r.type as InstrumentType] },
+              { header: "مبلغ", render: (r: any) => formatAmountFa(Number(r.remainingAmount)), filterValue: (r: any) => r.remainingAmount },
+            ]}
+            onOpen={guardHeaderComplete}
+            onSelectMultiple={(rows) => loadFromInstruments(rows as any)}
+          />
         </div>
         <div className="grid-wrap je-lines-wrap">
           <div className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
@@ -799,68 +1115,40 @@ function PaymentForm({ editId }: { editId?: number }) {
               <thead>
                 <tr>
                   <th>ردیف</th>
+                  <th>قلم</th>
                   <th>نوع پرداخت</th>
-                  <th>فاکتور خرید</th>
+                  <th>طرف حساب</th>
+                  <th>ارز</th>
+                  <th>مبنا</th>
+                  <th>نرخ ارز</th>
                   <th>مبلغ</th>
+                  <th>تسعیر</th>
                   <th>شرح</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
                 {settlementRows.map((row, idx) => (
-                  <tr key={idx}>
-                    <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
-                    <td style={{ minWidth: 180 }}>
-                      <select
-                        value={row.paymentTypeId}
-                        onChange={(e) => {
-                          const pt = paymentTypes.find((t) => String(t.id) === e.target.value);
-                          const keepInvoice = pt?.basisType === "PURCHASE_INVOICE";
-                          updateSettlementRow(idx, {
-                            paymentTypeId: e.target.value,
-                            ...(keepInvoice ? {} : { purchaseInvoiceId: "", invoiceDisplay: "" }),
-                          });
-                        }}
-                      >
-                        <option value="">انتخاب کنید</option>
-                        {paymentTypes.map((t) => (
-                          <option key={t.id} value={t.id}>{t.title}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td style={{ minWidth: 220 }}>
-                      <RecordPickerField
-                        title="انتخاب فاکتور خرید"
-                        disabled={!header.partyId || paymentTypes.find((t) => String(t.id) === row.paymentTypeId)?.basisType !== "PURCHASE_INVOICE"}
-                        placeholder="بدون مبنا"
-                        displayValue={row.invoiceDisplay}
-                        rows={pickableInvoices}
-                        columns={[
-                          { header: "شماره", render: (l) => toFaDigits(String(l.number)), filterValue: (l) => String(l.number), width: "70px" },
-                          { header: "مانده", render: (l) => formatAmountFa(l.remaining), filterValue: (l) => String(l.remaining), width: "100px" },
-                        ]}
-                        onSelect={(l) =>
-                          updateSettlementRow(idx, {
-                            purchaseInvoiceId: String((l as PickableInvoice).purchaseInvoiceId),
-                            invoiceDisplay: toFaDigits(String((l as PickableInvoice).number)),
-                            amount: row.amount || String((l as PickableInvoice).remaining),
-                          })
-                        }
-                        onClear={() => updateSettlementRow(idx, { purchaseInvoiceId: "", invoiceDisplay: "" })}
-                      />
-                    </td>
-                    <td style={{ minWidth: 130 }}>
-                      <AmountInput value={row.amount} onChange={(v) => updateSettlementRow(idx, { amount: v })} allowDecimal placeholder="۰" />
-                    </td>
-                    <td style={{ minWidth: 160 }}>
-                      <input value={row.description} onChange={(e) => updateSettlementRow(idx, { description: e.target.value })} />
-                    </td>
-                    <td>
-                      <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeSettlementRow(idx)}>
-                        حذف
-                      </button>
-                    </td>
-                  </tr>
+                  <SettlementRowFields
+                    key={idx}
+                    idx={idx}
+                    row={row}
+                    onChange={(patch) => updateSettlementRow(idx, patch)}
+                    onRemove={() => removeSettlementRow(idx)}
+                    paymentTypes={paymentTypes}
+                    parties={parties}
+                    customerPartyIds={customerPartyIds}
+                    supplierPartyIds={supplierPartyIds}
+                    currencies={currencies}
+                    baseCurrency={baseCurrency}
+                    instrumentRows={instrumentRows}
+                    editId={editId}
+                    headerPartyId={header.partyId}
+                    headerPartyDisplay={header.partyDisplay}
+                    headerDate={header.date}
+                    allSettlementRows={settlementRows}
+                    onApplyBasisSelection={onApplyBasisSelection}
+                  />
                 ))}
               </tbody>
             </table>
@@ -868,12 +1156,446 @@ function PaymentForm({ editId }: { editId?: number }) {
           <div className="grid-footer je-lines-footer">
             <span className="grid-footer-info">{settlementRows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(settlementRows.length))} ردیف`}</span>
             <span className="je-lines-totals">
-              جمع تسویه: {formatAmountFa(settlementTotal)}
-              {Math.abs(instrumentTotal - settlementTotal) > 0.001 && <span style={{ color: "var(--danger, #c0392b)" }}> — با جمع ابزار پرداخت برابر نیست</span>}
+              جمع موضوعات پرداخت (ارز پایه): {formatAmountFa(settlementBaseTotal)}
+              {Math.abs(instrumentBaseTotal - settlementBaseTotal) > 0.001 && <span style={{ color: "var(--danger, #c0392b)" }}> — با جمع ابزار پرداخت برابر نیست</span>}
             </span>
           </div>
         </div>
+        </fieldset>
       </form>
     </FormPage>
+  );
+}
+
+function SettlementRowFields({
+  idx, row, onChange, onRemove, paymentTypes, parties, customerPartyIds, supplierPartyIds, currencies, baseCurrency, instrumentRows, editId, headerPartyId, headerPartyDisplay, headerDate, allSettlementRows, onApplyBasisSelection,
+}: {
+  idx: number;
+  row: SettlementRowState;
+  onChange: (patch: Partial<SettlementRowState>) => void;
+  onRemove: () => void;
+  paymentTypes: PaymentTypeOption[];
+  parties: PartyOption[];
+  customerPartyIds: Set<number>;
+  supplierPartyIds: Set<number>;
+  currencies: CurrencyOption[];
+  baseCurrency: CurrencyOption;
+  instrumentRows: InstrumentRowState[];
+  editId?: number;
+  headerPartyId: string;
+  headerPartyDisplay: string;
+  headerDate: string;
+  allSettlementRows: SettlementRowState[];
+  onApplyBasisSelection: (idx: number, thisRowPatch: Partial<SettlementRowState>, additionalRows: SettlementRowState[]) => void;
+}) {
+  const [fxModalOpen, setFxModalOpen] = useState(false);
+  const [basisCandidates, setBasisCandidates] = useState<BasisCandidate[]>([]);
+  const paymentType = paymentTypes.find((t) => String(t.id) === row.paymentTypeId);
+  const basisType = paymentType?.basisType;
+  const instrumentRow = instrumentRows.find((r) => r.clientKey === row.instrumentClientKey);
+
+  useEffect(() => {
+    if (!basisType || basisType === "NONE" || !row.partyId) {
+      setBasisCandidates([]);
+      return;
+    }
+    const excl = editId ? `&excludePaymentId=${editId}` : "";
+    api
+      .get(`/payments/pickable-basis-documents?basisType=${basisType}&partyId=${row.partyId}${excl}`)
+      .then((rows: BasisCandidate[]) => setBasisCandidates(rows))
+      .catch(() => setBasisCandidates([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [basisType, row.partyId, editId]);
+
+  // مانده‌ی واقعاً قابل تسویه‌ی یک سند مبنا برای این ردیف: مانده‌ی گزارش‌شده توسط سرور، منهای مبلغ
+  // ردیف‌های خواهرِ همین فرم (هنوز ذخیره‌نشده) که به همان سند مبنا ارجاع می‌دهند — وگرنه انتخاب یک
+  // فاکتور در دو ردیف هم‌زمان، هر دو را تا سقف کامل مانده‌ی سرور مجاز نشان می‌داد. تبدیل ارز فقط برای
+  // برآورد پیش‌فرض/نمایشی است؛ اعتبارسنجی واقعی همیشه توسط سرور انجام می‌شود.
+  function effectiveRemaining(candidate: BasisCandidate): number {
+    if (!basisType || basisType === "NONE") return candidate.remaining;
+    const field = BASIS_FIELD[basisType];
+    const basisCurrency = currencies.find((c) => c.id === candidate.currencyId);
+    const allocatedByOthers = allSettlementRows.reduce((sum, r, i) => {
+      if (i === idx) return sum;
+      const rBasisId = (r as any)[field];
+      if (!rBasisId || Number(rBasisId) !== candidate.id) return sum;
+      const rAmount = Number(r.amount) || 0;
+      if (!rAmount) return sum;
+      if (!basisCurrency) return sum + rAmount;
+      const rCurrency = currencies.find((c) => String(c.id) === r.currencyId);
+      if (!rCurrency) return sum + rAmount;
+      if (rCurrency.id === basisCurrency.id) return sum + rAmount;
+      const rBase = toBaseCurrencyAmount(rAmount, Number(r.fxRate) || 1, rCurrency, baseCurrency);
+      return sum + fromBaseCurrencyAmount(rBase, candidate.fxRate, basisCurrency);
+    }, 0);
+    const remaining = candidate.remaining - allocatedByOthers;
+    return basisCurrency ? roundToCurrencyDecimals(remaining, basisCurrency.decimalPlaces) : remaining;
+  }
+
+  const eligibleParties =
+    !paymentType ? []
+    : paymentType.nature === "SUPPLIER_PAYMENT" || paymentType.nature === "ADVANCE_PAYMENT" ? parties.filter((p) => supplierPartyIds.has(p.id))
+    : paymentType.nature === "CUSTOMER_PAYMENT" ? parties.filter((p) => customerPartyIds.has(p.id))
+    : parties;
+
+  const rowCurrency = currencies.find((c) => String(c.id) === row.currencyId);
+  const isBaseCurrencyRow = !row.currencyId || Number(row.currencyId) === baseCurrency.id;
+
+  const currentBasisId = row.salesInvoiceId || row.purchaseInvoiceId || row.purchaseOrderId;
+
+  // مانده‌ی واقعاً باقی‌مانده‌ی خودِ ردیف ابزار پرداخت (قلم) برای این ردیف موضوع پرداخت: baseAmount قلم
+  // منهای مبلغ (به ارز پایه) ردیف‌های خواهرِ همین فرم که به همان قلم ارجاع می‌دهند (به‌جز خودِ این ردیف).
+  // طبق «مستندات تغییرات رسید دریافت.md» بند ۳ (حالت ارز غیرپایه): کنترل تایید مودال دقیقاً روی همین مقدار.
+  function instrumentRemainingBaseCapacity(): number {
+    if (!instrumentRow) return 0;
+    const instrumentCurrency = currencies.find((c) => String(c.id) === instrumentRow.currencyId);
+    if (!instrumentCurrency) return 0;
+    const instrumentBase = toBaseCurrencyAmount(Number(instrumentRow.amount) || 0, Number(instrumentRow.fxRate) || 1, instrumentCurrency, baseCurrency);
+    const allocatedByOthers = allSettlementRows.reduce((sum, r, i) => {
+      if (i === idx || r.instrumentClientKey !== row.instrumentClientKey) return sum;
+      const rAmount = Number(r.amount) || 0;
+      if (!rAmount) return sum;
+      const rCurrency = currencies.find((c) => String(c.id) === r.currencyId);
+      if (!rCurrency) return sum;
+      return sum + toBaseCurrencyAmount(rAmount, Number(r.fxRate) || 1, rCurrency, baseCurrency);
+    }, 0);
+    return roundToCurrencyDecimals(instrumentBase - allocatedByOthers, baseCurrency.decimalPlaces);
+  }
+
+  // طبق سند: پیش‌فرض طرف حساب هر ردیف، طرف حساب هدر است — فقط اگر با شرط نوع پرداخت سازگار باشد
+  // (مشتری/تامین‌کننده بودن طرف حساب هدر)؛ برای «سایر»/وی‌ای‌تی بدون شرط همیشه ست می‌شود.
+  function onPaymentTypeChange(paymentTypeId: string) {
+    const rt = paymentTypes.find((t) => String(t.id) === paymentTypeId);
+    let partyId = row.partyId;
+    let partyDisplay = row.partyDisplay;
+    if (rt && !partyId && headerPartyId) {
+      const headerPartyIdNum = Number(headerPartyId);
+      const qualifies =
+        rt.nature === "SUPPLIER_PAYMENT" || rt.nature === "ADVANCE_PAYMENT" ? supplierPartyIds.has(headerPartyIdNum)
+        : rt.nature === "CUSTOMER_PAYMENT" ? customerPartyIds.has(headerPartyIdNum)
+        : true;
+      if (qualifies) {
+        partyId = headerPartyId;
+        partyDisplay = headerPartyDisplay;
+      }
+    }
+    onChange({
+      paymentTypeId,
+      partyId, partyDisplay,
+      salesInvoiceId: "", purchaseInvoiceId: "", purchaseOrderId: "", basisDisplay: "",
+    });
+  }
+
+  // فقط برای حالت ارز پایه استفاده می‌شود (نگاه کنید به onBasisMultiSelect) — نرخ همیشه «۱» و تسعیر
+  // همیشه صفر است (طبق بند ۴ سند: «فراخوانی محاسبه تسعیر برای موضوعات با ارز پایه انجام نشود»).
+  // extraConsumedBase: مبلغِ (به ارز پایه) از همین قلم که در همین درخواستِ انتخاب چندگانه، به ردیف‌های
+  // قبلی این دسته (نه ردیف‌های خواهرِ از قبل موجود — آن‌ها را instrumentRemainingBaseCapacity خودش حساب
+  // می‌کند) اختصاص یافته؛ چون چند ردیف تازه در یک عمل ساخته می‌شوند و هنوز در allSettlementRows نیستند.
+  function computeBasisPatch(basis: BasisCandidate, extraConsumedBase: number): Partial<SettlementRowState> {
+    if (!basisType || basisType === "NONE") return {};
+    const field = BASIS_FIELD[basisType];
+    const currency = currencies.find((c) => c.id === basis.currencyId);
+    if (!currency) return {};
+    let amount = "";
+    if (instrumentRow) {
+      const remaining = effectiveRemaining(basis);
+      // طبق گزارش کاربر: وقتی ارز ردیف با ارز قلم یکسان است، مبلغ پیش‌فرض باید مانده‌ی واقعی قلم باشد
+      // (مبلغ کامل منهای آنچه به ردیف‌های خواهر همین قلم تخصیص یافته)، نه مبلغ کامل قلم — قبلاً همیشه
+      // مبلغ کامل قلم استفاده می‌شد که در ردیف دوم/بعدیِ همان قلم، پیش‌فرض را اشتباهاً بزرگ نشان می‌داد.
+      if (instrumentRow.currencyId === String(currency.id)) {
+        const instrumentRemainingBase = Math.max(0, instrumentRemainingBaseCapacity() - extraConsumedBase);
+        const instrumentRemainingInRowCurrency = fromBaseCurrencyAmount(instrumentRemainingBase, 1, currency);
+        amount = String(roundToCurrencyDecimals(Math.max(0, Math.min(remaining, instrumentRemainingInRowCurrency)), currency.decimalPlaces));
+      } else {
+        const instrumentCurrency = currencies.find((c) => String(c.id) === instrumentRow!.currencyId);
+        if (instrumentCurrency) {
+          const instrumentBase = toBaseCurrencyAmount(Number(instrumentRow.amount) || 0, Number(instrumentRow.fxRate) || 1, instrumentCurrency, baseCurrency);
+          const instrumentInRowCurrency = fromBaseCurrencyAmount(instrumentBase, 1, currency);
+          amount = String(roundToCurrencyDecimals(Math.max(0, Math.min(remaining, instrumentInRowCurrency)), currency.decimalPlaces));
+        }
+      }
+    }
+    return {
+      [field]: String(basis.id),
+      basisDisplay: toFaDigits(String(basis.number)),
+      fxRate: "1",
+      amount,
+      exchangeGainLoss: 0,
+    } as Partial<SettlementRowState>;
+  }
+
+  // طبق «مستندات تغییرات رسید دریافت.md» بند ۳ (حالت ارز پایه): انتخاب چندگانه؛ اولین مورد همین ردیف را
+  // پر می‌کند، بقیه به ردیف‌های تازه‌ی هم‌شکل تبدیل و بلافاصله بعد از این ردیف درج می‌شوند. مبلغ هر مورد
+  // بعدی، مصرفِ موردهای قبلیِ همین دسته را هم در نظر می‌گیرد (نگاه کنید به توضیح بالای computeBasisPatch).
+  function onBasisMultiSelect(selected: BasisCandidate[]) {
+    if (selected.length === 0) return;
+    let consumedBase = 0;
+    function applyAndTrack(basis: BasisCandidate): Partial<SettlementRowState> {
+      const patch = computeBasisPatch(basis, consumedBase);
+      const amountNum = Number(patch.amount) || 0;
+      if (amountNum > 0 && instrumentRow && instrumentRow.currencyId === String(basis.currencyId)) {
+        const currency = currencies.find((c) => c.id === basis.currencyId);
+        if (currency) consumedBase += toBaseCurrencyAmount(amountNum, 1, currency, baseCurrency);
+      }
+      return patch;
+    }
+    const [first, ...rest] = selected;
+    const thisRowPatch = applyAndTrack(first);
+    const additionalRows: SettlementRowState[] = rest.map((basis) => ({ ...row, ...applyAndTrack(basis) }));
+    onApplyBasisSelection(idx, thisRowPatch, additionalRows);
+  }
+
+  return (
+    <tr>
+      <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
+      <td style={{ minWidth: 120 }}>
+        <span>{row.instrumentLabel || `#${row.instrumentClientKey}`}</span>
+      </td>
+      <td style={{ minWidth: 160 }}>
+        <select value={row.paymentTypeId} onChange={(e) => onPaymentTypeChange(e.target.value)}>
+          <option value="">انتخاب کنید</option>
+          {paymentTypes.map((t) => (
+            <option key={t.id} value={t.id}>{t.title}</option>
+          ))}
+        </select>
+      </td>
+      <td style={{ minWidth: 180 }}>
+        <RecordPickerField
+          title="انتخاب طرف حساب"
+          disabled={!paymentType}
+          displayValue={row.partyDisplay}
+          rows={eligibleParties}
+          columns={[
+            { header: "کد", render: (p) => toFaDigits(p.detailCode), filterValue: (p) => p.detailCode, width: "100px" },
+            { header: "نام", render: (p) => partyDisplayName(p), filterValue: (p) => partyDisplayName(p) },
+          ]}
+          onSelect={(p) => onChange({ partyId: String(p.id), partyDisplay: partyDisplayName(p), salesInvoiceId: "", purchaseInvoiceId: "", purchaseOrderId: "", basisDisplay: "" })}
+        />
+      </td>
+      <td style={{ minWidth: 110 }}>
+        <select
+          value={row.currencyId}
+          onChange={(e) => {
+            const newCurrencyId = Number(e.target.value);
+            const hasBasisSet = !!currentBasisId;
+            // طبق «مستندات تغییرات رسید دریافت.md» بند ۶: تغییر ارز یک ردیف که مبنا/مبالغش قبلاً ست
+            // شده، باید با هشدار تایید شود؛ در صورت انصراف، هیچ تغییری اعمال نمی‌شود.
+            if (hasBasisSet && !window.confirm("با تغییر ارز، اطلاعات مبنا و مبالغ این ردیف حذف خواهد شد. ادامه می‌دهید؟")) {
+              return;
+            }
+            // طبق بند ۵ سند ReceiptChanges: نرخ فقط برای ارز پایه (=۱) یا ارز هم‌سان با قلم پرداختی
+            // (=نرخ همان قلم) خودکار پر می‌شود؛ در غیر این‌صورت برای ورود دستی خالی می‌ماند.
+            const fxRate =
+              newCurrencyId === baseCurrency.id ? "1"
+              : instrumentRow && String(newCurrencyId) === instrumentRow.currencyId ? instrumentRow.fxRate
+              : "";
+            onChange({
+              currencyId: e.target.value,
+              fxRate,
+              ...(hasBasisSet
+                ? { salesInvoiceId: "", purchaseInvoiceId: "", purchaseOrderId: "", basisDisplay: "", amount: "", exchangeGainLoss: 0 }
+                : {}),
+            });
+          }}
+        >
+          <option value="">انتخاب ارز</option>
+          {currencies.map((c) => (
+            <option key={c.id} value={c.id}>{c.title}</option>
+          ))}
+        </select>
+      </td>
+      <td style={{ minWidth: 160 }}>
+        {basisType && basisType !== "NONE" ? (
+          isBaseCurrencyRow ? (
+            // طبق بند ۳ (حالت ارز پایه): گرید انتخاب مستقیم، محدود به فاکتورهای هم‌ارز با ردیف، با
+            // امکان انتخاب چندگانه برای ورود سریع چند ردیف مبنا.
+            <RecordPickerField
+              title="انتخاب سند مبنا"
+              disabled={!row.partyId}
+              displayValue={row.basisDisplay}
+              placeholder="انتخاب سند مبنا"
+              multiSelect
+              rows={basisCandidates.filter((c) => c.currencyId === baseCurrency.id && (effectiveRemaining(c) > 0.001 || String(c.id) === currentBasisId))}
+              columns={[
+                { header: "شماره", render: (c) => toFaDigits(String(c.number)), filterValue: (c) => String(c.number), width: "70px" },
+                { header: "تاریخ", render: (c) => formatJalaliDate(c.date), filterValue: (c) => c.date.slice(0, 10), width: "100px" },
+                { header: "مانده", render: (c) => formatAmountFa(effectiveRemaining(c)), filterValue: (c) => String(effectiveRemaining(c)), width: "110px" },
+              ]}
+              onSelectMultiple={onBasisMultiSelect}
+            />
+          ) : rowCurrency ? (
+            // طبق بند ۳ (حالت ارز غیرپایه): ورود از طریق مودال، نه گرید مستقیم.
+            <>
+              <button type="button" className="picker-field" disabled={!row.partyId} onClick={() => setFxModalOpen(true)}>
+                <span>{row.basisDisplay ? toFaDigits(row.basisDisplay) : <span className="picker-placeholder">انتخاب سند مبنا (ارزی)</span>}</span>
+              </button>
+              {fxModalOpen && (
+                <PaymentForeignBasisModal
+                  candidates={basisCandidates.filter(
+                    (c) => c.currencyId === rowCurrency.id && c.date.slice(0, 10) <= headerDate && (effectiveRemaining(c) > 0.001 || String(c.id) === currentBasisId)
+                  )}
+                  instrumentRow={instrumentRow}
+                  rowCurrency={rowCurrency}
+                  baseCurrency={baseCurrency}
+                  remainingBaseCapacity={instrumentRemainingBaseCapacity()}
+                  initialBasisId={currentBasisId}
+                  initialFxRate={row.fxRate}
+                  initialAmount={row.amount}
+                  onClose={() => setFxModalOpen(false)}
+                  onConfirm={(basis, fxRate, amount) => {
+                    if (!basisType) return;
+                    const field = BASIS_FIELD[basisType as Exclude<PaymentBasisType, "NONE">];
+                    // طبق بند ۴ سند: تسعیر فقط همین‌جا، یک‌بار، بعد از تایید مودال محاسبه می‌شود.
+                    const exchangeGainLoss =
+                      basisType === "SALES_INVOICE" || basisType === "PURCHASE_INVOICE"
+                        ? calculateExchangeGainLoss("PAYMENT", Number(amount) || 0, Number(fxRate) || 1, basis.fxRate, rowCurrency, baseCurrency)
+                        : 0;
+                    onChange({
+                      [field]: String(basis.id),
+                      basisDisplay: toFaDigits(String(basis.number)),
+                      fxRate,
+                      amount,
+                      exchangeGainLoss,
+                    } as Partial<SettlementRowState>);
+                    setFxModalOpen(false);
+                  }}
+                />
+              )}
+            </>
+          ) : (
+            <span style={{ color: "var(--ink-soft)" }}>ابتدا ارز را انتخاب کنید</span>
+          )
+        ) : (
+          <span style={{ color: "var(--ink-soft)" }}>بدون مبنا</span>
+        )}
+      </td>
+      <td style={{ minWidth: 100 }}>
+        {isBaseCurrencyRow ? (
+          <input dir="ltr" value={toFaDigits("1")} disabled />
+        ) : (
+          <input dir="ltr" value={row.fxRate ? formatAmountFa(row.fxRate) : "—"} disabled />
+        )}
+      </td>
+      <td style={{ minWidth: 130 }}>
+        {isBaseCurrencyRow ? (
+          <AmountInput value={row.amount} onChange={(v) => onChange({ amount: v })} allowDecimal placeholder="۰" />
+        ) : (
+          <input dir="ltr" value={row.amount ? formatAmountFa(row.amount) : "—"} disabled />
+        )}
+      </td>
+      <td style={{ minWidth: 110, color: row.exchangeGainLoss > 0 ? "var(--success, #2e7d32)" : row.exchangeGainLoss < 0 ? "var(--danger, #c0392b)" : undefined }}>
+        {formatAmountFa(row.exchangeGainLoss)}
+      </td>
+      <td style={{ minWidth: 140 }}>
+        <input value={row.description} onChange={(e) => onChange({ description: e.target.value })} />
+      </td>
+      <td>
+        <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={onRemove}>
+          حذف
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+// طبق «مستندات تغییرات رسید دریافت.md» بند ۳ (حالت ارز غیرپایه) و ۴: تنها نقطه‌ی ورود اطلاعات موضوع
+// پرداختِ ارزی. مودال فقط وظیفه‌ی ورود اطلاعات و اعتبارسنجی اولیه (بند ۷) را دارد — هیچ محاسبه‌ی
+// تسعیری داخل آن انجام نمی‌شود؛ محاسبه‌ی تسعیر فقط در onConfirm فراخوانی‌کننده (SettlementRowFields)
+// انجام می‌شود، دقیقاً یک‌بار، بعد از تایید. الگوی «نرخ + مبلغ ارزی وارد می‌شود، معادل ارز پایه محاسبه و
+// نمایش داده می‌شود» دقیقاً هم‌شکل components/FxAmountDialog.tsx است.
+function PaymentForeignBasisModal({
+  candidates, instrumentRow, rowCurrency, baseCurrency, remainingBaseCapacity, initialBasisId, initialFxRate, initialAmount, onConfirm, onClose,
+}: {
+  candidates: BasisCandidate[];
+  instrumentRow: InstrumentRowState | undefined;
+  rowCurrency: CurrencyOption;
+  baseCurrency: CurrencyOption;
+  remainingBaseCapacity: number;
+  initialBasisId: string;
+  initialFxRate: string;
+  initialAmount: string;
+  onConfirm: (basis: BasisCandidate, fxRate: string, amount: string) => void;
+  onClose: () => void;
+}) {
+  const [basisId, setBasisId] = useState(initialBasisId);
+  const [fxRate, setFxRate] = useState(initialFxRate);
+  const [amount, setAmount] = useState(initialAmount);
+  const [error, setError] = useState<string | null>(null);
+
+  const selected = candidates.find((c) => String(c.id) === basisId);
+
+  // طبق بند ۳: اگر ارز فاکتور انتخاب‌شده با ارز قلم پرداخت یکسان باشد، نرخ از همان قلم پیش‌فرض می‌شود
+  // (قابل ویرایش)؛ در غیر این‌صورت کاربر باید دستی وارد کند — دقیقاً هم‌قاعده‌ی بند ۵ سند ReceiptChanges.
+  function selectBasis(basis: BasisCandidate) {
+    setBasisId(String(basis.id));
+    setError(null);
+    const matchesInstrumentCurrency = !!instrumentRow && String(basis.currencyId) === instrumentRow.currencyId;
+    setFxRate(matchesInstrumentCurrency ? instrumentRow!.fxRate : "");
+    if (matchesInstrumentCurrency) {
+      // طبق گزارش کاربر: وقتی ارز فاکتور با ارز قلم یکسان است، مبلغ پیش‌فرض باید مانده‌ی واقعی قلم
+      // باشد (نه مبلغ کامل قلم)، اگر آن مانده از مانده‌ی خودِ فاکتور کمتر باشد.
+      const instrumentRate = Number(instrumentRow!.fxRate) || 1;
+      const instrumentRemainingInRowCurrency = fromBaseCurrencyAmount(Math.max(0, remainingBaseCapacity), instrumentRate, rowCurrency);
+      setAmount(String(roundToCurrencyDecimals(Math.max(0, Math.min(basis.remaining, instrumentRemainingInRowCurrency)), rowCurrency.decimalPlaces)));
+    } else {
+      setAmount(String(basis.remaining));
+    }
+  }
+
+  const baseEquivalent = Number(fxRate) > 0 && Number(amount) > 0 ? toBaseCurrencyAmount(Number(amount), Number(fxRate), rowCurrency, baseCurrency) : 0;
+
+  function confirm() {
+    if (!selected) return setError("انتخاب سند مبنا الزامی است");
+    const amountNum = Number(amount) || 0;
+    const fxRateNum = Number(fxRate) || 0;
+    if (!(amountNum > 0)) return setError("مبلغ تسویه الزامی است");
+    if (!(fxRateNum > 0)) return setError("نرخ ارز باید مقداری معتبر و مثبت داشته باشد");
+    if (amountNum > selected.remaining + 0.001) {
+      return setError(`مبلغ تسویه از مانده‌ی قابل تسویه‌ی سند مبنا (${formatAmountFa(selected.remaining)}) بیشتر است`);
+    }
+    const baseAmount = toBaseCurrencyAmount(amountNum, fxRateNum, rowCurrency, baseCurrency);
+    if (baseAmount > remainingBaseCapacity + 0.001) {
+      return setError("مبلغ به ارز پایه نمی‌تواند از مبلغ باقیمانده قلم انتخاب‌شده بیشتر باشد");
+    }
+    onConfirm(selected, fxRate, amount);
+  }
+
+  return (
+    <Modal title={`ورود اطلاعات ارزی موضوع پرداخت (${rowCurrency.title})`} onClose={onClose}>
+      {error && <div className="alert error">{error}</div>}
+      <div className="form-grid">
+        <div className="form-field full">
+          <label>سند مبنا<RequiredMark /></label>
+          <RecordPickerField
+            title="انتخاب سند مبنا"
+            displayValue={selected ? toFaDigits(String(selected.number)) : ""}
+            placeholder="انتخاب سند مبنا"
+            rows={candidates}
+            columns={[
+              { header: "شماره", render: (c) => toFaDigits(String(c.number)), filterValue: (c) => String(c.number), width: "70px" },
+              { header: "تاریخ", render: (c) => formatJalaliDate(c.date), filterValue: (c) => c.date.slice(0, 10), width: "100px" },
+              { header: "مانده", render: (c) => formatAmountFa(c.remaining), filterValue: (c) => String(c.remaining), width: "110px" },
+            ]}
+            onSelect={selectBasis}
+          />
+        </div>
+        <div className="form-field">
+          <label>نرخ ارز<RequiredMark /></label>
+          <AmountInput value={fxRate} onChange={(v) => { setFxRate(v); setError(null); }} allowDecimal placeholder="نرخ ارز" />
+        </div>
+        <div className="form-field">
+          <label>مبلغ تسویه ({rowCurrency.title})<RequiredMark /></label>
+          <AmountInput value={amount} onChange={(v) => { setAmount(v); setError(null); }} allowDecimal placeholder="۰" />
+        </div>
+        <div className="form-field">
+          <label>مبلغ به ارز پایه ({baseCurrency.title})</label>
+          <div className="fx-computed">{formatAmountFa(baseEquivalent)}</div>
+        </div>
+      </div>
+      <div className="actions">
+        <button type="button" className="btn" onClick={confirm}>تایید</button>
+        <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
+      </div>
+    </Modal>
   );
 }

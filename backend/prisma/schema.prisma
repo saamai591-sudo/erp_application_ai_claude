@@ -118,7 +118,8 @@ model Currency {
   cheques          ChequeItem[]
   rates            ExchangeRate[]
   journalLines     JournalEntryLine[]
-  payments         Payment[]
+  paymentInstrumentLines   PaymentInstrumentLine[]
+  paymentSettlementLines   PaymentSettlementLine[]
   priceInquiries   PriceInquiry[]
   purchaseInvoices PurchaseInvoice[]
   servicePurchaseInvoices ServicePurchaseInvoice[]
@@ -282,6 +283,7 @@ model Party {
   bankAccounts       PartyBankAccount[]
   phones             PartyPhone[]
   payments           Payment[]
+  paymentSettlementLines PaymentSettlementLine[]
   purchaseExpert     PurchaseExpert?
   purchaseInvoices   PurchaseInvoice[]
   servicePurchaseInvoices ServicePurchaseInvoice[]
@@ -366,8 +368,36 @@ model BankAccount {
   receiptInstrumentLines ReceiptInstrumentLine[] @relation("ReceiptInstrumentBankAccount")
   chequeDeposits         ChequeDeposit[]
   treasuryAccountSettings TreasuryAccountSetting[]
+  chequeBookLeaves       ChequeBookLeaf[]
 
   @@unique([bankPartyId, accountNumber])
+}
+
+// طبق Documents/دسته چک.md — دسته چک: برگه‌های چک پرداختنی خامِ اخذشده از بانک، برای کنترل شماره‌های
+// چک هنگام صدور چک در سند پرداخت. هر رکورد یک برگه‌ی مجزاست (نه کل دسته)؛ «ایجاد دسته چک» در بک‌اند
+// (routes/chequeBookLeaves.ts) به‌ازای هر شماره‌ی سریالی یک رکورد جداگانه می‌سازد. حساب بانکی فقط از
+// نوع‌هایی قابل انتخاب است که BankAccountType.hasChequeBook فعال باشد (کنترل ۱ سند). شماره در سطح هر
+// حساب بانکی یکتاست (کنترل ۴ سند). وضعیت خودکار محاسبه می‌شود، نه مستقیماً توسط کاربر: خام تا وقتی
+// هیچ عملیاتی نداشته، صادر شده وقتی برای صدور چک تازه در یک سند پرداخت مصرف شده (در تایید/ویرایش سند
+// تاییدشده — نگاه کنید به routes/payments.ts)، باطل شده با اکشن دستی «ابطال» (فقط از خام).
+model ChequeBookLeaf {
+  id              Int                   @id @default(autoincrement())
+  bankAccountId   Int
+  series          String
+  number          String
+  printTemplate   String?
+  status          ChequeBookLeafStatus  @default(RAW)
+  createdAt       DateTime              @default(now())
+  bankAccount     BankAccount           @relation(fields: [bankAccountId], references: [id])
+  instrumentLines PaymentInstrumentLine[]
+
+  @@unique([bankAccountId, number])
+}
+
+enum ChequeBookLeafStatus {
+  RAW
+  ISSUED
+  VOID
 }
 
 model CostCenter {
@@ -512,6 +542,7 @@ model JournalEntry {
   servicePurchaseInvoice ServicePurchaseInvoice?
   salesInvoice        SalesInvoice?
   receipt             Receipt?
+  payment             Payment?
   salesReturnInvoice  SalesReturnInvoice?
   warehouseJournalEntryIssuance WarehouseJournalEntryIssuance?
 
@@ -1238,6 +1269,7 @@ model ReceivableChequeType {
   title     String   @unique
   createdAt DateTime @default(now())
   receiptInstrumentLines ReceiptInstrumentLine[]
+  chequeItems ChequeItem[]
   treasuryAccountSettings TreasuryAccountSetting[]
 }
 
@@ -1247,6 +1279,8 @@ model PayableChequeType {
   title     String   @unique
   isSameDay Boolean  @default(false)
   createdAt DateTime @default(now())
+  paymentInstrumentLines PaymentInstrumentLine[]
+  chequeItems ChequeItem[]
   treasuryAccountSettings TreasuryAccountSetting[]
 }
 
@@ -1579,6 +1613,7 @@ model InquiryEvaluationItemLine {
 }
 
 model PurchaseOrder {
+  paymentSettlementLines PaymentSettlementLine[]
   id             Int                 @id @default(autoincrement())
   fiscalPeriodId Int
   number         Int
@@ -2388,6 +2423,7 @@ model GoodsPricingFlowWarehouse {
 }
 
 model SalesInvoice {
+  paymentSettlementLines PaymentSettlementLine[]
   id                     Int                     @id @default(autoincrement())
   fiscalPeriodId         Int
   number                 Int
@@ -2517,9 +2553,15 @@ model ChequeItem {
   // بالای هرکدام از فایل‌های routes/receipts.ts, payments.ts, chequeDeposits.ts,
   // chequeDepositReturns.ts, chequeClearingReceivable.ts, chequeClearingPayable.ts.
   step                    Int                            @default(1)
+  // نوع چک (مستر «نوع چک دریافتی/پرداختی») — برای صدور سند حسابداری خرج‌کردن چک دریافتنی و چک پرداختنی:
+  // receivableChequeTypeId از ردیف سند دریافت، payableChequeTypeId از ردیف سند پرداخت کپی می‌شود.
+  receivableChequeTypeId  Int?
+  payableChequeTypeId     Int?
   description             String?
   createdAt               DateTime                       @default(now())
   bankBranch              BankBranch?                    @relation(fields: [bankBranchId], references: [id])
+  receivableChequeType    ReceivableChequeType?          @relation(fields: [receivableChequeTypeId], references: [id])
+  payableChequeType       PayableChequeType?             @relation(fields: [payableChequeTypeId], references: [id])
   currency                Currency                       @relation(fields: [currencyId], references: [id])
   ownerBankAccount        BankAccount?                   @relation(fields: [ownerBankAccountId], references: [id])
   party                   Party                          @relation(fields: [partyId], references: [id])
@@ -2620,18 +2662,20 @@ model ReceiptSettlementLine {
   currency          Currency               @relation(fields: [currencyId], references: [id])
 }
 
+// هم‌الگوی Receipt: ارز و نرخ ارز از هدر به هر ردیف ابزار منتقل شده (ندارد currencyId)، «موضوعات پرداخت» مدل
+// کامل‌تری دارد، و سند حسابداری با اکشن دستی صادر می‌شود (journalEntryId).
 model Payment {
   id              Int                     @id @default(autoincrement())
   fiscalPeriodId  Int
   number          Int
   date            DateTime                @db.Date
   partyId         Int
-  currencyId      Int
   description     String?
   status          TreasuryDocStatus       @default(DRAFT)
+  journalEntryId  Int?                    @unique
+  journalEntry    JournalEntry?           @relation(fields: [journalEntryId], references: [id])
   createdAt       DateTime                @default(now())
   updatedAt       DateTime                @default(now()) @updatedAt
-  currency        Currency                @relation(fields: [currencyId], references: [id])
   fiscalPeriod    FiscalPeriod            @relation(fields: [fiscalPeriodId], references: [id])
   party           Party                   @relation(fields: [partyId], references: [id])
   instrumentLines PaymentInstrumentLine[]
@@ -2646,6 +2690,11 @@ model PaymentInstrumentLine {
   rowOrder           Int                   @default(0)
   type               PaymentInstrumentType
   amount             Decimal               @db.Decimal(18, 2)
+  // هم‌الگوی ReceiptInstrumentLine: ارز و نرخ ارز هر ردیف؛ baseAmount محاسبه و نگهداری می‌شود ولی در UI نمایش داده نمی‌شود.
+  // نقد: ارز را کاربر انتخاب می‌کند؛ حواله/پوز: ارز حساب بانکی؛ چک (صدور یا خرج): همیشه ارز پایه.
+  currencyId         Int
+  fxRate             Decimal               @default(1) @db.Decimal(18, 6)
+  baseAmount         Decimal               @db.Decimal(36, 10)
   cashBoxId          Int?
   bankAccountId      Int?
   referenceNumber    String?
@@ -2653,6 +2702,11 @@ model PaymentInstrumentLine {
   chequeNumber       String?
   chequeDueDate      DateTime?             @db.Date
   chequeBankBranchId Int?
+  // نوع چک پرداختی — فقط برای صدور چک تازه (خرج‌کردن چک دریافتنی، نوع خودِ آن چک را دارد)
+  payableChequeTypeId Int?
+  // برگه‌ی مصرف‌شده از «دسته چک» — فقط برای صدور چک تازه از حساب بانکیِ دارای دسته چک (Documents/دسته چک.md)؛
+  // اختیاری برای حسابهای بدون دسته چک که شماره را کاربر آزادانه تایپ می‌کند.
+  chequeBookLeafId   Int?
   // فقط برای ردیف نوع CHEQUE (چه صدور تازه چه خرج‌کردن چک دریافتنی موجود)، در لحظه‌ی تایید سند
   // برابر step همان لحظه‌ی ChequeItem پر می‌شود (نگاه کنید به توضیح بالای ChequeItem.step).
   chequeStep         Int?
@@ -2662,21 +2716,39 @@ model PaymentInstrumentLine {
   cashBox            CashBox?              @relation(fields: [cashBoxId], references: [id])
   chequeBankBranch   BankBranch?           @relation("PaymentInstrumentChequeBankBranch", fields: [chequeBankBranchId], references: [id])
   chequeItem         ChequeItem?           @relation(fields: [chequeItemId], references: [id])
+  chequeBookLeaf     ChequeBookLeaf?       @relation(fields: [chequeBookLeafId], references: [id])
+  currency           Currency              @relation(fields: [currencyId], references: [id])
+  payableChequeType  PayableChequeType?    @relation(fields: [payableChequeTypeId], references: [id])
   payment            Payment               @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  settlementLines    PaymentSettlementLine[]
 }
 
+// هم‌الگوی ReceiptSettlementLine («موضوعات پرداخت»): هر ردیف به یک PaymentType، یک ردیف ابزار (قلم)، یک طرف حساب
+// مستقل، و (بسته به PaymentType.basisType) دقیقاً یکی از اسناد مبنا وصل می‌شود. exchangeGainLoss با علامتِ «پرداخت»
+// (منفی = زیان) طبق Documents/نحوه محاسبه تسعیر ارز.md نگهداری می‌شود.
 model PaymentSettlementLine {
-  id                Int              @id @default(autoincrement())
+  id                Int                   @id @default(autoincrement())
   paymentId         Int
-  rowOrder          Int              @default(0)
-  // اختیاری فقط برای ردیف‌های قدیمی پیش از معرفی «نوع پرداخت»؛ ردیف تازه/ویرایش‌شده همیشه نوع دارد.
-  paymentTypeId     Int?
+  rowOrder          Int                   @default(0)
+  paymentTypeId     Int
+  instrumentLineId  Int
+  partyId           Int
+  salesInvoiceId    Int?
   purchaseInvoiceId Int?
-  amount            Decimal          @db.Decimal(18, 2)
+  purchaseOrderId   Int?
+  currencyId        Int
+  fxRate            Decimal               @default(1) @db.Decimal(18, 6)
+  amount            Decimal               @db.Decimal(18, 2)
+  exchangeGainLoss  Decimal               @default(0) @db.Decimal(18, 2)
   description       String?
-  paymentType       PaymentType?     @relation(fields: [paymentTypeId], references: [id])
-  payment           Payment          @relation(fields: [paymentId], references: [id], onDelete: Cascade)
-  purchaseInvoice   PurchaseInvoice? @relation(fields: [purchaseInvoiceId], references: [id])
+  paymentType       PaymentType           @relation(fields: [paymentTypeId], references: [id])
+  payment           Payment               @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  instrumentLine    PaymentInstrumentLine @relation(fields: [instrumentLineId], references: [id])
+  party             Party                 @relation(fields: [partyId], references: [id])
+  salesInvoice      SalesInvoice?         @relation(fields: [salesInvoiceId], references: [id])
+  purchaseInvoice   PurchaseInvoice?      @relation(fields: [purchaseInvoiceId], references: [id])
+  purchaseOrder     PurchaseOrder?        @relation(fields: [purchaseOrderId], references: [id])
+  currency          Currency              @relation(fields: [currencyId], references: [id])
 }
 
 enum SalesDocStatus {
@@ -2943,8 +3015,7 @@ enum ReceiptBasisType {
   PROFORMA_INVOICE
 }
 
-// هم‌الگوی ReceiptNature. فعلاً فرم پرداخت فقط «فاکتور خرید» را به‌عنوان مبنا تسویه می‌کند، پس
-// PaymentBasisType هم فقط همین را دارد؛ مبناهای دیگر (فاکتور فروش، سفارش) با پشتیبانی فرم اضافه می‌شوند.
+// هم‌الگوی ReceiptNature / ReceiptBasisType — مبناهای مجاز هر ماهیت در routes/paymentTypes.ts#ALLOWED_BASIS_TYPES.
 enum PaymentNature {
   SUPPLIER_PAYMENT
   ADVANCE_PAYMENT
@@ -2957,6 +3028,8 @@ enum PaymentNature {
 enum PaymentBasisType {
   NONE
   PURCHASE_INVOICE
+  SALES_INVOICE
+  PURCHASE_ORDER
 }
 
 enum PaymentInstrumentType {
