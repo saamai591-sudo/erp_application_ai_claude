@@ -21,16 +21,19 @@ const FORM = findFormPrefix("payments");
 // یک سند مبنا (فاکتور خرید/فاکتور فروش/سفارش خرید) وصل می‌شوند، با ارز/نرخ/تسعیر مستقل هر ردیف؛
 // و سند حسابداری با اکشن دستی «صدور سند حسابداری» صادر می‌شود (services/paymentJournalEntryService.ts).
 //
-// تفاوت اصلی با سند دریافت در ردیف ابزار «چک»: در سند پرداخت، ردیف چک می‌تواند یکی از این دو حالت باشد:
-//   ۱) صدور یک چک پرداختنی تازه (chequeItemId خالی؛ شماره/سررسید/شعبه/حساب صادرکننده/نوع چک پرداختی از
-//      کاربر گرفته می‌شود) — در لحظه‌ی تایید، یک ChequeItem جدید با direction=PAYABLE و status=ISSUED
-//      ایجاد می‌شود.
-//   ۲) «خرج‌کردن» یک چک دریافتنی موجود که قبلاً از طریق یک سند دریافت دیگر وارد سیستم شده
-//      (chequeItemId به یک ChequeItem با direction=RECEIVABLE و status=IN_HAND اشاره می‌کند) —
-//      در لحظه‌ی تایید، وضعیت آن چک به ENDORSED تغییر می‌کند (بدون ایجاد رکورد جدید).
-// تشخیص این‌که یک چک متعلق به همین سند پرداخت است یا صرفاً «خرج» شده، از روی direction خود
-// ChequeItem قابل استنتاج است: PAYABLE = توسط همین سند ایجاد شده، RECEIVABLE = چکی موجود که خرج
-// شده (چون سند پرداخت هرگز چک دریافتنی تازه ایجاد نمی‌کند). چک همیشه با ارز پایه است.
+// تفاوت اصلی با سند دریافت: سند پرداخت دو نوع ابزار مجزا برای چک دارد (طبق درخواست کاربر، به‌جای یک نوع
+// «چک» با دو حالت داخلی، اکنون دو نوع کاملاً جدا در انتخابگر «نوع» هستند):
+//   ۱) CHEQUE («چک»): همیشه یعنی صدور یک چک پرداختنی تازه (شماره/سررسید/شعبه/حساب صادرکننده/نوع چک
+//      پرداختی از کاربر گرفته می‌شود) — در لحظه‌ی تایید، یک ChequeItem جدید با direction=PAYABLE و
+//      status=ISSUED ایجاد می‌شود.
+//   ۲) CHEQUE_TRANSFER («چک انتقالی»): همیشه یعنی «خرج‌کردن» یک چک دریافتنی موجود که قبلاً از طریق یک
+//      سند دریافت دیگر وارد سیستم شده (chequeItemId به یک ChequeItem با direction=RECEIVABLE و
+//      status=IN_HAND اشاره می‌کند) — در لحظه‌ی تایید، وضعیت آن چک به ENDORSED تغییر می‌کند (بدون
+//      ایجاد رکورد جدید).
+// تشخیص این‌که یک ردیف چک از کدام نوع است، از روی خودِ فیلد type ردیف مشخص است؛ برای ردیف‌های ذخیره‌شده
+// می‌توان از روی direction خود ChequeItem هم استنتاج کرد: PAYABLE = توسط CHEQUE همین سند ایجاد شده،
+// RECEIVABLE = چکی موجود که با CHEQUE_TRANSFER خرج شده. هر دو نوع همیشه با ارز پایه‌اند.
+// POS دیگر در سند پرداخت ارائه نمی‌شود (فقط برای سازگاری با داده‌های قدیمی سند دریافت در enum نگه داشته شده).
 //
 // اصلاح جزئی سند «تایید»شده (فاز ۲.۲ — سند نیمه‌باز؛ نگاه کنید به توضیح مشابه در routes/receipts.ts):
 // هر ChequeItem یک شمارنده‌ی نسخه (`step`) دارد؛ صدور چک تازه یا خرج/ظهرنویسی یک چک دریافتنی موجود
@@ -45,20 +48,19 @@ const router = Router();
 
 interface InstrumentLineInput {
   clientKey: string;
-  type: "CASH" | "BANK_TRANSFER" | "CHEQUE" | "POS";
+  type: "CASH" | "BANK_TRANSFER" | "CHEQUE" | "CHEQUE_TRANSFER";
   amount: number;
   currencyId?: number | null;
   fxRate?: number | null;
   cashBoxId?: number | null;
   bankAccountId?: number | null;
   referenceNumber?: string | null;
-  chequeItemId?: number | null; // اگر مقداردهی شود: خرج‌کردن یک چک دریافتنی موجود
+  chequeItemId?: number | null; // فقط برای CHEQUE_TRANSFER: خرج‌کردن یک چک دریافتنی موجود
   chequeNumber?: string | null;
   chequeDueDate?: string | null;
   chequeBankBranchId?: number | null;
   payableChequeTypeId?: number | null;
   chequeBookLeafId?: number | null;
-  posTerminal?: string | null;
   description?: string | null;
 }
 
@@ -143,45 +145,46 @@ async function cleanOneInstrumentLine(l: InstrumentLineInput, idx: number, baseC
     if (!l.cashBoxId) throw new Error(`ردیف ${idx + 1}: انتخاب صندوق الزامی است`);
     if (!l.currencyId) throw new Error(`ردیف ${idx + 1}: انتخاب ارز الزامی است`);
     currencyId = l.currencyId;
-  } else if (l.type === "BANK_TRANSFER" || l.type === "POS") {
+  } else if (l.type === "BANK_TRANSFER") {
     if (!l.bankAccountId) throw new Error(`ردیف ${idx + 1}: انتخاب حساب بانکی الزامی است`);
     const bankAccount = await prisma.bankAccount.findUnique({ where: { id: l.bankAccountId } });
     if (!bankAccount) throw new Error(`ردیف ${idx + 1}: حساب بانکی یافت نشد`);
     if (!bankAccount.currencyId) throw new Error(`ردیف ${idx + 1}: برای این حساب بانکی ارز تعریف نشده است`);
-    // طبق سند: ارز ردیف حواله/پوز همیشه از ارز حساب بانکی ست می‌شود، نه انتخاب کاربر
+    // طبق سند: ارز ردیف حواله همیشه از ارز حساب بانکی ست می‌شود، نه انتخاب کاربر
     currencyId = bankAccount.currencyId;
+  } else if (l.type === "CHEQUE_TRANSFER") {
+    if (!l.chequeItemId) throw new Error(`ردیف ${idx + 1}: انتخاب چک دریافتنی برای خرج‌کردن الزامی است`);
+    const existing = await prisma.chequeItem.findUnique({ where: { id: l.chequeItemId } });
+    if (!existing) throw new Error(`ردیف ${idx + 1}: چک انتخاب‌شده یافت نشد`);
+    if (existing.direction !== "RECEIVABLE" || existing.status !== "IN_HAND") {
+      throw new Error(`ردیف ${idx + 1}: این چک در وضعیت «در دست» نیست و قابل خرج‌کردن نیست`);
+    }
+    if (Math.abs(Number(existing.amount) - amount) > 0.001) {
+      throw new Error(`ردیف ${idx + 1}: مبلغ ردیف باید برابر مبلغ چک (${Number(existing.amount)}) باشد`);
+    }
+    // طبق سند: چک همیشه با ارز پایه ثبت می‌شود (چک ارزی در این کدبیس پشتیبانی نمی‌شود)
+    currencyId = baseCurrency.id;
   } else if (l.type === "CHEQUE") {
-    if (l.chequeItemId) {
-      const existing = await prisma.chequeItem.findUnique({ where: { id: l.chequeItemId } });
-      if (!existing) throw new Error(`ردیف ${idx + 1}: چک انتخاب‌شده یافت نشد`);
-      if (existing.direction !== "RECEIVABLE" || existing.status !== "IN_HAND") {
-        throw new Error(`ردیف ${idx + 1}: این چک در وضعیت «در دست» نیست و قابل خرج‌کردن نیست`);
-      }
-      if (Math.abs(Number(existing.amount) - amount) > 0.001) {
-        throw new Error(`ردیف ${idx + 1}: مبلغ ردیف باید برابر مبلغ چک (${Number(existing.amount)}) باشد`);
-      }
-    } else {
-      if (!l.chequeDueDate) throw new Error(`ردیف ${idx + 1}: تاریخ سررسید چک الزامی است`);
-      if (!l.bankAccountId) throw new Error(`ردیف ${idx + 1}: حساب بانکی صادرکننده‌ی چک الزامی است`);
-      if (!l.payableChequeTypeId) throw new Error(`ردیف ${idx + 1}: نوع چک الزامی است`);
-      const chequeType = await prisma.payableChequeType.findUnique({ where: { id: l.payableChequeTypeId } });
-      if (!chequeType) throw new Error(`ردیف ${idx + 1}: نوع چک پرداختی یافت نشد`);
+    if (!l.chequeDueDate) throw new Error(`ردیف ${idx + 1}: تاریخ سررسید چک الزامی است`);
+    if (!l.bankAccountId) throw new Error(`ردیف ${idx + 1}: حساب بانکی صادرکننده‌ی چک الزامی است`);
+    if (!l.payableChequeTypeId) throw new Error(`ردیف ${idx + 1}: نوع چک الزامی است`);
+    const chequeType = await prisma.payableChequeType.findUnique({ where: { id: l.payableChequeTypeId } });
+    if (!chequeType) throw new Error(`ردیف ${idx + 1}: نوع چک پرداختی یافت نشد`);
 
-      // طبق Documents/دسته چک.md: اگر حساب بانکی صادرکننده از نوعِ «دارای دسته چک» باشد، شماره چک باید
-      // از یک برگه‌ی «خام» دسته چک انتخاب شود (نه آزادانه تایپ شود)؛ در غیر این‌صورت مثل قبل آزاد است.
-      const bankAccount = await prisma.bankAccount.findUnique({ where: { id: l.bankAccountId }, include: { accountType: true } });
-      if (!bankAccount) throw new Error(`ردیف ${idx + 1}: حساب بانکی یافت نشد`);
-      if (bankAccount.accountType.hasChequeBook) {
-        if (!l.chequeBookLeafId) throw new Error(`ردیف ${idx + 1}: انتخاب برگه چک از دسته چک الزامی است`);
-        const leaf = await prisma.chequeBookLeaf.findUnique({ where: { id: l.chequeBookLeafId } });
-        if (!leaf) throw new Error(`ردیف ${idx + 1}: برگه چک یافت نشد`);
-        if (leaf.bankAccountId !== l.bankAccountId) throw new Error(`ردیف ${idx + 1}: برگه چک انتخاب‌شده متعلق به این حساب بانکی نیست`);
-        if (leaf.status !== "RAW") throw new Error(`ردیف ${idx + 1}: این برگه چک قبلاً صادر یا باطل شده است`);
-        chequeNumberOverride = leaf.number;
-        chequeBookLeafId = leaf.id;
-      } else if (!l.chequeNumber) {
-        throw new Error(`ردیف ${idx + 1}: شماره چک الزامی است`);
-      }
+    // طبق Documents/دسته چک.md: اگر حساب بانکی صادرکننده از نوعِ «دارای دسته چک» باشد، شماره چک باید
+    // از یک برگه‌ی «خام» دسته چک انتخاب شود (نه آزادانه تایپ شود)؛ در غیر این‌صورت مثل قبل آزاد است.
+    const bankAccount = await prisma.bankAccount.findUnique({ where: { id: l.bankAccountId }, include: { accountType: true } });
+    if (!bankAccount) throw new Error(`ردیف ${idx + 1}: حساب بانکی یافت نشد`);
+    if (bankAccount.accountType.hasChequeBook) {
+      if (!l.chequeBookLeafId) throw new Error(`ردیف ${idx + 1}: انتخاب برگه چک از دسته چک الزامی است`);
+      const leaf = await prisma.chequeBookLeaf.findUnique({ where: { id: l.chequeBookLeafId } });
+      if (!leaf) throw new Error(`ردیف ${idx + 1}: برگه چک یافت نشد`);
+      if (leaf.bankAccountId !== l.bankAccountId) throw new Error(`ردیف ${idx + 1}: برگه چک انتخاب‌شده متعلق به این حساب بانکی نیست`);
+      if (leaf.status !== "RAW") throw new Error(`ردیف ${idx + 1}: این برگه چک قبلاً صادر یا باطل شده است`);
+      chequeNumberOverride = leaf.number;
+      chequeBookLeafId = leaf.id;
+    } else if (!l.chequeNumber) {
+      throw new Error(`ردیف ${idx + 1}: شماره چک الزامی است`);
     }
     // طبق سند: چک همیشه با ارز پایه ثبت می‌شود (چک ارزی در این کدبیس پشتیبانی نمی‌شود)
     currencyId = baseCurrency.id;
@@ -194,7 +197,7 @@ async function cleanOneInstrumentLine(l: InstrumentLineInput, idx: number, baseC
   const fxRate = resolveFxRate(currencyId, baseCurrency.id, l.fxRate);
   const baseAmount = toBaseCurrencyAmount(amount, fxRate, currency, baseCurrency);
 
-  const isNewCheque = l.type === "CHEQUE" && !l.chequeItemId;
+  const isNewCheque = l.type === "CHEQUE";
   return {
     clientKey: l.clientKey,
     type: l.type,
@@ -203,15 +206,15 @@ async function cleanOneInstrumentLine(l: InstrumentLineInput, idx: number, baseC
     fxRate,
     baseAmount,
     cashBoxId: l.type === "CASH" ? l.cashBoxId! : null,
-    bankAccountId: l.type === "BANK_TRANSFER" || l.type === "POS" || isNewCheque ? l.bankAccountId || null : null,
+    bankAccountId: l.type === "BANK_TRANSFER" || isNewCheque ? l.bankAccountId || null : null,
     referenceNumber: l.referenceNumber || null,
-    chequeItemId: l.type === "CHEQUE" ? l.chequeItemId || null : null,
+    chequeItemId: l.type === "CHEQUE_TRANSFER" ? l.chequeItemId || null : null,
     chequeNumber: isNewCheque ? chequeNumberOverride ?? l.chequeNumber! : null,
     chequeDueDate: isNewCheque ? new Date(l.chequeDueDate!) : null,
     chequeBankBranchId: isNewCheque ? l.chequeBankBranchId || null : null,
     payableChequeTypeId: isNewCheque ? l.payableChequeTypeId! : null,
     chequeBookLeafId: isNewCheque ? chequeBookLeafId : null,
-    posTerminal: l.type === "POS" ? l.posTerminal || null : null,
+    posTerminal: null,
     description: l.description || null,
   };
 }
@@ -715,15 +718,15 @@ router.post("/payments/:id/approve", can(`${FORM}.approve`), async (req, res) =>
 
     // بازبینی مجدد چک‌های خرج‌شده در لحظه‌ی تایید (ممکن است از زمان ثبت، جای دیگری خرج شده باشند)
     for (const l of d.instrumentLines) {
-      if (l.type === "CHEQUE" && l.chequeItemId) {
+      if (l.type === "CHEQUE_TRANSFER") {
         // eslint-disable-next-line no-await-in-loop
-        const cheque = await prisma.chequeItem.findUnique({ where: { id: l.chequeItemId } });
+        const cheque = await prisma.chequeItem.findUnique({ where: { id: l.chequeItemId! } });
         if (!cheque || cheque.direction !== "RECEIVABLE" || cheque.status !== "IN_HAND") {
           throw new Error(`چک انتخاب‌شده در ردیف مربوطه دیگر در وضعیت «در دست» نیست`);
         }
       }
       // بازبینی مجدد برگه‌ی دسته چک در لحظه‌ی تایید (ممکن است از زمان ثبت، جای دیگری صادر/باطل شده باشد)
-      if (l.type === "CHEQUE" && !l.chequeItemId && l.chequeBookLeafId) {
+      if (l.type === "CHEQUE" && l.chequeBookLeafId) {
         // eslint-disable-next-line no-await-in-loop
         const leaf = await prisma.chequeBookLeaf.findUnique({ where: { id: l.chequeBookLeafId } });
         if (!leaf || leaf.status !== "RAW") throw new Error(`برگه چک ردیف مربوطه دیگر «خام» نیست و قابل صدور نیست`);
@@ -732,7 +735,7 @@ router.post("/payments/:id/approve", can(`${FORM}.approve`), async (req, res) =>
 
     await prisma.$transaction(async (tx: any) => {
       for (const l of d.instrumentLines) {
-        if (l.type === "CHEQUE" && !l.chequeItemId) {
+        if (l.type === "CHEQUE") {
           // eslint-disable-next-line no-await-in-loop
           const cheque = await tx.chequeItem.create({
             data: {
@@ -756,15 +759,15 @@ router.post("/payments/:id/approve", can(`${FORM}.approve`), async (req, res) =>
             // eslint-disable-next-line no-await-in-loop
             await tx.chequeBookLeaf.update({ where: { id: l.chequeBookLeafId }, data: { status: "ISSUED" } });
           }
-        } else if (l.type === "CHEQUE" && l.chequeItemId) {
+        } else if (l.type === "CHEQUE_TRANSFER") {
           // eslint-disable-next-line no-await-in-loop
-          const endorsed = await tx.chequeItem.update({ where: { id: l.chequeItemId }, data: { status: "ENDORSED", step: { increment: 1 } } });
+          const endorsed = await tx.chequeItem.update({ where: { id: l.chequeItemId! }, data: { status: "ENDORSED", step: { increment: 1 } } });
           // eslint-disable-next-line no-await-in-loop
           await tx.paymentInstrumentLine.update({ where: { id: l.id }, data: { chequeStep: endorsed.step } });
         } else if (l.type === "CASH" && l.cashBoxId) {
           // eslint-disable-next-line no-await-in-loop
           await tx.cashBox.update({ where: { id: l.cashBoxId }, data: { hasTransactions: true } });
-        } else if ((l.type === "BANK_TRANSFER" || l.type === "POS") && l.bankAccountId) {
+        } else if (l.type === "BANK_TRANSFER" && l.bankAccountId) {
           // eslint-disable-next-line no-await-in-loop
           await tx.bankAccount.update({ where: { id: l.bankAccountId }, data: { hasTransactions: true } });
         }
@@ -979,7 +982,7 @@ router.put("/payments/:id/edit-approved", can(`${FORM}.editApproved`), async (re
           if (u.data.type === "CASH" && u.data.cashBoxId) {
             // eslint-disable-next-line no-await-in-loop
             await tx.cashBox.update({ where: { id: u.data.cashBoxId }, data: { hasTransactions: true } });
-          } else if ((u.data.type === "BANK_TRANSFER" || u.data.type === "POS") && u.data.bankAccountId) {
+          } else if (u.data.type === "BANK_TRANSFER" && u.data.bankAccountId) {
             // eslint-disable-next-line no-await-in-loop
             await tx.bankAccount.update({ where: { id: u.data.bankAccountId }, data: { hasTransactions: true } });
           }
@@ -992,10 +995,10 @@ router.put("/payments/:id/edit-approved", can(`${FORM}.editApproved`), async (re
 
       for (const l of toCreate) {
         const { clientKey, ...data } = l;
-        if (data.type === "CHEQUE" && data.chequeItemId) {
+        if (data.type === "CHEQUE_TRANSFER") {
           // خرج‌کردن چک دریافتنیِ موجود
           // eslint-disable-next-line no-await-in-loop
-          const endorsed = await tx.chequeItem.update({ where: { id: data.chequeItemId }, data: { status: "ENDORSED", step: { increment: 1 } } });
+          const endorsed = await tx.chequeItem.update({ where: { id: data.chequeItemId! }, data: { status: "ENDORSED", step: { increment: 1 } } });
           // eslint-disable-next-line no-await-in-loop
           const created = await tx.paymentInstrumentLine.create({
             data: { ...data, paymentId: id, rowOrder: nextOrder++, chequeStep: endorsed.step },
@@ -1035,7 +1038,7 @@ router.put("/payments/:id/edit-approved", can(`${FORM}.editApproved`), async (re
           if (data.type === "CASH" && data.cashBoxId) {
             // eslint-disable-next-line no-await-in-loop
             await tx.cashBox.update({ where: { id: data.cashBoxId }, data: { hasTransactions: true } });
-          } else if ((data.type === "BANK_TRANSFER" || data.type === "POS") && data.bankAccountId) {
+          } else if (data.type === "BANK_TRANSFER" && data.bankAccountId) {
             // eslint-disable-next-line no-await-in-loop
             await tx.bankAccount.update({ where: { id: data.bankAccountId }, data: { hasTransactions: true } });
           }

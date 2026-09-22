@@ -9,10 +9,10 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 // services/receiptJournalEntryService.ts با جهت‌های معکوس؛ یک سند برای کل پرداخت و به تاریخ پرداخت:
 //
 // بستانکار — به‌ازای هر ردیف ابزار پرداخت:
-//   نقد            → معین «صندوق» (تعیین حسابهای معین: CASH_BOX) — تفصیل: خودِ صندوق
-//   حواله / پوز    → معین «حساب بانکی» (BANK_ACCOUNT)               — تفصیل: خودِ حساب بانکی
-//   چک پرداختنی    → معین «چک پرداختی» به‌ازای نوع چک ردیف (PAYABLE_CHEQUE) — تفصیل: طرف حساب پرداخت
-//   خرج چک دریافتنی → معین «چک دریافتی» به‌ازای نوع همان چک (RECEIVABLE_CHEQUE) — تفصیل: طرف حسابِ صادرکننده‌ی چک
+//   نقد                    → معین «صندوق» (تعیین حسابهای معین: CASH_BOX) — تفصیل: خودِ صندوق
+//   حواله                  → معین «حساب بانکی» (BANK_ACCOUNT)               — تفصیل: خودِ حساب بانکی
+//   چک (صدور چک تازه)      → معین «چک پرداختی» به‌ازای نوع چک ردیف (PAYABLE_CHEQUE) — تفصیل: طرف حساب پرداخت
+//   چک انتقالی (خرج چک دریافتنی) → معین «چک دریافتی» به‌ازای نوع همان چک (RECEIVABLE_CHEQUE) — تفصیل: طرف حسابِ صادرکننده‌ی چک
 // بدهکار — به‌ازای هر ردیف موضوعات پرداخت، بر اساس مبنای «نوع پرداخت»:
 //   بدون مبنا              → معین خودِ نوع پرداخت (PaymentType.accountId)
 //   فاکتور خرید            → «پرداختنی خرید» نوع خرید فاکتور (حسابداری کالا و خدمت: PURCHASE_PAYABLE)
@@ -79,29 +79,27 @@ export async function issuePaymentJournalEntry(paymentId: number) {
       account = treasurySettings.find((s) => s.accountType === "CASH_BOX" && s.cashBoxId === l.cashBoxId)?.account;
       if (!account) errors.push(`ردیف ابزار ${n}: برای صندوق «${l.cashBox?.title ?? ""}»، معین در «تعیین حسابهای معین» (صندوق) تعریف نشده است`);
       detailCode = l.cashBox?.detailCode ?? null;
-    } else if (l.type === "BANK_TRANSFER" || l.type === "POS") {
+    } else if (l.type === "BANK_TRANSFER") {
       account = treasurySettings.find((s) => s.accountType === "BANK_ACCOUNT" && s.bankAccountId === l.bankAccountId)?.account;
       if (!account) errors.push(`ردیف ابزار ${n}: برای حساب بانکی «${l.bankAccount?.accountNumber ?? ""}»، معین در «تعیین حسابهای معین» (حساب بانکی) تعریف نشده است`);
       detailCode = l.bankAccount?.detailCode ?? null;
-    } else if (l.type === "CHEQUE") {
-      if (l.chequeItem && l.chequeItem.direction === "RECEIVABLE") {
-        // خرج‌کردن چک دریافتنی موجود
-        if (!l.chequeItem.receivableChequeTypeId) {
-          errors.push(`ردیف ابزار ${n}: نوع چک دریافتیِ چک خرج‌شده مشخص نیست`);
-        } else {
-          account = treasurySettings.find((s) => s.accountType === "RECEIVABLE_CHEQUE" && s.receivableChequeTypeId === l.chequeItem!.receivableChequeTypeId)?.account;
-          if (!account) errors.push(`ردیف ابزار ${n}: برای نوع چک دریافتیِ چک خرج‌شده، معین در «تعیین حسابهای معین» (چک دریافتی) تعریف نشده است`);
-        }
-        detailCode = l.chequeItem.party?.detailCode ?? null;
+    } else if (l.type === "CHEQUE_TRANSFER") {
+      // خرج‌کردن چک دریافتنی موجود
+      if (!l.chequeItem || !l.chequeItem.receivableChequeTypeId) {
+        errors.push(`ردیف ابزار ${n}: نوع چک دریافتیِ چک خرج‌شده مشخص نیست`);
       } else {
-        if (!l.payableChequeTypeId) {
-          errors.push(`ردیف ابزار ${n}: نوع چک انتخاب نشده است`);
-        } else {
-          account = treasurySettings.find((s) => s.accountType === "PAYABLE_CHEQUE" && s.payableChequeTypeId === l.payableChequeTypeId)?.account;
-          if (!account) errors.push(`ردیف ابزار ${n}: برای نوع چک ردیف، معین در «تعیین حسابهای معین» (چک پرداختی) تعریف نشده است`);
-        }
-        detailCode = payment.party.detailCode;
+        account = treasurySettings.find((s) => s.accountType === "RECEIVABLE_CHEQUE" && s.receivableChequeTypeId === l.chequeItem!.receivableChequeTypeId)?.account;
+        if (!account) errors.push(`ردیف ابزار ${n}: برای نوع چک دریافتیِ چک خرج‌شده، معین در «تعیین حسابهای معین» (چک دریافتی) تعریف نشده است`);
       }
+      detailCode = l.chequeItem?.party?.detailCode ?? null;
+    } else if (l.type === "CHEQUE") {
+      if (!l.payableChequeTypeId) {
+        errors.push(`ردیف ابزار ${n}: نوع چک انتخاب نشده است`);
+      } else {
+        account = treasurySettings.find((s) => s.accountType === "PAYABLE_CHEQUE" && s.payableChequeTypeId === l.payableChequeTypeId)?.account;
+        if (!account) errors.push(`ردیف ابزار ${n}: برای نوع چک ردیف، معین در «تعیین حسابهای معین» (چک پرداختی) تعریف نشده است`);
+      }
+      detailCode = payment.party.detailCode;
     }
     if (!account) continue;
 

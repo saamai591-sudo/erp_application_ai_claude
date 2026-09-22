@@ -21,17 +21,19 @@ import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, vali
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, roundToCurrencyDecimals } from "../lib/currencyConversion";
 
 // ماژول «خزانه‌داری» > پرداخت / اعلامیه پرداخت — هم‌الگوی Receipts.tsx (نگاه کنید به یادداشت‌های آن فایل و
-// backend/src/routes/payments.ts): چهار ابزار (نقد/حواله بانکی/چک/پوز) با ارز و نرخ ارز مستقل هر ردیف، «موضوعات
-// پرداخت» (نوع پرداخت/طرف حساب/سند مبنا/ارز/نرخ/تسعیر مستقل هر ردیف) که با یک کلید موقت سمت-کلاینت («قلم») به ردیف
-// ابزار ارجاع می‌دهند، و سند حسابداری با اکشن دستی. تفاوت اصلی: ردیف ابزار «چک» می‌تواند یا صدور چک پرداختنی تازه
-// (با نوع چک پرداختی) باشد یا «خرج‌کردن» یک چک دریافتنی موجود (که قبلاً از یک سند دریافت وارد سیستم شده).
+// backend/src/routes/payments.ts): چهار ابزار (نقد/حواله بانکی/چک/چک انتقالی) با ارز و نرخ ارز مستقل هر ردیف،
+// «موضوعات پرداخت» (نوع پرداخت/طرف حساب/سند مبنا/ارز/نرخ/تسعیر مستقل هر ردیف) که با یک کلید موقت سمت-کلاینت
+// («قلم») به ردیف ابزار ارجاع می‌دهند، و سند حسابداری با اکشن دستی. تفاوت اصلی با سند دریافت: طبق درخواست کاربر،
+// «چک» و «چک انتقالی» دو نوع کاملاً جدا در انتخابگرِ نوع‌اند (نه یک نوع با دو حالت داخلی) — چک همیشه یعنی صدور
+// یک چک پرداختنی تازه (با نوع چک پرداختی)، چک انتقالی همیشه یعنی «خرج‌کردن» یک چک دریافتنی موجود (که قبلاً از
+// یک سند دریافت وارد سیستم شده). پوز/درگاه دیگر در سند پرداخت ارائه نمی‌شود.
 
-type InstrumentType = "CASH" | "BANK_TRANSFER" | "CHEQUE" | "POS";
+type InstrumentType = "CASH" | "BANK_TRANSFER" | "CHEQUE" | "CHEQUE_TRANSFER";
 type DocStatus = "DRAFT" | "APPROVED";
 type PaymentNature = "SUPPLIER_PAYMENT" | "ADVANCE_PAYMENT" | "CUSTOMER_PAYMENT" | "OTHER_PAYMENT" | "PURCHASE_VAT" | "SALES_VAT";
 type PaymentBasisType = "NONE" | "PURCHASE_INVOICE" | "SALES_INVOICE" | "PURCHASE_ORDER";
 
-const TYPE_FA: Record<InstrumentType, string> = { CASH: "نقد", BANK_TRANSFER: "حواله/انتقال بانکی", CHEQUE: "چک", POS: "پوز/درگاه" };
+const TYPE_FA: Record<InstrumentType, string> = { CASH: "نقد", BANK_TRANSFER: "حواله/انتقال بانکی", CHEQUE: "چک", CHEQUE_TRANSFER: "چک انتقالی" };
 const STATUS_FA: Record<DocStatus, string> = { DRAFT: "ثبت", APPROVED: "تایید" };
 
 interface PartyOption { id: number; detailCode: string; category: "INDIVIDUAL" | "LEGAL"; isActive: boolean; firstName: string | null; lastName: string | null; name: string | null }
@@ -87,7 +89,6 @@ interface DetailInstrumentLine {
   // قابل ویرایش/حذف از «ویرایش سند تایید‌شده» نیست. نگاه کنید به backend/src/routes/payments.ts.
   chequeStep: number | null;
   chequeItemStep: number | null;
-  posTerminal: string | null;
   description: string | null;
 }
 interface DetailSettlementLine {
@@ -127,10 +128,10 @@ interface Detail {
 
 function infoText() {
   return (
-    "ثبت پرداخت وجه به یک طرف حساب از طریق نقد، حواله/انتقال بانکی، چک یا پوز. ردیف «چک» می‌تواند صدور یک چک " +
-    "پرداختنی تازه (با نوع چک) یا خرج‌کردن یک چک دریافتنی موجود باشد. هر ردیف موضوعات پرداخت به یک نوع پرداخت، " +
-    "طرف حساب، و در صورت نیاز یک سند مبنا (فاکتور خرید/فروش، سفارش خرید) وصل می‌شود؛ هر ردیف ابزار پرداخت باید " +
-    "دقیقاً توسط ردیف‌های موضوعات پرداختِ مرتبط با آن تسویه شود. سند حسابداری با اکشن «صدور سند حسابداری» صادر می‌شود."
+    "ثبت پرداخت وجه به یک طرف حساب از طریق نقد، حواله/انتقال بانکی، چک یا چک انتقالی. ردیف «چک» یعنی صدور یک چک " +
+    "پرداختنی تازه (با نوع چک)؛ ردیف «چک انتقالی» یعنی خرج‌کردن یک چک دریافتنی موجود. هر ردیف موضوعات پرداخت به یک " +
+    "نوع پرداخت، طرف حساب، و در صورت نیاز یک سند مبنا (فاکتور خرید/فروش، سفارش خرید) وصل می‌شود؛ هر ردیف ابزار پرداخت " +
+    "باید دقیقاً توسط ردیف‌های موضوعات پرداختِ مرتبط با آن تسویه شود. سند حسابداری با اکشن «صدور سند حسابداری» صادر می‌شود."
   );
 }
 
@@ -257,11 +258,8 @@ interface InstrumentRowState {
   // Documents/دسته چک.md)؛ در آن حالت شماره چک آزادانه تایپ نمی‌شود، از این برگه می‌آید.
   chequeBookLeafId: string;
   chequeBookLeafDisplay: string;
-  // «صدور چک جدید» (NEW) یا «خرج‌کردن چک دریافتنی موجود» (SPEND) — فقط برای ردیف نوع چک؛ نگاه کنید به backend/src/routes/payments.ts
-  chequeMode: "NEW" | "SPEND";
   chequeItemId: string;
   chequeItemDisplay: string;
-  posTerminal: string;
   description: string;
   // فقط برای ردیف‌های موجود (id دار) که از سرور آمده‌اند؛ برای تشخیص «قفل» بودن ردیف در سند
   // «تایید»شده استفاده می‌شود (نگاه کنید به DetailInstrumentLine).
@@ -274,7 +272,7 @@ function nextClientKey() {
   return `new-${Date.now()}-${clientKeySeq}`;
 }
 function emptyInstrumentRow(): InstrumentRowState {
-  return { clientKey: nextClientKey(), type: "CASH", amount: "", currencyId: "", fxRate: "", cashBoxId: "", bankAccountId: "", referenceNumber: "", chequeNumber: "", chequeDueDate: "", chequeBankBranchId: "", payableChequeTypeId: "", chequeBookLeafId: "", chequeBookLeafDisplay: "", chequeMode: "NEW", chequeItemId: "", chequeItemDisplay: "", posTerminal: "", description: "" };
+  return { clientKey: nextClientKey(), type: "CASH", amount: "", currencyId: "", fxRate: "", cashBoxId: "", bankAccountId: "", referenceNumber: "", chequeNumber: "", chequeDueDate: "", chequeBankBranchId: "", payableChequeTypeId: "", chequeBookLeafId: "", chequeBookLeafDisplay: "", chequeItemId: "", chequeItemDisplay: "", description: "" };
 }
 // ردیف از سند «تایید»شده «قفل» است اگر یک چک به آن وصل باشد و step آن چک دیگر با chequeStep همین
 // ردیف برابر نباشد — یعنی اتفاق دیگری (واگذاری/وصول/...) بعد از این سند برای آن چک افتاده است.
@@ -364,11 +362,8 @@ function PaymentForm({ editId }: { editId?: number }) {
         payableChequeTypeId: l.payableChequeTypeId ? String(l.payableChequeTypeId) : "",
         chequeBookLeafId: l.chequeBookLeafId ? String(l.chequeBookLeafId) : "",
         chequeBookLeafDisplay: l.chequeBookLeafDisplay ? toFaDigits(l.chequeBookLeafDisplay) : "",
-        // ردیف چکی که چک دریافتنیِ موجودی به آن وصل است ولی شماره‌ی چک تازه ندارد = «خرج‌کردن»
-        chequeMode: l.chequeItemId && !l.chequeNumber ? "SPEND" : "NEW",
         chequeItemId: l.chequeItemId ? String(l.chequeItemId) : "",
         chequeItemDisplay: l.chequeItemNumber ? toFaDigits(l.chequeItemNumber) : "",
-        posTerminal: l.posTerminal || "",
         description: l.description || "",
         chequeStep: l.chequeStep,
         chequeItemStep: l.chequeItemStep,
@@ -535,7 +530,7 @@ function PaymentForm({ editId }: { editId?: number }) {
   }
 
   // ستون «نوع چک» فقط وقتی لازم است که حداقل یک ردیف «صدور چک جدید» وجود داشته باشد (چک خرج‌شده نوع خودش را دارد)
-  const hasChequeRow = instrumentRows.some((r) => r.type === "CHEQUE" && r.chequeMode === "NEW");
+  const hasChequeRow = instrumentRows.some((r) => r.type === "CHEQUE");
   const instrumentBaseTotal = !baseCurrency
     ? 0
     : roundToCurrencyDecimals(
@@ -567,15 +562,14 @@ function PaymentForm({ editId }: { editId?: number }) {
         currencyId: r.currencyId ? Number(r.currencyId) : undefined,
         fxRate: r.fxRate ? Number(r.fxRate) : undefined,
         cashBoxId: r.cashBoxId ? Number(r.cashBoxId) : null,
-        bankAccountId: r.type === "CHEQUE" && r.chequeMode === "SPEND" ? null : r.bankAccountId ? Number(r.bankAccountId) : null,
+        bankAccountId: r.type === "CHEQUE" && r.bankAccountId ? Number(r.bankAccountId) : r.type === "BANK_TRANSFER" && r.bankAccountId ? Number(r.bankAccountId) : null,
         referenceNumber: r.referenceNumber || null,
-        chequeItemId: r.type === "CHEQUE" && r.chequeMode === "SPEND" && r.chequeItemId ? Number(r.chequeItemId) : null,
-        chequeNumber: r.type === "CHEQUE" && r.chequeMode === "NEW" ? r.chequeNumber || null : null,
-        chequeDueDate: r.type === "CHEQUE" && r.chequeMode === "NEW" ? r.chequeDueDate || null : null,
-        chequeBankBranchId: r.type === "CHEQUE" && r.chequeMode === "NEW" && r.chequeBankBranchId ? Number(r.chequeBankBranchId) : null,
-        payableChequeTypeId: r.type === "CHEQUE" && r.chequeMode === "NEW" && r.payableChequeTypeId ? Number(r.payableChequeTypeId) : null,
-        chequeBookLeafId: r.type === "CHEQUE" && r.chequeMode === "NEW" && r.chequeBookLeafId ? Number(r.chequeBookLeafId) : null,
-        posTerminal: r.posTerminal || null,
+        chequeItemId: r.type === "CHEQUE_TRANSFER" && r.chequeItemId ? Number(r.chequeItemId) : null,
+        chequeNumber: r.type === "CHEQUE" ? r.chequeNumber || null : null,
+        chequeDueDate: r.type === "CHEQUE" ? r.chequeDueDate || null : null,
+        chequeBankBranchId: r.type === "CHEQUE" && r.chequeBankBranchId ? Number(r.chequeBankBranchId) : null,
+        payableChequeTypeId: r.type === "CHEQUE" && r.payableChequeTypeId ? Number(r.payableChequeTypeId) : null,
+        chequeBookLeafId: r.type === "CHEQUE" && r.chequeBookLeafId ? Number(r.chequeBookLeafId) : null,
         description: r.description || null,
       }));
   }
@@ -618,15 +612,15 @@ function PaymentForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
 
-    const missingChequeType = instrumentRows.some((r) => r.type === "CHEQUE" && r.chequeMode === "NEW" && Number(r.amount) > 0 && !r.payableChequeTypeId && !isRowLocked(r, isApprovedSemiOpen));
+    const missingChequeType = instrumentRows.some((r) => r.type === "CHEQUE" && Number(r.amount) > 0 && !r.payableChequeTypeId && !isRowLocked(r, isApprovedSemiOpen));
     if (missingChequeType) return setError("نوع چک در همه‌ی ردیف‌های صدور چک الزامی است");
-    const missingSpendCheque = instrumentRows.some((r) => r.type === "CHEQUE" && r.chequeMode === "SPEND" && !r.chequeItemId && !isRowLocked(r, isApprovedSemiOpen));
-    if (missingSpendCheque) return setError("چک دریافتنی برای خرج‌کردن در ردیف‌های مربوطه انتخاب نشده است");
+    const missingSpendCheque = instrumentRows.some((r) => r.type === "CHEQUE_TRANSFER" && !r.chequeItemId && !isRowLocked(r, isApprovedSemiOpen));
+    if (missingSpendCheque) return setError("چک دریافتنی برای خرج‌کردن در ردیف‌های «چک انتقالی» انتخاب نشده است");
     // طبق درخواست کاربر: برای صدور چک جدید، ابتدا حساب بانکی (فقط از نوع دارای دسته چک) و سپس برگه‌ی
     // چک از همان دسته چک انتخاب می‌شود — شماره چک دیگر آزادانه تایپ نمی‌شود.
-    const missingChequeBankAccount = instrumentRows.some((r) => r.type === "CHEQUE" && r.chequeMode === "NEW" && Number(r.amount) > 0 && !r.bankAccountId && !isRowLocked(r, isApprovedSemiOpen));
+    const missingChequeBankAccount = instrumentRows.some((r) => r.type === "CHEQUE" && Number(r.amount) > 0 && !r.bankAccountId && !isRowLocked(r, isApprovedSemiOpen));
     if (missingChequeBankAccount) return setError("حساب بانکی صادرکننده در همه‌ی ردیف‌های صدور چک الزامی است");
-    const missingChequeLeaf = instrumentRows.some((r) => r.type === "CHEQUE" && r.chequeMode === "NEW" && Number(r.amount) > 0 && !r.chequeBookLeafId && !isRowLocked(r, isApprovedSemiOpen));
+    const missingChequeLeaf = instrumentRows.some((r) => r.type === "CHEQUE" && Number(r.amount) > 0 && !r.chequeBookLeafId && !isRowLocked(r, isApprovedSemiOpen));
     if (missingChequeLeaf) return setError("انتخاب برگه چک از دسته چک در همه‌ی ردیف‌های صدور چک الزامی است");
 
     if (isApprovedSemiOpen) {
@@ -875,7 +869,7 @@ function PaymentForm({ editId }: { editId?: number }) {
                   const typeDisabled = locked || (isApprovedSemiOpen && !!row.id);
                   // چک دریافتنیِ خرج‌شده متعلق به سند دیگری است: انتخاب چک و مبلغ آن در یک ردیف موجود قابل تغییر نیست
                   const spendPickerDisabled = locked || (isApprovedSemiOpen && !!row.id);
-                  const isSpendRow = row.type === "CHEQUE" && row.chequeMode === "SPEND";
+                  const isSpendRow = row.type === "CHEQUE_TRANSFER";
                   const bankAccount = bankAccounts.find((a) => String(a.id) === row.bankAccountId);
                   const isBaseCurrencyRow = !row.currencyId || Number(row.currencyId) === baseCurrency.id;
                   return (
@@ -886,9 +880,10 @@ function PaymentForm({ editId }: { editId?: number }) {
                           value={row.type}
                           onChange={(e) => {
                             const type = e.target.value as InstrumentType;
-                            // طبق سند: چک همیشه با ارز پایه؛ حواله/پوز از ارز حساب بانکی (تا انتخاب حساب، خالی)
-                            const currencyId = type === "CHEQUE" ? String(baseCurrency.id) : type === "CASH" ? row.currencyId : "";
-                            updateInstrumentRow(idx, { type, currencyId, fxRate: type === "CHEQUE" ? "1" : row.fxRate });
+                            // طبق سند: چک/چک انتقالی همیشه با ارز پایه؛ حواله از ارز حساب بانکی (تا انتخاب حساب، خالی)
+                            const isCheque = type === "CHEQUE" || type === "CHEQUE_TRANSFER";
+                            const currencyId = isCheque ? String(baseCurrency.id) : type === "CASH" ? row.currencyId : "";
+                            updateInstrumentRow(idx, { type, currencyId, fxRate: isCheque ? "1" : row.fxRate });
                           }}
                           disabled={typeDisabled}
                         >
@@ -899,7 +894,7 @@ function PaymentForm({ editId }: { editId?: number }) {
                       </td>
                       {hasChequeRow && (
                         <td style={{ minWidth: 150 }}>
-                          {row.type === "CHEQUE" && row.chequeMode === "NEW" && (
+                          {row.type === "CHEQUE" && (
                             <select value={row.payableChequeTypeId} onChange={(e) => updateInstrumentRow(idx, { payableChequeTypeId: e.target.value })} disabled={locked}>
                               <option value="">انتخاب نوع چک</option>
                               {chequeTypes.map((t) => (
@@ -921,8 +916,8 @@ function PaymentForm({ editId }: { editId?: number }) {
                             ))}
                           </select>
                         )}
-                        {row.type === "CHEQUE" && <span>{baseCurrency.title}</span>}
-                        {(row.type === "BANK_TRANSFER" || row.type === "POS") && <span>{bankAccount?.currency?.title || "—"}</span>}
+                        {(row.type === "CHEQUE" || row.type === "CHEQUE_TRANSFER") && <span>{baseCurrency.title}</span>}
+                        {row.type === "BANK_TRANSFER" && <span>{bankAccount?.currency?.title || "—"}</span>}
                       </td>
                       <td style={{ minWidth: 100 }}>
                         {isBaseCurrencyRow ? (
@@ -940,7 +935,7 @@ function PaymentForm({ editId }: { editId?: number }) {
                             ))}
                           </select>
                         )}
-                        {(row.type === "BANK_TRANSFER" || row.type === "POS") && (
+                        {row.type === "BANK_TRANSFER" && (
                           <div style={{ display: "flex", gap: 6 }}>
                             <select
                               value={row.bankAccountId}
@@ -958,102 +953,84 @@ function PaymentForm({ editId }: { editId?: number }) {
                               ))}
                             </select>
                             <input
-                              placeholder={row.type === "POS" ? "شماره ترمینال" : "شماره پیگیری"}
-                              value={row.type === "POS" ? row.posTerminal : row.referenceNumber}
-                              onChange={(e) => updateInstrumentRow(idx, row.type === "POS" ? { posTerminal: e.target.value } : { referenceNumber: e.target.value })}
+                              placeholder="شماره پیگیری"
+                              value={row.referenceNumber}
+                              onChange={(e) => updateInstrumentRow(idx, { referenceNumber: e.target.value })}
                               disabled={locked}
                               style={{ flex: 1 }}
                             />
                           </div>
                         )}
                         {row.type === "CHEQUE" && (
-                          <div>
-                            <div style={{ display: "flex", gap: 10, marginBottom: 6, fontSize: 12 }}>
-                              <label style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                                <input type="radio" checked={row.chequeMode === "NEW"} onChange={() => updateInstrumentRow(idx, { chequeMode: "NEW", chequeItemId: "", chequeItemDisplay: "" })} disabled={typeDisabled} />
-                                صدور چک جدید
-                              </label>
-                              <label style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                                <input
-                                  type="radio"
-                                  checked={row.chequeMode === "SPEND"}
-                                  onChange={() => updateInstrumentRow(idx, { chequeMode: "SPEND", chequeNumber: "", chequeDueDate: "", chequeBankBranchId: "", bankAccountId: "", payableChequeTypeId: "" })}
-                                  disabled={typeDisabled}
-                                />
-                                خرج‌کردن چک دریافتنی موجود
-                              </label>
-                            </div>
-                            {row.chequeMode === "NEW" ? (
-                              // طبق درخواست کاربر: حساب بانکی همیشه اولین فیلد است (باید پیش از هر اطلاعات دیگر چک
-                              // انتخاب شود)، فقط حساب‌های بانکیِ نوعِ «دارای دسته چک» نمایش داده می‌شوند، شماره چک
-                              // همیشه از دسته چک انتخاب می‌شود (نه تایپ آزاد)، و شعبه بانک کاملاً حذف شده است.
-                              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                <select
-                                  value={row.bankAccountId}
-                                  onChange={(e) =>
-                                    updateInstrumentRow(idx, {
-                                      bankAccountId: e.target.value,
-                                      // با تغییر حساب بانکی صادرکننده، برگه‌ی دسته چک/شماره‌ی قبلی دیگر معتبر نیست
-                                      chequeBookLeafId: "",
-                                      chequeBookLeafDisplay: "",
-                                      chequeNumber: "",
-                                    })
-                                  }
-                                  disabled={locked}
-                                  style={{ flex: "1 1 160px" }}
-                                >
-                                  <option value="">حساب بانکی صادرکننده</option>
-                                  {bankAccounts.filter((a) => a.accountType.hasChequeBook).map((a) => (
-                                    <option key={a.id} value={a.id}>{a.accountNumber} — {a.bankBranch.title}</option>
-                                  ))}
-                                </select>
-                                <div style={{ width: 160 }}>
-                                  <RecordPickerField
-                                    title="انتخاب برگه چک"
-                                    placeholder={row.bankAccountId ? "انتخاب برگه از دسته چک" : "ابتدا حساب بانکی را انتخاب کنید"}
-                                    disabled={locked || !row.bankAccountId}
-                                    displayValue={row.chequeBookLeafDisplay}
-                                    rows={pickableChequeBookLeaves.filter((l) => l.bankAccountId === Number(row.bankAccountId))}
-                                    columns={[
-                                      { header: "سری", render: (l) => l.series, filterValue: (l) => l.series, width: "80px" },
-                                      { header: "شماره", render: (l) => toFaDigits(l.number), filterValue: (l) => l.number },
-                                    ]}
-                                    onSelect={(l) =>
-                                      updateInstrumentRow(idx, {
-                                        chequeBookLeafId: String((l as PickableChequeBookLeaf).id),
-                                        chequeBookLeafDisplay: `${(l as PickableChequeBookLeaf).series} - ${(l as PickableChequeBookLeaf).number}`,
-                                        chequeNumber: (l as PickableChequeBookLeaf).number,
-                                      })
-                                    }
-                                  />
-                                </div>
-                                <div style={{ width: 140 }}>
-                                  <JalaliDatePicker value={row.chequeDueDate} onChange={(v) => updateInstrumentRow(idx, { chequeDueDate: v })} />
-                                </div>
-                              </div>
-                            ) : (
+                          // طبق درخواست کاربر: حساب بانکی همیشه اولین فیلد است (باید پیش از هر اطلاعات دیگر چک
+                          // انتخاب شود)، فقط حساب‌های بانکیِ نوعِ «دارای دسته چک» نمایش داده می‌شوند، شماره چک
+                          // همیشه از دسته چک انتخاب می‌شود (نه تایپ آزاد)، و شعبه بانک کاملاً حذف شده است.
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            <select
+                              value={row.bankAccountId}
+                              onChange={(e) =>
+                                updateInstrumentRow(idx, {
+                                  bankAccountId: e.target.value,
+                                  // با تغییر حساب بانکی صادرکننده، برگه‌ی دسته چک/شماره‌ی قبلی دیگر معتبر نیست
+                                  chequeBookLeafId: "",
+                                  chequeBookLeafDisplay: "",
+                                  chequeNumber: "",
+                                })
+                              }
+                              disabled={locked}
+                              style={{ flex: "1 1 160px" }}
+                            >
+                              <option value="">حساب بانکی صادرکننده</option>
+                              {bankAccounts.filter((a) => a.accountType.hasChequeBook).map((a) => (
+                                <option key={a.id} value={a.id}>{a.accountNumber} — {a.bankBranch.title}</option>
+                              ))}
+                            </select>
+                            <div style={{ width: 160 }}>
                               <RecordPickerField
-                                title="انتخاب چک دریافتنی موجود"
-                                disabled={spendPickerDisabled}
-                                displayValue={row.chequeItemDisplay}
-                                rows={pickableCheques}
+                                title="انتخاب برگه چک"
+                                placeholder={row.bankAccountId ? "انتخاب برگه از دسته چک" : "ابتدا حساب بانکی را انتخاب کنید"}
+                                disabled={locked || !row.bankAccountId}
+                                displayValue={row.chequeBookLeafDisplay}
+                                rows={pickableChequeBookLeaves.filter((l) => l.bankAccountId === Number(row.bankAccountId))}
                                 columns={[
-                                  { header: "شماره", render: (c) => c.number, filterValue: (c) => c.number, width: "100px" },
-                                  { header: "طرف حساب", render: (c) => c.partyDisplay, filterValue: (c) => c.partyDisplay },
-                                  { header: "مبلغ", render: (c) => formatAmountFa(c.amount), filterValue: (c) => String(c.amount), width: "100px" },
+                                  { header: "سری", render: (l) => l.series, filterValue: (l) => l.series, width: "80px" },
+                                  { header: "شماره", render: (l) => toFaDigits(l.number), filterValue: (l) => l.number },
                                 ]}
-                                onSelect={(c) =>
+                                onSelect={(l) =>
                                   updateInstrumentRow(idx, {
-                                    chequeItemId: String((c as PickableCheque).id),
-                                    chequeItemDisplay: (c as PickableCheque).number,
-                                    amount: String((c as PickableCheque).amount),
-                                    currencyId: String(baseCurrency.id),
-                                    fxRate: "1",
+                                    chequeBookLeafId: String((l as PickableChequeBookLeaf).id),
+                                    chequeBookLeafDisplay: `${(l as PickableChequeBookLeaf).series} - ${(l as PickableChequeBookLeaf).number}`,
+                                    chequeNumber: (l as PickableChequeBookLeaf).number,
                                   })
                                 }
                               />
-                            )}
+                            </div>
+                            <div style={{ width: 140 }}>
+                              <JalaliDatePicker value={row.chequeDueDate} onChange={(v) => updateInstrumentRow(idx, { chequeDueDate: v })} />
+                            </div>
                           </div>
+                        )}
+                        {row.type === "CHEQUE_TRANSFER" && (
+                          <RecordPickerField
+                            title="انتخاب چک دریافتنی موجود"
+                            disabled={spendPickerDisabled}
+                            displayValue={row.chequeItemDisplay}
+                            rows={pickableCheques}
+                            columns={[
+                              { header: "شماره", render: (c) => c.number, filterValue: (c) => c.number, width: "100px" },
+                              { header: "طرف حساب", render: (c) => c.partyDisplay, filterValue: (c) => c.partyDisplay },
+                              { header: "مبلغ", render: (c) => formatAmountFa(c.amount), filterValue: (c) => String(c.amount), width: "100px" },
+                            ]}
+                            onSelect={(c) =>
+                              updateInstrumentRow(idx, {
+                                chequeItemId: String((c as PickableCheque).id),
+                                chequeItemDisplay: (c as PickableCheque).number,
+                                amount: String((c as PickableCheque).amount),
+                                currencyId: String(baseCurrency.id),
+                                fxRate: "1",
+                              })
+                            }
+                          />
                         )}
                       </td>
                       <td style={{ minWidth: 140 }}>
