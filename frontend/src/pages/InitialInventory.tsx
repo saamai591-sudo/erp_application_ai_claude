@@ -287,7 +287,7 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
   const [baseDecimalPlaces, setBaseDecimalPlaces] = useState(2);
   const [focusedRow, setFocusedRow] = useState<number | null>(null);
 
-  const { header, setHeader, rows, setRows, meta, setMeta, fiscalPeriod, error, setError, loaded, saved, flash, submit, remove } = useDocumentForm<
+  const { header, setHeader, rows, setRows, meta, setMeta, fiscalPeriod, error, setError, loaded, flash, submit, remove } = useDocumentForm<
     { warehouseId: string; date: string; description: string },
     RowState,
     Detail
@@ -466,7 +466,6 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
     >
       <form id="initial-inventory-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
 
         <fieldset disabled={nonMoneyReadOnly} style={{ border: 0, padding: 0, margin: 0 }}>
         <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>

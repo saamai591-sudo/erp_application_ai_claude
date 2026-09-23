@@ -279,7 +279,7 @@ function OlapBuilder({ editId }: { editId?: number }) {
   const [result, setResult] = usePersistedState<PivotResult | null>(`${cacheKey}:result`, null);
   const [running, setRunning] = useState(false);
   const [settingsCollapsed, setSettingsCollapsed] = usePersistedState(`${cacheKey}:collapsed`, false);
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   const [levels, setLevels] = useState<Level[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
@@ -480,7 +480,6 @@ function OlapBuilder({ editId }: { editId?: number }) {
     >
       <form id="olap-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
 
         <div className="form-grid">
           <div className="form-field full">

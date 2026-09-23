@@ -234,7 +234,7 @@ function ChequeBookLeafForm({ editId }: { editId?: number }) {
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_FORM);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     api.get("/banking/accounts").then(setBankAccounts);
@@ -328,7 +328,6 @@ function ChequeBookLeafForm({ editId }: { editId?: number }) {
     >
       <form id="cheque-book-leaf-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           {editId && (
             <div className="form-field">

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Modal } from "./Modal";
 import { api } from "../lib/api";
+import { showToast } from "../lib/toast";
 import { useTabs } from "../lib/TabsContext";
 import { FONT_OPTIONS, applyFont, THEME_OPTIONS, applyTheme } from "../lib/userSettings";
 import { loadPreferences, savePreferences, getPreference } from "../lib/preferences";
@@ -54,7 +55,6 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal title="تنظیمات کاربری" onClose={onClose}>
-      {saved && <div className="alert warn">تنظیمات ذخیره شد</div>}
       <div className="form-grid">
         <div className="form-field full">
           <label>دوره مالی جاری</label>

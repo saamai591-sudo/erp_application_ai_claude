@@ -143,7 +143,7 @@ function WarehouseForm({ editId }: { editId?: number }) {
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_WAREHOUSE_FORM);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     api.get("/warehouse-groups").then(setAllGroups);
@@ -236,7 +236,6 @@ function WarehouseForm({ editId }: { editId?: number }) {
     >
       <form id="warehouse-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
             <label>کد <FieldHint label="کد" text="اختیاری — در صورت خالی بودن، سیستم تعیین می‌کند" /></label>

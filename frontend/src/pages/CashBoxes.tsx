@@ -71,7 +71,7 @@ function CashBoxForm({ editId }: { editId?: number }) {
   const { create } = useCrud<CashBox>("/cash-boxes");
   const [title, setTitle] = usePersistedState(cacheKey, "");
   const [formError, setFormError] = useState<string | null>(null);
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
 
   useEffect(() => {
@@ -124,7 +124,6 @@ function CashBoxForm({ editId }: { editId?: number }) {
     >
       <form id="cashbox-form" onSubmit={onSubmit}>
         {formError && <div className="alert error">{formError}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-field full">
           <label>عنوان<RequiredMark /></label>
           <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />

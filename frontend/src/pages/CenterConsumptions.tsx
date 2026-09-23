@@ -160,7 +160,7 @@ function CenterConsumptionForm({ editId, basePath }: { editId?: number; basePath
   const [costCenters, setCostCenters] = useState<CostCenterOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
-  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, saved, submit, remove } = useDocumentForm<
+  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
     { date: string; basis: Basis; warehouseId: string; costCenterId: string; description: string },
     RowState,
     Detail
@@ -334,7 +334,6 @@ function CenterConsumptionForm({ editId, basePath }: { editId?: number; basePath
     >
       <form id="center-consumption-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
 
         {meta && (
           <div className="form-field" style={{ maxWidth: 220, marginBottom: 8 }}>

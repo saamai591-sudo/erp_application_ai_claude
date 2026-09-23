@@ -103,7 +103,7 @@ function SerialForm({ editId }: { editId?: number }) {
   const [goodsItems, setGoodsItems] = useState<GoodsItemOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     api.get("/goods-items?kind=GOODS&trackingMethod=SERIAL").then(setGoodsItems).catch(() => {});
@@ -181,7 +181,6 @@ function SerialForm({ editId }: { editId?: number }) {
     >
       <form id="serial-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
             <label>کالا<RequiredMark /></label>

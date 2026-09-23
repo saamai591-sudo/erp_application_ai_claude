@@ -209,7 +209,7 @@ function IssuanceList() {
 function IssueForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const { openTab } = useTabs();
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   const [meta, setMeta] = useState<IssuanceDetail | null>(null);
   const [initLoading, setInitLoading] = useState(true);
@@ -444,7 +444,6 @@ function IssueForm({ editId }: { editId?: number }) {
     >
       <form id="issue-warehouse-journal-entries-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">{saved}</div>}
 
         <div className="page-header">
           <div className="header-toolbar" style={{ gap: 4 }}>

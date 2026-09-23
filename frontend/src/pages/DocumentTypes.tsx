@@ -74,7 +74,7 @@ function TypeForm({ editId }: { editId?: number }) {
   const [isSystem, setIsSystem] = usePersistedState(`${cacheKey}:isSystem`, false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(`${cacheKey}:title`));
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     if (!editId || hasPersistedState(`${cacheKey}:title`)) return;
@@ -128,7 +128,6 @@ function TypeForm({ editId }: { editId?: number }) {
     >
       <form id="doctype-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         {isSystem && <div className="alert warn">این یک نوع سند سیستمی است و قابل حذف نیست؛ فقط عنوان قابل ویرایش است.</div>}
         <div className="form-field full">
           <label>عنوان<RequiredMark /></label>

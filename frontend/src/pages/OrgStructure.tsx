@@ -147,7 +147,7 @@ function NodeEditForm({ editId }: { editId: number }) {
   const [code, setCode] = usePersistedState(`${cacheKey}:code`, "");
   const [formError, setFormError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(hasPersistedState(`${cacheKey}:title`));
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     if (hasPersistedState(`${cacheKey}:title`)) return;
@@ -201,7 +201,6 @@ function NodeEditForm({ editId }: { editId: number }) {
     >
       <form id="org-edit-form" onSubmit={onSubmit}>
         {formError && <div className="alert error">{formError}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
             <label>کد</label>

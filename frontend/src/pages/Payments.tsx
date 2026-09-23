@@ -338,7 +338,7 @@ function PaymentForm({ editId }: { editId?: number }) {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   const baseCurrency = currencies.find((c) => c.isBase);
 
@@ -771,7 +771,6 @@ function PaymentForm({ editId }: { editId?: number }) {
     >
       <form id="payment-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">{saved}</div>}
 
         {/* بعد از صدور سند حسابداری، همه‌ی اطلاعات سند (هدر، ردیف‌های ابزار، موضوعات پرداخت، شرح) قفل است */}
         <fieldset disabled={jeLocked} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>

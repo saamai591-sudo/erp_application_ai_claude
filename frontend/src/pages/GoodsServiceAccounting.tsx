@@ -203,7 +203,7 @@ function SettingForm({ editId }: { editId?: number }) {
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_SETTING_FORM);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     api.get("/accounting-groups").then((g: AccountingGroup[]) => setAccountingGroups(g.filter((x) => x.isActive)));
@@ -315,7 +315,6 @@ function SettingForm({ editId }: { editId?: number }) {
     >
       <form id="goods-service-accounting-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           {showAccountingGroup && (
             <div className="form-field">

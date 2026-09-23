@@ -383,7 +383,7 @@ function EntryForm({ editId }: { editId?: number }) {
     `${cacheKey}:entryMeta`,
     null
   );
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
   const [focusedRow, setFocusedRow] = useState<number | null>(null);
   const [linesPage, setLinesPage] = useState(1);
   const [linesPageSize, setLinesPageSize] = useState(DEFAULT_LINES_PAGE_SIZE);
@@ -719,7 +719,6 @@ function EntryForm({ editId }: { editId?: number }) {
     >
       <form id="journal-entry-form" onSubmit={onSubmit} className="je-form-fill">
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">{saved}</div>}
         {entryMeta?.sources && entryMeta.sources.length > 0 && (
           <div className="je-meta-strip" style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: "10px 14px", background: "#f8f9fb", border: "1px solid var(--line)", borderRadius: 8, marginBottom: 14 }}>
             <b>اسناد مبدا:</b>

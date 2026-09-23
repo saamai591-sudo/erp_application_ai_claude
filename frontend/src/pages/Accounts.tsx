@@ -161,7 +161,7 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
   });
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(hasPersistedState(`${cacheKey}:form`));
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     async function init() {
@@ -267,7 +267,6 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
     >
       <form id="account-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
             <label>کد (طول {currentLevel.codeLength} رقم)<RequiredMark /></label>

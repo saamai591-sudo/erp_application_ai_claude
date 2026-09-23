@@ -172,7 +172,7 @@ export function PartyForm({
   const [detail, setDetail] = usePersistedState<PartyFull | null>(`${cacheKey}:detail`, null);
   const [formError, setFormError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(`${cacheKey}:form`));
 
   async function reloadDetail(id: number) {
@@ -277,7 +277,6 @@ export function PartyForm({
       {tab === "main" && (
         <form id="party-main-form" onSubmit={onSubmit}>
           {formError && <div className="alert error">{formError}</div>}
-          {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
           {warning && (
             <div className="alert warn">
               {warning}

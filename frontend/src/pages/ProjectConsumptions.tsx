@@ -137,7 +137,7 @@ function ProjectConsumptionForm({ editId, basePath }: { editId?: number; basePat
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
-  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, saved, submit, remove } = useDocumentForm<
+  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
     { date: string; basis: Basis; warehouseId: string; projectId: string; description: string },
     RowState,
     Detail
@@ -310,7 +310,6 @@ function ProjectConsumptionForm({ editId, basePath }: { editId?: number; basePat
     >
       <form id="project-consumption-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
 
         {meta && (
           <div className="form-field" style={{ maxWidth: 220, marginBottom: 8 }}>

@@ -130,7 +130,7 @@ function BatchForm({ editId }: { editId?: number }) {
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     api.get("/goods-items?kind=GOODS&trackingMethod=BATCH").then(setGoodsItems).catch(() => {});
@@ -227,7 +227,6 @@ function BatchForm({ editId }: { editId?: number }) {
     >
       <form id="batch-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
             <label>کالا<RequiredMark /></label>

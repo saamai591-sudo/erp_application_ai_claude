@@ -120,7 +120,7 @@ function PurchaseExpertForm({ editId }: { editId?: number }) {
   const [groupRows, setGroupRows] = usePersistedState<GroupRowState[]>(`${cacheKey}:groups`, []);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     api.get("/parties?category=INDIVIDUAL").then((p: PartyOption[]) => setParties(p.filter((x) => x.isActive))).catch(() => {});
@@ -208,7 +208,6 @@ function PurchaseExpertForm({ editId }: { editId?: number }) {
     >
       <form id="purchase-expert-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
             <label>کد <FieldHint label="کد" text="اختیاری — در صورت خالی بودن، سیستم تعیین می‌کند" /></label>

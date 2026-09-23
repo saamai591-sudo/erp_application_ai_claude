@@ -124,7 +124,7 @@ function CenterConsumptionReturnForm({ editId, basePath }: { editId?: number; ba
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
-  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, saved, submit, remove } = useDocumentForm<
+  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
     { date: string; warehouseId: string; description: string },
     RowState,
     Detail
@@ -255,7 +255,6 @@ function CenterConsumptionReturnForm({ editId, basePath }: { editId?: number; ba
     >
       <form id="center-consumption-return-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
 
         {meta && (
           <div className="form-field" style={{ maxWidth: 220, marginBottom: 8 }}>

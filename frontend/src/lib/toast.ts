@@ -5,7 +5,7 @@ type Listener = (items: ToastItem[]) => void;
 let items: ToastItem[] = [];
 let seq = 0;
 const listeners = new Set<Listener>();
-const DURATION_MS = 2500;
+const MIN_DURATION_MS = 2500;
 
 function emit() {
   listeners.forEach((l) => l(items));
@@ -27,5 +27,5 @@ export function showToast(message: string) {
   setTimeout(() => {
     items = items.filter((t) => t.id !== id);
     emit();
-  }, DURATION_MS);
+  }, Math.max(MIN_DURATION_MS, message.length * 60));
 }

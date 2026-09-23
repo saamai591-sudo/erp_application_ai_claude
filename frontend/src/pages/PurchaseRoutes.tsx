@@ -98,7 +98,7 @@ function PurchaseRouteForm({ editId }: { editId?: number }) {
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_FORM);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     if (!editId) {
@@ -162,7 +162,6 @@ function PurchaseRouteForm({ editId }: { editId?: number }) {
     >
       <form id="purchase-route-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
             <label>کد <FieldHint label="کد" text="اختیاری — در صورت خالی بودن، سیستم تعیین می‌کند" /></label>

@@ -3,6 +3,7 @@ import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { api } from "../lib/api";
+import { showToast } from "../lib/toast";
 import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
 
@@ -59,7 +60,7 @@ export default function DocumentConfirmation() {
         }
       }
       const result = await api.post("/document-confirmation/confirm", { date });
-      setSuccess(`${toFaDigits(String(result.updatedCount))} سند به وضعیت «تایید» تغییر یافت. ${result.message}`);
+      showToast(`${toFaDigits(String(result.updatedCount))} سند به وضعیت «تایید» تغییر یافت. ${result.message}`);
       await loadStatus(date);
     } catch (e: any) {
       setError(e.message);
@@ -77,7 +78,6 @@ export default function DocumentConfirmation() {
       </div>
 
       {error && <div className="alert error">{error}</div>}
-      {success && <div className="alert warn">{success}</div>}
 
       <div className="card" style={{ padding: 20 }}>
         {status && (

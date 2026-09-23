@@ -142,7 +142,7 @@ function PurchasePlanningForm({ editId }: { editId?: number }) {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     async function init() {
@@ -357,7 +357,6 @@ function PurchasePlanningForm({ editId }: { editId?: number }) {
     >
       <form id="purchase-planning-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
 
         <div className="wizard-steps" style={{ display: "flex", gap: 8, marginBottom: 16 }}>
           {[1, 2, 3].map((s) => (

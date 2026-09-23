@@ -85,7 +85,7 @@ function CurrencyForm({ editId }: { editId?: number }) {
     code: "", title: "", decimalPlaces: 2, isBase: false, rateDirection: "TO_BASE", baseVolume: 1,
   });
   const [formError, setFormError] = useState<string | null>(null);
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
 
   useEffect(() => {
@@ -152,7 +152,6 @@ function CurrencyForm({ editId }: { editId?: number }) {
     >
       <form id="currency-form" onSubmit={onSubmit}>
         {formError && <div className="alert error">{formError}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
             <label>کد<RequiredMark /></label>

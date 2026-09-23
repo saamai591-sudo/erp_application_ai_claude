@@ -319,7 +319,7 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
   const [error, setError] = useState<string | null>(null);
   const [existingHasTransactions, setExistingHasTransactions] = useState(false);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     Promise.all([
@@ -484,7 +484,6 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
       </div>
       <form id="goods-item-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
 
         {tab === "main" && (
           <div className="form-grid">

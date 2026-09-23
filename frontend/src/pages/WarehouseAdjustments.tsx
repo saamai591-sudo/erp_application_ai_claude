@@ -253,7 +253,7 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [baseDecimalPlaces, setBaseDecimalPlaces] = useState(2);
 
-  const { header, setHeader, rows, setRows, meta, setMeta, fiscalPeriod, error, setError, loaded, saved, flash, submit, remove } = useDocumentForm<
+  const { header, setHeader, rows, setRows, meta, setMeta, fiscalPeriod, error, setError, loaded, flash, submit, remove } = useDocumentForm<
     { date: string; warehouseId: string; description: string },
     RowState,
     Detail
@@ -410,7 +410,6 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
     >
       <form id="warehouse-adjustment-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
 
         {meta && (
           <div className="form-field" style={{ maxWidth: 220, marginBottom: 8 }}>

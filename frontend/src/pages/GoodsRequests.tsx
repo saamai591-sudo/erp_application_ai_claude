@@ -240,7 +240,7 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
   const [loaded, setLoaded] = useState(false);
   const [focusedRow, setFocusedRow] = useState<number | null>(null);
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     async function init() {
@@ -470,7 +470,6 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
     >
       <form id="goods-request-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
 
         <fieldset disabled={coreDisabled} style={{ border: 0, padding: 0, margin: 0 }}>
         <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>

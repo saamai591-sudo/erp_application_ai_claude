@@ -110,7 +110,7 @@ function PeriodEditForm({ editId }: { editId: number }) {
   const [title, setTitle] = usePersistedState(`${cacheKey}:title`, "");
   const [formError, setFormError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(hasPersistedState(`${cacheKey}:toDate`));
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     if (hasPersistedState(`${cacheKey}:toDate`)) return;
@@ -166,7 +166,6 @@ function PeriodEditForm({ editId }: { editId: number }) {
     >
       <form id="period-edit-form" onSubmit={onSubmit}>
         {formError && <div className="alert error">{formError}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
             <label>از تاریخ</label>

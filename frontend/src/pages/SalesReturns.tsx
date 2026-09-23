@@ -135,7 +135,7 @@ function SalesReturnForm({ editId, basePath }: { editId?: number; basePath: stri
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
-  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, saved, submit, remove } = useDocumentForm<
+  const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
     { date: string; warehouseId: string; partyId: string; description: string },
     RowState,
     Detail
@@ -274,7 +274,6 @@ function SalesReturnForm({ editId, basePath }: { editId?: number; basePath: stri
     >
       <form id="sales-return-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
 
         {meta && (
           <div className="form-field" style={{ maxWidth: 220, marginBottom: 8 }}>

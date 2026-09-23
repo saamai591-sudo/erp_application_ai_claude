@@ -93,7 +93,7 @@ function RequestTypeForm({ editId }: { editId?: number }) {
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_REQUEST_TYPE_FORM);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     // این کامپوننت وقتی از حالت ویرایش با دکمه‌ی «جدید» به فرم خالی می‌رود، remount نمی‌شود؛
@@ -158,7 +158,6 @@ function RequestTypeForm({ editId }: { editId?: number }) {
     >
       <form id="goods-request-type-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
             <label>عنوان<RequiredMark /></label>

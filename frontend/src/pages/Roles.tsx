@@ -68,7 +68,7 @@ function RoleForm({ editId }: { editId?: number }) {
   const [title, setTitle] = usePersistedState(`${cacheKey}:title`, "");
   const [checked, setChecked] = usePersistedState<Set<number>>(`${cacheKey}:checked`, new Set());
   const [formError, setFormError] = useState<string | null>(null);
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(`${cacheKey}:title`));
 
   useEffect(() => {
@@ -137,7 +137,6 @@ function RoleForm({ editId }: { editId?: number }) {
     >
       <form id="role-form" onSubmit={onSubmit}>
         {formError && <div className="alert error">{formError}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-field full" style={{ marginBottom: 14 }}>
           <label>عنوان<RequiredMark /></label>
           <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />

@@ -7,6 +7,7 @@ import { formatJalaliDate } from "../lib/formatDate";
 import { AmountInput } from "../components/AmountInput";
 import { formatAmountFa } from "../lib/formatAmount";
 import { api, ApiError } from "../lib/api";
+import { showToast } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { RefreshButton } from "../components/RefreshButton";
@@ -79,7 +80,7 @@ function RateForm({ editId }: { editId?: number }) {
   const [form, setForm] = usePersistedState(cacheKey, { date: new Date().toISOString().slice(0, 10), currencyId: "", rate: "" });
   const [hint, setHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
 
   useEffect(() => {
@@ -107,7 +108,7 @@ function RateForm({ editId }: { editId?: number }) {
         currencyId: Number(form.currencyId),
         rate: Number(form.rate),
       });
-      setHint(created.hint);
+      if (created.hint) showToast(created.hint);
       if (editId) {
         flash();
       } else {
@@ -141,8 +142,6 @@ function RateForm({ editId }: { editId?: number }) {
     >
       <form id="rate-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {hint && <div className="alert warn">{hint}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
             <label>تاریخ<RequiredMark /></label>

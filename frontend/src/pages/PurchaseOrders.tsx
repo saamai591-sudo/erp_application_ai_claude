@@ -136,7 +136,7 @@ function PurchaseOrderForm({ editId }: { editId?: number }) {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     async function init() {
@@ -358,7 +358,6 @@ function PurchaseOrderForm({ editId }: { editId?: number }) {
     >
       <form id="purchase-order-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
             <div className="form-field">

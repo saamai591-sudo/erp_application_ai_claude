@@ -82,7 +82,7 @@ function LevelForm({ editId }: { editId?: number }) {
   const [hasAccounts, setHasAccounts] = usePersistedState(`${cacheKey}:hasAccounts`, false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     if (!editId || hasPersistedState(cacheKey)) return;
@@ -142,7 +142,6 @@ function LevelForm({ editId }: { editId?: number }) {
     >
       <form id="level-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
             <label>عنوان<RequiredMark /></label>

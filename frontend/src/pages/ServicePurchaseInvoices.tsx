@@ -214,7 +214,7 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
   const [loaded, setLoaded] = useState(false);
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const [allocationDialogIdx, setAllocationDialogIdx] = useState<number | null>(null);
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     async function init() {
@@ -585,7 +585,6 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
     >
       <form id="service-purchase-invoice-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">{saved}</div>}
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
             <div className="form-field">

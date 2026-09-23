@@ -141,7 +141,7 @@ function GroupForm({ editId, parentId }: { editId?: number; parentId?: number })
   >(`${cacheKey}:attrRows`, []);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     async function init() {
@@ -309,7 +309,6 @@ function GroupForm({ editId, parentId }: { editId?: number; parentId?: number })
 
       <form id="goods-group-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
 
         {tab === "main" && (
           <div className="form-grid">

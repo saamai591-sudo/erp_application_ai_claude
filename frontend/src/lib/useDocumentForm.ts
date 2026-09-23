@@ -55,7 +55,7 @@ export function useDocumentForm<Header extends Record<string, any>, Row, Detail 
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     async function init() {
@@ -154,7 +154,6 @@ export function useDocumentForm<Header extends Record<string, any>, Row, Detail 
     error,
     setError,
     loaded,
-    saved,
     flash,
     checkDate,
     submit,

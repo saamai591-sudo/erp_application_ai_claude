@@ -98,7 +98,7 @@ function UserForm({ editId }: { editId?: number }) {
   const [roleIds, setRoleIds] = usePersistedState<Set<number>>(`${cacheKey}:roleIds`, new Set());
   const [actionIds, setActionIds] = usePersistedState<Set<number>>(`${cacheKey}:actionIds`, new Set());
   const [formError, setFormError] = useState<string | null>(null);
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(`${cacheKey}:form`));
 
   useEffect(() => {
@@ -196,7 +196,6 @@ function UserForm({ editId }: { editId?: number }) {
     >
       <form id="user-form" onSubmit={onSubmit} autoComplete="off">
         {formError && <div className="alert error">{formError}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
             <label>شماره همراه (۱۱ رقم)<RequiredMark /></label>

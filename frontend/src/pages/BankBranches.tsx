@@ -96,7 +96,7 @@ function BranchForm({ editId }: { editId?: number }) {
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_BRANCH_FORM);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
   const selectedBank = banks.find((b) => String(b.id) === form.bankPartyId);
 
   useEffect(() => {
@@ -158,7 +158,6 @@ function BranchForm({ editId }: { editId?: number }) {
     >
       <form id="branch-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
             <label>بانک<RequiredMark /> <FieldHint label="بانک" text="از بین اشخاص حقوقی با نوع «بانک/موسسه مالی» انتخاب می‌شود" /></label>

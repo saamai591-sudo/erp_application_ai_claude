@@ -101,7 +101,7 @@ function CostCenterForm({ editId }: { editId?: number }) {
   const [form, setForm] = usePersistedState(cacheKey, { title: "", type: "ADMIN", orgUnitId: "" });
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     api.get("/org-units").then(setOrgUnits);
@@ -158,7 +158,6 @@ function CostCenterForm({ editId }: { editId?: number }) {
     >
       <form id="cost-center-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid">
           <div className="form-field">
             <label>عنوان<RequiredMark /></label>

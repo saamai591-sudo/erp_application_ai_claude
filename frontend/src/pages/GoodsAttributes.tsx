@@ -95,7 +95,7 @@ function AttributeForm({ editId }: { editId?: number }) {
   const [items, setItems] = usePersistedState<AttributeItem[]>(`${cacheKey}:items`, DEFAULT_ATTR_ITEMS);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(`${cacheKey}:header`));
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedFlash();
 
   useEffect(() => {
     // این کامپوننت وقتی از حالت ویرایش با دکمه‌ی «جدید» به فرم خالی می‌رود، remount نمی‌شود؛
@@ -171,7 +171,6 @@ function AttributeForm({ editId }: { editId?: number }) {
     >
       <form id="goods-attribute-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">تغییرات ذخیره شد</div>}
         <div className="form-grid" style={{ marginBottom: 16 }}>
           <div className="form-field">
             <label>کد <FieldHint label="کد" text="اختیاری — در صورت خالی بودن، سیستم تعیین می‌کند" /></label>
