@@ -314,7 +314,7 @@ function ChequeClearingPayableForm({ editId }: { editId?: number }) {
   return (
     <FormPage
       title={editId ? "ویرایش نتیجه وصول/برگشت چک پرداختنی" : "نتیجه وصول/برگشت چک پرداختنی جدید"}
-      description={status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/شرح دیگر قابل تغییر نیستند، اما نتیجه‌ی ردیف‌های قفل‌نشده قابل تغییر/حذف و چک تازه قابل افزودن است." : undefined}
+      description={status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/شرح دیگر قابل تغییر نیستند، اما نتیجه‌ی ردیف‌های قفل‌نشده قابل تغییر/حذف و چک تازه قابل افزودن است. این سند «تایید» شده است. نتیجه‌ی ردیف‌های قفل‌نشده قابل تغییر است، ردیف قفل‌نشده قابل حذف است (چک به «صادرشده» برمی‌گردد)، و چک تازه هم قابل افزودن است، بدون نیاز به «برگشت از تایید». ردیف‌های قفل‌شده (علامت‌خورده با «قفل») فقط قابل مشاهده‌اند." : undefined}
       formId="cheque-clearing-payable-form"
       closePath="/cheque-clearings-payable"
       newPath="/cheque-clearings-payable/new"
@@ -358,12 +358,6 @@ function ChequeClearingPayableForm({ editId }: { editId?: number }) {
           </div>
         </fieldset>
 
-        {isApprovedSemiOpen && (
-          <div className="alert warn" style={{ marginBottom: 12 }}>
-            این سند «تایید» شده است. نتیجه‌ی ردیف‌های قفل‌نشده قابل تغییر است، ردیف قفل‌نشده قابل حذف است (چک به «صادرشده» برمی‌گردد)، و چک تازه
-            هم قابل افزودن است، بدون نیاز به «برگشت از تایید». ردیف‌های قفل‌شده (علامت‌خورده با «قفل») فقط قابل مشاهده‌اند.
-          </div>
-        )}
 
         <div className="je-lines-toolbar">
           <span className="je-lines-title">چک‌ها</span>

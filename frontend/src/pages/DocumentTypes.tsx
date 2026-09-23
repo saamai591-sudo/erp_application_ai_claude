@@ -125,10 +125,10 @@ function TypeForm({ editId }: { editId?: number }) {
       closePath="/document-types"
       newPath="/document-types/new"
       onDelete={editId && !isSystem ? handleDelete : undefined}
+      description={isSystem ? "این یک نوع سند سیستمی است و قابل حذف نیست؛ فقط عنوان قابل ویرایش است." : undefined}
     >
       <form id="doctype-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {isSystem && <div className="alert warn">این یک نوع سند سیستمی است و قابل حذف نیست؛ فقط عنوان قابل ویرایش است.</div>}
         <div className="form-field full">
           <label>عنوان<RequiredMark /></label>
           <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />

@@ -309,7 +309,7 @@ function ChequeDepositReturnForm({ editId }: { editId?: number }) {
   return (
     <FormPage
       title={editId ? "ویرایش برگشت از واگذاری" : "برگشت از واگذاری جدید"}
-      description={status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/شرح دیگر قابل تغییر نیستند، اما چک‌های قفل‌نشده مستقیماً قابل افزودن/حذف‌اند." : undefined}
+      description={status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/شرح دیگر قابل تغییر نیستند، اما چک‌های قفل‌نشده مستقیماً قابل افزودن/حذف‌اند. این سند «تایید» شده است. چک‌های قفل‌نشده (که هنوز از «در دست» خارج نشده‌اند) قابل حذف‌اند و چک تازه هم قابل افزودن است، بدون نیاز به «برگشت از تایید». چک‌های قفل‌شده (علامت‌خورده با «قفل») فقط قابل مشاهده‌اند." : undefined}
       formId="cheque-deposit-return-form"
       closePath="/cheque-deposit-returns"
       newPath="/cheque-deposit-returns/new"
@@ -353,12 +353,6 @@ function ChequeDepositReturnForm({ editId }: { editId?: number }) {
           </div>
         </fieldset>
 
-        {isApprovedSemiOpen && (
-          <div className="alert warn" style={{ marginBottom: 12 }}>
-            این سند «تایید» شده است. چک‌های قفل‌نشده (که هنوز از «در دست» خارج نشده‌اند) قابل حذف‌اند و چک تازه هم قابل افزودن است، بدون نیاز به
-            «برگشت از تایید». چک‌های قفل‌شده (علامت‌خورده با «قفل») فقط قابل مشاهده‌اند.
-          </div>
-        )}
 
         <div className="je-lines-toolbar">
           <span className="je-lines-title">چک‌ها</span>

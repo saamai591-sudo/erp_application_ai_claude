@@ -228,6 +228,7 @@ function PurchaseGroupForm({ editId }: { editId?: number }) {
       closePath="/purchase-groups"
       newPath="/purchase-groups/new"
       onDelete={editId ? handleDelete : undefined}
+      description={hasTransactions ? "این گروه خرید گردش دارد." : undefined}
       wide
     >
       <form id="purchase-group-form" onSubmit={onSubmit}>
@@ -356,7 +357,6 @@ function PurchaseGroupForm({ editId }: { editId?: number }) {
             <span className="grid-footer-info">{goodsRows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(goodsRows.length))} ردیف`}</span>
           </div>
         </div>
-        {hasTransactions && <div className="alert warn" style={{ marginTop: 12 }}>این گروه خرید گردش دارد.</div>}
       </form>
     </FormPage>
   );

@@ -331,7 +331,7 @@ function ChequeDepositForm({ editId }: { editId?: number }) {
   return (
     <FormPage
       title={editId ? "ویرایش واگذاری چک به بانک" : "واگذاری چک به بانک جدید"}
-      description={status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/حساب بانکی/شرح دیگر قابل تغییر نیستند، اما چک‌های قفل‌نشده مستقیماً قابل افزودن/حذف‌اند." : undefined}
+      description={status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/حساب بانکی/شرح دیگر قابل تغییر نیستند، اما چک‌های قفل‌نشده مستقیماً قابل افزودن/حذف‌اند. این سند «تایید» شده است. چک‌های قفل‌نشده (که هنوز از «واگذار به وصول» خارج نشده‌اند) قابل حذف‌اند و چک تازه هم قابل افزودن است، بدون نیاز به «برگشت از تایید». چک‌های قفل‌شده (علامت‌خورده با «قفل») فقط قابل مشاهده‌اند." : undefined}
       formId="cheque-deposit-form"
       closePath="/cheque-deposits"
       newPath="/cheque-deposits/new"
@@ -384,12 +384,6 @@ function ChequeDepositForm({ editId }: { editId?: number }) {
           </div>
         </fieldset>
 
-        {isApprovedSemiOpen && (
-          <div className="alert warn" style={{ marginBottom: 12 }}>
-            این سند «تایید» شده است. چک‌های قفل‌نشده (که هنوز از «واگذار به وصول» خارج نشده‌اند) قابل حذف‌اند و چک تازه هم قابل افزودن است، بدون
-            نیاز به «برگشت از تایید». چک‌های قفل‌شده (علامت‌خورده با «قفل») فقط قابل مشاهده‌اند.
-          </div>
-        )}
 
         <div className="je-lines-toolbar">
           <span className="je-lines-title">چک‌ها</span>
