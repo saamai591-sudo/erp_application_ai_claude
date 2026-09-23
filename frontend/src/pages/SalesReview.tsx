@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { ChainedTabsBar } from "../components/ChainedTabsBar";
 import { SelectableBalanceTable, BalanceTableColumn } from "../components/SelectableBalanceTable";
@@ -458,7 +459,7 @@ export default function SalesReview() {
 
   return (
     <div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
 
       <div className="card ar-filters">
         <div style={{ display: "flex", alignItems: "flex-end", gap: 14 }}>

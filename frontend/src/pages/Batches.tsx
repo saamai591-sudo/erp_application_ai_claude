@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -79,7 +81,7 @@ function BatchList() {
       await api.del(`/batches/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -92,7 +94,7 @@ function BatchList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "کالا", render: (r) => `${toFaDigits(r.goodsItem.fullCode)} — ${r.goodsItem.title}`, filterType: "string", filterValue: (r) => r.goodsItem.title },
@@ -167,14 +169,14 @@ function BatchForm({ editId }: { editId?: number }) {
 
   async function suggestNumber() {
     if (!form.goodsItemId) {
-      alert("ابتدا کالا را انتخاب کنید");
+      showError("ابتدا کالا را انتخاب کنید");
       return;
     }
     try {
       const res = await api.get(`/batches/suggest-number?goodsItemId=${form.goodsItemId}`);
       setForm({ ...form, batchNumber: res.batchNumber });
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -211,7 +213,7 @@ function BatchForm({ editId }: { editId?: number }) {
       await api.del(`/batches/${editId}`);
       navigate("/batches");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -226,7 +228,7 @@ function BatchForm({ editId }: { editId?: number }) {
       onDelete={editId ? handleDelete : undefined}
     >
       <form id="batch-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <div className="form-grid">
           <div className="form-field">
             <label>کالا<RequiredMark /></label>

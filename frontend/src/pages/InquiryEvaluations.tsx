@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -77,7 +79,7 @@ function InquiryEvaluationList() {
       await api.del(`/inquiry-evaluations/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -90,7 +92,7 @@ function InquiryEvaluationList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
@@ -156,14 +158,14 @@ function InquiryEvaluationForm({ editId }: { editId?: number }) {
   const allowMulti = selectedPlanning?.allowMultiSupplierPerLine ?? true;
 
   async function loadData() {
-    if (!header.purchasePlanningId) return alert("ابتدا برنامه ریزی خرید را انتخاب کنید");
+    if (!header.purchasePlanningId) return showError("ابتدا برنامه ریزی خرید را انتخاب کنید");
     try {
       const preview: { quoteRows: QuoteRow[]; itemLines: Omit<ItemLine, "approved">[] } = await api.get(`/inquiry-evaluations/preview?purchasePlanningId=${header.purchasePlanningId}`);
-      if (preview.itemLines.length === 0) return alert("هیچ استعلام قیمت تایید‌شده‌ای برای این برنامه ریزی خرید یافت نشد");
+      if (preview.itemLines.length === 0) return showError("هیچ استعلام قیمت تایید‌شده‌ای برای این برنامه ریزی خرید یافت نشد");
       setQuoteRows(preview.quoteRows);
       setItemLines(preview.itemLines.map((l) => ({ ...l, approved: false })));
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -211,7 +213,7 @@ function InquiryEvaluationForm({ editId }: { editId?: number }) {
       await api.del(`/inquiry-evaluations/${editId}`);
       navigate("/inquiry-evaluations");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
   async function runAction(path: string) {
@@ -222,7 +224,7 @@ function InquiryEvaluationForm({ editId }: { editId?: number }) {
       setMeta({ number: d.number, status: d.status });
       flash();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -246,7 +248,7 @@ function InquiryEvaluationForm({ editId }: { editId?: number }) {
       wide
     >
       <form id="inquiry-evaluation-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="form-grid">
             <div className="form-field">

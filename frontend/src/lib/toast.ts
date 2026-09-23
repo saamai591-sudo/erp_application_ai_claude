@@ -30,3 +30,8 @@ export function showToast(message: string, type: ToastType = "success") {
     emit();
   }, Math.max(MIN_DURATION_MS, message.length * 60));
 }
+
+/** پیام خطا (قرمز) بیرون از فرم؛ جایگزین alert() و کادر خطای داخل فرم که چیدمان را جابه‌جا می‌کرد. */
+export function showError(message?: string | null) {
+  showToast(message || "خطا رخ داد", "error");
+}

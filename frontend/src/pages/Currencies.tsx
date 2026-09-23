@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useCrud } from "../lib/useCrud";
 import { DataTable } from "../components/DataTable";
@@ -54,7 +56,7 @@ function CurrencyList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       {!loading && (
         <DataTable
           columns={[
@@ -68,7 +70,7 @@ function CurrencyList() {
           edit={{ path: (r) => `/currencies/${r.id}/edit` }}
           onDelete={async (r) => {
             const res = await remove(r.id);
-            if (!res.ok) alert(res.error);
+            if (!res.ok) showError(res.error);
           }}
         />
       )}
@@ -136,7 +138,7 @@ function CurrencyForm({ editId }: { editId?: number }) {
       await api.del(`/currencies/${editId}`);
       navigate("/currencies");
     } catch (err) {
-      alert((err as ApiError).message);
+      showError((err as ApiError).message);
     }
   }
 
@@ -151,7 +153,7 @@ function CurrencyForm({ editId }: { editId?: number }) {
       onDelete={editId ? handleDelete : undefined}
     >
       <form id="currency-form" onSubmit={onSubmit}>
-        {formError && <div className="alert error">{formError}</div>}
+        <ErrorToast message={formError} />
         <div className="form-grid">
           <div className="form-field">
             <label>کد<RequiredMark /></label>

@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -54,14 +56,14 @@ function ListView() {
 
   async function onDelete(row: ListItem) {
     if (row.issued) {
-      alert("این رکورد سند صادرشده دارد و قابل حذف نیست؛ ابتدا از داخل فرم، «حذف سند» را بزنید.");
+      showError("این رکورد سند صادرشده دارد و قابل حذف نیست؛ ابتدا از داخل فرم، «حذف سند» را بزنید.");
       return;
     }
     try {
       await api.del(`/opening-closing/${row.id}`);
       await reload();
     } catch (e: any) {
-      alert(e.message);
+      showError(e.message);
     }
   }
 
@@ -70,7 +72,7 @@ function ListView() {
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`بستن حساب‌های دائمی در پایان دوره مالی و افتتاح مجدد آن‌ها در دوره مالی بعد`} title="افتتاحیه و اختتامیه" /><NewRecordButton path="/opening-closing/new" /><RefreshButton onClick={reload} /></div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
@@ -178,7 +180,7 @@ function EntryForm({ viewId }: { viewId?: number }) {
           : []
       }
     >
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
 
       {isFinalized && (
         <div style={{ display: "flex", gap: 20, padding: "10px 14px", background: "#f8f9fb", border: "1px solid var(--line)", borderRadius: 8, marginBottom: 16 }}>

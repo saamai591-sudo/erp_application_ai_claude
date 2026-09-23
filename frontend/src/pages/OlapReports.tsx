@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Bar,
@@ -169,7 +171,7 @@ function OlapList() {
       await api.del(`/olap-reports/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -193,7 +195,7 @@ function OlapList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable columns={columns} rows={items} edit={{ path: (r) => `/olap-reports/${r.id}/edit` }} onDelete={onDelete} />
     </div>
   );
@@ -448,7 +450,7 @@ function OlapBuilder({ editId }: { editId?: number }) {
       await api.del(`/olap-reports/${editId}`);
       navigate("/olap-reports");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -479,7 +481,7 @@ function OlapBuilder({ editId }: { editId?: number }) {
       wide
     >
       <form id="olap-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
 
         <div className="form-grid">
           <div className="form-field full">

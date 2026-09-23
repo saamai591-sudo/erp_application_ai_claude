@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -200,14 +202,14 @@ function ReceiptList() {
 
   async function onDelete(row: ListRow) {
     if (row.status !== "DRAFT") {
-      alert("فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «تایید» برگردانید");
+      showError("فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «تایید» برگردانید");
       return;
     }
     try {
       await api.del(`/receipts/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -220,7 +222,7 @@ function ReceiptList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
@@ -652,7 +654,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
       await api.del(`/receipts/${editId}`);
       navigate("/receipts");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -664,7 +666,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
       applyDetail(d);
       flash(APPROVED_NOTICE);
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -676,7 +678,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
       applyDetail(d);
       flash();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -696,7 +698,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
         flash();
       }
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -756,7 +758,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
       wide
     >
       <form id="receipt-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
 
         {/* بعد از صدور سند حسابداری، همه‌ی اطلاعات سند (هدر، ردیف‌های ابزار، موضوعات دریافت، شرح) قفل است */}
         <fieldset disabled={jeLocked} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
@@ -1440,7 +1442,7 @@ function ReceiptForeignBasisModal({
 
   return (
     <Modal title={`ورود اطلاعات ارزی موضوع دریافت (${rowCurrency.title})`} onClose={onClose}>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <div className="form-grid">
         <div className="form-field full">
           <label>فاکتور مبنا<RequiredMark /></label>

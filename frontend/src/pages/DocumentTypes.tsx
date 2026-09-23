@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -42,7 +44,7 @@ function TypeList() {
       await api.del(`/document-types/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -51,7 +53,7 @@ function TypeList() {
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`انواع پیش‌فرض سیستمی (عملیاتی، افتتاحیه، بستن حسابها، اختتامیه) قابل حذف نیستند؛ انواع سفارشی برای گزارش‌گیری قابل تعریف است`} title="نوع سند" /><NewRecordButton path="/document-types/new" /><RefreshButton onClick={reload} /></div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "کد", render: (r) => toFaDigits(String(r.code)), width: "80px", filterType: "number", filterValue: (r) => r.code },
@@ -112,7 +114,7 @@ function TypeForm({ editId }: { editId?: number }) {
       await api.del(`/document-types/${editId}`);
       navigate("/document-types");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -128,7 +130,7 @@ function TypeForm({ editId }: { editId?: number }) {
       description={isSystem ? "این یک نوع سند سیستمی است و قابل حذف نیست؛ فقط عنوان قابل ویرایش است." : undefined}
     >
       <form id="doctype-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <div className="form-field full">
           <label>عنوان<RequiredMark /></label>
           <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />

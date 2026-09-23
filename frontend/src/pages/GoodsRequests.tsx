@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -159,14 +161,14 @@ function GoodsRequestList() {
 
   async function onDelete(row: ListRow) {
     if (row.status !== "DRAFT") {
-      alert("فقط درخواست‌های در وضعیت «ثبت» قابل حذف هستند");
+      showError("فقط درخواست‌های در وضعیت «ثبت» قابل حذف هستند");
       return;
     }
     try {
       await api.del(`/goods-requests/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -179,7 +181,7 @@ function GoodsRequestList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
@@ -394,7 +396,7 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
       await api.del(`/goods-requests/${editId}`);
       navigate("/goods-requests");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -427,7 +429,7 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
       await reloadMetaAndRows();
       flash();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -469,7 +471,7 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
       wide
     >
       <form id="goods-request-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
 
         <fieldset disabled={coreDisabled} style={{ border: 0, padding: 0, margin: 0 }}>
         <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>

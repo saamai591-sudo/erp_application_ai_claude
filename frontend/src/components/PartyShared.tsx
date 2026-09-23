@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "./ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -89,7 +91,7 @@ export function PartyList({ category, title, description }: { category: "INDIVID
       await api.del(`/parties/${row.id}`);
       await reload();
     } catch (e: any) {
-      alert(e.message);
+      showError(e.message);
     }
   }
 
@@ -129,7 +131,7 @@ export function PartyList({ category, title, description }: { category: "INDIVID
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       {!loading && (
         <DataTable
           columns={[
@@ -227,7 +229,7 @@ export function PartyForm({
       await api.del(`/parties/${currentId}`);
       navigate(backPath);
     } catch (err) {
-      alert((err as ApiError).message);
+      showError((err as ApiError).message);
     }
   }
 
@@ -276,7 +278,7 @@ export function PartyForm({
 
       {tab === "main" && (
         <form id="party-main-form" onSubmit={onSubmit}>
-          {formError && <div className="alert error">{formError}</div>}
+          <ErrorToast message={formError} />
           {warning && (
             <div className="alert warn">
               {warning}
@@ -405,7 +407,7 @@ function AddressTab({ partyId, addresses, onChanged }: { partyId: number; addres
       await api.del(`/parties/${partyId}/addresses/${id}`);
       onChanged();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -447,7 +449,7 @@ function AddressTab({ partyId, addresses, onChanged }: { partyId: number; addres
         </div>
       )}
       <form onSubmit={submit} className="sub-form">
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <div className="form-grid">
           <div className="form-field">
             <label>نوع نشانی</label>
@@ -508,7 +510,7 @@ function PhoneTab({ partyId, phones, onChanged }: { partyId: number; phones: Par
       await api.del(`/parties/${partyId}/phones/${id}`);
       onChanged();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -549,7 +551,7 @@ function PhoneTab({ partyId, phones, onChanged }: { partyId: number; phones: Par
         </div>
       )}
       <form onSubmit={submit} className="sub-form">
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <div className="form-grid">
           <div className="form-field">
             <label>نوع تلفن</label>
@@ -609,7 +611,7 @@ function BankTab({ partyId, bankAccounts, onChanged }: { partyId: number; bankAc
       await api.del(`/parties/${partyId}/bank-accounts/${id}`);
       onChanged();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -647,7 +649,7 @@ function BankTab({ partyId, bankAccounts, onChanged }: { partyId: number; bankAc
         </div>
       )}
       <form onSubmit={submit} className="sub-form">
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <div className="form-grid">
           <div className="form-field">
             <label>بانک</label>

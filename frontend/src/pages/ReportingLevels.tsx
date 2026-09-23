@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -42,7 +44,7 @@ function LevelList() {
       await api.del(`/reporting-levels/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -51,7 +53,7 @@ function LevelList() {
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف سطوح درختی سرفصل حسابها (گروه، کل، معین، جزء) با ترتیب اجباری و طول کد هر سطح`} title="سطح گزارشگری" /><NewRecordButton path="/reporting-levels/new" /><RefreshButton onClick={reload} /></div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "ترتیب", render: (r) => r.order, width: "70px", filterType: "number", filterValue: (r) => r.order },
@@ -125,7 +127,7 @@ function LevelForm({ editId }: { editId?: number }) {
       await api.del(`/reporting-levels/${editId}`);
       navigate("/reporting-levels");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -141,7 +143,7 @@ function LevelForm({ editId }: { editId?: number }) {
       onDelete={editId ? handleDelete : undefined}
     >
       <form id="level-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <div className="form-grid">
           <div className="form-field">
             <label>عنوان<RequiredMark /></label>

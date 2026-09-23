@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
@@ -77,7 +78,7 @@ export default function DocumentConfirmation() {
         </div>
       </div>
 
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
 
       <div className="card" style={{ padding: 20 }}>
         {status && (

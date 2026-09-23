@@ -1,4 +1,5 @@
 import { FormEvent, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/AuthContext";
 import { digitsOnly } from "../lib/digits";
@@ -30,7 +31,7 @@ export default function Login() {
       <form className="login-card" onSubmit={onSubmit}>
         <h1>نرم‌افزار حسابداری</h1>
         <p>برای ورود، شماره همراه و رمز عبور خود را وارد کنید</p>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <div className="form-field" style={{ marginBottom: 12 }}>
           <label>شماره همراه</label>
           <input value={mobile} onChange={(e) => setMobile(digitsOnly(e.target.value))} placeholder="09999999999" dir="ltr" />

@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -47,7 +49,7 @@ function BranchList() {
       await api.del(`/banking/branches/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -71,7 +73,7 @@ function BranchList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "کد", render: (r) => r.code, width: "80px", filterType: "number", filterValue: (r) => r.code },
@@ -142,7 +144,7 @@ function BranchForm({ editId }: { editId?: number }) {
       await api.del(`/banking/branches/${editId}`);
       navigate("/bank-branches");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -157,7 +159,7 @@ function BranchForm({ editId }: { editId?: number }) {
       onDelete={editId ? handleDelete : undefined}
     >
       <form id="branch-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <div className="form-grid">
           <div className="form-field">
             <label>بانک<RequiredMark /> <FieldHint label="بانک" text="از بین اشخاص حقوقی با نوع «بانک/موسسه مالی» انتخاب می‌شود" /></label>

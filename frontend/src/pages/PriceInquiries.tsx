@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -97,7 +99,7 @@ function PriceInquiryList() {
       await api.del(`/price-inquiries/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -110,7 +112,7 @@ function PriceInquiryList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
@@ -216,7 +218,7 @@ function PriceInquiryForm({ editId }: { editId?: number }) {
   const isDataLoaded = itemRows.length > 0;
 
   async function loadData() {
-    if (!header.purchasePlanningId) return alert("ابتدا برنامه ریزی خرید را انتخاب کنید");
+    if (!header.purchasePlanningId) return showError("ابتدا برنامه ریزی خرید را انتخاب کنید");
     try {
       const planning: PlanningDetail = await api.get(`/purchase-plannings/${header.purchasePlanningId}`);
       setItemRows(
@@ -232,7 +234,7 @@ function PriceInquiryForm({ editId }: { editId?: number }) {
         }))
       );
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -296,7 +298,7 @@ function PriceInquiryForm({ editId }: { editId?: number }) {
       await api.del(`/price-inquiries/${editId}`);
       navigate("/price-inquiries");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
   async function runAction(path: string) {
@@ -307,7 +309,7 @@ function PriceInquiryForm({ editId }: { editId?: number }) {
       setMeta({ number: d.number, status: d.status });
       flash();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -331,7 +333,7 @@ function PriceInquiryForm({ editId }: { editId?: number }) {
       wide
     >
       <form id="price-inquiry-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
             <div className="form-field">

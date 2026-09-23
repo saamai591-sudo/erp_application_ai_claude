@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -94,7 +96,7 @@ function PaymentTypeList() {
       await api.del(`/payment-types/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -107,7 +109,7 @@ function PaymentTypeList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "کد", render: (r) => toFaDigits(String(r.code).padStart(3, "0")), width: "80px", filterType: "number", filterValue: (r) => r.code },
@@ -230,7 +232,7 @@ function PaymentTypeForm({ editId }: { editId?: number }) {
       await api.del(`/payment-types/${editId}`);
       navigate("/payment-types");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -245,7 +247,7 @@ function PaymentTypeForm({ editId }: { editId?: number }) {
       onDelete={editId ? handleDelete : undefined}
     >
       <form id="payment-type-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <div className="form-grid">
           <div className="form-field">
             <label>کد <FieldHint label="کد" text="اختیاری — در صورت خالی بودن، سیستم تعیین می‌کند" /></label>

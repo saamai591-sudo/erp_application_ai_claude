@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -62,7 +64,7 @@ function SerialList() {
       await api.del(`/serials/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -75,7 +77,7 @@ function SerialList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "کالا", render: (r) => `${toFaDigits(r.goodsItem.fullCode)} — ${r.goodsItem.title}`, filterType: "string", filterValue: (r) => r.goodsItem.title },
@@ -165,7 +167,7 @@ function SerialForm({ editId }: { editId?: number }) {
       await api.del(`/serials/${editId}`);
       navigate("/serials");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -180,7 +182,7 @@ function SerialForm({ editId }: { editId?: number }) {
       onDelete={editId ? handleDelete : undefined}
     >
       <form id="serial-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <div className="form-grid">
           <div className="form-field">
             <label>کالا<RequiredMark /></label>

@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useCrud } from "../lib/useCrud";
 import { DataTable } from "../components/DataTable";
@@ -39,7 +41,7 @@ function RoleList() {
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف نقش‌ها و تعیین دسترسی به تفکیک ماژول، ساب‌ماژول، فرم و عملیات`} title="نقش کاربری" /><NewRecordButton path="/roles/new" /><RefreshButton onClick={reload} /></div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       {!loading && (
         <DataTable
           columns={[
@@ -51,7 +53,7 @@ function RoleList() {
           edit={{ path: (r) => `/roles/${r.id}/edit` }}
           onDelete={async (r) => {
             const res = await remove(r.id);
-            if (!res.ok) alert(res.error);
+            if (!res.ok) showError(res.error);
           }}
         />
       )}
@@ -120,7 +122,7 @@ function RoleForm({ editId }: { editId?: number }) {
       await api.del(`/roles/${editId}`);
       navigate("/roles");
     } catch (err) {
-      alert((err as ApiError).message);
+      showError((err as ApiError).message);
     }
   }
 
@@ -136,7 +138,7 @@ function RoleForm({ editId }: { editId?: number }) {
       onDelete={editId ? handleDelete : undefined}
     >
       <form id="role-form" onSubmit={onSubmit}>
-        {formError && <div className="alert error">{formError}</div>}
+        <ErrorToast message={formError} />
         <div className="form-field full" style={{ marginBottom: 14 }}>
           <label>عنوان<RequiredMark /></label>
           <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />

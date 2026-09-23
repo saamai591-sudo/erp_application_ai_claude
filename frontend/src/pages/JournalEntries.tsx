@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable, ActiveFilter } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -191,7 +193,7 @@ function EntryList() {
 
   function guardDraft(row: Entry, action: () => void) {
     if (row.status !== "DRAFT") {
-      alert("فقط اسناد در وضعیت «ثبت» قابل حذف هستند");
+      showError("فقط اسناد در وضعیت «ثبت» قابل حذف هستند");
       return;
     }
     action();
@@ -203,7 +205,7 @@ function EntryList() {
         await api.del(`/journal-entries/${row.id}`);
         await reload();
       } catch (e) {
-        alert((e as ApiError).message);
+        showError((e as ApiError).message);
       }
     });
   }
@@ -211,14 +213,14 @@ function EntryList() {
   async function bulkReview(rows: Entry[]) {
     const targets = rows.filter((r) => r.status === "DRAFT");
     if (targets.length === 0) {
-      alert("هیچ سند «ثبت‌شده»‌ای در انتخاب شما نیست");
+      showError("هیچ سند «ثبت‌شده»‌ای در انتخاب شما نیست");
       return;
     }
     for (const row of targets) {
       try {
         await api.put(`/journal-entries/${row.id}/review`, {});
       } catch (e) {
-        alert(`سند شماره ${row.number}: ${(e as ApiError).message}`);
+        showError(`سند شماره ${row.number}: ${(e as ApiError).message}`);
       }
     }
     await reload();
@@ -227,14 +229,14 @@ function EntryList() {
   async function bulkUnreview(rows: Entry[]) {
     const targets = rows.filter((r) => r.status === "REVIEW");
     if (targets.length === 0) {
-      alert("هیچ سند «در حال بررسی»ای در انتخاب شما نیست");
+      showError("هیچ سند «در حال بررسی»ای در انتخاب شما نیست");
       return;
     }
     for (const row of targets) {
       try {
         await api.put(`/journal-entries/${row.id}/unreview`, {});
       } catch (e) {
-        alert(`سند شماره ${row.number}: ${(e as ApiError).message}`);
+        showError(`سند شماره ${row.number}: ${(e as ApiError).message}`);
       }
     }
     await reload();
@@ -268,7 +270,7 @@ function EntryList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "شماره", render: (r) => r.number, width: "70px", filterType: "number", filterValue: (r) => r.number },
@@ -659,7 +661,7 @@ function EntryForm({ editId }: { editId?: number }) {
       await api.del(`/journal-entries/${editId}`);
       navigate("/journal-entries");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -670,7 +672,7 @@ function EntryForm({ editId }: { editId?: number }) {
       setEntryMeta((prev) => (prev ? { ...prev, status: "REVIEW" } : prev));
       flash();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -681,7 +683,7 @@ function EntryForm({ editId }: { editId?: number }) {
       setEntryMeta((prev) => (prev ? { ...prev, status: "DRAFT" } : prev));
       flash();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -718,7 +720,7 @@ function EntryForm({ editId }: { editId?: number }) {
       fillHeight
     >
       <form id="journal-entry-form" onSubmit={onSubmit} className="je-form-fill">
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         {entryMeta?.sources && entryMeta.sources.length > 0 && (
           <div className="je-meta-strip" style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: "10px 14px", background: "#f8f9fb", border: "1px solid var(--line)", borderRadius: 8, marginBottom: 14 }}>
             <b>اسناد مبدا:</b>

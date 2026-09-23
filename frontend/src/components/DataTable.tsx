@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { showError } from "../lib/toast";
 import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
 import { JalaliDatePicker } from "./JalaliDatePicker";
@@ -388,7 +389,7 @@ export function DataTable<T extends { id: number | string }>({
     if (edit.guard) {
       const result = edit.guard(row);
       if (result !== true) {
-        alert(result);
+        showError(result);
         return;
       }
     }

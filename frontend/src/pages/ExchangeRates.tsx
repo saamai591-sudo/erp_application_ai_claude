@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -7,7 +8,7 @@ import { formatJalaliDate } from "../lib/formatDate";
 import { AmountInput } from "../components/AmountInput";
 import { formatAmountFa } from "../lib/formatAmount";
 import { api, ApiError } from "../lib/api";
-import { showToast } from "../lib/toast";
+import { showToast, showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { RefreshButton } from "../components/RefreshButton";
@@ -48,7 +49,7 @@ function RateList() {
       await api.del(`/currencies/rates/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -57,7 +58,7 @@ function RateList() {
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`ثبت روزانه نرخ تسعیر برای ارزهای غیر پایه`} title="نرخ ارز" /><NewRecordButton path="/exchange-rates/new" /><RefreshButton onClick={reload} /></div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
@@ -126,7 +127,7 @@ function RateForm({ editId }: { editId?: number }) {
       await api.del(`/currencies/rates/${editId}`);
       navigate("/exchange-rates");
     } catch (err) {
-      alert((err as ApiError).message);
+      showError((err as ApiError).message);
     }
   }
 
@@ -141,7 +142,7 @@ function RateForm({ editId }: { editId?: number }) {
       onDelete={editId ? handleDelete : undefined}
     >
       <form id="rate-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <div className="form-grid">
           <div className="form-field">
             <label>تاریخ<RequiredMark /></label>

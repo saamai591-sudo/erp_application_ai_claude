@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "./ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate } from "react-router-dom";
 import { DataTable } from "./DataTable";
 import { FormPage } from "./FormPage";
@@ -215,7 +217,7 @@ export function GoodsItemList({ kind }: { kind: ItemKind }) {
       await api.del(`/goods-items/${row.id}`);
       reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -258,7 +260,7 @@ export function GoodsItemList({ kind }: { kind: ItemKind }) {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "کد", render: (r) => toFaDigits(r.fullCode), width: "140px", filterType: "string", filterValue: (r) => r.fullCode },
@@ -400,7 +402,7 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
       await api.del(`/goods-items/${editId}`);
       navigate(basePath);
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -483,7 +485,7 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
           ))}
       </div>
       <form id="goods-item-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
 
         {tab === "main" && (
           <div className="form-grid">

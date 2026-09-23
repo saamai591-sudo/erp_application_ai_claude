@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useCrud } from "../lib/useCrud";
 import { Modal } from "../components/Modal";
@@ -36,7 +38,7 @@ function GeoTree() {
 
   function openAddChild(p: TreeNode) {
     if (p.level === "CITY") {
-      alert("امکان تعریف زیرشاخه برای سطح شهر وجود ندارد");
+      showError("امکان تعریف زیرشاخه برای سطح شهر وجود ندارد");
       return;
     }
     setParent(p);
@@ -55,7 +57,7 @@ function GeoTree() {
 
   async function onDelete(node: TreeNode) {
     const res = await remove(node.id);
-    if (!res.ok) alert(res.error);
+    if (!res.ok) showError(res.error);
   }
 
   return (
@@ -66,7 +68,7 @@ function GeoTree() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <TreeView
         nodes={items}
         persistKey="/geo-regions"
@@ -80,7 +82,7 @@ function GeoTree() {
       {open && (
         <Modal title={`زیرشاخه جدید زیر «${parent?.title}»`} onClose={() => setOpen(false)}>
           <form onSubmit={onSubmit}>
-            {formError && <div className="alert error">{formError}</div>}
+            <ErrorToast message={formError} />
             <div className="form-grid">
               <div className="form-field">
                 <label>کد (اختیاری)</label>
@@ -122,7 +124,7 @@ function CountryForm() {
   return (
     <FormPage title="کشور جدید" formId="geo-root-form" closePath="/geo-regions" newPath="/geo-regions/new">
       <form id="geo-root-form" onSubmit={onSubmit}>
-        {formError && <div className="alert error">{formError}</div>}
+        <ErrorToast message={formError} />
         <div className="form-grid">
           <div className="form-field">
             <label>کد (اختیاری)</label>
@@ -185,7 +187,7 @@ function NodeEditForm({ editId }: { editId: number }) {
       await api.del(`/geo-regions/${editId}`);
       navigate("/geo-regions");
     } catch (err) {
-      alert((err as ApiError).message);
+      showError((err as ApiError).message);
     }
   }
 
@@ -200,7 +202,7 @@ function NodeEditForm({ editId }: { editId: number }) {
       onDelete={handleDelete}
     >
       <form id="geo-edit-form" onSubmit={onSubmit}>
-        {formError && <div className="alert error">{formError}</div>}
+        <ErrorToast message={formError} />
         <div className="form-grid">
           <div className="form-field">
             <label>کد</label>

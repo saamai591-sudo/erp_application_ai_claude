@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable, FilterIcon, FilterPopover, ActiveFilter, ColumnFilterType } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -158,14 +160,14 @@ function IssuanceList() {
 
   async function onDelete(row: IssuanceListItem) {
     if (row.status === "ISSUED") {
-      alert("این رکورد سند صادرشده دارد؛ ابتدا از داخل فرم، «حذف سند حسابداری» را بزنید.");
+      showError("این رکورد سند صادرشده دارد؛ ابتدا از داخل فرم، «حذف سند حسابداری» را بزنید.");
       return;
     }
     try {
       await api.del(`/issue-warehouse-journal-entries/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -178,7 +180,7 @@ function IssuanceList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
@@ -380,7 +382,7 @@ function IssueForm({ editId }: { editId?: number }) {
       await api.del(`/issue-warehouse-journal-entries/${editId}`);
       navigate("/warehouse-accounting/issue-journal-entries");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -413,7 +415,7 @@ function IssueForm({ editId }: { editId?: number }) {
       setMeta(d);
       flash();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -443,7 +445,7 @@ function IssueForm({ editId }: { editId?: number }) {
       wide
     >
       <form id="issue-warehouse-journal-entries-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
 
         <div className="page-header">
           <div className="header-toolbar" style={{ gap: 4 }}>

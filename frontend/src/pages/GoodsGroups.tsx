@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { TreeView, TreeNode } from "../components/TreeView";
 import { FormPage } from "../components/FormPage";
@@ -80,7 +82,7 @@ function GroupsTree() {
       await api.del(`/goods-groups/${node.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -95,7 +97,7 @@ function GroupsTree() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <TreeView
         nodes={nodes}
         persistKey={cacheKey}
@@ -275,7 +277,7 @@ function GroupForm({ editId, parentId }: { editId?: number; parentId?: number })
       await api.del(`/goods-groups/${editId}`);
       navigate("/goods-groups");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -308,7 +310,7 @@ function GroupForm({ editId, parentId }: { editId?: number; parentId?: number })
       </div>
 
       <form id="goods-group-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
 
         {tab === "main" && (
           <div className="form-grid">

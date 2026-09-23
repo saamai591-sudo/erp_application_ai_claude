@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { Modal } from "../components/Modal";
 import { TreeView, TreeNode } from "../components/TreeView";
 import { RefreshButton } from "../components/RefreshButton";
@@ -94,7 +96,7 @@ export default function PhysicalLocations() {
       await api.del(`/physical-locations/${node.id}`);
       await reload();
     } catch (err) {
-      alert((err as ApiError).message);
+      showError((err as ApiError).message);
     }
   }
 
@@ -114,7 +116,7 @@ export default function PhysicalLocations() {
           ))}
         </select>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       {warehouseId && (
         <TreeView
           nodes={items}
@@ -129,7 +131,7 @@ export default function PhysicalLocations() {
       {open && (
         <Modal title={editing ? "ویرایش محل فیزیکی" : parent ? `زیرشاخه جدید زیر «${parent.title}»` : "شاخه ریشه جدید"} onClose={() => setOpen(false)}>
           <form onSubmit={onSubmit}>
-            {formError && <div className="alert error">{formError}</div>}
+            <ErrorToast message={formError} />
             <div className="form-grid">
               <div className="form-field">
                 <label>کد (اختیاری)</label>

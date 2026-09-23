@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -115,7 +117,7 @@ function ChequeList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "شماره چک", render: (r) => r.number, filterType: "string", filterValue: (r) => r.number },
@@ -175,7 +177,7 @@ function ChequeDetail({ id }: { id: number }) {
       await api.post(`/cheques/${id}/transition`, { toStatus });
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -191,7 +193,7 @@ function ChequeDetail({ id }: { id: number }) {
       extraActions={allowedNext.map((s) => ({ label: `ابطال چک`, onClick: () => transition(s) }))}
       wide
     >
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <div className="je-header-grid" style={{ maxWidth: 900 }}>
         <div className="form-field">
           <label>نوع</label>

@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -83,7 +85,7 @@ function DeliveryAuthorizationList() {
       await api.del(`/delivery-authorizations/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -96,7 +98,7 @@ function DeliveryAuthorizationList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
@@ -235,7 +237,7 @@ function DeliveryAuthorizationForm({ editId }: { editId?: number }) {
       await api.del(`/delivery-authorizations/${editId}`);
       navigate("/delivery-authorizations");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
   async function runAction(path: string) {
@@ -246,7 +248,7 @@ function DeliveryAuthorizationForm({ editId }: { editId?: number }) {
       setMeta({ number: d.number, status: d.status });
       flash();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -270,7 +272,7 @@ function DeliveryAuthorizationForm({ editId }: { editId?: number }) {
       wide
     >
       <form id="delivery-authorization-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
             <div className="form-field">

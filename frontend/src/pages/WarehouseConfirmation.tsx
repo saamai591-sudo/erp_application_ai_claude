@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
 import { DataTable } from "../components/DataTable";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { toFaDigits } from "../lib/formatAmount";
@@ -119,7 +120,7 @@ export default function WarehouseConfirmation() {
 
   return (
     <div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
 
       <div style={{ display: "flex", gap: 16, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 16 }}>
         <div className="form-field" style={{ maxWidth: 220 }}>

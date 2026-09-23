@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -93,7 +95,7 @@ function SalesQuoteList() {
       await api.del(`/sales-quotes/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -106,7 +108,7 @@ function SalesQuoteList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
@@ -298,7 +300,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
       await api.del(`/sales-quotes/${editId}`);
       navigate("/sales-quotes");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
   async function runAction(path: string) {
@@ -309,7 +311,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
       setMeta({ number: d.number, status: d.status });
       flash();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -333,7 +335,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
       wide
     >
       <form id="sales-quote-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
             <div className="form-field">

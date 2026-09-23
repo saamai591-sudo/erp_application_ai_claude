@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -205,7 +206,7 @@ function InitialInventoryList({ basePath }: { basePath: string }) {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "شماره", render: (r) => r.number, width: "70px", filterType: "number", filterValue: (r) => r.number },
@@ -465,7 +466,7 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
       wide
     >
       <form id="initial-inventory-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
 
         <fieldset disabled={nonMoneyReadOnly} style={{ border: 0, padding: 0, margin: 0 }}>
         <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>

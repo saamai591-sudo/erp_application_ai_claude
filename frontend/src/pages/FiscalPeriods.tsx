@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useCrud } from "../lib/useCrud";
 import { DataTable } from "../components/DataTable";
@@ -37,7 +39,7 @@ function PeriodList() {
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`هر دوره باید ادامه‌ی بدون فاصله‌ی دوره‌ی قبلی باشد؛ فقط تا‌تاریخ آخرین دوره قابل ویرایش است`} title="دوره مالی" /><NewRecordButton path="/fiscal-periods/new" /><RefreshButton onClick={reload} /></div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       {!loading && (
         <DataTable
           columns={[
@@ -55,7 +57,7 @@ function PeriodList() {
           }
           onDelete={async (r) => {
             const res = await remove(r.id);
-            if (!res.ok) alert(res.error);
+            if (!res.ok) showError(res.error);
           }}
         />
       )}
@@ -80,7 +82,7 @@ function PeriodForm() {
   return (
     <FormPage title="دوره مالی جدید" formId="period-form" closePath="/fiscal-periods" newPath="/fiscal-periods/new">
       <form id="period-form" onSubmit={onSubmit}>
-        {formError && <div className="alert error">{formError}</div>}
+        <ErrorToast message={formError} />
         <div className="form-grid">
           <div className="form-field">
             <label>عنوان (عدد ۴ رقمی)<RequiredMark /></label>
@@ -149,7 +151,7 @@ function PeriodEditForm({ editId }: { editId: number }) {
       await api.del(`/fiscal-periods/${editId}`);
       navigate("/fiscal-periods");
     } catch (err) {
-      alert((err as ApiError).message);
+      showError((err as ApiError).message);
     }
   }
 
@@ -165,7 +167,7 @@ function PeriodEditForm({ editId }: { editId: number }) {
       onDelete={handleDelete}
     >
       <form id="period-edit-form" onSubmit={onSubmit}>
-        {formError && <div className="alert error">{formError}</div>}
+        <ErrorToast message={formError} />
         <div className="form-grid">
           <div className="form-field">
             <label>از تاریخ</label>

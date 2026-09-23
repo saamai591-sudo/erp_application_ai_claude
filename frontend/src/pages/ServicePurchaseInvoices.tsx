@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -130,7 +132,7 @@ function ServicePurchaseInvoiceList() {
       await api.del(`/service-purchase-invoices/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -143,7 +145,7 @@ function ServicePurchaseInvoiceList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
@@ -493,7 +495,7 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
       await api.del(`/service-purchase-invoices/${editId}`);
       navigate("/service-purchase-invoices");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -527,7 +529,7 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
       await reloadMetaAndRows();
       flash(result?.message);
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -539,7 +541,7 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
       await reloadMetaAndRows();
       flash();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -584,7 +586,7 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
       wide
     >
       <form id="service-purchase-invoice-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
             <div className="form-field">

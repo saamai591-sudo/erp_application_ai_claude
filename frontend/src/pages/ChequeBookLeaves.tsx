@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError, showToast } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -72,7 +74,7 @@ function ChequeBookLeafList() {
       await api.post(`/cheque-book-leaves/${row.id}/void`, {});
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
   async function onDelete(row: ChequeBookLeaf) {
@@ -80,7 +82,7 @@ function ChequeBookLeafList() {
       await api.del(`/cheque-book-leaves/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -96,7 +98,7 @@ function ChequeBookLeafList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "کد حساب بانکی", render: (r) => toFaDigits(r.bankAccount.detailCode), filterType: "string", filterValue: (r) => r.bankAccount.detailCode, width: "110px" },
@@ -173,7 +175,7 @@ function BulkCreateModal({ bankAccounts, onClose, onDone }: { bankAccounts: Bank
         startNumber,
         count: Number(count),
       });
-      alert(`${toFaDigits(String(res.count))} برگه چک ایجاد شد`);
+      showToast(`${toFaDigits(String(res.count))} برگه چک ایجاد شد`);
       onDone();
     } catch (e) {
       setError((e as ApiError).message);
@@ -184,7 +186,7 @@ function BulkCreateModal({ bankAccounts, onClose, onDone }: { bankAccounts: Bank
 
   return (
     <Modal title="ایجاد دسته چک" onClose={onClose}>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <div className="form-grid">
         <div className="form-field full">
           <label>حساب بانکی<RequiredMark /></label>
@@ -298,7 +300,7 @@ function ChequeBookLeafForm({ editId }: { editId?: number }) {
       await api.del(`/cheque-book-leaves/${editId}`);
       navigate("/cheque-book-leaves");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -310,7 +312,7 @@ function ChequeBookLeafForm({ editId }: { editId?: number }) {
       setStatus("VOID");
       flash();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -327,7 +329,7 @@ function ChequeBookLeafForm({ editId }: { editId?: number }) {
       extraActions={editId && status === "RAW" ? [{ label: "ابطال", icon: <VoidIcon />, onClick: handleVoid }] : []}
     >
       <form id="cheque-book-leaf-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <div className="form-grid">
           {editId && (
             <div className="form-field">

@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -92,7 +94,7 @@ function PurchasePlanningList() {
       await api.del(`/purchase-plannings/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -105,7 +107,7 @@ function PurchasePlanningList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
@@ -257,9 +259,9 @@ function PurchasePlanningForm({ editId }: { editId?: number }) {
 
   function goToStep2() {
     const nonEmpty = stage1Rows.filter((r) => r.purchaseRequestLineId);
-    if (nonEmpty.length === 0) return alert("حداقل یک ردیف درخواست خرید باید انتخاب شود");
+    if (nonEmpty.length === 0) return showError("حداقل یک ردیف درخواست خرید باید انتخاب شود");
     for (const [i, r] of nonEmpty.entries()) {
-      if (!(Number(r.quantity) > 0)) return alert(`مقدار ردیف ${i + 1} باید عددی مثبت باشد`);
+      if (!(Number(r.quantity) > 0)) return showError(`مقدار ردیف ${i + 1} باید عددی مثبت باشد`);
     }
     setStage2Rows(computeStage2());
     setStep(2);
@@ -312,7 +314,7 @@ function PurchasePlanningForm({ editId }: { editId?: number }) {
       await api.del(`/purchase-plannings/${editId}`);
       navigate("/purchase-plannings");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
   async function runAction(path: string, confirmMsg?: string) {
@@ -324,7 +326,7 @@ function PurchasePlanningForm({ editId }: { editId?: number }) {
       setMeta({ number: d.number, status: d.status });
       flash();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -356,7 +358,7 @@ function PurchasePlanningForm({ editId }: { editId?: number }) {
       wide
     >
       <form id="purchase-planning-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
 
         <div className="wizard-steps" style={{ display: "flex", gap: 8, marginBottom: 16 }}>
           {[1, 2, 3].map((s) => (

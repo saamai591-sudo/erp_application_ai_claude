@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
 import { useCrud } from "../lib/useCrud";
 import { api } from "../lib/api";
 import { toFaDigits } from "../lib/formatAmount";
@@ -45,8 +46,8 @@ export default function DetailTypes() {
         </div>
       </div>
 
-      {error && <div className="alert error">{error}</div>}
-      {rowError && <div className="alert error">{rowError}</div>}
+      <ErrorToast message={error} />
+      <ErrorToast message={rowError} />
 
       {!loading && (
         <div className="card" style={{ overflowX: "auto" }}>

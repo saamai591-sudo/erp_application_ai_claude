@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useCrud } from "../lib/useCrud";
 import { DataTable } from "../components/DataTable";
@@ -88,7 +90,7 @@ function PeriodList() {
   async function bulkClose(rows: Period[]) {
     const targets = rows.filter((r) => r.status === "OPEN");
     if (targets.length === 0) {
-      alert("هیچ دوره «باز»ی در انتخاب شما نیست");
+      showError("هیچ دوره «باز»ی در انتخاب شما نیست");
       return;
     }
     if (!window.confirm(`${toFaDigits(String(targets.length))} دوره بسته شود؟ دوره بسته قابل ویرایش و حذف نیست.`)) return;
@@ -96,7 +98,7 @@ function PeriodList() {
       try {
         await api.put(`/reporting-periods/${row.id}/close`, {});
       } catch (e) {
-        alert(`دوره ${row.title}: ${(e as ApiError).message}`);
+        showError(`دوره ${row.title}: ${(e as ApiError).message}`);
       }
     }
     await reload();
@@ -105,14 +107,14 @@ function PeriodList() {
   async function bulkReopen(rows: Period[]) {
     const targets = rows.filter((r) => r.status === "CLOSED");
     if (targets.length === 0) {
-      alert("هیچ دوره «بسته»ای در انتخاب شما نیست");
+      showError("هیچ دوره «بسته»ای در انتخاب شما نیست");
       return;
     }
     for (const row of targets) {
       try {
         await api.put(`/reporting-periods/${row.id}/reopen`, {});
       } catch (e) {
-        alert(`دوره ${row.title}: ${(e as ApiError).message}`);
+        showError(`دوره ${row.title}: ${(e as ApiError).message}`);
       }
     }
     await reload();
@@ -127,7 +129,7 @@ function PeriodList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       {resolved && !loading && (
         <DataTable
           columns={[
@@ -141,7 +143,7 @@ function PeriodList() {
           edit={{ path: (r) => `/reporting-periods/${r.id}/edit`, guard: (r) => r.status !== "CLOSED" || "دوره بسته قابل ویرایش نیست" }}
           onDelete={async (r) => {
             const res = await remove(r.id);
-            if (!res.ok) alert(res.error);
+            if (!res.ok) showError(res.error);
           }}
           bulkActions={[
             { label: (n) => `بستن دوره (${toFaDigits(String(n))})`, icon: <CheckIcon />, onClick: bulkClose },
@@ -190,7 +192,7 @@ function PeriodForm() {
   return (
     <FormPage title="دوره گزارشگری جدید" formId="reporting-period-form" closePath="/reporting-periods" newPath="/reporting-periods/new">
       <form id="reporting-period-form" onSubmit={onSubmit}>
-        {formError && <div className="alert error">{formError}</div>}
+        <ErrorToast message={formError} />
         <div className="form-grid">
           <div className="form-field">
             <label>کد دوره<RequiredMark /></label>
@@ -263,7 +265,7 @@ function PeriodEditForm({ editId }: { editId: number }) {
       await api.del(`/reporting-periods/${editId}`);
       navigate("/reporting-periods");
     } catch (err) {
-      alert((err as ApiError).message);
+      showError((err as ApiError).message);
     }
   }
 
@@ -279,7 +281,7 @@ function PeriodEditForm({ editId }: { editId: number }) {
       onDelete={handleDelete}
     >
       <form id="reporting-period-edit-form" onSubmit={onSubmit}>
-        {formError && <div className="alert error">{formError}</div>}
+        <ErrorToast message={formError} />
         <div className="form-grid">
           <div className="form-field">
             <label>کد دوره<RequiredMark /></label>

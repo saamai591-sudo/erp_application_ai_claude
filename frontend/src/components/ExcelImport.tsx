@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { ErrorToast } from "./ErrorToast";
 import * as XLSX from "xlsx";
 import { Modal } from "./Modal";
 import { toFaDigits } from "../lib/formatAmount";
@@ -296,7 +297,7 @@ export function ExcelImportButton({
                 <button type="button" className="btn secondary" onClick={downloadTemplate}>دانلود قالب اکسل</button>
               </div>
               <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFile} />
-              {fileError && <div className="alert error" style={{ marginTop: 12 }}>{fileError}</div>}
+              <ErrorToast message={fileError} />
             </div>
           )}
 

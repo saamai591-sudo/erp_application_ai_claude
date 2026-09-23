@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -109,14 +111,14 @@ function ClosingList() {
 
   async function onDelete(row: ClosingListItem) {
     if (row.issued) {
-      alert("این عملیات سند صادرشده دارد و قابل حذف نیست؛ ابتدا از داخل فرم، «حذف سند» را بزنید.");
+      showError("این عملیات سند صادرشده دارد و قابل حذف نیست؛ ابتدا از داخل فرم، «حذف سند» را بزنید.");
       return;
     }
     try {
       await api.del(`/account-closing/${row.id}`);
       await reload();
     } catch (e: any) {
-      alert(e.message);
+      showError(e.message);
     }
   }
 
@@ -125,7 +127,7 @@ function ClosingList() {
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`بستن حسابهای سود و زیانیِ دارای مانده در پایان دوره مالی، با صدور خودکار سند حسابداری معکوس‌کننده`} title="بستن حسابها" /><NewRecordButton path="/account-closing/new" /><RefreshButton onClick={reload} /></div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "شماره", render: (r) => r.number, width: "70px", filterType: "number", filterValue: (r) => r.number },
@@ -351,7 +353,7 @@ function ClosingWizard({ viewId }: { viewId?: number }) {
           : []
       }
     >
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
 
       {isFinalized && savedClosing?.number ? (
         <div>

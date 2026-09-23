@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useCrud } from "../lib/useCrud";
 import { DataTable } from "../components/DataTable";
@@ -63,7 +65,7 @@ function UserList() {
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}><InfoHint text={`تعریف کاربران سیستم و تخصیص نقش کاربری`} title="کاربر" /><NewRecordButton path="/users/new" /><RefreshButton onClick={reload} /></div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       {!loading && (
         <DataTable
           columns={[
@@ -78,7 +80,7 @@ function UserList() {
           edit={{ path: (r) => `/users/${r.id}/edit` }}
           onDelete={async (r) => {
             const res = await remove(r.id);
-            if (!res.ok) alert(res.error);
+            if (!res.ok) showError(res.error);
           }}
         />
       )}
@@ -180,7 +182,7 @@ function UserForm({ editId }: { editId?: number }) {
       await api.del(`/users/${editId}`);
       navigate("/users");
     } catch (err) {
-      alert((err as ApiError).message);
+      showError((err as ApiError).message);
     }
   }
 
@@ -195,7 +197,7 @@ function UserForm({ editId }: { editId?: number }) {
       onDelete={editId ? handleDelete : undefined}
     >
       <form id="user-form" onSubmit={onSubmit} autoComplete="off">
-        {formError && <div className="alert error">{formError}</div>}
+        <ErrorToast message={formError} />
         <div className="form-grid">
           <div className="form-field">
             <label>شماره همراه (۱۱ رقم)<RequiredMark /></label>

@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -158,7 +160,7 @@ function PurchaseRequestList() {
       await api.del(`/purchase-requests/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -171,7 +173,7 @@ function PurchaseRequestList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
@@ -382,7 +384,7 @@ function PurchaseRequestForm({ editId }: { editId?: number }) {
       await api.del(`/purchase-requests/${editId}`);
       navigate("/purchase-requests");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -395,7 +397,7 @@ function PurchaseRequestForm({ editId }: { editId?: number }) {
       setMeta({ number: d.number, status: d.status, reviewedAt: d.reviewedAt, approverName: d.approverName, approvedAt: d.approvedAt });
       flash();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -431,7 +433,7 @@ function PurchaseRequestForm({ editId }: { editId?: number }) {
       wide
     >
       <form id="purchase-request-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
 
         <fieldset disabled={coreDisabled} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>

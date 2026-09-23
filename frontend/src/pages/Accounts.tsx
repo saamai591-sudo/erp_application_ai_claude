@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { TreeView, TreeNode } from "../components/TreeView";
 import { FormPage } from "../components/FormPage";
@@ -65,7 +67,7 @@ function AccountsTree() {
       await api.del(`/accounts/${node.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -124,7 +126,7 @@ function AccountsTree() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <TreeView
         nodes={nodes}
         persistKey={cacheKey}
@@ -242,7 +244,7 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
       await api.del(`/accounts/${editId}`);
       navigate("/accounts");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -266,7 +268,7 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
       onDelete={editId ? handleDelete : undefined}
     >
       <form id="account-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
         <div className="form-grid">
           <div className="form-field">
             <label>کد (طول {currentLevel.codeLength} رقم)<RequiredMark /></label>

@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useCrud } from "../lib/useCrud";
 import { Modal } from "../components/Modal";
@@ -50,7 +52,7 @@ function OrgTree() {
 
   async function onDelete(node: TreeNode) {
     const res = await remove(node.id);
-    if (!res.ok) alert(res.error);
+    if (!res.ok) showError(res.error);
   }
 
   return (
@@ -61,7 +63,7 @@ function OrgTree() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <TreeView
         nodes={items}
         persistKey="/org-structure"
@@ -74,7 +76,7 @@ function OrgTree() {
       {open && (
         <Modal title={`زیرشاخه جدید زیر «${parent?.title}»`} onClose={() => setOpen(false)}>
           <form onSubmit={onSubmit}>
-            {formError && <div className="alert error">{formError}</div>}
+            <ErrorToast message={formError} />
             <div className="form-grid">
               <div className="form-field">
                 <label>کد (اختیاری)</label>
@@ -122,7 +124,7 @@ function RootForm() {
       newPath="/org-structure/new"
     >
       <form id="org-root-form" onSubmit={onSubmit}>
-        {formError && <div className="alert error">{formError}</div>}
+        <ErrorToast message={formError} />
         <div className="form-grid">
           <div className="form-field">
             <label>کد <FieldHint label="کد" text="اختیاری — خالی بگذارید تا خودکار صادر شود" /></label>
@@ -185,7 +187,7 @@ function NodeEditForm({ editId }: { editId: number }) {
       await api.del(`/org-structure/${editId}`);
       navigate("/org-structure");
     } catch (err) {
-      alert((err as ApiError).message);
+      showError((err as ApiError).message);
     }
   }
 
@@ -200,7 +202,7 @@ function NodeEditForm({ editId }: { editId: number }) {
       onDelete={handleDelete}
     >
       <form id="org-edit-form" onSubmit={onSubmit}>
-        {formError && <div className="alert error">{formError}</div>}
+        <ErrorToast message={formError} />
         <div className="form-grid">
           <div className="form-field">
             <label>کد</label>
