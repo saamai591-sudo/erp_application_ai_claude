@@ -15,7 +15,7 @@ import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
-import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { usePersistedState, hasPersistedState, clearPersistedStateFamily } from "../lib/usePersistedState";
 import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
 import { partyDisplayName } from "./Users";
@@ -86,11 +86,6 @@ interface DetailInstrumentLine {
   chequeBookLeafDisplay: string | null;
   chequeItemId: number | null;
   chequeItemNumber?: string;
-  // برای تشخیص ردیف «قفل» (فاز ۲.۲ — سند نیمه‌باز): اگر chequeStep با chequeItemStep برابر نباشد،
-  // یعنی از زمان این سند، اتفاق دیگری (واگذاری/وصول/...) برای این چک افتاده و این ردیف دیگر
-  // قابل ویرایش/حذف از «ویرایش سند تایید‌شده» نیست. نگاه کنید به backend/src/routes/payments.ts.
-  chequeStep: number | null;
-  chequeItemStep: number | null;
   description: string | null;
 }
 interface DetailSettlementLine {
@@ -126,6 +121,8 @@ interface Detail {
   journalEntryReferenceNumber: number | null;
   instrumentLines: DetailInstrumentLine[];
   settlementLines: DetailSettlementLine[];
+  updatedAt?: string;
+  ownLeaves?: PickableChequeBookLeaf[];
 }
 
 function infoText() {
@@ -138,15 +135,17 @@ function infoText() {
 }
 
 // پیام «تایید»: هم بعد از تایید اولیه به‌صورت toast و هم در دیالوگ راهنما (هنگام ویرایش) نمایش داده می‌شود
-const APPROVED_NOTICE = "این سند «تایید» شده است. ردیف‌های ابزار قفل‌نشده (چک‌هایی که هنوز واگذار/وصول نشده‌اند، یا ردیف‌های غیرچک) و ردیف‌های موضوعات پرداخت مستقیماً قابل ویرایش/افزودن/حذف‌اند، بدون نیاز به «برگشت از تایید». ردیف‌های قفل‌شده (علامت‌خورده با «قفل») و ردیف‌های موضوعات پرداختِ مرتبط با آن‌ها (چکی که بعد از این سند گردش داشته) فقط قابل مشاهده‌اند.";
+const APPROVED_NOTICE = "این سند «تایید» شده است و از مسیر «ویرایش» قابل تغییر نیست؛ برای اصلاح آیتم‌های فاقد گردش از «ویرایش مجدد» استفاده کنید، یا برای تغییر کامل ابتدا آن را «برگشت از تایید» کنید.";
 
 export default function Payments() {
   const location = useLocation();
   const { id } = useParams();
   const isNew = location.pathname.endsWith("/new");
   const isEdit = location.pathname.endsWith("/edit");
+  const isReEdit = location.pathname.endsWith("/re-edit");
   if (isNew) return <PaymentForm />;
   if (isEdit) return <PaymentForm editId={Number(id)} />;
+  if (isReEdit) return <PaymentForm editId={Number(id)} reEdit />;
   return <PaymentList />;
 }
 
@@ -266,10 +265,6 @@ interface InstrumentRowState {
   chequeItemId: string;
   chequeItemDisplay: string;
   description: string;
-  // فقط برای ردیف‌های موجود (id دار) که از سرور آمده‌اند؛ برای تشخیص «قفل» بودن ردیف در سند
-  // «تایید»شده استفاده می‌شود (نگاه کنید به DetailInstrumentLine).
-  chequeStep?: number | null;
-  chequeItemStep?: number | null;
 }
 let clientKeySeq = 0;
 function nextClientKey() {
@@ -279,12 +274,6 @@ function nextClientKey() {
 function emptyInstrumentRow(): InstrumentRowState {
   return { clientKey: nextClientKey(), type: "CASH", amount: "", currencyId: "", fxRate: "", cashBoxId: "", bankAccountId: "", referenceNumber: "", chequeNumber: "", chequeDueDate: "", chequeBankBranchId: "", payableChequeTypeId: "", chequeBookLeafId: "", chequeBookLeafDisplay: "", chequeItemId: "", chequeItemDisplay: "", description: "" };
 }
-// ردیف از سند «تایید»شده «قفل» است اگر یک چک به آن وصل باشد و step آن چک دیگر با chequeStep همین
-// ردیف برابر نباشد — یعنی اتفاق دیگری (واگذاری/وصول/...) بعد از این سند برای آن چک افتاده است.
-function isRowLocked(row: InstrumentRowState, semiOpen: boolean) {
-  return semiOpen && !!row.id && !!row.chequeItemId && row.chequeStep !== row.chequeItemStep;
-}
-
 const BASIS_FIELD: Record<Exclude<PaymentBasisType, "NONE">, "purchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
   PURCHASE_INVOICE: "purchaseInvoiceId",
   SALES_INVOICE: "salesInvoiceId",
@@ -321,7 +310,7 @@ function emptySettlementRow(instrumentClientKey: string, instrumentLabel: string
   };
 }
 
-function PaymentForm({ editId }: { editId?: number }) {
+function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) {
   const { openTab } = useTabs();
   const navigate = useNavigate();
   const location = useLocation();
@@ -333,6 +322,9 @@ function PaymentForm({ editId }: { editId?: number }) {
   const [chequeTypes, setChequeTypes] = useState<ChequeTypeOption[]>([]);
   const [pickableCheques, setPickableCheques] = useState<PickableCheque[]>([]);
   const [pickableChequeBookLeaves, setPickableChequeBookLeaves] = useState<PickableChequeBookLeaf[]>([]);
+  // «ویرایش مجدد»: برگه‌ی دسته چکِ فعلیِ ردیف‌های قابل ویرایش (ISSUED است و در فهرست برگه‌های «خام» نمی‌آید) و updatedAt سند
+  const [ownLeaves, setOwnLeaves] = usePersistedState<PickableChequeBookLeaf[]>(`${cacheKey}:ownLeaves`, []);
+  const [docUpdatedAt, setDocUpdatedAt] = usePersistedState<string>(`${cacheKey}:updatedAt`, "");
   const [paymentTypes, setPaymentTypes] = useState<PaymentTypeOption[]>([]);
   const [customerPartyIds, setCustomerPartyIds] = useState<Set<number>>(new Set());
   const [supplierPartyIds, setSupplierPartyIds] = useState<Set<number>>(new Set());
@@ -348,6 +340,8 @@ function PaymentForm({ editId }: { editId?: number }) {
   const baseCurrency = currencies.find((c) => c.isBase);
 
   function applyDetail(d: Detail) {
+    setOwnLeaves(d.ownLeaves ?? []);
+    setDocUpdatedAt(d.updatedAt ?? "");
     setMeta({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle, journalEntryId: d.journalEntryId ?? null, journalEntryReferenceNumber: d.journalEntryReferenceNumber ?? null });
     setHeader({ date: d.date.slice(0, 10), partyId: String(d.partyId), partyDisplay: d.partyDisplay, description: d.description || "" });
     setInstrumentRows(
@@ -370,8 +364,6 @@ function PaymentForm({ editId }: { editId?: number }) {
         chequeItemId: l.chequeItemId ? String(l.chequeItemId) : "",
         chequeItemDisplay: l.chequeItemNumber ? toFaDigits(l.chequeItemNumber) : "",
         description: l.description || "",
-        chequeStep: l.chequeStep,
-        chequeItemStep: l.chequeItemStep,
       }))
     );
     const instrumentIndexById = new Map(d.instrumentLines.map((l, i) => [l.id, i]));
@@ -429,17 +421,11 @@ function PaymentForm({ editId }: { editId?: number }) {
 
       if (hasPersistedState(`${cacheKey}:header`)) {
         setLoaded(true);
-        // این تب می‌تواند مدت‌ها باز مانده باشد (سوییچ بین تب‌ها مقدار کش‌شده را حفظ می‌کند —
-        // نگاه کنید به usePersistedState) و در همین فاصله چک یکی از ردیف‌ها از طریق سند دیگری
-        // (واگذاری به بانک/برگشت/نتیجه‌ی وصول) جابه‌جا شده باشد. بدون این بازخوانی، chequeItemStep
-        // کش‌شده قدیمی می‌ماند و isRowLocked ردیف را اشتباهاً «قفل‌نشده» تشخیص می‌دهد. فقط وضعیت
-        // سند و step ردیف‌های چکی را از سرور تازه می‌کنیم؛ بقیه‌ی ورودی‌های کاربر دست‌نخورده می‌ماند.
+        // این تب می‌تواند مدت‌ها باز مانده باشد؛ فقط وضعیت سند را از سرور تازه می‌کنیم (بقیه‌ی ورودی‌های کاربر دست‌نخورده می‌ماند).
         if (editId) {
           try {
             const d: Detail = await api.get(`/payments/${editId}`);
             setMeta((prev) => (prev ? { ...prev, status: d.status, journalEntryId: d.journalEntryId ?? null, journalEntryReferenceNumber: d.journalEntryReferenceNumber ?? null } : prev));
-            const stepById = new Map(d.instrumentLines.map((l) => [l.id, { chequeStep: l.chequeStep, chequeItemStep: l.chequeItemStep }]));
-            setInstrumentRows((prev) => prev.map((r) => (r.id && stepById.has(r.id) ? { ...r, ...stepById.get(r.id)! } : r)));
           } catch {
             // اگر واکشی ناموفق شد، به مقادیر کش‌شده بسنده می‌شود؛ ذخیره‌سازی همچنان توسط سرور اعتبارسنجی می‌شود
           }
@@ -448,8 +434,15 @@ function PaymentForm({ editId }: { editId?: number }) {
       }
 
       if (editId) {
-        const d: Detail = await api.get(`/payments/${editId}`);
-        applyDetail(d);
+        try {
+          const d: Detail = await api.get(reEdit ? `/payments/${editId}/re-edit` : `/payments/${editId}`);
+          applyDetail(d);
+        } catch (e) {
+          if (!reEdit) throw e;
+          showError((e as ApiError).message);
+          navigate(`/payments/${editId}/edit`);
+          return;
+        }
       } else {
         setHeader({ date: defaultDocumentDate(fp), partyId: "", partyDisplay: "", description: "" });
         setInstrumentRows([emptyInstrumentRow()]);
@@ -466,12 +459,10 @@ function PaymentForm({ editId }: { editId?: number }) {
   // فقط فیلدهای هدر (تاریخ/طرف حساب) با این معیار قفل می‌شوند — این‌ها هرگز از طریق
   // «ویرایش سند تایید‌شده» قابل تغییر نیستند (فقط شرح، ردیف‌های ابزار قفل‌نشده، و ردیف‌های تسویه).
   const coreDisabled = !!editId && status !== "DRAFT";
-  // فاز ۲.۲ — سند نیمه‌باز: در وضعیت «تایید»، سند دیگر کاملاً قفل نیست؛ ردیف‌های ابزار قفل‌نشده و
-  // همه‌ی ردیف‌های تسویه قابل ویرایش/افزودن/حذف‌اند و ذخیره از طریق PUT /payments/:id/edit-approved
-  // انجام می‌شود، نه PUT /payments/:id معمولی.
-  const isApprovedSemiOpen = !!editId && status === "APPROVED";
   // بعد از صدور سند حسابداری، سند پرداخت کاملاً قفل است (هم‌الگوی فاکتور فروش) تا سند حسابداری با آن هم‌خوان بماند
   const jeLocked = !!meta?.journalEntryId;
+  // سند «تایید»شده کاملاً قفل است: برای هر تغییری ابتدا باید از تایید برگردانده شود (طبق درخواست کاربر)
+  const formLocked = jeLocked || (status === "APPROVED" && !reEdit);
 
   function instrumentLabel(row: InstrumentRowState, idx: number) {
     return `ردیف ${toFaDigits(String(idx + 1))} - ${TYPE_FA[row.type]}`;
@@ -500,22 +491,14 @@ function PaymentForm({ editId }: { editId?: number }) {
     setInstrumentRows((prev) => [...prev, emptyInstrumentRow()]);
   }
   function removeInstrumentRow(idx: number) {
-    setInstrumentRows((prev) => {
-      const row = prev[idx];
-      if (row && isRowLocked(row, isApprovedSemiOpen)) return prev;
-      return prev.filter((_, i) => i !== idx);
-    });
+    setInstrumentRows((prev) => prev.filter((_, i) => i !== idx));
   }
 
   function updateSettlementRow(idx: number, patch: Partial<SettlementRowState>) {
     setSettlementRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
   function removeSettlementRow(idx: number) {
-    setSettlementRows((prev) => {
-      const inst = instrumentRows.find((r) => r.clientKey === prev[idx]?.instrumentClientKey);
-      if (inst && isRowLocked(inst, isApprovedSemiOpen)) return prev;
-      return prev.filter((_, i) => i !== idx);
-    });
+    setSettlementRows((prev) => prev.filter((_, i) => i !== idx));
   }
   // طبق «مستندات تغییرات رسید دریافت.md» بند ۳ (حالت ارز پایه): انتخاب چندگانه‌ی سند مبنا در یک ردیف،
   // این ردیف را با اولین مورد پر می‌کند و به‌ازای هر مورد اضافه، یک ردیف تازه‌ی هم‌شکل بلافاصله بعد از
@@ -603,44 +586,32 @@ function PaymentForm({ editId }: { editId?: number }) {
     return { date: header.date, partyId: Number(header.partyId), description: header.description, instrumentLines: buildInstrumentLinesPayload(), settlementLines: buildSettlementLinesPayload() };
   }
 
-  // بدنه‌ی درخواست PUT /payments/:id/edit-approved (سند نیمه‌باز): فقط شرح، ردیف‌های ابزار
-  // «قفل‌نشده» (موجود یا تازه)، و کل ردیف‌های تسویه ارسال می‌شود. ردیف‌های قفل‌شده اصلاً نباید در
-  // درخواست حاضر باشند — سرور خودش آن‌ها را حفظ می‌کند (نگاه کنید به توضیح بالای فایل بک‌اند).
-  function buildApprovedEditBody() {
-    return {
-      description: header.description,
-      instrumentLines: instrumentRows
-        .filter((r) => !isRowLocked(r, isApprovedSemiOpen))
-        .filter((r) => Number(r.amount) > 0)
-        .map((r) => ({ ...buildInstrumentLinesPayload().find((x) => x.clientKey === r.clientKey)!, id: r.id })),
-      settlementLines: buildSettlementLinesPayload(),
-    };
-  }
-
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
 
-    const missingChequeType = instrumentRows.some((r) => r.type === "CHEQUE" && Number(r.amount) > 0 && !r.payableChequeTypeId && !isRowLocked(r, isApprovedSemiOpen));
+    const missingChequeType = instrumentRows.some((r) => r.type === "CHEQUE" && Number(r.amount) > 0 && !r.payableChequeTypeId);
     if (missingChequeType) return setError("نوع چک در همه‌ی ردیف‌های صدور چک الزامی است");
-    const missingSpendCheque = instrumentRows.some((r) => r.type === "CHEQUE_TRANSFER" && !r.chequeItemId && !isRowLocked(r, isApprovedSemiOpen));
+    const missingSpendCheque = instrumentRows.some((r) => r.type === "CHEQUE_TRANSFER" && !r.chequeItemId);
     if (missingSpendCheque) return setError("چک دریافتنی برای خرج‌کردن در ردیف‌های «چک انتقالی» انتخاب نشده است");
     // طبق درخواست کاربر: برای صدور چک جدید، ابتدا حساب بانکی (فقط از نوع دارای دسته چک) و سپس برگه‌ی
     // چک از همان دسته چک انتخاب می‌شود — شماره چک دیگر آزادانه تایپ نمی‌شود.
-    const missingChequeBankAccount = instrumentRows.some((r) => r.type === "CHEQUE" && Number(r.amount) > 0 && !r.bankAccountId && !isRowLocked(r, isApprovedSemiOpen));
+    const missingChequeBankAccount = instrumentRows.some((r) => r.type === "CHEQUE" && Number(r.amount) > 0 && !r.bankAccountId);
     if (missingChequeBankAccount) return setError("حساب بانکی صادرکننده در همه‌ی ردیف‌های صدور چک الزامی است");
-    const missingChequeLeaf = instrumentRows.some((r) => r.type === "CHEQUE" && Number(r.amount) > 0 && !r.chequeBookLeafId && !isRowLocked(r, isApprovedSemiOpen));
+    const missingChequeLeaf = instrumentRows.some((r) => r.type === "CHEQUE" && Number(r.amount) > 0 && !r.chequeBookLeafId);
     if (missingChequeLeaf) return setError("انتخاب برگه چک از دسته چک در همه‌ی ردیف‌های صدور چک الزامی است");
 
-    if (isApprovedSemiOpen) {
-      const body = buildApprovedEditBody();
-      if (body.settlementLines.length === 0) return setError("حداقل یک ردیف موضوعات پرداخت الزامی است");
+    if (reEdit) {
+      if (instrumentRows.some((r) => !(Number(r.amount) > 0))) return setError("مبلغ همه‌ی ابزارهای پرداخت باید مثبت باشد؛ برای حذف یک ابزار، ردیف آن را حذف کنید");
+      const body = { description: header.description, updatedAt: docUpdatedAt, instrumentLines: buildInstrumentLinesPayload().map((x) => ({ ...x, id: instrumentRows.find((r) => r.clientKey === x.clientKey)?.id })), settlementLines: buildSettlementLinesPayload() };
       if (Math.abs(instrumentBaseTotal - settlementBaseTotal) > 0.001) return setError("مجموع ردیف‌های موضوعات پرداخت (به ارز پایه) باید با مجموع ردیف‌های ابزار پرداخت برابر باشد");
       try {
-        await api.put(`/payments/${editId}/edit-approved`, body);
-        const d: Detail = await api.get(`/payments/${editId}`);
-        applyDetail(d);
+        await api.put(`/payments/${editId}/re-edit`, body);
         flash();
+        // حافظه‌ی فرم «ویرایش» و «ویرایش مجدد» کهنه شده است؛ پاک می‌شود تا فرم از سرور تازه بارگذاری شود
+        clearPersistedStateFamily(`form:/payments/${editId}/edit`);
+        clearPersistedStateFamily(`form:/payments/${editId}/re-edit`);
+        navigate(`/payments/${editId}/edit`);
       } catch (err) {
         setError((err as ApiError).message);
       }
@@ -691,6 +662,17 @@ function PaymentForm({ editId }: { editId?: number }) {
     }
   }
 
+  // «ویرایش مجدد»: نمایش Action فقط به وضعیت «تایید» وابسته است؛ امکان‌سنجی (وجود ابزار فاقد گردش) بعد از کلیک انجام می‌شود
+  async function handleReEdit() {
+    if (!editId) return;
+    try {
+      await api.get(`/payments/${editId}/re-edit`);
+      openTab(`/payments/${editId}/re-edit`);
+    } catch (e) {
+      showError((e as ApiError).message);
+    }
+  }
+
   async function handleUnapprove() {
     if (!editId) return;
     try {
@@ -731,7 +713,7 @@ function PaymentForm({ editId }: { editId?: number }) {
   // تازه است، نه ویرایش ردیف موجود).
   const instrumentPickerRows = instrumentRows
     .map((r, idx) => ({ ...r, idx }))
-    .filter((r) => Number(r.amount) > 0 && !isRowLocked(r, isApprovedSemiOpen))
+    .filter((r) => Number(r.amount) > 0)
     .map((r) => {
       const currency = currencies.find((c) => String(c.id) === r.currencyId);
       if (!currency) return { ...r, remainingAmount: Number(r.amount) || 0 };
@@ -754,17 +736,18 @@ function PaymentForm({ editId }: { editId?: number }) {
 
   return (
     <FormPage
-      title={editId ? "ویرایش سند پرداخت" : "سند پرداخت جدید"}
-      description={jeLocked ? "برای این سند پرداخت سند حسابداری صادر شده است؛ برای هر تغییری ابتدا سند حسابداری را حذف کنید." : status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/طرف حساب دیگر قابل تغییر نیستند، اما شرح، ردیف‌های ابزار قفل‌نشده و ردیف‌های موضوعات پرداخت مستقیماً قابل ویرایش‌اند. " + APPROVED_NOTICE : undefined}
+      title={reEdit ? "ویرایش مجدد سند پرداخت" : editId ? "ویرایش سند پرداخت" : "سند پرداخت جدید"}
+      description={reEdit ? "حالت ویرایش مجدد: فقط آیتم‌های فاقد گردش قابل ویرایش هستند. ابزارهای پرداخت دارای گردش و موضوعات مرتبط با آن‌ها نمایش داده نمی‌شوند و بدون تغییر می‌مانند؛ افزودن ابزار پرداخت جدید مجاز نیست، اما برای هر ابزار می‌توانید موضوع پرداخت جدید اضافه کنید و جمع موضوعات هر ابزار باید با مبلغ همان ابزار برابر باشد." : jeLocked ? "برای این سند پرداخت سند حسابداری صادر شده است؛ برای هر تغییری ابتدا سند حسابداری را حذف کنید." : status === "APPROVED" ? APPROVED_NOTICE : undefined}
       formId="payment-form"
       closePath="/payments"
       newPath="/payments/new"
-      onDelete={!editId || status === "DRAFT" ? handleDelete : undefined}
-      saveDisabled={jeLocked}
+      onDelete={!reEdit && (!editId || status === "DRAFT") ? handleDelete : undefined}
+      saveDisabled={formLocked}
       extraActions={
-        meta
+        meta && !reEdit
           ? [
               ...(status === "DRAFT" ? [{ label: "تایید", icon: <CheckIcon />, onClick: handleApprove }] : []),
+              ...(status === "APPROVED" ? [{ label: "ویرایش مجدد", icon: <PlusIcon />, onClick: handleReEdit }] : []),
               ...(status === "APPROVED" && !jeLocked ? [{ label: "برگشت از تایید", icon: <UndoIcon />, onClick: handleUnapprove }] : []),
               ...(status === "APPROVED" && !jeLocked ? [{ label: "صدور سند حسابداری", icon: <PlusIcon />, onClick: () => runJournalAction("post") }] : []),
               ...(jeLocked
@@ -782,7 +765,7 @@ function PaymentForm({ editId }: { editId?: number }) {
         <ErrorToast message={error} />
 
         {/* بعد از صدور سند حسابداری، همه‌ی اطلاعات سند (هدر، ردیف‌های ابزار، موضوعات پرداخت، شرح) قفل است */}
-        <fieldset disabled={jeLocked} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+        <fieldset disabled={formLocked} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
 
         <fieldset disabled={coreDisabled} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
@@ -825,8 +808,7 @@ function PaymentForm({ editId }: { editId?: number }) {
           </div>
         </fieldset>
 
-        {/* شرح، برخلاف بقیه‌ی فیلدهای هدر، حتی در سند «تایید»شده هم قابل ویرایش است (بخشی از
-            PUT /payments/:id/edit-approved) — به همین دلیل بیرون از fieldset قفل‌شونده قرار دارد. */}
+        {/* شرح داخل همین fieldset است: در سند «تایید»شده فقط از مسیر «ویرایش مجدد» قابل تغییر است */}
         <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
           <div className="form-field full">
             <label>شرح</label>
@@ -837,9 +819,11 @@ function PaymentForm({ editId }: { editId?: number }) {
 
         <div className="je-lines-toolbar">
           <span className="je-lines-title">ردیف‌های ابزار پرداخت</span>
+          {!reEdit && (
           <button type="button" className="toolbar-icon-btn primary" onClick={addInstrumentRow} title="ردیف جدید">
             <PlusIcon />
           </button>
+          )}
         </div>
 
         <div className="grid-wrap je-lines-wrap">
@@ -860,17 +844,14 @@ function PaymentForm({ editId }: { editId?: number }) {
               </thead>
               <tbody>
                 {instrumentRows.map((row, idx) => {
-                  const locked = isRowLocked(row, isApprovedSemiOpen);
-                  // نوع ابزار یک ردیف موجود، حتی اگر قفل نباشد، در «ویرایش سند تایید‌شده» قابل تغییر
-                  // نیست (طبق قرارداد بک‌اند)؛ فقط ردیف‌های تازه (بدون id) نوعشان آزاد است.
-                  const typeDisabled = locked || (isApprovedSemiOpen && !!row.id);
-                  // چک دریافتنیِ خرج‌شده متعلق به سند دیگری است: انتخاب چک و مبلغ آن در یک ردیف موجود قابل تغییر نیست
-                  const spendPickerDisabled = locked || (isApprovedSemiOpen && !!row.id);
+                  // در «ویرایش مجدد» نوع ابزار و چکِ خرج‌شده‌ی یک ردیف موجود قابل تغییر نیست (فقط حذف)
+                  const typeDisabled = !!reEdit && !!row.id;
+                  const spendPickerDisabled = !!reEdit && !!row.id;
                   const isSpendRow = row.type === "CHEQUE_TRANSFER";
                   const bankAccount = bankAccounts.find((a) => String(a.id) === row.bankAccountId);
                   const isBaseCurrencyRow = !row.currencyId || Number(row.currencyId) === baseCurrency.id;
                   return (
-                    <tr key={row.clientKey} style={locked ? { opacity: 0.65 } : undefined}>
+                    <tr key={row.clientKey}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                       <td style={{ minWidth: 140 }}>
                         <select
@@ -892,7 +873,7 @@ function PaymentForm({ editId }: { editId?: number }) {
                       {hasChequeRow && (
                         <td style={{ minWidth: 150 }}>
                           {row.type === "CHEQUE" && (
-                            <select value={row.payableChequeTypeId} onChange={(e) => updateInstrumentRow(idx, { payableChequeTypeId: e.target.value })} disabled={locked}>
+                            <select value={row.payableChequeTypeId} onChange={(e) => updateInstrumentRow(idx, { payableChequeTypeId: e.target.value })}>
                               <option value="">انتخاب نوع چک</option>
                               {chequeTypes.map((t) => (
                                 <option key={t.id} value={t.id}>{t.title}</option>
@@ -902,11 +883,11 @@ function PaymentForm({ editId }: { editId?: number }) {
                         </td>
                       )}
                       <td style={{ minWidth: 130 }}>
-                        <AmountInput value={row.amount} onChange={(v) => updateInstrumentRow(idx, { amount: v })} allowDecimal placeholder="۰" disabled={locked || isSpendRow} />
+                        <AmountInput value={row.amount} onChange={(v) => updateInstrumentRow(idx, { amount: v })} allowDecimal placeholder="۰" disabled={isSpendRow} />
                       </td>
                       <td style={{ minWidth: 130 }}>
                         {row.type === "CASH" && (
-                          <select value={row.currencyId} onChange={(e) => updateInstrumentRow(idx, { currencyId: e.target.value, fxRate: Number(e.target.value) === baseCurrency.id ? "1" : row.fxRate })} disabled={locked}>
+                          <select value={row.currencyId} onChange={(e) => updateInstrumentRow(idx, { currencyId: e.target.value, fxRate: Number(e.target.value) === baseCurrency.id ? "1" : row.fxRate })}>
                             <option value="">انتخاب ارز</option>
                             {currencies.map((c) => (
                               <option key={c.id} value={c.id}>{c.title}</option>
@@ -920,12 +901,12 @@ function PaymentForm({ editId }: { editId?: number }) {
                         {isBaseCurrencyRow ? (
                           <input dir="ltr" value={toFaDigits("1")} disabled />
                         ) : (
-                          <AmountInput value={row.fxRate} onChange={(v) => updateInstrumentRow(idx, { fxRate: v })} allowDecimal placeholder="نرخ ارز" disabled={locked} />
+                          <AmountInput value={row.fxRate} onChange={(v) => updateInstrumentRow(idx, { fxRate: v })} allowDecimal placeholder="نرخ ارز" />
                         )}
                       </td>
                       <td style={{ minWidth: 320 }}>
                         {row.type === "CASH" && (
-                          <select value={row.cashBoxId} onChange={(e) => updateInstrumentRow(idx, { cashBoxId: e.target.value })} disabled={locked}>
+                          <select value={row.cashBoxId} onChange={(e) => updateInstrumentRow(idx, { cashBoxId: e.target.value })}>
                             <option value="">انتخاب صندوق</option>
                             {cashBoxes.map((c) => (
                               <option key={c.id} value={c.id}>{c.title}</option>
@@ -941,7 +922,7 @@ function PaymentForm({ editId }: { editId?: number }) {
                                 const currencyId = acc?.currencyId ? String(acc.currencyId) : "";
                                 updateInstrumentRow(idx, { bankAccountId: e.target.value, currencyId, fxRate: acc?.currencyId === baseCurrency.id ? "1" : row.fxRate });
                               }}
-                              disabled={locked}
+                             
                               style={{ flex: 1 }}
                             >
                               <option value="">انتخاب حساب بانکی</option>
@@ -953,7 +934,7 @@ function PaymentForm({ editId }: { editId?: number }) {
                               placeholder="شماره پیگیری"
                               value={row.referenceNumber}
                               onChange={(e) => updateInstrumentRow(idx, { referenceNumber: e.target.value })}
-                              disabled={locked}
+                             
                               style={{ flex: 1 }}
                             />
                           </div>
@@ -974,7 +955,7 @@ function PaymentForm({ editId }: { editId?: number }) {
                                   chequeNumber: "",
                                 })
                               }
-                              disabled={locked}
+                             
                               style={{ flex: "1 1 160px" }}
                             >
                               <option value="">حساب بانکی صادرکننده</option>
@@ -986,9 +967,9 @@ function PaymentForm({ editId }: { editId?: number }) {
                               <RecordPickerField
                                 title="انتخاب برگه چک"
                                 placeholder={row.bankAccountId ? "انتخاب برگه از دسته چک" : "ابتدا حساب بانکی را انتخاب کنید"}
-                                disabled={locked || !row.bankAccountId}
+                                disabled={!row.bankAccountId}
                                 displayValue={row.chequeBookLeafDisplay}
-                                rows={pickableChequeBookLeaves.filter((l) => l.bankAccountId === Number(row.bankAccountId))}
+                                rows={[...pickableChequeBookLeaves, ...ownLeaves].filter((l) => l.bankAccountId === Number(row.bankAccountId))}
                                 columns={[
                                   { header: "سری", render: (l) => l.series, filterValue: (l) => l.series, width: "80px" },
                                   { header: "شماره", render: (l) => toFaDigits(l.number), filterValue: (l) => l.number },
@@ -1031,16 +1012,12 @@ function PaymentForm({ editId }: { editId?: number }) {
                         )}
                       </td>
                       <td style={{ minWidth: 140 }}>
-                        <input value={row.description} onChange={(e) => updateInstrumentRow(idx, { description: e.target.value })} disabled={locked} />
+                        <input value={row.description} onChange={(e) => updateInstrumentRow(idx, { description: e.target.value })} />
                       </td>
                       <td>
-                        {locked ? (
-                          <span className="badge" title="این چک از زمان این سند تغییر کرده (واگذار/وصول/...) و فقط از همان سند مربوطه قابل اصلاح است">قفل</span>
-                        ) : (
-                          <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeInstrumentRow(idx)}>
+                        <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeInstrumentRow(idx)}>
                             حذف
                           </button>
-                        )}
                       </td>
                     </tr>
                   );
@@ -1097,7 +1074,6 @@ function PaymentForm({ editId }: { editId?: number }) {
                     row={row}
                     onChange={(patch) => updateSettlementRow(idx, patch)}
                     onRemove={() => removeSettlementRow(idx)}
-                    isApprovedSemiOpen={isApprovedSemiOpen}
                     paymentTypes={paymentTypes}
                     parties={parties}
                     customerPartyIds={customerPartyIds}
@@ -1131,13 +1107,12 @@ function PaymentForm({ editId }: { editId?: number }) {
 }
 
 function SettlementRowFields({
-  idx, row, onChange, onRemove, isApprovedSemiOpen, paymentTypes, parties, customerPartyIds, supplierPartyIds, currencies, baseCurrency, instrumentRows, editId, headerPartyId, headerPartyDisplay, headerDate, allSettlementRows, onApplyBasisSelection,
+  idx, row, onChange, onRemove, paymentTypes, parties, customerPartyIds, supplierPartyIds, currencies, baseCurrency, instrumentRows, editId, headerPartyId, headerPartyDisplay, headerDate, allSettlementRows, onApplyBasisSelection,
 }: {
   idx: number;
   row: SettlementRowState;
   onChange: (patch: Partial<SettlementRowState>) => void;
   onRemove: () => void;
-  isApprovedSemiOpen: boolean;
   paymentTypes: PaymentTypeOption[];
   parties: PartyOption[];
   customerPartyIds: Set<number>;
@@ -1157,8 +1132,6 @@ function SettlementRowFields({
   const paymentType = paymentTypes.find((t) => String(t.id) === row.paymentTypeId);
   const basisType = paymentType?.basisType;
   const instrumentRow = instrumentRows.find((r) => r.clientKey === row.instrumentClientKey);
-  // ردیف موضوعات پرداختِ مرتبط با چکی که بعد از این سند گردش داشته (ردیف ابزار قفل‌شده) کاملاً قفل است
-  const rowLocked = !!instrumentRow && isRowLocked(instrumentRow, isApprovedSemiOpen);
 
   useEffect(() => {
     if (!basisType || basisType === "NONE" || !row.partyId) {
@@ -1312,7 +1285,7 @@ function SettlementRowFields({
   }
 
   return (
-    <tr {...(rowLocked ? { inert: "", style: { opacity: 0.65 } } : {})}>
+    <tr>
       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
       <td style={{ minWidth: 120 }}>
         <span>{row.instrumentLabel || `#${row.instrumentClientKey}`}</span>
@@ -1456,13 +1429,9 @@ function SettlementRowFields({
         <input value={row.description} onChange={(e) => onChange({ description: e.target.value })} />
       </td>
       <td>
-        {rowLocked ? (
-          <span className="badge" title="این ردیف به چکی وصل است که بعد از این سند گردش داشته و قابل ویرایش/حذف نیست">قفل</span>
-        ) : (
         <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={onRemove}>
           حذف
         </button>
-        )}
       </td>
     </tr>
   );

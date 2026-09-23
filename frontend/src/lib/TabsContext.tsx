@@ -42,7 +42,7 @@ function pathOnly(path: string): string {
 
 function isFormShapedPath(path: string): boolean {
   const base = pathOnly(path);
-  return base.endsWith("/new") || base.endsWith("/edit");
+  return base.endsWith("/new") || base.endsWith("/edit") || base.endsWith("/re-edit");
 }
 
 function isListShapedPath(path: string): boolean {

@@ -7,13 +7,11 @@ interface Client {
   [k: string]: any;
 }
 
-export async function assertChequeNotUsedElsewhere(
+export async function findChequeUses(
   db: Client,
   chequeItemId: number,
-  except: { paymentInstrumentLineId?: number; receiptInstrumentLineId?: number } = {}
-) {
-  const cheque = await db.chequeItem.findUnique({ where: { id: chequeItemId } });
-  if (!cheque) return;
+  except: { paymentInstrumentLineId?: number; receiptInstrumentLineId?: number; ignoreReceipts?: boolean } = {}
+): Promise<string[]> {
 
   const uses: string[] = [];
   const add = (title: string, numbers: (number | null | undefined)[]) => {
@@ -25,7 +23,7 @@ export async function assertChequeNotUsedElsewhere(
     include: { payment: true },
   });
   add("پرداخت", paymentLines.map((l: any) => l.payment.number));
-  const receiptLines = await db.receiptInstrumentLine.findMany({
+  const receiptLines = except.ignoreReceipts ? [] : await db.receiptInstrumentLine.findMany({
     where: { chequeItemId, ...(except.receiptInstrumentLineId ? { id: { not: except.receiptInstrumentLineId } } : {}) },
     include: { receipt: true },
   });
@@ -35,6 +33,17 @@ export async function assertChequeNotUsedElsewhere(
   add("نتیجه وصول/برگشت (دریافتنی)", (await db.chequeClearingReceivableLine.findMany({ where: { chequeItemId }, include: { chequeClearingReceivable: true } })).map((l: any) => l.chequeClearingReceivable.number));
   add("نتیجه وصول/برگشت (پرداختنی)", (await db.chequeClearingPayableLine.findMany({ where: { chequeItemId }, include: { chequeClearingPayable: true } })).map((l: any) => l.chequeClearingPayable.number));
 
+  return uses;
+}
+
+export async function assertChequeNotUsedElsewhere(
+  db: Client,
+  chequeItemId: number,
+  except: { paymentInstrumentLineId?: number; receiptInstrumentLineId?: number } = {}
+) {
+  const cheque = await db.chequeItem.findUnique({ where: { id: chequeItemId } });
+  if (!cheque) return;
+  const uses = await findChequeUses(db, chequeItemId, except);
   if (uses.length > 0) {
     throw new Error(`چک شماره ${cheque.number} در سند دیگری استفاده شده است (${uses.join("، ")})؛ ابتدا آن را از آن سند حذف کنید یا آن سند را حذف کنید`);
   }

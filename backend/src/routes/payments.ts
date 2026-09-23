@@ -4,7 +4,7 @@ import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { recomputeCashBoxHasTransactions, recomputeBankAccountHasTransactions } from "../utils/treasuryTracking";
 import { assertRecordNotStale } from "../utils/concurrency";
-import { assertChequeNotUsedElsewhere } from "../utils/chequeUsage";
+import { assertChequeNotUsedElsewhere, findChequeUses } from "../utils/chequeUsage";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, ConversionCurrency } from "../utils/currencyConversion";
 import { issuePaymentJournalEntry, revertPaymentJournalEntry } from "../services/paymentJournalEntryService";
@@ -36,13 +36,10 @@ const FORM = findFormPrefix("payments");
 // RECEIVABLE = چکی موجود که با CHEQUE_TRANSFER خرج شده. هر دو نوع همیشه با ارز پایه‌اند.
 // POS دیگر در سند پرداخت ارائه نمی‌شود (فقط برای سازگاری با داده‌های قدیمی سند دریافت در enum نگه داشته شده).
 //
-// اصلاح جزئی سند «تایید»شده (فاز ۲.۲ — سند نیمه‌باز؛ نگاه کنید به توضیح مشابه در routes/receipts.ts):
-// هر ChequeItem یک شمارنده‌ی نسخه (`step`) دارد؛ صدور چک تازه یا خرج/ظهرنویسی یک چک دریافتنی موجود
-// هر دو یک «رویداد» هستند که step را بالا می‌برند و همان مقدار روی chequeStep همین ردیف ذخیره
-// می‌شود. فقط وقتی chequeStep ردیف با step فعلی چک برابر باشد (یعنی بعد از این سند، اتفاق دیگری
-// برای آن چک نیفتاده)، آن ردیف مستقیماً از PUT /payments/:id/edit-approved قابل ویرایش/حذف است.
-// بعد از صدور سند حسابداری، همه‌ی اطلاعات سند قفل است (برگشت از تایید، ویرایش سند تاییدشده، ویرایش و حذف
-// مسدود؛ ابتدا باید سند حسابداری حذف شود).
+// سند «تایید»شده اصلاً قابل ویرایش نیست (طبق درخواست کاربر): برای هر تغییری ابتدا باید از تایید برگردانده شود.
+// هر ChequeItem یک شمارنده‌ی نسخه (`step`) دارد؛ برگشت از تایید فقط وقتی مجاز است که بعد از این سند اتفاق
+// دیگری (واگذاری/وصول/...) برای چک نیفتاده باشد و هیچ سند دیگری به آن ارجاع ندهد. بعد از صدور سند
+// حسابداری هم برگشت از تایید و ویرایش و حذف مسدود است؛ ابتدا باید سند حسابداری حذف شود.
 // =========================================================================
 
 const router = Router();
@@ -134,7 +131,13 @@ async function validateInstrumentLines(lines: InstrumentLineInput[], baseCurrenc
   return cleaned;
 }
 
-async function cleanOneInstrumentLine(l: InstrumentLineInput, idx: number, baseCurrency: { id: number } & ConversionCurrency) {
+async function cleanOneInstrumentLine(
+  l: InstrumentLineInput,
+  idx: number,
+  baseCurrency: { id: number } & ConversionCurrency,
+  // در «ویرایش مجدد»: برگه‌ی دسته چکِ فعلیِ خودِ همین ردیف (که قبلاً ISSUED شده) مجاز به ادامه‌ی استفاده است
+  opts: { allowLeafId?: number | null } = {}
+) {
   const amount = Number(l.amount);
   if (!(amount > 0)) throw new Error(`مبلغ ردیف ابزار ${idx + 1} باید عددی مثبت باشد`);
 
@@ -181,7 +184,7 @@ async function cleanOneInstrumentLine(l: InstrumentLineInput, idx: number, baseC
       const leaf = await prisma.chequeBookLeaf.findUnique({ where: { id: l.chequeBookLeafId } });
       if (!leaf) throw new Error(`ردیف ${idx + 1}: برگه چک یافت نشد`);
       if (leaf.bankAccountId !== l.bankAccountId) throw new Error(`ردیف ${idx + 1}: برگه چک انتخاب‌شده متعلق به این حساب بانکی نیست`);
-      if (leaf.status !== "RAW") throw new Error(`ردیف ${idx + 1}: این برگه چک قبلاً صادر یا باطل شده است`);
+      if (leaf.status !== "RAW" && leaf.id !== opts.allowLeafId) throw new Error(`ردیف ${idx + 1}: این برگه چک قبلاً صادر یا باطل شده است`);
       chequeNumberOverride = leaf.number;
       chequeBookLeafId = leaf.id;
     } else if (!l.chequeNumber) {
@@ -324,8 +327,13 @@ async function validateSubjectLines(
   lines: SettlementLineInput[],
   instrumentByKey: Map<string, { id?: number; amount: number; baseAmount: number; currencyId: number; fxRate: number }>,
   baseCurrency: { id: number } & ConversionCurrency,
-  excludePaymentId?: number
+  excludePaymentId?: number,
+  // ردیف‌های موضوعات پرداختِ ذخیره‌شده‌ی ابزارهای دارای گردش (در «ویرایش مجدد» تغییر نمی‌کنند) — مبلغشان از
+  // مانده‌ی اسناد مبنا کم می‌شود تا با ردیف‌های ویرایش‌شده روی یک سند مبنا بیش‌تخصیص رخ ندهد
+  lockedSettlementLines: any[] = [],
+  allowEmpty = false
 ) {
+  if (allowEmpty && (!Array.isArray(lines) || lines.length === 0) && instrumentByKey.size === 0) return [];
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("سند پرداخت باید حداقل یک ردیف موضوعات پرداخت داشته باشد");
 
   const cleaned: any[] = [];
@@ -341,6 +349,24 @@ async function validateSubjectLines(
     if (!c) throw new Error("ارز سند مبنا یافت نشد");
     basisCurrencyCache.set(currencyId, c);
     return c;
+  }
+
+  for (const sl of lockedSettlementLines) {
+    const lockedBasisId = sl.purchaseInvoiceId || sl.salesInvoiceId || sl.purchaseOrderId;
+    if (!lockedBasisId) continue;
+    const lockedBasisType: BasisType = sl.purchaseInvoiceId ? "PURCHASE_INVOICE" : sl.salesInvoiceId ? "SALES_INVOICE" : "PURCHASE_ORDER";
+    // eslint-disable-next-line no-await-in-loop
+    const info = (await candidatesForBasisType(lockedBasisType, sl.partyId, excludePaymentId)).find((c) => c.id === lockedBasisId);
+    if (!info) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const rowCurrency = sl.currencyId === baseCurrency.id ? baseCurrency : await prisma.currency.findUnique({ where: { id: sl.currencyId } });
+    if (!rowCurrency) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const basisCurrency = await getBasisCurrency(info.currencyId);
+    const amountInBasisCurrency =
+      info.currencyId === sl.currencyId ? Number(sl.amount) : fromBaseCurrencyAmount(toBaseCurrencyAmount(Number(sl.amount), Number(sl.fxRate), rowCurrency, baseCurrency), info.fxRate, basisCurrency);
+    const lockedKey = `${lockedBasisType}:${info.id}`;
+    basisAllocated.set(lockedKey, (basisAllocated.get(lockedKey) || 0) + amountInBasisCurrency);
   }
 
   for (const [idx, l] of lines.entries()) {
@@ -482,23 +508,19 @@ router.get("/payments", can(`${FORM}.view`), async (_req, res) => {
   );
 });
 
-router.get("/payments/:id", can(`${FORM}.view`), async (req, res) => {
-  const id = Number(req.params.id);
-  const d = await prisma.payment.findUnique({
-    where: { id },
-    include: {
-      party: true,
-      fiscalPeriod: true,
-      journalEntry: true,
-      instrumentLines: { include: { currency: true, cashBox: true, bankAccount: { include: { accountType: true } }, chequeBankBranch: true, chequeItem: true, chequeBookLeaf: true }, orderBy: { rowOrder: "asc" } },
-      settlementLines: {
-        include: { paymentType: true, party: true, currency: true, purchaseInvoice: true, salesInvoice: true, purchaseOrder: true },
-        orderBy: { rowOrder: "asc" },
-      },
-    },
-  });
-  if (!d) return res.status(404).json({ error: "سند پرداخت یافت نشد" });
-  res.json({
+const PAYMENT_DETAIL_INCLUDE = {
+  party: true,
+  fiscalPeriod: true,
+  journalEntry: true,
+  instrumentLines: { include: { currency: true, cashBox: true, bankAccount: { include: { accountType: true } }, chequeBankBranch: true, chequeItem: true, chequeBookLeaf: true }, orderBy: { rowOrder: "asc" } },
+  settlementLines: {
+    include: { paymentType: true, party: true, currency: true, purchaseInvoice: true, salesInvoice: true, purchaseOrder: true },
+    orderBy: { rowOrder: "asc" },
+  },
+} as const;
+
+function serializePayment(d: any) {
+  return {
     id: d.id,
     number: d.number,
     date: d.date,
@@ -559,7 +581,14 @@ router.get("/payments/:id", can(`${FORM}.view`), async (req, res) => {
       exchangeGainLoss: Number(l.exchangeGainLoss),
       description: l.description,
     })),
-  });
+  };
+}
+
+router.get("/payments/:id", can(`${FORM}.view`), async (req, res) => {
+  const id = Number(req.params.id);
+  const d = await prisma.payment.findUnique({ where: { id }, include: PAYMENT_DETAIL_INCLUDE });
+  if (!d) return res.status(404).json({ error: "سند پرداخت یافت نشد" });
+  res.json(serializePayment(d));
 });
 
 router.post("/payments", can(`${FORM}.create`), async (req, res) => {
@@ -798,7 +827,7 @@ router.post("/payments/:id/unapprove", can(`${FORM}.unapprove`), async (req, res
     if (l.chequeItem.step !== l.chequeStep) {
       return res
         .status(400)
-        .json({ error: `چک شماره ${l.chequeItem.number} از وضعیت اولیه تغییر کرده و این سند قابل برگشت از تایید نیست؛ می‌توانید فقط همان ردیف را از «ویرایش سند تایید‌شده» اصلاح یا حذف کنید` });
+        .json({ error: `چک شماره ${l.chequeItem.number} بعد از این سند در سند دیگری گردش داشته و این سند قابل برگشت از تایید نیست؛ ابتدا آن گردش را برگردانید` });
     }
   }
 
@@ -832,110 +861,115 @@ router.post("/payments/:id/unapprove", can(`${FORM}.unapprove`), async (req, res
   }
 });
 
-// اصلاح جزئی سند «تایید»شده («سند نیمه‌باز» — نگاه کنید به توضیح بالای فایل و توضیح مشابه در
-// routes/receipts.ts). دو نوع ردیف چک رفتار متفاوتی دارند:
-//   - چک پرداختنی که خودِ همین سند صادر کرده (direction=PAYABLE): مثل سند دریافت، کاملاً قابل
-//     ویرایش درجا (شماره/سررسید/شعبه/حساب صادرکننده/نوع چک/مبلغ) است.
-//   - چک دریافتنیِ خرج‌شده (direction=RECEIVABLE، متعلق به سند دیگری): چون اطلاعات اصلی چک به آن
-//     سند دیگر تعلق دارد، فقط شرح آن قابل تغییر و خودِ ردیف قابل «حذف» (برگشت به در دست) است.
-// ردیف‌های موضوعات پرداخت هم‌زمان به‌طور کامل جایگزین می‌شوند: کلاینت برای ردیف‌های ابزار موجود/قفل‌شده همان id
-// واقعی را به‌عنوان instrumentClientKey می‌فرستد؛ برای ردیف‌های تازه، کلید دلخواهی که در همان درخواست به ردیف
-// ابزار تازه هم داده شده.
-router.put("/payments/:id/edit-approved", can(`${FORM}.editApproved`), async (req, res) => {
+// =========================================================================
+// «ویرایش مجدد» اعلامیه پرداختِ تاییدشده (Documents/مستند پیاده‌سازی قابلیت «ویرایش مجدد» اعلامیه پرداخت.md)
+//
+// مسیری کاملاً مستقل از «ویرایش» عادی. ابزار پرداخت «دارای گردش» = چکی که بعد از این سند اتفاق دیگری برایش
+// افتاده (step چک با chequeStep ردیف برابر نیست) یا سند دیگری به آن ارجاع می‌دهد؛ ردیف‌های نقد/حواله و چکِ
+// بی‌گردش «فاقد گردش»اند. GET فقط ابزارهای فاقد گردش و موضوعات مرتبط با آن‌ها را برمی‌گرداند (ابزار دارای
+// گردش و وابسته‌هایش اصلاً به کلاینت نمی‌رسند)، و PUT «Partial Update» است: فقط ردیف‌های فاقد گردش بازنویسی
+// می‌شوند و ابزارهای دارای گردش و موضوعاتشان دست‌نخورده می‌مانند. ابزار پرداخت جدید مجاز نیست؛ موضوع پرداخت
+// جدید فقط برای یک ابزار فاقد گردشِ موجود مجاز است و جمع موضوعات هر ابزار باید با مبلغ همان ابزار برابر باشد.
+// =========================================================================
+
+const NO_EDITABLE_MESSAGE = "همه آیتم‌ها دارای گردش هستند و امکان ویرایش مجدد وجود ندارد.";
+
+async function instrumentLineHasFlow(l: any): Promise<boolean> {
+  if (!l.chequeItemId || !l.chequeItem) return false;
+  if (l.chequeItem.step !== l.chequeStep) return true;
+  // چک دریافتیِ خرج‌شده به سند دریافت مبدأ هم ارجاع دارد؛ آن ارجاع «گردش» حساب نمی‌شود
+  const uses = await findChequeUses(prisma, l.chequeItemId, { paymentInstrumentLineId: l.id, ignoreReceipts: l.chequeItem.direction === "RECEIVABLE" });
+  return uses.length > 0;
+}
+
+async function loadReEditContext(id: number) {
+  const existing = await prisma.payment.findUnique({ where: { id }, include: PAYMENT_DETAIL_INCLUDE });
+  if (!existing) throw Object.assign(new Error("سند پرداخت یافت نشد"), { status: 404 });
+  if (existing.status !== "APPROVED") throw new Error("ویرایش مجدد فقط برای اعلامیه پرداختِ «تایید»شده مجاز است");
+  if (existing.journalEntryId) throw new Error(JE_LOCK_MESSAGE);
+  const lines = existing.instrumentLines as any[];
+  const flags = await Promise.all(lines.map((l) => instrumentLineHasFlow(l)));
+  const editable = lines.filter((_, i) => !flags[i]);
+  const locked = lines.filter((_, i) => flags[i]);
+  if (editable.length === 0) throw new Error(NO_EDITABLE_MESSAGE);
+  return { existing: existing as any, editable, locked };
+}
+
+router.get("/payments/:id/re-edit", can(`${FORM}.reEdit`), async (req, res) => {
+  try {
+    const { existing, editable } = await loadReEditContext(Number(req.params.id));
+    const ids = new Set(editable.map((l: any) => l.id));
+    const full = serializePayment(existing);
+    res.json({
+      ...full,
+      instrumentLines: full.instrumentLines.filter((l: any) => ids.has(l.id)),
+      settlementLines: full.settlementLines.filter((s: any) => ids.has(s.instrumentLineId)),
+      // برگه‌ی دسته چکِ فعلیِ ردیف‌های قابل ویرایش (ISSUED است و در فهرست برگه‌های «خام» نمی‌آید)
+      ownLeaves: editable
+        .filter((l: any) => l.chequeBookLeaf)
+        .map((l: any) => ({ id: l.chequeBookLeaf.id, bankAccountId: l.chequeBookLeaf.bankAccountId, series: l.chequeBookLeaf.series, number: l.chequeBookLeaf.number })),
+    });
+  } catch (e: any) {
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+router.put("/payments/:id/re-edit", can(`${FORM}.reEdit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as { description?: string; instrumentLines: (InstrumentLineInput & { id?: number })[]; settlementLines: SettlementLineInput[] };
-
-  const existing = await prisma.payment.findUnique({
-    where: { id },
-    include: { instrumentLines: { include: { chequeItem: true } }, settlementLines: true },
-  });
-  if (!existing) return res.status(404).json({ error: "سند پرداخت یافت نشد" });
-  if (existing.status !== "APPROVED") {
-    return res.status(400).json({ error: "این مسیر فقط برای اصلاح جزئی اسناد «تایید»شده است" });
-  }
-  if (existing.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
-
   try {
+    const { existing, editable, locked } = await loadReEditContext(id);
+    assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سند");
     await resolveFiscalPeriod(existing.date);
     const baseCurrency = await getBaseCurrency();
 
+    const editableById = new Map<number, any>(editable.map((l: any) => [l.id, l]));
     const incoming = Array.isArray(body.instrumentLines) ? body.instrumentLines : [];
-    const existingLines = existing.instrumentLines as any[];
-    const lockedLines = existingLines.filter((l: any) => l.chequeItemId && l.chequeItem && l.chequeItem.step !== l.chequeStep);
-    const lockedIds = new Set(lockedLines.map((l: any) => l.id));
-    const editableExistingById = new Map(existingLines.filter((l: any) => !lockedIds.has(l.id)).map((l: any) => [l.id, l]));
-
-    for (const l of incoming) {
-      if (l.id && lockedIds.has(l.id)) {
-        throw new Error("یکی از ردیف‌های قفل‌شده (چکی که دیگر آخرین اتفاق برایش این سند نیست) در درخواست ارسال شده و قابل ویرایش نیست");
-      }
-    }
-
-    const seenIds = new Set<number>();
-    const toCreate: Awaited<ReturnType<typeof cleanOneInstrumentLine>>[] = [];
-    const toUpdate: { id: number; existing: any; data: Awaited<ReturnType<typeof cleanOneInstrumentLine>> | null; endorsedDescription?: string | null }[] = [];
+    const seen = new Set<number>();
+    const keep: { ex: any; data: Awaited<ReturnType<typeof cleanOneInstrumentLine>> | null; description?: string | null }[] = [];
 
     for (const [idx, l] of incoming.entries()) {
-      if (!l.clientKey) throw new Error(`ردیف ابزار ${idx + 1}: شناسه‌ی داخلی ردیف (clientKey) ارسال نشده است`);
-
-      if (l.id) {
-        const ex = editableExistingById.get(l.id);
-        if (!ex) throw new Error(`ردیف ${idx + 1} در این سند یافت نشد یا قابل ویرایش نیست`);
-        seenIds.add(l.id);
-
-        if (ex.chequeItemId && ex.chequeItem.direction === "RECEIVABLE") {
-          // چک خرج‌شده‌ی متعلق به سند دیگر: فقط شرح قابل تغییر است، بقیه باید دست‌نخورده بمانند
-          const sameAmount = Math.abs(Number(l.amount) - Number(ex.chequeItem.amount)) < 0.001;
-          if (!sameAmount) {
-            throw new Error(`ردیف ${idx + 1}: این چک متعلق به سند دیگری است؛ مبلغ آن از این سند قابل ویرایش نیست (فقط قابل حذف است)`);
-          }
-          toUpdate.push({ id: l.id, existing: ex, data: null, endorsedDescription: l.description || null });
-          continue;
+      if (!l.id) throw new Error("افزودن ابزار پرداخت جدید در ویرایش مجدد مجاز نیست");
+      if (seen.has(l.id)) throw new Error(`ردیف ابزار ${idx + 1} تکراری است`);
+      seen.add(l.id);
+      const ex = editableById.get(l.id);
+      if (!ex) throw new Error("ابزار پرداختِ دارای گردش (یا نامعتبر) قابل تغییر نیست");
+      if (ex.type !== l.type) throw new Error(`ردیف ${idx + 1}: نوع ابزار قابل تغییر نیست؛ به‌جای آن ردیف قبلی را حذف کنید`);
+      if (ex.type === "CHEQUE_TRANSFER") {
+        // چک دریافتیِ خرج‌شده متعلق به سند دیگری است: فقط شرح قابل تغییر است (و حذف)
+        if (Math.abs(Number(l.amount) - Number(ex.chequeItem.amount)) > 0.001) {
+          throw new Error(`ردیف ${idx + 1}: این چک متعلق به سند دیگری است؛ مبلغ آن از این سند قابل ویرایش نیست`);
         }
-
-        // eslint-disable-next-line no-await-in-loop
-        const data = await cleanOneInstrumentLine(l, idx, baseCurrency);
-        if (ex.type !== data.type) throw new Error(`ردیف ${idx + 1}: نوع ابزار قابل تغییر نیست؛ به‌جای آن ردیف قبلی را حذف و ردیف جدید اضافه کنید`);
-        toUpdate.push({ id: l.id, existing: ex, data });
+        keep.push({ ex, data: null, description: l.description || null });
       } else {
         // eslint-disable-next-line no-await-in-loop
-        toCreate.push(await cleanOneInstrumentLine(l, idx, baseCurrency));
+        keep.push({ ex, data: await cleanOneInstrumentLine({ ...l, clientKey: String(l.id) }, idx, baseCurrency, { allowLeafId: ex.chequeBookLeafId }) });
       }
     }
+    const removed = editable.filter((l: any) => !seen.has(l.id));
+    if (locked.length + keep.length === 0) throw new Error("سند پرداخت باید حداقل یک ردیف ابزار پرداخت داشته باشد");
 
-    const toDelete = [...editableExistingById.values()].filter((l: any) => !seenIds.has(l.id));
-
-    const finalLineCount = lockedIds.size + toUpdate.length + toCreate.length;
-    if (finalLineCount === 0) throw new Error("سند پرداخت باید حداقل یک ردیف ابزار پرداخت داشته باشد");
-
-    // نگاشت clientKey → اطلاعات ردیف ابزار (چه از قبل موجود/قفل، چه تازه) برای اعتبارسنجی موضوعات پرداخت
     const instrumentByKey = new Map<string, { id?: number; amount: number; baseAmount: number; currencyId: number; fxRate: number }>();
-    for (const l of lockedLines) instrumentByKey.set(String(l.id), { id: l.id, amount: Number(l.amount), baseAmount: Number(l.baseAmount), currencyId: l.currencyId, fxRate: Number(l.fxRate) });
-    for (const u of toUpdate) {
-      if (u.data) instrumentByKey.set(String(u.id), { id: u.id, amount: u.data.amount, baseAmount: u.data.baseAmount, currencyId: u.data.currencyId, fxRate: u.data.fxRate });
-      else instrumentByKey.set(String(u.id), { id: u.id, amount: Number(u.existing.amount), baseAmount: Number(u.existing.baseAmount), currencyId: u.existing.currencyId, fxRate: Number(u.existing.fxRate) });
+    for (const k of keep) {
+      if (k.data) instrumentByKey.set(String(k.ex.id), { id: k.ex.id, amount: k.data.amount, baseAmount: k.data.baseAmount, currencyId: k.data.currencyId, fxRate: k.data.fxRate });
+      else instrumentByKey.set(String(k.ex.id), { id: k.ex.id, amount: Number(k.ex.amount), baseAmount: Number(k.ex.baseAmount), currencyId: k.ex.currencyId, fxRate: Number(k.ex.fxRate) });
     }
-    for (const c of toCreate) instrumentByKey.set(c.clientKey, { amount: c.amount, baseAmount: c.baseAmount, currencyId: c.currencyId, fxRate: c.fxRate });
-
-    // ردیف‌های موضوعات پرداختِ مرتبط با ردیف ابزارِ قفل‌شده (چکی که بعد از این سند گردش داشته) قابل ویرایش/افزودن/حذف
-    // نیستند؛ مجموعه‌ی آن‌ها در درخواست باید دقیقاً با مقدار ذخیره‌شده یکی باشد.
-    const settlementSig = (sl: any, key: string) =>
-      JSON.stringify([key, sl.paymentTypeId, sl.partyId, sl.purchaseInvoiceId ?? null, sl.salesInvoiceId ?? null, sl.purchaseOrderId ?? null, sl.currencyId, Number(sl.fxRate) || 1, Number(sl.amount), sl.description || null]);
-    const lockedKeySet = new Set(lockedLines.map((l: any) => String(l.id)));
-    const storedLockedSigs = (existing.settlementLines as any[]).filter((sl) => lockedIds.has(sl.instrumentLineId)).map((sl) => settlementSig(sl, String(sl.instrumentLineId))).sort();
-    const sentLockedSigs = (Array.isArray(body.settlementLines) ? body.settlementLines : []).filter((sl) => lockedKeySet.has(String(sl.instrumentClientKey))).map((sl) => settlementSig(sl, String(sl.instrumentClientKey))).sort();
-    if (JSON.stringify(storedLockedSigs) !== JSON.stringify(sentLockedSigs)) {
-      throw new Error("ردیف‌های موضوعات پرداختِ مرتبط با چک قفل‌شده (چکی که بعد از این سند گردش داشته) قابل ویرایش، افزودن یا حذف نیستند");
+    const incomingSettlements = Array.isArray(body.settlementLines) ? body.settlementLines : [];
+    for (const sl of incomingSettlements) {
+      // موضوع پرداخت مستقل (بدون ابزار)، یا وصل به ابزار دارای گردش/حذف‌شده/نامعتبر، مجاز نیست
+      if (!sl.instrumentClientKey || !instrumentByKey.has(String(sl.instrumentClientKey))) {
+        throw new Error("هر موضوع پرداخت باید به یک ابزار پرداختِ موجود و فاقد گردش متصل باشد");
+      }
     }
-
-    const settlementLines = await validateSubjectLines(body.settlementLines, instrumentByKey, baseCurrency, id);
+    const lockedSettlementLines = (existing.settlementLines as any[]).filter((sl) => !editableById.has(sl.instrumentLineId));
+    const settlementLines = await validateSubjectLines(incomingSettlements, instrumentByKey, baseCurrency, id, lockedSettlementLines, true);
 
     await prisma.$transaction(async (tx: any) => {
-      // ردیف‌های تسویه به ردیف‌های ابزار ارجاع می‌دهند (FK محدودکننده) — پس قبل از حذف ردیف‌های ابزار پاک می‌شوند
-      // و در انتها با کلیدهای نهایی دوباره ساخته می‌شوند.
-      await tx.paymentSettlementLine.deleteMany({ where: { paymentId: id } });
+      // ردیف‌های موضوعاتِ ابزارهای قابل ویرایش (FK محدودکننده) اول پاک و در انتها با مقادیر نهایی ساخته می‌شوند؛
+      // موضوعات ابزارهای دارای گردش اصلاً لمس نمی‌شوند.
+      await tx.paymentSettlementLine.deleteMany({ where: { paymentId: id, instrumentLineId: { in: editable.map((l: any) => l.id) } } });
 
-      for (const l of toDelete) {
+      for (const l of removed) {
         if (l.chequeItemId && l.chequeItem) {
           if (l.chequeItem.direction === "PAYABLE") {
             // eslint-disable-next-line no-await-in-loop
@@ -957,125 +991,67 @@ router.put("/payments/:id/edit-approved", can(`${FORM}.editApproved`), async (re
         await tx.paymentInstrumentLine.delete({ where: { id: l.id } });
       }
 
-      for (const u of toUpdate) {
-        if (!u.data) {
-          // چک دریافتنیِ خرج‌شده: فقط شرح
+      for (const k of keep) {
+        if (!k.data) {
           // eslint-disable-next-line no-await-in-loop
-          await tx.paymentInstrumentLine.update({ where: { id: u.id }, data: { description: u.endorsedDescription ?? null } });
+          await tx.paymentInstrumentLine.update({ where: { id: k.ex.id }, data: { description: k.description ?? null } });
           continue;
         }
-        const { clientKey, ...data } = u.data;
+        // chequeItemId/chequeStep ردیف (پیوند به ChequeItemِ همین سند) هرگز بازنویسی نمی‌شوند
+        const { clientKey, chequeItemId, ...data } = k.data;
         void clientKey;
+        void chequeItemId;
         // eslint-disable-next-line no-await-in-loop
-        await tx.paymentInstrumentLine.update({ where: { id: u.id }, data });
-        if (u.existing.chequeItemId && u.existing.chequeItem.direction === "PAYABLE") {
+        await tx.paymentInstrumentLine.update({ where: { id: k.ex.id }, data });
+        if (k.ex.chequeItemId && k.ex.chequeItem.direction === "PAYABLE") {
           // eslint-disable-next-line no-await-in-loop
           await tx.chequeItem.update({
-            where: { id: u.existing.chequeItemId },
+            where: { id: k.ex.chequeItemId },
             data: {
-              number: u.data.chequeNumber,
-              dueDate: u.data.chequeDueDate,
-              bankBranchId: u.data.chequeBankBranchId,
-              ownerBankAccountId: u.data.bankAccountId,
-              amount: u.data.amount,
-              payableChequeTypeId: u.data.payableChequeTypeId,
-              description: u.data.description,
+              number: k.data.chequeNumber,
+              dueDate: k.data.chequeDueDate,
+              bankBranchId: k.data.chequeBankBranchId,
+              ownerBankAccountId: k.data.bankAccountId,
+              amount: k.data.amount,
+              payableChequeTypeId: k.data.payableChequeTypeId,
+              description: k.data.description,
             },
           });
-          // اگر برگه‌ی دسته چکِ این ردیف عوض شده: برگه‌ی قبلی (در صورت وجود) آزاد و برگه‌ی جدید (در صورت
-          // وجود) مصرف می‌شود؛ اعتبارسنجی RAW-بودن برگه‌ی جدید در cleanOneInstrumentLine انجام شده است.
-          if (u.existing.chequeBookLeafId !== u.data.chequeBookLeafId) {
-            if (u.existing.chequeBookLeafId) {
+          if (k.ex.chequeBookLeafId !== k.data.chequeBookLeafId) {
+            if (k.ex.chequeBookLeafId) {
               // eslint-disable-next-line no-await-in-loop
-              await tx.chequeBookLeaf.update({ where: { id: u.existing.chequeBookLeafId }, data: { status: "RAW" } });
+              await tx.chequeBookLeaf.update({ where: { id: k.ex.chequeBookLeafId }, data: { status: "RAW" } });
             }
-            if (u.data.chequeBookLeafId) {
+            if (k.data.chequeBookLeafId) {
               // eslint-disable-next-line no-await-in-loop
-              await tx.chequeBookLeaf.update({ where: { id: u.data.chequeBookLeafId }, data: { status: "ISSUED" } });
+              await tx.chequeBookLeaf.update({ where: { id: k.data.chequeBookLeafId }, data: { status: "ISSUED" } });
             }
           }
-        } else if (!u.existing.chequeItemId) {
-          if (u.data.type === "CASH" && u.data.cashBoxId) {
+        } else if (!k.ex.chequeItemId) {
+          if (k.data.type === "CASH" && k.data.cashBoxId) {
             // eslint-disable-next-line no-await-in-loop
-            await tx.cashBox.update({ where: { id: u.data.cashBoxId }, data: { hasTransactions: true } });
-          } else if (u.data.type === "BANK_TRANSFER" && u.data.bankAccountId) {
+            await tx.cashBox.update({ where: { id: k.data.cashBoxId }, data: { hasTransactions: true } });
+          } else if (k.data.type === "BANK_TRANSFER" && k.data.bankAccountId) {
             // eslint-disable-next-line no-await-in-loop
-            await tx.bankAccount.update({ where: { id: u.data.bankAccountId }, data: { hasTransactions: true } });
-          }
-        }
-      }
-
-      const maxOrder = existingLines.reduce((m: number, l: any) => Math.max(m, l.rowOrder), -1);
-      let nextOrder = maxOrder + 1;
-      const newKeyToId = new Map<string, number>();
-
-      for (const l of toCreate) {
-        const { clientKey, ...data } = l;
-        if (data.type === "CHEQUE_TRANSFER") {
-          // خرج‌کردن چک دریافتنیِ موجود
-          // eslint-disable-next-line no-await-in-loop
-          const endorsed = await tx.chequeItem.update({ where: { id: data.chequeItemId! }, data: { status: "ENDORSED", step: { increment: 1 } } });
-          // eslint-disable-next-line no-await-in-loop
-          const created = await tx.paymentInstrumentLine.create({
-            data: { ...data, paymentId: id, rowOrder: nextOrder++, chequeStep: endorsed.step },
-          });
-          newKeyToId.set(clientKey, created.id);
-        } else if (data.type === "CHEQUE") {
-          // eslint-disable-next-line no-await-in-loop
-          const cheque = await tx.chequeItem.create({
-            data: {
-              direction: "PAYABLE",
-              number: data.chequeNumber,
-              dueDate: data.chequeDueDate,
-              bankBranchId: data.chequeBankBranchId,
-              ownerBankAccountId: data.bankAccountId,
-              partyId: existing.partyId,
-              amount: data.amount,
-              currencyId: data.currencyId,
-              status: "ISSUED",
-              step: 1,
-              payableChequeTypeId: data.payableChequeTypeId,
-              description: data.description,
-            },
-          });
-          // eslint-disable-next-line no-await-in-loop
-          const created = await tx.paymentInstrumentLine.create({
-            data: { ...data, paymentId: id, rowOrder: nextOrder++, chequeItemId: cheque.id, chequeStep: 1 },
-          });
-          newKeyToId.set(clientKey, created.id);
-          if (data.chequeBookLeafId) {
-            // eslint-disable-next-line no-await-in-loop
-            await tx.chequeBookLeaf.update({ where: { id: data.chequeBookLeafId }, data: { status: "ISSUED" } });
-          }
-        } else {
-          // eslint-disable-next-line no-await-in-loop
-          const created = await tx.paymentInstrumentLine.create({ data: { ...data, paymentId: id, rowOrder: nextOrder++ } });
-          newKeyToId.set(clientKey, created.id);
-          if (data.type === "CASH" && data.cashBoxId) {
-            // eslint-disable-next-line no-await-in-loop
-            await tx.cashBox.update({ where: { id: data.cashBoxId }, data: { hasTransactions: true } });
-          } else if (data.type === "BANK_TRANSFER" && data.bankAccountId) {
-            // eslint-disable-next-line no-await-in-loop
-            await tx.bankAccount.update({ where: { id: data.bankAccountId }, data: { hasTransactions: true } });
+            await tx.bankAccount.update({ where: { id: k.data.bankAccountId }, data: { hasTransactions: true } });
           }
         }
       }
 
       for (const [idx, l] of settlementLines.entries()) {
         const { instrumentClientKey, ...data } = l;
-        const instrumentLineId = newKeyToId.get(instrumentClientKey) ?? Number(instrumentClientKey);
         // eslint-disable-next-line no-await-in-loop
-        await tx.paymentSettlementLine.create({ data: { ...data, instrumentLineId, paymentId: id, rowOrder: idx } });
+        await tx.paymentSettlementLine.create({ data: { ...data, instrumentLineId: Number(instrumentClientKey), paymentId: id, rowOrder: existing.settlementLines.length + idx } });
       }
-      if (body.description !== undefined) {
-        await tx.payment.update({ where: { id }, data: { description: body.description || null } });
-      }
+      await tx.payment.update({ where: { id }, data: { description: body.description !== undefined ? body.description || null : existing.description } });
     });
 
     await markPaymentTypesUsed(settlementLines);
+    await recomputeCashBoxHasTransactions(removed.filter((l: any) => l.cashBoxId).map((l: any) => l.cashBoxId));
+    await recomputeBankAccountHasTransactions(removed.filter((l: any) => l.bankAccountId).map((l: any) => l.bankAccountId));
     res.json({ id });
   } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در ذخیره" });
+    res.status(e.status || 400).json({ error: e.message || "خطا در ذخیره" });
   }
 });
 

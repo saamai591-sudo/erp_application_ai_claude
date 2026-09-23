@@ -498,7 +498,8 @@ export const REGISTRY: ModuleDef[] = [
             title: "پرداخت",
             baseActions: CRUD,
             actions: [
-              ...APPROVE_UNAPPROVE_EDIT,
+              ...APPROVE_UNAPPROVE,
+              { key: "reEdit", title: "ویرایش مجدد" },
               { key: "issueJournalEntry", title: "صدور سند حسابداری" },
               { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
             ],
