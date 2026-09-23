@@ -4,6 +4,7 @@ import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { recomputeCashBoxHasTransactions, recomputeBankAccountHasTransactions } from "../utils/treasuryTracking";
 import { assertRecordNotStale } from "../utils/concurrency";
+import { assertChequeNotUsedElsewhere } from "../utils/chequeUsage";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, ConversionCurrency } from "../utils/currencyConversion";
 import { issueReceiptJournalEntry, revertReceiptJournalEntry } from "../services/receiptJournalEntryService";
@@ -798,6 +799,8 @@ router.post("/receipts/:id/unapprove", can(`${FORM}.unapprove`), async (req, res
       for (const l of d.instrumentLines) {
         if (l.chequeItemId) {
           // eslint-disable-next-line no-await-in-loop
+          await assertChequeNotUsedElsewhere(tx, l.chequeItemId, { receiptInstrumentLineId: l.id });
+          // eslint-disable-next-line no-await-in-loop
           await tx.receiptInstrumentLine.update({ where: { id: l.id }, data: { chequeItemId: null } });
           // eslint-disable-next-line no-await-in-loop
           await tx.chequeItem.delete({ where: { id: l.chequeItemId } });
@@ -890,7 +893,12 @@ router.put("/receipts/:id/edit-approved", can(`${FORM}.editApproved`), async (re
       await tx.receiptSettlementLine.deleteMany({ where: { receiptId: id } });
       for (const l of toDelete) {
         // eslint-disable-next-line no-await-in-loop
-        if (l.chequeItemId) await tx.chequeItem.delete({ where: { id: l.chequeItemId } });
+        if (l.chequeItemId) {
+          // eslint-disable-next-line no-await-in-loop
+          await assertChequeNotUsedElsewhere(tx, l.chequeItemId, { receiptInstrumentLineId: l.id });
+          // eslint-disable-next-line no-await-in-loop
+          await tx.chequeItem.delete({ where: { id: l.chequeItemId } });
+        }
         // eslint-disable-next-line no-await-in-loop
         await tx.receiptInstrumentLine.delete({ where: { id: l.id } });
       }

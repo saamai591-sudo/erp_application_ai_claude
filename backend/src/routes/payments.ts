@@ -4,6 +4,7 @@ import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { recomputeCashBoxHasTransactions, recomputeBankAccountHasTransactions } from "../utils/treasuryTracking";
 import { assertRecordNotStale } from "../utils/concurrency";
+import { assertChequeNotUsedElsewhere } from "../utils/chequeUsage";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, ConversionCurrency } from "../utils/currencyConversion";
 import { issuePaymentJournalEntry, revertPaymentJournalEntry } from "../services/paymentJournalEntryService";
@@ -807,6 +808,8 @@ router.post("/payments/:id/unapprove", can(`${FORM}.unapprove`), async (req, res
         if (!l.chequeItemId || !l.chequeItem) continue;
         if (l.chequeItem.direction === "PAYABLE") {
           // eslint-disable-next-line no-await-in-loop
+          await assertChequeNotUsedElsewhere(tx, l.chequeItemId, { paymentInstrumentLineId: l.id });
+          // eslint-disable-next-line no-await-in-loop
           await tx.paymentInstrumentLine.update({ where: { id: l.id }, data: { chequeItemId: null } });
           // eslint-disable-next-line no-await-in-loop
           await tx.chequeItem.delete({ where: { id: l.chequeItemId } });
@@ -924,6 +927,8 @@ router.put("/payments/:id/edit-approved", can(`${FORM}.editApproved`), async (re
       for (const l of toDelete) {
         if (l.chequeItemId && l.chequeItem) {
           if (l.chequeItem.direction === "PAYABLE") {
+            // eslint-disable-next-line no-await-in-loop
+            await assertChequeNotUsedElsewhere(tx, l.chequeItemId, { paymentInstrumentLineId: l.id });
             // eslint-disable-next-line no-await-in-loop
             await tx.paymentInstrumentLine.update({ where: { id: l.id }, data: { chequeItemId: null } });
             // eslint-disable-next-line no-await-in-loop

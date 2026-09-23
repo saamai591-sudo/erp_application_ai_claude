@@ -1,0 +1,41 @@
+// قبل از حذف یک ChequeItem (برگشت از تاییدِ سند دریافت/پرداخت، یا حذف ردیف چک از «ویرایش سند تایید‌شده») باید
+// مطمئن شد هیچ سند دیگری (حتی در وضعیت «ثبت») به آن چک ارجاع نمی‌دهد؛ وگرنه دیتابیس با خطای کلید خارجی
+// رد می‌کند و متن فنیِ Prisma به کاربر نشان داده می‌شود. این تابع به‌جای آن، پیام روشنِ فارسی می‌دهد.
+
+interface Client {
+  chequeItem: { findUnique: (args: any) => Promise<any> };
+  [k: string]: any;
+}
+
+export async function assertChequeNotUsedElsewhere(
+  db: Client,
+  chequeItemId: number,
+  except: { paymentInstrumentLineId?: number; receiptInstrumentLineId?: number } = {}
+) {
+  const cheque = await db.chequeItem.findUnique({ where: { id: chequeItemId } });
+  if (!cheque) return;
+
+  const uses: string[] = [];
+  const add = (title: string, numbers: (number | null | undefined)[]) => {
+    for (const n of numbers) uses.push(n ? `${title} شماره ${n}` : title);
+  };
+
+  const paymentLines = await db.paymentInstrumentLine.findMany({
+    where: { chequeItemId, ...(except.paymentInstrumentLineId ? { id: { not: except.paymentInstrumentLineId } } : {}) },
+    include: { payment: true },
+  });
+  add("پرداخت", paymentLines.map((l: any) => l.payment.number));
+  const receiptLines = await db.receiptInstrumentLine.findMany({
+    where: { chequeItemId, ...(except.receiptInstrumentLineId ? { id: { not: except.receiptInstrumentLineId } } : {}) },
+    include: { receipt: true },
+  });
+  add("دریافت", receiptLines.map((l: any) => l.receipt.number));
+  add("واگذاری به بانک", (await db.chequeDepositLine.findMany({ where: { chequeItemId }, include: { chequeDeposit: true } })).map((l: any) => l.chequeDeposit.number));
+  add("برگشت از واگذاری", (await db.chequeDepositReturnLine.findMany({ where: { chequeItemId }, include: { chequeDepositReturn: true } })).map((l: any) => l.chequeDepositReturn.number));
+  add("نتیجه وصول/برگشت (دریافتنی)", (await db.chequeClearingReceivableLine.findMany({ where: { chequeItemId }, include: { chequeClearingReceivable: true } })).map((l: any) => l.chequeClearingReceivable.number));
+  add("نتیجه وصول/برگشت (پرداختنی)", (await db.chequeClearingPayableLine.findMany({ where: { chequeItemId }, include: { chequeClearingPayable: true } })).map((l: any) => l.chequeClearingPayable.number));
+
+  if (uses.length > 0) {
+    throw new Error(`چک شماره ${cheque.number} در سند دیگری استفاده شده است (${uses.join("، ")})؛ ابتدا آن را از آن سند حذف کنید یا آن سند را حذف کنید`);
+  }
+}
