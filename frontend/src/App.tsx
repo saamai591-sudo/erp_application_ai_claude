@@ -102,10 +102,13 @@ import ChequeDepositReturns from "./pages/ChequeDepositReturns";
 import ChequeClearingReceivable from "./pages/ChequeClearingReceivable";
 import ChequeClearingPayable from "./pages/ChequeClearingPayable";
 
+import { ToastHost } from "./components/ToastHost";
+
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <ToastHost />
         <TabsProvider>
         <Routes>
           <Route path="/login" element={<Login />} />

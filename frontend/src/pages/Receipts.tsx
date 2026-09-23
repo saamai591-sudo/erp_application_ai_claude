@@ -12,7 +12,7 @@ import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
-import { useSavedFlash } from "../lib/useSavedFlash";
+import { useSavedToast } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
@@ -333,7 +333,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
-  const { saved, flash } = useSavedFlash();
+  const { flash } = useSavedToast();
 
   const baseCurrency = currencies.find((c) => c.isBase);
 
@@ -754,7 +754,6 @@ function ReceiptForm({ editId }: { editId?: number }) {
     >
       <form id="receipt-form" onSubmit={onSubmit}>
         {error && <div className="alert error">{error}</div>}
-        {saved && <div className="alert warn">{saved}</div>}
 
         {/* بعد از صدور سند حسابداری، همه‌ی اطلاعات سند (هدر، ردیف‌های ابزار، موضوعات دریافت، شرح) قفل است */}
         <fieldset disabled={jeLocked} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>

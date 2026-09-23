@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { showToast } from "./toast";
 
 const DEFAULT_MESSAGE = "تغییرات ذخیره شد";
 
@@ -13,4 +14,13 @@ export function useSavedFlash() {
     setTimeout(() => setSaved(false), 2000);
   }
   return { saved, flash };
+}
+
+/** جایگزین useSavedFlash: پیام موفقیت را به‌صورت toast شناور بیرون از فرم نمایش می‌دهد (چیدمان فرم جابه‌جا نمی‌شود)؛
+ * فراخوان‌کننده دیگر نیازی به نمایش `saved` داخل فرم ندارد. */
+export function useSavedToast() {
+  function flash(message?: string) {
+    showToast(message || DEFAULT_MESSAGE);
+  }
+  return { flash };
 }
