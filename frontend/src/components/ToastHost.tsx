@@ -8,7 +8,7 @@ export function ToastHost() {
   return (
     <div className="toast-host" role="status" aria-live="polite">
       {items.map((t) => (
-        <div key={t.id} className="toast">{t.message}</div>
+        <div key={t.id} className={`toast ${t.type}`}>{t.message}</div>
       ))}
     </div>
   );

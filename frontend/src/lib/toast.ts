@@ -1,4 +1,5 @@
-export interface ToastItem { id: number; message: string }
+export type ToastType = "success" | "error";
+export interface ToastItem { id: number; message: string; type: ToastType }
 
 type Listener = (items: ToastItem[]) => void;
 
@@ -20,9 +21,9 @@ export function subscribeToasts(l: Listener) {
 }
 
 /** پیام کوتاه موفقیت که بیرون از فرم (شناور روی صفحه) نمایش داده می‌شود و چیدمان فرم را جابه‌جا نمی‌کند. */
-export function showToast(message: string) {
+export function showToast(message: string, type: ToastType = "success") {
   const id = ++seq;
-  items = [...items, { id, message }];
+  items = [...items, { id, message, type }];
   emit();
   setTimeout(() => {
     items = items.filter((t) => t.id !== id);
