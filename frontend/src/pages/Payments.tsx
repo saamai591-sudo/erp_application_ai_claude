@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import { ErrorToast } from "../components/ErrorToast";
+import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -136,7 +138,7 @@ function infoText() {
 }
 
 // پیام «تایید»: هم بعد از تایید اولیه به‌صورت toast و هم در دیالوگ راهنما (هنگام ویرایش) نمایش داده می‌شود
-const APPROVED_NOTICE = "این سند «تایید» شده است. ردیف‌های ابزار قفل‌نشده (چک‌هایی که هنوز واگذار/وصول نشده‌اند، یا ردیف‌های غیرچک) و کل ردیف‌های موضوعات پرداخت مستقیماً قابل ویرایش/افزودن/حذف‌اند، بدون نیاز به «برگشت از تایید». ردیف‌های قفل‌شده (علامت‌خورده با «قفل») فقط قابل مشاهده‌اند.";
+const APPROVED_NOTICE = "این سند «تایید» شده است. ردیف‌های ابزار قفل‌نشده (چک‌هایی که هنوز واگذار/وصول نشده‌اند، یا ردیف‌های غیرچک) و ردیف‌های موضوعات پرداخت مستقیماً قابل ویرایش/افزودن/حذف‌اند، بدون نیاز به «برگشت از تایید». ردیف‌های قفل‌شده (علامت‌خورده با «قفل») و ردیف‌های موضوعات پرداختِ مرتبط با آن‌ها (چکی که بعد از این سند گردش داشته) فقط قابل مشاهده‌اند.";
 
 export default function Payments() {
   const location = useLocation();
@@ -202,14 +204,14 @@ function PaymentList() {
 
   async function onDelete(row: ListRow) {
     if (row.status !== "DRAFT") {
-      alert("فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «تایید» برگردانید");
+      showError("فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «تایید» برگردانید");
       return;
     }
     try {
       await api.del(`/payments/${row.id}`);
       await reload();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -222,7 +224,7 @@ function PaymentList() {
           <RefreshButton onClick={reload} />
         </div>
       </div>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <DataTable
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
@@ -509,7 +511,11 @@ function PaymentForm({ editId }: { editId?: number }) {
     setSettlementRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
   function removeSettlementRow(idx: number) {
-    setSettlementRows((prev) => prev.filter((_, i) => i !== idx));
+    setSettlementRows((prev) => {
+      const inst = instrumentRows.find((r) => r.clientKey === prev[idx]?.instrumentClientKey);
+      if (inst && isRowLocked(inst, isApprovedSemiOpen)) return prev;
+      return prev.filter((_, i) => i !== idx);
+    });
   }
   // طبق «مستندات تغییرات رسید دریافت.md» بند ۳ (حالت ارز پایه): انتخاب چندگانه‌ی سند مبنا در یک ردیف،
   // این ردیف را با اولین مورد پر می‌کند و به‌ازای هر مورد اضافه، یک ردیف تازه‌ی هم‌شکل بلافاصله بعد از
@@ -669,7 +675,7 @@ function PaymentForm({ editId }: { editId?: number }) {
       await api.del(`/payments/${editId}`);
       navigate("/payments");
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -681,7 +687,7 @@ function PaymentForm({ editId }: { editId?: number }) {
       applyDetail(d);
       flash(APPROVED_NOTICE);
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -693,7 +699,7 @@ function PaymentForm({ editId }: { editId?: number }) {
       applyDetail(d);
       flash();
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -713,7 +719,7 @@ function PaymentForm({ editId }: { editId?: number }) {
         flash();
       }
     } catch (e) {
-      alert((e as ApiError).message);
+      showError((e as ApiError).message);
     }
   }
 
@@ -725,7 +731,7 @@ function PaymentForm({ editId }: { editId?: number }) {
   // تازه است، نه ویرایش ردیف موجود).
   const instrumentPickerRows = instrumentRows
     .map((r, idx) => ({ ...r, idx }))
-    .filter((r) => Number(r.amount) > 0)
+    .filter((r) => Number(r.amount) > 0 && !isRowLocked(r, isApprovedSemiOpen))
     .map((r) => {
       const currency = currencies.find((c) => String(c.id) === r.currencyId);
       if (!currency) return { ...r, remainingAmount: Number(r.amount) || 0 };
@@ -773,7 +779,7 @@ function PaymentForm({ editId }: { editId?: number }) {
       wide
     >
       <form id="payment-form" onSubmit={onSubmit}>
-        {error && <div className="alert error">{error}</div>}
+        <ErrorToast message={error} />
 
         {/* بعد از صدور سند حسابداری، همه‌ی اطلاعات سند (هدر، ردیف‌های ابزار، موضوعات پرداخت، شرح) قفل است */}
         <fieldset disabled={jeLocked} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
@@ -1091,6 +1097,7 @@ function PaymentForm({ editId }: { editId?: number }) {
                     row={row}
                     onChange={(patch) => updateSettlementRow(idx, patch)}
                     onRemove={() => removeSettlementRow(idx)}
+                    isApprovedSemiOpen={isApprovedSemiOpen}
                     paymentTypes={paymentTypes}
                     parties={parties}
                     customerPartyIds={customerPartyIds}
@@ -1124,12 +1131,13 @@ function PaymentForm({ editId }: { editId?: number }) {
 }
 
 function SettlementRowFields({
-  idx, row, onChange, onRemove, paymentTypes, parties, customerPartyIds, supplierPartyIds, currencies, baseCurrency, instrumentRows, editId, headerPartyId, headerPartyDisplay, headerDate, allSettlementRows, onApplyBasisSelection,
+  idx, row, onChange, onRemove, isApprovedSemiOpen, paymentTypes, parties, customerPartyIds, supplierPartyIds, currencies, baseCurrency, instrumentRows, editId, headerPartyId, headerPartyDisplay, headerDate, allSettlementRows, onApplyBasisSelection,
 }: {
   idx: number;
   row: SettlementRowState;
   onChange: (patch: Partial<SettlementRowState>) => void;
   onRemove: () => void;
+  isApprovedSemiOpen: boolean;
   paymentTypes: PaymentTypeOption[];
   parties: PartyOption[];
   customerPartyIds: Set<number>;
@@ -1149,6 +1157,8 @@ function SettlementRowFields({
   const paymentType = paymentTypes.find((t) => String(t.id) === row.paymentTypeId);
   const basisType = paymentType?.basisType;
   const instrumentRow = instrumentRows.find((r) => r.clientKey === row.instrumentClientKey);
+  // ردیف موضوعات پرداختِ مرتبط با چکی که بعد از این سند گردش داشته (ردیف ابزار قفل‌شده) کاملاً قفل است
+  const rowLocked = !!instrumentRow && isRowLocked(instrumentRow, isApprovedSemiOpen);
 
   useEffect(() => {
     if (!basisType || basisType === "NONE" || !row.partyId) {
@@ -1302,7 +1312,7 @@ function SettlementRowFields({
   }
 
   return (
-    <tr>
+    <tr {...(rowLocked ? { inert: "", style: { opacity: 0.65 } } : {})}>
       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
       <td style={{ minWidth: 120 }}>
         <span>{row.instrumentLabel || `#${row.instrumentClientKey}`}</span>
@@ -1446,9 +1456,13 @@ function SettlementRowFields({
         <input value={row.description} onChange={(e) => onChange({ description: e.target.value })} />
       </td>
       <td>
+        {rowLocked ? (
+          <span className="badge" title="این ردیف به چکی وصل است که بعد از این سند گردش داشته و قابل ویرایش/حذف نیست">قفل</span>
+        ) : (
         <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={onRemove}>
           حذف
         </button>
+        )}
       </td>
     </tr>
   );
@@ -1518,7 +1532,7 @@ function PaymentForeignBasisModal({
 
   return (
     <Modal title={`ورود اطلاعات ارزی موضوع پرداخت (${rowCurrency.title})`} onClose={onClose}>
-      {error && <div className="alert error">{error}</div>}
+      <ErrorToast message={error} />
       <div className="form-grid">
         <div className="form-field full">
           <label>سند مبنا<RequiredMark /></label>

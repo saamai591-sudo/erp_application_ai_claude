@@ -847,7 +847,7 @@ router.put("/payments/:id/edit-approved", can(`${FORM}.editApproved`), async (re
 
   const existing = await prisma.payment.findUnique({
     where: { id },
-    include: { instrumentLines: { include: { chequeItem: true } } },
+    include: { instrumentLines: { include: { chequeItem: true } }, settlementLines: true },
   });
   if (!existing) return res.status(404).json({ error: "سند پرداخت یافت نشد" });
   if (existing.status !== "APPROVED") {
@@ -916,6 +916,17 @@ router.put("/payments/:id/edit-approved", can(`${FORM}.editApproved`), async (re
       else instrumentByKey.set(String(u.id), { id: u.id, amount: Number(u.existing.amount), baseAmount: Number(u.existing.baseAmount), currencyId: u.existing.currencyId, fxRate: Number(u.existing.fxRate) });
     }
     for (const c of toCreate) instrumentByKey.set(c.clientKey, { amount: c.amount, baseAmount: c.baseAmount, currencyId: c.currencyId, fxRate: c.fxRate });
+
+    // ردیف‌های موضوعات پرداختِ مرتبط با ردیف ابزارِ قفل‌شده (چکی که بعد از این سند گردش داشته) قابل ویرایش/افزودن/حذف
+    // نیستند؛ مجموعه‌ی آن‌ها در درخواست باید دقیقاً با مقدار ذخیره‌شده یکی باشد.
+    const settlementSig = (sl: any, key: string) =>
+      JSON.stringify([key, sl.paymentTypeId, sl.partyId, sl.purchaseInvoiceId ?? null, sl.salesInvoiceId ?? null, sl.purchaseOrderId ?? null, sl.currencyId, Number(sl.fxRate) || 1, Number(sl.amount), sl.description || null]);
+    const lockedKeySet = new Set(lockedLines.map((l: any) => String(l.id)));
+    const storedLockedSigs = (existing.settlementLines as any[]).filter((sl) => lockedIds.has(sl.instrumentLineId)).map((sl) => settlementSig(sl, String(sl.instrumentLineId))).sort();
+    const sentLockedSigs = (Array.isArray(body.settlementLines) ? body.settlementLines : []).filter((sl) => lockedKeySet.has(String(sl.instrumentClientKey))).map((sl) => settlementSig(sl, String(sl.instrumentClientKey))).sort();
+    if (JSON.stringify(storedLockedSigs) !== JSON.stringify(sentLockedSigs)) {
+      throw new Error("ردیف‌های موضوعات پرداختِ مرتبط با چک قفل‌شده (چکی که بعد از این سند گردش داشته) قابل ویرایش، افزودن یا حذف نیستند");
+    }
 
     const settlementLines = await validateSubjectLines(body.settlementLines, instrumentByKey, baseCurrency, id);
 
