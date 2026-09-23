@@ -71,6 +71,9 @@ function infoText() {
   return "چند چک دریافتنی «در دست» را با هم به یک حساب بانکی مشخص برای وصول واگذار می‌کند. در تایید، وضعیت چک‌های انتخاب‌شده به «واگذار به وصول» تغییر می‌کند.";
 }
 
+// پیام «تایید»: هم بعد از تایید اولیه به‌صورت toast و هم در دیالوگ راهنما (هنگام ویرایش) نمایش داده می‌شود
+const APPROVED_NOTICE = "این سند «تایید» شده است. چک‌های قفل‌نشده (که هنوز از «واگذار به وصول» خارج نشده‌اند) قابل حذف‌اند و چک تازه هم قابل افزودن است، بدون نیاز به «برگشت از تایید». چک‌های قفل‌شده (علامت‌خورده با «قفل») فقط قابل مشاهده‌اند.";
+
 export default function ChequeDeposits() {
   const location = useLocation();
   const { id } = useParams();
@@ -306,7 +309,7 @@ function ChequeDepositForm({ editId }: { editId?: number }) {
       await api.post(`/cheque-deposits/${editId}/approve`, {});
       const d: Detail = await api.get(`/cheque-deposits/${editId}`);
       applyDetail(d);
-      flash();
+      flash(APPROVED_NOTICE);
     } catch (e) {
       alert((e as ApiError).message);
     }
@@ -331,7 +334,7 @@ function ChequeDepositForm({ editId }: { editId?: number }) {
   return (
     <FormPage
       title={editId ? "ویرایش واگذاری چک به بانک" : "واگذاری چک به بانک جدید"}
-      description={status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/حساب بانکی/شرح دیگر قابل تغییر نیستند، اما چک‌های قفل‌نشده مستقیماً قابل افزودن/حذف‌اند. این سند «تایید» شده است. چک‌های قفل‌نشده (که هنوز از «واگذار به وصول» خارج نشده‌اند) قابل حذف‌اند و چک تازه هم قابل افزودن است، بدون نیاز به «برگشت از تایید». چک‌های قفل‌شده (علامت‌خورده با «قفل») فقط قابل مشاهده‌اند." : undefined}
+      description={status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/حساب بانکی/شرح دیگر قابل تغییر نیستند، اما چک‌های قفل‌نشده مستقیماً قابل افزودن/حذف‌اند. " + APPROVED_NOTICE : undefined}
       formId="cheque-deposit-form"
       closePath="/cheque-deposits"
       newPath="/cheque-deposits/new"

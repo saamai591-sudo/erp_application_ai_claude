@@ -65,6 +65,9 @@ function infoText() {
   return "چک‌هایی را که قبلاً «واگذار به وصول» شده‌اند، از بانک پس می‌گیرد (نیازی نیست همه‌ی چک‌های یک واگذاری با هم برگردانده شوند). در تایید، وضعیت چک‌های انتخاب‌شده به «در دست» برمی‌گردد.";
 }
 
+// پیام «تایید»: هم بعد از تایید اولیه به‌صورت toast و هم در دیالوگ راهنما (هنگام ویرایش) نمایش داده می‌شود
+const APPROVED_NOTICE = "این سند «تایید» شده است. چک‌های قفل‌نشده (که هنوز از «در دست» خارج نشده‌اند) قابل حذف‌اند و چک تازه هم قابل افزودن است، بدون نیاز به «برگشت از تایید». چک‌های قفل‌شده (علامت‌خورده با «قفل») فقط قابل مشاهده‌اند.";
+
 export default function ChequeDepositReturns() {
   const location = useLocation();
   const { id } = useParams();
@@ -284,7 +287,7 @@ function ChequeDepositReturnForm({ editId }: { editId?: number }) {
       await api.post(`/cheque-deposit-returns/${editId}/approve`, {});
       const d: Detail = await api.get(`/cheque-deposit-returns/${editId}`);
       applyDetail(d);
-      flash();
+      flash(APPROVED_NOTICE);
     } catch (e) {
       alert((e as ApiError).message);
     }
@@ -309,7 +312,7 @@ function ChequeDepositReturnForm({ editId }: { editId?: number }) {
   return (
     <FormPage
       title={editId ? "ویرایش برگشت از واگذاری" : "برگشت از واگذاری جدید"}
-      description={status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/شرح دیگر قابل تغییر نیستند، اما چک‌های قفل‌نشده مستقیماً قابل افزودن/حذف‌اند. این سند «تایید» شده است. چک‌های قفل‌نشده (که هنوز از «در دست» خارج نشده‌اند) قابل حذف‌اند و چک تازه هم قابل افزودن است، بدون نیاز به «برگشت از تایید». چک‌های قفل‌شده (علامت‌خورده با «قفل») فقط قابل مشاهده‌اند." : undefined}
+      description={status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/شرح دیگر قابل تغییر نیستند، اما چک‌های قفل‌نشده مستقیماً قابل افزودن/حذف‌اند. " + APPROVED_NOTICE : undefined}
       formId="cheque-deposit-return-form"
       closePath="/cheque-deposit-returns"
       newPath="/cheque-deposit-returns/new"

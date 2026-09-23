@@ -67,6 +67,9 @@ function infoText() {
   return "برای هر چک پرداختنیِ «صادرشده»، نتیجه‌ی نهایی (وصول‌شده یا برگشتی) را به‌صورت دسته‌ای ثبت می‌کند؛ نتیجه‌ی هر چک مستقل از بقیه انتخاب می‌شود. فعلاً بدون سند حسابداری خودکار.";
 }
 
+// پیام «تایید»: هم بعد از تایید اولیه به‌صورت toast و هم در دیالوگ راهنما (هنگام ویرایش) نمایش داده می‌شود
+const APPROVED_NOTICE = "این سند «تایید» شده است. نتیجه‌ی ردیف‌های قفل‌نشده قابل تغییر است، ردیف قفل‌نشده قابل حذف است (چک به «صادرشده» برمی‌گردد)، و چک تازه هم قابل افزودن است، بدون نیاز به «برگشت از تایید». ردیف‌های قفل‌شده (علامت‌خورده با «قفل») فقط قابل مشاهده‌اند.";
+
 export default function ChequeClearingPayable() {
   const location = useLocation();
   const { id } = useParams();
@@ -289,7 +292,7 @@ function ChequeClearingPayableForm({ editId }: { editId?: number }) {
       await api.post(`/cheque-clearings-payable/${editId}/approve`, {});
       const d: Detail = await api.get(`/cheque-clearings-payable/${editId}`);
       applyDetail(d);
-      flash();
+      flash(APPROVED_NOTICE);
     } catch (e) {
       alert((e as ApiError).message);
     }
@@ -314,7 +317,7 @@ function ChequeClearingPayableForm({ editId }: { editId?: number }) {
   return (
     <FormPage
       title={editId ? "ویرایش نتیجه وصول/برگشت چک پرداختنی" : "نتیجه وصول/برگشت چک پرداختنی جدید"}
-      description={status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/شرح دیگر قابل تغییر نیستند، اما نتیجه‌ی ردیف‌های قفل‌نشده قابل تغییر/حذف و چک تازه قابل افزودن است. این سند «تایید» شده است. نتیجه‌ی ردیف‌های قفل‌نشده قابل تغییر است، ردیف قفل‌نشده قابل حذف است (چک به «صادرشده» برمی‌گردد)، و چک تازه هم قابل افزودن است، بدون نیاز به «برگشت از تایید». ردیف‌های قفل‌شده (علامت‌خورده با «قفل») فقط قابل مشاهده‌اند." : undefined}
+      description={status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/شرح دیگر قابل تغییر نیستند، اما نتیجه‌ی ردیف‌های قفل‌نشده قابل تغییر/حذف و چک تازه قابل افزودن است. " + APPROVED_NOTICE : undefined}
       formId="cheque-clearing-payable-form"
       closePath="/cheque-clearings-payable"
       newPath="/cheque-clearings-payable/new"
