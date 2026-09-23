@@ -5,6 +5,7 @@ import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation
 import { recomputeBankAccountHasTransactions } from "../utils/treasuryTracking";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { can } from "../authz/guard";
+import { registerChequeDocReEdit } from "../utils/chequeDocReEdit";
 import { findFormPrefix } from "../authz/registry";
 
 const FORM = findFormPrefix("cheque-deposits");
@@ -17,10 +18,8 @@ const FORM = findFormPrefix("cheque-deposits");
 // وضعیت همه‌ی چک‌های انتخاب‌شده از IN_HAND به IN_COLLECTION تغییر می‌کند. فعلاً بدون سند حسابداری
 // خودکار (طبق تصمیم صریح کاربر؛ می‌تواند در فاز بعد اضافه شود).
 //
-// اصلاح جزئی سند «تایید»شده (فاز ۲.۲ — سند نیمه‌باز؛ نگاه کنید به توضیح مشابه در
-// routes/receipts.ts): چون این سند فیلد قابل‌ویرایشی به‌جز خودِ ارجاع به چک ندارد، «ویرایش درجا»
-// یعنی برداشتن یک چک step-مطابق از فهرست (که وضعیتش را به IN_HAND برمی‌گرداند) یا افزودن چک تازه —
-// بدون این‌که سند از حالت APPROVED خارج شود.
+// سند «تایید»شده از مسیر «ویرایش» عادی اصلاً قابل ویرایش نیست؛ برای هر تغییری یا باید از تایید برگردانده شود، یا از مسیر مستقل
+// «ویرایش مجدد» (GET/PUT /cheque-deposits/:id/re-edit، utils/chequeDocReEdit.ts) فقط ردیف‌های فاقد گردش اصلاح/حذف شوند.
 // =========================================================================
 
 const router = Router();
@@ -95,18 +94,14 @@ router.get("/cheque-deposits", can(`${FORM}.view`), async (_req, res) => {
   );
 });
 
-router.get("/cheque-deposits/:id", can(`${FORM}.view`), async (req, res) => {
-  const id = Number(req.params.id);
-  const d = await prisma.chequeDeposit.findUnique({
-    where: { id },
-    include: {
-      bankAccount: { include: { bankBranch: true } },
-      fiscalPeriod: true,
-      lines: { include: { chequeItem: { include: { party: true, currency: true } } }, orderBy: { rowOrder: "asc" } },
-    },
-  });
-  if (!d) return res.status(404).json({ error: "سند واگذاری به بانک یافت نشد" });
-  res.json({
+const CHEQUE_DEPOSITS_DETAIL_INCLUDE = {
+  bankAccount: { include: { bankBranch: true } },
+  fiscalPeriod: true,
+  lines: { include: { chequeItem: { include: { party: true, currency: true } } }, orderBy: { rowOrder: "asc" } },
+} as const;
+
+function serializeChequeDeposits(d: any) {
+  return {
     id: d.id,
     number: d.number,
     date: d.date,
@@ -126,10 +121,15 @@ router.get("/cheque-deposits/:id", can(`${FORM}.view`), async (req, res) => {
       chequeCurrencyTitle: l.chequeItem.currency?.title,
       chequePartyDisplay: l.chequeItem.party.category === "LEGAL" ? l.chequeItem.party.name || "" : `${l.chequeItem.party.firstName || ""} ${l.chequeItem.party.lastName || ""}`.trim(),
       chequeStatus: l.chequeItem.status,
-      chequeStep: l.chequeStep,
-      chequeItemStep: l.chequeItem.step,
     })),
-  });
+  };
+}
+
+router.get("/cheque-deposits/:id", can(`${FORM}.view`), async (req, res) => {
+  const id = Number(req.params.id);
+  const d = await prisma.chequeDeposit.findUnique({ where: { id }, include: CHEQUE_DEPOSITS_DETAIL_INCLUDE });
+  if (!d) return res.status(404).json({ error: "سند واگذاری به بانک یافت نشد" });
+  res.json(serializeChequeDeposits(d));
 });
 
 router.post("/cheque-deposits", can(`${FORM}.create`), async (req, res) => {
@@ -261,7 +261,7 @@ router.post("/cheque-deposits/:id/unapprove", can(`${FORM}.unapprove`), async (r
   if (touched) {
     return res
       .status(400)
-      .json({ error: `چک شماره ${touched.chequeItem.number} از وضعیت «واگذار به وصول» خارج شده و این سند قابل برگشت از تایید نیست؛ می‌توانید فقط همان چک را از «ویرایش سند تایید‌شده» حذف کنید` });
+      .json({ error: `چک شماره ${touched.chequeItem.number} از وضعیت «واگذار به وصول» خارج شده و این سند قابل برگشت از تایید نیست؛ ابتدا آن گردش را برگردانید (یا از «ویرایش مجدد» فقط ردیف‌های فاقد گردش را اصلاح کنید)` });
   }
 
   try {
@@ -279,71 +279,18 @@ router.post("/cheque-deposits/:id/unapprove", can(`${FORM}.unapprove`), async (r
   }
 });
 
-// اصلاح جزئی سند «تایید»شده («سند نیمه‌باز» — نگاه کنید به توضیح بالای فایل). سند در وضعیت APPROVED
-// باقی می‌ماند؛ چک‌های step-مطابق قابل حذف‌اند (برمی‌گردند به IN_HAND) و چک‌های جدید IN_HAND هم قابل
-// افزودن‌اند (می‌روند به IN_COLLECTION). چک‌های «قفل» (step دیگر مطابق نیست) دست‌نخورده می‌مانند.
-router.put("/cheque-deposits/:id/edit-approved", can(`${FORM}.editApproved`), async (req, res) => {
-  const id = Number(req.params.id);
-  const body = req.body as { chequeItemIds: number[] };
-
-  const existing = await prisma.chequeDeposit.findUnique({
-    where: { id },
-    include: { lines: { include: { chequeItem: true } } },
-  });
-  if (!existing) return res.status(404).json({ error: "سند واگذاری به بانک یافت نشد" });
-  if (existing.status !== "APPROVED") return res.status(400).json({ error: "این مسیر فقط برای اصلاح جزئی اسناد «تایید»شده است" });
-
-  try {
-    await resolveFiscalPeriod(existing.date);
-
-    const incomingIds = Array.isArray(body.chequeItemIds) ? Array.from(new Set(body.chequeItemIds)) : [];
-    const existingLines = existing.lines as any[];
-    const lockedLines = existingLines.filter((l: any) => l.chequeItem.step !== l.chequeStep);
-    const lockedIds = new Set(lockedLines.map((l: any) => l.chequeItemId));
-    const editableLines = existingLines.filter((l: any) => !lockedIds.has(l.chequeItemId));
-    const editableIds = new Set(editableLines.map((l: any) => l.chequeItemId));
-
-    for (const cid of incomingIds) {
-      if (lockedIds.has(cid)) throw new Error("یکی از چک‌های قفل‌شده (که دیگر آخرین اتفاق برایش این سند نیست) در درخواست ارسال شده است");
-    }
-
-    const toKeep = incomingIds.filter((cid) => editableIds.has(cid));
-    const toAdd = incomingIds.filter((cid) => !editableIds.has(cid) && !lockedIds.has(cid));
-    const toRemove = editableLines.filter((l: any) => !incomingIds.includes(l.chequeItemId));
-
-    if (lockedIds.size + toKeep.length + toAdd.length === 0) {
-      throw new Error("سند واگذاری به بانک باید حداقل یک چک داشته باشد");
-    }
-
-    for (const cid of toAdd) {
-      const cheque = await prisma.chequeItem.findUnique({ where: { id: cid } });
-      if (!cheque) throw new Error(`چک انتخاب‌شده یافت نشد`);
-      if (cheque.direction !== "RECEIVABLE" || cheque.status !== "IN_HAND") {
-        throw new Error(`چک شماره ${cheque.number} در وضعیت «در دست» نیست و قابل واگذاری به بانک نیست`);
-      }
-    }
-
-    await prisma.$transaction(async (tx: any) => {
-      for (const l of toRemove) {
-        // eslint-disable-next-line no-await-in-loop
-        await tx.chequeItem.update({ where: { id: l.chequeItemId }, data: { status: "IN_HAND", step: { decrement: 1 } } });
-        // eslint-disable-next-line no-await-in-loop
-        await tx.chequeDepositLine.delete({ where: { id: l.id } });
-      }
-      const maxOrder = existingLines.reduce((m: number, l: any) => Math.max(m, l.rowOrder), -1);
-      let nextOrder = maxOrder + 1;
-      for (const cid of toAdd) {
-        // eslint-disable-next-line no-await-in-loop
-        const updated = await tx.chequeItem.update({ where: { id: cid }, data: { status: "IN_COLLECTION", step: { increment: 1 } } });
-        // eslint-disable-next-line no-await-in-loop
-        await tx.chequeDepositLine.create({ data: { chequeDepositId: id, chequeItemId: cid, chequeStep: updated.step, rowOrder: nextOrder++ } });
-      }
-    });
-
-    res.json({ id });
-  } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در ذخیره" });
-  }
+registerChequeDocReEdit(router, {
+  path: "cheque-deposits",
+  form: FORM,
+  docModel: "chequeDeposit",
+  lineModel: "chequeDepositLine",
+  detailInclude: CHEQUE_DEPOSITS_DETAIL_INCLUDE,
+  serialize: serializeChequeDeposits,
+  notFoundMessage: "سند واگذاری به بانک یافت نشد",
+  minOneMessage: "سند واگذاری به بانک باید حداقل یک چک داشته باشد",
+  hasOutcome: false,
+  revertStatus: "IN_HAND",
+  resolveFiscalPeriod,
 });
 
 export default router;

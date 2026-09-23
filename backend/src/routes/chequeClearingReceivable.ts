@@ -4,6 +4,7 @@ import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { can } from "../authz/guard";
+import { registerChequeDocReEdit } from "../utils/chequeDocReEdit";
 import { findFormPrefix } from "../authz/registry";
 
 const FORM = findFormPrefix("cheque-clearings-receivable");
@@ -16,10 +17,8 @@ const FORM = findFormPrefix("cheque-clearings-receivable");
 // چک‌های دریافتنیِ در وضعیت «واگذار به وصول» قابل انتخاب هستند. فرم مستقل از چک پرداختنی است (طبق
 // تصمیم کاربر: دو فرم جداگانه) — نگاه کنید به routes/chequeClearingPayable.ts.
 //
-// اصلاح جزئی سند «تایید»شده (فاز ۲.۲ — سند نیمه‌باز؛ نگاه کنید به توضیح مشابه در
-// routes/receipts.ts): برای ردیف step-مطابق، عوض‌کردن outcome در جا (بدون تغییر step، چون تصحیح
-// همان رویداد است نه رویداد تازه) یا حذف کامل ردیف (برمی‌گردد به IN_COLLECTION) مجاز است؛ افزودن
-// چک تازه هم مجاز است — بدون این‌که سند از حالت APPROVED خارج شود.
+// سند «تایید»شده از مسیر «ویرایش» عادی اصلاً قابل ویرایش نیست؛ برای هر تغییری یا باید از تایید برگردانده شود، یا از مسیر مستقل
+// «ویرایش مجدد» (GET/PUT /cheque-clearings-receivable/:id/re-edit، utils/chequeDocReEdit.ts) فقط ردیف‌های فاقد گردش اصلاح/حذف شوند.
 // =========================================================================
 
 const router = Router();
@@ -100,17 +99,13 @@ router.get("/cheque-clearings-receivable", can(`${FORM}.view`), async (_req, res
   );
 });
 
-router.get("/cheque-clearings-receivable/:id", can(`${FORM}.view`), async (req, res) => {
-  const id = Number(req.params.id);
-  const d = await prisma.chequeClearingReceivable.findUnique({
-    where: { id },
-    include: {
-      fiscalPeriod: true,
-      lines: { include: { chequeItem: { include: { party: true, currency: true } } }, orderBy: { rowOrder: "asc" } },
-    },
-  });
-  if (!d) return res.status(404).json({ error: "سند نتیجه وصول/برگشت یافت نشد" });
-  res.json({
+const CHEQUE_CLEARING_RECEIVABLE_DETAIL_INCLUDE = {
+  fiscalPeriod: true,
+  lines: { include: { chequeItem: { include: { party: true, currency: true } } }, orderBy: { rowOrder: "asc" } },
+} as const;
+
+function serializeChequeClearingReceivable(d: any) {
+  return {
     id: d.id,
     number: d.number,
     date: d.date,
@@ -129,10 +124,15 @@ router.get("/cheque-clearings-receivable/:id", can(`${FORM}.view`), async (req, 
       chequeCurrencyTitle: l.chequeItem.currency?.title,
       chequePartyDisplay: l.chequeItem.party.category === "LEGAL" ? l.chequeItem.party.name || "" : `${l.chequeItem.party.firstName || ""} ${l.chequeItem.party.lastName || ""}`.trim(),
       chequeStatus: l.chequeItem.status,
-      chequeStep: l.chequeStep,
-      chequeItemStep: l.chequeItem.step,
     })),
-  });
+  };
+}
+
+router.get("/cheque-clearings-receivable/:id", can(`${FORM}.view`), async (req, res) => {
+  const id = Number(req.params.id);
+  const d = await prisma.chequeClearingReceivable.findUnique({ where: { id }, include: CHEQUE_CLEARING_RECEIVABLE_DETAIL_INCLUDE });
+  if (!d) return res.status(404).json({ error: "سند نتیجه وصول/برگشت یافت نشد" });
+  res.json(serializeChequeClearingReceivable(d));
 });
 
 router.post("/cheque-clearings-receivable", can(`${FORM}.create`), async (req, res) => {
@@ -251,7 +251,7 @@ router.post("/cheque-clearings-receivable/:id/unapprove", can(`${FORM}.unapprove
   if (touched) {
     return res
       .status(400)
-      .json({ error: `چک شماره ${touched.chequeItem.number} از وضعیت ثبت‌شده در این سند تغییر کرده و این سند قابل برگشت از تایید نیست؛ می‌توانید فقط همان ردیف را از «ویرایش سند تایید‌شده» اصلاح یا حذف کنید` });
+      .json({ error: `چک شماره ${touched.chequeItem.number} از وضعیت ثبت‌شده در این سند تغییر کرده و این سند قابل برگشت از تایید نیست؛ ابتدا آن گردش را برگردانید (یا از «ویرایش مجدد» فقط ردیف‌های فاقد گردش را اصلاح کنید)` });
   }
 
   try {
@@ -268,81 +268,18 @@ router.post("/cheque-clearings-receivable/:id/unapprove", can(`${FORM}.unapprove
   }
 });
 
-// اصلاح جزئی سند «تایید»شده («سند نیمه‌باز» — نگاه کنید به توضیح بالای فایل).
-router.put("/cheque-clearings-receivable/:id/edit-approved", can(`${FORM}.editApproved`), async (req, res) => {
-  const id = Number(req.params.id);
-  const body = req.body as { lines: (LineInput & { id?: number })[] };
-
-  const existing = await prisma.chequeClearingReceivable.findUnique({
-    where: { id },
-    include: { lines: { include: { chequeItem: true } } },
-  });
-  if (!existing) return res.status(404).json({ error: "سند نتیجه وصول/برگشت یافت نشد" });
-  if (existing.status !== "APPROVED") return res.status(400).json({ error: "این مسیر فقط برای اصلاح جزئی اسناد «تایید»شده است" });
-
-  try {
-    await resolveFiscalPeriod(existing.date);
-
-    const incoming = Array.isArray(body.lines) ? body.lines : [];
-    const existingLines = existing.lines as any[];
-    const lockedLines = existingLines.filter((l: any) => l.chequeItem.step !== l.chequeStep);
-    const lockedIds = new Set(lockedLines.map((l: any) => l.chequeItemId));
-    const editableLines = existingLines.filter((l: any) => !lockedIds.has(l.chequeItemId));
-    const editableByChequeId = new Map(editableLines.map((l: any) => [l.chequeItemId, l]));
-
-    for (const l of incoming) {
-      if (lockedIds.has(l.chequeItemId)) throw new Error("یکی از چک‌های قفل‌شده (که دیگر آخرین اتفاق برایش این سند نیست) در درخواست ارسال شده است");
-      if (l.outcome !== "CLEARED" && l.outcome !== "BOUNCED") throw new Error("نتیجه نامعتبر است");
-    }
-    const incomingIds = incoming.map((l) => l.chequeItemId);
-    if (new Set(incomingIds).size !== incomingIds.length) throw new Error("یک چک نمی‌تواند دو بار در یک سند تکرار شود");
-
-    const toUpdate = incoming.filter((l) => editableByChequeId.has(l.chequeItemId));
-    const toAdd = incoming.filter((l) => !editableByChequeId.has(l.chequeItemId));
-    const toRemove = editableLines.filter((l: any) => !incomingIds.includes(l.chequeItemId));
-
-    if (lockedIds.size + toUpdate.length + toAdd.length === 0) {
-      throw new Error("سند نتیجه وصول/برگشت باید حداقل یک چک داشته باشد");
-    }
-
-    for (const l of toAdd) {
-      const cheque = await prisma.chequeItem.findUnique({ where: { id: l.chequeItemId } });
-      if (!cheque) throw new Error(`چک انتخاب‌شده یافت نشد`);
-      if (cheque.direction !== "RECEIVABLE" || cheque.status !== "IN_COLLECTION") {
-        throw new Error(`چک شماره ${cheque.number} در وضعیت «واگذار به وصول» نیست`);
-      }
-    }
-
-    await prisma.$transaction(async (tx: any) => {
-      for (const l of toRemove) {
-        // eslint-disable-next-line no-await-in-loop
-        await tx.chequeItem.update({ where: { id: l.chequeItemId }, data: { status: "IN_COLLECTION", step: { decrement: 1 } } });
-        // eslint-disable-next-line no-await-in-loop
-        await tx.chequeClearingReceivableLine.delete({ where: { id: l.id } });
-      }
-      for (const l of toUpdate) {
-        const ex = editableByChequeId.get(l.chequeItemId);
-        // eslint-disable-next-line no-await-in-loop
-        await tx.chequeClearingReceivableLine.update({ where: { id: ex.id }, data: { outcome: l.outcome } });
-        // eslint-disable-next-line no-await-in-loop
-        await tx.chequeItem.update({ where: { id: l.chequeItemId }, data: { status: l.outcome } });
-      }
-      const maxOrder = existingLines.reduce((m: number, l: any) => Math.max(m, l.rowOrder), -1);
-      let nextOrder = maxOrder + 1;
-      for (const l of toAdd) {
-        // eslint-disable-next-line no-await-in-loop
-        const updated = await tx.chequeItem.update({ where: { id: l.chequeItemId }, data: { status: l.outcome, step: { increment: 1 } } });
-        // eslint-disable-next-line no-await-in-loop
-        await tx.chequeClearingReceivableLine.create({
-          data: { chequeClearingReceivableId: id, chequeItemId: l.chequeItemId, outcome: l.outcome, chequeStep: updated.step, rowOrder: nextOrder++ },
-        });
-      }
-    });
-
-    res.json({ id });
-  } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در ذخیره" });
-  }
+registerChequeDocReEdit(router, {
+  path: "cheque-clearings-receivable",
+  form: FORM,
+  docModel: "chequeClearingReceivable",
+  lineModel: "chequeClearingReceivableLine",
+  detailInclude: CHEQUE_CLEARING_RECEIVABLE_DETAIL_INCLUDE,
+  serialize: serializeChequeClearingReceivable,
+  notFoundMessage: "سند نتیجه وصول/برگشت یافت نشد",
+  minOneMessage: "سند نتیجه وصول/برگشت باید حداقل یک چک داشته باشد",
+  hasOutcome: true,
+  revertStatus: "IN_COLLECTION",
+  resolveFiscalPeriod,
 });
 
 export default router;

@@ -71,9 +71,9 @@ const APPROVE_UNAPPROVE: CustomActionDef[] = [
   { key: "unapprove", title: "برگشت از تایید" },
 ];
 
-const APPROVE_UNAPPROVE_EDIT: CustomActionDef[] = [
+const APPROVE_UNAPPROVE_REEDIT: CustomActionDef[] = [
   ...APPROVE_UNAPPROVE,
-  { key: "editApproved", title: "ویرایش پس از تایید" },
+  { key: "reEdit", title: "ویرایش مجدد" },
 ];
 
 const ACCOUNTING_CONFIRM: CustomActionDef[] = [
@@ -511,10 +511,10 @@ export const REGISTRY: ModuleDef[] = [
             baseActions: ["view"],
             actions: [{ key: "transition", title: "تغییر وضعیت" }],
           },
-          { key: "cheque-deposits", title: "واگذاری به بانک", baseActions: CRUD, actions: APPROVE_UNAPPROVE_EDIT },
-          { key: "cheque-deposit-returns", title: "برگشت از واگذاری", baseActions: CRUD, actions: APPROVE_UNAPPROVE_EDIT },
-          { key: "cheque-clearings-receivable", title: "نتیجه وصول/برگشت (دریافتنی)", baseActions: CRUD, actions: APPROVE_UNAPPROVE_EDIT },
-          { key: "cheque-clearings-payable", title: "نتیجه وصول/برگشت (پرداختنی)", baseActions: CRUD, actions: APPROVE_UNAPPROVE_EDIT },
+          { key: "cheque-deposits", title: "واگذاری به بانک", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
+          { key: "cheque-deposit-returns", title: "برگشت از واگذاری", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
+          { key: "cheque-clearings-receivable", title: "نتیجه وصول/برگشت (دریافتنی)", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
+          { key: "cheque-clearings-payable", title: "نتیجه وصول/برگشت (پرداختنی)", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
         ],
       },
     ],

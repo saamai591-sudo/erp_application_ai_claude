@@ -13,7 +13,8 @@ import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
-import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { useTabs } from "../lib/TabsContext";
+import { usePersistedState, hasPersistedState, clearPersistedStateFamily } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 
@@ -47,15 +48,9 @@ interface DetailLine {
   chequeCurrencyTitle: string;
   chequePartyDisplay: string;
   outcome: Outcome;
-  // برای تشخیص «قفل» بودن یک چک در سند «تایید»شده (فاز ۲.۲ — سند نیمه‌باز). نگاه کنید به توضیح
-  // مشابه در ChequeDeposits.tsx.
-  chequeStep?: number;
-  chequeItemStep?: number;
-}
-function isLineLocked(l: DetailLine, semiOpen: boolean) {
-  return semiOpen && l.chequeStep !== l.chequeItemStep;
 }
 interface Detail {
+  updatedAt?: string;
   id: number;
   number: number;
   date: string;
@@ -70,16 +65,26 @@ function infoText() {
 }
 
 // پیام «تایید»: هم بعد از تایید اولیه به‌صورت toast و هم در دیالوگ راهنما (هنگام ویرایش) نمایش داده می‌شود
-const APPROVED_NOTICE = "این سند «تایید» شده است. نتیجه‌ی ردیف‌های قفل‌نشده قابل تغییر است، ردیف قفل‌نشده قابل حذف است (چک به «صادرشده» برمی‌گردد)، و چک تازه هم قابل افزودن است، بدون نیاز به «برگشت از تایید». ردیف‌های قفل‌شده (علامت‌خورده با «قفل») فقط قابل مشاهده‌اند.";
+const APPROVED_NOTICE = "این سند «تایید» شده است و از مسیر «ویرایش» قابل تغییر نیست؛ برای اصلاح چک‌های فاقد گردش از «ویرایش مجدد» استفاده کنید، یا برای تغییر کامل ابتدا آن را «برگشت از تایید» کنید.";
 
 export default function ChequeClearingPayable() {
   const location = useLocation();
   const { id } = useParams();
   const isNew = location.pathname.endsWith("/new");
   const isEdit = location.pathname.endsWith("/edit");
+  const isReEdit = location.pathname.endsWith("/re-edit");
   if (isNew) return <ChequeClearingPayableForm />;
   if (isEdit) return <ChequeClearingPayableForm editId={Number(id)} />;
+  if (isReEdit) return <ChequeClearingPayableForm editId={Number(id)} reEdit />;
   return <ChequeClearingPayableList />;
+}
+
+function PlusIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 function CheckIcon() {
@@ -157,11 +162,14 @@ function ChequeClearingPayableList() {
   );
 }
 
-function ChequeClearingPayableForm({ editId }: { editId?: number }) {
+function ChequeClearingPayableForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) {
   const navigate = useNavigate();
+  const { openTab } = useTabs();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
   const [pickableCheques, setPickableCheques] = useState<PickableCheque[]>([]);
+  // «ویرایش مجدد»: updatedAt سند برای کنترل ویرایش هم‌زمان
+  const [docUpdatedAt, setDocUpdatedAt] = usePersistedState<string>(`${cacheKey}:updatedAt`, "");
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", description: "" });
   const [lines, setLines] = usePersistedState<DetailLine[]>(`${cacheKey}:lines`, []);
   const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; fiscalPeriodTitle: string } | null>(`${cacheKey}:meta`, null);
@@ -171,6 +179,7 @@ function ChequeClearingPayableForm({ editId }: { editId?: number }) {
   const { flash } = useSavedFlash();
 
   function applyDetail(d: Detail) {
+    setDocUpdatedAt(d.updatedAt ?? "");
     setMeta({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle });
     setHeader({ date: d.date.slice(0, 10), description: d.description || "" });
     setLines(d.lines);
@@ -187,15 +196,11 @@ function ChequeClearingPayableForm({ editId }: { editId?: number }) {
 
       if (hasPersistedState(`${cacheKey}:header`)) {
         setLoaded(true);
-        // این تب می‌تواند مدت‌ها باز مانده باشد و در همین فاصله یکی از چک‌ها با سند دیگری جابه‌جا شده
-        // باشد؛ بدون بازخوانی، chequeItemStep کش‌شده قدیمی می‌ماند و isLineLocked اشتباه تشخیص
-        // می‌دهد. فقط وضعیت سند و step ردیف‌ها را تازه می‌کنیم.
+        // این تب می‌تواند مدت‌ها باز مانده باشد؛ فقط وضعیت سند را تازه می‌کنیم تا قفل‌بودن فرم درست تشخیص داده شود.
         if (editId) {
           try {
             const d: Detail = await api.get(`/cheque-clearings-payable/${editId}`);
             setMeta((prev) => (prev ? { ...prev, status: d.status } : prev));
-            const stepById = new Map(d.lines.map((l) => [l.id, { chequeStep: l.chequeStep, chequeItemStep: l.chequeItemStep }]));
-            setLines((prev) => prev.map((l) => (stepById.has(l.id) ? { ...l, ...stepById.get(l.id)! } : l)));
           } catch {
             // اگر واکشی ناموفق شد، به مقادیر کش‌شده بسنده می‌شود؛ ذخیره‌سازی همچنان توسط سرور اعتبارسنجی می‌شود
           }
@@ -204,8 +209,15 @@ function ChequeClearingPayableForm({ editId }: { editId?: number }) {
       }
 
       if (editId) {
-        const d: Detail = await api.get(`/cheque-clearings-payable/${editId}`);
-        applyDetail(d);
+        try {
+          const d: Detail = await api.get(reEdit ? `/cheque-clearings-payable/${editId}/re-edit` : `/cheque-clearings-payable/${editId}`);
+          applyDetail(d);
+        } catch (e) {
+          if (!reEdit) throw e;
+          showError((e as ApiError).message);
+          navigate(`/cheque-clearings-payable/${editId}/edit`);
+          return;
+        }
       } else {
         setHeader({ date: defaultDocumentDate(fp), description: "" });
         setLines([]);
@@ -219,8 +231,8 @@ function ChequeClearingPayableForm({ editId }: { editId?: number }) {
 
   const status: DocStatus = meta?.status || "DRAFT";
   const coreDisabled = !!editId && status !== "DRAFT";
-  // فاز ۲.۲ — سند نیمه‌باز: نگاه کنید به توضیح مشابه در ChequeDeposits.tsx.
-  const isApprovedSemiOpen = !!editId && status === "APPROVED";
+  // سند «تایید»شده از مسیر «ویرایش» کاملاً قفل است؛ فقط «ویرایش مجدد» چک‌های فاقد گردش را اصلاح/حذف می‌کند
+  const linesLocked = !!editId && status !== "DRAFT" && !reEdit;
 
   function addCheque(c: PickableCheque) {
     if (lines.some((l) => l.chequeItemId === c.id)) return;
@@ -231,13 +243,11 @@ function ChequeClearingPayableForm({ editId }: { editId?: number }) {
   }
   function removeLine(chequeItemId: number) {
     setLines((prev) => {
-      const line = prev.find((l) => l.chequeItemId === chequeItemId);
-      if (line && isLineLocked(line, isApprovedSemiOpen)) return prev;
       return prev.filter((l) => l.chequeItemId !== chequeItemId);
     });
   }
   function setOutcome(chequeItemId: number, outcome: Outcome) {
-    setLines((prev) => prev.map((l) => (l.chequeItemId === chequeItemId && !isLineLocked(l, isApprovedSemiOpen) ? { ...l, outcome } : l)));
+    setLines((prev) => prev.map((l) => (l.chequeItemId === chequeItemId ? { ...l, outcome } : l)));
   }
 
   const totalAmount = lines.reduce((s, l) => s + l.chequeAmount, 0);
@@ -246,13 +256,14 @@ function ChequeClearingPayableForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
 
-    if (isApprovedSemiOpen) {
-      const editLines = lines.filter((l) => !isLineLocked(l, isApprovedSemiOpen)).map((l) => ({ chequeItemId: l.chequeItemId, outcome: l.outcome }));
+    if (reEdit) {
       try {
-        await api.put(`/cheque-clearings-payable/${editId}/edit-approved`, { lines: editLines });
-        const d: Detail = await api.get(`/cheque-clearings-payable/${editId}`);
-        applyDetail(d);
+        await api.put(`/cheque-clearings-payable/${editId}/re-edit`, { updatedAt: docUpdatedAt, lines: lines.map((l) => ({ chequeItemId: l.chequeItemId, outcome: l.outcome })) });
         flash();
+        // حافظه‌ی فرم «ویرایش» و «ویرایش مجدد» کهنه شده است؛ پاک می‌شود تا فرم از سرور تازه بارگذاری شود
+        clearPersistedStateFamily(`form:/cheque-clearings-payable/${editId}/edit`);
+        clearPersistedStateFamily(`form:/cheque-clearings-payable/${editId}/re-edit`);
+        navigate(`/cheque-clearings-payable/${editId}/edit`);
       } catch (err) {
         setError((err as ApiError).message);
       }
@@ -300,6 +311,17 @@ function ChequeClearingPayableForm({ editId }: { editId?: number }) {
     }
   }
 
+  // «ویرایش مجدد»: نمایش Action فقط به وضعیت «تایید» وابسته است؛ امکان‌سنجی (وجود چک فاقد گردش) بعد از کلیک انجام می‌شود
+  async function handleReEdit() {
+    if (!editId) return;
+    try {
+      await api.get(`/cheque-clearings-payable/${editId}/re-edit`);
+      openTab(`/cheque-clearings-payable/${editId}/re-edit`);
+    } catch (e) {
+      showError((e as ApiError).message);
+    }
+  }
+
   async function handleUnapprove() {
     if (!editId) return;
     try {
@@ -318,17 +340,18 @@ function ChequeClearingPayableForm({ editId }: { editId?: number }) {
 
   return (
     <FormPage
-      title={editId ? "ویرایش نتیجه وصول/برگشت چک پرداختنی" : "نتیجه وصول/برگشت چک پرداختنی جدید"}
-      description={status === "APPROVED" ? "این سند «تایید» شده؛ تاریخ/شرح دیگر قابل تغییر نیستند، اما نتیجه‌ی ردیف‌های قفل‌نشده قابل تغییر/حذف و چک تازه قابل افزودن است. " + APPROVED_NOTICE : undefined}
+      title={reEdit ? "ویرایش مجدد نتیجه وصول/برگشت چک پرداختنی" : editId ? "ویرایش نتیجه وصول/برگشت چک پرداختنی" : "نتیجه وصول/برگشت چک پرداختنی جدید"}
+      description={reEdit ? "حالت ویرایش مجدد: فقط چک‌های فاقد گردش نمایش داده می‌شوند و قابل اصلاح‌اند؛ چک‌های دارای گردش بدون تغییر می‌مانند و افزودن چک جدید مجاز نیست." : status === "APPROVED" ? APPROVED_NOTICE : undefined}
       formId="cheque-clearing-payable-form"
       closePath="/cheque-clearings-payable"
       newPath="/cheque-clearings-payable/new"
-      onDelete={!editId || status === "DRAFT" ? handleDelete : undefined}
-      saveDisabled={false}
+      onDelete={!reEdit && (!editId || status === "DRAFT") ? handleDelete : undefined}
+      saveDisabled={linesLocked}
       extraActions={
-        meta
+        meta && !reEdit
           ? [
               ...(status === "DRAFT" ? [{ label: "تایید", icon: <CheckIcon />, onClick: handleApprove }] : []),
+              ...(status === "APPROVED" ? [{ label: "ویرایش مجدد", icon: <PlusIcon />, onClick: handleReEdit }] : []),
               ...(status === "APPROVED" ? [{ label: "برگشت از تایید", icon: <UndoIcon />, onClick: handleUnapprove }] : []),
             ]
           : []
@@ -366,8 +389,9 @@ function ChequeClearingPayableForm({ editId }: { editId?: number }) {
 
         <div className="je-lines-toolbar">
           <span className="je-lines-title">چک‌ها</span>
+          {!reEdit && (
           <RecordPickerField
-            title="افزودن چک"
+            title="افزودن چک" disabled={linesLocked}
             displayValue=""
             placeholder="افزودن چک"
             rows={availableCheques}
@@ -378,6 +402,7 @@ function ChequeClearingPayableForm({ editId }: { editId?: number }) {
             ]}
             onSelect={(c) => addCheque(c as PickableCheque)}
           />
+          )}
         </div>
 
         <div className="grid-wrap je-lines-wrap">
@@ -396,32 +421,23 @@ function ChequeClearingPayableForm({ editId }: { editId?: number }) {
               </thead>
               <tbody>
                 {lines.map((l, idx) => {
-                  const locked = isLineLocked(l, isApprovedSemiOpen);
                   return (
-                    <tr key={l.chequeItemId} style={locked ? { opacity: 0.65 } : undefined}>
+                    <tr key={l.chequeItemId}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                       <td>{l.chequeNumber}</td>
                       <td>{formatJalaliDate(l.chequeDueDate)}</td>
                       <td>{l.chequePartyDisplay}</td>
                       <td>{formatAmountFa(l.chequeAmount)} {l.chequeCurrencyTitle}</td>
                       <td>
-                        {locked ? (
-                          <span className="badge">{OUTCOME_FA[l.outcome]}</span>
-                        ) : (
-                          <select value={l.outcome} onChange={(e) => setOutcome(l.chequeItemId, e.target.value as Outcome)}>
+                        <select value={l.outcome} disabled={linesLocked} onChange={(e) => setOutcome(l.chequeItemId, e.target.value as Outcome)}>
                             <option value="CLEARED">{OUTCOME_FA.CLEARED}</option>
                             <option value="BOUNCED">{OUTCOME_FA.BOUNCED}</option>
                           </select>
-                        )}
                       </td>
                       <td>
-                        {locked ? (
-                          <span className="badge" title="این چک از زمان این سند تغییر کرده و فقط از سند مربوطه قابل اصلاح است">قفل</span>
-                        ) : (
-                          <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeLine(l.chequeItemId)}>
+                        <button type="button" className="btn danger" disabled={linesLocked} style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeLine(l.chequeItemId)}>
                             حذف
                           </button>
-                        )}
                       </td>
                     </tr>
                   );

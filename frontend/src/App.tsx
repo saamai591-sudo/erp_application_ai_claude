@@ -400,15 +400,19 @@ export default function App() {
             <Route path="/cheque-deposits" element={<ChequeDeposits />} />
             <Route path="/cheque-deposits/new" element={<ChequeDeposits />} />
             <Route path="/cheque-deposits/:id/edit" element={<ChequeDeposits />} />
+            <Route path="/cheque-deposits/:id/re-edit" element={<ChequeDeposits />} />
             <Route path="/cheque-deposit-returns" element={<ChequeDepositReturns />} />
             <Route path="/cheque-deposit-returns/new" element={<ChequeDepositReturns />} />
             <Route path="/cheque-deposit-returns/:id/edit" element={<ChequeDepositReturns />} />
+            <Route path="/cheque-deposit-returns/:id/re-edit" element={<ChequeDepositReturns />} />
             <Route path="/cheque-clearings-receivable" element={<ChequeClearingReceivable />} />
             <Route path="/cheque-clearings-receivable/new" element={<ChequeClearingReceivable />} />
             <Route path="/cheque-clearings-receivable/:id/edit" element={<ChequeClearingReceivable />} />
+            <Route path="/cheque-clearings-receivable/:id/re-edit" element={<ChequeClearingReceivable />} />
             <Route path="/cheque-clearings-payable" element={<ChequeClearingPayable />} />
             <Route path="/cheque-clearings-payable/new" element={<ChequeClearingPayable />} />
             <Route path="/cheque-clearings-payable/:id/edit" element={<ChequeClearingPayable />} />
+            <Route path="/cheque-clearings-payable/:id/re-edit" element={<ChequeClearingPayable />} />
           </Route>
         </Routes>
         </TabsProvider>
