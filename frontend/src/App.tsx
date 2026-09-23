@@ -390,6 +390,7 @@ export default function App() {
             <Route path="/receipts" element={<Receipts />} />
             <Route path="/receipts/new" element={<Receipts />} />
             <Route path="/receipts/:id/edit" element={<Receipts />} />
+            <Route path="/receipts/:id/re-edit" element={<Receipts />} />
             <Route path="/payments" element={<Payments />} />
             <Route path="/payments/new" element={<Payments />} />
             <Route path="/payments/:id/edit" element={<Payments />} />
