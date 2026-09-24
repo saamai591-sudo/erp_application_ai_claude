@@ -528,6 +528,10 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
   function removeSettlementRow(idx: number) {
     setSettlementRows((prev) => prev.filter((_, i) => i !== idx));
   }
+  // اگر حساب بانکیِ مبدأ یک قلم به حسابِ مقصدِ یکی از ردیف‌های موضوعاتِ همان قلم تغییر کند، آن مقصد (که دیگر مجاز نیست) پاک می‌شود
+  function dropSettlementTargetsEqualTo(instrumentKey: string, bankAccountId: string) {
+    setSettlementRows((prev) => prev.map((r) => (r.instrumentClientKey === instrumentKey && r.bankAccountId === bankAccountId ? { ...r, bankAccountId: "", partyDisplay: "" } : r)));
+  }
   // طبق «مستندات تغییرات رسید دریافت.md» بند ۳ (حالت ارز پایه): انتخاب چندگانه‌ی سند مبنا در یک ردیف،
   // این ردیف را با اولین مورد پر می‌کند و به‌ازای هر مورد اضافه، یک ردیف تازه‌ی هم‌شکل بلافاصله بعد از
   // آن درج می‌کند — هم‌الگوی «بارگذاری از ابزار پرداخت».
@@ -864,10 +868,10 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                   <th>ردیف</th>
                   <th>نوع</th>
                   {hasChequeRow && <th>نوع چک<RequiredMark /></th>}
-                  <th>مبلغ</th>
-                  <th>ارز</th>
-                  <th>نرخ ارز</th>
                   <th>جزئیات</th>
+                  <th>ارز</th>
+                  <th>مبلغ</th>
+                  <th>نرخ ارز</th>
                   <th>شرح</th>
                   <th></th>
                 </tr>
@@ -912,28 +916,6 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                           )}
                         </td>
                       )}
-                      <td style={{ minWidth: 130 }}>
-                        <AmountInput value={row.amount} onChange={(v) => updateInstrumentRow(idx, { amount: v })} allowDecimal placeholder="۰" disabled={isSpendRow} />
-                      </td>
-                      <td style={{ minWidth: 130 }}>
-                        {row.type === "CASH" && (
-                          <select value={row.currencyId} onChange={(e) => updateInstrumentRow(idx, { currencyId: e.target.value, fxRate: Number(e.target.value) === baseCurrency.id ? "1" : row.fxRate })}>
-                            <option value="">انتخاب ارز</option>
-                            {currencies.map((c) => (
-                              <option key={c.id} value={c.id}>{c.title}</option>
-                            ))}
-                          </select>
-                        )}
-                        {(row.type === "CHEQUE" || row.type === "CHEQUE_TRANSFER") && <span>{baseCurrency.title}</span>}
-                        {row.type === "BANK_TRANSFER" && <span>{bankAccount?.currency?.title || "—"}</span>}
-                      </td>
-                      <td style={{ minWidth: 100 }}>
-                        {isBaseCurrencyRow ? (
-                          <input dir="ltr" value={toFaDigits("1")} disabled />
-                        ) : (
-                          <AmountInput value={row.fxRate} onChange={(v) => updateInstrumentRow(idx, { fxRate: v })} allowDecimal placeholder="نرخ ارز" />
-                        )}
-                      </td>
                       <td style={{ minWidth: 320 }}>
                         {row.type === "CASH" && (
                           <select value={row.cashBoxId} onChange={(e) => updateInstrumentRow(idx, { cashBoxId: e.target.value })}>
@@ -950,6 +932,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                                 accounts={bankAccounts}
                                 value={row.bankAccountId}
                                 onChange={(id, acc) => {
+                                  dropSettlementTargetsEqualTo(row.clientKey, id);
                                   const currencyId = acc.currencyId ? String(acc.currencyId) : "";
                                   updateInstrumentRow(idx, { bankAccountId: id, currencyId, fxRate: acc.currencyId === baseCurrency.id ? "1" : row.fxRate });
                                 }}
@@ -975,15 +958,16 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                                 filter={(a) => a.accountType.hasChequeBook}
                                 placeholder="حساب بانکی صادرکننده"
                                 value={row.bankAccountId}
-                                onChange={(id) =>
+                                onChange={(id) => {
+                                  dropSettlementTargetsEqualTo(row.clientKey, id);
                                   updateInstrumentRow(idx, {
                                     bankAccountId: id,
                                     // با تغییر حساب بانکی صادرکننده، برگه‌ی دسته چک/شماره‌ی قبلی دیگر معتبر نیست
                                     chequeBookLeafId: "",
                                     chequeBookLeafDisplay: "",
                                     chequeNumber: "",
-                                  })
-                                }
+                                  });
+                                }}
                               />
                             </div>
                             <div style={{ width: 160 }}>
@@ -1032,6 +1016,28 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                               })
                             }
                           />
+                        )}
+                      </td>
+                      <td style={{ minWidth: 130 }}>
+                        {row.type === "CASH" && (
+                          <select value={row.currencyId} onChange={(e) => updateInstrumentRow(idx, { currencyId: e.target.value, fxRate: Number(e.target.value) === baseCurrency.id ? "1" : row.fxRate })}>
+                            <option value="">انتخاب ارز</option>
+                            {currencies.map((c) => (
+                              <option key={c.id} value={c.id}>{c.title}</option>
+                            ))}
+                          </select>
+                        )}
+                        {(row.type === "CHEQUE" || row.type === "CHEQUE_TRANSFER") && <span>{baseCurrency.title}</span>}
+                        {row.type === "BANK_TRANSFER" && <span>{bankAccount?.currency?.title || "—"}</span>}
+                      </td>
+                      <td style={{ minWidth: 130 }}>
+                        <AmountInput value={row.amount} onChange={(v) => updateInstrumentRow(idx, { amount: v })} allowDecimal placeholder="۰" disabled={isSpendRow} />
+                      </td>
+                      <td style={{ minWidth: 100 }}>
+                        {isBaseCurrencyRow ? (
+                          <input dir="ltr" value={toFaDigits("1")} disabled />
+                        ) : (
+                          <AmountInput value={row.fxRate} onChange={(v) => updateInstrumentRow(idx, { fxRate: v })} allowDecimal placeholder="نرخ ارز" />
                         )}
                       </td>
                       <td style={{ minWidth: 140 }}>
@@ -1159,6 +1165,8 @@ function SettlementRowFields({
   const paymentType = paymentTypes.find((t) => String(t.id) === row.paymentTypeId);
   const basisType = paymentType?.basisType;
   const instrumentRow = instrumentRows.find((r) => r.clientKey === row.instrumentClientKey);
+  // حساب بانکیِ مبدأ (ابزار حواله یا چکِ صادرشده) از انتخابگر مقصدِ «به بانک» حذف می‌شود؛ پرداخت از یک حساب به همان حساب مجاز نیست
+  const sourceBankAccountId = instrumentRow && (instrumentRow.type === "BANK_TRANSFER" || instrumentRow.type === "CHEQUE") ? instrumentRow.bankAccountId : "";
 
   useEffect(() => {
     if (!basisType || basisType === "NONE" || !row.partyId) {
@@ -1348,6 +1356,7 @@ function SettlementRowFields({
         {selectorKind(paymentType?.nature) === "BANK" ? (
           <BankAccountPicker
             accounts={bankAccounts}
+            filter={(a) => !sourceBankAccountId || String(a.id) !== sourceBankAccountId}
             value={row.bankAccountId}
             onChange={(id, b) => onChange({ bankAccountId: id, cashBoxId: "", partyId: "", partyDisplay: bankAccountLabel(b) })}
           />

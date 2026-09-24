@@ -331,7 +331,7 @@ router.get("/payments/pickable-basis-documents", can(`${FORM}.view`), async (req
 
 async function validateSubjectLines(
   lines: SettlementLineInput[],
-  instrumentByKey: Map<string, { id?: number; amount: number; baseAmount: number; currencyId: number; fxRate: number }>,
+  instrumentByKey: Map<string, { id?: number; amount: number; baseAmount: number; currencyId: number; fxRate: number; bankAccountId?: number | null }>,
   baseCurrency: { id: number } & ConversionCurrency,
   excludePaymentId?: number,
   // ردیف‌های موضوعات پرداختِ ذخیره‌شده‌ی ابزارهای دارای گردش (در «ویرایش مجدد» تغییر نمی‌کنند) — مبلغشان از
@@ -393,6 +393,10 @@ async function validateSubjectLines(
       if (!l.bankAccountId) throw new Error(`ردیف ${idx + 1}: انتخاب حساب بانکی الزامی است`);
       // eslint-disable-next-line no-await-in-loop
       if (!(await prisma.bankAccount.findUnique({ where: { id: l.bankAccountId } }))) throw new Error(`ردیف ${idx + 1}: حساب بانکی یافت نشد`);
+      // پرداخت از یک حساب بانکی به همان حساب بانکی مجاز نیست (حساب بانکی مبدأ = حساب بانکی ابزار حواله/چکِ همان قلم)
+      if (l.bankAccountId === instrumentByKey.get(l.instrumentClientKey)?.bankAccountId) {
+        throw new Error(`ردیف ${idx + 1}: پرداخت از یک حساب بانکی به همان حساب بانکی مجاز نیست`);
+      }
       rowBankAccountId = l.bankAccountId;
     } else if (paymentType.nature === "TO_CASH_BOX") {
       if (!l.cashBoxId) throw new Error(`ردیف ${idx + 1}: انتخاب صندوق الزامی است`);
@@ -990,10 +994,10 @@ router.put("/payments/:id/re-edit", can(`${FORM}.reEdit`), async (req, res) => {
     const removed = editable.filter((l: any) => !seen.has(l.id));
     if (locked.length + keep.length === 0) throw new Error("سند پرداخت باید حداقل یک ردیف ابزار پرداخت داشته باشد");
 
-    const instrumentByKey = new Map<string, { id?: number; amount: number; baseAmount: number; currencyId: number; fxRate: number }>();
+    const instrumentByKey = new Map<string, { id?: number; amount: number; baseAmount: number; currencyId: number; fxRate: number; bankAccountId?: number | null }>();
     for (const k of keep) {
-      if (k.data) instrumentByKey.set(String(k.ex.id), { id: k.ex.id, amount: k.data.amount, baseAmount: k.data.baseAmount, currencyId: k.data.currencyId, fxRate: k.data.fxRate });
-      else instrumentByKey.set(String(k.ex.id), { id: k.ex.id, amount: Number(k.ex.amount), baseAmount: Number(k.ex.baseAmount), currencyId: k.ex.currencyId, fxRate: Number(k.ex.fxRate) });
+      if (k.data) instrumentByKey.set(String(k.ex.id), { id: k.ex.id, amount: k.data.amount, baseAmount: k.data.baseAmount, currencyId: k.data.currencyId, fxRate: k.data.fxRate, bankAccountId: k.data.bankAccountId });
+      else instrumentByKey.set(String(k.ex.id), { id: k.ex.id, amount: Number(k.ex.amount), baseAmount: Number(k.ex.baseAmount), currencyId: k.ex.currencyId, fxRate: Number(k.ex.fxRate), bankAccountId: k.ex.bankAccountId });
     }
     const incomingSettlements = Array.isArray(body.settlementLines) ? body.settlementLines : [];
     for (const sl of incomingSettlements) {
