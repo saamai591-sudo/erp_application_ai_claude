@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { generateDetailCode, registerDetailCode, nextSerialNumber } from "../utils/coding";
+import { bankAccountDetailTitle } from "../utils/detailValues";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 
@@ -115,12 +116,12 @@ router.delete("/branches/:id", can(`${BANK_BRANCHES}.delete`), async (req, res) 
 
 // ---------- حساب بانکی ----------
 router.get("/accounts", async (_req, res) => {
-  res.json(
-    await prisma.bankAccount.findMany({
-      include: { accountType: true, bankBranch: { include: { bankParty: true } }, currency: true },
-      orderBy: { detailCode: "asc" },
-    })
-  );
+  const accounts = await prisma.bankAccount.findMany({
+    include: { accountType: true, bankBranch: { include: { bankParty: true } }, currency: true },
+    orderBy: { detailCode: "asc" },
+  });
+  // detailTitle: عنوان تفصیلی حساب بانکی (برای انتخابگر مشترک BankAccountPicker)
+  res.json(accounts.map((a) => ({ ...a, detailTitle: bankAccountDetailTitle(a.accountNumber) })));
 });
 
 router.post("/accounts", can(`${BANK_ACCOUNTS}.create`), async (req, res) => {

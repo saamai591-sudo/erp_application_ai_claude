@@ -1,5 +1,10 @@
 import { prisma } from "../lib/prisma";
 
+/** عنوان تفصیلیِ حساب بانکی — تنها محل تعریف؛ هم در سند حسابداری و هم در انتخابگر مشترک حساب بانکی (detailTitle) استفاده می‌شود */
+export function bankAccountDetailTitle(accountNumber: string): string {
+  return `حساب ${accountNumber}`;
+}
+
 async function titleForEntity(entityTable: string, entityId: number): Promise<string> {
   switch (entityTable) {
     case "Party": {
@@ -13,7 +18,7 @@ async function titleForEntity(entityTable: string, entityId: number): Promise<st
     }
     case "BankAccount": {
       const b = await prisma.bankAccount.findUnique({ where: { id: entityId } });
-      return b ? `حساب ${b.accountNumber}` : "—";
+      return b ? bankAccountDetailTitle(b.accountNumber) : "—";
     }
     case "CostCenter": {
       const cc = await prisma.costCenter.findUnique({ where: { id: entityId } });

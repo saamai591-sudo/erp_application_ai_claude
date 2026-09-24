@@ -18,6 +18,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState, clearPersistedStateFamily } from "../lib/usePersistedState";
 import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
+import { BankAccountPicker, bankAccountLabel } from "../components/BankAccountPicker";
 import { partyDisplayName } from "./Users";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, roundToCurrencyDecimals } from "../lib/currencyConversion";
@@ -32,7 +33,11 @@ import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss
 
 type InstrumentType = "CASH" | "BANK_TRANSFER" | "CHEQUE" | "CHEQUE_TRANSFER";
 type DocStatus = "DRAFT" | "APPROVED";
-type PaymentNature = "SUPPLIER_PAYMENT" | "ADVANCE_PAYMENT" | "CUSTOMER_PAYMENT" | "OTHER_PAYMENT" | "PURCHASE_VAT" | "SALES_VAT";
+type PaymentNature = "SUPPLIER_PAYMENT" | "ADVANCE_PAYMENT" | "CUSTOMER_PAYMENT" | "OTHER_PAYMENT" | "PURCHASE_VAT" | "SALES_VAT" | "TO_BANK" | "TO_CASH_BOX";
+// انتخابگرِ «طرف حساب / حساب» ردیف موضوعات پرداخت: برای ماهیت «به بانک» فقط حساب‌های بانکی و برای «به صندوق» فقط صندوق‌ها؛ در بقیه‌ی ماهیت‌ها طرف حساب
+function selectorKind(nature?: PaymentNature): "BANK" | "CASH" | "PARTY" {
+  return nature === "TO_BANK" ? "BANK" : nature === "TO_CASH_BOX" ? "CASH" : "PARTY";
+}
 type PaymentBasisType = "NONE" | "PURCHASE_INVOICE" | "SALES_INVOICE" | "PURCHASE_ORDER";
 
 const TYPE_FA: Record<InstrumentType, string> = { CASH: "نقد", BANK_TRANSFER: "حواله/انتقال بانکی", CHEQUE: "چک", CHEQUE_TRANSFER: "چک انتقالی" };
@@ -41,7 +46,7 @@ const STATUS_FA: Record<DocStatus, string> = { DRAFT: "ثبت", APPROVED: "تا�
 interface PartyOption { id: number; detailCode: string; category: "INDIVIDUAL" | "LEGAL"; isActive: boolean; firstName: string | null; lastName: string | null; name: string | null }
 interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null; decimalPlaces: number }
 interface CashBoxOption { id: number; title: string }
-interface BankAccountOption { id: number; accountNumber: string; detailCode: string; bankBranch: { title: string }; currencyId: number | null; currency: { title: string } | null; accountType: { hasChequeBook: boolean } }
+interface BankAccountOption { id: number; accountNumber: string; detailCode: string; detailTitle: string; bankBranch: { title: string }; currencyId: number | null; currency: { title: string } | null; accountType: { hasChequeBook: boolean } }
 interface ChequeTypeOption { id: number; code: number; title: string; isSameDay?: boolean }
 interface PaymentTypeOption { id: number; title: string; nature: PaymentNature; basisType: PaymentBasisType; isActive: boolean }
 interface PickableCheque { id: number; number: string; dueDate: string; amount: number; partyDisplay: string; currencyTitle: string }
@@ -93,8 +98,11 @@ interface DetailSettlementLine {
   instrumentLineId: number;
   paymentTypeId: number;
   paymentTypeTitle: string;
-  partyId: number;
+  partyId: number | null;
   partyDisplay: string;
+  bankAccountId: number | null;
+  cashBoxId: number | null;
+  accountDisplay: string;
   salesInvoiceId: number | null;
   salesInvoiceNumber?: number;
   purchaseInvoiceId: number | null;
@@ -285,6 +293,8 @@ interface SettlementRowState {
   paymentTypeId: string;
   partyId: string;
   partyDisplay: string;
+  bankAccountId: string;
+  cashBoxId: string;
   salesInvoiceId: string;
   purchaseInvoiceId: string;
   purchaseOrderId: string;
@@ -302,7 +312,7 @@ interface SettlementRowState {
 // طبق بند ۲ سند: ارز به‌صورت پیش‌فرض از ارز قلم پرداخت مقداردهی شود.
 function emptySettlementRow(instrumentClientKey: string, instrumentLabel: string, instrumentCurrencyId: string): SettlementRowState {
   return {
-    instrumentClientKey, instrumentLabel, paymentTypeId: "", partyId: "", partyDisplay: "",
+    instrumentClientKey, instrumentLabel, paymentTypeId: "", partyId: "", partyDisplay: "", bankAccountId: "", cashBoxId: "",
     salesInvoiceId: "", purchaseInvoiceId: "", purchaseOrderId: "", basisDisplay: "",
     currencyId: instrumentCurrencyId, fxRate: "", amount: "", description: "",
     exchangeGainLoss: 0,
@@ -390,8 +400,10 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
           ? `ردیف ${toFaDigits(String(instrumentIndexById.get(l.instrumentLineId)! + 1))} - ${TYPE_FA[d.instrumentLines[instrumentIndexById.get(l.instrumentLineId)!].type]}`
           : "",
         paymentTypeId: String(l.paymentTypeId),
-        partyId: String(l.partyId),
-        partyDisplay: l.partyDisplay,
+        partyId: l.partyId ? String(l.partyId) : "",
+        bankAccountId: l.bankAccountId ? String(l.bankAccountId) : "",
+        cashBoxId: l.cashBoxId ? String(l.cashBoxId) : "",
+        partyDisplay: l.accountDisplay || l.partyDisplay,
         salesInvoiceId: l.salesInvoiceId ? String(l.salesInvoiceId) : "",
         purchaseInvoiceId: l.purchaseInvoiceId ? String(l.purchaseInvoiceId) : "",
         purchaseOrderId: l.purchaseOrderId ? String(l.purchaseOrderId) : "",
@@ -587,7 +599,9 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
       .map((r) => ({
         paymentTypeId: Number(r.paymentTypeId),
         instrumentClientKey: r.instrumentClientKey,
-        partyId: Number(r.partyId),
+        partyId: r.partyId ? Number(r.partyId) : null,
+        bankAccountId: r.bankAccountId ? Number(r.bankAccountId) : null,
+        cashBoxId: r.cashBoxId ? Number(r.cashBoxId) : null,
         salesInvoiceId: r.salesInvoiceId ? Number(r.salesInvoiceId) : null,
         purchaseInvoiceId: r.purchaseInvoiceId ? Number(r.purchaseInvoiceId) : null,
         purchaseOrderId: r.purchaseOrderId ? Number(r.purchaseOrderId) : null,
@@ -931,21 +945,16 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                         )}
                         {row.type === "BANK_TRANSFER" && (
                           <div style={{ display: "flex", gap: 6 }}>
-                            <select
-                              value={row.bankAccountId}
-                              onChange={(e) => {
-                                const acc = bankAccounts.find((a) => String(a.id) === e.target.value);
-                                const currencyId = acc?.currencyId ? String(acc.currencyId) : "";
-                                updateInstrumentRow(idx, { bankAccountId: e.target.value, currencyId, fxRate: acc?.currencyId === baseCurrency.id ? "1" : row.fxRate });
-                              }}
-                             
-                              style={{ flex: 1 }}
-                            >
-                              <option value="">انتخاب حساب بانکی</option>
-                              {bankAccounts.map((a) => (
-                                <option key={a.id} value={a.id}>{a.accountNumber} — {a.bankBranch.title}</option>
-                              ))}
-                            </select>
+                            <div style={{ flex: 1 }}>
+                              <BankAccountPicker
+                                accounts={bankAccounts}
+                                value={row.bankAccountId}
+                                onChange={(id, acc) => {
+                                  const currencyId = acc.currencyId ? String(acc.currencyId) : "";
+                                  updateInstrumentRow(idx, { bankAccountId: id, currencyId, fxRate: acc.currencyId === baseCurrency.id ? "1" : row.fxRate });
+                                }}
+                              />
+                            </div>
                             <input
                               placeholder="شماره پیگیری"
                               value={row.referenceNumber}
@@ -960,25 +969,23 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                           // انتخاب شود)، فقط حساب‌های بانکیِ نوعِ «دارای دسته چک» نمایش داده می‌شوند، شماره چک
                           // همیشه از دسته چک انتخاب می‌شود (نه تایپ آزاد)، و شعبه بانک کاملاً حذف شده است.
                           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                            <select
-                              value={row.bankAccountId}
-                              onChange={(e) =>
-                                updateInstrumentRow(idx, {
-                                  bankAccountId: e.target.value,
-                                  // با تغییر حساب بانکی صادرکننده، برگه‌ی دسته چک/شماره‌ی قبلی دیگر معتبر نیست
-                                  chequeBookLeafId: "",
-                                  chequeBookLeafDisplay: "",
-                                  chequeNumber: "",
-                                })
-                              }
-                             
-                              style={{ flex: "1 1 160px" }}
-                            >
-                              <option value="">حساب بانکی صادرکننده</option>
-                              {bankAccounts.filter((a) => a.accountType.hasChequeBook).map((a) => (
-                                <option key={a.id} value={a.id}>{a.accountNumber} — {a.bankBranch.title}</option>
-                              ))}
-                            </select>
+                            <div style={{ flex: "1 1 160px" }}>
+                              <BankAccountPicker
+                                accounts={bankAccounts}
+                                filter={(a) => a.accountType.hasChequeBook}
+                                placeholder="حساب بانکی صادرکننده"
+                                value={row.bankAccountId}
+                                onChange={(id) =>
+                                  updateInstrumentRow(idx, {
+                                    bankAccountId: id,
+                                    // با تغییر حساب بانکی صادرکننده، برگه‌ی دسته چک/شماره‌ی قبلی دیگر معتبر نیست
+                                    chequeBookLeafId: "",
+                                    chequeBookLeafDisplay: "",
+                                    chequeNumber: "",
+                                  })
+                                }
+                              />
+                            </div>
                             <div style={{ width: 160 }}>
                               <RecordPickerField
                                 title="انتخاب برگه چک"
@@ -1072,7 +1079,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                   <th>ردیف</th>
                   <th>قلم</th>
                   <th>نوع پرداخت</th>
-                  <th>طرف حساب</th>
+                  <th>طرف حساب / حساب</th>
                   <th>ارز</th>
                   <th>مبنا</th>
                   <th>نرخ ارز</th>
@@ -1092,6 +1099,8 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                     onRemove={() => removeSettlementRow(idx)}
                     paymentTypes={paymentTypes}
                     parties={parties}
+                    bankAccounts={bankAccounts}
+                    cashBoxes={cashBoxes}
                     customerPartyIds={customerPartyIds}
                     supplierPartyIds={supplierPartyIds}
                     currencies={currencies}
@@ -1123,7 +1132,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
 }
 
 function SettlementRowFields({
-  idx, row, onChange, onRemove, paymentTypes, parties, customerPartyIds, supplierPartyIds, currencies, baseCurrency, instrumentRows, editId, headerPartyId, headerPartyDisplay, headerDate, allSettlementRows, onApplyBasisSelection,
+  idx, row, onChange, onRemove, paymentTypes, parties, bankAccounts, cashBoxes, customerPartyIds, supplierPartyIds, currencies, baseCurrency, instrumentRows, editId, headerPartyId, headerPartyDisplay, headerDate, allSettlementRows, onApplyBasisSelection,
 }: {
   idx: number;
   row: SettlementRowState;
@@ -1131,6 +1140,8 @@ function SettlementRowFields({
   onRemove: () => void;
   paymentTypes: PaymentTypeOption[];
   parties: PartyOption[];
+  bankAccounts: BankAccountOption[];
+  cashBoxes: CashBoxOption[];
   customerPartyIds: Set<number>;
   supplierPartyIds: Set<number>;
   currencies: CurrencyOption[];
@@ -1221,9 +1232,13 @@ function SettlementRowFields({
   // (مشتری/تامین‌کننده بودن طرف حساب هدر)؛ برای «سایر»/وی‌ای‌تی بدون شرط همیشه ست می‌شود.
   function onPaymentTypeChange(paymentTypeId: string) {
     const rt = paymentTypes.find((t) => String(t.id) === paymentTypeId);
-    let partyId = row.partyId;
-    let partyDisplay = row.partyDisplay;
-    if (rt && !partyId && headerPartyId) {
+    // با تغییرِ نوعِ انتخابگر (طرف حساب ↔ حساب بانکی ↔ صندوق) مقدار قبلی معتبر نیست و پاک می‌شود
+    const kindChanged = selectorKind(rt?.nature) !== selectorKind(paymentType?.nature);
+    let partyId = kindChanged ? "" : row.partyId;
+    let partyDisplay = kindChanged ? "" : row.partyDisplay;
+    const bankAccountId = kindChanged ? "" : row.bankAccountId;
+    const cashBoxId = kindChanged ? "" : row.cashBoxId;
+    if (rt && selectorKind(rt.nature) === "PARTY" && !partyId && headerPartyId) {
       const headerPartyIdNum = Number(headerPartyId);
       const qualifies =
         rt.nature === "SUPPLIER_PAYMENT" || rt.nature === "ADVANCE_PAYMENT" ? supplierPartyIds.has(headerPartyIdNum)
@@ -1234,10 +1249,25 @@ function SettlementRowFields({
         partyDisplay = headerPartyDisplay;
       }
     }
+    // ماهیت «به بانک»/«به صندوق»: سند مبنایی وجود ندارد که مبلغ را تعیین کند؛ مبلغ ردیف خودکار برابر مانده‌ی قلم (ردیف ابزار پرداخت) این ردیف می‌شود
+    let amountPatch: Partial<SettlementRowState> = {};
+    if (rt && selectorKind(rt.nature) !== "PARTY" && instrumentRow && (kindChanged || !row.amount)) {
+      const remainingBase = instrumentRemainingBaseCapacity();
+      const instrumentCurrency = currencies.find((c) => String(c.id) === instrumentRow.currencyId);
+      if (remainingBase > 0) {
+        if (isBaseCurrencyRow) {
+          amountPatch = { amount: String(remainingBase), fxRate: "1", exchangeGainLoss: 0 };
+        } else if (rowCurrency && instrumentCurrency && rowCurrency.id === instrumentCurrency.id) {
+          const foreignAmount = roundToCurrencyDecimals(fromBaseCurrencyAmount(remainingBase, Number(instrumentRow.fxRate) || 1, rowCurrency), rowCurrency.decimalPlaces);
+          amountPatch = { amount: String(foreignAmount), fxRate: instrumentRow.fxRate, exchangeGainLoss: 0 };
+        }
+      }
+    }
     onChange({
       paymentTypeId,
-      partyId, partyDisplay,
+      partyId, partyDisplay, bankAccountId, cashBoxId,
       salesInvoiceId: "", purchaseInvoiceId: "", purchaseOrderId: "", basisDisplay: "",
+      ...amountPatch,
     });
   }
 
@@ -1315,6 +1345,21 @@ function SettlementRowFields({
         </select>
       </td>
       <td style={{ minWidth: 180 }}>
+        {selectorKind(paymentType?.nature) === "BANK" ? (
+          <BankAccountPicker
+            accounts={bankAccounts}
+            value={row.bankAccountId}
+            onChange={(id, b) => onChange({ bankAccountId: id, cashBoxId: "", partyId: "", partyDisplay: bankAccountLabel(b) })}
+          />
+        ) : selectorKind(paymentType?.nature) === "CASH" ? (
+          <RecordPickerField
+            title="انتخاب صندوق"
+            displayValue={row.partyDisplay}
+            rows={cashBoxes}
+            columns={[{ header: "عنوان", render: (c) => c.title, filterValue: (c) => c.title }]}
+            onSelect={(c) => onChange({ cashBoxId: String(c.id), bankAccountId: "", partyId: "", partyDisplay: c.title })}
+          />
+        ) : (
         <RecordPickerField
           title="انتخاب طرف حساب"
           disabled={!paymentType}
@@ -1326,6 +1371,7 @@ function SettlementRowFields({
           ]}
           onSelect={(p) => onChange({ partyId: String(p.id), partyDisplay: partyDisplayName(p), salesInvoiceId: "", purchaseInvoiceId: "", purchaseOrderId: "", basisDisplay: "" })}
         />
+        )}
       </td>
       <td style={{ minWidth: 110 }}>
         <select

@@ -5,8 +5,8 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { Modal } from "../components/Modal";
-import { RecordPickerField } from "../components/RecordPicker";
 import { api, ApiError } from "../lib/api";
+import { BankAccountPicker } from "../components/BankAccountPicker";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { RefreshButton } from "../components/RefreshButton";
@@ -26,6 +26,7 @@ const STATUS_FA: Record<string, string> = { RAW: "خام", ISSUED: "صادر ش�
 interface BankAccountOption {
   id: number;
   detailCode: string;
+  detailTitle: string;
   accountNumber: string;
   accountType: { id: number; hasChequeBook: boolean };
   bankBranch: { title: string };
@@ -37,11 +38,7 @@ interface ChequeBookLeaf {
   number: string;
   printTemplate: string | null;
   status: "RAW" | "ISSUED" | "VOID";
-  bankAccount: BankAccountOption;
-}
-
-function accountLabel(a: BankAccountOption): string {
-  return `${toFaDigits(a.detailCode)} - ${a.accountNumber} — ${a.bankBranch.title}`;
+  bankAccount: Omit<BankAccountOption, "detailTitle">;
 }
 
 export default function ChequeBookLeaves() {
@@ -154,7 +151,6 @@ function VoidIcon() {
 
 function BulkCreateModal({ bankAccounts, onClose, onDone }: { bankAccounts: BankAccountOption[]; onClose: () => void; onDone: () => void }) {
   const [bankAccountId, setBankAccountId] = useState("");
-  const [bankAccountDisplay, setBankAccountDisplay] = useState("");
   const [series, setSeries] = useState("");
   const [startNumber, setStartNumber] = useState("");
   const [count, setCount] = useState("");
@@ -190,19 +186,7 @@ function BulkCreateModal({ bankAccounts, onClose, onDone }: { bankAccounts: Bank
       <div className="form-grid">
         <div className="form-field full">
           <label>حساب بانکی<RequiredMark /></label>
-          <RecordPickerField
-            title="انتخاب حساب بانکی"
-            displayValue={bankAccountDisplay}
-            rows={bankAccounts}
-            columns={[
-              { header: "کد", render: (a) => toFaDigits(a.detailCode), filterValue: (a) => a.detailCode, width: "100px" },
-              { header: "شماره حساب", render: (a) => `${a.accountNumber} — ${a.bankBranch.title}`, filterValue: (a) => a.accountNumber },
-            ]}
-            onSelect={(a) => {
-              setBankAccountId(String(a.id));
-              setBankAccountDisplay(accountLabel(a));
-            }}
-          />
+          <BankAccountPicker accounts={bankAccounts} value={bankAccountId} onChange={(id) => setBankAccountId(id)} />
         </div>
         <div className="form-field">
           <label>سری<RequiredMark /></label>
@@ -225,7 +209,7 @@ function BulkCreateModal({ bankAccounts, onClose, onDone }: { bankAccounts: Bank
   );
 }
 
-const DEFAULT_FORM = { bankAccountId: "", bankAccountDisplay: "", series: "", number: "", printTemplate: "" };
+const DEFAULT_FORM = { bankAccountId: "", series: "", number: "", printTemplate: "" };
 
 function ChequeBookLeafForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
@@ -254,7 +238,6 @@ function ChequeBookLeafForm({ editId }: { editId?: number }) {
         setStatus(found.status);
         setForm({
           bankAccountId: String(found.bankAccountId),
-          bankAccountDisplay: accountLabel(found.bankAccount),
           series: found.series,
           number: found.number,
           printTemplate: found.printTemplate || "",
@@ -343,17 +326,7 @@ function ChequeBookLeafForm({ editId }: { editId?: number }) {
               <RequiredMark />
               <FieldHint label="حساب بانکی" text="فقط حساب‌های بانکیِ نوعِ «دارای دسته چک»" />
             </label>
-            <RecordPickerField
-              title="انتخاب حساب بانکی"
-              disabled={locked}
-              displayValue={form.bankAccountDisplay}
-              rows={eligibleAccounts}
-              columns={[
-                { header: "کد", render: (a) => toFaDigits(a.detailCode), filterValue: (a) => a.detailCode, width: "100px" },
-                { header: "شماره حساب", render: (a) => `${a.accountNumber} — ${a.bankBranch.title}`, filterValue: (a) => a.accountNumber },
-              ]}
-              onSelect={(a) => setForm({ ...form, bankAccountId: String(a.id), bankAccountDisplay: accountLabel(a) })}
-            />
+            <BankAccountPicker accounts={eligibleAccounts} value={form.bankAccountId} disabled={locked} onChange={(id) => setForm({ ...form, bankAccountId: id })} />
           </div>
           <div className="form-field">
             <label>سری<RequiredMark /></label>

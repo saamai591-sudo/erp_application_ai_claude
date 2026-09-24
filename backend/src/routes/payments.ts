@@ -65,7 +65,9 @@ interface InstrumentLineInput {
 interface SettlementLineInput {
   paymentTypeId: number;
   instrumentClientKey: string;
-  partyId: number;
+  partyId?: number | null;
+  bankAccountId?: number | null; // فقط برای ماهیت «به بانک»
+  cashBoxId?: number | null; // فقط برای ماهیت «به صندوق»
   salesInvoiceId?: number | null;
   purchaseInvoiceId?: number | null;
   purchaseOrderId?: number | null;
@@ -360,7 +362,7 @@ async function validateSubjectLines(
     if (!lockedBasisId) continue;
     const lockedBasisType: BasisType = sl.purchaseInvoiceId ? "PURCHASE_INVOICE" : sl.salesInvoiceId ? "SALES_INVOICE" : "PURCHASE_ORDER";
     // eslint-disable-next-line no-await-in-loop
-    const info = (await candidatesForBasisType(lockedBasisType, sl.partyId, excludePaymentId)).find((c) => c.id === lockedBasisId);
+    const info = (await candidatesForBasisType(lockedBasisType, sl.partyId as number, excludePaymentId)).find((c) => c.id === lockedBasisId);
     if (!info) continue;
     // eslint-disable-next-line no-await-in-loop
     const rowCurrency = sl.currencyId === baseCurrency.id ? baseCurrency : await prisma.currency.findUnique({ where: { id: sl.currencyId } });
@@ -383,15 +385,32 @@ async function validateSubjectLines(
       throw new Error(`ردیف ${idx + 1}: قلم (ردیف ابزار پرداخت مرتبط) نامعتبر است`);
     }
 
-    if (!l.partyId) throw new Error(`ردیف ${idx + 1}: طرف حساب الزامی است`);
-    if (paymentType.nature === "SUPPLIER_PAYMENT" || paymentType.nature === "ADVANCE_PAYMENT") {
+    // ماهیت «به بانک»/«به صندوق»: به‌جای طرف حساب، حساب بانکی/صندوق انتخاب می‌شود (معینِ سند حسابداری از تعیین حسابهای معین همان حساب/صندوق می‌آید)
+    let rowPartyId: number | null = null;
+    let rowBankAccountId: number | null = null;
+    let rowCashBoxId: number | null = null;
+    if (paymentType.nature === "TO_BANK") {
+      if (!l.bankAccountId) throw new Error(`ردیف ${idx + 1}: انتخاب حساب بانکی الزامی است`);
       // eslint-disable-next-line no-await-in-loop
-      const supplier = await prisma.supplier.findUnique({ where: { partyId: l.partyId } });
-      if (!supplier) throw new Error(`ردیف ${idx + 1}: طرف حساب باید در «تامین‌کنندگان» تعریف شده باشد`);
-    } else if (paymentType.nature === "CUSTOMER_PAYMENT") {
+      if (!(await prisma.bankAccount.findUnique({ where: { id: l.bankAccountId } }))) throw new Error(`ردیف ${idx + 1}: حساب بانکی یافت نشد`);
+      rowBankAccountId = l.bankAccountId;
+    } else if (paymentType.nature === "TO_CASH_BOX") {
+      if (!l.cashBoxId) throw new Error(`ردیف ${idx + 1}: انتخاب صندوق الزامی است`);
       // eslint-disable-next-line no-await-in-loop
-      const customer = await prisma.customer.findUnique({ where: { partyId: l.partyId } });
-      if (!customer) throw new Error(`ردیف ${idx + 1}: طرف حساب باید در «مشتریان» تعریف شده باشد`);
+      if (!(await prisma.cashBox.findUnique({ where: { id: l.cashBoxId } }))) throw new Error(`ردیف ${idx + 1}: صندوق یافت نشد`);
+      rowCashBoxId = l.cashBoxId;
+    } else {
+      if (!l.partyId) throw new Error(`ردیف ${idx + 1}: طرف حساب الزامی است`);
+      rowPartyId = l.partyId;
+      if (paymentType.nature === "SUPPLIER_PAYMENT" || paymentType.nature === "ADVANCE_PAYMENT") {
+        // eslint-disable-next-line no-await-in-loop
+        const supplier = await prisma.supplier.findUnique({ where: { partyId: l.partyId } });
+        if (!supplier) throw new Error(`ردیف ${idx + 1}: طرف حساب باید در «تامین‌کنندگان» تعریف شده باشد`);
+      } else if (paymentType.nature === "CUSTOMER_PAYMENT") {
+        // eslint-disable-next-line no-await-in-loop
+        const customer = await prisma.customer.findUnique({ where: { partyId: l.partyId } });
+        if (!customer) throw new Error(`ردیف ${idx + 1}: طرف حساب باید در «مشتریان» تعریف شده باشد`);
+      }
     }
 
     const basisType = paymentType.basisType as BasisType;
@@ -413,7 +432,7 @@ async function validateSubjectLines(
         if (f !== field && v) throw new Error(`ردیف ${idx + 1}: فقط سند مبنای متناسب با نوع پرداخت باید انتخاب شود`);
       }
       // eslint-disable-next-line no-await-in-loop
-      const candidates = await candidatesForBasisType(basisType, l.partyId, excludePaymentId);
+      const candidates = await candidatesForBasisType(basisType, l.partyId as number, excludePaymentId);
       basisInfo = candidates.find((c) => c.id === basisId) || null;
       if (!basisInfo) throw new Error(`ردیف ${idx + 1}: سند مبنای انتخاب‌شده یافت نشد یا متعلق به این طرف حساب نیست`);
     }
@@ -452,7 +471,9 @@ async function validateSubjectLines(
     cleaned.push({
       instrumentClientKey: l.instrumentClientKey,
       paymentTypeId: l.paymentTypeId,
-      partyId: l.partyId,
+      partyId: rowPartyId,
+      bankAccountId: rowBankAccountId,
+      cashBoxId: rowCashBoxId,
       purchaseInvoiceId: basisType === "PURCHASE_INVOICE" ? basisIds.purchaseInvoiceId : null,
       salesInvoiceId: basisType === "SALES_INVOICE" ? basisIds.salesInvoiceId : null,
       purchaseOrderId: basisType === "PURCHASE_ORDER" ? basisIds.purchaseOrderId : null,
@@ -518,7 +539,7 @@ const PAYMENT_DETAIL_INCLUDE = {
   journalEntry: true,
   instrumentLines: { include: { currency: true, cashBox: true, bankAccount: { include: { accountType: true } }, chequeBankBranch: true, chequeItem: true, chequeBookLeaf: true }, orderBy: { rowOrder: "asc" } },
   settlementLines: {
-    include: { paymentType: true, party: true, currency: true, purchaseInvoice: true, salesInvoice: true, purchaseOrder: true },
+    include: { paymentType: true, party: true, bankAccount: { include: { bankBranch: true } }, cashBox: true, currency: true, purchaseInvoice: true, salesInvoice: true, purchaseOrder: true },
     orderBy: { rowOrder: "asc" },
   },
 } as const;
@@ -571,7 +592,11 @@ function serializePayment(d: any) {
       paymentTypeId: l.paymentTypeId,
       paymentTypeTitle: l.paymentType.title,
       partyId: l.partyId,
-      partyDisplay: partyDisplay(l.party),
+      partyDisplay: l.party ? partyDisplay(l.party) : "",
+      bankAccountId: l.bankAccountId,
+      cashBoxId: l.cashBoxId,
+      // عنوان «حساب» ردیف: طرف حساب، یا حساب بانکی / صندوق (ماهیت «به بانک» / «به صندوق»)
+      accountDisplay: l.bankAccount ? `${l.bankAccount.accountNumber} — ${l.bankAccount.bankBranch.title}` : l.cashBox ? l.cashBox.title : l.party ? partyDisplay(l.party) : "",
       purchaseInvoiceId: l.purchaseInvoiceId,
       purchaseInvoiceNumber: l.purchaseInvoice?.number,
       salesInvoiceId: l.salesInvoiceId,
@@ -724,7 +749,7 @@ router.post("/payments/:id/approve", can(`${FORM}.approve`), async (req, res) =>
       if (!basisId) continue;
       const basisType: BasisType = s.purchaseInvoiceId ? "PURCHASE_INVOICE" : s.salesInvoiceId ? "SALES_INVOICE" : "PURCHASE_ORDER";
       // eslint-disable-next-line no-await-in-loop
-      const candidates = await candidatesForBasisType(basisType, s.partyId, id);
+      const candidates = await candidatesForBasisType(basisType, s.partyId as number, id);
       const info = candidates.find((c) => c.id === basisId);
       if (!info) throw new Error("سند مبنای یکی از ردیف‌های موضوعات پرداخت یافت نشد");
       // eslint-disable-next-line no-await-in-loop
@@ -807,6 +832,16 @@ router.post("/payments/:id/approve", can(`${FORM}.approve`), async (req, res) =>
           await tx.bankAccount.update({ where: { id: l.bankAccountId }, data: { hasTransactions: true } });
         }
       }
+      for (const s of d.settlementLines) {
+        if (s.bankAccountId) {
+          // eslint-disable-next-line no-await-in-loop
+          await tx.bankAccount.update({ where: { id: s.bankAccountId }, data: { hasTransactions: true } });
+        }
+        if (s.cashBoxId) {
+          // eslint-disable-next-line no-await-in-loop
+          await tx.cashBox.update({ where: { id: s.cashBoxId }, data: { hasTransactions: true } });
+        }
+      }
       await tx.party.update({ where: { id: d.partyId }, data: { hasTransactions: true } });
       await tx.payment.update({ where: { id }, data: { status: "APPROVED" } });
     });
@@ -858,8 +893,9 @@ router.post("/payments/:id/unapprove", can(`${FORM}.unapprove`), async (req, res
       }
       await tx.payment.update({ where: { id }, data: { status: "DRAFT" } });
     });
-    await recomputeCashBoxHasTransactions(d.instrumentLines.filter((l: any) => l.cashBoxId).map((l: any) => l.cashBoxId));
-    await recomputeBankAccountHasTransactions(d.instrumentLines.filter((l: any) => l.bankAccountId).map((l: any) => l.bankAccountId));
+    const settlementRefs = await prisma.paymentSettlementLine.findMany({ where: { paymentId: id }, select: { bankAccountId: true, cashBoxId: true } });
+    await recomputeCashBoxHasTransactions([...d.instrumentLines.filter((l: any) => l.cashBoxId).map((l: any) => l.cashBoxId), ...settlementRefs.filter((s) => s.cashBoxId).map((s) => s.cashBoxId as number)]);
+    await recomputeBankAccountHasTransactions([...d.instrumentLines.filter((l: any) => l.bankAccountId).map((l: any) => l.bankAccountId), ...settlementRefs.filter((s) => s.bankAccountId).map((s) => s.bankAccountId as number)]);
     res.json({ id, status: "DRAFT" });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در برگشت از تایید" });
@@ -1052,8 +1088,10 @@ router.put("/payments/:id/re-edit", can(`${FORM}.reEdit`), async (req, res) => {
     });
 
     await markPaymentTypesUsed(settlementLines);
-    await recomputeCashBoxHasTransactions(removed.filter((l: any) => l.cashBoxId).map((l: any) => l.cashBoxId));
-    await recomputeBankAccountHasTransactions(removed.filter((l: any) => l.bankAccountId).map((l: any) => l.bankAccountId));
+    // حساب بانکی/صندوقِ ردیف‌های موضوعاتِ قبلی و جدید هم دوباره محاسبه می‌شود (ماهیت «به بانک»/«به صندوق»)
+    const oldSettlements = (existing.settlementLines as any[]).filter((sl) => editableById.has(sl.instrumentLineId));
+    await recomputeCashBoxHasTransactions([...removed.filter((l: any) => l.cashBoxId).map((l: any) => l.cashBoxId), ...oldSettlements.filter((s) => s.cashBoxId).map((s) => s.cashBoxId), ...settlementLines.filter((s: any) => s.cashBoxId).map((s: any) => s.cashBoxId)]);
+    await recomputeBankAccountHasTransactions([...removed.filter((l: any) => l.bankAccountId).map((l: any) => l.bankAccountId), ...oldSettlements.filter((s) => s.bankAccountId).map((s) => s.bankAccountId), ...settlementLines.filter((s: any) => s.bankAccountId).map((s: any) => s.bankAccountId)]);
     res.json({ id });
   } catch (e: any) {
     res.status(e.status || 400).json({ error: e.message || "خطا در ذخیره" });

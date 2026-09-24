@@ -15,6 +15,7 @@ import { toFaDigits } from "../lib/formatAmount";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState, clearPersistedStateFamily } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
+import { BankAccountPicker } from "../components/BankAccountPicker";
 import { partyDisplayName } from "./Users";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod } from "../lib/fiscalYearDefaultDate";
 
@@ -26,7 +27,7 @@ import { FiscalPeriodRange, fetchSelectedFiscalPeriod } from "../lib/fiscalYearD
 interface PartyOption { id: number; detailCode: string; category: "INDIVIDUAL" | "LEGAL"; isActive: boolean; firstName: string | null; lastName: string | null; name: string | null }
 interface CurrencyOption { id: number; title: string; isBase: boolean }
 interface CashBoxOption { id: number; title: string }
-interface BankAccountOption { id: number; accountNumber: string; currencyId: number | null; currency: { title: string } | null; bankBranch: { title: string }; accountType: { hasChequeBook: boolean } }
+interface BankAccountOption { id: number; accountNumber: string; detailCode: string; detailTitle: string; currencyId: number | null; currency: { title: string } | null; bankBranch: { title: string }; accountType: { hasChequeBook: boolean } }
 interface BranchOption { id: number; title: string }
 interface TypeOption { id: number; title: string; isActive?: boolean }
 
@@ -354,11 +355,8 @@ function OpeningForm({ editId }: { editId?: number }) {
                   <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                   {kind === "payable" && (
                     <td style={{ minWidth: 170 }}>
-                      <select value={r.bankAccountId} disabled={r.locked} onChange={(e) => patchCheque(kind, r.key, { bankAccountId: e.target.value })}>
-                        <option value="">انتخاب حساب بانکی</option>
-                        {/* فقط حساب‌های بانکیِ نوعِ «دارای دسته چک» (چک پرداختی فقط از چنین حساب‌هایی صادر می‌شود) */}
-                        {bankAccounts.filter((a) => a.accountType.hasChequeBook).map((a) => <option key={a.id} value={a.id}>{a.accountNumber} — {a.bankBranch.title}</option>)}
-                      </select>
+                      {/* فقط حساب‌های بانکیِ نوعِ «دارای دسته چک» (چک پرداختی فقط از چنین حساب‌هایی صادر می‌شود) */}
+                      <BankAccountPicker accounts={bankAccounts} filter={(a) => a.accountType.hasChequeBook} value={r.bankAccountId} disabled={r.locked} onChange={(id) => patchCheque(kind, r.key, { bankAccountId: id })} />
                     </td>
                   )}
                   <td style={{ minWidth: 120 }}>
@@ -459,10 +457,7 @@ function OpeningForm({ editId }: { editId?: number }) {
                   <tr key={r.key}>
                     <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                     <td style={{ minWidth: 220 }}>
-                      <select value={r.bankAccountId} onChange={(e) => setBankRows((p) => p.map((x) => (x.key === r.key ? { ...x, bankAccountId: e.target.value } : x)))}>
-                        <option value="">انتخاب حساب بانکی</option>
-                        {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.accountNumber} — {a.bankBranch.title}</option>)}
-                      </select>
+                      <BankAccountPicker accounts={bankAccounts} value={r.bankAccountId} onChange={(id) => setBankRows((p) => p.map((x) => (x.key === r.key ? { ...x, bankAccountId: id } : x)))} />
                     </td>
                     <td style={{ minWidth: 100 }}>{acc ? acc.currency?.title ?? baseCur.title : "—"}</td>
                     <td style={{ minWidth: 160 }}>

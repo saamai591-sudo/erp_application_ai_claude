@@ -16,6 +16,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { useTabs } from "../lib/TabsContext";
 import { usePersistedState, hasPersistedState, clearPersistedStateFamily } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
+import { BankAccountPicker } from "../components/BankAccountPicker";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 
 // ماژول «خزانه‌داری» > واگذاری چک به بانک. طبق تصمیم صریح کاربر: چند چک دریافتنی «در دست» با هم به
@@ -25,7 +26,7 @@ import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, vali
 type DocStatus = "DRAFT" | "APPROVED";
 const STATUS_FA: Record<DocStatus, string> = { DRAFT: "ثبت", APPROVED: "تایید" };
 
-interface BankAccountOption { id: number; accountNumber: string; detailCode: string; bankBranch: { title: string } }
+interface BankAccountOption { id: number; accountNumber: string; detailCode: string; detailTitle: string; bankBranch: { title: string } }
 interface PickableCheque { id: number; number: string; dueDate: string; amount: number; currencyTitle: string; partyDisplay: string }
 
 interface ListRow {
@@ -413,12 +414,7 @@ function ChequeDepositForm({ editId, reEdit }: { editId?: number; reEdit?: boole
             </div>
             <div className="form-field">
               <label>حساب بانکی مقصد<RequiredMark /></label>
-              <select value={header.bankAccountId} onChange={(e) => setHeader({ ...header, bankAccountId: e.target.value })} disabled={coreDisabled}>
-                <option value="">انتخاب کنید</option>
-                {bankAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.accountNumber} — {a.bankBranch.title}</option>
-                ))}
-              </select>
+              <BankAccountPicker accounts={bankAccounts} value={header.bankAccountId} onChange={(id) => setHeader({ ...header, bankAccountId: id })} disabled={coreDisabled} />
             </div>
             <div className="form-field full">
               <label>شرح</label>

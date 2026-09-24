@@ -13,7 +13,8 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 //   حواله                  → معین «حساب بانکی» (BANK_ACCOUNT)               — تفصیل: خودِ حساب بانکی
 //   چک (صدور چک تازه)      → معین «چک پرداختی» به‌ازای نوع چک ردیف (PAYABLE_CHEQUE) — تفصیل: طرف حساب پرداخت
 //   چک انتقالی (خرج چک دریافتنی) → معین «چک دریافتی» به‌ازای نوع همان چک (RECEIVABLE_CHEQUE) — تفصیل: طرف حسابِ صادرکننده‌ی چک
-// بدهکار — به‌ازای هر ردیف موضوعات پرداخت، بر اساس مبنای «نوع پرداخت»:
+// بدهکار — به‌ازای هر ردیف موضوعات پرداخت، بر اساس مبنای «نوع پرداخت» (ماهیت «به بانک»/«به صندوق»: معین «حساب بانکی»/«صندوق»
+// همان حساب بانکی/صندوق انتخاب‌شده در ردیف، تفصیل: خودِ حساب/صندوق):
 //   بدون مبنا              → معین خودِ نوع پرداخت (PaymentType.accountId)
 //   فاکتور خرید            → «پرداختنی خرید» نوع خرید فاکتور (حسابداری کالا و خدمت: PURCHASE_PAYABLE)
 //   فاکتور فروش            → «دریافتنی فروش» نوع فروش فاکتور (SALES_RECEIVABLE)
@@ -40,7 +41,7 @@ export async function issuePaymentJournalEntry(paymentId: number) {
       party: true,
       instrumentLines: { include: { currency: true, cashBox: true, bankAccount: true, chequeItem: { include: { party: true } } }, orderBy: { rowOrder: "asc" } },
       settlementLines: {
-        include: { paymentType: { include: { account: true } }, party: true, currency: true, purchaseInvoice: true, salesInvoice: true },
+        include: { paymentType: { include: { account: true } }, party: true, bankAccount: true, cashBox: true, currency: true, purchaseInvoice: true, salesInvoice: true },
         orderBy: { rowOrder: "asc" },
       },
     },
@@ -123,8 +124,20 @@ export async function issuePaymentJournalEntry(paymentId: number) {
     const pt = l.paymentType;
     let account: AccountRef | undefined;
     let basisFx: { currencyId: number; fxRate: number } | null = null;
+    let detailCode: string | null = l.party?.detailCode ?? null;
 
-    switch (pt.basisType) {
+    // ماهیت «به بانک»/«به صندوق»: معین از «تعیین حسابهای معین» همان حساب بانکی/صندوقِ انتخاب‌شده در ردیف می‌آید (نه از نوع پرداخت)، تفصیل: خودِ حساب/صندوق
+    if (pt.nature === "TO_BANK") {
+      account = treasurySettings.find((s) => s.accountType === "BANK_ACCOUNT" && s.bankAccountId === l.bankAccountId)?.account;
+      if (!account) errors.push(`ردیف موضوعات پرداخت ${n}: برای حساب بانکی «${l.bankAccount?.accountNumber ?? ""}»، معین در «تعیین حسابهای معین» (حساب بانکی) تعریف نشده است`);
+      detailCode = l.bankAccount?.detailCode ?? null;
+    } else if (pt.nature === "TO_CASH_BOX") {
+      account = treasurySettings.find((s) => s.accountType === "CASH_BOX" && s.cashBoxId === l.cashBoxId)?.account;
+      if (!account) errors.push(`ردیف موضوعات پرداخت ${n}: برای صندوق «${l.cashBox?.title ?? ""}»، معین در «تعیین حسابهای معین» (صندوق) تعریف نشده است`);
+      detailCode = l.cashBox?.detailCode ?? null;
+    }
+
+    if (pt.nature !== "TO_BANK" && pt.nature !== "TO_CASH_BOX") switch (pt.basisType) {
       case "NONE":
         account = pt.account ?? undefined;
         if (!account) errors.push(`ردیف موضوعات پرداخت ${n}: برای نوع پرداخت «${pt.title}» معین تعریف نشده است`);
@@ -155,7 +168,7 @@ export async function issuePaymentJournalEntry(paymentId: number) {
     const rowRate = Number(l.fxRate);
     const isBaseRow = l.currencyId === baseCurrency.id;
     const baseRow = isBaseRow ? amount : toBaseCurrencyAmount(amount, rowRate, l.currency, baseCurrency);
-    const details = await detailFor(account, l.party.detailCode);
+    const details = await detailFor(account, detailCode);
 
     let debitBase: number;
     if (account.isCurrency && !isBaseRow) {

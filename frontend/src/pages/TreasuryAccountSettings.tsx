@@ -6,6 +6,7 @@ import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { RecordPickerField } from "../components/RecordPicker";
 import { api, ApiError } from "../lib/api";
+import { BankAccountPicker } from "../components/BankAccountPicker";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { RefreshButton } from "../components/RefreshButton";
@@ -60,7 +61,7 @@ interface TitledOption { id: number; title: string; basisType?: string }
 // موضوع دریافت/پرداختی که مبنایش فاکتور است، معین را از سند مبنا می‌گیرد؛ در این فرم نمایش داده نمی‌شود
 // (هم‌راستا با BASIS_FROM_DOCUMENT در بک‌اند routes/treasuryAccountSettings.ts)
 const BASIS_FROM_DOCUMENT = new Set(["SALES_INVOICE", "PURCHASE_INVOICE"]);
-interface BankAccountOption { id: number; accountNumber: string; bankBranch: { title: string } }
+interface BankAccountOption { id: number; accountNumber: string; detailCode: string; detailTitle: string; bankBranch: { title: string } }
 
 interface Setting {
   id: number;
@@ -283,10 +284,14 @@ function SettingForm({ editId }: { editId?: number }) {
           {field && (
             <div className="form-field">
               <label>{TARGET_LABEL[field]}<RequiredMark /></label>
-              <select value={form.targetId} onChange={(e) => setForm({ ...form, targetId: e.target.value })}>
-                <option value="">انتخاب کنید</option>
-                {targetOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-              </select>
+              {field === "bankAccountId" ? (
+                <BankAccountPicker accounts={bankAccounts} value={form.targetId} onChange={(id) => setForm({ ...form, targetId: id })} />
+              ) : (
+                <select value={form.targetId} onChange={(e) => setForm({ ...form, targetId: e.target.value })}>
+                  <option value="">انتخاب کنید</option>
+                  {targetOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+                </select>
+              )}
             </div>
           )}
           <div className="form-field">

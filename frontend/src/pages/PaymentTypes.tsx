@@ -27,6 +27,8 @@ const NATURE_FA: Record<string, string> = {
   OTHER_PAYMENT: "پرداخت به سایر",
   PURCHASE_VAT: "ارزش افزوده خرید",
   SALES_VAT: "ارزش افزوده فروش",
+  TO_BANK: "به بانک",
+  TO_CASH_BOX: "به صندوق",
 };
 
 const BASIS_TYPE_FA: Record<string, string> = {
@@ -43,7 +45,12 @@ const ALLOWED_BASIS_TYPES: Record<string, string[]> = {
   OTHER_PAYMENT: ["NONE"],
   PURCHASE_VAT: ["NONE", "PURCHASE_INVOICE"],
   SALES_VAT: ["NONE", "SALES_INVOICE"],
+  TO_BANK: ["NONE"],
+  TO_CASH_BOX: ["NONE"],
 };
+
+// ماهیت‌های «به بانک»/«به صندوق» معین ندارند: معین در صدور سند از تعیین حسابهای معینِ حساب بانکی/صندوقِ انتخاب‌شده در اعلامیه پرداخت می‌آید
+const ACCOUNTLESS_NATURES = ["TO_BANK", "TO_CASH_BOX"];
 
 interface Level { id: number; title: string }
 interface AccountRow {
@@ -104,7 +111,7 @@ function PaymentTypeList() {
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint text="تعریف انواع پرداخت — نوع پرداخت و مبنای مجاز آن، و در صورت بدون مبنا بودن، معین حسابداری پیش‌فرض" title="نوع پرداخت" />
+          <InfoHint text="تعریف انواع پرداخت — ماهیت پرداخت و مبنای مجاز آن، و در صورت بدون مبنا بودن، معین حسابداری پیش‌فرض" title="نوع پرداخت" />
           <NewRecordButton path="/payment-types/new" />
           <RefreshButton onClick={reload} />
         </div>
@@ -114,7 +121,7 @@ function PaymentTypeList() {
         columns={[
           { header: "کد", render: (r) => toFaDigits(String(r.code).padStart(3, "0")), width: "80px", filterType: "number", filterValue: (r) => r.code },
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
-          { header: "نوع پرداخت", render: (r) => NATURE_FA[r.nature] || r.nature, filterType: "string", filterValue: (r) => NATURE_FA[r.nature] || r.nature },
+          { header: "ماهیت پرداخت", render: (r) => NATURE_FA[r.nature] || r.nature, filterType: "string", filterValue: (r) => NATURE_FA[r.nature] || r.nature },
           { header: "نوع مبنا", render: (r) => BASIS_TYPE_FA[r.basisType] || r.basisType, filterType: "string", filterValue: (r) => BASIS_TYPE_FA[r.basisType] || r.basisType },
           { header: "معین", render: (r) => (r.account ? `${r.account.code} - ${r.account.title}` : "—") },
           { header: "فعال", render: (r) => (r.isActive ? "بله" : "خیر"), width: "80px" },
@@ -186,7 +193,8 @@ function PaymentTypeForm({ editId }: { editId?: number }) {
   const selectedAccount = accounts.find((a) => String(a.id) === form.accountId);
 
   const allowedBasisTypes = form.nature ? ALLOWED_BASIS_TYPES[form.nature] || [] : [];
-  const showAccount = form.basisType === "NONE";
+  const isAccountless = ACCOUNTLESS_NATURES.includes(form.nature);
+  const showAccount = form.basisType === "NONE" && !isAccountless;
 
   function onNatureChange(nature: string) {
     const allowed = ALLOWED_BASIS_TYPES[nature] || [];
@@ -194,6 +202,7 @@ function PaymentTypeForm({ editId }: { editId?: number }) {
       ...form,
       nature,
       basisType: allowed.includes(form.basisType) ? form.basisType : "",
+      accountId: ACCOUNTLESS_NATURES.includes(nature) ? "" : form.accountId,
     });
   }
 
@@ -201,7 +210,7 @@ function PaymentTypeForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
     if (!form.title) return setError("عنوان الزامی است");
-    if (!form.nature) return setError("نوع پرداخت الزامی است");
+    if (!form.nature) return setError("ماهیت پرداخت الزامی است");
     if (!form.basisType) return setError("نوع مبنا الزامی است");
     if (showAccount && !form.accountId) return setError("برای «بدون مبنا»، انتخاب معین حسابداری الزامی است");
     const body = {
@@ -259,9 +268,9 @@ function PaymentTypeForm({ editId }: { editId?: number }) {
           </div>
           <div className="form-field">
             <label>
-              نوع پرداخت
+              ماهیت پرداخت
               <RequiredMark />
-              {hasTransactions && <FieldHint label="نوع پرداخت" text="این نوع پرداخت گردش دارد" />}
+              {hasTransactions && <FieldHint label="ماهیت پرداخت" text="این نوع پرداخت گردش دارد" />}
             </label>
             <select value={form.nature} disabled={hasTransactions} onChange={(e) => onNatureChange(e.target.value)}>
               <option value="">انتخاب کنید</option>
@@ -296,6 +305,12 @@ function PaymentTypeForm({ editId }: { editId?: number }) {
                 ]}
                 onSelect={(a) => setForm({ ...form, accountId: String(a.id) })}
               />
+            </div>
+          )}
+          {isAccountless && form.basisType === "NONE" && (
+            <div className="form-field">
+              <label>معین</label>
+              <input value="بر اساس حساب بانکی/صندوق انتخاب‌شده در اعلامیه پرداخت" disabled />
             </div>
           )}
           <div className="form-field">

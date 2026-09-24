@@ -28,7 +28,12 @@ const ALLOWED_BASIS_TYPES: Record<string, string[]> = {
   OTHER_PAYMENT: ["NONE"],
   PURCHASE_VAT: ["NONE", "PURCHASE_INVOICE"],
   SALES_VAT: ["NONE", "SALES_INVOICE"],
+  TO_BANK: ["NONE"],
+  TO_CASH_BOX: ["NONE"],
 };
+
+// ماهیت‌هایی که معین حسابداری ندارند: در صدور سند، معین از «تعیین حسابهای معین» حساب بانکی/صندوق انتخاب‌شده در ردیف موضوعات پرداخت می‌آید
+const ACCOUNTLESS_NATURES = ["TO_BANK", "TO_CASH_BOX"];
 
 const router = Router();
 
@@ -44,16 +49,16 @@ router.get("/payment-types", async (_req, res) => {
 router.post("/payment-types", can(`${FORM}.create`), async (req, res) => {
   const body = req.body as { code?: number; title: string; nature: string; basisType: string; accountId?: number | null };
   if (!body.title) return res.status(400).json({ error: "عنوان الزامی است" });
-  if (!body.nature) return res.status(400).json({ error: "نوع پرداخت الزامی است" });
+  if (!body.nature) return res.status(400).json({ error: "ماهیت پرداخت الزامی است" });
   if (!body.basisType) return res.status(400).json({ error: "نوع مبنا الزامی است" });
 
   const allowed = ALLOWED_BASIS_TYPES[body.nature];
-  if (!allowed) return res.status(400).json({ error: "نوع پرداخت نامعتبر است" });
+  if (!allowed) return res.status(400).json({ error: "ماهیت پرداخت نامعتبر است" });
   if (!allowed.includes(body.basisType)) {
-    return res.status(400).json({ error: "نوع مبنای انتخاب‌شده با نوع پرداخت سازگار نیست" });
+    return res.status(400).json({ error: "نوع مبنای انتخاب‌شده با ماهیت پرداخت سازگار نیست" });
   }
 
-  const isNoBasis = body.basisType === "NONE";
+  const isNoBasis = body.basisType === "NONE" && !ACCOUNTLESS_NATURES.includes(body.nature);
   if (isNoBasis && !body.accountId) {
     return res.status(400).json({ error: "برای «بدون مبنا»، انتخاب معین حسابداری الزامی است" });
   }
@@ -94,7 +99,7 @@ router.put("/payment-types/:id", can(`${FORM}.edit`), async (req, res) => {
   const existing = await prisma.paymentType.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "نوع پرداخت یافت نشد" });
   if (existing.hasTransactions && (body.nature !== undefined || body.basisType !== undefined || body.accountId !== undefined)) {
-    return res.status(400).json({ error: "این نوع پرداخت گردش دارد و نوع/مبنا/معین آن قابل ویرایش نیست" });
+    return res.status(400).json({ error: "این نوع پرداخت گردش دارد و ماهیت/مبنا/معین آن قابل ویرایش نیست" });
   }
 
   const nature = body.nature ?? existing.nature;
@@ -106,12 +111,12 @@ router.put("/payment-types/:id", can(`${FORM}.edit`), async (req, res) => {
   }
 
   const allowed = ALLOWED_BASIS_TYPES[nature];
-  if (!allowed) return res.status(400).json({ error: "نوع پرداخت نامعتبر است" });
+  if (!allowed) return res.status(400).json({ error: "ماهیت پرداخت نامعتبر است" });
   if (!allowed.includes(basisType)) {
-    return res.status(400).json({ error: "نوع مبنای انتخاب‌شده با نوع پرداخت سازگار نیست" });
+    return res.status(400).json({ error: "نوع مبنای انتخاب‌شده با ماهیت پرداخت سازگار نیست" });
   }
 
-  const isNoBasis = basisType === "NONE";
+  const isNoBasis = basisType === "NONE" && !ACCOUNTLESS_NATURES.includes(nature);
   const accountId = body.accountId !== undefined ? body.accountId : existing.accountId;
   if (isNoBasis && !accountId) {
     return res.status(400).json({ error: "برای «بدون مبنا»، انتخاب معین حسابداری الزامی است" });

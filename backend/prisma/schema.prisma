@@ -370,6 +370,7 @@ model BankAccount {
   currency               Currency?               @relation(fields: [currencyId], references: [id])
   chequesOwned           ChequeItem[]
   paymentInstrumentLines PaymentInstrumentLine[] @relation("PaymentInstrumentBankAccount")
+  paymentSettlementLines PaymentSettlementLine[] @relation("PaymentSettlementBankAccount")
   receiptInstrumentLines ReceiptInstrumentLine[] @relation("ReceiptInstrumentBankAccount")
   chequeDeposits         ChequeDeposit[]
   treasuryAccountSettings TreasuryAccountSetting[]
@@ -461,6 +462,7 @@ model CashBox {
   title                  String                  @unique
   hasTransactions        Boolean                 @default(false)
   paymentInstrumentLines PaymentInstrumentLine[]
+  paymentSettlementLines PaymentSettlementLine[] @relation("PaymentSettlementCashBox")
   receiptInstrumentLines ReceiptInstrumentLine[]
   treasuryAccountSettings TreasuryAccountSetting[]
   treasuryOpeningLines TreasuryOpeningCashBox[]
@@ -552,9 +554,9 @@ model JournalEntry {
   payment             Payment?
   chequeDeposit       ChequeDeposit?
   chequeDepositReturn ChequeDepositReturn?
+  chequeClearingReceivable ChequeClearingReceivable?
   salesReturnInvoice  SalesReturnInvoice?
   warehouseJournalEntryIssuance WarehouseJournalEntryIssuance?
-  chequeClearingReceivable ChequeClearingReceivable?
 
   @@unique([fiscalPeriodId, number])
 }
@@ -2762,7 +2764,10 @@ model PaymentSettlementLine {
   rowOrder          Int                   @default(0)
   paymentTypeId     Int
   instrumentLineId  Int
-  partyId           Int
+  // برای ماهیت‌های «به بانک»/«به صندوق» به‌جای طرف حساب، bankAccountId/cashBoxId پر می‌شود و partyId خالی است
+  partyId           Int?
+  bankAccountId     Int?
+  cashBoxId         Int?
   salesInvoiceId    Int?
   purchaseInvoiceId Int?
   purchaseOrderId   Int?
@@ -2774,7 +2779,9 @@ model PaymentSettlementLine {
   paymentType       PaymentType           @relation(fields: [paymentTypeId], references: [id])
   payment           Payment               @relation(fields: [paymentId], references: [id], onDelete: Cascade)
   instrumentLine    PaymentInstrumentLine @relation(fields: [instrumentLineId], references: [id])
-  party             Party                 @relation(fields: [partyId], references: [id])
+  party             Party?                @relation(fields: [partyId], references: [id])
+  bankAccount       BankAccount?          @relation("PaymentSettlementBankAccount", fields: [bankAccountId], references: [id], onDelete: Restrict)
+  cashBox           CashBox?              @relation("PaymentSettlementCashBox", fields: [cashBoxId], references: [id], onDelete: Restrict)
   salesInvoice      SalesInvoice?         @relation(fields: [salesInvoiceId], references: [id])
   purchaseInvoice   PurchaseInvoice?      @relation(fields: [purchaseInvoiceId], references: [id])
   purchaseOrder     PurchaseOrder?        @relation(fields: [purchaseOrderId], references: [id])
@@ -3053,6 +3060,9 @@ enum PaymentNature {
   OTHER_PAYMENT
   PURCHASE_VAT
   SALES_VAT
+  // پرداخت به یک حساب بانکی / صندوق (بدون معین در نوع پرداخت؛ معین از تعیین حسابهای معینِ حساب بانکی/صندوق انتخاب‌شده می‌آید)
+  TO_BANK
+  TO_CASH_BOX
 }
 
 enum PaymentBasisType {
@@ -3185,6 +3195,9 @@ model ChequeClearingReceivable {
   date           DateTime                       @db.Date
   description    String?
   status         TreasuryDocStatus              @default(DRAFT)
+  // سند حسابداری صادرشده (اکشن دستی «صدور سند حسابداری» روی سند تاییدشده) — هم‌الگوی ChequeDeposit
+  journalEntryId Int?                           @unique
+  journalEntry   JournalEntry?                  @relation(fields: [journalEntryId], references: [id])
   createdAt      DateTime                       @default(now())
   updatedAt      DateTime                       @default(now()) @updatedAt
   fiscalPeriod   FiscalPeriod                   @relation(fields: [fiscalPeriodId], references: [id])
@@ -3195,9 +3208,6 @@ model ChequeClearingReceivable {
 
 model ChequeClearingReceivableLine {
   id                         Int                      @id @default(autoincrement())
-  // سند حسابداری صادرشده (اکشن دستی «صدور سند حسابداری» روی سند تاییدشده) — هم‌الگوی ChequeDeposit
-  journalEntryId Int?                           @unique
-  journalEntry   JournalEntry?                  @relation(fields: [journalEntryId], references: [id])
   chequeClearingReceivableId Int
   rowOrder                   Int                      @default(0)
   chequeItemId               Int

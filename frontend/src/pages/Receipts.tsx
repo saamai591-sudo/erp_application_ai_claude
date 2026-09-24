@@ -18,6 +18,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState, clearPersistedStateFamily } from "../lib/usePersistedState";
 import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
+import { BankAccountPicker } from "../components/BankAccountPicker";
 import { partyDisplayName } from "./Users";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, roundToCurrencyDecimals } from "../lib/currencyConversion";
@@ -43,7 +44,7 @@ const STATUS_FA: Record<DocStatus, string> = { DRAFT: "ثبت", APPROVED: "تا�
 interface PartyOption { id: number; detailCode: string; category: "INDIVIDUAL" | "LEGAL"; isActive: boolean; firstName: string | null; lastName: string | null; name: string | null }
 interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null; decimalPlaces: number }
 interface CashBoxOption { id: number; title: string }
-interface BankAccountOption { id: number; accountNumber: string; detailCode: string; bankBranch: { title: string }; currencyId: number | null; currency: { title: string } | null }
+interface BankAccountOption { id: number; accountNumber: string; detailCode: string; detailTitle: string; bankBranch: { title: string }; currencyId: number | null; currency: { title: string } | null }
 interface BankBranchOption { id: number; title: string }
 interface ChequeTypeOption { id: number; code: number; title: string }
 interface ReceiptTypeOption { id: number; title: string; nature: ReceiptNature; basisType: ReceiptBasisType; isActive: boolean }
@@ -893,21 +894,16 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                         )}
                         {(row.type === "BANK_TRANSFER" || row.type === "POS") && (
                           <div style={{ display: "flex", gap: 6 }}>
-                            <select
-                              value={row.bankAccountId}
-                              onChange={(e) => {
-                                const acc = bankAccounts.find((a) => String(a.id) === e.target.value);
-                                const currencyId = acc?.currencyId ? String(acc.currencyId) : "";
-                                updateInstrumentRow(idx, { bankAccountId: e.target.value, currencyId, fxRate: acc?.currencyId === baseCurrency.id ? "1" : row.fxRate });
-                              }}
-                             
-                              style={{ flex: 1 }}
-                            >
-                              <option value="">انتخاب حساب بانکی</option>
-                              {bankAccounts.map((a) => (
-                                <option key={a.id} value={a.id}>{a.accountNumber} — {a.bankBranch.title}</option>
-                              ))}
-                            </select>
+                            <div style={{ flex: 1 }}>
+                              <BankAccountPicker
+                                accounts={bankAccounts}
+                                value={row.bankAccountId}
+                                onChange={(id, acc) => {
+                                  const currencyId = acc.currencyId ? String(acc.currencyId) : "";
+                                  updateInstrumentRow(idx, { bankAccountId: id, currencyId, fxRate: acc.currencyId === baseCurrency.id ? "1" : row.fxRate });
+                                }}
+                              />
+                            </div>
                             <input
                               placeholder={row.type === "POS" ? "شماره ترمینال" : "شماره پیگیری"}
                               value={row.type === "POS" ? row.posTerminal : row.referenceNumber}

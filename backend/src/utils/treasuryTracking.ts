@@ -14,12 +14,13 @@ export async function recomputeCashBoxHasTransactions(cashBoxIds: number[]) {
   const ids = Array.from(new Set(cashBoxIds));
   for (const cashBoxId of ids) {
     // eslint-disable-next-line no-await-in-loop
-    const [receiptLine, paymentLine] = await Promise.all([
+    const [receiptLine, paymentLine, settlementLine] = await Promise.all([
       prisma.receiptInstrumentLine.findFirst({ where: { cashBoxId, type: "CASH", receipt: { status: "APPROVED" } } }),
       prisma.paymentInstrumentLine.findFirst({ where: { cashBoxId, type: "CASH", payment: { status: "APPROVED" } } }),
+      prisma.paymentSettlementLine.findFirst({ where: { cashBoxId, payment: { status: "APPROVED" } } }),
     ]);
     // eslint-disable-next-line no-await-in-loop
-    await prisma.cashBox.update({ where: { id: cashBoxId }, data: { hasTransactions: !!(receiptLine || paymentLine) } });
+    await prisma.cashBox.update({ where: { id: cashBoxId }, data: { hasTransactions: !!(receiptLine || paymentLine || settlementLine) } });
   }
 }
 
@@ -27,12 +28,13 @@ export async function recomputeBankAccountHasTransactions(bankAccountIds: number
   const ids = Array.from(new Set(bankAccountIds));
   for (const bankAccountId of ids) {
     // eslint-disable-next-line no-await-in-loop
-    const [receiptLine, paymentLine, deposit] = await Promise.all([
+    const [receiptLine, paymentLine, deposit, settlementLine] = await Promise.all([
       prisma.receiptInstrumentLine.findFirst({ where: { bankAccountId, receipt: { status: "APPROVED" } } }),
       prisma.paymentInstrumentLine.findFirst({ where: { bankAccountId, payment: { status: "APPROVED" } } }),
       prisma.chequeDeposit.findFirst({ where: { bankAccountId, status: "APPROVED" } }),
+      prisma.paymentSettlementLine.findFirst({ where: { bankAccountId, payment: { status: "APPROVED" } } }),
     ]);
     // eslint-disable-next-line no-await-in-loop
-    await prisma.bankAccount.update({ where: { id: bankAccountId }, data: { hasTransactions: !!(receiptLine || paymentLine || deposit) } });
+    await prisma.bankAccount.update({ where: { id: bankAccountId }, data: { hasTransactions: !!(receiptLine || paymentLine || deposit || settlementLine) } });
   }
 }
