@@ -516,7 +516,8 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
   }
   function addInstrumentRow() {
     if (!guardHeaderComplete()) return;
-    setInstrumentRows((prev) => [...prev, emptyInstrumentRow()]);
+    // شرح هدر (اگر وارد شده باشد) شرح پیش‌فرض ردیف تازه‌ی ابزار است
+    setInstrumentRows((prev) => [...prev, { ...emptyInstrumentRow(), description: header.description }]);
   }
   function removeInstrumentRow(idx: number) {
     setInstrumentRows((prev) => prev.filter((_, i) => i !== idx));
@@ -549,7 +550,8 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
   function loadFromInstruments(rows: (InstrumentRowState & { idx: number })[]) {
     setSettlementRows((prev) => [
       ...prev,
-      ...rows.map((r) => emptySettlementRow(r.clientKey, instrumentLabel(r, r.idx), r.currencyId)),
+      // شرح ردیف ابزارِ انتخاب‌شده، شرح پیش‌فرض ردیف موضوعات است
+      ...rows.map((r) => ({ ...emptySettlementRow(r.clientKey, instrumentLabel(r, r.idx), r.currencyId), description: r.description })),
     ]);
   }
 
@@ -846,7 +848,16 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
           <div className="form-field full">
             <label>شرح</label>
-            <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} />
+            <input
+              value={header.description}
+              onChange={(e) => {
+                const next = e.target.value;
+                const prevDescription = header.description;
+                setHeader({ ...header, description: next });
+                // فقط هنگام ایجاد سند: ردیف‌های ابزاری که هنوز شرح دلخواه ندارند (خالی یا برابر شرح قبلیِ هدر) شرح هدر را به‌عنوان پیش‌فرض می‌گیرند
+                if (!editId) setInstrumentRows((prev) => prev.map((r) => (r.description === "" || r.description === prevDescription ? { ...r, description: next } : r)));
+              }}
+            />
           </div>
         </div>
 
@@ -1257,9 +1268,11 @@ function SettlementRowFields({
         partyDisplay = headerPartyDisplay;
       }
     }
-    // ماهیت «به بانک»/«به صندوق»: سند مبنایی وجود ندارد که مبلغ را تعیین کند؛ مبلغ ردیف خودکار برابر مانده‌ی قلم (ردیف ابزار پرداخت) این ردیف می‌شود
+    // نوع پرداختِ «بدون مبنا» (هر ماهیتی: سایر، به بانک، به صندوق، …): سند مبنایی وجود ندارد که مبلغ را تعیین کند؛ مبلغ ردیف خودکار برابر مانده‌ی
+    // قلم (ردیف ابزار پرداخت) این ردیف می‌شود — وقتی مبلغ خالی است، یا انتخابگر عوض شده، یا نوع قبلیِ ردیف مبنادار بوده (مبلغِ آن سند مبنا کهنه است)
     let amountPatch: Partial<SettlementRowState> = {};
-    if (rt && selectorKind(rt.nature) !== "PARTY" && instrumentRow && (kindChanged || !row.amount)) {
+    const prevBasis = paymentType?.basisType;
+    if (rt && rt.basisType === "NONE" && instrumentRow && (kindChanged || !row.amount || (prevBasis && prevBasis !== "NONE"))) {
       const remainingBase = instrumentRemainingBaseCapacity();
       const instrumentCurrency = currencies.find((c) => String(c.id) === instrumentRow.currencyId);
       if (remainingBase > 0) {
