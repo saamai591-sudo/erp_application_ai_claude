@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Modal } from "./Modal";
+import { usePickerKeyboard } from "./pickerKeyboard";
 import { PickerColumn } from "./RecordPicker";
 import { SortIcon } from "./DataTable";
 
@@ -85,9 +86,23 @@ function MultiPickerDialog<T extends { id: number | string }>({
     });
   }
 
+  const kb = usePickerKeyboard({
+    count: filteredRows.length,
+    resetKey: JSON.stringify([filters, sort]),
+    onEnter: (i) => {
+      const row = filteredRows[i];
+      if (row) toggleRow(row.id);
+    },
+    onConfirmAll: () => {
+      onConfirm(checked);
+      onClose();
+    },
+    onEscape: onClose,
+  });
+
   return (
     <Modal title={title} onClose={onClose}>
-      <div className="picker-table-wrap">
+      <div className="picker-table-wrap" ref={kb.wrapRef}>
         <table className="picker-table">
           <thead>
             <tr>
@@ -108,10 +123,11 @@ function MultiPickerDialog<T extends { id: number | string }>({
             </tr>
             <tr>
               <th></th>
-              {columns.map((c) => (
+              {columns.map((c, ci) => (
                 <th key={c.header} style={{ width: c.width }}>
                   <input
                     className="picker-filter-input"
+                    autoFocus={ci === 0}
                     placeholder="فیلتر..."
                     value={filters[c.header] || ""}
                     onChange={(e) => setFilters((prev) => ({ ...prev, [c.header]: e.target.value }))}
@@ -126,8 +142,17 @@ function MultiPickerDialog<T extends { id: number | string }>({
                 <td colSpan={columns.length + 1} className="empty-state" style={{ border: "none" }}>موردی یافت نشد</td>
               </tr>
             )}
-            {filteredRows.map((row) => (
-              <tr key={row.id} className={checked.has(row.id) ? "active-list" : ""} onClick={() => toggleRow(row.id)} style={{ cursor: "pointer" }}>
+            {filteredRows.map((row, idx) => (
+              <tr
+                key={row.id}
+                data-row-index={idx}
+                className={`${checked.has(row.id) ? "active-list" : ""} ${kb.activeIndex === idx ? "picker-cursor" : ""}`}
+                onClick={() => {
+                  kb.setActiveIndex(idx);
+                  toggleRow(row.id);
+                }}
+                style={{ cursor: "pointer" }}
+              >
                 <td onClick={(e) => e.stopPropagation()} style={{ textAlign: "center" }}>
                   <input type="checkbox" checked={checked.has(row.id)} onChange={() => toggleRow(row.id)} />
                 </td>
@@ -140,6 +165,7 @@ function MultiPickerDialog<T extends { id: number | string }>({
         </table>
       </div>
       <div className="actions">
+        <span style={{ marginInlineEnd: "auto", alignSelf: "center", fontSize: 11, color: "var(--ink-soft)" }}>↑↓ حرکت · Enter تیک‌زدن · Ctrl+Enter تایید · Esc بستن</span>
         <button type="button" className="btn" onClick={() => { onConfirm(checked); onClose(); }}>
           افزودن ({checked.size})
         </button>

@@ -1,4 +1,4 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTabs } from "../lib/TabsContext";
 import { InfoHint } from "./InfoHint";
@@ -86,6 +86,22 @@ export function FormPage({
   const { openTab } = useTabs();
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // میان‌بر Ctrl+S (در مک Cmd+S): همان دکمه‌ی «ذخیره»ی نوار ابزار را فعال می‌کند (پس وضعیت غیرفعال بودن ذخیره رعایت می‌شود) و ذخیره‌ی
+  // پیش‌فرض مرورگر را مهار می‌کند. وقتی یک دیالوگ (انتخابگر و…) باز است یا فرم در تب فعال دیده نمی‌شود، کاری نمی‌کند.
+  useEffect(() => {
+    if (!formId) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      if (e.code !== "KeyS" && e.key.toLowerCase() !== "s") return;
+      e.preventDefault();
+      if (e.repeat || document.querySelector(".modal-overlay")) return;
+      const btn = document.querySelector<HTMLButtonElement>(`button[type="submit"][form="${formId}"]`);
+      if (btn && btn.offsetParent !== null && !btn.disabled) btn.click();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [formId]);
+
   async function handleDelete() {
     setMenuOpen(false);
     if (!onDelete) return;
@@ -110,7 +126,7 @@ export function FormPage({
         </div>
         <div className="form-toolbar-left">
           {description && <InfoHint text={description} title={title} />}
-          <button type="submit" form={formId} className="toolbar-icon-btn primary" disabled={saveDisabled} title="ذخیره">
+          <button type="submit" form={formId} className="toolbar-icon-btn primary" disabled={saveDisabled} title="ذخیره (Ctrl+S)">
             <SaveIcon />
           </button>
           {newPath && (

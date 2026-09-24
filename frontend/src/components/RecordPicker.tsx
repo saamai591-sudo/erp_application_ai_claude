@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Modal } from "./Modal";
+import { usePickerKeyboard } from "./pickerKeyboard";
 
 export interface PickerColumn<T> {
   header: string;
@@ -169,9 +170,26 @@ function RecordPickerDialog<T extends { id: number | string }>({
     if (row) onSelect(row);
   }
 
+  const kb = usePickerKeyboard({
+    count: filteredRows.length,
+    resetKey: JSON.stringify([filters, sort]),
+    onEnter: (i) => {
+      const row = filteredRows[i];
+      if (!row) return;
+      if (multiSelect) toggleRowSelection(row.id);
+      else onSelect(row);
+    },
+    onConfirmAll: multiSelect ? confirm : undefined,
+    onEscape: onClose,
+  });
+  // تک‌انتخابی: ردیف فعال همان ردیف انتخاب‌شده است (دکمه‌ی «تایید» هم به آن وابسته است)
+  useEffect(() => {
+    if (!multiSelect) setSelectedId(filteredRows[kb.activeIndex]?.id ?? null);
+  }, [kb.activeIndex, filteredRows, multiSelect]);
+
   return (
     <Modal title={title} onClose={onClose}>
-      <div className="picker-table-wrap">
+      <div className="picker-table-wrap" ref={kb.wrapRef}>
         <table className="picker-table">
           <thead>
             <tr>
@@ -194,10 +212,11 @@ function RecordPickerDialog<T extends { id: number | string }>({
             </tr>
             <tr>
               {multiSelect && <th style={{ width: 34 }}></th>}
-              {columns.map((c) => (
+              {columns.map((c, ci) => (
                 <th key={c.header} style={{ width: c.width }}>
                   <input
                     className="picker-filter-input"
+                    autoFocus={ci === 0}
                     placeholder="فیلتر..."
                     value={filters[c.header] || ""}
                     onChange={(e) => setFilters((prev) => ({ ...prev, [c.header]: e.target.value }))}
@@ -212,9 +231,18 @@ function RecordPickerDialog<T extends { id: number | string }>({
                 <td colSpan={columns.length + (multiSelect ? 1 : 0)} className="empty-state" style={{ border: "none" }}>موردی یافت نشد</td>
               </tr>
             )}
-            {filteredRows.map((row) =>
+            {filteredRows.map((row, idx) =>
               multiSelect ? (
-                <tr key={row.id} className={selectedIds.has(row.id) ? "active-list" : ""} onClick={() => toggleRowSelection(row.id)} style={{ cursor: "pointer" }}>
+                <tr
+                  key={row.id}
+                  data-row-index={idx}
+                  className={`${selectedIds.has(row.id) ? "active-list" : ""} ${kb.activeIndex === idx ? "picker-cursor" : ""}`}
+                  onClick={() => {
+                    kb.setActiveIndex(idx);
+                    toggleRowSelection(row.id);
+                  }}
+                  style={{ cursor: "pointer" }}
+                >
                   <td>
                     <input type="checkbox" checked={selectedIds.has(row.id)} onChange={() => toggleRowSelection(row.id)} onClick={(e) => e.stopPropagation()} />
                   </td>
@@ -225,8 +253,9 @@ function RecordPickerDialog<T extends { id: number | string }>({
               ) : (
                 <tr
                   key={row.id}
-                  className={selectedId === row.id ? "active-list" : ""}
-                  onClick={() => setSelectedId(row.id)}
+                  data-row-index={idx}
+                  className={kb.activeIndex === idx ? "active-list" : ""}
+                  onClick={() => kb.setActiveIndex(idx)}
                   onDoubleClick={() => onSelect(row)}
                   style={{ cursor: "pointer" }}
                 >
@@ -240,6 +269,7 @@ function RecordPickerDialog<T extends { id: number | string }>({
         </table>
       </div>
       <div className="actions">
+        <span style={{ marginInlineEnd: "auto", alignSelf: "center", fontSize: 11, color: "var(--ink-soft)" }}>{multiSelect ? "↑↓ حرکت · Enter تیک‌زدن · Ctrl+Enter تایید · Esc بستن" : "↑↓ حرکت · Enter انتخاب · Esc بستن"}</span>
         <button type="button" className="btn" disabled={multiSelect ? selectedIds.size === 0 : selectedId === null} onClick={confirm}>
           {multiSelect && selectedIds.size > 0 ? `تایید (${selectedIds.size})` : "تایید"}
         </button>
