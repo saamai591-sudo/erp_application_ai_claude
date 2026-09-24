@@ -816,10 +816,10 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                   <th>ردیف</th>
                   <th>نوع</th>
                   {hasChequeRow && <th>نوع چک<RequiredMark /></th>}
-                  <th>مبلغ</th>
-                  <th>ارز</th>
-                  <th>نرخ ارز</th>
                   <th>جزئیات</th>
+                  <th>ارز</th>
+                  <th>مبلغ</th>
+                  <th>نرخ ارز</th>
                   <th>شرح</th>
                   <th></th>
                 </tr>
@@ -861,28 +861,6 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                           )}
                         </td>
                       )}
-                      <td style={{ minWidth: 130 }}>
-                        <AmountInput value={row.amount} onChange={(v) => updateInstrumentRow(idx, { amount: v })} allowDecimal placeholder="۰" />
-                      </td>
-                      <td style={{ minWidth: 130 }}>
-                        {row.type === "CASH" && (
-                          <select value={row.currencyId} onChange={(e) => updateInstrumentRow(idx, { currencyId: e.target.value, fxRate: Number(e.target.value) === baseCurrency.id ? "1" : row.fxRate })}>
-                            <option value="">انتخاب ارز</option>
-                            {currencies.map((c) => (
-                              <option key={c.id} value={c.id}>{c.title}</option>
-                            ))}
-                          </select>
-                        )}
-                        {row.type === "CHEQUE" && <span>{baseCurrency.title}</span>}
-                        {(row.type === "BANK_TRANSFER" || row.type === "POS") && <span>{bankAccount?.currency?.title || "—"}</span>}
-                      </td>
-                      <td style={{ minWidth: 100 }}>
-                        {isBaseCurrencyRow ? (
-                          <input dir="ltr" value={toFaDigits("1")} disabled />
-                        ) : (
-                          <AmountInput value={row.fxRate} onChange={(v) => updateInstrumentRow(idx, { fxRate: v })} allowDecimal placeholder="نرخ ارز" />
-                        )}
-                      </td>
                       <td style={{ minWidth: 320 }}>
                         {row.type === "CASH" && (
                           <select value={row.cashBoxId} onChange={(e) => updateInstrumentRow(idx, { cashBoxId: e.target.value })}>
@@ -926,6 +904,28 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                               ))}
                             </select>
                           </div>
+                        )}
+                      </td>
+                      <td style={{ minWidth: 130 }}>
+                        {row.type === "CASH" && (
+                          <select value={row.currencyId} onChange={(e) => updateInstrumentRow(idx, { currencyId: e.target.value, fxRate: Number(e.target.value) === baseCurrency.id ? "1" : row.fxRate })}>
+                            <option value="">انتخاب ارز</option>
+                            {currencies.map((c) => (
+                              <option key={c.id} value={c.id}>{c.title}</option>
+                            ))}
+                          </select>
+                        )}
+                        {row.type === "CHEQUE" && <span>{baseCurrency.title}</span>}
+                        {(row.type === "BANK_TRANSFER" || row.type === "POS") && <span>{bankAccount?.currency?.title || "—"}</span>}
+                      </td>
+                      <td style={{ minWidth: 130 }}>
+                        <AmountInput value={row.amount} onChange={(v) => updateInstrumentRow(idx, { amount: v })} allowDecimal placeholder="۰" />
+                      </td>
+                      <td style={{ minWidth: 100 }}>
+                        {isBaseCurrencyRow ? (
+                          <input dir="ltr" value={toFaDigits("1")} disabled />
+                        ) : (
+                          <AmountInput value={row.fxRate} onChange={(v) => updateInstrumentRow(idx, { fxRate: v })} allowDecimal placeholder="نرخ ارز" />
                         )}
                       </td>
                       <td style={{ minWidth: 140 }}>
