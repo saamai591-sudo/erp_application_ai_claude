@@ -465,7 +465,7 @@ export const REGISTRY: ModuleDef[] = [
   },
   {
     key: "treasury",
-    title: "خزانه‌داری",
+    title: "مدیریت نقدینگی و چک",
     subModules: [
       {
         key: "settings",
@@ -480,24 +480,12 @@ export const REGISTRY: ModuleDef[] = [
         ],
       },
       {
-        key: "operations",
-        title: "عملیات",
+        key: "receipt-ops",
+        title: "دریافت",
         forms: [
-          { key: "treasury-openings", title: "عملیات اول دوره", baseActions: CRUD },
           {
             key: "receipts",
             title: "دریافت",
-            baseActions: CRUD,
-            actions: [
-              ...APPROVE_UNAPPROVE,
-              { key: "reEdit", title: "ویرایش مجدد" },
-              { key: "issueJournalEntry", title: "صدور سند حسابداری" },
-              { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
-            ],
-          },
-          {
-            key: "payments",
-            title: "پرداخت",
             baseActions: CRUD,
             actions: [
               ...APPROVE_UNAPPROVE,
@@ -512,10 +500,43 @@ export const REGISTRY: ModuleDef[] = [
             baseActions: ["view"],
             actions: [{ key: "transition", title: "تغییر وضعیت" }],
           },
-          { key: "cheque-deposits", title: "واگذاری به بانک", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
+          {
+            key: "cheque-deposits",
+            title: "واگذاری به بانک",
+            baseActions: CRUD,
+            actions: [
+              ...APPROVE_UNAPPROVE_REEDIT,
+              { key: "issueJournalEntry", title: "صدور سند حسابداری" },
+              { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
+            ],
+          },
           { key: "cheque-deposit-returns", title: "برگشت از واگذاری", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
           { key: "cheque-clearings-receivable", title: "نتیجه وصول/برگشت (دریافتنی)", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
+        ],
+      },
+      {
+        key: "payment-ops",
+        title: "پرداخت",
+        forms: [
+          {
+            key: "payments",
+            title: "پرداخت",
+            baseActions: CRUD,
+            actions: [
+              ...APPROVE_UNAPPROVE,
+              { key: "reEdit", title: "ویرایش مجدد" },
+              { key: "issueJournalEntry", title: "صدور سند حسابداری" },
+              { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
+            ],
+          },
           { key: "cheque-clearings-payable", title: "نتیجه وصول/برگشت (پرداختنی)", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
+        ],
+      },
+      {
+        key: "periodic-ops",
+        title: "عملیات دوره‌ای",
+        forms: [
+          { key: "treasury-openings", title: "عملیات اول دوره", baseActions: CRUD },
           {
             key: "treasury-year-close",
             title: "عملیات پایان دوره",
