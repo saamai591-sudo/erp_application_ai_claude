@@ -7,6 +7,26 @@ const FORM = findFormPrefix("accounts");
 
 const router = Router();
 
+// «گردش‌داشتن» حساب = وجود حداقل یک ردیف سند حسابداری روی خودِ حساب یا هر یک از حساب‌های زیرمجموعه‌ی آن (سرفصل‌های گروه/کل
+// با گردش زیرمجموعه‌هایشان هم «گردش‌دار» حساب می‌شوند). فیلد Account.hasTransactions هیچ‌جا به‌روز نمی‌شد، پس از روی
+// JournalEntryLine محاسبه می‌شود. طبق درخواست کاربر: حساب گردش‌دار فقط عنوانش قابل ویرایش است.
+async function accountIdsWithTransactions(): Promise<Set<number>> {
+  const [lineGroups, accounts] = await Promise.all([
+    prisma.journalEntryLine.groupBy({ by: ["accountId"] }),
+    prisma.account.findMany({ select: { id: true, parentId: true } }),
+  ]);
+  const parentOf = new Map<number, number | null>(accounts.map((a: any) => [a.id, a.parentId]));
+  const result = new Set<number>();
+  for (const g of lineGroups as any[]) {
+    let cur: number | null | undefined = g.accountId;
+    while (cur != null && !result.has(cur)) {
+      result.add(cur);
+      cur = parentOf.get(cur);
+    }
+  }
+  return result;
+}
+
 router.get("/", async (_req, res) => {
   const accounts = await prisma.account.findMany({
     include: {
@@ -17,7 +37,8 @@ router.get("/", async (_req, res) => {
     },
     orderBy: [{ levelId: "asc" }, { code: "asc" }],
   });
-  res.json(accounts);
+  const withTx = await accountIdsWithTransactions();
+  res.json(accounts.map((a: any) => ({ ...a, hasTransactions: withTx.has(a.id) })));
 });
 
 router.post("/", can(`${FORM}.create`), async (req, res) => {
@@ -111,8 +132,24 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
 
   const account = await prisma.account.findUnique({ where: { id }, include: { level: true } });
   if (!account) return res.status(404).json({ error: "حساب یافت نشد" });
-  if (account.hasTransactions && body.code && body.code !== account.code) {
-    return res.status(400).json({ error: "این حساب گردش دارد و کد آن قابل تغییر نیست" });
+  const hasTx = (await accountIdsWithTransactions()).has(id);
+  if (hasTx) {
+    // حساب گردش‌دار: فقط عنوان قابل تغییر است؛ هر مقدار ارسالیِ دیگر که با مقدار ذخیره‌شده فرق کند رد می‌شود
+    const norm = (v: any) => (v === undefined || v === "" ? null : v);
+    const changed: string[] = [];
+    if (body.code !== undefined && body.code !== account.code) changed.push("کد");
+    if (body.natureGroup !== undefined && norm(body.natureGroup) !== norm(account.natureGroup)) changed.push("ماهیت گروه");
+    if (body.natureDetail !== undefined && norm(body.natureDetail) !== norm(account.natureDetail)) changed.push("ماهیت تفصیلی");
+    if (body.balanceNature !== undefined && norm(body.balanceNature) !== norm(account.balanceNature)) changed.push("ماهیت مانده");
+    if (body.isCurrency !== undefined && !!body.isCurrency !== !!account.isCurrency) changed.push("ارزی");
+    if (body.isRevaluable !== undefined && !!body.isRevaluable !== !!account.isRevaluable) changed.push("تجدید ارزیابی");
+    for (const n of [1, 2, 3] as const) {
+      const key = `detailType${n}Id` as const;
+      if (body[key] !== undefined && norm(body[key]) !== norm((account as any)[key])) changed.push(`نوع تفصیل سطح ${n}`);
+    }
+    if (changed.length > 0) {
+      return res.status(400).json({ error: `این حساب گردش دارد و فقط عنوان آن قابل ویرایش است (${changed.join("، ")} قابل تغییر نیست)` });
+    }
   }
 
   if (body.code && body.code.length !== account.level.codeLength) {
@@ -127,8 +164,10 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
     if (dupTitle) return res.status(400).json({ error: "عنوان در این سطح تکراری است" });
   }
 
-  const data: any = { code: body.code, title: body.title };
-  if (account.level.order === 1) {
+  const data: any = hasTx ? { title: body.title } : { code: body.code, title: body.title };
+  if (hasTx) {
+    // فقط عنوان
+  } else if (account.level.order === 1) {
     data.natureGroup = body.natureGroup;
   } else if (account.level.order === 2) {
     data.natureDetail = body.natureDetail;
@@ -149,7 +188,7 @@ router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const account = await prisma.account.findUnique({ where: { id } });
   if (!account) return res.status(404).json({ error: "حساب یافت نشد" });
-  if (account.hasTransactions) return res.status(400).json({ error: "این حساب گردش دارد و قابل حذف نیست" });
+  if ((await accountIdsWithTransactions()).has(id)) return res.status(400).json({ error: "این حساب گردش دارد و قابل حذف نیست" });
   const children = await prisma.account.findFirst({ where: { parentId: id } });
   if (children) return res.status(400).json({ error: "این حساب دارای زیرحساب است و قابل حذف نیست" });
   await prisma.account.delete({ where: { id } });

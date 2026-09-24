@@ -21,6 +21,7 @@ interface AccountRow {
   levelId: number;
   code: string;
   title: string;
+  hasTransactions?: boolean;
   level: Level;
   natureGroup: string | null;
   natureDetail: string | null;
@@ -149,6 +150,8 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
   const [detailTypes, setDetailTypes] = useState<DetailType[]>([]);
   const [parentAccount, setParentAccount] = usePersistedState<AccountRow | null>(`${cacheKey}:parentAccount`, null);
   const [currentLevel, setCurrentLevel] = usePersistedState<Level | null>(`${cacheKey}:currentLevel`, null);
+  // حساب گردش‌دار (سند حسابداری دارد): فقط عنوان قابل ویرایش است (سرور هم همین را اعمال می‌کند)
+  const [hasTx, setHasTx] = usePersistedState<boolean>(`${cacheKey}:hasTx`, false);
   const [form, setForm] = usePersistedState<any>(`${cacheKey}:form`, {
     code: "",
     title: "",
@@ -185,6 +188,7 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
         const found = accs.find((a) => a.id === editId);
         if (found) {
           setCurrentLevel(found.level);
+          setHasTx(!!found.hasTransactions);
           setForm({
             code: found.code,
             title: found.title,
@@ -264,6 +268,7 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
     <FormPage
       title={editId ? `ویرایش حساب (${currentLevel.title})` : `سرفصل جدید — سطح ${currentLevel.title}${parentAccount ? ` (زیرمجموعه‌ی «${parentAccount.title}»)` : ""}`}
       formId="account-form"
+      description={hasTx ? "این حساب گردش دارد (سند حسابداری روی آن یا زیرمجموعه‌هایش ثبت شده)؛ فقط عنوان آن قابل ویرایش است." : undefined}
       closePath="/accounts"
       onDelete={editId ? handleDelete : undefined}
     >
@@ -272,7 +277,7 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
         <div className="form-grid">
           <div className="form-field">
             <label>کد (طول {currentLevel.codeLength} رقم)<RequiredMark /></label>
-            <input dir="ltr" maxLength={currentLevel.codeLength} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
+            <input dir="ltr" maxLength={currentLevel.codeLength} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} disabled={hasTx} />
           </div>
           <div className="form-field">
             <label>عنوان<RequiredMark /></label>
@@ -282,7 +287,7 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
           {currentLevel.order === 1 && (
             <div className="form-field">
               <label>ماهیت حساب<RequiredMark /></label>
-              <select value={form.natureGroup} onChange={(e) => setForm({ ...form, natureGroup: e.target.value })}>
+              <select value={form.natureGroup} disabled={hasTx} onChange={(e) => setForm({ ...form, natureGroup: e.target.value })}>
                 {Object.entries(NATURE_GROUP_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
@@ -291,7 +296,7 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
           {currentLevel.order === 2 && (
             <div className="form-field">
               <label>ماهیت حساب<RequiredMark /></label>
-              <select value={form.natureDetail} onChange={(e) => setForm({ ...form, natureDetail: e.target.value })}>
+              <select value={form.natureDetail} disabled={hasTx} onChange={(e) => setForm({ ...form, natureDetail: e.target.value })}>
                 {Object.entries(NATURE_DETAIL_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
@@ -301,39 +306,39 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
             <>
               <div className="form-field">
                 <label>ماهیت مانده<RequiredMark /></label>
-                <select value={form.balanceNature} onChange={(e) => setForm({ ...form, balanceNature: e.target.value })}>
+                <select value={form.balanceNature} disabled={hasTx} onChange={(e) => setForm({ ...form, balanceNature: e.target.value })}>
                   {Object.entries(BALANCE_NATURE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </div>
               <div className="form-field">
                 <label className="checkbox-row">
-                  <input type="checkbox" checked={form.isCurrency} onChange={(e) => setForm({ ...form, isCurrency: e.target.checked })} />
+                  <input type="checkbox" checked={form.isCurrency} disabled={hasTx} onChange={(e) => setForm({ ...form, isCurrency: e.target.checked })} />
                   ارزی
                 </label>
               </div>
               <div className="form-field">
                 <label className="checkbox-row">
-                  <input type="checkbox" checked={form.isRevaluable} onChange={(e) => setForm({ ...form, isRevaluable: e.target.checked })} />
+                  <input type="checkbox" checked={form.isRevaluable} disabled={hasTx} onChange={(e) => setForm({ ...form, isRevaluable: e.target.checked })} />
                   تسعیرپذیر
                 </label>
               </div>
               <div className="form-field full">
                 <label>تفصیل سطح ۱ (اختیاری)</label>
-                <select value={form.detailType1Id} onChange={(e) => setForm({ ...form, detailType1Id: e.target.value })}>
+                <select value={form.detailType1Id} disabled={hasTx} onChange={(e) => setForm({ ...form, detailType1Id: e.target.value })}>
                   <option value="">ندارد</option>
                   {detailTypes.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
                 </select>
               </div>
               <div className="form-field full">
                 <label>تفصیل سطح ۲ (اختیاری)</label>
-                <select value={form.detailType2Id} onChange={(e) => setForm({ ...form, detailType2Id: e.target.value })}>
+                <select value={form.detailType2Id} disabled={hasTx} onChange={(e) => setForm({ ...form, detailType2Id: e.target.value })}>
                   <option value="">ندارد</option>
                   {detailTypes.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
                 </select>
               </div>
               <div className="form-field full">
                 <label>تفصیل سطح ۳ (اختیاری)</label>
-                <select value={form.detailType3Id} onChange={(e) => setForm({ ...form, detailType3Id: e.target.value })}>
+                <select value={form.detailType3Id} disabled={hasTx} onChange={(e) => setForm({ ...form, detailType3Id: e.target.value })}>
                   <option value="">ندارد</option>
                   {detailTypes.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
                 </select>
