@@ -123,7 +123,7 @@ function OpeningList() {
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint text={INFO_TEXT} title="افتتاحیه دریافت و پرداخت" />
+          <InfoHint text={INFO_TEXT} title="عملیات اول دوره" />
           <RefreshButton onClick={reload} />
         </div>
         <NewRecordButton path="/treasury-openings/new" />

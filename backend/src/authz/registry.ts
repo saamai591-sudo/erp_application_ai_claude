@@ -483,6 +483,7 @@ export const REGISTRY: ModuleDef[] = [
         key: "operations",
         title: "عملیات",
         forms: [
+          { key: "treasury-openings", title: "عملیات اول دوره", baseActions: CRUD },
           {
             key: "receipts",
             title: "دریافت",
@@ -515,10 +516,9 @@ export const REGISTRY: ModuleDef[] = [
           { key: "cheque-deposit-returns", title: "برگشت از واگذاری", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
           { key: "cheque-clearings-receivable", title: "نتیجه وصول/برگشت (دریافتنی)", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
           { key: "cheque-clearings-payable", title: "نتیجه وصول/برگشت (پرداختنی)", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
-          { key: "treasury-openings", title: "افتتاحیه دریافت و پرداخت", baseActions: CRUD },
           {
             key: "treasury-year-close",
-            title: "بستن سال دریافت و پرداخت",
+            title: "عملیات پایان دوره",
             baseActions: ["view"],
             actions: [
               { key: "closeBankAccounts", title: "بستن حساب‌های بانکی" },

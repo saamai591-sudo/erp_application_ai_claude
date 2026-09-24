@@ -81,7 +81,7 @@ export default function TreasuryYearClose() {
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint text={INFO_TEXT} title="بستن سال دریافت و پرداخت" />
+          <InfoHint text={INFO_TEXT} title="عملیات پایان دوره" />
           <RefreshButton onClick={load} />
         </div>
       </div>

@@ -264,6 +264,7 @@ export const MODULES: ModuleGroup[] = [
       {
         title: "عملیات",
         items: [
+          { key: "treasury-openings", label: "عملیات اول دوره", list: "/treasury-openings", create: "/treasury-openings/new", icon: "ledger" },
           { key: "receipts", label: "دریافت", list: "/receipts", create: "/receipts/new", icon: "ledger" },
           { key: "payments", label: "پرداخت", list: "/payments", create: "/payments/new", icon: "ledger" },
           { key: "cheques", label: "چک‌ها", list: "/cheques", icon: "file" },
@@ -271,8 +272,7 @@ export const MODULES: ModuleGroup[] = [
           { key: "cheque-deposit-returns", label: "برگشت از واگذاری", list: "/cheque-deposit-returns", create: "/cheque-deposit-returns/new", icon: "bank" },
           { key: "cheque-clearings-receivable", label: "نتیجه وصول/برگشت (دریافتنی)", list: "/cheque-clearings-receivable", create: "/cheque-clearings-receivable/new", icon: "ledger" },
           { key: "cheque-clearings-payable", label: "نتیجه وصول/برگشت (پرداختنی)", list: "/cheque-clearings-payable", create: "/cheque-clearings-payable/new", icon: "ledger" },
-          { key: "treasury-openings", label: "افتتاحیه دریافت و پرداخت", list: "/treasury-openings", create: "/treasury-openings/new", icon: "ledger" },
-          { key: "treasury-year-close", label: "بستن سال دریافت و پرداخت", list: "/treasury-year-close", icon: "bank" },
+          { key: "treasury-year-close", label: "عملیات پایان دوره", list: "/treasury-year-close", icon: "bank" },
         ],
       },
       {
