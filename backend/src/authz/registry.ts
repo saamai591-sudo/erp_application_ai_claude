@@ -510,8 +510,17 @@ export const REGISTRY: ModuleDef[] = [
               { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
             ],
           },
-          { key: "cheque-deposit-returns", title: "برگشت از واگذاری", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
-          { key: "cheque-clearings-receivable", title: "نتیجه وصول/برگشت (دریافتنی)", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
+          {
+            key: "cheque-deposit-returns",
+            title: "برگشت از واگذاری",
+            baseActions: CRUD,
+            actions: [
+              ...APPROVE_UNAPPROVE_REEDIT,
+              { key: "issueJournalEntry", title: "صدور سند حسابداری" },
+              { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
+            ],
+          },
+          { key: "cheque-clearings-receivable", title: "وصول و برگشت چک", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
         ],
       },
       {
@@ -529,7 +538,7 @@ export const REGISTRY: ModuleDef[] = [
               { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
             ],
           },
-          { key: "cheque-clearings-payable", title: "نتیجه وصول/برگشت (پرداختنی)", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
+          { key: "cheque-clearings-payable", title: "وصول و برگشت چک", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
         ],
       },
       {

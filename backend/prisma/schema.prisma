@@ -551,6 +551,7 @@ model JournalEntry {
   receipt             Receipt?
   payment             Payment?
   chequeDeposit       ChequeDeposit?
+  chequeDepositReturn ChequeDepositReturn?
   salesReturnInvoice  SalesReturnInvoice?
   warehouseJournalEntryIssuance WarehouseJournalEntryIssuance?
 
@@ -3155,6 +3156,9 @@ model ChequeDepositReturn {
   date           DateTime                  @db.Date
   description    String?
   status         TreasuryDocStatus         @default(DRAFT)
+  // سند حسابداری صادرشده (اکشن دستی «صدور سند حسابداری» روی سند تاییدشده) — هم‌الگوی ChequeDeposit
+  journalEntryId Int?                      @unique
+  journalEntry   JournalEntry?             @relation(fields: [journalEntryId], references: [id])
   createdAt      DateTime                  @default(now())
   updatedAt      DateTime                  @default(now()) @updatedAt
   fiscalPeriod   FiscalPeriod              @relation(fields: [fiscalPeriodId], references: [id])

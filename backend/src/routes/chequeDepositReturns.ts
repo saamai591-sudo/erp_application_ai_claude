@@ -5,9 +5,12 @@ import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation
 import { assertRecordNotStale } from "../utils/concurrency";
 import { can } from "../authz/guard";
 import { registerChequeDocReEdit } from "../utils/chequeDocReEdit";
+import { issueChequeDepositReturnJournalEntry, revertChequeDepositReturnJournalEntry } from "../services/chequeDepositReturnJournalEntryService";
 import { findFormPrefix } from "../authz/registry";
 
 const FORM = findFormPrefix("cheque-deposit-returns");
+
+const JE_LOCK_MESSAGE = "برای این سند برگشت از واگذاری، سند حسابداری صادر شده است؛ ابتدا سند حسابداری را حذف کنید";
 
 // =========================================================================
 // ماژول «خزانه‌داری» > برگشت از واگذاری (ChequeDepositReturn)
@@ -74,7 +77,7 @@ router.get("/cheque-deposit-returns/pickable-cheques", can(`${FORM}.view`), asyn
 
 router.get("/cheque-deposit-returns", can(`${FORM}.view`), async (_req, res) => {
   const items = await prisma.chequeDepositReturn.findMany({
-    include: { fiscalPeriod: true, lines: true },
+    include: { fiscalPeriod: true, lines: true, journalEntry: true },
     orderBy: { id: "desc" },
   });
   res.json(
@@ -85,6 +88,7 @@ router.get("/cheque-deposit-returns", can(`${FORM}.view`), async (_req, res) => 
       fiscalPeriodTitle: d.fiscalPeriod.title,
       description: d.description,
       status: d.status,
+      journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
       lineCount: d.lines.length,
     }))
   );
@@ -92,6 +96,7 @@ router.get("/cheque-deposit-returns", can(`${FORM}.view`), async (_req, res) => 
 
 const CHEQUE_DEPOSIT_RETURNS_DETAIL_INCLUDE = {
   fiscalPeriod: true,
+  journalEntry: true,
   lines: { include: { chequeItem: { include: { party: true, currency: true } } }, orderBy: { rowOrder: "asc" } },
 } as const;
 
@@ -104,6 +109,8 @@ function serializeChequeDepositReturns(d: any) {
     fiscalPeriodTitle: d.fiscalPeriod.title,
     description: d.description,
     status: d.status,
+    journalEntryId: d.journalEntryId,
+    journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
     updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
       id: l.id,
@@ -161,6 +168,7 @@ router.put("/cheque-deposit-returns/:id", can(`${FORM}.edit`), async (req, res) 
 
   const existing = await prisma.chequeDepositReturn.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "سند برگشت از واگذاری یافت نشد" });
+  if (existing.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل ویرایش هستند؛ ابتدا از «تایید» برگردانید" });
 
   if (!body.date) return res.status(400).json({ error: "تاریخ سند الزامی است" });
@@ -194,6 +202,7 @@ router.delete("/cheque-deposit-returns/:id", can(`${FORM}.delete`), async (req, 
   const id = Number(req.params.id);
   const d = await prisma.chequeDepositReturn.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
+  if (d.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «تایید» برگردانید" });
   await prisma.chequeDepositReturn.delete({ where: { id } });
   res.status(204).send();
@@ -235,6 +244,7 @@ router.post("/cheque-deposit-returns/:id/unapprove", can(`${FORM}.unapprove`), a
   const id = Number(req.params.id);
   const d = await prisma.chequeDepositReturn.findUnique({ where: { id }, include: { lines: { include: { chequeItem: true } } } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
+  if (d.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
   if (d.status !== "APPROVED") return res.status(400).json({ error: "فقط اسناد «تایید»شده قابل برگشت هستند" });
 
   const touched = d.lines.find((l: any) => l.chequeItem.step !== l.chequeStep);
@@ -255,6 +265,24 @@ router.post("/cheque-deposit-returns/:id/unapprove", can(`${FORM}.unapprove`), a
     res.json({ id, status: "DRAFT" });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در برگشت از تایید" });
+  }
+});
+
+router.post("/cheque-deposit-returns/:id/issue-journal-entry", can(`${FORM}.issueJournalEntry`), async (req, res) => {
+  try {
+    const entry = await issueChequeDepositReturnJournalEntry(Number(req.params.id));
+    res.json({ journalEntryId: entry.id, number: entry.number, referenceNumber: entry.referenceNumber, message: entry.message });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در صدور سند حسابداری" });
+  }
+});
+
+router.delete("/cheque-deposit-returns/:id/journal-entry", can(`${FORM}.revertJournalEntry`), async (req, res) => {
+  try {
+    await revertChequeDepositReturnJournalEntry(Number(req.params.id));
+    res.status(204).send();
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در حذف سند حسابداری" });
   }
 });
 
