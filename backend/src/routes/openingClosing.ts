@@ -48,6 +48,7 @@ router.get("/", can(`${FORM}.view`), async (_req, res) => {
       issued: !!e.journalEntryId,
       journalEntryId: e.journalEntryId,
       journalEntryNumber: e.journalEntry?.number ?? null,
+      journalEntryReferenceNumber: e.journalEntry?.referenceNumber ?? null,
       journalEntryDate: e.journalEntry?.date ?? null,
       journalEntryStatus: e.journalEntry?.status ?? null,
     }))
@@ -72,6 +73,7 @@ router.get("/:id", can(`${FORM}.view`), async (req, res) => {
     issued: !!e.journalEntryId,
     journalEntryId: e.journalEntryId,
     journalEntryNumber: e.journalEntry?.number ?? null,
+      journalEntryReferenceNumber: e.journalEntry?.referenceNumber ?? null,
     journalEntryDate: e.journalEntry?.date ?? null,
     journalEntryStatus: e.journalEntry?.status ?? null,
   });

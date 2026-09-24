@@ -172,12 +172,6 @@ function PurchaseInvoiceList() {
           { header: "نوع خرید", render: (r) => r.purchaseTypeTitle || "—", filterType: "string", filterValue: (r) => r.purchaseTypeTitle || "" },
           { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
-          {
-            header: "شماره عطف سند",
-            render: (r) => (r.journalEntryReferenceNumber ? toFaDigits(String(r.journalEntryReferenceNumber)) : "—"),
-            filterType: "number",
-            filterValue: (r) => r.journalEntryReferenceNumber ?? undefined,
-          },
         ]}
         rows={items}
         edit={{ path: (r) => `/purchase-invoices/${r.id}/edit` }}

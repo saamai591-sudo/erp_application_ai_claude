@@ -124,12 +124,6 @@ function SalesReturnInvoiceList() {
           { header: "نوع فروش", render: (r) => r.salesTypeTitle || "—", filterType: "string", filterValue: (r) => r.salesTypeTitle || "" },
           { header: "مرکز فروش", render: (r) => r.salesCenterTitle || "—", filterType: "string", filterValue: (r) => r.salesCenterTitle || "" },
           { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
-          {
-            header: "شماره عطف سند",
-            render: (r) => (r.journalEntryReferenceNumber ? toFaDigits(String(r.journalEntryReferenceNumber)) : "—"),
-            filterType: "number",
-            filterValue: (r) => r.journalEntryReferenceNumber ?? undefined,
-          },
         ]}
         rows={items}
         edit={{ path: (r) => `/sales-return-invoices/${r.id}/edit` }}

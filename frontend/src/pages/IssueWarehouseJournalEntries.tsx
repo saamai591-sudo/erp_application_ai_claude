@@ -192,12 +192,6 @@ function IssuanceList() {
             filterValue: (r) => (r.status === "ISSUED" ? "صادر شده" : "پیش‌نویس"),
           },
           { header: "تعداد ردیف", render: (r) => toFaDigits(String(r.rowCount)), filterType: "number", filterValue: (r) => r.rowCount },
-          {
-            header: "شماره عطف سند",
-            render: (r) => (r.journalEntryReferenceNumber ? toFaDigits(String(r.journalEntryReferenceNumber)) : "—"),
-            filterType: "number",
-            filterValue: (r) => r.journalEntryReferenceNumber ?? undefined,
-          },
           { header: "تاریخ ثبت", render: (r) => formatJalaliDate(r.createdAt), filterType: "date", filterValue: (r) => r.createdAt.slice(0, 10) },
         ]}
         rows={items}

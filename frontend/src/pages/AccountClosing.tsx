@@ -137,7 +137,6 @@ function ClosingList() {
           { header: "جمع بدهکار", render: (r) => formatAmountFa(r.totalDebit), filterType: "number", filterValue: (r) => r.totalDebit, decimal: true },
           { header: "جمع بستانکار", render: (r) => formatAmountFa(r.totalCredit), filterType: "number", filterValue: (r) => r.totalCredit, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{r.issued ? "سند صادر شده" : "صادر نشده"}</span>, filterType: "string", filterValue: (r) => (r.issued ? "سند صادر شده" : "صادر نشده") },
-          { header: "شماره عطف سند", render: (r) => (r.journalEntryReferenceNumber ? toFaDigits(String(r.journalEntryReferenceNumber)) : "—"), filterType: "number", filterValue: (r) => r.journalEntryReferenceNumber ?? undefined },
         ]}
         rows={items}
         edit={{ path: (r) => `/account-closing/${r.id}` }}

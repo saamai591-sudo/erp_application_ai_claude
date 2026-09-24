@@ -229,7 +229,6 @@ function ReceiptList() {
           { header: "شرح", render: (r) => r.description || "—", filterType: "string", filterValue: (r) => r.description || "" },
           { header: "جمع (ارز پایه)", render: (r) => formatAmountFa(r.totalBaseAmount), filterType: "number", filterValue: (r) => r.totalBaseAmount, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
-          { header: "سند حسابداری", render: (r) => (r.journalEntryReferenceNumber ? toFaDigits(String(r.journalEntryReferenceNumber)) : "—"), width: "110px", filterType: "number", filterValue: (r) => r.journalEntryReferenceNumber ?? undefined },
         ]}
         rows={items}
         edit={{ path: (r) => `/receipts/${r.id}/edit` }}

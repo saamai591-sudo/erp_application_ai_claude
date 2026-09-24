@@ -81,7 +81,6 @@ function ListView() {
           { header: "دوره مالی", render: (r) => r.fiscalPeriodTitle, filterType: "string", filterValue: (r) => r.fiscalPeriodTitle },
           { header: "شرح", render: (r) => r.description, filterType: "string", filterValue: (r) => r.description },
           { header: "وضعیت", render: (r) => <span className="badge">{r.issued ? "سند صادر شده" : "صادر نشده"}</span>, filterType: "string", filterValue: (r) => (r.issued ? "سند صادر شده" : "صادر نشده") },
-          { header: "شماره سند", render: (r) => (r.journalEntryNumber ? toFaDigits(String(r.journalEntryNumber)) : "—"), filterType: "number", filterValue: (r) => r.journalEntryNumber ?? undefined },
         ]}
         rows={items}
         edit={{ path: (r) => `/opening-closing/${r.id}` }}

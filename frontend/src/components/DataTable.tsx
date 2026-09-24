@@ -42,6 +42,29 @@ export interface Column<T> {
   totalValue?: (row: T) => string | number | null | undefined;
 }
 
+/**
+ * قاعده‌ی پایه: هر فهرستی که سطرهایش فیلد journalEntryReferenceNumber (شماره عطف سند حسابداری صادرشده؛ null اگر هنوز
+ * صادر نشده) داشته باشد، به‌صورت خودکار ستون «شماره سند حسابداری» را (آخرین ستون) می‌گیرد — لازم نیست هر فرم جداگانه تعریف کند.
+ * فقط کافی است API فهرستِ فرمی که سند حسابداری صادر می‌کند این فیلد را برگرداند.
+ */
+export const JOURNAL_ENTRY_COLUMN_HEADER = "شماره سند حسابداری";
+
+function withJournalEntryColumn<T>(columns: Column<T>[], rows: T[]): Column<T>[] {
+  if (rows.length === 0 || columns.some((c) => c.header === JOURNAL_ENTRY_COLUMN_HEADER)) return columns;
+  if (!("journalEntryReferenceNumber" in (rows[0] as object))) return columns;
+  const value = (r: T) => ((r as any).journalEntryReferenceNumber as number | null | undefined) ?? undefined;
+  return [
+    ...columns,
+    {
+      header: JOURNAL_ENTRY_COLUMN_HEADER,
+      render: (r: T) => (value(r) ? toFaDigits(String(value(r))) : "—"),
+      width: "130px",
+      filterType: "number",
+      filterValue: value,
+    },
+  ];
+}
+
 export interface ActiveFilter {
   operator: string;
   value?: string;
@@ -303,7 +326,7 @@ export interface EditAction<T> {
 }
 
 export function DataTable<T extends { id: number | string }>({
-  columns,
+  columns: columnsProp,
   rows,
   edit,
   onDelete,
@@ -338,6 +361,7 @@ export function DataTable<T extends { id: number | string }>({
   stateKey?: string;
 }) {
   const { openTab } = useTabs();
+  const columns = withJournalEntryColumn(columnsProp, rows);
   const location = useLocation();
   const gridName = deriveGridName(location.pathname);
   // کلید پایه‌ی وضعیتِ همین گرید — با پیشوند مسیر صفحه، تا هم با clearPersistedStateByPrefix(مسیر) در
