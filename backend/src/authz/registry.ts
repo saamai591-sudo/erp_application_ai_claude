@@ -517,6 +517,14 @@ export const REGISTRY: ModuleDef[] = [
           { key: "cheque-clearings-payable", title: "نتیجه وصول/برگشت (پرداختنی)", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
         ],
       },
+      {
+        key: "reports",
+        title: "گزارش",
+        forms: [
+          { key: "bank-account-review", title: "مرور حساب بانکی", baseActions: ["view"] },
+          { key: "cash-review", title: "مرور صندوق", baseActions: ["view"] },
+        ],
+      },
     ],
   },
 ];

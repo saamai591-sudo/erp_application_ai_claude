@@ -91,6 +91,8 @@ import SalesDeliveries from "./pages/SalesDeliveries";
 import SalesInvoices from "./pages/SalesInvoices";
 import SalesReturnInvoices from "./pages/SalesReturnInvoices";
 import SalesReview from "./pages/SalesReview";
+import BankAccountReview from "./pages/BankAccountReview";
+import CashReview from "./pages/CashReview";
 import PurchaseInvoices from "./pages/PurchaseInvoices";
 import ServicePurchaseInvoices from "./pages/ServicePurchaseInvoices";
 import WarehouseReview from "./pages/WarehouseReview";
@@ -386,6 +388,8 @@ export default function App() {
             <Route path="/sales-return-invoices/new" element={<SalesReturnInvoices />} />
             <Route path="/sales-return-invoices/:id/edit" element={<SalesReturnInvoices />} />
             <Route path="/sales-review" element={<SalesReview />} />
+            <Route path="/bank-account-review" element={<BankAccountReview />} />
+            <Route path="/cash-review" element={<CashReview />} />
 
             <Route path="/receipts" element={<Receipts />} />
             <Route path="/receipts/new" element={<Receipts />} />

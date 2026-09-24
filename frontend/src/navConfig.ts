@@ -273,6 +273,13 @@ export const MODULES: ModuleGroup[] = [
           { key: "cheque-clearings-payable", label: "نتیجه وصول/برگشت (پرداختنی)", list: "/cheque-clearings-payable", create: "/cheque-clearings-payable/new", icon: "ledger" },
         ],
       },
+      {
+        title: "گزارش",
+        items: [
+          { key: "bank-account-review", label: "مرور حساب بانکی", list: "/bank-account-review", icon: "tree" },
+          { key: "cash-review", label: "مرور صندوق", list: "/cash-review", icon: "tree" },
+        ],
+      },
     ],
   },
 ];
