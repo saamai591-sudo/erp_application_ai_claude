@@ -55,6 +55,7 @@ async function main() {
     { code: 11, title: "فاکتور برگشت از فروش", systemKey: "SALES_RETURN_INVOICE" },
     { code: 12, title: "رسید دریافت", systemKey: "RECEIPT" },
     { code: 13, title: "اعلامیه پرداخت", systemKey: "PAYMENT" },
+    { code: 14, title: "واگذاری چک به بانک", systemKey: "CHEQUE_DEPOSIT" },
   ];
   for (const dt of documentTypes) {
     await prisma.documentType.upsert({

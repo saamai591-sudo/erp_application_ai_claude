@@ -550,6 +550,7 @@ model JournalEntry {
   salesInvoice        SalesInvoice?
   receipt             Receipt?
   payment             Payment?
+  chequeDeposit       ChequeDeposit?
   salesReturnInvoice  SalesReturnInvoice?
   warehouseJournalEntryIssuance WarehouseJournalEntryIssuance?
 
@@ -1332,6 +1333,8 @@ enum TreasuryAccountType {
   RECEIPT_SUBJECT
   PAYMENT_SUBJECT
   FX_GAIN_LOSS
+  // «اسناد در جریان وصول» — معین بدهکارِ صدور سند واگذاری چک به بانک، به‌ازای حساب بانکیِ مقصد (فیلد bankAccountId)
+  CHEQUE_IN_COLLECTION
 }
 
 model Supplier {
@@ -3121,6 +3124,9 @@ model ChequeDeposit {
   bankAccountId  Int
   description    String?
   status         TreasuryDocStatus   @default(DRAFT)
+  // سند حسابداری صادرشده (اکشن دستی «صدور سند حسابداری» روی سند تاییدشده) — هم‌الگوی Receipt/Payment
+  journalEntryId Int?                @unique
+  journalEntry   JournalEntry?       @relation(fields: [journalEntryId], references: [id])
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @default(now()) @updatedAt
   fiscalPeriod   FiscalPeriod        @relation(fields: [fiscalPeriodId], references: [id])

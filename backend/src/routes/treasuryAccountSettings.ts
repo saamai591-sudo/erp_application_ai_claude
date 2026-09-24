@@ -25,6 +25,7 @@ const TARGET_FIELD: Record<string, string | null> = {
   PAYABLE_CHEQUE: "payableChequeTypeId",
   RECEIPT_SUBJECT: "receiptTypeId",
   PAYMENT_SUBJECT: "paymentTypeId",
+  CHEQUE_IN_COLLECTION: "bankAccountId",
   FX_GAIN_LOSS: null,
 };
 

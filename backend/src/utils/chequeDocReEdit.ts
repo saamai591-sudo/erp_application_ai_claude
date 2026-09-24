@@ -58,6 +58,8 @@ export function registerChequeDocReEdit(router: Router, cfg: ChequeDocReEditConf
     const existing = await doc().findUnique({ where: { id }, include: cfg.detailInclude });
     if (!existing) throw Object.assign(new Error(cfg.notFoundMessage), { status: 404 });
     if (existing.status !== "APPROVED") throw new Error("ویرایش مجدد فقط برای سند «تایید»شده مجاز است");
+    // بعد از صدور سند حسابداری (فقط برخی اسناد مثل واگذاری به بانک)، همه‌ی اطلاعات سند قفل است
+    if ((existing as any).journalEntryId) throw new Error("برای این سند، سند حسابداری صادر شده است؛ ابتدا سند حسابداری را حذف کنید");
     const lines = existing.lines as any[];
     const flags = await Promise.all(
       lines.map(async (l) => l.chequeItem.step !== l.chequeStep || (await hasDraftReference(l.chequeItemId, cfg.lineModel, l.id)))

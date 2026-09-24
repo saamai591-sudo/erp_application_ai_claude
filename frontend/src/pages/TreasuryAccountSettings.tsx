@@ -26,6 +26,7 @@ const ACCOUNT_TYPE_FA: Record<string, string> = {
   PAYABLE_CHEQUE: "چک پرداختی",
   RECEIPT_SUBJECT: "موضوع دریافت",
   PAYMENT_SUBJECT: "موضوع پرداخت",
+  CHEQUE_IN_COLLECTION: "اسناد در جریان وصول",
   FX_GAIN_LOSS: "سود و زیان تسعیر ارز",
 };
 
@@ -40,6 +41,7 @@ const TARGET_FIELD: Record<string, TargetField | null> = {
   PAYABLE_CHEQUE: "payableChequeTypeId",
   RECEIPT_SUBJECT: "receiptTypeId",
   PAYMENT_SUBJECT: "paymentTypeId",
+  CHEQUE_IN_COLLECTION: "bankAccountId",
   FX_GAIN_LOSS: null,
 };
 
@@ -83,6 +85,7 @@ function targetDisplay(r: Setting): string {
   switch (r.accountType) {
     case "BANK_ACCOUNT":
     case "BANK_FEE":
+    case "CHEQUE_IN_COLLECTION":
       return r.bankAccount ? `${r.bankAccount.accountNumber} — ${r.bankAccount.bankBranch.title}` : "—";
     case "CASH_BOX": return r.cashBox?.title || "—";
     case "RECEIVABLE_CHEQUE": return r.receivableChequeType?.title || "—";
