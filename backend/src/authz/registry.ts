@@ -547,7 +547,16 @@ export const REGISTRY: ModuleDef[] = [
               { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
             ],
           },
-          { key: "cheque-clearings-payable", title: "وصول و برگشت چک", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
+          {
+            key: "cheque-clearings-payable",
+            title: "وصول و برگشت چک",
+            baseActions: CRUD,
+            actions: [
+              ...APPROVE_UNAPPROVE_REEDIT,
+              { key: "issueJournalEntry", title: "صدور سند حسابداری" },
+              { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
+            ],
+          },
         ],
       },
       {

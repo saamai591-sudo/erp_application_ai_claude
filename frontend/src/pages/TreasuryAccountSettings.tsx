@@ -29,6 +29,7 @@ const ACCOUNT_TYPE_FA: Record<string, string> = {
   PAYMENT_SUBJECT: "موضوع پرداخت",
   CHEQUE_IN_COLLECTION: "اسناد در جریان وصول",
   FX_GAIN_LOSS: "سود و زیان تسعیر ارز",
+  BOUNCED_PAYABLE_CHEQUE: "چک پرداختیِ برگشتی (بدهی به طرف حساب)",
 };
 
 type TargetField = "bankAccountId" | "cashBoxId" | "receivableChequeTypeId" | "payableChequeTypeId" | "receiptTypeId" | "paymentTypeId";
@@ -44,6 +45,7 @@ const TARGET_FIELD: Record<string, TargetField | null> = {
   PAYMENT_SUBJECT: "paymentTypeId",
   CHEQUE_IN_COLLECTION: "bankAccountId",
   FX_GAIN_LOSS: null,
+  BOUNCED_PAYABLE_CHEQUE: null,
 };
 
 const TARGET_LABEL: Record<TargetField, string> = {

@@ -27,6 +27,7 @@ const TARGET_FIELD: Record<string, string | null> = {
   PAYMENT_SUBJECT: "paymentTypeId",
   CHEQUE_IN_COLLECTION: "bankAccountId",
   FX_GAIN_LOSS: null,
+  BOUNCED_PAYABLE_CHEQUE: null,
 };
 
 const TARGET_LABEL: Record<string, string> = {

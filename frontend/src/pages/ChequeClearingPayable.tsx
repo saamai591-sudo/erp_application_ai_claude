@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
-import { showError } from "../lib/toast";
+import { showError, showToast } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -58,6 +58,8 @@ interface Detail {
   fiscalPeriodTitle: string;
   description: string | null;
   status: DocStatus;
+  journalEntryId?: number | null;
+  journalEntryReferenceNumber?: number | null;
   lines: DetailLine[];
 }
 
@@ -173,7 +175,7 @@ function ChequeClearingPayableForm({ editId, reEdit }: { editId?: number; reEdit
   const [docUpdatedAt, setDocUpdatedAt] = usePersistedState<string>(`${cacheKey}:updatedAt`, "");
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", description: "" });
   const [lines, setLines] = usePersistedState<DetailLine[]>(`${cacheKey}:lines`, []);
-  const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; fiscalPeriodTitle: string } | null>(`${cacheKey}:meta`, null);
+  const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; fiscalPeriodTitle: string; journalEntryId: number | null; journalEntryReferenceNumber: number | null } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
@@ -181,7 +183,7 @@ function ChequeClearingPayableForm({ editId, reEdit }: { editId?: number; reEdit
 
   function applyDetail(d: Detail) {
     setDocUpdatedAt(d.updatedAt ?? "");
-    setMeta({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle });
+    setMeta({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle, journalEntryId: d.journalEntryId ?? null, journalEntryReferenceNumber: d.journalEntryReferenceNumber ?? null });
     setHeader({ date: d.date.slice(0, 10), description: d.description || "" });
     setLines(d.lines);
   }
@@ -201,7 +203,7 @@ function ChequeClearingPayableForm({ editId, reEdit }: { editId?: number; reEdit
         if (editId) {
           try {
             const d: Detail = await api.get(`/cheque-clearings-payable/${editId}`);
-            setMeta((prev) => (prev ? { ...prev, status: d.status } : prev));
+            setMeta((prev) => (prev ? { ...prev, status: d.status, journalEntryId: d.journalEntryId ?? null, journalEntryReferenceNumber: d.journalEntryReferenceNumber ?? null } : prev));
           } catch {
             // اگر واکشی ناموفق شد، به مقادیر کش‌شده بسنده می‌شود؛ ذخیره‌سازی همچنان توسط سرور اعتبارسنجی می‌شود
           }
@@ -231,6 +233,8 @@ function ChequeClearingPayableForm({ editId, reEdit }: { editId?: number; reEdit
   }, [editId]);
 
   const status: DocStatus = meta?.status || "DRAFT";
+  // بعد از صدور سند حسابداری، همه‌ی اطلاعات سند قفل است (برگشت از تایید، ویرایش مجدد و حذف مسدود؛ ابتدا سند حسابداری حذف شود)
+  const jeLocked = !!meta?.journalEntryId;
   const coreDisabled = !!editId && status !== "DRAFT";
   // سند «تایید»شده از مسیر «ویرایش» کاملاً قفل است؛ فقط «ویرایش مجدد» چک‌های فاقد گردش را اصلاح/حذف می‌کند
   const linesLocked = !!editId && status !== "DRAFT" && !reEdit;
@@ -312,6 +316,24 @@ function ChequeClearingPayableForm({ editId, reEdit }: { editId?: number; reEdit
     }
   }
 
+  async function runJournalAction(method: "post" | "del") {
+    if (!editId) return;
+    try {
+      if (method === "post") {
+        const result: { message?: string } = await api.post(`/cheque-clearings-payable/${editId}/issue-journal-entry`, {});
+        applyDetail(await api.get(`/cheque-clearings-payable/${editId}`));
+        flash(result?.message);
+      } else {
+        if (!window.confirm("سند حسابداری صادرشده حذف می‌شود. ادامه می‌دهید؟")) return;
+        await api.del(`/cheque-clearings-payable/${editId}/journal-entry`);
+        applyDetail(await api.get(`/cheque-clearings-payable/${editId}`));
+        showToast("سند حسابداری حذف شد");
+      }
+    } catch (e) {
+      showError((e as ApiError).message);
+    }
+  }
+
   // «ویرایش مجدد»: نمایش Action فقط به وضعیت «تایید» وابسته است؛ امکان‌سنجی (وجود چک فاقد گردش) بعد از کلیک انجام می‌شود
   async function handleReEdit() {
     if (!editId) return;
@@ -353,7 +375,14 @@ function ChequeClearingPayableForm({ editId, reEdit }: { editId?: number; reEdit
           ? [
               ...(status === "DRAFT" ? [{ label: "تایید", icon: <CheckIcon />, onClick: handleApprove }] : []),
               ...(status === "APPROVED" ? [{ label: "ویرایش مجدد", icon: <PlusIcon />, onClick: handleReEdit }] : []),
-              ...(status === "APPROVED" ? [{ label: "برگشت از تایید", icon: <UndoIcon />, onClick: handleUnapprove }] : []),
+              ...(status === "APPROVED" && !jeLocked ? [{ label: "برگشت از تایید", icon: <UndoIcon />, onClick: handleUnapprove }] : []),
+              ...(status === "APPROVED" && !jeLocked ? [{ label: "صدور سند حسابداری", icon: <PlusIcon />, onClick: () => runJournalAction("post") }] : []),
+              ...(jeLocked
+                ? [
+                    { label: "مشاهده سند حسابداری", icon: <PlusIcon />, onClick: () => openTab(`/journal-entries/${meta?.journalEntryId}/edit`) },
+                    { label: "حذف سند حسابداری", icon: <UndoIcon />, onClick: () => runJournalAction("del") },
+                  ]
+                : []),
             ]
           : []
       }

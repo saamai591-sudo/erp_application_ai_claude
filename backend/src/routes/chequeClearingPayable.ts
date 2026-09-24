@@ -5,10 +5,13 @@ import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation
 import { assertRecordNotStale } from "../utils/concurrency";
 import { can } from "../authz/guard";
 import { registerChequeDocReEdit } from "../utils/chequeDocReEdit";
+import { issueChequeClearingPayableJournalEntry, revertChequeClearingPayableJournalEntry } from "../services/chequeClearingPayableJournalEntryService";
 import { bankAccountDisplayText } from "../services/chequeDepositBankLookup";
 import { findFormPrefix } from "../authz/registry";
 
 const FORM = findFormPrefix("cheque-clearings-payable");
+
+const JE_LOCK_MESSAGE = "برای این سند، سند حسابداری صادر شده است؛ ابتدا سند حسابداری را حذف کنید";
 
 // =========================================================================
 // ماژول «خزانه‌داری» > نتیجه وصول/برگشت چک پرداختنی (ChequeClearingPayable)
@@ -88,7 +91,7 @@ router.get("/cheque-clearings-payable/pickable-cheques", can(`${FORM}.view`), as
 
 router.get("/cheque-clearings-payable", can(`${FORM}.view`), async (_req, res) => {
   const items = await prisma.chequeClearingPayable.findMany({
-    include: { fiscalPeriod: true, lines: true },
+    include: { fiscalPeriod: true, lines: true, journalEntry: true },
     orderBy: { id: "desc" },
   });
   res.json(
@@ -99,6 +102,7 @@ router.get("/cheque-clearings-payable", can(`${FORM}.view`), async (_req, res) =
       fiscalPeriodTitle: d.fiscalPeriod.title,
       description: d.description,
       status: d.status,
+      journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
       lineCount: d.lines.length,
     }))
   );
@@ -106,6 +110,7 @@ router.get("/cheque-clearings-payable", can(`${FORM}.view`), async (_req, res) =
 
 const CHEQUE_CLEARING_PAYABLE_DETAIL_INCLUDE = {
   fiscalPeriod: true,
+  journalEntry: true,
   lines: { include: { chequeItem: { include: { party: true, currency: true, ownerBankAccount: { include: { bankBranch: true } } } } }, orderBy: { rowOrder: "asc" } },
 } as const;
 
@@ -118,6 +123,8 @@ function serializeChequeClearingPayable(d: any) {
     fiscalPeriodTitle: d.fiscalPeriod.title,
     description: d.description,
     status: d.status,
+    journalEntryId: d.journalEntryId,
+    journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
     updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
       id: l.id,
@@ -177,6 +184,7 @@ router.put("/cheque-clearings-payable/:id", can(`${FORM}.edit`), async (req, res
 
   const existing = await prisma.chequeClearingPayable.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "سند نتیجه وصول/برگشت یافت نشد" });
+  if (existing.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل ویرایش هستند؛ ابتدا از «تایید» برگردانید" });
 
   if (!body.date) return res.status(400).json({ error: "تاریخ سند الزامی است" });
@@ -210,6 +218,7 @@ router.delete("/cheque-clearings-payable/:id", can(`${FORM}.delete`), async (req
   const id = Number(req.params.id);
   const d = await prisma.chequeClearingPayable.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
+  if (d.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «تایید» برگردانید" });
   await prisma.chequeClearingPayable.delete({ where: { id } });
   res.status(204).send();
@@ -251,6 +260,7 @@ router.post("/cheque-clearings-payable/:id/unapprove", can(`${FORM}.unapprove`),
   const id = Number(req.params.id);
   const d = await prisma.chequeClearingPayable.findUnique({ where: { id }, include: { lines: { include: { chequeItem: true } } } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
+  if (d.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
   if (d.status !== "APPROVED") return res.status(400).json({ error: "فقط اسناد «تایید»شده قابل برگشت هستند" });
 
   const touched = d.lines.find((l: any) => l.chequeItem.step !== l.chequeStep);
@@ -271,6 +281,24 @@ router.post("/cheque-clearings-payable/:id/unapprove", can(`${FORM}.unapprove`),
     res.json({ id, status: "DRAFT" });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در برگشت از تایید" });
+  }
+});
+
+router.post("/cheque-clearings-payable/:id/issue-journal-entry", can(`${FORM}.issueJournalEntry`), async (req, res) => {
+  try {
+    const entry = await issueChequeClearingPayableJournalEntry(Number(req.params.id));
+    res.json({ journalEntryId: entry.id, number: entry.number, referenceNumber: entry.referenceNumber, message: entry.message });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در صدور سند حسابداری" });
+  }
+});
+
+router.delete("/cheque-clearings-payable/:id/journal-entry", can(`${FORM}.revertJournalEntry`), async (req, res) => {
+  try {
+    await revertChequeClearingPayableJournalEntry(Number(req.params.id));
+    res.status(204).send();
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در حذف سند حسابداری" });
   }
 });
 

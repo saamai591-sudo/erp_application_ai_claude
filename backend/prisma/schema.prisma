@@ -555,6 +555,7 @@ model JournalEntry {
   chequeDeposit       ChequeDeposit?
   chequeDepositReturn ChequeDepositReturn?
   chequeClearingReceivable ChequeClearingReceivable?
+  chequeClearingPayable ChequeClearingPayable?
   salesReturnInvoice  SalesReturnInvoice?
   warehouseJournalEntryIssuance WarehouseJournalEntryIssuance?
 
@@ -1339,6 +1340,8 @@ enum TreasuryAccountType {
   FX_GAIN_LOSS
   // «اسناد در جریان وصول» — معین بدهکارِ صدور سند واگذاری چک به بانک، به‌ازای حساب بانکیِ مقصد (فیلد bankAccountId)
   CHEQUE_IN_COLLECTION
+  // «چک پرداختیِ برگشتی (بدهی به طرف حساب)» — معین بستانکارِ صدور سند وصول و برگشت چک پرداختنی برای نتیجه‌ی «برگشتی»؛ بدون مورد هدف (تنها یک رکورد)
+  BOUNCED_PAYABLE_CHEQUE
 }
 
 model Supplier {
@@ -3224,6 +3227,9 @@ model ChequeClearingPayable {
   date           DateTime                    @db.Date
   description    String?
   status         TreasuryDocStatus           @default(DRAFT)
+  // سند حسابداری صادرشده (اکشن دستی «صدور سند حسابداری» روی سند تاییدشده) — هم‌الگوی ChequeDeposit
+  journalEntryId Int?                        @unique
+  journalEntry   JournalEntry?               @relation(fields: [journalEntryId], references: [id])
   createdAt      DateTime                    @default(now())
   updatedAt      DateTime                    @default(now()) @updatedAt
   fiscalPeriod   FiscalPeriod                @relation(fields: [fiscalPeriodId], references: [id])
