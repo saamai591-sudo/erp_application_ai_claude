@@ -49,5 +49,61 @@ services:
       - ./frontend:/app
       - /app/node_modules
 
+  # ---- پشته‌ی دوم با دیتابیس تازه (پروفایل new) — دیتابیس/بک‌اند/فرانت‌اند جدا؛ دیتای پشته‌ی اصلی دست‌نخورده می‌ماند.
+  # اجرا: docker compose --profile new up -d   (دیتابیس ۵۴۳۵، بک‌اند ۴۰۰۱، فرانت‌اند ۵۱۷۵)
+  db-new:
+    profiles: ["new"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: erp
+      POSTGRES_PASSWORD: erp_password
+      POSTGRES_DB: accounting_erp_new
+    ports:
+      - "5435:5432"
+    volumes:
+      - db_data_new:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp -d accounting_erp_new"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend-new:
+    profiles: ["new"]
+    # از ایمیج پشته‌ی اصلی استفاده می‌شود (بدون build مجدد؛ Dockerfile فعلی node_modules میزبان ویندوز را در ایمیج کپی می‌کند)
+    image: accounting-erp-backend:latest
+    restart: unless-stopped
+    init: true
+    depends_on:
+      db-new:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://erp:erp_password@db-new:5432/accounting_erp_new?schema=public
+      JWT_SECRET: change_this_secret_in_production_new
+      PORT: 4001
+    ports:
+      - "4001:4001"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+
+  frontend-new:
+    profiles: ["new"]
+    image: accounting-erp-frontend:latest
+    restart: unless-stopped
+    init: true
+    depends_on:
+      - backend-new
+    environment:
+      CI: "true"
+      VITE_API_URL: http://localhost:4001/api
+    ports:
+      - "5175:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
 volumes:
   db_data:
+  db_data_new:
