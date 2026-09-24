@@ -5,6 +5,7 @@ import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation
 import { assertRecordNotStale } from "../utils/concurrency";
 import { can } from "../authz/guard";
 import { registerChequeDocReEdit } from "../utils/chequeDocReEdit";
+import { bankAccountDisplayText } from "../services/chequeDepositBankLookup";
 import { findFormPrefix } from "../authz/registry";
 
 const FORM = findFormPrefix("cheque-clearings-payable");
@@ -69,7 +70,7 @@ router.get("/cheque-clearings-payable/pickable-cheques", can(`${FORM}.view`), as
   const items = await prisma.chequeItem.findMany({
     // چک روز در این فرم قابل انتخاب نیست (همان لحظه‌ی سند پرداخت، پرداخت‌شده حساب می‌شود)
     where: { direction: "PAYABLE", status: "ISSUED", payableChequeType: { isNot: { isSameDay: true } } },
-    include: { party: true, currency: true },
+    include: { party: true, currency: true, ownerBankAccount: { include: { bankBranch: true } } },
     orderBy: { id: "desc" },
   });
   res.json(
@@ -79,6 +80,7 @@ router.get("/cheque-clearings-payable/pickable-cheques", can(`${FORM}.view`), as
       dueDate: c.dueDate,
       amount: Number(c.amount),
       currencyTitle: c.currency?.title,
+      bankAccountDisplay: bankAccountDisplayText(c.ownerBankAccount),
       partyDisplay: c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim(),
     }))
   );
@@ -104,7 +106,7 @@ router.get("/cheque-clearings-payable", can(`${FORM}.view`), async (_req, res) =
 
 const CHEQUE_CLEARING_PAYABLE_DETAIL_INCLUDE = {
   fiscalPeriod: true,
-  lines: { include: { chequeItem: { include: { party: true, currency: true } } }, orderBy: { rowOrder: "asc" } },
+  lines: { include: { chequeItem: { include: { party: true, currency: true, ownerBankAccount: { include: { bankBranch: true } } } } }, orderBy: { rowOrder: "asc" } },
 } as const;
 
 function serializeChequeClearingPayable(d: any) {
@@ -125,6 +127,7 @@ function serializeChequeClearingPayable(d: any) {
       chequeDueDate: l.chequeItem.dueDate,
       chequeAmount: Number(l.chequeItem.amount),
       chequeCurrencyTitle: l.chequeItem.currency?.title,
+      chequeBankAccountDisplay: bankAccountDisplayText(l.chequeItem.ownerBankAccount),
       chequePartyDisplay: l.chequeItem.party.category === "LEGAL" ? l.chequeItem.party.name || "" : `${l.chequeItem.party.firstName || ""} ${l.chequeItem.party.lastName || ""}`.trim(),
       chequeStatus: l.chequeItem.status,
     })),

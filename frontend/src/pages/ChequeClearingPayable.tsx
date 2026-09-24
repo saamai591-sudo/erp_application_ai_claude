@@ -28,7 +28,7 @@ type Outcome = "CLEARED" | "BOUNCED";
 const STATUS_FA: Record<DocStatus, string> = { DRAFT: "ثبت", APPROVED: "تایید" };
 const OUTCOME_FA: Record<Outcome, string> = { CLEARED: "وصول‌شده", BOUNCED: "برگشتی" };
 
-interface PickableCheque { id: number; number: string; dueDate: string; amount: number; currencyTitle: string; partyDisplay: string }
+interface PickableCheque { id: number; number: string; dueDate: string; amount: number; currencyTitle: string; partyDisplay: string; bankAccountDisplay: string | null }
 
 interface ListRow {
   id: number;
@@ -47,6 +47,7 @@ interface DetailLine {
   chequeAmount: number;
   chequeCurrencyTitle: string;
   chequePartyDisplay: string;
+  chequeBankAccountDisplay: string | null;
   outcome: Outcome;
 }
 interface Detail {
@@ -238,7 +239,7 @@ function ChequeClearingPayableForm({ editId, reEdit }: { editId?: number; reEdit
     if (lines.some((l) => l.chequeItemId === c.id)) return;
     setLines((prev) => [
       ...prev,
-      { id: -Date.now(), chequeItemId: c.id, chequeNumber: c.number, chequeDueDate: c.dueDate, chequeAmount: c.amount, chequeCurrencyTitle: c.currencyTitle, chequePartyDisplay: c.partyDisplay, outcome: "CLEARED" },
+      { id: -Date.now(), chequeItemId: c.id, chequeNumber: c.number, chequeDueDate: c.dueDate, chequeAmount: c.amount, chequeCurrencyTitle: c.currencyTitle, chequePartyDisplay: c.partyDisplay, chequeBankAccountDisplay: c.bankAccountDisplay, outcome: "CLEARED" },
     ]);
   }
   function removeLine(chequeItemId: number) {
@@ -398,6 +399,7 @@ function ChequeClearingPayableForm({ editId, reEdit }: { editId?: number; reEdit
             columns={[
               { header: "شماره", render: (c) => c.number, filterValue: (c) => c.number, width: "100px" },
               { header: "طرف حساب", render: (c) => c.partyDisplay, filterValue: (c) => c.partyDisplay },
+              { header: "حساب بانکی", render: (c) => c.bankAccountDisplay || "—", filterValue: (c) => c.bankAccountDisplay || "" },
               { header: "مبلغ", render: (c) => formatAmountFa(c.amount), filterValue: (c) => String(c.amount), width: "100px" },
             ]}
             onSelect={(c) => addCheque(c as PickableCheque)}
@@ -414,6 +416,7 @@ function ChequeClearingPayableForm({ editId, reEdit }: { editId?: number; reEdit
                   <th>شماره چک</th>
                   <th>سررسید</th>
                   <th>طرف حساب</th>
+                  <th>حساب بانکی</th>
                   <th>مبلغ</th>
                   <th>نتیجه</th>
                   <th></th>
@@ -427,6 +430,7 @@ function ChequeClearingPayableForm({ editId, reEdit }: { editId?: number; reEdit
                       <td>{l.chequeNumber}</td>
                       <td>{formatJalaliDate(l.chequeDueDate)}</td>
                       <td>{l.chequePartyDisplay}</td>
+                      <td>{l.chequeBankAccountDisplay || "—"}</td>
                       <td>{formatAmountFa(l.chequeAmount)} {l.chequeCurrencyTitle}</td>
                       <td>
                         <select value={l.outcome} disabled={linesLocked} onChange={(e) => setOutcome(l.chequeItemId, e.target.value as Outcome)}>

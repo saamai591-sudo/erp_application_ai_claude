@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
-import { showError } from "../lib/toast";
+import { showError, showToast } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -28,7 +28,7 @@ type Outcome = "CLEARED" | "BOUNCED";
 const STATUS_FA: Record<DocStatus, string> = { DRAFT: "ثبت", APPROVED: "تایید" };
 const OUTCOME_FA: Record<Outcome, string> = { CLEARED: "وصول‌شده", BOUNCED: "برگشتی" };
 
-interface PickableCheque { id: number; number: string; dueDate: string; amount: number; currencyTitle: string; partyDisplay: string }
+interface PickableCheque { id: number; number: string; dueDate: string; amount: number; currencyTitle: string; partyDisplay: string; bankAccountDisplay: string | null }
 
 interface ListRow {
   id: number;
@@ -47,6 +47,7 @@ interface DetailLine {
   chequeAmount: number;
   chequeCurrencyTitle: string;
   chequePartyDisplay: string;
+  chequeBankAccountDisplay: string | null;
   outcome: Outcome;
 }
 interface Detail {
@@ -57,6 +58,8 @@ interface Detail {
   fiscalPeriodTitle: string;
   description: string | null;
   status: DocStatus;
+  journalEntryId?: number | null;
+  journalEntryReferenceNumber?: number | null;
   lines: DetailLine[];
 }
 
@@ -172,7 +175,7 @@ function ChequeClearingReceivableForm({ editId, reEdit }: { editId?: number; reE
   const [docUpdatedAt, setDocUpdatedAt] = usePersistedState<string>(`${cacheKey}:updatedAt`, "");
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", description: "" });
   const [lines, setLines] = usePersistedState<DetailLine[]>(`${cacheKey}:lines`, []);
-  const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; fiscalPeriodTitle: string } | null>(`${cacheKey}:meta`, null);
+  const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; fiscalPeriodTitle: string; journalEntryId: number | null; journalEntryReferenceNumber: number | null } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
@@ -180,7 +183,7 @@ function ChequeClearingReceivableForm({ editId, reEdit }: { editId?: number; reE
 
   function applyDetail(d: Detail) {
     setDocUpdatedAt(d.updatedAt ?? "");
-    setMeta({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle });
+    setMeta({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle, journalEntryId: d.journalEntryId ?? null, journalEntryReferenceNumber: d.journalEntryReferenceNumber ?? null });
     setHeader({ date: d.date.slice(0, 10), description: d.description || "" });
     setLines(d.lines);
   }
@@ -200,7 +203,7 @@ function ChequeClearingReceivableForm({ editId, reEdit }: { editId?: number; reE
         if (editId) {
           try {
             const d: Detail = await api.get(`/cheque-clearings-receivable/${editId}`);
-            setMeta((prev) => (prev ? { ...prev, status: d.status } : prev));
+            setMeta((prev) => (prev ? { ...prev, status: d.status, journalEntryId: d.journalEntryId ?? null, journalEntryReferenceNumber: d.journalEntryReferenceNumber ?? null } : prev));
           } catch {
             // اگر واکشی ناموفق شد، به مقادیر کش‌شده بسنده می‌شود؛ ذخیره‌سازی همچنان توسط سرور اعتبارسنجی می‌شود
           }
@@ -230,6 +233,8 @@ function ChequeClearingReceivableForm({ editId, reEdit }: { editId?: number; reE
   }, [editId]);
 
   const status: DocStatus = meta?.status || "DRAFT";
+  // بعد از صدور سند حسابداری، همه‌ی اطلاعات سند قفل است (برگشت از تایید، ویرایش مجدد و حذف مسدود؛ ابتدا سند حسابداری حذف شود)
+  const jeLocked = !!meta?.journalEntryId;
   const coreDisabled = !!editId && status !== "DRAFT";
   // سند «تایید»شده از مسیر «ویرایش» کاملاً قفل است؛ فقط «ویرایش مجدد» چک‌های فاقد گردش را اصلاح/حذف می‌کند
   const linesLocked = !!editId && status !== "DRAFT" && !reEdit;
@@ -238,7 +243,7 @@ function ChequeClearingReceivableForm({ editId, reEdit }: { editId?: number; reE
     if (lines.some((l) => l.chequeItemId === c.id)) return;
     setLines((prev) => [
       ...prev,
-      { id: -Date.now(), chequeItemId: c.id, chequeNumber: c.number, chequeDueDate: c.dueDate, chequeAmount: c.amount, chequeCurrencyTitle: c.currencyTitle, chequePartyDisplay: c.partyDisplay, outcome: "CLEARED" },
+      { id: -Date.now(), chequeItemId: c.id, chequeNumber: c.number, chequeDueDate: c.dueDate, chequeAmount: c.amount, chequeCurrencyTitle: c.currencyTitle, chequePartyDisplay: c.partyDisplay, chequeBankAccountDisplay: c.bankAccountDisplay, outcome: "CLEARED" },
     ]);
   }
   function removeLine(chequeItemId: number) {
@@ -311,6 +316,24 @@ function ChequeClearingReceivableForm({ editId, reEdit }: { editId?: number; reE
     }
   }
 
+  async function runJournalAction(method: "post" | "del") {
+    if (!editId) return;
+    try {
+      if (method === "post") {
+        const result: { message?: string } = await api.post(`/cheque-clearings-receivable/${editId}/issue-journal-entry`, {});
+        applyDetail(await api.get(`/cheque-clearings-receivable/${editId}`));
+        flash(result?.message);
+      } else {
+        if (!window.confirm("سند حسابداری صادرشده حذف می‌شود. ادامه می‌دهید؟")) return;
+        await api.del(`/cheque-clearings-receivable/${editId}/journal-entry`);
+        applyDetail(await api.get(`/cheque-clearings-receivable/${editId}`));
+        showToast("سند حسابداری حذف شد");
+      }
+    } catch (e) {
+      showError((e as ApiError).message);
+    }
+  }
+
   // «ویرایش مجدد»: نمایش Action فقط به وضعیت «تایید» وابسته است؛ امکان‌سنجی (وجود چک فاقد گردش) بعد از کلیک انجام می‌شود
   async function handleReEdit() {
     if (!editId) return;
@@ -352,7 +375,14 @@ function ChequeClearingReceivableForm({ editId, reEdit }: { editId?: number; reE
           ? [
               ...(status === "DRAFT" ? [{ label: "تایید", icon: <CheckIcon />, onClick: handleApprove }] : []),
               ...(status === "APPROVED" ? [{ label: "ویرایش مجدد", icon: <PlusIcon />, onClick: handleReEdit }] : []),
-              ...(status === "APPROVED" ? [{ label: "برگشت از تایید", icon: <UndoIcon />, onClick: handleUnapprove }] : []),
+              ...(status === "APPROVED" && !jeLocked ? [{ label: "برگشت از تایید", icon: <UndoIcon />, onClick: handleUnapprove }] : []),
+              ...(status === "APPROVED" && !jeLocked ? [{ label: "صدور سند حسابداری", icon: <PlusIcon />, onClick: () => runJournalAction("post") }] : []),
+              ...(jeLocked
+                ? [
+                    { label: "مشاهده سند حسابداری", icon: <PlusIcon />, onClick: () => openTab(`/journal-entries/${meta?.journalEntryId}/edit`) },
+                    { label: "حذف سند حسابداری", icon: <UndoIcon />, onClick: () => runJournalAction("del") },
+                  ]
+                : []),
             ]
           : []
       }
@@ -398,6 +428,7 @@ function ChequeClearingReceivableForm({ editId, reEdit }: { editId?: number; reE
             columns={[
               { header: "شماره", render: (c) => c.number, filterValue: (c) => c.number, width: "100px" },
               { header: "طرف حساب", render: (c) => c.partyDisplay, filterValue: (c) => c.partyDisplay },
+              { header: "حساب بانکی", render: (c) => c.bankAccountDisplay || "—", filterValue: (c) => c.bankAccountDisplay || "" },
               { header: "مبلغ", render: (c) => formatAmountFa(c.amount), filterValue: (c) => String(c.amount), width: "100px" },
             ]}
             onSelect={(c) => addCheque(c as PickableCheque)}
@@ -414,6 +445,7 @@ function ChequeClearingReceivableForm({ editId, reEdit }: { editId?: number; reE
                   <th>شماره چک</th>
                   <th>سررسید</th>
                   <th>طرف حساب</th>
+                  <th>حساب بانکی</th>
                   <th>مبلغ</th>
                   <th>نتیجه</th>
                   <th></th>
@@ -427,6 +459,7 @@ function ChequeClearingReceivableForm({ editId, reEdit }: { editId?: number; reE
                       <td>{l.chequeNumber}</td>
                       <td>{formatJalaliDate(l.chequeDueDate)}</td>
                       <td>{l.chequePartyDisplay}</td>
+                      <td>{l.chequeBankAccountDisplay || "—"}</td>
                       <td>{formatAmountFa(l.chequeAmount)} {l.chequeCurrencyTitle}</td>
                       <td>
                         <select value={l.outcome} disabled={linesLocked} onChange={(e) => setOutcome(l.chequeItemId, e.target.value as Outcome)}>

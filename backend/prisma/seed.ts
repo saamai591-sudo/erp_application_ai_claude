@@ -57,6 +57,7 @@ async function main() {
     { code: 13, title: "اعلامیه پرداخت", systemKey: "PAYMENT" },
     { code: 14, title: "واگذاری چک به بانک", systemKey: "CHEQUE_DEPOSIT" },
     { code: 15, title: "برگشت از واگذاری چک", systemKey: "CHEQUE_DEPOSIT_RETURN" },
+    { code: 16, title: "وصول و برگشت چک دریافتنی", systemKey: "CHEQUE_CLEARING_RECEIVABLE" },
   ];
   for (const dt of documentTypes) {
     await prisma.documentType.upsert({

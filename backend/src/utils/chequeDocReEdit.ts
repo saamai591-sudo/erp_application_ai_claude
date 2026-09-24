@@ -74,7 +74,7 @@ export function registerChequeDocReEdit(router: Router, cfg: ChequeDocReEditConf
     try {
       const { existing, editable } = await loadContext(Number(req.params.id));
       const ids = new Set(editable.map((l: any) => l.id));
-      const full = cfg.serialize(existing);
+      const full = await cfg.serialize(existing);
       res.json({ ...full, lines: full.lines.filter((l: any) => ids.has(l.id)) });
     } catch (e: any) {
       res.status(e.status || 400).json({ error: e.message });

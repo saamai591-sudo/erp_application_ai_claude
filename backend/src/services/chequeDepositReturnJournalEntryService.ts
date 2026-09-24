@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma";
 import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
+import { findDepositBankByCheque } from "./chequeDepositBankLookup";
 
 // =========================================================================
 // صدور سند حسابداری «برگشت از واگذاری چک» (ChequeDepositReturn) — اکشن دستی روی سند تاییدشده (هم‌الگوی واگذاری به بانک)،
@@ -43,11 +44,7 @@ export async function issueChequeDepositReturnJournalEntry(returnId: number) {
     return resolveAccountDetailFields(account, typeId, detailCode);
   };
 
-  // واگذاری‌های تاییدشده‌ی همه‌ی چک‌های سند (بدون محدودیت دوره مالی: چک ممکن است در سال قبل واگذار شده باشد)
-  const depositLines = await prisma.chequeDepositLine.findMany({
-    where: { chequeItemId: { in: doc.lines.map((l) => l.chequeItemId) }, chequeDeposit: { status: "APPROVED" } },
-    include: { chequeDeposit: { include: { bankAccount: true } } },
-  });
+  const bankByCheque = await findDepositBankByCheque(doc.lines);
 
   // ---------- بدهکار: هر چک ----------
   const debitLines: IssueLineInput[] = [];
@@ -56,10 +53,7 @@ export async function issueChequeDepositReturnJournalEntry(returnId: number) {
     const n = idx + 1;
     const cheque = l.chequeItem;
 
-    const candidates = depositLines.filter((d) => d.chequeItemId === l.chequeItemId);
-    const exact = l.chequeStep != null ? candidates.find((d) => d.chequeStep === l.chequeStep! - 1) : undefined;
-    const latest = [...candidates].sort((a, b) => b.chequeDeposit.date.getTime() - a.chequeDeposit.date.getTime() || b.chequeDepositId - a.chequeDepositId)[0];
-    const deposit = (exact ?? latest)?.chequeDeposit;
+    const deposit = bankByCheque.get(l.chequeItemId);
     if (!deposit) {
       errors.push(`ردیف ${n}: سند واگذاریِ تاییدشده‌ای برای چک شماره ${cheque.number} یافت نشد؛ حساب بانکیِ اسناد در جریان وصول مشخص نیست`);
     } else {

@@ -554,6 +554,7 @@ model JournalEntry {
   chequeDepositReturn ChequeDepositReturn?
   salesReturnInvoice  SalesReturnInvoice?
   warehouseJournalEntryIssuance WarehouseJournalEntryIssuance?
+  chequeClearingReceivable ChequeClearingReceivable?
 
   @@unique([fiscalPeriodId, number])
 }
@@ -3194,6 +3195,9 @@ model ChequeClearingReceivable {
 
 model ChequeClearingReceivableLine {
   id                         Int                      @id @default(autoincrement())
+  // سند حسابداری صادرشده (اکشن دستی «صدور سند حسابداری» روی سند تاییدشده) — هم‌الگوی ChequeDeposit
+  journalEntryId Int?                           @unique
+  journalEntry   JournalEntry?                  @relation(fields: [journalEntryId], references: [id])
   chequeClearingReceivableId Int
   rowOrder                   Int                      @default(0)
   chequeItemId               Int

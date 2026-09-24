@@ -5,9 +5,13 @@ import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation
 import { assertRecordNotStale } from "../utils/concurrency";
 import { can } from "../authz/guard";
 import { registerChequeDocReEdit } from "../utils/chequeDocReEdit";
+import { findDepositBankByCheque, bankAccountDisplayText } from "../services/chequeDepositBankLookup";
+import { issueChequeClearingReceivableJournalEntry, revertChequeClearingReceivableJournalEntry } from "../services/chequeClearingReceivableJournalEntryService";
 import { findFormPrefix } from "../authz/registry";
 
 const FORM = findFormPrefix("cheque-clearings-receivable");
+
+const JE_LOCK_MESSAGE = "برای این سند، سند حسابداری صادر شده است؛ ابتدا سند حسابداری را حذف کنید";
 
 // =========================================================================
 // ماژول «خزانه‌داری» > نتیجه وصول/برگشت چک دریافتنی (ChequeClearingReceivable)
@@ -69,11 +73,14 @@ router.get("/cheque-clearings-receivable/pickable-cheques", can(`${FORM}.view`),
     include: { party: true, currency: true },
     orderBy: { id: "desc" },
   });
+  // حساب بانکیِ اختصاص‌یافته = حساب واگذاریِ تاییدشده‌ای که چک در آن بوده
+  const bankByCheque = await findDepositBankByCheque(items.map((c: any) => ({ chequeItemId: c.id, chequeStep: null })));
   res.json(
     items.map((c: any) => ({
       id: c.id,
       number: c.number,
       dueDate: c.dueDate,
+      bankAccountDisplay: bankAccountDisplayText(bankByCheque.get(c.id)?.bankAccount),
       amount: Number(c.amount),
       currencyTitle: c.currency?.title,
       partyDisplay: c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim(),
@@ -83,7 +90,7 @@ router.get("/cheque-clearings-receivable/pickable-cheques", can(`${FORM}.view`),
 
 router.get("/cheque-clearings-receivable", can(`${FORM}.view`), async (_req, res) => {
   const items = await prisma.chequeClearingReceivable.findMany({
-    include: { fiscalPeriod: true, lines: true },
+    include: { fiscalPeriod: true, lines: true, journalEntry: true },
     orderBy: { id: "desc" },
   });
   res.json(
@@ -94,6 +101,7 @@ router.get("/cheque-clearings-receivable", can(`${FORM}.view`), async (_req, res
       fiscalPeriodTitle: d.fiscalPeriod.title,
       description: d.description,
       status: d.status,
+      journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
       lineCount: d.lines.length,
     }))
   );
@@ -101,10 +109,12 @@ router.get("/cheque-clearings-receivable", can(`${FORM}.view`), async (_req, res
 
 const CHEQUE_CLEARING_RECEIVABLE_DETAIL_INCLUDE = {
   fiscalPeriod: true,
+  journalEntry: true,
   lines: { include: { chequeItem: { include: { party: true, currency: true } } }, orderBy: { rowOrder: "asc" } },
 } as const;
 
-function serializeChequeClearingReceivable(d: any) {
+async function serializeChequeClearingReceivable(d: any) {
+  const bankByCheque = await findDepositBankByCheque(d.lines.map((l: any) => ({ chequeItemId: l.chequeItemId, chequeStep: l.chequeStep })));
   return {
     id: d.id,
     number: d.number,
@@ -113,6 +123,8 @@ function serializeChequeClearingReceivable(d: any) {
     fiscalPeriodTitle: d.fiscalPeriod.title,
     description: d.description,
     status: d.status,
+    journalEntryId: d.journalEntryId,
+    journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
     updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
       id: l.id,
@@ -122,6 +134,7 @@ function serializeChequeClearingReceivable(d: any) {
       chequeDueDate: l.chequeItem.dueDate,
       chequeAmount: Number(l.chequeItem.amount),
       chequeCurrencyTitle: l.chequeItem.currency?.title,
+      chequeBankAccountDisplay: bankAccountDisplayText(bankByCheque.get(l.chequeItemId)?.bankAccount),
       chequePartyDisplay: l.chequeItem.party.category === "LEGAL" ? l.chequeItem.party.name || "" : `${l.chequeItem.party.firstName || ""} ${l.chequeItem.party.lastName || ""}`.trim(),
       chequeStatus: l.chequeItem.status,
     })),
@@ -132,7 +145,7 @@ router.get("/cheque-clearings-receivable/:id", can(`${FORM}.view`), async (req, 
   const id = Number(req.params.id);
   const d = await prisma.chequeClearingReceivable.findUnique({ where: { id }, include: CHEQUE_CLEARING_RECEIVABLE_DETAIL_INCLUDE });
   if (!d) return res.status(404).json({ error: "سند نتیجه وصول/برگشت یافت نشد" });
-  res.json(serializeChequeClearingReceivable(d));
+  res.json(await serializeChequeClearingReceivable(d));
 });
 
 router.post("/cheque-clearings-receivable", can(`${FORM}.create`), async (req, res) => {
@@ -171,6 +184,7 @@ router.put("/cheque-clearings-receivable/:id", can(`${FORM}.edit`), async (req, 
 
   const existing = await prisma.chequeClearingReceivable.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "سند نتیجه وصول/برگشت یافت نشد" });
+  if (existing.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل ویرایش هستند؛ ابتدا از «تایید» برگردانید" });
 
   if (!body.date) return res.status(400).json({ error: "تاریخ سند الزامی است" });
@@ -204,6 +218,7 @@ router.delete("/cheque-clearings-receivable/:id", can(`${FORM}.delete`), async (
   const id = Number(req.params.id);
   const d = await prisma.chequeClearingReceivable.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
+  if (d.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «تایید» برگردانید" });
   await prisma.chequeClearingReceivable.delete({ where: { id } });
   res.status(204).send();
@@ -245,6 +260,7 @@ router.post("/cheque-clearings-receivable/:id/unapprove", can(`${FORM}.unapprove
   const id = Number(req.params.id);
   const d = await prisma.chequeClearingReceivable.findUnique({ where: { id }, include: { lines: { include: { chequeItem: true } } } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
+  if (d.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
   if (d.status !== "APPROVED") return res.status(400).json({ error: "فقط اسناد «تایید»شده قابل برگشت هستند" });
 
   const touched = d.lines.find((l: any) => l.chequeItem.step !== l.chequeStep);
@@ -265,6 +281,24 @@ router.post("/cheque-clearings-receivable/:id/unapprove", can(`${FORM}.unapprove
     res.json({ id, status: "DRAFT" });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در برگشت از تایید" });
+  }
+});
+
+router.post("/cheque-clearings-receivable/:id/issue-journal-entry", can(`${FORM}.issueJournalEntry`), async (req, res) => {
+  try {
+    const entry = await issueChequeClearingReceivableJournalEntry(Number(req.params.id));
+    res.json({ journalEntryId: entry.id, number: entry.number, referenceNumber: entry.referenceNumber, message: entry.message });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در صدور سند حسابداری" });
+  }
+});
+
+router.delete("/cheque-clearings-receivable/:id/journal-entry", can(`${FORM}.revertJournalEntry`), async (req, res) => {
+  try {
+    await revertChequeClearingReceivableJournalEntry(Number(req.params.id));
+    res.status(204).send();
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در حذف سند حسابداری" });
   }
 });
 
