@@ -117,7 +117,7 @@ function resolveFxRate(currencyId: number, baseCurrencyId: number, bodyFxRate: n
 // ردیف‌های ابزار پرداخت
 // =========================================================================
 
-async function validateInstrumentLines(lines: InstrumentLineInput[], baseCurrency: { id: number } & ConversionCurrency) {
+async function validateInstrumentLines(lines: InstrumentLineInput[], baseCurrency: { id: number } & ConversionCurrency, docDate: Date) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("سند پرداخت باید حداقل یک ردیف ابزار پرداخت داشته باشد");
   const cleaned: Awaited<ReturnType<typeof cleanOneInstrumentLine>>[] = [];
   const seenKeys = new Set<string>();
@@ -126,7 +126,7 @@ async function validateInstrumentLines(lines: InstrumentLineInput[], baseCurrenc
     if (seenKeys.has(l.clientKey)) throw new Error(`ردیف ابزار ${idx + 1}: شناسه‌ی داخلی ردیف تکراری است`);
     seenKeys.add(l.clientKey);
     // eslint-disable-next-line no-await-in-loop
-    cleaned.push(await cleanOneInstrumentLine(l, idx, baseCurrency));
+    cleaned.push(await cleanOneInstrumentLine(l, idx, baseCurrency, { docDate }));
   }
   return cleaned;
 }
@@ -136,7 +136,8 @@ async function cleanOneInstrumentLine(
   idx: number,
   baseCurrency: { id: number } & ConversionCurrency,
   // در «ویرایش مجدد»: برگه‌ی دسته چکِ فعلیِ خودِ همین ردیف (که قبلاً ISSUED شده) مجاز به ادامه‌ی استفاده است
-  opts: { allowLeafId?: number | null } = {}
+  // docDate: تاریخ سند — برای «چک روز» تاریخ سررسید همیشه همین تاریخ است
+  opts: { allowLeafId?: number | null; docDate: Date }
 ) {
   const amount = Number(l.amount);
   if (!(amount > 0)) throw new Error(`مبلغ ردیف ابزار ${idx + 1} باید عددی مثبت باشد`);
@@ -145,6 +146,7 @@ async function cleanOneInstrumentLine(
   // فقط برای صدور چک تازه از حساب بانکیِ دارای دسته چک — شماره‌ی برگه‌ی انتخاب‌شده جایگزین ورودی آزاد کاربر می‌شود
   let chequeNumberOverride: string | null = null;
   let chequeBookLeafId: number | null = null;
+  let sameDayDueDate: Date | null = null;
   if (l.type === "CASH") {
     if (!l.cashBoxId) throw new Error(`ردیف ${idx + 1}: انتخاب صندوق الزامی است`);
     if (!l.currencyId) throw new Error(`ردیف ${idx + 1}: انتخاب ارز الزامی است`);
@@ -169,11 +171,13 @@ async function cleanOneInstrumentLine(
     // طبق سند: چک همیشه با ارز پایه ثبت می‌شود (چک ارزی در این کدبیس پشتیبانی نمی‌شود)
     currencyId = baseCurrency.id;
   } else if (l.type === "CHEQUE") {
-    if (!l.chequeDueDate) throw new Error(`ردیف ${idx + 1}: تاریخ سررسید چک الزامی است`);
     if (!l.bankAccountId) throw new Error(`ردیف ${idx + 1}: حساب بانکی صادرکننده‌ی چک الزامی است`);
     if (!l.payableChequeTypeId) throw new Error(`ردیف ${idx + 1}: نوع چک الزامی است`);
     const chequeType = await prisma.payableChequeType.findUnique({ where: { id: l.payableChequeTypeId } });
     if (!chequeType) throw new Error(`ردیف ${idx + 1}: نوع چک پرداختی یافت نشد`);
+    // «چک روز»: چک همان روزِ سند است و مدت‌دار نیست — تاریخ سررسید ورودی نادیده گرفته و تاریخ سند ثبت می‌شود
+    if (chequeType.isSameDay) sameDayDueDate = opts.docDate;
+    else if (!l.chequeDueDate) throw new Error(`ردیف ${idx + 1}: تاریخ سررسید چک الزامی است`);
 
     // طبق Documents/دسته چک.md: اگر حساب بانکی صادرکننده از نوعِ «دارای دسته چک» باشد، شماره چک باید
     // از یک برگه‌ی «خام» دسته چک انتخاب شود (نه آزادانه تایپ شود)؛ در غیر این‌صورت مثل قبل آزاد است.
@@ -214,7 +218,7 @@ async function cleanOneInstrumentLine(
     referenceNumber: l.referenceNumber || null,
     chequeItemId: l.type === "CHEQUE_TRANSFER" ? l.chequeItemId || null : null,
     chequeNumber: isNewCheque ? chequeNumberOverride ?? l.chequeNumber! : null,
-    chequeDueDate: isNewCheque ? new Date(l.chequeDueDate!) : null,
+    chequeDueDate: isNewCheque ? sameDayDueDate ?? new Date(l.chequeDueDate!) : null,
     chequeBankBranchId: isNewCheque ? l.chequeBankBranchId || null : null,
     payableChequeTypeId: isNewCheque ? l.payableChequeTypeId! : null,
     chequeBookLeafId: isNewCheque ? chequeBookLeafId : null,
@@ -603,7 +607,7 @@ router.post("/payments", can(`${FORM}.create`), async (req, res) => {
     if (!party) throw new Error("طرف حساب یافت نشد");
 
     const baseCurrency = await getBaseCurrency();
-    const instrumentLines = await validateInstrumentLines(body.instrumentLines, baseCurrency);
+    const instrumentLines = await validateInstrumentLines(body.instrumentLines, baseCurrency, date);
     const instrumentByKey = new Map(instrumentLines.map((l) => [l.clientKey, l]));
     const settlementLines = await validateSubjectLines(body.settlementLines, instrumentByKey, baseCurrency);
 
@@ -658,7 +662,7 @@ router.put("/payments/:id", can(`${FORM}.edit`), async (req, res) => {
     if (!party) throw new Error("طرف حساب یافت نشد");
 
     const baseCurrency = await getBaseCurrency();
-    const instrumentLines = await validateInstrumentLines(body.instrumentLines, baseCurrency);
+    const instrumentLines = await validateInstrumentLines(body.instrumentLines, baseCurrency, date);
     const instrumentByKey = new Map(instrumentLines.map((l) => [l.clientKey, l]));
     const settlementLines = await validateSubjectLines(body.settlementLines, instrumentByKey, baseCurrency, id);
 
@@ -943,7 +947,7 @@ router.put("/payments/:id/re-edit", can(`${FORM}.reEdit`), async (req, res) => {
         keep.push({ ex, data: null, description: l.description || null });
       } else {
         // eslint-disable-next-line no-await-in-loop
-        keep.push({ ex, data: await cleanOneInstrumentLine({ ...l, clientKey: String(l.id) }, idx, baseCurrency, { allowLeafId: ex.chequeBookLeafId }) });
+        keep.push({ ex, data: await cleanOneInstrumentLine({ ...l, clientKey: String(l.id) }, idx, baseCurrency, { allowLeafId: ex.chequeBookLeafId, docDate: existing.date }) });
       }
     }
     const removed = editable.filter((l: any) => !seen.has(l.id));

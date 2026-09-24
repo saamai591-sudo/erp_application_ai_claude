@@ -42,7 +42,7 @@ interface PartyOption { id: number; detailCode: string; category: "INDIVIDUAL" |
 interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null; decimalPlaces: number }
 interface CashBoxOption { id: number; title: string }
 interface BankAccountOption { id: number; accountNumber: string; detailCode: string; bankBranch: { title: string }; currencyId: number | null; currency: { title: string } | null; accountType: { hasChequeBook: boolean } }
-interface ChequeTypeOption { id: number; code: number; title: string }
+interface ChequeTypeOption { id: number; code: number; title: string; isSameDay?: boolean }
 interface PaymentTypeOption { id: number; title: string; nature: PaymentNature; basisType: PaymentBasisType; isActive: boolean }
 interface PickableCheque { id: number; number: string; dueDate: string; amount: number; partyDisplay: string; currencyTitle: string }
 // برگه‌ی «خام» دسته چک (Documents/دسته چک.md) — برای ردیف «صدور چک تازه» وقتی حساب بانکی صادرکننده از
@@ -338,6 +338,23 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
   const { flash } = useSavedFlash();
 
   const baseCurrency = currencies.find((c) => c.isBase);
+
+  // «چک روز»: چک همان روزِ سند است و مدت‌دار نیست؛ تاریخ سررسید غیرفعال و همیشه برابر تاریخ سند است
+  const isSameDayType = (typeId: string) => !!chequeTypes.find((t) => String(t.id) === typeId)?.isSameDay;
+  useEffect(() => {
+    setInstrumentRows((prev) => {
+      let changed = false;
+      const next = prev.map((r) => {
+        if (r.type === "CHEQUE" && header.date && isSameDayType(r.payableChequeTypeId) && r.chequeDueDate !== header.date) {
+          changed = true;
+          return { ...r, chequeDueDate: header.date };
+        }
+        return r;
+      });
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [header.date, chequeTypes]);
 
   function applyDetail(d: Detail) {
     setOwnLeaves(d.ownLeaves ?? []);
@@ -873,7 +890,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                       {hasChequeRow && (
                         <td style={{ minWidth: 150 }}>
                           {row.type === "CHEQUE" && (
-                            <select value={row.payableChequeTypeId} onChange={(e) => updateInstrumentRow(idx, { payableChequeTypeId: e.target.value })}>
+                            <select value={row.payableChequeTypeId} onChange={(e) => updateInstrumentRow(idx, { payableChequeTypeId: e.target.value, ...(isSameDayType(e.target.value) ? { chequeDueDate: header.date } : {}) })}>
                               <option value="">انتخاب نوع چک</option>
                               {chequeTypes.map((t) => (
                                 <option key={t.id} value={t.id}>{t.title}</option>
@@ -984,7 +1001,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                               />
                             </div>
                             <div style={{ width: 140 }}>
-                              <JalaliDatePicker value={row.chequeDueDate} onChange={(v) => updateInstrumentRow(idx, { chequeDueDate: v })} />
+                              <JalaliDatePicker value={row.chequeDueDate} onChange={(v) => updateInstrumentRow(idx, { chequeDueDate: v })} disabled={isSameDayType(row.payableChequeTypeId)} />
                             </div>
                           </div>
                         )}

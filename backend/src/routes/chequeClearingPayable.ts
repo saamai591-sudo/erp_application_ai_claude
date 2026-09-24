@@ -53,11 +53,13 @@ async function validateLines(lines: LineInput[]) {
   const cleaned = [];
   for (const [idx, l] of lines.entries()) {
     if (l.outcome !== "CLEARED" && l.outcome !== "BOUNCED") throw new Error(`ردیف ${idx + 1}: نتیجه نامعتبر است`);
-    const cheque = await prisma.chequeItem.findUnique({ where: { id: l.chequeItemId } });
+    const cheque = await prisma.chequeItem.findUnique({ where: { id: l.chequeItemId }, include: { payableChequeType: true } });
     if (!cheque) throw new Error(`چک ردیف ${idx + 1} یافت نشد`);
     if (cheque.direction !== "PAYABLE" || cheque.status !== "ISSUED") {
       throw new Error(`چک شماره ${cheque.number} در وضعیت «صادرشده» نیست`);
     }
+    // «چک روز» همان لحظه‌ی سند پرداخت پرداخت‌شده حساب می‌شود و در این سند قابل انتخاب نیست
+    if (cheque.payableChequeType?.isSameDay) throw new Error(`چک شماره ${cheque.number} از نوع «چک روز» است و در سند نتیجه وصول/برگشت قابل انتخاب نیست`);
     cleaned.push({ chequeItemId: l.chequeItemId, outcome: l.outcome });
   }
   return cleaned;
@@ -65,7 +67,8 @@ async function validateLines(lines: LineInput[]) {
 
 router.get("/cheque-clearings-payable/pickable-cheques", can(`${FORM}.view`), async (_req, res) => {
   const items = await prisma.chequeItem.findMany({
-    where: { direction: "PAYABLE", status: "ISSUED" },
+    // چک روز در این فرم قابل انتخاب نیست (همان لحظه‌ی سند پرداخت، پرداخت‌شده حساب می‌شود)
+    where: { direction: "PAYABLE", status: "ISSUED", payableChequeType: { isNot: { isSameDay: true } } },
     include: { party: true, currency: true },
     orderBy: { id: "desc" },
   });
