@@ -99,7 +99,7 @@ function aggregate(
 
 async function dimensionRows(q: CommonQuery, keyOf: (a: BankAccountMeta) => string, rowMeta: (a: BankAccountMeta) => Record<string, any>) {
   const f = parseFilters(q);
-  const [movements, accounts] = await Promise.all([getBankMovements(f.toDate), loadBankAccounts()]);
+  const [movements, accounts] = await Promise.all([getBankMovements(f.toDate, f.fromDate), loadBankAccounts()]);
   return aggregate(applyDimFilters(movements, accounts, f), accounts, f, keyOf, rowMeta);
 }
 
@@ -149,7 +149,7 @@ router.get("/bank-account-review/account-types", can(`${FORM}.view`), async (req
 router.get("/bank-account-review/documents", can(`${FORM}.view`), async (req, res) => {
   try {
     const f = parseFilters(req.query as CommonQuery);
-    const [movements, accounts] = await Promise.all([getBankMovements(f.toDate), loadBankAccounts()]);
+    const [movements, accounts] = await Promise.all([getBankMovements(f.toDate, f.fromDate), loadBankAccounts()]);
     const docs = new Map<string, any>();
     for (const m of applyDimFilters(movements, accounts, f, true)) {
       if (m.date < f.fromDate || m.date > f.toDate) continue;
@@ -205,7 +205,7 @@ router.get("/bank-account-review/ledger", can(`${FORM}.view`), async (req, res) 
     const page = Math.max(1, parseInt((req.query.page as string) || "1", 10));
     const pageSize = Math.min(1000, Math.max(1, parseInt((req.query.pageSize as string) || "100", 10)));
 
-    const [movements, accounts] = await Promise.all([getBankMovements(f.toDate), loadBankAccounts()]);
+    const [movements, accounts] = await Promise.all([getBankMovements(f.toDate, f.fromDate), loadBankAccounts()]);
     const filtered = applyDimFilters(movements, accounts, f);
     const opening = filtered.filter((m) => m.date < f.fromDate).reduce((s, m) => s + m.inflow - m.outflow, 0);
     const inRange = filtered.filter((m) => m.date >= f.fromDate && m.date <= f.toDate).sort((a, b) => a.date.getTime() - b.date.getTime() || a.docNumber - b.docNumber || a.key.localeCompare(b.key));

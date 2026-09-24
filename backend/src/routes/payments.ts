@@ -773,6 +773,7 @@ router.post("/payments/:id/approve", can(`${FORM}.approve`), async (req, res) =>
           // eslint-disable-next-line no-await-in-loop
           const cheque = await tx.chequeItem.create({
             data: {
+              fiscalPeriodId: d.fiscalPeriodId,
               direction: "PAYABLE",
               number: l.chequeNumber!,
               dueDate: l.chequeDueDate!,

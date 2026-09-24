@@ -131,6 +131,8 @@ model Currency {
   bankAccounts             BankAccount[]
   receiptInstrumentLines   ReceiptInstrumentLine[]
   receiptSettlementLines   ReceiptSettlementLine[]
+  treasuryOpeningBankAccounts TreasuryOpeningBankAccount[]
+  treasuryOpeningCashBoxes TreasuryOpeningCashBox[]
 }
 
 model ExchangeRate {
@@ -185,6 +187,9 @@ model FiscalPeriod {
   inventoryDocuments        InventoryDocument[]
   reportingPeriods          ReportingPeriod[]
   warehouseJournalEntryIssuances WarehouseJournalEntryIssuance[]
+  chequeItems                ChequeItem[]
+  treasuryOpenings          TreasuryOpening[]
+  treasuryYearCloses        TreasuryYearClose[]
 }
 
 enum ReportingPeriodStatus {
@@ -371,6 +376,7 @@ model BankAccount {
   chequeBookLeaves       ChequeBookLeaf[]
 
   @@unique([bankPartyId, accountNumber])
+  treasuryOpeningLines TreasuryOpeningBankAccount[]
 }
 
 // طبق Documents/دسته چک.md — دسته چک: برگه‌های چک پرداختنی خامِ اخذشده از بانک، برای کنترل شماره‌های
@@ -457,6 +463,7 @@ model CashBox {
   paymentInstrumentLines PaymentInstrumentLine[]
   receiptInstrumentLines ReceiptInstrumentLine[]
   treasuryAccountSettings TreasuryAccountSetting[]
+  treasuryOpeningLines TreasuryOpeningCashBox[]
 }
 
 model ReportingLevel {
@@ -1240,6 +1247,7 @@ model ReceiptType {
   account         Account?         @relation(fields: [accountId], references: [id])
   receiptSettlementLines ReceiptSettlementLine[]
   treasuryAccountSettings TreasuryAccountSetting[]
+  openingCheques ChequeItem[] @relation("ChequeOpeningReceiptType")
 }
 
 // مستر «نوع پرداخت» — هم‌الگوی ReceiptType برای فرم پرداخت (اعلامیه پرداخت): nature تعیین می‌کند این پرداخت
@@ -1259,6 +1267,7 @@ model PaymentType {
   account                Account?                @relation(fields: [accountId], references: [id])
   paymentSettlementLines PaymentSettlementLine[]
   treasuryAccountSettings TreasuryAccountSetting[]
+  openingCheques ChequeItem[] @relation("ChequeOpeningPaymentType")
 }
 
 // طبق Documents/نوع چک دریافتی و پرداختی.md — دو مستر ساده‌ی تنظیمات خزانه‌داری: کد (خودکار: آخرین کد + ۱)
@@ -2571,6 +2580,22 @@ model ChequeItem {
   depositReturnLines      ChequeDepositReturnLine[]
   clearingReceivableLines ChequeClearingReceivableLine[]
   clearingPayableLines    ChequeClearingPayableLine[]
+  // طبق Documents/افتتاحیه دریافت و پرداخت و بستن سال.md: هر چک متعلق به یک دوره مالی است (فهرست‌ها و انتخابگرهای چک خودکار
+  // به دوره مالی جاری محدود می‌شوند). چک‌های افتتاحیه (isOpening) یا دستی در «افتتاحیه دریافت و پرداخت» ثبت شده‌اند یا با
+  // «بستن سال دریافت و پرداخت» از چک فعال سال قبل ساخته شده‌اند (parentChequeId → رکورد سال قبل، با همان شماره‌ی چک).
+  fiscalPeriodId  Int
+  fiscalPeriod    FiscalPeriod @relation(fields: [fiscalPeriodId], references: [id])
+  parentChequeId  Int?
+  parentCheque    ChequeItem?  @relation("ChequeCarryForward", fields: [parentChequeId], references: [id], onDelete: SetNull)
+  childCheques    ChequeItem[] @relation("ChequeCarryForward")
+  isOpening       Boolean      @default(false)
+  // فقط برای چک‌های افتتاحیه: «نوع دریافت»/«نوع پرداخت» (اختیاری)
+  openingReceiptTypeId Int?
+  openingPaymentTypeId Int?
+  openingReceiptType   ReceiptType? @relation("ChequeOpeningReceiptType", fields: [openingReceiptTypeId], references: [id])
+  openingPaymentType   PaymentType? @relation("ChequeOpeningPaymentType", fields: [openingPaymentTypeId], references: [id])
+  
+  @@index([fiscalPeriodId])
 }
 
 model Receipt {
@@ -3192,4 +3217,69 @@ model ChequeClearingPayableLine {
   chequeStep              Int?
   chequeClearingPayable   ChequeClearingPayable @relation(fields: [chequeClearingPayableId], references: [id], onDelete: Cascade)
   chequeItem              ChequeItem            @relation(fields: [chequeItemId], references: [id])
+}
+
+// ==================== خزانه‌داری > افتتاحیه دریافت و پرداخت / بستن سال ====================
+// طبق Documents/افتتاحیه دریافت و پرداخت و بستن سال.md: به‌ازای هر دوره مالی یک فرم افتتاحیه با چهار تب: چک‌های دریافتی و
+// پرداختی (خودِ ChequeItemهایی با isOpening=true در همان دوره — نگاه کنید به ChequeItem)، حساب‌های بانکی و صندوق‌ها (مانده‌ی
+// اول دوره، هم به ارز حساب/صندوق و هم به ارز پایه). هم برای استقرار اولیه (ورود دستی) و هم برای انتقال پایان سال (ایجاد
+// خودکار توسط «بستن سال دریافت و پرداخت») استفاده می‌شود.
+model TreasuryOpening {
+  id              Int                          @id @default(autoincrement())
+  fiscalPeriodId  Int                          @unique
+  date            DateTime                     @db.Date
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @default(now()) @updatedAt
+  fiscalPeriod    FiscalPeriod                 @relation(fields: [fiscalPeriodId], references: [id])
+  bankAccountLines TreasuryOpeningBankAccount[]
+  cashBoxLines    TreasuryOpeningCashBox[]
+}
+
+model TreasuryOpeningBankAccount {
+  id            Int             @id @default(autoincrement())
+  openingId     Int
+  rowOrder      Int             @default(0)
+  bankAccountId Int
+  currencyId    Int
+  balance       Decimal         @db.Decimal(18, 2)
+  baseBalance   Decimal         @db.Decimal(18, 2)
+  opening       TreasuryOpening @relation(fields: [openingId], references: [id], onDelete: Cascade)
+  bankAccount   BankAccount     @relation(fields: [bankAccountId], references: [id])
+  currency      Currency        @relation(fields: [currencyId], references: [id])
+
+  @@unique([openingId, bankAccountId])
+}
+
+model TreasuryOpeningCashBox {
+  id          Int             @id @default(autoincrement())
+  openingId   Int
+  rowOrder    Int             @default(0)
+  cashBoxId   Int
+  currencyId  Int
+  balance     Decimal         @db.Decimal(18, 2)
+  baseBalance Decimal         @db.Decimal(18, 2)
+  opening     TreasuryOpening @relation(fields: [openingId], references: [id], onDelete: Cascade)
+  cashBox     CashBox         @relation(fields: [cashBoxId], references: [id])
+  currency    Currency        @relation(fields: [currencyId], references: [id])
+
+  @@unique([openingId, cashBoxId, currencyId])
+}
+
+// «بستن سال دریافت و پرداخت» — هر بخش به‌صورت مستقل بسته می‌شود؛ ردیف این جدول یعنی آن بخش از دوره‌ی مالیِ fiscalPeriodId
+// بسته و به افتتاحیه‌ی دوره‌ی بعد منتقل شده است.
+enum TreasuryCloseSection {
+  BANK_ACCOUNTS
+  CASH_BOXES
+  RECEIVABLE_CHEQUES
+  PAYABLE_CHEQUES
+}
+
+model TreasuryYearClose {
+  id             Int                  @id @default(autoincrement())
+  fiscalPeriodId Int
+  section        TreasuryCloseSection
+  closedAt       DateTime             @default(now())
+  fiscalPeriod   FiscalPeriod         @relation(fields: [fiscalPeriodId], references: [id])
+
+  @@unique([fiscalPeriodId, section])
 }

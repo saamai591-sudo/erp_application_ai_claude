@@ -37,7 +37,7 @@ function applyFilters(movements: CashMovement[], boxes: Map<number, CashBoxMeta>
 router.get("/cash-review/cash-boxes", can(`${FORM}.view`), async (req, res) => {
   try {
     const f = parseFilters(req.query as CommonQuery);
-    const [movements, boxes] = await Promise.all([getCashMovements(f.toDate), loadCashBoxes()]);
+    const [movements, boxes] = await Promise.all([getCashMovements(f.toDate, f.fromDate), loadCashBoxes()]);
     const buckets = new Map<number, { opening: number; inflow: number; outflow: number }>();
     for (const m of applyFilters(movements, boxes, f.cashBoxIds)) {
       if (!buckets.has(m.cashBoxId)) buckets.set(m.cashBoxId, { opening: 0, inflow: 0, outflow: 0 });
@@ -97,7 +97,7 @@ router.get("/cash-review/ledger", can(`${FORM}.view`), async (req, res) => {
     const page = Math.max(1, parseInt((req.query.page as string) || "1", 10));
     const pageSize = Math.min(1000, Math.max(1, parseInt((req.query.pageSize as string) || "100", 10)));
 
-    const [movements, boxes] = await Promise.all([getCashMovements(f.toDate), loadCashBoxes()]);
+    const [movements, boxes] = await Promise.all([getCashMovements(f.toDate, f.fromDate), loadCashBoxes()]);
     const filtered = applyFilters(movements, boxes, f.cashBoxIds);
     const opening = filtered.filter((m) => m.date < f.fromDate).reduce((s, m) => s + m.inflow - m.outflow, 0);
     const inRange = filtered

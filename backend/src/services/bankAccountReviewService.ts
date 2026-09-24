@@ -14,7 +14,9 @@ import { withoutFiscalPeriodScope } from "../lib/requestContext";
 //          انتخاب نیست و اگر (از قبل) در چنین سندی باشد، دوباره شمرده نمی‌شود
 //          نتیجه‌ی وصول چک پرداختنی با نتیجه‌ی «وصول‌شده» — از حساب بانکی صادرکننده‌ی چک (ownerBankAccount)
 // خودِ «واگذاری به بانک» و صدور چک، تا وقتی وصول نشده‌اند، گردش بانکی حساب نمی‌شوند. چک برگشتی (BOUNCED) هم
-// گردشی ندارد. مانده‌ی ابتدای دوره = جمع گردش‌های قبل از «از تاریخ» (تجمعی از اولین سند؛ مثل مانده‌ی واقعی حساب).
+// گردشی ندارد. گزارش به «دوره‌ی مالیِ» تاریخ «از» محدود است: گردش‌ها از ابتدای همان دوره شروع می‌شوند و مانده‌ی اول دوره
+// از «افتتاحیه دریافت و پرداخت» همان دوره (TreasuryOpeningBankAccount) می‌آید — به‌صورت یک گردش «افتتاحیه» به تاریخ روز قبل از شروع
+// دوره تا در مانده‌ی ابتدا حساب شود. مانده‌ی ابتدای بازه = جمع گردش‌های قبل از «از تاریخ» (شامل افتتاحیه).
 // =========================================================================
 
 export interface BankMovement {
@@ -23,13 +25,16 @@ export interface BankMovement {
   bankAccountId: number;
   date: Date;
   docType: string;
-  docTypeCode: "RECEIPT" | "PAYMENT" | "CLEARING_RECEIVABLE" | "CLEARING_PAYABLE";
+  docTypeCode: "RECEIPT" | "PAYMENT" | "CLEARING_RECEIVABLE" | "CLEARING_PAYABLE" | "OPENING";
   docId: number;
   docNumber: number;
   partyDisplay: string;
   description: string | null;
   inflow: number;
   outflow: number;
+  // مبلغ به ارز خودِ حساب بانکی (برای انتقال مانده‌ی پایان سال در حساب‌های ارزی)؛ inflow/outflow همیشه به ارز پایه است
+  currencyInflow: number;
+  currencyOutflow: number;
 }
 
 export interface BankAccountMeta {
@@ -42,6 +47,7 @@ export interface BankAccountMeta {
   accountTypeId: number;
   accountTypeCode: number;
   accountTypeTitle: string;
+  currencyId: number | null;
 }
 
 function partyDisplay(p: any): string {
@@ -64,18 +70,33 @@ export async function loadBankAccounts(): Promise<Map<number, BankAccountMeta>> 
         accountTypeId: a.accountTypeId,
         accountTypeCode: a.accountType.code,
         accountTypeTitle: a.accountType.title,
+        currencyId: a.currencyId,
       },
     ])
   );
 }
 
 /** همه‌ی گردش‌های بانکیِ اسناد تاییدشده تا تاریخ toDate (شامل همان روز)، بدون محدودیت دوره‌ی مالی. */
-export async function getBankMovements(toDate: Date): Promise<BankMovement[]> {
+/** دوره‌ی مالی‌ای که تاریخ در آن است (وگرنه null). */
+export async function fiscalPeriodOf(date: Date) {
+  return prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
+}
+
+export async function getBankMovements(toDate: Date, fromDate?: Date): Promise<BankMovement[]> {
   return withoutFiscalPeriodScope(async () => {
     const movements: BankMovement[] = [];
+    const period = fromDate ? await fiscalPeriodOf(fromDate) : null;
+    const dateRange: any = period ? { gte: period.fromDate, lte: toDate } : { lte: toDate };
+    const accounts = await loadBankAccounts();
+    const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
+    // مبلغ به ارز حساب برای گردش‌های مبتنی بر چک (همیشه ارز پایه): فقط وقتی حساب به ارز پایه (یا بدون ارز) است
+    const chequeCurrencyAmount = (bankAccountId: number, base: number) => {
+      const a = accounts.get(bankAccountId);
+      return !a || a.currencyId == null || a.currencyId === baseCurrency?.id ? base : 0;
+    };
 
     const receiptLines = await prisma.receiptInstrumentLine.findMany({
-      where: { type: { in: ["BANK_TRANSFER", "POS"] }, bankAccountId: { not: null }, receipt: { status: "APPROVED", date: { lte: toDate } } },
+      where: { type: { in: ["BANK_TRANSFER", "POS"] }, bankAccountId: { not: null }, receipt: { status: "APPROVED", date: dateRange } },
       include: { receipt: { include: { party: true } } },
     });
     for (const l of receiptLines as any[]) {
@@ -92,11 +113,13 @@ export async function getBankMovements(toDate: Date): Promise<BankMovement[]> {
         description: l.description || l.receipt.description,
         inflow: Number(l.baseAmount),
         outflow: 0,
+        currencyInflow: Number(l.amount),
+        currencyOutflow: 0,
       });
     }
 
     const paymentLines = await prisma.paymentInstrumentLine.findMany({
-      where: { type: "BANK_TRANSFER", bankAccountId: { not: null }, payment: { status: "APPROVED", date: { lte: toDate } } },
+      where: { type: "BANK_TRANSFER", bankAccountId: { not: null }, payment: { status: "APPROVED", date: dateRange } },
       include: { payment: { include: { party: true } } },
     });
     for (const l of paymentLines as any[]) {
@@ -113,12 +136,14 @@ export async function getBankMovements(toDate: Date): Promise<BankMovement[]> {
         description: l.description || l.payment.description,
         inflow: 0,
         outflow: Number(l.baseAmount),
+        currencyInflow: 0,
+        currencyOutflow: Number(l.amount),
       });
     }
 
     // چک روز: پرداخت در همان لحظه‌ی تاییدِ سند پرداخت (از حساب بانکی صادرکننده‌ی همان ردیف)
     const sameDayLines = await prisma.paymentInstrumentLine.findMany({
-      where: { type: "CHEQUE", bankAccountId: { not: null }, payableChequeType: { isSameDay: true }, payment: { status: "APPROVED", date: { lte: toDate } } },
+      where: { type: "CHEQUE", bankAccountId: { not: null }, payableChequeType: { isSameDay: true }, payment: { status: "APPROVED", date: dateRange } },
       include: { payment: { include: { party: true } } },
     });
     for (const l of sameDayLines as any[]) {
@@ -135,11 +160,13 @@ export async function getBankMovements(toDate: Date): Promise<BankMovement[]> {
         description: `چک روز شماره ${l.chequeNumber ?? ""}`.trim(),
         inflow: 0,
         outflow: Number(l.baseAmount),
+        currencyInflow: 0,
+        currencyOutflow: chequeCurrencyAmount(l.bankAccountId, Number(l.baseAmount)),
       });
     }
 
     const receivableClearings = await prisma.chequeClearingReceivableLine.findMany({
-      where: { outcome: "CLEARED", chequeClearingReceivable: { status: "APPROVED", date: { lte: toDate } } },
+      where: { outcome: "CLEARED", chequeClearingReceivable: { status: "APPROVED", date: dateRange } },
       include: { chequeClearingReceivable: true, chequeItem: { include: { party: true } } },
     });
     if (receivableClearings.length > 0) {
@@ -170,13 +197,15 @@ export async function getBankMovements(toDate: Date): Promise<BankMovement[]> {
           description: `چک شماره ${l.chequeItem.number}`,
           inflow: Number(l.chequeItem.amount),
           outflow: 0,
+          currencyInflow: chequeCurrencyAmount(bank.bankAccountId, Number(l.chequeItem.amount)),
+          currencyOutflow: 0,
         });
       }
     }
 
     const payableClearings = await prisma.chequeClearingPayableLine.findMany({
       // چک روز قبلاً در سند پرداخت شمرده شده است؛ نتیجه‌ی وصولش دوباره گردش حساب نمی‌شود
-      where: { outcome: "CLEARED", chequeClearingPayable: { status: "APPROVED", date: { lte: toDate } }, chequeItem: { ownerBankAccountId: { not: null }, payableChequeType: { isNot: { isSameDay: true } } } },
+      where: { outcome: "CLEARED", chequeClearingPayable: { status: "APPROVED", date: dateRange }, chequeItem: { ownerBankAccountId: { not: null }, payableChequeType: { isNot: { isSameDay: true } } } },
       include: { chequeClearingPayable: true, chequeItem: { include: { party: true } } },
     });
     for (const l of payableClearings as any[]) {
@@ -193,7 +222,35 @@ export async function getBankMovements(toDate: Date): Promise<BankMovement[]> {
         description: `چک شماره ${l.chequeItem.number}`,
         inflow: 0,
         outflow: Number(l.chequeItem.amount),
+        currencyInflow: 0,
+        currencyOutflow: chequeCurrencyAmount(l.chequeItem.ownerBankAccountId, Number(l.chequeItem.amount)),
       });
+    }
+
+    // مانده‌ی اول دوره‌ی «افتتاحیه دریافت و پرداخت»: به‌صورت یک گردش به تاریخ روز قبل از شروع دوره (فقط در مانده‌ی ابتدا حساب می‌شود)
+    if (period) {
+      const openingLines = await prisma.treasuryOpeningBankAccount.findMany({ where: { opening: { fiscalPeriodId: period.id } } });
+      const before = new Date(period.fromDate.getTime() - 86400000);
+      for (const l of openingLines as any[]) {
+        const base = Number(l.baseBalance);
+        const cur = Number(l.balance);
+        movements.push({
+          key: `O${l.id}`,
+          docKey: `OPENING:${l.openingId}`,
+          bankAccountId: l.bankAccountId,
+          date: before,
+          docType: "افتتاحیه",
+          docTypeCode: "OPENING",
+          docId: l.openingId,
+          docNumber: 0,
+          partyDisplay: "",
+          description: "مانده اول دوره",
+          inflow: base > 0 ? base : 0,
+          outflow: base < 0 ? -base : 0,
+          currencyInflow: cur > 0 ? cur : 0,
+          currencyOutflow: cur < 0 ? -cur : 0,
+        });
+      }
     }
 
     return movements;

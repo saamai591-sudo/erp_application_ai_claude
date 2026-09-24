@@ -515,6 +515,19 @@ export const REGISTRY: ModuleDef[] = [
           { key: "cheque-deposit-returns", title: "برگشت از واگذاری", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
           { key: "cheque-clearings-receivable", title: "نتیجه وصول/برگشت (دریافتنی)", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
           { key: "cheque-clearings-payable", title: "نتیجه وصول/برگشت (پرداختنی)", baseActions: CRUD, actions: APPROVE_UNAPPROVE_REEDIT },
+          { key: "treasury-openings", title: "افتتاحیه دریافت و پرداخت", baseActions: CRUD },
+          {
+            key: "treasury-year-close",
+            title: "بستن سال دریافت و پرداخت",
+            baseActions: ["view"],
+            actions: [
+              { key: "closeBankAccounts", title: "بستن حساب‌های بانکی" },
+              { key: "closeCashBoxes", title: "بستن صندوق‌ها" },
+              { key: "closeReceivableCheques", title: "بستن چک‌های دریافتی" },
+              { key: "closePayableCheques", title: "بستن چک‌های پرداختی" },
+              { key: "closeAll", title: "بستن همه" },
+            ],
+          },
         ],
       },
       {

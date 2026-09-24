@@ -93,6 +93,8 @@ import SalesReturnInvoices from "./pages/SalesReturnInvoices";
 import SalesReview from "./pages/SalesReview";
 import BankAccountReview from "./pages/BankAccountReview";
 import CashReview from "./pages/CashReview";
+import TreasuryOpenings from "./pages/TreasuryOpenings";
+import TreasuryYearClose from "./pages/TreasuryYearClose";
 import PurchaseInvoices from "./pages/PurchaseInvoices";
 import ServicePurchaseInvoices from "./pages/ServicePurchaseInvoices";
 import WarehouseReview from "./pages/WarehouseReview";
@@ -390,6 +392,10 @@ export default function App() {
             <Route path="/sales-review" element={<SalesReview />} />
             <Route path="/bank-account-review" element={<BankAccountReview />} />
             <Route path="/cash-review" element={<CashReview />} />
+            <Route path="/treasury-openings" element={<TreasuryOpenings />} />
+            <Route path="/treasury-openings/new" element={<TreasuryOpenings />} />
+            <Route path="/treasury-openings/:id/edit" element={<TreasuryOpenings />} />
+            <Route path="/treasury-year-close" element={<TreasuryYearClose />} />
 
             <Route path="/receipts" element={<Receipts />} />
             <Route path="/receipts/new" element={<Receipts />} />
