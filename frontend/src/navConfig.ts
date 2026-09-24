@@ -16,21 +16,16 @@ export interface ModuleGroup {
   subModules: SubModule[];
 }
 
-export const MODULES: ModuleGroup[] = [
+const RAW_MODULES: ModuleGroup[] = [
   {
     title: "تنظیمات",
     subModules: [
       {
         title: "عملیات",
         items: [
-          { key: "roles", label: "نقش کاربری", list: "/roles", create: "/roles/new", icon: "shield" },
-          { key: "users", label: "کاربر", list: "/users", create: "/users/new", icon: "user" },
           { key: "currencies", label: "ارز", list: "/currencies", create: "/currencies/new", icon: "coin" },
           { key: "rates", label: "نرخ ارز", list: "/exchange-rates", create: "/exchange-rates/new", icon: "trend" },
           { key: "periods", label: "دوره مالی", list: "/fiscal-periods", create: "/fiscal-periods/new", icon: "calendar" },
-          { key: "org-structure", label: "ساختار سازمانی", list: "/org-structure", icon: "sitemap" },
-          { key: "geo", label: "مناطق جغرافیایی", list: "/geo-regions", icon: "pin" },
-          { key: "detail-types", label: "نوع تفصیل", list: "/detail-types", icon: "tag" },
         ],
       },
     ],
@@ -50,6 +45,16 @@ export const MODULES: ModuleGroup[] = [
           { key: "cost-centers", label: "مرکز هزینه", list: "/cost-centers", create: "/cost-centers/new", icon: "briefcase" },
           { key: "org-units", label: "واحد سازمانی", list: "/org-units", create: "/org-units/new", icon: "building" },
           { key: "reporting-periods", label: "دوره گزارشگری", list: "/reporting-periods", create: "/reporting-periods/new", icon: "calendar" },
+        ],
+      },
+      {
+        title: "تنظیمات",
+        items: [
+          { key: "roles", label: "نقش کاربری", list: "/roles", create: "/roles/new", icon: "shield" },
+          { key: "users", label: "کاربر", list: "/users", create: "/users/new", icon: "user" },
+          { key: "detail-types", label: "نوع تفصیل", list: "/detail-types", icon: "tag" },
+          { key: "org-structure", label: "ساختار سازمانی", list: "/org-structure", icon: "sitemap" },
+          { key: "geo", label: "مناطق جغرافیایی", list: "/geo-regions", icon: "pin" },
         ],
       },
     ],
@@ -294,6 +299,20 @@ export const MODULES: ModuleGroup[] = [
     ],
   },
 ];
+
+// قاعده‌ی عمومی ترتیب زیرماژول‌ها در همه‌ی ماژول‌ها: «تنظیمات» اول، بقیه (عملیات و گروه‌های عملیاتی) به همان ترتیب تعریف در وسط،
+// و «گزارش…» آخر. ترتیب تعریف در RAW_MODULES مهم نیست؛ این قاعده هنگام ساخت MODULES اعمال می‌شود (همین قاعده برای درخت دسترسی
+// در backend/src/authz/registry.ts: sortSubModules).
+function subModuleRank(title: string): number {
+  if (title === "تنظیمات") return 0;
+  if (title.startsWith("گزارش")) return 2;
+  return 1;
+}
+
+export const MODULES: ModuleGroup[] = RAW_MODULES.map((mod) => ({
+  ...mod,
+  subModules: [...mod.subModules].sort((a, b) => subModuleRank(a.title) - subModuleRank(b.title)),
+}));
 
 // نگاشت کلید آیتم منو → کلید فرم در Registry بک‌اند (authz/registry.ts) — فقط برای مواردی لازم است
 // که یک فرم واحد بک‌اند (یک جدول/مسیر مشترک) به عمد زیر دو آیتم منوی جدا نمایش داده می‌شود (مثلاً

@@ -85,6 +85,18 @@ const ACCOUNTING_CONFIRM: CustomActionDef[] = [
 // (نه فقط در UI مخفی می‌شوند) — نگاه کنید به authz/fieldRedaction.ts.
 const VIEW_ACCOUNTING: CustomActionDef = { key: "viewAccounting", title: "مشاهده اطلاعات حسابداری" };
 
+// قاعده‌ی عمومی ترتیب زیرماژول‌ها در همه‌ی ماژول‌ها (هم‌راستا با MODULES در frontend/src/navConfig.ts): «تنظیمات» اول، بقیه به همان
+// ترتیب تعریف در وسط، «گزارش…» آخر — در درخت دسترسی (GET /api/authz/tree) اعمال می‌شود؛ ترتیب تعریف در REGISTRY مهم نیست.
+function subModuleRank(title: string): number {
+  if (title === "تنظیمات") return 0;
+  if (title.startsWith("گزارش")) return 2;
+  return 1;
+}
+
+export function sortSubModules<T extends { title: string }>(subModules: T[]): T[] {
+  return [...subModules].sort((a, b) => subModuleRank(a.title) - subModuleRank(b.title));
+}
+
 export const REGISTRY: ModuleDef[] = [
   {
     key: "settings",
@@ -94,19 +106,9 @@ export const REGISTRY: ModuleDef[] = [
         key: "operations",
         title: "عملیات",
         forms: [
-          { key: "roles", title: "نقش کاربری", baseActions: CRUD },
-          { key: "users", title: "کاربر", baseActions: CRUD },
           { key: "currencies", title: "ارز", baseActions: CRUD },
           { key: "rates", title: "نرخ ارز", baseActions: ["view", "create", "delete"] },
           { key: "periods", title: "دوره مالی", baseActions: CRUD },
-          { key: "org-structure", title: "ساختار سازمانی", baseActions: CRUD },
-          { key: "geo", title: "مناطق جغرافیایی", baseActions: CRUD },
-          {
-            key: "detail-types",
-            title: "نوع تفصیل",
-            baseActions: ["view", "edit"],
-            actions: [{ key: "cleanupOrphans", title: "پاکسازی موارد یتیم" }],
-          },
         ],
       },
     ],
@@ -140,6 +142,22 @@ export const REGISTRY: ModuleDef[] = [
               { key: "reopenPeriod", title: "بازگشایی دوره" },
             ],
           },
+        ],
+      },
+      {
+        key: "settings",
+        title: "تنظیمات",
+        forms: [
+          { key: "roles", title: "نقش کاربری", baseActions: CRUD },
+          { key: "users", title: "کاربر", baseActions: CRUD },
+          {
+            key: "detail-types",
+            title: "نوع تفصیل",
+            baseActions: ["view", "edit"],
+            actions: [{ key: "cleanupOrphans", title: "پاکسازی موارد یتیم" }],
+          },
+          { key: "org-structure", title: "ساختار سازمانی", baseActions: CRUD },
+          { key: "geo", title: "مناطق جغرافیایی", baseActions: CRUD },
         ],
       },
     ],

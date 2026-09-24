@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
-import { REGISTRY, BASE_ACTION_TITLES } from "../authz/registry";
+import { REGISTRY, BASE_ACTION_TITLES, sortSubModules } from "../authz/registry";
 import { getUserActionKeys } from "../authz/guard";
 
 const router = Router();
@@ -16,7 +16,7 @@ router.get("/authz/tree", async (_req, res) => {
   const tree = REGISTRY.map((mod) => ({
     key: mod.key,
     title: mod.title,
-    subModules: mod.subModules.map((sub) => ({
+    subModules: sortSubModules(mod.subModules).map((sub) => ({
       key: sub.key,
       title: sub.title,
       forms: sub.forms.map((form) => {
