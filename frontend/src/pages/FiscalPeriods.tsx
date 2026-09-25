@@ -208,6 +208,12 @@ function PeriodEditForm({ editId }: { editId: number }) {
       <form id="period-edit-form" onSubmit={onSubmit}>
         <ErrorToast message={formError} />
         <div className="form-grid">
+          {/* فیلد «عنوان» بعد از ذخیره هم نمایش داده می‌شود (فقط‌خواندنی، هم‌ساختار فرم ایجاد) */}
+          <div className="form-field">
+            <label>عنوان (عدد ۴ رقمی)</label>
+            <input dir="ltr" value={title} disabled />
+          </div>
+          <div />
           <div className="form-field">
             <label>از تاریخ</label>
             <JalaliDatePicker value={fromDate} onChange={() => {}} disabled placeholder="انتخاب تاریخ" />
