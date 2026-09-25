@@ -168,6 +168,8 @@ function EntryForm({ viewId }: { viewId?: number }) {
   return (
     <FormPage
       title={viewId ? "مشاهده افتتاحیه/اختتامیه" : "افتتاحیه و اختتامیه"}
+      formId="opening-closing-form"
+      saveDisabled={isFinalized || loading || !date || !description.trim()}
       closePath="/opening-closing"
       newPath="/opening-closing/new"
       extraActions={
@@ -181,6 +183,8 @@ function EntryForm({ viewId }: { viewId?: number }) {
     >
       <ErrorToast message={error} />
 
+      {/* دکمه‌ی «ذخیره»ی نوار ابزار (و Ctrl+S) به همین فرم متصل است */}
+      <form id="opening-closing-form" onSubmit={(e) => { e.preventDefault(); if (!isFinalized && !loading && date && description.trim()) handleSave(); }}>
       {isFinalized && (
         <div style={{ display: "flex", gap: 20, padding: "10px 14px", background: "#f8f9fb", border: "1px solid var(--line)", borderRadius: 8, marginBottom: 16 }}>
           <span><b>شماره:</b> {toFaDigits(String(saved.number))}</span>
@@ -227,11 +231,7 @@ function EntryForm({ viewId }: { viewId?: number }) {
         )}
       </div>
 
-      {!isFinalized && (
-        <button type="button" className="btn" onClick={handleSave} disabled={loading || !date || !description.trim()}>
-          {loading ? "در حال ذخیره..." : "ذخیره"}
-        </button>
-      )}
+      </form>
 
       {isFinalized && !saved.issued && (
         <button type="button" className="btn" onClick={handleIssue} disabled={issuing}>

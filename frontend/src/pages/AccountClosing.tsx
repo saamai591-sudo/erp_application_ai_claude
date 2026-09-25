@@ -337,10 +337,14 @@ function ClosingWizard({ viewId }: { viewId?: number }) {
   }
 
   const isFinalized = savedClosing?.id && (savedClosing.issued !== undefined || viewId);
+  // ذخیره فقط وقتی مجاز است که همه‌ی مراحل معتبر باشند (تاریخ، حسابهای انتخاب‌شده، حساب مقصد و شرح)
+  const canSave = !!date && selectedRows.length > 0 && !!destinationAccountId && !!description.trim();
 
   return (
     <FormPage
       title={viewId ? "مشاهده سند بستن حسابها" : "بستن حسابها"}
+      formId="account-closing-form"
+      saveDisabled={!!isFinalized || loading || !canSave}
       closePath="/account-closing"
       newPath="/account-closing/new"
       extraActions={
@@ -354,6 +358,8 @@ function ClosingWizard({ viewId }: { viewId?: number }) {
     >
       <ErrorToast message={error} />
 
+      {/* دکمه‌ی «ذخیره»ی نوار ابزار (و Ctrl+S) به همین فرم متصل است؛ ذخیره‌ی پایین ویزارد حذف شده است */}
+      <form id="account-closing-form" onSubmit={(e) => { e.preventDefault(); if (!isFinalized && !loading && canSave) handleSave(); }}>
       {isFinalized && savedClosing?.number ? (
         <div>
           <div style={{ display: "flex", gap: 20, padding: "10px 14px", background: "#f8f9fb", border: "1px solid var(--line)", borderRadius: 8, marginBottom: 16 }}>
@@ -383,10 +389,8 @@ function ClosingWizard({ viewId }: { viewId?: number }) {
           onNext={() => setActiveStep((s: number) => Math.min(s + 1, STEPS.length - 1))}
           onBack={() => setActiveStep((s: number) => Math.max(s - 1, 0))}
           onCancel={() => navigate("/account-closing")}
-          onFinish={handleSave}
           canProceed={canProceedFromStep(activeStep)}
           loading={loading}
-          finishLabel="ذخیره"
         >
           {activeStep === 0 && (
             <div>
@@ -513,6 +517,7 @@ function ClosingWizard({ viewId }: { viewId?: number }) {
           )}
         </Wizard>
       )}
+      </form>
     </FormPage>
   );
 }
