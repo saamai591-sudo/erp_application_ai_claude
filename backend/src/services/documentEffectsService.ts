@@ -53,6 +53,12 @@ function signAndExcludeKey(documentType: InventoryDocumentType): { sign: 1 | -1;
 // باشد، اصلاً چک نمی‌شود)، به‌جز این سه نوع که همیشه — صرف‌نظر از stockControl — چک می‌شوند.
 const ALWAYS_CHECK_REGARDLESS_OF_STOCK_CONTROL = new Set<InventoryDocumentType>(["WAREHOUSE_RECEIPT", "WAREHOUSE_TRANSFER_IN", "INITIAL_INVENTORY"]);
 
+function mergeLinesByGoods(lines: EffectLine[]): EffectLine[] {
+  const byGoods = new Map<number, number>();
+  for (const l of lines) byGoods.set(l.goodsItemId, (byGoods.get(l.goodsItemId) || 0) + Number(l.quantity));
+  return Array.from(byGoods.entries()).map(([goodsItemId, quantity]) => ({ goodsItemId, quantity }));
+}
+
 /** فقط‌خواندنی — پیش از هرگونه نوشتن فراخوانی شود. اگر پرتاب کند، فراخوان نباید هیچ جهشی انجام دهد.
  * warehouseStockControl: مقدار فعلیِ Warehouse.stockControl همان انبار (برای دروازه‌بانی چک موجودی منفی
  * — نگاه کنید به توضیح بالای ALWAYS_CHECK_REGARDLESS_OF_STOCK_CONTROL). */
@@ -60,7 +66,8 @@ export async function assertSafeToReverseEffects(db: Db, doc: EffectDoc, lines: 
   await assertSerialsRevertible(db, doc.id);
   if (!warehouseStockControl && !ALWAYS_CHECK_REGARDLESS_OF_STOCK_CONTROL.has(doc.documentType)) return;
   const { sign } = signAndExcludeKey(doc.documentType);
-  for (const line of lines) {
+  // چند ردیف از یک کالا (مثلاً تفکیک به‌خاطر سریال/بچ/محل) باید با هم سنجیده شوند، نه هر ردیف مستقل با کل موجودی
+  for (const line of mergeLinesByGoods(lines)) {
     // eslint-disable-next-line no-await-in-loop
     await assertNoNegativeStockAfterChange(
       { warehouseId: doc.warehouseId, goodsItemId: line.goodsItemId, asOfDate: doc.date, delta: -sign * line.quantity },
@@ -85,7 +92,7 @@ export async function assertSafeToApplyEffects(
   if (!warehouseStockControl && !ALWAYS_CHECK_REGARDLESS_OF_STOCK_CONTROL.has(doc.documentType)) return;
   const { sign, excludeKey } = signAndExcludeKey(doc.documentType);
   const excludeOpts: StockExcludeOptions = excludeSelfId != null ? { [excludeKey]: excludeSelfId } : {};
-  for (const line of lines) {
+  for (const line of mergeLinesByGoods(lines)) {
     // eslint-disable-next-line no-await-in-loop
     await assertNoNegativeStockAfterChange(
       { ...excludeOpts, warehouseId: doc.warehouseId, goodsItemId: line.goodsItemId, asOfDate: doc.date, delta: sign * line.quantity },

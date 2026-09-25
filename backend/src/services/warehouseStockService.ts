@@ -138,6 +138,10 @@ export async function assertNoNegativeStockAfterChange(
   if (opts.delta >= 0) return;
   const current = await computeStockAsOf(opts.warehouseId, opts.goodsItemId, opts.asOfDate, opts, db);
   if (current + opts.delta < 0) {
-    throw new Error("این تغییر باعث منفی شدن موجودی کالا در انبار می‌شود");
+    // موجودی همیشه همین لحظه از پایگاه‌داده محاسبه می‌شود (نه کش/فرانت‌اند)؛ جزئیات در پیام تا علت (کالا/انبار/تاریخ سند) روشن باشد
+    const [item, wh] = await Promise.all([db.goodsItem.findUnique({ where: { id: opts.goodsItemId } }), db.warehouse.findUnique({ where: { id: opts.warehouseId } })]);
+    throw new Error(
+      `این تغییر باعث منفی شدن موجودی کالا در انبار می‌شود (کالا «${item?.title ?? opts.goodsItemId}»، انبار «${wh?.title ?? opts.warehouseId}»، موجودی تا تاریخ سند: ${current}، تغییر: ${opts.delta})`
+    );
   }
 }
