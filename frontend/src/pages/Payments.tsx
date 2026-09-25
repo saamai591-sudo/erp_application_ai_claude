@@ -82,6 +82,7 @@ interface DetailInstrumentLine {
   cashBoxId: number | null;
   bankAccountId: number | null;
   referenceNumber: string | null;
+  feeAmount?: number;
   chequeNumber: string | null;
   chequeDueDate: string | null;
   chequeBankBranchId: number | null;
@@ -261,6 +262,8 @@ interface InstrumentRowState {
   cashBoxId: string;
   bankAccountId: string;
   referenceNumber: string;
+  /** کارمزد پرداخت (فقط ردیف حواله/انتقال بانکی) */
+  feeAmount: string;
   chequeNumber: string;
   chequeDueDate: string;
   chequeBankBranchId: string;
@@ -279,7 +282,7 @@ function nextClientKey() {
   return `new-${Date.now()}-${clientKeySeq}`;
 }
 function emptyInstrumentRow(): InstrumentRowState {
-  return { clientKey: nextClientKey(), type: "CASH", amount: "", currencyId: "", fxRate: "", cashBoxId: "", bankAccountId: "", referenceNumber: "", chequeNumber: "", chequeDueDate: "", chequeBankBranchId: "", payableChequeTypeId: "", chequeBookLeafId: "", chequeBookLeafDisplay: "", chequeItemId: "", chequeItemDisplay: "", description: "" };
+  return { clientKey: nextClientKey(), type: "CASH", amount: "", currencyId: "", fxRate: "", cashBoxId: "", bankAccountId: "", referenceNumber: "", feeAmount: "", chequeNumber: "", chequeDueDate: "", chequeBankBranchId: "", payableChequeTypeId: "", chequeBookLeafId: "", chequeBookLeafDisplay: "", chequeItemId: "", chequeItemDisplay: "", description: "" };
 }
 const BASIS_FIELD: Record<Exclude<PaymentBasisType, "NONE">, "purchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
   PURCHASE_INVOICE: "purchaseInvoiceId",
@@ -381,6 +384,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         cashBoxId: l.cashBoxId ? String(l.cashBoxId) : "",
         bankAccountId: l.bankAccountId ? String(l.bankAccountId) : "",
         referenceNumber: l.referenceNumber || "",
+        feeAmount: l.feeAmount ? String(l.feeAmount) : "",
         chequeNumber: l.chequeNumber || "",
         chequeDueDate: l.chequeDueDate ? l.chequeDueDate.slice(0, 10) : "",
         chequeBankBranchId: l.chequeBankBranchId ? String(l.chequeBankBranchId) : "",
@@ -557,6 +561,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
 
   // ستون «نوع چک» فقط وقتی لازم است که حداقل یک ردیف «صدور چک جدید» وجود داشته باشد (چک خرج‌شده نوع خودش را دارد)
   const hasChequeRow = instrumentRows.some((r) => r.type === "CHEQUE");
+  const hasBankTransferRow = instrumentRows.some((r) => r.type === "BANK_TRANSFER");
   const instrumentBaseTotal = !baseCurrency
     ? 0
     : roundToCurrencyDecimals(
@@ -596,6 +601,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         cashBoxId: r.cashBoxId ? Number(r.cashBoxId) : null,
         bankAccountId: r.type === "CHEQUE" && r.bankAccountId ? Number(r.bankAccountId) : r.type === "BANK_TRANSFER" && r.bankAccountId ? Number(r.bankAccountId) : null,
         referenceNumber: r.referenceNumber || null,
+        feeAmount: r.type === "BANK_TRANSFER" ? Number(r.feeAmount) || 0 : 0,
         chequeItemId: r.type === "CHEQUE_TRANSFER" && r.chequeItemId ? Number(r.chequeItemId) : null,
         chequeNumber: r.type === "CHEQUE" ? r.chequeNumber || null : null,
         chequeDueDate: r.type === "CHEQUE" ? r.chequeDueDate || null : null,
@@ -888,6 +894,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                   <th>جزئیات</th>
                   <th>ارز</th>
                   <th>مبلغ</th>
+                  {hasBankTransferRow && <th>کارمزد پرداخت</th>}
                   <th>نرخ ارز</th>
                   <th>شرح</th>
                   <th></th>
@@ -1050,6 +1057,13 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                       <td style={{ minWidth: 130 }}>
                         <AmountInput value={row.amount} onChange={(v) => updateInstrumentRow(idx, { amount: v })} allowDecimal placeholder="۰" disabled={isSpendRow} />
                       </td>
+                      {hasBankTransferRow && (
+                        <td style={{ minWidth: 120 }}>
+                          {row.type === "BANK_TRANSFER" && (
+                            <AmountInput value={row.feeAmount} onChange={(v) => updateInstrumentRow(idx, { feeAmount: v })} allowDecimal placeholder="۰" />
+                          )}
+                        </td>
+                      )}
                       <td style={{ minWidth: 100 }}>
                         {isBaseCurrencyRow ? (
                           <input dir="ltr" value={toFaDigits("1")} disabled />

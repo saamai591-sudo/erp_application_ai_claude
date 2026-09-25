@@ -2753,6 +2753,8 @@ model PaymentInstrumentLine {
   // برابر step همان لحظه‌ی ChequeItem پر می‌شود (نگاه کنید به توضیح بالای ChequeItem.step).
   chequeStep         Int?
   posTerminal        String?
+  /// کارمزد پرداخت — فقط برای ردیف حواله/انتقال بانکی (به ارز همان ردیف)؛ برای بقیه‌ی انواع همیشه ۰
+  feeAmount          Decimal               @default(0) @db.Decimal(18, 2)
   description        String?
   bankAccount        BankAccount?          @relation("PaymentInstrumentBankAccount", fields: [bankAccountId], references: [id])
   cashBox            CashBox?              @relation(fields: [cashBoxId], references: [id])

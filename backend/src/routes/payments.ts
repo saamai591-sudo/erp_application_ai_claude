@@ -59,6 +59,7 @@ interface InstrumentLineInput {
   chequeBankBranchId?: number | null;
   payableChequeTypeId?: number | null;
   chequeBookLeafId?: number | null;
+  feeAmount?: number | null; // کارمزد پرداخت — فقط برای BANK_TRANSFER
   description?: string | null;
 }
 
@@ -208,6 +209,8 @@ async function cleanOneInstrumentLine(
   const baseAmount = toBaseCurrencyAmount(amount, fxRate, currency, baseCurrency);
 
   const isNewCheque = l.type === "CHEQUE";
+  const feeAmount = l.type === "BANK_TRANSFER" ? Number(l.feeAmount) || 0 : 0;
+  if (feeAmount < 0) throw new Error(`ردیف ${idx + 1}: کارمزد پرداخت نمی‌تواند منفی باشد`);
   return {
     clientKey: l.clientKey,
     type: l.type,
@@ -225,6 +228,7 @@ async function cleanOneInstrumentLine(
     payableChequeTypeId: isNewCheque ? l.payableChequeTypeId! : null,
     chequeBookLeafId: isNewCheque ? chequeBookLeafId : null,
     posTerminal: null,
+    feeAmount,
     description: l.description || null,
   };
 }
@@ -588,6 +592,7 @@ function serializePayment(d: any) {
       chequeBookLeafId: l.chequeBookLeafId,
       chequeBookLeafDisplay: l.chequeBookLeaf ? `${l.chequeBookLeaf.series} - ${l.chequeBookLeaf.number}` : null,
       posTerminal: l.posTerminal,
+      feeAmount: Number(l.feeAmount ?? 0),
       description: l.description,
     })),
     settlementLines: d.settlementLines.map((l: any) => ({
