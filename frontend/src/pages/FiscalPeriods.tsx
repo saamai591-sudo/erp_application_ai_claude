@@ -16,6 +16,31 @@ import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { digitsOnly } from "../lib/digits";
 import { toFaDigits } from "../lib/formatAmount";
+import DateObject from "react-date-object";
+import persian from "react-date-object/calendars/persian";
+import persian_fa from "react-date-object/locales/persian_fa";
+import gregorian from "react-date-object/calendars/gregorian";
+import gregorian_en from "react-date-object/locales/gregorian_en";
+
+const toIsoDate = (d: DateObject) => d.convert(gregorian, gregorian_en).format("YYYY-MM-DD");
+
+/** یک روز بعد از یک تاریخ میلادی (YYYY-MM-DD) */
+function dayAfter(iso: string): string {
+  const d = new Date(iso.slice(0, 10) + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/** پایان پیش‌فرض دوره: یک روز قبل از «همان تاریخ در سال جلالی بعد» — مثلاً شروع ۱۳۹۹/۰۱/۰۱ → پایان ۱۳۹۹/۱۲/۲۹ */
+function defaultPeriodEnd(startIso: string): string {
+  const s = new DateObject({ date: startIso, format: "YYYY-MM-DD", calendar: gregorian, locale: gregorian_en }).convert(persian, persian_fa);
+  try {
+    const nextYearSame = new DateObject({ year: s.year + 1, month: s.month.number, day: s.day, calendar: persian, locale: persian_fa });
+    return toIsoDate(nextYearSame.subtract(1, "day"));
+  } catch {
+    return "";
+  }
+}
 
 interface Period { id: number; code: string; title: string; fromDate: string; toDate: string; hasTransactions: boolean }
 
@@ -71,6 +96,20 @@ function PeriodForm() {
   const { create } = useCrud<Period>("/fiscal-periods");
   const [form, setForm] = usePersistedState(`form:${location.pathname}`, { title: "", fromDate: "", toDate: "" });
   const [formError, setFormError] = useState<string | null>(null);
+  // اگر دوره‌ای از قبل تعریف شده باشد، «از تاریخ» خودکار یک روز بعد از پایان آخرین دوره است و قابل ویرایش نیست (بک‌اند هم دقیقاً همین توالی را کنترل می‌کند)
+  const [hasPrevious, setHasPrevious] = useState(false);
+
+  useEffect(() => {
+    api.get("/fiscal-periods").then((items: Period[]) => {
+      if (items.length === 0) return;
+      const last = items.reduce((a, b) => (a.toDate >= b.toDate ? a : b));
+      const start = dayAfter(last.toDate);
+      setHasPrevious(true);
+      // «تا تاریخ» فقط وقتی هنوز چیزی وارد نشده پیش‌فرض می‌گیرد؛ کاربر می‌تواند آن را تغییر دهد
+      setForm((prev) => ({ ...prev, fromDate: start, toDate: prev.toDate && prev.fromDate === start ? prev.toDate : defaultPeriodEnd(start) }));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -91,7 +130,7 @@ function PeriodForm() {
           <div />
           <div className="form-field">
             <label>از تاریخ<RequiredMark /></label>
-            <JalaliDatePicker value={form.fromDate} onChange={(v) => setForm({ ...form, fromDate: v })} placeholder="انتخاب تاریخ" />
+            <JalaliDatePicker value={form.fromDate} onChange={(v) => setForm({ ...form, fromDate: v })} disabled={hasPrevious} placeholder="انتخاب تاریخ" />
           </div>
           <div className="form-field">
             <label>تا تاریخ<RequiredMark /></label>

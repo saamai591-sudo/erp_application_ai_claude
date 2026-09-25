@@ -3,11 +3,20 @@ import { prisma } from "../lib/prisma";
 import { generateDetailCode, registerDetailCode } from "../utils/coding";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
+import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 
 const DETAIL_TYPE_FISCAL_PERIOD = 7;
 const FORM = findFormPrefix("periods");
 
 const router = Router();
+
+// قفل مشورتی (advisory) پایگاه‌داده برای سریال‌سازی هر تغییری که «زنجیره‌ی دوره‌های مالی» را عوض می‌کند (ایجاد دوره‌ی جدید / تغییر تا تاریخ آخرین دوره):
+// دو درخواست هم‌زمان نمی‌توانند هم‌زمان آخرین دوره را بخوانند و دو دوره‌ی هم‌پوشان یا با فاصله بسازند؛ کنترل توالی داخل همان تراکنش و پس از گرفتن قفل انجام می‌شود.
+const FISCAL_CHAIN_LOCK_KEY = 7100001;
+const DAY_MS = 86400000;
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+class ChainError extends Error {}
 
 router.get("/", async (_req, res) => {
   const periods = await prisma.fiscalPeriod.findMany({ orderBy: { fromDate: "asc" } });
@@ -29,21 +38,32 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
   const dupTitle = await prisma.fiscalPeriod.findUnique({ where: { title } });
   if (dupTitle) return res.status(400).json({ error: "عنوان تکراری است" });
 
-  const lastPeriod = await prisma.fiscalPeriod.findFirst({ orderBy: { toDate: "desc" } });
-  if (lastPeriod && from <= lastPeriod.toDate) {
-    return res.status(400).json({
-      error: "از تاریخ نمی‌تواند کوچکتر یا مساوی تاریخ پایان آخرین دوره مالی تعریف شده باشد",
-    });
-  }
-
   const { code, detailTypeId } = await generateDetailCode(DETAIL_TYPE_FISCAL_PERIOD);
 
-  const period = await prisma.fiscalPeriod.create({
-    data: { code, title, fromDate: from, toDate: to },
-  });
-  await registerDetailCode(code, detailTypeId, "FiscalPeriod", period.id);
-
-  res.status(201).json(period);
+  try {
+    // توالی دوره‌ها سمت سرور کنترل می‌شود (نه فقط فرانت‌اند): «از تاریخ» دوره‌ی جدید باید دقیقاً یک روز بعد از پایان آخرین دوره باشد؛ نه فاصله، نه هم‌پوشانی.
+    // خواندن آخرین دوره، بررسی و ایجاد داخل یک تراکنش با قفل مشورتی انجام می‌شود تا ایجاد هم‌زمان چند دوره نتواند این قاعده را دور بزند.
+    const period = await prisma.$transaction(async (tx: any) => {
+      await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${FISCAL_CHAIN_LOCK_KEY})`);
+      const dupTitle = await tx.fiscalPeriod.findUnique({ where: { title } });
+      if (dupTitle) throw new ChainError("عنوان تکراری است");
+      const lastPeriod = await tx.fiscalPeriod.findFirst({ orderBy: { toDate: "desc" } });
+      if (lastPeriod) {
+        const expected = new Date(lastPeriod.toDate.getTime() + DAY_MS);
+        if (iso(from) !== iso(expected)) {
+          throw new ChainError(
+            `از تاریخ دوره‌ی مالی جدید باید دقیقاً یک روز بعد از پایان آخرین دوره مالی (${formatJalaliDateForMessage(lastPeriod.toDate)}) یعنی ${formatJalaliDateForMessage(expected)} باشد؛ بین دوره‌های مالی نباید فاصله یا هم‌پوشانی وجود داشته باشد`
+          );
+        }
+      }
+      return tx.fiscalPeriod.create({ data: { code, title, fromDate: from, toDate: to } });
+    });
+    await registerDetailCode(code, detailTypeId, "FiscalPeriod", period.id);
+    res.status(201).json(period);
+  } catch (e: any) {
+    if (e instanceof ChainError) return res.status(400).json({ error: e.message });
+    res.status(400).json({ error: e?.message || "خطا در ایجاد دوره مالی" });
+  }
 });
 
 // فقط تا تاریخ آخرین دوره مالی تعریف شده قابل ویرایش است
@@ -54,18 +74,25 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
   const period = await prisma.fiscalPeriod.findUnique({ where: { id } });
   if (!period) return res.status(404).json({ error: "دوره مالی یافت نشد" });
 
-  const lastPeriod = await prisma.fiscalPeriod.findFirst({ orderBy: { toDate: "desc" } });
-  if (!lastPeriod || lastPeriod.id !== id) {
-    return res.status(400).json({ error: "فقط تا تاریخ آخرین دوره مالی تعریف شده قابل ویرایش است" });
-  }
-
   const to = new Date(toDate);
+  if (!toDate || Number.isNaN(to.getTime())) return res.status(400).json({ error: "تا تاریخ الزامی است" });
   if (to <= period.fromDate) {
     return res.status(400).json({ error: "تا تاریخ نمی‌تواند کوچکتر یا مساوی از تاریخ باشد" });
   }
 
-  const updated = await prisma.fiscalPeriod.update({ where: { id }, data: { toDate: to } });
-  res.json(updated);
+  try {
+    // با همان قفل ایجاد دوره: در همان لحظه دوره‌ی بعدی ساخته نشود تا با تغییر پایان دوره‌ی قبلی فاصله/هم‌پوشانی ایجاد نکند
+    const updated = await prisma.$transaction(async (tx: any) => {
+      await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${FISCAL_CHAIN_LOCK_KEY})`);
+      const lastPeriod = await tx.fiscalPeriod.findFirst({ orderBy: { toDate: "desc" } });
+      if (!lastPeriod || lastPeriod.id !== id) throw new ChainError("فقط تا تاریخ آخرین دوره مالی تعریف شده قابل ویرایش است");
+      return tx.fiscalPeriod.update({ where: { id }, data: { toDate: to } });
+    });
+    res.json(updated);
+  } catch (e: any) {
+    if (e instanceof ChainError) return res.status(400).json({ error: e.message });
+    res.status(400).json({ error: e?.message || "خطا در ویرایش دوره مالی" });
+  }
 });
 
 router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
