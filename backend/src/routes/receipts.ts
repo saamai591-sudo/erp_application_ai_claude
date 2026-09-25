@@ -293,14 +293,51 @@ async function candidatesForBasisType(basisType: BasisType, partyId: number, exc
     const quotes = await withoutFiscalPeriodScope(() =>
       prisma.salesQuote.findMany({
         where: { customerId: customer.id, status: "APPROVED" },
-        include: { lines: true, currency: true, receiptSettlementLines: { include: { receipt: true, receiptType: true } } },
+        include: { lines: true, currency: true, receiptSettlementLines: { include: { receipt: true, receiptType: true, advanceAllocations: true } } },
       })
     );
+    // «مانده قابل دریافت ارزش افزوده‌ی پیش‌فاکتور» (Documents/مانده ارزش افزوده قابل دریافت پیش فاکتور.md) — محاسباتی، نه بر پایه‌ی پرچم «تبدیل‌شده»:
+    //   VAT پیش‌فاکتور − مجموع VAT فاکتورهای صادرشده از همین پیش‌فاکتور (مستقیم یا از مسیر سفارش فروش/حواله، پس تبدیل جزئی و چندمرحله‌ای هم پوشش داده می‌شود)
+    //   − مجموع پیش‌دریافت‌های ارزش‌افزوده‌ی «تخصیص‌نیافته»ی همین پیش‌فاکتور (بخشی که قبلاً به فاکتور تخصیص یافته، چون خودش در VAT فاکتور آمده، دوباره کم نمی‌شود)
+    let invoicedVatByQuote = new Map<number, number>();
+    if (group === "VAT" && quotes.length > 0) {
+      const quoteIds = quotes.map((q: any) => q.id);
+      const invoiceLines = await withoutFiscalPeriodScope(() =>
+        prisma.salesInvoiceLine.findMany({
+          where: {
+            sourceInventoryLine: {
+              OR: [
+                { sourceSalesQuoteLine: { salesQuoteId: { in: quoteIds } } },
+                { sourceSalesOrderLine: { sourceSalesQuoteLine: { salesQuoteId: { in: quoteIds } } } },
+              ],
+            },
+          },
+          select: {
+            vatAmount: true,
+            salesInvoice: { select: { fxRate: true } },
+            sourceInventoryLine: { select: { sourceSalesQuoteLine: { select: { salesQuoteId: true } }, sourceSalesOrderLine: { select: { sourceSalesQuoteLine: { select: { salesQuoteId: true } } } } } },
+          },
+        })
+      );
+      for (const il of invoiceLines as any[]) {
+        const quoteId = il.sourceInventoryLine?.sourceSalesQuoteLine?.salesQuoteId ?? il.sourceInventoryLine?.sourceSalesOrderLine?.sourceSalesQuoteLine?.salesQuoteId;
+        if (!quoteId) continue;
+        // VAT ردیف فاکتور همیشه به ارز مبنا ذخیره می‌شود؛ پیش‌فاکتور به ارز خودش است (= ارز فاکتور) پس بر نرخ فاکتور تقسیم می‌شود
+        const rate = Number(il.salesInvoice.fxRate) > 0 ? Number(il.salesInvoice.fxRate) : 1;
+        invoicedVatByQuote.set(quoteId, (invoicedVatByQuote.get(quoteId) || 0) + Number(il.vatAmount || 0) / rate);
+      }
+    }
     return quotes.map((q: any) => {
       const total = totalOf(q.lines);
-      const applied = q.receiptSettlementLines
-        .filter((s: any) => sameGroup(s) && s.receipt.status === "APPROVED" && (!excludeReceiptId || s.receipt.id !== excludeReceiptId))
-        .reduce((s: number, l: any) => s + Number(l.amount), 0);
+      const activeLines = q.receiptSettlementLines.filter((s: any) => sameGroup(s) && s.receipt.status === "APPROVED" && (!excludeReceiptId || s.receipt.id !== excludeReceiptId));
+      const applied =
+        group === "VAT"
+          ? (invoicedVatByQuote.get(q.id) || 0) +
+            activeLines.reduce((s: number, l: any) => {
+              const allocated = (l.advanceAllocations || []).reduce((a: number, x: any) => a + Number(x.amount), 0);
+              return s + Math.max(0, Number(l.amount) - allocated);
+            }, 0)
+          : activeLines.reduce((s: number, l: any) => s + Number(l.amount), 0);
       return {
         id: q.id, number: q.number, date: q.date, currencyId: q.currencyId, currencyTitle: q.currency.title,
         fxRate: 1, partyId, total, applied, remaining: total - applied,
