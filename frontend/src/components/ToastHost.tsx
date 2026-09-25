@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { subscribeToasts, ToastItem } from "../lib/toast";
+import { subscribeToasts, dismissToast, ToastItem } from "../lib/toast";
 
 export function ToastHost() {
   const [items, setItems] = useState<ToastItem[]>([]);
@@ -8,7 +8,12 @@ export function ToastHost() {
   return (
     <div className="toast-host" role="status" aria-live="polite">
       {items.map((t) => (
-        <div key={t.id} className={`toast ${t.type}`}>{t.message}</div>
+        <div key={t.id} className={`toast ${t.type}`}>
+          <span>{t.message}</span>
+          <button type="button" className="toast-close" aria-label="بستن پیام" title="بستن" onClick={() => dismissToast(t.id)}>
+            ×
+          </button>
+        </div>
       ))}
     </div>
   );
