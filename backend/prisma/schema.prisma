@@ -3052,6 +3052,7 @@ enum ReceiptNature {
   OTHER_RECEIPT
   SALES_VAT
   PURCHASE_VAT
+  ADVANCE_VAT_RECEIPT
 }
 
 enum ReceiptBasisType {

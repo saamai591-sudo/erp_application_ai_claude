@@ -35,7 +35,7 @@ import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss
 
 type InstrumentType = "CASH" | "BANK_TRANSFER" | "CHEQUE" | "POS";
 type DocStatus = "DRAFT" | "APPROVED";
-type ReceiptNature = "CUSTOMER_RECEIPT" | "ADVANCE_RECEIPT" | "SUPPLIER_RECEIPT" | "OTHER_RECEIPT" | "SALES_VAT" | "PURCHASE_VAT";
+type ReceiptNature = "CUSTOMER_RECEIPT" | "ADVANCE_RECEIPT" | "SUPPLIER_RECEIPT" | "OTHER_RECEIPT" | "SALES_VAT" | "PURCHASE_VAT" | "ADVANCE_VAT_RECEIPT";
 type ReceiptBasisType = "NONE" | "SALES_INVOICE" | "PURCHASE_INVOICE" | "SALES_ORDER" | "PROFORMA_INVOICE";
 
 const TYPE_FA: Record<InstrumentType, string> = { CASH: "نقد", BANK_TRANSFER: "حواله/انتقال بانکی", CHEQUE: "چک", POS: "پوز/درگاه" };
@@ -1107,7 +1107,7 @@ function SettlementRowFields({
 
   const eligibleParties =
     !receiptType ? []
-    : receiptType.nature === "CUSTOMER_RECEIPT" || receiptType.nature === "ADVANCE_RECEIPT" ? parties.filter((p) => customerPartyIds.has(p.id))
+    : receiptType.nature === "CUSTOMER_RECEIPT" || receiptType.nature === "ADVANCE_RECEIPT" || receiptType.nature === "ADVANCE_VAT_RECEIPT" ? parties.filter((p) => customerPartyIds.has(p.id))
     : receiptType.nature === "SUPPLIER_RECEIPT" ? parties.filter((p) => supplierPartyIds.has(p.id))
     : parties;
 
@@ -1144,7 +1144,7 @@ function SettlementRowFields({
     if (rt && !partyId && headerPartyId) {
       const headerPartyIdNum = Number(headerPartyId);
       const qualifies =
-        rt.nature === "CUSTOMER_RECEIPT" || rt.nature === "ADVANCE_RECEIPT" ? customerPartyIds.has(headerPartyIdNum)
+        rt.nature === "CUSTOMER_RECEIPT" || rt.nature === "ADVANCE_RECEIPT" || rt.nature === "ADVANCE_VAT_RECEIPT" ? customerPartyIds.has(headerPartyIdNum)
         : rt.nature === "SUPPLIER_RECEIPT" ? supplierPartyIds.has(headerPartyIdNum)
         : true;
       if (qualifies) {

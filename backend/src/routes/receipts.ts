@@ -389,7 +389,7 @@ async function validateSubjectLines(
     }
 
     if (!l.partyId) throw new Error(`ردیف ${idx + 1}: طرف حساب الزامی است`);
-    if (receiptType.nature === "CUSTOMER_RECEIPT" || receiptType.nature === "ADVANCE_RECEIPT") {
+    if (receiptType.nature === "CUSTOMER_RECEIPT" || receiptType.nature === "ADVANCE_RECEIPT" || receiptType.nature === "ADVANCE_VAT_RECEIPT") {
       // eslint-disable-next-line no-await-in-loop
       const customer = await prisma.customer.findUnique({ where: { partyId: l.partyId } });
       if (!customer) throw new Error(`ردیف ${idx + 1}: طرف حساب باید در «مشتریان» تعریف شده باشد`);

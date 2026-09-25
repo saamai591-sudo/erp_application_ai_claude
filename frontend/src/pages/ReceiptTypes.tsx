@@ -27,6 +27,7 @@ const NATURE_FA: Record<string, string> = {
   OTHER_RECEIPT: "دریافت از سایر",
   SALES_VAT: "ارزش افزوده فروش",
   PURCHASE_VAT: "ارزش افزوده خرید",
+  ADVANCE_VAT_RECEIPT: "پیش دریافت ارزش افزوده",
 };
 
 const BASIS_TYPE_FA: Record<string, string> = {
@@ -40,6 +41,7 @@ const BASIS_TYPE_FA: Record<string, string> = {
 const ALLOWED_BASIS_TYPES: Record<string, string[]> = {
   CUSTOMER_RECEIPT: ["NONE", "SALES_INVOICE"],
   ADVANCE_RECEIPT: ["NONE", "SALES_ORDER", "PROFORMA_INVOICE"],
+  ADVANCE_VAT_RECEIPT: ["NONE", "SALES_ORDER", "PROFORMA_INVOICE"],
   SUPPLIER_RECEIPT: ["NONE", "PURCHASE_INVOICE"],
   SALES_VAT: ["NONE", "SALES_INVOICE"],
   PURCHASE_VAT: ["NONE", "PURCHASE_INVOICE"],
