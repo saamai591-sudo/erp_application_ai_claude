@@ -16,6 +16,7 @@ import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { useDefaultBaseCurrency } from "../lib/useDefaultBaseCurrency";
 import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
 import { SalesType } from "./SalesTypes";
@@ -171,6 +172,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   );
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  useDefaultBaseCurrency({ enabled: !editId && loaded, currencies, current: header.currencyId, apply: (id) => setHeader((h) => ({ ...h, currencyId: id })) });
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const { flash } = useSavedFlash();
 
@@ -312,6 +314,11 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
     return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item, vatRateForDate(vatRates, header.date))));
   }
+  // مانده‌ی مؤثر یک ردیف حواله برای ردیف idx: مانده‌ی سرور منهای مقدار سایر ردیف‌های همین فاکتور که به همان ردیف حواله ارجاع می‌دهند (زنده، با هر تغییر ردیف‌ها)
+  function effectiveRemaining(line: PickableLine, excludeIdx: number): number {
+    const usedByOthers = rows.reduce((sum, r, i) => (i !== excludeIdx && r.sourceInventoryLineId === String(line.sourceInventoryLineId) ? sum + (Number(r.quantity) || 0) : sum), 0);
+    return Math.round((line.remaining - usedByOthers) * 1e6) / 1e6;
+  }
   function onSourceLineChange(idx: number, sourceInventoryLineId: string) {
     const src = pickableLines.find((l) => String(l.sourceInventoryLineId) === sourceInventoryLineId);
     if (!src) return;
@@ -322,7 +329,26 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
       goodsItemTitle: src.goodsItemTitle,
       unitId: String(src.unitId),
       unitTitle: src.unitTitle,
+      quantity: String(Math.max(0, effectiveRemaining(src, idx))),
+    });
+  }
+  // انتخاب چندگانه‌ی ردیف حواله فروش: اولین ردیف تیک‌خورده در همین ردیف گرید می‌نشیند و بقیه بلافاصله بعد از آن به‌صورت ردیف جدید اضافه می‌شوند
+  function onSourceLinesPicked(idx: number, picked: PickableLine[]) {
+    if (picked.length === 0) return;
+    const toRow = (src: PickableLine): Partial<RowState> => ({
+      sourceInventoryLineId: String(src.sourceInventoryLineId),
+      goodsItemId: String(src.goodsItemId),
+      goodsItemCode: src.goodsItemCode,
+      goodsItemTitle: src.goodsItemTitle,
+      unitId: String(src.unitId),
+      unitTitle: src.unitTitle,
       quantity: String(src.remaining),
+    });
+    setRows((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], ...toRow(picked[0]) };
+      next.splice(idx + 1, 0, ...picked.slice(1).map((src) => ({ ...emptyRow(), ...toRow(src) })));
+      return next;
     });
   }
   function onQuantityChange(idx: number, quantity: string) {
@@ -402,6 +428,11 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
       if (header.basis === "SALES_DELIVERY" && !l.sourceInventoryLineId) return setError(`ردیف ${i + 1}: انتخاب ردیف حواله فروش الزامی است`);
       if (header.basis === "NO_BASIS" && !l.goodsItemId) return setError(`کالا برای ردیف ${i + 1} الزامی است`);
       if (!(l.quantity > 0)) return setError(`مقدار ردیف ${i + 1} باید عددی مثبت باشد`);
+      if (header.basis === "SALES_DELIVERY" && l.sourceInventoryLineId) {
+        const src = pickableLines.find((p) => p.sourceInventoryLineId === l.sourceInventoryLineId);
+        const total = body.lines.reduce((s, x) => (x.sourceInventoryLineId === l.sourceInventoryLineId ? s + x.quantity : s), 0);
+        if (src && total > src.remaining + 1e-9) return setError(`ردیف ${i + 1}: مجموع مقدار ردیف‌هایی که به این ردیف حواله فروش ارجاع می‌دهند (${total}) از مانده‌ی قابل صورتحساب (${src.remaining}) بیشتر است`);
+      }
       if (!(l.unitPrice >= 0)) return setError(`فی ردیف ${i + 1} نامعتبر است`);
     }
     try {
@@ -604,13 +635,18 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
                           <RecordPickerField
                             title="انتخاب ردیف حواله فروش"
                             displayValue={src ? `${toFaDigits(String(src.number))}` : ""}
-                            rows={pickableLines}
+                            // «مانده» با احتساب مقدار سایر ردیف‌های همین فاکتور به‌روز می‌شود؛ ردیفِ بدون مانده‌ی مؤثر (جز ردیف انتخاب‌شده‌ی خودِ این سطر) نمایش داده نمی‌شود
+                            rows={pickableLines
+                              .map((l) => ({ ...l, remaining: effectiveRemaining(l, idx) }))
+                              .filter((l) => l.remaining > 0 || String(l.sourceInventoryLineId) === row.sourceInventoryLineId)}
                             columns={[
                               { header: "شماره", render: (l) => toFaDigits(String(l.number)), filterValue: (l) => String(l.number), width: "70px" },
                               { header: "کالا", render: (l) => l.goodsItemTitle, filterValue: (l) => l.goodsItemTitle },
                               { header: "مانده", render: (l) => formatAmountFa(l.remaining), filterValue: (l) => String(l.remaining), width: "90px" },
                             ]}
                             onOpen={guardRowEntry}
+                            multiSelect
+                            onSelectMultiple={(ls) => onSourceLinesPicked(idx, ls)}
                             onSelect={(l) => onSourceLineChange(idx, String(l.sourceInventoryLineId))}
                           />
                         </td>

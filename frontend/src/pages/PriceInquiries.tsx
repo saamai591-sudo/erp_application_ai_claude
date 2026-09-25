@@ -15,6 +15,7 @@ import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { useDefaultBaseCurrency } from "../lib/useDefaultBaseCurrency";
 import { useAuth } from "../lib/AuthContext";
 import { api, ApiError } from "../lib/api";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
@@ -148,6 +149,7 @@ function PriceInquiryForm({ editId }: { editId?: number }) {
   const [meta, setMeta] = usePersistedState<{ number: number; status: Status } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  useDefaultBaseCurrency({ enabled: !editId && loaded, currencies, current: header.currencyId, apply: (id) => setHeader((h) => ({ ...h, currencyId: id })) });
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const { flash } = useSavedFlash();
 

@@ -16,6 +16,7 @@ import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { useDefaultBaseCurrency } from "../lib/useDefaultBaseCurrency";
 import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
 import { partyDisplayName } from "./Users";
@@ -210,6 +211,7 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
   } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  useDefaultBaseCurrency({ enabled: !editId && loaded, currencies, current: header.currencyId, apply: (id) => setHeader((h) => ({ ...h, currencyId: id })) });
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const [allocationDialogIdx, setAllocationDialogIdx] = useState<number | null>(null);
   const { flash } = useSavedFlash();

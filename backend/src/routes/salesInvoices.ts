@@ -121,6 +121,9 @@ async function validateLines(lines: LineInput[], basis: string, currency: Conver
     description: string | null;
   }[] = [];
 
+  // یک ردیف حواله می‌تواند در چند ردیف فاکتور بیاید؛ مجموع مقدار ردیف‌های ارجاع‌دهنده به آن باید از مانده‌ی قابل صورتحسابش بیشتر نشود
+  const allocatedToDeliveryLine = new Map<number, number>();
+
   for (const [idx, l] of lines.entries()) {
     const qty = Number(l.quantity);
     if (!(qty > 0)) throw new Error(`مقدار ردیف ${idx + 1} باید عددی مثبت باشد`);
@@ -142,7 +145,9 @@ async function validateLines(lines: LineInput[], basis: string, currency: Conver
       if (!l.sourceInventoryLineId) throw new Error(`ردیف ${idx + 1}: انتخاب ردیف حواله فروش الزامی است`);
       const info = await salesDeliveryLineRemaining(l.sourceInventoryLineId, excludeInvoiceId);
       if (!info) throw new Error(`ردیف حواله فروش برای ردیف ${idx + 1} یافت نشد`);
-      if (qty > info.remaining) throw new Error(`مقدار ردیف ${idx + 1} از باقیمانده‌ی قابل صورتحساب (${info.remaining}) بیشتر است`);
+      const deliveryTotal = (allocatedToDeliveryLine.get(info.line.id) || 0) + qty;
+      if (deliveryTotal > info.remaining) throw new Error(`ردیف ${idx + 1}: مجموع مقدار ردیف‌هایی که به این ردیف حواله فروش ارجاع می‌دهند (${deliveryTotal}) از باقیمانده‌ی قابل صورتحساب (${info.remaining}) بیشتر است`);
+      allocatedToDeliveryLine.set(info.line.id, deliveryTotal);
       sourceInventoryLineId = info.line.id;
       goodsItemId = info.line.goodsItemId;
       unitId = info.line.unitId;
