@@ -42,6 +42,15 @@ async function computeLineData(line: LineInput, baseCurrencyId: number) {
   return { debit, credit, fxRate, baseDebit, baseCredit };
 }
 
+/** ردیف بدون شرح، هنگام ذخیره شرح سند (هدر) را می‌گیرد؛ اگر شرح سند هم خالی باشد دست‌نخورده می‌ماند تا کنترل «شرح ردیف الزامی است» عمل کند */
+function applyHeaderDescriptionToLines(body: { description?: string; lines: { description?: string }[] }) {
+  const header = body.description?.trim();
+  if (!header) return;
+  for (const line of body.lines) {
+    if (!line.description || !line.description.trim()) line.description = body.description;
+  }
+}
+
 async function validateAccountForLine(
   accountId: number,
   description: string | undefined,
@@ -286,6 +295,7 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
     const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
     if (!baseCurrency) return res.status(400).json({ error: "ارز پایه تعریف نشده است" });
 
+    applyHeaderDescriptionToLines(body);
     // اعتبارسنجی‌های خاصِ حساب (سطح حساب، تفصیل اجباری و ...) که مخصوص ورودی مستقیم کاربر است
     for (const line of body.lines) {
       await validateAccountForLine(line.accountId, line.description, line.currencyId, baseCurrency.id, line.detail1Code, line.detail2Code, line.detail3Code);
@@ -342,6 +352,7 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
     if (!fiscalPeriod) return res.status(400).json({ error: "این تاریخ در هیچ دوره مالی تعریف نشده است" });
     await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
 
+    applyHeaderDescriptionToLines(body);
     const computedLines = [];
     let totalDebit = 0;
     let totalCredit = 0;

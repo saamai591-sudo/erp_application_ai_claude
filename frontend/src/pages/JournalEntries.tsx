@@ -602,7 +602,8 @@ function EntryForm({ editId }: { editId?: number }) {
     if (!header.date) return setError("تاریخ سند الزامی است");
     const dateErr = validateDocumentDate(header.date, fiscalPeriod);
     if (dateErr) return setError(dateErr);
-    const emptyDescRow = rows.findIndex((r) => r.accountId && !r.description.trim());
+    // شرح خالی ردیف با شرح سند پر می‌شود (بک‌اند هم همین را اعمال می‌کند)؛ فقط اگر شرح سند هم خالی باشد خطا می‌دهد
+    const emptyDescRow = header.description.trim() ? -1 : rows.findIndex((r) => r.accountId && !r.description.trim());
     if (emptyDescRow !== -1) {
       setError(`شرح ردیف ${emptyDescRow + 1} الزامی است`);
       return;
@@ -638,7 +639,7 @@ function EntryForm({ editId }: { editId?: number }) {
         debit: Number(r.debit) || 0,
         credit: Number(r.credit) || 0,
         fxRate: Number(r.fxRate) || 1,
-        description: r.description,
+        description: r.description.trim() ? r.description : header.description,
       })),
     };
     try {

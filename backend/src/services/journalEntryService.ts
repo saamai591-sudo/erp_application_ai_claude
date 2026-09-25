@@ -120,7 +120,8 @@ export async function issueJournalEntry(opts: IssueJournalEntryOptions): Promise
       fxRate,
       baseDebit,
       baseCredit,
-      description: line.description,
+      // ردیف بدون شرح، شرح سند را می‌گیرد
+      description: line.description && line.description.trim() ? line.description : opts.description,
       rowOrder: idx,
     });
   }
