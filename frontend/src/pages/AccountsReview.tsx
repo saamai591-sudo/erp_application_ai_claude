@@ -148,6 +148,12 @@ export default function AccountsReview() {
   const [showRunningBalance, setShowRunningBalance] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // «فیلترهای بیشتر» روی یک پیش‌نویس (draft) ویرایش می‌شود و فقط با «اعمال فیلتر» روی filters (و گرید) اثر می‌گذارد؛ تیک‌زدن/برداشتن نوع سند یا تایپ در فیلدها
+  // خودش هیچ فیلتری اعمال نمی‌کند.
+  const [draft, setDraft] = useState<{ documentTypeIds: Set<number>; numberFrom: string; numberTo: string; referenceFrom: string; referenceTo: string } | null>(null);
+  // با هر «بازنشانی» (اعمال فیلتر/تغییر تاریخ/حذف همه فیلترها) بالا می‌رود تا کلید فعال‌سازی تب حتی وقتی خودِ فیلترها تغییری نکرده هم عوض شود و تب فعال دوباره
+  // بارگذاری شود (وگرنه بعد از پاک‌شدن داده‌ها، گرید خالی می‌ماند)
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   const [filters, setFilters] = useState(
     snapshot?.filters ?? {
@@ -400,8 +406,9 @@ export default function AccountsReview() {
         order: chain.order,
         filterParams: filterParams.toString(),
         detailQuery: detailQuery[activeTab],
+        reloadNonce,
       }),
-    [levels, chain.selections, chain.order, filterParams, detailQuery, activeTab]
+    [levels, chain.selections, chain.order, filterParams, detailQuery, activeTab, reloadNonce]
   );
   useReviewTabActivation(
     levels.length > 0 && !!filters.fromDate,
@@ -427,6 +434,7 @@ export default function AccountsReview() {
   }
 
   function resetAll() {
+    setReloadNonce((n) => n + 1);
     chain.reset();
     setTabData({});
     tabView.reset();
@@ -447,6 +455,7 @@ export default function AccountsReview() {
    * tabView/detailQuery/ledgerFilters، دادهٔ بارگذاری‌شده، و بازگشت به اولین تب) پاک می‌شود — دقیقاً
    * هم‌الگوی resetAll، فقط بدون setFilters. */
   function clearFilters() {
+    setReloadNonce((n) => n + 1);
     chain.reset();
     setTabData({});
     tabView.reset();
@@ -462,12 +471,28 @@ export default function AccountsReview() {
     setActiveTab(0);
   }
 
+  function openAdvancedFilters() {
+    setDraft({
+      documentTypeIds: new Set(filters.documentTypeIds),
+      numberFrom: filters.numberFrom,
+      numberTo: filters.numberTo,
+      referenceFrom: filters.referenceFrom,
+      referenceTo: filters.referenceTo,
+    });
+    setFiltersOpen(true);
+  }
+
   function toggleDocType(id: number) {
-    setFilters((prev) => {
+    setDraft((prev) => {
+      if (!prev) return prev;
       const next = new Set(prev.documentTypeIds);
       next.has(id) ? next.delete(id) : next.add(id);
       return { ...prev, documentTypeIds: next };
     });
+  }
+
+  function applyAdvancedFilters() {
+    if (draft) setFilters((prev) => ({ ...prev, ...draft }));
     resetAll();
   }
 
@@ -497,34 +522,34 @@ export default function AccountsReview() {
             <JalaliDatePicker value={filters.toDate} onChange={(v) => { setFilters((p) => ({ ...p, toDate: v })); resetAll(); }} />
           </div>
           <span style={{ flex: 1 }} />
-          <AdvancedFilterButton count={extraFilterCount} onClick={() => setFiltersOpen(true)} />
+          <AdvancedFilterButton count={extraFilterCount} onClick={openAdvancedFilters} />
         </div>
       </div>
 
-      {filtersOpen && (
-        <AdvancedFilterDialog onApply={resetAll} onClose={() => setFiltersOpen(false)} onClear={() => setFilters((p) => ({ ...p, documentTypeIds: new Set(), numberFrom: "", numberTo: "", referenceFrom: "", referenceTo: "" }))}>
+      {filtersOpen && draft && (
+        <AdvancedFilterDialog onApply={applyAdvancedFilters} onClose={() => setFiltersOpen(false)} onClear={() => setDraft({ documentTypeIds: new Set(), numberFrom: "", numberTo: "", referenceFrom: "", referenceTo: "" })}>
           <div className="form-field-inline">
             <label>شماره سند از</label>
-            <input dir="ltr" value={filters.numberFrom} onChange={(e) => setFilters((p) => ({ ...p, numberFrom: e.target.value }))} />
+            <input dir="ltr" value={draft.numberFrom} onChange={(e) => setDraft((p) => (p ? { ...p, numberFrom: e.target.value } : p))} />
           </div>
           <div className="form-field-inline">
             <label>شماره سند تا</label>
-            <input dir="ltr" value={filters.numberTo} onChange={(e) => setFilters((p) => ({ ...p, numberTo: e.target.value }))} />
+            <input dir="ltr" value={draft.numberTo} onChange={(e) => setDraft((p) => (p ? { ...p, numberTo: e.target.value } : p))} />
           </div>
           <div className="form-field-inline">
             <label>شماره عطف از</label>
-            <input dir="ltr" value={filters.referenceFrom} onChange={(e) => setFilters((p) => ({ ...p, referenceFrom: e.target.value }))} />
+            <input dir="ltr" value={draft.referenceFrom} onChange={(e) => setDraft((p) => (p ? { ...p, referenceFrom: e.target.value } : p))} />
           </div>
           <div className="form-field-inline">
             <label>شماره عطف تا</label>
-            <input dir="ltr" value={filters.referenceTo} onChange={(e) => setFilters((p) => ({ ...p, referenceTo: e.target.value }))} />
+            <input dir="ltr" value={draft.referenceTo} onChange={(e) => setDraft((p) => (p ? { ...p, referenceTo: e.target.value } : p))} />
           </div>
           <div className="form-field-inline" style={{ alignItems: "flex-start" }}>
             <label>انواع سند</label>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
               {docTypes.map((d) => (
                 <label key={d.id} className="checkbox-row">
-                  <input type="checkbox" checked={filters.documentTypeIds.has(d.id)} onChange={() => toggleDocType(d.id)} />
+                  <input type="checkbox" checked={draft.documentTypeIds.has(d.id)} onChange={() => toggleDocType(d.id)} />
                   {d.title}
                 </label>
               ))}
