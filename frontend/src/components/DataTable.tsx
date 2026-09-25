@@ -563,10 +563,8 @@ export function DataTable<T extends { id: number | string }>({
     setOpenFilterFor(openFilterFor === header ? null : header);
   }
 
+  // قاعده‌ی پایه: سرستون‌های گرید همیشه نمایش داده می‌شوند، حتی وقتی هیچ رکوردی نیست (پیام «خالی» داخل خودِ جدول می‌آید)
   const noRowsAtAll = serverPaging ? !serverPaging.loading && serverPaging.total === 0 : !rows.length;
-  if (noRowsAtAll) {
-    return <div className="card empty-state">{emptyText || "هنوز رکوردی ثبت نشده است"}</div>;
-  }
 
   // خروجی اکسل/چاپ همیشه روی داده‌ی «در دسترس» فعلی اجرا می‌شوند: در حالت کلاینتی یعنی کل نتیجه‌ی
   // فیلترشده/مرتب‌شده (sortedRows، نه فقط صفحه‌ی جاری)، در حالت serverPaging یعنی همان صفحه‌ی جاری از
@@ -689,7 +687,7 @@ export function DataTable<T extends { id: number | string }>({
             {sortedRows.length === 0 && (
               <tr>
                 <td colSpan={columns.length + 3} className="empty-state" style={{ border: "none" }}>
-                  رکوردی مطابق فیلترهای اعمال‌شده یافت نشد
+                  {noRowsAtAll ? emptyText || "هنوز رکوردی ثبت نشده است" : "رکوردی مطابق فیلترهای اعمال‌شده یافت نشد"}
                 </td>
               </tr>
             )}

@@ -251,6 +251,16 @@ function ChequeDepositForm({ editId, reEdit }: { editId?: number; reEdit?: boole
       { id: -Date.now(), chequeItemId: c.id, chequeNumber: c.number, chequeDueDate: c.dueDate, chequeAmount: c.amount, chequeCurrencyTitle: c.currencyTitle, chequePartyDisplay: c.partyDisplay, chequeStatus: "IN_HAND" },
     ]);
   }
+  // انتخاب چندگانه‌ی چک: همه‌ی چک‌های تیک‌خورده یک‌جا (بدون تکرار چکِ موجود در گرید) به ردیف‌ها اضافه می‌شوند
+  function addCheques(cs: PickableCheque[]) {
+    setLines((prev) => {
+      const existing = new Set(prev.map((l) => l.chequeItemId));
+      const fresh = cs
+        .filter((c) => !existing.has(c.id))
+        .map((c, i) => ({ id: -Date.now() - i, chequeItemId: c.id, chequeNumber: c.number, chequeDueDate: c.dueDate, chequeAmount: c.amount, chequeCurrencyTitle: c.currencyTitle, chequePartyDisplay: c.partyDisplay, chequeStatus: "IN_HAND" }));
+      return [...prev, ...fresh];
+    });
+  }
   function removeLine(chequeItemId: number) {
     setLines((prev) => {
       return prev.filter((l) => l.chequeItemId !== chequeItemId);
@@ -437,6 +447,8 @@ function ChequeDepositForm({ editId, reEdit }: { editId?: number; reEdit?: boole
               { header: "طرف حساب", render: (c) => c.partyDisplay, filterValue: (c) => c.partyDisplay },
               { header: "مبلغ", render: (c) => formatAmountFa(c.amount), filterValue: (c) => String(c.amount), width: "100px" },
             ]}
+            multiSelect
+            onSelectMultiple={(cs) => addCheques(cs as PickableCheque[])}
             onSelect={(c) => addCheque(c as PickableCheque)}
           />
           )}

@@ -280,9 +280,8 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
   });
   const hasColumnTotals = columnTotals.some((t) => t !== null);
 
-  const table = showLoadingState ? (
-    <div className="empty-state">در حال بارگذاری...</div>
-  ) : (
+  // قاعده‌ی پایه: سرستون‌ها همیشه نمایش داده می‌شوند (حین بارگذاری و برای گرید خالی هم)؛ پیام داخل بدنه‌ی جدول می‌آید
+  const table = (
     <table>
       <thead>
         <tr ref={theadRowRef}>
@@ -333,14 +332,21 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
         </tr>
       </thead>
       <tbody>
-        {sortedRows.length === 0 && (
+        {showLoadingState && (
+          <tr>
+            <td colSpan={columns.length + (selectable ? 2 : 1)} className="empty-state" style={{ border: "none" }}>
+              در حال بارگذاری...
+            </td>
+          </tr>
+        )}
+        {!showLoadingState && sortedRows.length === 0 && (
           <tr>
             <td colSpan={columns.length + (selectable ? 2 : 1)} className="empty-state" style={{ border: "none" }}>
               {emptyText || "رکوردی یافت نشد"}
             </td>
           </tr>
         )}
-        {sortedRows.map((row, idx) => (
+        {!showLoadingState && sortedRows.map((row, idx) => (
           <tr
             key={row.id}
             className={selectable && selected.has(row.id) ? "active-list" : ""}

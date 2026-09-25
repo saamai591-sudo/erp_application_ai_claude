@@ -1525,3 +1525,5 @@ tbody tr:hover { background: var(--bg); }
 .jalali-date-input[aria-invalid="true"] { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }
 /* روزهای بیرون از بازه‌ی دوره مالی (minDate/maxDate انتخابگر تاریخ) به‌وضوح غیرفعال دیده شوند */
 .rmdp-day.rmdp-disabled:not(.rmdp-day-hidden) span { opacity: .3; text-decoration: line-through; cursor: not-allowed; }
+/* ردیف ابزار پرداخت/دریافت که در موضوعات استفاده شده: قفل (inert) و کم‌رنگ */
+.instrument-row-locked td { opacity: .6; background: var(--bg); }
