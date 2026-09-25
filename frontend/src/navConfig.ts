@@ -298,6 +298,8 @@ const RAW_MODULES: ModuleGroup[] = [
         items: [
           { key: "bank-account-review", label: "مرور حساب بانکی", list: "/bank-account-review", icon: "tree" },
           { key: "cash-review", label: "مرور صندوق", list: "/cash-review", icon: "tree" },
+          { key: "receivable-documents-review", label: "مرور اسناد دریافتنی", list: "/receivable-documents-review", icon: "tree" },
+          { key: "payable-documents-review", label: "مرور اسناد پرداختنی", list: "/payable-documents-review", icon: "tree" },
         ],
       },
     ],
