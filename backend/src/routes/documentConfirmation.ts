@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { prisma } from "../lib/prisma";
+import { prisma, getCurrentFiscalPeriod } from "../lib/prisma";
+import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 
@@ -7,8 +8,10 @@ const FORM = findFormPrefix("document-confirmation");
 
 const router = Router();
 
+// بدون تاریخ (فرم تایید اسناد تاریخ پیش‌فرض ندارد)، دوره مالی «جاری/انتخاب‌شده‌ی کاربر» برگردانده می‌شود، نه دوره‌ی امروز
 async function resolveFiscalPeriod(dateStr?: string) {
-  const date = dateStr ? new Date(dateStr) : new Date();
+  if (!dateStr) return getCurrentFiscalPeriod();
+  const date = new Date(dateStr);
   return prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
 }
 
@@ -19,7 +22,7 @@ async function lastConfirmed(fiscalPeriodId: number) {
   });
 }
 
-// وضعیت فعلی: آخرین سند و تاریخ تایید‌شده‌ی دوره مالیِ حاوی تاریخ داده‌شده (پیش‌فرض: امروز)
+// وضعیت فعلی: آخرین سند و تاریخ تایید‌شده‌ی دوره مالیِ حاوی تاریخ داده‌شده (پیش‌فرض: دوره مالی جاری کاربر)
 router.get("/status", can(`${FORM}.view`), async (req, res) => {
   const date = req.query.date as string | undefined;
   const fiscalPeriod = await resolveFiscalPeriod(date);
@@ -43,6 +46,11 @@ async function validate(dateStr: string) {
 
   const fiscalPeriod = await resolveFiscalPeriod(dateStr);
   if (!fiscalPeriod) throw { status: 400, message: "این تاریخ در هیچ دوره مالی تعریف نشده است" };
+  try {
+    await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
+  } catch (e: any) {
+    throw { status: 400, message: e.message };
+  }
   if (date < fiscalPeriod.fromDate || date > fiscalPeriod.toDate) {
     throw { status: 400, message: "تاریخ وارد شده باید در بازه دوره مالی جاری باشد" };
   }

@@ -18,7 +18,8 @@ interface StatusResponse {
 }
 
 export default function DocumentConfirmation() {
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  // بدون مقدار پیش‌فرض؛ فیلد از نوع «تاریخ در دوره مالی» است (تقویم روی دوره مالی باز می‌شود)
+  const [date, setDate] = useState("");
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +28,7 @@ export default function DocumentConfirmation() {
   async function loadStatus(d: string) {
     setError(null);
     try {
-      const s: StatusResponse = await api.get(`/document-confirmation/status?date=${d}`);
+      const s: StatusResponse = await api.get(`/document-confirmation/status${d ? `?date=${d}` : ""}`);
       setStatus(s);
     } catch (e: any) {
       setStatus(null);
@@ -43,7 +44,7 @@ export default function DocumentConfirmation() {
   function onDateChange(v: string) {
     setDate(v);
     setSuccess(null);
-    if (v) loadStatus(v);
+    loadStatus(v);
   }
 
   async function onConfirm() {
@@ -89,7 +90,7 @@ export default function DocumentConfirmation() {
         <div className="form-grid" style={{ marginBottom: 16, maxWidth: 700 }}>
           <div className="form-field">
             <label>تایید تا تاریخ<RequiredMark /></label>
-            <JalaliDatePicker value={date} onChange={onDateChange} />
+            <JalaliDatePicker fiscalYear value={date} onChange={onDateChange} />
           </div>
           <div className="form-field">
             <label>آخرین سند تایید شده</label>
