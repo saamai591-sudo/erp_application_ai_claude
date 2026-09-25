@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, ReactNode } fro
 import { useLocation, useNavigate } from "react-router-dom";
 import { getTitleForPath } from "./tabTitle";
 import { clearReviewReportCacheForPath, clearAllReviewReportCaches } from "./reviewReportCache";
-import { clearPersistedStateByPrefix, clearPersistedStateFamily } from "./usePersistedState";
+import { clearPersistedStateByPrefix, clearPersistedStateFamily, instanceOfPath } from "./usePersistedState";
 import { refreshTabIfStale } from "./listInvalidation";
 
 export interface Tab {
@@ -52,9 +52,26 @@ function isListShapedPath(path: string): boolean {
 // کشِ فرم‌ها با کلید `form:<مسیر>` (گاهی با query، گاهی بدون آن — بسته به صفحه) و پسوندهایی مثل :form/:header
 // ذخیره می‌شود. فقط همین «خانواده»‌ی دقیق پاک می‌شود، نه هر کلیدی که همین رشته را به‌عنوان پیشوند دارد.
 function clearFormState(path: string) {
-  clearPersistedStateFamily(`form:${path}`);
   const base = pathOnly(path);
+  const inst = instanceOfPath(path);
+  if (inst) {
+    // «فرم جدیدِ» چندنمونه‌ای (مسیر با _i): فقط کش همان نمونه پاک می‌شود، نه فرم جدید دیگری با همان مسیر پایه
+    clearPersistedStateFamily(`form:${base}@${inst}`);
+    return;
+  }
+  clearPersistedStateFamily(`form:${path}`);
   if (base !== path) clearPersistedStateFamily(`form:${base}`);
+}
+
+// چند «فرم جدید» هم‌زمان مجازند (مثلاً دو حواله فروش تازه): اگر مسیر /new از قبل در یک تب باز است، تب تازه مسیر یکتای «…?_i=<شماره>» می‌گیرد
+// (کش هر نمونه جدا؛ نگاه کنید به usePersistedState). ویرایش یک رکورد (/edit) همچنان یک تب دارد.
+let instanceCounter = 1;
+function isNewFormPath(path: string): boolean {
+  return pathOnly(path).endsWith("/new");
+}
+function withNewInstance(path: string): string {
+  instanceCounter += 1;
+  return `${path}${path.includes("?") ? "&" : "?"}_i=${instanceCounter}`;
 }
 
 export function TabsProvider({ children }: { children: ReactNode }) {
@@ -105,7 +122,15 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     if (active && active.path !== currentFullPath) {
       if (isListShapedPath(active.path) && isFormShapedPath(currentFullPath)) {
         const existing = tabs.find((t) => t.path === currentFullPath);
-        if (existing) {
+        if (existing && isNewFormPath(currentFullPath) && !instanceOfPath(currentFullPath)) {
+          // فرم جدیدِ دیگری با همین مسیر از قبل باز است: به‌جای رفتن به آن، نمونه‌ی تازه‌ای با مسیر یکتا باز می‌شود
+          const uniquePath = withNewInstance(currentFullPath);
+          clearFormState(uniquePath);
+          const tab: Tab = { id: nextId(), path: uniquePath, title: getTitleForPath(pathOnly(uniquePath)) };
+          setTabs((prev) => [...prev, tab]);
+          setActiveTabId(tab.id);
+          navigate(uniquePath, { replace: true });
+        } else if (existing) {
           setActiveTabId(existing.id);
         } else {
           clearFormState(currentFullPath);
@@ -137,9 +162,14 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     if (isFormShapedPath(path)) {
       const existing = tabs.find((t) => t.path === path);
       if (existing) {
-        setActiveTabId(existing.id);
-        navigate(existing.path);
-        return;
+        if (isNewFormPath(path) && !instanceOfPath(path)) {
+          // فرم جدید دیگری با همین مسیر باز است: تب تازه با نمونه‌ی یکتا (به‌جای رفتن به تب موجود)
+          path = withNewInstance(path);
+        } else {
+          setActiveTabId(existing.id);
+          navigate(existing.path);
+          return;
+        }
       }
     }
 
