@@ -562,8 +562,11 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
     : roundToCurrencyDecimals(
         instrumentRows.reduce((s, r) => {
           const currency = currencies.find((c) => String(c.id) === r.currencyId);
-          if (!currency || !r.amount || !r.fxRate) return s;
-          return s + toBaseCurrencyAmount(Number(r.amount) || 0, Number(r.fxRate) || 1, currency, baseCurrency);
+          if (!currency || !r.amount) return s;
+          // نرخِ خالی برای ارز پایه همان «۱» است (در گرید نمایش داده می‌شود ولی در state خالی می‌ماند)؛ برای ارز غیرپایه بدون نرخ، ردیف شمرده نمی‌شود
+          const rate = r.fxRate ? Number(r.fxRate) : currency.id === baseCurrency.id ? 1 : 0;
+          if (!rate) return s;
+          return s + toBaseCurrencyAmount(Number(r.amount) || 0, rate, currency, baseCurrency);
         }, 0),
         baseCurrency.decimalPlaces
       );
@@ -572,8 +575,11 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
     : roundToCurrencyDecimals(
         settlementRows.reduce((s, r) => {
           const currency = currencies.find((c) => String(c.id) === r.currencyId);
-          if (!currency || !r.amount || !r.fxRate) return s;
-          return s + toBaseCurrencyAmount(Number(r.amount) || 0, Number(r.fxRate) || 1, currency, baseCurrency);
+          if (!currency || !r.amount) return s;
+          // نرخِ خالی برای ارز پایه همان «۱» است (در گرید نمایش داده می‌شود ولی در state خالی می‌ماند)؛ برای ارز غیرپایه بدون نرخ، ردیف شمرده نمی‌شود
+          const rate = r.fxRate ? Number(r.fxRate) : currency.id === baseCurrency.id ? 1 : 0;
+          if (!rate) return s;
+          return s + toBaseCurrencyAmount(Number(r.amount) || 0, rate, currency, baseCurrency);
         }, 0),
         baseCurrency.decimalPlaces
       );

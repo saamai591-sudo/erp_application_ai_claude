@@ -520,8 +520,11 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
     : roundToCurrencyDecimals(
         instrumentRows.reduce((s, r) => {
           const currency = currencies.find((c) => String(c.id) === r.currencyId);
-          if (!currency || !r.amount || !r.fxRate) return s;
-          return s + toBaseCurrencyAmount(Number(r.amount) || 0, Number(r.fxRate) || 1, currency, baseCurrency);
+          if (!currency || !r.amount) return s;
+          // نرخِ خالی برای ارز پایه همان «۱» است (در گرید نمایش داده می‌شود ولی در state خالی می‌ماند)؛ برای ارز غیرپایه بدون نرخ، ردیف شمرده نمی‌شود
+          const rate = r.fxRate ? Number(r.fxRate) : currency.id === baseCurrency.id ? 1 : 0;
+          if (!rate) return s;
+          return s + toBaseCurrencyAmount(Number(r.amount) || 0, rate, currency, baseCurrency);
         }, 0),
         baseCurrency.decimalPlaces
       );
@@ -530,8 +533,11 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
     : roundToCurrencyDecimals(
         settlementRows.reduce((s, r) => {
           const currency = currencies.find((c) => String(c.id) === r.currencyId);
-          if (!currency || !r.amount || !r.fxRate) return s;
-          return s + toBaseCurrencyAmount(Number(r.amount) || 0, Number(r.fxRate) || 1, currency, baseCurrency);
+          if (!currency || !r.amount) return s;
+          // نرخِ خالی برای ارز پایه همان «۱» است (در گرید نمایش داده می‌شود ولی در state خالی می‌ماند)؛ برای ارز غیرپایه بدون نرخ، ردیف شمرده نمی‌شود
+          const rate = r.fxRate ? Number(r.fxRate) : currency.id === baseCurrency.id ? 1 : 0;
+          if (!rate) return s;
+          return s + toBaseCurrencyAmount(Number(r.amount) || 0, rate, currency, baseCurrency);
         }, 0),
         baseCurrency.decimalPlaces
       );
@@ -1146,10 +1152,27 @@ function SettlementRowFields({
         partyDisplay = headerPartyDisplay;
       }
     }
+    // نوع دریافتِ «بدون مبنا» (هر ماهیتی، مثل «سایر»): سند مبنایی وجود ندارد که مبلغ را تعیین کند؛ مبلغ ردیف خودکار برابر مانده‌ی قلم (ردیف ابزار
+    // دریافت) این ردیف می‌شود — وقتی مبلغ خالی است، یا نوع قبلیِ ردیف مبنادار بوده (مبلغِ آن سند مبنا کهنه است)
+    let amountPatch: Partial<SettlementRowState> = {};
+    const prevBasis = receiptType?.basisType;
+    if (rt && rt.basisType === "NONE" && instrumentRow && (!row.amount || (prevBasis && prevBasis !== "NONE"))) {
+      const remainingBase = instrumentRemainingBaseCapacity();
+      const instrumentCurrency = currencies.find((c) => String(c.id) === instrumentRow.currencyId);
+      if (remainingBase > 0) {
+        if (isBaseCurrencyRow) {
+          amountPatch = { amount: String(remainingBase), fxRate: "1", exchangeGainLoss: 0 };
+        } else if (rowCurrency && instrumentCurrency && rowCurrency.id === instrumentCurrency.id) {
+          const foreignAmount = roundToCurrencyDecimals(fromBaseCurrencyAmount(remainingBase, Number(instrumentRow.fxRate) || 1, rowCurrency), rowCurrency.decimalPlaces);
+          amountPatch = { amount: String(foreignAmount), fxRate: instrumentRow.fxRate, exchangeGainLoss: 0 };
+        }
+      }
+    }
     onChange({
       receiptTypeId,
       partyId, partyDisplay,
       salesInvoiceId: "", purchaseInvoiceId: "", salesOrderId: "", salesQuoteId: "", basisDisplay: "",
+      ...amountPatch,
     });
   }
 
