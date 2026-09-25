@@ -387,6 +387,17 @@ router.get("/purchase-invoices/pickable-warehouse-receipt-lines", can(`${FORM}.v
 // CRUD
 // =========================================================================
 
+// ستون‌های مبلغی فهرست: مبلغ (اقلام + هزینه‌های جانبی) − تخفیف + ارزش‌افزوده = خالص. ارزش‌افزوده‌ی ردیف‌ها همیشه به ارز مبنا ذخیره می‌شود؛ برای هم‌ارزی
+// با بقیه‌ی ستون‌ها (ارز فاکتور) بر نرخ فاکتور تقسیم می‌شود.
+function listAmounts(d: any) {
+  const all = [...d.lines, ...d.otherCostLines];
+  const totalAmount = all.reduce((s: number, l: any) => s + Number(l.amount), 0);
+  const discountAmount = all.reduce((s: number, l: any) => s + Number(l.discount || 0), 0);
+  const rate = Number(d.fxRate) > 0 ? Number(d.fxRate) : 1;
+  const vatAmount = all.reduce((s: number, l: any) => s + Number(l.vatAmount || 0), 0) / rate;
+  return { totalAmount, discountAmount, vatAmount, netAmount: totalAmount - discountAmount + vatAmount };
+}
+
 router.get("/purchase-invoices", can(`${FORM}.view`), async (_req, res) => {
   const items = await prisma.purchaseInvoice.findMany({
     include: { party: true, purchaseType: true, currency: true, journalEntry: true, lines: true, otherCostLines: true },
@@ -408,9 +419,7 @@ router.get("/purchase-invoices", can(`${FORM}.view`), async (_req, res) => {
       status: d.status,
       journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
       lineCount: d.lines.length,
-      totalAmount:
-        d.lines.reduce((s: number, l: any) => s + Number(l.amount), 0) +
-        d.otherCostLines.reduce((s: number, l: any) => s + Number(l.amount), 0),
+      ...listAmounts(d),
     }))
   );
 });

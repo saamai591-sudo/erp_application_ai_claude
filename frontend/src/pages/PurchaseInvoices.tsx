@@ -65,7 +65,7 @@ const INFO_TEXT = "ثبت فاکتور خرید دریافتی از تامین�
 interface ListRow {
   id: number; number: number; date: string; vendorInvoiceNumber: string | null; basis: Basis;
   partyId: number; partyTitle: string | null; purchaseTypeId: number; purchaseTypeTitle: string | null;
-  currencyTitle: string; status: Status; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number;
+  currencyTitle: string; status: Status; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number; discountAmount: number; vatAmount: number; netAmount: number;
 }
 interface DetailLine {
   id: number; sourceInventoryLineId: number | null; sourceWarehouseReceiptNumber: number | null;
@@ -172,7 +172,10 @@ function PurchaseInvoiceList() {
           { header: "مبنا", render: (r) => BASIS_FA[r.basis], filterType: "string", filterValue: (r) => BASIS_FA[r.basis] },
           { header: "طرف مقابل", render: (r) => r.partyTitle || "—", filterType: "string", filterValue: (r) => r.partyTitle || "" },
           { header: "نوع خرید", render: (r) => r.purchaseTypeTitle || "—", filterType: "string", filterValue: (r) => r.purchaseTypeTitle || "" },
-          { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
+          { header: "مبلغ", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
+          { header: "تخفیف", render: (r) => formatAmountFa(r.discountAmount), filterType: "number", filterValue: (r) => r.discountAmount, decimal: true },
+          { header: "ارزش افزوده", render: (r) => formatAmountFa(r.vatAmount), filterType: "number", filterValue: (r) => r.vatAmount, decimal: true },
+          { header: "خالص", render: (r) => formatAmountFa(r.netAmount), filterType: "number", filterValue: (r) => r.netAmount, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
