@@ -20,18 +20,20 @@ function AddIcon() {
   );
 }
 
-function MultiPickerDialog<T extends { id: number | string }>({
+export function MultiPickerDialog<T extends { id: number | string }>({
   title,
   rows,
   columns,
   initialChecked,
   onConfirm,
   onClose,
+  confirmLabel = "افزودن",
 }: {
   title: string;
   rows: T[];
   columns: PickerColumn<T>[];
   initialChecked: Set<T["id"]>;
+  confirmLabel?: string;
   onConfirm: (checked: Set<T["id"]>) => void;
   onClose: () => void;
 }) {
@@ -167,7 +169,7 @@ function MultiPickerDialog<T extends { id: number | string }>({
       <div className="actions">
         <span style={{ marginInlineEnd: "auto", alignSelf: "center", fontSize: 11, color: "var(--ink-soft)" }}>↑↓ حرکت · Enter تیک‌زدن · Ctrl+Enter تایید · Esc بستن</span>
         <button type="button" className="btn" onClick={() => { onConfirm(checked); onClose(); }}>
-          افزودن ({checked.size})
+          {confirmLabel} ({checked.size})
         </button>
         <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
       </div>

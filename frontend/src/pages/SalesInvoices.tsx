@@ -6,7 +6,8 @@ import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
-import { RecordPickerField } from "../components/RecordPicker";
+import { RecordPickerField, PickerColumn } from "../components/RecordPicker";
+import { MultiPickerDialog } from "../components/MultiRecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
@@ -733,12 +734,16 @@ interface AdvanceState {
   candidates: AdvanceCandidate[];
 }
 
-// «تخصیص پیش‌دریافت» به فاکتور فروش (Documents/تخصیص پیش دریافت.md): فهرست پیش‌دریافت‌های قابل تخصیص همین فاکتور (طرف حساب/ارز یکسان، رسید تاییدشده،
-// تاریخ دریافت ≤ تاریخ فاکتور) و ورود مبلغ تخصیص برای هر کدام. همه‌ی کنترل‌ها (از جمله قفل بر اساس گردش فاکتور) در بک‌اند انجام می‌شود؛ اینجا فقط نمایش
+// «تخصیص پیش‌دریافت» به فاکتور فروش (Documents/تخصیص پیش دریافت.md): گریدِ تخصیص‌ها؛ با «بارگذاری اطلاعات» انتخابگر پیش‌دریافت‌های قابل تخصیص
+// همین فاکتور (طرف حساب/ارز یکسان، رسید تاییدشده، تاریخ دریافت ≤ تاریخ فاکتور) باز می‌شود و با انتخاب هر ردیف، «مبلغ تخصیص» خودکار برابر «مبلغ
+// قابل تخصیص» آن ردیف (حداکثر تا مانده‌ی فاکتور) پر می‌شود. همه‌ی کنترل‌ها (از جمله قفل بر اساس گردش فاکتور) در بک‌اند انجام می‌شود؛ اینجا فقط نمایش
 // و راهنمای زنده است. مبلغ‌ها به ارز فاکتورند و تفاوت نرخ ارز روی آن‌ها اثری ندارد (اثر تسعیر فقط هنگام صدور سند حسابداری فاکتور).
 function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: number; onClose: () => void; onSaved: () => void }) {
   const [state, setState] = useState<AdvanceState | null>(null);
+  // ردیف‌های گرید: کلید = receiptSettlementLineId، مقدار = مبلغ تخصیص (رشته‌ی قابل ویرایش)؛ ترتیب درج در order حفظ می‌شود
   const [amounts, setAmounts] = useState<Record<number, string>>({});
+  const [order, setOrder] = useState<number[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -747,24 +752,72 @@ function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: n
       .then((s: AdvanceState) => {
         setState(s);
         const initial: Record<number, string> = {};
+        const ids: number[] = [];
         s.candidates.forEach((c) => {
-          if (c.allocatedToThis > 0) initial[c.receiptSettlementLineId] = String(c.allocatedToThis);
+          if (c.allocatedToThis > 0) {
+            initial[c.receiptSettlementLineId] = String(c.allocatedToThis);
+            ids.push(c.receiptSettlementLineId);
+          }
         });
         setAmounts(initial);
+        setOrder(ids);
       })
       .catch((e) => setLoadError((e as ApiError).message));
   }, [invoiceId]);
 
   const locked = !!state && state.lockReasons.length > 0;
-  const sum = Object.values(amounts).reduce((s, v) => s + (Number(v) || 0), 0);
+  const gridRows = state
+    ? order.map((id) => state.candidates.find((c) => c.receiptSettlementLineId === id)).filter((c): c is AdvanceCandidate => !!c)
+    : [];
+  const sum = gridRows.reduce((s, c) => s + (Number(amounts[c.receiptSettlementLineId]) || 0), 0);
   const overInvoice = !!state && sum > state.invoice.total + 0.005;
   const overLine = (c: AdvanceCandidate) => (Number(amounts[c.receiptSettlementLineId]) || 0) > c.allocatableAmount + 0.005;
-  const anyOverLine = !!state && state.candidates.some(overLine);
+  const anyOverLine = gridRows.some(overLine);
+
+  const pickerColumns: PickerColumn<AdvanceCandidate & { id: number }>[] = [
+    { header: "شماره پیش‌دریافت", render: (c) => toFaDigits(String(c.receiptNumber)), filterValue: (c) => String(c.receiptNumber) },
+    { header: "تاریخ دریافت", render: (c) => formatJalaliDate(c.receiptDate), filterValue: (c) => formatJalaliDate(c.receiptDate) },
+    { header: "ارز", render: (c) => c.currencyTitle, filterValue: (c) => c.currencyTitle },
+    { header: "مبلغ اولیه", render: (c) => formatAmountFa(c.originalAmount), filterValue: (c) => String(c.originalAmount) },
+    { header: "مبلغ تخصیص‌یافته", render: (c) => formatAmountFa(c.allocatedAmount), filterValue: (c) => String(c.allocatedAmount) },
+    { header: "مبلغ قابل تخصیص", render: (c) => formatAmountFa(c.allocatableAmount), filterValue: (c) => String(c.allocatableAmount) },
+  ];
+
+  /** اعمال انتخاب انتخابگر: ردیف‌های تازه‌انتخاب‌شده با «مبلغ قابل تخصیص» (حداکثر مانده‌ی فاکتور) پر می‌شوند؛ ردیف‌های بی‌تیک از گرید حذف می‌شوند */
+  function applyPicked(checked: Set<number>) {
+    if (!state) return;
+    const kept = order.filter((id) => checked.has(id));
+    const added = state.candidates.map((c) => c.receiptSettlementLineId).filter((id) => checked.has(id) && !order.includes(id));
+    const next: Record<number, string> = {};
+    let used = 0;
+    kept.forEach((id) => {
+      next[id] = amounts[id] ?? "";
+      used += Number(next[id]) || 0;
+    });
+    added.forEach((id) => {
+      const c = state.candidates.find((x) => x.receiptSettlementLineId === id)!;
+      const remaining = Math.max(0, state.invoice.total - used);
+      const amount = Math.round(Math.min(c.allocatableAmount, remaining) * 100) / 100;
+      next[id] = amount > 0 ? String(amount) : "";
+      used += amount;
+    });
+    setAmounts(next);
+    setOrder([...kept, ...added]);
+  }
+
+  function removeRow(id: number) {
+    setOrder((prev) => prev.filter((x) => x !== id));
+    setAmounts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }
 
   async function save() {
     if (!state) return;
     try {
-      const allocations = state.candidates
+      const allocations = gridRows
         .map((c) => ({ receiptSettlementLineId: c.receiptSettlementLineId, amount: Number(amounts[c.receiptSettlementLineId]) || 0 }))
         .filter((a) => a.amount > 0);
       await api.put(`/sales-invoices/${invoiceId}/advance-allocations`, { allocations });
@@ -792,6 +845,11 @@ function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: n
               {state.lockReasons.join("\n")}
             </div>
           )}
+          <div style={{ marginBottom: 8 }}>
+            <button type="button" className="btn secondary" disabled={locked} onClick={() => setPickerOpen(true)}>
+              بارگذاری اطلاعات
+            </button>
+          </div>
           <div className="picker-table-wrap">
             <table className="picker-table">
               <thead>
@@ -803,15 +861,18 @@ function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: n
                   <th>مبلغ تخصیص‌یافته</th>
                   <th>مبلغ قابل تخصیص</th>
                   <th style={{ width: 160 }}>مبلغ تخصیص به این فاکتور</th>
+                  <th style={{ width: 60 }}></th>
                 </tr>
               </thead>
               <tbody>
-                {state.candidates.length === 0 && (
+                {gridRows.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="empty-state" style={{ border: "none" }}>پیش‌دریافت قابل تخصیصی برای این فاکتور وجود ندارد</td>
+                    <td colSpan={8} className="empty-state" style={{ border: "none" }}>
+                      {state.candidates.length === 0 ? "پیش‌دریافت قابل تخصیصی برای این فاکتور وجود ندارد" : "برای افزودن پیش‌دریافت، «بارگذاری اطلاعات» را بزنید"}
+                    </td>
                   </tr>
                 )}
-                {state.candidates.map((c) => (
+                {gridRows.map((c) => (
                   <tr key={c.receiptSettlementLineId}>
                     <td>{toFaDigits(String(c.receiptNumber))}</td>
                     <td>{formatJalaliDate(c.receiptDate)}</td>
@@ -829,17 +890,33 @@ function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: n
                       />
                       {overLine(c) && <span style={{ color: "var(--danger)", fontSize: 11 }}>بیشتر از مبلغ قابل تخصیص</span>}
                     </td>
+                    <td>
+                      <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} disabled={locked} onClick={() => removeRow(c.receiptSettlementLineId)}>
+                        حذف
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
           <div className="actions">
-            <button type="button" className="btn" disabled={locked || overInvoice || anyOverLine || state.candidates.length === 0} onClick={save}>
+            <button type="button" className="btn" disabled={locked || overInvoice || anyOverLine} onClick={save}>
               ذخیره تخصیص
             </button>
             <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
           </div>
+          {pickerOpen && (
+            <MultiPickerDialog
+              title="انتخاب پیش‌دریافت‌ها"
+              rows={state.candidates.map((c) => ({ ...c, id: c.receiptSettlementLineId }))}
+              columns={pickerColumns}
+              initialChecked={new Set<number>(order)}
+              onConfirm={applyPicked}
+              onClose={() => setPickerOpen(false)}
+              confirmLabel="تایید"
+            />
+          )}
         </>
       )}
     </Modal>
