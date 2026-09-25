@@ -110,7 +110,17 @@ export function JalaliDatePicker({
     new DateObject({ date: iso, format: "YYYY-MM-DD", calendar: gregorian, locale: gregorian_en }).convert(persian, persian_fa);
   // بدون مقدار، تقویم به‌جای «امروز» روی دوره مالی انتخاب‌شده باز می‌شود: امروز اگر در بازه باشد، وگرنه روز شروع دوره (سال شروع دوره مالی)
   const todayIso = new Date().toISOString().slice(0, 10);
-  const viewIso = !value && fromIso && toIso ? (todayIso >= fromIso && todayIso <= toIso ? todayIso : fromIso) : "";
+  // بدون مقدار، یا وقتی مقدار فعلی بیرون از دوره مالی است (مثلاً پیش‌فرضِ امروز)، تقویم روی دوره مالی باز می‌شود: امروز اگر در بازه باشد، وگرنه نزدیک‌ترین مرز بازه
+  const viewIso =
+    fromIso && toIso
+      ? !value
+        ? todayIso >= fromIso && todayIso <= toIso ? todayIso : fromIso
+        : value < fromIso
+        ? fromIso
+        : value > toIso
+        ? toIso
+        : ""
+      : "";
   // یک نمونه‌ی ثابت به‌ازای هر viewIso تا با هر رندر، نمای تقویم (ناوبری کاربر بین ماه‌ها) به حالت اول برنگردد
   const viewDate = useMemo(() => (viewIso ? toJalali(viewIso) : undefined), [viewIso]);
   const rangeMessage = () =>

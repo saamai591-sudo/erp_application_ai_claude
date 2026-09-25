@@ -14,6 +14,7 @@ import { api } from "../lib/api";
 import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { useTabs } from "../lib/TabsContext";
+import { useSelectedFiscalPeriod } from "../lib/useSelectedFiscalPeriod";
 
 interface ListItem {
   id: number;
@@ -96,13 +97,21 @@ function EntryForm({ viewId }: { viewId?: number }) {
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
 
-  const [date, setDate] = usePersistedState(`${cacheKey}:date`, new Date().toISOString().slice(0, 10));
+  // تاریخ پیش‌فرض: افتتاحیه = «اولین روز» و اختتامیه = «آخرین روز» دوره مالی انتخاب‌شده (نه امروز، که ممکن است بیرون از دوره باشد)؛ با عوض‌کردن نوع، تاریخ هم خودکار عوض می‌شود
+  const [date, setDate] = usePersistedState(`${cacheKey}:date`, "");
+  const fiscalPeriod = useSelectedFiscalPeriod(!viewId);
   const [type, setType] = usePersistedState<"OPENING" | "CLOSING">(`${cacheKey}:type`, "OPENING");
   const [description, setDescription] = usePersistedState(`${cacheKey}:desc`, "");
   const [loading, setLoading] = useState(false);
   const [issuing, setIssuing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<any>(viewId ? { id: viewId } : null);
+
+  useEffect(() => {
+    if (viewId || date || !fiscalPeriod) return;
+    setDate((type === "CLOSING" ? fiscalPeriod.toDate : fiscalPeriod.fromDate).slice(0, 10));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewId, fiscalPeriod]);
 
   useEffect(() => {
     if (!viewId) return;
@@ -114,6 +123,11 @@ function EntryForm({ viewId }: { viewId?: number }) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewId]);
+
+  function changeType(next: "OPENING" | "CLOSING") {
+    setType(next);
+    if (fiscalPeriod) setDate((next === "CLOSING" ? fiscalPeriod.toDate : fiscalPeriod.fromDate).slice(0, 10));
+  }
 
   async function handleSave() {
     setLoading(true);
@@ -172,13 +186,16 @@ function EntryForm({ viewId }: { viewId?: number }) {
       saveDisabled={isFinalized || loading || !date || !description.trim()}
       closePath="/opening-closing"
       newPath="/opening-closing/new"
+      // عملیات سند حسابداری در منوی فرم، هم‌الگوی بقیه‌ی فرم‌ها: قبل از صدور «صدور سند حسابداری»، بعد از صدور «مشاهده»/«حذف» سند حسابداری
       extraActions={
-        isFinalized && saved?.issued
+        !isFinalized
+          ? []
+          : saved?.issued
           ? [
-              { label: "مشاهده سند", onClick: handleViewJournalEntry },
-              { label: "حذف سند", onClick: handleDeleteJournalEntry },
+              { label: "مشاهده سند حسابداری", onClick: handleViewJournalEntry },
+              { label: "حذف سند حسابداری", onClick: handleDeleteJournalEntry },
             ]
-          : []
+          : [{ label: "صدور سند حسابداری", onClick: handleIssue }]
       }
     >
       <ErrorToast message={error} />
@@ -204,11 +221,11 @@ function EntryForm({ viewId }: { viewId?: number }) {
           <label>نوع</label>
           <div style={{ display: "flex", gap: 16 }}>
             <label className="checkbox-row">
-              <input type="radio" name="oc-type" checked={type === "OPENING"} onChange={() => setType("OPENING")} disabled={!canEdit} />
+              <input type="radio" name="oc-type" checked={type === "OPENING"} onChange={() => changeType("OPENING")} disabled={!canEdit} />
               افتتاحیه
             </label>
             <label className="checkbox-row">
-              <input type="radio" name="oc-type" checked={type === "CLOSING"} onChange={() => setType("CLOSING")} disabled={!canEdit} />
+              <input type="radio" name="oc-type" checked={type === "CLOSING"} onChange={() => changeType("CLOSING")} disabled={!canEdit} />
               اختتامیه
             </label>
           </div>
@@ -232,12 +249,6 @@ function EntryForm({ viewId }: { viewId?: number }) {
       </div>
 
       </form>
-
-      {isFinalized && !saved.issued && (
-        <button type="button" className="btn" onClick={handleIssue} disabled={issuing}>
-          {issuing ? "در حال صدور..." : "صدور سند"}
-        </button>
-      )}
     </FormPage>
   );
 }
