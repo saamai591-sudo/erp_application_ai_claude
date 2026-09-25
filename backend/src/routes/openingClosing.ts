@@ -109,6 +109,17 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
   }
 });
 
+/** اگر برای دوره‌ی مالی بعد «افتتاحیه» (حتی صادرنشده) وجود داشته باشد، اختتامیه‌ی دوره‌ی جاری (خودِ رکورد یا سند حسابداری‌اش) قابل حذف نیست. */
+async function nextOpeningBlocksClosingDelete(e: { type: string; fiscalPeriod?: { toDate: Date } | null; fiscalPeriodId: number }): Promise<string | null> {
+  if (e.type !== "CLOSING") return null;
+  const period = e.fiscalPeriod ?? (await prisma.fiscalPeriod.findUnique({ where: { id: e.fiscalPeriodId } }));
+  if (!period) return null;
+  const nextPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { gt: period.toDate } }, orderBy: { fromDate: "asc" } });
+  if (!nextPeriod) return null;
+  const nextOpening = await prisma.openingClosingEntry.findFirst({ where: { fiscalPeriodId: nextPeriod.id, type: "OPENING" } });
+  return nextOpening ? `برای دوره مالی بعد (${nextPeriod.title}) سند افتتاحیه وجود دارد؛ ابتدا افتتاحیه‌ی دوره مالی بعد را حذف کنید، سپس اختتامیه‌ی این دوره قابل حذف است` : null;
+}
+
 router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   const id = Number(req.params.id);
   const e = await prisma.openingClosingEntry.findUnique({ where: { id }, include: { fiscalPeriod: true } });
@@ -117,15 +128,8 @@ router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
     return res.status(400).json({ error: "این رکورد سند صادرشده دارد؛ ابتدا سند صادرشده را حذف کنید" });
   }
 
-  if (e.type === "CLOSING") {
-    const nextPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { gt: e.fiscalPeriod.toDate } }, orderBy: { fromDate: "asc" } });
-    if (nextPeriod) {
-      const nextOpening = await prisma.openingClosingEntry.findFirst({ where: { fiscalPeriodId: nextPeriod.id, type: "OPENING" } });
-      if (nextOpening?.journalEntryId) {
-        return res.status(400).json({ error: "سند افتتاحیه برای دوره مالی بعد صادر شده است و امکان حذف نیست" });
-      }
-    }
-  }
+  const blocked = await nextOpeningBlocksClosingDelete(e);
+  if (blocked) return res.status(400).json({ error: blocked });
 
   await prisma.openingClosingEntry.delete({ where: { id } });
   res.status(204).send();
@@ -137,6 +141,8 @@ router.delete("/:id/journal-entry", can(`${FORM}.revertIssue`), async (req, res)
   const e = await prisma.openingClosingEntry.findUnique({ where: { id } });
   if (!e) return res.status(404).json({ error: "رکورد یافت نشد" });
   if (!e.journalEntryId) return res.status(400).json({ error: "برای این رکورد سندی صادر نشده است" });
+  const blocked = await nextOpeningBlocksClosingDelete(e);
+  if (blocked) return res.status(400).json({ error: blocked });
 
   try {
     await prisma.$transaction([
