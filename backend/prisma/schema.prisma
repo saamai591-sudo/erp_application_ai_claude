@@ -2473,6 +2473,7 @@ model SalesInvoice {
   fiscalPeriod           FiscalPeriod            @relation(fields: [fiscalPeriodId], references: [id])
   journalEntry           JournalEntry?           @relation(fields: [journalEntryId], references: [id])
   lines                  SalesInvoiceLine[]
+  advanceAllocations     SalesInvoiceAdvanceAllocation[]
 
   @@unique([fiscalPeriodId, number])
 }
@@ -2700,6 +2701,7 @@ model ReceiptSettlementLine {
   salesQuote        SalesQuote?            @relation(fields: [salesQuoteId], references: [id])
   purchaseInvoice   PurchaseInvoice?       @relation(fields: [purchaseInvoiceId], references: [id])
   currency          Currency               @relation(fields: [currencyId], references: [id])
+  advanceAllocations SalesInvoiceAdvanceAllocation[]
 }
 
 // هم‌الگوی Receipt: ارز و نرخ ارز از هدر به هر ردیف ابزار منتقل شده (ندارد currencyId)، «موضوعات پرداخت» مدل
@@ -3342,4 +3344,20 @@ model AccountingAdvanceReceiptSetting {
   startDate DateTime               @unique @db.Date
   method    AdvanceReceiptFxMethod
   createdAt DateTime               @default(now())
+}
+
+// تخصیص پیش‌دریافت به فاکتور فروش (Documents/تخصیص پیش دریافت.md): مبلغ (به ارز فاکتور) از یک ردیف موضوع دریافتِ «پیش‌دریافت» به یک فاکتور.
+// یک پیش‌دریافت می‌تواند به چند فاکتور و یک فاکتور از چند پیش‌دریافت استفاده کند؛ مجموع تخصیص‌های یک پیش‌دریافت از مبلغ آن و مجموع تخصیص‌های
+// یک فاکتور از مبلغ فاکتور بیشتر نمی‌شود (کنترل در services/salesInvoiceAdvanceService.ts).
+model SalesInvoiceAdvanceAllocation {
+  id                      Int                   @id @default(autoincrement())
+  salesInvoiceId          Int
+  receiptSettlementLineId Int
+  /// به ارز فاکتور (= ارز پیش‌دریافت)؛ تفاوت نرخ ارز هرگز روی آن اثر نمی‌گذارد
+  amount                  Decimal               @db.Decimal(18, 2)
+  createdAt               DateTime              @default(now())
+  salesInvoice            SalesInvoice          @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
+  receiptSettlementLine   ReceiptSettlementLine @relation(fields: [receiptSettlementLineId], references: [id], onDelete: Restrict)
+
+  @@unique([salesInvoiceId, receiptSettlementLineId])
 }

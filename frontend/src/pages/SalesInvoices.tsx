@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
-import { showError } from "../lib/toast";
+import { showError, showToast } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -23,6 +23,7 @@ import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, vali
 import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
 import { useVatRates, vatRateForDate } from "../lib/useVatRates";
 import { toBaseCurrencyAmount } from "../lib/currencyConversion";
+import { Modal } from "../components/Modal";
 
 // «فاکتور فروش نهایی» — آخرین سند زنجیره فروش. مبنا: بدون مبنا / حواله فروش. برخلاف فاکتور خرید
 // (که هر ردیف رسید انبار خرید را دقیقاً یک‌بار و کامل مصرف می‌کرد)، اینجا طبق تصمیم صریح کاربر رابطه
@@ -149,6 +150,22 @@ function emptyRow(): RowState {
 
 function SalesInvoiceForm({ editId }: { editId?: number }) {
   const vatRates = useVatRates();
+  // «تخصیص پیش‌دریافت»: عملیات مستقل از ثبت/ویرایش فاکتور (Documents/تخصیص پیش دریافت.md)
+  const [advanceOpen, setAdvanceOpen] = useState(false);
+  const [advance, setAdvance] = useState<{ total: number; allocatedTotal: number; payable: number } | null>(null);
+  async function loadAdvance() {
+    if (!editId) return setAdvance(null);
+    try {
+      const s: AdvanceState = await api.get(`/sales-invoices/${editId}/advance-allocations`);
+      setAdvance({ total: s.invoice.total, allocatedTotal: s.allocatedTotal, payable: s.payable });
+    } catch {
+      setAdvance(null);
+    }
+  }
+  useEffect(() => {
+    loadAdvance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editId]);
   const navigate = useNavigate();
   const { openTab } = useTabs();
   const location = useLocation();
@@ -473,6 +490,8 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     }
   }
 
+  if (editId) extraActions.push({ label: "تخصیص پیش‌دریافت", icon: <PlusIcon />, onClick: () => setAdvanceOpen(true) });
+
   return (
     <FormPage
       title={editId ? "ویرایش فاکتور فروش" : "فاکتور فروش جدید"}
@@ -498,6 +517,22 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
               <label>سند حسابداری</label>
               <input dir="ltr" value={toFaDigits(String(meta.journalEntryReferenceNumber))} disabled />
             </div>
+          )}
+          {editId && advance && (
+            <>
+              <div className="form-field">
+                <label>مبلغ فاکتور</label>
+                <input dir="ltr" value={formatAmountFa(advance.total)} disabled />
+              </div>
+              <div className="form-field">
+                <label>پیش‌دریافت تخصیص‌یافته</label>
+                <input dir="ltr" value={formatAmountFa(advance.allocatedTotal)} disabled />
+              </div>
+              <div className="form-field">
+                <label>مانده قابل پرداخت</label>
+                <input dir="ltr" value={formatAmountFa(advance.payable)} disabled />
+              </div>
+            </>
           )}
           <div className="form-field">
             <label>تاریخ<RequiredMark /></label>
@@ -665,6 +700,148 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
         </div>
         </fieldset>
       </form>
+      {advanceOpen && editId && (
+        <AdvanceAllocationDialog
+          invoiceId={editId}
+          onClose={() => setAdvanceOpen(false)}
+          onSaved={() => {
+            setAdvanceOpen(false);
+            loadAdvance();
+          }}
+        />
+      )}
     </FormPage>
+  );
+}
+
+interface AdvanceCandidate {
+  receiptSettlementLineId: number;
+  receiptNumber: number;
+  receiptDate: string;
+  currencyTitle: string;
+  fxRate: number;
+  originalAmount: number;
+  allocatedAmount: number;
+  allocatableAmount: number;
+  allocatedToThis: number;
+}
+interface AdvanceState {
+  invoice: { id: number; number: number; currencyTitle: string; total: number };
+  allocatedTotal: number;
+  payable: number;
+  lockReasons: string[];
+  candidates: AdvanceCandidate[];
+}
+
+// «تخصیص پیش‌دریافت» به فاکتور فروش (Documents/تخصیص پیش دریافت.md): فهرست پیش‌دریافت‌های قابل تخصیص همین فاکتور (طرف حساب/ارز یکسان، رسید تاییدشده،
+// تاریخ دریافت ≤ تاریخ فاکتور) و ورود مبلغ تخصیص برای هر کدام. همه‌ی کنترل‌ها (از جمله قفل بر اساس گردش فاکتور) در بک‌اند انجام می‌شود؛ اینجا فقط نمایش
+// و راهنمای زنده است. مبلغ‌ها به ارز فاکتورند و تفاوت نرخ ارز روی آن‌ها اثری ندارد (اثر تسعیر فقط هنگام صدور سند حسابداری فاکتور).
+function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: number; onClose: () => void; onSaved: () => void }) {
+  const [state, setState] = useState<AdvanceState | null>(null);
+  const [amounts, setAmounts] = useState<Record<number, string>>({});
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api
+      .get(`/sales-invoices/${invoiceId}/advance-allocations`)
+      .then((s: AdvanceState) => {
+        setState(s);
+        const initial: Record<number, string> = {};
+        s.candidates.forEach((c) => {
+          if (c.allocatedToThis > 0) initial[c.receiptSettlementLineId] = String(c.allocatedToThis);
+        });
+        setAmounts(initial);
+      })
+      .catch((e) => setLoadError((e as ApiError).message));
+  }, [invoiceId]);
+
+  const locked = !!state && state.lockReasons.length > 0;
+  const sum = Object.values(amounts).reduce((s, v) => s + (Number(v) || 0), 0);
+  const overInvoice = !!state && sum > state.invoice.total + 0.005;
+  const overLine = (c: AdvanceCandidate) => (Number(amounts[c.receiptSettlementLineId]) || 0) > c.allocatableAmount + 0.005;
+  const anyOverLine = !!state && state.candidates.some(overLine);
+
+  async function save() {
+    if (!state) return;
+    try {
+      const allocations = state.candidates
+        .map((c) => ({ receiptSettlementLineId: c.receiptSettlementLineId, amount: Number(amounts[c.receiptSettlementLineId]) || 0 }))
+        .filter((a) => a.amount > 0);
+      await api.put(`/sales-invoices/${invoiceId}/advance-allocations`, { allocations });
+      showToast("تخصیص پیش‌دریافت ذخیره شد");
+      onSaved();
+    } catch (e) {
+      showError((e as ApiError).message);
+    }
+  }
+
+  return (
+    <Modal title="تخصیص پیش‌دریافت" onClose={onClose}>
+      {loadError && <div style={{ color: "var(--danger)", marginBottom: 8 }}>{loadError}</div>}
+      {!state && !loadError && <div>در حال بارگذاری...</div>}
+      {state && (
+        <>
+          <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 10, fontSize: 13 }}>
+            <span>فاکتور شماره {toFaDigits(String(state.invoice.number))} — ارز: {state.invoice.currencyTitle}</span>
+            <span>مبلغ فاکتور: <b>{formatAmountFa(state.invoice.total)}</b></span>
+            <span>مجموع تخصیص: <b style={{ color: overInvoice ? "var(--danger)" : undefined }}>{formatAmountFa(sum)}</b></span>
+            <span>مانده قابل پرداخت: <b>{formatAmountFa(state.invoice.total - sum)}</b></span>
+          </div>
+          {locked && (
+            <div style={{ background: "var(--primary-soft)", padding: "8px 10px", borderRadius: 8, marginBottom: 10, fontSize: 12.5, whiteSpace: "pre-line" }}>
+              {state.lockReasons.join("\n")}
+            </div>
+          )}
+          <div className="picker-table-wrap">
+            <table className="picker-table">
+              <thead>
+                <tr>
+                  <th>شماره پیش‌دریافت</th>
+                  <th>تاریخ دریافت</th>
+                  <th>ارز</th>
+                  <th>مبلغ اولیه</th>
+                  <th>مبلغ تخصیص‌یافته</th>
+                  <th>مبلغ قابل تخصیص</th>
+                  <th style={{ width: 160 }}>مبلغ تخصیص به این فاکتور</th>
+                </tr>
+              </thead>
+              <tbody>
+                {state.candidates.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="empty-state" style={{ border: "none" }}>پیش‌دریافت قابل تخصیصی برای این فاکتور وجود ندارد</td>
+                  </tr>
+                )}
+                {state.candidates.map((c) => (
+                  <tr key={c.receiptSettlementLineId}>
+                    <td>{toFaDigits(String(c.receiptNumber))}</td>
+                    <td>{formatJalaliDate(c.receiptDate)}</td>
+                    <td>{c.currencyTitle}</td>
+                    <td>{formatAmountFa(c.originalAmount)}</td>
+                    <td>{formatAmountFa(c.allocatedAmount)}</td>
+                    <td>{formatAmountFa(c.allocatableAmount)}</td>
+                    <td>
+                      <AmountInput
+                        value={amounts[c.receiptSettlementLineId] ?? ""}
+                        onChange={(v) => setAmounts((prev) => ({ ...prev, [c.receiptSettlementLineId]: v }))}
+                        allowDecimal
+                        placeholder="۰"
+                        disabled={locked}
+                      />
+                      {overLine(c) && <span style={{ color: "var(--danger)", fontSize: 11 }}>بیشتر از مبلغ قابل تخصیص</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="actions">
+            <button type="button" className="btn" disabled={locked || overInvoice || anyOverLine || state.candidates.length === 0} onClick={save}>
+              ذخیره تخصیص
+            </button>
+            <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }

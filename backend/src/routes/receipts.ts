@@ -9,6 +9,7 @@ import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, ConversionCurrency } from "../utils/currencyConversion";
 import { issueReceiptJournalEntry, revertReceiptJournalEntry } from "../services/receiptJournalEntryService";
 import { can } from "../authz/guard";
+import { assertReceiptAdvanceNotAllocated } from "../services/salesInvoiceAdvanceService";
 import { findFormPrefix } from "../authz/registry";
 
 const FORM = findFormPrefix("receipts");
@@ -219,14 +220,17 @@ async function candidatesForBasisType(basisType: BasisType, partyId: number, exc
     const invoices = await withoutFiscalPeriodScope(() =>
       prisma.salesInvoice.findMany({
         where: { customerId: customer.id },
-        include: { lines: true, currency: true, receiptSettlementLines: { include: { receipt: true } } },
+        include: { lines: true, currency: true, receiptSettlementLines: { include: { receipt: true } }, advanceAllocations: true },
       })
     );
     return invoices.map((inv: any) => {
       const total = inv.lines.reduce((s: number, l: any) => s + Number(l.amount), 0);
-      const applied = inv.receiptSettlementLines
-        .filter((s: any) => s.receipt.status === "APPROVED" && (!excludeReceiptId || s.receipt.id !== excludeReceiptId))
-        .reduce((s: number, l: any) => s + Number(l.amount), 0);
+      // پیش‌دریافت‌های تخصیص‌یافته به فاکتور (تخصیص پیش‌دریافت) هم از مانده‌ی قابل دریافت کم می‌شوند
+      const applied =
+        inv.receiptSettlementLines
+          .filter((s: any) => s.receipt.status === "APPROVED" && (!excludeReceiptId || s.receipt.id !== excludeReceiptId))
+          .reduce((s: number, l: any) => s + Number(l.amount), 0) +
+        inv.advanceAllocations.reduce((s: number, a: any) => s + Number(a.amount), 0);
       return {
         id: inv.id, number: inv.number, date: inv.date, currencyId: inv.currencyId, currencyTitle: inv.currency.title,
         fxRate: Number(inv.fxRate), partyId, total, applied, remaining: total - applied,
@@ -804,6 +808,11 @@ router.post("/receipts/:id/unapprove", can(`${FORM}.unapprove`), async (req, res
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "APPROVED") return res.status(400).json({ error: "فقط اسناد «تایید»شده قابل برگشت هستند" });
   if (d.journalEntryId) return res.status(400).json({ error: "برای این سند دریافت، سند حسابداری صادر شده؛ ابتدا سند حسابداری را حذف کنید" });
+  try {
+    await assertReceiptAdvanceNotAllocated(id);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
 
   const touchedCheque = d.instrumentLines.find((l: any) => l.chequeItem && l.chequeItem.step !== l.chequeStep);
   if (touchedCheque) {
@@ -923,6 +932,7 @@ router.put("/receipts/:id/re-edit", can(`${FORM}.reEdit`), async (req, res) => {
       }
     }
     const lockedSettlementLines = (existing.settlementLines as any[]).filter((sl) => !editableById.has(sl.instrumentLineId));
+    await assertReceiptAdvanceNotAllocated(id, editable.map((l: any) => l.id));
     const settlementLines = await validateSubjectLines(incomingSettlements, instrumentByKey, baseCurrency, id, lockedSettlementLines, true);
 
     await prisma.$transaction(async (tx: any) => {

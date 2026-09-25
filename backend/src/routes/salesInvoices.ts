@@ -4,7 +4,8 @@ import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
-import { getVatRatePercentForDate } from "../services/accountingSettingsService";
+import { getVatRatePercentForDate, getAdvanceReceiptMethodForDate } from "../services/accountingSettingsService";
+import { getSalesInvoiceAdvanceState, saveSalesInvoiceAdvanceAllocations, assertAdvanceAllocationsStillValid, salesInvoiceNetTotal } from "../services/salesInvoiceAdvanceService";
 import { toBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConversion";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
@@ -389,6 +390,7 @@ router.put("/sales-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
     const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
     const lines = await validateLines(body.lines, body.basis, currency, fxRate, baseCurrency, date, id);
+    await assertAdvanceAllocationsStillValid(id, { customerId: body.customerId, currencyId: body.currencyId, date, netTotal: salesInvoiceNetTotal(lines as any) });
 
     await prisma.$transaction([
       prisma.salesInvoiceLine.deleteMany({ where: { salesInvoiceId: id } }),
@@ -426,6 +428,28 @@ router.delete("/sales-invoices/:id", can(`${FORM}.delete`), async (req, res) => 
 // =========================================================================
 // صدور سند حسابداری — طبق Documents/SaleInvoiceVoucher.md.
 // =========================================================================
+
+// =========================================================================
+// تخصیص پیش‌دریافت (Documents/تخصیص پیش دریافت.md) — عملیات مستقل از ویرایش اطلاعات اصلی فاکتور؛ کنترل‌ها در
+// services/salesInvoiceAdvanceService.ts (شامل قفل بر اساس «گردش» فاکتور، قابل توسعه با یک مورد به SALES_INVOICE_ADVANCE_LOCKS).
+// =========================================================================
+
+router.get("/sales-invoices/:id/advance-allocations", can(`${FORM}.view`), async (req, res) => {
+  try {
+    res.json(await getSalesInvoiceAdvanceState(Number(req.params.id)));
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در دریافت اطلاعات پیش‌دریافت" });
+  }
+});
+
+router.put("/sales-invoices/:id/advance-allocations", can(`${FORM}.allocateAdvance`), async (req, res) => {
+  try {
+    await saveSalesInvoiceAdvanceAllocations(Number(req.params.id), req.body?.allocations);
+    res.json(await getSalesInvoiceAdvanceState(Number(req.params.id)));
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در ثبت تخصیص پیش‌دریافت" });
+  }
+});
 
 router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournalEntry`), async (req, res) => {
   const id = Number(req.params.id);
@@ -539,6 +563,96 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
 
     if (errors.length > 0) return res.status(400).json({ error: errors.join("\n") });
 
+    // ---------- تخصیص پیش‌دریافت (Documents/تخصیص پیش دریافت.md) ----------
+    // هر تخصیص: بدهکار «پیش‌دریافت» (همان معینی که رسید دریافت بستانکار کرده) به ارزش دفتری/تاریخی، و کاهش بدهکار «دریافتنی فروش» به مبلغ تخصیص
+    // با نرخ فاکتور. اختلاف ارزش ریالی (نرخ فاکتور − نرخ تاریخی) طبق «رویه‌ها و تنظیمات حسابداری» (روش معتبر در تاریخ فاکتور) شناسایی می‌شود:
+    //  • نرخ تاریخ معامله/فاکتور: روی «سود و زیان تسعیر ارز» (اختلاف مثبت = زیان، بدهکار؛ منفی = سود، بستانکار)
+    //  • نرخ تاریخی پیش‌دریافت: مبلغ فروش برای بخش پیش‌دریافت با نرخ تاریخی ثبت می‌شود (اصلاح درآمد فروش به‌اندازه‌ی اختلاف)، بدون تسعیر جدا
+    // مبلغ ارزی تخصیص/مانده‌ی قابل پرداخت هرگز تحت‌تأثیر اختلاف نرخ نیست. سند همیشه بالانس است.
+    const advanceDebitLines: IssueLineInput[] = [];
+    const advanceAdjustLines: IssueLineInput[] = [];
+    const allocations = await prisma.salesInvoiceAdvanceAllocation.findMany({
+      where: { salesInvoiceId: id },
+      include: { receiptSettlementLine: { include: { receipt: true, receiptType: { include: { account: true } } } } },
+      orderBy: { id: "asc" },
+    });
+    if (allocations.length > 0) {
+      const treasurySettings = await prisma.treasuryAccountSetting.findMany({
+        where: { accountType: { in: ["RECEIPT_SUBJECT", "FX_GAIN_LOSS"] } },
+        include: { account: true },
+      });
+      const invIsBase = invoice.currencyId === baseCurrency.id;
+      let allocCurrency = 0;
+      let allocInvoiceBase = 0;
+      let histBase = 0;
+      for (const a of allocations) {
+        const l = a.receiptSettlementLine;
+        const rt = l.receiptType;
+        const amount = Number(a.amount);
+        const account = rt.basisType === "NONE" ? rt.account : treasurySettings.find((s) => s.accountType === "RECEIPT_SUBJECT" && s.receiptTypeId === rt.id)?.account;
+        if (!account) {
+          errors.push(`برای نوع دریافت «${rt.title}» (پیش‌دریافت رسید شماره ${l.receipt.number}) معینِ پیش‌دریافت تعریف نشده است`);
+          continue;
+        }
+        const rowRate = Number(l.fxRate);
+        const hist = invIsBase ? amount : toBaseCurrencyAmount(amount, rowRate, invoice.currency, baseCurrency);
+        const atInvoice = invIsBase ? amount : toBaseCurrencyAmount(amount, fxRate, invoice.currency, baseCurrency);
+        allocCurrency += amount;
+        allocInvoiceBase += atInvoice;
+        histBase += hist;
+        const details = resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode);
+        const advDescription = `بابت تخصیص پیش‌دریافت رسید شماره ${l.receipt.number} به فاکتور فروش ${invoice.number} ${customerName}`.trim();
+        if (account.isCurrency && !invIsBase) {
+          advanceDebitLines.push({ accountId: account.id, ...details, currencyId: invoice.currencyId, debit: amount, credit: 0, fxRate: rowRate, description: advDescription });
+        } else {
+          advanceDebitLines.push({ accountId: account.id, ...details, currencyId: baseCurrency.id, debit: hist, credit: 0, fxRate: 1, description: advDescription });
+        }
+      }
+
+      // کاهش بدهکار «دریافتنی فروش» به‌اندازه‌ی مبلغ تخصیص‌یافته (مبلغ ارزی اگر معین ارزی است، وگرنه معادل ریالی با نرخ فاکتور)
+      for (const [key, entry] of Array.from(arAmountByAccount.entries())) {
+        entry.amount -= entry.account.isCurrency ? allocCurrency : allocInvoiceBase;
+        if (entry.amount < -0.005) errors.push("مجموع پیش‌دریافت تخصیص‌یافته از مبلغ دریافتنی فاکتور بیشتر است");
+        if (entry.amount <= 0.005) arAmountByAccount.delete(key);
+      }
+
+      const diff = Math.round((allocInvoiceBase - histBase) * 100) / 100;
+      if (!invIsBase && Math.abs(diff) > 0.005) {
+        const method = await getAdvanceReceiptMethodForDate(invoice.date);
+        if (!method) {
+          errors.push("روش شناسایی پیش‌دریافت ارزی برای تاریخ فاکتور در «رویه‌ها و تنظیمات حسابداری» (تنظیمات ارز) تعریف نشده است");
+        } else if (method === "TRANSACTION_DATE_RATE") {
+          const fxAccount = treasurySettings.find((s) => s.accountType === "FX_GAIN_LOSS")?.account;
+          if (!fxAccount) errors.push("حساب «سود و زیان تسعیر ارز» در «تعیین حسابهای معین» تعریف نشده است");
+          else
+            advanceAdjustLines.push({
+              accountId: fxAccount.id,
+              currencyId: baseCurrency.id,
+              debit: diff > 0 ? diff : 0,
+              credit: diff < 0 ? -diff : 0,
+              fxRate: 1,
+              description: `تسعیر پیش‌دریافت تخصیص‌یافته به ${description}`,
+            });
+        } else {
+          const revenue = Array.from(revenueByAccount.values())[0];
+          if (!revenue) errors.push("حساب «درآمد فروش» برای اصلاح مبلغ فروش بخش پیش‌دریافت مشخص نیست");
+          else {
+            const details = resolveAccountDetailFields(revenue.account, partyDetailTypeId, partyDetailCode);
+            advanceAdjustLines.push({
+              accountId: revenue.account.id,
+              ...details,
+              currencyId: baseCurrency.id,
+              debit: diff > 0 ? diff : 0,
+              credit: diff < 0 ? -diff : 0,
+              fxRate: 1,
+              description: `فروش بخش پیش‌دریافت با نرخ تاریخی — ${description}`,
+            });
+          }
+        }
+      }
+      if (errors.length > 0) return res.status(400).json({ error: errors.join("\n") });
+    }
+
     const debitLines: IssueLineInput[] = [];
     for (const { amount, account } of arAmountByAccount.values()) {
       const details = resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode);
@@ -604,7 +718,7 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
       description,
       issuingSystem: "SALES",
       isManual: false,
-      lines: [...debitLines, ...creditLines],
+      lines: [...debitLines, ...advanceDebitLines, ...creditLines, ...advanceAdjustLines],
       sources: [{ label: `فاکتور فروش شماره ${invoice.number}`, path: `/sales-invoices/${invoice.id}/edit` }],
     });
 

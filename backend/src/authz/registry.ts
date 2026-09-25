@@ -469,6 +469,7 @@ export const REGISTRY: ModuleDef[] = [
             actions: [
               { key: "issueJournalEntry", title: "صدور سند حسابداری" },
               { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
+              { key: "allocateAdvance", title: "تخصیص پیش‌دریافت" },
             ],
           },
           {
