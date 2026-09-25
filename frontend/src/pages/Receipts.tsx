@@ -1092,7 +1092,8 @@ function SettlementRowFields({
       if (i === idx) return sum;
       // ردیف‌های «پیش‌دریافت ارزش افزوده» و ردیف‌های عادیِ همان سند مبنا مانده‌ی جدا دارند
       const rNature = receiptTypes.find((t) => String(t.id) === r.receiptTypeId)?.nature;
-      if ((rNature === "ADVANCE_VAT_RECEIPT") !== (receiptType?.nature === "ADVANCE_VAT_RECEIPT")) return sum;
+      const isVatNature = (n?: string) => n === "ADVANCE_VAT_RECEIPT" || n === "SALES_VAT";
+      if (isVatNature(rNature) !== isVatNature(receiptType?.nature)) return sum;
       const rBasisId = (r as any)[field];
       if (!rBasisId || Number(rBasisId) !== candidate.id) return sum;
       const rAmount = Number(r.amount) || 0;

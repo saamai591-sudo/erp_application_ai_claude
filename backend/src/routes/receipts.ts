@@ -212,8 +212,9 @@ interface BasisCandidate {
 
 // «پیش‌دریافت ارزش افزوده» (ADVANCE_VAT_RECEIPT) روی سفارش فروش/پیش‌فاکتور، «ارزش افزوده‌ی» همان سند را دریافت می‌کند نه مبلغ آن را؛ پس سقف و مانده‌ی
 // آن جدا از دریافت‌های عادیِ همان سند محاسبه می‌شود (وگرنه سندی که مبلغش کامل پیش‌دریافت شده، هرگز برای پیش‌دریافت ارزش افزوده نمایش داده نمی‌شد).
+// «تسویه ارزش افزوده فروش» (SALES_VAT) روی فاکتور فروش هم همین منطق را دارد: سقف = ارزش‌افزوده‌ی فاکتور، نه مبلغ آن.
 export function basisGroupOf(nature?: string | null): "VAT" | "MAIN" {
-  return nature === "ADVANCE_VAT_RECEIPT" ? "VAT" : "MAIN";
+  return nature === "ADVANCE_VAT_RECEIPT" || nature === "SALES_VAT" ? "VAT" : "MAIN";
 }
 
 async function candidatesForBasisType(basisType: BasisType, partyId: number, excludeReceiptId?: number, nature?: string | null): Promise<BasisCandidate[]> {
@@ -229,17 +230,25 @@ async function candidatesForBasisType(basisType: BasisType, partyId: number, exc
     const invoices = await withoutFiscalPeriodScope(() =>
       prisma.salesInvoice.findMany({
         where: { customerId: customer.id },
-        include: { lines: true, currency: true, receiptSettlementLines: { include: { receipt: true } }, advanceAllocations: true },
+        include: { lines: true, currency: true, receiptSettlementLines: { include: { receipt: true, receiptType: true } }, advanceAllocations: true },
       })
     );
     return invoices.map((inv: any) => {
-      const total = inv.lines.reduce((s: number, l: any) => s + Number(l.amount), 0);
+      // نوع دریافت «تسویه ارزش افزوده فروش»: سقف = ارزش‌افزوده‌ی فاکتور (ردیف‌ها به ارز مبنا ذخیره می‌شوند، پس بر نرخ فاکتور تقسیم می‌شود) و فقط
+      // دریافت‌های هم‌گروه (ارزش‌افزوده) و پیش‌دریافت‌های ارزش‌افزوده‌ی تخصیص‌یافته از آن کم می‌شوند؛ دریافت‌های عادیِ مبلغ فاکتور با آن قاطی نمی‌شوند
+      const fxRateInv = Number(inv.fxRate) > 0 ? Number(inv.fxRate) : 1;
+      const total =
+        group === "VAT"
+          ? inv.lines.reduce((s: number, l: any) => s + Number(l.vatAmount || 0), 0) / fxRateInv
+          : inv.lines.reduce((s: number, l: any) => s + Number(l.amount), 0);
       // پیش‌دریافت‌های تخصیص‌یافته به فاکتور (تخصیص پیش‌دریافت) هم از مانده‌ی قابل دریافت کم می‌شوند
       const applied =
         inv.receiptSettlementLines
-          .filter((s: any) => s.receipt.status === "APPROVED" && (!excludeReceiptId || s.receipt.id !== excludeReceiptId))
+          .filter((s: any) => sameGroup(s) && s.receipt.status === "APPROVED" && (!excludeReceiptId || s.receipt.id !== excludeReceiptId))
           .reduce((s: number, l: any) => s + Number(l.amount), 0) +
-        inv.advanceAllocations.filter((a: any) => a.nature === "ADVANCE_RECEIPT").reduce((s: number, a: any) => s + Number(a.amount), 0);
+        inv.advanceAllocations
+          .filter((a: any) => a.nature === (group === "VAT" ? "ADVANCE_VAT_RECEIPT" : "ADVANCE_RECEIPT"))
+          .reduce((s: number, a: any) => s + Number(a.amount), 0);
       return {
         id: inv.id, number: inv.number, date: inv.date, currencyId: inv.currencyId, currencyTitle: inv.currency.title,
         fxRate: Number(inv.fxRate), partyId, total, applied, remaining: total - applied,
@@ -362,7 +371,7 @@ router.get("/receipts/pickable-sales-invoices", can(`${FORM}.view`), async (req,
   const partyId = req.query.partyId ? Number(req.query.partyId) : null;
   const excludeReceiptId = req.query.excludeReceiptId ? Number(req.query.excludeReceiptId) : undefined;
   if (!partyId) return res.json([]);
-  const candidates = await candidatesForBasisType("SALES_INVOICE", partyId, excludeReceiptId);
+  const candidates = await candidatesForBasisType("SALES_INVOICE", partyId, excludeReceiptId, req.query.nature ? String(req.query.nature) : undefined);
   res.json(candidates.filter((c) => c.remaining > 0.001).map((c) => ({ ...c, salesInvoiceId: c.id })));
 });
 
