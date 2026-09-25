@@ -41,6 +41,7 @@ const router = Router();
 
 interface LineInput {
   sourceSalesOrderLineId?: number | null;
+  sourceSalesQuoteLineId?: number | null;
   goodsItemId?: number | null;
   unitId?: number | null;
   quantity: number;
@@ -53,7 +54,7 @@ interface LineInput {
 interface HeaderBody {
   warehouseId: number;
   date: string;
-  basis: "NO_BASIS" | "SALES_ORDER";
+  basis: "NO_BASIS" | "SALES_ORDER" | "SALES_QUOTE";
   partyId?: number | null;
   description?: string;
   // فقط از مسیر Import پر می‌شود (طبق تصمیم صریح کاربر: هنگام مهاجرت از سیستم قبلی، شماره سند نباید
@@ -99,6 +100,21 @@ async function salesOrderLineRemaining(id: number, excludeDeliveryId?: number) {
   return { line, remaining };
 }
 
+// «مانده»ی ردیف پیش‌فاکتور برای حواله فروش = مقدار ردیف − آنچه به سفارش فروش تبدیل شده − آنچه مستقیماً با حواله فروش تحویل شده
+// (حواله‌ی یک سفارشِ برگرفته از همین پیش‌فاکتور، دوباره از پیش‌فاکتور کم نمی‌شود چون قبلاً در سفارش کم شده است).
+async function salesQuoteLineRemaining(id: number, excludeDeliveryId?: number) {
+  const line = await prisma.salesQuoteLine.findUnique({
+    where: { id },
+    include: { salesQuote: true, salesOrderLines: true, inventoryLines: { include: { document: true } } },
+  });
+  if (!line) return null;
+  const ordered = line.salesOrderLines.reduce((s: number, o: any) => s + Number(o.quantity), 0);
+  const delivered = line.inventoryLines
+    .filter((d: any) => d.document.documentType === "SALES_DELIVERY" && (!excludeDeliveryId || d.documentId !== excludeDeliveryId))
+    .reduce((s: number, d: any) => s + Number(d.quantity), 0);
+  return { line, remaining: Number(line.quantity) - ordered - delivered };
+}
+
 async function validateLines(
   lines: LineInput[],
   basis: string,
@@ -117,6 +133,7 @@ async function validateLines(
 
   const cleaned: {
     sourceSalesOrderLineId: number | null;
+    sourceSalesQuoteLineId: number | null;
     goodsItemId: number;
     unitId: number;
     quantity: number;
@@ -133,6 +150,7 @@ async function validateLines(
     let goodsItemId = l.goodsItemId || 0;
     let unitId = l.unitId || 0;
     let sourceSalesOrderLineId: number | null = null;
+    let sourceSalesQuoteLineId: number | null = null;
 
     if (basis === "SALES_ORDER") {
       if (!l.sourceSalesOrderLineId) throw new Error(`ردیف ${idx + 1}: انتخاب ردیف سفارش فروش الزامی است`);
@@ -144,6 +162,18 @@ async function validateLines(
         throw new Error(`مشتری سفارش فروش ردیف ${idx + 1} با طرف مقابل انتخاب‌شده در هدر یکسان نیست`);
       }
       sourceSalesOrderLineId = info.line.id;
+      goodsItemId = info.line.goodsItemId;
+      unitId = info.line.unitId;
+    } else if (basis === "SALES_QUOTE") {
+      if (!l.sourceSalesQuoteLineId) throw new Error(`ردیف ${idx + 1}: انتخاب ردیف پیش‌فاکتور الزامی است`);
+      const info = await salesQuoteLineRemaining(l.sourceSalesQuoteLineId, excludeDeliveryId);
+      if (!info) throw new Error(`ردیف پیش‌فاکتور برای ردیف ${idx + 1} یافت نشد`);
+      if (info.line.salesQuote.status !== "APPROVED") throw new Error(`پیش‌فاکتور ردیف ${idx + 1} در وضعیت تایید نیست`);
+      if (qty > info.remaining) throw new Error(`مقدار ردیف ${idx + 1} از باقیمانده‌ی قابل تحویل (${info.remaining}) بیشتر است`);
+      if (!partyCustomerId || info.line.salesQuote.customerId !== partyCustomerId) {
+        throw new Error(`مشتری پیش‌فاکتور ردیف ${idx + 1} با طرف مقابل انتخاب‌شده در هدر یکسان نیست`);
+      }
+      sourceSalesQuoteLineId = info.line.id;
       goodsItemId = info.line.goodsItemId;
       unitId = info.line.unitId;
     } else {
@@ -161,6 +191,7 @@ async function validateLines(
 
     cleaned.push({
       sourceSalesOrderLineId,
+      sourceSalesQuoteLineId,
       goodsItemId,
       unitId,
       quantity: qty,
@@ -209,6 +240,7 @@ router.get("/sales-deliveries/pickable-sales-order-lines", can(`${FORM}.view`), 
       const party = l.salesOrder.customer.party;
       return {
         id: l.id,
+        sourceLineId: l.id,
         sourceSalesOrderLineId: l.id,
         salesOrderId: l.salesOrder.id,
         number: l.salesOrder.number,
@@ -221,6 +253,53 @@ router.get("/sales-deliveries/pickable-sales-order-lines", can(`${FORM}.view`), 
         unitTitle: l.unit.title,
         quantity,
         done,
+        remaining,
+      };
+    })
+    .filter((r: any) => r.remaining > 0);
+  res.json(result);
+});
+
+// =========================================================================
+// پیکر «باقیمانده» پیش‌فاکتور (مبنای «پیش‌فاکتور»)
+// =========================================================================
+
+router.get("/sales-deliveries/pickable-sales-quote-lines", can(`${FORM}.view`), async (req, res) => {
+  const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
+  const lines = await prisma.salesQuoteLine.findMany({
+    where: { salesQuote: { status: "APPROVED", ...(destDate ? { date: { lte: destDate } } : {}) } },
+    include: {
+      salesQuote: { include: { customer: { include: { party: true } } } },
+      goodsItem: true,
+      unit: true,
+      salesOrderLines: true,
+      inventoryLines: { include: { document: true } },
+    },
+    orderBy: { id: "desc" },
+  });
+  const result = lines
+    .map((l: any) => {
+      const ordered = l.salesOrderLines.reduce((s: number, o: any) => s + Number(o.quantity), 0);
+      const done = l.inventoryLines
+        .filter((d: any) => d.document.documentType === "SALES_DELIVERY")
+        .reduce((s: number, d: any) => s + Number(d.quantity), 0);
+      const quantity = Number(l.quantity);
+      const remaining = quantity - ordered - done;
+      const party = l.salesQuote.customer.party;
+      return {
+        id: l.id,
+        sourceLineId: l.id,
+        salesQuoteId: l.salesQuote.id,
+        number: l.salesQuote.number,
+        date: l.salesQuote.date,
+        customerTitle: party.category === "LEGAL" ? party.name : `${party.firstName || ""} ${party.lastName || ""}`.trim(),
+        goodsItemId: l.goodsItemId,
+        goodsItemCode: l.goodsItem.fullCode,
+        goodsItemTitle: l.goodsItem.title,
+        unitId: l.unitId,
+        unitTitle: l.unit.title,
+        quantity,
+        done: ordered + done,
         remaining,
       };
     })
@@ -303,6 +382,7 @@ router.get("/sales-deliveries/:id", can(`${FORM}.view`), async (req: AuthedReque
     lines: d.lines.map((l: any) => ({
       id: l.id,
       sourceSalesOrderLineId: l.sourceSalesOrderLineId,
+      sourceSalesQuoteLineId: l.sourceSalesQuoteLineId,
       goodsItemId: l.goodsItemId,
       goodsItemCode: l.goodsItem.fullCode,
       goodsItemTitle: l.goodsItem.title,
@@ -371,6 +451,7 @@ export async function createSalesDelivery(body: HeaderBody) {
         lines: {
           create: cleanedLines.map((l, idx) => ({
             sourceSalesOrderLineId: l.sourceSalesOrderLineId,
+            sourceSalesQuoteLineId: l.sourceSalesQuoteLineId,
             goodsItemId: l.goodsItemId,
             unitId: l.unitId,
             quantity: l.quantity,
@@ -451,6 +532,7 @@ router.put("/sales-deliveries/:id", can(`${FORM}.edit`), async (req, res) => {
           lines: {
             create: cleanedLines.map((l, idx) => ({
               sourceSalesOrderLineId: l.sourceSalesOrderLineId,
+              sourceSalesQuoteLineId: l.sourceSalesQuoteLineId,
               goodsItemId: l.goodsItemId,
               unitId: l.unitId,
               quantity: l.quantity,

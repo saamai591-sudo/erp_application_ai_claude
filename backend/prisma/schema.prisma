@@ -2073,6 +2073,7 @@ model SalesQuoteLine {
   vatAmount       Decimal          @default(0) @db.Decimal(36, 10)
   description     String?
   salesOrderLines SalesOrderLine[] @relation("SalesOrderSourceSalesQuoteLine")
+  inventoryLines  InventoryDocumentLine[] @relation("InventoryLineSourceSalesQuoteLine")
   goodsItem       GoodsItem        @relation(fields: [goodsItemId], references: [id])
   salesQuote      SalesQuote       @relation(fields: [salesQuoteId], references: [id], onDelete: Cascade)
   unit            UnitOfMeasure    @relation(fields: [unitId], references: [id])
@@ -2207,6 +2208,8 @@ enum InventoryBasis {
   DELIVERY_AUTHORIZATION
   GOODS_REQUEST
   SALES_ORDER
+  // حواله فروش بر مبنای پیش‌فاکتور (ردیف‌ها به SalesQuoteLine ارجاع می‌دهند)
+  SALES_QUOTE
   WAREHOUSE_TRANSFER_OUT
 }
 
@@ -2257,6 +2260,7 @@ model InventoryDocumentLine {
   sourceDeliveryAuthorizationLineId Int?
   sourceGoodsRequestLineId          Int?
   sourceSalesOrderLineId            Int?
+  sourceSalesQuoteLineId            Int?
   // طبق بند ۴۰ سند: «هر برگشت باید به خروج/ورود مرتبط خود Reference داشته باشد» + کنترل
   // ReturnedQuantity <= IssuedQuantity — این ۵ فیلد خودارجاع (self-relation روی همین جدول) دقیقاً
   // همان قاعده را برای هر ۵ نوع سند «برگشتی» (Sales Return/Supplier Return/۳ نوع Consumption Return)
@@ -2276,6 +2280,7 @@ model InventoryDocumentLine {
   sourceDeliveryAuthorizationLine   DeliveryAuthorizationLine? @relation("InventoryLineSourceDeliveryAuthorizationLine", fields: [sourceDeliveryAuthorizationLineId], references: [id])
   sourceGoodsRequestLine            GoodsRequestLine?          @relation("InventoryLineSourceGoodsRequestLine", fields: [sourceGoodsRequestLineId], references: [id])
   sourceSalesOrderLine              SalesOrderLine?            @relation("InventoryLineSourceSalesOrderLine", fields: [sourceSalesOrderLineId], references: [id])
+  sourceSalesQuoteLine              SalesQuoteLine?            @relation("InventoryLineSourceSalesQuoteLine", fields: [sourceSalesQuoteLineId], references: [id])
   sourceSalesDeliveryLine           InventoryDocumentLine?     @relation("InventoryLineSourceSalesDeliveryLine", fields: [sourceSalesDeliveryLineId], references: [id])
   salesReturnLines                  InventoryDocumentLine[]    @relation("InventoryLineSourceSalesDeliveryLine")
   sourceWarehouseReceiptLine        InventoryDocumentLine?     @relation("InventoryLineSourceWarehouseReceiptLine", fields: [sourceWarehouseReceiptLineId], references: [id])

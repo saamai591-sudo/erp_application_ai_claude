@@ -322,7 +322,9 @@ router.put("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.edit`), async (req, re
 
 async function salesQuoteHasDownstreamUsage(salesQuoteId: number) {
   const count = await prisma.salesOrderLine.count({ where: { sourceSalesQuoteLine: { salesQuoteId } } });
-  return count > 0;
+  // حواله فروش مستقیم بر مبنای پیش‌فاکتور هم مصرف پیش‌فاکتور است
+  const deliveryCount = await prisma.inventoryDocumentLine.count({ where: { sourceSalesQuoteLine: { salesQuoteId } } });
+  return count > 0 || deliveryCount > 0;
 }
 
 router.delete("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.delete`), async (req, res) => {
@@ -443,7 +445,7 @@ router.get("/sales-orders/pickable-quote-lines", can(`${SALES_ORDERS_FORM}.view`
         ...(destDate ? { date: { lte: destDate } } : {}),
       },
     },
-    include: { salesQuote: true, goodsItem: true, unit: true, salesOrderLines: true },
+    include: { salesQuote: true, goodsItem: true, unit: true, salesOrderLines: true, inventoryLines: { include: { document: true } } },
     orderBy: { id: "desc" },
   });
 
@@ -452,9 +454,12 @@ router.get("/sales-orders/pickable-quote-lines", can(`${SALES_ORDERS_FORM}.view`
       // مصرف همین سفارش (در حال ویرایش) نباید در «مانده» لحاظ شود، وگرنه ردیفی که کل مانده‌اش را همین
       // سفارش قبلاً گرفته، از فهرست انتخابگر حذف می‌شود و در حالت ویرایش، ردیف پیش‌فاکتور قبلاً
       // انتخاب‌شده در گرید نمایش داده نمی‌شود — دقیقاً هم‌الگوی purchaseInvoices.ts/salesInvoices.ts.
-      const done = l.salesOrderLines
-        .filter((o: any) => !excludeOrderId || o.salesOrderId !== excludeOrderId)
-        .reduce((s: number, o: any) => s + Number(o.quantity), 0);
+      const done =
+        l.salesOrderLines
+          .filter((o: any) => !excludeOrderId || o.salesOrderId !== excludeOrderId)
+          .reduce((s: number, o: any) => s + Number(o.quantity), 0) +
+        // آنچه مستقیماً با حواله فروش (بر مبنای همین پیش‌فاکتور) تحویل شده هم از مانده کم می‌شود
+        l.inventoryLines.filter((d: any) => d.document.documentType === "SALES_DELIVERY").reduce((s: number, d: any) => s + Number(d.quantity), 0);
       const quantity = Number(l.quantity);
       const remaining = quantity - done;
       return {

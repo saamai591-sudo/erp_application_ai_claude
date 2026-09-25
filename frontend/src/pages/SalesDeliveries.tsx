@@ -29,7 +29,7 @@ import { useDocumentForm } from "../lib/useDocumentForm";
 // می‌شود؛ فقط برای کاربر دارای دسترسی «مشاهده اطلاعات حسابداری» به‌صورت فقط‌خواندنی نمایش داده می‌شود.
 const VIEW_ACCOUNTING_PERMISSION = "sales.operations.sales-deliveries.viewAccounting";
 
-type Basis = "NO_BASIS" | "SALES_ORDER";
+type Basis = "NO_BASIS" | "SALES_ORDER" | "SALES_QUOTE";
 type DocStatus = "REGISTERED" | "FINALIZED";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
@@ -52,12 +52,13 @@ interface GoodsItemRow {
   trackingMethod: "NONE" | "BATCH" | "SERIAL";
   isLocationTracked: boolean;
 }
-interface PickableLine { id: number; sourceSalesOrderLineId: number; salesOrderId: number; number: number; date: string; customerTitle: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
+interface PickableLine { id: number; sourceLineId: number; number: number; date: string; customerTitle: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
 
 interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; basis: Basis; partyId: number | null; partyTitle: string | null; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number; totalAmount?: number }
 interface DetailLine {
   id: number;
   sourceSalesOrderLineId: number | null;
+  sourceSalesQuoteLineId: number | null;
   goodsItemId: number;
   goodsItemCode: string;
   goodsItemTitle: string;
@@ -73,9 +74,9 @@ interface DetailLine {
 }
 interface Detail { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; basis: Basis; partyId: number | null; partyTitle: string | null; description: string | null; status: DocStatus; finalizedAt: string | null; lines: DetailLine[] }
 
-const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", SALES_ORDER: "سفارش فروش" };
+const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", SALES_ORDER: "سفارش فروش", SALES_QUOTE: "پیش‌فاکتور" };
 const STATUS_FA: Record<DocStatus, string> = { REGISTERED: "ثبت‌شده", FINALIZED: "تایید انبار شده" };
-const INFO_TEXT = "ثبت حواله فروش (مجوز خروج از انبار) برای تحویل کالا به مشتری — بدون مبنا یا بر اساس یک سفارش فروش تایید‌شده. فی/مبلغ توسط موتور کاردکس محاسبه می‌شود، نه توسط کاربر.";
+const INFO_TEXT = "ثبت حواله فروش (مجوز خروج از انبار) برای تحویل کالا به مشتری — بدون مبنا یا بر اساس یک سفارش فروش یا پیش‌فاکتور تایید‌شده. فی/مبلغ توسط موتور کاردکس محاسبه می‌شود، نه توسط کاربر.";
 
 export default function SalesDeliveries() {
   const location = useLocation();
@@ -228,7 +229,8 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
     mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), basis: d.basis, warehouseId: String(d.warehouseId), partyId: d.partyId ? String(d.partyId) : "", description: d.description || "" }),
     mapDetailToRows: (d) =>
       d.lines.map((l) => ({
-        sourceSalesOrderLineId: l.sourceSalesOrderLineId ? String(l.sourceSalesOrderLineId) : "",
+        // شناسه‌ی ردیف مبنا (بسته به مبنا: ردیف سفارش فروش یا ردیف پیش‌فاکتور) — همین یک فیلد state برای هر دو است
+        sourceSalesOrderLineId: String(l.sourceSalesOrderLineId ?? l.sourceSalesQuoteLineId ?? ""),
         sourceNumber: "",
         goodsItemId: String(l.goodsItemId),
         goodsItemCode: l.goodsItemCode,
@@ -262,7 +264,8 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
       return;
     }
     const q = header.date ? `?destDate=${header.date}` : "";
-    api.get(`/sales-deliveries/pickable-sales-order-lines${q}`).then(setPickableLines).catch(() => setPickableLines([]));
+    const endpoint = header.basis === "SALES_QUOTE" ? "pickable-sales-quote-lines" : "pickable-sales-order-lines";
+    api.get(`/sales-deliveries/${endpoint}${q}`).then(setPickableLines).catch(() => setPickableLines([]));
   }, [header.basis, header.date]);
 
   const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceSalesOrderLineId);
@@ -302,7 +305,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
   }
 
   function onSourceLineChange(idx: number, sourceSalesOrderLineId: string) {
-    const src = pickableLines.find((l) => String(l.sourceSalesOrderLineId) === sourceSalesOrderLineId);
+    const src = pickableLines.find((l) => String(l.sourceLineId) === sourceSalesOrderLineId);
     updateRow(idx, {
       sourceSalesOrderLineId,
       sourceNumber: src ? String(src.number) : "",
@@ -339,7 +342,8 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
       partyId: header.partyId ? Number(header.partyId) : null,
       description: header.description,
       lines: nonEmptyRows.map((r) => ({
-        sourceSalesOrderLineId: r.sourceSalesOrderLineId ? Number(r.sourceSalesOrderLineId) : null,
+        sourceSalesOrderLineId: header.basis === "SALES_ORDER" && r.sourceSalesOrderLineId ? Number(r.sourceSalesOrderLineId) : null,
+        sourceSalesQuoteLineId: header.basis === "SALES_QUOTE" && r.sourceSalesOrderLineId ? Number(r.sourceSalesOrderLineId) : null,
         goodsItemId: r.goodsItemId ? Number(r.goodsItemId) : undefined,
         unitId: Number(r.unitId),
         quantity: Number(r.quantity) || 0,
@@ -360,6 +364,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
         if (body.lines.length === 0) return "حواله فروش باید حداقل یک ردیف کالا داشته باشد";
         for (const [i, l] of body.lines.entries()) {
           if (header.basis === "SALES_ORDER" && !l.sourceSalesOrderLineId) return `ردیف ${i + 1}: انتخاب ردیف سفارش فروش الزامی است`;
+          if (header.basis === "SALES_QUOTE" && !l.sourceSalesQuoteLineId) return `ردیف ${i + 1}: انتخاب ردیف پیش‌فاکتور الزامی است`;
           if (header.basis === "NO_BASIS" && !l.goodsItemId) return `کالا برای ردیف ${i + 1} الزامی است`;
           if (!(l.quantity > 0)) return `مقدار ردیف ${i + 1} باید عددی مثبت باشد`;
         }
@@ -378,6 +383,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
   const selectedWarehouseStillListed = warehouses.some((w) => String(w.id) === header.warehouseId);
   const warehouseOptions = warehouses.filter((w) => w.isActive || String(w.id) === header.warehouseId);
   const hasSourceColumn = header.basis !== "NO_BASIS";
+  const sourceLabel = header.basis === "SALES_QUOTE" ? "پیش‌فاکتور" : "سفارش فروش";
   const selectedParty = parties.find((p) => String(p.id) === header.partyId);
 
   return (
@@ -476,7 +482,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
               <thead>
                 <tr>
                   <th>ردیف</th>
-                  {hasSourceColumn && <th>سفارش فروش مبدا</th>}
+                  {hasSourceColumn && <th>{sourceLabel} مبدا</th>}
                   <th>کالا</th>
                   <th>واحد</th>
                   <th>ردیابی</th>
@@ -492,7 +498,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                 {rows.map((row, idx) => {
                   const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
                   const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
-                  const src = pickableLines.find((l) => String(l.sourceSalesOrderLineId) === row.sourceSalesOrderLineId);
+                  const src = pickableLines.find((l) => String(l.sourceLineId) === row.sourceSalesOrderLineId);
                   const sourceDisplay = src ? `${toFaDigits(String(src.number))}` : row.sourceNumber ? toFaDigits(row.sourceNumber) : "";
                   return (
                     <tr key={idx}>
@@ -500,7 +506,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                       {hasSourceColumn && (
                         <td style={{ minWidth: 90 }}>
                           <RecordPickerField
-                            title="انتخاب ردیف سفارش فروش"
+                            title={`انتخاب ردیف ${sourceLabel}`}
                             disabled={coreDisabled}
                             displayValue={sourceDisplay}
                             rows={pickableLines}
@@ -511,7 +517,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                               { header: "مانده", render: (l) => formatAmountFa(l.remaining), filterValue: (l) => String(l.remaining), width: "90px" },
                             ]}
                             onOpen={guardRowEntry}
-                            onSelect={(l) => onSourceLineChange(idx, String(l.sourceSalesOrderLineId))}
+                            onSelect={(l) => onSourceLineChange(idx, String(l.sourceLineId))}
                           />
                         </td>
                       )}
