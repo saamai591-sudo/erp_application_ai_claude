@@ -110,6 +110,30 @@ function validWarehouseDocType(accountType: string, warehouseDocType?: string | 
   return false;
 }
 
+// جلوگیری از رکورد تکراری: هر ترکیب (نوع حساب، گروه حسابداری، گروه انبار، نوع فروش، نوع سند انبار، نوع خرید) فقط یک معین می‌تواند داشته باشد
+// (مثلاً «حساب دریافتنی فروش» + نوع فروش «فروش» دو بار تعریف نمی‌شود). مقدارهای خالی (null) با هم برابر حساب می‌شوند.
+async function assertNoDuplicateSetting(key: {
+  accountType: string;
+  accountingGroupId: number | null;
+  warehouseGroupId: number | null;
+  salesTypeId: number | null;
+  warehouseDocType: string | null;
+  purchaseTypeId: number | null;
+}, excludeId?: number) {
+  const dup = await prisma.goodsServiceAccountingSetting.findFirst({
+    where: {
+      accountType: key.accountType as any,
+      accountingGroupId: key.accountingGroupId,
+      warehouseGroupId: key.warehouseGroupId,
+      salesTypeId: key.salesTypeId,
+      warehouseDocType: key.warehouseDocType as any,
+      purchaseTypeId: key.purchaseTypeId,
+      ...(excludeId ? { NOT: { id: excludeId } } : {}),
+    },
+  });
+  if (dup) throw new Error("این تنظیم تکراری است: برای همین ترکیب (نوع حساب / گروه حسابداری / گروه انبار / نوع فروش / نوع خرید / نوع سند) قبلاً یک معین تعریف شده است");
+}
+
 router.get("/goods-service-accounting", async (_req, res) => {
   res.json(
     await prisma.goodsServiceAccountingSetting.findMany({
@@ -168,6 +192,15 @@ router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create
     if (!account || account.level.title !== "معین") {
       return res.status(400).json({ error: "حساب انتخاب‌شده باید در سطح «معین» باشد" });
     }
+
+    await assertNoDuplicateSetting({
+      accountType: body.accountType,
+      accountingGroupId: groupless ? null : body.accountingGroupId ?? null,
+      warehouseGroupId: body.warehouseGroupId || null,
+      salesTypeId: body.salesTypeId || null,
+      warehouseDocType: body.warehouseDocType || null,
+      purchaseTypeId: body.purchaseTypeId || null,
+    });
 
     const created = await prisma.goodsServiceAccountingSetting.create({
       data: {
@@ -233,6 +266,19 @@ router.put("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.edi
   }
 
   try {
+    // مقدار نهایی هر فیلد بعد از این ویرایش (فیلدی که در بدنه نیامده، همان مقدار فعلی رکورد است)
+    await assertNoDuplicateSetting(
+      {
+        accountType,
+        accountingGroupId: groupless ? null : body.accountingGroupId ?? setting.accountingGroupId,
+        warehouseGroupId: body.warehouseGroupId === undefined ? setting.warehouseGroupId : body.warehouseGroupId || null,
+        salesTypeId: body.salesTypeId === undefined ? setting.salesTypeId : body.salesTypeId || null,
+        warehouseDocType: body.warehouseDocType === undefined ? setting.warehouseDocType : body.warehouseDocType || null,
+        purchaseTypeId: body.purchaseTypeId === undefined ? setting.purchaseTypeId : body.purchaseTypeId || null,
+      },
+      id
+    );
+
     const updated = await prisma.goodsServiceAccountingSetting.update({
       where: { id },
       data: {

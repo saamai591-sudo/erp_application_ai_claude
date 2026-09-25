@@ -263,7 +263,9 @@ function SettingForm({ editId }: { editId?: number }) {
   const showWarehouseGroup = INVENTORY_TYPES.has(form.accountType);
   const showWarehouseDocType = WAREHOUSE_DOC_TYPES.has(form.accountType);
   const showPurchaseType = PURCHASE_TYPES.has(form.accountType);
-  const showAccountingGroup = !GROUPLESS_TYPES.has(form.accountType);
+  // «نوع حساب» اولین فیلد فرم است؛ «گروه حسابداری» تا وقتی نوعی انتخاب نشده نمایش داده نمی‌شود، و بعد از انتخاب نوع هم فقط برای نوع‌هایی که
+  // بر اساس گروه حسابداری تفکیک می‌شوند (نه GROUPLESS_TYPES) نمایش داده می‌شود.
+  const showAccountingGroup = !!form.accountType && !GROUPLESS_TYPES.has(form.accountType);
   const warehouseDocTypeOptions =
     form.accountType === "WAREHOUSE_RECEIPT_CREDIT" ? WAREHOUSE_RECEIPT_DOC_TYPES : WAREHOUSE_ISSUE_DOC_TYPES;
 
@@ -318,19 +320,6 @@ function SettingForm({ editId }: { editId?: number }) {
       <form id="goods-service-accounting-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
         <div className="form-grid">
-          {showAccountingGroup && (
-            <div className="form-field">
-              <label>گروه حسابداری<RequiredMark /></label>
-              <select
-                value={form.accountingGroupId}
-                disabled={hasTransactions}
-                onChange={(e) => setForm({ ...form, accountingGroupId: e.target.value })}
-              >
-                <option value="">انتخاب کنید</option>
-                {accountingGroups.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
-              </select>
-            </div>
-          )}
           <div className="form-field">
             <label>نوع حساب<RequiredMark /></label>
             <select
@@ -344,6 +333,19 @@ function SettingForm({ editId }: { editId?: number }) {
               ))}
             </select>
           </div>
+          {showAccountingGroup && (
+            <div className="form-field">
+              <label>گروه حسابداری<RequiredMark /></label>
+              <select
+                value={form.accountingGroupId}
+                disabled={hasTransactions}
+                onChange={(e) => setForm({ ...form, accountingGroupId: e.target.value })}
+              >
+                <option value="">انتخاب کنید</option>
+                {accountingGroups.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
+              </select>
+            </div>
+          )}
           {/* هر چهار فیلد زیر روی یک خانه‌ی مشترک از گرید قرار می‌گیرند (نه هرکدام خانه‌ی جدا) تا هم با
               تغییر «نوع حساب» فیلد «معین» بعدی جابه‌جا نشود، و هم در حالتی که هنوز نوعی انتخاب نشده
               فضای خالی زیاد ایجاد نشود؛ چون این چهار حالت متقابلاً انحصاری‌اند (بر اساس نوع حساب) */}
