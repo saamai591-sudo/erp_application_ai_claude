@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import DatePicker from "react-multi-date-picker";
 import DateObject from "react-date-object";
 import persian from "react-date-object/calendars/persian";
@@ -108,6 +108,11 @@ export function JalaliDatePicker({
   const toIso = fiscalYear && period ? period.toDate.slice(0, 10) : "";
   const toJalali = (iso: string) =>
     new DateObject({ date: iso, format: "YYYY-MM-DD", calendar: gregorian, locale: gregorian_en }).convert(persian, persian_fa);
+  // بدون مقدار، تقویم به‌جای «امروز» روی دوره مالی انتخاب‌شده باز می‌شود: امروز اگر در بازه باشد، وگرنه روز شروع دوره (سال شروع دوره مالی)
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const viewIso = !value && fromIso && toIso ? (todayIso >= fromIso && todayIso <= toIso ? todayIso : fromIso) : "";
+  // یک نمونه‌ی ثابت به‌ازای هر viewIso تا با هر رندر، نمای تقویم (ناوبری کاربر بین ماه‌ها) به حالت اول برنگردد
+  const viewDate = useMemo(() => (viewIso ? toJalali(viewIso) : undefined), [viewIso]);
   const rangeMessage = () =>
     `تاریخ باید در بازه‌ی دوره مالی «${period?.title}» (${formatJalaliDate(fromIso)} تا ${formatJalaliDate(toIso)}) باشد`;
   const outOfRange = !!value && ((!!fromIso && value < fromIso) || (!!toIso && value > toIso));
@@ -283,6 +288,7 @@ export function JalaliDatePicker({
       onChange={handleCalendarPick}
       minDate={fromIso ? toJalali(fromIso) : undefined}
       maxDate={toIso ? toJalali(toIso) : undefined}
+      currentDate={viewDate}
       render={(_value, openCalendar) => (
         <div className="jalali-date-wrapper">
           <button type="button" className="jalali-date-calendar-btn" onClick={disabled ? undefined : openCalendar} tabIndex={-1} disabled={disabled}>
