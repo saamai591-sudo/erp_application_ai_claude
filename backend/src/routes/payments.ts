@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { recomputeCashBoxHasTransactions, recomputeBankAccountHasTransactions } from "../utils/treasuryTracking";
+import { assertUsedInstrumentsUnchanged } from "../utils/instrumentLock";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { assertChequeNotUsedElsewhere, findChequeUses } from "../utils/chequeUsage";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
@@ -699,6 +700,7 @@ router.put("/payments/:id", can(`${FORM}.edit`), async (req, res) => {
     const instrumentLines = await validateInstrumentLines(body.instrumentLines, baseCurrency, date);
     const instrumentByKey = new Map(instrumentLines.map((l) => [l.clientKey, l]));
     const settlementLines = await validateSubjectLines(body.settlementLines, instrumentByKey, baseCurrency, id);
+    assertUsedInstrumentsUnchanged(await prisma.paymentInstrumentLine.findMany({ where: { paymentId: id } }), instrumentLines, settlementLines);
 
     await prisma.$transaction(async (tx: any) => {
       // ردیف‌های تسویه به ردیف‌های ابزار ارجاع می‌دهند (FK محدودکننده) — پس اول آن‌ها حذف می‌شوند

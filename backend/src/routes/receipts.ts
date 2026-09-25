@@ -10,6 +10,7 @@ import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss
 import { issueReceiptJournalEntry, revertReceiptJournalEntry } from "../services/receiptJournalEntryService";
 import { can } from "../authz/guard";
 import { assertReceiptAdvanceNotAllocated } from "../services/salesInvoiceAdvanceService";
+import { assertUsedInstrumentsUnchanged } from "../utils/instrumentLock";
 import { findFormPrefix } from "../authz/registry";
 
 const FORM = findFormPrefix("receipts");
@@ -156,6 +157,10 @@ async function cleanOneInstrumentLine(l: InstrumentLineInput, idx: number, baseC
   } else if (l.type === "CHEQUE") {
     if (!l.chequeNumber) throw new Error(`ردیف ${idx + 1}: شماره چک الزامی است`);
     if (!l.chequeDueDate) throw new Error(`ردیف ${idx + 1}: تاریخ سررسید چک الزامی است`);
+    // Documents/تغییرات نقدینگی و چک راه اندازی مرور اسناد دریافتی و پرداختی.md: صندوقی که چک در آن دریافت شده الزامی است
+    if (!l.cashBoxId) throw new Error(`ردیف ${idx + 1}: انتخاب صندوق برای ابزار چک الزامی است`);
+    const chequeCashBox = await prisma.cashBox.findUnique({ where: { id: l.cashBoxId } });
+    if (!chequeCashBox) throw new Error(`ردیف ${idx + 1}: صندوق یافت نشد`);
     // طبق سند: چک همیشه با ارز پایه ثبت می‌شود
     currencyId = baseCurrency.id;
     if (!l.chequeTypeId) throw new Error(`ردیف ${idx + 1}: نوع چک الزامی است`);
@@ -177,7 +182,7 @@ async function cleanOneInstrumentLine(l: InstrumentLineInput, idx: number, baseC
     currencyId,
     fxRate,
     baseAmount,
-    cashBoxId: l.type === "CASH" ? l.cashBoxId! : null,
+    cashBoxId: l.type === "CASH" || l.type === "CHEQUE" ? l.cashBoxId! : null,
     bankAccountId: l.type === "BANK_TRANSFER" || l.type === "POS" ? l.bankAccountId! : null,
     referenceNumber: l.referenceNumber || null,
     chequeNumber: l.type === "CHEQUE" ? l.chequeNumber! : null,
@@ -723,6 +728,7 @@ router.put("/receipts/:id", can(`${FORM}.edit`), async (req, res) => {
     const instrumentLines = await validateInstrumentLines(body.instrumentLines, baseCurrency);
     const instrumentByKey = new Map(instrumentLines.map((l) => [l.clientKey, l]));
     const settlementLines = await validateSubjectLines(body.settlementLines, instrumentByKey, baseCurrency, id);
+    assertUsedInstrumentsUnchanged(await prisma.receiptInstrumentLine.findMany({ where: { receiptId: id } }), instrumentLines, settlementLines);
 
     await prisma.$transaction(async (tx: any) => {
       await tx.receiptSettlementLine.deleteMany({ where: { receiptId: id } });
@@ -835,6 +841,10 @@ router.post("/receipts/:id/approve", can(`${FORM}.approve`), async (req, res) =>
           });
           // eslint-disable-next-line no-await-in-loop
           await tx.receiptInstrumentLine.update({ where: { id: l.id }, data: { chequeItemId: cheque.id, chequeStep: 1 } });
+          if (l.cashBoxId) {
+            // eslint-disable-next-line no-await-in-loop
+            await tx.cashBox.update({ where: { id: l.cashBoxId }, data: { hasTransactions: true } });
+          }
         } else if (l.type === "CASH" && l.cashBoxId) {
           // eslint-disable-next-line no-await-in-loop
           await tx.cashBox.update({ where: { id: l.cashBoxId }, data: { hasTransactions: true } });

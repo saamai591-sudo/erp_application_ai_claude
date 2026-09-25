@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, Fragment, useEffect, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
 import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -334,6 +334,15 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
 
   const baseCurrency = currencies.find((c) => c.isBase);
 
+  // قاعده‌ی پایه: ارز پیش‌فرض ردیف‌های نقدِ سند جدید «ارز پایه» است (کاربر می‌تواند تغییرش دهد)
+  useEffect(() => {
+    if (editId || !baseCurrency) return;
+    if (instrumentRows.some((r) => r.type === "CASH" && !r.currencyId)) {
+      setInstrumentRows((prev) => prev.map((r) => (r.type === "CASH" && !r.currencyId ? { ...r, currencyId: String(baseCurrency.id), fxRate: "1" } : r)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instrumentRows, baseCurrency?.id, editId]);
+
   function applyDetail(d: Detail) {
     setDocUpdatedAt(d.updatedAt ?? "");
     setMeta({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle, journalEntryId: d.journalEntryId ?? null, journalEntryReferenceNumber: d.journalEntryReferenceNumber ?? null });
@@ -590,6 +599,8 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
 
     const missingChequeType = instrumentRows.some((r) => r.type === "CHEQUE" && Number(r.amount) > 0 && !r.chequeTypeId);
     if (missingChequeType) return setError("نوع چک در همه‌ی ردیف‌های چک الزامی است");
+    // ابزار چک باید صندوقِ دریافت‌کننده‌ی چک را داشته باشد (بک‌اند هم کنترل می‌کند)
+    if (instrumentRows.some((r) => r.type === "CHEQUE" && Number(r.amount) > 0 && !r.cashBoxId)) return setError("صندوق در همه‌ی ردیف‌های چک الزامی است");
 
     if (reEdit) {
       if (instrumentRows.some((r) => !(Number(r.amount) > 0))) return setError("مبلغ همه‌ی ردیف‌های ابزار باید مثبت باشد؛ برای حذف یک ردیف، آن را حذف کنید");
@@ -847,8 +858,11 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                   const typeDisabled = !!reEdit && !!row.id;
                   const bankAccount = bankAccounts.find((a) => String(a.id) === row.bankAccountId);
                   const isBaseCurrencyRow = !row.currencyId || Number(row.currencyId) === baseCurrency.id;
+                  // ابزاری که در ردیف‌های موضوعات استفاده شده قابل ویرایش/حذف نیست؛ ابتدا باید موضوعات مرتبط حذف شوند (بک‌اند هم کنترل می‌کند)
+                  const instrumentUsed = settlementRows.some((sr) => sr.instrumentClientKey === row.clientKey);
                   return (
-                    <tr key={row.clientKey}>
+                    <Fragment key={row.clientKey}>
+                    <tr className={instrumentUsed ? "instrument-row-locked" : undefined} {...(instrumentUsed ? ({ inert: "" } as any) : {})}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                       <td style={{ minWidth: 140 }}>
                         <select
@@ -914,6 +928,12 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                             <div style={{ width: 140 }}>
                               <JalaliDatePicker value={row.chequeDueDate} onChange={(v) => updateInstrumentRow(idx, { chequeDueDate: v })} />
                             </div>
+                            <select value={row.cashBoxId} onChange={(e) => updateInstrumentRow(idx, { cashBoxId: e.target.value })} style={{ width: 150 }} title="صندوقی که چک در آن دریافت شده">
+                              <option value="">انتخاب صندوق (الزامی)</option>
+                              {cashBoxes.map((c) => (
+                                <option key={c.id} value={c.id}>{c.title}</option>
+                              ))}
+                            </select>
                             <select value={row.chequeBankBranchId} onChange={(e) => updateInstrumentRow(idx, { chequeBankBranchId: e.target.value })} style={{ flex: 1 }}>
                               <option value="">شعبه بانک (اختیاری)</option>
                               {bankBranches.map((b) => (
@@ -954,6 +974,14 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                           </button>
                       </td>
                     </tr>
+                    {instrumentUsed && (
+                      <tr>
+                        <td colSpan={14} style={{ fontSize: 11.5, color: "var(--ink-soft)", background: "var(--bg)" }}>
+                          🔒 این ابزار در موضوعات استفاده شده و قابل ویرایش/حذف نیست؛ برای ویرایش، ابتدا ردیف‌های موضوعاتِ مرتبط را حذف کنید.
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>

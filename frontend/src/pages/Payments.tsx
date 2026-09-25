@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, Fragment, useEffect, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
 import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -350,6 +350,15 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
   const { flash } = useSavedFlash();
 
   const baseCurrency = currencies.find((c) => c.isBase);
+
+  // قاعده‌ی پایه: ارز پیش‌فرض ردیف‌های نقدِ سند جدید «ارز پایه» است (کاربر می‌تواند تغییرش دهد)
+  useEffect(() => {
+    if (editId || !baseCurrency) return;
+    if (instrumentRows.some((r) => r.type === "CASH" && !r.currencyId)) {
+      setInstrumentRows((prev) => prev.map((r) => (r.type === "CASH" && !r.currencyId ? { ...r, currencyId: String(baseCurrency.id), fxRate: "1" } : r)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instrumentRows, baseCurrency?.id, editId]);
 
   // «چک روز»: چک همان روزِ سند است و مدت‌دار نیست؛ تاریخ سررسید غیرفعال و همیشه برابر تاریخ سند است
   const isSameDayType = (typeId: string) => !!chequeTypes.find((t) => String(t.id) === typeId)?.isSameDay;
@@ -908,8 +917,11 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                   const isSpendRow = row.type === "CHEQUE_TRANSFER";
                   const bankAccount = bankAccounts.find((a) => String(a.id) === row.bankAccountId);
                   const isBaseCurrencyRow = !row.currencyId || Number(row.currencyId) === baseCurrency.id;
+                  // ابزاری که در ردیف‌های موضوعات استفاده شده قابل ویرایش/حذف نیست؛ ابتدا باید موضوعات مرتبط حذف شوند (بک‌اند هم کنترل می‌کند)
+                  const instrumentUsed = settlementRows.some((sr) => sr.instrumentClientKey === row.clientKey);
                   return (
-                    <tr key={row.clientKey}>
+                    <Fragment key={row.clientKey}>
+                    <tr className={instrumentUsed ? "instrument-row-locked" : undefined} {...(instrumentUsed ? ({ inert: "" } as any) : {})}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                       <td style={{ minWidth: 140 }}>
                         <select
@@ -1080,6 +1092,14 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                           </button>
                       </td>
                     </tr>
+                    {instrumentUsed && (
+                      <tr>
+                        <td colSpan={14} style={{ fontSize: 11.5, color: "var(--ink-soft)", background: "var(--bg)" }}>
+                          🔒 این ابزار در موضوعات استفاده شده و قابل ویرایش/حذف نیست؛ برای ویرایش، ابتدا ردیف‌های موضوعاتِ مرتبط را حذف کنید.
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>
