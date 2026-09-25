@@ -3,6 +3,7 @@ import { Outlet, Navigate } from "react-router-dom";
 import { useAuth } from "../lib/AuthContext";
 import { useTabs } from "../lib/TabsContext";
 import { filterModulesByAccess } from "../navConfig";
+import { FitText } from "./FitText";
 import { usePermissions } from "../lib/usePermissions";
 import { TabsBar } from "./TabsBar";
 import { UserSettingsModal } from "./UserSettingsModal";
@@ -351,7 +352,7 @@ export default function Layout() {
                 <span className={`module-icon mod-ic-${MODULE_ICON[mod.title] || "layers"}`}>
                   <NavIcon name={MODULE_ICON[mod.title] || "layers"} />
                 </span>
-                <span>{mod.title}</span>
+                <FitText>{mod.title}</FitText>
               </button>
               {modOpen &&
                 mod.subModules.map((sub) => {
@@ -364,7 +365,7 @@ export default function Layout() {
                         <span className={`submodule-icon sub-ic-${SUBMODULE_ICON[sub.title] || "file"}`}>
                           <NavIcon name={SUBMODULE_ICON[sub.title] || "file"} />
                         </span>
-                        <span>{sub.title}</span>
+                        <FitText>{sub.title}</FitText>
                       </button>
                       {subOpen &&
                         sub.items.map((item) => {
@@ -378,7 +379,7 @@ export default function Layout() {
                                 title={item.create ? "باز کردن فرم جدید در تب جدید" : "باز کردن فهرست در تب جدید"}
                               >
                                 <span className={`nav-form-icon ic-${item.icon}`}><NavIcon name={item.icon} /></span>
-                                <span>{item.label}</span>
+                                <FitText>{item.label}</FitText>
                               </button>
                               <button
                                 className={`folder-btn ${isListActive ? "active" : ""}`}

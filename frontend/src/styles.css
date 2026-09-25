@@ -531,6 +531,8 @@ body {
   min-width: 0;
 }
 .nav-item .nav-label span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* متن سایدبار که در صورت نیاز فونتش کم می‌شود (components/FitText.tsx) */
+.fit-text { display: block; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; }
 .nav-item .nav-label:hover { color: var(--menu-title-ink); }
 .nav-item .nav-label.active-new { color: var(--menu-accent-1); font-weight: 600; }
 .nav-form-icon { display: flex; flex-shrink: 0; color: var(--menu-form-icon); }
