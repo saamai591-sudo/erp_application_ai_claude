@@ -57,8 +57,29 @@ async function withFiscalScope(model: string, args: any, query: (args: any) => P
   return query({ ...args, where: { ...(args?.where || {}), fiscalPeriodId } });
 }
 
+// «سرویس حذف سند حسابداری» (نقطه‌ی مرکزی): سند حسابداری «بررسی‌شده» (REVIEW) یا «تاییدشده» (APPROVED) هرگز قابل حذف نیست — مستقل از این‌که از کدام
+// سند مبدأ (فاکتور فروش/خرید، خزانه، انبار، بستن حساب ...) حذف شده باشد. چون همه‌ی مسیرها با prisma.journalEntry.delete/deleteMany حذف می‌کنند، کنترل
+// همین‌جا (روی کلاینت مشترک) انجام می‌شود تا هیچ مسیر فعلی یا آینده‌ای آن را دور نزند. ویرایش این اسناد هم فقط در وضعیت «ثبت» مجاز است (routes/journalEntries.ts).
+export const JOURNAL_ENTRY_LOCKED_DELETE_MESSAGE = "سند حسابداری تایید یا بررسی شده است و قابل حذف نیست؛ ابتدا سند را از وضعیت تایید/بررسی برگردانید";
+const LOCKED_JOURNAL_STATUSES = ["REVIEW", "APPROVED"] as const;
+
+async function assertJournalEntryDeletable(where: any) {
+  const locked = await rawPrisma.journalEntry.findFirst({ where: { AND: [where || {}, { status: { in: [...LOCKED_JOURNAL_STATUSES] as any } }] }, select: { id: true } });
+  if (locked) throw new Error(JOURNAL_ENTRY_LOCKED_DELETE_MESSAGE);
+}
+
 export const prisma = rawPrisma.$extends({
   query: {
+    journalEntry: {
+      async delete({ args, query }) {
+        await assertJournalEntryDeletable(args.where);
+        return query(args);
+      },
+      async deleteMany({ args, query }) {
+        await assertJournalEntryDeletable(args.where);
+        return query(args);
+      },
+    },
     $allModels: {
       findMany({ model, args, query }) {
         return withFiscalScope(model, args, query);
