@@ -440,6 +440,11 @@ export const REGISTRY: ModuleDef[] = [
           },
         ],
       },
+      {
+        key: "reports",
+        title: "گزارش",
+        forms: [{ key: "purchase-review", title: "مرور خرید", baseActions: ["view"] }],
+      },
     ],
   },
   {

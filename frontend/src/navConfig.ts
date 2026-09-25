@@ -228,6 +228,10 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "service-purchase-invoices", label: "فاکتور خرید خدمات", list: "/service-purchase-invoices", create: "/service-purchase-invoices/new", icon: "ledger" },
         ],
       },
+      {
+        title: "گزارش",
+        items: [{ key: "purchase-review", label: "مرور خرید", list: "/purchase-review", icon: "tree" }],
+      },
     ],
   },
   {
