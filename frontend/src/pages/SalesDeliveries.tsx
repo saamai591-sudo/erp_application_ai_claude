@@ -52,7 +52,7 @@ interface GoodsItemRow {
   trackingMethod: "NONE" | "BATCH" | "SERIAL";
   isLocationTracked: boolean;
 }
-interface PickableLine { id: number; sourceLineId: number; number: number; date: string; customerTitle: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
+interface PickableLine { id: number; sourceLineId: number; salesQuoteId?: number; customerPartyId?: number; number: number; date: string; customerTitle: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
 
 interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; basis: Basis; partyId: number | null; partyTitle: string | null; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number; totalAmount?: number }
 interface DetailLine {
@@ -318,6 +318,27 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
     });
   }
 
+  // انتخاب چندگانه‌ی ردیف پیش‌فاکتور از انتخابگر سطح ردیف: اولین ردیف تیک‌خورده در همین ردیف گرید می‌نشیند و بقیه بلافاصله بعد از آن به‌صورت ردیف جدید اضافه می‌شوند
+  function onSourceLinesPicked(idx: number, picked: PickableLine[]) {
+    if (picked.length === 0) return;
+    const toRow = (src: PickableLine): Partial<RowState> => ({
+      sourceSalesOrderLineId: String(src.sourceLineId),
+      sourceNumber: String(src.number),
+      goodsItemId: String(src.goodsItemId),
+      goodsItemCode: src.goodsItemCode,
+      goodsItemTitle: src.goodsItemTitle,
+      unitId: String(src.unitId),
+      unitTitle: src.unitTitle,
+      quantity: String(src.remaining),
+    });
+    setRows((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], ...toRow(picked[0]) };
+      next.splice(idx + 1, 0, ...picked.slice(1).map((src) => ({ ...emptyRow(), ...toRow(src) })));
+      return next;
+    });
+  }
+
   function onGoodsItemChange(idx: number, goodsItemId: string) {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
     updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "", unitTitle: "" });
@@ -326,6 +347,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
   function addRow() {
     setRows((prev) => [...prev, emptyRow()]);
   }
+
   function removeRow(idx: number) {
     setRows((prev) => prev.filter((_, i) => i !== idx));
   }
@@ -517,6 +539,8 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                               { header: "مانده", render: (l) => formatAmountFa(l.remaining), filterValue: (l) => String(l.remaining), width: "90px" },
                             ]}
                             onOpen={guardRowEntry}
+                            multiSelect={header.basis === "SALES_QUOTE"}
+                            onSelectMultiple={(ls) => onSourceLinesPicked(idx, ls)}
                             onSelect={(l) => onSourceLineChange(idx, String(l.sourceLineId))}
                           />
                         </td>

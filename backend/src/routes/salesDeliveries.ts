@@ -143,6 +143,10 @@ async function validateLines(
     physicalLocation: string | null;
   }[] = [];
 
+  // یک ردیف سفارش/پیش‌فاکتور می‌تواند در چند ردیف حواله بیاید (مثلاً تفکیک به‌خاطر سریال/بچ یا محل فیزیکی)؛ کنترل بر پایه‌ی «مجموع مقدار ردیف‌های ارجاع‌دهنده
+  // به آن ردیف مبنا ≤ مانده‌ی قابل تحویل آن» است، نه ممنوعیت انتخاب تکراری
+  const allocatedToSource = new Map<string, number>();
+
   for (const [idx, l] of lines.entries()) {
     const qty = Number(l.quantity);
     if (!(qty > 0)) throw new Error(`مقدار ردیف ${idx + 1} باید عددی مثبت باشد`);
@@ -157,7 +161,10 @@ async function validateLines(
       const info = await salesOrderLineRemaining(l.sourceSalesOrderLineId, excludeDeliveryId);
       if (!info) throw new Error(`ردیف سفارش فروش برای ردیف ${idx + 1} یافت نشد`);
       if (info.line.salesOrder.status !== "APPROVED") throw new Error(`سفارش فروش ردیف ${idx + 1} در وضعیت تایید نیست`);
-      if (qty > info.remaining) throw new Error(`مقدار ردیف ${idx + 1} از باقیمانده‌ی قابل تحویل (${info.remaining}) بیشتر است`);
+      const orderKey = `O:${info.line.id}`;
+      const orderTotal = (allocatedToSource.get(orderKey) || 0) + qty;
+      if (orderTotal > info.remaining) throw new Error(`ردیف ${idx + 1}: مجموع مقدار ردیف‌هایی که به این ردیف سفارش فروش ارجاع می‌دهند (${orderTotal}) از باقیمانده‌ی قابل تحویل (${info.remaining}) بیشتر است`);
+      allocatedToSource.set(orderKey, orderTotal);
       if (!partyCustomerId || info.line.salesOrder.customerId !== partyCustomerId) {
         throw new Error(`مشتری سفارش فروش ردیف ${idx + 1} با طرف مقابل انتخاب‌شده در هدر یکسان نیست`);
       }
@@ -169,7 +176,10 @@ async function validateLines(
       const info = await salesQuoteLineRemaining(l.sourceSalesQuoteLineId, excludeDeliveryId);
       if (!info) throw new Error(`ردیف پیش‌فاکتور برای ردیف ${idx + 1} یافت نشد`);
       if (info.line.salesQuote.status !== "APPROVED") throw new Error(`پیش‌فاکتور ردیف ${idx + 1} در وضعیت تایید نیست`);
-      if (qty > info.remaining) throw new Error(`مقدار ردیف ${idx + 1} از باقیمانده‌ی قابل تحویل (${info.remaining}) بیشتر است`);
+      const quoteKey = `Q:${info.line.id}`;
+      const quoteTotal = (allocatedToSource.get(quoteKey) || 0) + qty;
+      if (quoteTotal > info.remaining) throw new Error(`ردیف ${idx + 1}: مجموع مقدار ردیف‌هایی که به این ردیف پیش‌فاکتور ارجاع می‌دهند (${quoteTotal}) از باقیمانده‌ی قابل تحویل (${info.remaining}) بیشتر است`);
+      allocatedToSource.set(quoteKey, quoteTotal);
       if (!partyCustomerId || info.line.salesQuote.customerId !== partyCustomerId) {
         throw new Error(`مشتری پیش‌فاکتور ردیف ${idx + 1} با طرف مقابل انتخاب‌شده در هدر یکسان نیست`);
       }
@@ -290,6 +300,7 @@ router.get("/sales-deliveries/pickable-sales-quote-lines", can(`${FORM}.view`), 
         id: l.id,
         sourceLineId: l.id,
         salesQuoteId: l.salesQuote.id,
+        customerPartyId: party.id,
         number: l.salesQuote.number,
         date: l.salesQuote.date,
         customerTitle: party.category === "LEGAL" ? party.name : `${party.firstName || ""} ${party.lastName || ""}`.trim(),
