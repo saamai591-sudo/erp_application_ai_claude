@@ -9,6 +9,7 @@ import { digitsOnly } from "../lib/digits";
 import { toFaDigits } from "../lib/formatAmount";
 import { useSelectedFiscalPeriod } from "../lib/useSelectedFiscalPeriod";
 import { formatJalaliDate } from "../lib/formatDate";
+import { showError } from "../lib/toast";
 
 function CalendarIcon() {
   return (
@@ -107,6 +108,8 @@ export function JalaliDatePicker({
   const toIso = fiscalYear && period ? period.toDate.slice(0, 10) : "";
   const toJalali = (iso: string) =>
     new DateObject({ date: iso, format: "YYYY-MM-DD", calendar: gregorian, locale: gregorian_en }).convert(persian, persian_fa);
+  const rangeMessage = () =>
+    `تاریخ باید در بازه‌ی دوره مالی «${period?.title}» (${formatJalaliDate(fromIso)} تا ${formatJalaliDate(toIso)}) باشد`;
   const outOfRange = !!value && ((!!fromIso && value < fromIso) || (!!toIso && value > toIso));
 
   // slots/cursor هم به‌صورت state (برای رندر) و هم در یک ref (live، برای خواندن هم‌زمان/بدون تاخیر
@@ -154,7 +157,17 @@ export function JalaliDatePicker({
     pendingCaret.current = caretPosForSlot(newCursor);
     rerender();
     if (newSlots.every((s) => s)) {
-      onChange(slotsToGregorianIso(newSlots) ?? "");
+      const iso = slotsToGregorianIso(newSlots) ?? "";
+      // تاریخ کامل دستی/چسبانده‌شده‌ی بیرون از دوره مالی پذیرفته نمی‌شود: پیام می‌دهد و مقدار قبلیِ معتبر برمی‌گردد
+      if (iso && ((fromIso && iso < fromIso) || (toIso && iso > toIso))) {
+        showError(rangeMessage());
+        const previous = gregorianToJalaliSlots(value);
+        live.current = { slots: previous, cursor: previous.every((s) => s) ? 8 : 0 };
+        pendingCaret.current = caretPosForSlot(live.current.cursor);
+        rerender();
+        return;
+      }
+      onChange(iso);
     } else if (newSlots.every((s) => !s)) {
       onChange("");
     }
@@ -281,7 +294,7 @@ export function JalaliDatePicker({
             dir="ltr"
             placeholder={placeholder}
             aria-invalid={outOfRange || undefined}
-            title={outOfRange ? `تاریخ باید در بازه‌ی دوره مالی «${period?.title}» (${formatJalaliDate(fromIso)} تا ${formatJalaliDate(toIso)}) باشد` : undefined}
+            title={outOfRange ? rangeMessage() : undefined}
             value={toFaDigits(buildMaskedFromSlots(slots))}
             onKeyDown={disabled ? undefined : handleKeyDown}
             onPaste={disabled ? undefined : handlePaste}
