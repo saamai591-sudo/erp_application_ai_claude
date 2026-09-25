@@ -1486,6 +1486,7 @@ tbody tr:hover { background: var(--bg); }
   background: var(--surface); border-radius: var(--radius); width: 100%; max-width: 620px; padding: 22px;
   box-shadow: var(--shadow-md);
 }
+.modal.modal-wide { max-width: min(1200px, 96vw); }
 .modal h3 { margin: 0 0 16px; font-size: 16px; font-weight: 700; }
 .modal .actions { display: flex; justify-content: flex-start; gap: 10px; margin-top: 18px; }
 

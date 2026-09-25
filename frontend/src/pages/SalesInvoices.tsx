@@ -153,20 +153,6 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   const vatRates = useVatRates();
   // «تخصیص پیش‌دریافت»: عملیات مستقل از ثبت/ویرایش فاکتور (Documents/تخصیص پیش دریافت.md)
   const [advanceOpen, setAdvanceOpen] = useState(false);
-  const [advance, setAdvance] = useState<{ total: number; allocatedTotal: number; payable: number; vatTotal: number; allocatedVatTotal: number; vatPayable: number } | null>(null);
-  async function loadAdvance() {
-    if (!editId) return setAdvance(null);
-    try {
-      const s: AdvanceState = await api.get(`/sales-invoices/${editId}/advance-allocations`);
-      setAdvance({ total: s.invoice.total, allocatedTotal: s.allocatedTotal, payable: s.payable, vatTotal: s.invoice.vatTotal, allocatedVatTotal: s.allocatedVatTotal, vatPayable: s.vatPayable });
-    } catch {
-      setAdvance(null);
-    }
-  }
-  useEffect(() => {
-    loadAdvance();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editId]);
   const navigate = useNavigate();
   const { openTab } = useTabs();
   const location = useLocation();
@@ -519,38 +505,6 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
               <input dir="ltr" value={toFaDigits(String(meta.journalEntryReferenceNumber))} disabled />
             </div>
           )}
-          {editId && advance && (
-            <>
-              <div className="form-field">
-                <label>مبلغ فاکتور</label>
-                <input dir="ltr" value={formatAmountFa(advance.total)} disabled />
-              </div>
-              <div className="form-field">
-                <label>پیش‌دریافت تخصیص‌یافته</label>
-                <input dir="ltr" value={formatAmountFa(advance.allocatedTotal)} disabled />
-              </div>
-              <div className="form-field">
-                <label>مانده قابل پرداخت</label>
-                <input dir="ltr" value={formatAmountFa(advance.payable)} disabled />
-              </div>
-              {(advance.vatTotal > 0 || advance.allocatedVatTotal > 0) && (
-                <>
-                  <div className="form-field">
-                    <label>ارزش افزوده فاکتور</label>
-                    <input dir="ltr" value={formatAmountFa(advance.vatTotal)} disabled />
-                  </div>
-                  <div className="form-field">
-                    <label>پیش‌دریافت ارزش افزوده تخصیص‌یافته</label>
-                    <input dir="ltr" value={formatAmountFa(advance.allocatedVatTotal)} disabled />
-                  </div>
-                  <div className="form-field">
-                    <label>مانده ارزش افزوده قابل پرداخت</label>
-                    <input dir="ltr" value={formatAmountFa(advance.vatPayable)} disabled />
-                  </div>
-                </>
-              )}
-            </>
-          )}
           <div className="form-field">
             <label>تاریخ<RequiredMark /></label>
             <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={headerDisabled} />
@@ -723,7 +677,6 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
           onClose={() => setAdvanceOpen(false)}
           onSaved={() => {
             setAdvanceOpen(false);
-            loadAdvance();
           }}
         />
       )}
@@ -858,7 +811,7 @@ function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: n
   }
 
   return (
-    <Modal title="تخصیص پیش‌دریافت" onClose={onClose}>
+    <Modal title="تخصیص پیش‌دریافت" onClose={onClose} wide>
       {loadError && <div style={{ color: "var(--danger)", marginBottom: 8 }}>{loadError}</div>}
       {!state && !loadError && <div>در حال بارگذاری...</div>}
       {state && (
@@ -953,6 +906,7 @@ function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: n
               onConfirm={applyPicked}
               onClose={() => setPickerOpen(false)}
               confirmLabel="تایید"
+              wide
             />
           )}
         </>

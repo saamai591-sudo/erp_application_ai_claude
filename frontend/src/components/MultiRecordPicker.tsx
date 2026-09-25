@@ -28,12 +28,14 @@ export function MultiPickerDialog<T extends { id: number | string }>({
   onConfirm,
   onClose,
   confirmLabel = "افزودن",
+  wide,
 }: {
   title: string;
   rows: T[];
   columns: PickerColumn<T>[];
   initialChecked: Set<T["id"]>;
   confirmLabel?: string;
+  wide?: boolean;
   onConfirm: (checked: Set<T["id"]>) => void;
   onClose: () => void;
 }) {
@@ -103,7 +105,7 @@ export function MultiPickerDialog<T extends { id: number | string }>({
   });
 
   return (
-    <Modal title={title} onClose={onClose}>
+    <Modal title={title} onClose={onClose} wide={wide}>
       <div className="picker-table-wrap" ref={kb.wrapRef}>
         <table className="picker-table">
           <thead>
