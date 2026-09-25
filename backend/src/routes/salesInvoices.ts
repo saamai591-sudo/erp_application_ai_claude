@@ -5,7 +5,7 @@ import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation
 import { assertRecordNotStale } from "../utils/concurrency";
 import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
 import { getVatRatePercentForDate, getAdvanceReceiptMethodForDate } from "../services/accountingSettingsService";
-import { getSalesInvoiceAdvanceState, saveSalesInvoiceAdvanceAllocations, assertAdvanceAllocationsStillValid, salesInvoiceNetTotal } from "../services/salesInvoiceAdvanceService";
+import { getSalesInvoiceAdvanceState, saveSalesInvoiceAdvanceAllocations, assertAdvanceAllocationsStillValid, salesInvoiceNetTotal, salesInvoiceVatTotal } from "../services/salesInvoiceAdvanceService";
 import { toBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConversion";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
@@ -390,7 +390,7 @@ router.put("/sales-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
     const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
     const lines = await validateLines(body.lines, body.basis, currency, fxRate, baseCurrency, date, id);
-    await assertAdvanceAllocationsStillValid(id, { customerId: body.customerId, currencyId: body.currencyId, date, netTotal: salesInvoiceNetTotal(lines as any) });
+    await assertAdvanceAllocationsStillValid(id, { customerId: body.customerId, currencyId: body.currencyId, date, netTotal: salesInvoiceNetTotal(lines as any), vatTotal: salesInvoiceVatTotal(lines as any, fxRate) });
 
     await prisma.$transaction([
       prisma.salesInvoiceLine.deleteMany({ where: { salesInvoiceId: id } }),
@@ -569,6 +569,7 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
     //  • نرخ تاریخ معامله/فاکتور: روی «سود و زیان تسعیر ارز» (اختلاف مثبت = زیان، بدهکار؛ منفی = سود، بستانکار)
     //  • نرخ تاریخی پیش‌دریافت: مبلغ فروش برای بخش پیش‌دریافت با نرخ تاریخی ثبت می‌شود (اصلاح درآمد فروش به‌اندازه‌ی اختلاف)، بدون تسعیر جدا
     // مبلغ ارزی تخصیص/مانده‌ی قابل پرداخت هرگز تحت‌تأثیر اختلاف نرخ نیست. سند همیشه بالانس است.
+    // «پیش‌دریافت ارزش افزوده» (Documents/تغییرات تخصیص پیش‌دریافت.md) همین منطق را جدا از پیش‌دریافت عادی و روی دریافتنی/ارزش‌افزوده‌ی فاکتور دارد.
     const advanceDebitLines: IssueLineInput[] = [];
     const advanceAdjustLines: IssueLineInput[] = [];
     const allocations = await prisma.salesInvoiceAdvanceAllocation.findMany({
@@ -582,26 +583,30 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
         include: { account: true },
       });
       const invIsBase = invoice.currencyId === baseCurrency.id;
-      let allocCurrency = 0;
-      let allocInvoiceBase = 0;
-      let histBase = 0;
+      // مجموع هر ماهیت جدا نگهداری می‌شود («پیش‌دریافت» روی دریافتنیِ مبلغ، «پیش‌دریافت ارزش افزوده» روی دریافتنیِ ارزش‌افزوده) و هرگز با هم جمع نمی‌شوند
+      const acc = {
+        ADVANCE_RECEIPT: { cur: 0, inv: 0, hist: 0 },
+        ADVANCE_VAT_RECEIPT: { cur: 0, inv: 0, hist: 0 },
+      };
       for (const a of allocations) {
         const l = a.receiptSettlementLine;
         const rt = l.receiptType;
         const amount = Number(a.amount);
+        const bucket = a.nature === "ADVANCE_VAT_RECEIPT" ? acc.ADVANCE_VAT_RECEIPT : acc.ADVANCE_RECEIPT;
+        const natureTitle = a.nature === "ADVANCE_VAT_RECEIPT" ? "پیش‌دریافت ارزش افزوده" : "پیش‌دریافت";
         const account = rt.basisType === "NONE" ? rt.account : treasurySettings.find((s) => s.accountType === "RECEIPT_SUBJECT" && s.receiptTypeId === rt.id)?.account;
         if (!account) {
-          errors.push(`برای نوع دریافت «${rt.title}» (پیش‌دریافت رسید شماره ${l.receipt.number}) معینِ پیش‌دریافت تعریف نشده است`);
+          errors.push(`برای نوع دریافت «${rt.title}» (${natureTitle} رسید شماره ${l.receipt.number}) معینِ ${natureTitle} تعریف نشده است`);
           continue;
         }
         const rowRate = Number(l.fxRate);
         const hist = invIsBase ? amount : toBaseCurrencyAmount(amount, rowRate, invoice.currency, baseCurrency);
         const atInvoice = invIsBase ? amount : toBaseCurrencyAmount(amount, fxRate, invoice.currency, baseCurrency);
-        allocCurrency += amount;
-        allocInvoiceBase += atInvoice;
-        histBase += hist;
+        bucket.cur += amount;
+        bucket.inv += atInvoice;
+        bucket.hist += hist;
         const details = resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode);
-        const advDescription = `بابت تخصیص پیش‌دریافت رسید شماره ${l.receipt.number} به فاکتور فروش ${invoice.number} ${customerName}`.trim();
+        const advDescription = `بابت تخصیص ${natureTitle} رسید شماره ${l.receipt.number} به فاکتور فروش ${invoice.number} ${customerName}`.trim();
         if (account.isCurrency && !invIsBase) {
           advanceDebitLines.push({ accountId: account.id, ...details, currencyId: invoice.currencyId, debit: amount, credit: 0, fxRate: rowRate, description: advDescription });
         } else {
@@ -609,44 +614,75 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
         }
       }
 
-      // کاهش بدهکار «دریافتنی فروش» به‌اندازه‌ی مبلغ تخصیص‌یافته (مبلغ ارزی اگر معین ارزی است، وگرنه معادل ریالی با نرخ فاکتور)
-      for (const [key, entry] of Array.from(arAmountByAccount.entries())) {
-        entry.amount -= entry.account.isCurrency ? allocCurrency : allocInvoiceBase;
-        if (entry.amount < -0.005) errors.push("مجموع پیش‌دریافت تخصیص‌یافته از مبلغ دریافتنی فاکتور بیشتر است");
-        if (entry.amount <= 0.005) arAmountByAccount.delete(key);
+      // کاهش بدهکار «دریافتنی فروش» (بخش مبلغ) به‌اندازه‌ی پیش‌دریافتِ عادی (مبلغ ارزی اگر معین ارزی است، وگرنه معادل ریالی با نرخ فاکتور)
+      if (acc.ADVANCE_RECEIPT.cur > 0) {
+        for (const [key, entry] of Array.from(arAmountByAccount.entries())) {
+          entry.amount -= entry.account.isCurrency ? acc.ADVANCE_RECEIPT.cur : acc.ADVANCE_RECEIPT.inv;
+          if (entry.amount < -0.005) errors.push("مجموع پیش‌دریافت تخصیص‌یافته از مبلغ دریافتنی فاکتور بیشتر است");
+          if (entry.amount <= 0.005) arAmountByAccount.delete(key);
+        }
       }
 
-      const diff = Math.round((allocInvoiceBase - histBase) * 100) / 100;
-      if (!invIsBase && Math.abs(diff) > 0.005) {
+      // کاهش بدهکار «دریافتنی ارزش افزوده» (همیشه به ارز مبنا) به‌اندازه‌ی پیش‌دریافت ارزش افزوده؛ چون سقف تخصیص به ارز فاکتور و گرد‌شده است،
+      // مبلغ مؤثر حداکثر برابر ارزش‌افزوده‌ی فاکتور است (تا سند همیشه بالانس بماند)
+      let vatEffectiveBase = acc.ADVANCE_VAT_RECEIPT.inv;
+      if (acc.ADVANCE_VAT_RECEIPT.cur > 0) {
+        const arVatTotal = Array.from(arVatByAccount.values()).reduce((s, e) => s + e.amount, 0);
+        if (acc.ADVANCE_VAT_RECEIPT.inv > arVatTotal + 0.005 * Math.max(1, fxRate)) {
+          errors.push("مجموع پیش‌دریافت ارزش افزوده‌ی تخصیص‌یافته از ارزش افزوده‌ی فاکتور بیشتر است");
+        }
+        vatEffectiveBase = Math.min(acc.ADVANCE_VAT_RECEIPT.inv, arVatTotal);
+        let left = vatEffectiveBase;
+        for (const [key, entry] of Array.from(arVatByAccount.entries())) {
+          const take = Math.min(entry.amount, left);
+          entry.amount -= take;
+          left -= take;
+          if (entry.amount <= 0.005) arVatByAccount.delete(key);
+        }
+      }
+
+      // اختلاف ارزش ریالی (نرخ فاکتور − نرخ تاریخی) هر ماهیت جدا محاسبه و طبق روش معتبر در تاریخ فاکتور شناسایی می‌شود
+      const diffRegular = Math.round((acc.ADVANCE_RECEIPT.inv - acc.ADVANCE_RECEIPT.hist) * 100) / 100;
+      const diffVat = Math.round((vatEffectiveBase - acc.ADVANCE_VAT_RECEIPT.hist) * 100) / 100;
+      if (!invIsBase && (Math.abs(diffRegular) > 0.005 || Math.abs(diffVat) > 0.005)) {
         const method = await getAdvanceReceiptMethodForDate(invoice.date);
         if (!method) {
           errors.push("روش شناسایی پیش‌دریافت ارزی برای تاریخ فاکتور در «رویه‌ها و تنظیمات حسابداری» (تنظیمات ارز) تعریف نشده است");
-        } else if (method === "TRANSACTION_DATE_RATE") {
-          const fxAccount = treasurySettings.find((s) => s.accountType === "FX_GAIN_LOSS")?.account;
-          if (!fxAccount) errors.push("حساب «سود و زیان تسعیر ارز» در «تعیین حسابهای معین» تعریف نشده است");
-          else
-            advanceAdjustLines.push({
-              accountId: fxAccount.id,
-              currencyId: baseCurrency.id,
-              debit: diff > 0 ? diff : 0,
-              credit: diff < 0 ? -diff : 0,
-              fxRate: 1,
-              description: `تسعیر پیش‌دریافت تخصیص‌یافته به ${description}`,
-            });
         } else {
-          const revenue = Array.from(revenueByAccount.values())[0];
-          if (!revenue) errors.push("حساب «درآمد فروش» برای اصلاح مبلغ فروش بخش پیش‌دریافت مشخص نیست");
-          else {
-            const details = resolveAccountDetailFields(revenue.account, partyDetailTypeId, partyDetailCode);
-            advanceAdjustLines.push({
-              accountId: revenue.account.id,
-              ...details,
-              currencyId: baseCurrency.id,
-              debit: diff > 0 ? diff : 0,
-              credit: diff < 0 ? -diff : 0,
-              fxRate: 1,
-              description: `فروش بخش پیش‌دریافت با نرخ تاریخی — ${description}`,
-            });
+          const parts: { diff: number; title: string; contra: { account: any } | undefined; contraTitle: string }[] = [
+            { diff: diffRegular, title: "پیش‌دریافت", contra: Array.from(revenueByAccount.values())[0], contraTitle: "درآمد فروش" },
+            { diff: diffVat, title: "پیش‌دریافت ارزش افزوده", contra: Array.from(vatCreditByAccount.values())[0], contraTitle: "ارزش‌افزوده فروش" },
+          ];
+          const fxAccount = treasurySettings.find((s) => s.accountType === "FX_GAIN_LOSS")?.account;
+          for (const p of parts) {
+            if (Math.abs(p.diff) <= 0.005) continue;
+            if (method === "TRANSACTION_DATE_RATE") {
+              if (!fxAccount) {
+                errors.push("حساب «سود و زیان تسعیر ارز» در «تعیین حسابهای معین» تعریف نشده است");
+                break;
+              }
+              advanceAdjustLines.push({
+                accountId: fxAccount.id,
+                currencyId: baseCurrency.id,
+                debit: p.diff > 0 ? p.diff : 0,
+                credit: p.diff < 0 ? -p.diff : 0,
+                fxRate: 1,
+                description: `تسعیر ${p.title} تخصیص‌یافته به ${description}`,
+              });
+            } else if (!p.contra) {
+              errors.push(`حساب «${p.contraTitle}» برای اصلاح مبلغ بخش ${p.title} مشخص نیست`);
+            } else {
+              const details = resolveAccountDetailFields(p.contra.account, partyDetailTypeId, partyDetailCode);
+              advanceAdjustLines.push({
+                accountId: p.contra.account.id,
+                ...details,
+                currencyId: baseCurrency.id,
+                debit: p.diff > 0 ? p.diff : 0,
+                credit: p.diff < 0 ? -p.diff : 0,
+                fxRate: 1,
+                description: `فروش بخش ${p.title} با نرخ تاریخی — ${description}`,
+              });
+            }
           }
         }
       }

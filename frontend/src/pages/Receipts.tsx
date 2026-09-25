@@ -1074,11 +1074,11 @@ function SettlementRowFields({
     }
     const excl = editId ? `&excludeReceiptId=${editId}` : "";
     api
-      .get(`/receipts/pickable-basis-documents?basisType=${basisType}&partyId=${row.partyId}${excl}`)
+      .get(`/receipts/pickable-basis-documents?basisType=${basisType}&partyId=${row.partyId}${excl}&nature=${receiptType?.nature ?? ""}`)
       .then((rows: BasisCandidate[]) => setBasisCandidates(rows))
       .catch(() => setBasisCandidates([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [basisType, row.partyId, editId]);
+  }, [basisType, row.partyId, editId, receiptType?.nature]);
 
   // مانده‌ی واقعاً قابل تسویه‌ی یک سند مبنا برای این ردیف: مانده‌ی گزارش‌شده توسط سرور، منهای مبلغ
   // ردیف‌های خواهرِ همین فرم (هنوز ذخیره‌نشده) که به همان سند مبنا ارجاع می‌دهند — وگرنه انتخاب یک
@@ -1090,6 +1090,9 @@ function SettlementRowFields({
     const basisCurrency = currencies.find((c) => c.id === candidate.currencyId);
     const allocatedByOthers = allSettlementRows.reduce((sum, r, i) => {
       if (i === idx) return sum;
+      // ردیف‌های «پیش‌دریافت ارزش افزوده» و ردیف‌های عادیِ همان سند مبنا مانده‌ی جدا دارند
+      const rNature = receiptTypes.find((t) => String(t.id) === r.receiptTypeId)?.nature;
+      if ((rNature === "ADVANCE_VAT_RECEIPT") !== (receiptType?.nature === "ADVANCE_VAT_RECEIPT")) return sum;
       const rBasisId = (r as any)[field];
       if (!rBasisId || Number(rBasisId) !== candidate.id) return sum;
       const rAmount = Number(r.amount) || 0;

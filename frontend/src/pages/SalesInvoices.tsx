@@ -153,12 +153,12 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   const vatRates = useVatRates();
   // «تخصیص پیش‌دریافت»: عملیات مستقل از ثبت/ویرایش فاکتور (Documents/تخصیص پیش دریافت.md)
   const [advanceOpen, setAdvanceOpen] = useState(false);
-  const [advance, setAdvance] = useState<{ total: number; allocatedTotal: number; payable: number } | null>(null);
+  const [advance, setAdvance] = useState<{ total: number; allocatedTotal: number; payable: number; vatTotal: number; allocatedVatTotal: number; vatPayable: number } | null>(null);
   async function loadAdvance() {
     if (!editId) return setAdvance(null);
     try {
       const s: AdvanceState = await api.get(`/sales-invoices/${editId}/advance-allocations`);
-      setAdvance({ total: s.invoice.total, allocatedTotal: s.allocatedTotal, payable: s.payable });
+      setAdvance({ total: s.invoice.total, allocatedTotal: s.allocatedTotal, payable: s.payable, vatTotal: s.invoice.vatTotal, allocatedVatTotal: s.allocatedVatTotal, vatPayable: s.vatPayable });
     } catch {
       setAdvance(null);
     }
@@ -533,6 +533,22 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
                 <label>مانده قابل پرداخت</label>
                 <input dir="ltr" value={formatAmountFa(advance.payable)} disabled />
               </div>
+              {(advance.vatTotal > 0 || advance.allocatedVatTotal > 0) && (
+                <>
+                  <div className="form-field">
+                    <label>ارزش افزوده فاکتور</label>
+                    <input dir="ltr" value={formatAmountFa(advance.vatTotal)} disabled />
+                  </div>
+                  <div className="form-field">
+                    <label>پیش‌دریافت ارزش افزوده تخصیص‌یافته</label>
+                    <input dir="ltr" value={formatAmountFa(advance.allocatedVatTotal)} disabled />
+                  </div>
+                  <div className="form-field">
+                    <label>مانده ارزش افزوده قابل پرداخت</label>
+                    <input dir="ltr" value={formatAmountFa(advance.vatPayable)} disabled />
+                  </div>
+                </>
+              )}
             </>
           )}
           <div className="form-field">
@@ -715,8 +731,11 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   );
 }
 
+type AdvanceNature = "ADVANCE_RECEIPT" | "ADVANCE_VAT_RECEIPT";
 interface AdvanceCandidate {
   receiptSettlementLineId: number;
+  nature: AdvanceNature;
+  natureTitle: string;
   receiptNumber: number;
   receiptDate: string;
   currencyTitle: string;
@@ -727,9 +746,11 @@ interface AdvanceCandidate {
   allocatedToThis: number;
 }
 interface AdvanceState {
-  invoice: { id: number; number: number; currencyTitle: string; total: number };
+  invoice: { id: number; number: number; currencyTitle: string; total: number; vatTotal: number };
   allocatedTotal: number;
+  allocatedVatTotal: number;
   payable: number;
+  vatPayable: number;
   lockReasons: string[];
   candidates: AdvanceCandidate[];
 }
@@ -769,12 +790,18 @@ function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: n
   const gridRows = state
     ? order.map((id) => state.candidates.find((c) => c.receiptSettlementLineId === id)).filter((c): c is AdvanceCandidate => !!c)
     : [];
-  const sum = gridRows.reduce((s, c) => s + (Number(amounts[c.receiptSettlementLineId]) || 0), 0);
+  // مبلغ «پیش‌دریافت» (سقف = مبلغ فاکتور) و «پیش‌دریافت ارزش افزوده» (سقف = ارزش افزوده‌ی فاکتور) جدا از هم جمع و کنترل می‌شوند
+  const sumOf = (nature: AdvanceNature) =>
+    gridRows.filter((c) => c.nature === nature).reduce((s, c) => s + (Number(amounts[c.receiptSettlementLineId]) || 0), 0);
+  const sum = sumOf("ADVANCE_RECEIPT");
+  const sumVat = sumOf("ADVANCE_VAT_RECEIPT");
   const overInvoice = !!state && sum > state.invoice.total + 0.005;
+  const overVat = !!state && sumVat > state.invoice.vatTotal + 0.005;
   const overLine = (c: AdvanceCandidate) => (Number(amounts[c.receiptSettlementLineId]) || 0) > c.allocatableAmount + 0.005;
   const anyOverLine = gridRows.some(overLine);
 
   const pickerColumns: PickerColumn<AdvanceCandidate & { id: number }>[] = [
+    { header: "ماهیت پیش‌دریافت", render: (c) => c.natureTitle, filterValue: (c) => c.natureTitle },
     { header: "شماره پیش‌دریافت", render: (c) => toFaDigits(String(c.receiptNumber)), filterValue: (c) => String(c.receiptNumber) },
     { header: "تاریخ دریافت", render: (c) => formatJalaliDate(c.receiptDate), filterValue: (c) => formatJalaliDate(c.receiptDate) },
     { header: "ارز", render: (c) => c.currencyTitle, filterValue: (c) => c.currencyTitle },
@@ -789,17 +816,19 @@ function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: n
     const kept = order.filter((id) => checked.has(id));
     const added = state.candidates.map((c) => c.receiptSettlementLineId).filter((id) => checked.has(id) && !order.includes(id));
     const next: Record<number, string> = {};
-    let used = 0;
+    const used: Record<AdvanceNature, number> = { ADVANCE_RECEIPT: 0, ADVANCE_VAT_RECEIPT: 0 };
+    const limit: Record<AdvanceNature, number> = { ADVANCE_RECEIPT: state.invoice.total, ADVANCE_VAT_RECEIPT: state.invoice.vatTotal };
     kept.forEach((id) => {
+      const c = state.candidates.find((x) => x.receiptSettlementLineId === id)!;
       next[id] = amounts[id] ?? "";
-      used += Number(next[id]) || 0;
+      used[c.nature] += Number(next[id]) || 0;
     });
     added.forEach((id) => {
       const c = state.candidates.find((x) => x.receiptSettlementLineId === id)!;
-      const remaining = Math.max(0, state.invoice.total - used);
+      const remaining = Math.max(0, limit[c.nature] - used[c.nature]);
       const amount = Math.round(Math.min(c.allocatableAmount, remaining) * 100) / 100;
       next[id] = amount > 0 ? String(amount) : "";
-      used += amount;
+      used[c.nature] += amount;
     });
     setAmounts(next);
     setOrder([...kept, ...added]);
@@ -840,6 +869,13 @@ function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: n
             <span>مجموع تخصیص: <b style={{ color: overInvoice ? "var(--danger)" : undefined }}>{formatAmountFa(sum)}</b></span>
             <span>مانده قابل پرداخت: <b>{formatAmountFa(state.invoice.total - sum)}</b></span>
           </div>
+          {(state.invoice.vatTotal > 0 || sumVat > 0) && (
+            <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 10, fontSize: 13 }}>
+              <span>ارزش افزوده فاکتور: <b>{formatAmountFa(state.invoice.vatTotal)}</b></span>
+              <span>مجموع تخصیص پیش‌دریافت ارزش افزوده: <b style={{ color: overVat ? "var(--danger)" : undefined }}>{formatAmountFa(sumVat)}</b></span>
+              <span>مانده ارزش افزوده قابل پرداخت: <b>{formatAmountFa(state.invoice.vatTotal - sumVat)}</b></span>
+            </div>
+          )}
           {locked && (
             <div style={{ background: "var(--primary-soft)", padding: "8px 10px", borderRadius: 8, marginBottom: 10, fontSize: 12.5, whiteSpace: "pre-line" }}>
               {state.lockReasons.join("\n")}
@@ -854,6 +890,7 @@ function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: n
             <table className="picker-table">
               <thead>
                 <tr>
+                  <th>ماهیت پیش‌دریافت</th>
                   <th>شماره پیش‌دریافت</th>
                   <th>تاریخ دریافت</th>
                   <th>ارز</th>
@@ -867,13 +904,14 @@ function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: n
               <tbody>
                 {gridRows.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="empty-state" style={{ border: "none" }}>
+                    <td colSpan={9} className="empty-state" style={{ border: "none" }}>
                       {state.candidates.length === 0 ? "پیش‌دریافت قابل تخصیصی برای این فاکتور وجود ندارد" : "برای افزودن پیش‌دریافت، «بارگذاری اطلاعات» را بزنید"}
                     </td>
                   </tr>
                 )}
                 {gridRows.map((c) => (
                   <tr key={c.receiptSettlementLineId}>
+                    <td>{c.natureTitle}</td>
                     <td>{toFaDigits(String(c.receiptNumber))}</td>
                     <td>{formatJalaliDate(c.receiptDate)}</td>
                     <td>{c.currencyTitle}</td>
@@ -901,7 +939,7 @@ function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: n
             </table>
           </div>
           <div className="actions">
-            <button type="button" className="btn" disabled={locked || overInvoice || anyOverLine} onClick={save}>
+            <button type="button" className="btn" disabled={locked || overInvoice || overVat || anyOverLine} onClick={save}>
               ذخیره تخصیص
             </button>
             <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>

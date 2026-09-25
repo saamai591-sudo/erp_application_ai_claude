@@ -210,7 +210,16 @@ interface BasisCandidate {
   remaining: number;
 }
 
-async function candidatesForBasisType(basisType: BasisType, partyId: number, excludeReceiptId?: number): Promise<BasisCandidate[]> {
+// «پیش‌دریافت ارزش افزوده» (ADVANCE_VAT_RECEIPT) روی سفارش فروش/پیش‌فاکتور، «ارزش افزوده‌ی» همان سند را دریافت می‌کند نه مبلغ آن را؛ پس سقف و مانده‌ی
+// آن جدا از دریافت‌های عادیِ همان سند محاسبه می‌شود (وگرنه سندی که مبلغش کامل پیش‌دریافت شده، هرگز برای پیش‌دریافت ارزش افزوده نمایش داده نمی‌شد).
+export function basisGroupOf(nature?: string | null): "VAT" | "MAIN" {
+  return nature === "ADVANCE_VAT_RECEIPT" ? "VAT" : "MAIN";
+}
+
+async function candidatesForBasisType(basisType: BasisType, partyId: number, excludeReceiptId?: number, nature?: string | null): Promise<BasisCandidate[]> {
+  const group = basisGroupOf(nature);
+  const sameGroup = (s: any) => basisGroupOf(s.receiptType?.nature) === group;
+  const totalOf = (lines: any[]) => lines.reduce((s: number, l: any) => s + Number(group === "VAT" ? l.vatAmount || 0 : l.amount), 0);
   if (basisType === "SALES_INVOICE") {
     const customer = await prisma.customer.findUnique({ where: { partyId } });
     if (!customer) return [];
@@ -230,7 +239,7 @@ async function candidatesForBasisType(basisType: BasisType, partyId: number, exc
         inv.receiptSettlementLines
           .filter((s: any) => s.receipt.status === "APPROVED" && (!excludeReceiptId || s.receipt.id !== excludeReceiptId))
           .reduce((s: number, l: any) => s + Number(l.amount), 0) +
-        inv.advanceAllocations.reduce((s: number, a: any) => s + Number(a.amount), 0);
+        inv.advanceAllocations.filter((a: any) => a.nature === "ADVANCE_RECEIPT").reduce((s: number, a: any) => s + Number(a.amount), 0);
       return {
         id: inv.id, number: inv.number, date: inv.date, currencyId: inv.currencyId, currencyTitle: inv.currency.title,
         fxRate: Number(inv.fxRate), partyId, total, applied, remaining: total - applied,
@@ -263,13 +272,13 @@ async function candidatesForBasisType(basisType: BasisType, partyId: number, exc
     const orders = await withoutFiscalPeriodScope(() =>
       prisma.salesOrder.findMany({
         where: { customerId: customer.id, status: "APPROVED" },
-        include: { lines: true, currency: true, receiptSettlementLines: { include: { receipt: true } } },
+        include: { lines: true, currency: true, receiptSettlementLines: { include: { receipt: true, receiptType: true } } },
       })
     );
     return orders.map((o: any) => {
-      const total = o.lines.reduce((s: number, l: any) => s + Number(l.amount), 0);
+      const total = totalOf(o.lines);
       const applied = o.receiptSettlementLines
-        .filter((s: any) => s.receipt.status === "APPROVED" && (!excludeReceiptId || s.receipt.id !== excludeReceiptId))
+        .filter((s: any) => sameGroup(s) && s.receipt.status === "APPROVED" && (!excludeReceiptId || s.receipt.id !== excludeReceiptId))
         .reduce((s: number, l: any) => s + Number(l.amount), 0);
       // سفارش فروش اصلاً fxRate ندارد (سندی بدون تبدیل ارز) — همیشه ۱ گزارش می‌شود
       return {
@@ -284,13 +293,13 @@ async function candidatesForBasisType(basisType: BasisType, partyId: number, exc
     const quotes = await withoutFiscalPeriodScope(() =>
       prisma.salesQuote.findMany({
         where: { customerId: customer.id, status: "APPROVED" },
-        include: { lines: true, currency: true, receiptSettlementLines: { include: { receipt: true } } },
+        include: { lines: true, currency: true, receiptSettlementLines: { include: { receipt: true, receiptType: true } } },
       })
     );
     return quotes.map((q: any) => {
-      const total = q.lines.reduce((s: number, l: any) => s + Number(l.amount), 0);
+      const total = totalOf(q.lines);
       const applied = q.receiptSettlementLines
-        .filter((s: any) => s.receipt.status === "APPROVED" && (!excludeReceiptId || s.receipt.id !== excludeReceiptId))
+        .filter((s: any) => sameGroup(s) && s.receipt.status === "APPROVED" && (!excludeReceiptId || s.receipt.id !== excludeReceiptId))
         .reduce((s: number, l: any) => s + Number(l.amount), 0);
       return {
         id: q.id, number: q.number, date: q.date, currencyId: q.currencyId, currencyTitle: q.currency.title,
@@ -305,8 +314,9 @@ router.get("/receipts/pickable-basis-documents", can(`${FORM}.view`), async (req
   const basisType = req.query.basisType as BasisType | undefined;
   const partyId = req.query.partyId ? Number(req.query.partyId) : null;
   const excludeReceiptId = req.query.excludeReceiptId ? Number(req.query.excludeReceiptId) : undefined;
+  const nature = req.query.nature ? String(req.query.nature) : undefined;
   if (!basisType || basisType === "NONE" || !partyId) return res.json([]);
-  const candidates = await candidatesForBasisType(basisType, partyId, excludeReceiptId);
+  const candidates = await candidatesForBasisType(basisType, partyId, excludeReceiptId, nature);
   res.json(candidates.filter((c) => c.remaining > 0.001));
 });
 
@@ -365,7 +375,7 @@ async function validateSubjectLines(
     if (!lockedBasisType) continue;
     const lockedBasisId = sl.salesInvoiceId || sl.purchaseInvoiceId || sl.salesOrderId || sl.salesQuoteId;
     // eslint-disable-next-line no-await-in-loop
-    const info = (await candidatesForBasisType(lockedBasisType, sl.partyId, excludeReceiptId)).find((c) => c.id === lockedBasisId);
+    const info = (await candidatesForBasisType(lockedBasisType, sl.partyId, excludeReceiptId, sl.receiptType?.nature)).find((c) => c.id === lockedBasisId);
     if (!info) continue;
     // eslint-disable-next-line no-await-in-loop
     const rowCurrency = sl.currencyId === baseCurrency.id ? baseCurrency : await prisma.currency.findUnique({ where: { id: sl.currencyId } });
@@ -374,7 +384,7 @@ async function validateSubjectLines(
     const basisCurrency = await getBasisCurrency(info.currencyId);
     const amountInBasisCurrency =
       info.currencyId === sl.currencyId ? Number(sl.amount) : fromBaseCurrencyAmount(toBaseCurrencyAmount(Number(sl.amount), Number(sl.fxRate), rowCurrency, baseCurrency), info.fxRate, basisCurrency);
-    const lockedKey = `${lockedBasisType}:${info.id}`;
+    const lockedKey = `${lockedBasisType}:${basisGroupOf(sl.receiptType?.nature)}:${info.id}`;
     basisAllocated.set(lockedKey, (basisAllocated.get(lockedKey) || 0) + amountInBasisCurrency);
   }
 
@@ -419,7 +429,7 @@ async function validateSubjectLines(
         if (f !== field && v) throw new Error(`ردیف ${idx + 1}: فقط سند مبنای متناسب با نوع دریافت باید انتخاب شود`);
       }
       // eslint-disable-next-line no-await-in-loop
-      const candidates = await candidatesForBasisType(basisType, l.partyId, excludeReceiptId);
+      const candidates = await candidatesForBasisType(basisType, l.partyId, excludeReceiptId, receiptType.nature);
       basisInfo = candidates.find((c) => c.id === basisId) || null;
       if (!basisInfo) throw new Error(`ردیف ${idx + 1}: سند مبنای انتخاب‌شده یافت نشد یا متعلق به این طرف حساب نیست`);
     }
@@ -433,7 +443,7 @@ async function validateSubjectLines(
     const amount = Number(l.amount);
     if (!(amount > 0)) throw new Error(`ردیف ${idx + 1}: مبلغ باید عددی مثبت باشد`);
     if (basisInfo) {
-      const basisKey = `${basisType}:${basisInfo.id}`;
+      const basisKey = `${basisType}:${basisGroupOf(receiptType.nature)}:${basisInfo.id}`;
       // eslint-disable-next-line no-await-in-loop
       const basisCurrency = await getBasisCurrency(basisInfo.currencyId);
       const amountInBasisCurrency =
@@ -712,7 +722,7 @@ router.delete("/receipts/:id", can(`${FORM}.delete`), async (req, res) => {
 // طبق تصمیم کاربر برای این ماژول).
 router.post("/receipts/:id/approve", can(`${FORM}.approve`), async (req, res) => {
   const id = Number(req.params.id);
-  const d = await prisma.receipt.findUnique({ where: { id }, include: { instrumentLines: true, settlementLines: true } });
+  const d = await prisma.receipt.findUnique({ where: { id }, include: { instrumentLines: true, settlementLines: { include: { receiptType: true } } } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل تایید هستند" });
   if (d.instrumentLines.length === 0) return res.status(400).json({ error: "سند باید حداقل یک ردیف ابزار پرداخت داشته باشد" });
@@ -731,7 +741,7 @@ router.post("/receipts/:id/approve", can(`${FORM}.approve`), async (req, res) =>
       if (!basisId) continue;
       const basisType: BasisType = s.salesInvoiceId ? "SALES_INVOICE" : s.purchaseInvoiceId ? "PURCHASE_INVOICE" : s.salesOrderId ? "SALES_ORDER" : "PROFORMA_INVOICE";
       // eslint-disable-next-line no-await-in-loop
-      const candidates = await candidatesForBasisType(basisType, s.partyId, id);
+      const candidates = await candidatesForBasisType(basisType, s.partyId, id, s.receiptType?.nature);
       const info = candidates.find((c) => c.id === basisId);
       if (!info) throw new Error("سند مبنای یکی از ردیف‌های موضوعات دریافت یافت نشد");
       // eslint-disable-next-line no-await-in-loop
@@ -750,7 +760,7 @@ router.post("/receipts/:id/approve", can(`${FORM}.approve`), async (req, res) =>
         info.currencyId === s.currencyId
           ? Number(s.amount)
           : fromBaseCurrencyAmount(toBaseCurrencyAmount(Number(s.amount), Number(s.fxRate), rowCurrency, approveBaseCurrency), info.fxRate, basisCurrency);
-      const basisKey = `${basisType}:${info.id}`;
+      const basisKey = `${basisType}:${basisGroupOf(s.receiptType?.nature)}:${info.id}`;
       const alreadyAllocated = approveBasisAllocated.get(basisKey) || 0;
       const effectiveRemaining = info.remaining - alreadyAllocated;
       if (amountInBasisCurrency > effectiveRemaining + 0.001) throw new Error(`مانده‌ی سند مبنای شماره ${info.number} از زمان ثبت این سند کاهش یافته و کافی نیست`);

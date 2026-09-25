@@ -1,7 +1,9 @@
 import { prisma } from "../lib/prisma";
 
 // =========================================================================
-// تخصیص پیش‌دریافت به فاکتور فروش — طبق Documents/تخصیص پیش دریافت.md.
+// تخصیص پیش‌دریافت به فاکتور فروش — طبق Documents/تخصیص پیش دریافت.md و Documents/تغییرات تخصیص پیش‌دریافت.md.
+// دو ماهیت قابل تخصیص است: «پیش‌دریافت» (ADVANCE_RECEIPT، سقف = مبلغ فاکتور) و «پیش‌دریافت ارزش افزوده» (ADVANCE_VAT_RECEIPT، سقف = ارزش افزوده‌ی فاکتور)؛
+// مبلغ هر ماهیت جدا نگهداری، کنترل و در سند حسابداری جدا (روی دریافتنی/ارزش‌افزوده‌ی همان بخش) لحاظ می‌شود و هرگز با هم جمع نمی‌شوند.
 // یک عملیات مستقل از ثبت/ویرایش اطلاعات اصلی فاکتور: هر تخصیص یک ردیف موضوع دریافتِ «پیش‌دریافت» (ReceiptSettlementLine با ماهیت ADVANCE_RECEIPT
 // روی رسید تاییدشده) را با یک مبلغ (به ارز فاکتور) به فاکتور وصل می‌کند. یک پیش‌دریافت می‌تواند به چند فاکتور و یک فاکتور از چند پیش‌دریافت استفاده کند.
 // تفاوت نرخ ارز هرگز روی مبلغ ارزی تخصیص/مانده قابل پرداخت اثر نمی‌گذارد؛ فقط هنگام صدور سند حسابداری فاکتور (routes/salesInvoices.ts) بر اساس
@@ -9,6 +11,10 @@ import { prisma } from "../lib/prisma";
 // =========================================================================
 
 const TOLERANCE = 0.005;
+
+export type AdvanceNature = "ADVANCE_RECEIPT" | "ADVANCE_VAT_RECEIPT";
+export const ADVANCE_NATURES: AdvanceNature[] = ["ADVANCE_RECEIPT", "ADVANCE_VAT_RECEIPT"];
+const NATURE_FA: Record<AdvanceNature, string> = { ADVANCE_RECEIPT: "پیش‌دریافت", ADVANCE_VAT_RECEIPT: "پیش‌دریافت ارزش افزوده" };
 
 // -------------------------------------------------------------------------
 // کنترل ویرایش بر اساس «گردش» فاکتور — طبق مستند (بند ۹): امکان ایجاد/ویرایش/حذف تخصیص فقط وقتی است که فاکتور هیچ گردشی نداشته باشد.
@@ -62,6 +68,13 @@ export function salesInvoiceNetTotal(lines: { amount: any; discount: any }[]): n
   return lines.reduce((s, l) => s + Number(l.amount) - Number(l.discount), 0);
 }
 
+/** ارزش‌افزوده‌ی فاکتور به «ارز فاکتور»: vatAmount ردیف‌ها همیشه به ارز مبنا ذخیره می‌شود، پس برای فاکتور ارزی بر نرخ فاکتور تقسیم می‌شود */
+export function salesInvoiceVatTotal(lines: { vatAmount: any }[], fxRate: number): number {
+  const base = lines.reduce((s, l) => s + Number(l.vatAmount || 0), 0);
+  const rate = Number(fxRate) > 0 ? Number(fxRate) : 1;
+  return Math.round((base / rate) * 100) / 100;
+}
+
 async function loadInvoice(invoiceId: number) {
   const invoice = await prisma.salesInvoice.findUnique({
     where: { id: invoiceId },
@@ -80,15 +93,16 @@ function partyName(p: any): string {
 export async function getSalesInvoiceAdvanceState(invoiceId: number) {
   const invoice = await loadInvoice(invoiceId);
   const total = salesInvoiceNetTotal(invoice.lines);
+  const vatTotal = salesInvoiceVatTotal(invoice.lines, Number(invoice.fxRate));
 
   const lines = await prisma.receiptSettlementLine.findMany({
     where: {
       partyId: invoice.customer.partyId,
       currencyId: invoice.currencyId,
-      receiptType: { nature: "ADVANCE_RECEIPT" },
+      receiptType: { nature: { in: ADVANCE_NATURES } },
       receipt: { status: "APPROVED", date: { lte: invoice.date } },
     },
-    include: { receipt: true, currency: true, advanceAllocations: true },
+    include: { receipt: true, receiptType: true, currency: true, advanceAllocations: true },
     orderBy: { id: "asc" },
   });
 
@@ -99,6 +113,8 @@ export async function getSalesInvoiceAdvanceState(invoiceId: number) {
       const allocatedToOthers = l.advanceAllocations.filter((a) => a.salesInvoiceId !== invoiceId).reduce((s, a) => s + Number(a.amount), 0);
       return {
         receiptSettlementLineId: l.id,
+        nature: l.receiptType.nature as AdvanceNature,
+        natureTitle: NATURE_FA[l.receiptType.nature as AdvanceNature],
         receiptId: l.receiptId,
         receiptNumber: l.receipt.number,
         receiptDate: l.receipt.date,
@@ -114,7 +130,8 @@ export async function getSalesInvoiceAdvanceState(invoiceId: number) {
     .filter((c) => c.allocatableAmount > TOLERANCE);
 
   const allocations = await prisma.salesInvoiceAdvanceAllocation.findMany({ where: { salesInvoiceId: invoiceId }, orderBy: { id: "asc" } });
-  const allocatedTotal = allocations.reduce((s, a) => s + Number(a.amount), 0);
+  const allocatedTotal = allocations.filter((a) => a.nature === "ADVANCE_RECEIPT").reduce((s, a) => s + Number(a.amount), 0);
+  const allocatedVatTotal = allocations.filter((a) => a.nature === "ADVANCE_VAT_RECEIPT").reduce((s, a) => s + Number(a.amount), 0);
 
   return {
     invoice: {
@@ -124,9 +141,12 @@ export async function getSalesInvoiceAdvanceState(invoiceId: number) {
       customerTitle: partyName(invoice.customer.party),
       currencyTitle: invoice.currency.title,
       total,
+      vatTotal,
     },
     allocatedTotal,
+    allocatedVatTotal,
     payable: total - allocatedTotal,
+    vatPayable: vatTotal - allocatedVatTotal,
     lockReasons: await getAdvanceLockReasons(invoiceId),
     candidates,
   };
@@ -140,13 +160,15 @@ export async function saveSalesInvoiceAdvanceAllocations(invoiceId: number, item
   await assertAdvanceEditable(invoiceId);
   const invoice = await loadInvoice(invoiceId);
   const total = salesInvoiceNetTotal(invoice.lines);
+  const vatTotal = salesInvoiceVatTotal(invoice.lines, Number(invoice.fxRate));
 
   if (!Array.isArray(items)) throw new Error("فهرست تخصیص‌ها نامعتبر است");
   const wanted = items.filter((i) => Number(i.amount) > 0);
   const ids = wanted.map((i) => i.receiptSettlementLineId);
   if (new Set(ids).size !== ids.length) throw new Error("یک پیش‌دریافت نمی‌تواند دو بار در تخصیص یک فاکتور تکرار شود");
 
-  let sum = 0;
+  const sums: Record<AdvanceNature, number> = { ADVANCE_RECEIPT: 0, ADVANCE_VAT_RECEIPT: 0 };
+  const natureById = new Map<number, AdvanceNature>();
   for (const item of wanted) {
     const amount = Number(item.amount);
     if (!(amount > 0)) throw new Error("مبلغ تخصیص باید عددی مثبت باشد");
@@ -158,7 +180,8 @@ export async function saveSalesInvoiceAdvanceAllocations(invoiceId: number, item
     if (!line) throw new Error("پیش‌دریافت انتخاب‌شده یافت نشد");
     const label = `پیش‌دریافت رسید شماره ${line.receipt.number}`;
     if (line.partyId !== invoice.customer.partyId) throw new Error(`${label}: طرف حساب با طرف حساب فاکتور یکسان نیست`);
-    if (line.receiptType.nature !== "ADVANCE_RECEIPT") throw new Error(`${label}: نوع دریافت، «پیش‌دریافت» نیست`);
+    const nature = line.receiptType.nature as AdvanceNature;
+    if (!ADVANCE_NATURES.includes(nature)) throw new Error(`${label}: نوع دریافت، «پیش‌دریافت» یا «پیش‌دریافت ارزش افزوده» نیست`);
     if (line.receipt.status !== "APPROVED") throw new Error(`${label}: رسید دریافت تایید نشده است`);
     if (line.receipt.date.getTime() > invoice.date.getTime()) throw new Error(`${label}: تاریخ دریافت بعد از تاریخ فاکتور است`);
     if (line.currencyId !== invoice.currencyId) throw new Error(`${label}: ارز پیش‌دریافت با ارز فاکتور یکسان نیست`);
@@ -167,9 +190,11 @@ export async function saveSalesInvoiceAdvanceAllocations(invoiceId: number, item
     const allocatable = Number(line.amount) - allocatedToOthers;
     if (!(allocatable > TOLERANCE)) throw new Error(`${label}: مبلغ قابل تخصیصی باقی نمانده است`);
     if (amount > allocatable + TOLERANCE) throw new Error(`${label}: مبلغ تخصیص از مبلغ قابل تخصیص پیش‌دریافت (${allocatable}) بیشتر است`);
-    sum += amount;
+    sums[nature] += amount;
+    natureById.set(item.receiptSettlementLineId, nature);
   }
-  if (sum > total + TOLERANCE) throw new Error(`مجموع پیش‌دریافت‌های تخصیص‌یافته (${sum}) از مبلغ فاکتور (${total}) بیشتر است`);
+  if (sums.ADVANCE_RECEIPT > total + TOLERANCE) throw new Error(`مجموع پیش‌دریافت‌های تخصیص‌یافته (${sums.ADVANCE_RECEIPT}) از مبلغ فاکتور (${total}) بیشتر است`);
+  if (sums.ADVANCE_VAT_RECEIPT > vatTotal + TOLERANCE) throw new Error(`مجموع پیش‌دریافت‌های ارزش افزوده‌ی تخصیص‌یافته (${sums.ADVANCE_VAT_RECEIPT}) از ارزش افزوده‌ی فاکتور (${vatTotal}) بیشتر است`);
 
   await prisma.$transaction(async (tx) => {
     await tx.salesInvoiceAdvanceAllocation.deleteMany({ where: { salesInvoiceId: invoiceId, receiptSettlementLineId: { notIn: ids } } });
@@ -177,8 +202,8 @@ export async function saveSalesInvoiceAdvanceAllocations(invoiceId: number, item
       // eslint-disable-next-line no-await-in-loop
       await tx.salesInvoiceAdvanceAllocation.upsert({
         where: { salesInvoiceId_receiptSettlementLineId: { salesInvoiceId: invoiceId, receiptSettlementLineId: item.receiptSettlementLineId } },
-        create: { salesInvoiceId: invoiceId, receiptSettlementLineId: item.receiptSettlementLineId, amount: Number(item.amount) },
-        update: { amount: Number(item.amount) },
+        create: { salesInvoiceId: invoiceId, receiptSettlementLineId: item.receiptSettlementLineId, amount: Number(item.amount), nature: natureById.get(item.receiptSettlementLineId)! },
+        update: { amount: Number(item.amount), nature: natureById.get(item.receiptSettlementLineId)! },
       });
     }
   });
@@ -193,7 +218,7 @@ export async function assertReceiptAdvanceNotAllocated(receiptId: number, instru
 }
 
 /** پیش از ذخیره‌ی ویرایش فاکتور: تخصیص‌های موجود با مشتری/ارز/تاریخ/مبلغِ جدید فاکتور ناسازگار نشوند */
-export async function assertAdvanceAllocationsStillValid(invoiceId: number, next: { customerId: number; currencyId: number; date: Date; netTotal: number }) {
+export async function assertAdvanceAllocationsStillValid(invoiceId: number, next: { customerId: number; currencyId: number; date: Date; netTotal: number; vatTotal: number }) {
   const allocations = await prisma.salesInvoiceAdvanceAllocation.findMany({
     where: { salesInvoiceId: invoiceId },
     include: { receiptSettlementLine: { include: { receipt: true } }, salesInvoice: { include: { customer: true } } },
@@ -205,6 +230,8 @@ export async function assertAdvanceAllocationsStillValid(invoiceId: number, next
   if (allocations.some((a) => a.receiptSettlementLine.receipt.date.getTime() > next.date.getTime())) {
     throw new Error("تاریخ فاکتور نمی‌تواند قبل از تاریخ دریافتِ پیش‌دریافت‌های تخصیص‌یافته باشد؛ ابتدا تخصیص‌ها را حذف کنید");
   }
-  const allocated = allocations.reduce((s, a) => s + Number(a.amount), 0);
+  const allocated = allocations.filter((a) => a.nature === "ADVANCE_RECEIPT").reduce((s, a) => s + Number(a.amount), 0);
   if (allocated > next.netTotal + TOLERANCE) throw new Error("مبلغ جدید فاکتور از مجموع پیش‌دریافت تخصیص‌یافته کمتر می‌شود؛ ابتدا تخصیص‌ها را کاهش دهید");
+  const allocatedVat = allocations.filter((a) => a.nature === "ADVANCE_VAT_RECEIPT").reduce((s, a) => s + Number(a.amount), 0);
+  if (allocatedVat > next.vatTotal + TOLERANCE) throw new Error("ارزش افزوده‌ی جدید فاکتور از مجموع پیش‌دریافت ارزش افزوده‌ی تخصیص‌یافته کمتر می‌شود؛ ابتدا تخصیص‌ها را کاهش دهید");
 }

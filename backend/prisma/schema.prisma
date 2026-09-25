@@ -3356,9 +3356,16 @@ model SalesInvoiceAdvanceAllocation {
   receiptSettlementLineId Int
   /// به ارز فاکتور (= ارز پیش‌دریافت)؛ تفاوت نرخ ارز هرگز روی آن اثر نمی‌گذارد
   amount                  Decimal               @db.Decimal(18, 2)
+  /// ماهیت پیش‌دریافتِ تخصیص‌یافته (هنگام ثبت از نوع دریافت رسید): مبلغ پیش‌دریافت عادی و پیش‌دریافت ارزش افزوده جدا از هم نگهداری و کنترل می‌شوند
+  nature                  AdvanceAllocationNature @default(ADVANCE_RECEIPT)
   createdAt               DateTime              @default(now())
   salesInvoice            SalesInvoice          @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
   receiptSettlementLine   ReceiptSettlementLine @relation(fields: [receiptSettlementLineId], references: [id], onDelete: Restrict)
 
   @@unique([salesInvoiceId, receiptSettlementLineId])
+}
+
+enum AdvanceAllocationNature {
+  ADVANCE_RECEIPT
+  ADVANCE_VAT_RECEIPT
 }
