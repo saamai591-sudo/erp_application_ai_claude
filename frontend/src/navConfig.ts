@@ -63,6 +63,10 @@ const RAW_MODULES: ModuleGroup[] = [
     title: "حسابداری",
     subModules: [
       {
+        title: "تنظیمات",
+        items: [{ key: "accounting-settings", label: "رویه‌ها و تنظیمات حسابداری", list: "/accounting-settings", icon: "layers" }],
+      },
+      {
         title: "تعریف ساختار",
         items: [
           { key: "reporting-levels", label: "سطح گزارشگری", list: "/reporting-levels", create: "/reporting-levels/new", icon: "layers" },

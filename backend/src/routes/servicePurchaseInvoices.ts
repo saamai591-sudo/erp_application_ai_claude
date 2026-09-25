@@ -5,6 +5,7 @@ import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
+import { getVatRatePercentForDate } from "../services/accountingSettingsService";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmount, getLineAmounts, setLineAmount, enrichLinesWithAmount } from "../services/documentItemAmountService";
@@ -119,7 +120,7 @@ function resolveInvoiceFxRate(currencyId: number, baseCurrencyId: number, bodyFx
 
 const ALLOCATION_METHODS = new Set(["VALUE", "QUANTITY"]);
 
-async function validateLines(lines: LineInput[], currency: ConversionCurrency, fxRate: number, baseCurrency: ConversionCurrency) {
+async function validateLines(lines: LineInput[], currency: ConversionCurrency, fxRate: number, baseCurrency: ConversionCurrency, docDate: Date) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("فاکتور خرید خدمات باید حداقل یک ردیف داشته باشد");
 
   const cleaned: {
@@ -152,7 +153,7 @@ async function validateLines(lines: LineInput[], currency: ConversionCurrency, f
     // ویرایش کند (اگر کلاینت صریحاً مقداری فرستاده باشد، همان معتبر است، نه مقدار محاسبه‌شده).
     const baseAmount = toBaseCurrencyAmount(amount, fxRate, currency, baseCurrency);
     const baseDiscount = toBaseCurrencyAmount(discount, fxRate, currency, baseCurrency);
-    const vatRatePercent = resolveVatRatePercent(service);
+    const vatRatePercent = resolveVatRatePercent(service, await getVatRatePercentForDate(docDate));
     const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent);
     const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
     if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
@@ -360,7 +361,7 @@ router.post("/service-purchase-invoices", can(`${FORM}.create`), async (req, res
     if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
     const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
-    const cleanedLines = await validateLines(body.lines, currency, fxRate, baseCurrency);
+    const cleanedLines = await validateLines(body.lines, currency, fxRate, baseCurrency, date);
 
     const lastNumber = await prisma.servicePurchaseInvoice.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
     const number = lastNumber ? lastNumber.number + 1 : 1;
@@ -430,7 +431,7 @@ router.put("/service-purchase-invoices/:id", can(`${FORM}.edit`), async (req, re
     if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
     const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
-    const cleanedLines = await validateLines(body.lines, currency, fxRate, baseCurrency);
+    const cleanedLines = await validateLines(body.lines, currency, fxRate, baseCurrency, date);
 
     await prisma.$transaction([
       prisma.purchaseCostLine.deleteMany({ where: { servicePurchaseInvoiceId: id } }),

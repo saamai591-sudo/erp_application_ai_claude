@@ -6,6 +6,7 @@ import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation
 import { assertRecordNotStale } from "../utils/concurrency";
 import { fetchPickableWarehouseReceiptLines } from "../services/warehouseReceiptLineSelector";
 import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
+import { getVatRatePercentForDate } from "../services/accountingSettingsService";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmount, getLineAmounts, setLineAmount, deleteLatestLineAmount, enrichLinesWithAmount } from "../services/documentItemAmountService";
@@ -133,6 +134,7 @@ async function validateLines(
   currency: ConversionCurrency,
   fxRate: number,
   baseCurrency: ConversionCurrency,
+  docDate: Date,
   excludeInvoiceId?: number
 ) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("فاکتور خرید باید حداقل یک ردیف کالا داشته باشد");
@@ -207,7 +209,7 @@ async function validateLines(
     // پیش‌فرض/پیشنهاد اولیه است — طبق تصمیم صریح کاربر، کاربر باید بتواند بعد از محاسبه، خودش مقدار
     // مالیات را ویرایش کند؛ پس اگر کلاینت مقدار صریحی فرستاده باشد (که همیشه می‌فرستد، چون این فیلد در
     // فرم قابل‌ویرایش است)، همان مقدار معتبر ذخیره می‌شود، نه مقدار محاسبه‌شده.
-    const vatRatePercent = resolveVatRatePercent(item);
+    const vatRatePercent = resolveVatRatePercent(item, await getVatRatePercentForDate(docDate));
     const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent);
     const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
     if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
@@ -233,7 +235,7 @@ const ALLOCATION_METHODS = new Set(["VALUE", "QUANTITY"]);
 
 // دقیقاً هم‌الگوی servicePurchaseInvoices.ts#validateLines — همان جدول مشترک (PurchaseCostLine)، همان
 // قواعد بدون‌مبنا/رسید‌انبار/تسهیم؛ فقط پیام خطاها با پیشوند «سایر هزینه‌ها» برای وضوح در این فرم.
-async function validateOtherCostLines(lines: OtherCostInput[], currency: ConversionCurrency, fxRate: number, baseCurrency: ConversionCurrency) {
+async function validateOtherCostLines(lines: OtherCostInput[], currency: ConversionCurrency, fxRate: number, baseCurrency: ConversionCurrency, docDate: Date) {
   const cleaned: {
     serviceId: number;
     amount: number;
@@ -261,7 +263,7 @@ async function validateOtherCostLines(lines: OtherCostInput[], currency: Convers
 
     const baseAmount = toBaseCurrencyAmount(amount, fxRate, currency, baseCurrency);
     const baseDiscount = toBaseCurrencyAmount(discount, fxRate, currency, baseCurrency);
-    const vatRatePercent = resolveVatRatePercent(service);
+    const vatRatePercent = resolveVatRatePercent(service, await getVatRatePercentForDate(docDate));
     const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent);
     const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
     if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} سایر هزینه‌ها نامعتبر است`);
@@ -520,8 +522,8 @@ router.post("/purchase-invoices", can(`${FORM}.create`), async (req, res) => {
     if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
     const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
-    const cleanedLines = await validateLines(body.lines, body.basis, party.detailCode, currency, fxRate, baseCurrency);
-    const cleanedOtherCostLines = await validateOtherCostLines(body.otherCostLines || [], currency, fxRate, baseCurrency);
+    const cleanedLines = await validateLines(body.lines, body.basis, party.detailCode, currency, fxRate, baseCurrency, date);
+    const cleanedOtherCostLines = await validateOtherCostLines(body.otherCostLines || [], currency, fxRate, baseCurrency, date);
 
     const lastNumber = await prisma.purchaseInvoice.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
     const number = lastNumber ? lastNumber.number + 1 : 1;
@@ -594,8 +596,8 @@ router.put("/purchase-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
     if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
     const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
-    const cleanedLines = await validateLines(body.lines, body.basis, party.detailCode, currency, fxRate, baseCurrency, id);
-    const cleanedOtherCostLines = await validateOtherCostLines(body.otherCostLines || [], currency, fxRate, baseCurrency);
+    const cleanedLines = await validateLines(body.lines, body.basis, party.detailCode, currency, fxRate, baseCurrency, date, id);
+    const cleanedOtherCostLines = await validateOtherCostLines(body.otherCostLines || [], currency, fxRate, baseCurrency, date);
 
     await prisma.$transaction([
       prisma.purchaseInvoiceLine.deleteMany({ where: { purchaseInvoiceId: id } }),

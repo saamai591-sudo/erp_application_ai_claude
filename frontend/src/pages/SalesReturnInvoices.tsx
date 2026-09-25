@@ -21,6 +21,7 @@ import { SalesType } from "./SalesTypes";
 import { SalesCenter } from "./SalesCenters";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
+import { useVatRates, vatRateForDate } from "../lib/useVatRates";
 import { toBaseCurrencyAmount } from "../lib/currencyConversion";
 
 // «فاکتور برگشت از فروش» — طبق تصمیم صریح کاربر، دقیقاً هم‌ساختار/هم‌رفتار فاکتور فروش
@@ -140,6 +141,7 @@ function emptyRow(): RowState {
 }
 
 function SalesReturnInvoiceForm({ editId }: { editId?: number }) {
+  const vatRates = useVatRates();
   const navigate = useNavigate();
   const { openTab } = useTabs();
   const location = useLocation();
@@ -284,7 +286,7 @@ function SalesReturnInvoiceForm({ editId }: { editId?: number }) {
   }
   function computeSuggestedVat(amount: number, discount: number, goodsItemId: string): string {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
-    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item)));
+    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item, vatRateForDate(vatRates, header.date))));
   }
   function onSourceLineChange(idx: number, sourceInventoryLineId: string) {
     const src = pickableLines.find((l) => String(l.sourceInventoryLineId) === sourceInventoryLineId);

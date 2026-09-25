@@ -7,12 +7,10 @@
  * نرخ مالیات: اگر کالا «خاص» باشد (GoodsItem.isSpecial) و نرخ اختصاصی تعریف‌شده داشته باشد
  * (GoodsItem.taxRate)، همان نرخ استفاده می‌شود؛ در غیر این صورت نرخ پیش‌فرض سیستم اعمال می‌شود.
  *
- * نرخ پیش‌فرض فعلاً یک عدد ثابت است — طبق تصمیم صریح کاربر: «این درصد بعداً در سیستم قابل تنظیم خواهد
- * شد، ولی فعلاً همان ۱۰٪ ثابت استفاده شود». همین یک ثابت یک‌جا نگه داشته می‌شود تا وقتی تنظیم‌پذیر شد
- * (مثلاً خواندن از یک جدول تنظیمات)، فقط همین یک تابع (resolveVatRatePercent) نیاز به تغییر داشته
- * باشد، نه جست‌وجو در همه‌ی فراخوان‌کننده‌ها.
+ * نرخ پیش‌فرض تاریخ‌محور است و از «رویه‌ها و تنظیمات حسابداری» می‌آید: فراخوان‌کننده آن را با
+ * getVatRatePercentForDate(تاریخ سند) (services/accountingSettingsService.ts) می‌گیرد و به resolveVatRatePercent می‌دهد؛
+ * این تابع فقط نرخ اختصاصی کالای «خاص» را بر آن مقدم می‌کند.
  */
-export const DEFAULT_VAT_RATE_PERCENT = 10;
 
 export interface VatRateGoodsItem {
   isSpecial: boolean;
@@ -26,9 +24,9 @@ function toPlainNumber(value: number | { toNumber(): number } | null | undefined
 }
 
 /** نرخ مالیات بر ارزش افزوده‌ی قابل‌اعمال روی یک کالای مشخص (درصد، نه کسر اعشاری) */
-export function resolveVatRatePercent(goodsItem: VatRateGoodsItem | null | undefined): number {
+export function resolveVatRatePercent(goodsItem: VatRateGoodsItem | null | undefined, defaultRatePercent: number): number {
   const specificRate = goodsItem?.isSpecial ? toPlainNumber(goodsItem.taxRate) : null;
-  return specificRate ?? DEFAULT_VAT_RATE_PERCENT;
+  return specificRate ?? defaultRatePercent;
 }
 
 /** مالیات بر ارزش افزوده‌ی یک ردیف سند: (مبلغ − تخفیف) × نرخ مالیات٪ */

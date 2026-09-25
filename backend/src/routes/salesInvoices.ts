@@ -4,6 +4,7 @@ import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
+import { getVatRatePercentForDate } from "../services/accountingSettingsService";
 import { toBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConversion";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
@@ -102,7 +103,7 @@ interface LineInput {
   description?: string | null;
 }
 
-async function validateLines(lines: LineInput[], basis: string, currency: ConversionCurrency, fxRate: number, baseCurrency: ConversionCurrency, excludeInvoiceId?: number) {
+async function validateLines(lines: LineInput[], basis: string, currency: ConversionCurrency, fxRate: number, baseCurrency: ConversionCurrency, docDate: Date, excludeInvoiceId?: number) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("فاکتور فروش باید حداقل یک ردیف کالا داشته باشد");
 
   const cleaned: {
@@ -158,7 +159,7 @@ async function validateLines(lines: LineInput[], basis: string, currency: Conver
     // ویرایش کند (اگر کلاینت صریحاً مقداری فرستاده باشد، همان معتبر است، نه مقدار محاسبه‌شده).
     const baseAmount = toBaseCurrencyAmount(amount, fxRate, currency, baseCurrency);
     const baseDiscount = toBaseCurrencyAmount(discount, fxRate, currency, baseCurrency);
-    const vatRatePercent = resolveVatRatePercent(item);
+    const vatRatePercent = resolveVatRatePercent(item, await getVatRatePercentForDate(docDate));
     const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent);
     const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
     if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
@@ -336,7 +337,7 @@ router.post("/sales-invoices", can(`${FORM}.create`), async (req, res) => {
     if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
     const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
-    const lines = await validateLines(body.lines, body.basis, currency, fxRate, baseCurrency);
+    const lines = await validateLines(body.lines, body.basis, currency, fxRate, baseCurrency, date);
 
     const number = await nextNumber(prisma.salesInvoice, fiscalPeriod.id);
     const created = await prisma.salesInvoice.create({
@@ -387,7 +388,7 @@ router.put("/sales-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
     if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
     const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
-    const lines = await validateLines(body.lines, body.basis, currency, fxRate, baseCurrency, id);
+    const lines = await validateLines(body.lines, body.basis, currency, fxRate, baseCurrency, date, id);
 
     await prisma.$transaction([
       prisma.salesInvoiceLine.deleteMany({ where: { salesInvoiceId: id } }),

@@ -20,6 +20,7 @@ import { SalesType } from "./SalesTypes";
 import { SalesCenter } from "./SalesCenters";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
+import { useVatRates, vatRateForDate } from "../lib/useVatRates";
 
 // «پیش‌فاکتور» — بالاترین سند زنجیره فروش (پیش‌فاکتور > سفارش فروش > حواله فروش > فاکتور فروش)؛ این
 // ماژول هیچ مستند تحلیل اختصاصی در پروژه ندارد (رجوع کنید به یادداشت بالای schema.prisma و
@@ -134,6 +135,7 @@ function emptyRow(): RowState {
 }
 
 function SalesQuoteForm({ editId }: { editId?: number }) {
+  const vatRates = useVatRates();
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
@@ -212,7 +214,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
   // کار نیست.
   function computeSuggestedVat(amount: number, goodsItemId: string): string {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
-    return String(computeLineVat(amount, 0, resolveVatRatePercent(item)));
+    return String(computeLineVat(amount, 0, resolveVatRatePercent(item, vatRateForDate(vatRates, header.date))));
   }
   function onUnitPriceChange(idx: number, unitPrice: string) {
     const row = rows[idx];

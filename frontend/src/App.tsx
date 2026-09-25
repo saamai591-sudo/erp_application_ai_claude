@@ -28,6 +28,7 @@ import Accounts from "./pages/Accounts";
 import DocumentTypes from "./pages/DocumentTypes";
 import JournalEntries from "./pages/JournalEntries";
 import AccountClosing from "./pages/AccountClosing";
+import AccountingSettings from "./pages/AccountingSettings";
 import OpeningClosing from "./pages/OpeningClosing";
 import DocumentConfirmation from "./pages/DocumentConfirmation";
 import AccountsReview from "./pages/AccountsReview";
@@ -186,6 +187,7 @@ export default function App() {
             <Route path="/journal-entries" element={<JournalEntries />} />
             <Route path="/journal-entries/new" element={<JournalEntries />} />
             <Route path="/journal-entries/:id/edit" element={<JournalEntries />} />
+            <Route path="/accounting-settings" element={<AccountingSettings />} />
             <Route path="/account-closing" element={<AccountClosing />} />
             <Route path="/account-closing/new" element={<AccountClosing />} />
             <Route path="/account-closing/:id" element={<AccountClosing />} />

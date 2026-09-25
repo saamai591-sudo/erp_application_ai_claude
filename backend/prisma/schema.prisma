@@ -3318,3 +3318,28 @@ model TreasuryYearClose {
 
   @@unique([fiscalPeriodId, section])
 }
+
+// =========================================================================
+// «رویه‌ها و تنظیمات حسابداری» (Documents/رویه ها و تنظیمات حسابداری.md) — تنظیمات تاریخ‌محور سطح حسابداری.
+// هر رکورد «تاریخ شروع اعتبار» (یکتا) دارد؛ مقدار معتبر برای یک تاریخ = آخرین رکوردِ با تاریخ شروع ≤ آن تاریخ.
+// =========================================================================
+
+enum AdvanceReceiptFxMethod {
+  HISTORICAL_RATE          // نرخ تاریخی پیش‌دریافت
+  TRANSACTION_DATE_RATE    // نرخ تاریخ معامله/فاکتور (اختلاف نرخ = تفاوت تسعیر ارز)
+}
+
+model AccountingVatRate {
+  id          Int      @id @default(autoincrement())
+  startDate   DateTime @unique @db.Date
+  /// درصد (مثلاً ۱۰ یعنی ۱۰٪)
+  ratePercent Decimal  @db.Decimal(5, 2)
+  createdAt   DateTime @default(now())
+}
+
+model AccountingAdvanceReceiptSetting {
+  id        Int                    @id @default(autoincrement())
+  startDate DateTime               @unique @db.Date
+  method    AdvanceReceiptFxMethod
+  createdAt DateTime               @default(now())
+}

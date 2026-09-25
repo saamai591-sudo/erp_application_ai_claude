@@ -167,6 +167,14 @@ export const REGISTRY: ModuleDef[] = [
     title: "حسابداری",
     subModules: [
       {
+        key: "settings",
+        title: "تنظیمات",
+        forms: [
+          // زبانه‌های «رویه‌ها و تنظیمات حسابداری» (تنظیمات ارز، ارزش افزوده، …) همه زیر همین یک Form هستند
+          { key: "accounting-settings", title: "رویه‌ها و تنظیمات حسابداری", baseActions: CRUD },
+        ],
+      },
+      {
         key: "structure",
         title: "تعریف ساختار",
         forms: [

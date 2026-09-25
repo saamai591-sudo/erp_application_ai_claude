@@ -5,6 +5,7 @@ import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
+import { getVatRatePercentForDate } from "../services/accountingSettingsService";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 
@@ -128,7 +129,7 @@ interface SalesQuoteLineInput {
 // همیشه به همان ارز هدر (نه ارز مبنا) محاسبه/ذخیره می‌شود — چون پیش‌فاکتور اصلاً fxRate ندارد (سندی
 // صرفاً اطلاعاتی، بدون اثر حسابداری)، پس نیازی به تبدیل به ارز مبنا هم نیست؛ amount همان‌جا که هست
 // (به ارز هدر) مستقیماً در فرمول مشترک utils/vatCalculation.ts به کار می‌رود.
-async function validateSalesQuoteLines(lines: SalesQuoteLineInput[]) {
+async function validateSalesQuoteLines(lines: SalesQuoteLineInput[], docDate: Date) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("پیش‌فاکتور باید حداقل یک ردیف کالا داشته باشد");
   const cleaned: { goodsItemId: number; unitId: number; quantity: number; unitPrice: number; amount: number; vatAmount: number; description: string | null }[] = [];
   for (const [idx, l] of lines.entries()) {
@@ -146,7 +147,7 @@ async function validateSalesQuoteLines(lines: SalesQuoteLineInput[]) {
     if (!item.isActive) throw new Error(`کالای ردیف ${idx + 1} غیرفعال است`);
     const unitId = l.unitId || item.mainUnitId;
 
-    const vatRatePercent = resolveVatRatePercent(item);
+    const vatRatePercent = resolveVatRatePercent(item, await getVatRatePercentForDate(docDate));
     const suggestedVatAmount = computeLineVat(amount, 0, vatRatePercent);
     const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
     if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
@@ -251,7 +252,7 @@ router.post("/sales-quotes", can(`${SALES_QUOTES_FORM}.create`), async (req, res
     if (!salesCenter) throw new Error("مرکز فروش یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
-    const lines = await validateSalesQuoteLines(body.lines);
+    const lines = await validateSalesQuoteLines(body.lines, date);
 
     const number = await nextNumber(prisma.salesQuote, fiscalPeriod.id);
     const created = await prisma.salesQuote.create({
@@ -296,7 +297,7 @@ router.put("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.edit`), async (req, re
     if (!salesCenter) throw new Error("مرکز فروش یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
-    const lines = await validateSalesQuoteLines(body.lines);
+    const lines = await validateSalesQuoteLines(body.lines, date);
 
     await prisma.$transaction([
       prisma.salesQuoteLine.deleteMany({ where: { salesQuoteId: id } }),
@@ -373,7 +374,7 @@ interface SalesOrderLineInput {
 
 // طبق تصمیم صریح کاربر (۱۴۰۵/۰۶/۲۰، هم‌الگوی SalesQuote): مالیات بر ارزش‌افزوده همیشه به همان ارز هدر
 // محاسبه/ذخیره می‌شود (نه ارز مبنا)، چون این فرم اصلاً fxRate ندارد.
-async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: string) {
+async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: string, docDate: Date) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("سفارش فروش باید حداقل یک ردیف کالا داشته باشد");
   const cleaned: {
     sourceSalesQuoteLineId: number | null;
@@ -418,7 +419,7 @@ async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: stri
     if (!item.isActive) throw new Error(`کالای ردیف ${idx + 1} غیرفعال است`);
     if (!unitId) unitId = item.mainUnitId;
 
-    const vatRatePercent = resolveVatRatePercent(item);
+    const vatRatePercent = resolveVatRatePercent(item, await getVatRatePercentForDate(docDate));
     const suggestedVatAmount = computeLineVat(amount, 0, vatRatePercent);
     const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
     if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
@@ -582,7 +583,7 @@ router.post("/sales-orders", can(`${SALES_ORDERS_FORM}.create`), async (req, res
     if (!salesCenter) throw new Error("مرکز فروش یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
-    const lines = await validateSalesOrderLines(body.lines, body.basis);
+    const lines = await validateSalesOrderLines(body.lines, body.basis, date);
 
     const number = await nextNumber(prisma.salesOrder, fiscalPeriod.id);
     const created = await prisma.salesOrder.create({
@@ -628,7 +629,7 @@ router.put("/sales-orders/:id", can(`${SALES_ORDERS_FORM}.edit`), async (req, re
     if (!salesCenter) throw new Error("مرکز فروش یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
-    const lines = await validateSalesOrderLines(body.lines, body.basis);
+    const lines = await validateSalesOrderLines(body.lines, body.basis, date);
 
     await prisma.$transaction([
       prisma.salesOrderLine.deleteMany({ where: { salesOrderId: id } }),

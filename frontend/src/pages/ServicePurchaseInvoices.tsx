@@ -22,6 +22,7 @@ import { partyDisplayName } from "./Users";
 import { PurchaseType } from "./PurchaseTypes";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
+import { useVatRates, vatRateForDate } from "../lib/useVatRates";
 import { toBaseCurrencyAmount } from "../lib/currencyConversion";
 import { round, allocateProportionally } from "../lib/costAllocation";
 
@@ -185,6 +186,7 @@ function emptyRow(): RowState {
 }
 
 function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
+  const vatRates = useVatRates();
   const navigate = useNavigate();
   const { openTab } = useTabs();
   const location = useLocation();
@@ -335,7 +337,7 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
   // اولیه است، کاربر می‌تواند بعداً خودش مقدار را ویرایش کند — دقیقاً هم‌الگوی PurchaseInvoices.tsx.
   function computeSuggestedVat(amount: number, discount: number, serviceId: string): string {
     const svc = services.find((s) => String(s.id) === serviceId);
-    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(svc)));
+    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(svc, vatRateForDate(vatRates, header.date))));
   }
 
   async function onBasisChange(idx: number, basis: Basis) {

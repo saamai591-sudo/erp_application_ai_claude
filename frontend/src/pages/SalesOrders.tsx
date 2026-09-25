@@ -20,6 +20,7 @@ import { SalesType } from "./SalesTypes";
 import { SalesCenter } from "./SalesCenters";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
+import { useVatRates, vatRateForDate } from "../lib/useVatRates";
 
 // «سفارش فروش» (تایید مشتری) — مرحله دوم زنجیره فروش. مبنا: بدون مبنا / پیش‌فاکتور. طبق تصمیم
 // صریح کاربر، «مانده‌ای» فقط برای حواله فروش/فاکتور فروش لازم است؛ اینجا (مثل سفارش خرید از استعلام
@@ -138,6 +139,7 @@ function emptyRow(): RowState {
 }
 
 function SalesOrderForm({ editId }: { editId?: number }) {
+  const vatRates = useVatRates();
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
@@ -252,7 +254,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
   // ویرایش کند — دقیقاً هم‌الگوی SalesQuotes.tsx.
   function computeSuggestedVat(amount: number, goodsItemId: string): string {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
-    return String(computeLineVat(amount, 0, resolveVatRatePercent(item)));
+    return String(computeLineVat(amount, 0, resolveVatRatePercent(item, vatRateForDate(vatRates, header.date))));
   }
   function onSourceLineChange(idx: number, sourceSalesQuoteLineId: string) {
     const src = pickableLines.find((l) => String(l.sourceSalesQuoteLineId) === sourceSalesQuoteLineId);

@@ -23,6 +23,7 @@ import { partyDisplayName } from "./Users";
 import { PurchaseType } from "./PurchaseTypes";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
+import { useVatRates, vatRateForDate } from "../lib/useVatRates";
 import { toBaseCurrencyAmount } from "../lib/currencyConversion";
 import { round, allocateProportionally } from "../lib/costAllocation";
 
@@ -209,6 +210,7 @@ function emptyCostRow(): CostRowState {
 }
 
 function PurchaseInvoiceForm({ editId }: { editId?: number }) {
+  const vatRates = useVatRates();
   const navigate = useNavigate();
   const { openTab } = useTabs();
   const location = useLocation();
@@ -399,7 +401,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   // قابل‌ویرایش است).
   function computeSuggestedVat(amount: number, discount: number, goodsItemId: string): string {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
-    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item)));
+    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item, vatRateForDate(vatRates, header.date))));
   }
   function onUnitPriceChange(idx: number, unitPrice: string) {
     const row = rows[idx];
@@ -477,7 +479,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   // تب «سایر هزینه‌ها» — دقیقاً هم‌الگوی ServicePurchaseInvoices.tsx (همان جدول/منطق بک‌اند مشترک است).
   function computeSuggestedVatForCost(amount: number, discount: number, serviceId: string): string {
     const svc = services.find((s) => String(s.id) === serviceId);
-    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(svc)));
+    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(svc, vatRateForDate(vatRates, header.date))));
   }
 
   async function onCostBasisChange(idx: number, basis: Basis) {
