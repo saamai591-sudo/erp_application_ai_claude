@@ -4,6 +4,7 @@ import { resolveDetailTitles } from "../utils/detailValues";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { computeFullAccountCode } from "../utils/accountCode";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
+import { assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 
@@ -245,6 +246,7 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
     const date = new Date(body.date);
     const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
     if (!fiscalPeriod) return res.status(400).json({ error: "این تاریخ در هیچ دوره مالی تعریف نشده است" });
+    await assertDateWithinCurrentFiscalPeriod(date);
 
     const totalDebit = body.lines.reduce((s, l) => s + Number(l.baseDebit || 0), 0);
     const totalCredit = body.lines.reduce((s, l) => s + Number(l.baseCredit || 0), 0);

@@ -7,6 +7,8 @@ import gregorian from "react-date-object/calendars/gregorian";
 import gregorian_en from "react-date-object/locales/gregorian_en";
 import { digitsOnly } from "../lib/digits";
 import { toFaDigits } from "../lib/formatAmount";
+import { useSelectedFiscalPeriod } from "../lib/useSelectedFiscalPeriod";
+import { formatJalaliDate } from "../lib/formatDate";
 
 function CalendarIcon() {
   return (
@@ -80,18 +82,33 @@ function slotsToGregorianIso(slots: string[]): string | null {
  * فیلد ورودی همیشه ماسک ثابت با اسلش‌های از پیش نمایش داده‌شده (____/__/__) دارد؛ کاربر می‌تواند هم
  * با تایپ رقم به رقم (دقیقاً روی همان خانه‌ای که مکان‌نما/کلیک روی آن است — نه همیشه انتهای فیلد) و هم
  * با کلیک روی آیکن تقویم (سمت چپ فیلد) از تقویم گرافیکی، تاریخ را وارد کند.
+ *
+ * رفتار پایه‌ی «تاریخ باید در دوره مالی باشد»: با prop fiscalYear تقویم به بازه‌ی دوره مالی انتخاب‌شده‌ی کاربر محدود می‌شود
+ * (minDate = شروع، maxDate = پایان دوره؛ روزهای بیرون از بازه غیرفعال‌اند) و تاریخی که دستی و بیرون از بازه تایپ شده با
+ * حاشیه‌ی قرمز و راهنما علامت می‌خورد. کنترل قطعی همان‌جا در بک‌اند است (assertWithinCurrentFiscalPeriod)؛ هر فیلد تاریخ
+ * سندی فقط همین prop را می‌گیرد.
  */
 export function JalaliDatePicker({
   value,
   onChange,
   placeholder,
   disabled,
+  fiscalYear,
 }: {
   value: string;
   onChange: (isoGregorianDate: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  /** تقویم را به بازه‌ی دوره مالی انتخاب‌شده محدود می‌کند (برای فیلدهای تاریخ سند) */
+  fiscalYear?: boolean;
 }) {
+  const period = useSelectedFiscalPeriod(!!fiscalYear);
+  const fromIso = fiscalYear && period ? period.fromDate.slice(0, 10) : "";
+  const toIso = fiscalYear && period ? period.toDate.slice(0, 10) : "";
+  const toJalali = (iso: string) =>
+    new DateObject({ date: iso, format: "YYYY-MM-DD", calendar: gregorian, locale: gregorian_en }).convert(persian, persian_fa);
+  const outOfRange = !!value && ((!!fromIso && value < fromIso) || (!!toIso && value > toIso));
+
   // slots/cursor هم به‌صورت state (برای رندر) و هم در یک ref (live، برای خواندن هم‌زمان/بدون تاخیر
   // در خودِ event handlerها) نگه‌داری می‌شوند. علتش این است که در تایپ سریع (چند keydown پشت‌سرهم
   // پیش از این‌که React فرصت re-render پیدا کند)، اگر handler بعدی مقدار cursor/slots را از کلوژر
@@ -251,6 +268,8 @@ export function JalaliDatePicker({
       weekStartDayIndex={0}
       containerStyle={{ width: "100%" }}
       onChange={handleCalendarPick}
+      minDate={fromIso ? toJalali(fromIso) : undefined}
+      maxDate={toIso ? toJalali(toIso) : undefined}
       render={(_value, openCalendar) => (
         <div className="jalali-date-wrapper">
           <button type="button" className="jalali-date-calendar-btn" onClick={disabled ? undefined : openCalendar} tabIndex={-1} disabled={disabled}>
@@ -261,6 +280,8 @@ export function JalaliDatePicker({
             className="jalali-date-input"
             dir="ltr"
             placeholder={placeholder}
+            aria-invalid={outOfRange || undefined}
+            title={outOfRange ? `تاریخ باید در بازه‌ی دوره مالی «${period?.title}» (${formatJalaliDate(fromIso)} تا ${formatJalaliDate(toIso)}) باشد` : undefined}
             value={toFaDigits(buildMaskedFromSlots(slots))}
             onKeyDown={disabled ? undefined : handleKeyDown}
             onPaste={disabled ? undefined : handlePaste}

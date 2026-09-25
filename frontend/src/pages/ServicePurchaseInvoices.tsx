@@ -607,7 +607,7 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
             )}
             <div className="form-field">
               <label>تاریخ<RequiredMark /></label>
-              <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
+              <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
             </div>
             <div className="form-field">
               <label>شماره فاکتور فروشنده</label>

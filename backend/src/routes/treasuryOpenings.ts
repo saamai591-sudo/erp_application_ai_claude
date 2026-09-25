@@ -4,6 +4,7 @@ import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { findChequeUses } from "../utils/chequeUsage";
 import { can } from "../authz/guard";
+import { assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { findFormPrefix } from "../authz/registry";
 
 const FORM = findFormPrefix("treasury-openings");
@@ -292,6 +293,7 @@ async function resolvePeriod(body: OpeningBody) {
     : await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
   if (!period) throw new Error("دوره مالی این تاریخ تعریف نشده است");
   if (date < period.fromDate || date > period.toDate) throw new Error("تاریخ افتتاحیه باید در بازه‌ی دوره مالی باشد");
+  await assertDateWithinCurrentFiscalPeriod(date);
   return { date, period };
 }
 

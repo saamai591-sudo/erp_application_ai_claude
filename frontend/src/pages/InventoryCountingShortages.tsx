@@ -296,7 +296,7 @@ function InventoryCountingShortageForm({ editId, basePath }: { editId?: number; 
             </div>
             <div className="form-field">
               <label>تاریخ سند<RequiredMark /></label>
-              <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={coreDisabled} />
+              <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={coreDisabled} />
             </div>
             <div className="form-field full">
               <label>شرح</label>

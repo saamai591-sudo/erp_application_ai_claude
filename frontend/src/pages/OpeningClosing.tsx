@@ -194,7 +194,7 @@ function EntryForm({ viewId }: { viewId?: number }) {
       <div className="form-grid" style={{ maxWidth: 600, marginBottom: 16 }}>
         <div className="form-field">
           <label>تاریخ<RequiredMark /></label>
-          <JalaliDatePicker value={date} onChange={setDate} disabled={!canEdit} />
+          <JalaliDatePicker fiscalYear value={date} onChange={setDate} disabled={!canEdit} />
         </div>
         <div className="form-field">
           <label>نوع</label>

@@ -393,7 +393,7 @@ function ClosingWizard({ viewId }: { viewId?: number }) {
               <div className="form-grid" style={{ marginBottom: 14, maxWidth: 500 }}>
                 <div className="form-field">
                   <label>تاریخ<RequiredMark /></label>
-                  <JalaliDatePicker value={date} onChange={setDate} />
+                  <JalaliDatePicker fiscalYear value={date} onChange={setDate} />
                 </div>
                 <div className="form-field">
                   <label>&nbsp;</label>

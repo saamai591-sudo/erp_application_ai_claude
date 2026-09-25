@@ -496,7 +496,7 @@ function SupplyRequestForm({ editId }: { editId?: number }) {
           </div>
           <div className="form-field">
             <label>تاریخ<RequiredMark /></label>
-            <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={headerDisabled} />
+            <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={headerDisabled} />
           </div>
           <div className="form-field">
             <label>مبنا</label>

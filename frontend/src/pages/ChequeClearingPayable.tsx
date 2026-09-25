@@ -407,7 +407,7 @@ function ChequeClearingPayableForm({ editId, reEdit }: { editId?: number; reEdit
             </div>
             <div className="form-field">
               <label>تاریخ سند<RequiredMark /></label>
-              <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
+              <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
             </div>
             <div className="form-field full">
               <label>شرح</label>

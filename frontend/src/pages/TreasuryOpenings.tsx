@@ -554,7 +554,7 @@ function OpeningForm({ editId }: { editId?: number }) {
         <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
           <div className="form-field">
             <label>تاریخ افتتاحیه<RequiredMark /></label>
-            <JalaliDatePicker value={date} onChange={setDate} />
+            <JalaliDatePicker fiscalYear value={date} onChange={setDate} />
           </div>
           <div className="form-field">
             <label>سال مالی</label>

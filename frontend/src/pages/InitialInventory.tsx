@@ -499,7 +499,7 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
           </div>
           <div className="form-field">
             <label>تاریخ سند<RequiredMark /></label>
-            <JalaliDatePicker value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={nonMoneyReadOnly} />
+            <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={nonMoneyReadOnly} />
           </div>
           <div className="form-field full">
             <label>شرح</label>
