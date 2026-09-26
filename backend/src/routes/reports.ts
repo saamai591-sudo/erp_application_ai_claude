@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { resolveDetailTitles } from "../utils/detailValues";
 import { computeFullAccountCode, buildAccountByIdMap } from "../utils/accountCode";
-import { parseFilters, stringWhere, numberWhere, dateWhere, matchesFilterValue } from "../utils/tableFilters";
+import { parseFilters, stringWhere, numberWhere, dateWhere, matchesFilterValue, parseSorts } from "../utils/tableFilters";
 import { toJalaliYearMonth } from "../utils/jalaliDate";
 import { can, userHasAction } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
@@ -227,6 +227,7 @@ router.get("/detail-summary", async (req: AuthedRequest, res) => {
     pageSize?: string;
     sortField?: string;
     sortDir?: string;
+    sorts?: string;
     filters?: string;
   } & CommonFilters;
   const slot = Number(q.slot);
@@ -297,13 +298,17 @@ router.get("/detail-summary", async (req: AuthedRequest, res) => {
 
   // مرتب‌سازی روی کل نتیجه (که همین‌جا در حافظه محاسبه شده) انجام می‌شود؛ سپس فقط همان صفحه برگردانده می‌شود
   let sorted = filtered;
-  if (q.sortField && DETAIL_SUMMARY_SORT_FIELDS.has(q.sortField)) {
-    const field = q.sortField as "code" | "title" | "totalDebit" | "totalCredit";
+  const summarySortKeys = parseSorts(q.sorts, q.sortField, q.sortDir).filter((k) => DETAIL_SUMMARY_SORT_FIELDS.has(k.field));
+  if (summarySortKeys.length) {
     sorted = [...results].sort((a, b) => {
-      const av = a[field];
-      const bv = b[field];
-      const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv), "fa");
-      return q.sortDir === "asc" ? cmp : -cmp;
+      for (const k of summarySortKeys) {
+        const field = k.field as "code" | "title" | "totalDebit" | "totalCredit";
+        const av = a[field];
+        const bv = b[field];
+        const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv), "fa");
+        if (cmp !== 0) return k.dir === "asc" ? cmp : -cmp;
+      }
+      return 0;
     });
   }
 
@@ -326,6 +331,7 @@ router.get("/ledger", can(`${ACCOUNT_REVIEW}.view`), async (req, res) => {
     pageSize?: string;
     sortField?: string;
     sortDir?: string;
+    sorts?: string;
     filters?: string;
   } & CommonFilters;
 
@@ -409,22 +415,23 @@ router.get("/ledger", can(`${ACCOUNT_REVIEW}.view`), async (req, res) => {
   // همین ترتیب معنای واقعیِ «مانده‌ی حساب تا این لحظه» را دارد؛ اگر کاربر ستون دیگری را برای
   // مرتب‌سازی انتخاب کند، مانده‌ی هر ردیف همچنان صحیح محاسبه می‌شود (جمع تجمعی روی همان ترتیب
   // نمایش‌داده‌شده) ولی دیگر یک «مانده‌ی زمانی» متعارف نیست.
-  const sortDir = q.sortDir === "asc" ? "asc" : "desc";
-  const sortMap: Record<string, any> = {
-    number: { journalEntry: { number: sortDir } },
-    referenceNumber: { journalEntry: { referenceNumber: sortDir } },
-    date: { journalEntry: { date: sortDir } },
-    documentType: { journalEntry: { documentType: { title: sortDir } } },
-    issuingSystem: { journalEntry: { issuingSystem: sortDir } },
-    status: { journalEntry: { status: sortDir } },
-    description: { description: sortDir },
-    debit: { baseDebit: sortDir },
-    credit: { baseCredit: sortDir },
-  };
-  const orderBy =
-    q.sortField && sortMap[q.sortField]
-      ? [sortMap[q.sortField], { rowOrder: "asc" as const }]
-      : [{ journalEntry: { date: "asc" as const } }, { journalEntry: { number: "asc" as const } }, { rowOrder: "asc" as const }];
+  const orderFor = (field: string, dir: "asc" | "desc"): any =>
+    ({
+      number: { journalEntry: { number: dir } },
+      referenceNumber: { journalEntry: { referenceNumber: dir } },
+      date: { journalEntry: { date: dir } },
+      documentType: { journalEntry: { documentType: { title: dir } } },
+      issuingSystem: { journalEntry: { issuingSystem: dir } },
+      status: { journalEntry: { status: dir } },
+      description: { description: dir },
+      debit: { baseDebit: dir },
+      credit: { baseCredit: dir },
+    } as Record<string, any>)[field];
+  // مرتب‌سازی چندستونه (پارامتر sorts) یا تک‌ستونه‌ی قبلی؛ rowOrder همیشه آخرین کلید است تا ترتیب ردیف‌های یک سند پایدار بماند
+  const ledgerSortOrder = parseSorts(q.sorts, q.sortField, q.sortDir).map((k) => orderFor(k.field, k.dir)).filter(Boolean);
+  const orderBy = ledgerSortOrder.length
+    ? [...ledgerSortOrder, { rowOrder: "asc" as const }]
+    : [{ journalEntry: { date: "asc" as const } }, { journalEntry: { number: "asc" as const } }, { rowOrder: "asc" as const }];
 
   const page = Math.max(1, parseInt(q.page as any) || 1);
   const pageSize = Math.min(1000, Math.max(1, parseInt(q.pageSize as any) || 100));

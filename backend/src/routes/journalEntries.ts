@@ -6,6 +6,7 @@ import { issueJournalEntry } from "../services/journalEntryService";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { can } from "../authz/guard";
+import { parseSorts } from "../utils/tableFilters";
 import { findFormPrefix } from "../authz/registry";
 
 const FORM = findFormPrefix("journal-entries");
@@ -152,12 +153,13 @@ function dateWhere(f: FilterSpec): any {
 }
 
 router.get("/", can(`${FORM}.view`), async (req, res) => {
-  const { fiscalPeriodId, page: pageRaw, pageSize: pageSizeRaw, sortField, sortDir, filters: filtersRaw } = req.query as {
+  const { fiscalPeriodId, page: pageRaw, pageSize: pageSizeRaw, sortField, sortDir, sorts: sortsRaw, filters: filtersRaw } = req.query as {
     fiscalPeriodId?: string;
     page?: string;
     pageSize?: string;
     sortField?: string;
     sortDir?: string;
+    sorts?: string;
     filters?: string;
   };
 
@@ -212,15 +214,18 @@ router.get("/", can(`${FORM}.view`), async (req, res) => {
 
   const where = andConditions.length ? { AND: andConditions } : undefined;
 
-  const sortMap: Record<string, any> = {
-    number: { number: sortDir === "asc" ? "asc" : "desc" },
-    date: { date: sortDir === "asc" ? "asc" : "desc" },
-    referenceNumber: { referenceNumber: sortDir === "asc" ? "asc" : "desc" },
-    documentTypeTitle: { documentType: { title: sortDir === "asc" ? "asc" : "desc" } },
-    description: { description: sortDir === "asc" ? "asc" : "desc" },
-    status: { status: sortDir === "asc" ? "asc" : "desc" },
-  };
-  const orderBy = sortField && sortMap[sortField] ? [sortMap[sortField]] : [{ date: "desc" as const }, { number: "desc" as const }];
+  // مرتب‌سازی چندستونه (پارامتر sorts، به ترتیب اولویت) یا تک‌ستونه‌ی قبلی (sortField/sortDir)
+  const orderFor = (field: string, dir: "asc" | "desc"): any =>
+    ({
+      number: { number: dir },
+      date: { date: dir },
+      referenceNumber: { referenceNumber: dir },
+      documentTypeTitle: { documentType: { title: dir } },
+      description: { description: dir },
+      status: { status: dir },
+    } as Record<string, any>)[field];
+  const sortOrder = parseSorts(sortsRaw, sortField, sortDir).map((k) => orderFor(k.field, k.dir)).filter(Boolean);
+  const orderBy = sortOrder.length ? sortOrder : [{ date: "desc" as const }, { number: "desc" as const }];
 
   const [total, entries] = await Promise.all([
     prisma.journalEntry.count({ where }),

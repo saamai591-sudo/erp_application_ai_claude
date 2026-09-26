@@ -231,7 +231,7 @@ router.get("/bank-account-review/ledger", can(`${FORM}.view`), async (req, res) 
       };
     });
 
-    const filteredSorted = applyServerFilterSort(rows, LEDGER_COLUMN_DEFS, req.query.filters, req.query.sortField as string | undefined, req.query.sortDir as string | undefined);
+    const filteredSorted = applyServerFilterSort(rows, LEDGER_COLUMN_DEFS, req.query.filters, req.query.sortField as string | undefined, req.query.sortDir as string | undefined, req.query.sorts);
     const total = filteredSorted.length;
     const start = (page - 1) * pageSize;
     res.json({ rows: filteredSorted.slice(start, start + pageSize), total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)), openingBalance: opening });

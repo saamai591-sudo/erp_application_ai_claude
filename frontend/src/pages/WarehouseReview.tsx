@@ -12,6 +12,7 @@ import { resolveReviewDateRange, FiscalPeriodRange } from "../lib/fiscalYearDefa
 import { useReviewTabLoader, useReviewTabActivation, useReviewTabViewState, serializeForDepsKey } from "../lib/useReviewTabLoader";
 import { useTabs } from "../lib/TabsContext";
 import { api } from "../lib/api";
+import { appendSortParams } from "../lib/gridSort";
 import { InfoHint } from "../components/InfoHint";
 import { ColumnFilterType, ActiveFilter } from "../components/DataTable";
 
@@ -370,13 +371,7 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
         const p = buildParams(LEDGER_TAB);
         p.set("page", String(page));
         p.set("pageSize", String(pageSize));
-        if (sort) {
-          const field = LEDGER_SORT_FIELD_MAP[sort.header];
-          if (field) {
-            p.set("sortField", field);
-            p.set("sortDir", sort.dir);
-          }
-        }
+        appendSortParams(p, sort, LEDGER_SORT_FIELD_MAP);
         if (Object.keys(colFilters).length) {
           const serverFilters: Record<string, ActiveFilter> = {};
           for (const [header, f] of Object.entries(colFilters)) {

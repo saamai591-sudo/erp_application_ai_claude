@@ -5,6 +5,7 @@ import { SelectId } from "../lib/useChainedMultiSelect";
 import { toFaDigits, formatAmountFa } from "../lib/formatAmount";
 import { exportGridToCsv, printGrid, deriveGridName, ExportColumn } from "../lib/gridExport";
 import { useAutoPortalTarget } from "../lib/useAutoPortalTarget";
+import { GridSort, nextSort, sortStateOf, makeComparator } from "../lib/gridSort";
 import { ActiveFilter, ColumnFilterType, FilterIcon, FilterPopover, matchesFilter } from "./DataTable";
 
 export interface BalanceTableColumn<T> {
@@ -156,9 +157,9 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
    * می‌شد. این callbackها مستقل از serverPaging.onFiltersChange/onSortChange هستند (که فقط برای
    * تب‌های سرور-صفحه‌بندی‌شده به‌کار می‌روند) تا تب‌های کاملاً کلاینتی هم بتوانند وضعیتشان را حفظ کنند. */
   onFiltersChange?: (filters: Record<string, ActiveFilter>) => void;
-  onSortChange?: (sort: { header: string; dir: "asc" | "desc" } | null) => void;
+  onSortChange?: (sort: GridSort | null) => void;
 }) {
-  const [sort, setSort] = useState<{ header: string; dir: "asc" | "desc" } | null>(null);
+  const [sort, setSort] = useState<GridSort | null>(null);
   const [filters, setFilters] = useState<Record<string, ActiveFilter>>({});
   const [openFilterFor, setOpenFilterFor] = useState<string | null>(null);
   const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
@@ -213,11 +214,10 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stateKey]);
 
-  function toggleSort(col: BalanceTableColumn<T>) {
+  function toggleSort(col: BalanceTableColumn<T>, multi = false) {
     if (!col.sortValue) return;
     setSort((prev) => {
-      const next: { header: string; dir: "asc" | "desc" } | null =
-        !prev || prev.header !== col.header ? { header: col.header, dir: "asc" } : prev.dir === "asc" ? { header: col.header, dir: "desc" } : null;
+      const next = nextSort(prev, col.header, multi);
       serverPaging?.onSortChange?.(next);
       onSortChange?.(next);
       return next;
@@ -246,17 +246,9 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
 
   let sortedRows = filteredRows;
   if (!serverPaging && sort) {
-    const col = columns.find((c) => c.header === sort.header);
-    if (col?.sortValue) {
-      sortedRows = [...filteredRows].sort((a, b) => {
-        const av = col.sortValue!(a);
-        const bv = col.sortValue!(b);
-        if (av === null || av === undefined) return 1;
-        if (bv === null || bv === undefined) return -1;
-        const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv), "fa");
-        return sort.dir === "asc" ? cmp : -cmp;
-      });
-    }
+    // مرتب‌سازی چندستونه (Ctrl/Shift + کلیک) — lib/gridSort.ts
+    const cmp = makeComparator<T>(sort, (h) => columns.find((c) => c.header === h)?.sortValue);
+    if (cmp) sortedRows = [...filteredRows].sort(cmp);
   }
 
   // در حالت کلاینتی، دقیقاً رفتار قبلی حفظ می‌شود (نمایش کامل پیام بارگذاری)؛
@@ -302,16 +294,17 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
           )}
           <th style={{ width: 44 }}>ردیف</th>
           {columns.map((c) => {
-            const dir = sort?.header === c.header ? sort.dir : null;
+            const sortState = sortStateOf(sort, c.header);
             const hasFilter = !!c.filterType && !!c.filterValue;
             const isFilterActive = !!filters[c.header];
             return (
               <th key={c.header} style={{ width: c.width }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                   {c.sortValue ? (
-                    <span onClick={() => toggleSort(c)} style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }} title="مرتب‌سازی">
+                    <span onClick={(e) => toggleSort(c, e.ctrlKey || e.shiftKey || e.metaKey)} style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }} title="مرتب‌سازی (Ctrl/Shift + کلیک برای مرتب‌سازی چندستونه)">
                       {c.header}
-                      <SortIcon dir={dir} />
+                      <SortIcon dir={sortState?.dir ?? null} />
+                      {sortState?.priority && <span className="sort-priority">{toFaDigits(String(sortState.priority))}</span>}
                     </span>
                   ) : (
                     c.header

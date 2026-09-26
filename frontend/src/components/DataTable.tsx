@@ -7,6 +7,7 @@ import { toFaDigits, formatAmountFa } from "../lib/formatAmount";
 import { useTabs } from "../lib/TabsContext";
 import { usePersistedState } from "../lib/usePersistedState";
 import { exportGridToCsv, printGrid, deriveGridName, ExportColumn } from "../lib/gridExport";
+import { GridSort, nextSort, sortStateOf, makeComparator } from "../lib/gridSort";
 
 /** اعداد و رشته‌های خالص عددی را به ارقام فارسی تبدیل می‌کند؛ JSX و متن‌های ترکیبی دست‌نخورده می‌مانند */
 function renderCell(value: any): any {
@@ -315,7 +316,7 @@ export interface ServerPaging {
   onPageChange: (page: number) => void;
   onPageSizeChange: (size: number) => void;
   onFiltersChange?: (filters: Record<string, ActiveFilter>) => void;
-  onSortChange?: (sort: { header: string; dir: "asc" | "desc" } | null) => void;
+  onSortChange?: (sort: GridSort | null) => void;
 }
 
 export interface EditAction<T> {
@@ -375,7 +376,7 @@ export function DataTable<T extends { id: number | string }>({
   // باید دست‌نخورده بماند؛ فقط خودِ rows (که از بیرون داده می‌شود) ممکن است تازه‌سازی شود. طبق تصمیم
   // صریح کاربر، این یک ویژگی پایه است، نه چیزی که هر صفحه باید جداگانه سیم‌کشی کند.
   const [filters, setFilters] = usePersistedState<Record<string, ActiveFilter>>(`${gridStateBase}:filters`, {});
-  const [sort, setSort] = usePersistedState<{ header: string; dir: "asc" | "desc" } | null>(`${gridStateBase}:sort`, null);
+  const [sort, setSort] = usePersistedState<GridSort | null>(`${gridStateBase}:sort`, null);
   const [page, setPage] = usePersistedState<number>(`${gridStateBase}:page`, 1);
   const [pageSize, setPageSize] = usePersistedState<number>(`${gridStateBase}:pageSize`, DEFAULT_PAGE_SIZE);
   const [selected, setSelected] = usePersistedState<Set<number | string>>(`${gridStateBase}:selected`, () => new Set());
@@ -435,29 +436,19 @@ export function DataTable<T extends { id: number | string }>({
   const sortedRows = serverPaging
     ? filteredRows
     : (() => {
-        if (!sort) return filteredRows;
-        const col = columns.find((c) => c.header === sort.header);
-        const accessor = col?.sortValue || col?.filterValue;
-        if (!accessor) return filteredRows;
-        const withKey = filteredRows.map((row) => ({ row, key: accessor(row) }));
-        withKey.sort((a, b) => {
-          const av = a.key, bv = b.key;
-          if (av === null || av === undefined) return 1;
-          if (bv === null || bv === undefined) return -1;
-          let cmp: number;
-          if (typeof av === "number" && typeof bv === "number") cmp = av - bv;
-          else cmp = String(av).localeCompare(String(bv), "fa");
-          return sort.dir === "asc" ? cmp : -cmp;
+        // مرتب‌سازی چندستونه (Ctrl/Shift + کلیک): کلیدها به ترتیب اولویت — lib/gridSort.ts
+        const cmp = makeComparator<T>(sort, (h) => {
+          const col = columns.find((c) => c.header === h);
+          return col?.sortValue || col?.filterValue;
         });
-        return withKey.map((x) => x.row);
+        return cmp ? [...filteredRows].sort(cmp) : filteredRows;
       })();
 
-  function toggleSort(col: Column<T>) {
+  function toggleSort(col: Column<T>, multi = false) {
     const accessor = col.sortValue || col.filterValue;
     if (!accessor) return;
     setSort((prev) => {
-      const next: { header: string; dir: "asc" | "desc" } | null =
-        !prev || prev.header !== col.header ? { header: col.header, dir: "asc" } : prev.dir === "asc" ? { header: col.header, dir: "desc" } : null;
+      const next = nextSort(prev, col.header, multi);
       serverPaging?.onSortChange?.(next);
       return next;
     });
@@ -676,17 +667,18 @@ export function DataTable<T extends { id: number | string }>({
                 const hasFilter = !!c.filterType && !!c.filterValue;
                 const isActive = !!filters[c.header];
                 const canSort = !!(c.sortValue || c.filterValue);
-                const sortDir = sort?.header === c.header ? sort.dir : null;
+                const sortState = sortStateOf(sort, c.header);
                 return (
                   <th key={c.header} style={{ width: c.width }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                       <span
-                        onClick={canSort ? () => toggleSort(c) : undefined}
+                        onClick={canSort ? (e) => toggleSort(c, e.ctrlKey || e.shiftKey || e.metaKey) : undefined}
                         style={canSort ? { cursor: "pointer", display: "flex", alignItems: "center", gap: 3 } : undefined}
-                        title={canSort ? "مرتب‌سازی" : undefined}
+                        title={canSort ? "مرتب‌سازی (Ctrl/Shift + کلیک برای مرتب‌سازی چندستونه)" : undefined}
                       >
                         {c.header}
-                        {canSort && <SortIcon dir={sortDir} />}
+                        {canSort && <SortIcon dir={sortState?.dir ?? null} />}
+                        {sortState?.priority && <span className="sort-priority">{toFaDigits(String(sortState.priority))}</span>}
                       </span>
                       {hasFilter && (
                         <button

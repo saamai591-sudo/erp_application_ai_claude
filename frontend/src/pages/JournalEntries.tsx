@@ -18,6 +18,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
+import { appendSortParams } from "../lib/gridSort";
 import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
@@ -146,13 +147,7 @@ function EntryList() {
       params.set("page", String(page));
       params.set("pageSize", String(pageSize));
       if (fiscalPeriodId) params.set("fiscalPeriodId", fiscalPeriodId);
-      if (sort) {
-        const field = SERVER_FIELD_MAP[sort.header];
-        if (field) {
-          params.set("sortField", field);
-          params.set("sortDir", sort.dir);
-        }
-      }
+      appendSortParams(params, sort, SERVER_FIELD_MAP);
       const serverFilters: Record<string, ActiveFilter> = {};
       for (const [header, f] of Object.entries(filters)) {
         const field = SERVER_FIELD_MAP[header];

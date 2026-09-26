@@ -484,7 +484,8 @@ router.get("/warehouse-review/ledger", canViewWarehouseReview, async (req: Authe
       ledgerColumnDefs(!!req.canViewAmount),
       req.query.filters,
       req.query.sortField as string | undefined,
-      req.query.sortDir as string | undefined
+      req.query.sortDir as string | undefined,
+      req.query.sorts
     );
     const total = filteredSorted.length;
     const start = (page - 1) * pageSize;

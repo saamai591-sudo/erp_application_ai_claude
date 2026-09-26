@@ -364,7 +364,7 @@ router.get("/purchase-review/ledger", can(`${FORM}.view`), async (req, res) => {
 
     const withTotals = [...saleRows, ...returnRows].sort((a, b) => a.date.getTime() - b.date.getTime() || a.number - b.number || a.id - b.id);
 
-    const filteredSorted = applyServerFilterSort(withTotals, LEDGER_COLUMN_DEFS, req.query.filters, req.query.sortField as string | undefined, req.query.sortDir as string | undefined);
+    const filteredSorted = applyServerFilterSort(withTotals, LEDGER_COLUMN_DEFS, req.query.filters, req.query.sortField as string | undefined, req.query.sortDir as string | undefined, req.query.sorts);
     const total = filteredSorted.length;
     const start = (page - 1) * pageSize;
     const rows = filteredSorted.slice(start, start + pageSize);

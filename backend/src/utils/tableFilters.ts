@@ -128,7 +128,30 @@ export interface ServerColumnDef<T> {
  * می‌شود. columns با همان کلیدهایی که فرانت‌اند در query param «sortField»/«filters» می‌فرستد کلید
  * می‌خورد (دقیقاً هم‌الگوی LEDGER_SORT_FIELD_MAP در AccountsReview.tsx).
  */
-export function applyServerFilterSort<T>(rows: T[], columns: Record<string, ServerColumnDef<T>>, filtersRaw: unknown, sortField?: string, sortDir?: string): T[] {
+export interface SortSpecKey { field: string; dir: "asc" | "desc" }
+
+/**
+ * کلیدهای مرتب‌سازی چندستونه‌ی یک درخواست (به ترتیب اولویت): پارامتر «sorts» (JSON آرایه‌ای از {field, dir}) که فرانت‌اند با Ctrl/Shift + کلیک می‌فرستد؛
+ * اگر نبود، همان sortField/sortDir تک‌ستونه‌ی قبلی. فقط ساختار را اعتبارسنجی می‌کند؛ ناشناخته‌بودن field را مصرف‌کننده بر اساس ستون‌های مجاز خودش رد می‌کند.
+ */
+export function parseSorts(sortsRaw: unknown, sortField?: string, sortDir?: string): SortSpecKey[] {
+  if (typeof sortsRaw === "string" && sortsRaw) {
+    try {
+      const arr = JSON.parse(sortsRaw);
+      if (Array.isArray(arr)) {
+        const keys = arr
+          .filter((k) => k && typeof k.field === "string" && (k.dir === "asc" || k.dir === "desc"))
+          .map((k) => ({ field: k.field as string, dir: k.dir as "asc" | "desc" }));
+        if (keys.length) return keys;
+      }
+    } catch {
+      /* JSON نامعتبر: به sortField/sortDir برمی‌گردد */
+    }
+  }
+  return sortField ? [{ field: sortField, dir: sortDir === "asc" ? "asc" : "desc" }] : [];
+}
+
+export function applyServerFilterSort<T>(rows: T[], columns: Record<string, ServerColumnDef<T>>, filtersRaw: unknown, sortField?: string, sortDir?: string, sortsRaw?: unknown): T[] {
   const filters = parseFilters(filtersRaw);
   let result = rows;
   for (const [key, f] of Object.entries(filters)) {
@@ -136,17 +159,27 @@ export function applyServerFilterSort<T>(rows: T[], columns: Record<string, Serv
     if (!col) continue;
     result = result.filter((row) => matchesFilterValue(col.get(row) as any, col.type, f));
   }
-  if (sortField && columns[sortField]) {
-    const col = columns[sortField];
-    const dir = sortDir === "asc" ? 1 : -1;
+  const sortKeys = parseSorts(sortsRaw, sortField, sortDir).filter((k) => !!columns[k.field]);
+  if (sortKeys.length) {
     result = [...result].sort((a, b) => {
-      const av = col.get(a);
-      const bv = col.get(b);
-      if (av === null || av === undefined) return 1;
-      if (bv === null || bv === undefined) return -1;
-      if (col.type === "date") return ((av as Date).valueOf() - (bv as Date).valueOf()) * dir;
-      if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
-      return String(av).localeCompare(String(bv), "fa") * dir;
+      // مرتب‌سازی چندستونه: کلیدها به ترتیب اولویت؛ فقط وقتی کلید قبلی مساوی بود به کلید بعدی می‌رود
+      for (const k of sortKeys) {
+        const col = columns[k.field];
+        const dir = k.dir === "asc" ? 1 : -1;
+        const av = col.get(a);
+        const bv = col.get(b);
+        const aNull = av === null || av === undefined;
+        const bNull = bv === null || bv === undefined;
+        if (aNull && bNull) continue;
+        if (aNull) return 1;
+        if (bNull) return -1;
+        let cmp: number;
+        if (col.type === "date") cmp = (av as Date).valueOf() - (bv as Date).valueOf();
+        else if (typeof av === "number" && typeof bv === "number") cmp = av - bv;
+        else cmp = String(av).localeCompare(String(bv), "fa");
+        if (cmp !== 0) return cmp * dir;
+      }
+      return 0;
     });
   }
   return result;
