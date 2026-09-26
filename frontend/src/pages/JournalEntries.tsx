@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
 import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -596,6 +596,24 @@ function EntryForm({ editId }: { editId?: number }) {
   const linesPageStart = (linesPage - 1) * linesPageSize;
   const pagedRowEntries = rows.map((row, idx) => ({ row, idx })).slice(linesPageStart, linesPageStart + linesPageSize);
 
+  // ردیف «جمع» زیر گرید ردیف‌ها با همان مکانیزم «جمع گرید» بقیه‌ی گریدها (جدول مجزا بیرون از ناحیه‌ی اسکرول، زیر هر ستون، عرض ستون‌ها از <th>ها)؛
+  // جمع کل «سند» (همه‌ی ردیف‌ها، معادل ارز پایه) در هر صفحه‌ی گرید ثابت نمایش داده می‌شود. اختلاف بدهکار/بستانکار یک برچسب واحد «مغایرت» است.
+  const linesTheadRef = useRef<HTMLTableRowElement>(null);
+  const linesScrollRef = useRef<HTMLDivElement | null>(null);
+  const linesTotalsScrollRef = useRef<HTMLDivElement>(null);
+  const [linesColWidths, setLinesColWidths] = useState<number[]>([]);
+  useLayoutEffect(() => {
+    function measure() {
+      const ths = linesTheadRef.current?.querySelectorAll("th");
+      if (!ths || ths.length === 0) return;
+      setLinesColWidths(Array.from(ths).map((th) => th.getBoundingClientRect().width));
+    }
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, linesPage, linesPageSize, loaded]);
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -786,10 +804,15 @@ function EntryForm({ editId }: { editId?: number }) {
             جعبه‌ی رندر خودش را ندارد و grid-scroll-area عملاً فرزند مستقیم grid-wrap حساب می‌شود، در حالی
             که غیرفعال‌سازی HTML خودِ fieldset (disabled) دست‌نخورده باقی می‌ماند. */}
         <fieldset disabled={isReadOnly} style={{ border: 0, padding: 0, margin: 0, display: "contents" }}>
-        <div className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
+        <div
+          ref={linesScrollRef}
+          className="je-lines-scroll grid-scroll-area"
+          style={{ overflowX: "auto", overflowY: "auto" }}
+          onScroll={() => { if (linesScrollRef.current && linesTotalsScrollRef.current) linesTotalsScrollRef.current.scrollLeft = linesScrollRef.current.scrollLeft; }}
+        >
           <table className="je-lines-table">
             <thead>
-              <tr>
+              <tr ref={linesTheadRef}>
                 <th>ردیف</th>
                 <th>حساب</th>
                 <th>تفصیل ۱</th>
@@ -948,6 +971,22 @@ function EntryForm({ editId }: { editId?: number }) {
         </div>
         </fieldset>
 
+        <div className="grid-footer-totals">
+          <div className="grid-footer-totals-scroll" ref={linesTotalsScrollRef}>
+            <table style={{ tableLayout: "fixed", width: linesColWidths.length ? linesColWidths.reduce((a, w) => a + w, 0) : undefined }}>
+              <tbody>
+                <tr>
+                  {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) => (
+                    <td key={i} style={{ width: linesColWidths[i] }}>
+                      {i === 0 ? "جمع" : i === 6 ? formatAmountFa(totalDebit) : i === 7 ? formatAmountFa(totalCredit) : ""}
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <div className="grid-footer je-lines-footer">
           <span className="grid-footer-info">
             {rows.length === 0
@@ -955,7 +994,7 @@ function EntryForm({ editId }: { editId?: number }) {
               : `نمایش ${toFaDigits(String(linesPageStart + 1))} تا ${toFaDigits(String(Math.min(linesPageStart + linesPageSize, rows.length)))} از ${toFaDigits(String(rows.length))} ردیف`}
           </span>
           <span className="je-lines-totals">
-            جمع کل (معادل {baseCurrency?.title}): بدهکار {formatAmountFa(totalDebit)} — بستانکار {formatAmountFa(totalCredit)}
+            مغایرت (معادل {baseCurrency?.title}): {formatAmountFa(Math.abs(totalDebit - totalCredit))}
             {!isBalanced && <span className="je-lines-balance-bad"> · سند بالانس نیست</span>}
             {isBalanced && <span className="je-lines-balance-ok"> · بالانس ✓</span>}
           </span>
