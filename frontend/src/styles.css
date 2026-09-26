@@ -840,7 +840,14 @@ body {
    محتوای دیگری (مثلاً بنر خطا) بالای grid-wrap اضافه/حذف شود و مجموع ارتفاع فرزندان از فضای .content
    بیشتر شود، بدون shrink:0 فلکس سعی می‌کرد grid-wrap را کوچک‌تر از ارتفاع واقعیِ محتوایش کند (که چون خودِ
    wrap کانتینر overflow:visible است، باعث بیرون‌زدن فرزندان از قاب و جدا به‌نظر رسیدن هدر چسبان می‌شد). */
-.grid-wrap { flex: 1 0 auto; display: flex; flex-direction: column; min-height: 0; }
+.grid-wrap { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+/* ریشه‌ی باگ «فوتر گرید زیر صفحه می‌رود» (تکرارشونده در همه‌ی فهرست‌ها): قاعده‌ی shrink:0 که برای گریدِ ردیف‌های فرم‌های سند (بنر خطا بالای گرید) گذاشته شده بود، به‌اشتباه روی
+   خودِ .grid-wrap پایه گذاشته شد که مشترک با گرید فهرست (DataTable) و SelectableBalanceTable است؛ در نتیجه گرید فهرست هرگز کوچک نمی‌شد، ارتفاعش برابر کل ردیف‌ها می‌شد و فوتر
+   (تعداد/صفحه‌بندی) بعد از آخرین ردیف می‌آمد. حالا shrink:0 فقط برای گرید فرم‌های سند (.je-lines-wrap) است و گرید فهرست به‌صورت پایه بدنه‌ی داخلی اسکرول‌شونده و فوتر ثابت دارد. */
+.grid-wrap.je-lines-wrap { flex: 1 0 auto; }
+.grid-wrap:not(.je-lines-wrap) .grid-scroll-area,
+.grid-wrap-standalone .grid-scroll-area { flex: 1 1 auto; min-height: 120px; }
+.grid-footer, .grid-footer-totals { flex-shrink: 0; }
 .grid-wrap .grid-scroll-area {
   flex: 1;
   border-radius: var(--radius) var(--radius) 0 0;
@@ -910,7 +917,7 @@ body {
    هم تغییر می‌دهد (چون فرض می‌کند حتماً یک grid-footer صفحه‌بندی زیرش می‌آید)، در حالی که این‌جا وقتی
    ستون decimal ای نباشد (renderTotalsBar چیزی برنمی‌گرداند)، grid-scroll-area باید کادر کامل خودش
    (چهار گوشه‌ی گرد) را حفظ کند — پس فقط flex:1 اضافه می‌شود، نه بقیه‌ی قواعد .grid-wrap. */
-.grid-wrap-standalone { flex: 1 0 auto; display: flex; flex-direction: column; min-height: 0; }
+.grid-wrap-standalone { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
 .grid-wrap-standalone .grid-scroll-area { flex: 1; }
 .grid-page-size { display: flex; align-items: center; gap: 6px; }
 .grid-page-size select {
