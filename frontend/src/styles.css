@@ -20,6 +20,7 @@
   --ink: #111827;
   --ink-soft: #6b7280;
   --line: #e5e7eb;
+  --row-alt: #f9fafc; /* سایه‌ی ملایم ردیف‌های زوج گرید */
   --line-strong: #d1d5db;
   --primary: #4f46e5;
   --primary-ink: #ffffff;
@@ -95,6 +96,7 @@
   --ink: #0f172a;
   --ink-soft: #475569;
   --line: #e2e6eb;
+  --row-alt: #f7f9fb; /* سایه‌ی ملایم ردیف‌های زوج گرید */
   --line-strong: #cbd5e1;
   --primary: #1e3a5f;
   --primary-ink: #ffffff;
@@ -167,6 +169,7 @@
   --ink: #0f172a;
   --ink-soft: #475569;
   --line: #e4e7eb;
+  --row-alt: #f8fafb; /* سایه‌ی ملایم ردیف‌های زوج گرید */
   --line-strong: #cbd5e1;
   --primary: #1e3a5f;
   --primary-ink: #ffffff;
@@ -236,6 +239,7 @@
   --ink: #e8ecf3;
   --ink-soft: #94a3b8;
   --line: #262f40;
+  --row-alt: #182133; /* سایه‌ی ملایم ردیف‌های زوج گرید */
   --line-strong: #364256;
   --primary: #5b8fc7;
   --primary-ink: #071019;
@@ -304,6 +308,7 @@
   --ink: #1b2b36;
   --ink-soft: #56717d;
   --line: #dbe6e9;
+  --row-alt: #f4f9fa; /* سایه‌ی ملایم ردیف‌های زوج گرید */
   --line-strong: #b8ccd2;
   --primary: #0e7a90;
   --primary-ink: #ffffff;
@@ -1534,3 +1539,25 @@ tbody tr:hover { background: var(--bg); }
 .rmdp-day.rmdp-disabled:not(.rmdp-day-hidden) span { opacity: .3; text-decoration: line-through; cursor: not-allowed; }
 /* ردیف ابزار پرداخت/دریافت که در موضوعات استفاده شده: قفل (inert) و کم‌رنگ */
 .instrument-row-locked td { opacity: .6; background: var(--bg); }
+
+/* ===== Base Grid: جداکننده‌ی عمودی ستون‌ها و سایه‌ی ملایم ردیف‌های یک‌درمیان — یک‌جا برای همه‌ی گریدها =====
+   شامل گرید فهرست (DataTable/SelectableBalanceTable: .grid-scroll-area)، گرید ردیف‌های فرم (.je-lines-table که خودش کادر کامل دارد)، جدول انتخابگرها (.picker-table)
+   و نوار «جمع» (تا خط‌ها هم‌تراز ستون‌ها بمانند). ردیف انتخاب‌شده/هاور همچنان از سایه‌ی یک‌درمیان پررنگ‌ترند. */
+.grid-scroll-area table:not(.je-lines-table) th,
+.grid-scroll-area table:not(.je-lines-table) td,
+.picker-table th,
+.picker-table td,
+.grid-footer-totals td { border-inline-end: 1px solid var(--line); }
+.grid-scroll-area table:not(.je-lines-table) th:last-child,
+.grid-scroll-area table:not(.je-lines-table) td:last-child,
+.picker-table th:last-child,
+.picker-table td:last-child,
+.grid-footer-totals td:last-child { border-inline-end: none; }
+.grid-scroll-area tbody tr:nth-child(even) td,
+.je-lines-table tbody tr:nth-child(even) td,
+.picker-table tbody tr:nth-child(even) td { background: var(--row-alt); }
+.grid-scroll-area tbody tr:hover td,
+.je-lines-table tbody tr:hover td,
+.picker-table tbody tr:hover td { background: var(--bg); }
+.grid-scroll-area tbody tr.active-list td,
+.picker-table tbody tr.active-list td { background: var(--primary-soft); }
