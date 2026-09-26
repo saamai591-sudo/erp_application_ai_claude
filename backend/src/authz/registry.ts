@@ -498,7 +498,7 @@ export const REGISTRY: ModuleDef[] = [
   },
   {
     key: "treasury",
-    title: "مدیریت نقدینگی و چک",
+    title: "مدیریت خزانه",
     subModules: [
       {
         key: "settings",

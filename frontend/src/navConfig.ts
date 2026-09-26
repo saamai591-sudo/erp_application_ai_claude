@@ -261,7 +261,7 @@ const RAW_MODULES: ModuleGroup[] = [
     ],
   },
   {
-    title: "مدیریت نقدینگی و چک",
+    title: "مدیریت خزانه",
     subModules: [
       {
         title: "تنظیمات",
