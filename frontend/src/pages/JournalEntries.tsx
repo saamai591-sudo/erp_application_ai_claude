@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
-import { showError } from "../lib/toast";
+import { showError, showToast } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable, ActiveFilter } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -237,6 +237,22 @@ function EntryList() {
     await reload();
   }
 
+  // شماره‌گذاری مجدد اسناد «ثبت/بررسی» دوره‌ی مالی (منطق فقط در سرویس مشترک بک‌اند است؛ تایید اسناد هم همان را صدا می‌زند)
+  async function renumber() {
+    if (!window.confirm("اسناد در وضعیت «ثبت» و «بررسی» بر اساس تاریخ سند و شماره روزانه شماره‌گذاری مجدد می‌شوند. ادامه می‌دهید؟")) return;
+    try {
+      const r: { count: number; firstNumber: number | null; lastNumber: number | null } = await api.post("/journal-entries/renumber", {});
+      showToast(
+        r.count > 0
+          ? `${toFaDigits(String(r.count))} سند شماره‌گذاری مجدد شد (از ${toFaDigits(String(r.firstNumber))} تا ${toFaDigits(String(r.lastNumber))})`
+          : "سندی در وضعیت «ثبت» یا «بررسی» برای شماره‌گذاری مجدد وجود ندارد"
+      );
+      await reload();
+    } catch (e) {
+      showError((e as ApiError).message);
+    }
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -286,6 +302,7 @@ function EntryList() {
         bulkActions={[
           { label: (n) => `بررسی (${toFaDigits(String(n))})`, icon: <CheckIcon />, onClick: bulkReview },
           { label: (n) => `برگشت از بررسی (${toFaDigits(String(n))})`, icon: <UndoIcon />, onClick: bulkUnreview },
+          { label: () => "شماره‌گذاری مجدد", icon: <RenumberIcon />, onClick: renumber, noSelection: true },
         ]}
         serverPaging={{
           page,
@@ -319,6 +336,15 @@ function FxIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.7" />
       <path d="M9 10c0-1.2 1.2-2 3-2s3 .8 3 2-1 1.5-3 2-3 .8-3 2 1.2 2 3 2 3-.8 3-2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function RenumberIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M4 7h9M4 12h6M4 17h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M17 6v12m0 0l-3-3m3 3l3-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

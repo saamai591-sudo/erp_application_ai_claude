@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma, getCurrentFiscalPeriod } from "../lib/prisma";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { renumberJournalEntries } from "../services/journalEntryRenumberService";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 
@@ -87,12 +88,22 @@ router.post("/check", can(`${FORM}.view`), async (req, res) => {
 router.post("/confirm", can(`${FORM}.confirm`), async (req, res) => {
   try {
     const { fiscalPeriod, date } = await validate(req.body.date);
-    const result = await prisma.journalEntry.updateMany({
-      where: { fiscalPeriodId: fiscalPeriod.id, date: { lte: date }, status: { not: "APPROVED" } },
-      data: { status: "APPROVED" },
-    });
+    // ابتدا شماره‌گذاری مجدد (همان سرویس مشترکِ عملیات «شماره‌گذاری مجدد» فهرست اسناد)، سپس تایید؛
+    // هر دو در یک تراکنش: اگر شماره‌گذاری شکست بخورد هیچ سندی تایید نمی‌شود
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const renumbered = await renumberJournalEntries(fiscalPeriod.id, tx as any);
+        const updated = await tx.journalEntry.updateMany({
+          where: { fiscalPeriodId: fiscalPeriod.id, date: { lte: date }, status: { not: "APPROVED" } },
+          data: { status: "APPROVED" },
+        });
+        return { count: updated.count, renumbered };
+      },
+      { timeout: 120000, maxWait: 20000 }
+    );
     res.json({
       updatedCount: result.count,
+      renumberedCount: result.renumbered.count,
       message: "با این عملیات، به قبل از تاریخ وارد شده امکان ثبت هیچ سندی وجود ندارد",
     });
   } catch (e: any) {

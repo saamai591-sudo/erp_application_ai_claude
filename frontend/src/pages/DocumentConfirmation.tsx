@@ -61,6 +61,15 @@ export default function DocumentConfirmation() {
           return;
         }
       }
+      // اسناد بازه (وضعیت ثبت/بررسی) پیش از تایید شماره‌گذاری مجدد می‌شوند؛ خودِ شماره‌گذاری در بک‌اند و با همان سرویس مشترک «شماره‌گذاری مجدد» فهرست اسناد انجام می‌شود
+      const proceedRenumber = window.confirm(
+        `اسناد تا این تاریخ شماره‌گذاری مجدد خواهند شد. (${toFaDigits(String(check.totalInRange))} سند در بازه)
+آیا ادامه می‌دهید؟`
+      );
+      if (!proceedRenumber) {
+        setLoading(false);
+        return;
+      }
       const result = await api.post("/document-confirmation/confirm", { date });
       showToast(`${toFaDigits(String(result.updatedCount))} سند به وضعیت «تایید» تغییر یافت. ${result.message}`);
       await loadStatus(date);

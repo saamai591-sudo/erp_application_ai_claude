@@ -346,7 +346,9 @@ export function DataTable<T extends { id: number | string }>({
   /** اگر مشخص نشود ولی onDelete موجود باشد، حذف گروهی با فراخوانی onDelete برای هر ردیف انجام می‌شود */
   onBulkDelete?: (rows: T[]) => void | Promise<void>;
   /** عملیات گروهی سفارشی دیگر (مثل بررسی/برگشت از بررسی) که در همان منوی «عملیات» نمایش داده می‌شوند */
-  bulkActions?: { label: (count: number) => string; icon?: any; onClick: (rows: T[]) => void | Promise<void>; danger?: boolean }[];
+  bulkActions?: { label: (count: number) => string; icon?: any; onClick: (rows: T[]) => void | Promise<void>; danger?: boolean;
+    /** عملیات سراسری فهرست (مثل «شماره‌گذاری مجدد») که به انتخاب ردیف نیاز ندارد: همیشه فعال است و انتخاب را پاک نمی‌کند */
+    noSelection?: boolean }[];
   emptyText?: string;
   /** اگر داده شود، نوار عملیات گروهی به‌جای بالای جدول، در این عنصر (معمولاً سرصفحه‌ی صفحه) نمایش داده می‌شود.
    * اگر داده نشود، خودِ DataTable به‌صورت خودکار نزدیک‌ترین «.header-toolbar» هم‌سطح (زیرِ همان ریشه‌ی
@@ -561,8 +563,12 @@ export function DataTable<T extends { id: number | string }>({
     setSelected(new Set());
   }
 
-  async function handleCustomBulkAction(action: { onClick: (rows: T[]) => void | Promise<void> }) {
+  async function handleCustomBulkAction(action: { onClick: (rows: T[]) => void | Promise<void>; noSelection?: boolean }) {
     setBulkMenuOpen(false);
+    if (action.noSelection) {
+      await action.onClick(selectedRows);
+      return;
+    }
     if (selectedRows.length === 0) return;
     await action.onClick(selectedRows);
     setSelected(new Set());
@@ -627,7 +633,7 @@ export function DataTable<T extends { id: number | string }>({
                     key={i}
                     type="button"
                     className={`toolbar-menu-item ${action.danger ? "danger" : ""}`}
-                    disabled={selected.size === 0}
+                    disabled={selected.size === 0 && !action.noSelection}
                     onClick={() => handleCustomBulkAction(action)}
                   >
                     {action.icon}

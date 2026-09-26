@@ -194,6 +194,7 @@ export const REGISTRY: ModuleDef[] = [
             actions: [
               { key: "review", title: "بررسی" },
               { key: "unreview", title: "برگشت از بررسی" },
+              { key: "renumber", title: "شماره‌گذاری مجدد" },
             ],
           },
           {

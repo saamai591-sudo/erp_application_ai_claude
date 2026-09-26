@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { prisma } from "../lib/prisma";
+import { prisma, getCurrentFiscalPeriod } from "../lib/prisma";
+import { renumberJournalEntries } from "../services/journalEntryRenumberService";
 import { resolveDetailTitles } from "../utils/detailValues";
 import { assertLineHasAmount } from "../utils/journalEntryValidation";
 import { issueJournalEntry } from "../services/journalEntryService";
@@ -423,6 +424,20 @@ router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   if (entry.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل حذف هستند" });
   await prisma.journalEntry.delete({ where: { id } });
   res.status(204).send();
+});
+
+// عملیات «شماره‌گذاری مجدد» فهرست: اسناد ثبت/بررسی دوره‌ی مالی جاری کاربر بر اساس تاریخ سند و شماره‌ی روزانه؛
+// منطق فقط در سرویس مشترک است (همان که تایید اسناد هم صدا می‌زند)
+router.post("/renumber", can(`${FORM}.renumber`), async (_req, res) => {
+  try {
+    const fiscalPeriod = await getCurrentFiscalPeriod();
+    if (!fiscalPeriod) return res.status(400).json({ error: "دوره مالی جاری مشخص نیست" });
+    await assertWithinCurrentFiscalPeriod(fiscalPeriod.id);
+    const result = await renumberJournalEntries(fiscalPeriod.id);
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || "خطا در شماره‌گذاری مجدد اسناد" });
+  }
 });
 
 router.put("/:id/review", can(`${FORM}.review`), async (req, res) => {
