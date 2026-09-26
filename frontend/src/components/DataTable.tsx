@@ -511,7 +511,9 @@ export function DataTable<T extends { id: number | string }>({
     function measure() {
       const ths = theadRowRef.current?.querySelectorAll("th");
       if (!ths || ths.length === 0) return;
-      setColWidths(Array.from(ths).map((th) => th.getBoundingClientRect().width));
+      const next = Array.from(ths).map((th) => Math.round(th.getBoundingClientRect().width));
+      // اگر عرض‌ها تغییری نکرده‌اند همان state قبلی برگردانده می‌شود تا رندر مجدد/حلقه‌ی بی‌نهایت (وقتی columns هر رندر آرایه‌ی تازه است) ایجاد نشود
+      setColWidths((prev) => (prev.length === next.length && prev.every((w, i) => w === next[i]) ? prev : next));
     }
     measure();
     window.addEventListener("resize", measure);

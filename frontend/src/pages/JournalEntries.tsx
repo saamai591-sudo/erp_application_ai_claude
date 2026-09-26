@@ -606,7 +606,9 @@ function EntryForm({ editId }: { editId?: number }) {
     function measure() {
       const ths = linesTheadRef.current?.querySelectorAll("th");
       if (!ths || ths.length === 0) return;
-      setLinesColWidths(Array.from(ths).map((th) => th.getBoundingClientRect().width));
+      const next = Array.from(ths).map((th) => Math.round(th.getBoundingClientRect().width));
+      // اگر عرض‌ها تغییری نکرده‌اند همان state قبلی برگردانده می‌شود تا رندر مجدد/حلقه‌ی بی‌نهایت (وقتی columns هر رندر آرایه‌ی تازه است) ایجاد نشود
+      setLinesColWidths((prev) => (prev.length === next.length && prev.every((w, i) => w === next[i]) ? prev : next));
     }
     measure();
     window.addEventListener("resize", measure);
