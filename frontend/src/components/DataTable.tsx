@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { showError } from "../lib/toast";
 import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
@@ -501,6 +501,27 @@ export function DataTable<T extends { id: number | string }>({
   });
   const hasColumnTotals = columnTotals.some((t) => t !== null);
 
+  // ردیف «جمع» دقیقاً مثل گرید «مرور مبلغی انبار» (SelectableBalanceTable): یک جدول مجزا بیرون از ناحیه‌ی اسکرول‌شونده، زیر هر ستون (نه لیست برچسب:مقدار)، همیشه
+  // ته گرید و بالای صفحه‌بندی؛ عرض هر ستونش از عرض واقعی <th>های جدول اصلی اندازه‌گیری می‌شود و اسکرول افقی‌اش با گرید هم‌گام است. یک پیاده‌سازی برای همه‌ی فهرست‌ها.
+  const theadRowRef = useRef<HTMLTableRowElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement | null>(null);
+  const footerScrollRef = useRef<HTMLDivElement>(null);
+  const [colWidths, setColWidths] = useState<number[]>([]);
+  useLayoutEffect(() => {
+    function measure() {
+      const ths = theadRowRef.current?.querySelectorAll("th");
+      if (!ths || ths.length === 0) return;
+      setColWidths(Array.from(ths).map((th) => th.getBoundingClientRect().width));
+    }
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [columns, sort, filters, rows, selected.size]);
+  function syncFooterScroll() {
+    if (scrollAreaRef.current && footerScrollRef.current) footerScrollRef.current.scrollLeft = scrollAreaRef.current.scrollLeft;
+  }
+
   function goToPage(p: number) {
     const clamped = Math.max(1, Math.min(p, totalPages));
     if (serverPaging) serverPaging.onPageChange(clamped);
@@ -641,10 +662,10 @@ export function DataTable<T extends { id: number | string }>({
     <div className="datatable-root" ref={setRootRef}>
       {effectiveBulkContainer ? createPortal(bulkToolbar, effectiveBulkContainer) : bulkToolbar}
       <div className="grid-wrap">
-      <div className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
+      <div ref={scrollAreaRef} className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }} onScroll={syncFooterScroll}>
         <table>
           <thead>
-            <tr>
+            <tr ref={theadRowRef}>
               <th style={{ width: 34 }}>
                 <input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} />
               </th>
@@ -723,14 +744,24 @@ export function DataTable<T extends { id: number | string }>({
       </div>
       {hasColumnTotals && sortedRows.length > 0 && (
         <div className="grid-footer-totals">
-          {columns.map(
-            (c, i) =>
-              columnTotals[i] !== null && (
-                <span key={c.header} className="grid-footer-totals-item">
-                  <b>{c.header}:</b> {formatAmountFa(columnTotals[i]!)}
-                </span>
-              )
-          )}
+          <div className="grid-footer-totals-scroll" ref={footerScrollRef}>
+            <table style={{ tableLayout: "fixed", width: colWidths.length ? colWidths.reduce((a, w) => a + w, 0) : undefined }}>
+              <tbody>
+                <tr>
+                  <td style={{ width: colWidths[0] }} />
+                  <td style={{ width: colWidths[1] }}>جمع</td>
+                  {columns.map((c, i) => (
+                    <td key={c.header} style={{ width: colWidths[i + 2] }}>
+                      {columnTotals[i] !== null ? formatAmountFa(columnTotals[i]!) : ""}
+                    </td>
+                  ))}
+                  {colWidths.slice(columns.length + 2).map((w, k) => (
+                    <td key={`x${k}`} style={{ width: w }} />
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
       <div className="grid-footer">

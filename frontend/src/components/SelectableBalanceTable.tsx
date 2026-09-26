@@ -373,16 +373,18 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
   function renderTotalsBar(standalone: boolean) {
     if (!hasColumnTotals || sortedRows.length === 0 || showLoadingState) return null;
     const totalWidth = colWidths.length ? colWidths.reduce((s, w) => s + w, 0) : undefined;
+    const base = selectable ? 1 : 0; // اندیس ستون «ردیف» در colWidths
     return (
       <div className={`grid-footer-totals${standalone ? " grid-footer-totals-standalone" : ""}`}>
         <div className="grid-footer-totals-scroll" ref={footerScrollRef}>
           <table style={{ tableLayout: "fixed", width: totalWidth }}>
             <tbody>
               <tr>
-                <td style={{ width: colWidths[0] }} />
-                <td style={{ width: colWidths[1] }}>جمع</td>
+                {/* ستون چک‌باکس فقط وقتی هست که گرید selectable باشد؛ بدون آن (مثل تب «گردش»)، شمارنده‌ی ستون‌ها یکی کمتر است — وگرنه جمع‌ها یک ستون جابه‌جا می‌افتادند */}
+                {selectable && <td style={{ width: colWidths[0] }} />}
+                <td style={{ width: colWidths[base] }}>جمع</td>
                 {columns.map((c, i) => (
-                  <td key={c.header} style={{ width: colWidths[i + 2] }}>
+                  <td key={c.header} style={{ width: colWidths[base + 1 + i] }}>
                     {columnTotals[i] !== null ? formatAmountFa(columnTotals[i]!) : ""}
                   </td>
                 ))}

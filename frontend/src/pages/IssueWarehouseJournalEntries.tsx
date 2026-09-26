@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
 import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -226,6 +226,22 @@ function IssueForm({ editId }: { editId?: number }) {
   const [openFilterFor, setOpenFilterFor] = useState<string | null>(null);
   const [popoverPos, setPopoverPos] = useState({ top: 0, left: 0 });
   const filterBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  // ردیف «جمع» هم‌شکل بقیه‌ی فهرست‌ها (گرید «مرور مبلغی انبار»): جدول مجزا زیر هر ستون، بیرون از ناحیه‌ی اسکرول، با عرض اندازه‌گیری‌شده از <th>ها
+  const theadRowRef = useRef<HTMLTableRowElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement | null>(null);
+  const footerScrollRef = useRef<HTMLDivElement>(null);
+  const [colWidths, setColWidths] = useState<number[]>([]);
+  useLayoutEffect(() => {
+    function measure() {
+      const ths = theadRowRef.current?.querySelectorAll("th");
+      if (!ths || ths.length === 0) return;
+      setColWidths(Array.from(ths).map((th) => th.getBoundingClientRect().width));
+    }
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, columnFilters]);
 
   const [saving, setSaving] = useState(false);
   const [issuing, setIssuing] = useState(false);
@@ -496,10 +512,10 @@ function IssueForm({ editId }: { editId?: number }) {
         {loaded && (
           <>
             <div className="je-lines-wrap">
-              <div className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
+              <div ref={scrollAreaRef} className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }} onScroll={() => { if (scrollAreaRef.current && footerScrollRef.current) footerScrollRef.current.scrollLeft = scrollAreaRef.current.scrollLeft; }}>
                 <table className="je-lines-table">
                   <thead>
-                    <tr>
+                    <tr ref={theadRowRef}>
                       {COLUMNS.map((c) => {
                         const isFilterActive = !!columnFilters[c.key];
                         return (
@@ -544,14 +560,19 @@ function IssueForm({ editId }: { editId?: number }) {
               </div>
               {rows.length > 0 && (
                 <div className="grid-footer-totals">
-                  {COLUMNS.map(
-                    (c) =>
-                      c.decimal && (
-                        <span key={c.key} className="grid-footer-totals-item">
-                          <b>{c.header}:</b> {formatAmountFa(rows.reduce((s, r) => s + (Number((r as any)[c.key]) || 0), 0))}
-                        </span>
-                      )
-                  )}
+                  <div className="grid-footer-totals-scroll" ref={footerScrollRef}>
+                    <table style={{ tableLayout: "fixed", width: colWidths.length ? colWidths.reduce((a, w) => a + w, 0) : undefined }}>
+                      <tbody>
+                        <tr>
+                          {COLUMNS.map((c, i) => (
+                            <td key={c.key} style={{ width: colWidths[i] }}>
+                              {c.decimal ? formatAmountFa(rows.reduce((s, r) => s + (Number((r as any)[c.key]) || 0), 0)) : i === 0 ? "جمع" : ""}
+                            </td>
+                          ))}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
               <div className="grid-footer je-lines-footer">
