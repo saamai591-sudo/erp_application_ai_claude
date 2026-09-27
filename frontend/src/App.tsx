@@ -89,6 +89,7 @@ import ChequeBookLeaves from "./pages/ChequeBookLeaves";
 import PettyCashes from "./pages/PettyCashes";
 import PettyCashCustodians from "./pages/PettyCashCustodians";
 import PettyCashPayments from "./pages/PettyCashPayments";
+import PettyCashSummaries from "./pages/PettyCashSummaries";
 import SalesQuotes from "./pages/SalesQuotes";
 import SalesOrders from "./pages/SalesOrders";
 import SalesDeliveries from "./pages/SalesDeliveries";
@@ -390,6 +391,9 @@ export default function App() {
             <Route path="/petty-cash-payments" element={<PettyCashPayments />} />
             <Route path="/petty-cash-payments/new" element={<PettyCashPayments />} />
             <Route path="/petty-cash-payments/:id/edit" element={<PettyCashPayments />} />
+            <Route path="/petty-cash-summaries" element={<PettyCashSummaries />} />
+            <Route path="/petty-cash-summaries/new" element={<PettyCashSummaries />} />
+            <Route path="/petty-cash-summaries/:id/edit" element={<PettyCashSummaries />} />
             <Route path="/sales-quotes" element={<SalesQuotes />} />
             <Route path="/sales-quotes/new" element={<SalesQuotes />} />
             <Route path="/sales-quotes/:id/edit" element={<SalesQuotes />} />

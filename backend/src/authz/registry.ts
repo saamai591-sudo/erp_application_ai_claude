@@ -593,6 +593,16 @@ export const REGISTRY: ModuleDef[] = [
             ],
           },
           { key: "petty-cash-payments", title: "پرداخت تنخواه", baseActions: CRUD },
+          {
+            key: "petty-cash-summaries",
+            title: "خلاصه تنخواه",
+            baseActions: CRUD,
+            actions: [
+              ...APPROVE_UNAPPROVE,
+              { key: "issueJournalEntry", title: "صدور سند حسابداری" },
+              { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
+            ],
+          },
         ],
       },
       {

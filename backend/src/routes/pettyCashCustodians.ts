@@ -12,7 +12,7 @@ const FORM = findFormPrefix("petty-cash-custodians");
 const router = Router();
 
 const INCLUDE = {
-  pettyCash: { select: { id: true, detailCode: true, title: true, isActive: true, currency: { select: { title: true } } } },
+  pettyCash: { select: { id: true, detailCode: true, title: true, isActive: true, currency: { select: { id: true, title: true, isBase: true } } } },
   party: { select: { id: true, detailCode: true, category: true, firstName: true, lastName: true, name: true, isActive: true } },
 };
 

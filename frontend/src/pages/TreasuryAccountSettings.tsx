@@ -30,9 +30,10 @@ const ACCOUNT_TYPE_FA: Record<string, string> = {
   CHEQUE_IN_COLLECTION: "اسناد در جریان وصول",
   FX_GAIN_LOSS: "سود و زیان تسعیر ارز",
   BOUNCED_PAYABLE_CHEQUE: "چک پرداختیِ برگشتی (بدهی به طرف حساب)",
+  PETTY_CASH: "تنخواه",
 };
 
-type TargetField = "bankAccountId" | "cashBoxId" | "receivableChequeTypeId" | "payableChequeTypeId" | "receiptTypeId" | "paymentTypeId";
+type TargetField = "bankAccountId" | "cashBoxId" | "receivableChequeTypeId" | "payableChequeTypeId" | "receiptTypeId" | "paymentTypeId" | "pettyCashId";
 
 // FX_GAIN_LOSS هیچ فیلد هدفی ندارد (فقط یک معین کلی، بدون انتخاب مورد)
 const TARGET_FIELD: Record<string, TargetField | null> = {
@@ -46,6 +47,7 @@ const TARGET_FIELD: Record<string, TargetField | null> = {
   CHEQUE_IN_COLLECTION: "bankAccountId",
   FX_GAIN_LOSS: null,
   BOUNCED_PAYABLE_CHEQUE: null,
+  PETTY_CASH: "pettyCashId",
 };
 
 const TARGET_LABEL: Record<TargetField, string> = {
@@ -55,6 +57,7 @@ const TARGET_LABEL: Record<TargetField, string> = {
   payableChequeTypeId: "نوع چک پرداختی",
   receiptTypeId: "موضوع دریافت",
   paymentTypeId: "موضوع پرداخت",
+  pettyCashId: "تنخواه",
 };
 
 interface Level { id: number; title: string; order: number }
@@ -75,6 +78,7 @@ interface Setting {
   payableChequeTypeId: number | null;
   receiptTypeId: number | null;
   paymentTypeId: number | null;
+  pettyCashId: number | null;
   account: { id: number; code: string; title: string };
   bankAccount: BankAccountOption | null;
   cashBox: TitledOption | null;
@@ -82,6 +86,7 @@ interface Setting {
   payableChequeType: TitledOption | null;
   receiptType: TitledOption | null;
   paymentType: TitledOption | null;
+  pettyCash: TitledOption | null;
 }
 
 function targetDisplay(r: Setting): string {
@@ -95,6 +100,7 @@ function targetDisplay(r: Setting): string {
     case "PAYABLE_CHEQUE": return r.payableChequeType?.title || "—";
     case "RECEIPT_SUBJECT": return r.receiptType?.title || "—";
     case "PAYMENT_SUBJECT": return r.paymentType?.title || "—";
+    case "PETTY_CASH": return r.pettyCash?.title || "—";
     default: return "—";
   }
 }
@@ -166,6 +172,7 @@ function SettingForm({ editId }: { editId?: number }) {
   const [payableTypes, setPayableTypes] = useState<TitledOption[]>([]);
   const [receiptTypes, setReceiptTypes] = useState<TitledOption[]>([]);
   const [paymentTypes, setPaymentTypes] = useState<TitledOption[]>([]);
+  const [pettyCashes, setPettyCashes] = useState<TitledOption[]>([]);
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_FORM);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
@@ -179,6 +186,7 @@ function SettingForm({ editId }: { editId?: number }) {
     api.get("/payable-cheque-types").then(setPayableTypes);
     api.get("/receipt-types").then(setReceiptTypes);
     api.get("/payment-types").then(setPaymentTypes);
+    api.get("/petty-cashes").then(setPettyCashes);
   }, []);
 
   useEffect(() => {
@@ -223,6 +231,7 @@ function SettingForm({ editId }: { editId?: number }) {
     : field === "payableChequeTypeId" ? payableTypes.map((t) => ({ id: t.id, label: t.title }))
     : field === "receiptTypeId" ? receiptTypes.filter((t) => !BASIS_FROM_DOCUMENT.has(t.basisType ?? "")).map((t) => ({ id: t.id, label: t.title }))
     : field === "paymentTypeId" ? paymentTypes.filter((t) => !BASIS_FROM_DOCUMENT.has(t.basisType ?? "")).map((t) => ({ id: t.id, label: t.title }))
+    : field === "pettyCashId" ? pettyCashes.map((t) => ({ id: t.id, label: t.title }))
     : [];
 
   function onAccountTypeChange(accountType: string) {

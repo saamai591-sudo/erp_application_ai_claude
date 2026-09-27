@@ -142,6 +142,9 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
     const paymentType = await prisma.paymentType.findUnique({ where: { id: body.paymentTypeId } });
     if (!paymentType) return res.status(400).json({ error: "نوع پرداخت نامعتبر است" });
     if (!paymentType.isActive) return res.status(400).json({ error: "نوع پرداخت انتخاب‌شده غیرفعال است" });
+    if (paymentType.nature === "TO_BANK" || paymentType.nature === "TO_CASH_BOX") {
+      return res.status(400).json({ error: "این ماهیت نوع پرداخت (به بانک/به صندوق) برای پرداخت تنخواه قابل استفاده نیست" });
+    }
 
     const basisType = paymentType.basisType as BasisType;
     if (basisType === "PURCHASE_INVOICE" || basisType === "PURCHASE_ORDER") {
@@ -208,6 +211,9 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
     const paymentType = await prisma.paymentType.findUnique({ where: { id: body.paymentTypeId } });
     if (!paymentType) return res.status(400).json({ error: "نوع پرداخت نامعتبر است" });
     if (!paymentType.isActive && paymentType.id !== existing.paymentTypeId) return res.status(400).json({ error: "نوع پرداخت انتخاب‌شده غیرفعال است" });
+    if (paymentType.nature === "TO_BANK" || paymentType.nature === "TO_CASH_BOX") {
+      return res.status(400).json({ error: "این ماهیت نوع پرداخت (به بانک/به صندوق) برای پرداخت تنخواه قابل استفاده نیست" });
+    }
 
     const basisType = paymentType.basisType as BasisType;
     if (basisType === "PURCHASE_INVOICE" || basisType === "PURCHASE_ORDER") {

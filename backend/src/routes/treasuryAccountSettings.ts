@@ -28,6 +28,7 @@ const TARGET_FIELD: Record<string, string | null> = {
   CHEQUE_IN_COLLECTION: "bankAccountId",
   FX_GAIN_LOSS: null,
   BOUNCED_PAYABLE_CHEQUE: null,
+  PETTY_CASH: "pettyCashId",
 };
 
 const TARGET_LABEL: Record<string, string> = {
@@ -37,6 +38,7 @@ const TARGET_LABEL: Record<string, string> = {
   payableChequeTypeId: "نوع چک پرداختی",
   receiptTypeId: "موضوع دریافت",
   paymentTypeId: "موضوع پرداخت",
+  pettyCashId: "تنخواه",
 };
 
 // موضوع دریافت/پرداختی که مبنایش فاکتور است، معین را از خودِ سند مبنا می‌گیرد (دریافتنی فروش/پرداختنی خرید
@@ -50,6 +52,7 @@ const TARGET_EXISTS: Record<string, (id: number) => Promise<any>> = {
   payableChequeTypeId: (id) => prisma.payableChequeType.findUnique({ where: { id } }),
   receiptTypeId: (id) => prisma.receiptType.findUnique({ where: { id } }),
   paymentTypeId: (id) => prisma.paymentType.findUnique({ where: { id } }),
+  pettyCashId: (id) => prisma.pettyCash.findUnique({ where: { id } }),
 };
 
 const INCLUDE = {
@@ -60,6 +63,7 @@ const INCLUDE = {
   payableChequeType: true,
   receiptType: true,
   paymentType: true,
+  pettyCash: true,
 };
 
 interface Body {
@@ -71,6 +75,7 @@ interface Body {
   payableChequeTypeId?: number | null;
   receiptTypeId?: number | null;
   paymentTypeId?: number | null;
+  pettyCashId?: number | null;
 }
 
 // اعتبارسنجی مشترک POST/PUT روی مقدار «نهایی» (بدنه‌ی ادغام‌شده با رکورد موجود) و ساخت داده‌ی قابل ذخیره

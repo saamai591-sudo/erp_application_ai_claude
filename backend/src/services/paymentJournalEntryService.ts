@@ -3,6 +3,7 @@ import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { toBaseCurrencyAmount } from "../utils/currencyConversion";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
+import { resolvePaymentSubjectAccount } from "./paymentSubjectAccount";
 
 // =========================================================================
 // صدور سند حسابداری «پرداخت / اعلامیه پرداخت» (Payment) — اکشن دستی روی سند تاییدشده، هم‌الگوی
@@ -54,10 +55,6 @@ export async function issuePaymentJournalEntry(paymentId: number) {
   if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
 
   const treasurySettings = await prisma.treasuryAccountSetting.findMany({ include: { account: true } });
-  const goodsSettings = await prisma.goodsServiceAccountingSetting.findMany({
-    where: { accountType: { in: ["SALES_RECEIVABLE", "PURCHASE_PAYABLE"] } },
-    include: { account: true },
-  });
 
   const partyName = partyDisplayName(payment.party);
   const description = `بابت اعلامیه پرداخت ${payment.number} ${formatJalaliDateForMessage(payment.date)} ${partyName}`.trim();
@@ -137,30 +134,12 @@ export async function issuePaymentJournalEntry(paymentId: number) {
       detailCode = l.cashBox?.detailCode ?? null;
     }
 
-    if (pt.nature !== "TO_BANK" && pt.nature !== "TO_CASH_BOX") switch (pt.basisType) {
-      case "NONE":
-        account = pt.account ?? undefined;
-        if (!account) errors.push(`ردیف موضوعات پرداخت ${n}: برای نوع پرداخت «${pt.title}» معین تعریف نشده است`);
-        break;
-      case "PURCHASE_INVOICE": {
-        const inv = l.purchaseInvoice;
-        if (!inv) { errors.push(`ردیف موضوعات پرداخت ${n}: فاکتور خرید انتخاب نشده است`); break; }
-        account = goodsSettings.find((s) => s.accountType === "PURCHASE_PAYABLE" && s.purchaseTypeId === inv.purchaseTypeId)?.account;
-        if (!account) errors.push(`ردیف موضوعات پرداخت ${n}: برای نوع خرید فاکتور، حساب «پرداختنی خرید» در حسابداری کالا و خدمت تعریف نشده است`);
-        basisFx = { currencyId: inv.currencyId, fxRate: Number(inv.fxRate) };
-        break;
-      }
-      case "SALES_INVOICE": {
-        const inv = l.salesInvoice;
-        if (!inv) { errors.push(`ردیف موضوعات پرداخت ${n}: فاکتور فروش انتخاب نشده است`); break; }
-        account = goodsSettings.find((s) => s.accountType === "SALES_RECEIVABLE" && s.salesTypeId === inv.salesTypeId)?.account;
-        if (!account) errors.push(`ردیف موضوعات پرداخت ${n}: برای نوع فروش فاکتور، حساب «دریافتنی فروش» در حسابداری کالا و خدمت تعریف نشده است`);
-        basisFx = { currencyId: inv.currencyId, fxRate: Number(inv.fxRate) };
-        break;
-      }
-      default:
-        account = treasurySettings.find((s) => s.accountType === "PAYMENT_SUBJECT" && s.paymentTypeId === pt.id)?.account;
-        if (!account) errors.push(`ردیف موضوعات پرداخت ${n}: برای نوع پرداخت «${pt.title}»، معین در «تعیین حسابهای معین» (موضوع پرداخت) تعریف نشده است`);
+    if (pt.nature !== "TO_BANK" && pt.nature !== "TO_CASH_BOX") {
+      // eslint-disable-next-line no-await-in-loop
+      const resolved = await resolvePaymentSubjectAccount(pt, { purchaseInvoice: l.purchaseInvoice, salesInvoice: l.salesInvoice });
+      if (resolved.error) errors.push(`ردیف موضوعات پرداخت ${n}: ${resolved.error}`);
+      account = resolved.account ?? undefined;
+      basisFx = resolved.basisFx;
     }
     if (!account) continue;
 

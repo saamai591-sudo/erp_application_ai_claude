@@ -44,9 +44,13 @@ interface PartyOption {
 interface PaymentTypeOption {
   id: number;
   title: string;
+  nature: string;
   basisType: "NONE" | "PURCHASE_INVOICE" | "SALES_INVOICE" | "PURCHASE_ORDER";
   isActive: boolean;
 }
+// انواع پرداختِ «به بانک»/«به صندوق» معین را از حساب بانکی/صندوقِ خودِ ردیف می‌گیرند که این فرم و «خلاصه
+// تنخواه» ندارند؛ پس این دو ماهیت اصلاً در انتخابگر نوع پرداخت تنخواه ارائه نمی‌شوند (تصمیم صریح کاربر)
+const PETTY_CASH_INELIGIBLE_NATURES = new Set(["TO_BANK", "TO_CASH_BOX"]);
 type BasisType = Exclude<PaymentTypeOption["basisType"], "NONE">;
 const BASIS_FIELD: Record<BasisType, "purchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
   PURCHASE_INVOICE: "purchaseInvoiceId",
@@ -183,7 +187,7 @@ function PettyCashPaymentForm({ editId }: { editId?: number }) {
         ]);
       setCustodians(cus);
       setParties(ps);
-      setPaymentTypes(pts.filter((t) => t.isActive));
+      setPaymentTypes(pts.filter((t) => t.isActive && !PETTY_CASH_INELIGIBLE_NATURES.has(t.nature)));
       setCustomerPartyIds(new Set(customers.map((c) => c.partyId)));
       setSupplierPartyIds(new Set(suppliers.map((s) => s.partyId)));
       setFiscalPeriod(fp);
