@@ -9,6 +9,7 @@ import { assertChequeNotUsedElsewhere, findChequeUses } from "../utils/chequeUsa
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, ConversionCurrency } from "../utils/currencyConversion";
 import { issuePaymentJournalEntry, revertPaymentJournalEntry } from "../services/paymentJournalEntryService";
+import { candidatesForBasisType, BasisType, BasisCandidate } from "../services/paymentBasisCandidates";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 
@@ -86,8 +87,6 @@ interface HeaderBody {
   instrumentLines: InstrumentLineInput[];
   settlementLines: SettlementLineInput[];
 }
-
-type BasisType = "NONE" | "PURCHASE_INVOICE" | "SALES_INVOICE" | "PURCHASE_ORDER";
 
 const BASIS_FIELD: Record<Exclude<BasisType, "NONE">, "purchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
   PURCHASE_INVOICE: "purchaseInvoiceId",
@@ -235,98 +234,16 @@ async function cleanOneInstrumentLine(
 }
 
 // =========================================================================
-// اسناد مبنای قابل انتخاب برای موضوعات پرداخت — هم‌شکل candidatesForBasisType در routes/receipts.ts:
 // total = مجموع مبلغ ردیف‌ها (به ارز خود سند)، applied = مجموع مبلغ ردیف‌های موضوعات پرداختِ
 // تاییدشده‌ی مرتبط با همان سند (به‌جز این سند پرداخت در حالت ویرایش)، remaining = total - applied.
 // =========================================================================
-
-interface BasisCandidate {
-  id: number;
-  number: number;
-  date: Date;
-  currencyId: number;
-  currencyTitle: string;
-  fxRate: number;
-  partyId: number;
-  total: number;
-  applied: number;
-  remaining: number;
-}
-
-function sumApplied(settlementLines: any[], excludePaymentId?: number): number {
-  return settlementLines
-    .filter((s: any) => s.payment.status === "APPROVED" && (!excludePaymentId || s.payment.id !== excludePaymentId))
-    .reduce((sum: number, l: any) => sum + Number(l.amount), 0);
-}
-
-async function candidatesForBasisType(basisType: BasisType, partyId: number, excludePaymentId?: number): Promise<BasisCandidate[]> {
-  if (basisType === "PURCHASE_INVOICE") {
-    // فاکتور باز ممکن است متعلق به دوره مالی قبلی باشد (هنوز تسویه نشده) — پس عمداً به دوره مالی جاری محدود نمی‌شود
-    const invoices = await withoutFiscalPeriodScope(() =>
-      prisma.purchaseInvoice.findMany({
-        where: { partyId, status: "APPROVED" },
-        include: { lines: true, otherCostLines: true, currency: true, paymentSettlementLines: { include: { payment: true } } },
-      })
-    );
-    return invoices.map((inv: any) => {
-      const total =
-        inv.lines.reduce((s: number, l: any) => s + Number(l.amount), 0) +
-        inv.otherCostLines.reduce((s: number, l: any) => s + Number(l.amount), 0);
-      const applied = sumApplied(inv.paymentSettlementLines, excludePaymentId);
-      return {
-        id: inv.id, number: inv.number, date: inv.date, currencyId: inv.currencyId, currencyTitle: inv.currency.title,
-        fxRate: Number(inv.fxRate), partyId, total, applied, remaining: total - applied,
-      };
-    });
-  }
-  if (basisType === "SALES_INVOICE") {
-    const customer = await prisma.customer.findUnique({ where: { partyId } });
-    if (!customer) return [];
-    // فاکتور فروش اصلاً اکشن تایید ندارد و وضعیتش همیشه «ثبت» می‌ماند (نگاه کنید به routes/salesInvoices.ts) —
-    // پس نباید بر اساس status فیلتر شود.
-    const invoices = await withoutFiscalPeriodScope(() =>
-      prisma.salesInvoice.findMany({
-        where: { customerId: customer.id },
-        include: { lines: true, currency: true, paymentSettlementLines: { include: { payment: true } } },
-      })
-    );
-    return invoices.map((inv: any) => {
-      const total = inv.lines.reduce((s: number, l: any) => s + Number(l.amount), 0);
-      const applied = sumApplied(inv.paymentSettlementLines, excludePaymentId);
-      return {
-        id: inv.id, number: inv.number, date: inv.date, currencyId: inv.currencyId, currencyTitle: inv.currency.title,
-        fxRate: Number(inv.fxRate), partyId, total, applied, remaining: total - applied,
-      };
-    });
-  }
-  if (basisType === "PURCHASE_ORDER") {
-    const supplier = await prisma.supplier.findUnique({ where: { partyId } });
-    if (!supplier) return [];
-    const orders = await withoutFiscalPeriodScope(() =>
-      prisma.purchaseOrder.findMany({
-        where: { supplierId: supplier.id, status: "APPROVED" },
-        include: { lines: true, currency: true, paymentSettlementLines: { include: { payment: true } } },
-      })
-    );
-    return orders.map((o: any) => {
-      const total = o.lines.reduce((s: number, l: any) => s + Number(l.amount), 0);
-      const applied = sumApplied(o.paymentSettlementLines, excludePaymentId);
-      // سفارش خرید اصلاً fxRate ندارد (سندی بدون تبدیل ارز) — همیشه ۱ گزارش می‌شود
-      return {
-        id: o.id, number: o.number, date: o.date, currencyId: o.currencyId, currencyTitle: o.currency.title,
-        fxRate: 1, partyId, total, applied, remaining: total - applied,
-      };
-    });
-  }
-  return [];
-}
 
 router.get("/payments/pickable-basis-documents", can(`${FORM}.view`), async (req, res) => {
   const basisType = req.query.basisType as BasisType | undefined;
   const partyId = req.query.partyId ? Number(req.query.partyId) : null;
   const excludePaymentId = req.query.excludePaymentId ? Number(req.query.excludePaymentId) : undefined;
   if (!basisType || basisType === "NONE" || !partyId) return res.json([]);
-  const candidates = await candidatesForBasisType(basisType, partyId, excludePaymentId);
+  const candidates = await candidatesForBasisType(basisType, partyId, { excludePaymentId });
   res.json(candidates.filter((c) => c.remaining > 0.001));
 });
 
@@ -367,7 +284,7 @@ async function validateSubjectLines(
     if (!lockedBasisId) continue;
     const lockedBasisType: BasisType = sl.purchaseInvoiceId ? "PURCHASE_INVOICE" : sl.salesInvoiceId ? "SALES_INVOICE" : "PURCHASE_ORDER";
     // eslint-disable-next-line no-await-in-loop
-    const info = (await candidatesForBasisType(lockedBasisType, sl.partyId as number, excludePaymentId)).find((c) => c.id === lockedBasisId);
+    const info = (await candidatesForBasisType(lockedBasisType, sl.partyId as number, { excludePaymentId })).find((c) => c.id === lockedBasisId);
     if (!info) continue;
     // eslint-disable-next-line no-await-in-loop
     const rowCurrency = sl.currencyId === baseCurrency.id ? baseCurrency : await prisma.currency.findUnique({ where: { id: sl.currencyId } });
@@ -441,7 +358,7 @@ async function validateSubjectLines(
         if (f !== field && v) throw new Error(`ردیف ${idx + 1}: فقط سند مبنای متناسب با نوع پرداخت باید انتخاب شود`);
       }
       // eslint-disable-next-line no-await-in-loop
-      const candidates = await candidatesForBasisType(basisType, l.partyId as number, excludePaymentId);
+      const candidates = await candidatesForBasisType(basisType, l.partyId as number, { excludePaymentId });
       basisInfo = candidates.find((c) => c.id === basisId) || null;
       if (!basisInfo) throw new Error(`ردیف ${idx + 1}: سند مبنای انتخاب‌شده یافت نشد یا متعلق به این طرف حساب نیست`);
     }
@@ -760,7 +677,7 @@ router.post("/payments/:id/approve", can(`${FORM}.approve`), async (req, res) =>
       if (!basisId) continue;
       const basisType: BasisType = s.purchaseInvoiceId ? "PURCHASE_INVOICE" : s.salesInvoiceId ? "SALES_INVOICE" : "PURCHASE_ORDER";
       // eslint-disable-next-line no-await-in-loop
-      const candidates = await candidatesForBasisType(basisType, s.partyId as number, id);
+      const candidates = await candidatesForBasisType(basisType, s.partyId as number, { excludePaymentId: id });
       const info = candidates.find((c) => c.id === basisId);
       if (!info) throw new Error("سند مبنای یکی از ردیف‌های موضوعات پرداخت یافت نشد");
       // eslint-disable-next-line no-await-in-loop

@@ -1,0 +1,122 @@
+import { Router } from "express";
+import { prisma } from "../lib/prisma";
+import { generateDetailCode, registerDetailCode } from "../utils/coding";
+import { can } from "../authz/guard";
+import { findFormPrefix } from "../authz/registry";
+
+// «تنخواه‌دار» (مدیریت خزانه › تنظیمات). کد تفصیلی فقط از سرویس عمومی «ایجاد کد تفصیلی» (utils/coding.ts: generateDetailCode +
+// registerDetailCode، نوع تفصیل ۶ «تنخواه دار») صادر می‌شود و از ورودی کاربر پذیرفته نمی‌شود.
+
+const DETAIL_TYPE_PETTY_CASH_CUSTODIAN = 6;
+const FORM = findFormPrefix("petty-cash-custodians");
+const router = Router();
+
+const INCLUDE = {
+  pettyCash: { select: { id: true, detailCode: true, title: true, isActive: true, currency: { select: { title: true } } } },
+  party: { select: { id: true, detailCode: true, category: true, firstName: true, lastName: true, name: true, isActive: true } },
+};
+
+router.get("/", async (req, res) => {
+  res.json(
+    await prisma.pettyCashCustodian.findMany({
+      where: req.query.activeOnly === "true" ? { isActive: true } : undefined,
+      include: INCLUDE,
+      orderBy: { detailCode: "asc" },
+    })
+  );
+});
+
+/** تنخواه و طرف‌حساب باید موجود و فعال باشند؛ فقط در ویرایش، مقدار بدون تغییرِ غیرفعال (که قبلاً ثبت شده) مجاز می‌ماند */
+async function validateRefs(pettyCashId: number, partyId: number, existing?: { pettyCashId: number; partyId: number }) {
+  const pettyCash = await prisma.pettyCash.findUnique({ where: { id: pettyCashId } });
+  if (!pettyCash) throw new Error("تنخواه نامعتبر است");
+  if (!pettyCash.isActive && existing?.pettyCashId !== pettyCashId) throw new Error("تنخواه انتخاب‌شده غیرفعال است");
+  const party = await prisma.party.findUnique({ where: { id: partyId } });
+  if (!party) throw new Error("طرف‌حساب نامعتبر است");
+  if (!party.isActive && existing?.partyId !== partyId) throw new Error("طرف‌حساب انتخاب‌شده غیرفعال است");
+}
+
+router.post("/", can(`${FORM}.create`), async (req, res) => {
+  const body = req.body as { pettyCashId?: number; partyId?: number; isActive?: boolean; controlNegativeBalance?: boolean };
+  if (!body.pettyCashId) return res.status(400).json({ error: "تنخواه الزامی است" });
+  if (!body.partyId) return res.status(400).json({ error: "طرف‌حساب الزامی است" });
+
+  try {
+    await validateRefs(Number(body.pettyCashId), Number(body.partyId));
+    const dup = await prisma.pettyCashCustodian.findFirst({ where: { pettyCashId: Number(body.pettyCashId), partyId: Number(body.partyId) } });
+    if (dup) return res.status(400).json({ error: "این طرف‌حساب قبلاً برای همین تنخواه به‌عنوان تنخواه‌دار تعریف شده است" });
+
+    const { code, detailTypeId } = await generateDetailCode(DETAIL_TYPE_PETTY_CASH_CUSTODIAN);
+    const created = await prisma.pettyCashCustodian.create({
+      data: {
+        detailCode: code,
+        pettyCashId: Number(body.pettyCashId),
+        partyId: Number(body.partyId),
+        isActive: body.isActive ?? true,
+        controlNegativeBalance: body.controlNegativeBalance ?? true,
+      },
+      include: INCLUDE,
+    });
+    try {
+      await registerDetailCode(code, detailTypeId, "PettyCashCustodian", created.id);
+    } catch (e) {
+      // ثبت در جدول مرکزی کدها شکست خورد (مثلاً هم‌زمانی): رکورد نیمه‌کاره نماند
+      await prisma.pettyCashCustodian.delete({ where: { id: created.id } });
+      throw e;
+    }
+    res.status(201).json(created);
+  } catch (e: any) {
+    if (e.code === "P2002") return res.status(400).json({ error: "کد یا ترکیب تنخواه و طرف‌حساب تکراری است" });
+    res.status(400).json({ error: e.message || "خطا در ثبت تنخواه‌دار" });
+  }
+});
+
+router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
+  const id = Number(req.params.id);
+  const body = req.body as { pettyCashId?: number; partyId?: number; isActive?: boolean; controlNegativeBalance?: boolean };
+  const existing = await prisma.pettyCashCustodian.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ error: "تنخواه‌دار یافت نشد" });
+  if (!body.pettyCashId) return res.status(400).json({ error: "تنخواه الزامی است" });
+  if (!body.partyId) return res.status(400).json({ error: "طرف‌حساب الزامی است" });
+
+  try {
+    const pettyCashId = Number(body.pettyCashId);
+    const partyId = Number(body.partyId);
+    if (existing.hasTransactions && (existing.pettyCashId !== pettyCashId || existing.partyId !== partyId)) {
+      return res.status(400).json({ error: "این تنخواه‌دار گردش دارد و تنخواه/طرف‌حساب آن قابل تغییر نیست" });
+    }
+    await validateRefs(pettyCashId, partyId, existing);
+    const dup = await prisma.pettyCashCustodian.findFirst({ where: { pettyCashId, partyId, NOT: { id } } });
+    if (dup) return res.status(400).json({ error: "این طرف‌حساب قبلاً برای همین تنخواه به‌عنوان تنخواه‌دار تعریف شده است" });
+
+    // کد تفصیلی هرگز تغییر نمی‌کند (حتی اگر در بدنه‌ی درخواست باشد نادیده گرفته می‌شود)
+    const updated = await prisma.pettyCashCustodian.update({
+      where: { id },
+      data: {
+        pettyCashId,
+        partyId,
+        isActive: body.isActive ?? existing.isActive,
+        controlNegativeBalance: body.controlNegativeBalance ?? existing.controlNegativeBalance,
+      },
+      include: INCLUDE,
+    });
+    res.json(updated);
+  } catch (e: any) {
+    if (e.code === "P2002") return res.status(400).json({ error: "ترکیب تنخواه و طرف‌حساب تکراری است" });
+    res.status(400).json({ error: e.message || "خطا در ویرایش تنخواه‌دار" });
+  }
+});
+
+router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
+  const id = Number(req.params.id);
+  const existing = await prisma.pettyCashCustodian.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ error: "تنخواه‌دار یافت نشد" });
+  if (existing.hasTransactions) return res.status(400).json({ error: "این تنخواه‌دار گردش دارد و قابل حذف نیست" });
+  await prisma.$transaction([
+    prisma.detailCodeUsage.deleteMany({ where: { entityTable: "PettyCashCustodian", entityId: id } }),
+    prisma.pettyCashCustodian.delete({ where: { id } }),
+  ]);
+  res.status(204).send();
+});
+
+export default router;

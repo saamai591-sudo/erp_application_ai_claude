@@ -510,6 +510,8 @@ export const REGISTRY: ModuleDef[] = [
           { key: "payable-cheque-types", title: "نوع چک پرداختی", baseActions: CRUD },
           { key: "treasury-account-settings", title: "تعیین حسابهای معین", baseActions: CRUD },
           { key: "cheque-book-leaves", title: "دسته چک", baseActions: CRUD, actions: [{ key: "void", title: "ابطال" }] },
+          { key: "petty-cashes", title: "تنخواه", baseActions: CRUD },
+          { key: "petty-cash-custodians", title: "تنخواه‌دار", baseActions: CRUD },
         ],
       },
       {
@@ -590,6 +592,7 @@ export const REGISTRY: ModuleDef[] = [
               { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
             ],
           },
+          { key: "petty-cash-payments", title: "پرداخت تنخواه", baseActions: CRUD },
         ],
       },
       {

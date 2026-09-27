@@ -272,6 +272,8 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "payable-cheque-types", label: "نوع چک پرداختی", list: "/payable-cheque-types", create: "/payable-cheque-types/new", icon: "tag" },
           { key: "treasury-account-settings", label: "تعیین حسابهای معین", list: "/treasury-account-settings", create: "/treasury-account-settings/new", icon: "ledger" },
           { key: "cheque-book-leaves", label: "دسته چک", list: "/cheque-book-leaves", create: "/cheque-book-leaves/new", icon: "tag" },
+          { key: "petty-cashes", label: "تنخواه", list: "/petty-cashes", create: "/petty-cashes/new", icon: "wallet" },
+          { key: "petty-cash-custodians", label: "تنخواه‌دار", list: "/petty-cash-custodians", create: "/petty-cash-custodians/new", icon: "wallet" },
         ],
       },
       {
@@ -288,6 +290,7 @@ const RAW_MODULES: ModuleGroup[] = [
         items: [
           { key: "payments", label: "پرداخت", list: "/payments", create: "/payments/new", icon: "ledger" },
           { key: "cheque-clearings-payable", label: "وصول و برگشت چک", list: "/cheque-clearings-payable", create: "/cheque-clearings-payable/new", icon: "ledger" },
+          { key: "petty-cash-payments", label: "پرداخت تنخواه", list: "/petty-cash-payments", create: "/petty-cash-payments/new", icon: "wallet" },
         ],
       },
       {

@@ -86,6 +86,9 @@ import PaymentTypes from "./pages/PaymentTypes";
 import { ReceivableChequeTypes, PayableChequeTypes } from "./pages/ChequeTypes";
 import TreasuryAccountSettings from "./pages/TreasuryAccountSettings";
 import ChequeBookLeaves from "./pages/ChequeBookLeaves";
+import PettyCashes from "./pages/PettyCashes";
+import PettyCashCustodians from "./pages/PettyCashCustodians";
+import PettyCashPayments from "./pages/PettyCashPayments";
 import SalesQuotes from "./pages/SalesQuotes";
 import SalesOrders from "./pages/SalesOrders";
 import SalesDeliveries from "./pages/SalesDeliveries";
@@ -378,6 +381,15 @@ export default function App() {
             <Route path="/cheque-book-leaves" element={<ChequeBookLeaves />} />
             <Route path="/cheque-book-leaves/new" element={<ChequeBookLeaves />} />
             <Route path="/cheque-book-leaves/:id/edit" element={<ChequeBookLeaves />} />
+            <Route path="/petty-cashes" element={<PettyCashes />} />
+            <Route path="/petty-cashes/new" element={<PettyCashes />} />
+            <Route path="/petty-cashes/:id/edit" element={<PettyCashes />} />
+            <Route path="/petty-cash-custodians" element={<PettyCashCustodians />} />
+            <Route path="/petty-cash-custodians/new" element={<PettyCashCustodians />} />
+            <Route path="/petty-cash-custodians/:id/edit" element={<PettyCashCustodians />} />
+            <Route path="/petty-cash-payments" element={<PettyCashPayments />} />
+            <Route path="/petty-cash-payments/new" element={<PettyCashPayments />} />
+            <Route path="/petty-cash-payments/:id/edit" element={<PettyCashPayments />} />
             <Route path="/sales-quotes" element={<SalesQuotes />} />
             <Route path="/sales-quotes/new" element={<SalesQuotes />} />
             <Route path="/sales-quotes/:id/edit" element={<SalesQuotes />} />

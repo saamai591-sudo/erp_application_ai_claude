@@ -116,6 +116,7 @@ model Currency {
   updatedAt        DateTime             @updatedAt
   closingLines     AccountClosingLine[]
   cheques          ChequeItem[]
+  pettyCashes      PettyCash[]
   rates            ExchangeRate[]
   journalLines     JournalEntryLine[]
   paymentInstrumentLines   PaymentInstrumentLine[]
@@ -155,6 +156,7 @@ model FiscalPeriod {
   hasTransactions           Boolean                    @default(false)
   createdAt                 DateTime                   @default(now())
   accountClosings           AccountClosing[]
+  pettyCashPayments         PettyCashPayment[]
   chequeDeposits            ChequeDeposit[]
   chequeDepositReturns      ChequeDepositReturn[]
   chequeClearingReceivables ChequeClearingReceivable[]
@@ -297,8 +299,10 @@ model Party {
   supplier           Supplier?
   users              User[]
   warehousesManaged  Warehouse[]        @relation("WarehouseManager")
+  pettyCashPayments  PettyCashPayment[]
   warehouseReceipts  WarehouseReceipt[]
   batchesAsSupplier  Batch[]            @relation("BatchSupplier")
+  pettyCashCustodians PettyCashCustodian[]
 }
 
 model PartyAddress {
@@ -466,6 +470,70 @@ model CashBox {
   receiptInstrumentLines ReceiptInstrumentLine[]
   treasuryAccountSettings TreasuryAccountSetting[]
   treasuryOpeningLines TreasuryOpeningCashBox[]
+}
+
+/// تعریف تنخواه (مدیریت خزانه › تنظیمات): کد تفصیلی توسط سرویس عمومی «ایجاد کد تفصیلی» (utils/coding.ts، نوع تفصیل ۵ «تنخواه») صادر می‌شود، نه ورودی کاربر.
+/// limitAmount = سقف تنخواه به «ارز» همین تنخواه؛ isActive = قابل استفاده بودن.
+model PettyCash {
+  id              Int      @id @default(autoincrement())
+  detailCode      String   @unique
+  title           String   @unique
+  currencyId      Int
+  limitAmount     Decimal  @default(0) @db.Decimal(18, 2)
+  isActive        Boolean  @default(true)
+  hasTransactions Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  currency        Currency @relation(fields: [currencyId], references: [id])
+  custodians      PettyCashCustodian[]
+}
+
+/// تنخواه‌دار (مدیریت خزانه › تنظیمات): یک طرف‌حساب مسئول یک تنخواه. کد تفصیلی توسط سرویس عمومی «ایجاد کد تفصیلی» (نوع تفصیل ۶ «تنخواه دار») صادر می‌شود.
+/// controlNegativeBalance = سیستم باید مانع منفی‌شدن مانده‌ی تنخواه شود (برای عملیات آینده‌ی تنخواه)؛ isActive = قابل استفاده بودن.
+model PettyCashCustodian {
+  id                     Int      @id @default(autoincrement())
+  detailCode             String   @unique
+  pettyCashId            Int
+  partyId                Int
+  isActive               Boolean  @default(true)
+  controlNegativeBalance Boolean  @default(true)
+  hasTransactions        Boolean  @default(false)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  pettyCash              PettyCash @relation(fields: [pettyCashId], references: [id])
+  party                  Party    @relation(fields: [partyId], references: [id])
+  payments               PettyCashPayment[]
+
+  @@unique([pettyCashId, partyId])
+}
+
+/// پرداخت تنخواه (مدیریت خزانه › پرداخت): سند ساده‌ی ثبتِ برداشت از یک تنخواه — بدون سند حسابداری/گردش تایید (طبق تصمیم صریح کاربر، فعلاً
+/// فقط ثبت اطلاعات). ارز پرداخت همیشه ارز همان تنخواه‌دار/تنخواه است (فیلدی جدا ندارد، از رابطه خوانده می‌شود). دقیقاً یکی از
+/// purchaseInvoiceId/salesInvoiceId/purchaseOrderId پر می‌شود که با basisType نوع پرداختِ انتخاب‌شده (routes/paymentTypes.ts) سازگار
+/// باشد؛ اگر basisType=NONE هر سه خالی می‌مانند. اگر basisType!=NONE، تاریخ سند مبنا باید از تاریخ این پرداخت کوچکتر باشد (assertBasisDateBeforePayment)
+/// و از آن پس فیلد تاریخ دیگر قابل ویرایش نیست (کنترل هم‌الگوی «موضوعات پرداخت» سند پرداخت). کنترل مانده منفی: اگر تنخواه‌دار
+/// controlNegativeBalance=true باشد، مجموع پرداخت‌های همه‌ی تنخواه‌دارهای همان تنخواه هرگز از سقف تنخواه (PettyCash.limitAmount) بیشتر نمی‌شود.
+model PettyCashPayment {
+  id                Int      @id @default(autoincrement())
+  fiscalPeriodId    Int
+  date              DateTime @db.Date
+  custodianId       Int
+  partyId           Int
+  paymentTypeId     Int
+  purchaseInvoiceId Int?
+  salesInvoiceId    Int?
+  purchaseOrderId   Int?
+  amount            Decimal  @db.Decimal(18, 2)
+  description       String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  fiscalPeriod      FiscalPeriod     @relation(fields: [fiscalPeriodId], references: [id])
+  custodian         PettyCashCustodian @relation(fields: [custodianId], references: [id])
+  party             Party            @relation(fields: [partyId], references: [id])
+  paymentType       PaymentType      @relation(fields: [paymentTypeId], references: [id])
+  purchaseInvoice   PurchaseInvoice? @relation(fields: [purchaseInvoiceId], references: [id])
+  salesInvoice      SalesInvoice?    @relation(fields: [salesInvoiceId], references: [id])
+  purchaseOrder     PurchaseOrder?   @relation(fields: [purchaseOrderId], references: [id])
 }
 
 model ReportingLevel {
@@ -1274,6 +1342,7 @@ model PaymentType {
   paymentSettlementLines PaymentSettlementLine[]
   treasuryAccountSettings TreasuryAccountSetting[]
   openingCheques ChequeItem[] @relation("ChequeOpeningPaymentType")
+  pettyCashPayments PettyCashPayment[]
 }
 
 // طبق Documents/نوع چک دریافتی و پرداختی.md — دو مستر ساده‌ی تنظیمات خزانه‌داری: کد (خودکار: آخرین کد + ۱)
@@ -1648,6 +1717,7 @@ model PurchaseOrder {
   fiscalPeriod   FiscalPeriod        @relation(fields: [fiscalPeriodId], references: [id])
   supplier       Supplier            @relation(fields: [supplierId], references: [id])
   lines          PurchaseOrderLine[]
+  pettyCashPayments PettyCashPayment[]
 
   @@unique([fiscalPeriodId, number])
 }
@@ -1902,6 +1972,7 @@ model PurchaseInvoice {
   lines                  PurchaseInvoiceLine[]
   otherCostLines         PurchaseCostLine[]
   receiptSettlementLines ReceiptSettlementLine[]
+  pettyCashPayments      PettyCashPayment[]
 
   @@unique([fiscalPeriodId, number])
 }
@@ -2474,6 +2545,7 @@ model SalesInvoice {
   journalEntry           JournalEntry?           @relation(fields: [journalEntryId], references: [id])
   lines                  SalesInvoiceLine[]
   advanceAllocations     SalesInvoiceAdvanceAllocation[]
+  pettyCashPayments      PettyCashPayment[]
 
   @@unique([fiscalPeriodId, number])
 }
