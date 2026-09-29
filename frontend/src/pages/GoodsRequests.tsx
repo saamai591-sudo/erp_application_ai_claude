@@ -19,6 +19,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
 import { partyDisplayName } from "./Users";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
+import { DescriptionField } from "../components/DescriptionField";
 
 type RequestNature = "CENTER_REQUEST" | "PROJECT_REQUEST" | "FIXED_ASSET_REQUEST";
 type RequestStatus = "DRAFT" | "REVIEWED" | "APPROVED" | "REJECTED" | "CLOSED";
@@ -505,8 +506,7 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
             </select>
           </div>
           <div className="form-field full">
-            <label>شرح</label>
-            <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} />
+            <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} />
           </div>
           {meta?.reviewerName && (
             <div className="form-field">

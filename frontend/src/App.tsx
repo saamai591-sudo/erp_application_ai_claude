@@ -81,6 +81,7 @@ import DeliveryAuthorizations from "./pages/DeliveryAuthorizations";
 import Customers from "./pages/Customers";
 import SalesTypes from "./pages/SalesTypes";
 import SalesCenters from "./pages/SalesCenters";
+import FrequentDescriptions from "./pages/FrequentDescriptions";
 import ReceiptTypes from "./pages/ReceiptTypes";
 import PaymentTypes from "./pages/PaymentTypes";
 import { ReceivableChequeTypes, PayableChequeTypes } from "./pages/ChequeTypes";
@@ -154,6 +155,8 @@ export default function App() {
             <Route path="/geo-regions" element={<GeoRegions />} />
             <Route path="/geo-regions/new" element={<GeoRegions />} />
             <Route path="/geo-regions/:id/edit" element={<GeoRegions />} />
+            <Route path="/frequent-descriptions" element={<FrequentDescriptions />} />
+            <Route path="/frequent-descriptions/:id/edit" element={<FrequentDescriptions />} />
             <Route path="/detail-types" element={<DetailTypes />} />
 
             <Route path="/parties/individual" element={<PartyIndividual />} />

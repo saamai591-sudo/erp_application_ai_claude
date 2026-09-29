@@ -17,6 +17,7 @@ import { useTabs } from "../lib/TabsContext";
 import { usePersistedState, hasPersistedState, clearPersistedStateFamily } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
+import { DescriptionField } from "../components/DescriptionField";
 
 // ماژول «خزانه‌داری» > نتیجه وصول/برگشت چک دریافتنی. طبق تصمیم صریح کاربر: سند دسته‌ای که برای هر
 // چکِ «واگذار به وصول»، نتیجه‌ی نهایی (وصول‌شده یا برگشتی) را جداگانه ثبت می‌کند — چون ممکن است در
@@ -410,8 +411,7 @@ function ChequeClearingReceivableForm({ editId, reEdit }: { editId?: number; reE
               <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
             </div>
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={coreDisabled} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={coreDisabled} />
             </div>
           </div>
         </fieldset>

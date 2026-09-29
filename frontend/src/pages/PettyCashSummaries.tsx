@@ -23,6 +23,7 @@ import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { partyDisplayName } from "./Users";
+import { DescriptionField } from "../components/DescriptionField";
 
 // «خلاصه تنخواه» (مدیریت خزانه › پرداخت): پرداخت‌های تنخواهِ ثبت‌شده‌ی یک تنخواه‌دار را به حساب‌های حسابداری وصل می‌کند.
 // دو مرحله‌ای هم‌الگوی سند پرداخت: «تایید» سند را قفل و تسعیر ردیف‌های مبنادار را محاسبه می‌کند؛ «صدور سند حسابداری»
@@ -666,8 +667,7 @@ function SummaryForm({ editId }: { editId?: number }) {
               />
             </div>
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} />
             </div>
           </div>
 

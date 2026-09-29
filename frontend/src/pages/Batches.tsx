@@ -17,6 +17,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { formatJalaliDate } from "../lib/formatDate";
 import { toFaDigits } from "../lib/formatAmount";
 import { partyDisplayName } from "./Users";
+import { DescriptionField } from "../components/DescriptionField";
 
 const SOURCE_TYPE_FA: Record<string, string> = { MANUAL: "دستی", PURCHASE: "خرید", PRODUCTION: "تولید" };
 
@@ -282,8 +283,7 @@ function BatchForm({ editId }: { editId?: number }) {
             />
           </div>
           <div className="form-field">
-            <label>شرح</label>
-            <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+            <DescriptionField value={form.description} onChange={(v) => setForm({ ...form, description: v })} />
           </div>
           <div className="form-field">
             <label className="checkbox-row">

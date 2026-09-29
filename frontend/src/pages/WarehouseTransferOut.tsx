@@ -18,6 +18,7 @@ import { api, ApiError } from "../lib/api";
 import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
+import { DescriptionField } from "../components/DescriptionField";
 
 // «انتقال بین انبارها» به دو سند مستقل تقسیم شده — این صفحه («حواله انتقالی») فقط طرف ارسال (خروج از
 // انبار مبدا) را پوشش می‌دهد. با قطعی‌کردن این سند، فقط موجودی انبار مبدا کم می‌شود؛ کالا تا زمانی که
@@ -378,8 +379,7 @@ function WarehouseTransferOutForm({ editId, basePath }: { editId?: number; baseP
               </select>
             </div>
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={coreDisabled} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={coreDisabled} />
             </div>
             {header.warehouseId && header.destWarehouseId && header.warehouseId === header.destWarehouseId && (
               <div className="form-field full">

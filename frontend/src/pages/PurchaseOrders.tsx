@@ -18,6 +18,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { useDefaultBaseCurrency } from "../lib/useDefaultBaseCurrency";
 import { api, ApiError } from "../lib/api";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
+import { DescriptionField } from "../components/DescriptionField";
 
 type Basis = "NO_BASIS" | "PRICE_INQUIRY";
 type Status = "DRAFT" | "APPROVED";
@@ -408,8 +409,7 @@ function PurchaseOrderForm({ editId }: { editId?: number }) {
               </select>
             </div>
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={headerDisabled} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={headerDisabled} />
             </div>
           </div>
 

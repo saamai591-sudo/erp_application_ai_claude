@@ -22,6 +22,7 @@ import { BankAccountPicker } from "../components/BankAccountPicker";
 import { partyDisplayName } from "./Users";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, roundToCurrencyDecimals } from "../lib/currencyConversion";
+import { DescriptionField } from "../components/DescriptionField";
 
 // ماژول «خزانه‌داری» > دریافت. طبق تصمیم‌های صریح کاربر: چهار ابزار (نقد/حواله بانکی/چک/پوز)،
 // تسویه‌ی عمومی یا عطف به فاکتور فروش (یا ترکیبی)، فعلاً بدون سند حسابداری خودکار، گردش وضعیت
@@ -812,11 +813,9 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         {/* شرح داخل همین fieldset است: در سند «تایید»شده فقط از مسیر «ویرایش مجدد» قابل تغییر است */}
         <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
           <div className="form-field full">
-            <label>شرح</label>
-            <input
+            <DescriptionField
               value={header.description}
-              onChange={(e) => {
-                const next = e.target.value;
+              onChange={(next) => {
                 const prevDescription = header.description;
                 setHeader({ ...header, description: next });
                 // فقط هنگام ایجاد سند: ردیف‌های ابزاری که هنوز شرح دلخواه ندارند (خالی یا برابر شرح قبلیِ هدر) شرح هدر را به‌عنوان پیش‌فرض می‌گیرند

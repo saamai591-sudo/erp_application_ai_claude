@@ -17,6 +17,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
+import { DescriptionField } from "../components/DescriptionField";
 
 type Status = "DRAFT" | "APPROVED" | "CLOSED";
 
@@ -403,8 +404,7 @@ function PurchasePlanningForm({ editId }: { editId?: number }) {
                   </select>
                 </div>
                 <div className="form-field full">
-                  <label>شرح</label>
-                  <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} />
+                  <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} />
                 </div>
               </div>
 

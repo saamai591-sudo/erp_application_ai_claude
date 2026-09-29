@@ -19,6 +19,7 @@ import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
 import { partyDisplayName } from "./Users";
+import { DescriptionField } from "../components/DescriptionField";
 
 // «برگشت از فروش» — طبق stockAnalysis.md بند ۳۴؛ نگاه کنید به یادداشت بالای
 // backend/src/routes/salesReturns.ts برای توضیح طراحی (سکوت مستند در این مورد، هم‌الگوی بند ۴۰). طبق
@@ -324,8 +325,7 @@ function SalesReturnForm({ editId, basePath }: { editId?: number; basePath: stri
               />
             </div>
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={coreDisabled} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={coreDisabled} />
             </div>
             {!selectedWarehouseStillListed && header.warehouseId && (
               <div className="form-field full">
