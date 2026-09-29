@@ -77,6 +77,9 @@ export async function getSaleLines(f: SaleLineFilters): Promise<SaleLine[]> {
   const lines = await prisma.salesInvoiceLine.findMany({
     where: {
       salesInvoice: {
+        // فاکتور فروش باطل‌شده (routes/salesInvoices.ts#void) باید از محاسبات/جمع‌های این گزارش کنار
+        // بماند — طبق تصمیم صریح کاربر.
+        status: { not: "VOIDED" },
         date: { gte: f.fromDate, lte: f.toDate },
         ...(f.salesCenterIds?.length ? { salesCenterId: { in: f.salesCenterIds } } : {}),
         ...(f.salesTypeIds?.length ? { salesTypeId: { in: f.salesTypeIds } } : {}),

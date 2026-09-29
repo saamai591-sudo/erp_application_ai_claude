@@ -657,6 +657,7 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
   });
   if (!invoice) return res.status(404).json({ error: "فاکتور فروش یافت نشد" });
   if (invoice.journalEntryId) return res.status(400).json({ error: "قبلاً برای این فاکتور سند حسابداری صادر شده است" });
+  if (invoice.status === "VOIDED") return res.status(400).json({ error: "این فاکتور فروش باطل شده است؛ امکان صدور سند حسابداری وجود ندارد" });
 
   try {
     const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });

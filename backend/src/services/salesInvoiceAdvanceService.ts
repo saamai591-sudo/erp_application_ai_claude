@@ -46,6 +46,15 @@ export const SALES_INVOICE_ADVANCE_LOCKS: InvoiceFlowLock[] = [
       return inv?.journalEntryId ? "برای این فاکتور سند حسابداری صادر شده است؛ ابتدا سند حسابداری را حذف کنید" : null;
     },
   },
+  {
+    // فاکتور باطل‌شده (routes/salesInvoices.ts#void): طبق تصمیم صریح کاربر کاملاً قفل است — ابطال خودش
+    // فقط وقتی مجاز بود که این تخصیص‌ها از قبل صفر باشند، پس هیچ تخصیص جدیدی هم نباید بعد از آن اضافه شود.
+    key: "VOIDED",
+    check: async (invoiceId) => {
+      const inv = await prisma.salesInvoice.findUnique({ where: { id: invoiceId }, select: { status: true } });
+      return inv?.status === "VOIDED" ? "این فاکتور فروش باطل شده است؛ امکان تخصیص پیش‌دریافت وجود ندارد" : null;
+    },
+  },
 ];
 
 export async function getAdvanceLockReasons(invoiceId: number): Promise<string[]> {

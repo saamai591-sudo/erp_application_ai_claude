@@ -55,7 +55,9 @@ function customerTitle(c: CustomerOption): string {
   return c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim();
 }
 
-interface ListRow { id: number; number: number; date: string; basis: Basis; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: "DRAFT"; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number }
+type SalesInvoiceStatus = "DRAFT" | "VOIDED";
+const SALES_INVOICE_STATUS_FA: Record<SalesInvoiceStatus, string> = { DRAFT: "ثبت", VOIDED: "باطل شده" };
+interface ListRow { id: number; number: number; date: string; basis: Basis; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: SalesInvoiceStatus; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number }
 interface DetailLine { id: number; sourceInventoryLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null }
 interface Detail extends ListRow { currencyId: number; fxRate: number; description: string | null; journalEntryId: number | null; journalEntryReferenceNumber: number | null; lines: DetailLine[] }
 
@@ -88,6 +90,15 @@ function EyeIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
       <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
       <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+// دقیقاً هم‌شکل VoidIcon در ChequeBookLeaves.tsx — الگوی یکسان برای اکشن «ابطال» در کل سیستم.
+function VoidIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M6 6l12 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
@@ -139,6 +150,13 @@ function SalesInvoiceList() {
           { header: "نوع فروش", render: (r) => r.salesTypeTitle || "—", filterType: "string", filterValue: (r) => r.salesTypeTitle || "" },
           { header: "مرکز فروش", render: (r) => r.salesCenterTitle || "—", filterType: "string", filterValue: (r) => r.salesCenterTitle || "" },
           { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
+          {
+            header: "وضعیت",
+            render: (r) => <span style={r.status === "VOIDED" ? { color: "var(--danger)" } : undefined}>{SALES_INVOICE_STATUS_FA[r.status]}</span>,
+            filterType: "string",
+            filterValue: (r) => SALES_INVOICE_STATUS_FA[r.status],
+            width: "90px",
+          },
         ]}
         rows={items}
         edit={{ path: (r) => `/sales-invoices/${r.id}/edit` }}
@@ -170,7 +188,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", basis: "NO_BASIS" as Basis, customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", fxRate: "", description: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
-  const [meta, setMeta] = usePersistedState<{ number: number; journalEntryId: number | null; journalEntryReferenceNumber: number | null } | null>(
+  const [meta, setMeta] = usePersistedState<{ number: number; journalEntryId: number | null; journalEntryReferenceNumber: number | null; status: SalesInvoiceStatus } | null>(
     `${cacheKey}:meta`,
     null
   );
@@ -203,7 +221,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
       }
       if (editId) {
         const d: Detail = await api.get(`/sales-invoices/${editId}`);
-        setMeta({ number: d.number, journalEntryId: d.journalEntryId, journalEntryReferenceNumber: d.journalEntryReferenceNumber });
+        setMeta({ number: d.number, journalEntryId: d.journalEntryId, journalEntryReferenceNumber: d.journalEntryReferenceNumber, status: d.status });
         setHeader({
           date: d.date.slice(0, 10),
           basis: d.basis,
@@ -253,8 +271,10 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   }, [header.basis, header.date, editId]);
 
   // با صدور سند حسابداری، کل فرم (سرصفحه + ردیف‌ها) قفل می‌شود — دقیقاً هم‌الگوی PurchaseInvoices.tsx
-  // (آن‌جا شرط قفل «تایید+صدور سند» بود، اینجا چون تاییدی وجود ندارد، فقط «صدور سند»).
-  const locked = !!meta?.journalEntryId;
+  // (آن‌جا شرط قفل «تایید+صدور سند» بود، اینجا چون تاییدی وجود ندارد، فقط «صدور سند»). اکشن «ابطال»
+  // هم طبق تصمیم صریح کاربر همین‌قدر قفل‌کننده است — فاکتور باطل‌شده دیگر هیچ‌جا قابل ویرایش نیست.
+  const voided = meta?.status === "VOIDED";
+  const locked = !!meta?.journalEntryId || voided;
   const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceInventoryLineId);
   // طبق تصمیم صریح کاربر: به‌محض این‌که یک ردیف انتخاب/وارد شده باشد، کل سرصفحه (از جمله تاریخ) قفل
   // می‌شود — چون ردیف‌ها بر اساس سرصفحه (مشتری/تاریخ) انتخاب و ثبت شده‌اند و تغییر بعدی سرصفحه
@@ -480,7 +500,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   async function reloadMeta() {
     if (!editId) return;
     const d: Detail = await api.get(`/sales-invoices/${editId}`);
-    setMeta({ number: d.number, journalEntryId: d.journalEntryId, journalEntryReferenceNumber: d.journalEntryReferenceNumber });
+    setMeta({ number: d.number, journalEntryId: d.journalEntryId, journalEntryReferenceNumber: d.journalEntryReferenceNumber, status: d.status });
   }
 
   async function runAction(action: string) {
@@ -506,12 +526,22 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     }
   }
 
+  // ابطال فاکتور فروش: صرفاً تغییر وضعیت به «باطل شده» — بک‌اند مسئول کنترل «بدون گردش/سند حسابداری» است
+  // (routes/salesInvoices.ts#void)؛ اینجا فقط یک تاییدیه‌ی ساده قبل از فراخوانی، هم‌الگوی handleVoid در
+  // ChequeBookLeaves.tsx.
+  async function handleVoid() {
+    if (!editId) return;
+    if (!window.confirm("این فاکتور فروش باطل شود؟ این عملیات برگشت‌ناپذیر است.")) return;
+    await runAction("void");
+  }
+
   if (!loaded) return null;
 
   const extraActions: { label: string; icon: JSX.Element; onClick: () => void }[] = [];
-  if (editId && meta) {
+  if (editId && meta && !voided) {
     if (!meta.journalEntryId) {
       extraActions.push({ label: "صدور سند حسابداری", icon: <PlusIcon />, onClick: () => runAction("issue-journal-entry") });
+      extraActions.push({ label: "ابطال", icon: <VoidIcon />, onClick: handleVoid });
     } else {
       extraActions.push({
         label: "مشاهده سند حسابداری",
@@ -526,12 +556,18 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     }
   }
 
-  if (editId) extraActions.push({ label: "تخصیص پیش‌دریافت", icon: <PlusIcon />, onClick: () => setAdvanceOpen(true) });
+  if (editId && !voided) extraActions.push({ label: "تخصیص پیش‌دریافت", icon: <PlusIcon />, onClick: () => setAdvanceOpen(true) });
 
   return (
     <FormPage
       title={editId ? "ویرایش فاکتور فروش" : "فاکتور فروش جدید"}
-      description={locked ? "برای این فاکتور سند حسابداری صادر شده است؛ دیگر قابل ویرایش نیست." : "در این فاز فاکتور فروش فقط ثبت می‌شود و اکشن تایید ندارد."}
+      description={
+        voided
+          ? "این فاکتور فروش باطل شده است؛ دیگر قابل ویرایش نیست."
+          : locked
+          ? "برای این فاکتور سند حسابداری صادر شده است؛ دیگر قابل ویرایش نیست."
+          : "در این فاز فاکتور فروش فقط ثبت می‌شود و اکشن تایید ندارد."
+      }
       formId="sales-invoice-form"
       closePath="/sales-invoices"
       newPath="/sales-invoices/new"
@@ -552,6 +588,12 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
             <div className="form-field">
               <label>سند حسابداری</label>
               <input dir="ltr" value={toFaDigits(String(meta.journalEntryReferenceNumber))} disabled />
+            </div>
+          )}
+          {voided && (
+            <div className="form-field">
+              <label>وضعیت</label>
+              <input value={SALES_INVOICE_STATUS_FA.VOIDED} disabled style={{ color: "var(--danger)", fontWeight: 600 }} />
             </div>
           )}
           <div className="form-field">

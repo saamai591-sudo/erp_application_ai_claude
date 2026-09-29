@@ -36,9 +36,9 @@ function sumPettyCashApplied(pettyCashPayments: any[], excludePettyCashPaymentId
 export async function candidatesForBasisType(
   basisType: BasisType,
   partyId: number,
-  opts: { excludePaymentId?: number; excludePettyCashPaymentId?: number } = {}
+  opts: { excludePaymentId?: number; excludePettyCashPaymentId?: number; includeVoided?: boolean } = {}
 ): Promise<BasisCandidate[]> {
-  const { excludePaymentId, excludePettyCashPaymentId } = opts;
+  const { excludePaymentId, excludePettyCashPaymentId, includeVoided } = opts;
   if (basisType === "PURCHASE_INVOICE") {
     // فاکتور باز ممکن است متعلق به دوره مالی قبلی باشد (هنوز تسویه نشده) — پس عمداً به دوره مالی جاری محدود نمی‌شود
     const invoices = await withoutFiscalPeriodScope(() =>
@@ -61,11 +61,13 @@ export async function candidatesForBasisType(
   if (basisType === "SALES_INVOICE") {
     const customer = await prisma.customer.findUnique({ where: { partyId } });
     if (!customer) return [];
-    // فاکتور فروش اصلاً اکشن تایید ندارد و وضعیتش همیشه «ثبت» می‌ماند (نگاه کنید به routes/salesInvoices.ts) —
-    // پس نباید بر اساس status فیلتر شود.
+    // فاکتور فروش اصلاً اکشن تایید ندارد و وضعیتش همیشه «ثبت» می‌ماند (نگاه کنید به routes/salesInvoices.ts)
+    // — به‌جز اکشن «ابطال» که وضعیت را به VOIDED می‌برد؛ طبق تصمیم صریح کاربر، انتخابگر اسناد مبنا باید
+    // به‌طور پیش‌فرض فاکتورهای باطل‌شده را کنار بگذارد (includeVoided برای استثنای صریح این قاعده در جایی
+    // که واقعاً لازم شود).
     const invoices = await withoutFiscalPeriodScope(() =>
       prisma.salesInvoice.findMany({
-        where: { customerId: customer.id },
+        where: { customerId: customer.id, ...(includeVoided ? {} : { status: { not: "VOIDED" } }) },
         include: { lines: true, currency: true, paymentSettlementLines: { include: { payment: true } }, pettyCashPayments: true },
       })
     );

@@ -222,7 +222,7 @@ export function basisGroupOf(nature?: string | null): "VAT" | "MAIN" {
   return nature === "ADVANCE_VAT_RECEIPT" || nature === "SALES_VAT" ? "VAT" : "MAIN";
 }
 
-async function candidatesForBasisType(basisType: BasisType, partyId: number, excludeReceiptId?: number, nature?: string | null): Promise<BasisCandidate[]> {
+async function candidatesForBasisType(basisType: BasisType, partyId: number, excludeReceiptId?: number, nature?: string | null, includeVoided?: boolean): Promise<BasisCandidate[]> {
   const group = basisGroupOf(nature);
   const sameGroup = (s: any) => basisGroupOf(s.receiptType?.nature) === group;
   const totalOf = (lines: any[]) => lines.reduce((s: number, l: any) => s + Number(group === "VAT" ? l.vatAmount || 0 : l.amount), 0);
@@ -230,11 +230,12 @@ async function candidatesForBasisType(basisType: BasisType, partyId: number, exc
     const customer = await prisma.customer.findUnique({ where: { partyId } });
     if (!customer) return [];
     // برخلاف فاکتور خرید/سفارش فروش/پیش‌فاکتور، فاکتور فروش اصلاً اکشن تایید ندارد و وضعیتش همیشه
-    // «ثبت» می‌ماند (نگاه کنید به توضیح بالای routes/salesInvoices.ts) — پس اینجا نباید بر اساس status
-    // فیلتر شود، وگرنه هیچ فاکتوری هرگز نمایش داده نمی‌شود.
+    // «ثبت» می‌ماند (نگاه کنید به توضیح بالای routes/salesInvoices.ts) — به‌جز اکشن «ابطال» (VOIDED) که
+    // طبق تصمیم صریح کاربر باید به‌طور پیش‌فرض از این انتخابگر کنار گذاشته شود (includeVoided برای
+    // استثنای صریح این قاعده در جایی که واقعاً لازم شود).
     const invoices = await withoutFiscalPeriodScope(() =>
       prisma.salesInvoice.findMany({
-        where: { customerId: customer.id },
+        where: { customerId: customer.id, ...(includeVoided ? {} : { status: { not: "VOIDED" } }) },
         include: { lines: true, currency: true, receiptSettlementLines: { include: { receipt: true, receiptType: true } }, advanceAllocations: true },
       })
     );
