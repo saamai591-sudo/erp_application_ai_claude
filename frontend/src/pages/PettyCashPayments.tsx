@@ -19,6 +19,7 @@ import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { partyDisplayName } from "./Users";
+import { DescriptionField } from "../components/DescriptionField";
 
 // «پرداخت تنخواه» (مدیریت خزانه › پرداخت): سند ساده‌ی ثبتِ برداشت از یک تنخواه — بدون سند حسابداری/گردش تایید (طبق تصمیم صریح کاربر).
 // basisType از خودِ نوع پرداختِ انتخاب‌شده می‌آید (فیلد نمایشی، غیرقابل‌ویرایش)؛ وقتی basisType≠NONE، سند مبنا هم‌الگوی
@@ -415,8 +416,7 @@ function PettyCashPaymentForm({ editId }: { editId?: number }) {
             <AmountInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })} />
           </div>
           <div className="form-field full">
-            <label>شرح</label>
-            <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+            <DescriptionField value={form.description} onChange={(v) => setForm({ ...form, description: v })} />
           </div>
         </div>
       </form>

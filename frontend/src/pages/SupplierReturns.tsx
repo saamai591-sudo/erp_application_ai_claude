@@ -19,6 +19,7 @@ import { api, ApiError } from "../lib/api";
 import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
+import { DescriptionField } from "../components/DescriptionField";
 
 // «برگشت به تامین‌کننده» — طبق stockAnalysis.md بند ۳۸؛ نگاه کنید به یادداشت بالای
 // backend/src/routes/supplierReturns.ts. طرف مقابل (تامین‌کننده) در سطح سند الزامی است و باید با
@@ -336,8 +337,7 @@ function SupplierReturnForm({ editId, basePath }: { editId?: number; basePath: s
               />
             </div>
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={coreDisabled} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={coreDisabled} />
             </div>
             {!selectedWarehouseStillListed && header.warehouseId && (
               <div className="form-field full">

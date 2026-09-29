@@ -18,6 +18,7 @@ import { api, ApiError } from "../lib/api";
 import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
+import { DescriptionField } from "../components/DescriptionField";
 
 // «انتقال بین انبارها» به دو سند مستقل تقسیم شده — این صفحه («رسید انتقال») طرف دریافت را پوشش
 // می‌دهد. هر ردیف باید به یک ردیف سند «حواله انتقالی» قطعی‌شده ارجاع بدهد که انبار مقصد اعلام‌شده‌ی آن
@@ -312,8 +313,7 @@ function WarehouseTransferInForm({ editId, basePath }: { editId?: number; basePa
               <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={headerLocked} />
             </div>
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={coreDisabled} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={coreDisabled} />
             </div>
             {!selectedWarehouseStillListed && header.warehouseId && (
               <div className="form-field full">

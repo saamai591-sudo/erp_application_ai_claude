@@ -13,6 +13,7 @@ import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
+import { DescriptionField } from "../components/DescriptionField";
 
 // «مرکز فروش» — موجودیت عملیاتی فروش، وابسته به یک واحد سازمانی (۱ واحد سازمانی → چند مرکز فروش)، در
 // اسناد فروش برای شناسایی مرکز فروش مسئول تراکنش استفاده می‌شود. طبق تصمیم صریح کاربر، یک کد ساده‌ی
@@ -201,8 +202,7 @@ function SalesCenterForm({ editId }: { editId?: number }) {
             </select>
           </div>
           <div className="form-field full">
-            <label>شرح</label>
-            <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+            <DescriptionField value={form.description} onChange={(v) => setForm({ ...form, description: v })} />
           </div>
           <div className="form-field">
             <label className="checkbox-row">

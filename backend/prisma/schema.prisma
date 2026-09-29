@@ -3569,3 +3569,20 @@ enum AdvanceAllocationNature {
   ADVANCE_RECEIPT
   ADVANCE_VAT_RECEIPT
 }
+
+// «شرح‌های پرکاربرد»: متن‌هایی که کاربر با آیکن «ذخیره» کنار فیلد شرح یک فرم ذخیره می‌کند تا هنگام تایپ در همان
+// فیلد همان فرم پیشنهاد شوند. برای همه‌ی کاربران مشترک است. هر رکورد به «فرم + فیلد + متن» وابسته است:
+// formKey = کلید فرم در navConfig/registry (مثلاً payments)، fieldKey = نام فیلد (فعلاً همیشه description).
+// یکتایی (فرم، فیلد، متن) در سطح دیتابیس تضمین می‌شود تا ذخیره‌ی تکراری (حتی هم‌زمان) رکورد دوم نسازد.
+model FrequentDescription {
+  id          Int      @id @default(autoincrement())
+  formKey     String
+  fieldKey    String   @default("description")
+  text        String
+  createdById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  @@unique([formKey, fieldKey, text])
+  @@index([formKey, fieldKey])
+}

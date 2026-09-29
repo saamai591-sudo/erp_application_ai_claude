@@ -18,6 +18,7 @@ import { usePersistedState, hasPersistedState, clearPersistedStateFamily } from 
 import { api, ApiError } from "../lib/api";
 import { BankAccountPicker } from "../components/BankAccountPicker";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
+import { DescriptionField } from "../components/DescriptionField";
 
 // ماژول «خزانه‌داری» > واگذاری چک به بانک. طبق تصمیم صریح کاربر: چند چک دریافتنی «در دست» با هم به
 // یک حساب بانکی مشخص واگذار می‌شوند. در تایید، وضعیت چک‌ها به «واگذار به وصول» تغییر می‌کند. نگاه
@@ -427,8 +428,7 @@ function ChequeDepositForm({ editId, reEdit }: { editId?: number; reEdit?: boole
               <BankAccountPicker accounts={bankAccounts} value={header.bankAccountId} onChange={(id) => setHeader({ ...header, bankAccountId: id })} disabled={coreDisabled} />
             </div>
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={coreDisabled} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={coreDisabled} />
             </div>
           </div>
         </fieldset>

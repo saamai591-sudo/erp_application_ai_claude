@@ -20,6 +20,7 @@ import { usePermissions } from "../lib/usePermissions";
 import { partyDisplayName } from "./Users";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
+import { DescriptionField } from "../components/DescriptionField";
 
 // «حواله فروش» (مجوز خروج از انبار برای فروش) — سند واقعی حرکت انبار، جدا از حواله انبار مصرفی
 // موجود؛ ساختارش دقیقاً مطابق الگوی «رسید انبار خرید» است (رجوع کنید به یادداشت بالای
@@ -478,8 +479,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
               />
             </div>
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={headerDisabled} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={headerDisabled} />
             </div>
             {!selectedWarehouseStillListed && header.warehouseId && (
               <div className="form-field full">

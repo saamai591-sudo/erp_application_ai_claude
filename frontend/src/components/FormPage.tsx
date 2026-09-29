@@ -1,5 +1,6 @@
 import { ReactNode, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { clearTabDirty, confirmDiscard, currentTabPath, isTabDirty, markTabDirty } from "../lib/unsavedChanges";
 import { useTabs } from "../lib/TabsContext";
 import { InfoHint } from "./InfoHint";
 
@@ -116,11 +117,29 @@ export function FormPage({
 
   const hasMenu = !!onDelete || (extraActions && extraActions.length > 0);
 
+  // بستن فرم (×): اگر تغییر ذخیره‌نشده‌ای هست، پیش از خروج تایید می‌گیرد (سازوکار مشترک: lib/unsavedChanges.ts)
+  function handleClose() {
+    const tabPath = currentTabPath();
+    if (isTabDirty(tabPath)) {
+      if (!confirmDiscard()) return;
+      clearTabDirty(tabPath);
+    }
+    navigate(closePath);
+  }
+
+  // پشتیبان برای فرم‌هایی که stateشان از usePersistedState نمی‌آید: تایپ/انتخاب واقعیِ کاربر داخل خودِ فرم هم تغییر حساب
+  // می‌شود. دیالوگ‌ها (انتخابگرها…) به document.body پورتال می‌شوند اما رویدادشان در درخت React تا اینجا بالا می‌آید؛
+  // تایپ در فیلتر یک دیالوگ تغییرِ فرم نیست.
+  function handleInput(e: React.FormEvent<HTMLDivElement>) {
+    if (!e.nativeEvent.isTrusted || (e.target as HTMLElement).closest(".modal-overlay")) return;
+    markTabDirty(currentTabPath());
+  }
+
   return (
-    <div>
+    <div onInput={handleInput}>
       <div className="form-toolbar">
         <div className="form-toolbar-right">
-          <button type="button" className="toolbar-icon-btn" onClick={() => navigate(closePath)} title="بستن">
+          <button type="button" className="toolbar-icon-btn" onClick={handleClose} title="بستن">
             <CloseIcon />
           </button>
         </div>

@@ -19,6 +19,7 @@ import { api, ApiError } from "../lib/api";
 import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
+import { DescriptionField } from "../components/DescriptionField";
 
 // «مصرف تولید» — طبق stockAnalysis.md بند ۳۴/۳۹/۴۲؛ این پروژه ماژول «تولید»/«دستور تولید» ندارد، پس
 // این سند همیشه «بدون مبنا» است (نگاه کنید به یادداشت بالای backend/src/routes/productionConsumptions.ts).
@@ -322,8 +323,7 @@ function ProductionConsumptionForm({ editId, basePath }: { editId?: number; base
               </select>
             </div>
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={coreDisabled} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={coreDisabled} />
             </div>
             {!selectedWarehouseStillListed && header.warehouseId && (
               <div className="form-field full">

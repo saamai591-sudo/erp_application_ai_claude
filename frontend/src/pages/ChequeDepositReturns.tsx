@@ -17,6 +17,7 @@ import { useTabs } from "../lib/TabsContext";
 import { usePersistedState, hasPersistedState, clearPersistedStateFamily } from "../lib/usePersistedState";
 import { api, ApiError } from "../lib/api";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
+import { DescriptionField } from "../components/DescriptionField";
 
 // ماژول «خزانه‌داری» > برگشت از واگذاری. طبق تصمیم صریح کاربر: ممکن است یک یا چند چک را که قبلاً
 // «واگذار به وصول» شده‌اند، از بانک پس بگیریم (بدون ارجاع به یک سند واگذاری خاص؛ هر چک «واگذار به
@@ -404,8 +405,7 @@ function ChequeDepositReturnForm({ editId, reEdit }: { editId?: number; reEdit?:
               <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
             </div>
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={coreDisabled} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={coreDisabled} />
             </div>
           </div>
         </fieldset>

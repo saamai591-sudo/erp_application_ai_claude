@@ -15,6 +15,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { formatJalaliDate } from "../lib/formatDate";
 import { toFaDigits } from "../lib/formatAmount";
+import { DescriptionField } from "../components/DescriptionField";
 
 interface GoodsItemOption {
   id: number;
@@ -211,8 +212,7 @@ function SerialForm({ editId }: { editId?: number }) {
             <JalaliDatePicker value={form.expiryDate} onChange={(v) => setForm({ ...form, expiryDate: v })} />
           </div>
           <div className="form-field">
-            <label>شرح</label>
-            <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+            <DescriptionField value={form.description} onChange={(v) => setForm({ ...form, description: v })} />
           </div>
           <div className="form-field">
             <label className="checkbox-row">

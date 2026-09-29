@@ -18,6 +18,7 @@ import { api, ApiError } from "../lib/api";
 import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
+import { DescriptionField } from "../components/DescriptionField";
 
 // «حواله دارایی ثابت» — طبق stockAnalysis.md بند ۳۴/۴۱؛ نگاه کنید به یادداشت بالای
 // backend/src/routes/fixedAssetIssues.ts. بدون طرف‌حساب در سطح سند — اطلاعات تخصصی دارایی در ماژول
@@ -341,8 +342,7 @@ function FixedAssetIssueForm({ editId, basePath }: { editId?: number; basePath: 
               </select>
             </div>
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={headerDisabled} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={headerDisabled} />
             </div>
             {!selectedWarehouseStillListed && header.warehouseId && (
               <div className="form-field full">

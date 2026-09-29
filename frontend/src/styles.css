@@ -1690,3 +1690,20 @@ tbody tr:hover { background: var(--bg); }
 .picker-table tbody tr.active-list td { background: var(--primary-soft); }
 /* شماره‌ی اولویت کلید در مرتب‌سازی چندستونه (Ctrl/Shift + کلیک روی سرستون) */
 .sort-priority { font-size: 9px; font-weight: 700; color: var(--primary); background: var(--primary-soft); border-radius: 999px; min-width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; padding: 0 3px; }
+
+/* ===== فیلد «شرح» با شرح‌های پرکاربرد (components/DescriptionField.tsx) ===== */
+.desc-field { position: relative; display: flex; align-items: center; gap: 6px; }
+.desc-field input { flex: 1; min-width: 0; }
+.desc-save-btn {
+  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px;
+  border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: var(--ink-soft); cursor: pointer;
+}
+.desc-save-btn:hover:not(:disabled) { color: var(--primary); border-color: var(--primary); background: var(--primary-soft); }
+.desc-save-btn:disabled { opacity: .45; cursor: not-allowed; }
+.desc-suggestions {
+  position: absolute; top: calc(100% + 2px); inset-inline: 0; z-index: 30; margin: 0; padding: 4px; list-style: none;
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow-md);
+  max-height: 240px; overflow-y: auto;
+}
+.desc-suggestions li { padding: 6px 8px; border-radius: 5px; font-size: 12.5px; cursor: pointer; }
+.desc-suggestions li.active { background: var(--primary-soft); }
