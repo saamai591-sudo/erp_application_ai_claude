@@ -1180,11 +1180,18 @@ body {
   .olap-matrix-wrap { max-height: none !important; overflow: visible !important; }
 }
 
-.picker-table-wrap { max-height: 50vh; overflow: auto; margin-bottom: 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
-.picker-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+/* فقط بدنه‌ی جدول انتخابگر اسکرول می‌شود، نه سرستون: ارتفاع ناحیه‌ی اسکرول نیمی از صفحه است ولی هرگز بیشتر از آنچه
+   کنار عنوان و دکمه‌های دیالوگ در صفحه جا می‌شود (وگرنه در صفحه‌ی کوتاه کل دیالوگ اسکرول می‌شد و سرستون با آن می‌رفت). */
+.picker-table-wrap { max-height: max(120px, min(50vh, calc(100vh - 300px))); overflow: auto; margin-bottom: 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+/* border-collapse: separate + spacing 0 (به‌جای collapse): با collapse، مرزِ بین دو ردیفِ سرستونِ چسبان جزو thead نیست و
+   متن ردیف‌های اسکرول‌شده از لای آن (یک‌دو پیکسل) دیده می‌شد. ظاهر خطوط تغییری نمی‌کند (هر سلول فقط مرز پایین/انتهای خودش را دارد). */
+.picker-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
+/* کل thead چسبان است (نه هر th جداگانه): جدول انتخابگر دو ردیفِ سرستون دارد (عنوان ستون‌ها + کادر فیلتر)؛ اگر هر th
+   جدا top:0 بگیرد، دو ردیف روی هم می‌افتند و ردیف عنوان‌ها هنگام اسکرول پنهان می‌شود. */
+.picker-table thead { position: sticky; top: 0; z-index: 2; }
 .picker-table th {
-  position: sticky; top: 0; background: var(--bg); text-align: right; padding: 6px 8px;
-  border-bottom: 1px solid var(--line); font-weight: 600; color: var(--ink-soft); z-index: 1;
+  background: var(--bg); text-align: right; padding: 6px 8px;
+  border-bottom: 1px solid var(--line); font-weight: 600; color: var(--ink-soft);
 }
 .picker-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); }
 .picker-table tr:hover td { background: var(--bg); }
