@@ -1,0 +1,56 @@
+# اجرای این برنامه روی یک سرور، از روی ایمیج‌های آماده در reg.greenbits.ir (بدون نیاز به سورس‌کد روی سرور —
+# کد داخل خودِ ایمیج‌ها کپی شده). قبل از اجرا:
+#   1) docker login reg.greenbits.ir   (اگر سرور قبلاً لاگین نکرده)
+#   2) کنار همین فایل یک .env بسازید (نمونه در .env.example) و مقادیر را با رشته‌های تصادفی قوی پر کنید
+#   3) docker compose -f docker-compose.prod.yml up -d
+# بعد از بالا آمدن: رمز پیش‌فرض ادمین (seed) را حتماً از داخل برنامه تغییر دهید.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: erp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD را در فایل .env تنظیم کنید}
+      POSTGRES_DB: accounting_erp
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp -d accounting_erp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # دیتابیس عمداً به بیرون از شبکه‌ی Docker باز نیست؛ فقط backend به آن دسترسی دارد.
+    # برای دسترسی موقت با pgAdmin از همین سرور، خط زیر را از کامنت خارج کنید (فقط روی 127.0.0.1، نه 0.0.0.0):
+    # ports:
+    #   - "127.0.0.1:5433:5432"
+
+  backend:
+    image: reg.greenbits.ir/accounting-erp-backend:latest
+    restart: unless-stopped
+    init: true
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://erp:${POSTGRES_PASSWORD}@db:5432/accounting_erp?schema=public
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET را در فایل .env تنظیم کنید}
+      PORT: 4000
+    ports:
+      - "4000:4000"
+
+  frontend:
+    image: reg.greenbits.ir/accounting-erp-frontend:latest
+    restart: unless-stopped
+    init: true
+    depends_on:
+      - backend
+    environment:
+      # frontend/src/lib/api.ts در نبود این متغیر، آدرس بک‌اند را از روی hostname مرورگر می‌سازد
+      # (http://<همان آدرسی که فرانت‌اند رویش باز شده>:4000/api) — پس معمولاً نیازی به تنظیم نیست.
+      CI: "true"
+    ports:
+      - "5173:5173"
+
+volumes:
+  db_data:

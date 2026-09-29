@@ -17,6 +17,16 @@ export interface IssueLineInput {
   description?: string;
 }
 
+/** خطای «تفصیل الزامی» با پیام یکسان در همه‌جا، طبق تصمیم صریح کاربر: این کنترل باید در نقطه‌ی مرکزی صدور
+ * سند اعمال شود، نه فقط در فرم سند دستی — حتی اگر فراخواننده (پرداخت/دریافت/فاکتور/انبار/...) خودش هم
+ * پیش‌تر همین کنترل را زده باشد (مثل routes/journalEntries.ts که به‌خاطر مسیر PUT/ویرایش که این سرویس
+ * مشترک را صدا نمی‌زند، همچنان کنترل خودش را نگه می‌دارد) */
+function assertLineDetailsPresent(account: { title: string; detailType1Id: number | null; detailType2Id: number | null; detailType3Id: number | null }, line: IssueLineInput, rowLabel: string) {
+  if (account.detailType1Id && !line.detail1Code) throw new Error(`تفصیل سطح ۱ برای حساب «${account.title}» (${rowLabel}) الزامی است`);
+  if (account.detailType2Id && !line.detail2Code) throw new Error(`تفصیل سطح ۲ برای حساب «${account.title}» (${rowLabel}) الزامی است`);
+  if (account.detailType3Id && !line.detail3Code) throw new Error(`تفصیل سطح ۳ برای حساب «${account.title}» (${rowLabel}) الزامی است`);
+}
+
 export interface IssueJournalEntryOptions {
   date: Date;
   documentTypeId: number;
@@ -56,8 +66,10 @@ export const JOURNAL_ENTRY_ISSUED_MESSAGE = "سند با موفقیت صادر �
  * ثبت خودکار یا نیمه‌خودکار سند حسابداری دارد، باید از همین تابع استفاده کند تا:
  *   ۱) شماره‌گذاری سریالی (شماره سند در سطح دوره مالی، شماره عطف سراسری، شماره روزانه) همیشه یکسان و صحیح باشد
  *   ۲) کنترل «هر ردیف فقط بدهکار یا بستانکار» و «بالانس‌بودن سند» همیشه و در همه‌جا اعمال شود
- * اعتبارسنجی‌های خاصِ حساب (سطح حساب، تفصیل اجباری، ارزی/غیرارزی و ...) بر عهده‌ی خودِ فراخواننده است،
- * چون این قوانین بسته به سناریوی فراخوانی (ورودی مستقیم کاربر یا داده‌ی از پیش محاسبه‌شده) فرق می‌کند.
+ *   ۳) کنترل «تفصیل اجباری» (اگر حساب در سطح ۱/۲/۳ تفصیل الزامی دارد و آن تفصیل روی ردیف ست نشده) همیشه
+ *      و در همه‌جا اعمال شود — طبق تصمیم صریح کاربر، این یک قاعده‌ی عمومی است، نه مخصوص فرم سند دستی
+ * بقیه‌ی اعتبارسنجی‌های خاصِ حساب (سطح حساب، زیرحساب‌نداشتن، ارزی/غیرارزی و ...) همچنان بر عهده‌ی خودِ
+ * فراخواننده است، چون این قوانین بسته به سناریوی فراخوانی (ورودی مستقیم کاربر یا داده‌ی از پیش محاسبه‌شده) فرق می‌کند.
  */
 export async function issueJournalEntry(opts: IssueJournalEntryOptions): Promise<IssueJournalEntryResult> {
   if (!Array.isArray(opts.lines) || opts.lines.length === 0) {
@@ -97,8 +109,13 @@ export async function issueJournalEntry(opts: IssueJournalEntryOptions): Promise
     }
     assertLineHasAmount(debit, credit, `ردیف ${idx + 1}`);
 
-    const currency = await prisma.currency.findUnique({ where: { id: line.currencyId } });
+    const [currency, account] = await Promise.all([
+      prisma.currency.findUnique({ where: { id: line.currencyId } }),
+      prisma.account.findUnique({ where: { id: line.accountId }, select: { title: true, detailType1Id: true, detailType2Id: true, detailType3Id: true } }),
+    ]);
     if (!currency) throw new Error(`ارز ردیف ${idx + 1} نامعتبر است`);
+    if (!account) throw new Error(`حساب ردیف ${idx + 1} یافت نشد`);
+    assertLineDetailsPresent(account, line, `ردیف ${idx + 1}`);
 
     const isBaseLine = line.currencyId === baseCurrency.id;
     const fxRate = isBaseLine ? 1 : Number(line.fxRate) || 0;

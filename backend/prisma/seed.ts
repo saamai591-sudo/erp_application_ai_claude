@@ -40,33 +40,35 @@ async function main() {
   }
 
   // انواع سند پیش‌فرض سیستمی — کلید upsert عمداً systemKey است، نه code: چون «نوع سند» یک فهرست
-  // کاربر-قابل‌ویرایش هم هست (routes/documentTypes.ts)، کدهای کوچک (۱، ۲، ...) ممکن است تا زمان اجرای
-  // این seed توسط کاربر برای رکوردهای خودش گرفته شده باشند (nextSerialNumber فقط MAX+1 می‌دهد، جای خالی
-  // پر نمی‌کند) — systemKey تنها فیلد یکتایی است که هرگز از مسیر کاربر ست نمی‌شود، پس تصادم نمی‌کند.
+  // کاربر-قابل‌ویرایش هم هست (routes/documentTypes.ts) و چند نوع سند سیستمی دیگر (رسید/پرداخت/چک/خلاصه
+  // تنخواه) از قبل توسط خودِ migration مربوطه‌شان bootstrap می‌شوند (INSERT ... SELECT MAX(code)+1، برای
+  // این‌که همان لحظه که آن فرم اضافه می‌شود در دسترس باشند، نه فقط بعد از seed). روی یک دیتابیس کاملاً
+  // تازه، migrationها قبل از این seed اجرا می‌شوند، پس اگر این‌جا هم کد ثابت می‌دادیم، دقیقاً با همان
+  // کدهای تازه‌ساخته‌شده‌ی migrationها تصادم می‌کرد. به همین دلیل کد اینجا هرگز ثابت نیست؛ درست مثل خودِ
+  // migrationها، هر بار از MAX(code)+1 محاسبه می‌شود — امن چه دیتابیس تازه باشد چه قدیمی.
   const documentTypes = [
-    { code: 1, title: "عملیاتی", systemKey: "OPERATIONAL" },
-    { code: 2, title: "افتتاحیه", systemKey: "OPENING" },
-    { code: 3, title: "بستن حسابها", systemKey: "CLOSING_ACCOUNTS" },
-    { code: 4, title: "اختتامیه", systemKey: "CLOSING" },
-    { code: 7, title: "اسناد انبار", systemKey: "WAREHOUSE_DOCUMENTS" },
-    { code: 8, title: "فاکتور خرید", systemKey: "PURCHASE_INVOICE" },
-    { code: 9, title: "فاکتور خرید خدمات", systemKey: "SERVICE_PURCHASE_INVOICE" },
-    { code: 10, title: "فاکتور فروش", systemKey: "SALES_INVOICE" },
-    { code: 11, title: "فاکتور برگشت از فروش", systemKey: "SALES_RETURN_INVOICE" },
-    { code: 12, title: "رسید دریافت", systemKey: "RECEIPT" },
-    { code: 13, title: "اعلامیه پرداخت", systemKey: "PAYMENT" },
-    { code: 14, title: "واگذاری چک به بانک", systemKey: "CHEQUE_DEPOSIT" },
-    { code: 15, title: "برگشت از واگذاری چک", systemKey: "CHEQUE_DEPOSIT_RETURN" },
-    { code: 16, title: "وصول و برگشت چک دریافتنی", systemKey: "CHEQUE_CLEARING_RECEIVABLE" },
-    { code: 17, title: "وصول و برگشت چک پرداختنی", systemKey: "CHEQUE_CLEARING_PAYABLE" },
-    { code: 18, title: "خلاصه تنخواه", systemKey: "PETTY_CASH_SUMMARY" },
+    { title: "عملیاتی", systemKey: "OPERATIONAL" },
+    { title: "افتتاحیه", systemKey: "OPENING" },
+    { title: "بستن حسابها", systemKey: "CLOSING_ACCOUNTS" },
+    { title: "اختتامیه", systemKey: "CLOSING" },
+    { title: "اسناد انبار", systemKey: "WAREHOUSE_DOCUMENTS" },
+    { title: "فاکتور خرید", systemKey: "PURCHASE_INVOICE" },
+    { title: "فاکتور خرید خدمات", systemKey: "SERVICE_PURCHASE_INVOICE" },
+    { title: "فاکتور فروش", systemKey: "SALES_INVOICE" },
+    { title: "فاکتور برگشت از فروش", systemKey: "SALES_RETURN_INVOICE" },
+    { title: "رسید دریافت", systemKey: "RECEIPT" },
+    { title: "اعلامیه پرداخت", systemKey: "PAYMENT" },
+    { title: "واگذاری چک به بانک", systemKey: "CHEQUE_DEPOSIT" },
+    { title: "برگشت از واگذاری چک", systemKey: "CHEQUE_DEPOSIT_RETURN" },
+    { title: "وصول و برگشت چک دریافتنی", systemKey: "CHEQUE_CLEARING_RECEIVABLE" },
+    { title: "وصول و برگشت چک پرداختنی", systemKey: "CHEQUE_CLEARING_PAYABLE" },
+    { title: "خلاصه تنخواه", systemKey: "PETTY_CASH_SUMMARY" },
   ];
   for (const dt of documentTypes) {
-    await prisma.documentType.upsert({
-      where: { systemKey: dt.systemKey },
-      update: {},
-      create: { ...dt, isSystem: true },
-    });
+    const existing = await prisma.documentType.findUnique({ where: { systemKey: dt.systemKey } });
+    if (existing) continue;
+    const last = await prisma.documentType.findFirst({ orderBy: { code: "desc" } });
+    await prisma.documentType.create({ data: { ...dt, code: (last?.code ?? 0) + 1, isSystem: true } });
   }
 
   // درخت کامل دسترسی‌های سیستم (Module > SubModule > Form > Action) اکنون فقط در یک‌جا تعریف می‌شود:

@@ -87,7 +87,7 @@ export function RecordPickerField<T extends { id: number | string }>({
   );
 }
 
-function RecordPickerDialog<T extends { id: number | string }>({
+export function RecordPickerDialog<T extends { id: number | string }>({
   title,
   rows,
   columns,

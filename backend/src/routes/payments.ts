@@ -10,6 +10,8 @@ import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, ConversionCurrency } from "../utils/currencyConversion";
 import { issuePaymentJournalEntry, revertPaymentJournalEntry } from "../services/paymentJournalEntryService";
 import { candidatesForBasisType, BasisType, BasisCandidate } from "../services/paymentBasisCandidates";
+import { assertPettyCashRunningBalanceNotNegative } from "../services/pettyCashBalanceService";
+import { assertPaymentAdvanceNotAllocated } from "../services/purchaseInvoiceAdvanceService";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 
@@ -71,6 +73,7 @@ interface SettlementLineInput {
   partyId?: number | null;
   bankAccountId?: number | null; // فقط برای ماهیت «به بانک»
   cashBoxId?: number | null; // فقط برای ماهیت «به صندوق»
+  custodianId?: number | null; // فقط برای ماهیت «به تنخواه»
   salesInvoiceId?: number | null;
   purchaseInvoiceId?: number | null;
   purchaseOrderId?: number | null;
@@ -307,10 +310,12 @@ async function validateSubjectLines(
       throw new Error(`ردیف ${idx + 1}: قلم (ردیف ابزار پرداخت مرتبط) نامعتبر است`);
     }
 
-    // ماهیت «به بانک»/«به صندوق»: به‌جای طرف حساب، حساب بانکی/صندوق انتخاب می‌شود (معینِ سند حسابداری از تعیین حسابهای معین همان حساب/صندوق می‌آید)
+    // ماهیت «به بانک»/«به صندوق»/«به تنخواه»: به‌جای طرف حساب، حساب بانکی/صندوق/تنخواه‌دار انتخاب می‌شود
+    // (معینِ سند حسابداری از تعیین حسابهای معین همان حساب/صندوق/تنخواه می‌آید)
     let rowPartyId: number | null = null;
     let rowBankAccountId: number | null = null;
     let rowCashBoxId: number | null = null;
+    let rowCustodianId: number | null = null;
     if (paymentType.nature === "TO_BANK") {
       if (!l.bankAccountId) throw new Error(`ردیف ${idx + 1}: انتخاب حساب بانکی الزامی است`);
       // eslint-disable-next-line no-await-in-loop
@@ -325,6 +330,14 @@ async function validateSubjectLines(
       // eslint-disable-next-line no-await-in-loop
       if (!(await prisma.cashBox.findUnique({ where: { id: l.cashBoxId } }))) throw new Error(`ردیف ${idx + 1}: صندوق یافت نشد`);
       rowCashBoxId = l.cashBoxId;
+    } else if (paymentType.nature === "TO_PETTY_CASH") {
+      if (!l.custodianId) throw new Error(`ردیف ${idx + 1}: انتخاب تنخواه‌دار الزامی است`);
+      // eslint-disable-next-line no-await-in-loop
+      const custodian = await prisma.pettyCashCustodian.findUnique({ where: { id: l.custodianId }, include: { pettyCash: true } });
+      if (!custodian) throw new Error(`ردیف ${idx + 1}: تنخواه‌دار یافت نشد`);
+      if (!custodian.isActive) throw new Error(`ردیف ${idx + 1}: تنخواه‌دار انتخاب‌شده غیرفعال است`);
+      if (!custodian.pettyCash.isActive) throw new Error(`ردیف ${idx + 1}: تنخواه انتخاب‌شده غیرفعال است`);
+      rowCustodianId = l.custodianId;
     } else {
       if (!l.partyId) throw new Error(`ردیف ${idx + 1}: طرف حساب الزامی است`);
       rowPartyId = l.partyId;
@@ -400,6 +413,7 @@ async function validateSubjectLines(
       partyId: rowPartyId,
       bankAccountId: rowBankAccountId,
       cashBoxId: rowCashBoxId,
+      custodianId: rowCustodianId,
       purchaseInvoiceId: basisType === "PURCHASE_INVOICE" ? basisIds.purchaseInvoiceId : null,
       salesInvoiceId: basisType === "SALES_INVOICE" ? basisIds.salesInvoiceId : null,
       purchaseOrderId: basisType === "PURCHASE_ORDER" ? basisIds.purchaseOrderId : null,
@@ -465,7 +479,17 @@ const PAYMENT_DETAIL_INCLUDE = {
   journalEntry: true,
   instrumentLines: { include: { currency: true, cashBox: true, bankAccount: { include: { accountType: true } }, chequeBankBranch: true, chequeItem: true, chequeBookLeaf: true }, orderBy: { rowOrder: "asc" } },
   settlementLines: {
-    include: { paymentType: true, party: true, bankAccount: { include: { bankBranch: true } }, cashBox: true, currency: true, purchaseInvoice: true, salesInvoice: true, purchaseOrder: true },
+    include: {
+      paymentType: true,
+      party: true,
+      bankAccount: { include: { bankBranch: true } },
+      cashBox: true,
+      custodian: { include: { party: true, pettyCash: true } },
+      currency: true,
+      purchaseInvoice: true,
+      salesInvoice: true,
+      purchaseOrder: true,
+    },
     orderBy: { rowOrder: "asc" },
   },
 } as const;
@@ -522,8 +546,18 @@ function serializePayment(d: any) {
       partyDisplay: l.party ? partyDisplay(l.party) : "",
       bankAccountId: l.bankAccountId,
       cashBoxId: l.cashBoxId,
-      // عنوان «حساب» ردیف: طرف حساب، یا حساب بانکی / صندوق (ماهیت «به بانک» / «به صندوق»)
-      accountDisplay: l.bankAccount ? `${l.bankAccount.accountNumber} — ${l.bankAccount.bankBranch.title}` : l.cashBox ? l.cashBox.title : l.party ? partyDisplay(l.party) : "",
+      custodianId: l.custodianId,
+      custodianDisplay: l.custodian ? `${l.custodian.detailCode} — ${l.custodian.pettyCash.title} (${partyDisplay(l.custodian.party)})` : "",
+      // عنوان «حساب» ردیف: طرف حساب، یا حساب بانکی / صندوق / تنخواه‌دار (ماهیت «به بانک» / «به صندوق» / «به تنخواه»)
+      accountDisplay: l.bankAccount
+        ? `${l.bankAccount.accountNumber} — ${l.bankAccount.bankBranch.title}`
+        : l.cashBox
+          ? l.cashBox.title
+          : l.custodian
+            ? `${l.custodian.detailCode} — ${l.custodian.pettyCash.title} (${partyDisplay(l.custodian.party)})`
+            : l.party
+              ? partyDisplay(l.party)
+              : "",
       purchaseInvoiceId: l.purchaseInvoiceId,
       purchaseInvoiceNumber: l.purchaseInvoice?.number,
       salesInvoiceId: l.salesInvoiceId,
@@ -784,11 +818,19 @@ router.post("/payments/:id/unapprove", can(`${FORM}.unapprove`), async (req, res
   const id = Number(req.params.id);
   const d = await prisma.payment.findUnique({
     where: { id },
-    include: { instrumentLines: { include: { chequeItem: true } } },
+    include: {
+      instrumentLines: { include: { chequeItem: true } },
+      settlementLines: { include: { paymentType: true, custodian: true } },
+    },
   });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "APPROVED") return res.status(400).json({ error: "فقط اسناد «تایید»شده قابل برگشت هستند" });
   if (d.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
+  try {
+    await assertPaymentAdvanceNotAllocated(id);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
 
   for (const l of d.instrumentLines) {
     if (!l.chequeItem) continue;
@@ -797,6 +839,26 @@ router.post("/payments/:id/unapprove", can(`${FORM}.unapprove`), async (req, res
         .status(400)
         .json({ error: `چک شماره ${l.chequeItem.number} بعد از این سند در سند دیگری گردش داشته و این سند قابل برگشت از تایید نیست؛ ابتدا آن گردش را برگردانید` });
     }
+  }
+
+  // برگشت از تاییدِ ردیف‌های «به تنخواه» یعنی شارژِ همان تنخواه دیگر به‌حساب نمی‌آید — قبل از واقعاً برگرداندن،
+  // باید مطمئن شد که مانده‌ی جاری تنخواه (با احتساب حذفِ همین شارژ) در هیچ نقطه‌ای منفی نمی‌شود
+  try {
+    const pettyCashIds = new Set(
+      d.settlementLines.filter((s: any) => s.paymentType.nature === "TO_PETTY_CASH" && s.custodian?.controlNegativeBalance).map((s: any) => s.custodian!.pettyCashId)
+    );
+    for (const pettyCashId of pettyCashIds) {
+      // این سند هنوز APPROVED است، پس سرویس همین ردیف‌ها را جزو شارژهای موجود می‌بیند؛ با یک رویداد منفیِ
+      // هم‌مبلغ خنثی می‌شوند تا دقیقاً معادل «انگار این ردیف‌ها دیگر تاییدشده نیستند» محاسبه شود
+      // eslint-disable-next-line no-await-in-loop
+      await assertPettyCashRunningBalanceNotNegative(pettyCashId as number, {
+        pendingEvents: d.settlementLines
+          .filter((s: any) => s.paymentType.nature === "TO_PETTY_CASH" && s.custodian?.pettyCashId === pettyCashId)
+          .map((s: any) => ({ date: d.date, amount: -Number(s.amount) })),
+      });
+    }
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
   }
 
   try {
@@ -931,7 +993,38 @@ router.put("/payments/:id/re-edit", can(`${FORM}.reEdit`), async (req, res) => {
       }
     }
     const lockedSettlementLines = (existing.settlementLines as any[]).filter((sl) => !editableById.has(sl.instrumentLineId));
+    await assertPaymentAdvanceNotAllocated(id, editable.map((l: any) => l.id));
     const settlementLines = await validateSubjectLines(incomingSettlements, instrumentByKey, baseCurrency, id, lockedSettlementLines, true);
+
+    // این سند همچنان APPROVED می‌ماند، پس اگر ردیف‌های موضوعات پرداختِ ماهیت «به تنخواه» در ابزارهای
+    // قابل‌ویرایش عوض شوند، شارژِ واقعیِ یک تنخواه ممکن است کم/زیاد شود — قبل از ذخیره، مانده‌ی جاری بررسی می‌شود
+    {
+      const oldPettyCashLines = (existing.settlementLines as any[]).filter((sl) => editableById.has(sl.instrumentLineId) && sl.paymentType?.nature === "TO_PETTY_CASH");
+      const newPettyCashLines = settlementLines.filter((sl: any) => sl.custodianId);
+      if (oldPettyCashLines.length > 0 || newPettyCashLines.length > 0) {
+        const custodianIds = Array.from(new Set([...oldPettyCashLines.map((s) => s.custodianId), ...newPettyCashLines.map((s: any) => s.custodianId)].filter(Boolean)));
+        const custodians = await prisma.pettyCashCustodian.findMany({ where: { id: { in: custodianIds } } });
+        const custodianById = new Map(custodians.map((c: any) => [c.id, c]));
+        const deltaByPettyCash = new Map<number, number>();
+        for (const s of oldPettyCashLines) {
+          const c = custodianById.get(s.custodianId);
+          if (!c) continue;
+          deltaByPettyCash.set(c.pettyCashId, (deltaByPettyCash.get(c.pettyCashId) || 0) - Number(s.amount));
+        }
+        for (const s of newPettyCashLines) {
+          const c = custodianById.get(s.custodianId);
+          if (!c) continue;
+          deltaByPettyCash.set(c.pettyCashId, (deltaByPettyCash.get(c.pettyCashId) || 0) + Number(s.amount));
+        }
+        for (const [pettyCashId, delta] of deltaByPettyCash) {
+          if (Math.abs(delta) < 0.001) continue;
+          const anyCustodian: any = custodians.find((c: any) => c.pettyCashId === pettyCashId);
+          if (!anyCustodian?.controlNegativeBalance) continue;
+          // eslint-disable-next-line no-await-in-loop
+          await assertPettyCashRunningBalanceNotNegative(pettyCashId, { pendingEvents: [{ date: existing.date, amount: delta }] });
+        }
+      }
+    }
 
     await prisma.$transaction(async (tx: any) => {
       // ردیف‌های موضوعاتِ ابزارهای قابل ویرایش (FK محدودکننده) اول پاک و در انتها با مقادیر نهایی ساخته می‌شوند؛

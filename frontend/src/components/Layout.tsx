@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Outlet, Navigate } from "react-router-dom";
 import { useAuth } from "../lib/AuthContext";
 import { useTabs } from "../lib/TabsContext";
-import { filterModulesByAccess } from "../navConfig";
+import { filterModulesByAccess, ModuleGroup } from "../navConfig";
 import { FitText } from "./FitText";
 import { usePermissions } from "../lib/usePermissions";
 import { TabsBar } from "./TabsBar";
@@ -10,14 +11,33 @@ import { UserSettingsModal } from "./UserSettingsModal";
 import { applyFont, applyTheme } from "../lib/userSettings";
 import { loadPreferences } from "../lib/preferences";
 
+const SIDEBAR_COLLAPSED_KEY = "sidebar-collapsed";
+const MOBILE_QUERY = "(max-width: 768px)";
 
-/** رنگ اختصاصی هر ماژول اصلی (بر اساس عنوان ماژول در navConfig) */
+/** حالت پیش‌فرض جمع‌شدگی سایدبار: در موبایل همیشه جمع‌شده شروع می‌شود (صرف‌نظر از مقدار ذخیره‌شده‌ی
+ * قبلی)، وگرنه آخرین انتخاب کاربر روی همین دستگاه (localStorage — این یک ترجیح صرفاً نمایشی/دستگاهی
+ * است، نه تنظیمات کاربر که باید بین دستگاه‌ها همگام بماند مثل فونت/تم). */
+function getInitialSidebarCollapsed(): boolean {
+  try {
+    if (window.matchMedia?.(MOBILE_QUERY).matches) return true;
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+
+/** آیکن+رنگ اختصاصی هر ماژول اصلی (بر اساس عنوان ماژول در navConfig) — طبق تصمیم صریح کاربر، هر ماژول
+ * باید آیکنی یکتا و کاملاً قابل‌تمایز از بقیه داشته باشد (نگاه کنید به رنگ‌های --nc-mod-* در styles.css) */
 const MODULE_ICON: Record<string, string> = {
   "تنظیمات": "gear",
   "اطلاعات پایه": "database",
   "حسابداری": "calculator",
   "کالا و خدمت": "box",
-  "سیستم انبار": "warehouse",
+  "مدیریت موجودی و انبار": "warehouse",
+  "زنجیره تامین": "truck",
+  "فروش": "cart",
+  "مدیریت خزانه": "wallet",
 };
 
 /** رنگ اختصاصی هر ساب‌ماژول (بر اساس عنوان ساب‌ماژول؛ همین عنوان‌ها در چند ماژول تکرار می‌شوند، پس یک‌بار نگاشت کافی است) */
@@ -237,6 +257,23 @@ function NavIcon({ name }: { name: string }) {
           <rect x="9.8" y="14.3" width="4.4" height="7.2" fillOpacity="0.45" />
         </svg>
       );
+    case "truck":
+      return (
+        <svg {...common}>
+          <rect x="2" y="7" width="12.5" height="10" rx="1" />
+          <path d="M14.5 10.2h4l3 3.3V17h-7Z" fillOpacity="0.8" />
+          <circle cx="7" cy="18.3" r="2.1" />
+          <circle cx="17.3" cy="18.3" r="2.1" />
+        </svg>
+      );
+    case "cart":
+      return (
+        <svg {...common}>
+          <path d="M2.5 3h2.3l1.1 3.2M5.9 6.2 8 14.5h10l2.2-8.3H5.9Z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+          <circle cx="9.3" cy="19" r="1.7" />
+          <circle cx="17" cy="19" r="1.7" />
+        </svg>
+      );
     case "sliders":
       return (
         <svg {...common}>
@@ -285,6 +322,162 @@ function PowerIconFilled() {
   );
 }
 
+/** آیکن دکمه‌ی جمع/باز کردن سایدبار — جهتش با حالت (باز/جمع) عوض می‌شود */
+function CollapseIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      style={{ transform: collapsed ? "rotate(180deg)" : "none", transition: "transform .15s" }}
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M14.5 4v16" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M11 9.5 8 12l3 2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** فلش کوچک «رفتن به سطح بعد» (سمت چپ ردیف زیرماژول، رو به داخل محتوا) */
+function DrillInArrow() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0, marginInlineStart: "auto" }}>
+      <path d="M15 6 9 12l6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/**
+ * منوی فلای‌اوت یک ماژول — وقتی سایدبار جمع شده و کاربر روی آیکن یک ماژول کلیک می‌کند، به‌جای بازشدن
+ * آکاردئون داخل خودِ سایدبار (که چون سایدبار overflow دارد بریده می‌شد)، زیرماژول‌ها/فرم‌هایش را در پنل‌های
+ * شناور نشان می‌دهد. درست هم‌الگوی Modal.tsx (طبق همان تصمیم صریح کاربر): با createPortal به document.body
+ * پورتال می‌شود تا هیچ استایل/overflow ناخواسته‌ای از سایدبار به آن ارث نرسد.
+ * طبق تصمیم صریح کاربر (با نمونه‌ی تصویری مشخص)، دو سطح به‌صورت آبشاری/کنار هم است — نه جایگزینی محتوای
+ * همان پنل: پنل اول (ثابت، کنار آیکن) فقط فهرست زیرماژول‌ها را نشان می‌دهد؛ با کلیک روی یک زیرماژول، یک
+ * پنل دومِ جداگانه کنار آن (سمت چپش، رو به محتوا) باز می‌شود و فرم‌های همان زیرماژول را نشان می‌دهد — هر دو
+ * پنل هم‌زمان روی صفحه می‌مانند. موقعیت پنل دوم از روی مستطیل واقعیِ رندرشده‌ی پنل اول (ref + getBoundingClientRect)
+ * محاسبه می‌شود، نه یک عرض فرضی، تا با هر طول محتوایی درست بچسبد.
+ */
+function ModuleFlyout({
+  mod,
+  anchorRect,
+  activePath,
+  onNavigate,
+  onClose,
+}: {
+  mod: ModuleGroup;
+  anchorRect: DOMRect;
+  activePath?: string;
+  onNavigate: (path: string) => void;
+  onClose: () => void;
+}) {
+  const panel1Ref = useRef<HTMLDivElement>(null);
+  const panel2Ref = useRef<HTMLDivElement>(null);
+  const [activeSubTitle, setActiveSubTitle] = useState<string | null>(null);
+  const [panel1Rect, setPanel1Rect] = useState<DOMRect | null>(null);
+  const activeSub = mod.subModules.find((s) => s.title === activeSubTitle) || null;
+
+  useLayoutEffect(() => {
+    if (panel1Ref.current) setPanel1Rect(panel1Ref.current.getBoundingClientRect());
+  }, [mod]);
+
+  useEffect(() => {
+    function onDocPointerDown(e: MouseEvent) {
+      const target = e.target as Node;
+      if (panel1Ref.current?.contains(target)) return;
+      if (panel2Ref.current?.contains(target)) return;
+      onClose();
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("mousedown", onDocPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onDocPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose]);
+
+  // چون dir سراسری صفحه rtl است، سایدبار سمت راست است؛ پس هر پنل باید از سمت چپِ پنل/آیکنِ قبلی‌اش باز
+  // شود — یعنی لبه‌ی راستش روی لبه‌ی چپِ عنصر قبلی بنشیند (right محاسبه‌شده از فاصله‌ی لبه‌ی چپ تا لبه‌ی صفحه)
+  const style1: React.CSSProperties = {
+    position: "fixed",
+    top: Math.min(anchorRect.top, window.innerHeight - 24),
+    right: window.innerWidth - anchorRect.left + 6,
+    maxHeight: `calc(100vh - ${anchorRect.top}px - 16px)`,
+  };
+  const style2: React.CSSProperties | null = panel1Rect
+    ? {
+        position: "fixed",
+        top: Math.min(panel1Rect.top, window.innerHeight - 24),
+        right: window.innerWidth - panel1Rect.left + 6,
+        maxHeight: `calc(100vh - ${panel1Rect.top}px - 16px)`,
+      }
+    : null;
+
+  return createPortal(
+    <>
+      <div className="nav-flyout" ref={panel1Ref} style={style1}>
+        <div className="nav-flyout-header">
+          <span className={`module-icon mod-ic-${MODULE_ICON[mod.title] || "layers"}`}>
+            <NavIcon name={MODULE_ICON[mod.title] || "layers"} />
+          </span>
+          {mod.title}
+        </div>
+        {mod.subModules.map((sub) => (
+          <button
+            key={sub.title}
+            className={`nav-flyout-submodule-row ${activeSubTitle === sub.title ? "active" : ""}`}
+            onClick={() => setActiveSubTitle((prev) => (prev === sub.title ? null : sub.title))}
+          >
+            <span className={`submodule-icon sub-ic-${SUBMODULE_ICON[sub.title] || "file"}`}>
+              <NavIcon name={SUBMODULE_ICON[sub.title] || "file"} />
+            </span>
+            <span>{sub.title}</span>
+            <DrillInArrow />
+          </button>
+        ))}
+      </div>
+      {activeSub && style2 && (
+        <div className="nav-flyout" ref={panel2Ref} style={style2}>
+          <div className="nav-flyout-header">
+            <span className={`submodule-icon sub-ic-${SUBMODULE_ICON[activeSub.title] || "file"}`}>
+              <NavIcon name={SUBMODULE_ICON[activeSub.title] || "file"} />
+            </span>
+            {activeSub.title}
+          </div>
+          {activeSub.items.map((item) => {
+            const isListActive = activePath === item.list;
+            const isNewActive = !!item.create && activePath === item.create;
+            return (
+              <div key={item.key} className={`nav-item ${isListActive ? "active-list" : ""}`}>
+                <button
+                  className={`nav-label ${isNewActive ? "active-new" : ""}`}
+                  onClick={() => onNavigate(item.create ?? item.list)}
+                  title={item.create ? "باز کردن فرم جدید در تب جدید" : "باز کردن فهرست در تب جدید"}
+                >
+                  <span className={`nav-form-icon ic-${item.icon}`}><NavIcon name={item.icon} /></span>
+                  <span>{item.label}</span>
+                </button>
+                <button
+                  className={`folder-btn ${isListActive ? "active" : ""}`}
+                  title="باز کردن فهرست در تب جدید"
+                  onClick={() => onNavigate(item.list)}
+                >
+                  <FolderOpenIcon />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>,
+    document.body
+  );
+}
+
 export default function Layout() {
   const { user, logout, loading } = useAuth();
   const { openTab, activeTabId, tabs, refreshNonce } = useTabs();
@@ -293,6 +486,39 @@ export default function Layout() {
   const [openModule, setOpenModule] = useState<string | null>(null);
   const [openSubModule, setOpenSubModule] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // طبق تصمیم صریح کاربر: سایدبار قابل جمع‌شدن به یک ستون آیکن است؛ در حالت جمع، کلیک روی آیکن هر ماژول
+  // به‌جای آکاردئون داخلی، یک فلای‌اوت شناور (ModuleFlyout) باز می‌کند که زیرماژول‌ها/فرم‌هایش را نشان می‌دهد.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(getInitialSidebarCollapsed);
+  const [flyoutAnchor, setFlyoutAnchor] = useState<{ title: string; rect: DOMRect } | null>(null);
+
+  useEffect(() => {
+    // در موبایل، صرف‌نظر از انتخاب قبلی کاربر، هر بار عرض صفحه به بازه‌ی موبایل می‌رسد سایدبار جمع می‌شود
+    // (طبق تصمیم صریح کاربر: «روی موبایل حالت جمع‌شده همیشه پیش‌فرض باشد») — ولی خروج از حالت موبایل، آخرین
+    // انتخاب دستی کاربر را دست‌نخورده می‌گذارد (این افکت فقط ورود به موبایل را force می‌کند، نه خروج از آن)
+    const mql = window.matchMedia(MOBILE_QUERY);
+    function onChange(e: MediaQueryListEvent | MediaQueryList) {
+      if (e.matches) setSidebarCollapsed(true);
+    }
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+
+  function toggleSidebarCollapsed() {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        // localStorage ممکن است در حالت خصوصی/محدودشده در دسترس نباشد — صرفاً یک ترجیح نمایشی است، خطا مهم نیست
+      }
+      return next;
+    });
+    setFlyoutAnchor(null);
+  }
+
+  function onModuleIconClick(title: string, btn: HTMLButtonElement) {
+    setFlyoutAnchor((prev) => (prev?.title === title ? null : { title, rect: btn.getBoundingClientRect() }));
+  }
   // طبق تصمیم صریح کاربر (ریشه‌ی باگ پیش‌فرض بازه‌ی تاریخ در گزارش‌های Review): تا وقتی این fetch تمام
   // نشده، getPreference("fiscalPeriodId") (و هر تنظیم دیگری) مقدار DEFAULTS خالی را برمی‌گرداند — نه
   // مقدار واقعی ذخیره‌شده‌ی کاربر. صفحاتی که این مقدار را در افکت mount خودشان synchronous می‌خوانند
@@ -341,9 +567,37 @@ export default function Layout() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <h1>حسابداری ERP</h1>
+      <aside
+        className={`sidebar ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}
+        onScroll={() => flyoutAnchor && setFlyoutAnchor(null)}
+      >
+        <div className="sidebar-head">
+          {!sidebarCollapsed && <h1>حسابداری ERP</h1>}
+          <button
+            className="sidebar-toggle-btn"
+            onClick={toggleSidebarCollapsed}
+            title={sidebarCollapsed ? "باز کردن منو" : "جمع کردن منو"}
+          >
+            <CollapseIcon collapsed={sidebarCollapsed} />
+          </button>
+        </div>
         {visibleModules.map((mod) => {
+          // حالت جمع‌شده: به‌جای آکاردئون، فقط آیکن ماژول نشان داده می‌شود؛ کلیک روی آن ModuleFlyout را باز/بسته می‌کند
+          if (sidebarCollapsed) {
+            const isFlyoutOpen = flyoutAnchor?.title === mod.title;
+            return (
+              <button
+                key={mod.title}
+                className={`module-icon-btn ${isFlyoutOpen ? "active" : ""}`}
+                onClick={(e) => onModuleIconClick(mod.title, e.currentTarget)}
+                title={mod.title}
+              >
+                <span className={`module-icon mod-ic-${MODULE_ICON[mod.title] || "layers"}`}>
+                  <NavIcon name={MODULE_ICON[mod.title] || "layers"} />
+                </span>
+              </button>
+            );
+          }
           const modOpen = openModule === mod.title;
           return (
             <div key={mod.title} className="nav-module">
@@ -398,6 +652,24 @@ export default function Layout() {
           );
         })}
       </aside>
+      {sidebarCollapsed &&
+        flyoutAnchor &&
+        (() => {
+          const mod = visibleModules.find((m) => m.title === flyoutAnchor.title);
+          if (!mod) return null;
+          return (
+            <ModuleFlyout
+              mod={mod}
+              anchorRect={flyoutAnchor.rect}
+              activePath={activePath}
+              onNavigate={(path) => {
+                openTab(path);
+                setFlyoutAnchor(null);
+              }}
+              onClose={() => setFlyoutAnchor(null)}
+            />
+          );
+        })()}
       <div className="main">
         <div className="topbar">
           <div className="topbar-account">

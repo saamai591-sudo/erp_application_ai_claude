@@ -33,10 +33,10 @@ import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss
 
 type InstrumentType = "CASH" | "BANK_TRANSFER" | "CHEQUE" | "CHEQUE_TRANSFER";
 type DocStatus = "DRAFT" | "APPROVED";
-type PaymentNature = "SUPPLIER_PAYMENT" | "ADVANCE_PAYMENT" | "CUSTOMER_PAYMENT" | "OTHER_PAYMENT" | "PURCHASE_VAT" | "SALES_VAT" | "TO_BANK" | "TO_CASH_BOX";
-// انتخابگرِ «طرف حساب / حساب» ردیف موضوعات پرداخت: برای ماهیت «به بانک» فقط حساب‌های بانکی و برای «به صندوق» فقط صندوق‌ها؛ در بقیه‌ی ماهیت‌ها طرف حساب
-function selectorKind(nature?: PaymentNature): "BANK" | "CASH" | "PARTY" {
-  return nature === "TO_BANK" ? "BANK" : nature === "TO_CASH_BOX" ? "CASH" : "PARTY";
+type PaymentNature = "SUPPLIER_PAYMENT" | "ADVANCE_PAYMENT" | "CUSTOMER_PAYMENT" | "OTHER_PAYMENT" | "PURCHASE_VAT" | "SALES_VAT" | "TO_BANK" | "TO_CASH_BOX" | "TO_PETTY_CASH";
+// انتخابگرِ «طرف حساب / حساب» ردیف موضوعات پرداخت: برای ماهیت «به بانک» فقط حساب‌های بانکی، «به صندوق» فقط صندوق‌ها، «به تنخواه» فقط تنخواه‌دارها؛ در بقیه‌ی ماهیت‌ها طرف حساب
+function selectorKind(nature?: PaymentNature): "BANK" | "CASH" | "CUSTODIAN" | "PARTY" {
+  return nature === "TO_BANK" ? "BANK" : nature === "TO_CASH_BOX" ? "CASH" : nature === "TO_PETTY_CASH" ? "CUSTODIAN" : "PARTY";
 }
 type PaymentBasisType = "NONE" | "PURCHASE_INVOICE" | "SALES_INVOICE" | "PURCHASE_ORDER";
 
@@ -48,6 +48,10 @@ interface CurrencyOption { id: number; code: string; title: string; isBase: bool
 interface CashBoxOption { id: number; title: string }
 interface BankAccountOption { id: number; accountNumber: string; detailCode: string; detailTitle: string; bankBranch: { title: string }; currencyId: number | null; currency: { title: string } | null; accountType: { hasChequeBook: boolean } }
 interface ChequeTypeOption { id: number; code: number; title: string; isSameDay?: boolean }
+interface CustodianOption { id: number; detailCode: string; isActive: boolean; pettyCash: { id: number; title: string; isActive: boolean }; party: { id: number; detailCode: string; category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null; isActive: boolean } }
+function custodianLabel(c: CustodianOption) {
+  return `${toFaDigits(c.detailCode)} — ${c.pettyCash.title} (${partyDisplayName(c.party)})`;
+}
 interface PaymentTypeOption { id: number; title: string; nature: PaymentNature; basisType: PaymentBasisType; isActive: boolean }
 interface PickableCheque { id: number; number: string; dueDate: string; amount: number; partyDisplay: string; currencyTitle: string }
 // برگه‌ی «خام» دسته چک (Documents/دسته چک.md) — برای ردیف «صدور چک تازه» وقتی حساب بانکی صادرکننده از
@@ -103,6 +107,8 @@ interface DetailSettlementLine {
   partyDisplay: string;
   bankAccountId: number | null;
   cashBoxId: number | null;
+  custodianId: number | null;
+  custodianDisplay: string;
   accountDisplay: string;
   salesInvoiceId: number | null;
   salesInvoiceNumber?: number;
@@ -298,6 +304,7 @@ interface SettlementRowState {
   partyDisplay: string;
   bankAccountId: string;
   cashBoxId: string;
+  custodianId: string;
   salesInvoiceId: string;
   purchaseInvoiceId: string;
   purchaseOrderId: string;
@@ -315,7 +322,7 @@ interface SettlementRowState {
 // طبق بند ۲ سند: ارز به‌صورت پیش‌فرض از ارز قلم پرداخت مقداردهی شود.
 function emptySettlementRow(instrumentClientKey: string, instrumentLabel: string, instrumentCurrencyId: string): SettlementRowState {
   return {
-    instrumentClientKey, instrumentLabel, paymentTypeId: "", partyId: "", partyDisplay: "", bankAccountId: "", cashBoxId: "",
+    instrumentClientKey, instrumentLabel, paymentTypeId: "", partyId: "", partyDisplay: "", bankAccountId: "", cashBoxId: "", custodianId: "",
     salesInvoiceId: "", purchaseInvoiceId: "", purchaseOrderId: "", basisDisplay: "",
     currencyId: instrumentCurrencyId, fxRate: "", amount: "", description: "",
     exchangeGainLoss: 0,
@@ -331,6 +338,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
   const [cashBoxes, setCashBoxes] = useState<CashBoxOption[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccountOption[]>([]);
+  const [custodians, setCustodians] = useState<CustodianOption[]>([]);
   const [chequeTypes, setChequeTypes] = useState<ChequeTypeOption[]>([]);
   const [pickableCheques, setPickableCheques] = useState<PickableCheque[]>([]);
   const [pickableChequeBookLeaves, setPickableChequeBookLeaves] = useState<PickableChequeBookLeaf[]>([]);
@@ -416,6 +424,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         partyId: l.partyId ? String(l.partyId) : "",
         bankAccountId: l.bankAccountId ? String(l.bankAccountId) : "",
         cashBoxId: l.cashBoxId ? String(l.cashBoxId) : "",
+        custodianId: l.custodianId ? String(l.custodianId) : "",
         partyDisplay: l.accountDisplay || l.partyDisplay,
         salesInvoiceId: l.salesInvoiceId ? String(l.salesInvoiceId) : "",
         purchaseInvoiceId: l.purchaseInvoiceId ? String(l.purchaseInvoiceId) : "",
@@ -432,9 +441,9 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
 
   useEffect(() => {
     async function init() {
-      const [ps, cs, cbs, bas, rts, customers, suppliers, fp, cts, pcs, pbl]: [
+      const [ps, cs, cbs, bas, rts, customers, suppliers, fp, cts, pcs, pbl, cus]: [
         PartyOption[], CurrencyOption[], CashBoxOption[], BankAccountOption[],
-        PaymentTypeOption[], { partyId: number }[], { partyId: number }[], FiscalPeriodRange | null, ChequeTypeOption[], PickableCheque[], PickableChequeBookLeaf[]
+        PaymentTypeOption[], { partyId: number }[], { partyId: number }[], FiscalPeriodRange | null, ChequeTypeOption[], PickableCheque[], PickableChequeBookLeaf[], CustodianOption[]
       ] = await Promise.all([
         api.get("/parties"),
         api.get("/currencies"),
@@ -447,6 +456,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         api.get("/payable-cheque-types"),
         api.get("/cheques/pickable-receivable"),
         api.get("/cheque-book-leaves/pickable"),
+        api.get("/petty-cash-custodians?activeOnly=true"),
       ]);
       setChequeTypes(cts);
       setPickableCheques(pcs);
@@ -455,6 +465,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
       setCurrencies(cs);
       setCashBoxes(cbs);
       setBankAccounts(bas);
+      setCustodians(cus);
       setPaymentTypes(rts.filter((t) => t.isActive));
       setCustomerPartyIds(new Set(customers.map((c) => c.partyId)));
       setSupplierPartyIds(new Set(suppliers.map((s) => s.partyId)));
@@ -629,6 +640,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         partyId: r.partyId ? Number(r.partyId) : null,
         bankAccountId: r.bankAccountId ? Number(r.bankAccountId) : null,
         cashBoxId: r.cashBoxId ? Number(r.cashBoxId) : null,
+        custodianId: r.custodianId ? Number(r.custodianId) : null,
         salesInvoiceId: r.salesInvoiceId ? Number(r.salesInvoiceId) : null,
         purchaseInvoiceId: r.purchaseInvoiceId ? Number(r.purchaseInvoiceId) : null,
         purchaseOrderId: r.purchaseOrderId ? Number(r.purchaseOrderId) : null,
@@ -1158,6 +1170,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                     parties={parties}
                     bankAccounts={bankAccounts}
                     cashBoxes={cashBoxes}
+                    custodians={custodians}
                     customerPartyIds={customerPartyIds}
                     supplierPartyIds={supplierPartyIds}
                     currencies={currencies}
@@ -1189,7 +1202,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
 }
 
 function SettlementRowFields({
-  idx, row, onChange, onRemove, paymentTypes, parties, bankAccounts, cashBoxes, customerPartyIds, supplierPartyIds, currencies, baseCurrency, instrumentRows, editId, headerPartyId, headerPartyDisplay, headerDate, allSettlementRows, onApplyBasisSelection,
+  idx, row, onChange, onRemove, paymentTypes, parties, bankAccounts, cashBoxes, custodians, customerPartyIds, supplierPartyIds, currencies, baseCurrency, instrumentRows, editId, headerPartyId, headerPartyDisplay, headerDate, allSettlementRows, onApplyBasisSelection,
 }: {
   idx: number;
   row: SettlementRowState;
@@ -1199,6 +1212,7 @@ function SettlementRowFields({
   parties: PartyOption[];
   bankAccounts: BankAccountOption[];
   cashBoxes: CashBoxOption[];
+  custodians: CustodianOption[];
   customerPartyIds: Set<number>;
   supplierPartyIds: Set<number>;
   currencies: CurrencyOption[];
@@ -1291,12 +1305,13 @@ function SettlementRowFields({
   // (مشتری/تامین‌کننده بودن طرف حساب هدر)؛ برای «سایر»/وی‌ای‌تی بدون شرط همیشه ست می‌شود.
   function onPaymentTypeChange(paymentTypeId: string) {
     const rt = paymentTypes.find((t) => String(t.id) === paymentTypeId);
-    // با تغییرِ نوعِ انتخابگر (طرف حساب ↔ حساب بانکی ↔ صندوق) مقدار قبلی معتبر نیست و پاک می‌شود
+    // با تغییرِ نوعِ انتخابگر (طرف حساب ↔ حساب بانکی ↔ صندوق ↔ تنخواه‌دار) مقدار قبلی معتبر نیست و پاک می‌شود
     const kindChanged = selectorKind(rt?.nature) !== selectorKind(paymentType?.nature);
     let partyId = kindChanged ? "" : row.partyId;
     let partyDisplay = kindChanged ? "" : row.partyDisplay;
     const bankAccountId = kindChanged ? "" : row.bankAccountId;
     const cashBoxId = kindChanged ? "" : row.cashBoxId;
+    const custodianId = kindChanged ? "" : row.custodianId;
     if (rt && selectorKind(rt.nature) === "PARTY" && !partyId && headerPartyId) {
       const headerPartyIdNum = Number(headerPartyId);
       const qualifies =
@@ -1326,7 +1341,7 @@ function SettlementRowFields({
     }
     onChange({
       paymentTypeId,
-      partyId, partyDisplay, bankAccountId, cashBoxId,
+      partyId, partyDisplay, bankAccountId, cashBoxId, custodianId,
       salesInvoiceId: "", purchaseInvoiceId: "", purchaseOrderId: "", basisDisplay: "",
       ...amountPatch,
     });
@@ -1411,7 +1426,7 @@ function SettlementRowFields({
             accounts={bankAccounts}
             filter={(a) => !sourceBankAccountId || String(a.id) !== sourceBankAccountId}
             value={row.bankAccountId}
-            onChange={(id, b) => onChange({ bankAccountId: id, cashBoxId: "", partyId: "", partyDisplay: bankAccountLabel(b) })}
+            onChange={(id, b) => onChange({ bankAccountId: id, cashBoxId: "", custodianId: "", partyId: "", partyDisplay: bankAccountLabel(b) })}
           />
         ) : selectorKind(paymentType?.nature) === "CASH" ? (
           <RecordPickerField
@@ -1419,7 +1434,18 @@ function SettlementRowFields({
             displayValue={row.partyDisplay}
             rows={cashBoxes}
             columns={[{ header: "عنوان", render: (c) => c.title, filterValue: (c) => c.title }]}
-            onSelect={(c) => onChange({ cashBoxId: String(c.id), bankAccountId: "", partyId: "", partyDisplay: c.title })}
+            onSelect={(c) => onChange({ cashBoxId: String(c.id), bankAccountId: "", custodianId: "", partyId: "", partyDisplay: c.title })}
+          />
+        ) : selectorKind(paymentType?.nature) === "CUSTODIAN" ? (
+          <RecordPickerField
+            title="انتخاب تنخواه‌دار"
+            displayValue={row.partyDisplay}
+            rows={custodians}
+            columns={[
+              { header: "کد", render: (c) => toFaDigits(c.detailCode), filterValue: (c) => c.detailCode, width: "100px" },
+              { header: "تنخواه‌دار", render: (c) => custodianLabel(c), filterValue: (c) => custodianLabel(c) },
+            ]}
+            onSelect={(c) => onChange({ custodianId: String(c.id), bankAccountId: "", cashBoxId: "", partyId: "", partyDisplay: custodianLabel(c) })}
           />
         ) : (
         <RecordPickerField

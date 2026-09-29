@@ -11,6 +11,9 @@ import { RecordPickerField } from "../components/RecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { ExcelImportButton } from "../components/ExcelImport";
+import { LineGridToolbar } from "../components/LineGridToolbar";
+import { useLineGridBase } from "../lib/useLineGridBase";
+import type { ExportColumn } from "../lib/gridExport";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate, jalaliToGregorianIso } from "../lib/formatDate";
 import { getSavedFiscalPeriodId } from "../lib/userSettings";
@@ -366,14 +369,6 @@ function UndoIcon() {
   );
 }
 
-function PlusIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 const LINES_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const DEFAULT_LINES_PAGE_SIZE = 25;
 
@@ -407,7 +402,7 @@ function EntryForm({ editId }: { editId?: number }) {
     null
   );
   const { flash } = useSavedFlash();
-  const [focusedRow, setFocusedRow] = useState<number | null>(null);
+  const grid = useLineGridBase(rows, setRows, (row) => [accountTitlePath(row.accountId), detailTitlePath(row), row.description, row.debit, row.credit].join(" "));
   const [linesPage, setLinesPage] = useState(1);
   const [linesPageSize, setLinesPageSize] = useState(DEFAULT_LINES_PAGE_SIZE);
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
@@ -462,6 +457,15 @@ function EntryForm({ editId }: { editId?: number }) {
   function isForeignRow(row: RowState): boolean {
     return !!baseCurrency && row.currencyId !== String(baseCurrency.id);
   }
+
+  const lineExportColumns: ExportColumn<RowState>[] = [
+    { header: "حساب", render: (r) => accountTitlePath(r.accountId) },
+    { header: "تفصیل", render: (r) => detailTitlePath(r) },
+    { header: "ارز", render: (r) => currencies.find((c) => String(c.id) === r.currencyId)?.title || "" },
+    { header: "بدهکار", render: (r) => r.debit },
+    { header: "بستانکار", render: (r) => r.credit },
+    { header: "شرح", render: (r) => r.description },
+  ];
 
   function baseVolumeForRow(row: RowState): number {
     const c = currencies.find((cur) => String(cur.id) === row.currencyId);
@@ -601,21 +605,21 @@ function EntryForm({ editId }: { editId?: number }) {
     setLinesPage(Math.max(1, Math.ceil(newLength / linesPageSize)));
   }
   function removeRow(idx: number) {
-    setRows((prev) => prev.filter((_, i) => i !== idx));
+    grid.removeAt(idx);
   }
 
   const totalDebit = rows.reduce((s, r) => s + rowBaseDebit(r), 0);
   const totalCredit = rows.reduce((s, r) => s + rowBaseCredit(r), 0);
   const isBalanced = Math.abs(totalDebit - totalCredit) < 0.01 && totalDebit > 0;
 
-  // اگر ردیفی حذف شود و صفحه‌ی جاری دیگر معتبر نباشد (خالی شود)، به آخرین صفحه‌ی معتبر برگرد
-  const linesTotalPages = Math.max(1, Math.ceil(rows.length / linesPageSize));
+  // اگر ردیفی حذف شود/فیلتر عوض شود و صفحه‌ی جاری دیگر معتبر نباشد (خالی شود)، به آخرین صفحه‌ی معتبر برگرد
+  const linesTotalPages = Math.max(1, Math.ceil(grid.visibleEntries.length / linesPageSize));
   useEffect(() => {
     if (linesPage > linesTotalPages) setLinesPage(linesTotalPages);
   }, [linesTotalPages, linesPage]);
 
   const linesPageStart = (linesPage - 1) * linesPageSize;
-  const pagedRowEntries = rows.map((row, idx) => ({ row, idx })).slice(linesPageStart, linesPageStart + linesPageSize);
+  const pagedRowEntries = grid.visibleEntries.slice(linesPageStart, linesPageStart + linesPageSize);
 
   // ردیف «جمع» زیر گرید ردیف‌ها با همان مکانیزم «جمع گرید» بقیه‌ی گریدها (جدول مجزا بیرون از ناحیه‌ی اسکرول، زیر هر ستون، عرض ستون‌ها از <th>ها)؛
   // جمع کل «سند» (همه‌ی ردیف‌ها، معادل ارز پایه) در هر صفحه‌ی گرید ثابت نمایش داده می‌شود. اختلاف بدهکار/بستانکار یک برچسب واحد «مغایرت» است.
@@ -812,12 +816,21 @@ function EntryForm({ editId }: { editId?: number }) {
           </div>
         </div>
 
-        <div className="je-lines-toolbar">
-          <span className="je-lines-title">ردیف‌های سند</span>
-          <button type="button" className="toolbar-icon-btn primary" onClick={addRow} title="ردیف جدید">
-            <PlusIcon />
-          </button>
-        </div>
+        <LineGridToolbar<RowState>
+          title="ردیف‌های سند"
+          onAdd={addRow}
+          onDelete={grid.deleteSelected}
+          canDelete={grid.canDelete}
+          onMoveUp={grid.moveUp}
+          canMoveUp={grid.canMoveUp}
+          onMoveDown={grid.moveDown}
+          canMoveDown={grid.canMoveDown}
+          filterValue={grid.filterText}
+          onFilterChange={grid.setFilterText}
+          exportColumns={lineExportColumns}
+          exportRows={rows}
+          exportFileName="Journal-entry-lines"
+        />
         </fieldset>
 
         <div className="grid-wrap je-lines-wrap">
@@ -855,7 +868,7 @@ function EntryForm({ editId }: { editId?: number }) {
                 const account = accounts.find((a) => a.id === Number(row.accountId));
                 const foreign = isForeignRow(row);
                 return (
-                  <tr key={idx} onClick={() => setFocusedRow(idx)} className={focusedRow === idx ? "active-list" : ""}>
+                  <tr key={idx} onClick={() => grid.select(idx)} className={grid.selectedIndex === idx ? "active-list" : ""}>
                     <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                     <td style={{ minWidth: 62 }}>
                       <RecordPickerField
@@ -866,7 +879,7 @@ function EntryForm({ editId }: { editId?: number }) {
                           { header: "کد", render: (a) => toFaDigits(fullCode(a)), filterValue: (a) => fullCode(a), width: "110px" },
                           { header: "عنوان", render: (a) => a.title, filterValue: (a) => a.title },
                         ]}
-                        onOpen={() => setFocusedRow(idx)}
+                        onOpen={() => grid.select(idx)}
                         onSelect={(a) => onAccountChange(idx, String(a.id))}
                       />
                     </td>
@@ -880,7 +893,7 @@ function EntryForm({ editId }: { editId?: number }) {
                             { header: "کد", render: (o) => toFaDigits(o.code), filterValue: (o) => o.code, width: "90px" },
                             { header: "عنوان", render: (o) => o.title, filterValue: (o) => o.title },
                           ]}
-                          onOpen={() => setFocusedRow(idx)}
+                          onOpen={() => grid.select(idx)}
                           onSelect={(o) => updateRow(idx, { detail1Code: o.code })}
                         />
                       ) : <span style={{ color: "var(--ink-soft)" }}>—</span>}
@@ -895,7 +908,7 @@ function EntryForm({ editId }: { editId?: number }) {
                             { header: "کد", render: (o) => toFaDigits(o.code), filterValue: (o) => o.code, width: "90px" },
                             { header: "عنوان", render: (o) => o.title, filterValue: (o) => o.title },
                           ]}
-                          onOpen={() => setFocusedRow(idx)}
+                          onOpen={() => grid.select(idx)}
                           onSelect={(o) => updateRow(idx, { detail2Code: o.code })}
                         />
                       ) : <span style={{ color: "var(--ink-soft)" }}>—</span>}
@@ -910,7 +923,7 @@ function EntryForm({ editId }: { editId?: number }) {
                             { header: "کد", render: (o) => toFaDigits(o.code), filterValue: (o) => o.code, width: "90px" },
                             { header: "عنوان", render: (o) => o.title, filterValue: (o) => o.title },
                           ]}
-                          onOpen={() => setFocusedRow(idx)}
+                          onOpen={() => grid.select(idx)}
                           onSelect={(o) => updateRow(idx, { detail3Code: o.code })}
                         />
                       ) : <span style={{ color: "var(--ink-soft)" }}>—</span>}
@@ -1012,9 +1025,9 @@ function EntryForm({ editId }: { editId?: number }) {
 
         <div className="grid-footer je-lines-footer">
           <span className="grid-footer-info">
-            {rows.length === 0
+            {grid.visibleEntries.length === 0
               ? "بدون ردیف"
-              : `نمایش ${toFaDigits(String(linesPageStart + 1))} تا ${toFaDigits(String(Math.min(linesPageStart + linesPageSize, rows.length)))} از ${toFaDigits(String(rows.length))} ردیف`}
+              : `نمایش ${toFaDigits(String(linesPageStart + 1))} تا ${toFaDigits(String(Math.min(linesPageStart + linesPageSize, grid.visibleEntries.length)))} از ${toFaDigits(String(grid.visibleEntries.length))} ردیف`}
           </span>
           <span className="je-lines-totals">
             مغایرت (معادل {baseCurrency?.title}): {formatAmountFa(Math.abs(totalDebit - totalCredit))}
@@ -1045,10 +1058,10 @@ function EntryForm({ editId }: { editId?: number }) {
         </div>
         </div>
 
-        {focusedRow !== null && rows[focusedRow]?.accountId && (
+        {grid.selectedIndex !== null && rows[grid.selectedIndex]?.accountId && (
           <div className="je-breadcrumb" style={{ flexShrink: 0 }}>
-            <div><b>حساب:</b> {accountTitlePath(rows[focusedRow].accountId)}</div>
-            <div><b>حساب تفصیل:</b> {detailTitlePath(rows[focusedRow])}</div>
+            <div><b>حساب:</b> {accountTitlePath(rows[grid.selectedIndex].accountId)}</div>
+            <div><b>حساب تفصیل:</b> {detailTitlePath(rows[grid.selectedIndex])}</div>
           </div>
         )}
 

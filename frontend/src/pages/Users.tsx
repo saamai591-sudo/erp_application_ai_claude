@@ -30,7 +30,8 @@ interface PartyOption {
   name: string | null;
 }
 
-export function partyDisplayName(p: PartyOption): string {
+export function partyDisplayName(p: PartyOption | null | undefined): string {
+  if (!p) return "—";
   return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
 }
 

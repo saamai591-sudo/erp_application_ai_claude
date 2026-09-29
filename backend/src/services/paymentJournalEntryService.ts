@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
-import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
+import { resolveDetailTypeId, resolveAccountDetailFields, resolveCustodianDetailFields } from "../utils/detailValues";
 import { toBaseCurrencyAmount } from "../utils/currencyConversion";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { resolvePaymentSubjectAccount } from "./paymentSubjectAccount";
@@ -14,8 +14,8 @@ import { resolvePaymentSubjectAccount } from "./paymentSubjectAccount";
 //   حواله                  → معین «حساب بانکی» (BANK_ACCOUNT)               — تفصیل: خودِ حساب بانکی
 //   چک (صدور چک تازه)      → معین «چک پرداختی» به‌ازای نوع چک ردیف (PAYABLE_CHEQUE) — تفصیل: طرف حساب پرداخت
 //   چک انتقالی (خرج چک دریافتنی) → معین «چک دریافتی» به‌ازای نوع همان چک (RECEIVABLE_CHEQUE) — تفصیل: طرف حسابِ صادرکننده‌ی چک
-// بدهکار — به‌ازای هر ردیف موضوعات پرداخت، بر اساس مبنای «نوع پرداخت» (ماهیت «به بانک»/«به صندوق»: معین «حساب بانکی»/«صندوق»
-// همان حساب بانکی/صندوق انتخاب‌شده در ردیف، تفصیل: خودِ حساب/صندوق):
+// بدهکار — به‌ازای هر ردیف موضوعات پرداخت، بر اساس مبنای «نوع پرداخت» (ماهیت «به بانک»/«به صندوق»/«به تنخواه»: معین
+// «حساب بانکی»/«صندوق»/«تنخواه» همان حساب بانکی/صندوق/تنخواهِ تنخواه‌دارِ انتخاب‌شده در ردیف، تفصیل: خودِ حساب/صندوق/تنخواه‌دار):
 //   بدون مبنا              → معین خودِ نوع پرداخت (PaymentType.accountId)
 //   فاکتور خرید            → «پرداختنی خرید» نوع خرید فاکتور (حسابداری کالا و خدمت: PURCHASE_PAYABLE)
 //   فاکتور فروش            → «دریافتنی فروش» نوع فروش فاکتور (SALES_RECEIVABLE)
@@ -42,7 +42,16 @@ export async function issuePaymentJournalEntry(paymentId: number) {
       party: true,
       instrumentLines: { include: { currency: true, cashBox: true, bankAccount: true, chequeItem: { include: { party: true } } }, orderBy: { rowOrder: "asc" } },
       settlementLines: {
-        include: { paymentType: { include: { account: true } }, party: true, bankAccount: true, cashBox: true, currency: true, purchaseInvoice: true, salesInvoice: true },
+        include: {
+          paymentType: { include: { account: true } },
+          party: true,
+          bankAccount: true,
+          cashBox: true,
+          custodian: { include: { pettyCash: true, party: true } },
+          currency: true,
+          purchaseInvoice: true,
+          salesInvoice: true,
+        },
         orderBy: { rowOrder: "asc" },
       },
     },
@@ -122,8 +131,12 @@ export async function issuePaymentJournalEntry(paymentId: number) {
     let account: AccountRef | undefined;
     let basisFx: { currencyId: number; fxRate: number } | null = null;
     let detailCode: string | null = l.party?.detailCode ?? null;
+    // فقط برای ماهیت «به تنخواه»: برخلاف حساب بانکی/صندوق (یک کد ثابت)، تنخواه‌دار سه کد کاندید دارد
+    // (تنخواه/تنخواه‌دار/طرف‌حساب) که هرکدام باید در سطح تفصیلِ متناظر خودش بنشیند — resolveCustodianDetailFields
+    let custodianDetails: { detail1Code?: string; detail2Code?: string; detail3Code?: string } | null = null;
 
-    // ماهیت «به بانک»/«به صندوق»: معین از «تعیین حسابهای معین» همان حساب بانکی/صندوقِ انتخاب‌شده در ردیف می‌آید (نه از نوع پرداخت)، تفصیل: خودِ حساب/صندوق
+    // ماهیت «به بانک»/«به صندوق»/«به تنخواه»: معین از «تعیین حسابهای معین» همان حساب بانکی/صندوق/تنخواهِ (تنخواهِ خودِ تنخواه‌دار
+    // انتخاب‌شده در ردیف) می‌آید (نه از نوع پرداخت)، تفصیل: خودِ حساب/صندوق/تنخواه‌دار
     if (pt.nature === "TO_BANK") {
       account = treasurySettings.find((s) => s.accountType === "BANK_ACCOUNT" && s.bankAccountId === l.bankAccountId)?.account;
       if (!account) errors.push(`ردیف موضوعات پرداخت ${n}: برای حساب بانکی «${l.bankAccount?.accountNumber ?? ""}»، معین در «تعیین حسابهای معین» (حساب بانکی) تعریف نشده است`);
@@ -132,9 +145,20 @@ export async function issuePaymentJournalEntry(paymentId: number) {
       account = treasurySettings.find((s) => s.accountType === "CASH_BOX" && s.cashBoxId === l.cashBoxId)?.account;
       if (!account) errors.push(`ردیف موضوعات پرداخت ${n}: برای صندوق «${l.cashBox?.title ?? ""}»، معین در «تعیین حسابهای معین» (صندوق) تعریف نشده است`);
       detailCode = l.cashBox?.detailCode ?? null;
+    } else if (pt.nature === "TO_PETTY_CASH") {
+      account = treasurySettings.find((s) => s.accountType === "PETTY_CASH" && s.pettyCashId === l.custodian?.pettyCashId)?.account;
+      if (!account) errors.push(`ردیف موضوعات پرداخت ${n}: برای تنخواهِ تنخواه‌دار «${l.custodian?.detailCode ?? ""}»، معین در «تعیین حسابهای معین» (تنخواه) تعریف نشده است`);
+      if (account && l.custodian) {
+        // eslint-disable-next-line no-await-in-loop
+        custodianDetails = await resolveCustodianDetailFields(account, {
+          pettyCash: l.custodian.pettyCash?.detailCode,
+          custodian: l.custodian.detailCode,
+          party: l.custodian.party?.detailCode,
+        });
+      }
     }
 
-    if (pt.nature !== "TO_BANK" && pt.nature !== "TO_CASH_BOX") {
+    if (pt.nature !== "TO_BANK" && pt.nature !== "TO_CASH_BOX" && pt.nature !== "TO_PETTY_CASH") {
       // eslint-disable-next-line no-await-in-loop
       const resolved = await resolvePaymentSubjectAccount(pt, { purchaseInvoice: l.purchaseInvoice, salesInvoice: l.salesInvoice });
       if (resolved.error) errors.push(`ردیف موضوعات پرداخت ${n}: ${resolved.error}`);
@@ -147,7 +171,7 @@ export async function issuePaymentJournalEntry(paymentId: number) {
     const rowRate = Number(l.fxRate);
     const isBaseRow = l.currencyId === baseCurrency.id;
     const baseRow = isBaseRow ? amount : toBaseCurrencyAmount(amount, rowRate, l.currency, baseCurrency);
-    const details = await detailFor(account, detailCode);
+    const details = custodianDetails ?? (await detailFor(account, detailCode));
 
     let debitBase: number;
     if (account.isCurrency && !isBaseRow) {

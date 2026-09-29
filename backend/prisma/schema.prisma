@@ -506,6 +506,7 @@ model PettyCashCustodian {
   party                  Party    @relation(fields: [partyId], references: [id])
   payments               PettyCashPayment[]
   summaries              PettyCashSummary[]
+  paymentSettlementLines PaymentSettlementLine[]
 
   @@unique([pettyCashId, partyId])
 }
@@ -2041,6 +2042,7 @@ model PurchaseInvoice {
   receiptSettlementLines ReceiptSettlementLine[]
   pettyCashPayments      PettyCashPayment[]
   pettyCashSummaryLines  PettyCashSummaryLine[]
+  advanceAllocations     PurchaseInvoiceAdvanceAllocation[]
 
   @@unique([fiscalPeriodId, number])
 }
@@ -2064,6 +2066,16 @@ model PurchaseInvoiceLine {
   baseDiscount          Decimal                @default(0) @db.Decimal(36, 10)
   vatAmount             Decimal                @default(0) @db.Decimal(36, 10)
   description           String?
+  /// سهم این ردیف از اختلاف تسعیر پیش‌پرداخت خرید (Documents/تخصیص پیش‌پرداخت در فاکتور خرید.md) — فقط وقتی رویه‌ی معتبر در تاریخ فاکتور
+  /// «تأثیر بر مبلغ معامله» باشد غیرصفر است؛ طبق تصمیم صریح کاربر به ارز مبناست (نه ارز amount) چون انبار مفهوم ارز ندارد،
+  /// سیستمی و غیرنمایشی، با هر تایید/برگشت‌ازتایید فاکتور بازمحاسبه می‌شود.
+  exchangeRateAdjustmentShare Decimal          @default(0) @db.Decimal(36, 10)
+  /// baseAmount + exchangeRateAdjustmentShare، به ارز مبنا — طبق تصمیم صریح کاربر (نه ارز فاکتور)، چون تنها مصرف این مقدار
+  /// قیمت‌گذاری CROSS_ENTITY رسید انبار در تایید فاکتور است و انبار هیچ ارزی جز ارز مبنا نمی‌شناسد؛ سند حسابداری
+  /// (issue-journal-entry) وقتی معین موجودی خودش ارزی باشد، این مقدار را برعکس به ارز فاکتور برمی‌گرداند (نگاه کنید به
+  /// یادداشت همان‌جا). سیستمی، غیرقابل‌ویرایش توسط کاربر و غیرنمایشی. بدون پیش‌پرداخت تخصیص‌یافته (یا رویه=سود/زیان تسعیر)
+  /// همیشه برابر baseAmount است.
+  cost                  Decimal                @default(0) @db.Decimal(36, 10)
   goodsItem             GoodsItem              @relation(fields: [goodsItemId], references: [id])
   purchaseInvoice       PurchaseInvoice        @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
   sourceInventoryLine   InventoryDocumentLine? @relation("PurchaseInvoiceSourceInventoryLine", fields: [sourceInventoryLineId], references: [id])
@@ -2917,10 +2929,11 @@ model PaymentSettlementLine {
   rowOrder          Int                   @default(0)
   paymentTypeId     Int
   instrumentLineId  Int
-  // برای ماهیت‌های «به بانک»/«به صندوق» به‌جای طرف حساب، bankAccountId/cashBoxId پر می‌شود و partyId خالی است
+  // برای ماهیت‌های «به بانک»/«به صندوق»/«به تنخواه» به‌جای طرف حساب، بانک/صندوق/تنخواه‌دار پر می‌شود و partyId خالی است
   partyId           Int?
   bankAccountId     Int?
   cashBoxId         Int?
+  custodianId       Int?
   salesInvoiceId    Int?
   purchaseInvoiceId Int?
   purchaseOrderId   Int?
@@ -2935,15 +2948,22 @@ model PaymentSettlementLine {
   party             Party?                @relation(fields: [partyId], references: [id])
   bankAccount       BankAccount?          @relation("PaymentSettlementBankAccount", fields: [bankAccountId], references: [id], onDelete: Restrict)
   cashBox           CashBox?              @relation("PaymentSettlementCashBox", fields: [cashBoxId], references: [id], onDelete: Restrict)
+  custodian         PettyCashCustodian?   @relation(fields: [custodianId], references: [id], onDelete: Restrict)
   salesInvoice      SalesInvoice?         @relation(fields: [salesInvoiceId], references: [id])
   purchaseInvoice   PurchaseInvoice?      @relation(fields: [purchaseInvoiceId], references: [id])
   purchaseOrder     PurchaseOrder?        @relation(fields: [purchaseOrderId], references: [id])
   currency          Currency              @relation(fields: [currencyId], references: [id])
+  advanceAllocations PurchaseInvoiceAdvanceAllocation[]
 }
 
 enum SalesDocStatus {
   DRAFT
   APPROVED
+  /// طبق تصمیم صریح کاربر، فعلاً فقط SalesInvoice از این مقدار استفاده می‌کند (اکشن «ابطال»،
+  /// routes/salesInvoices.ts#void) — یک برگشت‌ناپذیرِ سبک به‌جای حذف، فقط وقتی هیچ گردش/سند
+  /// حسابداری‌ای برای فاکتور ثبت نشده باشد؛ روی SalesQuote/SalesOrder/SalesReturnInvoice
+  /// (که این enum را به اشتراک می‌گذارند) هیچ کد اپلیکیشنی این مقدار را نمی‌نویسد.
+  VOIDED
 }
 
 enum SalesOrderBasis {
@@ -3214,9 +3234,10 @@ enum PaymentNature {
   OTHER_PAYMENT
   PURCHASE_VAT
   SALES_VAT
-  // پرداخت به یک حساب بانکی / صندوق (بدون معین در نوع پرداخت؛ معین از تعیین حسابهای معینِ حساب بانکی/صندوق انتخاب‌شده می‌آید)
+  // پرداخت به یک حساب بانکی / صندوق / تنخواه (بدون معین در نوع پرداخت؛ معین از تعیین حسابهای معینِ حساب بانکی/صندوق/تنخواهِ انتخاب‌شده می‌آید)
   TO_BANK
   TO_CASH_BOX
+  TO_PETTY_CASH
 }
 
 enum PaymentBasisType {
@@ -3488,6 +3509,38 @@ model AccountingAdvanceReceiptSetting {
   startDate DateTime               @unique @db.Date
   method    AdvanceReceiptFxMethod
   createdAt DateTime               @default(now())
+}
+
+// رویه‌ی مستقل تسعیر پیش‌پرداخت خرید (Documents/تخصیص پیش‌پرداخت در فاکتور خرید.md) — همان مدل تاریخ‌محور و همان دو مقدار
+// AdvanceReceiptFxMethod (تاریخی/تاریخ معامله)، ولی رویه‌ای کاملاً جدا از رویه‌ی تسعیر پیش‌دریافت فروش، هرگز با هم ترکیب نمی‌شوند.
+enum AdvancePaymentFxMethod {
+  HISTORICAL_RATE       // نرخ تاریخی پیش‌پرداخت — اختلاف نرخ روی مبلغ خرید (قیمت تمام‌شده‌ی موجودی) اثر می‌گذارد
+  TRANSACTION_DATE_RATE // نرخ تاریخ معامله/فاکتور — اختلاف نرخ به‌عنوان سود و زیان تسعیر ارز شناسایی می‌شود
+}
+
+model AccountingAdvancePaymentSetting {
+  id        Int                    @id @default(autoincrement())
+  startDate DateTime               @unique @db.Date
+  method    AdvancePaymentFxMethod
+  createdAt DateTime               @default(now())
+}
+
+// تخصیص پیش‌پرداخت به فاکتور خرید (Documents/تخصیص پیش‌پرداخت در فاکتور خرید.md): مبلغ (به ارز فاکتور) از یک ردیف موضوع پرداختِ
+// «پیش‌پرداخت» (PaymentSettlementLine با ماهیت نوع پرداخت ADVANCE_PAYMENT روی پرداخت تاییدشده) به یک فاکتور خرید. یک پیش‌پرداخت
+// می‌تواند به چند فاکتور و یک فاکتور از چند پیش‌پرداخت استفاده کند؛ مجموع تخصیص‌های یک پیش‌پرداخت از مبلغ آن و مجموع تخصیص‌های
+// یک فاکتور از مبلغ قابل تخصیص فاکتور بیشتر نمی‌شود (کنترل در services/purchaseInvoiceAdvanceService.ts). برخلاف پیش‌دریافت فروش
+// فقط یک ماهیت دارد (بدون معادل ارزش‌افزوده)، پس فیلد nature ندارد.
+model PurchaseInvoiceAdvanceAllocation {
+  id                      Int                   @id @default(autoincrement())
+  purchaseInvoiceId       Int
+  paymentSettlementLineId Int
+  /// به ارز فاکتور (= ارز پیش‌پرداخت)؛ تفاوت نرخ ارز هرگز روی آن اثر نمی‌گذارد
+  amount                  Decimal               @db.Decimal(18, 2)
+  createdAt               DateTime              @default(now())
+  purchaseInvoice         PurchaseInvoice       @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  paymentSettlementLine   PaymentSettlementLine @relation(fields: [paymentSettlementLineId], references: [id], onDelete: Restrict)
+
+  @@unique([purchaseInvoiceId, paymentSettlementLineId])
 }
 
 // تخصیص پیش‌دریافت به فاکتور فروش (Documents/تخصیص پیش دریافت.md): مبلغ (به ارز فاکتور) از یک ردیف موضوع دریافتِ «پیش‌دریافت» به یک فاکتور.

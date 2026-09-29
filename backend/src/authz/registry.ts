@@ -427,6 +427,7 @@ export const REGISTRY: ModuleDef[] = [
               ...APPROVE_UNAPPROVE,
               { key: "issueJournalEntry", title: "صدور سند حسابداری" },
               { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
+              { key: "allocateAdvance", title: "تخصیص پیش‌پرداخت" },
             ],
           },
           {
@@ -592,7 +593,7 @@ export const REGISTRY: ModuleDef[] = [
               { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
             ],
           },
-          { key: "petty-cash-payments", title: "پرداخت تنخواه", baseActions: CRUD },
+          { key: "petty-cash-payments", title: "پرداخت از تنخواه", baseActions: CRUD },
           {
             key: "petty-cash-summaries",
             title: "خلاصه تنخواه",

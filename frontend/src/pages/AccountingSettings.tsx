@@ -81,9 +81,42 @@ const METHOD_CONFIG: DatedSettingConfig<DatedRow & { method: MethodValue }> = {
   validate: (value) => (value ? null : "روش شناسایی پیش‌دریافت ارزی الزامی است"),
 };
 
-type TabKey = "currency" | "vat";
+// رویه‌ی مستقل تسعیر پیش‌پرداخت خرید (Documents/تخصیص پیش‌پرداخت در فاکتور خرید.md) — همان دو مقدار/الگوی بالا، ولی
+// هرگز با «روش شناسایی پیش‌دریافت ارزی» فروش ترکیب نمی‌شود؛ روی فاکتورهای مبنای رسید انبار، «نرخ تاریخی» اختلاف نرخ را
+// در Cost (قیمت تمام‌شده‌ی موجودی) لحاظ می‌کند نه در سود/زیان تسعیر.
+const PURCHASE_METHOD_HINT: Record<MethodValue, string> = {
+  HISTORICAL_RATE: "مبلغ مربوط به پیش‌پرداخت با نرخ تاریخیِ ثبت‌شده در زمان پرداخت شناسایی می‌شود؛ روی فاکتور خرید مبنای رسید انبار، اختلاف نرخ در قیمت تمام‌شده‌ی موجودی (Cost) لحاظ می‌شود.",
+  TRANSACTION_DATE_RATE: "مبلغ مربوط به پیش‌پرداخت با نرخ تاریخ معامله یا فاکتور شناسایی می‌شود و اختلاف نرخ به‌عنوان سود و زیان تسعیر ارز محاسبه می‌شود.",
+};
+const PURCHASE_METHOD_CONFIG: DatedSettingConfig<DatedRow & { method: MethodValue }> = {
+  endpoint: "/accounting-settings/advance-payment-methods",
+  valueLabel: "روش شناسایی پیش‌پرداخت ارزی خرید",
+  emptyValue: "",
+  info:
+    "روش حسابداری پیش‌پرداخت‌های ارزی خرید هنگام تایید/صدور سند فاکتور خرید ارزی که برای آن پیش‌پرداخت تخصیص یافته. رویه‌ای کاملاً مستقل از «روش شناسایی پیش‌دریافت ارزی» فروش؛ تاریخ‌محور است.",
+  renderValue: (r) => (
+    <span>
+      <b>{METHOD_FA[r.method]}</b>
+      <span style={{ display: "block", color: "var(--ink-soft)", fontSize: 11.5 }}>{PURCHASE_METHOD_HINT[r.method]}</span>
+    </span>
+  ),
+  toFormValue: (r) => r.method,
+  valueControl: (value, onChange) => (
+    <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">انتخاب کنید</option>
+      {(Object.keys(METHOD_FA) as MethodValue[]).map((k) => (
+        <option key={k} value={k}>{METHOD_FA[k]}</option>
+      ))}
+    </select>
+  ),
+  toBody: (value) => ({ method: value }),
+  validate: (value) => (value ? null : "روش شناسایی پیش‌پرداخت ارزی خرید الزامی است"),
+};
+
+type TabKey = "currency" | "purchaseCurrency" | "vat";
 const TABS: { key: TabKey; label: string }[] = [
-  { key: "currency", label: "تنظیمات ارز" },
+  { key: "currency", label: "تنظیمات ارز فروش" },
+  { key: "purchaseCurrency", label: "تنظیمات ارز خرید" },
   { key: "vat", label: "ارزش افزوده" },
 ];
 
@@ -108,6 +141,7 @@ export default function AccountingSettings() {
       </div>
       <div className="card" style={{ padding: 16, maxWidth: 900 }}>
         {tab === "currency" && <DatedSettingTab key="currency" config={METHOD_CONFIG} />}
+        {tab === "purchaseCurrency" && <DatedSettingTab key="purchaseCurrency" config={PURCHASE_METHOD_CONFIG} />}
         {tab === "vat" && <DatedSettingTab key="vat" config={VAT_CONFIG} />}
       </div>
     </div>

@@ -1,0 +1,1080 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.registerAllImportProcessors = registerAllImportProcessors;
+const prisma_1 = require("../lib/prisma");
+const importJobService_1 = require("../services/importJobService");
+const coding_1 = require("../utils/coding");
+const accountCode_1 = require("../utils/accountCode");
+const journalEntryService_1 = require("../services/journalEntryService");
+const jalaliDate_1 = require("../utils/jalaliDate");
+const digits_1 = require("../utils/digits");
+const goodsItems_1 = require("../routes/goodsItems");
+const initialInventory_1 = require("../routes/initialInventory");
+const productionReceipts_1 = require("../routes/productionReceipts");
+const warehouseReceipts_1 = require("../routes/warehouseReceipts");
+const productionConsumptions_1 = require("../routes/productionConsumptions");
+const salesDeliveries_1 = require("../routes/salesDeliveries");
+const centerConsumptions_1 = require("../routes/centerConsumptions");
+const warehouseAdjustments_1 = require("../routes/warehouseAdjustments");
+const inventoryCountingShortages_1 = require("../routes/inventoryCountingShortages");
+const DETAIL_TYPE_PARTY = 1;
+const DETAIL_TYPE_COST_CENTER = 2;
+const DETAIL_TYPE_CASHBOX = 3;
+const DETAIL_TYPE_BANK_ACCOUNT = 4;
+const NATURE_GROUP_FA_REVERSE = { "ترازنامه‌ای": "BALANCE_SHEET", "سود و زیانی": "PROFIT_LOSS", "انتظامی": "MEMORANDUM" };
+const NATURE_DETAIL_FA_REVERSE = { "دارایی": "ASSET", "بدهی": "LIABILITY", "درآمد": "REVENUE", "هزینه": "EXPENSE", "انتظامی": "MEMORANDUM" };
+const BALANCE_NATURE_FA_REVERSE = { "بدهکار": "DEBIT", "بستانکار": "CREDIT" };
+const LEGAL_TYPE_FA_REVERSE = { "حقوقی": "LEGAL", "مشارکت خاص": "SPECIAL_PARTNERSHIP", "بانک/موسسه مالی": "BANK" };
+const COST_CENTER_TYPE_FA_REVERSE = { "عملیاتی/تولیدی": "OPERATIONAL", "پشتیبانی": "SUPPORT", "خدماتی": "SERVICE", "اداری و تشکیلاتی": "ADMIN" };
+const TRACKING_METHOD_FA_REVERSE = { "بدون ردیابی": "NONE", "بچ": "BATCH", "سریال": "SERIAL" };
+const GOODS_TYPE_FA_REVERSE = {
+    "مواد اولیه": "RAW_MATERIAL",
+    "نیمه‌ساخته": "SEMI_FINISHED",
+    "محصول": "PRODUCT",
+    "ملزومات و لوازم": "SUPPLIES",
+    "خدمت": "SERVICE",
+    "کالای کارمزدی": "CONTRACT_GOODS",
+    "ضایعات": "SCRAP",
+    "دارایی ثابت": "FIXED_ASSET",
+    "کالای تجاری": "TRADE_GOODS",
+};
+// وقتی یک کالای سریال‌دار مثلاً ۱۰۰۰ سریال دارد، هر سریال یک ردیف اکسل جداست (نمی‌شود ۱۰۰۰ سریال را در
+// یک سلول نوشت)، اما تبدیل بی‌قید‌وشرط هر ردیف به یک سطر سند جداگانه یعنی سند نهایی ۱۰۰۰ سطر می‌شود —
+// روی گرید/محاسبه‌ی موجودی/اسنپ‌شات تایید انبار و... کند است. این تابع ردیف‌های خام (هرکدام حداکثر یک
+// بچ/سریال) را بر اساس (کالا+واحد+محل‌فیزیکی) با هم ادغام می‌کند: مقدار جمع می‌شود، سریال‌ها/بچ‌ها روی
+// همان یک سطر تجمیع می‌شوند (بچ‌های تکراری هم جمع می‌شوند، چون InventoryLineBatch یکتای lineId+batchId
+// است)، و چون یک سطر فقط یک «فی» دارد، فی نهایی میانگین موزون (بر مبنای مقدار) ردیف‌های همان گروه است —
+// نه انتخاب یکی و نه رد کردن ستون فی، چون میانگین موزون همان مقدار ریاضی درستی است که با ادغام از دست
+// نمی‌رود. محل‌فیزیکی و واحد عمداً بخشی از کلید گروه‌بندی‌اند (نه فقط کالا) چون یک سطر فقط یک مقدار برای
+// هرکدام دارد و ادغام مقادیر متفاوتِ این دو، برخلاف فی، از نظر معنایی نادرست است (نمی‌شود «میانگین» دو
+// محل فیزیکی گرفت).
+function mergeLinesByItem(rawLines) {
+    const groups = new Map();
+    const order = [];
+    for (const line of rawLines) {
+        const key = `${line.goodsItemId}__${line.unitId}__${line.physicalLocation || ""}`;
+        if (!groups.has(key)) {
+            groups.set(key, []);
+            order.push(key);
+        }
+        groups.get(key).push(line);
+    }
+    return order.map((key) => {
+        const rows = groups.get(key);
+        const first = rows[0];
+        const quantity = rows.reduce((s, r) => s + r.quantity, 0);
+        const costWeightSum = rows.reduce((s, r) => s + r.quantity * r.unitCost, 0);
+        const unitCost = quantity > 0 ? costWeightSum / quantity : 0;
+        const serialIds = rows.flatMap((r) => r.serialIds);
+        const batchQuantityByBatchId = new Map();
+        for (const r of rows) {
+            for (const a of r.batchAllocations) {
+                batchQuantityByBatchId.set(a.batchId, (batchQuantityByBatchId.get(a.batchId) || 0) + a.quantity);
+            }
+        }
+        return {
+            goodsItemId: first.goodsItemId,
+            unitId: first.unitId,
+            quantity,
+            unitCost,
+            description: rows.find((r) => r.description)?.description ?? null,
+            serialIds,
+            batchAllocations: Array.from(batchQuantityByBatchId.entries()).map(([batchId, batchQuantity]) => ({ batchId, quantity: batchQuantity })),
+            physicalLocation: first.physicalLocation,
+        };
+    });
+}
+// «موجودی اول دوره» و «رسید تولید» ساختار ردیف اکسل یکسانی دارند (کد انبار/تاریخ/شرح در سطح سند —
+// تکرارشده روی هر ردیف، دقیقاً هم‌الگوی groupByKey ترکیبی «حساب+تاریخ» در journal-entry — به‌علاوه
+// کد کالا/واحد/مقدار/فی/بچ/سریال/تاریخ‌انقضا/محل‌فیزیکی در سطح ردیف)، پس یک تابع مشترک هر دو گروه را
+// به بدنه‌ی قابل‌قبول createInitialInventory/createProductionReceipt تبدیل می‌کند.
+// groupByItem فعلاً فقط برای «موجودی اول دوره» روشن است (طبق تصمیم صریح کاربر: اول همین‌جا تایید شود،
+// بعد به «رسید تولید» و بقیه هم تعمیم داده می‌شود) — تا آن زمان رسید تولید با رفتار قبلی (هر ردیف اکسل =
+// یک سطر سند) دست‌نخورده می‌ماند.
+// موقت — مهاجرت داده‌ی «موجودی اول دوره» از سیستم قبلی: چون کد کالا در سیستم جدید عوض شده، اکسل خروجی
+// سیستم قبلی دیگر با fullCode فعلی مطابقت ندارد. ستون «کد کالا (سیستم قدیم)» به‌جای «کد کالا» پر می‌شود
+// و روی technicalSpec (که موقتاً با کد قدیم پر شده) جستجو می‌شود، نه fullCode. دقیقاً یکی از این دو ستون
+// باید پر باشد تا ابهامی نباشد (اگر هر دو خالی/پر باشند خطا می‌دهیم) — چون بعد از تغییر کلی کدها، ممکن
+// است کد قدیمِ یک کالا با fullCode فعلیِ یک کالای کاملاً متفاوت یکی باشد؛ جستجوی کورکورانه (اول fullCode
+// بعد technicalSpec) می‌توانست بی‌سروصدا کالای اشتباه را برگرداند.
+async function resolveGoodsItemByCode(row, idx) {
+    const newCode = (0, digits_1.toEnglishDigits)(row.goodsItemCode || "").trim();
+    const oldCode = (0, digits_1.toEnglishDigits)(row.goodsItemOldCode || "").trim();
+    if (newCode && oldCode)
+        return { error: `ردیف ${idx + 1}: فقط یکی از «کد کالا» یا «کد کالا (سیستم قدیم)» باید پر باشد` };
+    if (!newCode && !oldCode)
+        return { error: `ردیف ${idx + 1}: «کد کالا» یا «کد کالا (سیستم قدیم)» باید پر باشد` };
+    const item = newCode
+        ? await prisma_1.prisma.goodsItem.findFirst({ where: { fullCode: newCode } })
+        : await prisma_1.prisma.goodsItem.findFirst({ where: { technicalSpec: oldCode } });
+    if (!item)
+        return { error: `ردیف ${idx + 1}: کالا با کد «${newCode || oldCode}» یافت نشد` };
+    return { item };
+}
+async function resolveWarehouseDocGroup(groupRows, opts = {}) {
+    const first = groupRows[0];
+    const warehouseCode = (0, digits_1.toEnglishDigits)(first.warehouseCode || "").trim();
+    const warehouse = await prisma_1.prisma.warehouse.findFirst({ where: { code: Number(warehouseCode) } });
+    if (!warehouse)
+        return { error: `انبار با کد «${first.warehouseCode}» یافت نشد` };
+    // فقط برای «رسید انبار خرید» و «رسید تولید» — طبق تصمیم صریح کاربر، هنگام مهاجرت از سیستم قبلی، شماره
+    // سند نباید خودکار بازتولید شود؛ همان مقدار ستون «شماره سند» عیناً حفظ می‌شود (نگاه کنید به
+    // createWarehouseReceipt/createProductionReceipt برای بررسی تکراری‌نبودنش). چون همین شماره برای
+    // گروه‌بندی ردیف‌ها هم استفاده می‌شود (groupByKey)، اگر این ستون در یک ردیف خالی بماند، «required:true»
+    // در قالب اکسل فقط وجود خودِ ستون را چک می‌کند نه خالی‌نبودن هر سلول — پس بدون این بررسی صریح، چند
+    // ردیف با شماره‌ی خالی که تصادفاً انبار+تاریخ یکسان دارند، اشتباهاً زیر یک سند ادغام می‌شدند. برای
+    // initial-inventory/production-receiptِ قدیمی (که requireNumber نمی‌فرستند) این فیلد اصلاً خوانده
+    // نمی‌شود، پس بی‌تاثیر می‌ماند.
+    const rawNumber = (0, digits_1.toEnglishDigits)(first.number || "").trim();
+    if (opts.requireNumber && !rawNumber)
+        return { error: "شماره سند الزامی است" };
+    const number = rawNumber ? Number(rawNumber) : undefined;
+    // فقط برای «رسید انبار خرید» — طرف مقابل (خودِ Import عمداً فقط بدون‌مبنا را پوشش می‌دهد، طبق تصمیم
+    // صریح کاربر، نه رسیدهای متصل به سفارش‌خرید/مجوزتحویل/درخواست‌تامین، که هر ردیفشان باید به یک سطر
+    // مبنای مشخص و باقیمانده‌ی آن گره بخورد — کاری که در قالب اکسل به‌سختی و مستعد خطا قابل انجام است).
+    let partyId;
+    let detailCode;
+    if (opts.requireParty) {
+        const partyDetailCode = (0, digits_1.toEnglishDigits)(first.partyDetailCode || "").trim();
+        if (!partyDetailCode)
+            return { error: "کد تفصیل طرف مقابل الزامی است" };
+        const party = await prisma_1.prisma.party.findFirst({ where: { detailCode: partyDetailCode } });
+        if (!party)
+            return { error: `طرف مقابل با کد تفصیل «${first.partyDetailCode}» یافت نشد` };
+        partyId = party.id;
+        detailCode = party.detailCode;
+    }
+    // فقط برای «مصرف تولید» — مرکز هزینه (دقیقاً هم‌الگوی طرف مقابل در «رسید انبار خرید»)
+    let costCenterId;
+    if (opts.requireCostCenter) {
+        const costCenterDetailCode = (0, digits_1.toEnglishDigits)(first.costCenterDetailCode || "").trim();
+        if (!costCenterDetailCode)
+            return { error: "کد تفصیل مرکز هزینه الزامی است" };
+        const costCenter = await prisma_1.prisma.costCenter.findFirst({ where: { detailCode: costCenterDetailCode } });
+        if (!costCenter)
+            return { error: `مرکز هزینه با کد تفصیل «${first.costCenterDetailCode}» یافت نشد` };
+        costCenterId = costCenter.id;
+        detailCode = costCenter.detailCode;
+    }
+    const lines = [];
+    for (const [idx, row] of groupRows.entries()) {
+        const resolvedItem = await resolveGoodsItemByCode(row, idx);
+        if ("error" in resolvedItem)
+            return { error: resolvedItem.error };
+        const item = resolvedItem.item;
+        let unitId = item.mainUnitId;
+        if (row.unitTitle && row.unitTitle.trim()) {
+            const unit = await prisma_1.prisma.unitOfMeasure.findFirst({ where: { title: row.unitTitle.trim() } });
+            if (!unit)
+                return { error: `ردیف ${idx + 1}: واحد سنجش «${row.unitTitle}» یافت نشد` };
+            unitId = unit.id;
+        }
+        // برخلاف قبل، بچ/سریال دیگر با متن ردیف find-or-create نمی‌شوند (طبق «اصلاح مدل رهگیری کالا»)؛
+        // چون نمی‌شود شناسه‌ی خام دیتابیس را در اکسل تایپ کرد، اینجا فقط با (کالا، شماره) در Master
+        // از‌قبل‌موجود جستجو می‌شود و اگر نبود خطا می‌دهد.
+        let batchId = null;
+        if (row.batchNumber && row.batchNumber.trim()) {
+            const batch = await prisma_1.prisma.batch.findUnique({ where: { goodsItemId_batchNumber: { goodsItemId: item.id, batchNumber: row.batchNumber.trim() } } });
+            if (!batch)
+                return { error: `ردیف ${idx + 1}: بچ «${row.batchNumber}» برای این کالا یافت نشد` };
+            batchId = batch.id;
+        }
+        let serialId = null;
+        if (row.serialNumber && row.serialNumber.trim()) {
+            const serial = await prisma_1.prisma.serial.findUnique({ where: { goodsItemId_serialNumber: { goodsItemId: item.id, serialNumber: row.serialNumber.trim() } } });
+            if (!serial)
+                return { error: `ردیف ${idx + 1}: سریال «${row.serialNumber}» برای این کالا یافت نشد` };
+            serialId = serial.id;
+        }
+        const quantity = Number((0, digits_1.toEnglishDigits)(row.quantity || "")) || 0;
+        // «رسید تولید» هنوز ستون «فی» مستقیم دارد (پابرجا برای سازگاری با قبل)؛ اما «موجودی اول دوره» طبق
+        // تصمیم کاربر دیگر ستون فی ندارد و به‌جایش (وقتی ستون مبلغ در قالب باشد) مبلغ می‌گیرد و فی را از
+        // مبلغ÷مقدار می‌سازد — دقیقاً هم‌الگوی initial-inventory-cost. اگر مبلغ ستون این ردیف خالی/غایب
+        // باشد (قالب اصلی انبارداری، بدون ستون مبلغ)، به فی مستقیم (اگر بود) برمی‌گردد.
+        const rowAmount = row.amount ? Number((0, digits_1.toEnglishDigits)(row.amount)) : null;
+        const unitCost = rowAmount != null && quantity > 0 ? rowAmount / quantity : Number((0, digits_1.toEnglishDigits)(row.unitCost || "")) || 0;
+        lines.push({
+            goodsItemId: item.id,
+            unitId,
+            quantity,
+            unitCost,
+            description: row.lineDescription || null,
+            serialIds: serialId ? [serialId] : [],
+            batchAllocations: batchId ? [{ batchId, quantity }] : [],
+            physicalLocation: row.physicalLocation || null,
+        });
+    }
+    return {
+        warehouseId: warehouse.id,
+        date: (0, jalaliDate_1.resolveDateString)(first.date),
+        description: first.description || undefined,
+        partyId,
+        costCenterId,
+        detailCode,
+        number,
+        lines: opts.groupByItem ? mergeLinesByItem(lines) : lines,
+    };
+}
+function registerAllImportProcessors() {
+    (0, importJobService_1.registerImportEntity)("party", {
+        row: async (row, ctx) => {
+            try {
+                const category = row.category === "LEGAL" ? "LEGAL" : "INDIVIDUAL";
+                const nationality = row.nationality === "خارجی" ? "FOREIGN" : "LOCAL";
+                const data = { category, nationality };
+                if (category === "INDIVIDUAL") {
+                    if (!row.firstName || !row.lastName)
+                        return { ok: false, error: "نام و نام خانوادگی الزامی است" };
+                    data.firstName = row.firstName;
+                    data.lastName = row.lastName;
+                    data.nationalId = row.nationalId || null;
+                }
+                else {
+                    if (!row.name)
+                        return { ok: false, error: "نام الزامی است" };
+                    data.name = row.name;
+                    data.legalType = LEGAL_TYPE_FA_REVERSE[row.legalType] || "LEGAL";
+                    data.nationalId = row.nationalId || null;
+                    data.economicCode = row.economicCode || null;
+                }
+                if (!ctx.allowDuplicates) {
+                    const dup = await prisma_1.prisma.party.findFirst({
+                        where: category === "INDIVIDUAL" ? { firstName: data.firstName, lastName: data.lastName } : { name: data.name },
+                    });
+                    if (dup)
+                        return { ok: false, error: "طرف‌حساب مشابه (هم‌نام) از قبل موجود است" };
+                }
+                const { code, detailTypeId } = await (0, coding_1.resolveDetailCode)(DETAIL_TYPE_PARTY, row.detailCode);
+                const party = await prisma_1.prisma.party.create({ data: { ...data, detailCode: code } });
+                await (0, coding_1.registerDetailCode)(code, detailTypeId, "Party", party.id);
+                return { ok: true };
+            }
+            catch (e) {
+                if (e.code === "P2002")
+                    return { ok: false, error: "یکی از فیلدهای یکتا (کد ملی/شناسه ملی/کد اقتصادی/کد تفصیل) تکراری است" };
+                return { ok: false, error: e.message || "خطا در ثبت طرف‌حساب" };
+            }
+        },
+    });
+    (0, importJobService_1.registerImportEntity)("cash-box", {
+        row: async (row) => {
+            try {
+                if (!row.title)
+                    return { ok: false, error: "عنوان الزامی است" };
+                const dup = await prisma_1.prisma.cashBox.findUnique({ where: { title: row.title } });
+                if (dup)
+                    return { ok: false, error: "عنوان تکراری است" };
+                const { code, detailTypeId } = await (0, coding_1.resolveDetailCode)(DETAIL_TYPE_CASHBOX, row.detailCode);
+                const cashBox = await prisma_1.prisma.cashBox.create({ data: { detailCode: code, title: row.title } });
+                await (0, coding_1.registerDetailCode)(code, detailTypeId, "CashBox", cashBox.id);
+                return { ok: true };
+            }
+            catch (e) {
+                return { ok: false, error: e.message || "خطا در ثبت صندوق" };
+            }
+        },
+    });
+    (0, importJobService_1.registerImportEntity)("bank-branch", {
+        row: async (row) => {
+            try {
+                if (!row.partyDetailCode)
+                    return { ok: false, error: "کد تفصیل بانک الزامی است" };
+                if (!row.title)
+                    return { ok: false, error: "عنوان الزامی است" };
+                const bankParty = await prisma_1.prisma.party.findFirst({ where: { detailCode: row.partyDetailCode.trim() } });
+                if (!bankParty)
+                    return { ok: false, error: `طرف‌حساب با کد تفصیل «${row.partyDetailCode}» یافت نشد` };
+                if (bankParty.legalType !== "BANK")
+                    return { ok: false, error: "طرف‌حساب انتخاب‌شده از نوع بانک/موسسه مالی نیست" };
+                const dupTitle = await prisma_1.prisma.bankBranch.findUnique({ where: { title: row.title } });
+                if (dupTitle)
+                    return { ok: false, error: "عنوان تکراری است" };
+                let finalCode = row.code ? Number(row.code) : undefined;
+                if (!finalCode) {
+                    const last = await prisma_1.prisma.bankBranch.findFirst({ where: { bankPartyId: bankParty.id }, orderBy: { code: "desc" } });
+                    finalCode = last ? last.code + 1 : 1;
+                }
+                const dupCode = await prisma_1.prisma.bankBranch.findFirst({ where: { bankPartyId: bankParty.id, code: finalCode } });
+                if (dupCode)
+                    return { ok: false, error: "کد در سطح این بانک تکراری است" };
+                await prisma_1.prisma.bankBranch.create({ data: { code: finalCode, title: row.title, bankPartyId: bankParty.id } });
+                return { ok: true };
+            }
+            catch (e) {
+                return { ok: false, error: e.message || "خطا در ثبت شعبه بانک" };
+            }
+        },
+    });
+    (0, importJobService_1.registerImportEntity)("bank-account", {
+        row: async (row) => {
+            try {
+                if (!row.accountTypeTitle || !row.branchTitle || !row.accountNumber) {
+                    return { ok: false, error: "نوع حساب، شعبه بانک و شماره حساب الزامی است" };
+                }
+                const accountType = await prisma_1.prisma.bankAccountType.findFirst({ where: { title: row.accountTypeTitle.trim() } });
+                if (!accountType)
+                    return { ok: false, error: `نوع حساب بانکی «${row.accountTypeTitle}» یافت نشد` };
+                const branch = await prisma_1.prisma.bankBranch.findFirst({ where: { title: row.branchTitle.trim() } });
+                if (!branch)
+                    return { ok: false, error: `شعبه بانک «${row.branchTitle}» یافت نشد` };
+                const dup = await prisma_1.prisma.bankAccount.findFirst({ where: { bankPartyId: branch.bankPartyId, accountNumber: row.accountNumber.trim() } });
+                if (dup)
+                    return { ok: false, error: "شماره حساب در سطح این بانک تکراری است" };
+                let currencyId;
+                if (row.currencyCode) {
+                    const currency = await prisma_1.prisma.currency.findFirst({ where: { code: row.currencyCode.trim() } });
+                    if (!currency)
+                        return { ok: false, error: `ارز «${row.currencyCode}» یافت نشد` };
+                    currencyId = currency.id;
+                }
+                else {
+                    const base = await prisma_1.prisma.currency.findFirst({ where: { isBase: true } });
+                    currencyId = base?.id;
+                }
+                // برخلاف فرم دستی «حساب بانکی جدید» (که کد تفصیل همیشه خودکار است)، ورود اکسل امکان تعیین
+                // صریح کد تفصیل را هم می‌دهد — برای مهاجرت داده از سیستم قبلی که کدهای از پیش موجود دارد.
+                const { code, detailTypeId } = await (0, coding_1.resolveDetailCode)(DETAIL_TYPE_BANK_ACCOUNT, row.detailCode);
+                const created = await prisma_1.prisma.bankAccount.create({
+                    data: {
+                        detailCode: code,
+                        accountTypeId: accountType.id,
+                        bankBranchId: branch.id,
+                        accountNumber: row.accountNumber.trim(),
+                        currencyId,
+                        bankPartyId: branch.bankPartyId,
+                    },
+                });
+                await (0, coding_1.registerDetailCode)(code, detailTypeId, "BankAccount", created.id);
+                return { ok: true };
+            }
+            catch (e) {
+                return { ok: false, error: e.message || "خطا در ثبت حساب بانکی" };
+            }
+        },
+    });
+    (0, importJobService_1.registerImportEntity)("org-unit", {
+        row: async (row) => {
+            try {
+                if (!row.title || !row.orgStructureTitle)
+                    return { ok: false, error: "عنوان و شاخه ساختار سازمانی الزامی است" };
+                const nodes = await prisma_1.prisma.orgStructure.findMany();
+                const parentIds = new Set(nodes.map((n) => n.parentId).filter(Boolean));
+                const leaf = nodes.find((n) => n.title === row.orgStructureTitle && !parentIds.has(n.id));
+                if (!leaf)
+                    return { ok: false, error: `شاخه ساختار سازمانی «${row.orgStructureTitle}» (به‌عنوان آخرین شاخه) یافت نشد` };
+                const dup = await prisma_1.prisma.orgUnit.findUnique({ where: { title: row.title } });
+                if (dup)
+                    return { ok: false, error: "عنوان تکراری است" };
+                const finalCode = row.code ? Number(row.code) : await (0, coding_1.nextSerialNumber)(prisma_1.prisma.orgUnit, "code");
+                await prisma_1.prisma.orgUnit.create({ data: { code: finalCode, title: row.title, orgStructureId: leaf.id } });
+                return { ok: true };
+            }
+            catch (e) {
+                if (e.code === "P2002")
+                    return { ok: false, error: "کد یا عنوان تکراری است" };
+                return { ok: false, error: e.message || "خطا در ثبت واحد سازمانی" };
+            }
+        },
+    });
+    (0, importJobService_1.registerImportEntity)("cost-center", {
+        row: async (row) => {
+            try {
+                if (!row.title || !row.orgUnitTitle)
+                    return { ok: false, error: "عنوان و واحد سازمانی الزامی است" };
+                const type = COST_CENTER_TYPE_FA_REVERSE[row.type];
+                if (!type)
+                    return { ok: false, error: `نوع «${row.type}» نامعتبر است` };
+                const orgUnit = await prisma_1.prisma.orgUnit.findFirst({ where: { title: row.orgUnitTitle } });
+                if (!orgUnit)
+                    return { ok: false, error: `واحد سازمانی «${row.orgUnitTitle}» یافت نشد` };
+                const dup = await prisma_1.prisma.costCenter.findUnique({ where: { title: row.title } });
+                if (dup)
+                    return { ok: false, error: "عنوان تکراری است" };
+                const { code, detailTypeId } = await (0, coding_1.resolveDetailCode)(DETAIL_TYPE_COST_CENTER, row.detailCode);
+                const created = await prisma_1.prisma.costCenter.create({
+                    data: { detailCode: code, title: row.title, type: type, orgUnitId: orgUnit.id },
+                });
+                await (0, coding_1.registerDetailCode)(code, detailTypeId, "CostCenter", created.id);
+                return { ok: true };
+            }
+            catch (e) {
+                return { ok: false, error: e.message || "خطا در ثبت مرکز هزینه" };
+            }
+        },
+    });
+    (0, importJobService_1.registerImportEntity)("accounting-group", {
+        row: async (row) => {
+            try {
+                if (!row.title || !row.goodsType)
+                    return { ok: false, error: "عنوان و نوع کالا الزامی است" };
+                const goodsType = GOODS_TYPE_FA_REVERSE[row.goodsType];
+                if (!goodsType)
+                    return { ok: false, error: `نوع کالا «${row.goodsType}» نامعتبر است` };
+                const dupTitle = await prisma_1.prisma.accountingGroup.findUnique({ where: { title: row.title } });
+                if (dupTitle)
+                    return { ok: false, error: "عنوان تکراری است" };
+                const finalCode = row.code ? Number(row.code) : await (0, coding_1.nextSerialNumber)(prisma_1.prisma.accountingGroup, "code");
+                const dupCode = await prisma_1.prisma.accountingGroup.findUnique({ where: { code: finalCode } });
+                if (dupCode)
+                    return { ok: false, error: "کد تکراری است" };
+                await prisma_1.prisma.accountingGroup.create({
+                    data: { code: finalCode, title: row.title, goodsType: goodsType, isActive: row.isActive !== "خیر" },
+                });
+                return { ok: true };
+            }
+            catch (e) {
+                if (e.code === "P2002")
+                    return { ok: false, error: "کد یا عنوان تکراری است" };
+                return { ok: false, error: e.message || "خطا در ثبت گروه حسابداری" };
+            }
+        },
+    });
+    (0, importJobService_1.registerImportEntity)("unit-of-measure", {
+        row: async (row) => {
+            try {
+                if (!row.title)
+                    return { ok: false, error: "عنوان الزامی است" };
+                const isWeight = row.isWeight === "بله";
+                if (isWeight && !row.kgEquivalent)
+                    return { ok: false, error: "برای واحد وزنی، معادل به کیلوگرم الزامی است" };
+                const dupTitle = await prisma_1.prisma.unitOfMeasure.findUnique({ where: { title: row.title } });
+                if (dupTitle)
+                    return { ok: false, error: "عنوان تکراری است" };
+                const finalCode = row.code ? Number(row.code) : await (0, coding_1.nextSerialNumber)(prisma_1.prisma.unitOfMeasure, "code");
+                const dupCode = await prisma_1.prisma.unitOfMeasure.findUnique({ where: { code: finalCode } });
+                if (dupCode)
+                    return { ok: false, error: "کد تکراری است" };
+                await prisma_1.prisma.unitOfMeasure.create({
+                    data: { code: finalCode, title: row.title, isWeight, kgEquivalent: isWeight ? Number(row.kgEquivalent) : null },
+                });
+                return { ok: true };
+            }
+            catch (e) {
+                if (e.code === "P2002")
+                    return { ok: false, error: "کد یا عنوان تکراری است" };
+                return { ok: false, error: e.message || "خطا در ثبت واحد سنجش" };
+            }
+        },
+    });
+    (0, importJobService_1.registerImportEntity)("warehouse", {
+        row: async (row) => {
+            try {
+                if (!row.title || !row.warehouseGroupTitle)
+                    return { ok: false, error: "عنوان و گروه انبار الزامی است" };
+                const group = await prisma_1.prisma.warehouseGroup.findFirst({ where: { title: row.warehouseGroupTitle } });
+                if (!group)
+                    return { ok: false, error: `گروه انبار «${row.warehouseGroupTitle}» یافت نشد` };
+                const dupTitle = await prisma_1.prisma.warehouse.findUnique({ where: { title: row.title } });
+                if (dupTitle)
+                    return { ok: false, error: "عنوان تکراری است" };
+                let managerId = null;
+                if (row.managerDetailCode) {
+                    const manager = await prisma_1.prisma.party.findFirst({ where: { detailCode: (0, digits_1.toEnglishDigits)(row.managerDetailCode).trim() } });
+                    if (!manager || manager.category !== "INDIVIDUAL" || !manager.isActive) {
+                        return { ok: false, error: `مسئول انبار با کد تفصیل «${row.managerDetailCode}» یافت نشد یا شخص حقیقی فعال نیست` };
+                    }
+                    managerId = manager.id;
+                }
+                const finalCode = row.code ? Number((0, digits_1.toEnglishDigits)(row.code)) : await (0, coding_1.nextSerialNumber)(prisma_1.prisma.warehouse, "code");
+                const dupCode = await prisma_1.prisma.warehouse.findUnique({ where: { code: finalCode } });
+                if (dupCode)
+                    return { ok: false, error: "کد تکراری است" };
+                await prisma_1.prisma.warehouse.create({
+                    data: {
+                        code: finalCode,
+                        title: row.title,
+                        warehouseGroupId: group.id,
+                        address: row.address?.trim() || null,
+                        phone: row.phone?.trim() || null,
+                        managerId,
+                        stockControl: row.stockControl !== "خیر",
+                        isActive: row.isActive !== "خیر",
+                    },
+                });
+                return { ok: true };
+            }
+            catch (e) {
+                if (e.code === "P2002")
+                    return { ok: false, error: "کد یا عنوان تکراری است" };
+                return { ok: false, error: e.message || "خطا در ثبت انبار" };
+            }
+        },
+    });
+    (0, importJobService_1.registerImportEntity)("currency", {
+        row: async (row) => {
+            try {
+                if (!row.code || !row.title)
+                    return { ok: false, error: "کد و عنوان الزامی است" };
+                const dup = await prisma_1.prisma.currency.findFirst({ where: { OR: [{ code: row.code }, { title: row.title }] } });
+                if (dup)
+                    return { ok: false, error: "کد یا عنوان تکراری است" };
+                await prisma_1.prisma.currency.create({
+                    data: {
+                        code: row.code,
+                        title: row.title,
+                        decimalPlaces: row.decimalPlaces ? Number(row.decimalPlaces) : 2,
+                        isBase: false,
+                        rateDirection: "TO_BASE",
+                        baseVolume: 1,
+                    },
+                });
+                return { ok: true };
+            }
+            catch (e) {
+                return { ok: false, error: e.message || "خطا در ثبت ارز" };
+            }
+        },
+    });
+    (0, importJobService_1.registerImportEntity)("account", {
+        row: async (row) => {
+            try {
+                if (!row.code || !row.title)
+                    return { ok: false, error: "کد و عنوان الزامی است" };
+                const code = (0, digits_1.toEnglishDigits)(row.code).trim();
+                let parentId = null;
+                let level;
+                if (row.parentFullCode) {
+                    const parentFullCode = (0, digits_1.toEnglishDigits)(row.parentFullCode).trim();
+                    const allAccounts = await prisma_1.prisma.account.findMany({ select: { id: true, code: true, parentId: true } });
+                    const byId = (0, accountCode_1.buildAccountByIdMap)(allAccounts);
+                    const parent = allAccounts.find((a) => (0, digits_1.toEnglishDigits)((0, accountCode_1.computeFullAccountCode)(a.id, byId)) === parentFullCode);
+                    if (!parent)
+                        return { ok: false, error: `حساب والد با کد کامل «${row.parentFullCode}» یافت نشد` };
+                    parentId = parent.id;
+                    const parentFull = await prisma_1.prisma.account.findUnique({ where: { id: parentId }, include: { level: true } });
+                    level = await prisma_1.prisma.reportingLevel.findFirst({ where: { order: parentFull.level.order + 1 } });
+                    if (!level)
+                        return { ok: false, error: "سطح گزارشگری بعدی تعریف نشده است" };
+                }
+                else {
+                    level = await prisma_1.prisma.reportingLevel.findFirst({ where: { order: 1 } });
+                    if (!level)
+                        return { ok: false, error: "ابتدا سطح گزارشگری (سطح گروه) را تعریف کنید" };
+                }
+                if (code.length !== level.codeLength) {
+                    return { ok: false, error: `طول کد باید ${level.codeLength} رقم باشد (سطح ${level.title})` };
+                }
+                const dup = await prisma_1.prisma.account.findFirst({ where: { parentId, code } });
+                if (dup)
+                    return { ok: false, error: "کد در این سطح تکراری است" };
+                const data = { parentId, levelId: level.id, code, title: row.title };
+                if (level.order === 1) {
+                    if (!row.natureGroup)
+                        return { ok: false, error: "ماهیت حساب (سطح گروه) الزامی است" };
+                    data.natureGroup = NATURE_GROUP_FA_REVERSE[row.natureGroup];
+                }
+                else if (level.order === 2) {
+                    if (!row.natureDetail)
+                        return { ok: false, error: "ماهیت حساب (سطح کل) الزامی است" };
+                    data.natureDetail = NATURE_DETAIL_FA_REVERSE[row.natureDetail];
+                }
+                else {
+                    if (!row.balanceNature)
+                        return { ok: false, error: "ماهیت مانده الزامی است" };
+                    data.balanceNature = BALANCE_NATURE_FA_REVERSE[row.balanceNature];
+                    data.isCurrency = row.isCurrency === "بله";
+                    data.isRevaluable = row.isRevaluable === "بله";
+                    if (row.detailType1 || row.detailType2 || row.detailType3) {
+                        const detailTypes = await prisma_1.prisma.detailType.findMany();
+                        for (const [col, field] of [
+                            ["detailType1", "detailType1Id"],
+                            ["detailType2", "detailType2Id"],
+                            ["detailType3", "detailType3Id"],
+                        ]) {
+                            const value = row[col];
+                            if (!value)
+                                continue;
+                            const normalizedValue = (0, digits_1.toEnglishDigits)(value).trim();
+                            const match = detailTypes.find((t) => String(t.code) === normalizedValue);
+                            if (!match)
+                                return { ok: false, error: `نوع تفصیل با کد «${value}» یافت نشد` };
+                            data[field] = match.id;
+                        }
+                    }
+                }
+                await prisma_1.prisma.account.create({ data });
+                return { ok: true };
+            }
+            catch (e) {
+                if (e.code === "P2002")
+                    return { ok: false, error: "کد در این سطح تکراری است" };
+                return { ok: false, error: e.message || "خطا در ثبت حساب" };
+            }
+        },
+    });
+    (0, importJobService_1.registerImportEntity)("goods-item", {
+        row: async (row, ctx) => {
+            try {
+                const kind = row.kind === "SERVICE" ? "SERVICE" : "GOODS";
+                const label = goodsItems_1.KIND_FA[kind];
+                if (!row.groupFullCode)
+                    return { ok: false, error: `کد کامل گروه ${label} الزامی است` };
+                if (!row.title)
+                    return { ok: false, error: "عنوان الزامی است" };
+                if (!row.mainUnitCode)
+                    return { ok: false, error: "کد واحد اصلی الزامی است" };
+                if (!row.accountingGroupCode)
+                    return { ok: false, error: "کد گروه حساب الزامی است" };
+                // پیدا کردن گروه (شاخه‌ی آخر) بر اساس کد کامل — دقیقاً همان کدی که در انتخابگر گروه فرانت‌اند
+                // نمایش داده می‌شود (زنجیره‌ی کد همه‌ی سطوح از ریشه تا برگ، نه فقط سطوحی که در کد کالا موثرند).
+                const allGroups = await prisma_1.prisma.goodsGroup.findMany();
+                const byId = new Map(allGroups.map((g) => [g.id, g]));
+                function fullGroupCode(g) {
+                    const parts = [];
+                    let cur = g;
+                    while (cur) {
+                        parts.unshift(cur.code);
+                        cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+                    }
+                    return parts.join("");
+                }
+                const normalizedGroupFullCode = (0, digits_1.toEnglishDigits)(row.groupFullCode).trim();
+                const group = allGroups.find((g) => g.isLastBranch && (0, digits_1.toEnglishDigits)(fullGroupCode(g)) === normalizedGroupFullCode);
+                if (!group)
+                    return { ok: false, error: `گروه ${label} با کد کامل «${row.groupFullCode}» (شاخه‌ی آخر) یافت نشد` };
+                const mainUnit = await prisma_1.prisma.unitOfMeasure.findFirst({ where: { code: Number((0, digits_1.toEnglishDigits)(row.mainUnitCode)) } });
+                if (!mainUnit)
+                    return { ok: false, error: `واحد اصلی با کد «${row.mainUnitCode}» یافت نشد` };
+                const accountingGroup = await prisma_1.prisma.accountingGroup.findFirst({ where: { code: Number((0, digits_1.toEnglishDigits)(row.accountingGroupCode)) } });
+                if (!accountingGroup)
+                    return { ok: false, error: `گروه حساب با کد «${row.accountingGroupCode}» یافت نشد` };
+                // ویژگی‌ها (اختیاری): «عنوان ویژگی=عنوان مقدار» به‌ازای هر ویژگی، جدا شده با «،» — مثلاً «رنگ=قرمز،سایز=بزرگ»
+                const attrSelections = [];
+                if (row.attributes) {
+                    const pairs = row.attributes.split(/[،,]/).map((s) => s.trim()).filter(Boolean);
+                    for (const pair of pairs) {
+                        const [attrTitle, itemTitle] = pair.split("=").map((s) => s?.trim());
+                        if (!attrTitle || !itemTitle) {
+                            return { ok: false, error: `فرمت ویژگی «${pair}» نامعتبر است — باید «عنوان ویژگی=عنوان مقدار» باشد` };
+                        }
+                        const attr = await prisma_1.prisma.goodsAttribute.findFirst({ where: { title: attrTitle } });
+                        if (!attr)
+                            return { ok: false, error: `ویژگی «${attrTitle}» یافت نشد` };
+                        const item = await prisma_1.prisma.goodsAttributeItem.findFirst({ where: { attributeId: attr.id, title: itemTitle } });
+                        if (!item)
+                            return { ok: false, error: `مقدار «${itemTitle}» برای ویژگی «${attrTitle}» یافت نشد` };
+                        attrSelections.push({ attributeId: attr.id, itemId: item.id });
+                    }
+                }
+                let weightUnitId = null;
+                let weightRatio = null;
+                if (kind === "GOODS" && !mainUnit.isWeight && row.weightUnitCode) {
+                    const weightUnit = await prisma_1.prisma.unitOfMeasure.findFirst({ where: { code: Number((0, digits_1.toEnglishDigits)(row.weightUnitCode)) } });
+                    if (!weightUnit)
+                        return { ok: false, error: `واحد وزنی با کد «${row.weightUnitCode}» یافت نشد` };
+                    weightUnitId = weightUnit.id;
+                    if (!row.weightRatio)
+                        return { ok: false, error: "نسبت وزنی الزامی است" };
+                    weightRatio = Number((0, digits_1.toEnglishDigits)(row.weightRatio));
+                }
+                const isSpecial = row.isSpecial === "بله";
+                let taxRate = null;
+                if (isSpecial) {
+                    if (!row.taxRate)
+                        return { ok: false, error: "نرخ مالیات الزامی است" };
+                    taxRate = Number((0, digits_1.toEnglishDigits)(row.taxRate));
+                }
+                const reorderControl = kind === "GOODS" && row.reorderControl === "بله";
+                let reorderPoint = null;
+                if (reorderControl) {
+                    if (!row.reorderPoint)
+                        return { ok: false, error: "مقدار نقطه سفارش الزامی است" };
+                    reorderPoint = Number((0, digits_1.toEnglishDigits)(row.reorderPoint));
+                }
+                const { leaf, codePrefix, titlePrefix, resolvedAttrs } = await (0, goodsItems_1.computePrefixes)(group.id, attrSelections);
+                const serial = await (0, goodsItems_1.resolveSerial)(group.id, row.code ? (0, digits_1.toEnglishDigits)(row.code) : undefined, leaf.childCodeLength);
+                const fullCode = codePrefix + serial;
+                const rawTitle = row.title.trim();
+                const fullTitle = titlePrefix ? `${titlePrefix}، ${rawTitle}` : rawTitle;
+                await prisma_1.prisma.goodsItem.create({
+                    data: {
+                        kind,
+                        goodsGroupId: group.id,
+                        code: serial,
+                        fullCode,
+                        rawTitle,
+                        title: fullTitle,
+                        mainUnitId: mainUnit.id,
+                        weightUnitId,
+                        weightRatio,
+                        technicalSpec: row.technicalSpec?.trim() || null,
+                        barcode: row.barcode?.trim() || null,
+                        reorderControl,
+                        reorderPoint,
+                        trackingMethod: kind === "GOODS" ? TRACKING_METHOD_FA_REVERSE[row.trackingMethod] || "NONE" : "NONE",
+                        isLocationTracked: kind === "GOODS" && row.isLocationTracked === "بله",
+                        accountingGroupId: accountingGroup.id,
+                        isSpecial,
+                        taxRate,
+                        isActive: row.isActive !== "خیر",
+                        attributeValues: { create: resolvedAttrs.map((a) => ({ attributeId: a.attributeId, itemId: a.itemId })) },
+                    },
+                });
+                return { ok: true };
+            }
+            catch (e) {
+                if (e.code === "P2002")
+                    return { ok: false, error: "این کد قبلا در همین گروه استفاده شده است" };
+                return { ok: false, error: e.message || "خطا در ثبت" };
+            }
+        },
+    });
+    (0, importJobService_1.registerImportEntity)("journal-entry", {
+        // کلید گروه‌بندی ترکیبی است: «شماره گروه سند» + «تاریخ» — فقط «شماره گروه سند» کافی نیست، چون
+        // کاربر ممکن است یک شماره‌گذاری ساده (۱، ۲، ۳...) را در دسته‌های اکسل مختلف/تاریخ‌های مختلف
+        // تکرار کند؛ در آن حالت دو سند واقعاً جدا با شماره گروه یکسان اما تاریخ متفاوت، اشتباهاً به‌عنوان
+        // ردیف‌های یک سند چندردیفی با هم ادغام می‌شدند (و تاریخ ردیف‌های بعدی هم نادیده گرفته می‌شد، چون
+        // فقط تاریخ اولین ردیف گروه برای کل سند استفاده می‌شود).
+        groupByKey: (row) => `${row.documentGroup || ""}__${row.date || ""}`,
+        group: async (groupRows) => {
+            try {
+                const first = groupRows[0];
+                const docType = await prisma_1.prisma.documentType.findFirst({ where: { title: first.documentType } });
+                if (!docType)
+                    return { ok: false, error: `نوع سند «${first.documentType}» یافت نشد` };
+                const allAccounts = await prisma_1.prisma.account.findMany({ select: { id: true, code: true, parentId: true } });
+                const byId = (0, accountCode_1.buildAccountByIdMap)(allAccounts);
+                const currencies = await prisma_1.prisma.currency.findMany();
+                const baseCurrency = currencies.find((c) => c.isBase);
+                if (!baseCurrency)
+                    return { ok: false, error: "ارز پایه تعریف نشده است" };
+                const lines = [];
+                for (const row of groupRows) {
+                    const normalizedAccountCode = (0, digits_1.toEnglishDigits)(row.accountCode).trim();
+                    const account = allAccounts.find((a) => (0, digits_1.toEnglishDigits)((0, accountCode_1.computeFullAccountCode)(a.id, byId)) === normalizedAccountCode);
+                    if (!account)
+                        return { ok: false, error: `حساب با کد «${row.accountCode}» یافت نشد` };
+                    const currency = row.currencyCode ? currencies.find((c) => c.code === row.currencyCode) : baseCurrency;
+                    if (!currency)
+                        return { ok: false, error: `ارز «${row.currencyCode}» یافت نشد` };
+                    lines.push({
+                        accountId: account.id,
+                        detail1Code: row.detail1Code || null,
+                        detail2Code: row.detail2Code || null,
+                        detail3Code: row.detail3Code || null,
+                        currencyId: currency.id,
+                        debit: Number(row.debit) || 0,
+                        credit: Number(row.credit) || 0,
+                        fxRate: currency.id === baseCurrency.id ? 1 : Number(row.fxRate) || 1,
+                        description: row.lineDescription || first.description || "-",
+                    });
+                }
+                await (0, journalEntryService_1.issueJournalEntry)({
+                    date: new Date((0, jalaliDate_1.resolveDateString)(first.date)),
+                    documentTypeId: docType.id,
+                    description: first.description,
+                    issuingSystem: "ACCOUNTING_EXCEL_IMPORT",
+                    isManual: true,
+                    lines,
+                });
+                return { ok: true };
+            }
+            catch (e) {
+                return { ok: false, error: e.message || "خطا در ثبت سند" };
+            }
+        },
+    });
+    (0, importJobService_1.registerImportEntity)("initial-inventory", {
+        // کلید گروه‌بندی «کد انبار + شماره گروه سند + تاریخ» است. توجه: چون هر انبار در هر دوره مالی حداکثر
+        // یک سند موجودی اول دوره می‌تواند داشته باشد (نگاه کنید به بررسی «dup» در createInitialInventory)،
+        // صرفاً کد انبار+تاریخ همیشه برای گروه‌بندی کافی بوده؛ «شماره گروه سند» فقط برای هم‌الگو بودن با
+        // journal-entry و مرجع/کنترل صریح‌تر کاربر روی گروه‌بندی ردیف‌ها اضافه شده، نه برای رفع ابهام گروه‌بندی.
+        groupByKey: (row) => `${row.warehouseCode || ""}__${row.documentGroup || ""}__${row.date || ""}`,
+        group: async (groupRows) => {
+            try {
+                const resolved = await resolveWarehouseDocGroup(groupRows, { groupByItem: true });
+                if ("error" in resolved)
+                    return { ok: false, error: resolved.error };
+                await (0, initialInventory_1.createInitialInventory)(resolved);
+                return { ok: true };
+            }
+            catch (e) {
+                return { ok: false, error: e.message || "خطا در ثبت سند" };
+            }
+        },
+    });
+    // «حسابداری انبار»: برخلاف حالت بالا، اینجا سند جدید ساخته نمی‌شود — فقط فی/مبلغ ردیف‌های یک سند
+    // «موجودی اول دوره» از قبل موجود (که با کد انبار+تاریخ پیدا می‌شود) به‌روزرسانی می‌شود، دقیقاً با همان
+    // منطق فرم دستی حسابداری انبار (updateInitialInventoryAccounting در initialInventory.ts).
+    (0, importJobService_1.registerImportEntity)("initial-inventory-cost", {
+        // «شماره گروه سند» این‌جا برای پیدا کردن سند نقشی ندارد (هر انبار در هر دوره مالی حداکثر یک سند
+        // موجودی اول دوره دارد، پس کد انبار+تاریخ به‌تنهایی کافی است)، فقط برای هم‌الگو بودن ستون‌های قالب
+        // اکسل با «موجودی اول دوره» اضافه شده — تا کاربر بتواند ردیف‌های یک رویداد اصلاح فی را از رویداد بعدی
+        // (مثلاً هفته‌ی بعد، هنوز همان انبار/تاریخ) در همان فایل جدا نگه دارد؛ هر گروه میانگین‌موزون خودش را
+        // جدا محاسبه می‌کند، پس اگر دو گروه به یک سطر اشاره کنند، گروه پردازش‌شده‌ی بعدی همان last-write است.
+        groupByKey: (row) => `${row.warehouseCode || ""}__${row.documentGroup || ""}__${row.date || ""}`,
+        group: async (groupRows) => {
+            try {
+                const first = groupRows[0];
+                const warehouseCode = (0, digits_1.toEnglishDigits)(first.warehouseCode || "").trim();
+                const warehouse = await prisma_1.prisma.warehouse.findFirst({ where: { code: Number(warehouseCode) } });
+                if (!warehouse)
+                    return { ok: false, error: `انبار با کد «${first.warehouseCode}» یافت نشد` };
+                const date = (0, jalaliDate_1.resolveDateString)(first.date);
+                const docs = await prisma_1.prisma.inventoryDocument.findMany({
+                    where: { documentType: "INITIAL_INVENTORY", warehouseId: warehouse.id, date: new Date(date) },
+                    include: { lines: { include: { serials: true, batches: true } } },
+                });
+                if (docs.length === 0)
+                    return { ok: false, error: "سند موجودی اول دوره‌ای با این کد انبار و تاریخ یافت نشد" };
+                if (docs.length > 1)
+                    return { ok: false, error: "بیش از یک سند موجودی اول دوره با این کد انبار و تاریخ موجود است؛ امکان تشخیص خودکار سند وجود ندارد" };
+                const doc = docs[0];
+                // از وقتی «موجودی اول دوره» ردیف‌های اکسل را بر اساس کالا ادغام می‌کند (mergeLinesByItem)، یک
+                // سطر سند می‌تواند چند بچ/سریال داشته باشد؛ پس این‌جا هم دیگر با اندیس ۰ (l.batches[0]) تطبیق
+                // داده نمی‌شود (فقط اولین بچ/سریال را می‌دید)، بلکه با .some در کل آرایه‌ی بچ‌ها/سریال‌های همان
+                // سطر جستجو می‌شود. همچنین چون «فی» ملک کل سطر است نه یک بچ/سریال خاص، وقتی چند ردیف اکسل به یک
+                // سطر ادغام‌شده اشاره کنند (چند بچ/سریال از یک سطر)، مبلغ/مقدار آن‌ها تجمیع و در پایان یک فیِ
+                // میانگین‌موزون برای کل سطر محاسبه می‌شود — دقیقاً هم‌الگوی mergeLinesByItem، نه last-write-wins.
+                const accByLineId = new Map();
+                for (const [idx, row] of groupRows.entries()) {
+                    const resolvedItem = await resolveGoodsItemByCode(row, idx);
+                    if ("error" in resolvedItem)
+                        return { ok: false, error: resolvedItem.error };
+                    const item = resolvedItem.item;
+                    // برخلاف resolveWarehouseDocGroup، اینجا نبودِ بچ/سریال متناظر خطا نیست (ردیف ممکن است اصلا
+                    // بچ/سریال نداشته باشد)؛ فقط اگر خودِ ستون پر شده و بچ/سریالی با آن پیدا نشود خطا می‌دهیم.
+                    let expectedBatchId = null;
+                    if (row.batchNumber && row.batchNumber.trim()) {
+                        const batch = await prisma_1.prisma.batch.findUnique({ where: { goodsItemId_batchNumber: { goodsItemId: item.id, batchNumber: row.batchNumber.trim() } } });
+                        if (!batch)
+                            return { ok: false, error: `ردیف ${idx + 1}: بچ «${row.batchNumber}» برای این کالا یافت نشد` };
+                        expectedBatchId = batch.id;
+                    }
+                    let expectedSerialId = null;
+                    if (row.serialNumber && row.serialNumber.trim()) {
+                        const serial = await prisma_1.prisma.serial.findUnique({ where: { goodsItemId_serialNumber: { goodsItemId: item.id, serialNumber: row.serialNumber.trim() } } });
+                        if (!serial)
+                            return { ok: false, error: `ردیف ${idx + 1}: سریال «${row.serialNumber}» برای این کالا یافت نشد` };
+                        expectedSerialId = serial.id;
+                    }
+                    const line = doc.lines.find((l) => l.goodsItemId === item.id &&
+                        (expectedBatchId === null || l.batches.some((b) => b.batchId === expectedBatchId)) &&
+                        (expectedSerialId === null || l.serials.some((s) => s.serialId === expectedSerialId)));
+                    if (!line)
+                        return { ok: false, error: `ردیف ${idx + 1}: ردیفی با این کالا/سریال/بچ در سند یافت نشد` };
+                    // مقدار مرجع برای اعتبارسنجی/محاسبه، مقدار همان بچ/سریال خاص است (نه کل مقدار سطر ادغام‌شده)؛
+                    // سریال همیشه مقدار ۱ دارد، بچ مقدار اختصاصی خودش را در همان سطر دارد.
+                    let allocationQuantity;
+                    if (expectedBatchId !== null) {
+                        allocationQuantity = Number(line.batches.find((b) => b.batchId === expectedBatchId).quantity);
+                    }
+                    else if (expectedSerialId !== null) {
+                        allocationQuantity = 1;
+                    }
+                    else {
+                        allocationQuantity = Number(line.quantity);
+                    }
+                    const enteredQty = row.quantity ? Number((0, digits_1.toEnglishDigits)(row.quantity)) : null;
+                    if (enteredQty != null && Math.abs(enteredQty - allocationQuantity) > 1e-9) {
+                        return { ok: false, error: `ردیف ${idx + 1}: مقدار وارد شده (${row.quantity}) با مقدار این بچ/سریال در سند (${allocationQuantity}) مطابقت ندارد` };
+                    }
+                    // ستون «فی» عمداً در این ورودی وجود ندارد (طبق تصمیم کاربر) — دقیقاً مثل فرم دستی «حسابداری
+                    // انبار» که کاربر فقط مبلغ را وارد می‌کند و فی از تقسیم مبلغ بر مقدار به‌دست می‌آید
+                    // (recomputeUnitCostFromAmount در InitialInventory.tsx)، نه برعکس.
+                    const rowAmount = Number((0, digits_1.toEnglishDigits)(row.amount || "")) || 0;
+                    const acc = accByLineId.get(line.id) || { qty: 0, amount: 0 };
+                    acc.qty += allocationQuantity;
+                    acc.amount += rowAmount;
+                    accByLineId.set(line.id, acc);
+                }
+                const updates = Array.from(accByLineId.entries()).map(([id, acc]) => ({
+                    id,
+                    unitCost: acc.qty > 0 ? acc.amount / acc.qty : 0,
+                }));
+                await (0, initialInventory_1.updateInitialInventoryAccounting)(doc.id, updates);
+                return { ok: true };
+            }
+            catch (e) {
+                return { ok: false, error: e.message || "خطا در ثبت فی/مبلغ" };
+            }
+        },
+    });
+    (0, importJobService_1.registerImportEntity)("production-receipt", {
+        // طبق تصمیم صریح کاربر (هم‌الگوی «رسید انبار خرید»): «شماره سند» هم برای گروه‌بندی ردیف‌ها و هم
+        // به‌عنوان شماره‌ی نهایی سند استفاده می‌شود — ستون جدای «شماره گروه» لازم نیست. طبق تصمیم صریح کاربر،
+        // این سند هم یک «مرکز هزینه» الزامی دارد (دقیقاً هم‌الگوی «مصرف تولید»).
+        groupByKey: (row) => `${row.warehouseCode || ""}__${row.number || ""}__${row.date || ""}`,
+        group: async (groupRows, ctx) => {
+            try {
+                const resolved = await resolveWarehouseDocGroup(groupRows, { requireCostCenter: true, requireNumber: true });
+                if ("error" in resolved)
+                    return { ok: false, error: resolved.error };
+                if (!ctx.allowDuplicates) {
+                    const isDup = await isDuplicateInventoryDocGroup("PRODUCTION_RECEIPT", resolved.warehouseId, resolved.date, resolved.detailCode, resolved.lines);
+                    if (isDup)
+                        return { ok: false, error: "رسیدی با همین انبار، تاریخ، مرکز هزینه و اقلام از قبل ثبت شده است" };
+                }
+                await (0, productionReceipts_1.createProductionReceipt)(resolved);
+                return { ok: true };
+            }
+            catch (e) {
+                return { ok: false, error: e.message || "خطا در ثبت سند" };
+            }
+        },
+    });
+    // «رسید انبار خرید» — فقط انبارداری (بدون فی/مبلغ، دقیقاً مثل فرم دستی که هرگز این دو را از کاربر
+    // نمی‌گیرد) و فقط بدون‌مبنا (طبق تصمیم صریح کاربر؛ رسید‌های متصل به سفارش‌خرید/مجوزتحویل/درخواست‌تامین
+    // از این Import پشتیبانی نمی‌شوند، چون هر ردیفشان باید به یک سطر مبنای مشخص گره بخورد).
+    (0, importJobService_1.registerImportEntity)("warehouse-receipt", {
+        // طبق تصمیم صریح کاربر: به‌جای دو شماره‌ی جدا («شماره گروه سند» فقط برای گروه‌بندی + «شماره سند»
+        // برای شماره‌ی نهایی)، همان «شماره سند» واقعی هم برای گروه‌بندی ردیف‌ها استفاده می‌شود — چون به هر
+        // حال باید در دوره مالی یکتا باشد (createWarehouseReceipt این را چک می‌کند)، همین یکتایی برای
+        // گروه‌بندی درست هم کافی است.
+        groupByKey: (row) => `${row.warehouseCode || ""}__${row.number || ""}__${row.date || ""}`,
+        group: async (groupRows, ctx) => {
+            try {
+                const resolved = await resolveWarehouseDocGroup(groupRows, { requireParty: true, requireNumber: true });
+                if ("error" in resolved)
+                    return { ok: false, error: resolved.error };
+                // برخلاف «موجودی اول دوره» که یک قانون سخت («حداکثر یک سند در هر دوره مالی») این کار را خودکار
+                // انجام می‌دهد، رسید انبار خرید ذاتاً می‌تواند چندین‌بار برای یک انبار/تامین‌کننده ثبت شود — پس
+                // اجرای دوباره‌ی همان فایل Import (مثلاً چون بار قبل نیمه‌کاره خطا خورده بود) هیچ مانع طبیعی‌ای
+                // نداشت و منجر به ثبت دوبرابر می‌شد. طبق همان قرارداد allowDuplicates که در Import «طرف‌حساب»
+                // هم استفاده شده: پیش‌فرض، رسیدی با همان انبار/تاریخ/طرف‌مقابل/اقلامِ عیناً یکسان رد می‌شود؛
+                // کاربر با تیک «ردیف‌های مشابه هم ثبت شوند» می‌تواند صراحتاً override کند.
+                if (!ctx.allowDuplicates) {
+                    const isDup = await isDuplicateInventoryDocGroup("WAREHOUSE_RECEIPT", resolved.warehouseId, resolved.date, resolved.detailCode, resolved.lines);
+                    if (isDup)
+                        return { ok: false, error: "رسیدی با همین انبار، تاریخ، طرف مقابل و اقلام از قبل ثبت شده است" };
+                }
+                await (0, warehouseReceipts_1.createWarehouseReceipt)({ ...resolved, partyDetailCode: resolved.detailCode, basis: "NO_BASIS" });
+                return { ok: true };
+            }
+            catch (e) {
+                return { ok: false, error: e.message || "خطا در ثبت سند" };
+            }
+        },
+    });
+    // «مصرف تولید» — فقط انبارداری (بدون فی/مبلغ) و همیشه بدون‌مبنا (این سند اصلاً مفهوم مبنا ندارد)؛
+    // برخلاف «رسید انبار خرید»/«رسید تولید»، این یکی یک «مرکز هزینه» الزامی دارد (طبق تصمیم صریح کاربر
+    // برای تخصیص بهای تمام‌شده در فاز بعدی)، دقیقاً هم‌الگوی طرف مقابل در «رسید انبار خرید».
+    (0, importJobService_1.registerImportEntity)("production-consumption", {
+        groupByKey: (row) => `${row.warehouseCode || ""}__${row.number || ""}__${row.date || ""}`,
+        group: async (groupRows, ctx) => {
+            try {
+                const resolved = await resolveWarehouseDocGroup(groupRows, { requireCostCenter: true, requireNumber: true });
+                if ("error" in resolved)
+                    return { ok: false, error: resolved.error };
+                if (!ctx.allowDuplicates) {
+                    const isDup = await isDuplicateInventoryDocGroup("PRODUCTION_CONSUMPTION", resolved.warehouseId, resolved.date, resolved.detailCode, resolved.lines);
+                    if (isDup)
+                        return { ok: false, error: "مصرفی با همین انبار، تاریخ، مرکز هزینه و اقلام از قبل ثبت شده است" };
+                }
+                await (0, productionConsumptions_1.createProductionConsumption)(resolved);
+                return { ok: true };
+            }
+            catch (e) {
+                return { ok: false, error: e.message || "خطا در ثبت سند" };
+            }
+        },
+    });
+    // «حواله فروش» (تحویل کالا به مشتری) — فقط انبارداری (بدون فی/مبلغ) و فقط بدون‌مبنا، دقیقاً هم‌الگوی
+    // «رسید انبار خرید» (خودِ createSalesDelivery/validateLines طرف مقابل را فقط طرف‌حساب معتبر می‌خواهد؛
+    // بحث تخصیص «فقط مشتری» مثل رسید انبار خرید/تامین‌کننده در این سند اصلاً به‌عنوان قید backend وجود
+    // ندارد، پس این Import هم چیزی فراتر از فرم دستی تحمیل نمی‌کند).
+    (0, importJobService_1.registerImportEntity)("sales-delivery", {
+        groupByKey: (row) => `${row.warehouseCode || ""}__${row.number || ""}__${row.date || ""}`,
+        group: async (groupRows, ctx) => {
+            try {
+                const resolved = await resolveWarehouseDocGroup(groupRows, { requireParty: true, requireNumber: true });
+                if ("error" in resolved)
+                    return { ok: false, error: resolved.error };
+                if (!ctx.allowDuplicates) {
+                    const isDup = await isDuplicateInventoryDocGroup("SALES_DELIVERY", resolved.warehouseId, resolved.date, resolved.detailCode, resolved.lines);
+                    if (isDup)
+                        return { ok: false, error: "حواله‌ای با همین انبار، تاریخ، طرف مقابل و اقلام از قبل ثبت شده است" };
+                }
+                await (0, salesDeliveries_1.createSalesDelivery)({ ...resolved, basis: "NO_BASIS" });
+                return { ok: true };
+            }
+            catch (e) {
+                return { ok: false, error: e.message || "خطا در ثبت سند" };
+            }
+        },
+    });
+    // «مصرف مرکز هزینه» — فقط انبارداری (بدون فی/مبلغ) و فقط بدون‌مبنا (دقیقاً هم‌الگوی «مصرف تولید»)
+    (0, importJobService_1.registerImportEntity)("center-consumption", {
+        groupByKey: (row) => `${row.warehouseCode || ""}__${row.number || ""}__${row.date || ""}`,
+        group: async (groupRows, ctx) => {
+            try {
+                const resolved = await resolveWarehouseDocGroup(groupRows, { requireCostCenter: true, requireNumber: true });
+                if ("error" in resolved)
+                    return { ok: false, error: resolved.error };
+                if (!ctx.allowDuplicates) {
+                    const isDup = await isDuplicateInventoryDocGroup("CENTER_CONSUMPTION", resolved.warehouseId, resolved.date, resolved.detailCode, resolved.lines);
+                    if (isDup)
+                        return { ok: false, error: "مصرفی با همین انبار، تاریخ، مرکز هزینه و اقلام از قبل ثبت شده است" };
+                }
+                await (0, centerConsumptions_1.createCenterConsumption)({ ...resolved, basis: "NO_BASIS" });
+                return { ok: true };
+            }
+            catch (e) {
+                return { ok: false, error: e.message || "خطا در ثبت سند" };
+            }
+        },
+    });
+    // «اضافات انبارگردانی» — فقط انبارداری (بدون فی/مبلغ، فی فقط بعد از «تایید حسابداری» دستی وارد
+    // می‌شود، دقیقاً هم‌الگوی «رسید تولید»)، بدون مبنا و بدون طرف‌حساب/مرکز هزینه.
+    (0, importJobService_1.registerImportEntity)("warehouse-adjustment", {
+        groupByKey: (row) => `${row.warehouseCode || ""}__${row.number || ""}__${row.date || ""}`,
+        group: async (groupRows, ctx) => {
+            try {
+                const resolved = await resolveWarehouseDocGroup(groupRows, { requireNumber: true });
+                if ("error" in resolved)
+                    return { ok: false, error: resolved.error };
+                if (!ctx.allowDuplicates) {
+                    const isDup = await isDuplicateInventoryDocGroup("WAREHOUSE_ADJUSTMENT", resolved.warehouseId, resolved.date, undefined, resolved.lines);
+                    if (isDup)
+                        return { ok: false, error: "سندی با همین انبار، تاریخ و اقلام از قبل ثبت شده است" };
+                }
+                await (0, warehouseAdjustments_1.createWarehouseAdjustment)(resolved);
+                return { ok: true };
+            }
+            catch (e) {
+                return { ok: false, error: e.message || "خطا در ثبت سند" };
+            }
+        },
+    });
+    // «کسری انبارگردانی» — فقط انبارداری (بدون فی/مبلغ، بدون مبنا و بدون طرف‌حساب/مرکز هزینه)؛ این سند
+    // «تایید حسابداری» فردی ندارد، فی/مبلغ فقط با «تایید انبار» دسته‌ای وارد می‌شود.
+    (0, importJobService_1.registerImportEntity)("inventory-counting-shortage", {
+        groupByKey: (row) => `${row.warehouseCode || ""}__${row.number || ""}__${row.date || ""}`,
+        group: async (groupRows, ctx) => {
+            try {
+                const resolved = await resolveWarehouseDocGroup(groupRows, { requireNumber: true });
+                if ("error" in resolved)
+                    return { ok: false, error: resolved.error };
+                if (!ctx.allowDuplicates) {
+                    const isDup = await isDuplicateInventoryDocGroup("INVENTORY_COUNTING_SHORTAGE", resolved.warehouseId, resolved.date, undefined, resolved.lines);
+                    if (isDup)
+                        return { ok: false, error: "سندی با همین انبار، تاریخ و اقلام از قبل ثبت شده است" };
+                }
+                await (0, inventoryCountingShortages_1.createInventoryCountingShortage)(resolved);
+                return { ok: true };
+            }
+            catch (e) {
+                return { ok: false, error: e.message || "خطا در ثبت سند" };
+            }
+        },
+    });
+}
+// مشترک بین «رسید انبار خرید» (detailCode از طرف مقابل)، «مصرف تولید» (detailCode از مرکز هزینه) و
+// «رسید تولید» (detailCode ندارد) — یک سند از همان نوع با همان انبار/تاریخ/(تفصیل اگر داشت)/مجموعه‌ی
+// دقیقاً یکسانِ اقلام، تکراری در نظر گرفته می‌شود. تفصیل (اگر ماهیت سند دارد) از قبل توسط فراخوان
+// resolve شده و مستقیم به‌عنوان detailCode داده می‌شود — این تابع خودش نمی‌داند طرف مقابل است یا مرکز
+// هزینه، فقط رشته‌ی detailCode را می‌بیند.
+async function isDuplicateInventoryDocGroup(documentType, warehouseId, dateStr, detailCode, lines) {
+    const candidates = await prisma_1.prisma.inventoryDocument.findMany({
+        where: { documentType, warehouseId, date: new Date(dateStr), ...(detailCode ? { detailCode } : {}) },
+        include: { lines: { select: { goodsItemId: true, quantity: true } } },
+    });
+    if (!candidates.length)
+        return false;
+    const signature = (rows) => rows
+        .map((r) => `${r.goodsItemId}:${Number(r.quantity)}`)
+        .sort()
+        .join("|");
+    const incoming = signature(lines);
+    return candidates.some((c) => signature(c.lines) === incoming);
+}

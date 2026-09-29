@@ -7,7 +7,10 @@ import { FormPage } from "../components/FormPage";
 import { Modal } from "../components/Modal";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
-import { RecordPickerField } from "../components/RecordPicker";
+import { RecordPickerField, RecordPickerDialog, type PickerColumn } from "../components/RecordPicker";
+import { LineGridToolbar } from "../components/LineGridToolbar";
+import type { ExportColumn } from "../lib/gridExport";
+import { useLineGridBase } from "../lib/useLineGridBase";
 import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
@@ -47,7 +50,7 @@ interface CustodianOption {
   party: { id: number; detailCode: string; category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null; isActive: boolean };
 }
 interface PaymentTypeOption { id: number; title: string; nature: string; basisType: BasisType; isActive: boolean }
-const PETTY_CASH_INELIGIBLE_NATURES = new Set(["TO_BANK", "TO_CASH_BOX"]);
+const PETTY_CASH_INELIGIBLE_NATURES = new Set(["TO_BANK", "TO_CASH_BOX", "TO_PETTY_CASH"]);
 
 interface PickablePayment {
   id: number;
@@ -101,6 +104,7 @@ interface SummaryLineDto {
   description: string | null;
   resolvedAccount: ResolvedAccount | null;
   resolvedAccountError: string | null;
+  partyDetail?: { detail1Code?: string; detail2Code?: string; detail3Code?: string };
 }
 
 export default function PettyCashSummaries() {
@@ -169,6 +173,7 @@ interface LineState {
   paymentAmount: number;
   paymentPartyId: number;
   paymentPartyDisplay: string;
+  paymentPartyDetailCode: string;
   paymentDisplay: string;
   paymentTypeId: string;
   paymentTypeTitle: string;
@@ -182,6 +187,9 @@ interface LineState {
   detail1Code: string;
   detail2Code: string;
   detail3Code: string;
+  /** طبق تصمیم صریح کاربر: اگر معینِ ردیف در یکی از سطوح تفصیلش به نوع «طرف حساب» وصل باشد، همان سطح از
+   * طرف‌حساب خودِ پرداخت تنخواه پر و غیرقابل‌ویرایش می‌شود — این فیلد می‌گوید کدام سطح قفل است */
+  partyDetailLocked: "detail1Code" | "detail2Code" | "detail3Code" | null;
   amount: string;
   description: string;
   exchangeGainLoss: number;
@@ -193,20 +201,75 @@ function nextClientKey() {
   return `pcs-${Date.now()}-${clientKeySeq}`;
 }
 
+function EditIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M4 20h4l10.5-10.5a2.121 2.121 0 0 0-3-3L5 17v3Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function paymentLabel(p: { id: number; date: string; amount: string | number }) {
   return `#${toFaDigits(String(p.id))} — ${formatJalaliDate(p.date)} — ${formatAmountFa(p.amount)}`;
 }
 
-async function resolveAccountFor(paymentTypeId: string, purchaseInvoiceId: string, salesInvoiceId: string): Promise<{ account: ResolvedAccount | null; error: string }> {
-  if (!paymentTypeId) return { account: null, error: "" };
+function lineSearchableText(row: LineState): string {
+  return [
+    row.paymentDisplay,
+    row.paymentPartyDisplay,
+    row.paymentTypeTitle,
+    BASIS_TITLE_FA[row.basisType],
+    row.account ? `${row.account.code} ${row.account.title}` : "",
+    row.description,
+  ].join(" ");
+}
+
+const ADD_PICKER_COLUMNS: PickerColumn<PickablePayment & { remaining: number }>[] = [
+  { header: "پرداخت", render: (p) => paymentLabel(p), filterValue: (p) => paymentLabel(p) },
+  { header: "طرف حساب", render: (p) => partyDisplayName(p.party), filterValue: (p) => partyDisplayName(p.party) },
+  { header: "نوع پرداخت", render: (p) => p.paymentType?.title || "", filterValue: (p) => p.paymentType?.title || "" },
+  { header: "مانده", render: (p) => formatAmountFa(p.remaining), filterValue: (p) => String(p.remaining) },
+];
+
+const lineExportColumns: ExportColumn<LineState>[] = [
+  { header: "موضوع پرداخت", render: (l) => l.paymentDisplay },
+  { header: "طرف حساب", render: (l) => l.paymentPartyDisplay },
+  { header: "نوع پرداخت", render: (l) => l.paymentTypeTitle },
+  { header: "مبنا", render: (l) => BASIS_TITLE_FA[l.basisType] },
+  { header: "حساب معین", render: (l) => (l.account ? `${l.account.code} — ${l.account.title}` : "") },
+  { header: "تفصیل ۱", render: (l) => l.detail1Code },
+  { header: "تفصیل ۲", render: (l) => l.detail2Code },
+  { header: "تفصیل ۳", render: (l) => l.detail3Code },
+  { header: "مبلغ", render: (l) => l.amount },
+  { header: "تسعیر", render: (l) => l.exchangeGainLoss },
+  { header: "شرح", render: (l) => l.description },
+];
+
+interface PartyDetail { detail1Code?: string; detail2Code?: string; detail3Code?: string }
+function partyDetailLockedSlot(pd: PartyDetail | undefined): LineState["partyDetailLocked"] {
+  if (!pd) return null;
+  if (pd.detail1Code) return "detail1Code";
+  if (pd.detail2Code) return "detail2Code";
+  if (pd.detail3Code) return "detail3Code";
+  return null;
+}
+
+async function resolveAccountFor(
+  paymentTypeId: string,
+  purchaseInvoiceId: string,
+  salesInvoiceId: string,
+  partyDetailCode?: string | null
+): Promise<{ account: ResolvedAccount | null; error: string; partyDetail: PartyDetail }> {
+  if (!paymentTypeId) return { account: null, error: "", partyDetail: {} };
   const params = new URLSearchParams({ paymentTypeId });
   if (purchaseInvoiceId) params.set("purchaseInvoiceId", purchaseInvoiceId);
   if (salesInvoiceId) params.set("salesInvoiceId", salesInvoiceId);
+  if (partyDetailCode) params.set("partyDetailCode", partyDetailCode);
   try {
-    const account: ResolvedAccount = await api.get(`/petty-cash-summaries/resolve-account?${params.toString()}`);
-    return { account, error: "" };
+    const { partyDetail, ...account }: ResolvedAccount & { partyDetail: PartyDetail } = await api.get(`/petty-cash-summaries/resolve-account?${params.toString()}`);
+    return { account, error: "", partyDetail: partyDetail || {} };
   } catch (e) {
-    return { account: null, error: (e as ApiError).message };
+    return { account: null, error: (e as ApiError).message, partyDetail: {} };
   }
 }
 
@@ -217,6 +280,7 @@ function lineFromPayment(p: PickablePayment): Omit<LineState, "account" | "accou
     paymentAmount: Number(p.amount),
     paymentPartyId: p.partyId,
     paymentPartyDisplay: partyDisplayName(p.party),
+    paymentPartyDetailCode: p.party.detailCode,
     paymentDisplay: paymentLabel(p),
     paymentTypeId: String(p.paymentTypeId),
     paymentTypeTitle: p.paymentType?.title || "",
@@ -228,6 +292,7 @@ function lineFromPayment(p: PickablePayment): Omit<LineState, "account" | "accou
     detail1Code: "",
     detail2Code: "",
     detail3Code: "",
+    partyDetailLocked: null,
     amount: String(p.remaining),
     description: p.description || "",
     exchangeGainLoss: 0,
@@ -243,6 +308,7 @@ function lineFromDto(l: SummaryLineDto): LineState {
     paymentAmount: Number(l.pettyCashPayment.amount),
     paymentPartyId: l.pettyCashPayment.party.id,
     paymentPartyDisplay: partyDisplayName(l.pettyCashPayment.party),
+    paymentPartyDetailCode: l.pettyCashPayment.party.detailCode,
     paymentDisplay: paymentLabel(l.pettyCashPayment),
     paymentTypeId: String(l.paymentTypeId),
     paymentTypeTitle: l.paymentType?.title || "",
@@ -253,9 +319,10 @@ function lineFromDto(l: SummaryLineDto): LineState {
     basisDisplay: basisId && basisDoc ? toFaDigits(String(basisDoc.number)) : "",
     account: l.resolvedAccount,
     accountError: l.resolvedAccountError || "",
-    detail1Code: l.detail1Code || "",
-    detail2Code: l.detail2Code || "",
-    detail3Code: l.detail3Code || "",
+    detail1Code: l.partyDetail?.detail1Code || l.detail1Code || "",
+    detail2Code: l.partyDetail?.detail2Code || l.detail2Code || "",
+    detail3Code: l.partyDetail?.detail3Code || l.detail3Code || "",
+    partyDetailLocked: partyDetailLockedSlot(l.partyDetail),
     amount: String(Number(l.amount)),
     description: l.description || "",
     exchangeGainLoss: Number(l.exchangeGainLoss) || 0,
@@ -279,6 +346,8 @@ function SummaryForm({ editId }: { editId?: number }) {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(`${cacheKey}:header`));
   const [modifyIdx, setModifyIdx] = useState<number | null>(null);
+  const [addPickerOpen, setAddPickerOpen] = useState(false);
+  const grid = useLineGridBase(lines, setLines, lineSearchableText);
   const { flash } = useSavedFlash();
 
   const status = meta?.status || "DRAFT";
@@ -343,17 +412,18 @@ function SummaryForm({ editId }: { editId?: number }) {
   }, [editId]);
 
   // مانده‌های پرداخت‌های تنخواهِ همین تنخواه‌دار (شامل همان‌هایی که در همین سند استفاده شده‌اند — مانده‌ی برگشتی، مصرفِ خودِ این سند را حساب نمی‌کند)
+  // فقط پرداخت‌های تنخواه‌ای که تاریخشان از تاریخ سرصفحه‌ی همین خلاصه تنخواه کوچکتر است (طبق تصمیم صریح کاربر)
   useEffect(() => {
-    if (!header.custodianId) {
+    if (!header.custodianId || !header.date) {
       setPickable([]);
       return;
     }
     const excl = editId ? `&excludeId=${editId}` : "";
     api
-      .get(`/petty-cash-summaries/pickable-payments?custodianId=${header.custodianId}${excl}`)
+      .get(`/petty-cash-summaries/pickable-payments?custodianId=${header.custodianId}&beforeDate=${header.date}${excl}`)
       .then(setPickable)
       .catch(() => setPickable([]));
-  }, [header.custodianId, editId]);
+  }, [header.custodianId, header.date, editId]);
 
   const custodian = custodians.find((c) => String(c.id) === header.custodianId);
 
@@ -371,46 +441,36 @@ function SummaryForm({ editId }: { editId?: number }) {
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
   }
   function removeLine(idx: number) {
-    setLines((prev) => prev.filter((_, i) => i !== idx));
+    grid.removeAt(idx);
   }
+
+  // پرداخت‌های تنخواهِ این تنخواه‌دار که هنوز مانده‌ی قابل‌تخصیص دارند (با احتساب ردیف‌های همین فرم) —
+  // هم برای دکمه‌ی «بارگذاری» (همه‌شان یک‌جا) و هم برای آیکن «ردیف جدید» (انتخابگرِ تک‌موردی) استفاده می‌شود
+  const addableCandidates: (PickablePayment & { remaining: number })[] = header.custodianId
+    ? pickable
+        .map((p) => ({ p, remaining: liveRemaining(String(p.id)) }))
+        .filter(({ remaining }) => remaining > 0.001)
+        .map(({ p, remaining }) => ({ ...p, remaining }))
+    : [];
 
   async function onLoadPayments(selected: PickablePayment[]) {
     const newLines: LineState[] = [];
     for (const p of selected) {
       const base = lineFromPayment(p);
       // eslint-disable-next-line no-await-in-loop
-      const { account, error: accErr } = await resolveAccountFor(base.paymentTypeId, base.purchaseInvoiceId, base.salesInvoiceId);
+      const { account, error: accErr, partyDetail } = await resolveAccountFor(base.paymentTypeId, base.purchaseInvoiceId, base.salesInvoiceId, p.party.detailCode);
       preloadDetailOptionsFor(account);
-      newLines.push({ ...base, account, accountError: accErr });
+      newLines.push({
+        ...base,
+        account,
+        accountError: accErr,
+        detail1Code: partyDetail.detail1Code || base.detail1Code,
+        detail2Code: partyDetail.detail2Code || base.detail2Code,
+        detail3Code: partyDetail.detail3Code || base.detail3Code,
+        partyDetailLocked: partyDetailLockedSlot(partyDetail),
+      });
     }
     setLines((prev) => [...prev, ...newLines]);
-  }
-
-  function splitRow(idx: number) {
-    const row = lines[idx];
-    const remaining = liveRemaining(row.pettyCashPaymentId, row.clientKey);
-    if (remaining <= 0.001) return showError("مانده‌ای برای این پرداخت تنخواه باقی نمانده است");
-    // ردیف جدید دقیقاً از روی خودِ پرداخت تنخواه (نه ردیف فعلی) دوباره ساخته می‌شود، با مانده‌ی باقی‌مانده
-    const p = pickable.find((x) => String(x.id) === row.pettyCashPaymentId);
-    const base: PickablePayment = p || {
-      id: Number(row.pettyCashPaymentId), date: "", amount: String(row.paymentAmount), remaining, description: row.description,
-      partyId: row.paymentPartyId, party: { id: row.paymentPartyId, detailCode: "", category: "INDIVIDUAL", firstName: null, lastName: null, name: null, isActive: true },
-      paymentTypeId: Number(row.paymentTypeId), paymentType: { id: Number(row.paymentTypeId), title: row.paymentTypeTitle, nature: "", basisType: row.basisType, isActive: true },
-      purchaseInvoiceId: row.purchaseInvoiceId ? Number(row.purchaseInvoiceId) : null,
-      salesInvoiceId: row.salesInvoiceId ? Number(row.salesInvoiceId) : null,
-      purchaseOrderId: row.purchaseOrderId ? Number(row.purchaseOrderId) : null,
-    };
-    const newLine = lineFromPayment({ ...base, remaining });
-    (async () => {
-      const { account, error: accErr } = await resolveAccountFor(newLine.paymentTypeId, newLine.purchaseInvoiceId, newLine.salesInvoiceId);
-      preloadDetailOptionsFor(account);
-      setLines((prev) => {
-        const at = prev.findIndex((l) => l.clientKey === row.clientKey);
-        const copy = [...prev];
-        copy.splice(at + 1, 0, { ...newLine, account, accountError: accErr });
-        return copy;
-      });
-    })();
   }
 
   // دکمه‌ی «بارگذاری»: به‌جای انتخابگر، همه‌ی پرداخت‌های تنخواهِ این تنخواه‌دار که هنوز مانده‌ی
@@ -420,17 +480,21 @@ function SummaryForm({ editId }: { editId?: number }) {
       showError("ابتدا تنخواه‌دار را انتخاب کنید");
       return;
     }
-    const toLoad = pickable
-      .map((p) => ({ p, remaining: liveRemaining(String(p.id)) }))
-      .filter(({ remaining }) => remaining > 0.001)
-      .map(({ p, remaining }) => ({ ...p, remaining }));
-    if (toLoad.length === 0) {
+    if (addableCandidates.length === 0) {
       showError("پرداخت تنخواهِ قابل بارگذاری برای این تنخواه‌دار وجود ندارد");
       return;
     }
-    onLoadPayments(toLoad);
+    onLoadPayments(addableCandidates);
   }
 
+  // آیکن «ردیف جدید» نوار ابزار: برخلاف «بارگذاری» (همه‌ی موارد قابل‌بارگذاری یک‌جا)، این‌جا کاربر خودش
+  // دقیقاً یک پرداخت تنخواه را از میان همان فهرست انتخاب می‌کند
+  function addSelectedPayment(p: PickablePayment) {
+    onLoadPayments([p]);
+    setAddPickerOpen(false);
+  }
+
+  // جابه‌جایی/حذف از نوار ابزار روی «ردیف انتخاب‌شده» (با کلیک روی ردیف) عمل می‌کند
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -565,7 +629,9 @@ function SummaryForm({ editId }: { editId?: number }) {
           <div className="form-grid" style={{ marginBottom: 16 }}>
             <div className="form-field">
               <label>تاریخ<RequiredMark /></label>
-              <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
+              {/* طبق تصمیم صریح کاربر: چون ردیف‌ها بر مبنای تاریخ/تنخواه‌دارِ سرصفحه بارگذاری می‌شوند، به‌محض افزودن
+                  اولین ردیف این دو فیلد قفل می‌شوند (کاربر باید ابتدا همه‌ی ردیف‌ها را حذف کند تا بتواند عوضشان کند) */}
+              <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={lines.length > 0} />
             </div>
             <div className="form-field">
               <label>تنخواه‌دار<RequiredMark /></label>
@@ -573,13 +639,13 @@ function SummaryForm({ editId }: { editId?: number }) {
                 title="انتخاب تنخواه‌دار"
                 displayValue={header.custodianDisplay}
                 rows={custodians}
+                disabled={lines.length > 0}
                 columns={[
                   { header: "کد", render: (c) => toFaDigits(c.detailCode), filterValue: (c) => c.detailCode, width: "90px" },
                   { header: "تنخواه", render: (c) => c.pettyCash.title, filterValue: (c) => c.pettyCash.title },
                   { header: "تنخواه‌دار", render: (c) => partyDisplayName(c.party), filterValue: (c) => partyDisplayName(c.party) },
                 ]}
                 onSelect={(c) => {
-                  if (lines.length > 0 && String(c.id) !== header.custodianId && !window.confirm("با تغییر تنخواه‌دار، همه‌ی ردیف‌ها پاک می‌شوند. ادامه می‌دهید؟")) return;
                   setHeader({ ...header, custodianId: String(c.id), custodianDisplay: custodianLabel(c) });
                   setLines([]);
                 }}
@@ -605,12 +671,35 @@ function SummaryForm({ editId }: { editId?: number }) {
             </div>
           </div>
 
-          <div className="je-lines-toolbar">
-            <span className="je-lines-title">ردیف‌های خلاصه تنخواه</span>
-            <button type="button" className="btn" disabled={!header.custodianId} onClick={loadAllPending}>
-              بارگذاری پرداخت‌های تنخواه
+          <LineGridToolbar<LineState>
+            title="ردیف‌های خلاصه تنخواه"
+            show={{ load: true }}
+            onAdd={() => setAddPickerOpen(true)}
+            onLoad={loadAllPending}
+            loadLabel="بارگذاری پرداخت‌های تنخواه"
+            loadDisabled={!header.custodianId}
+            onDelete={grid.deleteSelected}
+            canDelete={grid.canDelete}
+            onMoveUp={grid.moveUp}
+            canMoveUp={grid.canMoveUp}
+            onMoveDown={grid.moveDown}
+            canMoveDown={grid.canMoveDown}
+            filterValue={grid.filterText}
+            onFilterChange={grid.setFilterText}
+            exportColumns={lineExportColumns}
+            exportRows={lines}
+            exportFileName="Petty-cash-summary-lines"
+          >
+            <button
+              type="button"
+              className="toolbar-icon-btn"
+              disabled={grid.selectedIndex === null}
+              onClick={() => setModifyIdx(grid.selectedIndex)}
+              title="تغییر نوع پرداخت"
+            >
+              <EditIcon />
             </button>
-          </div>
+          </LineGridToolbar>
           <div className="grid-wrap je-lines-wrap">
             <div className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
               <table className="je-lines-table">
@@ -631,11 +720,15 @@ function SummaryForm({ editId }: { editId?: number }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {lines.map((row, idx) => {
+                  {grid.visibleEntries.map(({ row, idx }) => {
                     const remaining = liveRemaining(row.pettyCashPaymentId, row.clientKey);
                     const detailOpts = (typeId: number | null) => (typeId ? detailOptions[typeId] || [] : []);
                     return (
-                      <tr key={row.clientKey}>
+                      <tr
+                        key={row.clientKey}
+                        className={idx === grid.selectedIndex ? "line-grid-row-selected" : undefined}
+                        onClick={() => grid.select(idx)}
+                      >
                         <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                         <td style={{ minWidth: 190 }}>
                           <div>{row.paymentDisplay}</div>
@@ -643,9 +736,6 @@ function SummaryForm({ editId }: { editId?: number }) {
                         </td>
                         <td style={{ minWidth: 160 }}>
                           <div>{row.paymentTypeTitle}</div>
-                          <button type="button" className="btn" style={{ padding: "3px 8px", fontSize: 11, marginTop: 4 }} onClick={() => setModifyIdx(idx)}>
-                            تغییر نوع پرداخت
-                          </button>
                         </td>
                         <td style={{ minWidth: 130 }}>
                           {BASIS_TITLE_FA[row.basisType]}
@@ -658,7 +748,9 @@ function SummaryForm({ editId }: { editId?: number }) {
                           const typeId = row.account ? (i === 0 ? row.account.detailType1Id : i === 1 ? row.account.detailType2Id : row.account.detailType3Id) : null;
                           return (
                             <td key={field} style={{ minWidth: 140 }}>
-                              {typeId ? (
+                              {row.partyDetailLocked === field ? (
+                                <span title="قفل — از طرف‌حساب پرداخت تنخواه">{row[field] ? toFaDigits(row[field]) : "—"}</span>
+                              ) : typeId ? (
                                 <RecordPickerField
                                   title={`انتخاب تفصیل ${toFaDigits(String(i + 1))}`}
                                   displayValue={row[field] ? toFaDigits(row[field]) : ""}
@@ -685,21 +777,9 @@ function SummaryForm({ editId }: { editId?: number }) {
                           <input value={row.description} onChange={(e) => updateLine(idx, { description: e.target.value })} />
                         </td>
                         <td>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            <button
-                              type="button"
-                              className="btn"
-                              style={{ padding: "4px 8px", fontSize: 11 }}
-                              disabled={remaining <= 0.001}
-                              onClick={() => splitRow(idx)}
-                              title="افزودن ردیف دیگر از همین پرداخت با مانده‌ی باقی‌مانده"
-                            >
-                              تقسیم
-                            </button>
-                            <button type="button" className="btn danger" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => removeLine(idx)}>
-                              حذف
-                            </button>
-                          </div>
+                          <button type="button" className="btn danger" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => removeLine(idx)}>
+                            حذف
+                          </button>
                         </td>
                       </tr>
                     );
@@ -719,11 +799,33 @@ function SummaryForm({ editId }: { editId?: number }) {
           row={lines[modifyIdx]}
           onClose={() => setModifyIdx(null)}
           onConfirm={async (patch) => {
-            const { account, error: accErr } = await resolveAccountFor(patch.paymentTypeId, patch.purchaseInvoiceId, patch.salesInvoiceId);
+            const { account, error: accErr, partyDetail } = await resolveAccountFor(
+              patch.paymentTypeId,
+              patch.purchaseInvoiceId,
+              patch.salesInvoiceId,
+              lines[modifyIdx].paymentPartyDetailCode
+            );
             preloadDetailOptionsFor(account);
-            updateLine(modifyIdx, { ...patch, account, accountError: accErr, detail1Code: "", detail2Code: "", detail3Code: "" });
+            updateLine(modifyIdx, {
+              ...patch,
+              account,
+              accountError: accErr,
+              detail1Code: partyDetail.detail1Code || "",
+              detail2Code: partyDetail.detail2Code || "",
+              detail3Code: partyDetail.detail3Code || "",
+              partyDetailLocked: partyDetailLockedSlot(partyDetail),
+            });
             setModifyIdx(null);
           }}
+        />
+      )}
+      {addPickerOpen && (
+        <RecordPickerDialog
+          title="انتخاب پرداخت تنخواه"
+          rows={addableCandidates}
+          columns={ADD_PICKER_COLUMNS}
+          onSelect={addSelectedPayment}
+          onClose={() => setAddPickerOpen(false)}
         />
       )}
     </FormPage>

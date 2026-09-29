@@ -15,10 +15,12 @@ interface MethodRow { startDate: Date; method: string }
 
 let vatCache: { at: number; rows: VatRow[] } | null = null;
 let methodCache: { at: number; rows: MethodRow[] } | null = null;
+let purchaseMethodCache: { at: number; rows: MethodRow[] } | null = null;
 
 export function invalidateAccountingSettingsCache() {
   vatCache = null;
   methodCache = null;
+  purchaseMethodCache = null;
 }
 
 async function loadVatRows(): Promise<VatRow[]> {
@@ -56,5 +58,19 @@ export async function getVatRatePercentForDate(date: Date): Promise<number> {
 /** روش شناسایی پیش‌دریافت ارزی معتبر در تاریخ معامله (null اگر رکوردی تا آن تاریخ تعریف نشده باشد) */
 export async function getAdvanceReceiptMethodForDate(date: Date): Promise<"HISTORICAL_RATE" | "TRANSACTION_DATE_RATE" | null> {
   const row = latestOnOrBefore(await loadMethodRows(), date);
+  return (row?.method as any) ?? null;
+}
+
+async function loadPurchaseMethodRows(): Promise<MethodRow[]> {
+  if (!purchaseMethodCache || Date.now() - purchaseMethodCache.at > CACHE_TTL_MS) {
+    const rows = await prisma.accountingAdvancePaymentSetting.findMany({ orderBy: { startDate: "asc" } });
+    purchaseMethodCache = { at: Date.now(), rows: rows.map((r) => ({ startDate: r.startDate, method: r.method })) };
+  }
+  return purchaseMethodCache.rows;
+}
+
+/** روش شناسایی پیش‌پرداخت ارزی خرید معتبر در تاریخ معامله — رویه‌ای کاملاً جدا از پیش‌دریافت فروش (null اگر رکوردی تا آن تاریخ تعریف نشده باشد) */
+export async function getAdvancePaymentMethodForDate(date: Date): Promise<"HISTORICAL_RATE" | "TRANSACTION_DATE_RATE" | null> {
+  const row = latestOnOrBefore(await loadPurchaseMethodRows(), date);
   return (row?.method as any) ?? null;
 }

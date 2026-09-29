@@ -7,6 +7,7 @@ import { resolvePaymentSubjectAccount } from "../services/paymentSubjectAccount"
 import { remainingOfPettyCashPayment, pickablePettyCashPayments } from "../services/pettyCashSummaryRemaining";
 import { issuePettyCashSummaryJournalEntry, revertPettyCashSummaryJournalEntry } from "../services/pettyCashSummaryJournalEntryService";
 import { calculateExchangeGainLoss } from "../utils/currencyConversion";
+import { resolveAccountDetailFields, resolveSystemDetailTypeId, DETAIL_TYPE_CODE_PARTY } from "../utils/detailValues";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 
@@ -80,6 +81,7 @@ async function assertLinesWithinPaymentAmount(lines: { pettyCashPaymentId: numbe
 /** اعتبارسنجی کامل خطوط سند (بدون ذخیره) — هم POST/PUT و هم approve از این استفاده می‌کنند */
 async function validateLines(body: Body, custodianId: number, excludeSummaryId?: number) {
   if (!Array.isArray(body.lines) || body.lines.length === 0) throw new Error("خلاصه تنخواه باید حداقل یک ردیف داشته باشد");
+  const headerDate = new Date(body.date);
 
   const cleaned: any[] = [];
   for (const [idx, l] of body.lines.entries()) {
@@ -88,12 +90,16 @@ async function validateLines(body: Body, custodianId: number, excludeSummaryId?:
     const payment = await prisma.pettyCashPayment.findUnique({ where: { id: l.pettyCashPaymentId } });
     if (!payment) throw new Error(`ردیف ${n}: پرداخت تنخواه یافت نشد`);
     if (payment.custodianId !== custodianId) throw new Error(`ردیف ${n}: پرداخت تنخواه انتخاب‌شده متعلق به تنخواه‌دار دیگری است`);
+    // طبق تصمیم صریح کاربر: هم‌الگوی فیلتر «بارگذاری» (services/pettyCashSummaryRemaining.ts، beforeDate) — فقط
+    // چون آن فیلتر صرفاً سمت کلاینت است (لیست ردیف‌ها با POST/PUT یک‌جا ذخیره می‌شود)، اگر کاربر بعد از
+    // بارگذاری، تاریخ سرصفحه را عوض کند این کنترل باید اینجا هم (سمت بک‌اند، در لحظه‌ی ذخیره) تکرار شود
+    if (payment.date >= headerDate) throw new Error(`ردیف ${n}: تاریخ پرداخت تنخواه باید از تاریخ سند کوچکتر باشد`);
 
     if (!l.paymentTypeId) throw new Error(`ردیف ${n}: نوع پرداخت الزامی است`);
     const paymentType = await prisma.paymentType.findUnique({ where: { id: l.paymentTypeId } });
     if (!paymentType) throw new Error(`ردیف ${n}: نوع پرداخت نامعتبر است`);
-    if (paymentType.nature === "TO_BANK" || paymentType.nature === "TO_CASH_BOX") {
-      throw new Error(`ردیف ${n}: این ماهیت نوع پرداخت (به بانک/به صندوق) برای خلاصه تنخواه قابل استفاده نیست`);
+    if (paymentType.nature === "TO_BANK" || paymentType.nature === "TO_CASH_BOX" || paymentType.nature === "TO_PETTY_CASH") {
+      throw new Error(`ردیف ${n}: این ماهیت نوع پرداخت (به بانک/به صندوق/به تنخواه) برای خلاصه تنخواه قابل استفاده نیست`);
     }
 
     const basisType = paymentType.basisType as BasisType;
@@ -163,8 +169,9 @@ router.get("/", async (_req, res) => {
 router.get("/pickable-payments", can(`${FORM}.view`), async (req, res) => {
   const custodianId = req.query.custodianId ? Number(req.query.custodianId) : null;
   const excludeId = req.query.excludeId ? Number(req.query.excludeId) : undefined;
+  const beforeDate = req.query.beforeDate ? new Date(req.query.beforeDate as string) : undefined;
   if (!custodianId) return res.json([]);
-  res.json(await pickablePettyCashPayments(custodianId, excludeId));
+  res.json(await pickablePettyCashPayments(custodianId, excludeId, beforeDate));
 });
 
 // معین «موضوع پرداخت» + نوع‌های تفصیل مجاز آن، برای یک نوع پرداخت/سند مبنای مشخص — برای نمایش «حساب معین» و
@@ -174,8 +181,8 @@ router.get("/resolve-account", can(`${FORM}.view`), async (req, res) => {
   if (!paymentTypeId) return res.status(400).json({ error: "نوع پرداخت الزامی است" });
   const paymentType = await prisma.paymentType.findUnique({ where: { id: paymentTypeId } });
   if (!paymentType) return res.status(400).json({ error: "نوع پرداخت نامعتبر است" });
-  if (paymentType.nature === "TO_BANK" || paymentType.nature === "TO_CASH_BOX") {
-    return res.status(400).json({ error: "این ماهیت نوع پرداخت (به بانک/به صندوق) برای خلاصه تنخواه قابل استفاده نیست" });
+  if (paymentType.nature === "TO_BANK" || paymentType.nature === "TO_CASH_BOX" || paymentType.nature === "TO_PETTY_CASH") {
+    return res.status(400).json({ error: "این ماهیت نوع پرداخت (به بانک/به صندوق/به تنخواه) برای خلاصه تنخواه قابل استفاده نیست" });
   }
   const purchaseInvoiceId = req.query.purchaseInvoiceId ? Number(req.query.purchaseInvoiceId) : null;
   const salesInvoiceId = req.query.salesInvoiceId ? Number(req.query.salesInvoiceId) : null;
@@ -183,17 +190,25 @@ router.get("/resolve-account", can(`${FORM}.view`), async (req, res) => {
   const salesInvoice = salesInvoiceId ? await prisma.salesInvoice.findUnique({ where: { id: salesInvoiceId } }) : null;
   const resolved = await resolvePaymentSubjectAccount(paymentType, { purchaseInvoice, salesInvoice });
   if (resolved.error) return res.status(400).json({ error: resolved.error });
-  res.json(resolved.account);
+  // طبق تصمیم صریح کاربر: اگر معینِ برگشتی در یکی از سطوح تفصیلش به نوع تفصیل «طرف حساب» وصل باشد، آن
+  // سطح باید از طرف‌حساب خودِ پرداخت تنخواه (نه چیز دیگر) پر و غیرقابل‌ویرایش شود — partyDetailCode را
+  // فرانت‌اند از روی همان پرداخت تنخواهِ در حال بارگذاری/تغییر می‌فرستد
+  const partyDetailCode = (req.query.partyDetailCode as string) || null;
+  const partyTypeId = await resolveSystemDetailTypeId(DETAIL_TYPE_CODE_PARTY);
+  const partyDetail = resolved.account ? resolveAccountDetailFields(resolved.account, partyTypeId, partyDetailCode) : {};
+  res.json({ ...(resolved.account || {}), partyDetail });
 });
 
 router.get("/:id", can(`${FORM}.view`), async (req, res) => {
   const item = await prisma.pettyCashSummary.findUnique({ where: { id: Number(req.params.id) }, include: DETAIL_INCLUDE });
   if (!item) return res.status(404).json({ error: "خلاصه تنخواه یافت نشد" });
   // حساب معین هر ردیف برای نمایش (محاسبه‌شده، ذخیره نمی‌شود)
+  const partyTypeId = await resolveSystemDetailTypeId(DETAIL_TYPE_CODE_PARTY);
   const lines = await Promise.all(
     item.lines.map(async (l: any) => {
       const resolved = await resolvePaymentSubjectAccount(l.paymentType, { purchaseInvoice: l.purchaseInvoice, salesInvoice: l.salesInvoice });
-      return { ...l, resolvedAccount: resolved.account, resolvedAccountError: resolved.error || null };
+      const partyDetail = resolved.account ? resolveAccountDetailFields(resolved.account, partyTypeId, l.pettyCashPayment?.party?.detailCode ?? null) : {};
+      return { ...l, resolvedAccount: resolved.account, resolvedAccountError: resolved.error || null, partyDetail };
     })
   );
   res.json({ ...item, lines });

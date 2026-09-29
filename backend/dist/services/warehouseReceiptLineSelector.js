@@ -1,0 +1,44 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.fetchPickableWarehouseReceiptLines = fetchPickableWarehouseReceiptLines;
+const prisma_1 = require("../lib/prisma");
+/**
+ * انتخابگر پایه‌ی «ردیف رسید انبار خرید» — طبق تصمیم صریح کاربر، هرجا لازم است از میان ردیف‌های رسید
+ * انبار خرید یکی به‌عنوان مبنا انتخاب شود (فاکتور خرید، برگشت به تامین‌کننده، و هر فرم آینده‌ای از این
+ * دست)، همین تابع پایه صدا زده می‌شود، نه یک Query جدا در هر فرم. دو قاعده‌ی فیلترِ همیشگی و
+ * غیرقابل‌بازنویسی:
+ *   ۱) تاریخ رسید <= تاریخ سند جاری (formDate)
+ *   ۲) مانده (remaining) بزرگتر از صفر
+ * «مانده» عمداً اینجا محاسبه نمی‌شود — معنای «مصرف‌شده» بین فاکتور خرید (یک‌باره و کامل؛ رجوع کنید به
+ * سرصفحه‌ی purchaseInvoices.ts) و برگشت به تامین‌کننده (تدریجی؛ رجوع کنید به سرصفحه‌ی
+ * supplierReturns.ts) کاملاً متفاوت است، پس هر فراخوان‌کننده نحوه‌ی محاسبه‌ی مانده‌ی خودش را
+ * (computeRemaining) و include اضافیِ لازم برایش را می‌دهد؛ فقط شکل خروجی (ستون‌های شماره/تاریخ/کد
+ * کالا/عنوان کالا/مقدار/مانده) و دو قاعده‌ی فیلتر بالا مشترک و پایه هستند.
+ */
+async function fetchPickableWarehouseReceiptLines(opts) {
+    const lines = await prisma_1.prisma.inventoryDocumentLine.findMany({
+        where: {
+            document: {
+                documentType: "WAREHOUSE_RECEIPT",
+                date: { lte: opts.formDate },
+                ...(opts.documentWhere || {}),
+            },
+        },
+        include: { document: true, goodsItem: true, unit: true, ...(opts.include || {}) },
+        orderBy: { id: "desc" },
+    });
+    return lines
+        .map((l) => ({
+        id: l.id,
+        number: l.document.number,
+        date: l.document.date,
+        goodsItemId: l.goodsItemId,
+        goodsItemCode: l.goodsItem.fullCode,
+        goodsItemTitle: l.goodsItem.title,
+        unitId: l.unitId,
+        unitTitle: l.unit.title,
+        quantity: Number(l.quantity),
+        remaining: opts.computeRemaining(l),
+    }))
+        .filter((r) => r.remaining > 0);
+}

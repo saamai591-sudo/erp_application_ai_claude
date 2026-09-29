@@ -1,0 +1,60 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+const fs = __importStar(require("fs"));
+const prisma_1 = require("../lib/prisma");
+// اسکریپت موقتِ مهاجرت «موجودی اول دوره»: بعد از اتمام و تایید Import (که technicalSpec کالاها را موقتاً
+// با کد قدیم پر کرده بود — نگاه کنید به backfillOldGoodsCode)، این اسکریپت مقدار اصلی technicalSpec را
+// از فایل پشتیبانِ backupGoodsTechnicalSpec بازمی‌گرداند.
+async function main() {
+    const backupPath = process.argv[2];
+    if (!backupPath) {
+        console.error("استفاده: tsx src/scripts/restoreGoodsTechnicalSpec.ts <backup.json>");
+        process.exit(1);
+    }
+    const items = JSON.parse(fs.readFileSync(backupPath, "utf8"));
+    let restored = 0;
+    for (const item of items) {
+        await prisma_1.prisma.goodsItem.update({ where: { id: item.id }, data: { technicalSpec: item.technicalSpec } });
+        restored++;
+    }
+    console.log(`تمام شد. مقدار technicalSpec برای ${restored} کالا بازگردانده شد.`);
+}
+main()
+    .catch((e) => {
+    console.error(e);
+    process.exit(1);
+})
+    .finally(() => process.exit(0));

@@ -128,4 +128,50 @@ router.delete("/accounting-settings/advance-receipt-methods/:id", can(`${FORM}.d
   res.status(204).send();
 });
 
+// -------------------------------------------------------------------------
+// روش شناسایی پیش‌پرداخت ارزی خرید — رویه‌ای کاملاً مستقل از «روش شناسایی پیش‌دریافت ارزی» فروش بالا (همان مدل تاریخ‌محور)
+// -------------------------------------------------------------------------
+
+router.get("/accounting-settings/advance-payment-methods", can(`${FORM}.view`), async (_req, res) => {
+  const rows = await prisma.accountingAdvancePaymentSetting.findMany({ orderBy: { startDate: "asc" } });
+  res.json(rows.map((r) => ({ id: r.id, startDate: r.startDate, method: r.method })));
+});
+
+router.post("/accounting-settings/advance-payment-methods", can(`${FORM}.create`), async (req, res) => {
+  try {
+    const startDate = parseStartDate(req.body.startDate);
+    const method = parseMethod(req.body.method);
+    if (await prisma.accountingAdvancePaymentSetting.findUnique({ where: { startDate } })) throw new Error("برای این تاریخ شروع اعتبار قبلاً روش شناسایی ثبت شده است");
+    const created = await prisma.accountingAdvancePaymentSetting.create({ data: { startDate, method: method as any } });
+    invalidateAccountingSettingsCache();
+    res.status(201).json({ id: created.id, startDate: created.startDate, method: created.method });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در ثبت روش شناسایی پیش‌پرداخت ارزی خرید" });
+  }
+});
+
+router.put("/accounting-settings/advance-payment-methods/:id", can(`${FORM}.edit`), async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    if (!(await prisma.accountingAdvancePaymentSetting.findUnique({ where: { id } }))) return res.status(404).json({ error: "رکورد یافت نشد" });
+    const startDate = parseStartDate(req.body.startDate);
+    const method = parseMethod(req.body.method);
+    const dup = await prisma.accountingAdvancePaymentSetting.findFirst({ where: { startDate, NOT: { id } } });
+    if (dup) throw new Error("برای این تاریخ شروع اعتبار قبلاً روش شناسایی ثبت شده است");
+    const updated = await prisma.accountingAdvancePaymentSetting.update({ where: { id }, data: { startDate, method: method as any } });
+    invalidateAccountingSettingsCache();
+    res.json({ id: updated.id, startDate: updated.startDate, method: updated.method });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در ویرایش روش شناسایی پیش‌پرداخت ارزی خرید" });
+  }
+});
+
+router.delete("/accounting-settings/advance-payment-methods/:id", can(`${FORM}.delete`), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!(await prisma.accountingAdvancePaymentSetting.findUnique({ where: { id } }))) return res.status(404).json({ error: "رکورد یافت نشد" });
+  await prisma.accountingAdvancePaymentSetting.delete({ where: { id } });
+  invalidateAccountingSettingsCache();
+  res.status(204).send();
+});
+
 export default router;

@@ -1,0 +1,41 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.recomputeCashBoxHasTransactions = recomputeCashBoxHasTransactions;
+exports.recomputeBankAccountHasTransactions = recomputeBankAccountHasTransactions;
+const prisma_1 = require("../lib/prisma");
+// =========================================================================
+// همان الگوی warehouseTracking.ts (recomputeGoodsItemHasTransactions/recomputeWarehouseHasTransactions):
+// CashBox.hasTransactions / BankAccount.hasTransactions یک کش ساده است که فقط در «تایید» سند دریافت،
+// پرداخت، یا واگذاری چک به بانک true می‌شود تا حذف صندوق/حساب بانکیِ دارای گردش مسدود شود. اما
+// «برگشت از تایید» فقط وضعیت خودِ سند را به DRAFT برمی‌گرداند و این کش را دست‌نخورده (true) رها
+// می‌کند؛ در نتیجه حتی بعد از برگشت از تایید و حذف کامل سند، صندوق/حساب بانکی برای همیشه «دارای
+// گردش» گزارش می‌شود، هرچند هیچ سند «تایید»شده‌ی دیگری به آن ارجاع نمی‌دهد. این دو تابع، بعد از هر
+// «برگشت از تایید»، وضعیت واقعی را دوباره محاسبه و کش را اصلاح می‌کنند.
+// =========================================================================
+async function recomputeCashBoxHasTransactions(cashBoxIds) {
+    const ids = Array.from(new Set(cashBoxIds));
+    for (const cashBoxId of ids) {
+        // eslint-disable-next-line no-await-in-loop
+        const [receiptLine, paymentLine, settlementLine] = await Promise.all([
+            prisma_1.prisma.receiptInstrumentLine.findFirst({ where: { cashBoxId, type: "CASH", receipt: { status: "APPROVED" } } }),
+            prisma_1.prisma.paymentInstrumentLine.findFirst({ where: { cashBoxId, type: "CASH", payment: { status: "APPROVED" } } }),
+            prisma_1.prisma.paymentSettlementLine.findFirst({ where: { cashBoxId, payment: { status: "APPROVED" } } }),
+        ]);
+        // eslint-disable-next-line no-await-in-loop
+        await prisma_1.prisma.cashBox.update({ where: { id: cashBoxId }, data: { hasTransactions: !!(receiptLine || paymentLine || settlementLine) } });
+    }
+}
+async function recomputeBankAccountHasTransactions(bankAccountIds) {
+    const ids = Array.from(new Set(bankAccountIds));
+    for (const bankAccountId of ids) {
+        // eslint-disable-next-line no-await-in-loop
+        const [receiptLine, paymentLine, deposit, settlementLine] = await Promise.all([
+            prisma_1.prisma.receiptInstrumentLine.findFirst({ where: { bankAccountId, receipt: { status: "APPROVED" } } }),
+            prisma_1.prisma.paymentInstrumentLine.findFirst({ where: { bankAccountId, payment: { status: "APPROVED" } } }),
+            prisma_1.prisma.chequeDeposit.findFirst({ where: { bankAccountId, status: "APPROVED" } }),
+            prisma_1.prisma.paymentSettlementLine.findFirst({ where: { bankAccountId, payment: { status: "APPROVED" } } }),
+        ]);
+        // eslint-disable-next-line no-await-in-loop
+        await prisma_1.prisma.bankAccount.update({ where: { id: bankAccountId }, data: { hasTransactions: !!(receiptLine || paymentLine || deposit || settlementLine) } });
+    }
+}

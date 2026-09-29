@@ -50,7 +50,7 @@ interface PaymentTypeOption {
 }
 // انواع پرداختِ «به بانک»/«به صندوق» معین را از حساب بانکی/صندوقِ خودِ ردیف می‌گیرند که این فرم و «خلاصه
 // تنخواه» ندارند؛ پس این دو ماهیت اصلاً در انتخابگر نوع پرداخت تنخواه ارائه نمی‌شوند (تصمیم صریح کاربر)
-const PETTY_CASH_INELIGIBLE_NATURES = new Set(["TO_BANK", "TO_CASH_BOX"]);
+const PETTY_CASH_INELIGIBLE_NATURES = new Set(["TO_BANK", "TO_CASH_BOX", "TO_PETTY_CASH"]);
 type BasisType = Exclude<PaymentTypeOption["basisType"], "NONE">;
 const BASIS_FIELD: Record<BasisType, "purchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
   PURCHASE_INVOICE: "purchaseInvoiceId",
@@ -125,7 +125,7 @@ function PettyCashPaymentList() {
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint text="ثبت پرداخت‌های تنخواه — بدون سند حسابداری" title="پرداخت تنخواه" />
+          <InfoHint text="ثبت پرداخت‌های تنخواه — بدون سند حسابداری" title="پرداخت از تنخواه" />
           <NewRecordButton path="/petty-cash-payments/new" />
           <RefreshButton onClick={reload} />
         </div>
@@ -331,7 +331,7 @@ function PettyCashPaymentForm({ editId }: { editId?: number }) {
 
   return (
     <FormPage
-      title={editId ? "ویرایش پرداخت تنخواه" : "پرداخت تنخواه جدید"}
+      title={editId ? "ویرایش پرداخت از تنخواه" : "پرداخت از تنخواه جدید"}
       formId="petty-cash-payment-form"
       closePath="/petty-cash-payments"
       newPath="/petty-cash-payments/new"

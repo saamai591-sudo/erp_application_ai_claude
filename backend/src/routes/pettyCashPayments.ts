@@ -5,6 +5,7 @@ import { assertRecordNotStale } from "../utils/concurrency";
 import { candidatesForBasisType, BasisType, BasisCandidate } from "../services/paymentBasisCandidates";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
+import { assertPettyCashRunningBalanceNotNegative } from "../services/pettyCashBalanceService";
 
 // «پرداخت تنخواه» (مدیریت خزانه › پرداخت): سند ساده‌ی ثبتِ برداشت از یک تنخواه — طبق تصمیم صریح کاربر، فعلاً بدون
 // سند حسابداری/گردش تایید (فقط ثبت اطلاعات). basisType از خودِ PaymentType انتخاب‌شده می‌آید (هر نوع پرداخت
@@ -13,8 +14,8 @@ import { findFormPrefix } from "../authz/registry";
 //  - basisType=NONE ⇐⇒ هیچ‌کدام از سه فیلد سند مبنا پر نمی‌شود.
 //  - وگرنه دقیقاً یکی از purchaseInvoiceId/salesInvoiceId/purchaseOrderId (متناظر با basisType) الزامی است، طرف‌حساب باید
 //    تامین‌کننده (فاکتور/سفارش خرید) یا مشتری (فاکتور فروش) باشد، و تاریخ سند مبنا باید از تاریخ این پرداخت کوچکتر باشد.
-// کنترل مانده منفی: اگر تنخواه‌دارِ انتخاب‌شده controlNegativeBalance=true باشد، مجموع همه‌ی پرداخت‌های ثبت‌شده برای هر
-// تنخواه‌دار همان تنخواه هرگز از سقف تنخواه (PettyCash.limitAmount) بیشتر نمی‌شود.
+// کنترل مانده منفی: اگر تنخواه‌دارِ انتخاب‌شده controlNegativeBalance=true باشد، مانده‌ی جاریِ تنخواه (از صفر شروع
+// می‌شود، نه از سقف تنخواه — services/pettyCashBalanceService.ts) در هیچ لحظه‌ای از ترتیب زمانیِ تراکنش‌ها نباید منفی شود.
 
 const BASIS_FIELD: Record<Exclude<BasisType, "NONE">, "purchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
   PURCHASE_INVOICE: "purchaseInvoiceId",
@@ -31,6 +32,7 @@ const INCLUDE = {
       id: true,
       detailCode: true,
       pettyCash: { select: { id: true, detailCode: true, title: true, currencyId: true, limitAmount: true, currency: { select: { title: true, decimalPlaces: true } } } },
+      party: { select: { id: true, detailCode: true, category: true, firstName: true, lastName: true, name: true } },
     },
   },
   party: { select: { id: true, detailCode: true, category: true, firstName: true, lastName: true, name: true } },
@@ -63,21 +65,6 @@ interface Body {
   updatedAt?: string;
 }
 
-/** کنترل مانده منفی: مجموع پرداخت‌های ثبت‌شده‌ی همه‌ی تنخواه‌دارهای همان تنخواه (به‌جز رکورد در حال ویرایش) + این پرداخت، نباید از سقف تنخواه بیشتر شود */
-async function assertNegativeBalanceControl(pettyCashId: number, limitAmount: number, amount: number, excludeId?: number) {
-  const custodians = await prisma.pettyCashCustodian.findMany({ where: { pettyCashId }, select: { id: true } });
-  const custodianIds = custodians.map((c) => c.id);
-  const agg = await prisma.pettyCashPayment.aggregate({
-    where: { custodianId: { in: custodianIds }, ...(excludeId ? { NOT: { id: excludeId } } : {}) },
-    _sum: { amount: true },
-  });
-  const priorTotal = Number(agg._sum.amount || 0);
-  if (priorTotal + amount > limitAmount + 0.001) {
-    throw new Error(
-      `این پرداخت باعث منفی‌شدن مانده‌ی تنخواه می‌شود (سقف تنخواه: ${limitAmount.toLocaleString("fa-IR")} — مانده‌ی قابل پرداخت: ${Math.max(0, limitAmount - priorTotal).toLocaleString("fa-IR")})`
-    );
-  }
-}
 
 /** اعتبارسنجی/محاسبه‌ی سند مبنا طبق basisType نوع پرداخت؛ خروجی چیزی است که مستقیم در data ذخیره می‌شود.
  * این فرم تک‌ردیفی است و تبدیل ارز ندارد (برخلاف «موضوعات پرداخت» سند پرداخت)، پس سند مبنا باید دقیقاً هم‌ارز تنخواه باشد. */
@@ -142,8 +129,8 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
     const paymentType = await prisma.paymentType.findUnique({ where: { id: body.paymentTypeId } });
     if (!paymentType) return res.status(400).json({ error: "نوع پرداخت نامعتبر است" });
     if (!paymentType.isActive) return res.status(400).json({ error: "نوع پرداخت انتخاب‌شده غیرفعال است" });
-    if (paymentType.nature === "TO_BANK" || paymentType.nature === "TO_CASH_BOX") {
-      return res.status(400).json({ error: "این ماهیت نوع پرداخت (به بانک/به صندوق) برای پرداخت تنخواه قابل استفاده نیست" });
+    if (paymentType.nature === "TO_BANK" || paymentType.nature === "TO_CASH_BOX" || paymentType.nature === "TO_PETTY_CASH") {
+      return res.status(400).json({ error: "این ماهیت نوع پرداخت (به بانک/به صندوق/به تنخواه) برای پرداخت تنخواه قابل استفاده نیست" });
     }
 
     const basisType = paymentType.basisType as BasisType;
@@ -155,7 +142,7 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
     const basisIds = await resolveBasis(basisType, body, undefined, date, amount, custodian.pettyCash.currencyId);
 
     if (custodian.controlNegativeBalance) {
-      await assertNegativeBalanceControl(custodian.pettyCashId, Number(custodian.pettyCash.limitAmount), amount);
+      await assertPettyCashRunningBalanceNotNegative(custodian.pettyCashId, { pendingEvents: [{ date, amount: -amount }] });
     }
 
     const created = await prisma.pettyCashPayment.create({
@@ -211,8 +198,8 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
     const paymentType = await prisma.paymentType.findUnique({ where: { id: body.paymentTypeId } });
     if (!paymentType) return res.status(400).json({ error: "نوع پرداخت نامعتبر است" });
     if (!paymentType.isActive && paymentType.id !== existing.paymentTypeId) return res.status(400).json({ error: "نوع پرداخت انتخاب‌شده غیرفعال است" });
-    if (paymentType.nature === "TO_BANK" || paymentType.nature === "TO_CASH_BOX") {
-      return res.status(400).json({ error: "این ماهیت نوع پرداخت (به بانک/به صندوق) برای پرداخت تنخواه قابل استفاده نیست" });
+    if (paymentType.nature === "TO_BANK" || paymentType.nature === "TO_CASH_BOX" || paymentType.nature === "TO_PETTY_CASH") {
+      return res.status(400).json({ error: "این ماهیت نوع پرداخت (به بانک/به صندوق/به تنخواه) برای پرداخت تنخواه قابل استفاده نیست" });
     }
 
     const basisType = paymentType.basisType as BasisType;
@@ -224,7 +211,10 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
     const basisIds = await resolveBasis(basisType, body, id, date, amount, custodian.pettyCash.currencyId);
 
     if (custodian.controlNegativeBalance) {
-      await assertNegativeBalanceControl(custodian.pettyCashId, Number(custodian.pettyCash.limitAmount), amount, id);
+      await assertPettyCashRunningBalanceNotNegative(custodian.pettyCashId, {
+        excludePettyCashPaymentId: id,
+        pendingEvents: [{ date, amount: -amount }],
+      });
     }
 
     const updated = await prisma.pettyCashPayment.update({

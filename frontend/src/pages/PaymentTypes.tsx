@@ -29,6 +29,7 @@ const NATURE_FA: Record<string, string> = {
   SALES_VAT: "ارزش افزوده فروش",
   TO_BANK: "به بانک",
   TO_CASH_BOX: "به صندوق",
+  TO_PETTY_CASH: "به تنخواه",
 };
 
 const BASIS_TYPE_FA: Record<string, string> = {
@@ -47,10 +48,11 @@ const ALLOWED_BASIS_TYPES: Record<string, string[]> = {
   SALES_VAT: ["NONE", "SALES_INVOICE"],
   TO_BANK: ["NONE"],
   TO_CASH_BOX: ["NONE"],
+  TO_PETTY_CASH: ["NONE"],
 };
 
-// ماهیت‌های «به بانک»/«به صندوق» معین ندارند: معین در صدور سند از تعیین حسابهای معینِ حساب بانکی/صندوقِ انتخاب‌شده در اعلامیه پرداخت می‌آید
-const ACCOUNTLESS_NATURES = ["TO_BANK", "TO_CASH_BOX"];
+// ماهیت‌های «به بانک»/«به صندوق»/«به تنخواه» معین ندارند: معین در صدور سند از تعیین حسابهای معینِ حساب بانکی/صندوق/تنخواهِ انتخاب‌شده در اعلامیه پرداخت می‌آید
+const ACCOUNTLESS_NATURES = ["TO_BANK", "TO_CASH_BOX", "TO_PETTY_CASH"];
 
 interface Level { id: number; title: string }
 interface AccountRow {
@@ -310,7 +312,7 @@ function PaymentTypeForm({ editId }: { editId?: number }) {
           {isAccountless && form.basisType === "NONE" && (
             <div className="form-field">
               <label>معین</label>
-              <input value="بر اساس حساب بانکی/صندوق انتخاب‌شده در اعلامیه پرداخت" disabled />
+              <input value="بر اساس حساب بانکی/صندوق/تنخواه‌دار انتخاب‌شده در اعلامیه پرداخت" disabled />
             </div>
           )}
           <div className="form-field">

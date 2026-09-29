@@ -83,6 +83,9 @@
   --nc-mod-accounting: #a3e635;
   --nc-mod-goods: #e0b48f;
   --nc-mod-warehouse: #7fc9c9;
+  --nc-mod-supply: #f0a3a3;
+  --nc-mod-sales: #e8cf7a;
+  --nc-mod-treasury: #cf94cf;
   --nc-sub-ops: #e8cf7a;
   --nc-sub-structure: #7fa3d9;
   --nc-sub-report: #d994b3;
@@ -155,6 +158,9 @@
   --nc-mod-accounting: #34d399;
   --nc-mod-goods: #e0b48f;
   --nc-mod-warehouse: #7fc9c9;
+  --nc-mod-supply: #f0a3a3;
+  --nc-mod-sales: #e8cf7a;
+  --nc-mod-treasury: #cf94cf;
   --nc-sub-ops: #e8cf7a;
   --nc-sub-structure: #7fa3d9;
   --nc-sub-report: #d994b3;
@@ -224,6 +230,9 @@
   --nc-mod-accounting: #0f7a54;
   --nc-mod-goods: #8a641f;
   --nc-mod-warehouse: #1f8a8a;
+  --nc-mod-supply: #a13d3d;
+  --nc-mod-sales: #8a7318;
+  --nc-mod-treasury: #8a3a7d;
   --nc-sub-ops: #8a7318;
   --nc-sub-structure: #1f5a8a;
   --nc-sub-report: #8a3a5a;
@@ -294,6 +303,9 @@
   --nc-mod-accounting: #34d399;
   --nc-mod-goods: #e0b48f;
   --nc-mod-warehouse: #7fc9c9;
+  --nc-mod-supply: #f0a3a3;
+  --nc-mod-sales: #e8cf7a;
+  --nc-mod-treasury: #cf94cf;
   --nc-sub-ops: #e8cf7a;
   --nc-sub-structure: #7fa3d9;
   --nc-sub-report: #d994b3;
@@ -362,6 +374,9 @@
   --nc-mod-accounting: #0f7a54;
   --nc-mod-goods: #8a641f;
   --nc-mod-warehouse: #1f8a8a;
+  --nc-mod-supply: #a13d3d;
+  --nc-mod-sales: #8a7318;
+  --nc-mod-treasury: #8a3a7d;
   --nc-sub-ops: #8a7318;
   --nc-sub-structure: #1f5a8a;
   --nc-sub-report: #8a3a5a;
@@ -431,9 +446,49 @@ body {
   padding: 20px 14px;
   flex-shrink: 0;
   overflow-y: auto;
+  transition: width 0.15s ease, padding 0.15s ease;
 }
+/* حالت جمع‌شده: فقط ستون آیکن ماژول‌ها — زیرماژول‌ها/فرم‌ها با کلیک روی هر آیکن به‌صورت فلای‌اوت شناور
+   (ModuleFlyout در Layout.tsx) نشان داده می‌شوند، نه آکاردئون داخل خودِ سایدبار */
+.sidebar.sidebar-collapsed { width: 60px; padding: 14px 8px; }
 
-.sidebar h1 { font-size: 16px; margin: 0 0 20px; padding: 0 8px; font-weight: 700; letter-spacing: -0.01em; }
+.sidebar h1 { font-size: 16px; margin: 0; padding: 0 8px; font-weight: 700; letter-spacing: -0.01em; }
+
+.sidebar-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.sidebar-collapsed .sidebar-head { justify-content: center; }
+.sidebar-toggle-btn {
+  background: none;
+  border: none;
+  color: var(--sidebar-ink);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  opacity: 0.75;
+  transition: background-color 0.15s, opacity 0.15s;
+}
+.sidebar-toggle-btn:hover { background: var(--menu-hover-bg); opacity: 1; }
+
+/* حالت جمع‌شده: دکمه‌ی آیکنِ هر ماژول — هم‌رنگ با module-title خودش، فقط بدون متن/چوران */
+.module-icon-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--menu-accent-1-bg);
+  border: none;
+  border-right: 3px solid var(--menu-accent-1);
+  border-radius: 8px;
+  padding: 10px 0;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.module-icon-btn:hover, .module-icon-btn.active { background: var(--menu-accent-1-bg-hover); }
+.module-icon-btn .module-icon svg { width: 19px; height: 19px; }
 
 .nav-module { margin-bottom: 8px; }
 .module-title {
@@ -463,6 +518,9 @@ body {
 .module-icon.mod-ic-calculator { color: var(--nc-mod-accounting); }
 .module-icon.mod-ic-box { color: var(--nc-mod-goods); }
 .module-icon.mod-ic-warehouse { color: var(--nc-mod-warehouse); }
+.module-icon.mod-ic-truck { color: var(--nc-mod-supply); }
+.module-icon.mod-ic-cart { color: var(--nc-mod-sales); }
+.module-icon.mod-ic-wallet { color: var(--nc-mod-treasury); }
 
 .nav-submodule { margin: 4px 0 8px 0; padding-right: 8px; margin-right: 10px; }
 .submodule-title {
@@ -562,6 +620,61 @@ body {
 .nav-form-icon.ic-ledger { color: var(--nc-ledger); }
 .nav-item .nav-label:hover .nav-form-icon { color: var(--menu-form-icon-hover); filter: brightness(1.1) saturate(1.1); }
 .nav-item .nav-label.active-new .nav-form-icon { color: var(--menu-accent-1); filter: none; }
+
+/* فلای‌اوت ماژول در حالت جمع‌شده‌ی سایدبار (Layout.tsx#ModuleFlyout) — با createPortal به document.body
+   پورتال می‌شود (هم‌الگوی Modal.tsx)، پس هیچ استایل/overflow سایدبار روی آن اثر نمی‌گذارد */
+.nav-flyout {
+  min-width: 230px;
+  max-width: 300px;
+  overflow-y: auto;
+  background: var(--sidebar-bg);
+  color: var(--sidebar-ink);
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
+  padding: 10px;
+  z-index: 500;
+}
+.nav-flyout-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--menu-title-ink);
+  padding: 2px 6px 10px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--menu-hover-bg);
+}
+.nav-flyout-header .module-icon svg { width: 17px; height: 17px; color: inherit; }
+.nav-flyout-header .submodule-icon svg { width: 15px; height: 15px; color: inherit; }
+
+/* سطح اول فلای‌اوت (طبق تصمیم صریح کاربر): فقط ردیف‌های قابل‌کلیکِ زیرماژول‌ها، بدون فرم‌ها — کلیک هر
+   ردیف، پنل دومِ کنارش (فرم‌های همان زیرماژول) را باز می‌کند؛ هر دو پنل هم‌زمان روی صفحه می‌مانند
+   (آبشاری/کنار هم، نه جایگزینی محتوای همان پنل — طبق نمونه‌ی تصویریِ کاربر) */
+.nav-flyout-submodule-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  color: var(--menu-item-text);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 8px;
+  margin-bottom: 2px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: right;
+  transition: background-color 0.15s, color 0.15s;
+}
+.nav-flyout-submodule-row:hover, .nav-flyout-submodule-row.active { background: var(--menu-item-bg-hover); color: var(--menu-title-ink); }
+.nav-flyout-submodule-row .submodule-icon svg { width: 15px; height: 15px; color: inherit; }
+.nav-flyout-submodule-row svg:last-child { color: var(--menu-folder-icon); }
+.nav-flyout-submodule-row.active svg:last-child { color: var(--menu-accent-1); }
+
+.nav-flyout .nav-item { margin-bottom: 2px; }
 
 .welcome-page {
   display: flex;
@@ -1264,7 +1377,14 @@ body {
 .toolbar-icon-btn:hover { background: var(--bg); color: var(--ink); }
 .toolbar-icon-btn.primary { background: var(--primary); color: var(--primary-ink); }
 .toolbar-icon-btn.primary:hover { background: var(--primary); filter: brightness(1.1); }
+.toolbar-icon-btn.danger { color: var(--danger, #c0392b); }
+.toolbar-icon-btn.danger:hover { background: var(--danger, #c0392b); color: #fff; }
+.toolbar-icon-btn.active { background: var(--bg); color: var(--primary); }
 .toolbar-icon-btn:disabled { opacity: .5; cursor: not-allowed; }
+.line-grid-toolbar { flex-wrap: wrap; gap: 6px; }
+.line-grid-toolbar-icons { display: flex; align-items: center; gap: 2px; }
+.line-grid-filter-input { flex-basis: 100%; margin-top: 4px; }
+.line-grid-row-selected { background: var(--row-selected, #e7ecfb); }
 .form-toolbar-left .toolbar-icon-btn,
 .form-toolbar-right .toolbar-icon-btn {
   width: 27px; height: 27px; border-radius: 6px;

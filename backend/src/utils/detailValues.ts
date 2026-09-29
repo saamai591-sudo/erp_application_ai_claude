@@ -113,3 +113,47 @@ export function resolveAccountDetailFields(
   if (account.detailType3Id === detailTypeId) return { detail3Code: code };
   return {};
 }
+
+// کدِ ثابتِ نوع‌های تفصیلِ عمومی سیستم (فیلد DetailType.code، همان مقادیر هاردکد در routes/parties.ts،
+// routes/pettyCashCustodians.ts، routes/pettyCashes.ts). توجه: این مقدار «کد» است، نه شناسه‌ی ردیف
+// (DetailType.id) در پایگاه‌داده — چون این نوع‌های تفصیل هم مثل هر نوع تفصیل دیگری از همان فرم «نوع تفصیل»
+// ساخته می‌شوند، id واقعی‌شان به ترتیب ایجادشان در هر محیط بستگی دارد و هرگز نباید با کدشان یکی فرض شود
+// (این دقیقاً همان اشتباهی بود که پیش از این اصلاح اینجا وجود داشت: در محیطی که این id با کدش برابر نبود
+// — مثلاً چون قبل از افزودن نوع تفصیل «تنخواه»/«تنخواه‌دار» تفصیل‌های دیگری هم تعریف شده بودند — تطبیق
+// همیشه بی‌صدا شکست می‌خورد). resolveSystemDetailTypeId زیر، تبدیل صحیح کد به id را انجام می‌دهد.
+export const DETAIL_TYPE_CODE_PARTY = 1;
+export const DETAIL_TYPE_CODE_PETTY_CASH = 5;
+export const DETAIL_TYPE_CODE_PETTY_CASH_CUSTODIAN = 6;
+
+const systemDetailTypeIdCache = new Map<number, number>();
+
+/** کدِ ثابتِ یک نوع تفصیل سیستمی (DETAIL_TYPE_CODE_*) را به شناسه‌ی واقعی ردیفش در پایگاه‌داده تبدیل
+ * می‌کند. نتیجه کش می‌شود چون این نگاشت در طول اجرای برنامه هرگز عوض نمی‌شود. */
+export async function resolveSystemDetailTypeId(code: number): Promise<number> {
+  const cached = systemDetailTypeIdCache.get(code);
+  if (cached != null) return cached;
+  const detailType = await prisma.detailType.findUnique({ where: { code } });
+  if (!detailType) throw new Error(`نوع تفصیل سیستمی با کد ${code} در پایگاه‌داده یافت نشد`);
+  systemDetailTypeIdCache.set(code, detailType.id);
+  return detailType.id;
+}
+
+/** طبق تصمیم صریح کاربر: در هر جایی که معینِ بدهکار/بستانکار سند از یک تنخواه‌دارِ انتخاب‌شده تعیین می‌شود
+ * (سند پرداخت با ماهیت «به تنخواه»، سند خلاصه تنخواه)، تفصیل هر یک از سه سطح معین — هرکدام به هر نوع
+ * تفصیلی از این سه وصل باشد (تنخواه/تنخواه‌دار/طرف‌حساب) — باید از مقدار متناظرش در همان تنخواه‌دار پر شود؛
+ * یک معین می‌تواند هم‌زمان در سطح‌های مختلفش به بیش از یکی از این سه نوع وصل باشد. */
+export async function resolveCustodianDetailFields(
+  account: { detailType1Id: number | null; detailType2Id: number | null; detailType3Id: number | null },
+  codes: { pettyCash?: string | null; custodian?: string | null; party?: string | null }
+): Promise<{ detail1Code?: string; detail2Code?: string; detail3Code?: string }> {
+  const [pettyCashTypeId, custodianTypeId, partyTypeId] = await Promise.all([
+    resolveSystemDetailTypeId(DETAIL_TYPE_CODE_PETTY_CASH),
+    resolveSystemDetailTypeId(DETAIL_TYPE_CODE_PETTY_CASH_CUSTODIAN),
+    resolveSystemDetailTypeId(DETAIL_TYPE_CODE_PARTY),
+  ]);
+  return {
+    ...resolveAccountDetailFields(account, pettyCashTypeId, codes.pettyCash ?? null),
+    ...resolveAccountDetailFields(account, custodianTypeId, codes.custodian ?? null),
+    ...resolveAccountDetailFields(account, partyTypeId, codes.party ?? null),
+  };
+}

@@ -14,6 +14,15 @@ import { issueJournalEntry, IssueLineInput } from "../services/journalEntryServi
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, roundToCurrencyDecimals, ConversionCurrency } from "../utils/currencyConversion";
+import {
+  getPurchaseInvoiceAdvanceState,
+  savePurchaseInvoiceAdvanceAllocations,
+  assertAdvanceAllocationsStillValid,
+  purchaseInvoiceNetTotal,
+  computePurchaseInvoiceLineCosts,
+} from "../services/purchaseInvoiceAdvanceService";
+import { getAdvancePaymentMethodForDate } from "../services/accountingSettingsService";
+import { resolvePaymentSubjectAccount } from "../services/paymentSubjectAccount";
 
 const FORM = findFormPrefix("purchase-invoices");
 
@@ -607,6 +616,8 @@ router.put("/purchase-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
 
     const cleanedLines = await validateLines(body.lines, body.basis, party.detailCode, currency, fxRate, baseCurrency, date, id);
     const cleanedOtherCostLines = await validateOtherCostLines(body.otherCostLines || [], currency, fxRate, baseCurrency, date);
+    // اگر تخصیص پیش‌پرداختی برای این فاکتور ثبت شده، ویرایش نباید آن را با طرف‌حساب/ارز/تاریخ/مبلغ جدید ناسازگار کند
+    await assertAdvanceAllocationsStillValid(id, { partyId: body.partyId, currencyId: body.currencyId, date, netTotal: purchaseInvoiceNetTotal(cleanedLines) });
 
     await prisma.$transaction([
       prisma.purchaseInvoiceLine.deleteMany({ where: { purchaseInvoiceId: id } }),
@@ -658,6 +669,28 @@ router.delete("/purchase-invoices/:id", can(`${FORM}.delete`), async (req, res) 
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل حذف هستند" });
   await prisma.purchaseInvoice.delete({ where: { id } });
   res.status(204).send();
+});
+
+// =========================================================================
+// تخصیص پیش‌پرداخت (Documents/تخصیص پیش‌پرداخت در فاکتور خرید.md) — عملیات مستقل از ویرایش اطلاعات اصلی فاکتور؛ کنترل‌ها در
+// services/purchaseInvoiceAdvanceService.ts (شامل قفل بر اساس «گردش»/تاییدِ فاکتور، قابل توسعه با یک مورد به PURCHASE_INVOICE_ADVANCE_LOCKS).
+// =========================================================================
+
+router.get("/purchase-invoices/:id/advance-allocations", can(`${FORM}.view`), async (req, res) => {
+  try {
+    res.json(await getPurchaseInvoiceAdvanceState(Number(req.params.id)));
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در دریافت اطلاعات پیش‌پرداخت" });
+  }
+});
+
+router.put("/purchase-invoices/:id/advance-allocations", can(`${FORM}.allocateAdvance`), async (req, res) => {
+  try {
+    await savePurchaseInvoiceAdvanceAllocations(Number(req.params.id), req.body?.allocations);
+    res.json(await getPurchaseInvoiceAdvanceState(Number(req.params.id)));
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در ثبت تخصیص پیش‌پرداخت" });
+  }
 });
 
 // =========================================================================
@@ -729,13 +762,24 @@ router.post("/purchase-invoices/:id/approve", can(`${FORM}.approve`), async (req
       if (!receiptDocs.has(l.document.id)) receiptDocs.set(l.document.id, { warehouseId: l.document.warehouseId!, date: l.document.date });
     }
 
+    // سهم تسعیر پیش‌پرداخت خرید (Documents/تخصیص پیش‌پرداخت در فاکتور خرید.md) — قبل از تراکنش محاسبه می‌شود چون خودش کوئری‌های
+    // مستقل دارد (ممکن است خطای «روش تعریف‌نشده» بدهد، که باید تایید را کامل رد کند، نه نیمه‌کاره)
+    const lineCosts = await computePurchaseInvoiceLineCosts(id);
+    const costByLineId = new Map(lineCosts.map((c) => [c.lineId, c]));
+
     // فاکتور خرید تنها راه قیمت‌گذاری رسید انبار خرید است (کاربر انبار هرگز مستقیم فی وارد نمی‌کند) —
     // پس تایید فاکتور، رسید(های) مبنا را هم Finalized می‌کند تا مقدار/سرصفحه‌ی آن‌ها قفل شود.
     await prisma.$transaction(async (tx) => {
+      for (const l of invoice.lines) {
+        const c = costByLineId.get(l.id);
+        if (c) await tx.purchaseInvoiceLine.update({ where: { id: l.id }, data: { cost: c.cost, exchangeRateAdjustmentShare: c.exchangeRateAdjustmentShare } });
+      }
       for (const l of receiptLines) {
+        // انبار هیچ مفهوم «ارز» ندارد (همه‌جا فقط ارز مبنا) — Cost طبق تصمیم صریح کاربر خودش به ارز مبناست
+        // (services/purchaseInvoiceAdvanceService.ts#computePurchaseInvoiceLineCosts)، پس بی‌واسطه نوشته می‌شود.
         await setLineAmount(tx, {
           lineId: l.sourceInventoryLineId!,
-          newAmount: Number(l.amount),
+          newAmount: Number(costByLineId.get(l.id)?.cost ?? l.baseAmount),
           priceType: "CROSS_ENTITY",
           createdById: req.user?.id ?? null,
         });
@@ -820,6 +864,13 @@ router.post("/purchase-invoices/:id/unapprove", can(`${FORM}.unapprove`), async 
   const fxRate = Number(invoice.fxRate);
 
   await prisma.$transaction(async (tx) => {
+    // سهم تسعیر پیش‌پرداخت (اگر تایید قبلی محاسبه کرده بود) به صفر برمی‌گردد؛ اگر فاکتور دوباره تایید شود، از نو محاسبه می‌شود
+    // — cost به ارز مبناست، پس با baseAmount (نه amount) مقایسه/ریست می‌شود.
+    for (const l of invoice.lines) {
+      if (Number(l.exchangeRateAdjustmentShare) !== 0 || Number(l.cost) !== Number(l.baseAmount)) {
+        await tx.purchaseInvoiceLine.update({ where: { id: l.id }, data: { cost: l.baseAmount, exchangeRateAdjustmentShare: 0 } });
+      }
+    }
     for (const lineId of receiptLineIds) {
       // طبق تصمیم صریح کاربر: برگشت‌ازتایید یک رکورد صفرکننده‌ی تازه اضافه نمی‌کند (که مبلغ رسید را
       // صفر می‌کرد)؛ همان رکورد CROSS_ENTITY لحظه‌ی تایید کامل حذف می‌شود تا مبلغ به مقدار قبل از تایید
@@ -940,6 +991,9 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
     const creditByAccount = new Map<number, { amount: number; baseAmount: number; account: (typeof settings)[number]["account"] }>();
     const vatDebitByAccount = new Map<number, { amount: number; account: (typeof settings)[number]["account"] }>();
     const costAllocationIds: number[] = [];
+    // برای تخصیص پیش‌پرداخت + رویه‌ی «نرخ تاریخی» روی فاکتورهای بدون‌مبنا (بدون مکانیزم Cost/قیمت‌گذاری رسید انبار)؛
+    // اولین معین بدهکار ردیف‌های کالا، برای یک ردیف تعدیل/سود-زیان تسعیر مستقل، هم‌الگوی contra درآمد فروش در سند فاکتور فروش.
+    let firstGoodsDebitSetting: (typeof settings)[number] | undefined;
 
     const payableSetting = findPayableSetting((s) => s.purchaseTypeId === invoice.purchaseTypeId);
     if (!payableSetting) {
@@ -986,13 +1040,22 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
         }
       }
 
+      if (!firstGoodsDebitSetting) firstGoodsDebitSetting = debitSetting;
+
+      // بدهکار کالا/موجودی به «Cost» ردیف ثبت می‌شود، نه amount خام — Cost = baseAmount مگر این‌که تخصیص پیش‌پرداخت +
+      // رویه‌ی «نرخ تاریخی» سهمی به آن اضافه کرده باشد (services/purchaseInvoiceAdvanceService.ts#computePurchaseInvoiceLineCosts،
+      // فقط برای فاکتورهای مبنای رسید انبار)؛ برای فاکتور بدون‌مبنا Cost همیشه برابر baseAmount است و سهم تسعیر پایین‌تر
+      // جداگانه لحاظ می‌شود. Cost طبق تصمیم صریح کاربر به ارز مبناست (چون انبار مفهوم ارز ندارد)؛ فقط وقتی خودِ معین
+      // موجودی ارزی باشد، برعکس (fromBaseCurrencyAmount) به ارز فاکتور برگردانده می‌شود تا این خط سند به ارز آن معین ثبت شود.
+      const costBase = Number(line.cost);
+      const costInvoiceCcy = costBase === baseAmount ? amount : fromBaseCurrencyAmount(costBase, fxRate, invoice.currency);
       const debitDetails = resolveAccountDetailFields(debitSetting.account, partyDetailTypeId, partyDetailCode);
       const debitIsCurrency = debitSetting.account.isCurrency;
       debitLines.push({
         accountId: debitSetting.accountId,
         ...debitDetails,
         currencyId: debitIsCurrency ? invoice.currencyId : baseCurrency.id,
-        debit: debitIsCurrency ? amount : baseAmount,
+        debit: debitIsCurrency ? costInvoiceCcy : costBase,
         credit: 0,
         fxRate: debitIsCurrency ? fxRate : 1,
         description,
@@ -1119,6 +1182,100 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
       }
     }
 
+    // ---------- تخصیص پیش‌پرداخت (Documents/تخصیص پیش‌پرداخت در فاکتور خرید.md) ----------
+    // هر تخصیص: بستانکار «پیش‌پرداخت» (همان معینی که پرداخت بدهکار کرده) به ارزش دفتری/تاریخی، و کاهش بستانکار «پرداختنی خرید» به مبلغ
+    // تخصیص با نرخ فاکتور. اختلاف ارزش ریالی طبق «رویه‌ها و تنظیمات حسابداری» (روش معتبر در تاریخ فاکتور) شناسایی می‌شود:
+    //  • فاکتور مبنای «رسید انبار» + نرخ تاریخی: اختلاف از قبل در Cost/بدهکار «موجودی کالا» لحاظ شده (بالا) — ردیف تعدیل جداگانه لازم نیست.
+    //  • نرخ تاریخ معامله/فاکتور: روی «سود و زیان تسعیر ارز» (diff=hist−atInvoice؛ مثبت=بدهکار، منفی=بستانکار — علامت طوری انتخاب شده که سند بالانس بماند).
+    //  • فاکتور بدون‌مبنا + نرخ تاریخی (بدون مکانیزم Cost): مبلغ خرید ردیف اول با نرخ تاریخی اصلاح می‌شود (اصلاح هزینه/کنترل خرید به‌اندازه‌ی اختلاف).
+    // مبلغ ارزی تخصیص/مانده‌ی قابل پرداخت هرگز تحت‌تأثیر اختلاف نرخ نیست. سند همیشه بالانس است.
+    const advanceCreditLines: IssueLineInput[] = [];
+    const advanceAdjustLines: IssueLineInput[] = [];
+    const purchaseAdvanceAllocations = await prisma.purchaseInvoiceAdvanceAllocation.findMany({
+      where: { purchaseInvoiceId: id },
+      include: { paymentSettlementLine: { include: { payment: true, paymentType: true } } },
+      orderBy: { id: "asc" },
+    });
+    if (purchaseAdvanceAllocations.length > 0) {
+      const invIsBase = invoice.currencyId === baseCurrency.id;
+      let cur = 0;
+      let inv = 0;
+      let hist = 0;
+      for (const a of purchaseAdvanceAllocations) {
+        const l = a.paymentSettlementLine;
+        const amount = Number(a.amount);
+        const resolved = await resolvePaymentSubjectAccount(l.paymentType, {});
+        if (resolved.error || !resolved.account) {
+          errors.push(`برای نوع پرداخت «${l.paymentType.title}» (پیش‌پرداخت پرداخت شماره ${l.payment.number}) معینِ پیش‌پرداخت تعریف نشده است`);
+          continue;
+        }
+        const account = resolved.account;
+        const rowRate = Number(l.fxRate);
+        const rowHist = invIsBase ? amount : toBaseCurrencyAmount(amount, rowRate, invoice.currency, baseCurrency);
+        const rowAtInvoice = invIsBase ? amount : toBaseCurrencyAmount(amount, fxRate, invoice.currency, baseCurrency);
+        cur += amount;
+        inv += rowAtInvoice;
+        hist += rowHist;
+        const details = resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode);
+        const advDescription = `بابت تخصیص پیش‌پرداخت پرداخت شماره ${l.payment.number} به فاکتور خرید ${invoice.number} ${partyTitle(invoice.party)}`.trim();
+        if (account.isCurrency && !invIsBase) {
+          advanceCreditLines.push({ accountId: account.id, ...details, currencyId: invoice.currencyId, debit: 0, credit: amount, fxRate: rowRate, description: advDescription });
+        } else {
+          advanceCreditLines.push({ accountId: account.id, ...details, currencyId: baseCurrency.id, debit: 0, credit: rowHist, fxRate: 1, description: advDescription });
+        }
+      }
+
+      // کاهش بستانکار «پرداختنی خرید» به‌اندازه‌ی پیش‌پرداخت تخصیص‌یافته — creditByAccount هر دو واحد را همزمان نگه می‌دارد
+      // (amount به ارز فاکتور، baseAmount به ارز پایه با نرخ فاکتور)، پس هر دو با واحد خودشان کم می‌شوند؛ ردیف بستانکار نهایی
+      // بسته به ارزی‌بودن معین یکی از این دو را انتخاب می‌کند (پایین‌تر) — دقیقاً هم‌الگوی ساختِ خودِ این سطل بالا.
+      if (cur > 0) {
+        for (const [key, entry] of Array.from(creditByAccount.entries())) {
+          entry.amount -= cur;
+          entry.baseAmount -= inv;
+          if (entry.amount < -0.005 || entry.baseAmount < -0.005) errors.push("مجموع پیش‌پرداخت تخصیص‌یافته از مبلغ پرداختنی فاکتور بیشتر است");
+          if (Math.abs(entry.amount) <= 0.005) creditByAccount.delete(key);
+        }
+      }
+
+      // اختلاف ارزش ریالی (نرخ تاریخی − نرخ فاکتور): برای فاکتور مبنای رسید انبار + رویه‌ی نرخ تاریخی، از قبل در Cost لحاظ شده
+      const diff = Math.round((hist - inv) * 100) / 100;
+      const alreadyInCost = invoice.basis === "WAREHOUSE_RECEIPT" && invoice.lines.some((l) => Number(l.exchangeRateAdjustmentShare) !== 0);
+      if (!invIsBase && Math.abs(diff) > 0.005 && !alreadyInCost) {
+        const method = await getAdvancePaymentMethodForDate(invoice.date);
+        if (!method) {
+          errors.push("روش شناسایی پیش‌پرداخت ارزی خرید برای تاریخ فاکتور در «رویه‌ها و تنظیمات حسابداری» (تنظیمات ارز) تعریف نشده است");
+        } else if (method === "TRANSACTION_DATE_RATE") {
+          const fxAccount = (await prisma.treasuryAccountSetting.findFirst({ where: { accountType: "FX_GAIN_LOSS" }, include: { account: true } }))?.account;
+          if (!fxAccount) {
+            errors.push("حساب «سود و زیان تسعیر ارز» در «تعیین حسابهای معین» تعریف نشده است");
+          } else {
+            advanceAdjustLines.push({
+              accountId: fxAccount.id,
+              currencyId: baseCurrency.id,
+              debit: diff > 0 ? diff : 0,
+              credit: diff < 0 ? -diff : 0,
+              fxRate: 1,
+              description: `تسعیر پیش‌پرداخت تخصیص‌یافته به ${description}`,
+            });
+          }
+        } else if (!firstGoodsDebitSetting) {
+          errors.push("برای اصلاح مبلغ ردیف کالا بر اساس نرخ تاریخی پیش‌پرداخت، حساب بدهکاری در دسترس نیست");
+        } else {
+          const details = resolveAccountDetailFields(firstGoodsDebitSetting.account, partyDetailTypeId, partyDetailCode);
+          advanceAdjustLines.push({
+            accountId: firstGoodsDebitSetting.accountId,
+            ...details,
+            currencyId: baseCurrency.id,
+            debit: diff > 0 ? diff : 0,
+            credit: diff < 0 ? -diff : 0,
+            fxRate: 1,
+            description: `خرید بخش پیش‌پرداخت با نرخ تاریخی — ${description}`,
+          });
+        }
+      }
+      if (errors.length > 0) return res.status(400).json({ error: errors.join("\n") });
+    }
+
     if (errors.length > 0) return res.status(400).json({ error: errors.join("\n") });
 
     const creditLines: IssueLineInput[] = [];
@@ -1162,7 +1319,7 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
       description,
       issuingSystem: "PURCHASE",
       isManual: false,
-      lines: [...debitLines, ...vatDebitLines, ...creditLines],
+      lines: [...debitLines, ...vatDebitLines, ...creditLines, ...advanceCreditLines, ...advanceAdjustLines],
       sources: [{ label: `فاکتور خرید شماره ${invoice.number}`, path: `/purchase-invoices/${invoice.id}/edit` }],
     });
 

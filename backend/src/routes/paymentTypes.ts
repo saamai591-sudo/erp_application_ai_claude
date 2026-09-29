@@ -30,10 +30,11 @@ const ALLOWED_BASIS_TYPES: Record<string, string[]> = {
   SALES_VAT: ["NONE", "SALES_INVOICE"],
   TO_BANK: ["NONE"],
   TO_CASH_BOX: ["NONE"],
+  TO_PETTY_CASH: ["NONE"],
 };
 
-// ماهیت‌هایی که معین حسابداری ندارند: در صدور سند، معین از «تعیین حسابهای معین» حساب بانکی/صندوق انتخاب‌شده در ردیف موضوعات پرداخت می‌آید
-const ACCOUNTLESS_NATURES = ["TO_BANK", "TO_CASH_BOX"];
+// ماهیت‌هایی که معین حسابداری ندارند: در صدور سند، معین از «تعیین حسابهای معین» حساب بانکی/صندوق/تنخواهِ انتخاب‌شده در ردیف موضوعات پرداخت می‌آید
+const ACCOUNTLESS_NATURES = ["TO_BANK", "TO_CASH_BOX", "TO_PETTY_CASH"];
 
 const router = Router();
 

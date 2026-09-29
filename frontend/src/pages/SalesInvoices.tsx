@@ -45,7 +45,11 @@ type Basis = "NO_BASIS" | "SALES_DELIVERY";
 interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null } }
 interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; decimalPlaces: number; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null }
 interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
-interface PickableLine { id: number; sourceInventoryLineId: number; salesDeliveryId: number; number: number; date: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
+// اطلاعات سند مبنای واقعی حواله فروش (سفارش فروش/پیش‌فاکتور) — طبق Documents/فراخوانی قیمت در فاکتور.md؛
+// چون خودِ حواله فروش ارز/نوع فروش ندارد، انتخابگر این اطلاعات را از سند مبنای آن همراه می‌آورد.
+// null یعنی حواله «بدون‌مبنا»ست (فی/مبلغ همچنان دستی وارد می‌شود).
+interface DeliveryBaseInfo { currencyId: number; currencyTitle: string; salesTypeId: number; salesTypeTitle: string; baseAmount: number; uninvoicedAmount: number; baseQuantity: number; uninvoicedQuantity: number }
+interface PickableLine { id: number; sourceInventoryLineId: number; salesDeliveryId: number; number: number; date: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number; base: DeliveryBaseInfo | null }
 
 function customerTitle(c: CustomerOption): string {
   return c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim();
@@ -319,9 +323,21 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     const usedByOthers = rows.reduce((sum, r, i) => (i !== excludeIdx && r.sourceInventoryLineId === String(line.sourceInventoryLineId) ? sum + (Number(r.quantity) || 0) : sum), 0);
     return Math.round((line.remaining - usedByOthers) * 1e6) / 1e6;
   }
+  // فراخوانی قیمت از سند مبنای حواله (Documents/فراخوانی قیمت در فاکتور.md): اگر ردیف حواله‌ی انتخاب‌شده
+  // خودش بر مبنای سفارش فروش/پیش‌فاکتور صادر شده باشد، فی/مبلغ از مانده‌ی فاکتورنشده‌ی همان سند مبنا
+  // محاسبه می‌شود (صرفاً پیش‌نمایش زنده — مقدار نهایی هر بار در سرور بازمحاسبه/جایگزین می‌شود). حواله‌ی
+  // «بدون‌مبنا» (src.base=null) هیچ تغییری نمی‌کند و فی/مبلغ همچنان دستی می‌ماند.
+  function baseDerivedAmounts(src: PickableLine, quantity: number): Partial<RowState> {
+    if (!src.base || !(src.base.uninvoicedQuantity > 0)) return {};
+    const unitAmount = src.base.uninvoicedAmount / src.base.uninvoicedQuantity;
+    const unitPrice = Math.round(unitAmount * 10000) / 10000;
+    const amount = Math.round(unitPrice * quantity * 100) / 100;
+    return { unitPrice: String(unitPrice), amount: String(amount), vatAmount: computeSuggestedVat(amount, 0, String(src.goodsItemId)) };
+  }
   function onSourceLineChange(idx: number, sourceInventoryLineId: string) {
     const src = pickableLines.find((l) => String(l.sourceInventoryLineId) === sourceInventoryLineId);
     if (!src) return;
+    const quantity = Math.max(0, effectiveRemaining(src, idx));
     updateRow(idx, {
       sourceInventoryLineId,
       goodsItemId: String(src.goodsItemId),
@@ -329,7 +345,8 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
       goodsItemTitle: src.goodsItemTitle,
       unitId: String(src.unitId),
       unitTitle: src.unitTitle,
-      quantity: String(Math.max(0, effectiveRemaining(src, idx))),
+      quantity: String(quantity),
+      ...baseDerivedAmounts(src, quantity),
     });
   }
   // انتخاب چندگانه‌ی ردیف حواله فروش: اولین ردیف تیک‌خورده در همین ردیف گرید می‌نشیند و بقیه بلافاصله بعد از آن به‌صورت ردیف جدید اضافه می‌شوند
@@ -343,6 +360,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
       unitId: String(src.unitId),
       unitTitle: src.unitTitle,
       quantity: String(src.remaining),
+      ...baseDerivedAmounts(src, src.remaining),
     });
     setRows((prev) => {
       const next = [...prev];
@@ -627,6 +645,9 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
                   const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
                   const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
                   const src = pickableLines.find((l) => String(l.sourceInventoryLineId) === row.sourceInventoryLineId);
+                  // فی/مبلغ ردیفی که حواله‌ی مبدایش خودش بر مبنای سفارش فروش/پیش‌فاکتور صادر شده باشد،
+                  // دیگر قابل ویرایش نیست — همیشه از سند مبنا محاسبه می‌شود (Documents/فراخوانی قیمت در فاکتور.md).
+                  const priceLocked = !!src?.base;
                   return (
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
@@ -643,6 +664,12 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
                               { header: "شماره", render: (l) => toFaDigits(String(l.number)), filterValue: (l) => String(l.number), width: "70px" },
                               { header: "کالا", render: (l) => l.goodsItemTitle, filterValue: (l) => l.goodsItemTitle },
                               { header: "مانده", render: (l) => formatAmountFa(l.remaining), filterValue: (l) => String(l.remaining), width: "90px" },
+                              { header: "ارز مبنا", render: (l) => l.base?.currencyTitle || "—", filterValue: (l) => l.base?.currencyTitle || "", width: "90px" },
+                              { header: "نوع فروش مبنا", render: (l) => l.base?.salesTypeTitle || "—", filterValue: (l) => l.base?.salesTypeTitle || "", width: "100px" },
+                              { header: "مبلغ مبنا", render: (l) => (l.base ? formatAmountFa(l.base.baseAmount) : "—"), filterValue: (l) => String(l.base?.baseAmount ?? ""), width: "110px" },
+                              { header: "مبلغ فاکتورنشده", render: (l) => (l.base ? formatAmountFa(l.base.uninvoicedAmount) : "—"), filterValue: (l) => String(l.base?.uninvoicedAmount ?? ""), width: "110px" },
+                              { header: "مقدار مبنا", render: (l) => (l.base ? formatAmountFa(l.base.baseQuantity) : "—"), filterValue: (l) => String(l.base?.baseQuantity ?? ""), width: "90px" },
+                              { header: "مقدار فاکتورنشده", render: (l) => (l.base ? formatAmountFa(l.base.uninvoicedQuantity) : "—"), filterValue: (l) => String(l.base?.uninvoicedQuantity ?? ""), width: "100px" },
                             ]}
                             onOpen={guardRowEntry}
                             multiSelect
@@ -672,11 +699,11 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
                       <td style={{ minWidth: 120 }}>
                         <AmountInput value={row.quantity} onChange={(v) => onQuantityChange(idx, v)} allowDecimal />
                       </td>
-                      <td style={{ minWidth: 120 }}>
-                        <AmountInput value={row.unitPrice} onChange={(v) => onUnitPriceChange(idx, v)} allowDecimal />
+                      <td style={{ minWidth: 120 }} title={priceLocked ? "فی از سند مبنای حواله فروش محاسبه شده و غیرقابل ویرایش است" : undefined}>
+                        <AmountInput value={row.unitPrice} onChange={(v) => onUnitPriceChange(idx, v)} allowDecimal disabled={priceLocked} />
                       </td>
-                      <td style={{ minWidth: 120 }}>
-                        <AmountInput value={row.amount} onChange={(v) => onAmountChange(idx, v)} allowDecimal />
+                      <td style={{ minWidth: 120 }} title={priceLocked ? "مبلغ از سند مبنای حواله فروش محاسبه شده و غیرقابل ویرایش است" : undefined}>
+                        <AmountInput value={row.amount} onChange={(v) => onAmountChange(idx, v)} allowDecimal disabled={priceLocked} />
                       </td>
                       <td style={{ minWidth: 120 }}>
                         <AmountInput value={row.discount} onChange={(v) => onDiscountChange(idx, v)} allowDecimal placeholder="۰" />

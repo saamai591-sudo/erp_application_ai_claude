@@ -290,7 +290,7 @@ const RAW_MODULES: ModuleGroup[] = [
         items: [
           { key: "payments", label: "پرداخت", list: "/payments", create: "/payments/new", icon: "ledger" },
           { key: "cheque-clearings-payable", label: "وصول و برگشت چک", list: "/cheque-clearings-payable", create: "/cheque-clearings-payable/new", icon: "ledger" },
-          { key: "petty-cash-payments", label: "پرداخت تنخواه", list: "/petty-cash-payments", create: "/petty-cash-payments/new", icon: "wallet" },
+          { key: "petty-cash-payments", label: "پرداخت از تنخواه", list: "/petty-cash-payments", create: "/petty-cash-payments/new", icon: "wallet" },
           { key: "petty-cash-summaries", label: "خلاصه تنخواه", list: "/petty-cash-summaries", create: "/petty-cash-summaries/new", icon: "ledger" },
         ],
       },

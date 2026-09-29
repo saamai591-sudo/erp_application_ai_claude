@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
-import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
+import { resolveDetailTypeId, resolveAccountDetailFields, resolveCustodianDetailFields } from "../utils/detailValues";
 import { toBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConversion";
 import { resolvePaymentSubjectAccount } from "./paymentSubjectAccount";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
@@ -22,7 +22,7 @@ export async function issuePettyCashSummaryJournalEntry(summaryId: number) {
   const summary = await prisma.pettyCashSummary.findUnique({
     where: { id: summaryId },
     include: {
-      custodian: { include: { pettyCash: { include: { currency: true } } } },
+      custodian: { include: { pettyCash: { include: { currency: true } }, party: true } },
       lines: {
         include: { paymentType: true, purchaseInvoice: true, salesInvoice: true, purchaseOrder: true },
         orderBy: { rowOrder: "asc" },
@@ -102,8 +102,13 @@ export async function issuePettyCashSummaryJournalEntry(summaryId: number) {
   const pettyCashSetting = await prisma.treasuryAccountSetting.findFirst({ where: { accountType: "PETTY_CASH", pettyCashId: pettyCash.id }, include: { account: true } });
   if (!pettyCashSetting) throw new Error(`برای تنخواه «${pettyCash.title}»، معین در «تعیین حسابهای معین» (تنخواه) تعریف نشده است`);
   const creditAccount = pettyCashSetting.account;
-  const creditDetailTypeId = await resolveDetailTypeId(pettyCash.detailCode);
-  const creditDetails = resolveAccountDetailFields(creditAccount, creditDetailTypeId, pettyCash.detailCode);
+  // طبق تصمیم صریح کاربر: تفصیلِ معینِ بستانکار از تنخواه‌دارِ انتخاب‌شده‌ی سند تعیین می‌شود — هر سطح تفصیل
+  // به هرکدام از سه نوع (تنخواه/تنخواه‌دار/طرف‌حساب) وصل باشد، با کد متناظرش پر می‌شود
+  const creditDetails = await resolveCustodianDetailFields(creditAccount, {
+    pettyCash: pettyCash.detailCode,
+    custodian: summary.custodian.detailCode,
+    party: summary.custodian.party?.detailCode,
+  });
 
   const creditLines: IssueLineInput[] = [];
   if (creditAccount.isCurrency && !isBaseDoc) {
