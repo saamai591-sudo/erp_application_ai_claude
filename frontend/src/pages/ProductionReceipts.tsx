@@ -19,6 +19,7 @@ import { api, ApiError } from "../lib/api";
 import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
+import { DescriptionField } from "../components/DescriptionField";
 
 // «رسید تولید» — طبق stockAnalysis.md بند ۳۴/۴۲ («دریافت محصول»)؛ این پروژه ماژول «تولید» ندارد، پس
 // این سند همیشه «بدون مبنا» و بدون طرف‌حساب است (نگاه کنید به یادداشت بالای
@@ -403,8 +404,7 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
               </select>
             </div>
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={coreDisabled} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={coreDisabled} />
             </div>
             {!selectedWarehouseStillListed && header.warehouseId && (
               <div className="form-field full">

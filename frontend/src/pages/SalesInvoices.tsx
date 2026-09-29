@@ -27,6 +27,7 @@ import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
 import { useVatRates, vatRateForDate } from "../lib/useVatRates";
 import { toBaseCurrencyAmount } from "../lib/currencyConversion";
 import { Modal } from "../components/Modal";
+import { DescriptionField } from "../components/DescriptionField";
 
 // «فاکتور فروش نهایی» — آخرین سند زنجیره فروش. مبنا: بدون مبنا / حواله فروش. برخلاف فاکتور خرید
 // (که هر ردیف رسید انبار خرید را دقیقاً یک‌بار و کامل مصرف می‌کرد)، اینجا طبق تصمیم صریح کاربر رابطه
@@ -653,8 +654,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
             </div>
           )}
           <div className="form-field full">
-            <label>شرح</label>
-            <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={headerDisabled} />
+            <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={headerDisabled} />
           </div>
         </div>
 

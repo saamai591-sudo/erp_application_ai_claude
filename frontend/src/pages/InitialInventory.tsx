@@ -19,6 +19,7 @@ import { api, ApiError } from "../lib/api";
 import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
+import { DescriptionField } from "../components/DescriptionField";
 
 // طبق تصمیم معماری «ادغام نمای انبارداری/حسابداری انبار»: این فرم دیگر دو مسیر/دو مود جدا ندارد —
 // یک نمای واحد است که ستون‌های مبلغی بر اساس مجوز کاربر نمایش داده می‌شوند، نه بر اساس مسیر URL. دقیقاً
@@ -502,8 +503,7 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
             <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={nonMoneyReadOnly} />
           </div>
           <div className="form-field full">
-            <label>شرح</label>
-            <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} />
+            <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} />
           </div>
           {!selectedWarehouseStillListed && header.warehouseId && (
             <div className="form-field full">

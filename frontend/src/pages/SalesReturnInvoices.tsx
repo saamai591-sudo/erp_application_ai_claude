@@ -24,6 +24,7 @@ import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, vali
 import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
 import { useVatRates, vatRateForDate } from "../lib/useVatRates";
 import { toBaseCurrencyAmount } from "../lib/currencyConversion";
+import { DescriptionField } from "../components/DescriptionField";
 
 // «فاکتور برگشت از فروش» — طبق تصمیم صریح کاربر، دقیقاً هم‌ساختار/هم‌رفتار فاکتور فروش
 // (SalesInvoices.tsx)، با جایگزینی «حواله فروش» با «برگشت از فروش» (سند انبار SALES_RETURN — نگاه
@@ -537,8 +538,7 @@ function SalesReturnInvoiceForm({ editId }: { editId?: number }) {
             </div>
           )}
           <div className="form-field full">
-            <label>شرح</label>
-            <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={headerDisabled} />
+            <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={headerDisabled} />
           </div>
         </div>
 

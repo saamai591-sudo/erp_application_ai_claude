@@ -29,6 +29,7 @@ import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
 import { useVatRates, vatRateForDate } from "../lib/useVatRates";
 import { toBaseCurrencyAmount } from "../lib/currencyConversion";
 import { round, allocateProportionally } from "../lib/costAllocation";
+import { DescriptionField } from "../components/DescriptionField";
 
 // این فرآیند («فاکتور خرید») مستند تحلیل اختصاصی در پروژه ندارد؛ ساختار این فرم حاصل تصمیم مشترک با
 // کاربر است (نگاه کنید به یادداشت‌های backend/src/routes/purchaseInvoices.ts). با تایید فاکتور، مبلغ
@@ -849,8 +850,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
               </div>
             )}
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={headerDisabled} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={headerDisabled} />
             </div>
           </div>
 

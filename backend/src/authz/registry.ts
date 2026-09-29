@@ -158,6 +158,8 @@ export const REGISTRY: ModuleDef[] = [
           },
           { key: "org-structure", title: "ساختار سازمانی", baseActions: CRUD },
           { key: "geo", title: "مناطق جغرافیایی", baseActions: CRUD },
+          // ایجاد رکورد از خودِ فرم‌ها (آیکن ذخیره کنار فیلد شرح) انجام می‌شود، نه از این فرم؛ پس «ایجاد» ندارد
+          { key: "frequent-descriptions", title: "شرح‌های پرکاربرد", baseActions: ["view", "edit", "delete"] },
         ],
       },
     ],

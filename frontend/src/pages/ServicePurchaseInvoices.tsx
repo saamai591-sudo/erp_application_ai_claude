@@ -26,6 +26,7 @@ import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
 import { useVatRates, vatRateForDate } from "../lib/useVatRates";
 import { toBaseCurrencyAmount } from "../lib/currencyConversion";
 import { round, allocateProportionally } from "../lib/costAllocation";
+import { DescriptionField } from "../components/DescriptionField";
 
 // طبق Documents/ServicePurchaseAndItsRelationToStockReceipt.md — این فرم عمداً از فاکتور خرید کالا
 // (PurchaseInvoices.tsx) مستقل است. با تایید فاکتور، به‌ازای هر ردیف تسهیم‌شده، یک AmountLine
@@ -650,8 +651,7 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
               </div>
             )}
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} />
             </div>
           </div>
 

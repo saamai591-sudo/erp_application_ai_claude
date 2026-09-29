@@ -19,6 +19,7 @@ import { api, ApiError } from "../lib/api";
 import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
+import { DescriptionField } from "../components/DescriptionField";
 
 // «کسری انبارگردانی» — طبق تصمیم صریح کاربر، سندی مستقل از «اضافات انبارگردانی» (که از این پس
 // فقط مازاد را می‌پذیرد): یک حواله‌ی خروج مستقیم و ساده، بدون مبنا، بدون هیچ مقایسه‌ای با موجودی
@@ -299,8 +300,7 @@ function InventoryCountingShortageForm({ editId, basePath }: { editId?: number; 
               <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={coreDisabled} />
             </div>
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={coreDisabled} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={coreDisabled} />
             </div>
             {!selectedWarehouseStillListed && header.warehouseId && (
               <div className="form-field full">

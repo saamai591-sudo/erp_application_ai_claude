@@ -55,6 +55,7 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "detail-types", label: "نوع تفصیل", list: "/detail-types", icon: "tag" },
           { key: "org-structure", label: "ساختار سازمانی", list: "/org-structure", icon: "sitemap" },
           { key: "geo", label: "مناطق جغرافیایی", list: "/geo-regions", icon: "pin" },
+          { key: "frequent-descriptions", label: "شرح‌های پرکاربرد", list: "/frequent-descriptions", icon: "tag" },
         ],
       },
     ],

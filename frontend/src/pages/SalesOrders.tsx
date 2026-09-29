@@ -23,6 +23,7 @@ import { SalesCenter } from "./SalesCenters";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
 import { useVatRates, vatRateForDate } from "../lib/useVatRates";
+import { DescriptionField } from "../components/DescriptionField";
 
 // «سفارش فروش» (تایید مشتری) — مرحله دوم زنجیره فروش. مبنا: بدون مبنا / پیش‌فاکتور. طبق تصمیم
 // صریح کاربر، «مانده‌ای» فقط برای حواله فروش/فاکتور فروش لازم است؛ اینجا (مثل سفارش خرید از استعلام
@@ -464,8 +465,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
               </select>
             </div>
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={headerDisabled} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={headerDisabled} />
             </div>
           </div>
 

@@ -18,6 +18,7 @@ import { api, ApiError } from "../lib/api";
 import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
+import { DescriptionField } from "../components/DescriptionField";
 
 // «برگشت مصرف مرکز هزینه» — طبق stockAnalysis.md بند ۴۰: همیشه به یک ردیف مصرف مرکز هزینه‌ی
 // قطعی‌شده Reference می‌دهد (نه «بدون مبنا») + کنترل ReturnedQuantity <= IssuedQuantity. نگاه کنید به
@@ -288,8 +289,7 @@ function CenterConsumptionReturnForm({ editId, basePath }: { editId?: number; ba
               <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={coreDisabled} />
             </div>
             <div className="form-field full">
-              <label>شرح</label>
-              <input value={header.description} onChange={(e) => setHeader({ ...header, description: e.target.value })} disabled={coreDisabled} />
+              <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={coreDisabled} />
             </div>
             {!selectedWarehouseStillListed && header.warehouseId && (
               <div className="form-field full">
