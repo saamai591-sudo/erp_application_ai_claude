@@ -54,8 +54,9 @@ const FORM = findFormPrefix("purchase-invoices");
 //   می‌شود — دقیقاً همان چیزی که در یادداشت warehouseReceipts.ts به‌عنوان «فاز بعد» رزرو شده بود.
 //   جدا از آن، به‌ازای هر تخصیصِ هر ردیف «سایر هزینه‌ها»ی مبنادار، دقیقاً مثل تایید فاکتور خرید خدمات،
 //   یک رکورد INBOUND_RELATED_COST به ردیف رسید مربوطه افزوده می‌شود.
-// - برگشت از تایید: مقدار CROSS_ENTITY فقط اگر هیچ‌کدام از کالاهای ردیف‌های رسیدی این فاکتور تا امروز
-//   در «قیمت‌گذاری اسناد انبار» قیمت‌گذاری نشده باشند (وگرنه مبلغ رسید زیر پای محاسبه‌ی قیمت‌گذاریِ
+// - برگشت از تایید: مقدار CROSS_ENTITY فقط اگر هیچ‌کدام از کالاهای ردیف‌های رسیدی این فاکتور در «قیمت‌گذاری
+//   اسناد انبار» برای دوره‌ای که تاریخ پایانش ≥ تاریخ همان رسید است (دوره‌ی شامل تاریخ رسید یا بعدتر) قیمت‌گذاری
+//   نشده باشند (وگرنه مبلغ رسید زیر پای محاسبه‌ی قیمت‌گذاریِ
 //   قبلاً انجام‌شده خالی می‌شود) حذف و amount/unitCost ردیف‌های رسید به صفر برمی‌گردد؛ تخصیص‌های «سایر
 //   هزینه‌ها» بدون این کنترل (additive/appended، دقیقاً هم‌الگوی برگشت‌ازتایید فاکتور خرید خدمات) کسر
 //   می‌شوند.
@@ -841,10 +842,22 @@ router.post("/purchase-invoices/:id/unapprove", can(`${FORM}.unapprove`), async 
         include: { document: true },
       });
       const goodsItemIds = sourceLines.map((l) => l.goodsItemId);
-      const pricedCount = await prisma.goodsPricingStatus.count({ where: { goodsItemId: { in: goodsItemIds } } });
-      if (pricedCount > 0) {
+      // قیمت‌گذاریِ یک دوره‌ی گزارشگری همه‌ی اسناد کالا را تا پایان همان دوره حساب می‌کند (goodsPricingService.priceItem:
+      // تاریخ سند ≤ toDate دوره)؛ پس مبلغ یک رسید فقط وقتی «زیر پای قیمت‌گذاری» است که کالای همان ردیف در دوره‌ای
+      // قیمت‌گذاری شده باشد که تاریخ پایانش ≥ تاریخ همان رسید است (دوره‌ی شامل تاریخ رسید یا دوره‌های بعدتر). قیمت‌گذاریِ دوره‌های
+      // کاملاً قبل از تاریخ رسید هیچ اثری روی این رسید ندارد و مانع برگشت از تایید نیست. GoodsPricingStatus خودش به دوره‌ی مالی
+      // محدود نمی‌شود، پس قیمت‌گذاری دوره‌های مالیِ بعدی هم دیده می‌شود.
+      const pricedStatuses = await prisma.goodsPricingStatus.findMany({
+        where: { goodsItemId: { in: goodsItemIds } },
+        select: { goodsItemId: true, reportingPeriod: { select: { toDate: true } } },
+      });
+      const pricedAffectingReceipt = sourceLines.some((l) =>
+        pricedStatuses.some((s) => s.goodsItemId === l.goodsItemId && s.reportingPeriod.toDate.getTime() >= l.document.date.getTime())
+      );
+      if (pricedAffectingReceipt) {
         return res.status(400).json({
-          error: "برخی از کالاهای این فاکتور قبلاً در «قیمت‌گذاری اسناد انبار» قیمت‌گذاری شده‌اند؛ ابتدا قیمت‌گذاری آن‌ها را برگشت بزنید",
+          error:
+            "برخی از کالاهای این فاکتور در «قیمت‌گذاری اسناد انبار» برای دوره‌ای که شامل تاریخ رسید انبار (یا بعد از آن) است قیمت‌گذاری شده‌اند؛ ابتدا قیمت‌گذاری آن‌ها را برگشت بزنید",
         });
       }
 
