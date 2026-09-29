@@ -8,6 +8,7 @@ import { FitText } from "./FitText";
 import { usePermissions } from "../lib/usePermissions";
 import { TabsBar } from "./TabsBar";
 import { UserSettingsModal } from "./UserSettingsModal";
+import { AboutModal } from "./AboutModal";
 import { applyFont, applyTheme } from "../lib/userSettings";
 import { loadPreferences } from "../lib/preferences";
 
@@ -312,6 +313,15 @@ function GearIconFilled() {
   );
 }
 
+/** آیکن توپر «درباره» (i داخل دایره) برای دکمه‌ی درباره در نوار دکمه‌های رنگی */
+function InfoIconFilled() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path fillRule="evenodd" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 4.4a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm-1.4 4.6h2.2c.6 0 1 .4 1 1v5.2h.6a.9.9 0 0 1 0 1.8h-3.4a.9.9 0 0 1 0-1.8h.6V12.8h-.6a.9.9 0 0 1 0-1.8Z" />
+    </svg>
+  );
+}
+
 /** آیکن توپر خروج (power) برای دکمه‌ی خروج در نوار دکمه‌های رنگی */
 function PowerIconFilled() {
   return (
@@ -486,6 +496,7 @@ export default function Layout() {
   const [openModule, setOpenModule] = useState<string | null>(null);
   const [openSubModule, setOpenSubModule] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   // طبق تصمیم صریح کاربر: سایدبار قابل جمع‌شدن به یک ستون آیکن است؛ در حالت جمع، کلیک روی آیکن هر ماژول
   // به‌جای آکاردئون داخلی، یک فلای‌اوت شناور (ModuleFlyout) باز می‌کند که زیرماژول‌ها/فرم‌هایش را نشان می‌دهد.
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(getInitialSidebarCollapsed);
@@ -679,6 +690,9 @@ export default function Layout() {
             <button className="topbar-dock-btn dock-c-blue" onClick={() => setSettingsOpen(true)} title="تنظیمات کاربری">
               <GearIconFilled />
             </button>
+            <button className="topbar-dock-btn dock-c-slate" onClick={() => setAboutOpen(true)} title="درباره" aria-label="درباره">
+              <InfoIconFilled />
+            </button>
             <button className="topbar-dock-btn dock-c-red" onClick={logout} title="خروج">
               <PowerIconFilled />
             </button>
@@ -704,6 +718,7 @@ export default function Layout() {
         </div>
       </div>
       {settingsOpen && <UserSettingsModal onClose={() => setSettingsOpen(false)} />}
+      {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
     </div>
   );
 }
