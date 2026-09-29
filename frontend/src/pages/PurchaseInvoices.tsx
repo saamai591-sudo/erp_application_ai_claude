@@ -925,6 +925,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                               { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
                             ]}
                             multiSelect
+                            resultInDisplayOrder
                             onOpen={guardRowEntry}
                             onSelectMultiple={(selected) => onGoodsItemsSelected(idx, selected as GoodsItemRow[])}
                           />
