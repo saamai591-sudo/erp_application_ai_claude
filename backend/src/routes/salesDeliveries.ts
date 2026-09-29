@@ -231,7 +231,8 @@ const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
 router.get("/sales-deliveries/pickable-sales-order-lines", can(`${FORM}.view`), async (req, res) => {
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
   const lines = await prisma.salesOrderLine.findMany({
-    where: { salesOrder: { status: "APPROVED", ...(destDate ? { date: { lte: destDate } } : {}) } },
+    // ردیف خدمت وارد انبار/حواله نمی‌شود — فقط ردیف‌های کالا قابل انتخاب‌اند.
+    where: { goodsItem: { kind: "GOODS" }, salesOrder: { status: "APPROVED", ...(destDate ? { date: { lte: destDate } } : {}) } },
     include: {
       salesOrder: { include: { customer: { include: { party: true } } } },
       goodsItem: true,
@@ -277,7 +278,8 @@ router.get("/sales-deliveries/pickable-sales-order-lines", can(`${FORM}.view`), 
 router.get("/sales-deliveries/pickable-sales-quote-lines", can(`${FORM}.view`), async (req, res) => {
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
   const lines = await prisma.salesQuoteLine.findMany({
-    where: { salesQuote: { status: "APPROVED", ...(destDate ? { date: { lte: destDate } } : {}) } },
+    // ردیف خدمت وارد انبار/حواله نمی‌شود — فقط ردیف‌های کالا قابل انتخاب‌اند.
+    where: { goodsItem: { kind: "GOODS" }, salesQuote: { status: "APPROVED", ...(destDate ? { date: { lte: destDate } } : {}) } },
     include: {
       salesQuote: { include: { customer: { include: { party: true } } } },
       goodsItem: true,

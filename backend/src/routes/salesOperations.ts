@@ -143,7 +143,6 @@ async function validateSalesQuoteLines(lines: SalesQuoteLineInput[], docDate: Da
 
     const item = await prisma.goodsItem.findUnique({ where: { id: l.goodsItemId } });
     if (!item) throw new Error(`کالای ردیف ${idx + 1} یافت نشد`);
-    if (item.kind !== "GOODS") throw new Error(`ردیف ${idx + 1}: فقط کالا قابل انتخاب است`);
     if (!item.isActive) throw new Error(`کالای ردیف ${idx + 1} غیرفعال است`);
     const unitId = l.unitId || item.mainUnitId;
 
@@ -415,7 +414,6 @@ async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: stri
 
     const item = await prisma.goodsItem.findUnique({ where: { id: goodsItemId } });
     if (!item) throw new Error(`کالای ردیف ${idx + 1} یافت نشد`);
-    if (item.kind !== "GOODS") throw new Error(`ردیف ${idx + 1}: فقط کالا قابل انتخاب است`);
     if (!item.isActive) throw new Error(`کالای ردیف ${idx + 1} غیرفعال است`);
     if (!unitId) unitId = item.mainUnitId;
 

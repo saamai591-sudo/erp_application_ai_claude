@@ -92,7 +92,9 @@ export async function resolveSerial(goodsGroupId: number, explicitCode: string |
 // =========================================================================
 
 router.get("/goods-items", async (req, res) => {
+  // kind می‌تواند یک مقدار (GOODS | SERVICE) یا چند مقدار جداشده با ویرگول (GOODS,SERVICE) باشد.
   const kind = req.query.kind as string | undefined;
+  const kindList = kind ? kind.split(",").map((k) => k.trim()).filter(Boolean) : [];
   const trackingMethod = req.query.trackingMethod as string | undefined;
 
   // فیلتر اختیاری بر اساس ماهیت/نوع سند انبار (طبق مستند «نوع کالا-ماهیت سند انبار»):
@@ -104,12 +106,14 @@ router.get("/goods-items", async (req, res) => {
   if (docDirection && docType) {
     const allowed = getAllowedGoodsTypes(docDirection as any, docType);
     if (!allowed || allowed.length === 0) return res.json([]);
-    allowedGoodsTypesFilter = { accountingGroup: { goodsType: { in: allowed as any } } };
+    // این فیلتر بر اساس «نوع کالای انبار» است و فقط برای کالا معنا دارد؛ خدمت وارد انبار نمی‌شود، پس
+    // وقتی kind شامل SERVICE است، خدمت‌ها از این فیلتر مستثنی‌اند.
+    allowedGoodsTypesFilter = { OR: [{ kind: "SERVICE" }, { accountingGroup: { goodsType: { in: allowed as any } } }] };
   }
 
   const items = await prisma.goodsItem.findMany({
     where: {
-      ...(kind ? { kind: kind as any } : {}),
+      ...(kindList.length ? { kind: { in: kindList as any } } : {}),
       ...(trackingMethod ? { trackingMethod: trackingMethod as any } : {}),
       ...(allowedGoodsTypesFilter || {}),
     },

@@ -17,6 +17,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { useDefaultBaseCurrency } from "../lib/useDefaultBaseCurrency";
 import { api, ApiError } from "../lib/api";
+import { fetchSalesLineItems } from "../lib/salesLineItems";
 import { SalesType } from "./SalesTypes";
 import { SalesCenter } from "./SalesCenters";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
@@ -166,7 +167,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
         api.get("/sales-types"),
         api.get("/sales-centers"),
         api.get("/currencies"),
-        api.get("/goods-items?kind=GOODS&docDirection=OUTBOUND&docType=فروش"),
+        fetchSalesLineItems({ withWarehouseFilter: true }),
         fetchSelectedFiscalPeriod(),
       ]);
       setCustomers((cu as any[]).filter((x) => x.isActive));
