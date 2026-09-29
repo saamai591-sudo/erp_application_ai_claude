@@ -19,6 +19,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { useDefaultBaseCurrency } from "../lib/useDefaultBaseCurrency";
 import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
+import { fetchSalesLineItems } from "../lib/salesLineItems";
 import { SalesType } from "./SalesTypes";
 import { SalesCenter } from "./SalesCenters";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
@@ -205,7 +206,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
         api.get("/sales-types"),
         api.get("/sales-centers"),
         api.get("/currencies"),
-        api.get("/goods-items?kind=GOODS"),
+        fetchSalesLineItems(),
         fetchSelectedFiscalPeriod(),
       ]);
       setCustomers((cu as any[]).filter((x) => x.isActive));

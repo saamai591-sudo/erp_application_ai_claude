@@ -296,7 +296,6 @@ async function validateLines(lines: LineInput[], basis: string, currency: Conver
 
     const item = await prisma.goodsItem.findUnique({ where: { id: goodsItemId } });
     if (!item) throw new Error(`کالای ردیف ${idx + 1} یافت نشد`);
-    if (item.kind !== "GOODS") throw new Error(`ردیف ${idx + 1}: فقط کالا قابل انتخاب است`);
     if (!unitId) unitId = item.mainUnitId;
 
     // مبلغ/تخفیف به ارز مبنا و ارزش‌افزوده — دقیقاً هم‌الگوی purchaseInvoices.ts#validateLines: فقط برای
