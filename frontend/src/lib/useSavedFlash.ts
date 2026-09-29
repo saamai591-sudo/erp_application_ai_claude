@@ -1,4 +1,5 @@
 import { showToast } from "./toast";
+import { clearTabDirty, currentTabPath } from "./unsavedChanges";
 
 const DEFAULT_MESSAGE = "تغییرات ذخیره شد";
 
@@ -9,6 +10,8 @@ const DEFAULT_MESSAGE = "تغییرات ذخیره شد";
  * کاربر پیام درست را ببیند، نه «تغییرات ذخیره شد» عمومی برای عملیاتی که اصلاً ذخیره نیست. */
 export function useSavedFlash() {
   function flash(message?: string) {
+    // ذخیره‌ی موفق: تغییرات ذخیره‌نشده‌ای برای این فرم نمانده (هشدار بستن فرم، lib/unsavedChanges.ts)
+    clearTabDirty(currentTabPath());
     showToast(message || DEFAULT_MESSAGE);
   }
   return { flash };

@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { isUserInitiatedEvent, markStateKeyDirty } from "./unsavedChanges";
 
 const store = new Map<string, any>();
 
@@ -34,6 +35,9 @@ export function usePersistedState<T>(rawKey: string, initialValue: T | (() => T)
   keyRef.current = key;
 
   function setValue(v: T | ((prev: T) => T)) {
+    // window.event فقط داخل اجرای همزمانِ handler یک رویداد کاربر مقدار دارد؛ بعد از await (بارگذاری داده) یا در effect
+    // undefined است. باید همین‌جا (نه داخل updater که در رندر اجرا می‌شود) خوانده شود. نگاه کنید به lib/unsavedChanges.ts
+    if (isUserInitiatedEvent(window.event)) markStateKeyDirty(keyRef.current);
     setState((prev) => {
       const next = typeof v === "function" ? (v as (prev: T) => T)(prev) : v;
       store.set(keyRef.current, next);
