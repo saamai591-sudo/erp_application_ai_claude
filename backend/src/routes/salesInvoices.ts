@@ -554,7 +554,7 @@ router.put("/sales-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
     const lines = await validateLines(body.lines, body.basis, currency, body.currencyId, fxRate, baseCurrency, date, body.salesTypeId, id);
     await assertAdvanceAllocationsStillValid(id, { customerId: body.customerId, currencyId: body.currencyId, date, netTotal: salesInvoiceNetTotal(lines as any), vatTotal: salesInvoiceVatTotal(lines as any, fxRate) });
 
-    await prisma.$transaction([
+    const [, updated] = await prisma.$transaction([
       prisma.salesInvoiceLine.deleteMany({ where: { salesInvoiceId: id } }),
       prisma.salesInvoice.update({
         where: { id },
@@ -572,7 +572,10 @@ router.put("/sales-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
         },
       }),
     ]);
-    res.json({ id });
+    // updatedAt جدید باید برگردد تا frontend/lib/api.ts (rememberVersion) آن را جایگزین نسخه‌ی قبلی کند؛
+    // وگرنه ذخیره‌ی دوباره‌ی همان فرم (بدون بارگذاری مجدد) با نسخه‌ی کهنه ارسال و رد می‌شود
+    // (utils/concurrency.ts).
+    res.json({ id, updatedAt: updated.updatedAt });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در ذخیره" });
   }
