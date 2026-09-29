@@ -6,6 +6,7 @@ import { findChequeUses } from "../utils/chequeUsage";
 import { can } from "../authz/guard";
 import { assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { findFormPrefix } from "../authz/registry";
+import { openingHasSystemGeneratedContent } from "../services/treasuryYearCloseService";
 
 const FORM = findFormPrefix("treasury-openings");
 
@@ -22,7 +23,8 @@ const FORM = findFormPrefix("treasury-openings");
 //
 // ردیف‌هایی که «بستن سال دریافت و پرداخت» خودکار می‌سازد (ردیف حساب بانکی/صندوق با isSystemGenerated، و چک‌های منتقل‌شده با
 // parentChequeId) توسط سیستم ساخته شده‌اند و کاربر نمی‌تواند آن‌ها را ویرایش یا حذف کند؛ فقط ردیف‌های دستی (استقرار اولیه) قابل
-// ویرایش‌اند. تنها راه برگرداندن، حذف کل افتتاحیه است (DELETE) که بستن‌های دوره‌ی قبل را هم باز می‌کند.
+// ویرایش‌اند. تنها راه حذفشان «بازگشایی» همان بخش در «عملیات پایان دوره‌ی» دوره‌ی قبل است (services/treasuryYearCloseService.ts#reopenSection)؛
+// حذف کل افتتاحیه (DELETE) برای افتتاحیه‌ای که رکورد خودکار دارد یا بستنِ دوره‌ی قبل آن را ساخته رد می‌شود.
 // =========================================================================
 
 const router = Router();
@@ -81,6 +83,14 @@ async function isChequeLocked(c: any): Promise<boolean> {
   return (await findChequeUses(prisma, c.id, {})).length > 0;
 }
 
+/** افتتاحیه‌ای که «عملیات پایان دوره»ی سال قبل ساخته (بستنِ ثبت‌شده یا رکورد خودکار دارد) با «حذف» پاک نمی‌شود؛ فقط با «بازگشایی» در سال قبل. */
+async function isOpeningDeletionBlocked(opening: { id: number; fiscalPeriodId: number }): Promise<boolean> {
+  const thisPeriod = await prisma.fiscalPeriod.findUnique({ where: { id: opening.fiscalPeriodId } });
+  const prev = thisPeriod ? await prisma.fiscalPeriod.findFirst({ where: { toDate: { lt: thisPeriod.fromDate } }, orderBy: { toDate: "desc" } }) : null;
+  const prevCloses = prev ? await withoutFiscalPeriodScope(() => prisma.treasuryYearClose.count({ where: { fiscalPeriodId: prev.id } })) : 0;
+  return prevCloses > 0 || (await openingHasSystemGeneratedContent(opening.fiscalPeriodId, opening.id));
+}
+
 async function serializeOpening(o: any) {
   const cheques = await loadOpeningCheques(o.fiscalPeriodId);
   const locks = await Promise.all(cheques.map((c: any) => isChequeLocked(c)));
@@ -115,6 +125,8 @@ async function serializeOpening(o: any) {
     fiscalPeriodId: o.fiscalPeriodId,
     fiscalPeriodTitle: o.fiscalPeriod.title,
     updatedAt: o.updatedAt,
+    // false = افتتاحیه توسط عملیات پایان دوره‌ی سال قبل ساخته شده؛ دکمه‌ی حذف نمایش داده نمی‌شود (فقط «بازگشایی» در سال قبل)
+    deletable: !(await isOpeningDeletionBlocked(o)),
     bankAccountLines: o.bankAccountLines.map((l: any) => ({
       bankAccountId: l.bankAccountId,
       bankAccountNumber: l.bankAccount.accountNumber,
@@ -279,8 +291,8 @@ function transferredChequeChanged(ex: any, data: ReturnType<typeof chequeData>):
 const TRANSFERRED_MESSAGE = "این چک توسط «بستن سال» به این دوره منتقل شده است و قابل ویرایش یا حذف نیست";
 
 /** چک‌های یک جهت را با ردیف‌های ارسالی هم‌گام می‌کند (افزودن/ویرایش/حذف)، به‌جز چک‌های قفل که دست‌نخورده می‌مانند.
- *  چک منتقل‌شده‌ی بستن سال هرگز ویرایش/حذف نمی‌شود، مگر کل افتتاحیه حذف شود (allowRemoveTransferred). */
-async function syncCheques(tx: any, fiscalPeriodId: number, direction: "RECEIVABLE" | "PAYABLE", rows: ChequeIn[], baseCurrencyId: number, tab: string, allowRemoveTransferred = false) {
+ *  چک منتقل‌شده‌ی بستن سال هرگز از این فرم ویرایش/حذف نمی‌شود (فقط با «بازگشایی» در عملیات پایان دوره‌ی سال قبل). */
+async function syncCheques(tx: any, fiscalPeriodId: number, direction: "RECEIVABLE" | "PAYABLE", rows: ChequeIn[], baseCurrencyId: number, tab: string) {
   const existing = await tx.chequeItem.findMany({ where: { fiscalPeriodId, isOpening: true, direction } });
   const byId = new Map<number, any>(existing.map((c: any) => [c.id, c]));
   const seen = new Set<number>();
@@ -311,7 +323,7 @@ async function syncCheques(tx: any, fiscalPeriodId: number, direction: "RECEIVAB
   }
   for (const ex of existing) {
     if (seen.has(ex.id)) continue;
-    if (ex.parentChequeId != null && !allowRemoveTransferred) throw new Error(`${tab}: چک شماره ${ex.number} — ${TRANSFERRED_MESSAGE}`);
+    if (ex.parentChequeId != null) throw new Error(`${tab}: چک شماره ${ex.number} — ${TRANSFERRED_MESSAGE}`);
     // eslint-disable-next-line no-await-in-loop
     if (await isChequeLocked(ex)) throw new Error(`${tab}: چک شماره ${ex.number} در سند دیگری استفاده شده یا گردش داشته و قابل حذف نیست`);
     // eslint-disable-next-line no-await-in-loop
@@ -433,13 +445,13 @@ router.delete("/treasury-openings/:id", can(`${FORM}.delete`), async (req, res) 
   const existing = await prisma.treasuryOpening.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "افتتاحیه یافت نشد" });
   try {
+    // رکوردهای خودکارِ «عملیات پایان دوره» فقط با «بازگشایی» همان بخش در دوره‌ی قبل حذف می‌شوند، نه با حذف افتتاحیه
+    if (await isOpeningDeletionBlocked(existing)) {
+      return res.status(400).json({ error: "این افتتاحیه (یا بخشی از آن) توسط «عملیات پایان دوره»ی سال قبل ایجاد شده و قابل حذف نیست؛ برای حذف آن‌ها بخش مربوطه را در «عملیات پایان دوره»ی سال قبل «بازگشایی» کنید" });
+    }
     await prisma.$transaction(async (tx: any) => {
-      await syncCheques(tx, existing.fiscalPeriodId, "RECEIVABLE", [], (await getBaseCurrency()).id, "چک‌های دریافتی", true);
-      await syncCheques(tx, existing.fiscalPeriodId, "PAYABLE", [], (await getBaseCurrency()).id, "چک‌های پرداختی", true);
-      // حذف افتتاحیه، بستن‌های دوره‌ی قبل را که این افتتاحیه را ساخته بودند باز می‌کند تا دوباره قابل بستن باشند
-      const thisPeriod = await tx.fiscalPeriod.findUnique({ where: { id: existing.fiscalPeriodId } });
-      const prev = thisPeriod ? await tx.fiscalPeriod.findFirst({ where: { toDate: { lt: thisPeriod.fromDate } }, orderBy: { toDate: "desc" } }) : null;
-      if (prev) await tx.treasuryYearClose.deleteMany({ where: { fiscalPeriodId: prev.id } });
+      await syncCheques(tx, existing.fiscalPeriodId, "RECEIVABLE", [], (await getBaseCurrency()).id, "چک‌های دریافتی");
+      await syncCheques(tx, existing.fiscalPeriodId, "PAYABLE", [], (await getBaseCurrency()).id, "چک‌های پرداختی");
       await tx.treasuryOpening.delete({ where: { id } });
     });
     res.status(204).send();
