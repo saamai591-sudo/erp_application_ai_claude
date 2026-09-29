@@ -628,6 +628,29 @@ router.post("/payments", can(`${FORM}.create`), async (req, res) => {
   }
 });
 
+// شارژ تنخواه از هر سند پرداخت «ثبت‌شده» (چه «ثبت» چه «تایید شده») به‌حساب می‌آید (services/pettyCashBalanceService.ts)؛ پس ویرایش/حذف
+// یک سند ثبت‌شده که ردیف «به تنخواه» دارد باید مطمئن شود مانده‌ی جاری آن تنخواه در هیچ نقطه‌ای منفی نمی‌شود. ردیف‌های فعلیِ همین سند از
+// شارژهای موجود کنار گذاشته و ردیف‌های جدید (در صورت ویرایش) با تاریخ جدید اضافه می‌شوند؛ برای حذف، ردیف جدیدی نیست.
+async function assertPettyCashFundingChangeAllowed(paymentId: number, newLines: { custodianId?: number | null; amount: number | string }[], newDate?: Date) {
+  const oldLines = await prisma.paymentSettlementLine.findMany({ where: { paymentId, paymentType: { nature: "TO_PETTY_CASH" } }, select: { custodianId: true } });
+  const pendingLines = newLines.filter((l) => l.custodianId);
+  const custodianIds = Array.from(new Set([...oldLines.map((l) => l.custodianId), ...pendingLines.map((l) => l.custodianId)].filter((v): v is number => !!v)));
+  if (custodianIds.length === 0) return;
+  const custodians = await prisma.pettyCashCustodian.findMany({ where: { id: { in: custodianIds } } });
+  const pettyCashIds = new Set(custodians.filter((c: any) => c.controlNegativeBalance).map((c: any) => c.pettyCashId));
+  for (const pettyCashId of pettyCashIds) {
+    // eslint-disable-next-line no-await-in-loop
+    await assertPettyCashRunningBalanceNotNegative(pettyCashId as number, {
+      excludePaymentId: paymentId,
+      pendingEvents: newDate
+        ? pendingLines
+            .filter((l) => custodians.find((c: any) => c.id === l.custodianId)?.pettyCashId === pettyCashId)
+            .map((l) => ({ date: newDate, amount: Number(l.amount) }))
+        : [],
+    });
+  }
+}
+
 router.put("/payments/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const body = req.body as HeaderBody;
@@ -652,6 +675,7 @@ router.put("/payments/:id", can(`${FORM}.edit`), async (req, res) => {
     const instrumentByKey = new Map(instrumentLines.map((l) => [l.clientKey, l]));
     const settlementLines = await validateSubjectLines(body.settlementLines, instrumentByKey, baseCurrency, id);
     assertUsedInstrumentsUnchanged(await prisma.paymentInstrumentLine.findMany({ where: { paymentId: id } }), instrumentLines, settlementLines);
+    await assertPettyCashFundingChangeAllowed(id, settlementLines, date);
 
     await prisma.$transaction(async (tx: any) => {
       // ردیف‌های تسویه به ردیف‌های ابزار ارجاع می‌دهند (FK محدودکننده) — پس اول آن‌ها حذف می‌شوند
@@ -687,6 +711,11 @@ router.delete("/payments/:id", can(`${FORM}.delete`), async (req, res) => {
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل حذف هستند؛ ابتدا از «تایید» برگردانید" });
+  try {
+    await assertPettyCashFundingChangeAllowed(id, []);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
   await prisma.payment.delete({ where: { id } });
   res.status(204).send();
 });
@@ -841,25 +870,8 @@ router.post("/payments/:id/unapprove", can(`${FORM}.unapprove`), async (req, res
     }
   }
 
-  // برگشت از تاییدِ ردیف‌های «به تنخواه» یعنی شارژِ همان تنخواه دیگر به‌حساب نمی‌آید — قبل از واقعاً برگرداندن،
-  // باید مطمئن شد که مانده‌ی جاری تنخواه (با احتساب حذفِ همین شارژ) در هیچ نقطه‌ای منفی نمی‌شود
-  try {
-    const pettyCashIds = new Set(
-      d.settlementLines.filter((s: any) => s.paymentType.nature === "TO_PETTY_CASH" && s.custodian?.controlNegativeBalance).map((s: any) => s.custodian!.pettyCashId)
-    );
-    for (const pettyCashId of pettyCashIds) {
-      // این سند هنوز APPROVED است، پس سرویس همین ردیف‌ها را جزو شارژهای موجود می‌بیند؛ با یک رویداد منفیِ
-      // هم‌مبلغ خنثی می‌شوند تا دقیقاً معادل «انگار این ردیف‌ها دیگر تاییدشده نیستند» محاسبه شود
-      // eslint-disable-next-line no-await-in-loop
-      await assertPettyCashRunningBalanceNotNegative(pettyCashId as number, {
-        pendingEvents: d.settlementLines
-          .filter((s: any) => s.paymentType.nature === "TO_PETTY_CASH" && s.custodian?.pettyCashId === pettyCashId)
-          .map((s: any) => ({ date: d.date, amount: -Number(s.amount) })),
-      });
-    }
-  } catch (e: any) {
-    return res.status(400).json({ error: e.message });
-  }
+  // برگشت از تایید سند را به وضعیت «ثبت» برمی‌گرداند و شارژِ «به تنخواه»ِ آن همچنان به‌حساب می‌آید (services/pettyCashBalanceService.ts)؛
+  // پس مانده‌ی تنخواه تغییر نمی‌کند و کنترل مانده‌ی منفی اینجا لازم نیست — کنترل هنگام ویرایش/حذفِ سند «ثبت» انجام می‌شود.
 
   try {
     await prisma.$transaction(async (tx: any) => {
