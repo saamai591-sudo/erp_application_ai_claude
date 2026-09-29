@@ -336,7 +336,9 @@ router.get("/sales-invoices/pickable-sales-delivery-lines", can(`${FORM}.view`),
   const lines = await prisma.inventoryDocumentLine.findMany({
     where: { document: { documentType: "SALES_DELIVERY", ...(destDate ? { date: { lte: destDate } } : {}) } },
     include: { document: true, goodsItem: true, unit: true, salesInvoiceLines: true },
-    orderBy: { id: "desc" },
+    // به ترتیب سند مبنا و سپس ترتیب ردیف‌ها در همان سند (rowOrder) — چون انتخابگر چندتایی ردیف‌های انتخاب‌شده
+    // را به همین ترتیب به فاکتور اضافه می‌کند، ترتیب نزولی id ردیف‌های یک سند را وارونه اضافه می‌کرد.
+    orderBy: [{ document: { date: "asc" } }, { document: { number: "asc" } }, { documentId: "asc" }, { rowOrder: "asc" }, { id: "asc" }],
   });
   const result: any[] = [];
   for (const l of lines as any[]) {

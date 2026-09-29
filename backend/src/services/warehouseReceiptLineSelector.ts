@@ -43,7 +43,9 @@ export async function fetchPickableWarehouseReceiptLines(opts: {
       },
     },
     include: { document: true, goodsItem: true, unit: true, ...(opts.include || {}) },
-    orderBy: { id: "desc" },
+    // به ترتیب سند مبنا و سپس ترتیب ردیف‌ها در همان سند (rowOrder) — انتخابگر چندتایی ردیف‌های انتخاب‌شده را
+    // به همین ترتیب به سند مقصد اضافه می‌کند؛ ترتیب نزولی id ردیف‌های یک رسید را وارونه اضافه می‌کرد.
+    orderBy: [{ document: { date: "asc" } }, { document: { number: "asc" } }, { documentId: "asc" }, { rowOrder: "asc" }, { id: "asc" }],
   });
 
   return lines

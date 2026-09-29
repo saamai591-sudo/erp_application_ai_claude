@@ -16,6 +16,7 @@ export function RecordPickerField<T extends { id: number | string }>({
   onSelect,
   onSelectMultiple,
   multiSelect,
+  resultInDisplayOrder,
   onOpen,
   placeholder,
   disabled,
@@ -34,6 +35,10 @@ export function RecordPickerField<T extends { id: number | string }>({
   /** اگر true باشد، دیالوگ به‌جای انتخاب تک‌ردیفی (کلیک=انتخاب، دابل‌کلیک=تایید فوری)، هر ردیف را با
    * چک‌باکس تیک می‌زند و «تایید» همه‌ی ردیف‌های تیک‌خورده را با onSelectMultiple برمی‌گرداند */
   multiSelect?: boolean;
+  /** فقط در حالت multiSelect: ردیف‌های تیک‌خورده به همان ترتیبی که در دیالوگ (مرتب‌سازی فعلی) نمایش داده می‌شوند
+   * برگردانده شوند. پیش‌فرض (false): به ترتیب خودِ rows — مناسب انتخابگر ردیف‌های سند مبنا که rows از قبل
+   * به ترتیب ردیف‌های همان سند است. برای فهرست‌هایی مثل کالا که «سند مبنا» ندارند و ترتیب rows دلخواه/نزولی است. */
+  resultInDisplayOrder?: boolean;
   /** اگر مقدار بازگشتی دقیقاً false باشد، دیالوگ باز نمی‌شود (برای گیت کردن باز شدن انتخابگر پشتِ یک
    * پیش‌شرط، مثل الزامی‌بودن فیلدهای سرصفحه — نگاه کنید به guardRowEntry در فرم‌های مبنادار) */
   onOpen?: () => void | boolean;
@@ -72,6 +77,7 @@ export function RecordPickerField<T extends { id: number | string }>({
           rows={rows}
           columns={columns}
           multiSelect={multiSelect}
+          resultInDisplayOrder={resultInDisplayOrder}
           onSelect={(row) => {
             onSelect?.(row);
             setOpen(false);
@@ -92,6 +98,7 @@ export function RecordPickerDialog<T extends { id: number | string }>({
   rows,
   columns,
   multiSelect,
+  resultInDisplayOrder,
   onSelect,
   onSelectMultiple,
   onClose,
@@ -100,6 +107,7 @@ export function RecordPickerDialog<T extends { id: number | string }>({
   rows: T[];
   columns: PickerColumn<T>[];
   multiSelect?: boolean;
+  resultInDisplayOrder?: boolean;
   onSelect: (row: T) => void;
   onSelectMultiple?: (rows: T[]) => void;
   onClose: () => void;
@@ -111,14 +119,9 @@ export function RecordPickerDialog<T extends { id: number | string }>({
     columns[0] ? { header: columns[0].header, dir: "asc" } : null
   );
 
-  const filteredRows = useMemo(() => {
-    const result = rows.filter((row) =>
-      columns.every((col) => {
-        const f = (filters[col.header] || "").trim().toLowerCase();
-        if (!f) return true;
-        return col.filterValue(row).toLowerCase().includes(f);
-      })
-    );
+  // همه‌ی ردیف‌ها با مرتب‌سازی فعلی (بدون فیلتر) — filteredRows و ترتیب خروجی انتخاب چندتایی از همین می‌آید
+  const sortedRows = useMemo(() => {
+    const result = [...rows];
     if (sort) {
       const col = columns.find((c) => c.header === sort.header);
       if (col) {
@@ -129,7 +132,19 @@ export function RecordPickerDialog<T extends { id: number | string }>({
       }
     }
     return result;
-  }, [rows, columns, filters, sort]);
+  }, [rows, columns, sort]);
+
+  const filteredRows = useMemo(
+    () =>
+      sortedRows.filter((row) =>
+        columns.every((col) => {
+          const f = (filters[col.header] || "").trim().toLowerCase();
+          if (!f) return true;
+          return col.filterValue(row).toLowerCase().includes(f);
+        })
+      ),
+    [sortedRows, columns, filters]
+  );
 
   function toggleSort(header: string) {
     setSort((prev) => {
@@ -162,7 +177,8 @@ export function RecordPickerDialog<T extends { id: number | string }>({
       // طبق تصمیم صریح کاربر: انتخاب چندتایی روی همه‌ی rows (نه فقط filteredRows) کار می‌کند تا اگر
       // کاربر بعد از تیک‌زدن چند ردیف، فیلتر را عوض کند، ردیف‌های قبلاً تیک‌خورده که موقتاً از دید فیلتر
       // پنهان شده‌اند هم در نتیجه‌ی نهایی حفظ شوند.
-      const selectedRows = rows.filter((r) => selectedIds.has(r.id));
+      // ترتیب خروجی: پیش‌فرض ترتیب rows (ترتیب سند مبنا)، یا (resultInDisplayOrder) ترتیب نمایش فعلی دیالوگ
+      const selectedRows = (resultInDisplayOrder ? sortedRows : rows).filter((r) => selectedIds.has(r.id));
       if (selectedRows.length > 0) onSelectMultiple?.(selectedRows);
       return;
     }
