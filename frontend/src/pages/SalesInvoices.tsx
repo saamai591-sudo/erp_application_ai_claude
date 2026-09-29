@@ -59,7 +59,7 @@ function customerTitle(c: CustomerOption): string {
 
 type SalesInvoiceStatus = "DRAFT" | "VOIDED";
 const SALES_INVOICE_STATUS_FA: Record<SalesInvoiceStatus, string> = { DRAFT: "ثبت", VOIDED: "باطل شده" };
-interface ListRow { id: number; number: number; date: string; basis: Basis; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: SalesInvoiceStatus; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number }
+interface ListRow { id: number; number: number; date: string; basis: Basis; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: SalesInvoiceStatus; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number; advanceAmount: number }
 interface DetailLine { id: number; sourceInventoryLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null }
 interface Detail extends ListRow { currencyId: number; fxRate: number; description: string | null; journalEntryId: number | null; journalEntryReferenceNumber: number | null; lines: DetailLine[] }
 
@@ -152,6 +152,7 @@ function SalesInvoiceList() {
           { header: "نوع فروش", render: (r) => r.salesTypeTitle || "—", filterType: "string", filterValue: (r) => r.salesTypeTitle || "" },
           { header: "مرکز فروش", render: (r) => r.salesCenterTitle || "—", filterType: "string", filterValue: (r) => r.salesCenterTitle || "" },
           { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
+          { header: "پیش‌دریافت", render: (r) => formatAmountFa(r.advanceAmount), filterType: "number", filterValue: (r) => r.advanceAmount, decimal: true },
           {
             header: "وضعیت",
             render: (r) => <span style={r.status === "VOIDED" ? { color: "var(--danger)" } : undefined}>{SALES_INVOICE_STATUS_FA[r.status]}</span>,
