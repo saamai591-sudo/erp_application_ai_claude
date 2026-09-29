@@ -65,7 +65,7 @@ export function FormPage({
   formId?: string;
   /** مسیر بازگشت برای دکمه‌ی × (بستن) */
   closePath: string;
-  /** اگر مشخص شود، دکمه‌ی «جدید» یک تب مستقل جدید برای رکورد تازه باز می‌کند */
+  /** اگر مشخص شود، دکمه‌ی «جدید» همین تب را به فرمِ خالیِ رکورد تازه برمی‌گرداند (تب جدید باز نمی‌شود) */
   newPath?: string;
   /** اگر مشخص شود (یعنی در حالت ویرایش هستیم)، گزینه‌ی «حذف» در منوی کشویی نمایش داده می‌شود */
   onDelete?: () => void | Promise<void>;
@@ -83,7 +83,7 @@ export function FormPage({
   children: ReactNode;
 }) {
   const navigate = useNavigate();
-  const { openTab } = useTabs();
+  const { resetActiveTabToNew } = useTabs();
   const [menuOpen, setMenuOpen] = useState(false);
 
   // میان‌بر Ctrl+S (در مک Cmd+S): همان دکمه‌ی «ذخیره»ی نوار ابزار را فعال می‌کند (پس وضعیت غیرفعال بودن ذخیره رعایت می‌شود) و ذخیره‌ی
@@ -130,7 +130,7 @@ export function FormPage({
             <SaveIcon />
           </button>
           {newPath && (
-            <button type="button" className="toolbar-icon-btn" onClick={() => openTab(newPath)} title="جدید">
+            <button type="button" className="toolbar-icon-btn" onClick={() => resetActiveTabToNew(newPath)} title="جدید">
               <PlusIcon />
             </button>
           )}
