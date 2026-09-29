@@ -3,7 +3,7 @@
 // می‌شود؛ اگر ثابت روی localhost باشد، کاربرهایی که از یک PC دیگر در شبکه به آدرس IP سرور وصل می‌شوند
 // درخواستشان به localhost خودشان (نه سرور) می‌رود و با ERR_CONNECTION_REFUSED مواجه می‌شوند.
 import { recordResourceFetch, recordResourceMutation } from "./listInvalidation";
-import { rememberVersion, attachVersion } from "./concurrencyToken";
+import { rememberVersion, attachVersion, hasRememberedVersion, forgetVersion } from "./concurrencyToken";
 import { getSavedFiscalPeriodId } from "./userSettings";
 import { getAuthToken } from "./authToken";
 
@@ -59,11 +59,25 @@ export const api = {
     recordResourceMutation(path);
     return data;
   }),
-  put: (path: string, body?: any) => request(path, { method: "PUT", body: JSON.stringify(attachVersion(path, body)) }).then((data) => {
+  put: async (path: string, body?: any) => {
+    const hadVersion = hasRememberedVersion(path);
+    const data = await request(path, { method: "PUT", body: JSON.stringify(attachVersion(path, body)) });
     recordResourceMutation(path);
-    rememberVersion(path, data);
+    if (data && typeof data === "object" && typeof data.updatedAt === "string") {
+      rememberVersion(path, data);
+    } else if (hadVersion) {
+      // بیشتر بک‌اندها در پاسخ PUT فقط { id } برمی‌گردانند و صفحه‌ی ویرایش هم بعد از ذخیره دوباره GET نمی‌زند؛
+      // نسخه‌ی به‌خاطر‌سپرده‌شده کهنه می‌ماند و ذخیره‌ی بعدیِ همان فرم به‌اشتباه «توسط کاربر دیگری تغییر کرده»
+      // می‌خورد (utils/concurrency.ts). پس نسخه‌ی تازه‌ی همان رکورد را بی‌سروصدا می‌خوانیم؛ اگر ممکن نبود،
+      // نسخه‌ی کهنه را رها می‌کنیم (بک‌اند وقتی updatedAt نرسد کنترل را رد می‌کند، نه اینکه خطای کاذب بدهد).
+      try {
+        rememberVersion(path, await request(path));
+      } catch {
+        forgetVersion(path);
+      }
+    }
     return data;
-  }),
+  },
   del: (path: string) => request(path, { method: "DELETE" }).then((data) => {
     recordResourceMutation(path);
     return data;

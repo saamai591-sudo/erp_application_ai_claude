@@ -24,6 +24,16 @@ export function rememberVersion(path: string, data: any) {
   }
 }
 
+/** آیا برای این مسیر نسخه‌ای به‌خاطر سپرده شده (یعنی قبلاً یک GET روی دقیقاً همین مسیر انجام شده)؟ */
+export function hasRememberedVersion(path: string): boolean {
+  return versionByPath.has(normalizePath(path));
+}
+
+/** فقط از api.ts: وقتی تازه‌سازی نسخه بعد از PUT ممکن نبود، نسخه‌ی کهنه را نگه نمی‌داریم (ارسال آن خطای کاذب می‌دهد). */
+export function forgetVersion(path: string) {
+  versionByPath.delete(normalizePath(path));
+}
+
 /** فقط از api.ts، درست قبل از سریالایز کردن بدنه‌ی هر PUT صدا زده شود. */
 export function attachVersion(path: string, body: any): any {
   if (body === null || typeof body !== "object" || Array.isArray(body)) return body;
