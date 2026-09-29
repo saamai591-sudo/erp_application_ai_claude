@@ -58,8 +58,9 @@ interface ChequeRow {
   locked: boolean;
   parentChequeId: number | null;
 }
-interface BankRow { key: string; bankAccountId: string; balance: string; baseBalance: string }
-interface CashRow { key: string; cashBoxId: string; currencyId: string; balance: string; baseBalance: string }
+// systemGenerated: ردیف را «بستن سال دریافت و پرداخت» ساخته است؛ فقط‌خواندنی (قابل ویرایش/حذف نیست)
+interface BankRow { key: string; bankAccountId: string; balance: string; baseBalance: string; systemGenerated?: boolean }
+interface CashRow { key: string; cashBoxId: string; currencyId: string; balance: string; baseBalance: string; systemGenerated?: boolean }
 
 const RECEIVABLE_STATUS_FA: Record<string, string> = { IN_HAND: "در دست", IN_COLLECTION: "واگذار به وصول", BOUNCED: "برگشتی" };
 const PAYABLE_STATUS_FA: Record<string, string> = { ISSUED: "صادرشده" };
@@ -70,7 +71,7 @@ const TAB_LABEL: Record<TabKey, string> = { receivable: "چک‌های دریا�
 const INFO_TEXT =
   "ثبت اطلاعات افتتاحیه‌ی دریافت و پرداخت یک دوره‌ی مالی: چک‌های دریافتی و پرداختی، مانده‌ی اول دوره‌ی حساب‌های بانکی و صندوق‌ها. " +
   "این فرم هم برای استقرار اولیه (ورود دستی) و هم برای انتقال پایان سال (با «بستن سال دریافت و پرداخت») استفاده می‌شود و می‌تواند " +
-  "مرحله‌به‌مرحله تکمیل شود. چک‌هایی که سندی به آن‌ها ارجاع می‌دهد یا گردش داشته‌اند قفل‌اند. ارز حساب بانکی از خودِ حساب می‌آید؛ " +
+  "مرحله‌به‌مرحله تکمیل شود. چک‌هایی که سندی به آن‌ها ارجاع می‌دهد یا گردش داشته‌اند قفل‌اند. ردیف‌ها و چک‌هایی که «بستن سال دریافت و پرداخت» خودکار می‌سازد فقط‌خواندنی‌اند و قابل ویرایش یا حذف نیستند. ارز حساب بانکی از خودِ حساب می‌آید؛ " +
   "برای ارز غیرپایه هر دو مبلغ (به ارز حساب و به ارز پایه) ثبت می‌شود. مانده‌ها می‌توانند منفی باشند.";
 
 let seq = 0;
@@ -197,8 +198,8 @@ function OpeningForm({ editId }: { editId?: number }) {
     });
     setReceivable(d.receivableCheques.map(toCheque));
     setPayable(d.payableCheques.map(toCheque));
-    setBankRows(d.bankAccountLines.map((l: any) => ({ key: nextKey(), bankAccountId: String(l.bankAccountId), balance: String(l.balance), baseBalance: String(l.baseBalance) })));
-    setCashRows(d.cashBoxLines.map((l: any) => ({ key: nextKey(), cashBoxId: String(l.cashBoxId), currencyId: String(l.currencyId), balance: String(l.balance), baseBalance: String(l.baseBalance) })));
+    setBankRows(d.bankAccountLines.map((l: any) => ({ key: nextKey(), bankAccountId: String(l.bankAccountId), balance: String(l.balance), baseBalance: String(l.baseBalance), systemGenerated: !!l.systemGenerated })));
+    setCashRows(d.cashBoxLines.map((l: any) => ({ key: nextKey(), cashBoxId: String(l.cashBoxId), currencyId: String(l.currencyId), balance: String(l.balance), baseBalance: String(l.baseBalance), systemGenerated: !!l.systemGenerated })));
   }
 
   useEffect(() => {
@@ -239,6 +240,11 @@ function OpeningForm({ editId }: { editId?: number }) {
     init().catch((e) => setError((e as ApiError).message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
+
+  // نشان ردیف ساخته‌شده توسط «بستن سال» (فقط‌خواندنی)
+  function systemBadge() {
+    return <span className="badge" title="این ردیف توسط «بستن سال دریافت و پرداخت» ساخته شده است و قابل ویرایش/حذف نیست">ایجاد‌شده توسط بستن سال</span>;
+  }
 
   function setChequeRows(kind: "receivable" | "payable", fn: (prev: ChequeRow[]) => ChequeRow[]) {
     (kind === "receivable" ? setReceivable : setPayable)(fn);
@@ -409,7 +415,7 @@ function OpeningForm({ editId }: { editId?: number }) {
                   </td>
                   <td>
                     {r.locked ? (
-                      <span className="badge" title="این چک در سند دیگری استفاده شده یا گردش داشته و قابل ویرایش/حذف نیست">قفل</span>
+                      <span className="badge" title={r.parentChequeId ? "این چک توسط «بستن سال» منتقل شده است و قابل ویرایش/حذف نیست" : "این چک در سند دیگری استفاده شده یا گردش داشته و قابل ویرایش/حذف نیست"}>قفل</span>
                     ) : (
                       <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeCheque(kind, r.key)}>حذف</button>
                     )}
@@ -457,16 +463,16 @@ function OpeningForm({ editId }: { editId?: number }) {
                   <tr key={r.key}>
                     <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                     <td style={{ minWidth: 220 }}>
-                      <BankAccountPicker accounts={bankAccounts} value={r.bankAccountId} onChange={(id) => setBankRows((p) => p.map((x) => (x.key === r.key ? { ...x, bankAccountId: id } : x)))} />
+                      <BankAccountPicker accounts={bankAccounts} value={r.bankAccountId} disabled={r.systemGenerated} onChange={(id) => setBankRows((p) => p.map((x) => (x.key === r.key ? { ...x, bankAccountId: id } : x)))} />
                     </td>
                     <td style={{ minWidth: 100 }}>{acc ? acc.currency?.title ?? baseCur.title : "—"}</td>
                     <td style={{ minWidth: 160 }}>
-                      <SignedInput value={r.balance} onChange={(v) => setBankRows((p) => p.map((x) => (x.key === r.key ? { ...x, balance: v, baseBalance: isBase ? v : x.baseBalance } : x)))} />
+                      <SignedInput value={r.balance} disabled={r.systemGenerated} onChange={(v) => setBankRows((p) => p.map((x) => (x.key === r.key ? { ...x, balance: v, baseBalance: isBase ? v : x.baseBalance } : x)))} />
                     </td>
                     <td style={{ minWidth: 160 }}>
-                      <SignedInput value={isBase ? r.balance : r.baseBalance} disabled={isBase} onChange={(v) => setBankRows((p) => p.map((x) => (x.key === r.key ? { ...x, baseBalance: v } : x)))} />
+                      <SignedInput value={isBase ? r.balance : r.baseBalance} disabled={isBase || r.systemGenerated} onChange={(v) => setBankRows((p) => p.map((x) => (x.key === r.key ? { ...x, baseBalance: v } : x)))} />
                     </td>
-                    <td><button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => setBankRows((p) => p.filter((x) => x.key !== r.key))}>حذف</button></td>
+                    <td>{r.systemGenerated ? systemBadge() : <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => setBankRows((p) => p.filter((x) => x.key !== r.key))}>حذف</button>}</td>
                   </tr>
                 );
               })}
@@ -508,23 +514,23 @@ function OpeningForm({ editId }: { editId?: number }) {
                   <tr key={r.key}>
                     <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                     <td style={{ minWidth: 200 }}>
-                      <select value={r.cashBoxId} onChange={(e) => setCashRows((p) => p.map((x) => (x.key === r.key ? { ...x, cashBoxId: e.target.value } : x)))}>
+                      <select value={r.cashBoxId} disabled={r.systemGenerated} onChange={(e) => setCashRows((p) => p.map((x) => (x.key === r.key ? { ...x, cashBoxId: e.target.value } : x)))}>
                         <option value="">انتخاب صندوق</option>
                         {cashBoxes.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
                       </select>
                     </td>
                     <td style={{ minWidth: 130 }}>
-                      <select value={r.currencyId} onChange={(e) => setCashRows((p) => p.map((x) => (x.key === r.key ? { ...x, currencyId: e.target.value, baseBalance: Number(e.target.value) === baseCur.id ? x.balance : x.baseBalance } : x)))}>
+                      <select value={r.currencyId} disabled={r.systemGenerated} onChange={(e) => setCashRows((p) => p.map((x) => (x.key === r.key ? { ...x, currencyId: e.target.value, baseBalance: Number(e.target.value) === baseCur.id ? x.balance : x.baseBalance } : x)))}>
                         {currencies.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
                       </select>
                     </td>
                     <td style={{ minWidth: 160 }}>
-                      <SignedInput value={r.balance} onChange={(v) => setCashRows((p) => p.map((x) => (x.key === r.key ? { ...x, balance: v, baseBalance: isBase ? v : x.baseBalance } : x)))} />
+                      <SignedInput value={r.balance} disabled={r.systemGenerated} onChange={(v) => setCashRows((p) => p.map((x) => (x.key === r.key ? { ...x, balance: v, baseBalance: isBase ? v : x.baseBalance } : x)))} />
                     </td>
                     <td style={{ minWidth: 160 }}>
-                      <SignedInput value={isBase ? r.balance : r.baseBalance} disabled={isBase} onChange={(v) => setCashRows((p) => p.map((x) => (x.key === r.key ? { ...x, baseBalance: v } : x)))} />
+                      <SignedInput value={isBase ? r.balance : r.baseBalance} disabled={isBase || r.systemGenerated} onChange={(v) => setCashRows((p) => p.map((x) => (x.key === r.key ? { ...x, baseBalance: v } : x)))} />
                     </td>
-                    <td><button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => setCashRows((p) => p.filter((x) => x.key !== r.key))}>حذف</button></td>
+                    <td>{r.systemGenerated ? systemBadge() : <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => setCashRows((p) => p.filter((x) => x.key !== r.key))}>حذف</button>}</td>
                   </tr>
                 );
               })}

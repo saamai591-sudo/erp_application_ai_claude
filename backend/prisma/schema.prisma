@@ -3445,6 +3445,8 @@ model TreasuryOpeningBankAccount {
   currencyId    Int
   balance       Decimal         @db.Decimal(18, 2)
   baseBalance   Decimal         @db.Decimal(18, 2)
+  // true = ردیف را «بستن سال دریافت و پرداخت» خودکار ساخته است؛ کاربر نمی‌تواند آن را ویرایش/حذف کند (routes/treasuryOpenings.ts)
+  isSystemGenerated Boolean     @default(false)
   opening       TreasuryOpening @relation(fields: [openingId], references: [id], onDelete: Cascade)
   bankAccount   BankAccount     @relation(fields: [bankAccountId], references: [id])
   currency      Currency        @relation(fields: [currencyId], references: [id])
@@ -3460,6 +3462,8 @@ model TreasuryOpeningCashBox {
   currencyId  Int
   balance     Decimal         @db.Decimal(18, 2)
   baseBalance Decimal         @db.Decimal(18, 2)
+  // همان معنای TreasuryOpeningBankAccount.isSystemGenerated
+  isSystemGenerated Boolean   @default(false)
   opening     TreasuryOpening @relation(fields: [openingId], references: [id], onDelete: Cascade)
   cashBox     CashBox         @relation(fields: [cashBoxId], references: [id])
   currency    Currency        @relation(fields: [currencyId], references: [id])

@@ -9,6 +9,8 @@ import { getCashMovements } from "./cashReviewService";
 // اطلاعات پایان دوره‌ی مالیِ جاری را به «افتتاحیه دریافت و پرداخت» دوره‌ی بعد منتقل می‌کند؛ هر بخش مستقل قابل بستن است
 // (و «بستن همه»). بستن‌ها با TreasuryYearClose ثبت می‌شوند و یک بخش را نمی‌شود دوباره بست (مگر افتتاحیه‌ی دوره‌ی بعد حذف
 // شود که بستن‌های این دوره را باز می‌کند — نگاه کنید به DELETE /treasury-openings/:id).
+// ردیف‌ها/چک‌هایی که بستن می‌سازد «ساخته‌شده توسط سیستم» هستند (TreasuryOpening{BankAccount,CashBox}.isSystemGenerated؛ برای چک:
+// parentChequeId) و کاربر نمی‌تواند در فرم افتتاحیه ویرایش/حذفشان کند (routes/treasuryOpenings.ts).
 //   - حساب‌های بانکی: مانده‌ی پایان سال هر حساب (افتتاحیه‌ی همین دوره + گردش‌های تاییدشده، همان تعریف «مرور حساب بانکی»)
 //     به ارز حساب و ارز پایه. مانده‌ی ارز حساب برای گردش‌های مبتنی بر چک (ارز پایه) فقط برای حساب‌های ارز پایه حساب می‌شود.
 //   - صندوق‌ها: مانده‌ی پایان سال هر صندوق به تفکیک ارز (به ارز ردیف و ارز پایه).
@@ -131,8 +133,8 @@ export async function closeSection(section: CloseSection): Promise<{ section: Cl
           // eslint-disable-next-line no-await-in-loop
           await tx.treasuryOpeningBankAccount.upsert({
             where: { openingId_bankAccountId: { openingId: opening.id, bankAccountId: r.bankAccountId } },
-            update: { currencyId: r.currencyId, balance: r.balance, baseBalance: r.baseBalance },
-            create: { openingId: opening.id, bankAccountId: r.bankAccountId, currencyId: r.currencyId, balance: r.balance, baseBalance: r.baseBalance, rowOrder: order++ },
+            update: { currencyId: r.currencyId, balance: r.balance, baseBalance: r.baseBalance, isSystemGenerated: true },
+            create: { openingId: opening.id, bankAccountId: r.bankAccountId, currencyId: r.currencyId, balance: r.balance, baseBalance: r.baseBalance, rowOrder: order++, isSystemGenerated: true },
           });
         }
         await tx.treasuryYearClose.create({ data: { fiscalPeriodId: current.id, section } });
@@ -148,8 +150,8 @@ export async function closeSection(section: CloseSection): Promise<{ section: Cl
           // eslint-disable-next-line no-await-in-loop
           await tx.treasuryOpeningCashBox.upsert({
             where: { openingId_cashBoxId_currencyId: { openingId: opening.id, cashBoxId: r.cashBoxId, currencyId: r.currencyId } },
-            update: { balance: r.balance, baseBalance: r.baseBalance },
-            create: { openingId: opening.id, cashBoxId: r.cashBoxId, currencyId: r.currencyId, balance: r.balance, baseBalance: r.baseBalance, rowOrder: order++ },
+            update: { balance: r.balance, baseBalance: r.baseBalance, isSystemGenerated: true },
+            create: { openingId: opening.id, cashBoxId: r.cashBoxId, currencyId: r.currencyId, balance: r.balance, baseBalance: r.baseBalance, rowOrder: order++, isSystemGenerated: true },
           });
         }
         await tx.treasuryYearClose.create({ data: { fiscalPeriodId: current.id, section } });

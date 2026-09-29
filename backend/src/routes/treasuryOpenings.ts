@@ -19,6 +19,10 @@ const FORM = findFormPrefix("treasury-openings");
 //
 // ذخیره (PUT) کل چهار تب را هم‌زمان جایگزین می‌کند؛ مگر چک‌های «قفل»: چکی که سندی (حتی پیش‌نویس) به آن ارجاع می‌دهد یا
 // بعد از افتتاحیه گردش داشته (step ≠ ۱) دیگر از این فرم قابل تغییر/حذف نیست.
+//
+// ردیف‌هایی که «بستن سال دریافت و پرداخت» خودکار می‌سازد (ردیف حساب بانکی/صندوق با isSystemGenerated، و چک‌های منتقل‌شده با
+// parentChequeId) توسط سیستم ساخته شده‌اند و کاربر نمی‌تواند آن‌ها را ویرایش یا حذف کند؛ فقط ردیف‌های دستی (استقرار اولیه) قابل
+// ویرایش‌اند. تنها راه برگرداندن، حذف کل افتتاحیه است (DELETE) که بستن‌های دوره‌ی قبل را هم باز می‌کند.
 // =========================================================================
 
 const router = Router();
@@ -100,7 +104,9 @@ async function serializeOpening(o: any) {
     status: c.status,
     description: c.description,
     parentChequeId: c.parentChequeId,
-    locked: locks[i],
+    // چک منتقل‌شده توسط «بستن سال» (به چک سال قبل ارجاع دارد): همیشه فقط‌خواندنی
+    transferred: c.parentChequeId != null,
+    locked: locks[i] || c.parentChequeId != null,
   });
   const all = cheques.map((c: any, i: number) => ({ c, i }));
   return {
@@ -116,6 +122,7 @@ async function serializeOpening(o: any) {
       currencyTitle: l.currency.title,
       balance: Number(l.balance),
       baseBalance: Number(l.baseBalance),
+      systemGenerated: l.isSystemGenerated,
     })),
     cashBoxLines: o.cashBoxLines.map((l: any) => ({
       cashBoxId: l.cashBoxId,
@@ -124,6 +131,7 @@ async function serializeOpening(o: any) {
       currencyTitle: l.currency.title,
       balance: Number(l.balance),
       baseBalance: Number(l.baseBalance),
+      systemGenerated: l.isSystemGenerated,
     })),
     receivableCheques: all.filter(({ c }: any) => c.direction === "RECEIVABLE").map(({ c, i }: any) => mapCheque(c, i)),
     payableCheques: all.filter(({ c }: any) => c.direction === "PAYABLE").map(({ c, i }: any) => mapCheque(c, i)),
@@ -250,8 +258,29 @@ function chequeData(l: ChequeIn, direction: "RECEIVABLE" | "PAYABLE", amount: nu
   };
 }
 
-/** چک‌های یک جهت را با ردیف‌های ارسالی هم‌گام می‌کند (افزودن/ویرایش/حذف)، به‌جز چک‌های قفل که دست‌نخورده می‌مانند. */
-async function syncCheques(tx: any, fiscalPeriodId: number, direction: "RECEIVABLE" | "PAYABLE", rows: ChequeIn[], baseCurrencyId: number, tab: string) {
+/** آیا ردیف ارسالی با چک منتقل‌شده‌ی ذخیره‌شده فرق دارد؟ (چک منتقل‌شده‌ی بستن سال نباید هیچ فیلدی‌اش عوض شود) */
+function transferredChequeChanged(ex: any, data: ReturnType<typeof chequeData>): boolean {
+  return (
+    ex.number !== data.number ||
+    new Date(ex.dueDate).toISOString().slice(0, 10) !== data.dueDate.toISOString().slice(0, 10) ||
+    Math.abs(Number(ex.amount) - Number(data.amount)) > 0.001 ||
+    ex.partyId !== data.partyId ||
+    ex.status !== data.status ||
+    (ex.description || null) !== data.description ||
+    (ex.bankBranchId || null) !== data.bankBranchId ||
+    (ex.ownerBankAccountId || null) !== data.ownerBankAccountId ||
+    (ex.receivableChequeTypeId || null) !== data.receivableChequeTypeId ||
+    (ex.payableChequeTypeId || null) !== data.payableChequeTypeId ||
+    (ex.openingReceiptTypeId || null) !== data.openingReceiptTypeId ||
+    (ex.openingPaymentTypeId || null) !== data.openingPaymentTypeId
+  );
+}
+
+const TRANSFERRED_MESSAGE = "این چک توسط «بستن سال» به این دوره منتقل شده است و قابل ویرایش یا حذف نیست";
+
+/** چک‌های یک جهت را با ردیف‌های ارسالی هم‌گام می‌کند (افزودن/ویرایش/حذف)، به‌جز چک‌های قفل که دست‌نخورده می‌مانند.
+ *  چک منتقل‌شده‌ی بستن سال هرگز ویرایش/حذف نمی‌شود، مگر کل افتتاحیه حذف شود (allowRemoveTransferred). */
+async function syncCheques(tx: any, fiscalPeriodId: number, direction: "RECEIVABLE" | "PAYABLE", rows: ChequeIn[], baseCurrencyId: number, tab: string, allowRemoveTransferred = false) {
   const existing = await tx.chequeItem.findMany({ where: { fiscalPeriodId, isOpening: true, direction } });
   const byId = new Map<number, any>(existing.map((c: any) => [c.id, c]));
   const seen = new Set<number>();
@@ -263,6 +292,10 @@ async function syncCheques(tx: any, fiscalPeriodId: number, direction: "RECEIVAB
       const ex = byId.get(l.id);
       if (!ex) throw new Error(`${tab} — ردیف ${idx + 1}: چک یافت نشد`);
       seen.add(l.id);
+      if (ex.parentChequeId != null) {
+        if (transferredChequeChanged(ex, data)) throw new Error(`${tab} — ردیف ${idx + 1}: ${TRANSFERRED_MESSAGE}`);
+        continue;
+      }
       // eslint-disable-next-line no-await-in-loop
       if (await isChequeLocked(ex)) {
         const changed = ex.number !== data.number || Math.abs(Number(ex.amount) - amount) > 0.001 || ex.status !== data.status || ex.partyId !== data.partyId;
@@ -278,10 +311,55 @@ async function syncCheques(tx: any, fiscalPeriodId: number, direction: "RECEIVAB
   }
   for (const ex of existing) {
     if (seen.has(ex.id)) continue;
+    if (ex.parentChequeId != null && !allowRemoveTransferred) throw new Error(`${tab}: چک شماره ${ex.number} — ${TRANSFERRED_MESSAGE}`);
     // eslint-disable-next-line no-await-in-loop
     if (await isChequeLocked(ex)) throw new Error(`${tab}: چک شماره ${ex.number} در سند دیگری استفاده شده یا گردش داشته و قابل حذف نیست`);
     // eslint-disable-next-line no-await-in-loop
     await tx.chequeItem.delete({ where: { id: ex.id } });
+  }
+}
+
+/** ردیف‌های حساب بانکی: ردیف‌های ساخته‌شده توسط بستن سال دست‌نخورده می‌مانند (ویرایش/حذفشان خطا می‌دهد)؛ بقیه جایگزین می‌شوند. */
+async function syncBankLines(tx: any, openingId: number, incoming: { bankAccountId: number; currencyId: number; balance: number; baseBalance: number }[]) {
+  const existing = await tx.treasuryOpeningBankAccount.findMany({ where: { openingId, isSystemGenerated: true }, include: { bankAccount: true } });
+  const byAccount = new Map<number, (typeof incoming)[number]>(incoming.map((l) => [l.bankAccountId, l]));
+  for (const e of existing) {
+    const l = byAccount.get(e.bankAccountId);
+    const label = `حساب‌های بانکی — حساب ${e.bankAccount.accountNumber}`;
+    if (!l) throw new Error(`${label}: این ردیف توسط «بستن سال» ساخته شده است و قابل حذف نیست`);
+    if (l.currencyId !== e.currencyId || Math.abs(l.balance - Number(e.balance)) > 0.005 || Math.abs(l.baseBalance - Number(e.baseBalance)) > 0.005) {
+      throw new Error(`${label}: این ردیف توسط «بستن سال» ساخته شده است و قابل ویرایش نیست`);
+    }
+  }
+  const systemIds = new Set<number>(existing.map((e: any) => e.bankAccountId));
+  await tx.treasuryOpeningBankAccount.deleteMany({ where: { openingId, isSystemGenerated: false } });
+  for (const [i, l] of incoming.entries()) {
+    if (systemIds.has(l.bankAccountId)) await tx.treasuryOpeningBankAccount.update({ where: { openingId_bankAccountId: { openingId, bankAccountId: l.bankAccountId } }, data: { rowOrder: i } });
+    else await tx.treasuryOpeningBankAccount.create({ data: { ...l, openingId, rowOrder: i } });
+  }
+}
+
+/** ردیف‌های صندوق: همان قاعده‌ی syncBankLines (کلید ردیف = صندوق + ارز). */
+async function syncCashLines(tx: any, openingId: number, incoming: { cashBoxId: number; currencyId: number; balance: number; baseBalance: number }[]) {
+  const existing = await tx.treasuryOpeningCashBox.findMany({ where: { openingId, isSystemGenerated: true }, include: { cashBox: true } });
+  const keyOf = (cashBoxId: number, currencyId: number) => `${cashBoxId}:${currencyId}`;
+  const byKey = new Map<string, (typeof incoming)[number]>(incoming.map((l) => [keyOf(l.cashBoxId, l.currencyId), l]));
+  for (const e of existing) {
+    const l = byKey.get(keyOf(e.cashBoxId, e.currencyId));
+    const label = `صندوق‌ها — صندوق ${e.cashBox.title}`;
+    if (!l) throw new Error(`${label}: این ردیف توسط «بستن سال» ساخته شده است و قابل حذف نیست`);
+    if (Math.abs(l.balance - Number(e.balance)) > 0.005 || Math.abs(l.baseBalance - Number(e.baseBalance)) > 0.005) {
+      throw new Error(`${label}: این ردیف توسط «بستن سال» ساخته شده است و قابل ویرایش نیست`);
+    }
+  }
+  const systemKeys = new Set<string>(existing.map((e: any) => keyOf(e.cashBoxId, e.currencyId)));
+  await tx.treasuryOpeningCashBox.deleteMany({ where: { openingId, isSystemGenerated: false } });
+  for (const [i, l] of incoming.entries()) {
+    if (systemKeys.has(keyOf(l.cashBoxId, l.currencyId))) {
+      await tx.treasuryOpeningCashBox.update({ where: { openingId_cashBoxId_currencyId: { openingId, cashBoxId: l.cashBoxId, currencyId: l.currencyId } }, data: { rowOrder: i } });
+    } else {
+      await tx.treasuryOpeningCashBox.create({ data: { ...l, openingId, rowOrder: i } });
+    }
   }
 }
 
@@ -338,10 +416,8 @@ router.put("/treasury-openings/:id", can(`${FORM}.edit`), async (req, res) => {
     const cashLines = await cleanCashLines(body.cashBoxLines, base.id);
 
     await prisma.$transaction(async (tx: any) => {
-      await tx.treasuryOpeningBankAccount.deleteMany({ where: { openingId: id } });
-      await tx.treasuryOpeningCashBox.deleteMany({ where: { openingId: id } });
-      for (const [i, l] of bankLines.entries()) await tx.treasuryOpeningBankAccount.create({ data: { ...l, openingId: id, rowOrder: i } });
-      for (const [i, l] of cashLines.entries()) await tx.treasuryOpeningCashBox.create({ data: { ...l, openingId: id, rowOrder: i } });
+      await syncBankLines(tx, id, bankLines);
+      await syncCashLines(tx, id, cashLines);
       await syncCheques(tx, existing.fiscalPeriodId, "RECEIVABLE", body.receivableCheques || [], base.id, "چک‌های دریافتی");
       await syncCheques(tx, existing.fiscalPeriodId, "PAYABLE", body.payableCheques || [], base.id, "چک‌های پرداختی");
       await tx.treasuryOpening.update({ where: { id }, data: { date } });
@@ -358,8 +434,8 @@ router.delete("/treasury-openings/:id", can(`${FORM}.delete`), async (req, res) 
   if (!existing) return res.status(404).json({ error: "افتتاحیه یافت نشد" });
   try {
     await prisma.$transaction(async (tx: any) => {
-      await syncCheques(tx, existing.fiscalPeriodId, "RECEIVABLE", [], (await getBaseCurrency()).id, "چک‌های دریافتی");
-      await syncCheques(tx, existing.fiscalPeriodId, "PAYABLE", [], (await getBaseCurrency()).id, "چک‌های پرداختی");
+      await syncCheques(tx, existing.fiscalPeriodId, "RECEIVABLE", [], (await getBaseCurrency()).id, "چک‌های دریافتی", true);
+      await syncCheques(tx, existing.fiscalPeriodId, "PAYABLE", [], (await getBaseCurrency()).id, "چک‌های پرداختی", true);
       // حذف افتتاحیه، بستن‌های دوره‌ی قبل را که این افتتاحیه را ساخته بودند باز می‌کند تا دوباره قابل بستن باشند
       const thisPeriod = await tx.fiscalPeriod.findUnique({ where: { id: existing.fiscalPeriodId } });
       const prev = thisPeriod ? await tx.fiscalPeriod.findFirst({ where: { toDate: { lt: thisPeriod.fromDate } }, orderBy: { toDate: "desc" } }) : null;
