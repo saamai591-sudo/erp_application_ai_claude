@@ -3,13 +3,14 @@ import { Modal } from "./Modal";
 import { api } from "../lib/api";
 import { showToast } from "../lib/toast";
 import { useTabs } from "../lib/TabsContext";
+import { confirmDiscard } from "../lib/unsavedChanges";
 import { FONT_OPTIONS, applyFont, THEME_OPTIONS, applyTheme } from "../lib/userSettings";
 import { loadPreferences, savePreferences, getPreference } from "../lib/preferences";
 
 interface FiscalPeriod { id: number; title: string; fromDate: string; toDate: string }
 
 export function UserSettingsModal({ onClose }: { onClose: () => void }) {
-  const { closeAllTabs } = useTabs();
+  const { closeAllTabs, hasUnsavedTabs } = useTabs();
   const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
   const [periodId, setPeriodId] = useState("");
   const [fontKey, setFontKey] = useState("vazirmatn");
@@ -40,12 +41,14 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
     if (periodChanged) {
       const proceed = window.confirm("با تغییر دوره مالی، همه فرمهای سیستم بسته می شوند. آیا ادامه می دهید؟");
       if (!proceed) return;
+      // فرمِ دارای تغییر ذخیره‌نشده هم بسته می‌شود: پیش از ذخیره‌ی هر چیزی هشدار می‌دهیم تا انصراف، همه‌چیز را دست‌نخورده بگذارد
+      if (hasUnsavedTabs() && !confirmDiscard()) return;
     }
     applyFont(fontKey);
     applyTheme(themeKey);
     savePreferences({ font: fontKey, theme: themeKey, fiscalPeriodId: periodId });
     if (periodChanged) {
-      closeAllTabs();
+      closeAllTabs(true);
       onClose();
       return;
     }

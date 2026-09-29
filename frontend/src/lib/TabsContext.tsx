@@ -4,6 +4,7 @@ import { getTitleForPath } from "./tabTitle";
 import { clearReviewReportCacheForPath, clearAllReviewReportCaches } from "./reviewReportCache";
 import { clearPersistedStateByPrefix, clearPersistedStateFamily, instanceOfPath } from "./usePersistedState";
 import { refreshTabIfStale } from "./listInvalidation";
+import { clearAllDirty, clearTabDirty, confirmDiscard, isTabDirty } from "./unsavedChanges";
 
 export interface Tab {
   id: string;
@@ -23,7 +24,11 @@ interface TabsCtx {
   resetActiveTabToNew: (newPath: string) => void;
   switchTab: (id: string) => void;
   closeTab: (id: string) => void;
-  closeAllTabs: () => void;
+  /** اگر force نباشد و تبی فرمِ دارای تغییر ذخیره‌نشده باشد، ابتدا تایید می‌گیرد؛ force وقتی است که فراخوان‌کننده
+   * خودش پیش‌تر (مثلاً پیش از ذخیره‌ی تنظیمات) تایید گرفته است. */
+  closeAllTabs: (force?: boolean) => void;
+  /** آیا تبی فرمِ دارای تغییر ذخیره‌نشده باز است؟ */
+  hasUnsavedTabs: () => boolean;
 }
 
 const Ctx = createContext<TabsCtx | null>(null);
@@ -54,6 +59,7 @@ function isListShapedPath(path: string): boolean {
 // کشِ فرم‌ها با کلید `form:<مسیر>` (گاهی با query، گاهی بدون آن — بسته به صفحه) و پسوندهایی مثل :form/:header
 // ذخیره می‌شود. فقط همین «خانواده»‌ی دقیق پاک می‌شود، نه هر کلیدی که همین رشته را به‌عنوان پیشوند دارد.
 function clearFormState(path: string) {
+  clearTabDirty(path);
   const base = pathOnly(path);
   const inst = instanceOfPath(path);
   if (inst) {
@@ -107,6 +113,18 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const currentFullPath = location.pathname + location.search;
+
+  // بستن/رفرش مرورگر وقتی تبی فرم با تغییر ذخیره‌نشده دارد: پیام استاندارد مرورگر (متن سفارشی را مرورگرها نمی‌پذیرند)
+  const hasUnsavedTab = tabs.some((t) => isFormShapedPath(t.path) && isTabDirty(t.path));
+  useEffect(() => {
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      if (!tabs.some((t) => isFormShapedPath(t.path) && isTabDirty(t.path))) return;
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [tabs, hasUnsavedTab]);
 
   // هماهنگ‌سازی: وقتی ناوبری داخلی (نه از طریق openTab) مسیر را عوض می‌کند،
   // تب فعال همان تب به‌روزرسانی می‌شود (نه ساخت تب جدید). این حالت شامل navigate() مستقیمی هم می‌شود که
@@ -196,6 +214,8 @@ export function TabsProvider({ children }: { children: ReactNode }) {
       openTab(newPath);
       return;
     }
+    // «جدید» تغییرات ذخیره‌نشده‌ی فرمِ فعلی را دور می‌ریزد؛ اول از کاربر تایید می‌گیرد
+    if (isTabDirty(active.path) && !confirmDiscard()) return;
     // کش فرمِ فعلی (رکورد در حال ویرایش یا پیش‌نویس فرم جدید) دور ریخته می‌شود تا فرم خالی شروع شود
     clearFormState(active.path);
     let path = newPath;
@@ -219,6 +239,9 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   }
 
   function closeTab(id: string) {
+    // بستن تبِ یک فرم با تغییر ذخیره‌نشده: تایید کاربر (× تب و کلیک وسط، هر دو از همین‌جا می‌گذرند)
+    const target = tabs.find((t) => t.id === id);
+    if (target && isFormShapedPath(target.path) && isTabDirty(target.path) && !confirmDiscard()) return;
     setTabs((prev) => {
       const closed = prev.find((t) => t.id === id);
       if (closed) {
@@ -245,7 +268,13 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   }
 
   /** بستن همه‌ی تب‌های باز (مثلاً وقتی کاربر دوره مالی جاری را عوض می‌کند، تا هیچ فرمی با اطلاعات کش‌شده‌ی دوره‌ی قبلی باز نماند) */
-  function closeAllTabs() {
+  function hasUnsavedTabs() {
+    return tabs.some((t) => isFormShapedPath(t.path) && isTabDirty(t.path));
+  }
+
+  function closeAllTabs(force = false) {
+    if (!force && hasUnsavedTabs() && !confirmDiscard()) return;
+    clearAllDirty();
     clearAllReviewReportCaches();
     clearPersistedStateByPrefix("");
     setTabs([]);
@@ -254,7 +283,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <Ctx.Provider value={{ tabs, activeTabId, refreshNonce, openTab, resetActiveTabToNew, switchTab, closeTab, closeAllTabs }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ tabs, activeTabId, refreshNonce, openTab, resetActiveTabToNew, switchTab, closeTab, closeAllTabs, hasUnsavedTabs }}>{children}</Ctx.Provider>
   );
 }
 
