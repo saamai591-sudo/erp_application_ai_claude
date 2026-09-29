@@ -937,9 +937,16 @@ body {
    در عوض .content خودش کمی بیشتر اسکرول می‌کند، که کاملاً بی‌ضرر است. */
 .je-lines-wrap { flex-shrink: 0; }
 
+/* <fieldset> به‌طور پیش‌فرض min-width: min-content دارد؛ فرم‌های سند (فاکتور خرید/فروش و…) کل محتوایشان را داخل یک fieldset
+   می‌گذارند (قفل‌شدن بعد از تایید)، پس fieldset به پهنای عریض‌ترین فرزندش (جدول ردیف‌ها) کش می‌آمد و کل فرم (سرصفحه، گرید و
+   جمع‌ها) در صفحه‌ی کوچک/وقتی منوی کناری باز است از قاب بیرون می‌زد، به‌جای اینکه جدول درون قاب خودش (.je-lines-scroll) اسکرول شود. */
+fieldset { min-width: 0; }
+
 .je-lines-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .je-lines-title { font-weight: 600; font-size: 13px; color: var(--ink); }
-.je-lines-totals { font-weight: 600; color: var(--ink); white-space: nowrap; }
+/* نوار «جمع» پایین گرید: فوتر flex-wrap است، پس در صفحه‌ی باریک کل این بخش ابتدا به خط بعد می‌رود و فقط اگر باز هم جا نشد، متنش
+   می‌شکند (قبلاً nowrap بود و از قاب بیرون می‌زد). */
+.je-lines-totals { font-weight: 600; color: var(--ink); }
 .je-lines-balance-bad { color: var(--danger); font-size: 12px; font-weight: 600; }
 .je-lines-balance-ok { color: var(--accent); font-size: 12px; font-weight: 600; }
 .grid-scroll-area {
@@ -1205,6 +1212,10 @@ body {
 /* هدر سند حسابداری - شبکه سه‌ستونه فشرده */
 .je-header-grid { display: grid; grid-template-columns: 1fr 1fr 1.8fr; gap: 12px 20px; }
 .je-header-grid .form-field { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+/* آیتم‌های grid به‌طور پیش‌فرض min-width: auto دارند و از محتوایشان (برچسب + select) کوچک‌تر نمی‌شوند؛ در صفحه‌ی باریک ستون‌ها از قاب بیرون
+   می‌زدند. اجازه‌ی کوچک‌شدن به خود فیلد و کنترل داخلش داده می‌شود. */
+.je-header-grid > .form-field { min-width: 0; }
+.je-header-grid .form-field select, .je-header-grid .form-field input:not([type="checkbox"]) { min-width: 0; }
 .je-header-grid .form-field label { font-size: 11.5px; color: var(--ink-soft); white-space: nowrap; flex-shrink: 0; min-width: 78px; text-align: right; }
 .je-header-grid input,
 .je-header-grid select,
