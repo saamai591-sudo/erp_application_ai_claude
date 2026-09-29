@@ -96,8 +96,16 @@ Form-specific (still needs testing per form): its own validations, lookups/filte
 - `Documents/*.md`: Persian design specs (warehouse pricing algorithm and reverse-mode engine, warehouse confirmation, JE issuance, FX rounding/تسعیر, receipt changes/types, sales review report, sale invoice voucher, reporting period, tracking model, serial/batch selection, service purchase vs stock receipt). Read the relevant doc before changing that area. `~$…`/`~…bak` files there are Office/editor temp files — ignore.
 - Root `fix-issuing-system-data.sql` (also in `backend/`) is a one-off data fix.
 
+## Versioning & releases
+
+- The system has one release version (semver `major.minor.patch`), first set to **1.0.0**. It lives in four files that must always match — `backend/package.json` (the source of truth the API reads), `backend/package-lock.json`, `frontend/package.json`, `frontend/package-lock.json` — and is changed **only** by `node scripts/release.mjs patch|minor|major|x.y.z` (never edit those fields by hand). `node scripts/release.mjs --check` verifies the four files agree and that `CHANGELOG.md` has the current version (run it before tagging/building).
+- Choosing the number: **patch** = bug fixes only; **minor** = new backward-compatible features (including additive migrations); **major** = breaking change or a manual migration step for the operator.
+- Every change that matters to users/operators is written under `## [Unreleased]` in `CHANGELOG.md` **in the same PR that makes it**. A release = the script (it names the Unreleased section with the version and date, opens a fresh empty one, and refuses to run when Unreleased is empty) → `git commit -m "Release vX.Y.Z"` → `git tag vX.Y.Z` → build the Docker images tagged with the version (`…/accounting-erp-backend:X.Y.Z` and `:latest`, same for frontend).
+- The About dialog (top bar, next to user settings; `components/AboutModal.tsx`, `routes/about.ts`, `GET /api/about`) shows «نسخه» (the release version) and «پایگاه داده» = the **schema version**: the newest Prisma migration applied on that database (`_prisma_migrations`, its 14-digit timestamp + name), with the PostgreSQL version and the number of applied migrations. It warns when the newest migration bundled with the running app is not yet applied (`database.upToDate === false`) and when the frontend's own version (`__APP_VERSION__`, injected from `frontend/package.json` by `vite.config.ts`) differs from the server's.
+
 ## Working rules for this repo
 
 - Match existing patterns: new route file + register in `index.ts` + `authz/registry.ts` + `navConfig.ts` + `App.tsx` + page; schema change ⇒ Prisma migration.
 - Reuse `journalEntryService`, `assertRecordNotStale`, fiscal scoping, and shared components instead of re-implementing.
 - Don't commit `dist/`, `~$` temp files, or `.env`.
+- User-visible changes get a line under `## [Unreleased]` in `CHANGELOG.md` in the same PR; versions are bumped only with `scripts/release.mjs` (see «Versioning & releases»).
