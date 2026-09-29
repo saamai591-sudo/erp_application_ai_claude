@@ -19,6 +19,8 @@ interface TabsCtx {
    * remount واقعی بشود؛ نگاه کنید به switchTabInternal. */
   refreshNonce: number;
   openTab: (path: string) => void;
+  /** دکمه‌ی «جدید» داخل یک فرم باز: به‌جای باز کردن تب تازه، همین تب فعال را به حالت «جدید» برمی‌گرداند */
+  resetActiveTabToNew: (newPath: string) => void;
   switchTab: (id: string) => void;
   closeTab: (id: string) => void;
   closeAllTabs: () => void;
@@ -185,6 +187,29 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     navigate(path);
   }
 
+  /** «جدید» از داخل یک فرم باز (مثلاً بعد از ذخیره): همین تب فعال دوباره‌ی فرم خالی می‌شود، تب جدید باز
+   * نمی‌شود. «جدید» از فهرست و از منوی کناری همچنان تب تازه باز می‌کنند (همان openTab). اگر تب فعال اصلاً
+   * فرم نیست، همان رفتار قبلی (تب تازه) را دارد. */
+  function resetActiveTabToNew(newPath: string) {
+    const active = tabs.find((t) => t.id === activeTabId);
+    if (!active || !isFormShapedPath(active.path)) {
+      openTab(newPath);
+      return;
+    }
+    // کش فرمِ فعلی (رکورد در حال ویرایش یا پیش‌نویس فرم جدید) دور ریخته می‌شود تا فرم خالی شروع شود
+    clearFormState(active.path);
+    let path = newPath;
+    // تب دیگری از قبل روی همین مسیرِ «جدید» است: کلید کش مشترک حالت همدیگر را خراب می‌کند، پس نمونه‌ی یکتا
+    if (tabs.some((t) => t.id !== active.id && t.path === path) && !instanceOfPath(path)) {
+      path = withNewInstance(path);
+    }
+    clearFormState(path);
+    setTabs((prev) => prev.map((t) => (t.id === active.id ? { ...t, path, title: getTitleForPath(pathOnly(path)) } : t)));
+    // remount واقعی همین تب (کلید Outlet در Layout)، حتی وقتی مسیر عوض نمی‌شود (مثلاً از /x/new به /x/new)
+    setRefreshNonce((n) => n + 1);
+    navigate(path);
+  }
+
   function switchTab(id: string) {
     const tab = tabs.find((t) => t.id === id);
     if (!tab) return;
@@ -229,7 +254,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <Ctx.Provider value={{ tabs, activeTabId, refreshNonce, openTab, switchTab, closeTab, closeAllTabs }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ tabs, activeTabId, refreshNonce, openTab, resetActiveTabToNew, switchTab, closeTab, closeAllTabs }}>{children}</Ctx.Provider>
   );
 }
 
