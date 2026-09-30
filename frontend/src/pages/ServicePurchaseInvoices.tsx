@@ -4,6 +4,7 @@ import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
+import { PurchaseAdvanceAllocationDialog } from "../components/PurchaseAdvanceAllocationDialog";
 import { PurchaseCostAllocationDialog, AllocationDetail } from "../components/PurchaseCostAllocationDialog";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
@@ -64,7 +65,7 @@ interface ReceiptLine { id: number; goodsItemCode: string; goodsItemTitle: strin
 interface ListRow {
   id: number; number: number; date: string; vendorInvoiceNumber: string | null;
   partyId: number; partyTitle: string | null; purchaseTypeId: number; purchaseTypeTitle: string | null;
-  currencyTitle: string; status: Status; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number;
+  currencyTitle: string; status: Status; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number; advanceAmount: number;
 }
 interface DetailLine {
   id: number; serviceId: number; serviceCode: string; serviceTitle: string; amount: number; discount: number; vatAmount: number; basis: Basis;
@@ -164,6 +165,7 @@ function ServicePurchaseInvoiceList() {
           { header: "طرف مقابل", render: (r) => r.partyTitle || "—", filterType: "string", filterValue: (r) => r.partyTitle || "" },
           { header: "نوع خرید", render: (r) => r.purchaseTypeTitle || "—", filterType: "string", filterValue: (r) => r.purchaseTypeTitle || "" },
           { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
+          { header: "پیش‌پرداخت", render: (r) => formatAmountFa(r.advanceAmount), filterType: "number", filterValue: (r) => r.advanceAmount, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
@@ -219,6 +221,7 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
   } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [advanceOpen, setAdvanceOpen] = useState(false);
   useDefaultBaseCurrency({ enabled: !editId && loaded, currencies, current: header.currencyId, apply: (id) => setHeader((h) => ({ ...h, currencyId: id })) });
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const [allocationDialogIdx, setAllocationDialogIdx] = useState<number | null>(null);
@@ -574,6 +577,7 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
   const extraActions: { label: string; icon: JSX.Element; onClick: () => void }[] = [];
   if (editId && meta) {
     if (status === "DRAFT") {
+      extraActions.push({ label: "تخصیص پیش‌پرداخت", icon: <PlusIcon />, onClick: () => setAdvanceOpen(true) });
       extraActions.push({ label: "تایید", icon: <CheckIcon />, onClick: () => runAction("approve") });
     } else if (status === "APPROVED") {
       if (!meta.journalEntryId) {
@@ -821,6 +825,14 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
           decimalPlaces={decimalPlaces}
           onApply={(next) => updateRow(allocationDialogIdx, { allocations: next })}
           onClose={() => setAllocationDialogIdx(null)}
+        />
+      )}
+      {advanceOpen && editId && (
+        <PurchaseAdvanceAllocationDialog
+          basePath="/service-purchase-invoices"
+          invoiceId={editId}
+          onClose={() => setAdvanceOpen(false)}
+          onSaved={() => setAdvanceOpen(false)}
         />
       )}
     </FormPage>

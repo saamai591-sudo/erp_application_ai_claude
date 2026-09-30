@@ -16,20 +16,45 @@ import { toBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConve
 const TOLERANCE = 0.005;
 
 // -------------------------------------------------------------------------
+// «نوع فاکتور خرید» — همین منطق تخصیص هم برای فاکتور خرید کالا (GOODS) و هم فاکتور خرید خدمات (SERVICE) به کار می‌رود.
+// فقط جدول تخصیص/کلید خارجی/مدل فاکتور فرق می‌کند؛ کنترل‌های مبلغ و انتخاب پیش‌پرداخت یکی است. یک ردیف پیش‌پرداخت می‌تواند
+// هم به فاکتورهای کالا و هم به فاکتورهای خدمات تخصیص بگیرد (مانده‌ی قابل تخصیص از جمع هر دو جدول حساب می‌شود).
+// -------------------------------------------------------------------------
+export type PurchaseAdvanceKind = "GOODS" | "SERVICE";
+const KINDS: Record<PurchaseAdvanceKind, { model: string; alloc: string; fk: string; notFound: string }> = {
+  GOODS: { model: "purchaseInvoice", alloc: "purchaseInvoiceAdvanceAllocation", fk: "purchaseInvoiceId", notFound: "فاکتور خرید یافت نشد" },
+  SERVICE: { model: "servicePurchaseInvoice", alloc: "servicePurchaseInvoiceAdvanceAllocation", fk: "servicePurchaseInvoiceId", notFound: "فاکتور خرید خدمات یافت نشد" },
+};
+const db = prisma as any;
+
+/** تخصیص‌های یک ردیف پیش‌پرداخت (هر دو نوع فاکتور) — فهرست {amount, isThis} نسبت به فاکتور جاری */
+function splitAllocations(line: any, kind: PurchaseAdvanceKind, invoiceId: number) {
+  const goods: any[] = line.advanceAllocations || [];
+  const service: any[] = line.servicePurchaseAdvanceAllocations || [];
+  const isThis = (a: any, k: PurchaseAdvanceKind) => k === kind && (k === "GOODS" ? a.purchaseInvoiceId : a.servicePurchaseInvoiceId) === invoiceId;
+  const all = [...goods.map((a) => ({ amount: Number(a.amount), isThis: isThis(a, "GOODS") })), ...service.map((a) => ({ amount: Number(a.amount), isThis: isThis(a, "SERVICE") }))];
+  const toThis = all.filter((a) => a.isThis).reduce((x, a) => x + a.amount, 0);
+  const toOthers = all.filter((a) => !a.isThis).reduce((x, a) => x + a.amount, 0);
+  return { toThis, toOthers };
+}
+
+// -------------------------------------------------------------------------
 // کنترل ویرایش بر اساس «گردش» فاکتور — هم‌الگوی SALES_INVOICE_ADVANCE_LOCKS: امکان ایجاد/ویرایش/حذف
 // تخصیص فقط وقتی است که فاکتور هیچ گردشی نداشته باشد. برای افزودن یک گردش جدید در آینده فقط کافی است
 // یک مورد به PURCHASE_INVOICE_ADVANCE_LOCKS اضافه شود.
 // -------------------------------------------------------------------------
 export interface InvoiceFlowLock {
   key: string;
-  check: (invoiceId: number) => Promise<string | null>;
+  check: (invoiceId: number, kind: PurchaseAdvanceKind) => Promise<string | null>;
 }
 
 export const PURCHASE_INVOICE_ADVANCE_LOCKS: InvoiceFlowLock[] = [
   {
     // گردش پرداخت مستقیم (نه پیش‌پرداخت): هر ردیف موضوع پرداختی که مستقیماً (basisType=PURCHASE_INVOICE) به این فاکتور ارجاع داده باشد
     key: "PAYMENT_FLOW",
-    check: async (invoiceId) => {
+    check: async (invoiceId, kind) => {
+      // ردیف موضوع پرداخت فقط می‌تواند مستقیم به فاکتور خرید کالا ارجاع بدهد
+      if (kind !== "GOODS") return null;
       const payments = await prisma.paymentSettlementLine.count({ where: { purchaseInvoiceId: invoiceId } });
       return payments > 0
         ? "برای این فاکتور گردش پرداخت مستقیم ثبت شده است؛ امکان ایجاد، ویرایش یا حذف تخصیص پیش‌پرداخت وجود ندارد"
@@ -39,33 +64,33 @@ export const PURCHASE_INVOICE_ADVANCE_LOCKS: InvoiceFlowLock[] = [
   {
     // سند حسابداری صادرشده: سند فاکتور از روی تخصیص‌ها ساخته می‌شود، پس بعد از صدور نباید تخصیص تغییر کند
     key: "JOURNAL_ENTRY",
-    check: async (invoiceId) => {
-      const inv = await prisma.purchaseInvoice.findUnique({ where: { id: invoiceId }, select: { journalEntryId: true } });
+    check: async (invoiceId, kind) => {
+      const inv = await db[KINDS[kind].model].findUnique({ where: { id: invoiceId }, select: { journalEntryId: true } });
       return inv?.journalEntryId ? "برای این فاکتور سند حسابداری صادر شده است؛ ابتدا سند حسابداری را حذف کنید" : null;
     },
   },
   {
     // فاکتور تاییدشده: فاکتور تاییدشده رسید(های) انبار را Finalized کرده و سهم تسعیر را در Cost لحاظ کرده — تخصیص فقط قبل از تایید قابل تغییر است
     key: "APPROVED",
-    check: async (invoiceId) => {
-      const inv = await prisma.purchaseInvoice.findUnique({ where: { id: invoiceId }, select: { status: true } });
+    check: async (invoiceId, kind) => {
+      const inv = await db[KINDS[kind].model].findUnique({ where: { id: invoiceId }, select: { status: true } });
       return inv?.status === "APPROVED" ? "این فاکتور تایید شده است؛ ابتدا فاکتور را از تایید برگردانید" : null;
     },
   },
 ];
 
-export async function getAdvanceLockReasons(invoiceId: number): Promise<string[]> {
+export async function getAdvanceLockReasons(invoiceId: number, kind: PurchaseAdvanceKind = "GOODS"): Promise<string[]> {
   const reasons: string[] = [];
   for (const lock of PURCHASE_INVOICE_ADVANCE_LOCKS) {
     // eslint-disable-next-line no-await-in-loop
-    const r = await lock.check(invoiceId);
+    const r = await lock.check(invoiceId, kind);
     if (r) reasons.push(r);
   }
   return reasons;
 }
 
-export async function assertAdvanceEditable(invoiceId: number) {
-  const reasons = await getAdvanceLockReasons(invoiceId);
+export async function assertAdvanceEditable(invoiceId: number, kind: PurchaseAdvanceKind = "GOODS") {
+  const reasons = await getAdvanceLockReasons(invoiceId, kind);
   if (reasons.length > 0) throw new Error(reasons.join("\n"));
 }
 
@@ -74,13 +99,14 @@ export function purchaseInvoiceNetTotal(lines: { amount: any; discount: any }[])
   return lines.reduce((s, l) => s + Number(l.amount) - Number(l.discount), 0);
 }
 
-async function loadInvoice(invoiceId: number) {
-  const invoice = await prisma.purchaseInvoice.findUnique({
+async function loadInvoice(invoiceId: number, kind: PurchaseAdvanceKind) {
+  // ردیف‌های فاکتور کالا (PurchaseInvoiceLine) و خدمات (PurchaseCostLine) هر دو amount/discount دارند
+  const invoice = await db[KINDS[kind].model].findUnique({
     where: { id: invoiceId },
     include: { party: true, currency: true, lines: true },
   });
-  if (!invoice) throw new Error("فاکتور خرید یافت نشد");
-  return invoice;
+  if (!invoice) throw new Error(KINDS[kind].notFound);
+  return invoice as { id: number; number: number; date: Date; partyId: number; currencyId: number; party: any; currency: any; lines: { amount: any; discount: any }[] };
 }
 
 function partyName(p: any): string {
@@ -90,8 +116,8 @@ function partyName(p: any): string {
 // پیش‌پرداخت‌های قابل نمایش برای یک فاکتور (Documents/تخصیص پیش‌پرداخت در فاکتور خرید.md، بند «کنترل‌های Selector»): طرف حساب یکسان،
 // نوع پرداختِ دارای ماهیت «پیش‌پرداخت» (ADVANCE_PAYMENT)، پرداخت تاییدشده، تاریخ پرداخت ≤ تاریخ فاکتور، ارز یکسان و مبلغ قابل
 // تخصیص > صفر (ردیف‌هایی که همین فاکتور از آن‌ها تخصیص گرفته هم برای ویرایش نمایش داده می‌شوند).
-export async function getPurchaseInvoiceAdvanceState(invoiceId: number) {
-  const invoice = await loadInvoice(invoiceId);
+export async function getPurchaseInvoiceAdvanceState(invoiceId: number, kind: PurchaseAdvanceKind = "GOODS") {
+  const invoice = await loadInvoice(invoiceId, kind);
   const total = purchaseInvoiceNetTotal(invoice.lines);
 
   const lines = await prisma.paymentSettlementLine.findMany({
@@ -101,15 +127,14 @@ export async function getPurchaseInvoiceAdvanceState(invoiceId: number) {
       paymentType: { nature: "ADVANCE_PAYMENT" },
       payment: { status: "APPROVED", date: { lte: invoice.date } },
     },
-    include: { payment: true, paymentType: true, currency: true, advanceAllocations: true },
+    include: { payment: true, paymentType: true, currency: true, advanceAllocations: true, servicePurchaseAdvanceAllocations: true },
     orderBy: { id: "asc" },
   });
 
   const candidates = lines
     .map((l) => {
       const original = Number(l.amount);
-      const allocatedToThis = l.advanceAllocations.filter((a) => a.purchaseInvoiceId === invoiceId).reduce((s, a) => s + Number(a.amount), 0);
-      const allocatedToOthers = l.advanceAllocations.filter((a) => a.purchaseInvoiceId !== invoiceId).reduce((s, a) => s + Number(a.amount), 0);
+      const { toThis: allocatedToThis, toOthers: allocatedToOthers } = splitAllocations(l, kind, invoiceId);
       return {
         paymentSettlementLineId: l.id,
         paymentId: l.paymentId,
@@ -126,7 +151,7 @@ export async function getPurchaseInvoiceAdvanceState(invoiceId: number) {
     })
     .filter((c) => c.allocatableAmount > TOLERANCE);
 
-  const allocations = await prisma.purchaseInvoiceAdvanceAllocation.findMany({ where: { purchaseInvoiceId: invoiceId }, orderBy: { id: "asc" } });
+  const allocations: any[] = await db[KINDS[kind].alloc].findMany({ where: { [KINDS[kind].fk]: invoiceId }, orderBy: { id: "asc" } });
   const allocatedTotal = allocations.reduce((s, a) => s + Number(a.amount), 0);
 
   return {
@@ -140,7 +165,7 @@ export async function getPurchaseInvoiceAdvanceState(invoiceId: number) {
     },
     allocatedTotal,
     payable: total - allocatedTotal,
-    lockReasons: await getAdvanceLockReasons(invoiceId),
+    lockReasons: await getAdvanceLockReasons(invoiceId, kind),
     candidates,
   };
 }
@@ -149,9 +174,9 @@ export async function getPurchaseInvoiceAdvanceState(invoiceId: number) {
  * ثبت مجموعه‌ی تخصیص‌های یک فاکتور (ایجاد/ویرایش/حذف با هم): ردیف‌هایی که در items نیامده‌اند یا مبلغشان صفر است حذف می‌شوند.
  * همه‌ی محدودیت‌های مستند (کنترل‌های Selector + کنترل مبلغ تخصیص) اینجا در بک‌اند کنترل می‌شود.
  */
-export async function savePurchaseInvoiceAdvanceAllocations(invoiceId: number, items: { paymentSettlementLineId: number; amount: number }[]) {
-  await assertAdvanceEditable(invoiceId);
-  const invoice = await loadInvoice(invoiceId);
+export async function savePurchaseInvoiceAdvanceAllocations(invoiceId: number, items: { paymentSettlementLineId: number; amount: number }[], kind: PurchaseAdvanceKind = "GOODS") {
+  await assertAdvanceEditable(invoiceId, kind);
+  const invoice = await loadInvoice(invoiceId, kind);
   const total = purchaseInvoiceNetTotal(invoice.lines);
 
   if (!Array.isArray(items)) throw new Error("فهرست تخصیص‌ها نامعتبر است");
@@ -166,7 +191,7 @@ export async function savePurchaseInvoiceAdvanceAllocations(invoiceId: number, i
     // eslint-disable-next-line no-await-in-loop
     const line = await prisma.paymentSettlementLine.findUnique({
       where: { id: item.paymentSettlementLineId },
-      include: { payment: true, paymentType: true, advanceAllocations: true },
+      include: { payment: true, paymentType: true, advanceAllocations: true, servicePurchaseAdvanceAllocations: true },
     });
     if (!line) throw new Error("پیش‌پرداخت انتخاب‌شده یافت نشد");
     const label = `پیش‌پرداخت پرداخت شماره ${line.payment.number}`;
@@ -176,7 +201,7 @@ export async function savePurchaseInvoiceAdvanceAllocations(invoiceId: number, i
     if (line.payment.date.getTime() > invoice.date.getTime()) throw new Error(`${label}: تاریخ پرداخت بعد از تاریخ فاکتور است`);
     if (line.currencyId !== invoice.currencyId) throw new Error(`${label}: ارز پیش‌پرداخت با ارز فاکتور یکسان نیست`);
 
-    const allocatedToOthers = line.advanceAllocations.filter((a) => a.purchaseInvoiceId !== invoiceId).reduce((s, a) => s + Number(a.amount), 0);
+    const { toOthers: allocatedToOthers } = splitAllocations(line, kind, invoiceId);
     const allocatable = Number(line.amount) - allocatedToOthers;
     if (!(allocatable > TOLERANCE)) throw new Error(`${label}: مبلغ قابل تخصیصی باقی نمانده است`);
     if (amount > allocatable + TOLERANCE) throw new Error(`${label}: مبلغ تخصیص از مبلغ قابل تخصیص پیش‌پرداخت (${allocatable}) بیشتر است`);
@@ -184,13 +209,15 @@ export async function savePurchaseInvoiceAdvanceAllocations(invoiceId: number, i
   }
   if (sum > total + TOLERANCE) throw new Error(`مجموع پیش‌پرداخت‌های تخصیص‌یافته (${sum}) از مبلغ قابل تخصیص فاکتور (${total}) بیشتر است`);
 
+  const { alloc, fk } = KINDS[kind];
   await prisma.$transaction(async (tx) => {
-    await tx.purchaseInvoiceAdvanceAllocation.deleteMany({ where: { purchaseInvoiceId: invoiceId, paymentSettlementLineId: { notIn: ids } } });
+    const t = tx as any;
+    await t[alloc].deleteMany({ where: { [fk]: invoiceId, paymentSettlementLineId: { notIn: ids } } });
     for (const item of wanted) {
       // eslint-disable-next-line no-await-in-loop
-      await tx.purchaseInvoiceAdvanceAllocation.upsert({
-        where: { purchaseInvoiceId_paymentSettlementLineId: { purchaseInvoiceId: invoiceId, paymentSettlementLineId: item.paymentSettlementLineId } },
-        create: { purchaseInvoiceId: invoiceId, paymentSettlementLineId: item.paymentSettlementLineId, amount: Number(item.amount) },
+      await t[alloc].upsert({
+        where: { [`${fk}_paymentSettlementLineId`]: { [fk]: invoiceId, paymentSettlementLineId: item.paymentSettlementLineId } },
+        create: { [fk]: invoiceId, paymentSettlementLineId: item.paymentSettlementLineId, amount: Number(item.amount) },
         update: { amount: Number(item.amount) },
       });
     }
@@ -199,16 +226,15 @@ export async function savePurchaseInvoiceAdvanceAllocations(invoiceId: number, i
 
 /** پرداختی که پیش‌پرداختش به فاکتور خرید تخصیص داده شده، قابل برگشت از تایید نیست تا تخصیص‌ها حذف شوند */
 export async function assertPaymentAdvanceNotAllocated(paymentId: number, instrumentLineIds?: number[]) {
-  const count = await prisma.purchaseInvoiceAdvanceAllocation.count({
-    where: { paymentSettlementLine: { paymentId, ...(instrumentLineIds ? { instrumentLineId: { in: instrumentLineIds } } : {}) } },
-  });
-  if (count > 0) throw new Error("این پرداخت (پیش‌پرداخت) به فاکتور خرید تخصیص داده شده است؛ ابتدا تخصیص‌ها را حذف کنید");
+  const where = { paymentSettlementLine: { paymentId, ...(instrumentLineIds ? { instrumentLineId: { in: instrumentLineIds } } : {}) } };
+  const [goods, service] = await Promise.all([prisma.purchaseInvoiceAdvanceAllocation.count({ where }), prisma.servicePurchaseInvoiceAdvanceAllocation.count({ where })]);
+  if (goods + service > 0) throw new Error("این پرداخت (پیش‌پرداخت) به فاکتور خرید تخصیص داده شده است؛ ابتدا تخصیص‌ها را حذف کنید");
 }
 
 /** پیش از ذخیره‌ی ویرایش فاکتور: تخصیص‌های موجود با طرف‌حساب/ارز/تاریخ/مبلغِ جدید فاکتور ناسازگار نشوند */
-export async function assertAdvanceAllocationsStillValid(invoiceId: number, next: { partyId: number; currencyId: number; date: Date; netTotal: number }) {
-  const allocations = await prisma.purchaseInvoiceAdvanceAllocation.findMany({
-    where: { purchaseInvoiceId: invoiceId },
+export async function assertAdvanceAllocationsStillValid(invoiceId: number, next: { partyId: number; currencyId: number; date: Date; netTotal: number }, kind: PurchaseAdvanceKind = "GOODS") {
+  const allocations: any[] = await db[KINDS[kind].alloc].findMany({
+    where: { [KINDS[kind].fk]: invoiceId },
     include: { paymentSettlementLine: { include: { payment: true } } },
   });
   if (allocations.length === 0) return;

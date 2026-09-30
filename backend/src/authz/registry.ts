@@ -440,6 +440,7 @@ export const REGISTRY: ModuleDef[] = [
               ...APPROVE_UNAPPROVE,
               { key: "issueJournalEntry", title: "صدور سند حسابداری" },
               { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
+              { key: "allocateAdvance", title: "تخصیص پیش‌پرداخت" },
             ],
           },
         ],
