@@ -5,7 +5,14 @@ import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
-import { getVatRatePercentForDate } from "../services/accountingSettingsService";
+import { getVatRatePercentForDate, getAdvancePaymentMethodForDate } from "../services/accountingSettingsService";
+import { resolvePaymentSubjectAccount } from "../services/paymentSubjectAccount";
+import {
+  getPurchaseInvoiceAdvanceState,
+  savePurchaseInvoiceAdvanceAllocations,
+  assertAdvanceAllocationsStillValid,
+  purchaseInvoiceNetTotal,
+} from "../services/purchaseInvoiceAdvanceService";
 import { resolveCostLineBasis } from "../services/serviceAccountingTreatment";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
@@ -259,6 +266,8 @@ router.get("/service-purchase-invoices", can(`${FORM}.view`), async (_req, res) 
     include: { party: true, purchaseType: true, currency: true, journalEntry: true, lines: true },
     orderBy: { id: "desc" },
   });
+  const advanceSums = await prisma.servicePurchaseInvoiceAdvanceAllocation.groupBy({ by: ["servicePurchaseInvoiceId"], _sum: { amount: true } });
+  const advanceByInvoice = new Map<number, number>(advanceSums.map((a: any) => [a.servicePurchaseInvoiceId, Number(a._sum.amount ?? 0)]));
   res.json(
     items.map((d: any) => ({
       id: d.id,
@@ -275,8 +284,27 @@ router.get("/service-purchase-invoices", can(`${FORM}.view`), async (_req, res) 
       journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
       lineCount: d.lines.length,
       totalAmount: d.lines.reduce((s: number, l: any) => s + Number(l.amount), 0),
+      advanceAmount: advanceByInvoice.get(d.id) ?? 0,
     }))
   );
+});
+
+// تخصیص پیش‌پرداخت — همان منطق و کنترل‌های فاکتور خرید کالا (services/purchaseInvoiceAdvanceService.ts، نوع SERVICE)
+router.get("/service-purchase-invoices/:id/advance-allocations", can(`${FORM}.view`), async (req, res) => {
+  try {
+    res.json(await getPurchaseInvoiceAdvanceState(Number(req.params.id), "SERVICE"));
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در دریافت اطلاعات پیش‌پرداخت" });
+  }
+});
+
+router.put("/service-purchase-invoices/:id/advance-allocations", can(`${FORM}.allocateAdvance`), async (req, res) => {
+  try {
+    await savePurchaseInvoiceAdvanceAllocations(Number(req.params.id), req.body?.allocations, "SERVICE");
+    res.json(await getPurchaseInvoiceAdvanceState(Number(req.params.id), "SERVICE"));
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در ثبت تخصیص پیش‌پرداخت" });
+  }
 });
 
 router.get("/service-purchase-invoices/:id", can(`${FORM}.view`), async (req, res) => {
@@ -435,6 +463,8 @@ router.put("/service-purchase-invoices/:id", can(`${FORM}.edit`), async (req, re
     const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
     const cleanedLines = await validateLines(body.lines, currency, fxRate, baseCurrency, date);
+    // اگر تخصیص پیش‌پرداختی برای این فاکتور ثبت شده، ویرایش نباید آن را با طرف‌حساب/ارز/تاریخ/مبلغ جدید ناسازگار کند
+    await assertAdvanceAllocationsStillValid(id, { partyId: body.partyId, currencyId: body.currencyId, date, netTotal: purchaseInvoiceNetTotal(cleanedLines) }, "SERVICE");
 
     await prisma.$transaction([
       prisma.purchaseCostLine.deleteMany({ where: { servicePurchaseInvoiceId: id } }),
@@ -672,6 +702,8 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
     const creditByAccount = new Map<number, { amount: number; baseAmount: number; account: (typeof settings)[number]["account"] }>();
     const vatDebitByAccount = new Map<number, { amount: number; account: (typeof settings)[number]["account"] }>();
     const allocationIds: number[] = [];
+    // اولین معین بدهکار «هزینه» (برای اصلاح مبلغ بر اساس نرخ تاریخی پیش‌پرداخت)
+    let firstExpenseDebit: { accountId: number; account: any } | null = null;
 
     const payableSetting = findPayableSetting((s) => s.purchaseTypeId === invoice.purchaseTypeId);
     if (!payableSetting) {
@@ -737,6 +769,7 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
           errors.push(`برای خدمت «${service.title}»، حساب «خرید خدمت» در حسابداری کالا و خدمت تعریف نشده است`);
           continue;
         }
+        if (!firstExpenseDebit) firstExpenseDebit = { accountId: debitSetting.accountId, account: debitSetting.account };
         const debitDetails = resolveAccountDetailFields(debitSetting.account, partyDetailTypeId, partyDetailCode);
         const debitIsCurrency = debitSetting.account.isCurrency;
         debitLines.push({
@@ -780,6 +813,92 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
       }
     }
 
+    // ---------- تخصیص پیش‌پرداخت (هم‌الگوی فاکتور خرید کالا — routes/purchaseInvoices.ts) ----------
+    // هر تخصیص: بستانکار «پیش‌پرداخت» (همان معینی که پرداخت بدهکار کرده) به ارزش دفتری/تاریخی، و کاهش بستانکار «پرداختنی خرید» به مبلغ
+    // تخصیص با نرخ فاکتور. اختلاف ارزش ریالی (نرخ تاریخی − نرخ فاکتور) طبق «رویه‌ها و تنظیمات حسابداری» (روش معتبر در تاریخ فاکتور):
+    //  • نرخ تاریخ معامله/فاکتور: روی «سود و زیان تسعیر ارز».
+    //  • نرخ تاریخی: مبلغ بدهکارِ اولین ردیف «هزینه» اصلاح می‌شود؛ اگر فاکتور ردیف هزینه‌ای ندارد (فقط «بهای موجودی» — رسید انبار قبلاً به
+    //    نرخ فاکتور ارزش‌گذاری شده) اختلاف روی «سود و زیان تسعیر ارز» می‌نشیند تا ارزش موجودی و سند ناهمخوان نشوند. سند همیشه بالانس است.
+    const advanceCreditLines: IssueLineInput[] = [];
+    const advanceAdjustLines: IssueLineInput[] = [];
+    const serviceAdvanceAllocations = await prisma.servicePurchaseInvoiceAdvanceAllocation.findMany({
+      where: { servicePurchaseInvoiceId: id },
+      include: { paymentSettlementLine: { include: { payment: true, paymentType: true } } },
+      orderBy: { id: "asc" },
+    });
+    if (serviceAdvanceAllocations.length > 0 && errors.length === 0) {
+      const invIsBase = invoice.currencyId === baseCurrency.id;
+      let cur = 0;
+      let inv = 0;
+      let hist = 0;
+      for (const a of serviceAdvanceAllocations) {
+        const l = a.paymentSettlementLine;
+        const amount = Number(a.amount);
+        const resolved = await resolvePaymentSubjectAccount(l.paymentType, {});
+        if (resolved.error || !resolved.account) {
+          errors.push(`برای نوع پرداخت «${l.paymentType.title}» (پیش‌پرداخت پرداخت شماره ${l.payment.number}) معینِ پیش‌پرداخت تعریف نشده است`);
+          continue;
+        }
+        const account = resolved.account;
+        const rowRate = Number(l.fxRate);
+        const rowHist = invIsBase ? amount : toBaseCurrencyAmount(amount, rowRate, invoice.currency, baseCurrency);
+        const rowAtInvoice = invIsBase ? amount : toBaseCurrencyAmount(amount, fxRate, invoice.currency, baseCurrency);
+        cur += amount;
+        inv += rowAtInvoice;
+        hist += rowHist;
+        const details = resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode);
+        const advDescription = `بابت تخصیص پیش‌پرداخت پرداخت شماره ${l.payment.number} به فاکتور خرید خدمات ${invoice.number} ${partyTitle(invoice.party) || ""}`.trim();
+        if (account.isCurrency && !invIsBase) {
+          advanceCreditLines.push({ accountId: account.id, ...details, currencyId: invoice.currencyId, debit: 0, credit: amount, fxRate: rowRate, description: advDescription });
+        } else {
+          advanceCreditLines.push({ accountId: account.id, ...details, currencyId: baseCurrency.id, debit: 0, credit: rowHist, fxRate: 1, description: advDescription });
+        }
+      }
+
+      // کاهش بستانکار «پرداختنی خرید» به‌اندازه‌ی پیش‌پرداخت تخصیص‌یافته (ارز فاکتور و ارز پایه با نرخ فاکتور)
+      if (cur > 0) {
+        for (const [key, entry] of Array.from(creditByAccount.entries())) {
+          entry.amount -= cur;
+          entry.baseAmount -= inv;
+          if (entry.amount < -0.005 || entry.baseAmount < -0.005) errors.push("مجموع پیش‌پرداخت تخصیص‌یافته از مبلغ پرداختنی فاکتور بیشتر است");
+          if (Math.abs(entry.amount) <= 0.005) creditByAccount.delete(key);
+        }
+      }
+
+      const diff = Math.round((hist - inv) * 100) / 100;
+      if (!invIsBase && Math.abs(diff) > 0.005) {
+        const method = await getAdvancePaymentMethodForDate(invoice.date);
+        if (!method) {
+          errors.push("روش شناسایی پیش‌پرداخت ارزی خرید برای تاریخ فاکتور در «رویه‌ها و تنظیمات حسابداری» (تنظیمات ارز) تعریف نشده است");
+        } else if (method === "TRANSACTION_DATE_RATE" || !firstExpenseDebit) {
+          const fxAccount = (await prisma.treasuryAccountSetting.findFirst({ where: { accountType: "FX_GAIN_LOSS" }, include: { account: true } }))?.account;
+          if (!fxAccount) {
+            errors.push("حساب «سود و زیان تسعیر ارز» در «تعیین حسابهای معین» تعریف نشده است");
+          } else {
+            advanceAdjustLines.push({
+              accountId: fxAccount.id,
+              currencyId: baseCurrency.id,
+              debit: diff > 0 ? diff : 0,
+              credit: diff < 0 ? -diff : 0,
+              fxRate: 1,
+              description: `تسعیر پیش‌پرداخت تخصیص‌یافته به ${description}`,
+            });
+          }
+        } else {
+          const details = resolveAccountDetailFields(firstExpenseDebit.account, partyDetailTypeId, partyDetailCode);
+          advanceAdjustLines.push({
+            accountId: firstExpenseDebit.accountId,
+            ...details,
+            currencyId: baseCurrency.id,
+            debit: diff > 0 ? diff : 0,
+            credit: diff < 0 ? -diff : 0,
+            fxRate: 1,
+            description: `خرید بخش پیش‌پرداخت با نرخ تاریخی — ${description}`,
+          });
+        }
+      }
+    }
+
     if (errors.length > 0) return res.status(400).json({ error: errors.join("\n") });
 
     const creditLines: IssueLineInput[] = [];
@@ -820,7 +939,7 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
       description,
       issuingSystem: "PURCHASE",
       isManual: false,
-      lines: [...debitLines, ...vatDebitLines, ...creditLines],
+      lines: [...debitLines, ...vatDebitLines, ...creditLines, ...advanceCreditLines, ...advanceAdjustLines],
       sources: [{ label: `فاکتور خرید خدمات شماره ${invoice.number}`, path: `/service-purchase-invoices/${invoice.id}/edit` }],
     });
 
