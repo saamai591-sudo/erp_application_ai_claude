@@ -5,7 +5,6 @@ import { RefreshButton } from "../components/RefreshButton";
 import { showToast, showError } from "../lib/toast";
 import { formatJalaliDate } from "../lib/formatDate";
 import { toFaDigits } from "../lib/formatAmount";
-import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
 
 // ماژول «خزانه‌داری» > بستن سال دریافت و پرداخت — طبق Documents/افتتاحیه دریافت و پرداخت و بستن سال.md. اطلاعات پایان دوره‌ی مالیِ
@@ -15,7 +14,7 @@ import { api, ApiError } from "../lib/api";
 interface Section { section: string; title: string; closedAt: string | null; count: number }
 interface Status {
   current: { id: number; title: string; fromDate: string; toDate: string };
-  next: { id: number; title: string; fromDate: string; toDate: string; openingId: number | null } | null;
+  next: { id: number; title: string; fromDate: string; toDate: string } | null;
   sections: Section[];
 }
 
@@ -34,13 +33,14 @@ const COUNT_LABEL: Record<string, string> = {
 };
 
 const INFO_TEXT =
-  "با بستن هر بخش، اطلاعات پایان سال مالی جاری به فرم «افتتاحیه دریافت و پرداخت» سال مالی بعد اضافه می‌شود (و آن فرم را می‌توانید بعداً " +
-  "ویرایش/تکمیل کنید). حساب‌های بانکی و صندوق‌ها: مانده‌ی پایان سال (به ارز حساب/صندوق و ارز پایه). چک‌های دریافتی (در دست/واگذار به وصول/برگشتی) و " +
-  "پرداختی (صادرشده): برای هر چک فعال یک چک تازه در سال بعد با همان شماره‌ی چک و ارجاع به چک سال قبل ساخته می‌شود. هر بخش را فقط یک‌بار می‌توان " +
-  "بست؛ برای بستن دوباره، افتتاحیه‌ی سال بعد را حذف کنید. سال مالی بعد باید از قبل تعریف شده باشد.";
+  "با «بستن» هر بخش، اطلاعات پایان سال مالی جاری به فرم «افتتاحیه دریافت و پرداخت» سال مالی بعد اضافه می‌شود. حساب‌های بانکی و صندوق‌ها: " +
+  "مانده‌ی پایان سال (به ارز حساب/صندوق و ارز پایه). چک‌های دریافتی (در دست/واگذار به وصول/برگشتی) و پرداختی (صادرشده): برای هر چک فعال یک چک " +
+  "تازه در سال بعد با همان شماره‌ی چک و ارجاع به چک سال قبل ساخته می‌شود. رکوردهای ساخته‌شده در افتتاحیه‌ی سال بعد فقط‌خواندنی‌اند و کاربر نمی‌تواند " +
+  "آن‌ها را ویرایش یا حذف کند؛ تنها راه حذفشان «بازگشایی» همان بخش در همین صفحه است (که رکوردهای ساخته‌شده‌ی آن بخش را از افتتاحیه‌ی سال بعد پاک " +
+  "می‌کند و بخش را دوباره قابل بستن می‌کند). هر ردیف فقط یکی از «بستن» یا «بازگشایی» را (بر اساس وضعیتش) فعال دارد. چکی که در سال بعد سندی دارد یا " +
+  "گردش داشته، مانع بازگشایی بخش چک‌ها می‌شود. سال مالی بعد باید از قبل تعریف شده باشد.";
 
 export default function TreasuryYearClose() {
-  const { openTab } = useTabs();
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -74,6 +74,21 @@ export default function TreasuryYearClose() {
     }
   }
 
+  async function runReopen(section: Section) {
+    if (!window.confirm(`بخش «${section.title}» بازگشایی شود؟ رکوردهای ساخته‌شده‌ی این بخش در افتتاحیه‌ی سال بعد حذف می‌شوند.`)) return;
+    setBusy(`reopen:${section.section}`);
+    try {
+      const res: { result: { title: string; count: number } } = await api.post(`/treasury-year-close/${ROUTE[section.section]}/reopen`, {});
+      showToast(`بازگشایی انجام شد — ${res.result.title}: ${toFaDigits(String(res.result.count))} ردیف از افتتاحیه‌ی سال بعد حذف شد`);
+      await load();
+    } catch (e) {
+      showError((e as ApiError).message);
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const noNext = !!status && !status.next;
   const allClosed = !!status && status.sections.every((s) => s.closedAt);
 
@@ -95,11 +110,6 @@ export default function TreasuryYearClose() {
               <b>سال مالی بعد:</b>{" "}
               {status.next ? `${toFaDigits(status.next.title)} (${formatJalaliDate(status.next.fromDate)} تا ${formatJalaliDate(status.next.toDate)})` : "تعریف نشده"}
             </div>
-            {status.next?.openingId && (
-              <button type="button" className="btn secondary" style={{ padding: "4px 12px", fontSize: 12 }} onClick={() => openTab(`/treasury-openings/${status.next!.openingId}/edit`)}>
-                مشاهده‌ی افتتاحیه‌ی سال بعد
-              </button>
-            )}
           </div>
 
           <table className="je-lines-table" style={{ width: "100%" }}>
@@ -108,7 +118,7 @@ export default function TreasuryYearClose() {
                 <th>بخش</th>
                 <th>مورد قابل انتقال</th>
                 <th>وضعیت</th>
-                <th></th>
+                <th>عملیات</th>
               </tr>
             </thead>
             <tbody>
@@ -117,14 +127,22 @@ export default function TreasuryYearClose() {
                   <td>{s.title}</td>
                   <td>{toFaDigits(String(s.count))} {COUNT_LABEL[s.section]}</td>
                   <td>{s.closedAt ? <span className="badge">بسته شد — {formatJalaliDate(s.closedAt)}</span> : "باز"}</td>
-                  <td>
+                  <td style={{ whiteSpace: "nowrap" }}>
                     <button
                       type="button"
                       className="btn"
                       disabled={!!s.closedAt || noNext || busy !== null}
                       onClick={() => runClose(s.section, `/treasury-year-close/${ROUTE[s.section]}`, `بخش «${s.title}» بسته و به افتتاحیه‌ی سال بعد منتقل شود؟`)}
                     >
-                      {busy === s.section ? "در حال بستن..." : `بستن ${s.title}`}
+                      {busy === s.section ? "در حال بستن..." : "بستن"}
+                    </button>{" "}
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      disabled={!s.closedAt || busy !== null}
+                      onClick={() => runReopen(s)}
+                    >
+                      {busy === `reopen:${s.section}` ? "در حال بازگشایی..." : "بازگشایی"}
                     </button>
                   </td>
                 </tr>
