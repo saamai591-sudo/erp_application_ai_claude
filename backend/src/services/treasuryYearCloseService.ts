@@ -48,10 +48,16 @@ async function requireNext() {
   return { current: ctx.current, next: ctx.next };
 }
 
-async function ensureOpening(tx: any, nextPeriod: { id: number; fromDate: Date }) {
+async function ensureOpening(tx: any, nextPeriod: { id: number; title?: string; fromDate: Date }) {
   const existing = await tx.treasuryOpening.findUnique({ where: { fiscalPeriodId: nextPeriod.id } });
-  if (existing) return existing;
-  return tx.treasuryOpening.create({ data: { fiscalPeriodId: nextPeriod.id, date: nextPeriod.fromDate } });
+  if (existing) {
+    // افتتاحیه‌ی سیستمی فقط با بستن ساخته/تکمیل می‌شود؛ افتتاحیه‌ی دستیِ همین دوره با آن قاطی نمی‌شود
+    if (!existing.isSystemGenerated) {
+      throw new Error(`برای دوره مالی سال بعد یک افتتاحیه‌ی دستی ثبت شده است؛ ابتدا آن را در «عملیات اول دوره» حذف کنید تا بستن بتواند افتتاحیه‌ی سیستمی بسازد`);
+    }
+    return existing;
+  }
+  return tx.treasuryOpening.create({ data: { fiscalPeriodId: nextPeriod.id, date: nextPeriod.fromDate, isSystemGenerated: true } });
 }
 
 /** تعداد ردیف‌هایی که بستن هر بخش ایجاد می‌کند (پیش‌نمایش صفحه‌ی بستن سال). */
@@ -220,20 +226,6 @@ export async function closeAll() {
     results.push(await closeSection(s));
   }
   return { results, skipped };
-}
-
-/** آیا افتتاحیه‌ی این دوره رکورد ساخته‌شده توسط «بستن سال» دارد (ردیف بانک/صندوق isSystemGenerated یا چک منتقل‌شده با parentChequeId)؟ */
-export async function openingHasSystemGeneratedContent(fiscalPeriodId: number, openingId?: number): Promise<boolean> {
-  return withoutFiscalPeriodScope(async () => {
-    const opening = openingId ? { id: openingId } : await prisma.treasuryOpening.findUnique({ where: { fiscalPeriodId } });
-    if (!opening) return false;
-    const [bank, cash, cheques] = await Promise.all([
-      prisma.treasuryOpeningBankAccount.count({ where: { openingId: opening.id, isSystemGenerated: true } }),
-      prisma.treasuryOpeningCashBox.count({ where: { openingId: opening.id, isSystemGenerated: true } }),
-      prisma.chequeItem.count({ where: { fiscalPeriodId, isOpening: true, parentChequeId: { not: null } } }),
-    ]);
-    return bank + cash + cheques > 0;
-  });
 }
 
 /**
