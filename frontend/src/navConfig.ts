@@ -1,9 +1,13 @@
+import type { FormType } from "./lib/formTypes";
+
 export interface NavItem {
   key: string;
   label: string;
   list: string;
   create?: string; // اگر تعریف نشود، فرم قابل ایجاد نیست (فقط فهرست/ویرایش دارد)
   icon: string;
+  /** نوع فرم (list | operational | report) — رفتار مشترک منو از روی آن تعیین می‌شود (lib/formTypes.ts). اگر داده نشود از ساختار استنتاج می‌شود: دارای «create» = list، بدون آن = operational. گزارش‌ها باید صریحاً "report" باشند. */
+  type?: FormType;
 }
 
 export interface SubModule {
@@ -87,7 +91,7 @@ const RAW_MODULES: ModuleGroup[] = [
       {
         title: "گزارش",
         items: [
-          { key: "account-review", label: "مرور حسابها", list: "/account-review", icon: "tree" },
+          { key: "account-review", label: "مرور حسابها", list: "/account-review", icon: "tree", type: "report" },
           { key: "olap-reports", label: "گزارش تحلیلی (OLAP)", list: "/olap-reports", create: "/olap-reports/new", icon: "trend" },
         ],
       },
@@ -196,8 +200,8 @@ const RAW_MODULES: ModuleGroup[] = [
       {
         title: "گزارش",
         items: [
-          { key: "warehousing-warehouse-review", label: "مرور تعدادی", list: "/warehousing/warehouse-review", icon: "tree" },
-          { key: "accounting-warehouse-review", label: "مرور مبلغی", list: "/warehouse-accounting/warehouse-review", icon: "tree" },
+          { key: "warehousing-warehouse-review", label: "مرور تعدادی", list: "/warehousing/warehouse-review", icon: "tree", type: "report" },
+          { key: "accounting-warehouse-review", label: "مرور مبلغی", list: "/warehouse-accounting/warehouse-review", icon: "tree", type: "report" },
         ],
       },
     ],
@@ -231,7 +235,7 @@ const RAW_MODULES: ModuleGroup[] = [
       },
       {
         title: "گزارش",
-        items: [{ key: "purchase-review", label: "مرور خرید", list: "/purchase-review", icon: "tree" }],
+        items: [{ key: "purchase-review", label: "مرور خرید", list: "/purchase-review", icon: "tree", type: "report" }],
       },
     ],
   },
@@ -257,7 +261,7 @@ const RAW_MODULES: ModuleGroup[] = [
       },
       {
         title: "گزارش",
-        items: [{ key: "sales-review", label: "مرور فروش", list: "/sales-review", icon: "tree" }],
+        items: [{ key: "sales-review", label: "مرور فروش", list: "/sales-review", icon: "tree", type: "report" }],
       },
     ],
   },
@@ -305,11 +309,11 @@ const RAW_MODULES: ModuleGroup[] = [
       {
         title: "گزارش",
         items: [
-          { key: "bank-account-review", label: "مرور حساب بانکی", list: "/bank-account-review", icon: "tree" },
-          { key: "cash-review", label: "مرور صندوق", list: "/cash-review", icon: "tree" },
-          { key: "petty-cash-review", label: "مرور تنخواه", list: "/petty-cash-review", icon: "tree" },
-          { key: "receivable-documents-review", label: "مرور اسناد دریافتنی", list: "/receivable-documents-review", icon: "tree" },
-          { key: "payable-documents-review", label: "مرور اسناد پرداختنی", list: "/payable-documents-review", icon: "tree" },
+          { key: "bank-account-review", label: "مرور حساب بانکی", list: "/bank-account-review", icon: "tree", type: "report" },
+          { key: "cash-review", label: "مرور صندوق", list: "/cash-review", icon: "tree", type: "report" },
+          { key: "petty-cash-review", label: "مرور تنخواه", list: "/petty-cash-review", icon: "tree", type: "report" },
+          { key: "receivable-documents-review", label: "مرور اسناد دریافتنی", list: "/receivable-documents-review", icon: "tree", type: "report" },
+          { key: "payable-documents-review", label: "مرور اسناد پرداختنی", list: "/payable-documents-review", icon: "tree", type: "report" },
         ],
       },
     ],
