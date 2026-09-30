@@ -624,6 +624,10 @@ export const REGISTRY: ModuleDef[] = [
               { key: "closeReceivableCheques", title: "بستن چک‌های دریافتی" },
               { key: "closePayableCheques", title: "بستن چک‌های پرداختی" },
               { key: "closeAll", title: "بستن همه" },
+              { key: "reopenBankAccounts", title: "بازگشایی حساب‌های بانکی" },
+              { key: "reopenCashBoxes", title: "بازگشایی صندوق‌ها" },
+              { key: "reopenReceivableCheques", title: "بازگشایی چک‌های دریافتی" },
+              { key: "reopenPayableCheques", title: "بازگشایی چک‌های پرداختی" },
             ],
           },
         ],
@@ -634,6 +638,7 @@ export const REGISTRY: ModuleDef[] = [
         forms: [
           { key: "bank-account-review", title: "مرور حساب بانکی", baseActions: ["view"] },
           { key: "cash-review", title: "مرور صندوق", baseActions: ["view"] },
+          { key: "petty-cash-review", title: "مرور تنخواه", baseActions: ["view"] },
           { key: "receivable-documents-review", title: "مرور اسناد دریافتنی", baseActions: ["view"] },
           { key: "payable-documents-review", title: "مرور اسناد پرداختنی", baseActions: ["view"] },
         ],
