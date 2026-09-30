@@ -638,6 +638,7 @@ export const REGISTRY: ModuleDef[] = [
         forms: [
           { key: "bank-account-review", title: "مرور حساب بانکی", baseActions: ["view"] },
           { key: "cash-review", title: "مرور صندوق", baseActions: ["view"] },
+          { key: "petty-cash-review", title: "مرور تنخواه", baseActions: ["view"] },
           { key: "receivable-documents-review", title: "مرور اسناد دریافتنی", baseActions: ["view"] },
           { key: "payable-documents-review", title: "مرور اسناد پرداختنی", baseActions: ["view"] },
         ],
