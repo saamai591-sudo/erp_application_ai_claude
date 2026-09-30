@@ -598,6 +598,8 @@ body {
 /* متن سایدبار که در صورت نیاز فونتش کم می‌شود (components/FitText.tsx) */
 .fit-text { display: block; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; }
 .nav-item .nav-label:hover { color: var(--menu-title-ink); }
+/* فرم‌های عملیاتی/گزارش (lib/formTypes.ts) آیکن «فهرست» ندارند؛ برچسب کل عرض ردیف را می‌گیرد */
+.nav-item.no-list-icon .nav-label { padding-left: 8px; }
 .nav-item .nav-label.active-new { color: var(--menu-accent-1); font-weight: 600; }
 .nav-form-icon { display: flex; flex-shrink: 0; color: var(--menu-form-icon); }
 /* رنگ اختصاصی هر آیکن فرم؛ تنوع بصری سایدبار از یک پالت هماهنگ و کم‌اشباع (نه رنگین‌کمانی).

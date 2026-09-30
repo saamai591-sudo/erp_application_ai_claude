@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import { Outlet, Navigate } from "react-router-dom";
 import { useAuth } from "../lib/AuthContext";
 import { useTabs } from "../lib/TabsContext";
-import { filterModulesByAccess, ModuleGroup } from "../navConfig";
+import { filterModulesByAccess, ModuleGroup, NavItem } from "../navConfig";
+import { resolveNavBehavior } from "../lib/formTypes";
 import { FitText } from "./FitText";
 import { usePermissions } from "../lib/usePermissions";
 import { TabsBar } from "./TabsBar";
@@ -369,6 +370,30 @@ function DrillInArrow() {
  * پنل هم‌زمان روی صفحه می‌مانند. موقعیت پنل دوم از روی مستطیل واقعیِ رندرشده‌ی پنل اول (ref + getBoundingClientRect)
  * محاسبه می‌شود، نه یک عرض فرضی، تا با هر طول محتوایی درست بچسبد.
  */
+/**
+ * یک ردیف آیتم منوی سمت راست — تنها جایی که ظاهر/رفتار مشترک آیتم‌ها بر اساس «نوع فرم» (lib/formTypes.ts) اعمال می‌شود؛ هم منوی عادی و هم
+ * منوی شناور (منوی جمع‌شده) از همین استفاده می‌کنند. آیکن «فهرست» فقط برای فرم‌های نوع list نمایش داده می‌شود (فرم‌های عملیاتی/گزارش فهرست جدا
+ * ندارند)؛ برچسب فرم و راهنمای آن هم از همین رفتار می‌آید. هر فرم/آیتم جدید فقط نوعش را در navConfig مشخص می‌کند.
+ */
+function NavItemRow({ item, activePath, onOpen, fitLabel }: { item: NavItem; activePath?: string; onOpen: (path: string) => void; fitLabel?: boolean }) {
+  const behavior = resolveNavBehavior(item);
+  const isListActive = activePath === item.list;
+  const isNewActive = !!item.create && activePath === item.create;
+  return (
+    <div className={`nav-item ${isListActive ? "active-list" : ""} ${behavior.showListIcon ? "" : "no-list-icon"}`}>
+      <button className={`nav-label ${isNewActive ? "active-new" : ""}`} onClick={() => onOpen(behavior.labelTarget)} title={behavior.labelTitle}>
+        <span className={`nav-form-icon ic-${item.icon}`}><NavIcon name={item.icon} /></span>
+        {fitLabel ? <FitText>{item.label}</FitText> : <span>{item.label}</span>}
+      </button>
+      {behavior.showListIcon && (
+        <button className={`folder-btn ${isListActive ? "active" : ""}`} title="باز کردن فهرست در تب جدید" onClick={() => onOpen(item.list)}>
+          <FolderOpenIcon />
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ModuleFlyout({
   mod,
   anchorRect,
@@ -458,29 +483,9 @@ function ModuleFlyout({
             </span>
             {activeSub.title}
           </div>
-          {activeSub.items.map((item) => {
-            const isListActive = activePath === item.list;
-            const isNewActive = !!item.create && activePath === item.create;
-            return (
-              <div key={item.key} className={`nav-item ${isListActive ? "active-list" : ""}`}>
-                <button
-                  className={`nav-label ${isNewActive ? "active-new" : ""}`}
-                  onClick={() => onNavigate(item.create ?? item.list)}
-                  title={item.create ? "باز کردن فرم جدید در تب جدید" : "باز کردن فهرست در تب جدید"}
-                >
-                  <span className={`nav-form-icon ic-${item.icon}`}><NavIcon name={item.icon} /></span>
-                  <span>{item.label}</span>
-                </button>
-                <button
-                  className={`folder-btn ${isListActive ? "active" : ""}`}
-                  title="باز کردن فهرست در تب جدید"
-                  onClick={() => onNavigate(item.list)}
-                >
-                  <FolderOpenIcon />
-                </button>
-              </div>
-            );
-          })}
+          {activeSub.items.map((item) => (
+            <NavItemRow key={item.key} item={item} activePath={activePath} onOpen={onNavigate} />
+          ))}
         </div>
       )}
     </>,
@@ -633,29 +638,9 @@ export default function Layout() {
                         <FitText>{sub.title}</FitText>
                       </button>
                       {subOpen &&
-                        sub.items.map((item) => {
-                          const isListActive = activePath === item.list;
-                          const isNewActive = !!item.create && activePath === item.create;
-                          return (
-                            <div key={item.key} className={`nav-item ${isListActive ? "active-list" : ""}`}>
-                              <button
-                                className={`nav-label ${isNewActive ? "active-new" : ""}`}
-                                onClick={() => openTab(item.create ?? item.list)}
-                                title={item.create ? "باز کردن فرم جدید در تب جدید" : "باز کردن فهرست در تب جدید"}
-                              >
-                                <span className={`nav-form-icon ic-${item.icon}`}><NavIcon name={item.icon} /></span>
-                                <FitText>{item.label}</FitText>
-                              </button>
-                              <button
-                                className={`folder-btn ${isListActive ? "active" : ""}`}
-                                title="باز کردن فهرست در تب جدید"
-                                onClick={() => openTab(item.list)}
-                              >
-                                <FolderOpenIcon />
-                              </button>
-                            </div>
-                          );
-                        })}
+                        sub.items.map((item) => (
+                          <NavItemRow key={item.key} item={item} activePath={activePath} onOpen={openTab} fitLabel />
+                        ))}
                     </div>
                   );
                 })}
