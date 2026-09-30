@@ -6,6 +6,7 @@ import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation
 import { assertRecordNotStale } from "../utils/concurrency";
 import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
 import { getVatRatePercentForDate } from "../services/accountingSettingsService";
+import { resolveCostLineBasis } from "../services/serviceAccountingTreatment";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmount, getLineAmounts, setLineAmount, enrichLinesWithAmount } from "../services/documentItemAmountService";
@@ -50,8 +51,9 @@ const FORM = findFormPrefix("service-purchase-invoices");
 //   خرید کالا) پیاده شده‌اند — هدر «نوع خرید» + fxRate دستی (نه از جدول نرخ ارز)، هر ردیف baseAmount/
 //   baseDiscount/vatAmount (طبق utils/vatCalculation.ts، فقط برای بایگانی/محاسبه، در UI/پاسخ API
 //   نمی‌آیند). دو تفاوت ساختاری آگاهانه در «صدور سند حسابداری» (طبق تصمیم صریح کاربر):
-//     ۱) بدهکارِ ردیف «بدون مبنا»: چون هیچ کالای انباری درگیر نیست، از همان accountType «کنترل خرید»
-//        استفاده می‌شود ولی کلید آن گروه حسابداریِ خودِ ردیف خدمت است (نه یک کالا).
+//     ۱) بدهکارِ ردیف «بدون مبنا» (خدمتِ دارای نحوه حسابداری «هزینه»): چون هیچ کالای انباری درگیر نیست، معین از تنظیم «خرید خدمت»
+//        (accountType=SERVICE_PURCHASE، کلید = خودِ خدمت) در حسابداری کالا و خدمت می‌آید. خدمتِ «بهای موجودی» ردیفش همیشه «رسید انبار» است
+//        (مبنا از نحوه حسابداری خدمت مشتق می‌شود، services/serviceAccountingTreatment.ts) و بدهکارش مورد ۲ است.
 //     ۲) بدهکارِ ردیف «رسید انبار»: چون یک ردیف فاکتور خدمات می‌تواند بین چند ردیف رسید (با کالا/گروه
 //        حسابداری/انبار متفاوت) تسهیم شود، بدهکار «موجودی کالا» به‌ازای هر تخصیص (allocation) جدا
 //        محاسبه می‌شود (کلید: گروه حسابداری کالای همان تخصیص + گروه انبار رسید آن)، نه یک ردیف در سطح
@@ -158,7 +160,8 @@ async function validateLines(lines: LineInput[], currency: ConversionCurrency, f
     const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
     if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
 
-    const basis: "NO_BASIS" | "WAREHOUSE_RECEIPT" = l.basis === "WAREHOUSE_RECEIPT" ? "WAREHOUSE_RECEIPT" : "NO_BASIS";
+    // مبنای ردیف از «نحوه حسابداری» خدمت می‌آید: بهای موجودی ⇒ رسید انبار (الزامی)، هزینه ⇒ بدون مبنا (services/serviceAccountingTreatment.ts)
+    const basis = resolveCostLineBasis(service, l.basis, `ردیف ${idx + 1}`, { sourceReceiptDocumentId: l.sourceReceiptDocumentId, hasAllocations: (l.allocations || []).length > 0 });
     if (basis === "NO_BASIS") {
       cleaned.push({
         serviceId: l.serviceId,
@@ -638,6 +641,7 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
     const warehouses = await prisma.warehouse.findMany({ where: { id: { in: warehouseIds } } });
     const warehouseGroupById = new Map(warehouses.map((w) => [w.id, w.warehouseGroupId]));
 
+    const serviceIds = Array.from(new Set(invoice.lines.map((l) => l.serviceId)));
     const accountingGroupIds = Array.from(
       new Set([
         ...invoice.lines.map((l) => l.service.accountingGroupId),
@@ -647,11 +651,14 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
     // طبق تصمیم صریح کاربر: «پرداختنی خرید» دیگر به گروه حسابداری وابسته نیست (فقط نوع خرید) — دقیقاً
     // هم‌الگوی purchaseInvoices.ts.
     const settings = await prisma.goodsServiceAccountingSetting.findMany({
-      where: { OR: [{ accountingGroupId: { in: accountingGroupIds } }, { accountType: "PURCHASE_PAYABLE" }] },
+      where: { OR: [{ accountingGroupId: { in: accountingGroupIds } }, { accountType: "PURCHASE_PAYABLE" }, { accountType: "SERVICE_PURCHASE", serviceId: { in: serviceIds } }] },
       include: { account: true },
     });
     function findSetting(accountingGroupId: number, accountType: string, match: (s: (typeof settings)[number]) => boolean) {
       return settings.find((s) => s.accountingGroupId === accountingGroupId && s.accountType === accountType && match(s));
+    }
+    function findServicePurchaseSetting(serviceId: number) {
+      return settings.find((s) => s.accountType === "SERVICE_PURCHASE" && s.serviceId === serviceId);
     }
     function findPayableSetting(match: (s: (typeof settings)[number]) => boolean) {
       return settings.find((s) => s.accountType === "PURCHASE_PAYABLE" && match(s));
@@ -677,6 +684,14 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
       const baseAmount = Number(line.baseAmount);
       const vatAmount = Number(line.vatAmount);
       const service = line.service;
+
+      // مبنای ذخیره‌شده‌ی ردیف باید با «نحوه حسابداری» فعلی خدمت سازگار باشد (فاکتور قدیمی: ردیف را ویرایش و دوباره ذخیره کنید)
+      try {
+        resolveCostLineBasis(service, line.basis, `ردیف خدمت «${service.title}»`);
+      } catch (e: any) {
+        errors.push(`${e.message}؛ فاکتور را ویرایش و دوباره ذخیره کنید`);
+        continue;
+      }
 
       if (line.basis === "WAREHOUSE_RECEIPT") {
         if (line.allocations.length === 0) {
@@ -716,9 +731,10 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
         }
         if (hasAllocationError) continue;
       } else {
-        const debitSetting = findSetting(service.accountingGroupId, "PURCHASE_CONTROL", (s) => s.purchaseTypeId === invoice.purchaseTypeId);
+        // خدمتِ «هزینه»: معین بدهکار از تنظیم «خرید خدمت» همان خدمت در حسابداری کالا و خدمت می‌آید
+        const debitSetting = findServicePurchaseSetting(service.id);
         if (!debitSetting) {
-          errors.push(`برای خدمت «${service.title}» و نوع خرید «${invoice.purchaseType.title}»، حساب «کنترل خرید» در حسابداری کالا و خدمت تعریف نشده است`);
+          errors.push(`برای خدمت «${service.title}»، حساب «خرید خدمت» در حسابداری کالا و خدمت تعریف نشده است`);
           continue;
         }
         const debitDetails = resolveAccountDetailFields(debitSetting.account, partyDetailTypeId, partyDetailCode);

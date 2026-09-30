@@ -652,6 +652,15 @@ export function registerAllImportProcessors() {
           taxRate = Number(toEnglishDigits(row.taxRate));
         }
 
+        // «نحوه حسابداری» فقط برای خدمت (خالی = هزینه)؛ کالا همیشه null
+        let accountingTreatment: "EXPENSE" | "INVENTORY_COST" | null = null;
+        if (kind === "SERVICE") {
+          const raw = (row.accountingTreatment || "").trim();
+          if (!raw || raw === "هزینه") accountingTreatment = "EXPENSE";
+          else if (raw === "بهای موجودی") accountingTreatment = "INVENTORY_COST";
+          else return { ok: false, error: "نحوه حسابداری باید «هزینه» یا «بهای موجودی» باشد" };
+        }
+
         const reorderControl = kind === "GOODS" && row.reorderControl === "بله";
         let reorderPoint: number | null = null;
         if (reorderControl) {
@@ -685,6 +694,7 @@ export function registerAllImportProcessors() {
             accountingGroupId: accountingGroup.id,
             isSpecial,
             taxRate,
+            accountingTreatment,
             isActive: row.isActive !== "خیر",
             attributeValues: { create: resolvedAttrs.map((a: AttrSelection) => ({ attributeId: a.attributeId, itemId: a.itemId })) },
           },

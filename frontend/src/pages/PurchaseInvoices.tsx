@@ -57,7 +57,7 @@ interface GoodsItemRow {
   id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean;
   isSpecial: boolean; taxRate: number | string | null;
 }
-interface ServiceOption { id: number; fullCode: string; title: string; kind: string; isSpecial: boolean; taxRate: number | string | null }
+interface ServiceOption { id: number; fullCode: string; title: string; kind: string; isSpecial: boolean; taxRate: number | string | null; accountingTreatment?: "EXPENSE" | "INVENTORY_COST" | null }
 interface ReceiptOption { id: number; number: number; date: string; warehouseTitle: string }
 interface ReceiptLine { id: number; goodsItemCode: string; goodsItemTitle: string; unitTitle: string; quantity: number; amount: number }
 
@@ -491,6 +491,15 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
     return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(svc, vatRateForDate(vatRates, header.date))));
   }
 
+  // انتخاب خدمت در «سایر هزینه‌ها»: مبنای ردیف از «نحوه حسابداری» خدمت تعیین می‌شود (بهای موجودی ⇒ رسید انبار الزامی، هزینه ⇒ رسید انبار مجاز نیست)
+  function onCostServiceSelected(idx: number, svc: ServiceOption) {
+    if (svc.accountingTreatment === "INVENTORY_COST") {
+      updateCostRow(idx, { serviceId: String(svc.id), basis: "WAREHOUSE_RECEIPT" });
+    } else {
+      updateCostRow(idx, { serviceId: String(svc.id), basis: "NO_BASIS", sourceReceiptDocumentId: "", sourceReceiptNumber: "", allocationMethod: "", allocations: [] });
+    }
+  }
+
   async function onCostBasisChange(idx: number, basis: Basis) {
     if (basis === "NO_BASIS") {
       updateCostRow(idx, { basis, sourceReceiptDocumentId: "", sourceReceiptNumber: "", allocationMethod: "", allocations: [] });
@@ -640,6 +649,14 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
     for (const [i, l] of body.otherCostLines.entries()) {
       if (!(l.amount >= 0)) return setError(`مبلغ ردیف ${i + 1} سایر هزینه‌ها نامعتبر است`);
       if (l.basis === "WAREHOUSE_RECEIPT" && !l.sourceReceiptDocumentId) return setError(`سایر هزینه‌ها ردیف ${i + 1}: انتخاب رسید انبار الزامی است`);
+      // بر اساس «نحوه حسابداری» خدمت (سمت سرور هم همین کنترل انجام می‌شود): بهای موجودی ⇒ رسید انبار الزامی؛ هزینه ⇒ رسید انبار ممنوع
+      const svc = services.find((x) => x.id === l.serviceId);
+      if (svc?.accountingTreatment === "INVENTORY_COST" && (l.basis !== "WAREHOUSE_RECEIPT" || !l.sourceReceiptDocumentId)) {
+        return setError(`سایر هزینه‌ها ردیف ${i + 1}: نحوه حسابداری خدمت «${svc.title}» «بهای موجودی» است؛ انتخاب رسید انبار الزامی است`);
+      }
+      if (svc && svc.accountingTreatment !== "INVENTORY_COST" && (l.basis === "WAREHOUSE_RECEIPT" || l.sourceReceiptDocumentId)) {
+        return setError(`سایر هزینه‌ها ردیف ${i + 1}: نحوه حسابداری خدمت «${svc.title}» «هزینه» است و ردیف آن نمی‌تواند به رسید انبار وصل شود`);
+      }
     }
     try {
       if (editId) {
@@ -1023,7 +1040,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                             { header: "عنوان", render: (s) => (s as ServiceOption).title, filterValue: (s) => (s as ServiceOption).title },
                           ]}
                           onOpen={guardRowEntry}
-                          onSelect={(s) => updateCostRow(idx, { serviceId: String((s as ServiceOption).id) })}
+                          onSelect={(s) => onCostServiceSelected(idx, s as ServiceOption)}
                         />
                       </td>
                       <td style={{ minWidth: 120 }}>
@@ -1036,7 +1053,12 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                         <AmountInput value={row.vatAmount} onChange={(v) => updateCostRow(idx, { vatAmount: v })} allowDecimal placeholder="۰" />
                       </td>
                       <td style={{ minWidth: 110 }}>
-                        <select value={row.basis} onChange={(e) => onCostBasisChange(idx, e.target.value as Basis)}>
+                        <select
+                          value={row.basis}
+                          disabled={!!svc}
+                          title={svc ? (svc.accountingTreatment === "INVENTORY_COST" ? "خدمتِ «بهای موجودی»: انتخاب رسید انبار الزامی است" : "خدمتِ «هزینه»: رسید انبار مجاز نیست") : undefined}
+                          onChange={(e) => onCostBasisChange(idx, e.target.value as Basis)}
+                        >
                           <option value="NO_BASIS">{COST_BASIS_FA.NO_BASIS}</option>
                           <option value="WAREHOUSE_RECEIPT">{COST_BASIS_FA.WAREHOUSE_RECEIPT}</option>
                         </select>
