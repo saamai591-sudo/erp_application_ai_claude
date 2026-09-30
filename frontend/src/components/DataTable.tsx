@@ -7,6 +7,8 @@ import { toFaDigits, formatAmountFa } from "../lib/formatAmount";
 import { useTabs } from "../lib/TabsContext";
 import { usePersistedState } from "../lib/usePersistedState";
 import { exportGridToCsv, printGrid, deriveGridName, ExportColumn } from "../lib/gridExport";
+import { measureBestFitWidths, sumWidths } from "../lib/bestFit";
+import { BestFitIcon, BEST_FIT_TITLE } from "./BestFitIcon";
 import { GridSort, nextSort, sortStateOf, makeComparator } from "../lib/gridSort";
 
 /** اعداد و رشته‌های خالص عددی را به ارقام فارسی تبدیل می‌کند؛ JSX و متن‌های ترکیبی دست‌نخورده می‌مانند */
@@ -500,6 +502,17 @@ export function DataTable<T extends { id: number | string }>({
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
   const footerScrollRef = useRef<HTMLDivElement>(null);
   const [colWidths, setColWidths] = useState<number[]>([]);
+  // «Best Fit»: عرض ستون‌ها بر اساس بزرگ‌ترین مقدارِ ردیف‌های صفحه‌ی جاری — فقط state همین کامپوننت (نه ذخیره‌شده، نه بک‌اند)؛ با عوض‌شدن
+  // صفحه/تعداد در صفحه/ردیف‌های نمایش‌داده‌شده (فیلتر، مرتب‌سازی، داده‌ی تازه) پاک می‌شود و عرض‌های پیش‌فرض برمی‌گردند.
+  const [bestFit, setBestFit] = useState<number[] | null>(null);
+  const bestFitSignature = `${page}|${pageSize}|${pageRows.map((r) => r.id).join(",")}`;
+  useEffect(() => {
+    setBestFit(null);
+  }, [bestFitSignature]);
+  function applyBestFit() {
+    const widths = measureBestFitWidths(scrollAreaRef.current?.querySelector("table"));
+    setBestFit(widths.length ? widths : null);
+  }
   useLayoutEffect(() => {
     function measure() {
       const ths = theadRowRef.current?.querySelectorAll("th");
@@ -512,7 +525,7 @@ export function DataTable<T extends { id: number | string }>({
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columns, sort, filters, rows, selected.size]);
+  }, [columns, sort, filters, rows, selected.size, bestFit]);
   function syncFooterScroll() {
     if (scrollAreaRef.current && footerScrollRef.current) footerScrollRef.current.scrollLeft = scrollAreaRef.current.scrollLeft;
   }
@@ -604,6 +617,9 @@ export function DataTable<T extends { id: number | string }>({
         {selected.size > 0 ? `${toFaDigits(String(selected.size))} ردیف انتخاب شده` : "\u00A0"}
       </span>
       <div className="bulk-toolbar-actions">
+        <button type="button" className="toolbar-icon-btn" onClick={applyBestFit} title={BEST_FIT_TITLE}>
+          <BestFitIcon />
+        </button>
         <button type="button" className="toolbar-icon-btn" onClick={() => exportGridToCsv(exportColumns, exportRows, gridName)} title="خروجی اکسل">
           <ExcelExportIcon />
         </button>
@@ -662,20 +678,20 @@ export function DataTable<T extends { id: number | string }>({
       {effectiveBulkContainer ? createPortal(bulkToolbar, effectiveBulkContainer) : bulkToolbar}
       <div className="grid-wrap">
       <div ref={scrollAreaRef} className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }} onScroll={syncFooterScroll}>
-        <table>
+        <table style={bestFit ? { tableLayout: "fixed", width: sumWidths(bestFit) } : undefined}>
           <thead>
             <tr ref={theadRowRef}>
-              <th style={{ width: 34 }}>
+              <th style={{ width: bestFit ? bestFit[0] : 34 }}>
                 <input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} />
               </th>
-              <th style={{ width: 44 }}>ردیف</th>
-              {columns.map((c) => {
+              <th style={{ width: bestFit ? bestFit[1] : 44 }}>ردیف</th>
+              {columns.map((c, ci) => {
                 const hasFilter = !!c.filterType && !!c.filterValue;
                 const isActive = !!filters[c.header];
                 const canSort = !!(c.sortValue || c.filterValue);
                 const sortState = sortStateOf(sort, c.header);
                 return (
-                  <th key={c.header} style={{ width: c.width }}>
+                  <th key={c.header} style={{ width: bestFit ? bestFit[ci + 2] : c.width }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                       <span
                         onClick={canSort ? (e) => toggleSort(c, e.ctrlKey || e.shiftKey || e.metaKey) : undefined}
@@ -701,7 +717,7 @@ export function DataTable<T extends { id: number | string }>({
                   </th>
                 );
               })}
-              {(edit || onDelete) && <th style={{ width: edit && onDelete ? 130 : 70 }}></th>}
+              {(edit || onDelete) && <th style={{ width: bestFit ? bestFit[bestFit.length - 1] : edit && onDelete ? 130 : 70 }}></th>}
             </tr>
           </thead>
           <tbody>
