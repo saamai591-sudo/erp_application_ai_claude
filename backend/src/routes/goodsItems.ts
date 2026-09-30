@@ -9,6 +9,8 @@ const FORM = findFormPrefix("goods-items");
 
 const router = Router();
 
+const TREATMENTS = new Set("EXPENSE INVENTORY_COST".split(" "));
+
 export const KIND_FA: Record<string, string> = { GOODS: "کالا", SERVICE: "خدمت" };
 
 // =========================================================================
@@ -162,6 +164,8 @@ interface ItemBody {
   accountingGroupId: number;
   isSpecial?: boolean;
   taxRate?: number | null;
+  /** فقط برای خدمت: EXPENSE (هزینه) | INVENTORY_COST (بهای موجودی)؛ اگر نیاید، هنگام ثبت «هزینه» می‌شود */
+  accountingTreatment?: "EXPENSE" | "INVENTORY_COST" | null;
   isActive?: boolean;
   attributes?: AttrSelection[];
 }
@@ -204,6 +208,13 @@ router.post("/goods-items", can(`${FORM}.create`), async (req, res) => {
       reorderPoint = Number(body.reorderPoint);
     }
 
+    // «نحوه حسابداری» فقط برای خدمت معنا دارد؛ کالا همیشه null
+    let accountingTreatment: "EXPENSE" | "INVENTORY_COST" | null = null;
+    if (body.kind === "SERVICE") {
+      accountingTreatment = body.accountingTreatment ?? "EXPENSE";
+      if (!TREATMENTS.has(accountingTreatment)) return res.status(400).json({ error: "نحوه حسابداری نامعتبر است" });
+    }
+
     const { leaf, codePrefix, titlePrefix, resolvedAttrs } = await computePrefixes(body.goodsGroupId, body.attributes ?? []);
     const serial = await resolveSerial(body.goodsGroupId, body.code, leaf.childCodeLength!);
     const fullCode = codePrefix + serial;
@@ -230,6 +241,7 @@ router.post("/goods-items", can(`${FORM}.create`), async (req, res) => {
         accountingGroupId: body.accountingGroupId,
         isSpecial,
         taxRate,
+        accountingTreatment,
         isActive: body.isActive ?? true,
         attributeValues: { create: resolvedAttrs.map((a) => ({ attributeId: a.attributeId, itemId: a.itemId })) },
       },
@@ -290,6 +302,20 @@ router.put("/goods-items/:id", can(`${FORM}.edit`), async (req, res) => {
       taxRate = null;
     }
 
+    // تغییر «نحوه حسابداری» خدمت: اگر در فاکتور خرید خدمات/سایر هزینه‌ها استفاده شده باشد، ردیف‌های قبلی با مقدار جدید ناسازگار می‌شوند؛
+    // و «بهای موجودی» نباید تنظیم «خرید خدمت» (معین خرید جداگانه) داشته باشد.
+    let accountingTreatment = existing.accountingTreatment;
+    if (existing.kind === "SERVICE" && body.accountingTreatment !== undefined && body.accountingTreatment !== existing.accountingTreatment) {
+      if (!body.accountingTreatment || !TREATMENTS.has(body.accountingTreatment)) return res.status(400).json({ error: "نحوه حسابداری نامعتبر است" });
+      const usedInPurchase = await prisma.purchaseCostLine.count({ where: { serviceId: id } });
+      if (usedInPurchase > 0) return res.status(400).json({ error: "این خدمت در فاکتور خرید استفاده شده و امکان تغییر نحوه حسابداری آن وجود ندارد" });
+      if (body.accountingTreatment === "INVENTORY_COST") {
+        const hasSetting = await prisma.goodsServiceAccountingSetting.count({ where: { accountType: "SERVICE_PURCHASE", serviceId: id } });
+        if (hasSetting > 0) return res.status(400).json({ error: "برای خدمت با نحوه حسابداری «بهای موجودی» معین خرید جداگانه تعریف نمی‌شود؛ ابتدا تنظیم «خرید خدمت» این خدمت را در حسابداری کالا و خدمت حذف کنید" });
+      }
+      accountingTreatment = body.accountingTreatment;
+    }
+
     const reorderControl = existing.kind === "GOODS" ? body.reorderControl ?? existing.reorderControl : false;
     let reorderPoint: number | null = existing.reorderPoint ? existing.reorderPoint.toNumber() : null;
     if (reorderControl) {
@@ -333,6 +359,7 @@ router.put("/goods-items/:id", can(`${FORM}.edit`), async (req, res) => {
         accountingGroupId: body.accountingGroupId ?? existing.accountingGroupId,
         isSpecial,
         taxRate,
+        accountingTreatment,
         isActive: body.isActive ?? existing.isActive,
         ...(body.attributes !== undefined
           ? { attributeValues: { create: resolvedAttrs.map((a) => ({ attributeId: a.attributeId, itemId: a.itemId })) } }
@@ -357,6 +384,9 @@ router.delete("/goods-items/:id", can(`${FORM}.delete`), async (req, res) => {
   const item = await prisma.goodsItem.findUnique({ where: { id } });
   if (!item) return res.status(404).json({ error: "یافت نشد" });
   if (item.hasTransactions) return res.status(400).json({ error: `این ${KIND_FA[item.kind]} گردش دارد و قابل حذف نیست` });
+  if (await prisma.goodsServiceAccountingSetting.count({ where: { serviceId: id } })) {
+    return res.status(400).json({ error: "برای این خدمت در حسابداری کالا و خدمت (خرید خدمت) معین تعریف شده است؛ ابتدا آن تنظیم را حذف کنید" });
+  }
   await prisma.$transaction([
     prisma.goodsItemAttributeValue.deleteMany({ where: { goodsItemId: id } }),
     prisma.goodsItem.delete({ where: { id } }),

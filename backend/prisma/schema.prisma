@@ -1006,10 +1006,13 @@ model GoodsItem {
   accountingGroupId             Int
   isSpecial                     Boolean                        @default(false)
   taxRate                       Decimal?                       @db.Decimal(9, 4)
+  /// «نحوه حسابداری» خدمت (فقط برای kind=SERVICE؛ برای کالا null): هزینه (حساب از تنظیم «خرید خدمت» همان خدمت) یا بهای موجودی (حتماً به رسید انبار وصل می‌شود)
+  accountingTreatment           ServiceAccountingTreatment?
   isActive                      Boolean                        @default(true)
   hasTransactions               Boolean                        @default(false)
   createdAt                     DateTime                       @default(now())
   updatedAt                     DateTime                       @default(now()) @updatedAt
+  serviceAccountingSettings     GoodsServiceAccountingSetting[]
   deliveryAuthorizationLines    DeliveryAuthorizationLine[]
   accountingGroup               AccountingGroup                @relation(fields: [accountingGroupId], references: [id])
   goodsGroup                    GoodsGroup                     @relation(fields: [goodsGroupId], references: [id])
@@ -1155,8 +1158,11 @@ model GoodsServiceAccountingSetting {
   salesTypeId         Int?
   warehouseDocType    InventoryDocumentType?
   purchaseTypeId      Int?
+  /// فقط برای accountType=SERVICE_PURCHASE (نوع «خرید خدمت»): خدمتی که این معین برایش تعریف شده (فقط خدمت با نحوه حسابداری «هزینه»)
+  serviceId           Int?
   hasTransactions     Boolean          @default(false)
   createdAt           DateTime         @default(now())
+  service             GoodsItem?       @relation(fields: [serviceId], references: [id], onDelete: Restrict)
   account             Account          @relation(fields: [accountId], references: [id])
   accountingGroup     AccountingGroup? @relation(fields: [accountingGroupId], references: [id])
   warehouseGroup      WarehouseGroup?  @relation(fields: [warehouseGroupId], references: [id])
@@ -3106,6 +3112,8 @@ enum GoodsAccountType {
   PURCHASE_PAYABLE
   PURCHASE_CONTROL
   PURCHASE_VAT
+  /// «خرید خدمت» — معین بدهکار فاکتور خرید خدمات به‌ازای هر خدمتِ دارای نحوه حسابداری «هزینه» (فیلد serviceId)
+  SERVICE_PURCHASE
 }
 
 enum GoodsRequestNature {
@@ -3117,6 +3125,13 @@ enum GoodsRequestNature {
 enum GoodsItemKind {
   GOODS
   SERVICE
+}
+
+/// نحوه حسابداری خدمت خریداری‌شده: EXPENSE = هزینه (معین بدهکار از تنظیم «خرید خدمت» همان خدمت در حسابداری کالا و خدمت)؛
+/// INVENTORY_COST = بهای موجودی (بدون معین خرید جداگانه؛ ردیف فاکتور حتماً به رسید انبار وصل می‌شود و بدهکار از معین موجودی همان رسید می‌آید)
+enum ServiceAccountingTreatment {
+  EXPENSE
+  INVENTORY_COST
 }
 
 // طبق تصمیم صریح کاربر: چرخه‌ی عمر سند انبار برگشت — ثبت (بلافاصله در محاسبات موجودی لحاظ می‌شود) →

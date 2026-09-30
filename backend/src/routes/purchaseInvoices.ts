@@ -7,6 +7,7 @@ import { assertRecordNotStale } from "../utils/concurrency";
 import { fetchPickableWarehouseReceiptLines } from "../services/warehouseReceiptLineSelector";
 import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
 import { getVatRatePercentForDate } from "../services/accountingSettingsService";
+import { resolveCostLineBasis } from "../services/serviceAccountingTreatment";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmount, getLineAmounts, setLineAmount, deleteLatestLineAmount, enrichLinesWithAmount } from "../services/documentItemAmountService";
@@ -278,7 +279,8 @@ async function validateOtherCostLines(lines: OtherCostInput[], currency: Convers
     const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
     if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} سایر هزینه‌ها نامعتبر است`);
 
-    const basis: "NO_BASIS" | "WAREHOUSE_RECEIPT" = l.basis === "WAREHOUSE_RECEIPT" ? "WAREHOUSE_RECEIPT" : "NO_BASIS";
+    // مبنای ردیف از «نحوه حسابداری» خدمت می‌آید (بهای موجودی ⇒ رسید انبار، هزینه ⇒ بدون مبنا) — services/serviceAccountingTreatment.ts
+    const basis = resolveCostLineBasis(service, l.basis, `ردیف ${idx + 1} سایر هزینه‌ها`, { sourceReceiptDocumentId: l.sourceReceiptDocumentId, hasAllocations: (l.allocations || []).length > 0 });
     if (basis === "NO_BASIS") {
       cleaned.push({
         serviceId: l.serviceId,
@@ -988,11 +990,21 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
     // طبق تصمیم صریح کاربر: «پرداختنی خرید» دیگر به گروه حسابداری وابسته نیست (فقط نوع خرید) — شرط OR
     // لازم است تا این نوع، صرف‌نظر از گروه‌های حسابداری این فاکتور، هم واکشی شود.
     const settings = await prisma.goodsServiceAccountingSetting.findMany({
-      where: { OR: [{ accountingGroupId: { in: accountingGroupIds } }, { accountType: "PURCHASE_PAYABLE" }] },
+      where: {
+        OR: [
+          { accountingGroupId: { in: accountingGroupIds } },
+          { accountType: "PURCHASE_PAYABLE" },
+          { accountType: "SERVICE_PURCHASE", serviceId: { in: Array.from(new Set(invoice.otherCostLines.map((c) => c.serviceId))) } },
+        ],
+      },
       include: { account: true },
     });
     function findSetting(accountingGroupId: number, accountType: string, match: (s: (typeof settings)[number]) => boolean) {
       return settings.find((s) => s.accountingGroupId === accountingGroupId && s.accountType === accountType && match(s));
+    }
+    // «خرید خدمت»: معین بدهکار ردیف «سایر هزینه‌ها»ی خدمتِ «هزینه» — کلید = خودِ خدمت (نه گروه حسابداری/نوع خرید)
+    function findServicePurchaseSetting(serviceId: number) {
+      return settings.find((s) => s.accountType === "SERVICE_PURCHASE" && s.serviceId === serviceId);
     }
     // «پرداختنی خرید» فقط با نوع خرید کلید می‌خورد — بدون قید گروه حسابداری. یک بار برای کل فاکتور
     // (هم ردیف‌های کالا، هم ردیف‌های «سایر هزینه‌ها») کافی است، چون نوع خرید یک فیلد سرصفحه است.
@@ -1113,6 +1125,13 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
       const vatAmount = Number(cost.vatAmount);
       const service = cost.service;
 
+      try {
+        resolveCostLineBasis(service, cost.basis, `ردیف «سایر هزینه‌ها» خدمت «${service.title}»`);
+      } catch (e: any) {
+        errors.push(`${e.message}؛ فاکتور را ویرایش و دوباره ذخیره کنید`);
+        continue;
+      }
+
       if (cost.basis === "WAREHOUSE_RECEIPT") {
         if (cost.allocations.length === 0) {
           errors.push(`برای ردیف «سایر هزینه‌ها» خدمت «${service.title}» تسهیمی ثبت نشده است`);
@@ -1151,9 +1170,10 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
         }
         if (hasAllocationError) continue;
       } else {
-        const debitSetting = findSetting(service.accountingGroupId, "PURCHASE_CONTROL", (s) => s.purchaseTypeId === invoice.purchaseTypeId);
+        // خدمتِ «هزینه»: معین بدهکار از تنظیم «خرید خدمت» همان خدمت در حسابداری کالا و خدمت
+        const debitSetting = findServicePurchaseSetting(service.id);
         if (!debitSetting) {
-          errors.push(`برای خدمت «${service.title}» و نوع خرید «${invoice.purchaseType.title}»، حساب «کنترل خرید» در حسابداری کالا و خدمت تعریف نشده است`);
+          errors.push(`برای خدمت «${service.title}»، حساب «خرید خدمت» در حسابداری کالا و خدمت تعریف نشده است`);
           continue;
         }
         const debitDetails = resolveAccountDetailFields(debitSetting.account, partyDetailTypeId, partyDetailCode);

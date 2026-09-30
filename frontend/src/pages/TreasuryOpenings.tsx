@@ -71,7 +71,7 @@ const TAB_LABEL: Record<TabKey, string> = { receivable: "چک‌های دریا�
 const INFO_TEXT =
   "ثبت اطلاعات افتتاحیه‌ی دریافت و پرداخت یک دوره‌ی مالی: چک‌های دریافتی و پرداختی، مانده‌ی اول دوره‌ی حساب‌های بانکی و صندوق‌ها. " +
   "این فرم هم برای استقرار اولیه (ورود دستی) و هم برای انتقال پایان سال (با «بستن سال دریافت و پرداخت») استفاده می‌شود و می‌تواند " +
-  "مرحله‌به‌مرحله تکمیل شود. چک‌هایی که سندی به آن‌ها ارجاع می‌دهد یا گردش داشته‌اند قفل‌اند. ردیف‌ها و چک‌هایی که «بستن سال دریافت و پرداخت» خودکار می‌سازد فقط‌خواندنی‌اند و قابل ویرایش یا حذف نیستند. ارز حساب بانکی از خودِ حساب می‌آید؛ " +
+  "مرحله‌به‌مرحله تکمیل شود. چک‌هایی که سندی به آن‌ها ارجاع می‌دهد یا گردش داشته‌اند قفل‌اند. ردیف‌ها و چک‌هایی که «عملیات پایان دوره» خودکار می‌سازد فقط‌خواندنی‌اند و قابل ویرایش یا حذف نیستند؛ فقط با «بازگشایی» همان بخش در «عملیات پایان دوره»ی سال قبل حذف می‌شوند. ارز حساب بانکی از خودِ حساب می‌آید؛ " +
   "برای ارز غیرپایه هر دو مبلغ (به ارز حساب و به ارز پایه) ثبت می‌شود. مانده‌ها می‌توانند منفی باشند.";
 
 let seq = 0;
@@ -166,6 +166,8 @@ function OpeningForm({ editId }: { editId?: number }) {
   const [date, setDate] = usePersistedState(`${cacheKey}:date`, "");
   const [periodTitle, setPeriodTitle] = usePersistedState(`${cacheKey}:period`, "");
   const [updatedAt, setUpdatedAt] = usePersistedState(`${cacheKey}:updatedAt`, "");
+  // false = افتتاحیه را «عملیات پایان دوره»ی سال قبل ساخته؛ فقط با «بازگشایی» در همان صفحه‌ی سال قبل حذف می‌شود (دکمه‌ی حذف نمایش داده نمی‌شود)
+  const [deletable, setDeletable] = useState(true);
   const [receivable, setReceivable] = usePersistedState<ChequeRow[]>(`${cacheKey}:receivable`, []);
   const [payable, setPayable] = usePersistedState<ChequeRow[]>(`${cacheKey}:payable`, []);
   const [bankRows, setBankRows] = usePersistedState<BankRow[]>(`${cacheKey}:bank`, []);
@@ -179,6 +181,7 @@ function OpeningForm({ editId }: { editId?: number }) {
     setDate(d.date.slice(0, 10));
     setPeriodTitle(d.fiscalPeriodTitle);
     setUpdatedAt(d.updatedAt);
+    setDeletable(d.deletable !== false);
     const toCheque = (c: any): ChequeRow => ({
       id: c.id,
       key: String(c.id),
@@ -551,7 +554,7 @@ function OpeningForm({ editId }: { editId?: number }) {
       formId="treasury-opening-form"
       closePath="/treasury-openings"
       newPath="/treasury-openings/new"
-      onDelete={editId ? handleDelete : undefined}
+      onDelete={editId && deletable ? handleDelete : undefined}
       wide
     >
       <form id="treasury-opening-form" onSubmit={onSubmit}>

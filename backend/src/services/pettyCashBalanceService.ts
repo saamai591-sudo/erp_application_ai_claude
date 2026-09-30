@@ -6,7 +6,10 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 // مقدار تنظیماتی است و هرگز نباید به‌عنوان مانده‌ی موجود در نظر گرفته شود — طبق تصمیم صریح کاربر، نقطه‌ی
 // شروع مانده همیشه صفر است. مانده‌ی تنخواه در هر لحظه =
 //   صفر (نقطه‌ی شروع — نه سقف تنخواه)
-//   + مجموع «شارژ» (ردیف‌های موضوعات پرداختِ تاییدشده با ماهیت «به تنخواه»، هرکدام به تاریخ سند پرداختش)
+//   + مجموع «شارژ» (ردیف‌های موضوعات پرداختِ ماهیت «به تنخواه» در هر سند پرداختِ ثبت‌شده — چه در وضعیت «ثبت» چه «تایید شده» —
+//     هرکدام به تاریخ سند پرداختش). سند پرداختی که کاربر ثبت کرده، همان لحظه مبلغ را به تنخواه اعلام کرده است؛ منتظر ماندنِ تایید
+//     باعث می‌شد «مانده‌ی واقعی» کمتر از آنچه کاربر ثبت کرده نشان داده شود. به همین دلیل ویرایش/حذف/برگشتِ چنین سندی هم
+//     باید همین کنترل را بگذراند (routes/payments.ts).
 //   − مجموع «برداشت» (پرداخت‌های تنخواه، به تاریخ خودشان)
 // به ترتیب زمانیِ تاریخ هر رویداد. تنخواه بین همه‌ی تنخواه‌دارهای همان تنخواه مشترک است (رویدادهای همه‌شان
 // با هم دیده می‌شوند). در هیچ نقطه‌ای از این ترتیب، مانده نباید منفی شود — اگر کنترلِ مانده‌ی منفی برای
@@ -26,6 +29,7 @@ export interface PendingBalanceEvent {
 /**
  * @param excludePettyCashPaymentId رکورد پرداخت تنخواهِ در حال ویرایش — از محاسبه‌ی مانده‌ی قبلی کنار گذاشته می‌شود
  * @param excludeSettlementLineId ردیف موضوع پرداختِ (با ماهیت «به تنخواه») در حال ویرایش/حذف — از محاسبه کنار گذاشته می‌شود
+ * @param excludePaymentId سند پرداختِ در حال ویرایش/حذف — همه‌ی ردیف‌های «به تنخواه»ِ آن از شارژهای موجود کنار گذاشته می‌شود
  * @param pendingEvents رویداد(های) جدید/درحال‌ذخیره که هنوز در پایگاه‌داده نیستند و باید به لیست اضافه شوند
  */
 export async function assertPettyCashRunningBalanceNotNegative(
@@ -33,6 +37,7 @@ export async function assertPettyCashRunningBalanceNotNegative(
   opts: {
     excludePettyCashPaymentId?: number;
     excludeSettlementLineId?: number;
+    excludePaymentId?: number;
     pendingEvents?: PendingBalanceEvent[];
   } = {}
 ): Promise<void> {
@@ -55,8 +60,8 @@ export async function assertPettyCashRunningBalanceNotNegative(
       where: {
         custodianId: { in: custodianIds },
         paymentType: { nature: "TO_PETTY_CASH" },
-        payment: { status: "APPROVED" },
         ...(opts.excludeSettlementLineId ? { NOT: { id: opts.excludeSettlementLineId } } : {}),
+        ...(opts.excludePaymentId ? { paymentId: { not: opts.excludePaymentId } } : {}),
       },
       select: { amount: true, payment: { select: { date: true } } },
     }),

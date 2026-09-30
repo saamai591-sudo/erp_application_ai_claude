@@ -100,6 +100,7 @@ import SalesReview from "./pages/SalesReview";
 import PurchaseReview from "./pages/PurchaseReview";
 import BankAccountReview from "./pages/BankAccountReview";
 import CashReview from "./pages/CashReview";
+import PettyCashReview from "./pages/PettyCashReview";
 import ChequeDocumentsReview from "./pages/ChequeDocumentsReview";
 import TreasuryOpenings from "./pages/TreasuryOpenings";
 import TreasuryYearClose from "./pages/TreasuryYearClose";
@@ -416,6 +417,7 @@ export default function App() {
             <Route path="/purchase-review" element={<PurchaseReview />} />
             <Route path="/bank-account-review" element={<BankAccountReview />} />
             <Route path="/cash-review" element={<CashReview />} />
+            <Route path="/petty-cash-review" element={<PettyCashReview />} />
             <Route path="/receivable-documents-review" element={<ChequeDocumentsReview kind="receivable" />} />
             <Route path="/payable-documents-review" element={<ChequeDocumentsReview kind="payable" />} />
             <Route path="/treasury-openings" element={<TreasuryOpenings />} />

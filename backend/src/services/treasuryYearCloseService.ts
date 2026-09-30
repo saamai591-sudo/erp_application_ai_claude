@@ -2,6 +2,7 @@ import { prisma, getCurrentFiscalPeriod } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { getBankMovements, loadBankAccounts } from "./bankAccountReviewService";
 import { getCashMovements } from "./cashReviewService";
+import { findChequeUses } from "../utils/chequeUsage";
 
 // =========================================================================
 // «بستن سال دریافت و پرداخت» — Documents/افتتاحیه دریافت و پرداخت و بستن سال.md
@@ -16,6 +17,8 @@ import { getCashMovements } from "./cashReviewService";
 //   - صندوق‌ها: مانده‌ی پایان سال هر صندوق به تفکیک ارز (به ارز ردیف و ارز پایه).
 //   - چک‌های دریافتی فعال (در دست / واگذار به وصول / برگشتی) و پرداختی فعال (صادرشده): برای هر چک یک ChequeItem تازه در دوره‌ی بعد با
 //     همان شماره‌ی چک و parentChequeId به چک سال قبل ساخته می‌شود (چک سال قبل دست‌نخورده می‌ماند).
+// «بازگشایی» (reopenSection) دقیقاً برعکس بستن است: رکوردهای ساخته‌شده‌ی همان بخش در افتتاحیه‌ی دوره‌ی بعد پاک و ثبتِ بستن برداشته
+// می‌شود. این تنها راه حذف رکوردهای خودکار افتتاحیه است (DELETE افتتاحیه برای افتتاحیه‌ی ساخته‌شده توسط بستن سال رد می‌شود).
 // =========================================================================
 
 export type CloseSection = "BANK_ACCOUNTS" | "CASH_BOXES" | "RECEIVABLE_CHEQUES" | "PAYABLE_CHEQUES";
@@ -217,4 +220,69 @@ export async function closeAll() {
     results.push(await closeSection(s));
   }
   return { results, skipped };
+}
+
+/** آیا افتتاحیه‌ی این دوره رکورد ساخته‌شده توسط «بستن سال» دارد (ردیف بانک/صندوق isSystemGenerated یا چک منتقل‌شده با parentChequeId)؟ */
+export async function openingHasSystemGeneratedContent(fiscalPeriodId: number, openingId?: number): Promise<boolean> {
+  return withoutFiscalPeriodScope(async () => {
+    const opening = openingId ? { id: openingId } : await prisma.treasuryOpening.findUnique({ where: { fiscalPeriodId } });
+    if (!opening) return false;
+    const [bank, cash, cheques] = await Promise.all([
+      prisma.treasuryOpeningBankAccount.count({ where: { openingId: opening.id, isSystemGenerated: true } }),
+      prisma.treasuryOpeningCashBox.count({ where: { openingId: opening.id, isSystemGenerated: true } }),
+      prisma.chequeItem.count({ where: { fiscalPeriodId, isOpening: true, parentChequeId: { not: null } } }),
+    ]);
+    return bank + cash + cheques > 0;
+  });
+}
+
+/**
+ * بازگشایی یک بخش بسته‌شده: رکوردهایی که بستنِ همان بخش در افتتاحیه‌ی دوره‌ی بعد ساخته حذف می‌شوند و بخش دوباره «باز» می‌شود. چک‌های
+ * منتقل‌شده‌ای که در دوره‌ی بعد سندی به آن‌ها ارجاع می‌دهد یا گردش داشته‌اند بازگشایی را متوقف می‌کنند (هیچ‌چیز حذف نمی‌شود). اگر بعد از
+ * بازگشایی افتتاحیه‌ی دوره‌ی بعد کاملاً خالی بماند (بستن ساخته بودش)، خودِ افتتاحیه هم حذف می‌شود.
+ */
+export async function reopenSection(section: CloseSection): Promise<{ section: CloseSection; title: string; count: number }> {
+  const { current, next } = await requireNext();
+  return withoutFiscalPeriodScope(async () => {
+    const closed = await prisma.treasuryYearClose.findUnique({ where: { fiscalPeriodId_section: { fiscalPeriodId: current.id, section } } });
+    if (!closed) throw new Error(`بخش «${SECTION_TITLE[section]}» بسته نشده است و قابل بازگشایی نیست`);
+    // اگر سال بعد خودش بسته شده، مانده‌های افتتاحیه‌اش مبنای آن بستن بوده‌اند
+    const nextCloses = await prisma.treasuryYearClose.count({ where: { fiscalPeriodId: next.id } });
+    if (nextCloses > 0) throw new Error("عملیات پایان دوره‌ی سال بعد انجام شده است؛ ابتدا آن را بازگشایی کنید");
+
+    let count = 0;
+    await prisma.$transaction(async (tx: any) => {
+      const opening = await tx.treasuryOpening.findUnique({ where: { fiscalPeriodId: next.id } });
+      if (opening) {
+        if (section === "BANK_ACCOUNTS") {
+          count = (await tx.treasuryOpeningBankAccount.deleteMany({ where: { openingId: opening.id, isSystemGenerated: true } })).count;
+        } else if (section === "CASH_BOXES") {
+          count = (await tx.treasuryOpeningCashBox.deleteMany({ where: { openingId: opening.id, isSystemGenerated: true } })).count;
+        } else {
+          const direction = section === "RECEIVABLE_CHEQUES" ? "RECEIVABLE" : "PAYABLE";
+          const children = await tx.chequeItem.findMany({ where: { fiscalPeriodId: next.id, isOpening: true, direction, parentChequeId: { not: null } } });
+          for (const c of children as any[]) {
+            // eslint-disable-next-line no-await-in-loop
+            const used = c.step !== 1 || (await findChequeUses(tx, c.id, {})).length > 0;
+            if (used) throw new Error(`چک شماره ${c.number} در سال بعد سندی دارد یا گردش داشته است؛ ابتدا آن را از سند/گردش جدا کنید تا بازگشایی ممکن شود`);
+          }
+          for (const c of children as any[]) {
+            // eslint-disable-next-line no-await-in-loop
+            await tx.chequeItem.delete({ where: { id: c.id } });
+            count++;
+          }
+        }
+      }
+      await tx.treasuryYearClose.delete({ where: { fiscalPeriodId_section: { fiscalPeriodId: current.id, section } } });
+      if (opening) {
+        const [bank, cash, cheques] = await Promise.all([
+          tx.treasuryOpeningBankAccount.count({ where: { openingId: opening.id } }),
+          tx.treasuryOpeningCashBox.count({ where: { openingId: opening.id } }),
+          tx.chequeItem.count({ where: { fiscalPeriodId: next.id, isOpening: true } }),
+        ]);
+        if (bank + cash + cheques === 0) await tx.treasuryOpening.delete({ where: { id: opening.id } });
+      }
+    });
+    return { section, title: SECTION_TITLE[section], count };
+  });
 }
