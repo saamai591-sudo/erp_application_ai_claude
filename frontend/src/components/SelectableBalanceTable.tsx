@@ -1,3 +1,5 @@
+import { measureBestFitWidths, sumWidths } from "../lib/bestFit";
+import { BestFitIcon, BEST_FIT_TITLE } from "./BestFitIcon";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
@@ -179,6 +181,16 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
   const footerScrollRef = useRef<HTMLDivElement>(null);
   const [colWidths, setColWidths] = useState<number[]>([]);
+  // «Best Fit»: فقط state همین کامپوننت (نه ذخیره‌شده/بک‌اند)؛ با عوض‌شدن صفحه یا ردیف‌های نمایش‌داده‌شده پاک می‌شود. نگاه کنید به lib/bestFit.ts
+  const [bestFit, setBestFit] = useState<number[] | null>(null);
+  const bestFitSignature = `${serverPaging?.page ?? 0}|${serverPaging?.pageSize ?? 0}|${rows.map((r) => r.id).join(",")}`;
+  useEffect(() => {
+    setBestFit(null);
+  }, [bestFitSignature]);
+  function applyBestFit() {
+    const widths = measureBestFitWidths(scrollAreaRef.current?.querySelector("table"));
+    setBestFit(widths.length ? widths : null);
+  }
 
   useLayoutEffect(() => {
     function measure() {
@@ -192,7 +204,7 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columns, sort, filters, rows]);
+  }, [columns, sort, filters, rows, bestFit]);
 
   function syncFooterScroll() {
     if (scrollAreaRef.current && footerScrollRef.current) {
@@ -276,11 +288,11 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
 
   // قاعده‌ی پایه: سرستون‌ها همیشه نمایش داده می‌شوند (حین بارگذاری و برای گرید خالی هم)؛ پیام داخل بدنه‌ی جدول می‌آید
   const table = (
-    <table>
+    <table style={bestFit ? { tableLayout: "fixed", width: sumWidths(bestFit) } : undefined}>
       <thead>
         <tr ref={theadRowRef}>
           {selectable && (
-            <th style={{ width: 34 }}>
+            <th style={{ width: bestFit ? bestFit[0] : 34 }}>
               {selectAll && (
                 <input
                   type="checkbox"
@@ -292,13 +304,13 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
               )}
             </th>
           )}
-          <th style={{ width: 44 }}>ردیف</th>
-          {columns.map((c) => {
+          <th style={{ width: bestFit ? bestFit[selectable ? 1 : 0] : 44 }}>ردیف</th>
+          {columns.map((c, ci) => {
             const sortState = sortStateOf(sort, c.header);
             const hasFilter = !!c.filterType && !!c.filterValue;
             const isFilterActive = !!filters[c.header];
             return (
-              <th key={c.header} style={{ width: c.width }}>
+              <th key={c.header} style={{ width: bestFit ? bestFit[(selectable ? 2 : 1) + ci] : c.width }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                   {c.sortValue ? (
                     <span onClick={(e) => toggleSort(c, e.ctrlKey || e.shiftKey || e.metaKey)} style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }} title="مرتب‌سازی (Ctrl/Shift + کلیک برای مرتب‌سازی چندستونه)">
@@ -443,6 +455,9 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
     <div className={`bulk-toolbar ${tabsActionsTarget ? "in-tabs" : ""}`}>
       <span className="bulk-toolbar-info">{" "}</span>
       <div className="bulk-toolbar-actions">
+        <button type="button" className="toolbar-icon-btn" onClick={applyBestFit} title={BEST_FIT_TITLE}>
+          <BestFitIcon />
+        </button>
         <button type="button" className="toolbar-icon-btn" onClick={() => exportGridToCsv(exportColumns, exportRows, gridName)} title="خروجی اکسل">
           <ExcelExportIcon />
         </button>

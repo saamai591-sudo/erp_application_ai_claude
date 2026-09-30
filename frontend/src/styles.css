@@ -1729,3 +1729,12 @@ tbody tr:hover { background: var(--bg); }
 
 /* یادداشت قفل بودن افتتاحیه (افتتاحیه‌ی سیستمی / ایجاد دستیِ غیرمجاز) */
 .opening-lock-note { margin: 0 0 12px; padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--primary-soft); color: var(--ink); font-size: 12.5px; line-height: 1.7; }
+/* «Best Fit»: کپی نامرئیِ جدول برای اندازه‌گیری عرض طبیعی ستون‌ها (lib/bestFit.ts) — نمایش‌داده نمی‌شود و روی چیدمان اثر ندارد */
+table.bestfit-measure {
+  position: absolute !important; left: -100000px !important; top: 0 !important; visibility: hidden !important; pointer-events: none !important;
+  table-layout: auto !important; width: max-content !important; min-width: 0 !important; max-width: none !important;
+}
+table.bestfit-measure th, table.bestfit-measure td {
+  white-space: nowrap !important; width: auto !important; min-width: 0 !important; max-width: none !important;
+  overflow: visible !important; text-overflow: clip !important; position: static !important; transform: none !important;
+}
