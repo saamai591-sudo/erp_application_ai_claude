@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
 import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -9,6 +9,8 @@ import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
 import { RecordPickerField, RecordPickerDialog, type PickerColumn } from "../components/RecordPicker";
 import { LineGridToolbar } from "../components/LineGridToolbar";
+import { BestFitCols } from "../components/BestFitIcon";
+import { useBestFitColumns } from "../lib/useBestFit";
 import type { ExportColumn } from "../lib/gridExport";
 import { useLineGridBase } from "../lib/useLineGridBase";
 import { api, ApiError } from "../lib/api";
@@ -343,6 +345,9 @@ function SummaryForm({ editId }: { editId?: number }) {
   const [detailOptions, setDetailOptions] = useState<Record<number, DetailOption[]>>({});
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, DEFAULT_HEADER);
   const [lines, setLines] = usePersistedState<LineState[]>(`${cacheKey}:lines`, []);
+  // «Best Fit» (فقط نمایش، سمت کلاینت): عرض ستون‌ها بر اساس بزرگ‌ترین مقدار ردیف‌های گرید؛ با عوض‌شدن ردیف‌ها پاک می‌شود
+  const linesScrollRef = useRef<HTMLDivElement | null>(null);
+  const bestFit = useBestFitColumns(() => linesScrollRef.current?.querySelector("table"), `${lines.length}|${lines.map((l) => l.clientKey).join(",")}`);
   const [meta, setMeta] = useState<{ number: number; status: "DRAFT" | "APPROVED"; journalEntryId: number | null; journalEntryReferenceNumber: number | null; updatedAt: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(`${cacheKey}:header`));
@@ -689,6 +694,7 @@ function SummaryForm({ editId }: { editId?: number }) {
             exportColumns={lineExportColumns}
             exportRows={lines}
             exportFileName="Petty-cash-summary-lines"
+            onBestFit={bestFit.apply}
           >
             <button
               type="button"
@@ -701,8 +707,9 @@ function SummaryForm({ editId }: { editId?: number }) {
             </button>
           </LineGridToolbar>
           <div className="grid-wrap je-lines-wrap">
-            <div className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
-              <table className="je-lines-table">
+            <div ref={linesScrollRef} className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
+              <table className="je-lines-table" style={bestFit.tableStyle}>
+                <BestFitCols widths={bestFit.widths} />
                 <thead>
                   <tr>
                     <th>ردیف</th>

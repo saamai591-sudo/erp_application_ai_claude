@@ -1726,3 +1726,13 @@ tbody tr:hover { background: var(--bg); }
 .about-value { font-weight: 700; font-size: 15px; text-align: start; word-break: break-all; }
 .about-sub { font-weight: 400; font-size: 11.5px; color: var(--ink-soft); }
 .about-warning { margin-top: 12px; padding: 8px 10px; border-radius: var(--radius-sm); background: #fff7ed; color: #9a3412; font-size: 12px; line-height: 1.7; }
+
+/* «Best Fit»: کپی نامرئیِ جدول برای اندازه‌گیری عرض طبیعی ستون‌ها (lib/bestFit.ts) — نمایش‌داده نمی‌شود و روی چیدمان اثر ندارد */
+table.bestfit-measure {
+  position: absolute !important; left: -100000px !important; top: 0 !important; visibility: hidden !important; pointer-events: none !important;
+  table-layout: auto !important; width: max-content !important; min-width: 0 !important; max-width: none !important;
+}
+table.bestfit-measure th, table.bestfit-measure td {
+  white-space: nowrap !important; width: auto !important; min-width: 0 !important; max-width: none !important;
+  overflow: visible !important; text-overflow: clip !important; position: static !important; transform: none !important;
+}
