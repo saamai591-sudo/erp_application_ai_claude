@@ -100,6 +100,9 @@ router.post("/goods-group-levels/:id/move", can(`${GOODS_GROUP_LEVELS}.reorder`)
 // =========================================================================
 
 const MAX_ATTRS = 200;
+const GROUP_TYPES = new Set(["PRODUCT", "SERVICE"]);
+const TYPE_FA: Record<string, string> = { PRODUCT: "کالا", SERVICE: "خدمت" };
+const KIND_OF_TYPE: Record<string, "GOODS" | "SERVICE"> = { PRODUCT: "GOODS", SERVICE: "SERVICE" };
 
 router.get("/goods-groups", async (_req, res) => {
   const groups = await prisma.goodsGroup.findMany({
@@ -109,7 +112,14 @@ router.get("/goods-groups", async (_req, res) => {
     },
     orderBy: [{ levelId: "asc" }, { code: "asc" }],
   });
-  res.json(groups);
+  // نوع هر گروه = نوع ریشه‌ی آن (rootGroupType)؛ groupType فقط روی خودِ ریشه ذخیره شده است
+  const byId = new Map(groups.map((g) => [g.id, g]));
+  const rootTypeOf = (g: (typeof groups)[number]) => {
+    let cur: (typeof groups)[number] | undefined = g;
+    while (cur && cur.parentId) cur = byId.get(cur.parentId);
+    return cur?.groupType ?? null;
+  };
+  res.json(groups.map((g) => ({ ...g, rootGroupType: rootTypeOf(g) })));
 });
 
 async function resolveLevelForParent(parentId: number | null) {
@@ -145,6 +155,7 @@ router.post("/goods-groups", can(`${GOODS_GROUPS}.create`), async (req, res) => 
     affectsGoodsTitle?: boolean;
     childCodeLength?: number | null;
     isActive?: boolean;
+    groupType?: "PRODUCT" | "SERVICE" | null;
     attributes?: any[];
   };
   if (!body.code || !body.title) return res.status(400).json({ error: "کد و عنوان الزامی است" });
@@ -152,6 +163,10 @@ router.post("/goods-groups", can(`${GOODS_GROUPS}.create`), async (req, res) => 
   try {
     const parentId = body.parentId ?? null;
     const level = await resolveLevelForParent(parentId);
+    // «نوع گروه» فقط برای ریشه الزامی است؛ زیرشاخه نوع ریشه‌ی خودش را به ارث می‌برد و مقدار ارسالی نادیده گرفته می‌شود
+    if (!parentId && (!body.groupType || !GROUP_TYPES.has(body.groupType))) {
+      return res.status(400).json({ error: "نوع گروه (کالا / خدمت) برای گروه ریشه الزامی است" });
+    }
 
     if (parentId) {
       const parent = await prisma.goodsGroup.findUnique({ where: { id: parentId }, include: { level: true } });
@@ -190,6 +205,7 @@ router.post("/goods-groups", can(`${GOODS_GROUPS}.create`), async (req, res) => 
         affectsGoodsTitle: body.affectsGoodsTitle ?? false,
         childCodeLength: isLastBranch ? body.childCodeLength : null,
         isActive: body.isActive ?? true,
+        groupType: parentId ? null : body.groupType!,
         attributes: { create: attributes },
       },
       include: { level: true, attributes: { include: { attribute: true } } },
@@ -210,6 +226,7 @@ router.put("/goods-groups/:id", can(`${GOODS_GROUPS}.edit`), async (req, res) =>
     affectsGoodsTitle?: boolean;
     childCodeLength?: number | null;
     isActive?: boolean;
+    groupType?: "PRODUCT" | "SERVICE" | null;
     attributes?: any[];
   };
 
@@ -233,6 +250,23 @@ router.put("/goods-groups/:id", can(`${GOODS_GROUPS}.edit`), async (req, res) =>
   if (body.title && body.title !== group.title) {
     const dupTitle = await prisma.goodsGroup.findFirst({ where: { parentId: group.parentId, title: body.title, NOT: { id } } });
     if (dupTitle) return res.status(400).json({ error: "عنوان در این سطح تکراری است" });
+  }
+
+  // تغییر «نوع گروه» (فقط ریشه): اگر در زیردرخت کالا/خدمتِ ناهمنوع با نوع جدید ثبت شده باشد مجاز نیست
+  let nextGroupType = group.groupType;
+  if (!group.parentId && body.groupType !== undefined && body.groupType !== group.groupType) {
+    if (!body.groupType || !GROUP_TYPES.has(body.groupType)) return res.status(400).json({ error: "نوع گروه نامعتبر است" });
+    const ids = [group.id];
+    for (let i = 0; i < ids.length; i++) {
+      // eslint-disable-next-line no-await-in-loop
+      const kids = await prisma.goodsGroup.findMany({ where: { parentId: ids[i] }, select: { id: true } });
+      ids.push(...kids.map((k) => k.id));
+    }
+    const conflicting = await prisma.goodsItem.count({ where: { goodsGroupId: { in: ids }, kind: { not: KIND_OF_TYPE[body.groupType] } } });
+    if (conflicting > 0) {
+      return res.status(400).json({ error: `این گروه دارای ${TYPE_FA[group.groupType === "SERVICE" ? "SERVICE" : "PRODUCT"]} ثبت‌شده است و نوع آن به «${TYPE_FA[body.groupType]}» قابل تغییر نیست` });
+    }
+    nextGroupType = body.groupType;
   }
 
   const maxLevel = await prisma.goodsGroupLevel.findFirst({ orderBy: { order: "desc" } });
@@ -260,6 +294,7 @@ router.put("/goods-groups/:id", can(`${GOODS_GROUPS}.edit`), async (req, res) =>
       affectsGoodsTitle: body.affectsGoodsTitle,
       childCodeLength: isLastBranch ? body.childCodeLength ?? group.childCodeLength : null,
       isActive: body.isActive,
+      groupType: group.parentId ? null : nextGroupType,
     };
 
     if (isLastBranch && body.attributes !== undefined) {

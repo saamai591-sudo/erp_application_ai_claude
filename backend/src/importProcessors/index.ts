@@ -5,7 +5,7 @@ import { computeFullAccountCode, buildAccountByIdMap } from "../utils/accountCod
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { resolveDateString } from "../utils/jalaliDate";
 import { toEnglishDigits } from "../utils/digits";
-import { KIND_FA, computePrefixes, resolveSerial, AttrSelection } from "../routes/goodsItems";
+import { KIND_FA, computePrefixes, resolveSerial, assertGroupMatchesKind, AttrSelection } from "../routes/goodsItems";
 import { createInitialInventory, updateInitialInventoryAccounting } from "../routes/initialInventory";
 import { createProductionReceipt } from "../routes/productionReceipts";
 import { createWarehouseReceipt } from "../routes/warehouseReceipts";
@@ -668,6 +668,7 @@ export function registerAllImportProcessors() {
           reorderPoint = Number(toEnglishDigits(row.reorderPoint));
         }
 
+        await assertGroupMatchesKind(group.id, kind);
         const { leaf, codePrefix, titlePrefix, resolvedAttrs } = await computePrefixes(group.id, attrSelections);
         const serial = await resolveSerial(group.id, row.code ? toEnglishDigits(row.code) : undefined, leaf.childCodeLength!);
         const fullCode = codePrefix + serial;
