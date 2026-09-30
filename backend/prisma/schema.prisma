@@ -2122,6 +2122,7 @@ model ServicePurchaseInvoice {
   approver            User?                        @relation("ServicePurchaseInvoiceApprover", fields: [approverId], references: [id])
   journalEntry        JournalEntry?                @relation(fields: [journalEntryId], references: [id])
   lines               PurchaseCostLine[]
+  advanceAllocations  ServicePurchaseInvoiceAdvanceAllocation[]
 
   @@unique([fiscalPeriodId, number])
 }
@@ -2962,6 +2963,7 @@ model PaymentSettlementLine {
   purchaseOrder     PurchaseOrder?        @relation(fields: [purchaseOrderId], references: [id])
   currency          Currency              @relation(fields: [currencyId], references: [id])
   advanceAllocations PurchaseInvoiceAdvanceAllocation[]
+  servicePurchaseAdvanceAllocations ServicePurchaseInvoiceAdvanceAllocation[]
 }
 
 enum SalesDocStatus {
@@ -3587,6 +3589,20 @@ model PurchaseInvoiceAdvanceAllocation {
   paymentSettlementLine   PaymentSettlementLine @relation(fields: [paymentSettlementLineId], references: [id], onDelete: Restrict)
 
   @@unique([purchaseInvoiceId, paymentSettlementLineId])
+}
+
+/// تخصیص پیش‌پرداخت به فاکتور خرید خدمات — هم‌الگوی PurchaseInvoiceAdvanceAllocation (services/purchaseInvoiceAdvanceService.ts، نوع SERVICE)
+model ServicePurchaseInvoiceAdvanceAllocation {
+  id                       Int                     @id @default(autoincrement())
+  servicePurchaseInvoiceId Int
+  paymentSettlementLineId  Int
+  /// به ارز فاکتور (= ارز پیش‌پرداخت)؛ تفاوت نرخ ارز هرگز روی آن اثر نمی‌گذارد
+  amount                   Decimal                 @db.Decimal(18, 2)
+  createdAt                DateTime                @default(now())
+  servicePurchaseInvoice   ServicePurchaseInvoice  @relation(fields: [servicePurchaseInvoiceId], references: [id], onDelete: Cascade, map: "SPIAdvanceAlloc_invoiceId_fkey")
+  paymentSettlementLine    PaymentSettlementLine   @relation(fields: [paymentSettlementLineId], references: [id], onDelete: Restrict, map: "SPIAdvanceAlloc_lineId_fkey")
+
+  @@unique([servicePurchaseInvoiceId, paymentSettlementLineId], map: "SPIAdvanceAlloc_invoice_line_key")
 }
 
 // تخصیص پیش‌دریافت به فاکتور فروش (Documents/تخصیص پیش دریافت.md): مبلغ (به ارز فاکتور) از یک ردیف موضوع دریافتِ «پیش‌دریافت» به یک فاکتور.
