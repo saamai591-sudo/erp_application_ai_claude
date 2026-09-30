@@ -930,6 +930,11 @@ model GoodsGroupLevel {
   groups           GoodsGroup[]
 }
 
+enum GoodsGroupType {
+  PRODUCT
+  SERVICE
+}
+
 model GoodsGroup {
   id                Int                   @id @default(autoincrement())
   parentId          Int?
@@ -941,6 +946,8 @@ model GoodsGroup {
   childCodeLength   Int?
   isActive          Boolean               @default(true)
   hasTransactions   Boolean               @default(false)
+  /// نوع گروه (کالا/خدمت) — فقط روی گروه‌های ریشه (parentId = null) مقدار دارد؛ زیرشاخه‌ها نوع ریشه‌ی خودشان را به ارث می‌برند
+  groupType         GoodsGroupType?
   createdAt         DateTime              @default(now())
   level             GoodsGroupLevel       @relation(fields: [levelId], references: [id])
   parent            GoodsGroup?           @relation("GoodsGroupTree", fields: [parentId], references: [id])

@@ -38,6 +38,7 @@ interface GroupAttrLink {
 
 interface GroupRow {
   id: number;
+  rootGroupType?: "PRODUCT" | "SERVICE" | null;
   parentId: number | null;
   levelId: number;
   level: GoodsGroupLevelRow;
@@ -400,7 +401,9 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
   const selectedUnit = units.find((u) => String(u.id) === form.mainUnitId);
   const selectedWeightUnit = units.find((u) => String(u.id) === form.weightUnitId);
   const selectedAccountingGroup = accountingGroups.find((a) => String(a.id) === form.accountingGroupId);
-  const leafGroups = groups.filter((g) => g.isLastBranch && g.isActive);
+  // فقط گروه‌هایی که نوع ریشه‌شان با این فرم (کالا ⇄ PRODUCT، خدمت ⇄ SERVICE) یکی است
+  const wantedGroupType = kind === "GOODS" ? "PRODUCT" : "SERVICE";
+  const leafGroups = groups.filter((g) => g.isLastBranch && g.isActive && (!g.rootGroupType || g.rootGroupType === wantedGroupType));
   const showWeightFields = kind === "GOODS" && selectedUnit && !selectedUnit.isWeight;
   const { codePreview, titlePreview } = computePreview(selectedGroup, groups, attrRows, form.code, form.title);
 

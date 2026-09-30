@@ -37,6 +37,17 @@ export async function loadGroupChain(goodsGroupId: number) {
   return { chain, leaf };
 }
 
+/** نوع کالا/خدمت باید با «نوع گروه» ریشه‌ی گروه انتخاب‌شده یکی باشد (گروه کالا فقط برای کالا، گروه خدمت فقط برای خدمت) */
+export async function assertGroupMatchesKind(goodsGroupId: number, kind: "GOODS" | "SERVICE") {
+  const { chain } = await loadGroupChain(goodsGroupId);
+  const rootType = chain[0].groupType;
+  if (!rootType) return;
+  const want = kind === "GOODS" ? "PRODUCT" : "SERVICE";
+  if (rootType !== want) {
+    throw new Error(`گروه انتخاب‌شده از نوع «${rootType === "SERVICE" ? "خدمت" : "کالا"}» است و برای ${KIND_FA[kind]} قابل استفاده نیست`);
+  }
+}
+
 export interface AttrSelection {
   attributeId: number;
   itemId: number;
@@ -215,6 +226,7 @@ router.post("/goods-items", can(`${FORM}.create`), async (req, res) => {
       if (!TREATMENTS.has(accountingTreatment)) return res.status(400).json({ error: "نحوه حسابداری نامعتبر است" });
     }
 
+    await assertGroupMatchesKind(body.goodsGroupId, body.kind);
     const { leaf, codePrefix, titlePrefix, resolvedAttrs } = await computePrefixes(body.goodsGroupId, body.attributes ?? []);
     const serial = await resolveSerial(body.goodsGroupId, body.code, leaf.childCodeLength!);
     const fullCode = codePrefix + serial;

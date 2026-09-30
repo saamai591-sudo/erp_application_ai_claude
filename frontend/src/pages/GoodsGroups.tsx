@@ -41,8 +41,13 @@ export interface GoodsGroup {
   childCodeLength: number | null;
   isActive: boolean;
   hasTransactions: boolean;
+  /** فقط گروه‌های ریشه مقدار دارند؛ rootGroupType نوع ریشه‌ی هر گروه (برای همه) */
+  groupType?: "PRODUCT" | "SERVICE" | null;
+  rootGroupType?: "PRODUCT" | "SERVICE" | null;
   attributes: GroupAttributeLink[];
 }
+
+export const GROUP_TYPE_FA: Record<string, string> = { PRODUCT: "کالا", SERVICE: "خدمت" };
 
 export default function GoodsGroups() {
   const location = useLocation();
@@ -137,6 +142,7 @@ function GroupForm({ editId, parentId }: { editId?: number; parentId?: number })
     affectsGoodsTitle: false,
     childCodeLength: "",
     isActive: true,
+    groupType: "PRODUCT" as "PRODUCT" | "SERVICE",
   });
   const [attrRows, setAttrRows] = usePersistedState<
     { attributeId: number; title: string; selected: boolean; affectsCode: boolean; titleEffect: string }[]
@@ -189,6 +195,7 @@ function GroupForm({ editId, parentId }: { editId?: number; parentId?: number })
             affectsGoodsTitle: found.affectsGoodsTitle,
             childCodeLength: found.childCodeLength ? String(found.childCodeLength) : "",
             isActive: found.isActive,
+            groupType: found.groupType || "PRODUCT",
           });
           setAttrRows(buildAttrRows(found.attributes || []));
           if (found.parentId) {
@@ -254,6 +261,8 @@ function GroupForm({ editId, parentId }: { editId?: number; parentId?: number })
       affectsGoodsTitle: form.affectsGoodsTitle,
       childCodeLength: isLastBranch ? Number(form.childCodeLength) : null,
       isActive: form.isActive,
+      // «نوع گروه» فقط برای ریشه ارسال می‌شود (زیرشاخه از ریشه به ارث می‌برد)
+      ...(effectiveParentId ? {} : { groupType: form.groupType }),
       attributes: isLastBranch ? selectedAttrs : [],
     };
 
@@ -318,6 +327,15 @@ function GroupForm({ editId, parentId }: { editId?: number; parentId?: number })
               <label>سطح</label>
               <input disabled value={currentLevel.title} title="سطح بر اساس جایگاه این گروه در درخت به‌صورت خودکار تعیین می‌شود و قابل تغییر نیست" />
             </div>
+            {!effectiveParentId && (
+              <div className="form-field">
+                <label>نوع گروه<RequiredMark /></label>
+                <select value={form.groupType} onChange={(e) => setForm({ ...form, groupType: e.target.value as "PRODUCT" | "SERVICE" })}>
+                  <option value="PRODUCT">{GROUP_TYPE_FA.PRODUCT}</option>
+                  <option value="SERVICE">{GROUP_TYPE_FA.SERVICE}</option>
+                </select>
+              </div>
+            )}
             <div className="form-field">
               <label>کد (حداکثر {toFaDigits(String(currentLevel.codeLength))} کاراکتر)<RequiredMark /></label>
               <input dir="ltr" maxLength={currentLevel.codeLength} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
