@@ -78,7 +78,18 @@ const INVENTORY_TYPES = new Set(["INVENTORY"]);
 // طبق تصمیم صریح کاربر: این دو نوع حساب دیگر بر اساس «گروه حسابداری» تفکیک نمی‌شوند — فقط بر اساس نوع
 // فروش/نوع خرید. «گروه حسابداری» برایشان کاملاً حذف شده (نه فقط اختیاری) — همیشه null ذخیره می‌شود،
 // حتی اگر کلاینت مقداری برایش بفرستد؛ در عوض نوع فروش/نوع خرید برایشان الزامی است.
-const GROUPLESS_TYPES = new Set(["SALES_RECEIVABLE", "PURCHASE_PAYABLE"]);
+const GROUPLESS_TYPES = new Set(["SALES_RECEIVABLE", "PURCHASE_PAYABLE", "SERVICE_PURCHASE"]);
+
+// «خرید خدمت»: معین بدهکار فاکتور خرید خدمات به‌ازای هر خدمت (نه گروه حسابداری/نوع خرید)؛ فقط برای خدمتِ دارای نحوه حسابداری «هزینه».
+// خدمتِ «بهای موجودی» معین خرید جداگانه ندارد (بدهکارش از معین موجودی رسید انبار می‌آید — routes/servicePurchaseInvoices.ts).
+async function assertValidServicePurchaseService(serviceId: number | null | undefined) {
+  if (!serviceId) throw new Error("انتخاب خدمت الزامی است");
+  const service = await prisma.goodsItem.findUnique({ where: { id: serviceId } });
+  if (!service || service.kind !== "SERVICE") throw new Error("خدمت انتخاب‌شده نامعتبر است");
+  if (service.accountingTreatment === "INVENTORY_COST") {
+    throw new Error(`نحوه حسابداری خدمت «${service.title}» «بهای موجودی» است و برای آن معین خرید جداگانه تعریف نمی‌شود (بدهکار از معین موجودی رسید انبار می‌آید)`);
+  }
+}
 
 // انواع سند انبار مجاز برای هر نوع حساب — دقیقاً هم‌راستا با warehouseMovementService.OUTBOUND_DOC_TYPES:
 // «بستانکار رسید انبار» یعنی اسناد واردکننده (رسید)، «بدهکار حواله انبار» یعنی اسناد صادرکننده (حواله)
@@ -119,6 +130,7 @@ async function assertNoDuplicateSetting(key: {
   salesTypeId: number | null;
   warehouseDocType: string | null;
   purchaseTypeId: number | null;
+  serviceId?: number | null;
 }, excludeId?: number) {
   const dup = await prisma.goodsServiceAccountingSetting.findFirst({
     where: {
@@ -128,10 +140,11 @@ async function assertNoDuplicateSetting(key: {
       salesTypeId: key.salesTypeId,
       warehouseDocType: key.warehouseDocType as any,
       purchaseTypeId: key.purchaseTypeId,
+      serviceId: key.serviceId ?? null,
       ...(excludeId ? { NOT: { id: excludeId } } : {}),
     },
   });
-  if (dup) throw new Error("این تنظیم تکراری است: برای همین ترکیب (نوع حساب / گروه حسابداری / گروه انبار / نوع فروش / نوع خرید / نوع سند) قبلاً یک معین تعریف شده است");
+  if (dup) throw new Error("این تنظیم تکراری است: برای همین ترکیب (نوع حساب / گروه حسابداری / گروه انبار / نوع فروش / نوع خرید / نوع سند / خدمت) قبلاً یک معین تعریف شده است");
 }
 
 router.get("/goods-service-accounting", async (_req, res) => {
@@ -142,6 +155,7 @@ router.get("/goods-service-accounting", async (_req, res) => {
         warehouseGroup: true,
         purchaseType: true,
         salesType: true,
+        service: { select: { id: true, fullCode: true, title: true, accountingTreatment: true } },
         account: { include: { level: true } },
       },
       orderBy: { id: "asc" },
@@ -158,6 +172,7 @@ router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create
     salesTypeId?: number | null;
     warehouseDocType?: string | null;
     purchaseTypeId?: number | null;
+    serviceId?: number | null;
   };
   if (!body.accountType || !body.accountId) {
     return res.status(400).json({ error: "نوع حساب و معین الزامی است" });
@@ -182,6 +197,8 @@ router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create
   }
 
   try {
+    const isServicePurchase = body.accountType === "SERVICE_PURCHASE";
+    if (isServicePurchase) await assertValidServicePurchaseService(body.serviceId);
     if (!groupless) {
       // طبق بررسی الزامی‌بودن بالا، اینجا body.accountingGroupId قطعاً مقداردهی شده است.
       const group = await prisma.accountingGroup.findUnique({ where: { id: body.accountingGroupId! } });
@@ -200,6 +217,7 @@ router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create
       salesTypeId: body.salesTypeId || null,
       warehouseDocType: body.warehouseDocType || null,
       purchaseTypeId: body.purchaseTypeId || null,
+      serviceId: isServicePurchase ? body.serviceId! : null,
     });
 
     const created = await prisma.goodsServiceAccountingSetting.create({
@@ -211,8 +229,9 @@ router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create
         salesTypeId: body.salesTypeId || null,
         warehouseDocType: (body.warehouseDocType || null) as any,
         purchaseTypeId: body.purchaseTypeId || null,
+        serviceId: isServicePurchase ? body.serviceId! : null,
       },
-      include: { accountingGroup: true, warehouseGroup: true, purchaseType: true, salesType: true, account: { include: { level: true } } },
+      include: { accountingGroup: true, warehouseGroup: true, purchaseType: true, salesType: true, service: { select: { id: true, fullCode: true, title: true, accountingTreatment: true } }, account: { include: { level: true } } },
     });
     res.status(201).json(created);
   } catch (e: any) {
@@ -230,6 +249,7 @@ router.put("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.edi
     salesTypeId?: number | null;
     warehouseDocType?: string | null;
     purchaseTypeId?: number | null;
+    serviceId?: number | null;
   };
 
   const setting = await prisma.goodsServiceAccountingSetting.findUnique({ where: { id } });
@@ -266,6 +286,9 @@ router.put("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.edi
   }
 
   try {
+    const isServicePurchase = accountType === "SERVICE_PURCHASE";
+    const nextServiceId = isServicePurchase ? (body.serviceId === undefined ? setting.serviceId : body.serviceId) : null;
+    if (isServicePurchase) await assertValidServicePurchaseService(nextServiceId);
     // مقدار نهایی هر فیلد بعد از این ویرایش (فیلدی که در بدنه نیامده، همان مقدار فعلی رکورد است)
     await assertNoDuplicateSetting(
       {
@@ -275,6 +298,7 @@ router.put("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.edi
         salesTypeId: body.salesTypeId === undefined ? setting.salesTypeId : body.salesTypeId || null,
         warehouseDocType: body.warehouseDocType === undefined ? setting.warehouseDocType : body.warehouseDocType || null,
         purchaseTypeId: body.purchaseTypeId === undefined ? setting.purchaseTypeId : body.purchaseTypeId || null,
+        serviceId: nextServiceId,
       },
       id
     );
@@ -289,8 +313,9 @@ router.put("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.edi
         salesTypeId: body.salesTypeId === undefined ? undefined : body.salesTypeId || null,
         warehouseDocType: body.warehouseDocType === undefined ? undefined : ((body.warehouseDocType || null) as any),
         purchaseTypeId: body.purchaseTypeId === undefined ? undefined : body.purchaseTypeId || null,
+        serviceId: nextServiceId,
       },
-      include: { accountingGroup: true, warehouseGroup: true, purchaseType: true, salesType: true, account: { include: { level: true } } },
+      include: { accountingGroup: true, warehouseGroup: true, purchaseType: true, salesType: true, service: { select: { id: true, fullCode: true, title: true, accountingTreatment: true } }, account: { include: { level: true } } },
     });
     res.json(updated);
   } catch (e: any) {

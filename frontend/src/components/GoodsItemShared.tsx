@@ -1,3 +1,4 @@
+import { RequiredMark } from "./RequiredMark";
 import { FormEvent, useEffect, useState } from "react";
 import { ErrorToast } from "./ErrorToast";
 import { showError } from "../lib/toast";
@@ -98,6 +99,7 @@ interface ItemRow {
   accountingGroupId: number;
   isSpecial: boolean;
   taxRate: string | null;
+  accountingTreatment: "EXPENSE" | "INVENTORY_COST" | null;
   isActive: boolean;
   hasTransactions: boolean;
   goodsGroup: GroupRow;
@@ -250,6 +252,9 @@ export function GoodsItemList({ kind }: { kind: ItemKind }) {
                     { key: "isLocationTracked", label: "محل‌پذیر", hint: "بله / خیر" },
                   ] as const)
                 : []),
+              ...(kind === "SERVICE"
+                ? ([{ key: "accountingTreatment", label: "نحوه حسابداری", hint: "هزینه / بهای موجودی — پیش‌فرض هزینه" }] as const)
+                : []),
               { key: "isSpecial", label: `${label} خاص`, hint: "بله / خیر" },
               { key: "taxRate", label: "نرخ مالیات", hint: `اگر «${label} خاص» «بله» باشد الزامی است` },
               { key: "isActive", label: "فعال", hint: "بله / خیر — پیش‌فرض بله" },
@@ -297,6 +302,8 @@ const DEFAULT_FORM = {
   accountingGroupId: "",
   isSpecial: false,
   taxRate: "",
+  // فقط برای خدمت: هزینه (معین از تنظیم «خرید خدمت» همان خدمت) یا بهای موجودی (حتماً به رسید انبار وصل می‌شود)
+  accountingTreatment: "EXPENSE" as "EXPENSE" | "INVENTORY_COST",
   isActive: true,
 };
 
@@ -364,6 +371,7 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
         accountingGroupId: String(item.accountingGroupId),
         isSpecial: item.isSpecial,
         taxRate: item.taxRate ?? "",
+        accountingTreatment: item.accountingTreatment ?? "EXPENSE",
         isActive: item.isActive,
       });
       setExistingHasTransactions(item.hasTransactions);
@@ -436,6 +444,7 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
       isActive: form.isActive,
       attributes: attrRows.map((r) => ({ attributeId: r.attributeId, itemId: Number(r.selectedItemId) })),
     };
+    if (kind === "SERVICE") body.accountingTreatment = form.accountingTreatment || "EXPENSE";
     if (kind === "GOODS") {
       body.reorderControl = form.reorderControl;
       body.reorderPoint = form.reorderControl ? Number(form.reorderPoint) : null;
@@ -632,6 +641,19 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
                 onSelect={(a) => setForm({ ...form, accountingGroupId: String(a.id) })}
               />
             </div>
+            {kind === "SERVICE" && (
+              <div className="form-field">
+                <label>نحوه حسابداری<RequiredMark /></label>
+                <select
+                  value={form.accountingTreatment || "EXPENSE"}
+                  onChange={(e) => setForm({ ...form, accountingTreatment: e.target.value as "EXPENSE" | "INVENTORY_COST" })}
+                  title="هزینه: معین بدهکار خرید این خدمت در «حسابداری کالا و خدمت» (نوع «خرید خدمت») تعریف می‌شود. بهای موجودی: معین خرید جداگانه ندارد؛ خرید این خدمت حتماً به یک رسید انبار وصل می‌شود و بدهکار از معین موجودی همان رسید می‌آید."
+                >
+                  <option value="EXPENSE">هزینه</option>
+                  <option value="INVENTORY_COST">بهای موجودی</option>
+                </select>
+              </div>
+            )}
             <div className="form-field">
               <label className="checkbox-row">
                 <input type="checkbox" checked={form.isSpecial} onChange={(e) => setForm({ ...form, isSpecial: e.target.checked, taxRate: e.target.checked ? form.taxRate : "" })} />

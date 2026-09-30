@@ -30,6 +30,7 @@ const ACCOUNT_TYPE_FA: Record<string, string> = {
   PURCHASE_PAYABLE: "حساب پرداختنی خرید",
   PURCHASE_CONTROL: "کنترل خرید",
   PURCHASE_VAT: "ارزش افزوده خرید",
+  SERVICE_PURCHASE: "خرید خدمت",
 };
 
 const SALES_TYPES = new Set(["SALES_VAT", "SALES_RECEIVABLE", "SALES_RETURN", "SALES_DISCOUNT", "SALES_REVENUE"]);
@@ -38,7 +39,10 @@ const WAREHOUSE_DOC_TYPES = new Set(["WAREHOUSE_RECEIPT_CREDIT", "WAREHOUSE_ISSU
 const PURCHASE_TYPES = new Set(["PURCHASE_PAYABLE", "PURCHASE_CONTROL", "PURCHASE_VAT"]);
 // طبق تصمیم صریح کاربر: این دو نوع حساب دیگر بر اساس «گروه حسابداری» تفکیک نمی‌شوند — فیلد گروه
 // حسابداری برایشان کاملاً از فرم/فهرست حذف می‌شود (نه فقط غیرفعال)، فقط بر اساس نوع فروش/نوع خرید.
-const GROUPLESS_TYPES = new Set(["SALES_RECEIVABLE", "PURCHASE_PAYABLE"]);
+const GROUPLESS_TYPES = new Set(["SALES_RECEIVABLE", "PURCHASE_PAYABLE", "SERVICE_PURCHASE"]);
+// «خرید خدمت»: معین بدهکار خرید هر خدمت (فقط خدمتِ دارای نحوه حسابداری «هزینه»)؛ به‌جای گروه حسابداری، «خدمت» انتخاب می‌شود.
+// خدمتِ «بهای موجودی» معین خرید جداگانه ندارد و در فهرست انتخاب نمی‌آید.
+const SERVICE_TYPES = new Set(["SERVICE_PURCHASE"]);
 
 // دقیقاً هم‌راستا با warehouseMovementService.OUTBOUND_DOC_TYPES (بک‌اند): «بستانکار رسید انبار» یعنی
 // اسناد واردکننده (رسید)، «بدهکار حواله انبار» یعنی اسناد صادرکننده (حواله)
@@ -114,8 +118,12 @@ interface GoodsServiceAccountingSetting {
   warehouseDocType: string | null;
   purchaseTypeId: number | null;
   purchaseType: PurchaseType | null;
+  serviceId: number | null;
+  service: { id: number; fullCode: string; title: string; accountingTreatment: string | null } | null;
   hasTransactions: boolean;
 }
+
+interface ServicePick { id: number; fullCode: string; title: string; isActive: boolean; accountingTreatment: string | null }
 
 export default function GoodsServiceAccounting() {
   const location = useLocation();
@@ -164,6 +172,7 @@ function SettingList() {
         columns={[
           { header: "گروه حسابداری", render: (r) => r.accountingGroup?.title || "—", filterType: "string", filterValue: (r) => r.accountingGroup?.title || "" },
           { header: "نوع حساب", render: (r) => ACCOUNT_TYPE_FA[r.accountType] || r.accountType },
+          { header: "خدمت", render: (r) => r.service ? `${toFaDigits(r.service.fullCode)} — ${r.service.title}` : "—", filterType: "string", filterValue: (r) => r.service?.title || "" },
           { header: "گروه انبار", render: (r) => r.warehouseGroup?.title || "—" },
           {
             header: "نوع سند / نوع خرید / نوع فروش",
@@ -190,6 +199,7 @@ const DEFAULT_SETTING_FORM = {
   salesTypeId: "",
   warehouseDocType: "",
   purchaseTypeId: "",
+  serviceId: "",
 };
 
 function SettingForm({ editId }: { editId?: number }) {
@@ -201,6 +211,7 @@ function SettingForm({ editId }: { editId?: number }) {
   const [purchaseTypes, setPurchaseTypes] = useState<PurchaseType[]>([]);
   const [salesTypes, setSalesTypes] = useState<SalesType[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [services, setServices] = useState<ServicePick[]>([]);
   const [hasTransactions, setHasTransactions] = useState(false);
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_SETTING_FORM);
   const [error, setError] = useState<string | null>(null);
@@ -213,6 +224,7 @@ function SettingForm({ editId }: { editId?: number }) {
     api.get("/purchase-types").then(setPurchaseTypes);
     api.get("/sales-types").then(setSalesTypes);
     api.get("/accounts").then(setAccounts);
+    api.get("/goods-items?kind=SERVICE").then((rows: ServicePick[]) => setServices(rows.filter((x) => x.isActive)));
   }, []);
 
   useEffect(() => {
@@ -238,6 +250,7 @@ function SettingForm({ editId }: { editId?: number }) {
           salesTypeId: found.salesTypeId != null ? String(found.salesTypeId) : "",
           warehouseDocType: found.warehouseDocType || "",
           purchaseTypeId: found.purchaseTypeId != null ? String(found.purchaseTypeId) : "",
+          serviceId: found.serviceId != null ? String(found.serviceId) : "",
         });
       }
       setLoaded(true);
@@ -263,6 +276,10 @@ function SettingForm({ editId }: { editId?: number }) {
   const showWarehouseGroup = INVENTORY_TYPES.has(form.accountType);
   const showWarehouseDocType = WAREHOUSE_DOC_TYPES.has(form.accountType);
   const showPurchaseType = PURCHASE_TYPES.has(form.accountType);
+  const showService = SERVICE_TYPES.has(form.accountType);
+  // فقط خدمتِ «هزینه» (یا خدمتی که همین رکورد برایش ثبت شده) قابل انتخاب است؛ «بهای موجودی» معین خرید جداگانه ندارد
+  const selectableServices = services.filter((x) => x.accountingTreatment !== "INVENTORY_COST");
+  const selectedService = services.find((x) => String(x.id) === form.serviceId);
   // «نوع حساب» اولین فیلد فرم است؛ «گروه حسابداری» تا وقتی نوعی انتخاب نشده نمایش داده نمی‌شود، و بعد از انتخاب نوع هم فقط برای نوع‌هایی که
   // بر اساس گروه حسابداری تفکیک می‌شوند (نه GROUPLESS_TYPES) نمایش داده می‌شود.
   const showAccountingGroup = !!form.accountType && !GROUPLESS_TYPES.has(form.accountType);
@@ -280,7 +297,9 @@ function SettingForm({ editId }: { editId?: number }) {
       salesTypeId: showSalesType && form.salesTypeId ? Number(form.salesTypeId) : null,
       warehouseDocType: showWarehouseDocType && form.warehouseDocType ? form.warehouseDocType : null,
       purchaseTypeId: showPurchaseType && form.purchaseTypeId ? Number(form.purchaseTypeId) : null,
+      serviceId: showService && form.serviceId ? Number(form.serviceId) : null,
     };
+    if (showService && !form.serviceId) return setError("انتخاب خدمت الزامی است");
     try {
       if (editId) {
         await api.put(`/goods-service-accounting/${editId}`, body);
@@ -349,7 +368,23 @@ function SettingForm({ editId }: { editId?: number }) {
           {/* هر چهار فیلد زیر روی یک خانه‌ی مشترک از گرید قرار می‌گیرند (نه هرکدام خانه‌ی جدا) تا هم با
               تغییر «نوع حساب» فیلد «معین» بعدی جابه‌جا نشود، و هم در حالتی که هنوز نوعی انتخاب نشده
               فضای خالی زیاد ایجاد نشود؛ چون این چهار حالت متقابلاً انحصاری‌اند (بر اساس نوع حساب) */}
-          <div className={`form-field ${showSalesType || showWarehouseGroup || showWarehouseDocType || showPurchaseType ? "" : "form-field-hidden"}`}>
+          <div className={`form-field ${showSalesType || showWarehouseGroup || showWarehouseDocType || showPurchaseType || showService ? "" : "form-field-hidden"}`}>
+            {showService && (
+              <>
+                <label>خدمت<RequiredMark /></label>
+                <RecordPickerField
+                  title="انتخاب خدمت (نحوه حسابداری: هزینه)"
+                  displayValue={selectedService ? `${toFaDigits(selectedService.fullCode)} — ${selectedService.title}` : ""}
+                  rows={selectableServices}
+                  disabled={hasTransactions}
+                  columns={[
+                    { header: "کد", render: (x) => toFaDigits(x.fullCode), filterValue: (x) => x.fullCode, width: "120px" },
+                    { header: "عنوان", render: (x) => x.title, filterValue: (x) => x.title },
+                  ]}
+                  onSelect={(x) => setForm({ ...form, serviceId: String(x.id) })}
+                />
+              </>
+            )}
             {showSalesType && (
               <>
                 <label>نوع فروش<RequiredMark /></label>
