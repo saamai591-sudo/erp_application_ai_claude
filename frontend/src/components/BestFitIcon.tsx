@@ -9,15 +9,3 @@ export function BestFitIcon() {
 
 /** متن راهنمای دکمه‌ی «Best Fit» در همه‌ی گریدها */
 export const BEST_FIT_TITLE = "Best Fit — تنظیم خودکار عرض ستون‌ها (فقط صفحه‌ی جاری)";
-
-/** ستون‌های ثابتِ حالت «Best Fit» برای جدول‌هایی که سلول‌های سرستونشان را جدا استایل نمی‌کنند (باید اولین فرزند <table> باشد). */
-export function BestFitCols({ widths }: { widths: number[] | null }) {
-  if (!widths) return null;
-  return (
-    <colgroup>
-      {widths.map((w, i) => (
-        <col key={i} style={{ width: w }} />
-      ))}
-    </colgroup>
-  );
-}

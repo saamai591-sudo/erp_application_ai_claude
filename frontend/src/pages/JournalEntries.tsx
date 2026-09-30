@@ -12,8 +12,6 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { ExcelImportButton } from "../components/ExcelImport";
 import { LineGridToolbar } from "../components/LineGridToolbar";
-import { BestFitCols } from "../components/BestFitIcon";
-import { useBestFitColumns } from "../lib/useBestFit";
 import { useLineGridBase } from "../lib/useLineGridBase";
 import type { ExportColumn } from "../lib/gridExport";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
@@ -629,8 +627,6 @@ function EntryForm({ editId }: { editId?: number }) {
   const linesScrollRef = useRef<HTMLDivElement | null>(null);
   const linesTotalsScrollRef = useRef<HTMLDivElement>(null);
   const [linesColWidths, setLinesColWidths] = useState<number[]>([]);
-  // «Best Fit» (فقط نمایش، سمت کلاینت): عرض ستون‌ها بر اساس بزرگ‌ترین مقدار ردیف‌های صفحه‌ی جاری گرید؛ با عوض‌شدن صفحه/ردیف‌ها پاک می‌شود
-  const bestFit = useBestFitColumns(() => linesScrollRef.current?.querySelector("table"), `${linesPage}|${linesPageSize}|${pagedRowEntries.length}`);
   useLayoutEffect(() => {
     function measure() {
       const ths = linesTheadRef.current?.querySelectorAll("th");
@@ -643,7 +639,7 @@ function EntryForm({ editId }: { editId?: number }) {
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, linesPage, linesPageSize, loaded, bestFit.widths]);
+  }, [rows, linesPage, linesPageSize, loaded]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -834,7 +830,6 @@ function EntryForm({ editId }: { editId?: number }) {
           exportColumns={lineExportColumns}
           exportRows={rows}
           exportFileName="Journal-entry-lines"
-          onBestFit={bestFit.apply}
         />
         </fieldset>
 
@@ -851,8 +846,7 @@ function EntryForm({ editId }: { editId?: number }) {
           style={{ overflowX: "auto", overflowY: "auto" }}
           onScroll={() => { if (linesScrollRef.current && linesTotalsScrollRef.current) linesTotalsScrollRef.current.scrollLeft = linesScrollRef.current.scrollLeft; }}
         >
-          <table className="je-lines-table" style={bestFit.tableStyle}>
-            <BestFitCols widths={bestFit.widths} />
+          <table className="je-lines-table">
             <thead>
               <tr ref={linesTheadRef}>
                 <th>ردیف</th>

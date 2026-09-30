@@ -13,22 +13,6 @@ export function measureBestFitWidths(table: HTMLTableElement | null | undefined)
   const clone = table.cloneNode(true) as HTMLTableElement;
   clone.classList.add("bestfit-measure");
   clone.removeAttribute("id");
-  // فیلدهای ویرایشی (input/select/textarea) در کپی با متنِ واقعیِ مقدارشان جایگزین می‌شوند تا عرض ستون به‌اندازه‌ی «مقدار» باشد،
-  // نه عرض پیش‌فرض خودِ فیلد. (cloneNode مقدار زنده‌ی فیلد را کپی نمی‌کند، پس از عنصر اصلیِ هم‌ترتیب خوانده می‌شود.)
-  const FIELDS = "input:not([type=checkbox]):not([type=radio]):not([type=hidden]), select, textarea";
-  const originals = Array.from(table.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(FIELDS));
-  const clones = Array.from(clone.querySelectorAll<HTMLElement>(FIELDS));
-  clones.forEach((el, i) => {
-    const src = originals[i];
-    if (!src) return;
-    const text = src instanceof HTMLSelectElement ? src.selectedOptions[0]?.text ?? "" : src.value ?? "";
-    const span = document.createElement("span");
-    span.textContent = text;
-    span.style.display = "inline-block";
-    span.style.padding = "0 20px";
-    span.style.whiteSpace = "nowrap";
-    el.replaceWith(span);
-  });
   host.appendChild(clone);
   try {
     const headerCells = clone.querySelectorAll<HTMLElement>("thead tr:first-child > th, thead tr:first-child > td");

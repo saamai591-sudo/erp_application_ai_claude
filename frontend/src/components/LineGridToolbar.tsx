@@ -1,6 +1,5 @@
 import { ReactNode, useState } from "react";
 import { exportGridToCsv, type ExportColumn } from "../lib/gridExport";
-import { BestFitIcon, BEST_FIT_TITLE } from "./BestFitIcon";
 
 // نوار ابزار پایه‌ی گریدهای ردیفی اسناد (طبق تصمیم صریح کاربر: «در base انجام بده، در هر فرم می‌گویم
 // کدام لازم نیست») — افزودن/حذف/جابه‌جایی بالا-پایین/فیلتر/خروجی اکسل به‌صورت پیش‌فرض فعال، «بارگذاری»
@@ -37,9 +36,6 @@ export interface LineGridToolbarProps<T> {
   filterValue?: string;
   onFilterChange?: (value: string) => void;
 
-  /** «Best Fit»: اگر داده شود دکمه‌ی تنظیم خودکار عرض ستون‌ها (فقط نمایش، سمت کلاینت) نشان داده می‌شود — نگاه کنید به lib/useBestFit.ts */
-  onBestFit?: () => void;
-
   exportColumns?: ExportColumn<T>[];
   exportRows?: T[];
   exportFileName?: string;
@@ -67,7 +63,6 @@ export function LineGridToolbar<T>({
   canMoveDown = true,
   filterValue,
   onFilterChange,
-  onBestFit,
   exportColumns,
   exportRows,
   exportFileName,
@@ -117,11 +112,6 @@ export function LineGridToolbar<T>({
             title="فیلتر ردیف‌ها"
           >
             <FilterIcon active={!!filterValue} />
-          </button>
-        )}
-        {onBestFit && (
-          <button type="button" className="toolbar-icon-btn" onClick={onBestFit} title={BEST_FIT_TITLE}>
-            <BestFitIcon />
           </button>
         )}
         {effective.excel && exportColumns && exportRows && (
