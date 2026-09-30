@@ -133,6 +133,7 @@ model Currency {
   receiptInstrumentLines   ReceiptInstrumentLine[]
   receiptSettlementLines   ReceiptSettlementLine[]
   treasuryOpeningBankAccounts TreasuryOpeningBankAccount[]
+  treasuryOpeningPettyCashLines TreasuryOpeningPettyCash[]
   treasuryOpeningCashBoxes TreasuryOpeningCashBox[]
 }
 
@@ -488,6 +489,7 @@ model PettyCash {
   currency        Currency @relation(fields: [currencyId], references: [id])
   custodians      PettyCashCustodian[]
   treasuryAccountSettings TreasuryAccountSetting[]
+  openingLines    TreasuryOpeningPettyCash[]
 }
 
 /// تنخواه‌دار (مدیریت خزانه › تنظیمات): یک طرف‌حساب مسئول یک تنخواه. کد تفصیلی توسط سرویس عمومی «ایجاد کد تفصیلی» (نوع تفصیل ۶ «تنخواه دار») صادر می‌شود.
@@ -3453,6 +3455,7 @@ model TreasuryOpening {
   fiscalPeriod    FiscalPeriod                 @relation(fields: [fiscalPeriodId], references: [id])
   bankAccountLines TreasuryOpeningBankAccount[]
   cashBoxLines    TreasuryOpeningCashBox[]
+  pettyCashLines  TreasuryOpeningPettyCash[]
 }
 
 model TreasuryOpeningBankAccount {
@@ -3489,11 +3492,32 @@ model TreasuryOpeningCashBox {
   @@unique([openingId, cashBoxId, currencyId])
 }
 
+/// مانده‌ی اول دوره‌ی یک تنخواه (هم‌الگوی TreasuryOpeningBankAccount): به‌ازای هر تنخواه یک ردیف، به ارز خودِ تنخواه (و ارز پایه). اگر برای دوره ردیفی
+/// باشد، «مانده‌ی جاری» تنخواه در آن دوره از همین مقدار شروع می‌شود (services/pettyCashBalanceService.ts، services/pettyCashReviewService.ts).
+model TreasuryOpeningPettyCash {
+  id                Int             @id @default(autoincrement())
+  openingId         Int
+  rowOrder          Int             @default(0)
+  pettyCashId       Int
+  currencyId        Int
+  balance           Decimal         @db.Decimal(18, 2)
+  baseBalance       Decimal         @db.Decimal(18, 2)
+  /// true = ردیف را «عملیات پایان دوره»ی سال قبل (بستن تنخواه‌ها) خودکار ساخته است
+  isSystemGenerated Boolean         @default(false)
+  opening           TreasuryOpening @relation(fields: [openingId], references: [id], onDelete: Cascade)
+  pettyCash         PettyCash       @relation(fields: [pettyCashId], references: [id])
+  currency          Currency        @relation(fields: [currencyId], references: [id])
+
+  @@unique([openingId, pettyCashId])
+}
+
 // «بستن سال دریافت و پرداخت» — هر بخش به‌صورت مستقل بسته می‌شود؛ ردیف این جدول یعنی آن بخش از دوره‌ی مالیِ fiscalPeriodId
 // بسته و به افتتاحیه‌ی دوره‌ی بعد منتقل شده است.
 enum TreasuryCloseSection {
   BANK_ACCOUNTS
   CASH_BOXES
+  /// مانده‌ی پایان سال هر تنخواه (به ارز خودِ تنخواه) که به افتتاحیه‌ی سال بعد منتقل می‌شود (TreasuryOpeningPettyCash)
+  PETTY_CASHES
   RECEIVABLE_CHEQUES
   PAYABLE_CHEQUES
 }

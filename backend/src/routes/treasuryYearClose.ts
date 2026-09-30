@@ -35,17 +35,20 @@ router.get("/treasury-year-close", can(`${FORM}.view`), async (_req, res) => {
 const SECTION_ROUTE: Record<string, CloseSection> = {
   "bank-accounts": "BANK_ACCOUNTS",
   "cash-boxes": "CASH_BOXES",
+  "petty-cashes": "PETTY_CASHES",
   "receivable-cheques": "RECEIVABLE_CHEQUES",
   "payable-cheques": "PAYABLE_CHEQUES",
 };
 
 router.post("/treasury-year-close/bank-accounts", can(`${FORM}.closeBankAccounts`), async (_req, res) => closeOne("bank-accounts", res));
 router.post("/treasury-year-close/cash-boxes", can(`${FORM}.closeCashBoxes`), async (_req, res) => closeOne("cash-boxes", res));
+router.post("/treasury-year-close/petty-cashes", can(`${FORM}.closePettyCashes`), async (_req, res) => closeOne("petty-cashes", res));
 router.post("/treasury-year-close/receivable-cheques", can(`${FORM}.closeReceivableCheques`), async (_req, res) => closeOne("receivable-cheques", res));
 router.post("/treasury-year-close/payable-cheques", can(`${FORM}.closePayableCheques`), async (_req, res) => closeOne("payable-cheques", res));
 
 router.post("/treasury-year-close/bank-accounts/reopen", can(`${FORM}.reopenBankAccounts`), async (_req, res) => reopenOne("bank-accounts", res));
 router.post("/treasury-year-close/cash-boxes/reopen", can(`${FORM}.reopenCashBoxes`), async (_req, res) => reopenOne("cash-boxes", res));
+router.post("/treasury-year-close/petty-cashes/reopen", can(`${FORM}.reopenPettyCashes`), async (_req, res) => reopenOne("petty-cashes", res));
 router.post("/treasury-year-close/receivable-cheques/reopen", can(`${FORM}.reopenReceivableCheques`), async (_req, res) => reopenOne("receivable-cheques", res));
 router.post("/treasury-year-close/payable-cheques/reopen", can(`${FORM}.reopenPayableCheques`), async (_req, res) => reopenOne("payable-cheques", res));
 

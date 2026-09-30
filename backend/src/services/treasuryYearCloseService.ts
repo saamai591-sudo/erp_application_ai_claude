@@ -2,6 +2,7 @@ import { prisma, getCurrentFiscalPeriod } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { getBankMovements, loadBankAccounts } from "./bankAccountReviewService";
 import { getCashMovements } from "./cashReviewService";
+import { getPettyCashMovements } from "./pettyCashReviewService";
 import { findChequeUses } from "../utils/chequeUsage";
 
 // =========================================================================
@@ -15,18 +16,21 @@ import { findChequeUses } from "../utils/chequeUsage";
 //   - حساب‌های بانکی: مانده‌ی پایان سال هر حساب (افتتاحیه‌ی همین دوره + گردش‌های تاییدشده، همان تعریف «مرور حساب بانکی»)
 //     به ارز حساب و ارز پایه. مانده‌ی ارز حساب برای گردش‌های مبتنی بر چک (ارز پایه) فقط برای حساب‌های ارز پایه حساب می‌شود.
 //   - صندوق‌ها: مانده‌ی پایان سال هر صندوق به تفکیک ارز (به ارز ردیف و ارز پایه).
+//   - تنخواه‌ها: مانده‌ی پایان سال هر تنخواه (زنجیره‌ی پیوسته‌ی شارژ تاییدشده − پرداخت‌های تنخواه، همان تعریف «مرور تنخواه») به ارز خودِ تنخواه؛
+//     مانده‌ی ارز پایه برای تنخواه ارزی با میانگین وزنیِ نرخ ارز شارژها تخمین زده می‌شود (نرخ مستقلی برای پرداخت تنخواه ثبت نمی‌شود).
 //   - چک‌های دریافتی فعال (در دست / واگذار به وصول / برگشتی) و پرداختی فعال (صادرشده): برای هر چک یک ChequeItem تازه در دوره‌ی بعد با
 //     همان شماره‌ی چک و parentChequeId به چک سال قبل ساخته می‌شود (چک سال قبل دست‌نخورده می‌ماند).
 // «بازگشایی» (reopenSection) دقیقاً برعکس بستن است: رکوردهای ساخته‌شده‌ی همان بخش در افتتاحیه‌ی دوره‌ی بعد پاک و ثبتِ بستن برداشته
 // می‌شود. این تنها راه حذف رکوردهای خودکار افتتاحیه است (DELETE افتتاحیه برای افتتاحیه‌ی ساخته‌شده توسط بستن سال رد می‌شود).
 // =========================================================================
 
-export type CloseSection = "BANK_ACCOUNTS" | "CASH_BOXES" | "RECEIVABLE_CHEQUES" | "PAYABLE_CHEQUES";
-export const CLOSE_SECTIONS: CloseSection[] = ["BANK_ACCOUNTS", "CASH_BOXES", "RECEIVABLE_CHEQUES", "PAYABLE_CHEQUES"];
+export type CloseSection = "BANK_ACCOUNTS" | "CASH_BOXES" | "PETTY_CASHES" | "RECEIVABLE_CHEQUES" | "PAYABLE_CHEQUES";
+export const CLOSE_SECTIONS: CloseSection[] = ["BANK_ACCOUNTS", "CASH_BOXES", "PETTY_CASHES", "RECEIVABLE_CHEQUES", "PAYABLE_CHEQUES"];
 
 const SECTION_TITLE: Record<CloseSection, string> = {
   BANK_ACCOUNTS: "حساب‌های بانکی",
   CASH_BOXES: "صندوق‌ها",
+  PETTY_CASHES: "تنخواه‌ها",
   RECEIVABLE_CHEQUES: "چک‌های دریافتی",
   PAYABLE_CHEQUES: "چک‌های پرداختی",
 };
@@ -62,13 +66,14 @@ async function ensureOpening(tx: any, nextPeriod: { id: number; title?: string; 
 
 /** تعداد ردیف‌هایی که بستن هر بخش ایجاد می‌کند (پیش‌نمایش صفحه‌ی بستن سال). */
 export async function previewCounts(current: { id: number; fromDate: Date; toDate: Date }) {
-  const [bank, cash, receivable, payable] = await Promise.all([
+  const [bank, cash, pettyCash, receivable, payable] = await Promise.all([
     computeBankClosing(current),
     computeCashClosing(current),
+    computePettyCashClosing(current),
     prisma.chequeItem.count({ where: { fiscalPeriodId: current.id, direction: "RECEIVABLE", status: { in: [...ACTIVE_RECEIVABLE] } } }),
     prisma.chequeItem.count({ where: { fiscalPeriodId: current.id, direction: "PAYABLE", status: { in: [...ACTIVE_PAYABLE] } } }),
   ]);
-  return { BANK_ACCOUNTS: bank.length, CASH_BOXES: cash.length, RECEIVABLE_CHEQUES: receivable, PAYABLE_CHEQUES: payable } as Record<CloseSection, number>;
+  return { BANK_ACCOUNTS: bank.length, CASH_BOXES: cash.length, PETTY_CASHES: pettyCash.length, RECEIVABLE_CHEQUES: receivable, PAYABLE_CHEQUES: payable } as Record<CloseSection, number>;
 }
 
 export async function computeBankClosing(current: { fromDate: Date; toDate: Date }) {
@@ -111,6 +116,57 @@ export async function computeCashClosing(current: { fromDate: Date; toDate: Date
     .filter((r) => r.balance !== 0 || r.baseBalance !== 0);
 }
 
+export async function computePettyCashClosing(current: { fromDate: Date; toDate: Date }) {
+  // افتتاحیه‌ی دوره‌ی بعد (تاریخش = آخرین روز همین دوره) در مانده‌ی بستن اثر نمی‌گذارد
+  const [movements, pettyCashes, base] = await Promise.all([
+    getPettyCashMovements(current.toDate, { openingsBeforeDate: current.toDate }),
+    prisma.pettyCash.findMany({ select: { id: true, currencyId: true } }),
+    prisma.currency.findFirst({ where: { isBase: true } }),
+  ]);
+  const currencyOf = new Map<number, number>(pettyCashes.map((p: any) => [p.id, p.currencyId]));
+  const totals = new Map<number, number>();
+  for (const m of movements) {
+    if (!currencyOf.has(m.pettyCashId)) continue;
+    totals.set(m.pettyCashId, (totals.get(m.pettyCashId) || 0) + m.inflow - m.outflow);
+  }
+  const round = (n: number) => Math.round(n * 100) / 100;
+
+  // نرخ تبدیل تنخواه ارزی: میانگین وزنیِ نرخ ارز ردیف‌های شارژِ تاییدشده؛ در نبودِ شارژ، نسبت مانده‌ی ارز پایه به مانده در آخرین افتتاحیه‌ی همان تنخواه
+  const foreign = Array.from(totals.keys()).filter((id) => currencyOf.get(id) !== base!.id);
+  const rates = new Map<number, number>();
+  if (foreign.length) {
+    const lines: any[] = await withoutFiscalPeriodScope(() =>
+      prisma.paymentSettlementLine.findMany({
+        where: { paymentType: { nature: "TO_PETTY_CASH" }, payment: { status: "APPROVED", date: { lte: current.toDate } }, custodian: { pettyCashId: { in: foreign } } },
+        select: { amount: true, fxRate: true, custodian: { select: { pettyCashId: true } } },
+      })
+    );
+    const acc = new Map<number, { amount: number; base: number }>();
+    for (const l of lines) {
+      const a = acc.get(l.custodian.pettyCashId) || { amount: 0, base: 0 };
+      a.amount += Number(l.amount);
+      a.base += Number(l.amount) * Number(l.fxRate);
+      acc.set(l.custodian.pettyCashId, a);
+    }
+    for (const [id, a] of acc) if (a.amount > 0) rates.set(id, a.base / a.amount);
+    const missing = foreign.filter((id) => !rates.has(id));
+    if (missing.length) {
+      const rows: any[] = await withoutFiscalPeriodScope(() =>
+        prisma.treasuryOpeningPettyCash.findMany({ where: { pettyCashId: { in: missing } }, include: { opening: { include: { fiscalPeriod: true } } } })
+      );
+      rows.sort((a, b) => a.opening.fiscalPeriod.fromDate.getTime() - b.opening.fiscalPeriod.fromDate.getTime());
+      for (const r of rows) if (Number(r.balance) !== 0 && r.opening.fiscalPeriod.fromDate <= current.fromDate) rates.set(r.pettyCashId, Number(r.baseBalance) / Number(r.balance));
+    }
+  }
+  return Array.from(totals.entries())
+    .map(([pettyCashId, total]) => {
+      const currencyId = currencyOf.get(pettyCashId)!;
+      const balance = round(total);
+      return { pettyCashId, currencyId, balance, baseBalance: currencyId === base!.id ? balance : round(balance * (rates.get(pettyCashId) ?? 1)) };
+    })
+    .filter((r) => r.balance !== 0 || r.baseBalance !== 0);
+}
+
 /** «نوع دریافت/پرداخت» چک منتقل‌شده: از افتتاحیه‌ی خودِ چک، یا از ردیف‌های موضوع سندی که چک را ایجاد کرده (فقط اگر یکتا باشد). */
 async function deriveTypeIds(cheque: any): Promise<{ openingReceiptTypeId: number | null; openingPaymentTypeId: number | null }> {
   if (cheque.isOpening) return { openingReceiptTypeId: cheque.openingReceiptTypeId, openingPaymentTypeId: cheque.openingPaymentTypeId };
@@ -144,6 +200,23 @@ export async function closeSection(section: CloseSection): Promise<{ section: Cl
             where: { openingId_bankAccountId: { openingId: opening.id, bankAccountId: r.bankAccountId } },
             update: { currencyId: r.currencyId, balance: r.balance, baseBalance: r.baseBalance, isSystemGenerated: true },
             create: { openingId: opening.id, bankAccountId: r.bankAccountId, currencyId: r.currencyId, balance: r.balance, baseBalance: r.baseBalance, rowOrder: order++, isSystemGenerated: true },
+          });
+        }
+        await tx.treasuryYearClose.create({ data: { fiscalPeriodId: current.id, section } });
+      });
+      count = rows.length;
+    } else if (section === "PETTY_CASHES") {
+      const rows = await computePettyCashClosing(current);
+      await prisma.$transaction(async (tx: any) => {
+        const opening = await ensureOpening(tx, next);
+        const last = await tx.treasuryOpeningPettyCash.aggregate({ where: { openingId: opening.id }, _max: { rowOrder: true } });
+        let order = (last._max.rowOrder ?? -1) + 1;
+        for (const r of rows) {
+          // eslint-disable-next-line no-await-in-loop
+          await tx.treasuryOpeningPettyCash.upsert({
+            where: { openingId_pettyCashId: { openingId: opening.id, pettyCashId: r.pettyCashId } },
+            update: { currencyId: r.currencyId, balance: r.balance, baseBalance: r.baseBalance, isSystemGenerated: true },
+            create: { openingId: opening.id, pettyCashId: r.pettyCashId, currencyId: r.currencyId, balance: r.balance, baseBalance: r.baseBalance, rowOrder: order++, isSystemGenerated: true },
           });
         }
         await tx.treasuryYearClose.create({ data: { fiscalPeriodId: current.id, section } });
@@ -248,6 +321,8 @@ export async function reopenSection(section: CloseSection): Promise<{ section: C
       if (opening) {
         if (section === "BANK_ACCOUNTS") {
           count = (await tx.treasuryOpeningBankAccount.deleteMany({ where: { openingId: opening.id, isSystemGenerated: true } })).count;
+        } else if (section === "PETTY_CASHES") {
+          count = (await tx.treasuryOpeningPettyCash.deleteMany({ where: { openingId: opening.id, isSystemGenerated: true } })).count;
         } else if (section === "CASH_BOXES") {
           count = (await tx.treasuryOpeningCashBox.deleteMany({ where: { openingId: opening.id, isSystemGenerated: true } })).count;
         } else {
@@ -267,12 +342,13 @@ export async function reopenSection(section: CloseSection): Promise<{ section: C
       }
       await tx.treasuryYearClose.delete({ where: { fiscalPeriodId_section: { fiscalPeriodId: current.id, section } } });
       if (opening) {
-        const [bank, cash, cheques] = await Promise.all([
+        const [bank, cash, pettyCash, cheques] = await Promise.all([
           tx.treasuryOpeningBankAccount.count({ where: { openingId: opening.id } }),
           tx.treasuryOpeningCashBox.count({ where: { openingId: opening.id } }),
+          tx.treasuryOpeningPettyCash.count({ where: { openingId: opening.id } }),
           tx.chequeItem.count({ where: { fiscalPeriodId: next.id, isOpening: true } }),
         ]);
-        if (bank + cash + cheques === 0) await tx.treasuryOpening.delete({ where: { id: opening.id } });
+        if (bank + cash + pettyCash + cheques === 0) await tx.treasuryOpening.delete({ where: { id: opening.id } });
       }
     });
     return { section, title: SECTION_TITLE[section], count };

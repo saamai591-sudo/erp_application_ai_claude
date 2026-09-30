@@ -1,10 +1,14 @@
 import { prisma } from "../lib/prisma";
+import { withoutFiscalPeriodScope } from "../lib/requestContext";
+import { loadPettyCashOpenings, openingAdjustments } from "./pettyCashReviewService";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 
 // کنترل مانده منفی تنخواه — طبق تصمیم صریح کاربر: باید روی «مانده‌ی جاری» (running balance) در طول زمان
 // محاسبه شود، نه فقط جمع کل نهایی یا مانده‌ی یک تاریخ مشخص. «سقف تنخواه» (PettyCash.limitAmount) صرفاً یک
 // مقدار تنظیماتی است و هرگز نباید به‌عنوان مانده‌ی موجود در نظر گرفته شود — طبق تصمیم صریح کاربر، نقطه‌ی
-// شروع مانده همیشه صفر است. مانده‌ی تنخواه در هر لحظه =
+// شروع مانده همیشه صفر است — مگر «افتتاحیه‌ی تنخواه» (TreasuryOpeningPettyCash) وجود داشته باشد: آن مانده را در یک روز قبل از شروع دوره‌ی
+// مالیِ افتتاحیه برابر مقدار افتتاحیه می‌کند (services/pettyCashReviewService.ts#openingAdjustments؛ در حالت عادی که افتتاحیه همان مانده‌ی
+// پایان سال قبل است تعدیلی نمی‌افتد). زنجیره از همه‌ی دوره‌های مالی پیوسته است (نه فقط دوره‌ی جاری). مانده‌ی تنخواه در هر لحظه =
 //   صفر (نقطه‌ی شروع — نه سقف تنخواه)
 //   + مجموع «شارژ» (ردیف‌های موضوعات پرداختِ ماهیت «به تنخواه» در هر سند پرداختِ ثبت‌شده — چه در وضعیت «ثبت» چه «تایید شده» —
 //     هرکدام به تاریخ سند پرداختش). سند پرداختی که کاربر ثبت کرده، همان لحظه مبلغ را به تنخواه اعلام کرده است؛ منتظر ماندنِ تایید
@@ -48,7 +52,7 @@ export async function assertPettyCashRunningBalanceNotNegative(
   const custodianIds = custodians.map((c) => c.id);
   if (custodianIds.length === 0 && !opts.pendingEvents?.length) return;
 
-  const [payments, fundingLines] = await Promise.all([
+  const [payments, fundingLines] = await withoutFiscalPeriodScope(() => Promise.all([
     prisma.pettyCashPayment.findMany({
       where: {
         custodianId: { in: custodianIds },
@@ -65,13 +69,15 @@ export async function assertPettyCashRunningBalanceNotNegative(
       },
       select: { amount: true, payment: { select: { date: true } } },
     }),
-  ]);
+  ]));
 
   const events: BalanceEvent[] = [
     ...payments.map((p) => ({ date: p.date, amount: -Number(p.amount) })),
     ...fundingLines.map((f) => ({ date: f.payment.date, amount: Number(f.amount) })),
     ...(opts.pendingEvents || []),
   ];
+
+  events.push(...openingAdjustments(events, await loadPettyCashOpenings({ pettyCashId })));
 
   // در تاریخ‌های برابر، شارژ قبل از برداشت اعمال می‌شود (فرض خوش‌بینانه‌ی معمول کسب‌وکار: همان روز که
   // تنخواه شارژ می‌شود، برداشتِ همان روز هم پوشش داده می‌شود) — طبق تصمیم صریح کاربر برای «مانده‌ی جاری»
