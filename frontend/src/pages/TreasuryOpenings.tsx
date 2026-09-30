@@ -34,6 +34,7 @@ interface TypeOption { id: number; title: string; isActive?: boolean }
 interface ListRow {
   id: number;
   date: string;
+  isSystemGenerated?: boolean;
   fiscalPeriodTitle: string;
   receivableChequeCount: number;
   payableChequeCount: number;
@@ -107,9 +108,12 @@ function OpeningList() {
   const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  // امکان ایجاد افتتاحیه‌ی دستی (سمت سرور هم اعمال می‌شود): فقط یکی در کل سیستم، و فقط وقتی هیچ افتتاحیه‌ی سیستمی وجود ندارد
+  const [creation, setCreation] = useState<{ canCreate: boolean; reason: string | null }>({ canCreate: true, reason: null });
 
   async function reload() {
     try {
+      api.get("/treasury-openings/creation-status").then(setCreation).catch(() => {});
       setItems(await api.get("/treasury-openings"));
       setError(null);
     } catch (e) {
@@ -128,12 +132,20 @@ function OpeningList() {
           <InfoHint text={INFO_TEXT} title="عملیات اول دوره" />
           <RefreshButton onClick={reload} />
         </div>
-        <NewRecordButton path="/treasury-openings/new" />
+        {creation.canCreate ? (
+          <NewRecordButton path="/treasury-openings/new" />
+        ) : (
+          <button type="button" className="toolbar-icon-btn" disabled title={creation.reason || ""} aria-label="جدید (غیرفعال)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+          </button>
+        )}
       </div>
       <ErrorToast message={error} />
+      {!creation.canCreate && creation.reason && <div className="opening-lock-note">{creation.reason}</div>}
       <DataTable
         columns={[
           { header: "دوره مالی", render: (r: ListRow) => toFaDigits(r.fiscalPeriodTitle), width: "110px", filterType: "string", filterValue: (r: ListRow) => r.fiscalPeriodTitle },
+          { header: "نوع", render: (r: ListRow) => <span className="badge">{r.isSystemGenerated ? "سیستمی (پایان دوره)" : "دستی"}</span>, width: "150px", filterType: "string", filterValue: (r: ListRow) => (r.isSystemGenerated ? "سیستمی" : "دستی") },
           { header: "تاریخ", render: (r: ListRow) => formatJalaliDate(r.date), width: "120px", filterType: "date", filterValue: (r: ListRow) => r.date?.slice(0, 10) },
           { header: "چک‌های دریافتی", render: (r: ListRow) => toFaDigits(String(r.receivableChequeCount)), width: "120px" },
           { header: "چک‌های پرداختی", render: (r: ListRow) => toFaDigits(String(r.payableChequeCount)), width: "120px" },
@@ -166,8 +178,23 @@ function OpeningForm({ editId }: { editId?: number }) {
   const [date, setDate] = usePersistedState(`${cacheKey}:date`, "");
   const [periodTitle, setPeriodTitle] = usePersistedState(`${cacheKey}:period`, "");
   const [updatedAt, setUpdatedAt] = usePersistedState(`${cacheKey}:updatedAt`, "");
-  // false = افتتاحیه را «عملیات پایان دوره»ی سال قبل ساخته؛ فقط با «بازگشایی» در همان صفحه‌ی سال قبل حذف می‌شود (دکمه‌ی حذف نمایش داده نمی‌شود)
-  const [deletable, setDeletable] = useState(true);
+  // افتتاحیه‌ی سیستمی (ساخته‌شده توسط «عملیات پایان دوره»ی سال قبل): کل فرم فقط‌خواندنی است — بدون ذخیره/حذف/افزودن/ویرایش/حذف قلم در هر تب؛ تغییرش فقط
+  // با بستن/بازگشایی در سال قبل. برای «جدید»: اگر ایجاد افتتاحیه‌ی دستی مجاز نباشد (یکی در کل سیستم / وجود افتتاحیه‌ی سیستمی) هم فرم قفل است.
+  // این‌ها عمداً state معمولی‌اند (نه usePersistedState) و همیشه از سرور خوانده می‌شوند، حتی وقتی مقدار فیلدهای فرم از کش برمی‌گردد.
+  const [systemGenerated, setSystemGenerated] = useState(false);
+  const [createBlockedReason, setCreateBlockedReason] = useState<string | null>(null);
+  const lockedBySystem = !!editId && systemGenerated;
+  const lockedByCreation = !editId && !!createBlockedReason;
+  const formLocked = lockedBySystem || lockedByCreation;
+  useEffect(() => {
+    if (editId) {
+      api.get(`/treasury-openings/${editId}`).then((d: any) => setSystemGenerated(!!d.isSystemGenerated)).catch(() => {});
+      setCreateBlockedReason(null);
+    } else {
+      setSystemGenerated(false);
+      api.get("/treasury-openings/creation-status").then((r: { canCreate: boolean; reason: string | null }) => setCreateBlockedReason(r.canCreate ? null : r.reason)).catch(() => {});
+    }
+  }, [editId]);
   const [receivable, setReceivable] = usePersistedState<ChequeRow[]>(`${cacheKey}:receivable`, []);
   const [payable, setPayable] = usePersistedState<ChequeRow[]>(`${cacheKey}:payable`, []);
   const [bankRows, setBankRows] = usePersistedState<BankRow[]>(`${cacheKey}:bank`, []);
@@ -181,7 +208,7 @@ function OpeningForm({ editId }: { editId?: number }) {
     setDate(d.date.slice(0, 10));
     setPeriodTitle(d.fiscalPeriodTitle);
     setUpdatedAt(d.updatedAt);
-    setDeletable(d.deletable !== false);
+    setSystemGenerated(!!d.isSystemGenerated);
     const toCheque = (c: any): ChequeRow => ({
       id: c.id,
       key: String(c.id),
@@ -282,6 +309,10 @@ function OpeningForm({ editId }: { editId?: number }) {
   }
 
   async function onSubmit(e: FormEvent) {
+    if (formLocked) {
+      e.preventDefault();
+      return;
+    }
     e.preventDefault();
     setError(null);
     if (!date) return setError("تاریخ افتتاحیه الزامی است");
@@ -554,12 +585,20 @@ function OpeningForm({ editId }: { editId?: number }) {
       formId="treasury-opening-form"
       closePath="/treasury-openings"
       newPath="/treasury-openings/new"
-      onDelete={editId && deletable ? handleDelete : undefined}
+      onDelete={editId && !systemGenerated ? handleDelete : undefined}
+      saveDisabled={formLocked}
       wide
     >
       <form id="treasury-opening-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
+        {lockedBySystem && (
+          <div className="opening-lock-note">
+            این افتتاحیه توسط «عملیات پایان دوره»ی سال قبل ساخته شده و فقط‌خواندنی است: ویرایش، حذف و افزودن یا تغییر اقلام هیچ‌یک از تب‌ها ممکن نیست. ایجاد، تغییر و حذف آن فقط با «بستن/بازگشایی» در «عملیات پایان دوره»ی سال قبل انجام می‌شود.
+          </div>
+        )}
+        {lockedByCreation && <div className="opening-lock-note">{createBlockedReason}</div>}
 
+        <fieldset disabled={formLocked} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
           <div className="form-field">
             <label>تاریخ افتتاحیه<RequiredMark /></label>
@@ -571,6 +610,9 @@ function OpeningForm({ editId }: { editId?: number }) {
           </div>
         </div>
 
+        </fieldset>
+
+        {/* دکمه‌های تب‌ها عمداً بیرون از fieldset قفل‌شده‌اند تا در حالت فقط‌خواندنی هم بتوان بین تب‌ها جابه‌جا شد و اقلام را دید */}
         <div className="party-tabs">
           {(Object.keys(TAB_LABEL) as TabKey[]).map((k) => (
             <button key={k} type="button" className={`party-tab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>
@@ -579,10 +621,12 @@ function OpeningForm({ editId }: { editId?: number }) {
           ))}
         </div>
 
+        <fieldset disabled={formLocked} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         {tab === "receivable" && chequeTable("receivable")}
         {tab === "payable" && chequeTable("payable")}
         {tab === "bank" && bankTable()}
         {tab === "cash" && cashTable()}
+        </fieldset>
       </form>
     </FormPage>
   );

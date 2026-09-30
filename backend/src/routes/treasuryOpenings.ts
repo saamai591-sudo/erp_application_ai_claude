@@ -6,7 +6,6 @@ import { findChequeUses } from "../utils/chequeUsage";
 import { can } from "../authz/guard";
 import { assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { findFormPrefix } from "../authz/registry";
-import { openingHasSystemGeneratedContent } from "../services/treasuryYearCloseService";
 
 const FORM = findFormPrefix("treasury-openings");
 
@@ -23,8 +22,11 @@ const FORM = findFormPrefix("treasury-openings");
 //
 // ردیف‌هایی که «بستن سال دریافت و پرداخت» خودکار می‌سازد (ردیف حساب بانکی/صندوق با isSystemGenerated، و چک‌های منتقل‌شده با
 // parentChequeId) توسط سیستم ساخته شده‌اند و کاربر نمی‌تواند آن‌ها را ویرایش یا حذف کند؛ فقط ردیف‌های دستی (استقرار اولیه) قابل
-// ویرایش‌اند. تنها راه حذفشان «بازگشایی» همان بخش در «عملیات پایان دوره‌ی» دوره‌ی قبل است (services/treasuryYearCloseService.ts#reopenSection)؛
-// حذف کل افتتاحیه (DELETE) برای افتتاحیه‌ای که رکورد خودکار دارد یا بستنِ دوره‌ی قبل آن را ساخته رد می‌شود.
+// ویرایش‌اند. تنها راه حذفشان «بازگشایی» همان بخش در «عملیات پایان دوره‌ی» دوره‌ی قبل است (services/treasuryYearCloseService.ts#reopenSection).
+//
+// قاعده‌ی سطح افتتاحیه (TreasuryOpening.isSystemGenerated): افتتاحیه‌ی ساخته‌شده توسط «عملیات پایان دوره» کاملاً فقط‌خواندنی است — PUT/DELETE
+// رد می‌شوند و هیچ قلمی در هیچ تبی افزوده/حذف/تغییر نمی‌کند؛ ایجاد/تغییر/حذفش فقط با بستن/بازگشایی در سال قبل. افتتاحیه‌ی دستی: در کل سیستم فقط
+// یکی، و فقط وقتی هیچ افتتاحیه‌ی سیستمی وجود ندارد قابل ایجاد است (manualCreationBlockedReason).
 // =========================================================================
 
 const router = Router();
@@ -83,12 +85,20 @@ async function isChequeLocked(c: any): Promise<boolean> {
   return (await findChequeUses(prisma, c.id, {})).length > 0;
 }
 
-/** افتتاحیه‌ای که «عملیات پایان دوره»ی سال قبل ساخته (بستنِ ثبت‌شده یا رکورد خودکار دارد) با «حذف» پاک نمی‌شود؛ فقط با «بازگشایی» در سال قبل. */
-async function isOpeningDeletionBlocked(opening: { id: number; fiscalPeriodId: number }): Promise<boolean> {
-  const thisPeriod = await prisma.fiscalPeriod.findUnique({ where: { id: opening.fiscalPeriodId } });
-  const prev = thisPeriod ? await prisma.fiscalPeriod.findFirst({ where: { toDate: { lt: thisPeriod.fromDate } }, orderBy: { toDate: "desc" } }) : null;
-  const prevCloses = prev ? await withoutFiscalPeriodScope(() => prisma.treasuryYearClose.count({ where: { fiscalPeriodId: prev.id } })) : 0;
-  return prevCloses > 0 || (await openingHasSystemGeneratedContent(opening.fiscalPeriodId, opening.id));
+const SYSTEM_LOCK_MESSAGE =
+  "این افتتاحیه توسط «عملیات پایان دوره»ی سال قبل ساخته شده و فقط‌خواندنی است؛ هرگونه ایجاد، ویرایش یا حذف آن (و اقلام تب‌هایش) فقط با «بستن/بازگشایی» در «عملیات پایان دوره»ی سال قبل ممکن است";
+
+/**
+ * قاعده‌ی افتتاحیه‌ی دستی: در کل سیستم فقط یک افتتاحیه‌ی دستی وجود دارد، و فقط وقتی می‌توان آن را ساخت که هیچ افتتاحیه‌ی سیستمی (ساخته‌شده
+ * توسط عملیات پایان دوره) وجود نداشته باشد. reason خالی = مجاز. هم POST این را اجرا می‌کند و هم صفحه (برای غیرفعال‌کردن دکمه‌ی «جدید»).
+ */
+async function manualCreationBlockedReason(): Promise<string | null> {
+  const [system, manual] = await withoutFiscalPeriodScope(() =>
+    Promise.all([prisma.treasuryOpening.count({ where: { isSystemGenerated: true } }), prisma.treasuryOpening.count({ where: { isSystemGenerated: false } })])
+  );
+  if (system > 0) return "افتتاحیه‌ی دستی فقط وقتی قابل ایجاد است که هیچ افتتاحیه‌ی ساخته‌شده توسط «عملیات پایان دوره» در سیستم وجود نداشته باشد";
+  if (manual > 0) return "در کل سیستم فقط یک افتتاحیه‌ی دستی می‌تواند وجود داشته باشد و آن قبلاً ثبت شده است؛ همان را ویرایش کنید";
+  return null;
 }
 
 async function serializeOpening(o: any) {
@@ -125,8 +135,10 @@ async function serializeOpening(o: any) {
     fiscalPeriodId: o.fiscalPeriodId,
     fiscalPeriodTitle: o.fiscalPeriod.title,
     updatedAt: o.updatedAt,
-    // false = افتتاحیه توسط عملیات پایان دوره‌ی سال قبل ساخته شده؛ دکمه‌ی حذف نمایش داده نمی‌شود (فقط «بازگشایی» در سال قبل)
-    deletable: !(await isOpeningDeletionBlocked(o)),
+    // افتتاحیه‌ی سیستمی (ساخته‌شده توسط عملیات پایان دوره‌ی سال قبل): کاملاً فقط‌خواندنی؛ فرم همه‌ی تب‌ها را قفل و حذف را مخفی می‌کند
+    isSystemGenerated: !!o.isSystemGenerated,
+    readOnly: !!o.isSystemGenerated,
+    deletable: !o.isSystemGenerated,
     bankAccountLines: o.bankAccountLines.map((l: any) => ({
       bankAccountId: l.bankAccountId,
       bankAccountNumber: l.bankAccount.accountNumber,
@@ -164,6 +176,7 @@ router.get("/treasury-openings", can(`${FORM}.view`), async (_req, res) => {
     result.push({
       id: o.id,
       date: o.date,
+      isSystemGenerated: !!o.isSystemGenerated,
       fiscalPeriodTitle: o.fiscalPeriod.title,
       receivableChequeCount: cheques.filter((c: any) => c.direction === "RECEIVABLE").length,
       payableChequeCount: cheques.filter((c: any) => c.direction === "PAYABLE").length,
@@ -172,6 +185,12 @@ router.get("/treasury-openings", can(`${FORM}.view`), async (_req, res) => {
     });
   }
   res.json(result);
+});
+
+// وضعیت امکان ایجاد افتتاحیه‌ی دستی (برای غیرفعال‌کردن دکمه‌ی «جدید» و فرم جدید)؛ باید قبل از /:id ثبت شود
+router.get("/treasury-openings/creation-status", can(`${FORM}.view`), async (_req, res) => {
+  const reason = await manualCreationBlockedReason();
+  res.json({ canCreate: reason === null, reason });
 });
 
 router.get("/treasury-openings/:id", can(`${FORM}.view`), async (req, res) => {
@@ -390,6 +409,8 @@ async function resolvePeriod(body: OpeningBody) {
 router.post("/treasury-openings", can(`${FORM}.create`), async (req, res) => {
   const body = req.body as OpeningBody;
   try {
+    const blocked = await manualCreationBlockedReason();
+    if (blocked) throw new Error(blocked);
     const { date, period } = await resolvePeriod(body);
     if (await withoutFiscalPeriodScope(() => prisma.treasuryOpening.findUnique({ where: { fiscalPeriodId: period.id } }))) {
       throw new Error("برای این دوره مالی قبلاً افتتاحیه ثبت شده است؛ همان را ویرایش کنید");
@@ -399,7 +420,7 @@ router.post("/treasury-openings", can(`${FORM}.create`), async (req, res) => {
     const cashLines = await cleanCashLines(body.cashBoxLines, base.id);
 
     const id = await prisma.$transaction(async (tx: any) => {
-      const o = await tx.treasuryOpening.create({ data: { fiscalPeriodId: period.id, date } });
+      const o = await tx.treasuryOpening.create({ data: { fiscalPeriodId: period.id, date, isSystemGenerated: false } });
       for (const [i, l] of bankLines.entries()) await tx.treasuryOpeningBankAccount.create({ data: { ...l, openingId: o.id, rowOrder: i } });
       for (const [i, l] of cashLines.entries()) await tx.treasuryOpeningCashBox.create({ data: { ...l, openingId: o.id, rowOrder: i } });
       await syncCheques(tx, period.id, "RECEIVABLE", body.receivableCheques || [], base.id, "چک‌های دریافتی");
@@ -417,6 +438,8 @@ router.put("/treasury-openings/:id", can(`${FORM}.edit`), async (req, res) => {
   const body = req.body as OpeningBody;
   const existing = await prisma.treasuryOpening.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "افتتاحیه یافت نشد" });
+  // افتتاحیه‌ی سیستمی هیچ ویرایشی (تاریخ، افزودن/حذف/تغییر اقلام هیچ تبی) را نمی‌پذیرد — سمت سرور، مستقل از فرانت‌اند
+  if (existing.isSystemGenerated) return res.status(400).json({ error: SYSTEM_LOCK_MESSAGE });
   try {
     assertRecordNotStale(existing.updatedAt, body.updatedAt, "این افتتاحیه");
     if (!body.date) throw new Error("تاریخ افتتاحیه الزامی است");
@@ -444,11 +467,9 @@ router.delete("/treasury-openings/:id", can(`${FORM}.delete`), async (req, res) 
   const id = Number(req.params.id);
   const existing = await prisma.treasuryOpening.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "افتتاحیه یافت نشد" });
+  // رکوردهای افتتاحیه‌ی سیستمی فقط با «بازگشایی» همان بخش در دوره‌ی قبل حذف می‌شوند، نه با حذف افتتاحیه
+  if (existing.isSystemGenerated) return res.status(400).json({ error: SYSTEM_LOCK_MESSAGE });
   try {
-    // رکوردهای خودکارِ «عملیات پایان دوره» فقط با «بازگشایی» همان بخش در دوره‌ی قبل حذف می‌شوند، نه با حذف افتتاحیه
-    if (await isOpeningDeletionBlocked(existing)) {
-      return res.status(400).json({ error: "این افتتاحیه (یا بخشی از آن) توسط «عملیات پایان دوره»ی سال قبل ایجاد شده و قابل حذف نیست؛ برای حذف آن‌ها بخش مربوطه را در «عملیات پایان دوره»ی سال قبل «بازگشایی» کنید" });
-    }
     await prisma.$transaction(async (tx: any) => {
       await syncCheques(tx, existing.fiscalPeriodId, "RECEIVABLE", [], (await getBaseCurrency()).id, "چک‌های دریافتی");
       await syncCheques(tx, existing.fiscalPeriodId, "PAYABLE", [], (await getBaseCurrency()).id, "چک‌های پرداختی");

@@ -3445,6 +3445,9 @@ model TreasuryOpening {
   id              Int                          @id @default(autoincrement())
   fiscalPeriodId  Int                          @unique
   date            DateTime                     @db.Date
+  /// true = افتتاحیه را «عملیات پایان دوره»ی دوره‌ی قبل ساخته؛ کاملاً فقط‌خواندنی است (ایجاد/ویرایش/حذف فقط با بستن/بازگشایی در دوره‌ی قبل).
+  /// false = افتتاحیه‌ی دستی (استقرار اولیه): در کل سیستم فقط یکی، و فقط وقتی هیچ افتتاحیه‌ی سیستمی وجود ندارد قابل ایجاد است.
+  isSystemGenerated Boolean                   @default(false)
   createdAt       DateTime                     @default(now())
   updatedAt       DateTime                     @default(now()) @updatedAt
   fiscalPeriod    FiscalPeriod                 @relation(fields: [fiscalPeriodId], references: [id])
