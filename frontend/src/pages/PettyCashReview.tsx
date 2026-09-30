@@ -356,7 +356,7 @@ export default function PettyCashReview() {
           rows={ledgerRows}
           columns={LEDGER_COLUMNS}
           selectable={false}
-          onRowDoubleClick={(r) => openTab(`${DOC_ROUTE[r.docTypeCode]}/${r.documentId}/edit`)}
+          onRowDoubleClick={(r) => DOC_ROUTE[r.docTypeCode] && openTab(`${DOC_ROUTE[r.docTypeCode]}/${r.documentId}/edit`)}
           loading={tabLoader.loading}
           emptyText="گردشی یافت نشد"
           restoreFilters={ledgerFilters}

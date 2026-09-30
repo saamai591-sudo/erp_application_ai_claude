@@ -34,6 +34,7 @@ const router = Router();
 const RECEIVABLE_STATUSES = ["IN_HAND", "IN_COLLECTION", "BOUNCED"];
 const PAYABLE_STATUSES = ["ISSUED"];
 
+interface PettyCashLineIn { pettyCashId: number; balance: number; baseBalance?: number }
 interface BankLineIn { bankAccountId: number; balance: number; baseBalance?: number }
 interface CashLineIn { cashBoxId: number; currencyId: number; balance: number; baseBalance?: number }
 interface ChequeIn {
@@ -54,6 +55,7 @@ interface OpeningBody {
   date: string;
   fiscalPeriodId?: number;
   bankAccountLines?: BankLineIn[];
+  pettyCashLines?: PettyCashLineIn[];
   cashBoxLines?: CashLineIn[];
   receivableCheques?: ChequeIn[];
   payableCheques?: ChequeIn[];
@@ -148,6 +150,15 @@ async function serializeOpening(o: any) {
       baseBalance: Number(l.baseBalance),
       systemGenerated: l.isSystemGenerated,
     })),
+    pettyCashLines: o.pettyCashLines.map((l: any) => ({
+      pettyCashId: l.pettyCashId,
+      pettyCashTitle: l.pettyCash.title,
+      currencyId: l.currencyId,
+      currencyTitle: l.currency.title,
+      balance: Number(l.balance),
+      baseBalance: Number(l.baseBalance),
+      systemGenerated: l.isSystemGenerated,
+    })),
     cashBoxLines: o.cashBoxLines.map((l: any) => ({
       cashBoxId: l.cashBoxId,
       cashBoxTitle: l.cashBox.title,
@@ -166,10 +177,11 @@ const DETAIL_INCLUDE = {
   fiscalPeriod: true,
   bankAccountLines: { include: { bankAccount: true, currency: true }, orderBy: { rowOrder: "asc" } },
   cashBoxLines: { include: { cashBox: true, currency: true }, orderBy: { rowOrder: "asc" } },
+  pettyCashLines: { include: { pettyCash: true, currency: true }, orderBy: { rowOrder: "asc" } },
 } as const;
 
 router.get("/treasury-openings", can(`${FORM}.view`), async (_req, res) => {
-  const items = await prisma.treasuryOpening.findMany({ include: { fiscalPeriod: true, bankAccountLines: true, cashBoxLines: true }, orderBy: { id: "desc" } });
+  const items = await prisma.treasuryOpening.findMany({ include: { fiscalPeriod: true, bankAccountLines: true, cashBoxLines: true, pettyCashLines: true }, orderBy: { id: "desc" } });
   const result = [];
   for (const o of items as any[]) {
     const cheques = await loadOpeningCheques(o.fiscalPeriodId);
@@ -182,6 +194,7 @@ router.get("/treasury-openings", can(`${FORM}.view`), async (_req, res) => {
       payableChequeCount: cheques.filter((c: any) => c.direction === "PAYABLE").length,
       bankAccountCount: o.bankAccountLines.length,
       cashBoxCount: o.cashBoxLines.length,
+      pettyCashCount: o.pettyCashLines.length,
     });
   }
   res.json(result);
@@ -220,6 +233,27 @@ async function cleanBankLines(lines: BankLineIn[] | undefined, baseCurrencyId: n
     const baseBalance = currencyId === baseCurrencyId ? balance : Number(l.baseBalance);
     if (Number.isNaN(baseBalance)) throw new Error(`حساب‌های بانکی — ردیف ${idx + 1}: مانده به ارز پایه الزامی است`);
     out.push({ bankAccountId: l.bankAccountId, currencyId, balance, baseBalance });
+  }
+  return out;
+}
+
+async function cleanPettyCashLines(lines: PettyCashLineIn[] | undefined, baseCurrencyId: number) {
+  const out: { pettyCashId: number; currencyId: number; balance: number; baseBalance: number }[] = [];
+  const seen = new Set<number>();
+  for (const [idx, l] of (lines || []).entries()) {
+    if (!l.pettyCashId) throw new Error(`تنخواه‌ها — ردیف ${idx + 1}: انتخاب تنخواه الزامی است`);
+    if (seen.has(l.pettyCashId)) throw new Error(`تنخواه‌ها — ردیف ${idx + 1}: یک تنخواه نمی‌تواند دو بار ثبت شود`);
+    seen.add(l.pettyCashId);
+    // eslint-disable-next-line no-await-in-loop
+    const pc = await prisma.pettyCash.findUnique({ where: { id: l.pettyCashId } });
+    if (!pc) throw new Error(`تنخواه‌ها — ردیف ${idx + 1}: تنخواه یافت نشد`);
+    const balance = Number(l.balance);
+    if (Number.isNaN(balance)) throw new Error(`تنخواه‌ها — ردیف ${idx + 1}: مانده نامعتبر است`);
+    if (balance < 0) throw new Error(`تنخواه‌ها — ردیف ${idx + 1}: مانده‌ی تنخواه نمی‌تواند منفی باشد`);
+    // ارز از خودِ تنخواه می‌آید؛ برای ارز غیرپایه مانده‌ی ارز پایه هم الزامی است
+    const baseBalance = pc.currencyId === baseCurrencyId ? balance : Number(l.baseBalance);
+    if (Number.isNaN(baseBalance)) throw new Error(`تنخواه‌ها — ردیف ${idx + 1}: مانده به ارز پایه الزامی است`);
+    out.push({ pettyCashId: l.pettyCashId, currencyId: pc.currencyId, balance, baseBalance });
   }
   return out;
 }
@@ -370,6 +404,26 @@ async function syncBankLines(tx: any, openingId: number, incoming: { bankAccount
   }
 }
 
+/** ردیف‌های تنخواه: همان قاعده‌ی syncBankLines (کلید ردیف = تنخواه). */
+async function syncPettyCashLines(tx: any, openingId: number, incoming: { pettyCashId: number; currencyId: number; balance: number; baseBalance: number }[]) {
+  const existing = await tx.treasuryOpeningPettyCash.findMany({ where: { openingId, isSystemGenerated: true }, include: { pettyCash: true } });
+  const byId = new Map<number, (typeof incoming)[number]>(incoming.map((l) => [l.pettyCashId, l]));
+  for (const e of existing) {
+    const l = byId.get(e.pettyCashId);
+    const label = `تنخواه‌ها — تنخواه ${e.pettyCash.title}`;
+    if (!l) throw new Error(`${label}: این ردیف توسط «بستن سال» ساخته شده است و قابل حذف نیست`);
+    if (Math.abs(l.balance - Number(e.balance)) > 0.005 || Math.abs(l.baseBalance - Number(e.baseBalance)) > 0.005) {
+      throw new Error(`${label}: این ردیف توسط «بستن سال» ساخته شده است و قابل ویرایش نیست`);
+    }
+  }
+  const systemIds = new Set<number>(existing.map((e: any) => e.pettyCashId));
+  await tx.treasuryOpeningPettyCash.deleteMany({ where: { openingId, isSystemGenerated: false } });
+  for (const [i, l] of incoming.entries()) {
+    if (systemIds.has(l.pettyCashId)) await tx.treasuryOpeningPettyCash.update({ where: { openingId_pettyCashId: { openingId, pettyCashId: l.pettyCashId } }, data: { rowOrder: i } });
+    else await tx.treasuryOpeningPettyCash.create({ data: { ...l, openingId, rowOrder: i } });
+  }
+}
+
 /** ردیف‌های صندوق: همان قاعده‌ی syncBankLines (کلید ردیف = صندوق + ارز). */
 async function syncCashLines(tx: any, openingId: number, incoming: { cashBoxId: number; currencyId: number; balance: number; baseBalance: number }[]) {
   const existing = await tx.treasuryOpeningCashBox.findMany({ where: { openingId, isSystemGenerated: true }, include: { cashBox: true } });
@@ -418,10 +472,12 @@ router.post("/treasury-openings", can(`${FORM}.create`), async (req, res) => {
     const base = await getBaseCurrency();
     const bankLines = await cleanBankLines(body.bankAccountLines, base.id);
     const cashLines = await cleanCashLines(body.cashBoxLines, base.id);
+    const pettyCashLines = await cleanPettyCashLines(body.pettyCashLines, base.id);
 
     const id = await prisma.$transaction(async (tx: any) => {
       const o = await tx.treasuryOpening.create({ data: { fiscalPeriodId: period.id, date, isSystemGenerated: false } });
       for (const [i, l] of bankLines.entries()) await tx.treasuryOpeningBankAccount.create({ data: { ...l, openingId: o.id, rowOrder: i } });
+      for (const [i, l] of pettyCashLines.entries()) await tx.treasuryOpeningPettyCash.create({ data: { ...l, openingId: o.id, rowOrder: i } });
       for (const [i, l] of cashLines.entries()) await tx.treasuryOpeningCashBox.create({ data: { ...l, openingId: o.id, rowOrder: i } });
       await syncCheques(tx, period.id, "RECEIVABLE", body.receivableCheques || [], base.id, "چک‌های دریافتی");
       await syncCheques(tx, period.id, "PAYABLE", body.payableCheques || [], base.id, "چک‌های پرداختی");
@@ -449,10 +505,12 @@ router.put("/treasury-openings/:id", can(`${FORM}.edit`), async (req, res) => {
     const base = await getBaseCurrency();
     const bankLines = await cleanBankLines(body.bankAccountLines, base.id);
     const cashLines = await cleanCashLines(body.cashBoxLines, base.id);
+    const pettyCashLines = await cleanPettyCashLines(body.pettyCashLines, base.id);
 
     await prisma.$transaction(async (tx: any) => {
       await syncBankLines(tx, id, bankLines);
       await syncCashLines(tx, id, cashLines);
+      await syncPettyCashLines(tx, id, pettyCashLines);
       await syncCheques(tx, existing.fiscalPeriodId, "RECEIVABLE", body.receivableCheques || [], base.id, "چک‌های دریافتی");
       await syncCheques(tx, existing.fiscalPeriodId, "PAYABLE", body.payableCheques || [], base.id, "چک‌های پرداختی");
       await tx.treasuryOpening.update({ where: { id }, data: { date } });

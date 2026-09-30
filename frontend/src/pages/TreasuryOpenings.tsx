@@ -27,6 +27,7 @@ import { FiscalPeriodRange, fetchSelectedFiscalPeriod } from "../lib/fiscalYearD
 interface PartyOption { id: number; detailCode: string; category: "INDIVIDUAL" | "LEGAL"; isActive: boolean; firstName: string | null; lastName: string | null; name: string | null }
 interface CurrencyOption { id: number; title: string; isBase: boolean }
 interface CashBoxOption { id: number; title: string }
+interface PettyCashOption { id: number; detailCode: string; title: string; currencyId: number; currency: { title: string } | null }
 interface BankAccountOption { id: number; accountNumber: string; detailCode: string; detailTitle: string; currencyId: number | null; currency: { title: string } | null; bankBranch: { title: string }; accountType: { hasChequeBook: boolean } }
 interface BranchOption { id: number; title: string }
 interface TypeOption { id: number; title: string; isActive?: boolean }
@@ -40,6 +41,7 @@ interface ListRow {
   payableChequeCount: number;
   bankAccountCount: number;
   cashBoxCount: number;
+  pettyCashCount: number;
 }
 
 interface ChequeRow {
@@ -61,13 +63,14 @@ interface ChequeRow {
 }
 // systemGenerated: ردیف را «بستن سال دریافت و پرداخت» ساخته است؛ فقط‌خواندنی (قابل ویرایش/حذف نیست)
 interface BankRow { key: string; bankAccountId: string; balance: string; baseBalance: string; systemGenerated?: boolean }
+interface PettyRow { key: string; pettyCashId: string; balance: string; baseBalance: string; systemGenerated?: boolean }
 interface CashRow { key: string; cashBoxId: string; currencyId: string; balance: string; baseBalance: string; systemGenerated?: boolean }
 
 const RECEIVABLE_STATUS_FA: Record<string, string> = { IN_HAND: "در دست", IN_COLLECTION: "واگذار به وصول", BOUNCED: "برگشتی" };
 const PAYABLE_STATUS_FA: Record<string, string> = { ISSUED: "صادرشده" };
 
-type TabKey = "receivable" | "payable" | "bank" | "cash";
-const TAB_LABEL: Record<TabKey, string> = { receivable: "چک‌های دریافتی", payable: "چک‌های پرداختی", bank: "حساب‌های بانکی", cash: "صندوق‌ها" };
+type TabKey = "receivable" | "payable" | "bank" | "cash" | "petty";
+const TAB_LABEL: Record<TabKey, string> = { receivable: "چک‌های دریافتی", payable: "چک‌های پرداختی", bank: "حساب‌های بانکی", cash: "صندوق‌ها", petty: "تنخواه‌ها" };
 
 const INFO_TEXT =
   "ثبت اطلاعات افتتاحیه‌ی دریافت و پرداخت یک دوره‌ی مالی: چک‌های دریافتی و پرداختی، مانده‌ی اول دوره‌ی حساب‌های بانکی و صندوق‌ها. " +
@@ -151,6 +154,7 @@ function OpeningList() {
           { header: "چک‌های پرداختی", render: (r: ListRow) => toFaDigits(String(r.payableChequeCount)), width: "120px" },
           { header: "حساب‌های بانکی", render: (r: ListRow) => toFaDigits(String(r.bankAccountCount)), width: "120px" },
           { header: "صندوق‌ها", render: (r: ListRow) => toFaDigits(String(r.cashBoxCount)), width: "100px" },
+          { header: "تنخواه‌ها", render: (r: ListRow) => toFaDigits(String(r.pettyCashCount ?? 0)), width: "100px" },
         ]}
         rows={items}
         edit={{ path: (r: ListRow) => `/treasury-openings/${r.id}/edit` }}
@@ -167,6 +171,7 @@ function OpeningForm({ editId }: { editId?: number }) {
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
   const [cashBoxes, setCashBoxes] = useState<CashBoxOption[]>([]);
+  const [pettyCashes, setPettyCashes] = useState<PettyCashOption[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccountOption[]>([]);
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [recvTypes, setRecvTypes] = useState<TypeOption[]>([]);
@@ -199,6 +204,7 @@ function OpeningForm({ editId }: { editId?: number }) {
   const [payable, setPayable] = usePersistedState<ChequeRow[]>(`${cacheKey}:payable`, []);
   const [bankRows, setBankRows] = usePersistedState<BankRow[]>(`${cacheKey}:bank`, []);
   const [cashRows, setCashRows] = usePersistedState<CashRow[]>(`${cacheKey}:cash`, []);
+  const [pettyRows, setPettyRows] = usePersistedState<PettyRow[]>(`${cacheKey}:petty`, []);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -229,15 +235,17 @@ function OpeningForm({ editId }: { editId?: number }) {
     setReceivable(d.receivableCheques.map(toCheque));
     setPayable(d.payableCheques.map(toCheque));
     setBankRows(d.bankAccountLines.map((l: any) => ({ key: nextKey(), bankAccountId: String(l.bankAccountId), balance: String(l.balance), baseBalance: String(l.baseBalance), systemGenerated: !!l.systemGenerated })));
+    setPettyRows((d.pettyCashLines || []).map((l: any) => ({ key: nextKey(), pettyCashId: String(l.pettyCashId), balance: String(l.balance), baseBalance: String(l.baseBalance), systemGenerated: !!l.systemGenerated })));
     setCashRows(d.cashBoxLines.map((l: any) => ({ key: nextKey(), cashBoxId: String(l.cashBoxId), currencyId: String(l.currencyId), balance: String(l.balance), baseBalance: String(l.baseBalance), systemGenerated: !!l.systemGenerated })));
   }
 
   useEffect(() => {
     async function init() {
-      const [ps, cs, cbs, bas, brs, rct, pct, rts, pts, fp]: [PartyOption[], CurrencyOption[], CashBoxOption[], BankAccountOption[], BranchOption[], TypeOption[], TypeOption[], TypeOption[], TypeOption[], FiscalPeriodRange | null] = await Promise.all([
+      const [ps, cs, cbs, pcs, bas, brs, rct, pct, rts, pts, fp]: [PartyOption[], CurrencyOption[], CashBoxOption[], PettyCashOption[], BankAccountOption[], BranchOption[], TypeOption[], TypeOption[], TypeOption[], TypeOption[], FiscalPeriodRange | null] = await Promise.all([
         api.get("/parties"),
         api.get("/currencies"),
         api.get("/cash-boxes"),
+        api.get("/petty-cashes"),
         api.get("/banking/accounts"),
         api.get("/banking/branches"),
         api.get("/receivable-cheque-types"),
@@ -249,6 +257,7 @@ function OpeningForm({ editId }: { editId?: number }) {
       setParties(ps);
       setCurrencies(cs);
       setCashBoxes(cbs);
+      setPettyCashes(pcs);
       setBankAccounts(bas);
       setBranches(brs);
       setRecvTypes(rct);
@@ -320,6 +329,7 @@ function OpeningForm({ editId }: { editId?: number }) {
       date,
       updatedAt,
       bankAccountLines: bankRows.map((r) => ({ bankAccountId: Number(r.bankAccountId), balance: Number(r.balance) || 0, baseBalance: Number(r.baseBalance) || 0 })),
+      pettyCashLines: pettyRows.map((r) => ({ pettyCashId: Number(r.pettyCashId), balance: Number(r.balance) || 0, baseBalance: Number(r.baseBalance) || 0 })),
       cashBoxLines: cashRows.map((r) => ({ cashBoxId: Number(r.cashBoxId), currencyId: Number(r.currencyId), balance: Number(r.balance) || 0, baseBalance: Number(r.baseBalance) || 0 })),
       receivableCheques: buildCheques(receivable, "receivable"),
       payableCheques: buildCheques(payable, "payable"),
@@ -520,6 +530,61 @@ function OpeningForm({ editId }: { editId?: number }) {
     );
   }
 
+  function pettyTable() {
+    return (
+      <div className="grid-wrap je-lines-wrap">
+        <div className="je-lines-toolbar">
+          <span className="je-lines-title">{TAB_LABEL.petty}</span>
+          <button type="button" className="toolbar-icon-btn primary" onClick={() => setPettyRows((p) => [...p, { key: nextKey(), pettyCashId: "", balance: "", baseBalance: "" }])} title="ردیف جدید">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+          </button>
+        </div>
+        <div className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto" }}>
+          <table className="je-lines-table">
+            <thead>
+              <tr>
+                <th>ردیف</th>
+                <th>تنخواه<RequiredMark /></th>
+                <th>ارز</th>
+                <th>مانده اول دوره به ارز تنخواه</th>
+                <th>مانده اول دوره به ارز پایه</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pettyRows.map((r, idx) => {
+                const pc = pettyCashes.find((a) => String(a.id) === r.pettyCashId);
+                const isBase = !pc || pc.currencyId === baseCur.id;
+                return (
+                  <tr key={r.key}>
+                    <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
+                    <td style={{ minWidth: 220 }}>
+                      <select value={r.pettyCashId} disabled={r.systemGenerated} onChange={(e) => setPettyRows((p) => p.map((x) => (x.key === r.key ? { ...x, pettyCashId: e.target.value } : x)))}>
+                        <option value="">— انتخاب —</option>
+                        {pettyCashes.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
+                      </select>
+                    </td>
+                    <td style={{ minWidth: 100 }}>{pc ? pc.currency?.title ?? baseCur.title : "—"}</td>
+                    <td style={{ minWidth: 160 }}>
+                      <SignedInput value={r.balance} disabled={r.systemGenerated} onChange={(v) => setPettyRows((p) => p.map((x) => (x.key === r.key ? { ...x, balance: v, baseBalance: isBase ? v : x.baseBalance } : x)))} />
+                    </td>
+                    <td style={{ minWidth: 160 }}>
+                      <SignedInput value={isBase ? r.balance : r.baseBalance} disabled={isBase || r.systemGenerated} onChange={(v) => setPettyRows((p) => p.map((x) => (x.key === r.key ? { ...x, baseBalance: v } : x)))} />
+                    </td>
+                    <td>{r.systemGenerated ? systemBadge() : <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => setPettyRows((p) => p.filter((x) => x.key !== r.key))}>حذف</button>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className="grid-footer je-lines-footer">
+          <span className="grid-footer-info">{pettyRows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(pettyRows.length))} تنخواه`}</span>
+        </div>
+      </div>
+    );
+  }
+
   function cashTable() {
     return (
       <div className="grid-wrap je-lines-wrap">
@@ -626,6 +691,7 @@ function OpeningForm({ editId }: { editId?: number }) {
         {tab === "payable" && chequeTable("payable")}
         {tab === "bank" && bankTable()}
         {tab === "cash" && cashTable()}
+        {tab === "petty" && pettyTable()}
         </fieldset>
       </form>
     </FormPage>

@@ -621,11 +621,13 @@ export const REGISTRY: ModuleDef[] = [
             actions: [
               { key: "closeBankAccounts", title: "بستن حساب‌های بانکی" },
               { key: "closeCashBoxes", title: "بستن صندوق‌ها" },
+              { key: "closePettyCashes", title: "بستن تنخواه‌ها" },
               { key: "closeReceivableCheques", title: "بستن چک‌های دریافتی" },
               { key: "closePayableCheques", title: "بستن چک‌های پرداختی" },
               { key: "closeAll", title: "بستن همه" },
               { key: "reopenBankAccounts", title: "بازگشایی حساب‌های بانکی" },
               { key: "reopenCashBoxes", title: "بازگشایی صندوق‌ها" },
+              { key: "reopenPettyCashes", title: "بازگشایی تنخواه‌ها" },
               { key: "reopenReceivableCheques", title: "بازگشایی چک‌های دریافتی" },
               { key: "reopenPayableCheques", title: "بازگشایی چک‌های پرداختی" },
             ],
