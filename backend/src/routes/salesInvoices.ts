@@ -408,6 +408,9 @@ router.get("/sales-invoices", can(`${FORM}.view`), async (_req, res) => {
     include: { customer: { include: { party: true } }, salesType: true, salesCenter: true, fiscalPeriod: true, currency: true, journalEntry: true, lines: true },
     orderBy: { id: "desc" },
   });
+  // جمع پیش‌دریافت‌های تخصیص‌یافته به هر فاکتور (پیش‌دریافت عادی + پیش‌دریافت ارزش افزوده، به ارز فاکتور)؛ برای ستون «پیش‌دریافت» فهرست و جمع پای گرید
+  const advanceSums = await prisma.salesInvoiceAdvanceAllocation.groupBy({ by: ["salesInvoiceId"], _sum: { amount: true } });
+  const advanceByInvoice = new Map<number, number>(advanceSums.map((a: any) => [a.salesInvoiceId, Number(a._sum.amount ?? 0)]));
   res.json(
     items.map((d: any) => ({
       id: d.id,
@@ -425,6 +428,7 @@ router.get("/sales-invoices", can(`${FORM}.view`), async (_req, res) => {
       journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
       lineCount: d.lines.length,
       totalAmount: d.lines.reduce((s: number, l: any) => s + Number(l.amount), 0),
+      advanceAmount: advanceByInvoice.get(d.id) ?? 0,
     }))
   );
 });
