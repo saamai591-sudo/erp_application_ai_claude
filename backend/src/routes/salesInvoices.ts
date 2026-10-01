@@ -318,7 +318,7 @@ async function validateLines(
   fxRate: number,
   baseCurrency: ConversionCurrency,
   excludeInvoiceId?: number,
-  /** ردیف‌های «بدون مبنا»ی کالایی که از قبل در همین فاکتور ذخیره بوده‌اند (طراحی قدیمی) — فقط همان‌ها اجازه‌ی ماندن دارند */
+  /** ردیف‌های کالاییِ «بدون مبنا/سفارش/پیش‌فاکتور» که از قبل در همین فاکتور ذخیره بوده‌اند (طراحی قبلی) — فقط همان‌ها اجازه‌ی ماندن دارند */
   legacyNoBasisGoodsIds: Set<number> = new Set()
 ) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("فاکتور فروش باید حداقل یک ردیف داشته باشد");
@@ -450,8 +450,9 @@ async function validateLines(
     const item = await prisma.goodsItem.findUnique({ where: { id: goodsItemId } });
     if (!item) throw new Error(`کالای ردیف ${n} یافت نشد`);
     // «بدون مبنا»: فقط خدمت (کالا فقط از طریق مبنای حواله/سفارش/پیش‌فاکتور وارد فاکتور می‌شود). ردیف کالاییِ بدون مبنای قدیمی که از قبل در همین فاکتور بوده، می‌ماند.
-    if (basis === "NO_BASIS" && item.kind !== "SERVICE" && !legacyNoBasisGoodsIds.has(item.id)) {
-      throw new Error(`ردیف ${n}: برای مبنای «بدون مبنا» فقط خدمت قابل انتخاب است`);
+    // سفارش فروش و پیش‌فاکتور هم همین‌طورند: کالا فقط از مسیر حواله فروش می‌آید، از این دو فقط ردیف «خدمت» قابل انتخاب است.
+    if (basis !== "SALES_DELIVERY" && item.kind !== "SERVICE" && !legacyNoBasisGoodsIds.has(item.id)) {
+      throw new Error(`ردیف ${n}: برای مبنای «${BASIS_FA[basis]}» فقط خدمت قابل انتخاب است`);
     }
     if (!unitId) unitId = item.mainUnitId;
 
@@ -484,71 +485,11 @@ async function validateLines(
 }
 
 // =========================================================================
-// پیکر «باقیمانده» حواله فروش
-// =========================================================================
-
-router.get("/sales-invoices/pickable-sales-delivery-lines", can(`${FORM}.view`), async (req, res) => {
-  const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
-  const excludeInvoiceId = req.query.excludeInvoiceId ? Number(req.query.excludeInvoiceId) : null;
-  const lines = await prisma.inventoryDocumentLine.findMany({
-    where: { document: { documentType: "SALES_DELIVERY", ...(destDate ? { date: { lte: destDate } } : {}) } },
-    include: { document: true, goodsItem: true, unit: true, salesInvoiceLines: true },
-    // به ترتیب سند مبنا و سپس ترتیب ردیف‌ها در همان سند (rowOrder) — چون انتخابگر چندتایی ردیف‌های انتخاب‌شده
-    // را به همین ترتیب به فاکتور اضافه می‌کند، ترتیب نزولی id ردیف‌های یک سند را وارونه اضافه می‌کرد.
-    orderBy: [{ document: { date: "asc" } }, { document: { number: "asc" } }, { documentId: "asc" }, { rowOrder: "asc" }, { id: "asc" }],
-  });
-  const result: any[] = [];
-  for (const l of lines as any[]) {
-    // مصرف همین فاکتور (در حال ویرایش) نباید در «مانده» لحاظ شود، وگرنه ردیفی که کل مانده‌اش را
-    // همین فاکتور قبلاً گرفته، از فهرست انتخابگر حذف می‌شود و در حالت ویرایش، ردیف مبدای قبلاً
-    // انتخاب‌شده در گرید نمایش داده نمی‌شود — دقیقاً هم‌الگوی purchaseInvoices.ts's excludeInvoiceId.
-    const done = l.salesInvoiceLines
-      .filter((i: any) => !excludeInvoiceId || i.salesInvoiceId !== excludeInvoiceId)
-      .reduce((s: number, i: any) => s + Number(i.quantity), 0);
-    const quantity = Number(l.quantity);
-    const remaining = quantity - done;
-    if (!(remaining > 0)) continue;
-
-    // اطلاعات سند مبنای واقعی حواله (سفارش فروش/پیش‌فاکتور) — طبق
-    // Documents/فراخوانی قیمت در فاکتور.md: چون خودِ حواله فروش ارز/نوع فروش ندارد، انتخابگر باید
-    // این اطلاعات را از سند مبنای آن همراه بیاورد؛ null یعنی حواله «بدون‌مبنا»ست.
-    const base = await deliveryLineBaseInfo(l, excludeInvoiceId ?? undefined);
-
-    result.push({
-      id: l.id,
-      sourceInventoryLineId: l.id,
-      salesDeliveryId: l.document.id,
-      number: l.document.number,
-      date: l.document.date,
-      goodsItemId: l.goodsItemId,
-      goodsItemCode: l.goodsItem.fullCode,
-      goodsItemTitle: l.goodsItem.title,
-      unitId: l.unitId,
-      unitTitle: l.unit.title,
-      quantity,
-      done,
-      remaining,
-      base: base
-        ? {
-            currencyId: base.currencyId,
-            currencyTitle: base.currencyTitle,
-            salesTypeId: base.salesTypeId,
-            salesTypeTitle: base.salesTypeTitle,
-            baseAmount: base.baseAmount,
-            uninvoicedAmount: base.uninvoicedAmount,
-            baseQuantity: base.baseQuantity,
-            uninvoicedQuantity: base.uninvoicedQuantity,
-          }
-        : null,
-    });
-  }
-  res.json(result);
-});
-
-// =========================================================================
-// انتخابگر «سند مبنا» (چندانتخابی) — برای هر نوع مبنای ردیف: حواله فروش / سفارش فروش / پیش‌فاکتور.
-// دو مرحله: ۱) فهرست «اسناد مبنا» (قابل‌انتخاب‌ها + ناسازگارها با دلیل) ۲) بارگذاری ردیف‌های قابل صورتحسابِ اسناد انتخاب‌شده.
-// همه‌ی قواعد سازگاری با هدر (طرف حساب/مرکز/نوع/ارز/تاریخ) برای هر سند جداگانه سمت سرور اعمال می‌شود؛ سند ناسازگار هرگز بارگذاری نمی‌شود.
+// انتخابگر «ردیف مبنا» در سطح ردیف — برای هر نوع مبنای ردیف: حواله فروش / سفارش فروش / پیش‌فاکتور. یک endpoint
+// (basis-lines) ردیف‌های قابل صورتحساب (مانده > ۰) اسنادِ سازگار با هدر (طرف حساب/مرکز/نوع/ارز/تاریخ) را برمی‌گرداند؛
+// سند ناسازگار هرگز لیست نمی‌شود و ثبت/ویرایش هم همین قواعد را سمت سرور دوباره اعمال می‌کند (validateLines).
+// اطلاعات سند مبنای حواله (ارز/نوع فروش/مبلغ مبنا) فقط برای محاسبه‌ی فی/مبلغ ردیف در سرور استفاده می‌شود و در انتخابگر نمایش داده نمی‌شود.
+// سفارش فروش و پیش‌فاکتور فقط ردیف «خدمت» می‌دهند (کالا فقط از مسیر حواله فروش وارد فاکتور می‌شود).
 // =========================================================================
 
 async function headerCtxFromQuery(q: any): Promise<HeaderCtx> {
@@ -622,6 +563,7 @@ async function basisDocumentLines(type: LineBasis, docId: number, excludeInvoice
     const order = await prisma.salesOrder.findUnique({ where: { id: docId }, include: { lines: { include: { goodsItem: true, unit: true }, orderBy: [{ rowOrder: "asc" }, { id: "asc" }] } } });
     if (!order) return out;
     for (const l of order.lines as any[]) {
+      if (l.goodsItem.kind !== "SERVICE") continue; // کالا فقط از مسیر حواله فروش
       const info = await salesOrderLineUninvoiced(l.id, excludeInvoiceId);
       if (!info || !(info.remainingQty > 0)) continue;
       out.push({
@@ -648,6 +590,7 @@ async function basisDocumentLines(type: LineBasis, docId: number, excludeInvoice
     const quote = await prisma.salesQuote.findUnique({ where: { id: docId }, include: { lines: { include: { goodsItem: true, unit: true }, orderBy: [{ rowOrder: "asc" }, { id: "asc" }] } } });
     if (!quote) return out;
     for (const l of quote.lines as any[]) {
+      if (l.goodsItem.kind !== "SERVICE") continue; // کالا فقط از مسیر حواله فروش
       const info = await salesQuoteLineUninvoiced(l.id, excludeInvoiceId);
       if (!info) continue;
       const remaining = info.remainingQty - (await quoteLineOrderedQty(l.id));
@@ -693,70 +636,29 @@ async function basisDocumentReason(type: LineBasis, docId: number, h: HeaderCtx)
   return { reason: orderOrQuoteReason(q, h, "پیش‌فاکتور"), number: q.number };
 }
 
-router.get("/sales-invoices/basis-documents", can(`${FORM}.view`), async (req, res) => {
+router.get("/sales-invoices/basis-lines", can(`${FORM}.view`), async (req, res) => {
   try {
     const type = req.query.type as LineBasis;
     if (!["SALES_DELIVERY", "SALES_ORDER", "SALES_QUOTE"].includes(type)) throw new Error("نوع مبنا نامعتبر است");
     const h = await headerCtxFromQuery(req.query);
     const excludeInvoiceId = req.query.excludeInvoiceId ? Number(req.query.excludeInvoiceId) : undefined;
 
-    let docs: { id: number; number: number; date: Date; partyTitle: string; salesTypeTitle: string | null; salesCenterTitle: string | null; currencyTitle: string | null }[] = [];
-    if (type === "SALES_DELIVERY") {
-      const list = await prisma.inventoryDocument.findMany({ where: { documentType: "SALES_DELIVERY" }, orderBy: [{ date: "asc" }, { number: "asc" }] });
-      const parties = await prisma.party.findMany({ where: { detailCode: { in: list.map((d) => d.detailCode).filter((x): x is string => !!x) } } });
-      const partyByCode = new Map(parties.map((p) => [p.detailCode, partyDisplayName(p)]));
-      docs = list.map((d) => ({ id: d.id, number: d.number, date: d.date, partyTitle: (d.detailCode && partyByCode.get(d.detailCode)) || "", salesTypeTitle: null, salesCenterTitle: null, currencyTitle: null }));
-    } else if (type === "SALES_ORDER") {
-      const list = await prisma.salesOrder.findMany({ include: { customer: { include: { party: true } }, salesType: true, salesCenter: true, currency: true }, orderBy: [{ date: "asc" }, { number: "asc" }] });
-      docs = list.map((d) => ({ id: d.id, number: d.number, date: d.date, partyTitle: partyDisplayName(d.customer.party), salesTypeTitle: d.salesType.title, salesCenterTitle: d.salesCenter.title, currencyTitle: d.currency.title }));
-    } else {
-      const list = await prisma.salesQuote.findMany({ include: { customer: { include: { party: true } }, salesType: true, salesCenter: true, currency: true }, orderBy: [{ date: "asc" }, { number: "asc" }] });
-      docs = list.map((d) => ({ id: d.id, number: d.number, date: d.date, partyTitle: partyDisplayName(d.customer.party), salesTypeTitle: d.salesType.title, salesCenterTitle: d.salesCenter.title, currencyTitle: d.currency.title }));
-    }
-
-    const eligible: any[] = [];
-    const ineligible: any[] = [];
-    for (const d of docs) {
-      // eslint-disable-next-line no-await-in-loop
-      const { reason } = await basisDocumentReason(type, d.id, h);
-      // eslint-disable-next-line no-await-in-loop
-      const lines = await basisDocumentLines(type, d.id, excludeInvoiceId);
-      if (lines.length === 0) continue; // سندی که چیزی برای صورتحساب ندارد اصلاً نمایش داده نمی‌شود
-      const row = { ...d, lineCount: lines.length };
-      if (reason) ineligible.push({ ...row, reason });
-      else eligible.push(row);
-    }
-    res.json({ eligible, ineligible });
-  } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در دریافت اسناد مبنا" });
-  }
-});
-
-router.get("/sales-invoices/basis-document-lines", can(`${FORM}.view`), async (req, res) => {
-  try {
-    const type = req.query.type as LineBasis;
-    if (!["SALES_DELIVERY", "SALES_ORDER", "SALES_QUOTE"].includes(type)) throw new Error("نوع مبنا نامعتبر است");
-    const h = await headerCtxFromQuery(req.query);
-    const excludeInvoiceId = req.query.excludeInvoiceId ? Number(req.query.excludeInvoiceId) : undefined;
-    const ids = Array.from(new Set(String(req.query.ids || "").split(",").map(Number).filter((n) => n > 0)));
-    if (ids.length === 0) throw new Error("حداقل یک سند مبنا باید انتخاب شود");
+    let docIds: number[];
+    if (type === "SALES_DELIVERY") docIds = (await prisma.inventoryDocument.findMany({ where: { documentType: "SALES_DELIVERY", date: { lte: h.date } }, select: { id: true }, orderBy: [{ date: "asc" }, { number: "asc" }] })).map((d) => d.id);
+    else if (type === "SALES_ORDER") docIds = (await prisma.salesOrder.findMany({ where: { customerId: h.customerId, status: "APPROVED" }, select: { id: true }, orderBy: [{ date: "asc" }, { number: "asc" }] })).map((d) => d.id);
+    else docIds = (await prisma.salesQuote.findMany({ where: { customerId: h.customerId, status: "APPROVED" }, select: { id: true }, orderBy: [{ date: "asc" }, { number: "asc" }] })).map((d) => d.id);
 
     const lines: BasisLineRow[] = [];
-    const rejected: { id: number; number: number; reason: string }[] = [];
-    for (const id of ids) {
-      // هر سند جداگانه سنجیده می‌شود؛ سند ناسازگار بی‌صدا بارگذاری نمی‌شود، با دلیل برگردانده می‌شود
+    for (const id of docIds) {
       // eslint-disable-next-line no-await-in-loop
-      const { reason, number } = await basisDocumentReason(type, id, h);
-      if (reason) {
-        rejected.push({ id, number, reason });
-        continue;
-      }
+      const { reason } = await basisDocumentReason(type, id, h);
+      if (reason) continue; // سند ناسازگار با هدر هرگز لیست نمی‌شود
       // eslint-disable-next-line no-await-in-loop
       lines.push(...(await basisDocumentLines(type, id, excludeInvoiceId)));
     }
-    res.json({ lines, rejected });
+    res.json(lines);
   } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در بارگذاری ردیف‌های سند مبنا" });
+    res.status(400).json({ error: e.message || "خطا در دریافت ردیف‌های مبنا" });
   }
 });
 
@@ -965,8 +867,8 @@ router.put("/sales-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
     if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
     const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
-    // ردیف‌های «بدون مبنا»ی کالایی که از طراحی قدیمی (مبنا در هدر) در همین فاکتور مانده‌اند، می‌توانند بمانند؛ ردیف تازه‌ی کالایی بدون مبنا مجاز نیست
-    const legacyRows = await prisma.salesInvoiceLine.findMany({ where: { salesInvoiceId: id, basis: "NO_BASIS", goodsItem: { kind: "GOODS" } }, select: { goodsItemId: true } });
+    // ردیف‌های کالاییِ «بدون مبنا/سفارش/پیش‌فاکتور» که از طراحی قبلی در همین فاکتور مانده‌اند می‌توانند بمانند؛ ردیف تازه‌ی کالایی با این مبناها مجاز نیست (کالا فقط از حواله فروش)
+    const legacyRows = await prisma.salesInvoiceLine.findMany({ where: { salesInvoiceId: id, basis: { in: ["NO_BASIS", "SALES_ORDER", "SALES_QUOTE"] }, goodsItem: { kind: "GOODS" } }, select: { goodsItemId: true } });
     const headerCtx = await buildHeaderCtx({ customerId: body.customerId, salesTypeId: body.salesTypeId, salesCenterId: body.salesCenterId, currencyId: body.currencyId, date });
     const lines = await validateLines(body.lines, headerCtx, currency, fxRate, baseCurrency, id, new Set(legacyRows.map((r) => r.goodsItemId)));
     await assertAdvanceAllocationsStillValid(id, { customerId: body.customerId, currencyId: body.currencyId, date, netTotal: salesInvoiceNetTotal(lines as any), vatTotal: salesInvoiceVatTotal(lines as any, fxRate) });
