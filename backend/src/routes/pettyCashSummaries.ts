@@ -93,7 +93,7 @@ async function validateLines(body: Body, custodianId: number, excludeSummaryId?:
     // طبق تصمیم صریح کاربر: هم‌الگوی فیلتر «بارگذاری» (services/pettyCashSummaryRemaining.ts، beforeDate) — فقط
     // چون آن فیلتر صرفاً سمت کلاینت است (لیست ردیف‌ها با POST/PUT یک‌جا ذخیره می‌شود)، اگر کاربر بعد از
     // بارگذاری، تاریخ سرصفحه را عوض کند این کنترل باید اینجا هم (سمت بک‌اند، در لحظه‌ی ذخیره) تکرار شود
-    if (payment.date >= headerDate) throw new Error(`ردیف ${n}: تاریخ پرداخت تنخواه باید از تاریخ سند کوچکتر باشد`);
+    if (payment.date > headerDate) throw new Error(`ردیف ${n}: تاریخ پرداخت تنخواه نباید بعد از تاریخ سند باشد`);
 
     if (!l.paymentTypeId) throw new Error(`ردیف ${n}: نوع پرداخت الزامی است`);
     const paymentType = await prisma.paymentType.findUnique({ where: { id: l.paymentTypeId } });
