@@ -16,7 +16,7 @@ import { resolvePaymentSubjectAccount } from "./paymentSubjectAccount";
 //   چک انتقالی (خرج چک دریافتنی) → معین «چک دریافتی» به‌ازای نوع همان چک (RECEIVABLE_CHEQUE) — تفصیل: طرف حسابِ صادرکننده‌ی چک
 // بدهکار — به‌ازای هر ردیف موضوعات پرداخت، بر اساس مبنای «نوع پرداخت» (ماهیت «به بانک»/«به صندوق»/«به تنخواه»: معین
 // «حساب بانکی»/«صندوق»/«تنخواه» همان حساب بانکی/صندوق/تنخواهِ تنخواه‌دارِ انتخاب‌شده در ردیف، تفصیل: خودِ حساب/صندوق/تنخواه‌دار):
-//   بدون مبنا              → معین خودِ نوع پرداخت (PaymentType.accountId)
+//   بدون مبنا / سفارش…     → معین «موضوع پرداخت» همان نوع در «تعیین حسابهای معین» (PAYMENT_SUBJECT)
 //   فاکتور خرید            → «پرداختنی خرید» نوع خرید فاکتور (حسابداری کالا و خدمت: PURCHASE_PAYABLE)
 //   فاکتور فروش            → «دریافتنی فروش» نوع فروش فاکتور (SALES_RECEIVABLE)
 //   سفارش خرید             → معین «موضوع پرداخت» (PAYMENT_SUBJECT)
@@ -43,7 +43,7 @@ export async function issuePaymentJournalEntry(paymentId: number) {
       instrumentLines: { include: { currency: true, cashBox: true, bankAccount: true, chequeItem: { include: { party: true } } }, orderBy: { rowOrder: "asc" } },
       settlementLines: {
         include: {
-          paymentType: { include: { account: true } },
+          paymentType: true,
           party: true,
           bankAccount: true,
           cashBox: true,

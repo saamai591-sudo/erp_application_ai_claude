@@ -1090,7 +1090,7 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
     const advanceAdjustLines: IssueLineInput[] = [];
     const allocations = await prisma.salesInvoiceAdvanceAllocation.findMany({
       where: { salesInvoiceId: id },
-      include: { receiptSettlementLine: { include: { receipt: true, receiptType: { include: { account: true } } } } },
+      include: { receiptSettlementLine: { include: { receipt: true, receiptType: true } } },
       orderBy: { id: "asc" },
     });
     if (allocations.length > 0) {
@@ -1110,7 +1110,7 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
         const amount = Number(a.amount);
         const bucket = a.nature === "ADVANCE_VAT_RECEIPT" ? acc.ADVANCE_VAT_RECEIPT : acc.ADVANCE_RECEIPT;
         const natureTitle = a.nature === "ADVANCE_VAT_RECEIPT" ? "پیش‌دریافت ارزش افزوده" : "پیش‌دریافت";
-        const account = rt.basisType === "NONE" ? rt.account : treasurySettings.find((s) => s.accountType === "RECEIPT_SUBJECT" && s.receiptTypeId === rt.id)?.account;
+        const account = treasurySettings.find((s) => s.accountType === "RECEIPT_SUBJECT" && s.receiptTypeId === rt.id)?.account;
         if (!account) {
           errors.push(`برای نوع دریافت «${rt.title}» (${natureTitle} رسید شماره ${l.receipt.number}) معینِ ${natureTitle} تعریف نشده است`);
           continue;

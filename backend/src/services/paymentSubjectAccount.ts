@@ -27,18 +27,13 @@ export interface PaymentSubjectAccountResult {
 
 /** نوع پرداختی که «به بانک»/«به صندوق» نیست، به همراه سند مبنای متناظر با basisType آن (هرکدام لازم بود) */
 export async function resolvePaymentSubjectAccount(
-  paymentType: { id: number; title: string; basisType: PaymentSubjectBasisType; accountId: number | null },
+  paymentType: { id: number; title: string; basisType: PaymentSubjectBasisType },
   basisDocs: {
     purchaseInvoice?: { purchaseTypeId: number; currencyId: number; fxRate: any } | null;
     salesInvoice?: { salesTypeId: number; currencyId: number; fxRate: any } | null;
   }
 ): Promise<PaymentSubjectAccountResult> {
   switch (paymentType.basisType) {
-    case "NONE": {
-      if (!paymentType.accountId) return { account: null, basisFx: null, error: `برای نوع پرداخت «${paymentType.title}» معین تعریف نشده است` };
-      const account = await loadAccount(paymentType.accountId);
-      return { account, basisFx: null };
-    }
     case "PURCHASE_INVOICE": {
       const inv = basisDocs.purchaseInvoice;
       if (!inv) return { account: null, basisFx: null, error: "فاکتور خرید انتخاب نشده است" };
@@ -59,7 +54,7 @@ export async function resolvePaymentSubjectAccount(
       if (!setting) return { account: null, basisFx: null, error: "برای نوع فروش فاکتور، حساب «دریافتنی فروش» در حسابداری کالا و خدمت تعریف نشده است" };
       return { account: toResolvedAccount(setting.account), basisFx: { currencyId: inv.currencyId, fxRate: Number(inv.fxRate) } };
     }
-    // سفارش خرید (و هر basisType آینده‌ی مشابه): معین «موضوع پرداخت» تعیین‌شده برای همین نوع پرداخت
+    // بدون مبنا، سفارش خرید (و هر basisType آینده‌ی مشابه): معین «موضوع پرداخت» تعیین‌شده برای همین نوع پرداخت در «تعیین حسابهای معین»
     default: {
       const setting = await prisma.treasuryAccountSetting.findFirst({
         where: { accountType: "PAYMENT_SUBJECT", paymentTypeId: paymentType.id },
@@ -69,11 +64,6 @@ export async function resolvePaymentSubjectAccount(
       return { account: toResolvedAccount(setting.account), basisFx: null };
     }
   }
-}
-
-async function loadAccount(id: number): Promise<ResolvedAccount | null> {
-  const account = await prisma.account.findUnique({ where: { id } });
-  return account ? toResolvedAccount(account) : null;
 }
 
 function toResolvedAccount(a: any): ResolvedAccount {
