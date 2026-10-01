@@ -82,6 +82,9 @@ async function assertLinesWithinPaymentAmount(lines: { pettyCashPaymentId: numbe
 async function validateLines(body: Body, custodianId: number, excludeSummaryId?: number) {
   if (!Array.isArray(body.lines) || body.lines.length === 0) throw new Error("خلاصه تنخواه باید حداقل یک ردیف داشته باشد");
   const headerDate = new Date(body.date);
+  const alreadyUsedTypeIds = new Set<number>(
+    excludeSummaryId ? (await prisma.pettyCashSummaryLine.findMany({ where: { summaryId: excludeSummaryId }, select: { paymentTypeId: true } })).map((x) => x.paymentTypeId) : []
+  );
 
   const cleaned: any[] = [];
   for (const [idx, l] of body.lines.entries()) {
@@ -98,6 +101,8 @@ async function validateLines(body: Body, custodianId: number, excludeSummaryId?:
     if (!l.paymentTypeId) throw new Error(`ردیف ${n}: نوع پرداخت الزامی است`);
     const paymentType = await prisma.paymentType.findUnique({ where: { id: l.paymentTypeId } });
     if (!paymentType) throw new Error(`ردیف ${n}: نوع پرداخت نامعتبر است`);
+    // نوع پرداختِ غیرفعال برای خلاصه‌ی جدید قابل استفاده نیست؛ خلاصه‌ی موجود با همان نوعِ قبلی معتبر می‌ماند
+    if (!paymentType.isActive && !alreadyUsedTypeIds.has(paymentType.id)) throw new Error(`ردیف ${n}: نوع پرداخت «${paymentType.title}» غیرفعال است و برای سند جدید قابل انتخاب نیست`);
     if (paymentType.nature === "TO_BANK" || paymentType.nature === "TO_CASH_BOX" || paymentType.nature === "TO_PETTY_CASH") {
       throw new Error(`ردیف ${n}: این ماهیت نوع پرداخت (به بانک/به صندوق/به تنخواه) برای خلاصه تنخواه قابل استفاده نیست`);
     }

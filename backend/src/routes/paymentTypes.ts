@@ -48,7 +48,7 @@ router.get("/payment-types", async (_req, res) => {
 });
 
 router.post("/payment-types", can(`${FORM}.create`), async (req, res) => {
-  const body = req.body as { code?: number; title: string; nature: string; basisType: string; accountId?: number | null };
+  const body = req.body as { code?: number; title: string; nature: string; basisType: string; accountId?: number | null; isActive?: boolean };
   if (!body.title) return res.status(400).json({ error: "عنوان الزامی است" });
   if (!body.nature) return res.status(400).json({ error: "ماهیت پرداخت الزامی است" });
   if (!body.basisType) return res.status(400).json({ error: "نوع مبنا الزامی است" });
@@ -83,6 +83,7 @@ router.post("/payment-types", can(`${FORM}.create`), async (req, res) => {
         nature: body.nature as any,
         basisType: body.basisType as any,
         accountId: isNoBasis ? body.accountId! : null,
+        isActive: body.isActive ?? true,
       },
       include: { account: { include: { level: true } } },
     });

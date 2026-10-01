@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { selectableTypes, typeLabel } from "../lib/typeOptions";
 import { ErrorToast } from "../components/ErrorToast";
 import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -188,7 +189,7 @@ function PettyCashPaymentForm({ editId }: { editId?: number }) {
         ]);
       setCustodians(cus);
       setParties(ps);
-      setPaymentTypes(pts.filter((t) => t.isActive && !PETTY_CASH_INELIGIBLE_NATURES.has(t.nature)));
+      setPaymentTypes(pts.filter((t) => !PETTY_CASH_INELIGIBLE_NATURES.has(t.nature)));
       setCustomerPartyIds(new Set(customers.map((c) => c.partyId)));
       setSupplierPartyIds(new Set(suppliers.map((s) => s.partyId)));
       setFiscalPeriod(fp);
@@ -371,7 +372,7 @@ function PettyCashPaymentForm({ editId }: { editId?: number }) {
             <label>نوع پرداخت<RequiredMark /></label>
             <select value={form.paymentTypeId} onChange={(e) => onPaymentTypeChange(e.target.value)}>
               <option value="">انتخاب کنید</option>
-              {paymentTypes.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+              {selectableTypes(paymentTypes, form.paymentTypeId).map((t) => <option key={t.id} value={t.id}>{typeLabel(t)}</option>)}
             </select>
           </div>
           <div className="form-field">
