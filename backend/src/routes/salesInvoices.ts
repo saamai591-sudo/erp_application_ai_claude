@@ -95,8 +95,16 @@ async function salesDeliveryLineRemaining(id: number, excludeInvoiceId?: number)
   return { line, remaining };
 }
 
+type LineBasis = "NO_BASIS" | "SALES_DELIVERY" | "SALES_ORDER" | "SALES_QUOTE";
+const LINE_BASES = new Set<string>(["NO_BASIS", "SALES_DELIVERY", "SALES_ORDER", "SALES_QUOTE"]);
+const BASIS_FA: Record<LineBasis, string> = { NO_BASIS: "بدون مبنا", SALES_DELIVERY: "حواله فروش", SALES_ORDER: "سفارش فروش", SALES_QUOTE: "پیش‌فاکتور" };
+
 interface LineInput {
+  /** مبنای همین ردیف (تنها منبع حقیقت؛ هدر فاکتور مبنا ندارد) */
+  basis?: LineBasis;
   sourceInventoryLineId?: number | null;
+  sourceSalesOrderLineId?: number | null;
+  sourceSalesQuoteLineId?: number | null;
   goodsItemId?: number | null;
   unitId?: number | null;
   quantity: number;
@@ -116,6 +124,7 @@ async function salesOrderLineUninvoiced(id: number, excludeInvoiceId?: number) {
     include: {
       salesOrder: { include: { currency: true, salesType: true } },
       inventoryLines: { where: { document: { documentType: "SALES_DELIVERY" } }, include: { salesInvoiceLines: true } },
+      salesInvoiceLines: true,
     },
   });
   if (!line) return null;
@@ -127,6 +136,12 @@ async function salesOrderLineUninvoiced(id: number, excludeInvoiceId?: number) {
       invoicedQty += Number(il.quantity);
       invoicedAmount += Number(il.amount);
     }
+  }
+  // ردیف‌های فاکتورِ مستقیماً بر مبنای «سفارش فروش» (مبنای سطح ردیف) هم از مانده کم می‌شوند
+  for (const il of (line as any).salesInvoiceLines) {
+    if (excludeInvoiceId && il.salesInvoiceId === excludeInvoiceId) continue;
+    invoicedQty += Number(il.quantity);
+    invoicedAmount += Number(il.amount);
   }
   const totalQty = Number(line.quantity);
   const totalAmount = Number(line.amount);
@@ -141,6 +156,7 @@ async function salesQuoteLineUninvoiced(id: number, excludeInvoiceId?: number) {
     include: {
       salesQuote: { include: { currency: true, salesType: true } },
       inventoryLines: { where: { document: { documentType: "SALES_DELIVERY" } }, include: { salesInvoiceLines: true } },
+      salesInvoiceLines: true,
     },
   });
   if (!line) return null;
@@ -152,6 +168,12 @@ async function salesQuoteLineUninvoiced(id: number, excludeInvoiceId?: number) {
       invoicedQty += Number(il.quantity);
       invoicedAmount += Number(il.amount);
     }
+  }
+  // ردیف‌های فاکتورِ مستقیماً بر مبنای «پیش‌فاکتور» (مبنای سطح ردیف) هم از مانده کم می‌شوند
+  for (const il of (line as any).salesInvoiceLines) {
+    if (excludeInvoiceId && il.salesInvoiceId === excludeInvoiceId) continue;
+    invoicedQty += Number(il.quantity);
+    invoicedAmount += Number(il.amount);
   }
   const totalQty = Number(line.quantity);
   const totalAmount = Number(line.amount);
@@ -211,11 +233,101 @@ async function deliveryLineBaseInfo(
   return null;
 }
 
-async function validateLines(lines: LineInput[], basis: string, currency: ConversionCurrency, currencyId: number, fxRate: number, baseCurrency: ConversionCurrency, docDate: Date, salesTypeId: number, excludeInvoiceId?: number) {
-  if (!Array.isArray(lines) || lines.length === 0) throw new Error("فاکتور فروش باید حداقل یک ردیف کالا داشته باشد");
+// =========================================================================
+// «مبنا» در سطح ردیف (هدر فاکتور مبنا ندارد): هر ردیف مبنای خودش را دارد — بدون مبنا / حواله فروش / سفارش فروش / پیش‌فاکتور — و
+// مبنا تعیین می‌کند کدام فیلد مبدا (sourceInventoryLineId | sourceSalesOrderLineId | sourceSalesQuoteLineId) پر باشد و چه اقلامی قابل انتخاب‌اند.
+// قواعد سازگاری سند مبنا با هدر فاکتور (همه در بک‌اند، مستقل از فرانت‌اند، برای هر سند مبنا جداگانه):
+//   طرف حساب = مشتری هدر، مرکز فروش = مرکز هدر، نوع فروش = نوع هدر، ارز = ارز هدر، و تاریخ مبنا <= تاریخ فاکتور.
+//   «حواله فروش» خودش مرکز فروش/نوع فروش/ارز ندارد: اگر حواله مبنا داشته باشد (سفارش فروش/پیش‌فاکتور) این سه از همان مبنا گرفته و مقایسه
+//   می‌شود؛ اگر مبنا نداشته باشد فقط طرف حساب و تاریخ کنترل می‌شود.
+// =========================================================================
+
+interface HeaderCtx {
+  customerId: number;
+  partyDetailCode: string | null;
+  salesTypeId: number;
+  salesCenterId: number;
+  currencyId: number;
+  date: Date;
+}
+
+async function buildHeaderCtx(h: { customerId: number; salesTypeId: number; salesCenterId: number; currencyId: number; date: Date }): Promise<HeaderCtx> {
+  const customer = await prisma.customer.findUnique({ where: { id: h.customerId }, include: { party: true } });
+  if (!customer) throw new Error("مشتری یافت نشد");
+  return { ...h, partyDetailCode: customer.party.detailCode };
+}
+
+/** سازگاری سفارش فروش/پیش‌فاکتور با هدر؛ دلیل عدم پذیرش یا null */
+function orderOrQuoteReason(doc: { status: string; customerId: number; salesTypeId: number; salesCenterId: number; currencyId: number; date: Date }, h: HeaderCtx, title: string): string | null {
+  if (doc.status !== "APPROVED") return `${title} در وضعیت تایید نیست`;
+  if (doc.customerId !== h.customerId) return `طرف حساب ${title} با مشتری فاکتور یکسان نیست`;
+  if (doc.salesCenterId !== h.salesCenterId) return `مرکز فروش ${title} با مرکز فروش فاکتور یکسان نیست`;
+  if (doc.salesTypeId !== h.salesTypeId) return `نوع فروش ${title} با نوع فروش فاکتور یکسان نیست`;
+  if (doc.currencyId !== h.currencyId) return `ارز ${title} با ارز فاکتور یکسان نیست`;
+  if (doc.date.getTime() > h.date.getTime()) return `تاریخ ${title} بعد از تاریخ فاکتور است`;
+  return null;
+}
+
+async function loadDeliveryDoc(id: number) {
+  return prisma.inventoryDocument.findFirst({
+    where: { id, documentType: "SALES_DELIVERY" },
+    include: {
+      lines: {
+        include: {
+          goodsItem: true,
+          unit: true,
+          salesInvoiceLines: true,
+          sourceSalesOrderLine: { include: { salesOrder: { include: { currency: true, salesType: true, salesCenter: true } } } },
+          sourceSalesQuoteLine: { include: { salesQuote: { include: { currency: true, salesType: true, salesCenter: true } } } },
+        },
+        orderBy: [{ rowOrder: "asc" }, { id: "asc" }],
+      },
+    },
+  });
+}
+
+/** سازگاری حواله فروش با هدر: همیشه طرف حساب + تاریخ؛ فقط اگر حواله مبنا (سفارش/پیش‌فاکتور) دارد، مرکز فروش/نوع فروش/ارز مبنا هم */
+function deliveryDocReason(doc: any, h: HeaderCtx): string | null {
+  if (!h.partyDetailCode || doc.detailCode !== h.partyDetailCode) return "طرف حساب حواله فروش با مشتری فاکتور یکسان نیست";
+  if (doc.date.getTime() > h.date.getTime()) return "تاریخ حواله فروش بعد از تاریخ فاکتور است";
+  const seen = new Set<string>();
+  for (const l of doc.lines) {
+    const base: any = l.sourceSalesOrderLine?.salesOrder ?? l.sourceSalesQuoteLine?.salesQuote;
+    if (!base) continue; // حواله بدون مبنا: مرکز فروش/نوع فروش/ارز کنترل نمی‌شود
+    const key = `${l.sourceSalesOrderLine ? "O" : "Q"}${base.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const t = l.sourceSalesOrderLine ? "سفارش فروشِ مبنای حواله" : "پیش‌فاکتورِ مبنای حواله";
+    if (base.salesCenterId !== h.salesCenterId) return `مرکز فروش ${t} با مرکز فروش فاکتور یکسان نیست`;
+    if (base.salesTypeId !== h.salesTypeId) return `نوع فروش ${t} با نوع فروش فاکتور یکسان نیست`;
+    if (base.currencyId !== h.currencyId) return `ارز ${t} با ارز فاکتور یکسان نیست`;
+  }
+  return null;
+}
+
+/** مقدار ردیف‌های پیش‌فاکتور که قبلاً در سفارش فروش آمده‌اند — از مانده‌ی صورتحساب مستقیم پیش‌فاکتور کم می‌شود (همان سند دوبار صورتحساب نشود) */
+async function quoteLineOrderedQty(quoteLineId: number): Promise<number> {
+  const agg = await prisma.salesOrderLine.aggregate({ where: { sourceSalesQuoteLineId: quoteLineId }, _sum: { quantity: true } });
+  return Number(agg._sum.quantity ?? 0);
+}
+
+async function validateLines(
+  lines: LineInput[],
+  h: HeaderCtx,
+  currency: ConversionCurrency,
+  fxRate: number,
+  baseCurrency: ConversionCurrency,
+  excludeInvoiceId?: number,
+  /** ردیف‌های «بدون مبنا»ی کالایی که از قبل در همین فاکتور ذخیره بوده‌اند (طراحی قدیمی) — فقط همان‌ها اجازه‌ی ماندن دارند */
+  legacyNoBasisGoodsIds: Set<number> = new Set()
+) {
+  if (!Array.isArray(lines) || lines.length === 0) throw new Error("فاکتور فروش باید حداقل یک ردیف داشته باشد");
 
   const cleaned: {
+    basis: LineBasis;
     sourceInventoryLineId: number | null;
+    sourceSalesOrderLineId: number | null;
+    sourceSalesQuoteLineId: number | null;
     goodsItemId: number;
     unitId: number;
     quantity: number;
@@ -228,84 +340,134 @@ async function validateLines(lines: LineInput[], basis: string, currency: Conver
     description: string | null;
   }[] = [];
 
-  // یک ردیف حواله می‌تواند در چند ردیف فاکتور بیاید؛ مجموع مقدار ردیف‌های ارجاع‌دهنده به آن باید از مانده‌ی قابل صورتحسابش بیشتر نشود
-  const allocatedToDeliveryLine = new Map<number, number>();
-  // نرخ واحدِ محاسبه‌شده از سند مبنای هر ردیف سفارش/پیش‌فاکتور، برای یک بار محاسبه و استفاده‌ی مجدد
-  // در همه‌ی ردیف‌های فاکتور که به همان ردیف سفارش/پیش‌فاکتور ارجاع می‌دهند (حتی از طریق حواله‌های
-  // مختلف) — طبق Documents/فراخوانی قیمت در فاکتور.md.
+  // یک ردیف مبنا (حواله/سفارش/پیش‌فاکتور) می‌تواند در چند ردیف فاکتور بیاید؛ مجموع مقدارِ ارجاع‌دهنده‌ها از مانده‌ی قابل صورتحساب بیشتر نشود
+  const allocated = new Map<string, number>();
   const baseInfoCache = new Map<string, DeliveryBaseInfo>();
+  const docReasonCache = new Map<string, string | null>();
 
   for (const [idx, l] of lines.entries()) {
+    const n = idx + 1;
+    const basis = l.basis as LineBasis;
+    if (!basis || !LINE_BASES.has(basis)) throw new Error(`ردیف ${n}: مبنا الزامی/نامعتبر است`);
     const qty = Number(l.quantity);
-    if (!(qty > 0)) throw new Error(`مقدار ردیف ${idx + 1} باید عددی مثبت باشد`);
+    if (!(qty > 0)) throw new Error(`مقدار ردیف ${n} باید عددی مثبت باشد`);
+
+    // فقط فیلد مبدای متناسب با مبنای همین ردیف مجاز است
+    const wanted = { SALES_DELIVERY: "sourceInventoryLineId", SALES_ORDER: "sourceSalesOrderLineId", SALES_QUOTE: "sourceSalesQuoteLineId" } as Record<string, string>;
+    for (const f of ["sourceInventoryLineId", "sourceSalesOrderLineId", "sourceSalesQuoteLineId"] as const) {
+      if (l[f] && wanted[basis] !== f) throw new Error(`ردیف ${n}: برای مبنای «${BASIS_FA[basis]}» انتخاب این سند مبنا مجاز نیست`);
+    }
 
     let goodsItemId = l.goodsItemId || 0;
     let unitId = l.unitId || 0;
     let unitPrice = Number(l.unitPrice) || 0;
     let amount = Number(l.amount) || 0;
     let sourceInventoryLineId: number | null = null;
+    let sourceSalesOrderLineId: number | null = null;
+    let sourceSalesQuoteLineId: number | null = null;
 
-    if (basis === "SALES_DELIVERY") {
-      if (!l.sourceInventoryLineId) throw new Error(`ردیف ${idx + 1}: انتخاب ردیف حواله فروش الزامی است`);
+    if (basis === "NO_BASIS") {
+      if (!goodsItemId) throw new Error(`ردیف ${n}: انتخاب خدمت الزامی است`);
+    } else if (basis === "SALES_DELIVERY") {
+      if (!l.sourceInventoryLineId) throw new Error(`ردیف ${n}: انتخاب ردیف حواله فروش الزامی است`);
       const info = await salesDeliveryLineRemaining(l.sourceInventoryLineId, excludeInvoiceId);
-      if (!info) throw new Error(`ردیف حواله فروش برای ردیف ${idx + 1} یافت نشد`);
-      const deliveryTotal = (allocatedToDeliveryLine.get(info.line.id) || 0) + qty;
-      if (deliveryTotal > info.remaining) throw new Error(`ردیف ${idx + 1}: مجموع مقدار ردیف‌هایی که به این ردیف حواله فروش ارجاع می‌دهند (${deliveryTotal}) از باقیمانده‌ی قابل صورتحساب (${info.remaining}) بیشتر است`);
-      allocatedToDeliveryLine.set(info.line.id, deliveryTotal);
+      if (!info) throw new Error(`ردیف حواله فروش برای ردیف ${n} یافت نشد`);
+      // سازگاری خودِ سند حواله با هدر (طرف حساب/تاریخ، و مرکز/نوع/ارز مبنای حواله در صورت وجود)
+      const docKey = `D${info.line.documentId}`;
+      if (!docReasonCache.has(docKey)) {
+        const doc = await loadDeliveryDoc(info.line.documentId);
+        docReasonCache.set(docKey, doc ? deliveryDocReason(doc, h) : "حواله فروش یافت نشد");
+      }
+      const docReason = docReasonCache.get(docKey);
+      if (docReason) throw new Error(`ردیف ${n}: ${docReason}`);
+
+      const key = `D:${info.line.id}`;
+      const deliveryTotal = (allocated.get(key) || 0) + qty;
+      if (deliveryTotal > info.remaining) throw new Error(`ردیف ${n}: مجموع مقدار ردیف‌هایی که به این ردیف حواله فروش ارجاع می‌دهند (${deliveryTotal}) از باقیمانده‌ی قابل صورتحساب (${info.remaining}) بیشتر است`);
+      allocated.set(key, deliveryTotal);
       sourceInventoryLineId = info.line.id;
       goodsItemId = info.line.goodsItemId;
       unitId = info.line.unitId;
 
-      // فراخوانی قیمت از سند مبنای حواله (Documents/فراخوانی قیمت در فاکتور.md): اگر حواله‌ی انتخاب‌شده
-      // خودش بر مبنای سفارش فروش/پیش‌فاکتور صادر شده باشد، فی/مبلغ همیشه از مانده‌ی فاکتورنشده‌ی آن سند
-      // مبنا محاسبه و جایگزین هر مقدار ارسالی کلاینت می‌شود — هم در ایجاد هم در ویرایش.
-      const baseKey = info.line.sourceSalesOrderLineId
-        ? `O:${info.line.sourceSalesOrderLineId}`
-        : info.line.sourceSalesQuoteLineId
-        ? `Q:${info.line.sourceSalesQuoteLineId}`
-        : null;
+      // فراخوانی قیمت از سند مبنای حواله (Documents/فراخوانی قیمت در فاکتور.md) — بدون تغییر نسبت به قبل
+      const baseKey = info.line.sourceSalesOrderLineId ? `O:${info.line.sourceSalesOrderLineId}` : info.line.sourceSalesQuoteLineId ? `Q:${info.line.sourceSalesQuoteLineId}` : null;
       if (baseKey) {
         let base = baseInfoCache.get(baseKey);
         if (!base) {
           const computed = await deliveryLineBaseInfo(info.line, excludeInvoiceId);
-          if (!computed) throw new Error(`سند مبنای ردیف حواله فروش ${idx + 1} یافت نشد`);
+          if (!computed) throw new Error(`سند مبنای ردیف حواله فروش ${n} یافت نشد`);
           base = computed;
           baseInfoCache.set(baseKey, base);
         }
-        if (base.currencyId !== currencyId) throw new Error(`ردیف ${idx + 1}: ارز فاکتور باید با ارز سند مبنای حواله فروش (${base.currencyTitle}) یکسان باشد`);
-        if (base.salesTypeId !== salesTypeId) throw new Error(`ردیف ${idx + 1}: نوع فروش فاکتور باید با نوع فروش سند مبنای حواله فروش (${base.salesTypeTitle}) یکسان باشد`);
-        if (!(base.uninvoicedQuantity > 0)) throw new Error(`ردیف ${idx + 1}: مانده‌ی مقدار فاکتورنشده‌ی سند مبنا صفر یا منفی است`);
+        if (!(base.uninvoicedQuantity > 0)) throw new Error(`ردیف ${n}: مانده‌ی مقدار فاکتورنشده‌ی سند مبنا صفر یا منفی است`);
         const unitAmount = base.uninvoicedAmount / base.uninvoicedQuantity;
         unitPrice = Math.round(unitAmount * 10000) / 10000;
         amount = Math.round(unitPrice * qty * 100) / 100;
       }
+    } else if (basis === "SALES_ORDER") {
+      if (!l.sourceSalesOrderLineId) throw new Error(`ردیف ${n}: انتخاب ردیف سفارش فروش الزامی است`);
+      const info = await salesOrderLineUninvoiced(l.sourceSalesOrderLineId, excludeInvoiceId);
+      if (!info) throw new Error(`ردیف سفارش فروش برای ردیف ${n} یافت نشد`);
+      const reason = orderOrQuoteReason(info.salesOrder, h, "سفارش فروش");
+      if (reason) throw new Error(`ردیف ${n}: ${reason}`);
+      const key = `O:${info.line.id}`;
+      const total = (allocated.get(key) || 0) + qty;
+      if (total > info.remainingQty + 1e-9) throw new Error(`ردیف ${n}: مجموع مقدار ردیف‌هایی که به این ردیف سفارش فروش ارجاع می‌دهند (${total}) از باقیمانده‌ی قابل صورتحساب (${info.remainingQty}) بیشتر است`);
+      allocated.set(key, total);
+      if (!(info.remainingQty > 0)) throw new Error(`ردیف ${n}: مانده‌ی مقدار فاکتورنشده‌ی ردیف سفارش فروش صفر یا منفی است`);
+      sourceSalesOrderLineId = info.line.id;
+      goodsItemId = info.line.goodsItemId;
+      unitId = info.line.unitId;
+      // فی/مبلغ همیشه از مانده‌ی فاکتورنشده‌ی ردیف سفارش محاسبه می‌شود (مثل مسیر حواله مبتنی بر سفارش)
+      unitPrice = Math.round((info.remainingAmount / info.remainingQty) * 10000) / 10000;
+      amount = Math.round(unitPrice * qty * 100) / 100;
     } else {
-      if (!goodsItemId) throw new Error(`کالا برای ردیف ${idx + 1} الزامی است`);
+      if (!l.sourceSalesQuoteLineId) throw new Error(`ردیف ${n}: انتخاب ردیف پیش‌فاکتور الزامی است`);
+      const info = await salesQuoteLineUninvoiced(l.sourceSalesQuoteLineId, excludeInvoiceId);
+      if (!info) throw new Error(`ردیف پیش‌فاکتور برای ردیف ${n} یافت نشد`);
+      const reason = orderOrQuoteReason(info.salesQuote, h, "پیش‌فاکتور");
+      if (reason) throw new Error(`ردیف ${n}: ${reason}`);
+      const remainingQty = info.remainingQty - (await quoteLineOrderedQty(info.line.id));
+      const key = `Q:${info.line.id}`;
+      const total = (allocated.get(key) || 0) + qty;
+      if (total > remainingQty + 1e-9) throw new Error(`ردیف ${n}: مجموع مقدار ردیف‌هایی که به این ردیف پیش‌فاکتور ارجاع می‌دهند (${total}) از باقیمانده‌ی قابل صورتحساب (${remainingQty}) بیشتر است`);
+      allocated.set(key, total);
+      if (!(remainingQty > 0)) throw new Error(`ردیف ${n}: مانده‌ی مقدار فاکتورنشده‌ی ردیف پیش‌فاکتور صفر یا منفی است`);
+      sourceSalesQuoteLineId = info.line.id;
+      goodsItemId = info.line.goodsItemId;
+      unitId = info.line.unitId;
+      unitPrice = Math.round((info.totalAmount / info.totalQty) * 10000) / 10000;
+      amount = Math.round(unitPrice * qty * 100) / 100;
     }
 
-    if (!(unitPrice >= 0)) throw new Error(`فی ردیف ${idx + 1} نامعتبر است`);
-    if (!(amount >= 0)) throw new Error(`مبلغ ردیف ${idx + 1} نامعتبر است`);
+    if (!(unitPrice >= 0)) throw new Error(`فی ردیف ${n} نامعتبر است`);
+    if (!(amount >= 0)) throw new Error(`مبلغ ردیف ${n} نامعتبر است`);
 
     const discount = Number(l.discount) || 0;
-    if (!(discount >= 0)) throw new Error(`تخفیف ردیف ${idx + 1} نامعتبر است`);
-    if (discount > amount) throw new Error(`تخفیف ردیف ${idx + 1} نمی‌تواند از مبلغ ردیف بیشتر باشد`);
+    if (!(discount >= 0)) throw new Error(`تخفیف ردیف ${n} نامعتبر است`);
+    if (discount > amount) throw new Error(`تخفیف ردیف ${n} نمی‌تواند از مبلغ ردیف بیشتر باشد`);
 
     const item = await prisma.goodsItem.findUnique({ where: { id: goodsItemId } });
-    if (!item) throw new Error(`کالای ردیف ${idx + 1} یافت نشد`);
+    if (!item) throw new Error(`کالای ردیف ${n} یافت نشد`);
+    // «بدون مبنا»: فقط خدمت (کالا فقط از طریق مبنای حواله/سفارش/پیش‌فاکتور وارد فاکتور می‌شود). ردیف کالاییِ بدون مبنای قدیمی که از قبل در همین فاکتور بوده، می‌ماند.
+    if (basis === "NO_BASIS" && item.kind !== "SERVICE" && !legacyNoBasisGoodsIds.has(item.id)) {
+      throw new Error(`ردیف ${n}: برای مبنای «بدون مبنا» فقط خدمت قابل انتخاب است`);
+    }
     if (!unitId) unitId = item.mainUnitId;
 
-    // مبلغ/تخفیف به ارز مبنا و ارزش‌افزوده — دقیقاً هم‌الگوی purchaseInvoices.ts#validateLines: فقط برای
-    // بایگانی/محاسبه نگه داشته می‌شوند (نه نمایش در UI)، و کاربر می‌تواند مقدار پیشنهادی مالیات را
-    // ویرایش کند (اگر کلاینت صریحاً مقداری فرستاده باشد، همان معتبر است، نه مقدار محاسبه‌شده).
+    // مبلغ/تخفیف به ارز مبنا و ارزش‌افزوده — دقیقاً هم‌الگوی purchaseInvoices.ts#validateLines
     const baseAmount = toBaseCurrencyAmount(amount, fxRate, currency, baseCurrency);
     const baseDiscount = toBaseCurrencyAmount(discount, fxRate, currency, baseCurrency);
-    const vatRatePercent = resolveVatRatePercent(item, await getVatRatePercentForDate(docDate));
+    const vatRatePercent = resolveVatRatePercent(item, await getVatRatePercentForDate(h.date));
     const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent);
     const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
-    if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
+    if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${n} نامعتبر است`);
 
     cleaned.push({
+      basis,
       sourceInventoryLineId,
+      sourceSalesOrderLineId,
+      sourceSalesQuoteLineId,
       goodsItemId,
       unitId,
       quantity: qty,
@@ -384,12 +546,226 @@ router.get("/sales-invoices/pickable-sales-delivery-lines", can(`${FORM}.view`),
 });
 
 // =========================================================================
+// انتخابگر «سند مبنا» (چندانتخابی) — برای هر نوع مبنای ردیف: حواله فروش / سفارش فروش / پیش‌فاکتور.
+// دو مرحله: ۱) فهرست «اسناد مبنا» (قابل‌انتخاب‌ها + ناسازگارها با دلیل) ۲) بارگذاری ردیف‌های قابل صورتحسابِ اسناد انتخاب‌شده.
+// همه‌ی قواعد سازگاری با هدر (طرف حساب/مرکز/نوع/ارز/تاریخ) برای هر سند جداگانه سمت سرور اعمال می‌شود؛ سند ناسازگار هرگز بارگذاری نمی‌شود.
+// =========================================================================
+
+async function headerCtxFromQuery(q: any): Promise<HeaderCtx> {
+  const customerId = Number(q.customerId);
+  const salesTypeId = Number(q.salesTypeId);
+  const salesCenterId = Number(q.salesCenterId);
+  const currencyId = Number(q.currencyId);
+  if (!customerId || !salesTypeId || !salesCenterId || !currencyId || !q.date) {
+    throw new Error("تاریخ، مشتری، نوع فروش، مرکز فروش و ارز برای انتخاب مبنا الزامی است");
+  }
+  return buildHeaderCtx({ customerId, salesTypeId, salesCenterId, currencyId, date: new Date(q.date as string) });
+}
+
+interface BasisLineRow {
+  basis: LineBasis;
+  sourceInventoryLineId: number | null;
+  sourceSalesOrderLineId: number | null;
+  sourceSalesQuoteLineId: number | null;
+  documentId: number;
+  documentNumber: number;
+  documentDate: Date;
+  goodsItemId: number;
+  goodsItemCode: string;
+  goodsItemTitle: string;
+  goodsItemKind: string;
+  unitId: number;
+  unitTitle: string;
+  quantity: number;
+  remaining: number;
+  /** فی از سند مبنا محاسبه شده و قابل ویرایش نیست */
+  priceLocked: boolean;
+  unitPrice: number | null;
+}
+
+function round4(n: number) {
+  return Math.round(n * 10000) / 10000;
+}
+
+/** ردیف‌های قابل صورتحساب (مانده > ۰) یک سند مبنا */
+async function basisDocumentLines(type: LineBasis, docId: number, excludeInvoiceId?: number): Promise<BasisLineRow[]> {
+  const out: BasisLineRow[] = [];
+  if (type === "SALES_DELIVERY") {
+    const doc = await loadDeliveryDoc(docId);
+    if (!doc) return out;
+    for (const l of doc.lines as any[]) {
+      const done = l.salesInvoiceLines.filter((i: any) => !excludeInvoiceId || i.salesInvoiceId !== excludeInvoiceId).reduce((s: number, i: any) => s + Number(i.quantity), 0);
+      const remaining = Number(l.quantity) - done;
+      if (!(remaining > 0)) continue;
+      const base = await deliveryLineBaseInfo(l, excludeInvoiceId);
+      out.push({
+        basis: "SALES_DELIVERY",
+        sourceInventoryLineId: l.id,
+        sourceSalesOrderLineId: null,
+        sourceSalesQuoteLineId: null,
+        documentId: doc.id,
+        documentNumber: doc.number,
+        documentDate: doc.date,
+        goodsItemId: l.goodsItemId,
+        goodsItemCode: l.goodsItem.fullCode,
+        goodsItemTitle: l.goodsItem.title,
+        goodsItemKind: l.goodsItem.kind,
+        unitId: l.unitId,
+        unitTitle: l.unit.title,
+        quantity: Number(l.quantity),
+        remaining,
+        priceLocked: !!base,
+        unitPrice: base && base.uninvoicedQuantity > 0 ? round4(base.uninvoicedAmount / base.uninvoicedQuantity) : null,
+      });
+    }
+  } else if (type === "SALES_ORDER") {
+    const order = await prisma.salesOrder.findUnique({ where: { id: docId }, include: { lines: { include: { goodsItem: true, unit: true }, orderBy: [{ rowOrder: "asc" }, { id: "asc" }] } } });
+    if (!order) return out;
+    for (const l of order.lines as any[]) {
+      const info = await salesOrderLineUninvoiced(l.id, excludeInvoiceId);
+      if (!info || !(info.remainingQty > 0)) continue;
+      out.push({
+        basis: "SALES_ORDER",
+        sourceInventoryLineId: null,
+        sourceSalesOrderLineId: l.id,
+        sourceSalesQuoteLineId: null,
+        documentId: order.id,
+        documentNumber: order.number,
+        documentDate: order.date,
+        goodsItemId: l.goodsItemId,
+        goodsItemCode: l.goodsItem.fullCode,
+        goodsItemTitle: l.goodsItem.title,
+        goodsItemKind: l.goodsItem.kind,
+        unitId: l.unitId,
+        unitTitle: l.unit.title,
+        quantity: info.totalQty,
+        remaining: info.remainingQty,
+        priceLocked: true,
+        unitPrice: round4(info.remainingAmount / info.remainingQty),
+      });
+    }
+  } else if (type === "SALES_QUOTE") {
+    const quote = await prisma.salesQuote.findUnique({ where: { id: docId }, include: { lines: { include: { goodsItem: true, unit: true }, orderBy: [{ rowOrder: "asc" }, { id: "asc" }] } } });
+    if (!quote) return out;
+    for (const l of quote.lines as any[]) {
+      const info = await salesQuoteLineUninvoiced(l.id, excludeInvoiceId);
+      if (!info) continue;
+      const remaining = info.remainingQty - (await quoteLineOrderedQty(l.id));
+      if (!(remaining > 0)) continue;
+      out.push({
+        basis: "SALES_QUOTE",
+        sourceInventoryLineId: null,
+        sourceSalesOrderLineId: null,
+        sourceSalesQuoteLineId: l.id,
+        documentId: quote.id,
+        documentNumber: quote.number,
+        documentDate: quote.date,
+        goodsItemId: l.goodsItemId,
+        goodsItemCode: l.goodsItem.fullCode,
+        goodsItemTitle: l.goodsItem.title,
+        goodsItemKind: l.goodsItem.kind,
+        unitId: l.unitId,
+        unitTitle: l.unit.title,
+        quantity: info.totalQty,
+        remaining,
+        priceLocked: true,
+        unitPrice: round4(info.totalAmount / info.totalQty),
+      });
+    }
+  }
+  return out;
+}
+
+/** دلیل ناسازگاری یک سند مبنا با هدر (null = سازگار) */
+async function basisDocumentReason(type: LineBasis, docId: number, h: HeaderCtx): Promise<{ reason: string | null; number: number }> {
+  if (type === "SALES_DELIVERY") {
+    const doc = await loadDeliveryDoc(docId);
+    if (!doc) return { reason: "حواله فروش یافت نشد", number: docId };
+    return { reason: deliveryDocReason(doc, h), number: doc.number };
+  }
+  if (type === "SALES_ORDER") {
+    const o = await prisma.salesOrder.findUnique({ where: { id: docId } });
+    if (!o) return { reason: "سفارش فروش یافت نشد", number: docId };
+    return { reason: orderOrQuoteReason(o, h, "سفارش فروش"), number: o.number };
+  }
+  const q = await prisma.salesQuote.findUnique({ where: { id: docId } });
+  if (!q) return { reason: "پیش‌فاکتور یافت نشد", number: docId };
+  return { reason: orderOrQuoteReason(q, h, "پیش‌فاکتور"), number: q.number };
+}
+
+router.get("/sales-invoices/basis-documents", can(`${FORM}.view`), async (req, res) => {
+  try {
+    const type = req.query.type as LineBasis;
+    if (!["SALES_DELIVERY", "SALES_ORDER", "SALES_QUOTE"].includes(type)) throw new Error("نوع مبنا نامعتبر است");
+    const h = await headerCtxFromQuery(req.query);
+    const excludeInvoiceId = req.query.excludeInvoiceId ? Number(req.query.excludeInvoiceId) : undefined;
+
+    let docs: { id: number; number: number; date: Date; partyTitle: string; salesTypeTitle: string | null; salesCenterTitle: string | null; currencyTitle: string | null }[] = [];
+    if (type === "SALES_DELIVERY") {
+      const list = await prisma.inventoryDocument.findMany({ where: { documentType: "SALES_DELIVERY" }, orderBy: [{ date: "asc" }, { number: "asc" }] });
+      const parties = await prisma.party.findMany({ where: { detailCode: { in: list.map((d) => d.detailCode).filter((x): x is string => !!x) } } });
+      const partyByCode = new Map(parties.map((p) => [p.detailCode, partyDisplayName(p)]));
+      docs = list.map((d) => ({ id: d.id, number: d.number, date: d.date, partyTitle: (d.detailCode && partyByCode.get(d.detailCode)) || "", salesTypeTitle: null, salesCenterTitle: null, currencyTitle: null }));
+    } else if (type === "SALES_ORDER") {
+      const list = await prisma.salesOrder.findMany({ include: { customer: { include: { party: true } }, salesType: true, salesCenter: true, currency: true }, orderBy: [{ date: "asc" }, { number: "asc" }] });
+      docs = list.map((d) => ({ id: d.id, number: d.number, date: d.date, partyTitle: partyDisplayName(d.customer.party), salesTypeTitle: d.salesType.title, salesCenterTitle: d.salesCenter.title, currencyTitle: d.currency.title }));
+    } else {
+      const list = await prisma.salesQuote.findMany({ include: { customer: { include: { party: true } }, salesType: true, salesCenter: true, currency: true }, orderBy: [{ date: "asc" }, { number: "asc" }] });
+      docs = list.map((d) => ({ id: d.id, number: d.number, date: d.date, partyTitle: partyDisplayName(d.customer.party), salesTypeTitle: d.salesType.title, salesCenterTitle: d.salesCenter.title, currencyTitle: d.currency.title }));
+    }
+
+    const eligible: any[] = [];
+    const ineligible: any[] = [];
+    for (const d of docs) {
+      // eslint-disable-next-line no-await-in-loop
+      const { reason } = await basisDocumentReason(type, d.id, h);
+      // eslint-disable-next-line no-await-in-loop
+      const lines = await basisDocumentLines(type, d.id, excludeInvoiceId);
+      if (lines.length === 0) continue; // سندی که چیزی برای صورتحساب ندارد اصلاً نمایش داده نمی‌شود
+      const row = { ...d, lineCount: lines.length };
+      if (reason) ineligible.push({ ...row, reason });
+      else eligible.push(row);
+    }
+    res.json({ eligible, ineligible });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در دریافت اسناد مبنا" });
+  }
+});
+
+router.get("/sales-invoices/basis-document-lines", can(`${FORM}.view`), async (req, res) => {
+  try {
+    const type = req.query.type as LineBasis;
+    if (!["SALES_DELIVERY", "SALES_ORDER", "SALES_QUOTE"].includes(type)) throw new Error("نوع مبنا نامعتبر است");
+    const h = await headerCtxFromQuery(req.query);
+    const excludeInvoiceId = req.query.excludeInvoiceId ? Number(req.query.excludeInvoiceId) : undefined;
+    const ids = Array.from(new Set(String(req.query.ids || "").split(",").map(Number).filter((n) => n > 0)));
+    if (ids.length === 0) throw new Error("حداقل یک سند مبنا باید انتخاب شود");
+
+    const lines: BasisLineRow[] = [];
+    const rejected: { id: number; number: number; reason: string }[] = [];
+    for (const id of ids) {
+      // هر سند جداگانه سنجیده می‌شود؛ سند ناسازگار بی‌صدا بارگذاری نمی‌شود، با دلیل برگردانده می‌شود
+      // eslint-disable-next-line no-await-in-loop
+      const { reason, number } = await basisDocumentReason(type, id, h);
+      if (reason) {
+        rejected.push({ id, number, reason });
+        continue;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      lines.push(...(await basisDocumentLines(type, id, excludeInvoiceId)));
+    }
+    res.json({ lines, rejected });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در بارگذاری ردیف‌های سند مبنا" });
+  }
+});
+
+// =========================================================================
 // CRUD
 // =========================================================================
 
 interface HeaderBody {
   date: string;
-  basis: "NO_BASIS" | "SALES_DELIVERY";
   customerId: number;
   salesTypeId: number;
   salesCenterId: number;
@@ -412,7 +788,6 @@ router.get("/sales-invoices", can(`${FORM}.view`), async (_req, res) => {
       id: d.id,
       number: d.number,
       date: d.date,
-      basis: d.basis,
       customerId: d.customerId,
       customerTitle: partyDisplayName(d.customer.party),
       salesTypeId: d.salesTypeId,
@@ -440,15 +815,61 @@ router.get("/sales-invoices/:id", can(`${FORM}.view`), async (req, res) => {
       fiscalPeriod: true,
       currency: true,
       journalEntry: true,
-      lines: { include: { goodsItem: true, unit: true }, orderBy: { rowOrder: "asc" } },
+      lines: {
+        include: {
+          goodsItem: true,
+          unit: true,
+          sourceInventoryLine: { include: { document: true } },
+          sourceSalesOrderLine: { include: { salesOrder: true } },
+          sourceSalesQuoteLine: { include: { salesQuote: true } },
+        },
+        orderBy: { rowOrder: "asc" },
+      },
     },
   });
   if (!d) return res.status(404).json({ error: "فاکتور فروش یافت نشد" });
+  // مبنا و سند مبدای هر ردیف از خودِ ردیف خوانده می‌شود (نه از هدر): نوع سند/شماره/تاریخ برای نمایش، مانده‌ی قابل صورتحساب (بدون احتساب همین فاکتور)
+  // و این‌که فی از سند مبنا محاسبه شده (قفل) یا نه.
+  const lineDtos = [];
+  for (const l of d.lines as any[]) {
+    let source: any = null;
+    if (l.basis === "SALES_DELIVERY" && l.sourceInventoryLine) {
+      const info = await salesDeliveryLineRemaining(l.sourceInventoryLineId, id);
+      const base = info ? await deliveryLineBaseInfo(info.line, id) : null;
+      source = { documentId: l.sourceInventoryLine.document.id, documentNumber: l.sourceInventoryLine.document.number, documentDate: l.sourceInventoryLine.document.date, remaining: info?.remaining ?? 0, priceLocked: !!base };
+    } else if (l.basis === "SALES_ORDER" && l.sourceSalesOrderLine) {
+      const info = await salesOrderLineUninvoiced(l.sourceSalesOrderLineId, id);
+      source = { documentId: l.sourceSalesOrderLine.salesOrder.id, documentNumber: l.sourceSalesOrderLine.salesOrder.number, documentDate: l.sourceSalesOrderLine.salesOrder.date, remaining: info?.remainingQty ?? 0, priceLocked: true };
+    } else if (l.basis === "SALES_QUOTE" && l.sourceSalesQuoteLine) {
+      const info = await salesQuoteLineUninvoiced(l.sourceSalesQuoteLineId, id);
+      const remaining = info ? info.remainingQty - (await quoteLineOrderedQty(l.sourceSalesQuoteLineId)) : 0;
+      source = { documentId: l.sourceSalesQuoteLine.salesQuote.id, documentNumber: l.sourceSalesQuoteLine.salesQuote.number, documentDate: l.sourceSalesQuoteLine.salesQuote.date, remaining, priceLocked: true };
+    }
+    lineDtos.push({
+      id: l.id,
+      basis: l.basis,
+      sourceInventoryLineId: l.sourceInventoryLineId,
+      sourceSalesOrderLineId: l.sourceSalesOrderLineId,
+      sourceSalesQuoteLineId: l.sourceSalesQuoteLineId,
+      source,
+      goodsItemId: l.goodsItemId,
+      goodsItemCode: l.goodsItem.fullCode,
+      goodsItemTitle: l.goodsItem.title,
+      goodsItemKind: l.goodsItem.kind,
+      unitId: l.unitId,
+      unitTitle: l.unit.title,
+      quantity: Number(l.quantity),
+      unitPrice: Number(l.unitPrice),
+      amount: Number(l.amount),
+      discount: Number(l.discount),
+      vatAmount: Number(l.vatAmount),
+      description: l.description,
+    });
+  }
   res.json({
     id: d.id,
     number: d.number,
     date: d.date,
-    basis: d.basis,
     customerId: d.customerId,
     customerTitle: partyDisplayName(d.customer.party),
     salesTypeId: d.salesTypeId,
@@ -463,28 +884,14 @@ router.get("/sales-invoices/:id", can(`${FORM}.view`), async (req, res) => {
     journalEntryId: d.journalEntryId,
     journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
     updatedAt: d.updatedAt,
-    lines: d.lines.map((l: any) => ({
-      id: l.id,
-      sourceInventoryLineId: l.sourceInventoryLineId,
-      goodsItemId: l.goodsItemId,
-      goodsItemCode: l.goodsItem.fullCode,
-      goodsItemTitle: l.goodsItem.title,
-      unitId: l.unitId,
-      unitTitle: l.unit.title,
-      quantity: Number(l.quantity),
-      unitPrice: Number(l.unitPrice),
-      amount: Number(l.amount),
-      discount: Number(l.discount),
-      vatAmount: Number(l.vatAmount),
-      description: l.description,
-    })),
+    lines: lineDtos,
   });
 });
 
 router.post("/sales-invoices", can(`${FORM}.create`), async (req, res) => {
   const body = req.body as HeaderBody;
-  if (!body.date || !body.basis || !body.customerId || !body.salesTypeId || !body.salesCenterId || !body.currencyId) {
-    return res.status(400).json({ error: "تاریخ، مبنا، مشتری، نوع فروش، مرکز فروش و ارز الزامی است" });
+  if (!body.date || !body.customerId || !body.salesTypeId || !body.salesCenterId || !body.currencyId) {
+    return res.status(400).json({ error: "تاریخ، مشتری، نوع فروش، مرکز فروش و ارز الزامی است" });
   }
   try {
     const date = new Date(body.date);
@@ -501,7 +908,8 @@ router.post("/sales-invoices", can(`${FORM}.create`), async (req, res) => {
     if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
     const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
-    const lines = await validateLines(body.lines, body.basis, currency, body.currencyId, fxRate, baseCurrency, date, body.salesTypeId);
+    const headerCtx = await buildHeaderCtx({ customerId: body.customerId, salesTypeId: body.salesTypeId, salesCenterId: body.salesCenterId, currencyId: body.currencyId, date });
+    const lines = await validateLines(body.lines, headerCtx, currency, fxRate, baseCurrency);
 
     // شماره از «الگوی شماره‌گذاری» (اتمی، داخل همین تراکنش) می‌آید؛ اگر برای (نوع فروش، مرکز فروش) الگویی نباشد ذخیره ممنوع است.
     const created = await prisma.$transaction(async (tx: any) => {
@@ -513,7 +921,6 @@ router.post("/sales-invoices", can(`${FORM}.create`), async (req, res) => {
         number,
         numberingPatternId: allocated.numberingPatternId,
         date,
-        basis: body.basis,
         customerId: body.customerId,
         salesTypeId: body.salesTypeId,
         salesCenterId: body.salesCenterId,
@@ -539,8 +946,8 @@ router.put("/sales-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
   if (!existing) return res.status(404).json({ error: "یافت نشد" });
   if (existing.journalEntryId) return res.status(400).json({ error: "برای این فاکتور سند حسابداری صادر شده؛ ابتدا سند حسابداری را حذف کنید" });
   if (existing.status === "VOIDED") return res.status(400).json({ error: "این فاکتور فروش باطل شده است؛ قابل ویرایش نیست" });
-  if (!body.date || !body.basis || !body.customerId || !body.salesTypeId || !body.salesCenterId || !body.currencyId) {
-    return res.status(400).json({ error: "تاریخ، مبنا، مشتری، نوع فروش، مرکز فروش و ارز الزامی است" });
+  if (!body.date || !body.customerId || !body.salesTypeId || !body.salesCenterId || !body.currencyId) {
+    return res.status(400).json({ error: "تاریخ، مشتری، نوع فروش، مرکز فروش و ارز الزامی است" });
   }
   try {
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این فاکتور فروش");
@@ -558,7 +965,10 @@ router.put("/sales-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
     if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
     const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
-    const lines = await validateLines(body.lines, body.basis, currency, body.currencyId, fxRate, baseCurrency, date, body.salesTypeId, id);
+    // ردیف‌های «بدون مبنا»ی کالایی که از طراحی قدیمی (مبنا در هدر) در همین فاکتور مانده‌اند، می‌توانند بمانند؛ ردیف تازه‌ی کالایی بدون مبنا مجاز نیست
+    const legacyRows = await prisma.salesInvoiceLine.findMany({ where: { salesInvoiceId: id, basis: "NO_BASIS", goodsItem: { kind: "GOODS" } }, select: { goodsItemId: true } });
+    const headerCtx = await buildHeaderCtx({ customerId: body.customerId, salesTypeId: body.salesTypeId, salesCenterId: body.salesCenterId, currencyId: body.currencyId, date });
+    const lines = await validateLines(body.lines, headerCtx, currency, fxRate, baseCurrency, id, new Set(legacyRows.map((r) => r.goodsItemId)));
     await assertAdvanceAllocationsStillValid(id, { customerId: body.customerId, currencyId: body.currencyId, date, netTotal: salesInvoiceNetTotal(lines as any), vatTotal: salesInvoiceVatTotal(lines as any, fxRate) });
 
     const updated = await prisma.$transaction(async (tx: any) => {
@@ -570,7 +980,6 @@ router.put("/sales-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
         data: {
           fiscalPeriodId: fiscalPeriod.id,
           date,
-          basis: body.basis,
           customerId: body.customerId,
           salesTypeId: body.salesTypeId,
           salesCenterId: body.salesCenterId,

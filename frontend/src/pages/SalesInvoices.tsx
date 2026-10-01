@@ -27,6 +27,7 @@ import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
 import { useVatRates, vatRateForDate } from "../lib/useVatRates";
 import { toBaseCurrencyAmount } from "../lib/currencyConversion";
 import { Modal } from "../components/Modal";
+import { BasisDocumentPickerDialog, BasisDocument } from "../components/BasisDocumentPickerDialog";
 import { DescriptionField } from "../components/DescriptionField";
 
 // «فاکتور فروش نهایی» — آخرین سند زنجیره فروش. مبنا: بدون مبنا / حواله فروش. برخلاف فاکتور خرید
@@ -42,16 +43,32 @@ import { DescriptionField } from "../components/DescriptionField";
 // ندارد، «صدور سند حسابداری» مستقیماً از همان وضعیت «ثبت» انجام می‌شود (نه پس از یک تایید جدا، برخلاف
 // فاکتور خرید/فاکتور خرید خدمات) — با صدور سند، فرم قفل می‌شود.
 
-type Basis = "NO_BASIS" | "SALES_DELIVERY";
+// «مبنا» در سطح ردیف است (نه هدر): هر ردیف مبنای خودش را دارد و مبنا تعیین می‌کند چه سندی/اقلامی قابل انتخاب است
+type Basis = "NO_BASIS" | "SALES_DELIVERY" | "SALES_ORDER" | "SALES_QUOTE";
 
 interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null } }
 interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; decimalPlaces: number; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null }
-interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
-// اطلاعات سند مبنای واقعی حواله فروش (سفارش فروش/پیش‌فاکتور) — طبق Documents/فراخوانی قیمت در فاکتور.md؛
-// چون خودِ حواله فروش ارز/نوع فروش ندارد، انتخابگر این اطلاعات را از سند مبنای آن همراه می‌آورد.
-// null یعنی حواله «بدون‌مبنا»ست (فی/مبلغ همچنان دستی وارد می‌شود).
-interface DeliveryBaseInfo { currencyId: number; currencyTitle: string; salesTypeId: number; salesTypeTitle: string; baseAmount: number; uninvoicedAmount: number; baseQuantity: number; uninvoicedQuantity: number }
-interface PickableLine { id: number; sourceInventoryLineId: number; salesDeliveryId: number; number: number; date: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number; base: DeliveryBaseInfo | null }
+interface GoodsItemRow { id: number; kind?: "GOODS" | "SERVICE"; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
+// ردیف قابل صورتحسابِ یک سند مبنا (پاسخ GET /sales-invoices/basis-document-lines)
+interface BasisLine {
+  basis: Basis;
+  sourceInventoryLineId: number | null;
+  sourceSalesOrderLineId: number | null;
+  sourceSalesQuoteLineId: number | null;
+  documentId: number;
+  documentNumber: number;
+  documentDate: string;
+  goodsItemId: number;
+  goodsItemCode: string;
+  goodsItemTitle: string;
+  goodsItemKind: string;
+  unitId: number;
+  unitTitle: string;
+  quantity: number;
+  remaining: number;
+  priceLocked: boolean;
+  unitPrice: number | null;
+}
 
 function customerTitle(c: CustomerOption): string {
   return c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim();
@@ -59,12 +76,12 @@ function customerTitle(c: CustomerOption): string {
 
 type SalesInvoiceStatus = "DRAFT" | "VOIDED";
 const SALES_INVOICE_STATUS_FA: Record<SalesInvoiceStatus, string> = { DRAFT: "ثبت", VOIDED: "باطل شده" };
-interface ListRow { id: number; number: number; date: string; basis: Basis; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: SalesInvoiceStatus; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number; advanceAmount: number }
-interface DetailLine { id: number; sourceInventoryLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null }
+interface ListRow { id: number; number: number; date: string; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: SalesInvoiceStatus; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number; advanceAmount: number }
+interface DetailLine { id: number; basis: Basis; sourceInventoryLineId: number | null; sourceSalesOrderLineId: number | null; sourceSalesQuoteLineId: number | null; source: { documentId: number; documentNumber: number; documentDate: string; remaining: number; priceLocked: boolean } | null; goodsItemKind: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null }
 interface Detail extends ListRow { currencyId: number; fxRate: number; description: string | null; journalEntryId: number | null; journalEntryReferenceNumber: number | null; lines: DetailLine[] }
 
-const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", SALES_DELIVERY: "حواله فروش" };
-const INFO_TEXT = "ثبت فاکتور فروش نهایی برای مشتری — بدون مبنا یا بر اساس یک یا چند حواله فروش «قطعی»‌شده. در این فاز فقط ثبت می‌شود (بدون اکشن تایید).";
+const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", SALES_DELIVERY: "حواله فروش", SALES_ORDER: "سفارش فروش", SALES_QUOTE: "پیش‌فاکتور" };
+const INFO_TEXT = "ثبت فاکتور فروش نهایی برای مشتری — هر ردیف مبنای خودش را دارد (بدون مبنا / حواله فروش / سفارش فروش / پیش‌فاکتور)؛ یک فاکتور می‌تواند ردیف‌هایی با مبنای متفاوت داشته باشد. در این فاز فقط ثبت می‌شود (بدون اکشن تایید).";
 
 export default function SalesInvoices() {
   const location = useLocation();
@@ -147,7 +164,6 @@ function SalesInvoiceList() {
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
-          { header: "مبنا", render: (r) => BASIS_FA[r.basis], filterType: "string", filterValue: (r) => BASIS_FA[r.basis] },
           { header: "مشتری", render: (r) => r.customerTitle, filterType: "string", filterValue: (r) => r.customerTitle },
           { header: "نوع فروش", render: (r) => r.salesTypeTitle || "—", filterType: "string", filterValue: (r) => r.salesTypeTitle || "" },
           { header: "مرکز فروش", render: (r) => r.salesCenterTitle || "—", filterType: "string", filterValue: (r) => r.salesCenterTitle || "" },
@@ -169,10 +185,40 @@ function SalesInvoiceList() {
   );
 }
 
-interface RowState { sourceInventoryLineId: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; discount: string; vatAmount: string; description: string }
+// مبنا در سطح ردیف: basis + فقط یکی از سه فیلد مبدا (sourceInventoryLineId | sourceSalesOrderLineId | sourceSalesQuoteLineId)؛ docLabel نمایشی؛
+// remaining = سقف مقدار از سند مبنا؛ priceLocked = فی/مبلغ از سند مبنا محاسبه شده و قابل ویرایش نیست
+interface RowState {
+  basis: Basis;
+  sourceInventoryLineId: string;
+  sourceSalesOrderLineId: string;
+  sourceSalesQuoteLineId: string;
+  docId: number | null;
+  docLabel: string;
+  remaining: number | null;
+  priceLocked: boolean;
+  goodsItemId: string;
+  goodsItemCode: string;
+  goodsItemTitle: string;
+  unitId: string;
+  unitTitle: string;
+  quantity: string;
+  unitPrice: string;
+  amount: string;
+  discount: string;
+  vatAmount: string;
+  description: string;
+}
 
-function emptyRow(): RowState {
-  return { sourceInventoryLineId: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "" };
+function emptyRow(basis: Basis = "NO_BASIS"): RowState {
+  return { basis, sourceInventoryLineId: "", sourceSalesOrderLineId: "", sourceSalesQuoteLineId: "", docId: null, docLabel: "", remaining: null, priceLocked: false, goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "" };
+}
+
+/** کلید یکتای ردیف مبدا (برای جمع مقدار ردیف‌هایی که به یک ردیف مبنا ارجاع می‌دهند) */
+function sourceKey(r: RowState): string | null {
+  if (r.sourceInventoryLineId) return `D:${r.sourceInventoryLineId}`;
+  if (r.sourceSalesOrderLineId) return `O:${r.sourceSalesOrderLineId}`;
+  if (r.sourceSalesQuoteLineId) return `Q:${r.sourceSalesQuoteLineId}`;
+  return null;
 }
 
 function SalesInvoiceForm({ editId }: { editId?: number }) {
@@ -188,8 +234,9 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   const [salesCenters, setSalesCenters] = useState<SalesCenter[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
-  const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
-  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", basis: "NO_BASIS" as Basis, customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", fxRate: "", description: "" });
+  // انتخابگر سند مبنا (چندانتخابی): ردیفی که انتخابگر برایش باز است + اسناد قابل انتخاب/ناسازگار
+  const [basisPicker, setBasisPicker] = useState<{ idx: number; basis: Basis; eligible: BasisDocument[]; ineligible: BasisDocument[]; alreadyLoaded: number } | null>(null);
+  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", fxRate: "", description: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
   const [meta, setMeta] = usePersistedState<{ number: number; journalEntryId: number | null; journalEntryReferenceNumber: number | null; status: SalesInvoiceStatus } | null>(
     `${cacheKey}:meta`,
@@ -227,7 +274,6 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
         setMeta({ number: d.number, journalEntryId: d.journalEntryId, journalEntryReferenceNumber: d.journalEntryReferenceNumber, status: d.status });
         setHeader({
           date: d.date.slice(0, 10),
-          basis: d.basis,
           customerId: String(d.customerId),
           salesTypeId: String(d.salesTypeId),
           salesCenterId: String(d.salesCenterId),
@@ -235,9 +281,17 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
           fxRate: String(d.fxRate),
           description: d.description || "",
         });
+        // مبنا و سند مبدای هر ردیف از خودِ ردیف خوانده می‌شود (نه از هدر)
         setRows(
           d.lines.map((l) => ({
+            basis: l.basis,
             sourceInventoryLineId: l.sourceInventoryLineId ? String(l.sourceInventoryLineId) : "",
+            sourceSalesOrderLineId: l.sourceSalesOrderLineId ? String(l.sourceSalesOrderLineId) : "",
+            sourceSalesQuoteLineId: l.sourceSalesQuoteLineId ? String(l.sourceSalesQuoteLineId) : "",
+            docId: l.source?.documentId ?? null,
+            docLabel: l.source ? `${BASIS_FA[l.basis]} ${l.source.documentNumber}` : "",
+            remaining: l.source ? l.source.remaining : null,
+            priceLocked: !!l.source?.priceLocked,
             goodsItemId: String(l.goodsItemId),
             goodsItemCode: l.goodsItemCode,
             goodsItemTitle: l.goodsItemTitle,
@@ -252,7 +306,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
           }))
         );
       } else {
-        setHeader({ date: defaultDocumentDate(fp), basis: "NO_BASIS", customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", fxRate: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", fxRate: "", description: "" });
         setRows([emptyRow()]);
         setMeta(null);
       }
@@ -262,23 +316,13 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
 
-  useEffect(() => {
-    if (header.basis !== "SALES_DELIVERY") {
-      setPickableLines([]);
-      return;
-    }
-    const params = new URLSearchParams();
-    if (header.date) params.set("destDate", header.date);
-    if (editId) params.set("excludeInvoiceId", String(editId));
-    api.get(`/sales-invoices/pickable-sales-delivery-lines?${params.toString()}`).then(setPickableLines).catch(() => setPickableLines([]));
-  }, [header.basis, header.date, editId]);
 
   // با صدور سند حسابداری، کل فرم (سرصفحه + ردیف‌ها) قفل می‌شود — دقیقاً هم‌الگوی PurchaseInvoices.tsx
   // (آن‌جا شرط قفل «تایید+صدور سند» بود، اینجا چون تاییدی وجود ندارد، فقط «صدور سند»). اکشن «ابطال»
   // هم طبق تصمیم صریح کاربر همین‌قدر قفل‌کننده است — فاکتور باطل‌شده دیگر هیچ‌جا قابل ویرایش نیست.
   const voided = meta?.status === "VOIDED";
   const locked = !!meta?.journalEntryId || voided;
-  const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceInventoryLineId);
+  const hasAnyLine = rows.some((r) => r.goodsItemId || sourceKey(r));
   // طبق تصمیم صریح کاربر: به‌محض این‌که یک ردیف انتخاب/وارد شده باشد، کل سرصفحه (از جمله تاریخ) قفل
   // می‌شود — چون ردیف‌ها بر اساس سرصفحه (مشتری/تاریخ) انتخاب و ثبت شده‌اند و تغییر بعدی سرصفحه
   // ناسازگاری ایجاد می‌کند.
@@ -341,56 +385,76 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
     return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item, vatRateForDate(vatRates, header.date))));
   }
-  // مانده‌ی مؤثر یک ردیف حواله برای ردیف idx: مانده‌ی سرور منهای مقدار سایر ردیف‌های همین فاکتور که به همان ردیف حواله ارجاع می‌دهند (زنده، با هر تغییر ردیف‌ها)
-  function effectiveRemaining(line: PickableLine, excludeIdx: number): number {
-    const usedByOthers = rows.reduce((sum, r, i) => (i !== excludeIdx && r.sourceInventoryLineId === String(line.sourceInventoryLineId) ? sum + (Number(r.quantity) || 0) : sum), 0);
-    return Math.round((line.remaining - usedByOthers) * 1e6) / 1e6;
+  // مانده‌ی مؤثر یک ردیف بر اساس سند مبنایش: مانده‌ی سرور منهای مقدار سایر ردیف‌های همین فاکتور که به همان ردیف مبنا ارجاع می‌دهند (زنده، با هر تغییر ردیف‌ها)
+  function effectiveRemaining(row: RowState, excludeIdx: number): number | null {
+    if (row.remaining == null) return null;
+    const key = sourceKey(row);
+    const usedByOthers = key ? rows.reduce((sum, r, i) => (i !== excludeIdx && sourceKey(r) === key ? sum + (Number(r.quantity) || 0) : sum), 0) : 0;
+    return Math.round((row.remaining - usedByOthers) * 1e6) / 1e6;
   }
-  // فراخوانی قیمت از سند مبنای حواله (Documents/فراخوانی قیمت در فاکتور.md): اگر ردیف حواله‌ی انتخاب‌شده
-  // خودش بر مبنای سفارش فروش/پیش‌فاکتور صادر شده باشد، فی/مبلغ از مانده‌ی فاکتورنشده‌ی همان سند مبنا
-  // محاسبه می‌شود (صرفاً پیش‌نمایش زنده — مقدار نهایی هر بار در سرور بازمحاسبه/جایگزین می‌شود). حواله‌ی
-  // «بدون‌مبنا» (src.base=null) هیچ تغییری نمی‌کند و فی/مبلغ همچنان دستی می‌ماند.
-  function baseDerivedAmounts(src: PickableLine, quantity: number): Partial<RowState> {
-    if (!src.base || !(src.base.uninvoicedQuantity > 0)) return {};
-    const unitAmount = src.base.uninvoicedAmount / src.base.uninvoicedQuantity;
-    const unitPrice = Math.round(unitAmount * 10000) / 10000;
-    const amount = Math.round(unitPrice * quantity * 100) / 100;
-    return { unitPrice: String(unitPrice), amount: String(amount), vatAmount: computeSuggestedVat(amount, 0, String(src.goodsItemId)) };
+  // تغییر مبنای یک ردیف: ردیف از نو (با همان مبنا) شروع می‌شود؛ سند مبدا/کالا/مقدار قبلی پاک می‌شود چون مبنای جدید فهرست و قواعد دیگری دارد
+  function onBasisChange(idx: number, basis: Basis) {
+    setRows((prev) => prev.map((r, i) => (i === idx ? { ...emptyRow(basis), description: r.description } : r)));
   }
-  function onSourceLineChange(idx: number, sourceInventoryLineId: string) {
-    const src = pickableLines.find((l) => String(l.sourceInventoryLineId) === sourceInventoryLineId);
-    if (!src) return;
-    const quantity = Math.max(0, effectiveRemaining(src, idx));
-    updateRow(idx, {
-      sourceInventoryLineId,
-      goodsItemId: String(src.goodsItemId),
-      goodsItemCode: src.goodsItemCode,
-      goodsItemTitle: src.goodsItemTitle,
-      unitId: String(src.unitId),
-      unitTitle: src.unitTitle,
-      quantity: String(quantity),
-      ...baseDerivedAmounts(src, quantity),
-    });
+  function lineToRow(l: BasisLine): RowState {
+    const price = l.priceLocked && l.unitPrice != null ? l.unitPrice : 0;
+    const amount = l.priceLocked ? Math.round(price * l.remaining * 100) / 100 : 0;
+    return {
+      ...emptyRow(l.basis),
+      sourceInventoryLineId: l.sourceInventoryLineId ? String(l.sourceInventoryLineId) : "",
+      sourceSalesOrderLineId: l.sourceSalesOrderLineId ? String(l.sourceSalesOrderLineId) : "",
+      sourceSalesQuoteLineId: l.sourceSalesQuoteLineId ? String(l.sourceSalesQuoteLineId) : "",
+      docId: l.documentId,
+      docLabel: `${BASIS_FA[l.basis]} ${l.documentNumber}`,
+      remaining: l.remaining,
+      priceLocked: l.priceLocked,
+      goodsItemId: String(l.goodsItemId),
+      goodsItemCode: l.goodsItemCode,
+      goodsItemTitle: l.goodsItemTitle,
+      unitId: String(l.unitId),
+      unitTitle: l.unitTitle,
+      quantity: String(l.remaining),
+      unitPrice: l.priceLocked && l.unitPrice != null ? String(price) : "",
+      amount: l.priceLocked ? String(amount) : "",
+      vatAmount: l.priceLocked ? computeSuggestedVat(amount, 0, String(l.goodsItemId)) : "",
+    };
   }
-  // انتخاب چندگانه‌ی ردیف حواله فروش: اولین ردیف تیک‌خورده در همین ردیف گرید می‌نشیند و بقیه بلافاصله بعد از آن به‌صورت ردیف جدید اضافه می‌شوند
-  function onSourceLinesPicked(idx: number, picked: PickableLine[]) {
-    if (picked.length === 0) return;
-    const toRow = (src: PickableLine): Partial<RowState> => ({
-      sourceInventoryLineId: String(src.sourceInventoryLineId),
-      goodsItemId: String(src.goodsItemId),
-      goodsItemCode: src.goodsItemCode,
-      goodsItemTitle: src.goodsItemTitle,
-      unitId: String(src.unitId),
-      unitTitle: src.unitTitle,
-      quantity: String(src.remaining),
-      ...baseDerivedAmounts(src, src.remaining),
-    });
-    setRows((prev) => {
-      const next = [...prev];
-      next[idx] = { ...next[idx], ...toRow(picked[0]) };
-      next.splice(idx + 1, 0, ...picked.slice(1).map((src) => ({ ...emptyRow(), ...toRow(src) })));
-      return next;
-    });
+  function basisQuery(extra: Record<string, string>) {
+    const p = new URLSearchParams({ customerId: header.customerId, salesTypeId: header.salesTypeId, salesCenterId: header.salesCenterId, currencyId: header.currencyId, date: header.date, ...extra });
+    if (editId) p.set("excludeInvoiceId", String(editId));
+    return p.toString();
+  }
+  // باز کردن انتخابگر چندگانه‌ی «سند مبنا» برای مبنای همین ردیف؛ اسنادی که قبلاً در همین فاکتور بارگذاری شده‌اند دوباره قابل انتخاب نیستند
+  async function openBasisPicker(idx: number) {
+    if (!guardRowEntry()) return;
+    const basis = rows[idx].basis;
+    if (basis === "NO_BASIS") return;
+    try {
+      const r: { eligible: BasisDocument[]; ineligible: BasisDocument[] } = await api.get(`/sales-invoices/basis-documents?${basisQuery({ type: basis })}`);
+      const loaded = new Set(rows.filter((x) => x.basis === basis && x.docId != null).map((x) => x.docId));
+      const eligible = r.eligible.filter((d) => !loaded.has(d.id));
+      setBasisPicker({ idx, basis, eligible, ineligible: r.ineligible, alreadyLoaded: r.eligible.length - eligible.length });
+    } catch (e) {
+      setError((e as ApiError).message);
+    }
+  }
+  // بارگذاری ردیف‌های قابل صورتحسابِ همه‌ی اسناد انتخاب‌شده در همین گرید؛ هر سند در سرور جداگانه اعتبارسنجی می‌شود و سند ناسازگار با دلیل اعلام (نه بی‌صدا بارگذاری) می‌شود
+  async function loadBasisDocuments(idx: number, basis: Basis, ids: number[]) {
+    try {
+      const r: { lines: BasisLine[]; rejected: { id: number; number: number; reason: string }[] } = await api.get(`/sales-invoices/basis-document-lines?${basisQuery({ type: basis, ids: ids.join(",") })}`);
+      if (r.rejected.length > 0) setError(r.rejected.map((x) => `سند ${x.number}: ${x.reason}`).join("\n"));
+      if (r.lines.length === 0) return;
+      const newRows = r.lines.map(lineToRow);
+      setRows((prev) => {
+        const next = [...prev];
+        const cur = next[idx];
+        const empty = cur && !cur.goodsItemId && !sourceKey(cur);
+        next.splice(empty ? idx : idx + 1, empty ? 1 : 0, ...newRows);
+        return next;
+      });
+    } catch (e) {
+      setError((e as ApiError).message);
+    }
   }
   function onQuantityChange(idx: number, quantity: string) {
     const row = rows[idx];
@@ -432,10 +496,9 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   const totalVat = rows.reduce((s, r) => s + (Number(r.vatAmount) || 0), 0);
 
   function buildBody() {
-    const nonEmptyRows = rows.filter((r) => r.goodsItemId || r.sourceInventoryLineId);
+    const nonEmptyRows = rows.filter((r) => r.goodsItemId || sourceKey(r));
     return {
       date: header.date,
-      basis: header.basis,
       customerId: Number(header.customerId),
       salesTypeId: Number(header.salesTypeId),
       salesCenterId: Number(header.salesCenterId),
@@ -443,7 +506,10 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
       fxRate: needsFxRate ? Number(header.fxRate) : 1,
       description: header.description,
       lines: nonEmptyRows.map((r) => ({
+        basis: r.basis,
         sourceInventoryLineId: r.sourceInventoryLineId ? Number(r.sourceInventoryLineId) : null,
+        sourceSalesOrderLineId: r.sourceSalesOrderLineId ? Number(r.sourceSalesOrderLineId) : null,
+        sourceSalesQuoteLineId: r.sourceSalesQuoteLineId ? Number(r.sourceSalesQuoteLineId) : null,
         goodsItemId: r.goodsItemId ? Number(r.goodsItemId) : undefined,
         unitId: Number(r.unitId),
         quantity: Number(r.quantity) || 0,
@@ -464,15 +530,22 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     const dateErr = validateDocumentDate(header.date, fiscalPeriod);
     if (dateErr) return setError(dateErr);
     const body = buildBody();
-    if (body.lines.length === 0) return setError("فاکتور فروش باید حداقل یک ردیف کالا داشته باشد");
+    if (body.lines.length === 0) return setError("فاکتور فروش باید حداقل یک ردیف داشته باشد");
+    // مجموع مقدار ردیف‌هایی که به یک ردیف مبنا ارجاع می‌دهند نباید از مانده‌ی آن بیشتر شود (سرور هم کنترل می‌کند)
+    const sums = new Map<string, number>();
+    const caps = new Map<string, number>();
+    const used = rows.filter((r) => r.goodsItemId || sourceKey(r));
     for (const [i, l] of body.lines.entries()) {
-      if (header.basis === "SALES_DELIVERY" && !l.sourceInventoryLineId) return setError(`ردیف ${i + 1}: انتخاب ردیف حواله فروش الزامی است`);
-      if (header.basis === "NO_BASIS" && !l.goodsItemId) return setError(`کالا برای ردیف ${i + 1} الزامی است`);
+      const r = used[i];
+      if (l.basis === "NO_BASIS" && !l.goodsItemId) return setError(`ردیف ${i + 1}: انتخاب خدمت الزامی است`);
+      if (l.basis !== "NO_BASIS" && !sourceKey(r)) return setError(`ردیف ${i + 1}: انتخاب سند مبنا (${BASIS_FA[l.basis]}) الزامی است`);
       if (!(l.quantity > 0)) return setError(`مقدار ردیف ${i + 1} باید عددی مثبت باشد`);
-      if (header.basis === "SALES_DELIVERY" && l.sourceInventoryLineId) {
-        const src = pickableLines.find((p) => p.sourceInventoryLineId === l.sourceInventoryLineId);
-        const total = body.lines.reduce((s, x) => (x.sourceInventoryLineId === l.sourceInventoryLineId ? s + x.quantity : s), 0);
-        if (src && total > src.remaining + 1e-9) return setError(`ردیف ${i + 1}: مجموع مقدار ردیف‌هایی که به این ردیف حواله فروش ارجاع می‌دهند (${total}) از مانده‌ی قابل صورتحساب (${src.remaining}) بیشتر است`);
+      const key = sourceKey(r);
+      if (key) {
+        sums.set(key, (sums.get(key) || 0) + l.quantity);
+        if (r.remaining != null) caps.set(key, r.remaining);
+        const cap = caps.get(key);
+        if (cap != null && (sums.get(key) || 0) > cap + 1e-9) return setError(`ردیف ${i + 1}: مجموع مقدار ردیف‌هایی که به این ردیف سند مبنا ارجاع می‌دهند (${sums.get(key)}) از مانده‌ی قابل صورتحساب (${cap}) بیشتر است`);
       }
       if (!(l.unitPrice >= 0)) return setError(`فی ردیف ${i + 1} نامعتبر است`);
     }
@@ -604,13 +677,6 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
             <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={headerDisabled} />
           </div>
           <div className="form-field">
-            <label>مبنا<RequiredMark /></label>
-            <select value={header.basis} onChange={(e) => setHeader({ ...header, basis: e.target.value as Basis })} disabled={headerDisabled}>
-              <option value="NO_BASIS">{BASIS_FA.NO_BASIS}</option>
-              <option value="SALES_DELIVERY">{BASIS_FA.SALES_DELIVERY}</option>
-            </select>
-          </div>
-          <div className="form-field">
             <label>مشتری<RequiredMark /></label>
             <RecordPickerField
               title="انتخاب مشتری"
@@ -672,8 +738,9 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
               <thead>
                 <tr>
                   <th>ردیف</th>
-                  {header.basis === "SALES_DELIVERY" && <th>حواله فروش مبدا</th>}
-                  <th>کالا</th>
+                  <th>مبنا</th>
+                  <th>سند مبنا</th>
+                  <th>کالا / خدمت</th>
                   <th>واحد</th>
                   <th>مقدار</th>
                   <th>فی</th>
@@ -687,49 +754,37 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
               <tbody>
                 {rows.map((row, idx) => {
                   const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
-                  const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
-                  const src = pickableLines.find((l) => String(l.sourceInventoryLineId) === row.sourceInventoryLineId);
-                  // فی/مبلغ ردیفی که حواله‌ی مبدایش خودش بر مبنای سفارش فروش/پیش‌فاکتور صادر شده باشد،
-                  // دیگر قابل ویرایش نیست — همیشه از سند مبنا محاسبه می‌شود (Documents/فراخوانی قیمت در فاکتور.md).
-                  const priceLocked = !!src?.base;
+                  // «بدون مبنا» (و هر مبنایی که کالا/انبار ندارد): فقط خدمت قابل انتخاب است. انتخابگر کالا/خدمت همان رفتار قبلی (تک‌انتخابی) را دارد.
+                  const servicePickerRows = goodsItems.filter((g) => g.kind === "SERVICE" && g.isActive);
+                  const remaining = effectiveRemaining(row, idx);
+                  // فی/مبلغ ردیفی که از سند مبنا محاسبه می‌شود قابل ویرایش نیست (Documents/فراخوانی قیمت در فاکتور.md)
+                  const priceLocked = row.priceLocked;
+                  const hasSource = !!sourceKey(row);
                   return (
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
-                      {header.basis === "SALES_DELIVERY" && (
-                        <td style={{ minWidth: 90 }}>
-                          <RecordPickerField
-                            title="انتخاب ردیف حواله فروش"
-                            displayValue={src ? `${toFaDigits(String(src.number))}` : ""}
-                            // «مانده» با احتساب مقدار سایر ردیف‌های همین فاکتور به‌روز می‌شود؛ ردیفِ بدون مانده‌ی مؤثر (جز ردیف انتخاب‌شده‌ی خودِ این سطر) نمایش داده نمی‌شود
-                            rows={pickableLines
-                              .map((l) => ({ ...l, remaining: effectiveRemaining(l, idx) }))
-                              .filter((l) => l.remaining > 0 || String(l.sourceInventoryLineId) === row.sourceInventoryLineId)}
-                            columns={[
-                              { header: "شماره", render: (l) => toFaDigits(String(l.number)), filterValue: (l) => String(l.number), width: "70px" },
-                              { header: "کالا", render: (l) => l.goodsItemTitle, filterValue: (l) => l.goodsItemTitle },
-                              { header: "مانده", render: (l) => formatAmountFa(l.remaining), filterValue: (l) => String(l.remaining), width: "90px" },
-                              { header: "ارز مبنا", render: (l) => l.base?.currencyTitle || "—", filterValue: (l) => l.base?.currencyTitle || "", width: "90px" },
-                              { header: "نوع فروش مبنا", render: (l) => l.base?.salesTypeTitle || "—", filterValue: (l) => l.base?.salesTypeTitle || "", width: "100px" },
-                              { header: "مبلغ مبنا", render: (l) => (l.base ? formatAmountFa(l.base.baseAmount) : "—"), filterValue: (l) => String(l.base?.baseAmount ?? ""), width: "110px" },
-                              { header: "مبلغ فاکتورنشده", render: (l) => (l.base ? formatAmountFa(l.base.uninvoicedAmount) : "—"), filterValue: (l) => String(l.base?.uninvoicedAmount ?? ""), width: "110px" },
-                              { header: "مقدار مبنا", render: (l) => (l.base ? formatAmountFa(l.base.baseQuantity) : "—"), filterValue: (l) => String(l.base?.baseQuantity ?? ""), width: "90px" },
-                              { header: "مقدار فاکتورنشده", render: (l) => (l.base ? formatAmountFa(l.base.uninvoicedQuantity) : "—"), filterValue: (l) => String(l.base?.uninvoicedQuantity ?? ""), width: "100px" },
-                            ]}
-                            onOpen={guardRowEntry}
-                            multiSelect
-                            onSelectMultiple={(ls) => onSourceLinesPicked(idx, ls)}
-                            onSelect={(l) => onSourceLineChange(idx, String(l.sourceInventoryLineId))}
-                          />
-                        </td>
-                      )}
-                      <td style={{ minWidth: 320 }}>
-                        {header.basis === "SALES_DELIVERY" ? (
-                          <span>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</span>
+                      <td style={{ minWidth: 130 }}>
+                        <select value={row.basis} onChange={(e) => onBasisChange(idx, e.target.value as Basis)}>
+                          {(Object.keys(BASIS_FA) as Basis[]).map((b) => <option key={b} value={b}>{BASIS_FA[b]}</option>)}
+                        </select>
+                      </td>
+                      <td style={{ minWidth: 150 }}>
+                        {row.basis === "NO_BASIS" ? (
+                          <span style={{ color: "var(--ink-soft)" }}>—</span>
+                        ) : hasSource ? (
+                          <span title={remaining != null ? `مانده‌ی قابل صورتحساب: ${formatAmountFa(remaining)}` : undefined}>{row.docLabel}</span>
                         ) : (
+                          <button type="button" className="btn secondary" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => openBasisPicker(idx)}>
+                            انتخاب {BASIS_FA[row.basis]}…
+                          </button>
+                        )}
+                      </td>
+                      <td style={{ minWidth: 300 }}>
+                        {row.basis === "NO_BASIS" ? (
                           <RecordPickerField
-                            title="انتخاب کالا"
+                            title="انتخاب خدمت"
                             displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                            rows={pickerRows}
+                            rows={servicePickerRows}
                             columns={[
                               { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
                               { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
@@ -737,16 +792,18 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
                             onOpen={guardRowEntry}
                             onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
                           />
+                        ) : (
+                          <span>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</span>
                         )}
                       </td>
                       <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>
                       <td style={{ minWidth: 120 }}>
                         <AmountInput value={row.quantity} onChange={(v) => onQuantityChange(idx, v)} allowDecimal />
                       </td>
-                      <td style={{ minWidth: 120 }} title={priceLocked ? "فی از سند مبنای حواله فروش محاسبه شده و غیرقابل ویرایش است" : undefined}>
+                      <td style={{ minWidth: 120 }} title={priceLocked ? "فی از سند مبنا محاسبه شده و غیرقابل ویرایش است" : undefined}>
                         <AmountInput value={row.unitPrice} onChange={(v) => onUnitPriceChange(idx, v)} allowDecimal disabled={priceLocked} />
                       </td>
-                      <td style={{ minWidth: 120 }} title={priceLocked ? "مبلغ از سند مبنای حواله فروش محاسبه شده و غیرقابل ویرایش است" : undefined}>
+                      <td style={{ minWidth: 120 }} title={priceLocked ? "مبلغ از سند مبنا محاسبه شده و غیرقابل ویرایش است" : undefined}>
                         <AmountInput value={row.amount} onChange={(v) => onAmountChange(idx, v)} allowDecimal disabled={priceLocked} />
                       </td>
                       <td style={{ minWidth: 120 }}>
@@ -778,6 +835,16 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
         </div>
         </fieldset>
       </form>
+      {basisPicker && (
+        <BasisDocumentPickerDialog
+          title={`انتخاب ${BASIS_FA[basisPicker.basis]} (چندانتخابی)`}
+          eligible={basisPicker.eligible}
+          ineligible={basisPicker.ineligible}
+          alreadyLoadedCount={basisPicker.alreadyLoaded}
+          onConfirm={(ids) => loadBasisDocuments(basisPicker.idx, basisPicker.basis, ids)}
+          onClose={() => setBasisPicker(null)}
+        />
+      )}
       {advanceOpen && editId && (
         <AdvanceAllocationDialog
           invoiceId={editId}
