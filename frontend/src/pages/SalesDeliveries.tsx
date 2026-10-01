@@ -60,6 +60,7 @@ interface DetailLine {
   id: number;
   sourceSalesOrderLineId: number | null;
   sourceSalesQuoteLineId: number | null;
+  sourceNumber?: number | null;
   goodsItemId: number;
   goodsItemCode: string;
   goodsItemTitle: string;
@@ -232,7 +233,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
       d.lines.map((l) => ({
         // شناسه‌ی ردیف مبنا (بسته به مبنا: ردیف سفارش فروش یا ردیف پیش‌فاکتور) — همین یک فیلد state برای هر دو است
         sourceSalesOrderLineId: String(l.sourceSalesOrderLineId ?? l.sourceSalesQuoteLineId ?? ""),
-        sourceNumber: "",
+        sourceNumber: l.sourceNumber != null ? String(l.sourceNumber) : "",
         goodsItemId: String(l.goodsItemId),
         goodsItemCode: l.goodsItemCode,
         goodsItemTitle: l.goodsItemTitle,

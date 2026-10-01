@@ -10,7 +10,8 @@ import { getLineAmounts } from "./documentItemAmountService";
 //                از تاریخچه‌ی مبلغ ردیف انبار (getLineAmounts، ارز پایه، فقط بعد از محاسبه‌ی قیمت) خوانده می‌شود و تخفیف/ارزش‌افزوده ندارد. سند برگشت
 //                «نوع خرید» ندارد؛ در تب «نوع خرید» زیر ردیف «نامشخص (برگشت از خرید)» می‌آید.
 //   بُعد تامین‌کننده بر اساس طرف حساب (Party) است: فاکتور خرید partyId و سند انبار detailCode طرف حساب را دارد.
-// خدمات (فاکتور خرید خدمات) چون کالا/مقدار ندارد، در این گزارش نیست.
+// خدمات: ردیف‌های «فاکتور خرید خدمات» تاییدشده (PurchaseCostLine) هم در همین جمع‌ها می‌آیند؛ «خدمت» یک GoodsItem است (گروه/گروه حسابداری دارد)، پس در همان
+// ابعاد کالا قرار می‌گیرد؛ مقدار ندارد (۰) و مبلغ/تخفیف/ارزش‌افزوده از baseAmount/baseDiscount/vatAmount (ارز پایه).
 // =========================================================================
 
 export interface PurchaseLineFilters {
@@ -19,8 +20,11 @@ export interface PurchaseLineFilters {
   purchaseTypeIds?: number[];
   supplierPartyIds?: number[];
   goodsItemIds?: number[];
+  /** شناسه‌ی فاکتور: مثبت = فاکتور خرید کالا، منفی = فاکتور خرید خدمات (قرارداد تب «اسناد»، چون دو جدول id جدا دارند) */
   invoiceIds?: number[];
 }
+
+export type PurchaseDocumentKind = "GOODS" | "SERVICE";
 
 /** «نوع خرید» ناشناخته‌ی ردیف‌های برگشت از خرید */
 export const UNKNOWN_PURCHASE_TYPE_ID = 0;
@@ -50,6 +54,7 @@ export interface PurchaseLine extends PurchaseDimensionFields {
   lineId: number;
   purchaseInvoiceId: number;
   purchaseInvoiceNumber: number;
+  documentKind: PurchaseDocumentKind;
   date: Date;
 }
 
@@ -72,30 +77,37 @@ async function loadSupplierCodes(): Promise<Map<number, number>> {
 }
 
 export async function getPurchaseLines(f: PurchaseLineFilters): Promise<PurchaseLine[]> {
-  const lines = await prisma.purchaseInvoiceLine.findMany({
-    where: {
-      purchaseInvoice: {
-        status: "APPROVED",
-        date: { gte: f.fromDate, lte: f.toDate },
-        ...(f.purchaseTypeIds?.length ? { purchaseTypeId: { in: f.purchaseTypeIds } } : {}),
-        ...(f.supplierPartyIds?.length ? { partyId: { in: f.supplierPartyIds } } : {}),
-        ...(f.invoiceIds?.length ? { id: { in: f.invoiceIds } } : {}),
-      },
-      ...(f.goodsItemIds?.length ? { goodsItemId: { in: f.goodsItemIds } } : {}),
-    },
-    include: {
-      purchaseInvoice: { include: { party: true, purchaseType: true } },
-      goodsItem: { include: { accountingGroup: true } },
-      unit: true,
-    },
-    orderBy: [{ purchaseInvoice: { date: "asc" } }, { purchaseInvoiceId: "asc" }, { rowOrder: "asc" }],
-  });
+  const goodsInvoiceIds = f.invoiceIds?.filter((n) => n > 0);
+  const serviceInvoiceIds = f.invoiceIds?.filter((n) => n < 0).map((n) => -n);
+  const onlyInvoices = !!f.invoiceIds?.length;
   const codes = await loadSupplierCodes();
 
-  return lines.map((l: any) => ({
+  const goods = !onlyInvoices || goodsInvoiceIds!.length
+    ? await prisma.purchaseInvoiceLine.findMany({
+        where: {
+          purchaseInvoice: {
+            status: "APPROVED",
+            date: { gte: f.fromDate, lte: f.toDate },
+            ...(f.purchaseTypeIds?.length ? { purchaseTypeId: { in: f.purchaseTypeIds } } : {}),
+            ...(f.supplierPartyIds?.length ? { partyId: { in: f.supplierPartyIds } } : {}),
+            ...(goodsInvoiceIds?.length ? { id: { in: goodsInvoiceIds } } : {}),
+          },
+          ...(f.goodsItemIds?.length ? { goodsItemId: { in: f.goodsItemIds } } : {}),
+        },
+        include: {
+          purchaseInvoice: { include: { party: true, purchaseType: true } },
+          goodsItem: { include: { accountingGroup: true } },
+          unit: true,
+        },
+        orderBy: [{ purchaseInvoice: { date: "asc" } }, { purchaseInvoiceId: "asc" }, { rowOrder: "asc" }],
+      })
+    : [];
+
+  const goodsLines: PurchaseLine[] = goods.map((l: any) => ({
     lineId: l.id,
     purchaseInvoiceId: l.purchaseInvoiceId,
     purchaseInvoiceNumber: l.purchaseInvoice.number,
+    documentKind: "GOODS" as const,
     date: l.purchaseInvoice.date,
     supplierPartyId: l.purchaseInvoice.partyId,
     supplierCode: String(codes.get(l.purchaseInvoice.partyId) ?? l.purchaseInvoice.party.detailCode),
@@ -116,6 +128,56 @@ export async function getPurchaseLines(f: PurchaseLineFilters): Promise<Purchase
     discount: Number(l.baseDiscount),
     vatAmount: Number(l.vatAmount),
   }));
+
+  const services = !onlyInvoices || serviceInvoiceIds!.length
+    ? await prisma.purchaseCostLine.findMany({
+        where: {
+          servicePurchaseInvoice: {
+            status: "APPROVED",
+            date: { gte: f.fromDate, lte: f.toDate },
+            ...(f.purchaseTypeIds?.length ? { purchaseTypeId: { in: f.purchaseTypeIds } } : {}),
+            ...(f.supplierPartyIds?.length ? { partyId: { in: f.supplierPartyIds } } : {}),
+            ...(serviceInvoiceIds?.length ? { id: { in: serviceInvoiceIds } } : {}),
+          },
+          ...(f.goodsItemIds?.length ? { serviceId: { in: f.goodsItemIds } } : {}),
+        },
+        include: {
+          servicePurchaseInvoice: { include: { party: true, purchaseType: true } },
+          service: { include: { accountingGroup: true } },
+        },
+        orderBy: [{ servicePurchaseInvoice: { date: "asc" } }, { servicePurchaseInvoiceId: "asc" }, { rowOrder: "asc" }],
+      })
+    : [];
+
+  const serviceLines: PurchaseLine[] = services.map((l: any) => ({
+    lineId: l.id,
+    purchaseInvoiceId: l.servicePurchaseInvoiceId,
+    purchaseInvoiceNumber: l.servicePurchaseInvoice.number,
+    documentKind: "SERVICE" as const,
+    date: l.servicePurchaseInvoice.date,
+    supplierPartyId: l.servicePurchaseInvoice.partyId,
+    supplierCode: String(codes.get(l.servicePurchaseInvoice.partyId) ?? l.servicePurchaseInvoice.party.detailCode),
+    supplierTitle: partyTitle(l.servicePurchaseInvoice.party),
+    purchaseTypeId: l.servicePurchaseInvoice.purchaseTypeId,
+    purchaseTypeCode: l.servicePurchaseInvoice.purchaseType.code,
+    purchaseTypeTitle: l.servicePurchaseInvoice.purchaseType.title,
+    goodsItemId: l.serviceId,
+    goodsItemCode: l.service.fullCode,
+    goodsItemTitle: l.service.title,
+    goodsGroupId: l.service.goodsGroupId,
+    accountingGroupId: l.service.accountingGroupId,
+    accountingGroupCode: l.service.accountingGroup.code,
+    accountingGroupTitle: l.service.accountingGroup.title,
+    unitTitle: "",
+    quantity: 0,
+    amount: Number(l.baseAmount),
+    discount: Number(l.baseDiscount),
+    vatAmount: Number(l.vatAmount),
+  }));
+
+  return [...goodsLines, ...serviceLines].sort(
+    (a, b) => a.date.getTime() - b.date.getTime() || a.purchaseInvoiceNumber - b.purchaseInvoiceNumber || a.lineId - b.lineId
+  );
 }
 
 /**

@@ -68,12 +68,6 @@ async function resolveFiscalPeriod(date: Date) {
   return fiscalPeriod;
 }
 
-async function nextNumber(model: { findFirst: (args: any) => Promise<any> }, fiscalPeriodId: number) {
-  // فقط اسناد بدون الگو: شماره‌ی اسناد الگودار از دنباله‌ی خودِ الگو می‌آید و نباید شماره‌گذاری قدیمی را جلو ببرد
-  const last = await model.findFirst({ where: { fiscalPeriodId, numberingPatternId: null }, orderBy: { number: "desc" } });
-  return last ? last.number + 1 : 1;
-}
-
 function partyDisplayName(party: any) {
   return party.category === "LEGAL" ? party.name : `${party.firstName || ""} ${party.lastName || ""}`.trim();
 }
@@ -917,16 +911,15 @@ router.post("/sales-invoices", can(`${FORM}.create`), async (req, res) => {
     const headerCtx = await buildHeaderCtx({ customerId: body.customerId, salesTypeId: body.salesTypeId, salesCenterId: body.salesCenterId, currencyId: body.currencyId, date });
     const lines = await validateLines(body.lines, headerCtx, currency, fxRate, baseCurrency);
 
-    // شماره: اگر ترکیب (نوع فروش، مرکز فروش) در یک «الگوی شماره‌گذاری» باشد، شماره از دنباله‌ی همان الگو و داخل همین تراکنش (اتمی) گرفته می‌شود؛
-    // وگرنه شماره‌گذاری قدیمی (آخرین شماره‌ی دوره + ۱).
+    // شماره از «الگوی شماره‌گذاری» (اتمی، داخل همین تراکنش) می‌آید؛ اگر برای (نوع فروش، مرکز فروش) الگویی نباشد ذخیره ممنوع است.
     const created = await prisma.$transaction(async (tx: any) => {
       const allocated = await allocateDocumentNumber(tx, { form: "SALES_INVOICE", salesTypeId: body.salesTypeId, salesCenterId: body.salesCenterId, fiscalPeriodId: fiscalPeriod.id, date });
-      const number = allocated ? allocated.number : await nextNumber(tx.salesInvoice, fiscalPeriod.id);
+      const number = allocated.number;
       return tx.salesInvoice.create({
       data: {
         fiscalPeriodId: fiscalPeriod.id,
         number,
-        numberingPatternId: allocated?.numberingPatternId ?? null,
+        numberingPatternId: allocated.numberingPatternId,
         date,
         customerId: body.customerId,
         salesTypeId: body.salesTypeId,

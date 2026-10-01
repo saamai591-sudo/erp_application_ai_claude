@@ -82,6 +82,9 @@ async function assertLinesWithinPaymentAmount(lines: { pettyCashPaymentId: numbe
 async function validateLines(body: Body, custodianId: number, excludeSummaryId?: number) {
   if (!Array.isArray(body.lines) || body.lines.length === 0) throw new Error("خلاصه تنخواه باید حداقل یک ردیف داشته باشد");
   const headerDate = new Date(body.date);
+  const alreadyUsedTypeIds = new Set<number>(
+    excludeSummaryId ? (await prisma.pettyCashSummaryLine.findMany({ where: { summaryId: excludeSummaryId }, select: { paymentTypeId: true } })).map((x) => x.paymentTypeId) : []
+  );
 
   const cleaned: any[] = [];
   for (const [idx, l] of body.lines.entries()) {
@@ -93,11 +96,13 @@ async function validateLines(body: Body, custodianId: number, excludeSummaryId?:
     // طبق تصمیم صریح کاربر: هم‌الگوی فیلتر «بارگذاری» (services/pettyCashSummaryRemaining.ts، beforeDate) — فقط
     // چون آن فیلتر صرفاً سمت کلاینت است (لیست ردیف‌ها با POST/PUT یک‌جا ذخیره می‌شود)، اگر کاربر بعد از
     // بارگذاری، تاریخ سرصفحه را عوض کند این کنترل باید اینجا هم (سمت بک‌اند، در لحظه‌ی ذخیره) تکرار شود
-    if (payment.date >= headerDate) throw new Error(`ردیف ${n}: تاریخ پرداخت تنخواه باید از تاریخ سند کوچکتر باشد`);
+    if (payment.date > headerDate) throw new Error(`ردیف ${n}: تاریخ پرداخت تنخواه نباید بعد از تاریخ سند باشد`);
 
     if (!l.paymentTypeId) throw new Error(`ردیف ${n}: نوع پرداخت الزامی است`);
     const paymentType = await prisma.paymentType.findUnique({ where: { id: l.paymentTypeId } });
     if (!paymentType) throw new Error(`ردیف ${n}: نوع پرداخت نامعتبر است`);
+    // نوع پرداختِ غیرفعال برای خلاصه‌ی جدید قابل استفاده نیست؛ خلاصه‌ی موجود با همان نوعِ قبلی معتبر می‌ماند
+    if (!paymentType.isActive && !alreadyUsedTypeIds.has(paymentType.id)) throw new Error(`ردیف ${n}: نوع پرداخت «${paymentType.title}» غیرفعال است و برای سند جدید قابل انتخاب نیست`);
     if (paymentType.nature === "TO_BANK" || paymentType.nature === "TO_CASH_BOX" || paymentType.nature === "TO_PETTY_CASH") {
       throw new Error(`ردیف ${n}: این ماهیت نوع پرداخت (به بانک/به صندوق/به تنخواه) برای خلاصه تنخواه قابل استفاده نیست`);
     }
@@ -119,7 +124,7 @@ async function validateLines(body: Body, custodianId: number, excludeSummaryId?:
         if (f !== field && v) throw new Error(`ردیف ${n}: فقط سند مبنای متناسب با نوع پرداخت باید انتخاب شود`);
       }
       // طرف‌حساب سند مبنا همیشه طرف‌حساب خودِ پرداخت تنخواه است (فیلد جدایی در ردیف نیست)
-      const candidates = await candidatesForBasisType(basisType, payment.partyId);
+      const candidates = await candidatesForBasisType(basisType, payment.partyId, { nature: paymentType.nature });
       const info = candidates.find((c) => c.id === basisId);
       if (!info) throw new Error(`ردیف ${n}: سند مبنای انتخاب‌شده یافت نشد یا متعلق به طرف‌حساب این پرداخت تنخواه نیست`);
       if (basisType === "PURCHASE_INVOICE") purchaseInvoice = await prisma.purchaseInvoice.findUnique({ where: { id: basisId } });

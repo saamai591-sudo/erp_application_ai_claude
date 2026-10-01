@@ -53,6 +53,7 @@ interface DimRow {
   goodsItemId?: number;
   goodsItemIds?: number[];
   purchaseInvoiceId?: number;
+  documentType?: string;
   number?: number;
   date?: string;
   supplierCode?: string;
@@ -98,7 +99,7 @@ const GROUP_LEVEL_TAB_START = 2;
 
 const INFO_TEXT =
   "گزارش سلسله‌مراتبی خرید — در هر تب چندین ردیف قابل انتخاب است تا تب‌های بعدی (و تب‌های «اسناد»/«گردش») بر اساس آن فیلتر شوند. " +
-  "همه‌ی مبالغ به ارز پایه نمایش داده می‌شوند. مقدار/مبلغ برگشتی از اسناد «برگشت به تامین‌کننده» محاسبه می‌شود (مبلغ از قیمت‌گذاری انبار، بدون تخفیف/ارزش‌افزوده) و در تب «نوع خرید» زیر «نامشخص» می‌آید؛ تخفیف/ارزش‌افزوده/خالص هر تب دوطرفه‌اند (خرید منهای برگشت). فقط فاکتورهای خرید تاییدشده.";
+  "همه‌ی مبالغ به ارز پایه نمایش داده می‌شوند. مقدار/مبلغ برگشتی از اسناد «برگشت به تامین‌کننده» محاسبه می‌شود (مبلغ از قیمت‌گذاری انبار، بدون تخفیف/ارزش‌افزوده) و در تب «نوع خرید» زیر «نامشخص» می‌آید؛ تخفیف/ارزش‌افزوده/خالص هر تب دوطرفه‌اند (خرید منهای برگشت). فقط فاکتورهای خرید کالا و خرید خدمات تاییدشده (خدمات مقدار ندارد).";
 
 /** اعداد منفی به‌شکل متعارف حسابداری (داخل پرانتز و قرمز) نمایش داده می‌شوند — دقیقاً هم‌الگوی
  * AmountCell در OlapReports.tsx (کلاس olap-amount-negative، از قبل در styles.css تعریف شده). */
@@ -136,22 +137,22 @@ const LEDGER_COLUMNS: (BalanceTableColumn<LedgerRow> & { field: string })[] = [
   { header: "عنوان کالا", field: "goodsItemTitle", render: (r) => r.goodsItemTitle, sortValue: (r) => r.goodsItemTitle, filterType: "string", filterValue: (r) => r.goodsItemTitle },
   {
     header: "مقدار", field: "quantity",
-    render: (r) => <SignedCell value={r.type === "خرید" ? ledgerAsIs(r, "quantity") : ledgerNegated(r, "quantity")} />,
-    sortValue: (r) => (r.type === "خرید" ? ledgerAsIs(r, "quantity") : ledgerNegated(r, "quantity")),
-    filterType: "number", filterValue: (r) => (r.type === "خرید" ? ledgerAsIs(r, "quantity") : ledgerNegated(r, "quantity")), decimal: true,
+    render: (r) => <SignedCell value={r.type !== "برگشت از خرید" ? ledgerAsIs(r, "quantity") : ledgerNegated(r, "quantity")} />,
+    sortValue: (r) => (r.type !== "برگشت از خرید" ? ledgerAsIs(r, "quantity") : ledgerNegated(r, "quantity")),
+    filterType: "number", filterValue: (r) => (r.type !== "برگشت از خرید" ? ledgerAsIs(r, "quantity") : ledgerNegated(r, "quantity")), decimal: true,
   },
   { header: "فی", field: "unitPrice", render: (r) => formatAmountFa(r.unitPrice), sortValue: (r) => r.unitPrice, filterType: "number", filterValue: (r) => r.unitPrice },
   {
     header: "مبلغ", field: "amount",
-    render: (r) => <SignedCell value={r.type === "خرید" ? ledgerAsIs(r, "amount") : ledgerNegated(r, "amount")} />,
-    sortValue: (r) => (r.type === "خرید" ? ledgerAsIs(r, "amount") : ledgerNegated(r, "amount")),
-    filterType: "number", filterValue: (r) => (r.type === "خرید" ? ledgerAsIs(r, "amount") : ledgerNegated(r, "amount")), decimal: true,
+    render: (r) => <SignedCell value={r.type !== "برگشت از خرید" ? ledgerAsIs(r, "amount") : ledgerNegated(r, "amount")} />,
+    sortValue: (r) => (r.type !== "برگشت از خرید" ? ledgerAsIs(r, "amount") : ledgerNegated(r, "amount")),
+    filterType: "number", filterValue: (r) => (r.type !== "برگشت از خرید" ? ledgerAsIs(r, "amount") : ledgerNegated(r, "amount")), decimal: true,
   },
   {
     header: "تخفیف", field: "discount",
-    render: (r) => <SignedCell value={r.type === "خرید" ? ledgerNegated(r, "discount") : ledgerAsIs(r, "discount")} />,
-    sortValue: (r) => (r.type === "خرید" ? ledgerNegated(r, "discount") : ledgerAsIs(r, "discount")),
-    filterType: "number", filterValue: (r) => (r.type === "خرید" ? ledgerNegated(r, "discount") : ledgerAsIs(r, "discount")), decimal: true,
+    render: (r) => <SignedCell value={r.type !== "برگشت از خرید" ? ledgerNegated(r, "discount") : ledgerAsIs(r, "discount")} />,
+    sortValue: (r) => (r.type !== "برگشت از خرید" ? ledgerNegated(r, "discount") : ledgerAsIs(r, "discount")),
+    filterType: "number", filterValue: (r) => (r.type !== "برگشت از خرید" ? ledgerNegated(r, "discount") : ledgerAsIs(r, "discount")), decimal: true,
   },
   { header: "خالص خرید", field: "netAmount", render: (r) => formatAmountFa(r.netAmount), sortValue: (r) => r.netAmount, filterType: "number", filterValue: (r) => r.netAmount, decimal: true },
   { header: "ارزش افزوده", field: "vatAmount", render: (r) => formatAmountFa(r.vatAmount), sortValue: (r) => r.vatAmount, filterType: "number", filterValue: (r) => r.vatAmount, decimal: true },
@@ -411,6 +412,7 @@ export default function PurchaseReview() {
 
     if (activeTab === DOCUMENTS_TAB) {
       prefix.push(
+        { header: "نوع", render: (r) => r.documentType || "—", sortValue: (r) => r.documentType || "", width: "90px", filterType: strFilter, filterValue: (r) => r.documentType || "" },
         { header: "شماره", render: (r) => toFaDigits(String(r.number)), sortValue: (r) => r.number || 0, width: "80px", filterType: "number", filterValue: (r) => r.number ?? null },
         { header: "تاریخ", render: (r) => (r.date ? formatJalaliDate(r.date) : "—"), sortValue: (r) => r.date || "", filterType: "date", filterValue: (r) => r.date?.slice(0, 10) },
         { header: "کد تامین‌کننده", render: (r) => (r.supplierCode != null ? toFaDigits(String(r.supplierCode)) : "—"), sortValue: (r) => r.supplierCode ?? "", filterType: strFilter, filterValue: (r) => r.supplierCode ?? "" },
@@ -497,7 +499,7 @@ export default function PurchaseReview() {
           rows={ledgerRows}
           columns={LEDGER_COLUMNS}
           selectable={false}
-          onRowDoubleClick={(r) => openTab(r.type === "خرید" ? `/purchase-invoices/${r.documentId}/edit` : `/supplier-returns/${r.documentId}/edit`)}
+          onRowDoubleClick={(r) => openTab(r.type === "خرید" ? `/purchase-invoices/${r.documentId}/edit` : r.type === "خرید خدمات" ? `/service-purchase-invoices/${r.documentId}/edit` : `/supplier-returns/${r.documentId}/edit`)}
           loading={tabLoader.loading}
           emptyText="گردشی یافت نشد"
           restoreFilters={ledgerFilters}

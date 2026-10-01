@@ -26,10 +26,11 @@ export async function remainingOfPettyCashPayment(pettyCashPaymentId: number, ex
 
 /** پرداخت‌های تنخواهِ یک تنخواه‌دار که هنوز مانده‌ی قابل‌تخصیص دارند — برای انتخابگر «بارگذاری پرداخت‌های تنخواه» */
 // فقط طبق تصمیم صریح کاربر: در «بارگذاری» خلاصه تنخواه، فقط پرداخت‌های تنخواه‌ای که تاریخشان از تاریخ
-// سرصفحه‌ی خلاصه تنخواه کوچکتر است قابل بارگذاری‌اند (نه پرداخت‌های با تاریخ برابر یا بعد از آن)
+// سرصفحه‌ی خلاصه تنخواه کوچکتر «یا مساوی» است قابل بارگذاری‌اند (پرداخت‌های هم‌تاریخ با خلاصه هم می‌آیند؛ بعد از آن نه).
+// (نام پارامتر beforeDate تاریخاً مانده؛ مرز اکنون شامل خودِ همان تاریخ است.)
 export async function pickablePettyCashPayments(custodianId: number, excludeSummaryId?: number, beforeDate?: Date) {
   const payments = await prisma.pettyCashPayment.findMany({
-    where: { custodianId, ...(beforeDate ? { date: { lt: beforeDate } } : {}) },
+    where: { custodianId, ...(beforeDate ? { date: { lte: beforeDate } } : {}) },
     include: {
       party: true,
       paymentType: true,
