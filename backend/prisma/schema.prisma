@@ -642,8 +642,6 @@ model Account {
   goodsServiceAccountingSettings GoodsServiceAccountingSetting[]
   treasuryAccountSettings        TreasuryAccountSetting[]
   lines                          JournalEntryLine[]
-  receiptTypes                   ReceiptType[]
-  paymentTypes                   PaymentType[]
 
   @@unique([parentId, code])
 }
@@ -1384,19 +1382,17 @@ model SalesType {
 // طبق Documents/ReceiptType.md: مستر «نوع دریافت» — نوع دریافت (nature) تعیین می‌کند این دریافت اساساً
 // چه ماهیتی دارد (از مشتری/پیش‌دریافت/از تامین‌کننده/از سایر/ارزش‌افزوده فروش/ارزش‌افزوده خرید)، و
 // basisType تعیین می‌کند دریافت بر چه سندی مبتنی است — مقادیر basisType مجاز برای هر nature محدود است
-// (نگاه کنید به ALLOWED_BASIS_TYPES در routes/receiptTypes.ts، تنها محل این قاعده). accountId (معین
-// حسابداری) فقط برای basisType=NONE پر می‌شود؛ برای بقیه‌ی مقادیر همیشه null است (نه فقط مخفی در UI).
+// (نگاه کنید به ALLOWED_BASIS_TYPES در routes/receiptTypes.ts، تنها محل این قاعده). معین حسابداریِ نوع دریافت
+// دیگر روی خود نوع نیست؛ در «تعیین حسابهای معین» (TreasuryAccountSetting، RECEIPT_SUBJECT) تعریف می‌شود.
 model ReceiptType {
   id              Int              @id @default(autoincrement())
   code            Int              @unique
   title           String           @unique
   nature          ReceiptNature
   basisType       ReceiptBasisType
-  accountId       Int?
   isActive        Boolean          @default(true)
   hasTransactions Boolean          @default(false)
   createdAt       DateTime         @default(now())
-  account         Account?         @relation(fields: [accountId], references: [id])
   receiptSettlementLines ReceiptSettlementLine[]
   treasuryAccountSettings TreasuryAccountSetting[]
   openingCheques ChequeItem[] @relation("ChequeOpeningReceiptType")
@@ -1404,19 +1400,17 @@ model ReceiptType {
 
 // مستر «نوع پرداخت» — هم‌الگوی ReceiptType برای فرم پرداخت (اعلامیه پرداخت): nature تعیین می‌کند این پرداخت
 // اساساً چه ماهیتی دارد و basisType تعیین می‌کند بر چه سندی مبتنی است (نگاه کنید به ALLOWED_BASIS_TYPES در
-// routes/paymentTypes.ts، تنها محل این قاعده). accountId (معین حسابداری) فقط برای basisType=NONE پر می‌شود؛
-// برای بقیه‌ی مقادیر همیشه null است.
+// routes/paymentTypes.ts، تنها محل این قاعده). معین حسابداریِ نوع پرداخت دیگر روی خود نوع نیست؛
+// در «تعیین حسابهای معین» (TreasuryAccountSetting، PAYMENT_SUBJECT) تعریف می‌شود.
 model PaymentType {
   id                     Int                     @id @default(autoincrement())
   code                   Int                     @unique
   title                  String                  @unique
   nature                 PaymentNature
   basisType              PaymentBasisType
-  accountId              Int?
   isActive               Boolean                 @default(true)
   hasTransactions        Boolean                 @default(false)
   createdAt              DateTime                @default(now())
-  account                Account?                @relation(fields: [accountId], references: [id])
   paymentSettlementLines PaymentSettlementLine[]
   treasuryAccountSettings TreasuryAccountSetting[]
   openingCheques ChequeItem[] @relation("ChequeOpeningPaymentType")

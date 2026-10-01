@@ -17,8 +17,7 @@ const FORM = findFormPrefix("payment-types");
 // ارزش‌افزوده خرید → فاکتور خرید؛ پیش‌پرداخت → سفارش خرید؛ پرداخت به مشتری (استرداد) و ارزش‌افزوده فروش →
 // فاکتور فروش.
 //
-// accountId (معین حسابداری) فقط برای basisType=NONE معنا دارد: در آن حالت الزامی است؛ برای بقیه‌ی
-// basisType ها سرور هرگز آن را ذخیره نمی‌کند (حتی اگر کلاینت مقداری بفرستد).
+// معین حسابداری روی نوع پرداخت نیست؛ در «تعیین حسابهای معین» (خزانه‌داری، موضوع پرداخت) تعریف می‌شود.
 // =========================================================================
 
 const ALLOWED_BASIS_TYPES: Record<string, string[]> = {
@@ -35,22 +34,18 @@ const ALLOWED_BASIS_TYPES: Record<string, string[]> = {
   TO_PETTY_CASH: ["NONE"],
 };
 
-// ماهیت‌هایی که معین حسابداری ندارند: در صدور سند، معین از «تعیین حسابهای معین» حساب بانکی/صندوق/تنخواهِ انتخاب‌شده در ردیف موضوعات پرداخت می‌آید
-const ACCOUNTLESS_NATURES = ["TO_BANK", "TO_CASH_BOX", "TO_PETTY_CASH"];
-
 const router = Router();
 
 router.get("/payment-types", async (_req, res) => {
   res.json(
     await prisma.paymentType.findMany({
-      include: { account: { include: { level: true } } },
       orderBy: { code: "asc" },
     })
   );
 });
 
 router.post("/payment-types", can(`${FORM}.create`), async (req, res) => {
-  const body = req.body as { code?: number; title: string; nature: string; basisType: string; accountId?: number | null; isActive?: boolean };
+  const body = req.body as { code?: number; title: string; nature: string; basisType: string; isActive?: boolean };
   if (!body.title) return res.status(400).json({ error: "عنوان الزامی است" });
   if (!body.nature) return res.status(400).json({ error: "ماهیت پرداخت الزامی است" });
   if (!body.basisType) return res.status(400).json({ error: "نوع مبنا الزامی است" });
@@ -61,21 +56,11 @@ router.post("/payment-types", can(`${FORM}.create`), async (req, res) => {
     return res.status(400).json({ error: "نوع مبنای انتخاب‌شده با ماهیت پرداخت سازگار نیست" });
   }
 
-  const isNoBasis = body.basisType === "NONE" && !ACCOUNTLESS_NATURES.includes(body.nature);
-  if (isNoBasis && !body.accountId) {
-    return res.status(400).json({ error: "برای «بدون مبنا»، انتخاب معین حسابداری الزامی است" });
-  }
 
   try {
     const dup = await prisma.paymentType.findUnique({ where: { title: body.title } });
     if (dup) return res.status(400).json({ error: "عنوان تکراری است" });
 
-    if (isNoBasis) {
-      const account = await prisma.account.findUnique({ where: { id: body.accountId! }, include: { level: true } });
-      if (!account || account.level.title !== "معین") {
-        return res.status(400).json({ error: "حساب انتخاب‌شده باید در سطح «معین» باشد" });
-      }
-    }
 
     const finalCode = body.code ?? (await nextSerialNumber(prisma.paymentType, "code"));
     const created = await prisma.paymentType.create({
@@ -84,10 +69,8 @@ router.post("/payment-types", can(`${FORM}.create`), async (req, res) => {
         title: body.title,
         nature: body.nature as any,
         basisType: body.basisType as any,
-        accountId: isNoBasis ? body.accountId! : null,
         isActive: body.isActive ?? true,
       },
-      include: { account: { include: { level: true } } },
     });
     res.status(201).json(created);
   } catch (e: any) {
@@ -98,12 +81,12 @@ router.post("/payment-types", can(`${FORM}.create`), async (req, res) => {
 
 router.put("/payment-types/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
-  const body = req.body as { title?: string; nature?: string; basisType?: string; accountId?: number | null; isActive?: boolean };
+  const body = req.body as { title?: string; nature?: string; basisType?: string; isActive?: boolean };
 
   const existing = await prisma.paymentType.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "نوع پرداخت یافت نشد" });
-  if (existing.hasTransactions && (body.nature !== undefined || body.basisType !== undefined || body.accountId !== undefined)) {
-    return res.status(400).json({ error: "این نوع پرداخت گردش دارد و ماهیت/مبنا/معین آن قابل ویرایش نیست" });
+  if (existing.hasTransactions && (body.nature !== undefined || body.basisType !== undefined)) {
+    return res.status(400).json({ error: "این نوع پرداخت گردش دارد و ماهیت/مبنا آن قابل ویرایش نیست" });
   }
 
   const nature = body.nature ?? existing.nature;
@@ -120,19 +103,8 @@ router.put("/payment-types/:id", can(`${FORM}.edit`), async (req, res) => {
     return res.status(400).json({ error: "نوع مبنای انتخاب‌شده با ماهیت پرداخت سازگار نیست" });
   }
 
-  const isNoBasis = basisType === "NONE" && !ACCOUNTLESS_NATURES.includes(nature);
-  const accountId = body.accountId !== undefined ? body.accountId : existing.accountId;
-  if (isNoBasis && !accountId) {
-    return res.status(400).json({ error: "برای «بدون مبنا»، انتخاب معین حسابداری الزامی است" });
-  }
 
   try {
-    if (isNoBasis && accountId) {
-      const account = await prisma.account.findUnique({ where: { id: accountId }, include: { level: true } });
-      if (!account || account.level.title !== "معین") {
-        return res.status(400).json({ error: "حساب انتخاب‌شده باید در سطح «معین» باشد" });
-      }
-    }
 
     const updated = await prisma.paymentType.update({
       where: { id },
@@ -140,10 +112,8 @@ router.put("/payment-types/:id", can(`${FORM}.edit`), async (req, res) => {
         title: body.title,
         nature: body.nature as any,
         basisType: body.basisType as any,
-        accountId: isNoBasis ? accountId : null,
         isActive: body.isActive,
       },
-      include: { account: { include: { level: true } } },
     });
     res.json(updated);
   } catch (e: any) {

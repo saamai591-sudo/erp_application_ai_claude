@@ -13,7 +13,7 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 //   حواله / پوز   → معین «حساب بانکی» (BANK_ACCOUNT)               — تفصیل: خودِ حساب بانکی
 //   چک            → معین «چک دریافتی» به‌ازای نوع چک ردیف (RECEIVABLE_CHEQUE) — تفصیل: طرف حساب رسید
 // بستانکار — به‌ازای هر ردیف موضوعات دریافت، بر اساس مبنای «نوع دریافت»:
-//   بدون مبنا              → معین خودِ نوع دریافت (ReceiptType.accountId)
+//   بدون مبنا / سفارش…     → معین «موضوع دریافت» همان نوع در «تعیین حسابهای معین» (RECEIPT_SUBJECT)
 //   فاکتور فروش            → «دریافتنی فروش» نوع فروش فاکتور (حسابداری کالا و خدمت: SALES_RECEIVABLE)
 //   فاکتور خرید            → «پرداختنی خرید» نوع خرید فاکتور (PURCHASE_PAYABLE)
 //   سفارش فروش/پیش‌فاکتور  → معین «موضوع دریافت» (RECEIPT_SUBJECT)
@@ -41,7 +41,7 @@ export async function issueReceiptJournalEntry(receiptId: number) {
       party: true,
       instrumentLines: { include: { currency: true, cashBox: true, bankAccount: true }, orderBy: { rowOrder: "asc" } },
       settlementLines: {
-        include: { receiptType: { include: { account: true } }, party: true, currency: true, salesInvoice: true, purchaseInvoice: true },
+        include: { receiptType: true, party: true, currency: true, salesInvoice: true, purchaseInvoice: true },
         orderBy: { rowOrder: "asc" },
       },
     },
@@ -117,10 +117,6 @@ export async function issueReceiptJournalEntry(receiptId: number) {
     let basisFx: { currencyId: number; fxRate: number } | null = null;
 
     switch (rt.basisType) {
-      case "NONE":
-        account = rt.account ?? undefined;
-        if (!account) errors.push(`ردیف موضوعات دریافت ${n}: برای نوع دریافت «${rt.title}» معین تعریف نشده است`);
-        break;
       case "SALES_INVOICE": {
         const inv = l.salesInvoice;
         if (!inv) { errors.push(`ردیف موضوعات دریافت ${n}: فاکتور فروش انتخاب نشده است`); break; }
