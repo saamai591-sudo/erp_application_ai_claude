@@ -281,7 +281,7 @@ async function cleanCashLines(lines: CashLineIn[] | undefined, baseCurrencyId: n
 }
 
 // unchangedAccountId: حساب فعلیِ خودِ چک (ردیف موجود) — اگر تغییر نکرده، شرط «دارای دسته چک» دوباره کنترل نمی‌شود (چک‌های منتقل‌شده‌ی قدیمی)
-async function cleanCheque(l: ChequeIn, idx: number, direction: "RECEIVABLE" | "PAYABLE", tab: string, unchangedAccountId?: number | null) {
+async function cleanCheque(l: ChequeIn, idx: number, direction: "RECEIVABLE" | "PAYABLE", tab: string, unchangedAccountId?: number | null, unchangedTypeId?: number | null) {
   const label = `${tab} — ردیف ${idx + 1}`;
   if (!l.number || !String(l.number).trim()) throw new Error(`${label}: شماره چک الزامی است`);
   if (!l.typeId) throw new Error(`${label}: نوع چک الزامی است`);
@@ -292,6 +292,17 @@ async function cleanCheque(l: ChequeIn, idx: number, direction: "RECEIVABLE" | "
   const allowed = direction === "RECEIVABLE" ? RECEIVABLE_STATUSES : PAYABLE_STATUSES;
   if (!allowed.includes(l.status)) throw new Error(`${label}: وضعیت چک نامعتبر است`);
   if (!(await prisma.party.findUnique({ where: { id: l.partyId } }))) throw new Error(`${label}: طرف حساب یافت نشد`);
+  // «نوع دریافت/پرداخت» چکِ افتتاحیه: نوع غیرفعال برای چک جدید قابل انتخاب نیست؛ چکِ موجود با همان نوعِ قبلی معتبر می‌ماند
+  if (direction === "RECEIVABLE" && l.receiptTypeId) {
+    const t = await prisma.receiptType.findUnique({ where: { id: l.receiptTypeId } });
+    if (!t) throw new Error(`${label}: نوع دریافت یافت نشد`);
+    if (!t.isActive && t.id !== unchangedTypeId) throw new Error(`${label}: نوع دریافت «${t.title}» غیرفعال است و قابل انتخاب نیست`);
+  }
+  if (direction === "PAYABLE" && l.paymentTypeId) {
+    const t = await prisma.paymentType.findUnique({ where: { id: l.paymentTypeId } });
+    if (!t) throw new Error(`${label}: نوع پرداخت یافت نشد`);
+    if (!t.isActive && t.id !== unchangedTypeId) throw new Error(`${label}: نوع پرداخت «${t.title}» غیرفعال است و قابل انتخاب نیست`);
+  }
   if (direction === "RECEIVABLE") {
     if (!(await prisma.receivableChequeType.findUnique({ where: { id: l.typeId } }))) throw new Error(`${label}: نوع چک دریافتی یافت نشد`);
     if (l.bankBranchId && !(await prisma.bankBranch.findUnique({ where: { id: l.bankBranchId } }))) throw new Error(`${label}: شعبه بانک یافت نشد`);
@@ -351,7 +362,7 @@ async function syncCheques(tx: any, fiscalPeriodId: number, direction: "RECEIVAB
   const seen = new Set<number>();
   for (const [idx, l] of rows.entries()) {
     // eslint-disable-next-line no-await-in-loop
-    const amount = await cleanCheque(l, idx, direction, tab, l.id ? byId.get(l.id)?.ownerBankAccountId : null);
+    const amount = await cleanCheque(l, idx, direction, tab, l.id ? byId.get(l.id)?.ownerBankAccountId : null, l.id ? (direction === "RECEIVABLE" ? byId.get(l.id)?.openingReceiptTypeId : byId.get(l.id)?.openingPaymentTypeId) ?? null : null);
     const data = chequeData(l, direction, amount, baseCurrencyId);
     if (l.id) {
       const ex = byId.get(l.id);
