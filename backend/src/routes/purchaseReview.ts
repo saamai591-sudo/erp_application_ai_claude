@@ -248,9 +248,12 @@ router.get("/purchase-review/documents", can(`${FORM}.view`), async (req, res) =
     const rows = aggregate(
       lines,
       [],
-      (l) => String((l as PurchaseLine).purchaseInvoiceId),
+      (l) => `${(l as PurchaseLine).documentKind}:${(l as PurchaseLine).purchaseInvoiceId}`,
       (_key, l) => ({
-        purchaseInvoiceId: (l as PurchaseLine).purchaseInvoiceId,
+        // فیلتر تب‌های بعدی: مثبت = فاکتور خرید کالا، منفی = فاکتور خرید خدمات (جدول‌های جدا id یکسان دارند)
+        purchaseInvoiceId: (l as PurchaseLine).documentKind === "SERVICE" ? -(l as PurchaseLine).purchaseInvoiceId : (l as PurchaseLine).purchaseInvoiceId,
+        documentId: (l as PurchaseLine).purchaseInvoiceId,
+        documentType: (l as PurchaseLine).documentKind === "SERVICE" ? "خرید خدمات" : "خرید",
         number: (l as PurchaseLine).purchaseInvoiceNumber,
         date: l.date,
         supplierCode: l.supplierCode,
@@ -321,7 +324,7 @@ router.get("/purchase-review/ledger", can(`${FORM}.view`), async (req, res) => {
       const netAmount = l.amount - l.discount;
       return {
         id: l.lineId,
-        type: "خرید",
+        type: l.documentKind === "SERVICE" ? "خرید خدمات" : "خرید",
         documentId: l.purchaseInvoiceId,
         number: l.purchaseInvoiceNumber,
         date: l.date,

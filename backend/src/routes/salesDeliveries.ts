@@ -367,7 +367,7 @@ router.get("/sales-deliveries/:id", can(`${FORM}.view`), async (req: AuthedReque
       warehouse: true,
       fiscalPeriod: true,
       lines: {
-        include: { goodsItem: true, unit: true, batches: { include: { batch: true } }, physicalLocation: true, serials: { include: { serial: true } } },
+        include: { goodsItem: true, unit: true, batches: { include: { batch: true } }, physicalLocation: true, serials: { include: { serial: true } }, sourceSalesOrderLine: { include: { salesOrder: true } }, sourceSalesQuoteLine: { include: { salesQuote: true } } },
         orderBy: { rowOrder: "asc" },
       },
     },
@@ -396,6 +396,8 @@ router.get("/sales-deliveries/:id", can(`${FORM}.view`), async (req: AuthedReque
       id: l.id,
       sourceSalesOrderLineId: l.sourceSalesOrderLineId,
       sourceSalesQuoteLineId: l.sourceSalesQuoteLineId,
+      // شماره‌ی سند مبدأ (سفارش فروش یا پیش‌فاکتور) برای نمایش در گرید ردیف‌ها؛ در ویرایش، ردیف مبدأ ممکن است دیگر در فهرست «قابل انتخاب» نباشد
+      sourceNumber: l.sourceSalesOrderLine?.salesOrder?.number ?? l.sourceSalesQuoteLine?.salesQuote?.number ?? null,
       goodsItemId: l.goodsItemId,
       goodsItemCode: l.goodsItem.fullCode,
       goodsItemTitle: l.goodsItem.title,

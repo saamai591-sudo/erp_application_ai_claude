@@ -16,6 +16,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { useTabs } from "../lib/TabsContext";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
+import { selectableTypes, typeLabel } from "../lib/typeOptions";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
@@ -413,7 +414,7 @@ function SummaryForm({ editId }: { editId?: number }) {
   }, [editId]);
 
   // مانده‌های پرداخت‌های تنخواهِ همین تنخواه‌دار (شامل همان‌هایی که در همین سند استفاده شده‌اند — مانده‌ی برگشتی، مصرفِ خودِ این سند را حساب نمی‌کند)
-  // فقط پرداخت‌های تنخواه‌ای که تاریخشان از تاریخ سرصفحه‌ی همین خلاصه تنخواه کوچکتر است (طبق تصمیم صریح کاربر)
+  // فقط پرداخت‌های تنخواه‌ای که تاریخشان از تاریخ سرصفحه‌ی همین خلاصه تنخواه کوچکتر یا مساوی است (طبق تصمیم صریح کاربر)
   useEffect(() => {
     if (!header.custodianId || !header.date) {
       setPickable([]);
@@ -852,7 +853,7 @@ function ModifyPaymentTypeDialog({
   const [candidates, setCandidates] = useState<BasisCandidate[]>([]);
 
   useEffect(() => {
-    api.get("/payment-types").then((pts: PaymentTypeOption[]) => setPaymentTypes(pts.filter((t) => t.isActive && !PETTY_CASH_INELIGIBLE_NATURES.has(t.nature))));
+    api.get("/payment-types").then((pts: PaymentTypeOption[]) => setPaymentTypes(pts.filter((t) => !PETTY_CASH_INELIGIBLE_NATURES.has(t.nature))));
   }, []);
 
   const paymentType = paymentTypes.find((t) => String(t.id) === paymentTypeId);
@@ -897,7 +898,7 @@ function ModifyPaymentTypeDialog({
           <label>نوع پرداخت<RequiredMark /></label>
           <select value={paymentTypeId} onChange={(e) => onPaymentTypeChange(e.target.value)}>
             <option value="">انتخاب کنید</option>
-            {paymentTypes.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+            {selectableTypes(paymentTypes, Number(paymentTypeId) || undefined).map((t) => <option key={t.id} value={t.id}>{typeLabel(t)}</option>)}
           </select>
         </div>
         {basisType !== "NONE" && (
