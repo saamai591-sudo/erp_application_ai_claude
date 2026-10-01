@@ -2242,6 +2242,7 @@ model SalesQuoteLine {
   vatAmount       Decimal          @default(0) @db.Decimal(36, 10)
   description     String?
   salesOrderLines SalesOrderLine[] @relation("SalesOrderSourceSalesQuoteLine")
+  salesInvoiceLines SalesInvoiceLine[] @relation("SalesInvoiceSourceSalesQuoteLine")
   inventoryLines  InventoryDocumentLine[] @relation("InventoryLineSourceSalesQuoteLine")
   goodsItem       GoodsItem        @relation(fields: [goodsItemId], references: [id])
   salesQuote      SalesQuote       @relation(fields: [salesQuoteId], references: [id], onDelete: Cascade)
@@ -2288,6 +2289,7 @@ model SalesOrderLine {
   vatAmount              Decimal                 @default(0) @db.Decimal(36, 10)
   description            String?
   salesDeliveryLines     SalesDeliveryLine[]     @relation("SalesDeliverySourceSalesOrderLine")
+  salesInvoiceLines      SalesInvoiceLine[]      @relation("SalesInvoiceSourceSalesOrderLine")
   goodsItem              GoodsItem               @relation(fields: [goodsItemId], references: [id])
   salesOrder             SalesOrder              @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
   sourceSalesQuoteLine   SalesQuoteLine?         @relation("SalesOrderSourceSalesQuoteLine", fields: [sourceSalesQuoteLineId], references: [id])
@@ -2621,7 +2623,6 @@ model SalesInvoice {
   fiscalPeriodId         Int
   number                 Int
   date                   DateTime                @db.Date
-  basis                  SalesInvoiceBasis
   customerId             Int
   salesTypeId            Int
   salesCenterId          Int
@@ -2659,7 +2660,12 @@ model SalesInvoiceLine {
   id                    Int                    @id @default(autoincrement())
   salesInvoiceId        Int
   rowOrder              Int                    @default(0)
+  /// «مبنا» در سطح ردیف (تنها منبع حقیقت — هدر فاکتور دیگر مبنا ندارد): بدون مبنا / حواله فروش / سفارش فروش / پیش‌فاکتور.
+  /// تعیین می‌کند کدام یک از sourceInventoryLineId / sourceSalesOrderLineId / sourceSalesQuoteLineId پر است (بدون مبنا: هیچ‌کدام).
+  basis                 SalesInvoiceLineBasis
   sourceInventoryLineId Int?
+  sourceSalesOrderLineId Int?
+  sourceSalesQuoteLineId Int?
   goodsItemId           Int
   unitId                Int
   quantity              Decimal                @db.Decimal(36, 10)
@@ -2676,6 +2682,8 @@ model SalesInvoiceLine {
   goodsItem             GoodsItem              @relation(fields: [goodsItemId], references: [id])
   salesInvoice          SalesInvoice           @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
   sourceInventoryLine   InventoryDocumentLine? @relation("SalesInvoiceSourceInventoryLine", fields: [sourceInventoryLineId], references: [id])
+  sourceSalesOrderLine  SalesOrderLine?        @relation("SalesInvoiceSourceSalesOrderLine", fields: [sourceSalesOrderLineId], references: [id])
+  sourceSalesQuoteLine  SalesQuoteLine?        @relation("SalesInvoiceSourceSalesQuoteLine", fields: [sourceSalesQuoteLineId], references: [id])
   unit                  UnitOfMeasure          @relation(fields: [unitId], references: [id])
 }
 
@@ -3007,9 +3015,12 @@ enum SalesDeliveryBasis {
   SALES_ORDER
 }
 
-enum SalesInvoiceBasis {
+/// مبنای هر ردیف فاکتور فروش (در سطح ردیف، نه هدر)
+enum SalesInvoiceLineBasis {
   NO_BASIS
   SALES_DELIVERY
+  SALES_ORDER
+  SALES_QUOTE
 }
 
 enum SalesReturnInvoiceBasis {
