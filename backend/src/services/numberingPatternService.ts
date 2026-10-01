@@ -16,6 +16,9 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 
 export type NumberingFormKey = "SALES_INVOICE" | "SALES_RETURN";
 
+/** پیام ذخیره‌ی سند بدون الگوی شماره‌گذاری (فاکتور فروش / برگشت از فروش) */
+export const NO_PATTERN_MESSAGE = "برای این مرکز و نوع فروش، الگوی شماره‌گذاری تعریف نشده است.";
+
 export const FORM_TITLE: Record<NumberingFormKey, string> = { SALES_INVOICE: "فاکتور فروش", SALES_RETURN: "برگشت از فروش" };
 
 /** الگوی مربوط به یک سند (بر اساس فرم + نوع فروش + مرکز فروش) یا null اگر هیچ الگویی ندارد (شماره‌گذاری قدیمی) */
@@ -65,14 +68,14 @@ function assertDateAllowed(pattern: { title: string; restrictEarlierDates: boole
 
 /**
  * شماره‌ی بعدی را اتمی می‌گیرد. باید با tx یک تراکنش تعاملی (prisma.$transaction(async tx => …)) صدا زده شود و سند در همان تراکنش ساخته شود.
- * اگر سند الگویی ندارد null برمی‌گرداند (caller شماره‌گذاری قدیمی را به کار می‌برد).
+ * اگر برای ترکیب (فرم، نوع فروش، مرکز فروش) الگویی تعریف نشده باشد، ذخیره‌ی سند ممنوع است (NO_PATTERN_MESSAGE).
  */
 export async function allocateDocumentNumber(
   tx: any,
   input: { form: NumberingFormKey; salesTypeId: number; salesCenterId: number; fiscalPeriodId: number; date: Date }
-): Promise<{ number: number; numberingPatternId: number } | null> {
+): Promise<{ number: number; numberingPatternId: number }> {
   const pattern = await findPatternFor(tx, input.form, input.salesTypeId, input.salesCenterId);
-  if (!pattern) return null;
+  if (!pattern) throw new Error(NO_PATTERN_MESSAGE);
 
   const scopeKey = scopeOf(pattern, input.fiscalPeriodId);
   // مقدار آغازین این محدوده: «آخرین شماره»ی مهاجرت (در حالت ریست سالانه فقط برای سال مالی ثبت‌کننده‌ی الگو، بقیه‌ی سال‌ها از صفر)
@@ -99,13 +102,14 @@ export async function assertEditAllowed(
   existing: { id: number; date: Date; fiscalPeriodId: number; numberingPatternId: number | null },
   next: { form: NumberingFormKey; salesTypeId: number; salesCenterId: number; fiscalPeriodId: number; date: Date }
 ) {
-  // سند قدیمی (بدون الگو) شماره‌ی قدیمی‌اش را نگه می‌دارد، حتی اگر ترکیبش حالا در یک الگو آمده باشد
-  if (existing.numberingPatternId === null) return;
+  // ذخیره بدون الگوی قابل اعمال ممنوع است (هم ایجاد، هم ویرایش)
   const nextPattern = await findPatternFor(tx, next.form, next.salesTypeId, next.salesCenterId);
-  if (nextPattern?.id !== existing.numberingPatternId) {
+  if (!nextPattern) throw new Error(NO_PATTERN_MESSAGE);
+  // سند قدیمی (بدون الگو) که ترکیبش حالا الگو دارد، شماره‌ی قدیمی‌اش را نگه می‌دارد
+  if (existing.numberingPatternId === null) return;
+  if (nextPattern.id !== existing.numberingPatternId) {
     throw new Error("با تغییر نوع فروش/مرکز فروش، سند به الگوی شماره‌گذاری دیگری می‌رود و شماره‌ی آن قابل تغییر نیست؛ مقدار قبلی را نگه دارید");
   }
-  if (!nextPattern) return;
   if (nextPattern.resetPerFiscalYear && next.fiscalPeriodId !== existing.fiscalPeriodId) {
     throw new Error("این الگوی شماره‌گذاری در هر سال مالی از نو شروع می‌شود؛ تاریخ سند نمی‌تواند به سال مالی دیگری منتقل شود");
   }
