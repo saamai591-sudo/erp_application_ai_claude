@@ -52,7 +52,7 @@ export async function candidatesForBasisType(
     const invoices = await withoutFiscalPeriodScope(() =>
       prisma.purchaseInvoice.findMany({
         where: { partyId, status: "APPROVED" },
-        include: { lines: true, otherCostLines: true, currency: true, paymentSettlementLines: { include: { payment: true, paymentType: true } }, pettyCashPayments: { include: { paymentType: true } } },
+        include: { lines: true, otherCostLines: true, currency: true, paymentSettlementLines: { include: { payment: true, paymentType: true } }, pettyCashPayments: { include: { paymentType: true } }, advanceAllocations: true },
       })
     );
     return invoices.map((inv: any) => {
@@ -62,7 +62,10 @@ export async function candidatesForBasisType(
         group === "VAT"
           ? [...inv.lines, ...inv.otherCostLines].reduce((s: number, l: any) => s + Number(l.vatAmount || 0), 0) / fxRateInv
           : inv.lines.reduce((s: number, l: any) => s + Number(l.amount), 0) + inv.otherCostLines.reduce((s: number, l: any) => s + Number(l.amount), 0);
-      const applied = sumApplied(inv.paymentSettlementLines, group, excludePaymentId) + sumPettyCashApplied(inv.pettyCashPayments, group, excludePettyCashPaymentId);
+      // «پیش‌پرداخت ارزش افزوده»ی تخصیص‌یافته به همین فاکتور (به ارز فاکتور) هم از مانده‌ی ارزش‌افزوده کم می‌شود:
+      //   مانده = ارزش‌افزوده‌ی فاکتور − پیش‌پرداخت‌های ارزش افزوده‌ی تخصیص‌یافته − پرداخت‌های «ارزش افزوده خرید» (تاییدشده/تنخواه)
+      const advanceVat = group === "VAT" ? inv.advanceAllocations.filter((a: any) => a.nature === "ADVANCE_VAT_PAYMENT").reduce((s: number, a: any) => s + Number(a.amount), 0) : 0;
+      const applied = advanceVat + sumApplied(inv.paymentSettlementLines, group, excludePaymentId) + sumPettyCashApplied(inv.pettyCashPayments, group, excludePettyCashPaymentId);
       return {
         id: inv.id, number: inv.number, date: inv.date, currencyId: inv.currencyId, currencyTitle: inv.currency.title,
         fxRate: Number(inv.fxRate), partyId, total, applied, remaining: total - applied,

@@ -24,6 +24,8 @@ const FORM = findFormPrefix("payment-types");
 const ALLOWED_BASIS_TYPES: Record<string, string[]> = {
   SUPPLIER_PAYMENT: ["NONE", "PURCHASE_INVOICE"],
   ADVANCE_PAYMENT: ["NONE", "PURCHASE_ORDER"],
+  // پیش‌پرداخت ارزش افزوده: فقط بدون مبنا (سفارش خرید ارزش‌افزوده‌ی جدا ندارد)؛ به ارزش‌افزوده‌ی فاکتور خرید تخصیص داده می‌شود
+  ADVANCE_VAT_PAYMENT: ["NONE"],
   CUSTOMER_PAYMENT: ["NONE", "SALES_INVOICE"],
   OTHER_PAYMENT: ["NONE"],
   PURCHASE_VAT: ["NONE", "PURCHASE_INVOICE"],
