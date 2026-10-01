@@ -84,4 +84,22 @@ export const api = {
   }),
 };
 
+/** دانلود یک فایل متنی/باینری محافظت‌شده با توکن (مثلاً public-key.txt / csr.txt) و ذخیره با نام داده‌شده */
+export async function downloadFile(path: string, filename: string) {
+  const token = getAuthToken();
+  const res = await fetch(`${API_URL}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new ApiError(data.error || "خطا در دانلود فایل");
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export { getAuthToken as getToken };

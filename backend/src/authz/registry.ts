@@ -502,6 +502,27 @@ export const REGISTRY: ModuleDef[] = [
     ],
   },
   {
+    key: "tax-affairs",
+    title: "امور مالیاتی",
+    subModules: [
+      {
+        key: "settings",
+        title: "تنظیمات",
+        forms: [
+          {
+            key: "tax-memories",
+            title: "حافظه مالیاتی",
+            baseActions: CRUD,
+            actions: [
+              { key: "downloadPublicKey", title: "دانلود کلید عمومی" },
+              { key: "downloadCsr", title: "دانلود CSR" },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
     key: "treasury",
     title: "مدیریت خزانه",
     subModules: [
