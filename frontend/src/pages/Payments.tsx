@@ -1,4 +1,5 @@
 import { FormEvent, Fragment, useEffect, useState } from "react";
+import { selectableTypes, typeLabel } from "../lib/typeOptions";
 import { ErrorToast } from "../components/ErrorToast";
 import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -467,7 +468,8 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
       setCashBoxes(cbs);
       setBankAccounts(bas);
       setCustodians(cus);
-      setPaymentTypes(rts.filter((t) => t.isActive));
+      // فهرست کامل نگه داشته می‌شود تا سند موجودِ دارای نوع غیرفعال درست نمایش داده شود؛ گزینه‌های انتخاب با selectableTypes فقط فعال‌ها (+ نوع فعلی همان ردیف) هستند
+      setPaymentTypes(rts);
       setCustomerPartyIds(new Set(customers.map((c) => c.partyId)));
       setSupplierPartyIds(new Set(suppliers.map((s) => s.partyId)));
       setFiscalPeriod(fp);
@@ -1402,8 +1404,8 @@ function SettlementRowFields({
       <td style={{ minWidth: 160 }}>
         <select value={row.paymentTypeId} onChange={(e) => onPaymentTypeChange(e.target.value)}>
           <option value="">انتخاب کنید</option>
-          {paymentTypes.map((t) => (
-            <option key={t.id} value={t.id}>{t.title}</option>
+          {selectableTypes(paymentTypes, row.paymentTypeId).map((t) => (
+            <option key={t.id} value={t.id}>{typeLabel(t)}</option>
           ))}
         </select>
       </td>

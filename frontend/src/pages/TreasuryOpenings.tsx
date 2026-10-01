@@ -5,6 +5,7 @@ import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
 import { RecordPickerField } from "../components/RecordPicker";
+import { selectableTypes, typeLabel } from "../lib/typeOptions";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
@@ -262,8 +263,8 @@ function OpeningForm({ editId }: { editId?: number }) {
       setBranches(brs);
       setRecvTypes(rct);
       setPayTypes(pct);
-      setReceiptTypes(rts.filter((t) => t.isActive !== false));
-      setPaymentTypes(pts.filter((t) => t.isActive !== false));
+      setReceiptTypes(rts);
+      setPaymentTypes(pts);
       setFiscalPeriod(fp);
 
       if (!hasPersistedState(`${cacheKey}:date`)) {
@@ -425,7 +426,7 @@ function OpeningForm({ editId }: { editId?: number }) {
                       onChange={(e) => patchCheque(kind, r.key, kind === "receivable" ? { receiptTypeId: e.target.value } : { paymentTypeId: e.target.value })}
                     >
                       <option value="">—</option>
-                      {(kind === "receivable" ? receiptTypes : paymentTypes).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+                      {selectableTypes(kind === "receivable" ? receiptTypes : paymentTypes, Number(kind === "receivable" ? r.receiptTypeId : r.paymentTypeId) || undefined).map((t) => <option key={t.id} value={t.id}>{typeLabel(t)}</option>)}
                     </select>
                   </td>
                   {kind === "receivable" && (
