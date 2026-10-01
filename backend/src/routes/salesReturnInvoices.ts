@@ -46,12 +46,6 @@ async function resolveFiscalPeriod(date: Date) {
   return fiscalPeriod;
 }
 
-async function nextNumber(model: { findFirst: (args: any) => Promise<any> }, fiscalPeriodId: number) {
-  // فقط اسناد بدون الگو: شماره‌ی اسناد الگودار از دنباله‌ی خودِ الگو می‌آید و نباید شماره‌گذاری قدیمی را جلو ببرد
-  const last = await model.findFirst({ where: { fiscalPeriodId, numberingPatternId: null }, orderBy: { number: "desc" } });
-  return last ? last.number + 1 : 1;
-}
-
 function partyDisplayName(party: any) {
   return party.category === "LEGAL" ? party.name : `${party.firstName || ""} ${party.lastName || ""}`.trim();
 }
@@ -321,15 +315,15 @@ router.post("/sales-return-invoices", can(`${FORM}.create`), async (req, res) =>
 
     const lines = await validateLines(body.lines, body.basis, currency, fxRate, baseCurrency, date);
 
-    // شماره: از «الگوی شماره‌گذاری» (اتمی، داخل همین تراکنش) یا شماره‌گذاری قدیمی اگر ترکیب (نوع فروش، مرکز فروش) الگو ندارد
+    // شماره از «الگوی شماره‌گذاری» (اتمی، داخل همین تراکنش) می‌آید؛ اگر برای (نوع فروش، مرکز فروش) الگویی نباشد ذخیره ممنوع است.
     const created = await prisma.$transaction(async (tx: any) => {
       const allocated = await allocateDocumentNumber(tx, { form: "SALES_RETURN", salesTypeId: body.salesTypeId, salesCenterId: body.salesCenterId, fiscalPeriodId: fiscalPeriod.id, date });
-      const number = allocated ? allocated.number : await nextNumber(tx.salesReturnInvoice, fiscalPeriod.id);
+      const number = allocated.number;
       return tx.salesReturnInvoice.create({
       data: {
         fiscalPeriodId: fiscalPeriod.id,
         number,
-        numberingPatternId: allocated?.numberingPatternId ?? null,
+        numberingPatternId: allocated.numberingPatternId,
         date,
         basis: body.basis,
         customerId: body.customerId,
