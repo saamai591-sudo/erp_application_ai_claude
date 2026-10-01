@@ -94,6 +94,11 @@ async function buildData(b: Body, excludeId?: number) {
   if (field) {
     const target = await TARGET_EXISTS[field](targetId!);
     if (!target) throw new Error(`${TARGET_LABEL[field]} یافت نشد`);
+    // نوع دریافت/پرداختِ غیرفعال برای تنظیم جدید قابل انتخاب نیست؛ تنظیمی که از قبل همین نوع را دارد معتبر می‌ماند
+    if ((field === "receiptTypeId" || field === "paymentTypeId") && target.isActive === false) {
+      const existing = excludeId ? await prisma.treasuryAccountSetting.findUnique({ where: { id: excludeId } }) : null;
+      if (!existing || (existing as any)[field] !== targetId) throw new Error(`${TARGET_LABEL[field]} «${target.title}» غیرفعال است و قابل انتخاب نیست`);
+    }
     if ((field === "receiptTypeId" || field === "paymentTypeId") && BASIS_FROM_DOCUMENT.has(target.basisType)) {
       throw new Error(`معین این ${TARGET_LABEL[field]} از سند مبنا تعیین می‌شود و نیازی به تعیین در اینجا نیست`);
     }

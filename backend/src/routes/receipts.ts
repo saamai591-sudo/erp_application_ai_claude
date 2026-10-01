@@ -405,6 +405,11 @@ async function validateSubjectLines(
   if (allowEmpty && (!Array.isArray(lines) || lines.length === 0) && instrumentByKey.size === 0) return [];
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("سند دریافت باید حداقل یک ردیف موضوعات دریافت داشته باشد");
 
+  // «نوع دریافت»ِ غیرفعال برای سند جدید قابل استفاده نیست؛ ولی سندِ موجودی که قبلاً از آن استفاده کرده، با همان نوع معتبر می‌ماند (ویرایش/ذخیره‌ی بدون تغییر نوع)
+  const alreadyUsedTypeIds = new Set<number>(
+    excludeReceiptId ? (await prisma.receiptSettlementLine.findMany({ where: { receiptId: excludeReceiptId }, select: { receiptTypeId: true } })).map((x) => x.receiptTypeId) : []
+  );
+
   const cleaned: any[] = [];
   const baseByInstrumentKey = new Map<string, number>();
   // مجموع مبلغ ردیف‌های همین درخواست که به یک سند مبنای یکسان ارجاع می‌دهند (کلید:
@@ -444,7 +449,8 @@ async function validateSubjectLines(
     if (!l.receiptTypeId) throw new Error(`ردیف موضوعات دریافت ${idx + 1}: نوع دریافت الزامی است`);
     // eslint-disable-next-line no-await-in-loop
     const receiptType = await prisma.receiptType.findUnique({ where: { id: l.receiptTypeId } });
-    if (!receiptType || !receiptType.isActive) throw new Error(`ردیف ${idx + 1}: نوع دریافت یافت نشد یا غیرفعال است`);
+    if (!receiptType) throw new Error(`ردیف ${idx + 1}: نوع دریافت یافت نشد`);
+    if (!receiptType.isActive && !alreadyUsedTypeIds.has(receiptType.id)) throw new Error(`ردیف ${idx + 1}: نوع دریافت «${receiptType.title}» غیرفعال است و برای سند جدید قابل انتخاب نیست`);
 
     if (!l.instrumentClientKey || !instrumentByKey.has(l.instrumentClientKey)) {
       throw new Error(`ردیف ${idx + 1}: قلم (ردیف اقلام دریافت مرتبط) نامعتبر است`);
