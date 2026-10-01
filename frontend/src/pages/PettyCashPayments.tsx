@@ -7,6 +7,7 @@ import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
+import { PaymentBasisPicker, usePaymentBasisCandidates, BasisCandidate } from "../components/PaymentBasisPicker";
 import { RecordPickerField } from "../components/RecordPicker";
 import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
@@ -65,7 +66,6 @@ const BASIS_TITLE_FA: Record<PaymentTypeOption["basisType"], string> = {
   SALES_INVOICE: "فاکتور فروش",
   PURCHASE_ORDER: "سفارش خرید",
 };
-interface BasisCandidate { id: number; number: number; date: string; currencyId: number; remaining: number }
 
 interface PettyCashPayment {
   id: number;
@@ -168,7 +168,6 @@ function PettyCashPaymentForm({ editId }: { editId?: number }) {
   const [paymentTypes, setPaymentTypes] = useState<PaymentTypeOption[]>([]);
   const [customerPartyIds, setCustomerPartyIds] = useState<Set<number>>(new Set());
   const [supplierPartyIds, setSupplierPartyIds] = useState<Set<number>>(new Set());
-  const [basisCandidates, setBasisCandidates] = useState<BasisCandidate[]>([]);
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | undefined>(undefined);
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_FORM);
@@ -228,19 +227,8 @@ function PettyCashPaymentForm({ editId }: { editId?: number }) {
   const basisType = paymentType?.basisType;
   const currentBasisId = form.purchaseInvoiceId || form.salesInvoiceId || form.purchaseOrderId;
 
-  // اسناد مبنای قابل انتخاب، فقط وقتی basisType نوع پرداخت یک مبنا الزامی می‌کند و طرف‌حساب مشخص شده
-  useEffect(() => {
-    if (!basisType || basisType === "NONE" || !form.partyId) {
-      setBasisCandidates([]);
-      return;
-    }
-    const excl = editId ? `&excludeId=${editId}` : "";
-    api
-      .get(`/petty-cash-payments/basis/pickable-documents?basisType=${basisType}&partyId=${form.partyId}${excl}`)
-      .then((rows: BasisCandidate[]) => setBasisCandidates(rows))
-      .catch(() => setBasisCandidates([]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [basisType, form.partyId, editId]);
+  // اسناد مبنای قابل انتخاب — همان هوک/انتخابگر مشترک «موضوعات پرداخت» (components/PaymentBasisPicker.tsx)
+  const basisCandidates = usePaymentBasisCandidates({ source: "petty-cash-payments", basisType, partyId: form.partyId, paymentTypeId: form.paymentTypeId, editId });
 
   // طرف‌حساب‌های واجد شرایط سند مبنا: فاکتور/سفارش خرید ⇐ باید «تامین‌کننده» باشد، فاکتور فروش ⇐ باید «مشتری» باشد؛ بدون مبنا = همه
   const eligibleParties =
@@ -396,17 +384,11 @@ function PettyCashPaymentForm({ editId }: { editId?: number }) {
           {basisType && basisType !== "NONE" && (
             <div className="form-field">
               <label>سند مبنا<RequiredMark /></label>
-              <RecordPickerField
-                title="انتخاب سند مبنا"
+              <PaymentBasisPicker
+                candidates={basisCandidates}
+                currentBasisId={currentBasisId}
                 disabled={!form.partyId}
                 displayValue={form.basisDisplay}
-                placeholder="انتخاب سند مبنا"
-                rows={basisCandidates.filter((c) => c.remaining > 0.001 || String(c.id) === currentBasisId)}
-                columns={[
-                  { header: "شماره", render: (c) => toFaDigits(String(c.number)), filterValue: (c) => String(c.number), width: "70px" },
-                  { header: "تاریخ", render: (c) => formatJalaliDate(c.date), filterValue: (c) => c.date.slice(0, 10), width: "100px" },
-                  { header: "مانده", render: (c) => formatAmountFa(c.remaining), filterValue: (c) => String(c.remaining), width: "110px" },
-                ]}
                 onSelect={onBasisSelect}
                 onClear={currentBasisId ? onBasisClear : undefined}
               />

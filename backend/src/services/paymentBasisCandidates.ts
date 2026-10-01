@@ -20,38 +20,49 @@ export interface BasisCandidate {
   remaining: number;
 }
 
-function sumApplied(settlementLines: any[], excludePaymentId?: number): number {
+// «تسویه ارزش افزوده خرید» (nature=PURCHASE_VAT) روی فاکتور خرید فقط «ارزش‌افزوده‌ی» فاکتور را پرداخت می‌کند نه مبلغ آن را؛ پس سقف و مانده‌ی آن
+// جدا از پرداخت‌های عادیِ همان فاکتور محاسبه می‌شود (همان منطق «گروه VAT» دریافت در routes/receipts.ts) — تنها محل این قاعده.
+export type BasisGroup = "VAT" | "MAIN";
+export function basisGroupOf(nature?: string | null): BasisGroup {
+  return nature === "PURCHASE_VAT" ? "VAT" : "MAIN";
+}
+
+function sumApplied(settlementLines: any[], group: BasisGroup, excludePaymentId?: number): number {
   return settlementLines
-    .filter((s: any) => s.payment.status === "APPROVED" && (!excludePaymentId || s.payment.id !== excludePaymentId))
+    .filter((s: any) => basisGroupOf(s.paymentType?.nature) === group && s.payment.status === "APPROVED" && (!excludePaymentId || s.payment.id !== excludePaymentId))
     .reduce((sum: number, l: any) => sum + Number(l.amount), 0);
 }
 
 // پرداخت تنخواه سند حسابداری/تایید ندارد؛ هر ردیف ذخیره‌شده (به‌جز خودِ رکورد در حال ویرایش) بلافاصله مصرف‌شده حساب می‌شود
-function sumPettyCashApplied(pettyCashPayments: any[], excludePettyCashPaymentId?: number): number {
+function sumPettyCashApplied(pettyCashPayments: any[], group: BasisGroup, excludePettyCashPaymentId?: number): number {
   return pettyCashPayments
-    .filter((p: any) => !excludePettyCashPaymentId || p.id !== excludePettyCashPaymentId)
+    .filter((p: any) => basisGroupOf(p.paymentType?.nature) === group && (!excludePettyCashPaymentId || p.id !== excludePettyCashPaymentId))
     .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
 }
 
 export async function candidatesForBasisType(
   basisType: BasisType,
   partyId: number,
-  opts: { excludePaymentId?: number; excludePettyCashPaymentId?: number; includeVoided?: boolean } = {}
+  opts: { excludePaymentId?: number; excludePettyCashPaymentId?: number; includeVoided?: boolean; nature?: string | null } = {}
 ): Promise<BasisCandidate[]> {
   const { excludePaymentId, excludePettyCashPaymentId, includeVoided } = opts;
+  const group = basisGroupOf(opts.nature);
   if (basisType === "PURCHASE_INVOICE") {
     // فاکتور باز ممکن است متعلق به دوره مالی قبلی باشد (هنوز تسویه نشده) — پس عمداً به دوره مالی جاری محدود نمی‌شود
     const invoices = await withoutFiscalPeriodScope(() =>
       prisma.purchaseInvoice.findMany({
         where: { partyId, status: "APPROVED" },
-        include: { lines: true, otherCostLines: true, currency: true, paymentSettlementLines: { include: { payment: true } }, pettyCashPayments: true },
+        include: { lines: true, otherCostLines: true, currency: true, paymentSettlementLines: { include: { payment: true, paymentType: true } }, pettyCashPayments: { include: { paymentType: true } } },
       })
     );
     return invoices.map((inv: any) => {
+      // ارزش‌افزوده‌ی ردیف‌ها همیشه به ارز مبنا ذخیره می‌شود؛ برای هم‌ارزی با ارز فاکتور بر نرخ فاکتور تقسیم می‌شود (هم‌الگوی listAmounts در purchaseInvoices.ts)
+      const fxRateInv = Number(inv.fxRate) > 0 ? Number(inv.fxRate) : 1;
       const total =
-        inv.lines.reduce((s: number, l: any) => s + Number(l.amount), 0) +
-        inv.otherCostLines.reduce((s: number, l: any) => s + Number(l.amount), 0);
-      const applied = sumApplied(inv.paymentSettlementLines, excludePaymentId) + sumPettyCashApplied(inv.pettyCashPayments, excludePettyCashPaymentId);
+        group === "VAT"
+          ? [...inv.lines, ...inv.otherCostLines].reduce((s: number, l: any) => s + Number(l.vatAmount || 0), 0) / fxRateInv
+          : inv.lines.reduce((s: number, l: any) => s + Number(l.amount), 0) + inv.otherCostLines.reduce((s: number, l: any) => s + Number(l.amount), 0);
+      const applied = sumApplied(inv.paymentSettlementLines, group, excludePaymentId) + sumPettyCashApplied(inv.pettyCashPayments, group, excludePettyCashPaymentId);
       return {
         id: inv.id, number: inv.number, date: inv.date, currencyId: inv.currencyId, currencyTitle: inv.currency.title,
         fxRate: Number(inv.fxRate), partyId, total, applied, remaining: total - applied,
@@ -68,12 +79,12 @@ export async function candidatesForBasisType(
     const invoices = await withoutFiscalPeriodScope(() =>
       prisma.salesInvoice.findMany({
         where: { customerId: customer.id, ...(includeVoided ? {} : { status: { not: "VOIDED" } }) },
-        include: { lines: true, currency: true, paymentSettlementLines: { include: { payment: true } }, pettyCashPayments: true },
+        include: { lines: true, currency: true, paymentSettlementLines: { include: { payment: true, paymentType: true } }, pettyCashPayments: { include: { paymentType: true } } },
       })
     );
     return invoices.map((inv: any) => {
       const total = inv.lines.reduce((s: number, l: any) => s + Number(l.amount), 0);
-      const applied = sumApplied(inv.paymentSettlementLines, excludePaymentId) + sumPettyCashApplied(inv.pettyCashPayments, excludePettyCashPaymentId);
+      const applied = sumApplied(inv.paymentSettlementLines, group, excludePaymentId) + sumPettyCashApplied(inv.pettyCashPayments, group, excludePettyCashPaymentId);
       return {
         id: inv.id, number: inv.number, date: inv.date, currencyId: inv.currencyId, currencyTitle: inv.currency.title,
         fxRate: Number(inv.fxRate), partyId, total, applied, remaining: total - applied,
@@ -86,12 +97,12 @@ export async function candidatesForBasisType(
     const orders = await withoutFiscalPeriodScope(() =>
       prisma.purchaseOrder.findMany({
         where: { supplierId: supplier.id, status: "APPROVED" },
-        include: { lines: true, currency: true, paymentSettlementLines: { include: { payment: true } }, pettyCashPayments: true },
+        include: { lines: true, currency: true, paymentSettlementLines: { include: { payment: true, paymentType: true } }, pettyCashPayments: { include: { paymentType: true } } },
       })
     );
     return orders.map((o: any) => {
       const total = o.lines.reduce((s: number, l: any) => s + Number(l.amount), 0);
-      const applied = sumApplied(o.paymentSettlementLines, excludePaymentId) + sumPettyCashApplied(o.pettyCashPayments, excludePettyCashPaymentId);
+      const applied = sumApplied(o.paymentSettlementLines, group, excludePaymentId) + sumPettyCashApplied(o.pettyCashPayments, group, excludePettyCashPaymentId);
       // سفارش خرید اصلاً fxRate ندارد (سندی بدون تبدیل ارز) — همیشه ۱ گزارش می‌شود
       return {
         id: o.id, number: o.number, date: o.date, currencyId: o.currencyId, currencyTitle: o.currency.title,
@@ -100,4 +111,19 @@ export async function candidatesForBasisType(
     });
   }
   return [];
+}
+
+/** منطق مشترک «انتخابگر سند مبنا» — هر دو مصرف‌کننده (موضوعات پرداخت و پرداخت تنخواه) فقط از همین تابع استفاده می‌کنند؛
+ * paymentTypeId ماهیت (مثلاً ارزش افزوده خرید) را مشخص می‌کند تا مانده‌ی درست (مبلغ یا ارزش‌افزوده) برگردد. */
+export async function pickableBasisDocuments(q: {
+  basisType?: BasisType;
+  partyId?: number | null;
+  paymentTypeId?: number | null;
+  excludePaymentId?: number;
+  excludePettyCashPaymentId?: number;
+}): Promise<BasisCandidate[]> {
+  if (!q.basisType || q.basisType === "NONE" || !q.partyId) return [];
+  const nature = q.paymentTypeId ? (await prisma.paymentType.findUnique({ where: { id: q.paymentTypeId }, select: { nature: true } }))?.nature : null;
+  const candidates = await candidatesForBasisType(q.basisType, q.partyId, { excludePaymentId: q.excludePaymentId, excludePettyCashPaymentId: q.excludePettyCashPaymentId, nature });
+  return candidates.filter((c) => c.remaining > 0.001);
 }

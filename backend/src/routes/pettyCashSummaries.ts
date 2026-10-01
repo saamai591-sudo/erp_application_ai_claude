@@ -124,7 +124,7 @@ async function validateLines(body: Body, custodianId: number, excludeSummaryId?:
         if (f !== field && v) throw new Error(`ردیف ${n}: فقط سند مبنای متناسب با نوع پرداخت باید انتخاب شود`);
       }
       // طرف‌حساب سند مبنا همیشه طرف‌حساب خودِ پرداخت تنخواه است (فیلد جدایی در ردیف نیست)
-      const candidates = await candidatesForBasisType(basisType, payment.partyId);
+      const candidates = await candidatesForBasisType(basisType, payment.partyId, { nature: paymentType.nature });
       const info = candidates.find((c) => c.id === basisId);
       if (!info) throw new Error(`ردیف ${n}: سند مبنای انتخاب‌شده یافت نشد یا متعلق به طرف‌حساب این پرداخت تنخواه نیست`);
       if (basisType === "PURCHASE_INVOICE") purchaseInvoice = await prisma.purchaseInvoice.findUnique({ where: { id: basisId } });

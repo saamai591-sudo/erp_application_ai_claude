@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
-import { candidatesForBasisType, BasisType, BasisCandidate } from "../services/paymentBasisCandidates";
+import { candidatesForBasisType, pickableBasisDocuments, BasisType } from "../services/paymentBasisCandidates";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertPettyCashRunningBalanceNotNegative } from "../services/pettyCashBalanceService";
@@ -74,7 +74,8 @@ async function resolveBasis(
   excludePettyCashPaymentId: number | undefined,
   date: Date,
   amount: number,
-  pettyCashCurrencyId: number
+  pettyCashCurrencyId: number,
+  nature?: string | null
 ): Promise<{ purchaseInvoiceId: number | null; salesInvoiceId: number | null; purchaseOrderId: number | null }> {
   const ids = {
     purchaseInvoiceId: body.purchaseInvoiceId || null,
@@ -93,7 +94,7 @@ async function resolveBasis(
   for (const [f, v] of Object.entries(ids)) {
     if (f !== field && v) throw new Error("فقط سند مبنای متناسب با نوع پرداخت باید انتخاب شود");
   }
-  const candidates = await candidatesForBasisType(basisType, body.partyId, { excludePettyCashPaymentId });
+  const candidates = await candidatesForBasisType(basisType, body.partyId, { excludePettyCashPaymentId, nature });
   const info = candidates.find((c) => c.id === basisId);
   if (!info) throw new Error("سند مبنای انتخاب‌شده یافت نشد یا متعلق به این طرف‌حساب نیست");
   if (info.currencyId !== pettyCashCurrencyId) throw new Error("ارز سند مبنا باید با ارز تنخواه یکسان باشد");
@@ -139,7 +140,7 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
     } else if (basisType === "SALES_INVOICE") {
       if (!party.customer) return res.status(400).json({ error: "طرف‌حساب باید در «مشتریان» تعریف شده باشد" });
     }
-    const basisIds = await resolveBasis(basisType, body, undefined, date, amount, custodian.pettyCash.currencyId);
+    const basisIds = await resolveBasis(basisType, body, undefined, date, amount, custodian.pettyCash.currencyId, paymentType.nature);
 
     if (custodian.controlNegativeBalance) {
       await assertPettyCashRunningBalanceNotNegative(custodian.pettyCashId, { pendingEvents: [{ date, amount: -amount }] });
@@ -208,7 +209,7 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
     } else if (basisType === "SALES_INVOICE") {
       if (!party.customer) return res.status(400).json({ error: "طرف‌حساب باید در «مشتریان» تعریف شده باشد" });
     }
-    const basisIds = await resolveBasis(basisType, body, id, date, amount, custodian.pettyCash.currencyId);
+    const basisIds = await resolveBasis(basisType, body, id, date, amount, custodian.pettyCash.currencyId, paymentType.nature);
 
     if (custodian.controlNegativeBalance) {
       await assertPettyCashRunningBalanceNotNegative(custodian.pettyCashId, {
@@ -247,12 +248,14 @@ router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
 
 // اسناد مبنای قابل انتخاب برای این پرداخت — دقیقاً هم‌الگوی /payments/pickable-basis-documents (منطق مشترک در paymentBasisCandidates.ts)
 router.get("/basis/pickable-documents", can(`${FORM}.view`), async (req, res) => {
-  const basisType = req.query.basisType as BasisType | undefined;
-  const partyId = req.query.partyId ? Number(req.query.partyId) : null;
-  const excludePettyCashPaymentId = req.query.excludeId ? Number(req.query.excludeId) : undefined;
-  if (!basisType || basisType === "NONE" || !partyId) return res.json([]);
-  const candidates = await candidatesForBasisType(basisType, partyId, { excludePettyCashPaymentId });
-  res.json(candidates.filter((c: BasisCandidate) => c.remaining > 0.001));
+  res.json(
+    await pickableBasisDocuments({
+      basisType: req.query.basisType as BasisType | undefined,
+      partyId: req.query.partyId ? Number(req.query.partyId) : null,
+      paymentTypeId: req.query.paymentTypeId ? Number(req.query.paymentTypeId) : null,
+      excludePettyCashPaymentId: req.query.excludeId ? Number(req.query.excludeId) : undefined,
+    })
+  );
 });
 
 export default router;

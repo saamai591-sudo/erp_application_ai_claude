@@ -7,6 +7,7 @@ import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
+import { PaymentBasisPicker, usePaymentBasisCandidates, BasisCandidate } from "../components/PaymentBasisPicker";
 import { RecordPickerField } from "../components/RecordPicker";
 import { Modal } from "../components/Modal";
 import { RefreshButton } from "../components/RefreshButton";
@@ -59,7 +60,6 @@ interface PickableCheque { id: number; number: string; dueDate: string; amount: 
 // برگه‌ی «خام» دسته چک (Documents/دسته چک.md) — برای ردیف «صدور چک تازه» وقتی حساب بانکی صادرکننده از
 // نوعِ «دارای دسته چک» باشد؛ نگاه کنید به backend/src/routes/chequeBookLeaves.ts و routes/payments.ts.
 interface PickableChequeBookLeaf { id: number; bankAccountId: number; series: string; number: string }
-interface BasisCandidate { id: number; number: number; date: string; currencyId: number; currencyTitle: string; fxRate: number; total: number; applied: number; remaining: number }
 interface PickableInvoice extends BasisCandidate { salesInvoiceId: number }
 
 // تبدیل ارز/گرد کردن اعشار: از lib/currencyConversion.ts (تنها محل مشترک این فرمول‌ها در فرانت‌اند،
@@ -1227,25 +1227,13 @@ function SettlementRowFields({
   onApplyBasisSelection: (idx: number, thisRowPatch: Partial<SettlementRowState>, additionalRows: SettlementRowState[]) => void;
 }) {
   const [fxModalOpen, setFxModalOpen] = useState(false);
-  const [basisCandidates, setBasisCandidates] = useState<BasisCandidate[]>([]);
   const paymentType = paymentTypes.find((t) => String(t.id) === row.paymentTypeId);
   const basisType = paymentType?.basisType;
+  const basisCandidates = usePaymentBasisCandidates({ source: "payments", basisType, partyId: row.partyId, paymentTypeId: row.paymentTypeId, editId });
   const instrumentRow = instrumentRows.find((r) => r.clientKey === row.instrumentClientKey);
   // حساب بانکیِ مبدأ (ابزار حواله یا چکِ صادرشده) از انتخابگر مقصدِ «به بانک» حذف می‌شود؛ پرداخت از یک حساب به همان حساب مجاز نیست
   const sourceBankAccountId = instrumentRow && (instrumentRow.type === "BANK_TRANSFER" || instrumentRow.type === "CHEQUE") ? instrumentRow.bankAccountId : "";
 
-  useEffect(() => {
-    if (!basisType || basisType === "NONE" || !row.partyId) {
-      setBasisCandidates([]);
-      return;
-    }
-    const excl = editId ? `&excludePaymentId=${editId}` : "";
-    api
-      .get(`/payments/pickable-basis-documents?basisType=${basisType}&partyId=${row.partyId}${excl}`)
-      .then((rows: BasisCandidate[]) => setBasisCandidates(rows))
-      .catch(() => setBasisCandidates([]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [basisType, row.partyId, editId]);
 
   // مانده‌ی واقعاً قابل تسویه‌ی یک سند مبنا برای این ردیف: مانده‌ی گزارش‌شده توسط سرور، منهای مبلغ
   // ردیف‌های خواهرِ همین فرم (هنوز ذخیره‌نشده) که به همان سند مبنا ارجاع می‌دهند — وگرنه انتخاب یک
@@ -1499,18 +1487,14 @@ function SettlementRowFields({
           isBaseCurrencyRow ? (
             // طبق بند ۳ (حالت ارز پایه): گرید انتخاب مستقیم، محدود به فاکتورهای هم‌ارز با ردیف، با
             // امکان انتخاب چندگانه برای ورود سریع چند ردیف مبنا.
-            <RecordPickerField
-              title="انتخاب سند مبنا"
+            <PaymentBasisPicker
+              candidates={basisCandidates}
+              remainingOf={effectiveRemaining}
+              filter={(c) => c.currencyId === baseCurrency.id}
+              currentBasisId={currentBasisId}
               disabled={!row.partyId}
               displayValue={row.basisDisplay}
-              placeholder="انتخاب سند مبنا"
               multiSelect
-              rows={basisCandidates.filter((c) => c.currencyId === baseCurrency.id && (effectiveRemaining(c) > 0.001 || String(c.id) === currentBasisId))}
-              columns={[
-                { header: "شماره", render: (c) => toFaDigits(String(c.number)), filterValue: (c) => String(c.number), width: "70px" },
-                { header: "تاریخ", render: (c) => formatJalaliDate(c.date), filterValue: (c) => c.date.slice(0, 10), width: "100px" },
-                { header: "مانده", render: (c) => formatAmountFa(effectiveRemaining(c)), filterValue: (c) => String(effectiveRemaining(c)), width: "110px" },
-              ]}
               onSelectMultiple={onBasisMultiSelect}
             />
           ) : rowCurrency ? (
