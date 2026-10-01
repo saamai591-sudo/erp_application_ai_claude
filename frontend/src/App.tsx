@@ -89,6 +89,7 @@ import TreasuryAccountSettings from "./pages/TreasuryAccountSettings";
 import ChequeBookLeaves from "./pages/ChequeBookLeaves";
 import PettyCashes from "./pages/PettyCashes";
 import TaxMemories from "./pages/TaxMemories";
+import NumberingPatterns from "./pages/NumberingPatterns";
 import PettyCashCustodians from "./pages/PettyCashCustodians";
 import PettyCashPayments from "./pages/PettyCashPayments";
 import PettyCashSummaries from "./pages/PettyCashSummaries";
@@ -387,6 +388,9 @@ export default function App() {
             <Route path="/cheque-book-leaves" element={<ChequeBookLeaves />} />
             <Route path="/cheque-book-leaves/new" element={<ChequeBookLeaves />} />
             <Route path="/cheque-book-leaves/:id/edit" element={<ChequeBookLeaves />} />
+            <Route path="/numbering-patterns" element={<NumberingPatterns />} />
+            <Route path="/numbering-patterns/new" element={<NumberingPatterns />} />
+            <Route path="/numbering-patterns/:id/edit" element={<NumberingPatterns />} />
             <Route path="/tax-memories" element={<TaxMemories />} />
             <Route path="/tax-memories/new" element={<TaxMemories />} />
             <Route path="/tax-memories/:id/edit" element={<TaxMemories />} />

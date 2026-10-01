@@ -7,6 +7,7 @@ import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
 import { getVatRatePercentForDate, getAdvanceReceiptMethodForDate } from "../services/accountingSettingsService";
 import { getSalesInvoiceAdvanceState, saveSalesInvoiceAdvanceAllocations, assertAdvanceAllocationsStillValid, salesInvoiceNetTotal, salesInvoiceVatTotal } from "../services/salesInvoiceAdvanceService";
 import { toBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConversion";
+import { allocateDocumentNumber, assertEditAllowed } from "../services/numberingPatternService";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
@@ -68,7 +69,8 @@ async function resolveFiscalPeriod(date: Date) {
 }
 
 async function nextNumber(model: { findFirst: (args: any) => Promise<any> }, fiscalPeriodId: number) {
-  const last = await model.findFirst({ where: { fiscalPeriodId }, orderBy: { number: "desc" } });
+  // فقط اسناد بدون الگو: شماره‌ی اسناد الگودار از دنباله‌ی خودِ الگو می‌آید و نباید شماره‌گذاری قدیمی را جلو ببرد
+  const last = await model.findFirst({ where: { fiscalPeriodId, numberingPatternId: null }, orderBy: { number: "desc" } });
   return last ? last.number + 1 : 1;
 }
 
@@ -507,11 +509,16 @@ router.post("/sales-invoices", can(`${FORM}.create`), async (req, res) => {
 
     const lines = await validateLines(body.lines, body.basis, currency, body.currencyId, fxRate, baseCurrency, date, body.salesTypeId);
 
-    const number = await nextNumber(prisma.salesInvoice, fiscalPeriod.id);
-    const created = await prisma.salesInvoice.create({
+    // شماره: اگر ترکیب (نوع فروش، مرکز فروش) در یک «الگوی شماره‌گذاری» باشد، شماره از دنباله‌ی همان الگو و داخل همین تراکنش (اتمی) گرفته می‌شود؛
+    // وگرنه شماره‌گذاری قدیمی (آخرین شماره‌ی دوره + ۱).
+    const created = await prisma.$transaction(async (tx: any) => {
+      const allocated = await allocateDocumentNumber(tx, { form: "SALES_INVOICE", salesTypeId: body.salesTypeId, salesCenterId: body.salesCenterId, fiscalPeriodId: fiscalPeriod.id, date });
+      const number = allocated ? allocated.number : await nextNumber(tx.salesInvoice, fiscalPeriod.id);
+      return tx.salesInvoice.create({
       data: {
         fiscalPeriodId: fiscalPeriod.id,
         number,
+        numberingPatternId: allocated?.numberingPatternId ?? null,
         date,
         basis: body.basis,
         customerId: body.customerId,
@@ -523,6 +530,7 @@ router.post("/sales-invoices", can(`${FORM}.create`), async (req, res) => {
         status: "DRAFT",
         lines: { create: lines.map((l, idx) => ({ ...l, rowOrder: idx })) },
       },
+      });
     });
     res.status(201).json(created);
   } catch (e: any) {
@@ -560,9 +568,11 @@ router.put("/sales-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
     const lines = await validateLines(body.lines, body.basis, currency, body.currencyId, fxRate, baseCurrency, date, body.salesTypeId, id);
     await assertAdvanceAllocationsStillValid(id, { customerId: body.customerId, currencyId: body.currencyId, date, netTotal: salesInvoiceNetTotal(lines as any), vatTotal: salesInvoiceVatTotal(lines as any, fxRate) });
 
-    const [, updated] = await prisma.$transaction([
-      prisma.salesInvoiceLine.deleteMany({ where: { salesInvoiceId: id } }),
-      prisma.salesInvoice.update({
+    const updated = await prisma.$transaction(async (tx: any) => {
+      // «الگوی شماره‌گذاری»: شماره عوض نمی‌شود؛ تغییر الگو/سال مالی رد و تغییر تاریخ با کنترل تاریخ الگو سنجیده می‌شود (داخل همین تراکنش)
+      await assertEditAllowed(tx, existing, { form: "SALES_INVOICE", salesTypeId: body.salesTypeId, salesCenterId: body.salesCenterId, fiscalPeriodId: fiscalPeriod.id, date });
+      await tx.salesInvoiceLine.deleteMany({ where: { salesInvoiceId: id } });
+      return tx.salesInvoice.update({
         where: { id },
         data: {
           fiscalPeriodId: fiscalPeriod.id,
@@ -576,8 +586,8 @@ router.put("/sales-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
           description: body.description || null,
           lines: { create: lines.map((l, idx) => ({ ...l, rowOrder: idx })) },
         },
-      }),
-    ]);
+      });
+    });
     // updatedAt جدید باید برگردد تا frontend/lib/api.ts (rememberVersion) آن را جایگزین نسخه‌ی قبلی کند؛
     // وگرنه ذخیره‌ی دوباره‌ی همان فرم (بدون بارگذاری مجدد) با نسخه‌ی کهنه ارسال و رد می‌شود
     // (utils/concurrency.ts).

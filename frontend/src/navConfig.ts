@@ -30,6 +30,7 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "currencies", label: "ارز", list: "/currencies", create: "/currencies/new", icon: "coin" },
           { key: "rates", label: "نرخ ارز", list: "/exchange-rates", create: "/exchange-rates/new", icon: "trend" },
           { key: "periods", label: "دوره مالی", list: "/fiscal-periods", create: "/fiscal-periods/new", icon: "calendar" },
+          { key: "numbering-patterns", label: "الگوی شماره‌گذاری", list: "/numbering-patterns", create: "/numbering-patterns/new", icon: "tag" },
         ],
       },
     ],

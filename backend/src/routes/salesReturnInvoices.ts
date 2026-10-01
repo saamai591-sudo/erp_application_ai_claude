@@ -10,6 +10,7 @@ import { issueJournalEntry, IssueLineInput } from "../services/journalEntryServi
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { can } from "../authz/guard";
+import { allocateDocumentNumber, assertEditAllowed } from "../services/numberingPatternService";
 import { findFormPrefix } from "../authz/registry";
 
 const FORM = findFormPrefix("sales-return-invoices");
@@ -46,7 +47,8 @@ async function resolveFiscalPeriod(date: Date) {
 }
 
 async function nextNumber(model: { findFirst: (args: any) => Promise<any> }, fiscalPeriodId: number) {
-  const last = await model.findFirst({ where: { fiscalPeriodId }, orderBy: { number: "desc" } });
+  // فقط اسناد بدون الگو: شماره‌ی اسناد الگودار از دنباله‌ی خودِ الگو می‌آید و نباید شماره‌گذاری قدیمی را جلو ببرد
+  const last = await model.findFirst({ where: { fiscalPeriodId, numberingPatternId: null }, orderBy: { number: "desc" } });
   return last ? last.number + 1 : 1;
 }
 
@@ -319,11 +321,15 @@ router.post("/sales-return-invoices", can(`${FORM}.create`), async (req, res) =>
 
     const lines = await validateLines(body.lines, body.basis, currency, fxRate, baseCurrency, date);
 
-    const number = await nextNumber(prisma.salesReturnInvoice, fiscalPeriod.id);
-    const created = await prisma.salesReturnInvoice.create({
+    // شماره: از «الگوی شماره‌گذاری» (اتمی، داخل همین تراکنش) یا شماره‌گذاری قدیمی اگر ترکیب (نوع فروش، مرکز فروش) الگو ندارد
+    const created = await prisma.$transaction(async (tx: any) => {
+      const allocated = await allocateDocumentNumber(tx, { form: "SALES_RETURN", salesTypeId: body.salesTypeId, salesCenterId: body.salesCenterId, fiscalPeriodId: fiscalPeriod.id, date });
+      const number = allocated ? allocated.number : await nextNumber(tx.salesReturnInvoice, fiscalPeriod.id);
+      return tx.salesReturnInvoice.create({
       data: {
         fiscalPeriodId: fiscalPeriod.id,
         number,
+        numberingPatternId: allocated?.numberingPatternId ?? null,
         date,
         basis: body.basis,
         customerId: body.customerId,
@@ -335,6 +341,7 @@ router.post("/sales-return-invoices", can(`${FORM}.create`), async (req, res) =>
         status: "DRAFT",
         lines: { create: lines.map((l, idx) => ({ ...l, rowOrder: idx })) },
       },
+      });
     });
     res.status(201).json(created);
   } catch (e: any) {
@@ -370,9 +377,10 @@ router.put("/sales-return-invoices/:id", can(`${FORM}.edit`), async (req, res) =
 
     const lines = await validateLines(body.lines, body.basis, currency, fxRate, baseCurrency, date, id);
 
-    await prisma.$transaction([
-      prisma.salesReturnInvoiceLine.deleteMany({ where: { salesReturnInvoiceId: id } }),
-      prisma.salesReturnInvoice.update({
+    await prisma.$transaction(async (tx: any) => {
+      await assertEditAllowed(tx, existing, { form: "SALES_RETURN", salesTypeId: body.salesTypeId, salesCenterId: body.salesCenterId, fiscalPeriodId: fiscalPeriod.id, date });
+      await tx.salesReturnInvoiceLine.deleteMany({ where: { salesReturnInvoiceId: id } });
+      await tx.salesReturnInvoice.update({
         where: { id },
         data: {
           fiscalPeriodId: fiscalPeriod.id,
@@ -386,8 +394,8 @@ router.put("/sales-return-invoices/:id", can(`${FORM}.edit`), async (req, res) =
           description: body.description || null,
           lines: { create: lines.map((l, idx) => ({ ...l, rowOrder: idx })) },
         },
-      }),
-    ]);
+      });
+    });
     res.json({ id });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در ذخیره" });
