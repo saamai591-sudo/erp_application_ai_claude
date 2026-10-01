@@ -102,6 +102,8 @@ async function salesDeliveryLineRemaining(id: number, excludeInvoiceId?: number)
 }
 
 interface LineInput {
+  /** true = ردیف تب «اقلام اضافی» (خدمت، بدون وابستگی به حواله فروش) — فقط وقتی مبنا «حواله فروش» است */
+  isAdditionalItem?: boolean;
   sourceInventoryLineId?: number | null;
   goodsItemId?: number | null;
   unitId?: number | null;
@@ -251,7 +253,15 @@ async function validateLines(lines: LineInput[], basis: string, currency: Conver
     let amount = Number(l.amount) || 0;
     let sourceInventoryLineId: number | null = null;
 
-    if (basis === "SALES_DELIVERY") {
+    // «اقلام اضافی» (مبنای حواله فروش): ردیف خدمتی که هیچ وابستگی به حواله فروش و ردیف‌های آن ندارد؛ در همین جدول/مدل ردیف‌های
+    // فاکتور ذخیره می‌شود و با «مبنا = حواله فروش + بدون ردیف حواله مبدا + نوع خدمت» از ردیف‌های حواله‌ای تفکیک می‌شود.
+    const additional = !!l.isAdditionalItem;
+    if (additional) {
+      if (basis !== "SALES_DELIVERY") throw new Error(`ردیف ${idx + 1}: «اقلام اضافی» فقط برای فاکتور با مبنای حواله فروش مجاز است`);
+      if (l.sourceInventoryLineId) throw new Error(`ردیف ${idx + 1}: ردیف «اقلام اضافی» نمی‌تواند به ردیف حواله فروش وابسته باشد`);
+    }
+
+    if (basis === "SALES_DELIVERY" && !additional) {
       if (!l.sourceInventoryLineId) throw new Error(`ردیف ${idx + 1}: انتخاب ردیف حواله فروش الزامی است`);
       const info = await salesDeliveryLineRemaining(l.sourceInventoryLineId, excludeInvoiceId);
       if (!info) throw new Error(`ردیف حواله فروش برای ردیف ${idx + 1} یافت نشد`);
@@ -298,6 +308,7 @@ async function validateLines(lines: LineInput[], basis: string, currency: Conver
 
     const item = await prisma.goodsItem.findUnique({ where: { id: goodsItemId } });
     if (!item) throw new Error(`کالای ردیف ${idx + 1} یافت نشد`);
+    if (additional && item.kind !== "SERVICE") throw new Error(`ردیف ${idx + 1}: در «اقلام اضافی» فقط خدمت قابل انتخاب است`);
     if (!unitId) unitId = item.mainUnitId;
 
     // مبلغ/تخفیف به ارز مبنا و ارزش‌افزوده — دقیقاً هم‌الگوی purchaseInvoices.ts#validateLines: فقط برای
@@ -475,6 +486,9 @@ router.get("/sales-invoices/:id", can(`${FORM}.view`), async (req, res) => {
       goodsItemId: l.goodsItemId,
       goodsItemCode: l.goodsItem.fullCode,
       goodsItemTitle: l.goodsItem.title,
+      goodsItemKind: l.goodsItem.kind,
+      // ردیف «اقلام اضافی»: خدمتِ بدون ردیف حواله مبدا در فاکتورِ مبنا-حواله‌فروش (همان جدول/مدل ردیف‌ها؛ ستون جداگانه‌ای ندارد)
+      isAdditionalItem: d.basis === "SALES_DELIVERY" && !l.sourceInventoryLineId,
       unitId: l.unitId,
       unitTitle: l.unit.title,
       quantity: Number(l.quantity),

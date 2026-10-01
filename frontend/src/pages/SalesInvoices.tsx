@@ -46,7 +46,7 @@ type Basis = "NO_BASIS" | "SALES_DELIVERY";
 
 interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null } }
 interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; decimalPlaces: number; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null }
-interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
+interface GoodsItemRow { id: number; kind?: "GOODS" | "SERVICE"; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
 // اطلاعات سند مبنای واقعی حواله فروش (سفارش فروش/پیش‌فاکتور) — طبق Documents/فراخوانی قیمت در فاکتور.md؛
 // چون خودِ حواله فروش ارز/نوع فروش ندارد، انتخابگر این اطلاعات را از سند مبنای آن همراه می‌آورد.
 // null یعنی حواله «بدون‌مبنا»ست (فی/مبلغ همچنان دستی وارد می‌شود).
@@ -60,7 +60,7 @@ function customerTitle(c: CustomerOption): string {
 type SalesInvoiceStatus = "DRAFT" | "VOIDED";
 const SALES_INVOICE_STATUS_FA: Record<SalesInvoiceStatus, string> = { DRAFT: "ثبت", VOIDED: "باطل شده" };
 interface ListRow { id: number; number: number; date: string; basis: Basis; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: SalesInvoiceStatus; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number; advanceAmount: number }
-interface DetailLine { id: number; sourceInventoryLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null }
+interface DetailLine { id: number; isAdditionalItem?: boolean; sourceInventoryLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null }
 interface Detail extends ListRow { currencyId: number; fxRate: number; description: string | null; journalEntryId: number | null; journalEntryReferenceNumber: number | null; lines: DetailLine[] }
 
 const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", SALES_DELIVERY: "حواله فروش" };
@@ -169,7 +169,8 @@ function SalesInvoiceList() {
   );
 }
 
-interface RowState { sourceInventoryLineId: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; discount: string; vatAmount: string; description: string }
+// additional = ردیف تب «اقلام اضافی» (خدمتِ بدون وابستگی به حواله فروش — فقط وقتی مبنا «حواله فروش» است)
+interface RowState { additional?: boolean; sourceInventoryLineId: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; discount: string; vatAmount: string; description: string }
 
 function emptyRow(): RowState {
   return { sourceInventoryLineId: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "" };
@@ -191,6 +192,8 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", basis: "NO_BASIS" as Basis, customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", fxRate: "", description: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
+  // تب ردیف‌ها: «اقلام» (گرید اصلی) | «اقلام اضافی» (فقط مبنای حواله فروش)
+  const [linesTab, setLinesTab] = useState<"main" | "additional">("main");
   const [meta, setMeta] = usePersistedState<{ number: number; journalEntryId: number | null; journalEntryReferenceNumber: number | null; status: SalesInvoiceStatus } | null>(
     `${cacheKey}:meta`,
     null
@@ -237,6 +240,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
         });
         setRows(
           d.lines.map((l) => ({
+            additional: !!l.isAdditionalItem,
             sourceInventoryLineId: l.sourceInventoryLineId ? String(l.sourceInventoryLineId) : "",
             goodsItemId: String(l.goodsItemId),
             goodsItemCode: l.goodsItemCode,
@@ -261,6 +265,11 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
+
+  // تب «اقلام اضافی» فقط برای مبنای حواله فروش وجود دارد
+  useEffect(() => {
+    if (header.basis !== "SALES_DELIVERY") setLinesTab("main");
+  }, [header.basis]);
 
   useEffect(() => {
     if (header.basis !== "SALES_DELIVERY") {
@@ -423,10 +432,16 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   function addRow() {
     setRows((prev) => [...prev, emptyRow()]);
   }
+  function addAdditionalRow() {
+    setRows((prev) => [...prev, { ...emptyRow(), additional: true }]);
+  }
   function removeRow(idx: number) {
     setRows((prev) => prev.filter((_, i) => i !== idx));
   }
 
+  const mainRows = rows.filter((r) => !r.additional);
+  const additionalRows = rows.map((r, i) => ({ r, i })).filter((x) => x.r.additional);
+  const showAdditionalTab = header.basis === "SALES_DELIVERY";
   const totalAmount = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
   const totalDiscount = rows.reduce((s, r) => s + (Number(r.discount) || 0), 0);
   const totalVat = rows.reduce((s, r) => s + (Number(r.vatAmount) || 0), 0);
@@ -443,6 +458,8 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
       fxRate: needsFxRate ? Number(header.fxRate) : 1,
       description: header.description,
       lines: nonEmptyRows.map((r) => ({
+        // «اقلام اضافی» با همین مدل/API ردیف‌های فاکتور ارسال می‌شوند؛ سرور هم قواعد را کنترل می‌کند
+        ...(r.additional ? { isAdditionalItem: true } : {}),
         sourceInventoryLineId: r.sourceInventoryLineId ? Number(r.sourceInventoryLineId) : null,
         goodsItemId: r.goodsItemId ? Number(r.goodsItemId) : undefined,
         unitId: Number(r.unitId),
@@ -466,7 +483,9 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     const body = buildBody();
     if (body.lines.length === 0) return setError("فاکتور فروش باید حداقل یک ردیف کالا داشته باشد");
     for (const [i, l] of body.lines.entries()) {
-      if (header.basis === "SALES_DELIVERY" && !l.sourceInventoryLineId) return setError(`ردیف ${i + 1}: انتخاب ردیف حواله فروش الزامی است`);
+      const isAdd = !!(l as any).isAdditionalItem;
+      if (header.basis === "SALES_DELIVERY" && !isAdd && !l.sourceInventoryLineId) return setError(`ردیف ${i + 1}: انتخاب ردیف حواله فروش الزامی است`);
+      if (isAdd && !l.goodsItemId) return setError(`اقلام اضافی — ردیف ${i + 1}: انتخاب خدمت الزامی است`);
       if (header.basis === "NO_BASIS" && !l.goodsItemId) return setError(`کالا برای ردیف ${i + 1} الزامی است`);
       if (!(l.quantity > 0)) return setError(`مقدار ردیف ${i + 1} باید عددی مثبت باشد`);
       if (header.basis === "SALES_DELIVERY" && l.sourceInventoryLineId) {
@@ -488,6 +507,95 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     } catch (err) {
       setError((err as ApiError).message);
     }
+  }
+
+  // تب «اقلام اضافی»: خدمت‌هایی که به فاکتورِ مبنا-حواله‌فروش اضافه می‌شوند. این ردیف‌ها در همان آرایه‌ی ردیف‌های فاکتور (rows) نگهداری و با همان
+  // API/جدول ذخیره می‌شوند و هیچ وابستگی به حواله فروش ندارند (sourceInventoryLineId همیشه خالی).
+  function additionalItemsTab() {
+    const services = goodsItems.filter((g) => g.kind === "SERVICE" && g.isActive);
+    return (
+      <>
+        <div className="je-lines-toolbar">
+          <span className="je-lines-title">اقلام اضافی (خدمات)</span>
+          <button type="button" className="toolbar-icon-btn primary" onClick={() => { if (guardRowEntry()) addAdditionalRow(); }} title="خدمت جدید">
+            <PlusIcon />
+          </button>
+        </div>
+        <div className="grid-wrap je-lines-wrap">
+          <div className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
+            <table className="je-lines-table">
+              <thead>
+                <tr>
+                  <th>ردیف</th>
+                  <th>خدمت</th>
+                  <th>واحد</th>
+                  <th>مقدار</th>
+                  <th>فی</th>
+                  <th>مبلغ</th>
+                  <th>تخفیف</th>
+                  <th>مالیات بر ارزش افزوده</th>
+                  <th>شرح</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {additionalRows.map(({ r: row, i: idx }, n) => {
+                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
+                  return (
+                    <tr key={idx}>
+                      <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(n + 1))}</td>
+                      <td style={{ minWidth: 320 }}>
+                        <RecordPickerField
+                          title="انتخاب خدمت"
+                          displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
+                          rows={services}
+                          columns={[
+                            { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
+                            { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
+                          ]}
+                          onOpen={guardRowEntry}
+                          onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
+                        />
+                      </td>
+                      <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>
+                      <td style={{ minWidth: 120 }}>
+                        <AmountInput value={row.quantity} onChange={(v) => onQuantityChange(idx, v)} allowDecimal />
+                      </td>
+                      <td style={{ minWidth: 120 }}>
+                        <AmountInput value={row.unitPrice} onChange={(v) => onUnitPriceChange(idx, v)} allowDecimal />
+                      </td>
+                      <td style={{ minWidth: 120 }}>
+                        <AmountInput value={row.amount} onChange={(v) => onAmountChange(idx, v)} allowDecimal />
+                      </td>
+                      <td style={{ minWidth: 120 }}>
+                        <AmountInput value={row.discount} onChange={(v) => onDiscountChange(idx, v)} allowDecimal placeholder="۰" />
+                      </td>
+                      <td style={{ minWidth: 120 }}>
+                        <AmountInput value={row.vatAmount} onChange={(v) => updateRow(idx, { vatAmount: v })} allowDecimal placeholder="۰" />
+                      </td>
+                      <td style={{ minWidth: 140 }}>
+                        <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} />
+                      </td>
+                      <td>
+                        <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeRow(idx)}>
+                          حذف
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="grid-footer je-lines-footer">
+            <span className="grid-footer-info">{additionalRows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(additionalRows.length))} ردیف`}</span>
+            <span className="je-lines-totals">
+              جمع مبلغ اقلام: {formatAmountFa(totalAmount)} — جمع تخفیف: {formatAmountFa(totalDiscount)} — جمع مالیات بر ارزش افزوده: {formatAmountFa(totalVat)}
+            </span>
+          </div>
+        </div>
+      </>
+    );
   }
 
   async function handleDelete() {
@@ -659,6 +767,23 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
           </div>
         </div>
 
+        </fieldset>
+
+        {/* تب‌ها عمداً بیرون از fieldset قفل‌شده‌اند تا بعد از صدور سند هم بتوان بین تب‌ها جابه‌جا شد؛ «اقلام اضافی» فقط برای مبنای حواله فروش دیده می‌شود */}
+        {showAdditionalTab && (
+          <div className="party-tabs">
+            <button type="button" className={`party-tab ${linesTab === "main" ? "active" : ""}`} onClick={() => setLinesTab("main")}>
+              اقلام
+            </button>
+            <button type="button" className={`party-tab ${linesTab === "additional" ? "active" : ""}`} onClick={() => setLinesTab("additional")}>
+              اقلام اضافی{additionalRows.length > 0 ? ` (${toFaDigits(String(additionalRows.length))})` : ""}
+            </button>
+          </div>
+        )}
+
+        <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
+        {linesTab === "main" && (
+        <>
         <div className="je-lines-toolbar">
           <span className="je-lines-title">اقلام</span>
           <button type="button" className="toolbar-icon-btn primary" onClick={() => { if (guardRowEntry()) addRow(); }} title="ردیف جدید">
@@ -686,6 +811,9 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
+                  // ردیف‌های «اقلام اضافی» در تب خودشان نمایش داده می‌شوند (گرید اصلی بدون تغییر می‌ماند)
+                  if (row.additional) return null;
+                  const mainNo = rows.slice(0, idx).filter((r) => !r.additional).length + 1;
                   const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
                   const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
                   const src = pickableLines.find((l) => String(l.sourceInventoryLineId) === row.sourceInventoryLineId);
@@ -694,7 +822,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
                   const priceLocked = !!src?.base;
                   return (
                     <tr key={idx}>
-                      <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
+                      <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(mainNo))}</td>
                       {header.basis === "SALES_DELIVERY" && (
                         <td style={{ minWidth: 90 }}>
                           <RecordPickerField
@@ -770,12 +898,15 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
             </table>
           </div>
           <div className="grid-footer je-lines-footer">
-            <span className="grid-footer-info">{rows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(rows.length))} ردیف`}</span>
+            <span className="grid-footer-info">{mainRows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(mainRows.length))} ردیف`}</span>
             <span className="je-lines-totals">
               جمع مبلغ اقلام: {formatAmountFa(totalAmount)} — جمع تخفیف: {formatAmountFa(totalDiscount)} — جمع مالیات بر ارزش افزوده: {formatAmountFa(totalVat)}
             </span>
           </div>
         </div>
+        </>
+        )}
+        {showAdditionalTab && linesTab === "additional" && additionalItemsTab()}
         </fieldset>
       </form>
       {advanceOpen && editId && (
