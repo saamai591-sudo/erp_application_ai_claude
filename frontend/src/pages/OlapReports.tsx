@@ -29,6 +29,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
+import { downloadExcel } from "../lib/gridExport";
 
 type DimType = "account" | "detail" | "period";
 interface DimensionSpec {
@@ -396,11 +397,6 @@ function OlapBuilder({ editId }: { editId?: number }) {
     return runReportWith(config);
   }
 
-  function csvEscape(v: string | number): string {
-    const s = String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  }
-
   function downloadCsv() {
     if (!result) return;
     const cols = result.cols ?? [{ key: "_", label: MEASURE_OPTIONS.find((m) => m.value === config.measure)?.label || "" }];
@@ -410,17 +406,8 @@ function OlapBuilder({ editId }: { editId?: number }) {
       return [r.label, ...vals, ...(result.cols ? [result.rowTotals[r.key] ?? 0] : [])];
     });
     const totalsRow = ["جمع کل", ...cols.map((c) => result.colTotals[c.key] ?? 0), ...(result.cols ? [result.grandTotal] : [])];
-    const csvBody = [header, ...bodyRows, totalsRow].map((row) => row.map(csvEscape).join(",")).join("\r\n");
-    const BOM = String.fromCharCode(0xfeff);
-    const blob = new Blob([BOM + csvBody], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${(title || "olap-report").trim()}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // برچسب سطرها/ستون‌ها (بُعد، مثلاً کد 00125) متن می‌ماند؛ مقادیر اندازه‌گیری عدد اکسل‌اند
+    downloadExcel([header, ...bodyRows, totalsRow], (title || "olap-report").trim(), "OLAP");
   }
 
   async function onSubmit(e: FormEvent) {

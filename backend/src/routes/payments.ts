@@ -300,11 +300,17 @@ async function validateSubjectLines(
     basisAllocated.set(lockedKey, (basisAllocated.get(lockedKey) || 0) + amountInBasisCurrency);
   }
 
+  // «نوع پرداخت»ِ غیرفعال برای سند جدید قابل استفاده نیست؛ ولی سندِ موجودی که قبلاً از آن استفاده کرده، با همان نوع معتبر می‌ماند
+  const alreadyUsedTypeIds = new Set<number>(
+    excludePaymentId ? (await prisma.paymentSettlementLine.findMany({ where: { paymentId: excludePaymentId }, select: { paymentTypeId: true } })).map((x) => x.paymentTypeId) : []
+  );
+
   for (const [idx, l] of lines.entries()) {
     if (!l.paymentTypeId) throw new Error(`ردیف موضوعات پرداخت ${idx + 1}: نوع پرداخت الزامی است`);
     // eslint-disable-next-line no-await-in-loop
     const paymentType = await prisma.paymentType.findUnique({ where: { id: l.paymentTypeId } });
-    if (!paymentType || !paymentType.isActive) throw new Error(`ردیف ${idx + 1}: نوع پرداخت یافت نشد یا غیرفعال است`);
+    if (!paymentType) throw new Error(`ردیف ${idx + 1}: نوع پرداخت یافت نشد`);
+    if (!paymentType.isActive && !alreadyUsedTypeIds.has(paymentType.id)) throw new Error(`ردیف ${idx + 1}: نوع پرداخت «${paymentType.title}» غیرفعال است و برای سند جدید قابل انتخاب نیست`);
 
     if (!l.instrumentClientKey || !instrumentByKey.has(l.instrumentClientKey)) {
       throw new Error(`ردیف ${idx + 1}: قلم (ردیف ابزار پرداخت مرتبط) نامعتبر است`);
