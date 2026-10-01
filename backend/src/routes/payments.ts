@@ -9,7 +9,7 @@ import { assertChequeNotUsedElsewhere, findChequeUses } from "../utils/chequeUsa
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, ConversionCurrency } from "../utils/currencyConversion";
 import { issuePaymentJournalEntry, revertPaymentJournalEntry } from "../services/paymentJournalEntryService";
-import { candidatesForBasisType, BasisType, BasisCandidate } from "../services/paymentBasisCandidates";
+import { candidatesForBasisType, pickableBasisDocuments, basisGroupOf, BasisType, BasisCandidate } from "../services/paymentBasisCandidates";
 import { assertPettyCashRunningBalanceNotNegative } from "../services/pettyCashBalanceService";
 import { assertPaymentAdvanceNotAllocated } from "../services/purchaseInvoiceAdvanceService";
 import { can } from "../authz/guard";
@@ -242,12 +242,14 @@ async function cleanOneInstrumentLine(
 // =========================================================================
 
 router.get("/payments/pickable-basis-documents", can(`${FORM}.view`), async (req, res) => {
-  const basisType = req.query.basisType as BasisType | undefined;
-  const partyId = req.query.partyId ? Number(req.query.partyId) : null;
-  const excludePaymentId = req.query.excludePaymentId ? Number(req.query.excludePaymentId) : undefined;
-  if (!basisType || basisType === "NONE" || !partyId) return res.json([]);
-  const candidates = await candidatesForBasisType(basisType, partyId, { excludePaymentId });
-  res.json(candidates.filter((c) => c.remaining > 0.001));
+  res.json(
+    await pickableBasisDocuments({
+      basisType: req.query.basisType as BasisType | undefined,
+      partyId: req.query.partyId ? Number(req.query.partyId) : null,
+      paymentTypeId: req.query.paymentTypeId ? Number(req.query.paymentTypeId) : null,
+      excludePaymentId: req.query.excludePaymentId ? Number(req.query.excludePaymentId) : undefined,
+    })
+  );
 });
 
 // =========================================================================
@@ -287,7 +289,9 @@ async function validateSubjectLines(
     if (!lockedBasisId) continue;
     const lockedBasisType: BasisType = sl.purchaseInvoiceId ? "PURCHASE_INVOICE" : sl.salesInvoiceId ? "SALES_INVOICE" : "PURCHASE_ORDER";
     // eslint-disable-next-line no-await-in-loop
-    const info = (await candidatesForBasisType(lockedBasisType, sl.partyId as number, { excludePaymentId })).find((c) => c.id === lockedBasisId);
+    const lockedNature = (await prisma.paymentType.findUnique({ where: { id: sl.paymentTypeId }, select: { nature: true } }))?.nature;
+    // eslint-disable-next-line no-await-in-loop
+    const info = (await candidatesForBasisType(lockedBasisType, sl.partyId as number, { excludePaymentId, nature: lockedNature })).find((c) => c.id === lockedBasisId);
     if (!info) continue;
     // eslint-disable-next-line no-await-in-loop
     const rowCurrency = sl.currencyId === baseCurrency.id ? baseCurrency : await prisma.currency.findUnique({ where: { id: sl.currencyId } });
@@ -296,7 +300,7 @@ async function validateSubjectLines(
     const basisCurrency = await getBasisCurrency(info.currencyId);
     const amountInBasisCurrency =
       info.currencyId === sl.currencyId ? Number(sl.amount) : fromBaseCurrencyAmount(toBaseCurrencyAmount(Number(sl.amount), Number(sl.fxRate), rowCurrency, baseCurrency), info.fxRate, basisCurrency);
-    const lockedKey = `${lockedBasisType}:${info.id}`;
+    const lockedKey = `${lockedBasisType}:${info.id}:${basisGroupOf(lockedNature)}`;
     basisAllocated.set(lockedKey, (basisAllocated.get(lockedKey) || 0) + amountInBasisCurrency);
   }
 
@@ -371,7 +375,7 @@ async function validateSubjectLines(
         if (f !== field && v) throw new Error(`ردیف ${idx + 1}: فقط سند مبنای متناسب با نوع پرداخت باید انتخاب شود`);
       }
       // eslint-disable-next-line no-await-in-loop
-      const candidates = await candidatesForBasisType(basisType, l.partyId as number, { excludePaymentId });
+      const candidates = await candidatesForBasisType(basisType, l.partyId as number, { excludePaymentId, nature: paymentType.nature });
       basisInfo = candidates.find((c) => c.id === basisId) || null;
       if (!basisInfo) throw new Error(`ردیف ${idx + 1}: سند مبنای انتخاب‌شده یافت نشد یا متعلق به این طرف حساب نیست`);
     }
@@ -385,7 +389,7 @@ async function validateSubjectLines(
     const amount = Number(l.amount);
     if (!(amount > 0)) throw new Error(`ردیف ${idx + 1}: مبلغ باید عددی مثبت باشد`);
     if (basisInfo) {
-      const basisKey = `${basisType}:${basisInfo.id}`;
+      const basisKey = `${basisType}:${basisInfo.id}:${basisGroupOf(paymentType.nature)}`;
       // eslint-disable-next-line no-await-in-loop
       const basisCurrency = await getBasisCurrency(basisInfo.currencyId);
       const amountInBasisCurrency =
@@ -740,7 +744,9 @@ router.post("/payments/:id/approve", can(`${FORM}.approve`), async (req, res) =>
       if (!basisId) continue;
       const basisType: BasisType = s.purchaseInvoiceId ? "PURCHASE_INVOICE" : s.salesInvoiceId ? "SALES_INVOICE" : "PURCHASE_ORDER";
       // eslint-disable-next-line no-await-in-loop
-      const candidates = await candidatesForBasisType(basisType, s.partyId as number, { excludePaymentId: id });
+      const approveNature = (await prisma.paymentType.findUnique({ where: { id: s.paymentTypeId }, select: { nature: true } }))?.nature;
+      // eslint-disable-next-line no-await-in-loop
+      const candidates = await candidatesForBasisType(basisType, s.partyId as number, { excludePaymentId: id, nature: approveNature });
       const info = candidates.find((c) => c.id === basisId);
       if (!info) throw new Error("سند مبنای یکی از ردیف‌های موضوعات پرداخت یافت نشد");
       // eslint-disable-next-line no-await-in-loop
@@ -759,7 +765,7 @@ router.post("/payments/:id/approve", can(`${FORM}.approve`), async (req, res) =>
         info.currencyId === s.currencyId
           ? Number(s.amount)
           : fromBaseCurrencyAmount(toBaseCurrencyAmount(Number(s.amount), Number(s.fxRate), rowCurrency, approveBaseCurrency), info.fxRate, basisCurrency);
-      const basisKey = `${basisType}:${info.id}`;
+      const basisKey = `${basisType}:${info.id}:${basisGroupOf(approveNature)}`;
       const alreadyAllocated = approveBasisAllocated.get(basisKey) || 0;
       const effectiveRemaining = info.remaining - alreadyAllocated;
       if (amountInBasisCurrency > effectiveRemaining + 0.001) throw new Error(`مانده‌ی سند مبنای شماره ${info.number} از زمان ثبت این سند کاهش یافته و کافی نیست`);
