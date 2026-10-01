@@ -318,6 +318,15 @@ const RAW_MODULES: ModuleGroup[] = [
       },
     ],
   },
+  {
+    title: "امور مالیاتی",
+    subModules: [
+      {
+        title: "تنظیمات",
+        items: [{ key: "tax-memories", label: "حافظه مالیاتی", list: "/tax-memories", create: "/tax-memories/new", icon: "shield" }],
+      },
+    ],
+  },
 ];
 
 // قاعده‌ی عمومی ترتیب زیرماژول‌ها در همه‌ی ماژول‌ها: «تنظیمات» اول، بقیه (عملیات و گروه‌های عملیاتی) به همان ترتیب تعریف در وسط،

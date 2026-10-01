@@ -86,6 +86,7 @@
   --nc-mod-supply: #f0a3a3;
   --nc-mod-sales: #e8cf7a;
   --nc-mod-treasury: #cf94cf;
+  --nc-mod-tax: #f2b66d;
   --nc-sub-ops: #e8cf7a;
   --nc-sub-structure: #7fa3d9;
   --nc-sub-report: #d994b3;
@@ -161,6 +162,7 @@
   --nc-mod-supply: #f0a3a3;
   --nc-mod-sales: #e8cf7a;
   --nc-mod-treasury: #cf94cf;
+  --nc-mod-tax: #f2b66d;
   --nc-sub-ops: #e8cf7a;
   --nc-sub-structure: #7fa3d9;
   --nc-sub-report: #d994b3;
@@ -233,6 +235,7 @@
   --nc-mod-supply: #a13d3d;
   --nc-mod-sales: #8a7318;
   --nc-mod-treasury: #8a3a7d;
+  --nc-mod-tax: #9a5b12;
   --nc-sub-ops: #8a7318;
   --nc-sub-structure: #1f5a8a;
   --nc-sub-report: #8a3a5a;
@@ -306,6 +309,7 @@
   --nc-mod-supply: #f0a3a3;
   --nc-mod-sales: #e8cf7a;
   --nc-mod-treasury: #cf94cf;
+  --nc-mod-tax: #f2b66d;
   --nc-sub-ops: #e8cf7a;
   --nc-sub-structure: #7fa3d9;
   --nc-sub-report: #d994b3;
@@ -377,6 +381,7 @@
   --nc-mod-supply: #a13d3d;
   --nc-mod-sales: #8a7318;
   --nc-mod-treasury: #8a3a7d;
+  --nc-mod-tax: #9a5b12;
   --nc-sub-ops: #8a7318;
   --nc-sub-structure: #1f5a8a;
   --nc-sub-report: #8a3a5a;
@@ -522,6 +527,7 @@ body {
 .module-icon.mod-ic-truck { color: var(--nc-mod-supply); }
 .module-icon.mod-ic-cart { color: var(--nc-mod-sales); }
 .module-icon.mod-ic-wallet { color: var(--nc-mod-treasury); }
+.module-icon.mod-ic-receipt { color: var(--nc-mod-tax); }
 
 .nav-submodule { margin: 4px 0 8px 0; padding-right: 8px; margin-right: 10px; }
 .submodule-title {

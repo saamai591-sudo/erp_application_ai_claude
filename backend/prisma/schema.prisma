@@ -3651,3 +3651,23 @@ model FrequentDescription {
   @@unique([formKey, fieldKey, text])
   @@index([formKey, fieldKey])
 }
+
+/// «حافظه مالیاتی» (امور مالیاتی › تنظیمات). جفت‌کلید RSA 2048 هنگام اولین ذخیره ساخته می‌شود؛ کلید خصوصی فقط به‌صورت رمزشده (AES-256-GCM،
+/// services/taxMemoryService.ts) ذخیره و هرگز از طریق API/لاگ/UI بیرون نمی‌آید. publicKeyPem/csrPem از روی همان جفت‌کلید تولید می‌شوند و کاربر نمی‌تواند آن‌ها را جایگزین کند.
+model TaxMemory {
+  id                  Int      @id @default(autoincrement())
+  persianCompanyName  String
+  englishCompanyName  String
+  nationalId          String
+  /// همیشه IR (سرور هر مقدار دیگری را رد می‌کند)
+  countryId           String   @default("IR")
+  email               String
+  /// شناسه یکتای حافظه مالیاتی — بعد از دریافت از سامانه مودیان دستی وارد می‌شود
+  taxMemoryUniqueId   String?
+  publicKeyPem        String
+  csrPem              String
+  /// iv:authTag:ciphertext (base64) — کلید خصوصی PKCS#8 PEM که با AES-256-GCM رمز شده
+  privateKeyEncrypted String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}

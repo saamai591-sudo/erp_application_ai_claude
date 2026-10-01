@@ -40,6 +40,7 @@ const MODULE_ICON: Record<string, string> = {
   "زنجیره تامین": "truck",
   "فروش": "cart",
   "مدیریت خزانه": "wallet",
+  "امور مالیاتی": "receipt",
 };
 
 /** رنگ اختصاصی هر ساب‌ماژول (بر اساس عنوان ساب‌ماژول؛ همین عنوان‌ها در چند ماژول تکرار می‌شوند، پس یک‌بار نگاشت کافی است) */
@@ -266,6 +267,13 @@ function NavIcon({ name }: { name: string }) {
           <path d="M14.5 10.2h4l3 3.3V17h-7Z" fillOpacity="0.8" />
           <circle cx="7" cy="18.3" r="2.1" />
           <circle cx="17.3" cy="18.3" r="2.1" />
+        </svg>
+      );
+    case "receipt":
+      return (
+        <svg {...common}>
+          <path d="M6 3h12v18l-2.4-1.6L13.2 21 12 20.2 10.8 21l-2.4-1.6L6 21V3Z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+          <path d="M9 8h6M9 12h6M9 16h3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
         </svg>
       );
     case "cart":
