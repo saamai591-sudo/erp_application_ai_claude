@@ -27,7 +27,6 @@ import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
 import { useVatRates, vatRateForDate } from "../lib/useVatRates";
 import { toBaseCurrencyAmount } from "../lib/currencyConversion";
 import { Modal } from "../components/Modal";
-import { BasisDocumentPickerDialog, BasisDocument } from "../components/BasisDocumentPickerDialog";
 import { DescriptionField } from "../components/DescriptionField";
 
 // «فاکتور فروش نهایی» — آخرین سند زنجیره فروش. مبنا: بدون مبنا / حواله فروش. برخلاف فاکتور خرید
@@ -49,7 +48,7 @@ type Basis = "NO_BASIS" | "SALES_DELIVERY" | "SALES_ORDER" | "SALES_QUOTE";
 interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null } }
 interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; decimalPlaces: number; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null }
 interface GoodsItemRow { id: number; kind?: "GOODS" | "SERVICE"; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
-// ردیف قابل صورتحسابِ یک سند مبنا (پاسخ GET /sales-invoices/basis-document-lines)
+// ردیف قابل صورتحسابِ یک سند مبنا (پاسخ GET /sales-invoices/basis-lines)
 interface BasisLine {
   basis: Basis;
   sourceInventoryLineId: number | null;
@@ -185,15 +184,14 @@ function SalesInvoiceList() {
   );
 }
 
-// مبنا در سطح ردیف: basis + فقط یکی از سه فیلد مبدا (sourceInventoryLineId | sourceSalesOrderLineId | sourceSalesQuoteLineId)؛ docLabel نمایشی؛
+// مبنا در سطح ردیف: basis + فقط یکی از سه فیلد مبدا (sourceInventoryLineId | sourceSalesOrderLineId | sourceSalesQuoteLineId)؛ docNumber نمایشی؛
 // remaining = سقف مقدار از سند مبنا؛ priceLocked = فی/مبلغ از سند مبنا محاسبه شده و قابل ویرایش نیست
 interface RowState {
   basis: Basis;
   sourceInventoryLineId: string;
   sourceSalesOrderLineId: string;
   sourceSalesQuoteLineId: string;
-  docId: number | null;
-  docLabel: string;
+  docNumber: number | null;
   remaining: number | null;
   priceLocked: boolean;
   goodsItemId: string;
@@ -210,7 +208,12 @@ interface RowState {
 }
 
 function emptyRow(basis: Basis = "NO_BASIS"): RowState {
-  return { basis, sourceInventoryLineId: "", sourceSalesOrderLineId: "", sourceSalesQuoteLineId: "", docId: null, docLabel: "", remaining: null, priceLocked: false, goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "" };
+  return { basis, sourceInventoryLineId: "", sourceSalesOrderLineId: "", sourceSalesQuoteLineId: "", docNumber: null, remaining: null, priceLocked: false, goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "" };
+}
+
+type PickLine = BasisLine & { id: string };
+function basisLineKey(l: BasisLine): string {
+  return l.sourceInventoryLineId ? `D:${l.sourceInventoryLineId}` : l.sourceSalesOrderLineId ? `O:${l.sourceSalesOrderLineId}` : `Q:${l.sourceSalesQuoteLineId}`;
 }
 
 /** کلید یکتای ردیف مبدا (برای جمع مقدار ردیف‌هایی که به یک ردیف مبنا ارجاع می‌دهند) */
@@ -234,8 +237,8 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   const [salesCenters, setSalesCenters] = useState<SalesCenter[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
-  // انتخابگر سند مبنا (چندانتخابی): ردیفی که انتخابگر برایش باز است + اسناد قابل انتخاب/ناسازگار
-  const [basisPicker, setBasisPicker] = useState<{ idx: number; basis: Basis; eligible: BasisDocument[]; ineligible: BasisDocument[]; alreadyLoaded: number } | null>(null);
+  // ردیف‌های قابل انتخاب هر نوع مبنا (سطح ردیف): فقط ردیف‌های دارای مانده از اسنادِ سازگار با هدر؛ سرور فیلتر می‌کند
+  const [basisLines, setBasisLines] = useState<Record<string, BasisLine[]>>({});
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", fxRate: "", description: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
   const [meta, setMeta] = usePersistedState<{ number: number; journalEntryId: number | null; journalEntryReferenceNumber: number | null; status: SalesInvoiceStatus } | null>(
@@ -288,8 +291,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
             sourceInventoryLineId: l.sourceInventoryLineId ? String(l.sourceInventoryLineId) : "",
             sourceSalesOrderLineId: l.sourceSalesOrderLineId ? String(l.sourceSalesOrderLineId) : "",
             sourceSalesQuoteLineId: l.sourceSalesQuoteLineId ? String(l.sourceSalesQuoteLineId) : "",
-            docId: l.source?.documentId ?? null,
-            docLabel: l.source ? `${BASIS_FA[l.basis]} ${l.source.documentNumber}` : "",
+            docNumber: l.source?.documentNumber ?? null,
             remaining: l.source ? l.source.remaining : null,
             priceLocked: !!l.source?.priceLocked,
             goodsItemId: String(l.goodsItemId),
@@ -404,8 +406,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
       sourceInventoryLineId: l.sourceInventoryLineId ? String(l.sourceInventoryLineId) : "",
       sourceSalesOrderLineId: l.sourceSalesOrderLineId ? String(l.sourceSalesOrderLineId) : "",
       sourceSalesQuoteLineId: l.sourceSalesQuoteLineId ? String(l.sourceSalesQuoteLineId) : "",
-      docId: l.documentId,
-      docLabel: `${BASIS_FA[l.basis]} ${l.documentNumber}`,
+      docNumber: l.documentNumber,
       remaining: l.remaining,
       priceLocked: l.priceLocked,
       goodsItemId: String(l.goodsItemId),
@@ -424,37 +425,44 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     if (editId) p.set("excludeInvoiceId", String(editId));
     return p.toString();
   }
-  // باز کردن انتخابگر چندگانه‌ی «سند مبنا» برای مبنای همین ردیف؛ اسنادی که قبلاً در همین فاکتور بارگذاری شده‌اند دوباره قابل انتخاب نیستند
-  async function openBasisPicker(idx: number) {
-    if (!guardRowEntry()) return;
-    const basis = rows[idx].basis;
-    if (basis === "NO_BASIS") return;
-    try {
-      const r: { eligible: BasisDocument[]; ineligible: BasisDocument[] } = await api.get(`/sales-invoices/basis-documents?${basisQuery({ type: basis })}`);
-      const loaded = new Set(rows.filter((x) => x.basis === basis && x.docId != null).map((x) => x.docId));
-      const eligible = r.eligible.filter((d) => !loaded.has(d.id));
-      setBasisPicker({ idx, basis, eligible, ineligible: r.ineligible, alreadyLoaded: r.eligible.length - eligible.length });
-    } catch (e) {
-      setError((e as ApiError).message);
+  // مبناهای استفاده‌شده در ردیف‌ها؛ برای هرکدام فهرست ردیف‌های قابل انتخاب (سرور: سند سازگار با هدر + مانده > ۰ + فقط خدمت برای سفارش/پیش‌فاکتور) بارگذاری می‌شود
+  const usedBases = Array.from(new Set(rows.map((r) => r.basis).filter((b) => b !== "NO_BASIS"))).sort().join(",");
+  const headerReady = !!(header.date && header.customerId && header.salesTypeId && header.salesCenterId && header.currencyId);
+  useEffect(() => {
+    if (!headerReady || !usedBases) return;
+    let alive = true;
+    for (const basis of usedBases.split(",") as Basis[]) {
+      api
+        .get(`/sales-invoices/basis-lines?${basisQuery({ type: basis })}`)
+        .then((r: BasisLine[]) => alive && setBasisLines((prev) => ({ ...prev, [basis]: r })))
+        .catch(() => alive && setBasisLines((prev) => ({ ...prev, [basis]: [] })));
     }
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usedBases, headerReady, header.date, header.customerId, header.salesTypeId, header.salesCenterId, header.currencyId, editId]);
+
+  // مانده‌ی قابل انتخابِ یک ردیف مبنا برای ردیف idx: مانده‌ی سرور منهای مقدار سایر ردیف‌های همین فاکتور که به همان ردیف مبنا ارجاع می‌دهند
+  function availableBasisLines(basis: Basis, idx: number): PickLine[] {
+    const current = sourceKey(rows[idx]);
+    return (basisLines[basis] || [])
+      .map((l) => {
+        const key = basisLineKey(l);
+        const usedByOthers = rows.reduce((sum, r, i) => (i !== idx && sourceKey(r) === key ? sum + (Number(r.quantity) || 0) : sum), 0);
+        return { ...l, id: key, remaining: Math.round((l.remaining - usedByOthers) * 1e6) / 1e6 };
+      })
+      .filter((l) => l.remaining > 0 || basisLineKey(l) === current);
   }
-  // بارگذاری ردیف‌های قابل صورتحسابِ همه‌ی اسناد انتخاب‌شده در همین گرید؛ هر سند در سرور جداگانه اعتبارسنجی می‌شود و سند ناسازگار با دلیل اعلام (نه بی‌صدا بارگذاری) می‌شود
-  async function loadBasisDocuments(idx: number, basis: Basis, ids: number[]) {
-    try {
-      const r: { lines: BasisLine[]; rejected: { id: number; number: number; reason: string }[] } = await api.get(`/sales-invoices/basis-document-lines?${basisQuery({ type: basis, ids: ids.join(",") })}`);
-      if (r.rejected.length > 0) setError(r.rejected.map((x) => `سند ${x.number}: ${x.reason}`).join("\n"));
-      if (r.lines.length === 0) return;
-      const newRows = r.lines.map(lineToRow);
-      setRows((prev) => {
-        const next = [...prev];
-        const cur = next[idx];
-        const empty = cur && !cur.goodsItemId && !sourceKey(cur);
-        next.splice(empty ? idx : idx + 1, empty ? 1 : 0, ...newRows);
-        return next;
-      });
-    } catch (e) {
-      setError((e as ApiError).message);
-    }
+  // اعمال انتخاب یک یا چند ردیف مبنا: اولین ردیف در همین سطر می‌نشیند و بقیه بلافاصله بعد از آن به‌صورت ردیف جدید اضافه می‌شوند
+  function onBasisLinesPicked(idx: number, picked: BasisLine[]) {
+    if (picked.length === 0) return;
+    const newRows = picked.map(lineToRow);
+    setRows((prev) => {
+      const next = [...prev];
+      next.splice(idx, 1, { ...newRows[0], description: next[idx]?.description || "" }, ...newRows.slice(1));
+      return next;
+    });
   }
   function onQuantityChange(idx: number, quantity: string) {
     const row = rows[idx];
@@ -768,15 +776,24 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
                           {(Object.keys(BASIS_FA) as Basis[]).map((b) => <option key={b} value={b}>{BASIS_FA[b]}</option>)}
                         </select>
                       </td>
-                      <td style={{ minWidth: 150 }}>
+                      <td style={{ minWidth: 110 }}>
                         {row.basis === "NO_BASIS" ? (
                           <span style={{ color: "var(--ink-soft)" }}>—</span>
-                        ) : hasSource ? (
-                          <span title={remaining != null ? `مانده‌ی قابل صورتحساب: ${formatAmountFa(remaining)}` : undefined}>{row.docLabel}</span>
                         ) : (
-                          <button type="button" className="btn secondary" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => openBasisPicker(idx)}>
-                            انتخاب {BASIS_FA[row.basis]}…
-                          </button>
+                          <RecordPickerField
+                            title={`انتخاب ردیف ${BASIS_FA[row.basis]}`}
+                            displayValue={hasSource ? toFaDigits(String(row.docNumber ?? "")) : ""}
+                            rows={availableBasisLines(row.basis, idx)}
+                            columns={[
+                              { header: "شماره", render: (l) => toFaDigits(String(l.documentNumber)), filterValue: (l) => String(l.documentNumber), width: "70px" },
+                              { header: "کالا / خدمت", render: (l) => l.goodsItemTitle, filterValue: (l) => l.goodsItemTitle },
+                              { header: "مانده", render: (l) => formatAmountFa(l.remaining), filterValue: (l) => String(l.remaining), width: "90px" },
+                            ]}
+                            onOpen={guardRowEntry}
+                            multiSelect
+                            onSelectMultiple={(ls) => onBasisLinesPicked(idx, ls)}
+                            onSelect={(l) => onBasisLinesPicked(idx, [l])}
+                          />
                         )}
                       </td>
                       <td style={{ minWidth: 300 }}>
@@ -835,16 +852,6 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
         </div>
         </fieldset>
       </form>
-      {basisPicker && (
-        <BasisDocumentPickerDialog
-          title={`انتخاب ${BASIS_FA[basisPicker.basis]} (چندانتخابی)`}
-          eligible={basisPicker.eligible}
-          ineligible={basisPicker.ineligible}
-          alreadyLoadedCount={basisPicker.alreadyLoaded}
-          onConfirm={(ids) => loadBasisDocuments(basisPicker.idx, basisPicker.basis, ids)}
-          onClose={() => setBasisPicker(null)}
-        />
-      )}
       {advanceOpen && editId && (
         <AdvanceAllocationDialog
           invoiceId={editId}
