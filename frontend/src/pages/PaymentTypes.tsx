@@ -23,6 +23,7 @@ import { toFaDigits } from "../lib/formatAmount";
 const NATURE_FA: Record<string, string> = {
   SUPPLIER_PAYMENT: "پرداخت به تأمین‌کننده",
   ADVANCE_PAYMENT: "پیش‌پرداخت",
+  ADVANCE_VAT_PAYMENT: "پیش‌پرداخت ارزش افزوده",
   CUSTOMER_PAYMENT: "پرداخت به مشتری",
   OTHER_PAYMENT: "پرداخت به سایر",
   PURCHASE_VAT: "ارزش افزوده خرید",
@@ -42,6 +43,7 @@ const BASIS_TYPE_FA: Record<string, string> = {
 const ALLOWED_BASIS_TYPES: Record<string, string[]> = {
   SUPPLIER_PAYMENT: ["NONE", "PURCHASE_INVOICE"],
   ADVANCE_PAYMENT: ["NONE", "PURCHASE_ORDER"],
+  ADVANCE_VAT_PAYMENT: ["NONE"],
   CUSTOMER_PAYMENT: ["NONE", "SALES_INVOICE"],
   OTHER_PAYMENT: ["NONE"],
   PURCHASE_VAT: ["NONE", "PURCHASE_INVOICE"],

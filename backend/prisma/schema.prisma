@@ -3281,6 +3281,8 @@ enum ReceiptBasisType {
 enum PaymentNature {
   SUPPLIER_PAYMENT
   ADVANCE_PAYMENT
+  /// «پیش‌پرداخت ارزش افزوده»: پرداختِ پیشِ ارزش‌افزوده‌ی خرید به تامین‌کننده؛ به‌صورت جدا از «پیش‌پرداخت» عادی به ارزش‌افزوده‌ی فاکتور خرید تخصیص می‌یابد
+  ADVANCE_VAT_PAYMENT
   CUSTOMER_PAYMENT
   OTHER_PAYMENT
   PURCHASE_VAT
@@ -3616,11 +3618,18 @@ model PurchaseInvoiceAdvanceAllocation {
   paymentSettlementLineId Int
   /// به ارز فاکتور (= ارز پیش‌پرداخت)؛ تفاوت نرخ ارز هرگز روی آن اثر نمی‌گذارد
   amount                  Decimal               @db.Decimal(18, 2)
+  /// ماهیت پیش‌پرداختِ تخصیص‌یافته (از نوع پرداخت): مبلغ پیش‌پرداخت عادی و پیش‌پرداخت ارزش افزوده جدا از هم کنترل می‌شوند
+  nature                  PurchaseAdvanceAllocationNature @default(ADVANCE_PAYMENT)
   createdAt               DateTime              @default(now())
   purchaseInvoice         PurchaseInvoice       @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
   paymentSettlementLine   PaymentSettlementLine @relation(fields: [paymentSettlementLineId], references: [id], onDelete: Restrict)
 
   @@unique([purchaseInvoiceId, paymentSettlementLineId])
+}
+
+enum PurchaseAdvanceAllocationNature {
+  ADVANCE_PAYMENT
+  ADVANCE_VAT_PAYMENT
 }
 
 /// تخصیص پیش‌پرداخت به فاکتور خرید خدمات — هم‌الگوی PurchaseInvoiceAdvanceAllocation (services/purchaseInvoiceAdvanceService.ts، نوع SERVICE)
@@ -3630,6 +3639,7 @@ model ServicePurchaseInvoiceAdvanceAllocation {
   paymentSettlementLineId  Int
   /// به ارز فاکتور (= ارز پیش‌پرداخت)؛ تفاوت نرخ ارز هرگز روی آن اثر نمی‌گذارد
   amount                   Decimal                 @db.Decimal(18, 2)
+  nature                   PurchaseAdvanceAllocationNature @default(ADVANCE_PAYMENT)
   createdAt                DateTime                @default(now())
   servicePurchaseInvoice   ServicePurchaseInvoice  @relation(fields: [servicePurchaseInvoiceId], references: [id], onDelete: Cascade, map: "SPIAdvanceAlloc_invoiceId_fkey")
   paymentSettlementLine    PaymentSettlementLine   @relation(fields: [paymentSettlementLineId], references: [id], onDelete: Restrict, map: "SPIAdvanceAlloc_lineId_fkey")

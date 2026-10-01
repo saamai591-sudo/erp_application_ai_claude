@@ -7,13 +7,19 @@ import { toBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConve
 // services/salesInvoiceAdvanceService.ts (تخصیص پیش‌دریافت فروش) ولی روی فاکتور خرید: هر تخصیص یک ردیف
 // موضوع پرداختِ «پیش‌پرداخت» (PaymentSettlementLine با نوع پرداختی که ماهیتش ADVANCE_PAYMENT است، روی
 // پرداخت تاییدشده) را با یک مبلغ (به ارز فاکتور) به فاکتور وصل می‌کند. یک پیش‌پرداخت می‌تواند به چند
-// فاکتور و یک فاکتور از چند پیش‌پرداخت استفاده کند. برخلاف پیش‌دریافت فروش، فقط یک ماهیت دارد (بدون
-// معادل ارزش‌افزوده) — پس منطق سطل‌های جدا/nature اینجا نیست. تفاوت نرخ ارز هرگز روی مبلغ ارزی
+// فاکتور و یک فاکتور از چند پیش‌پرداخت استفاده کند. هم‌الگوی پیش‌دریافت فروش، دو ماهیت دارد: «پیش‌پرداخت» (سقف = مبلغ فاکتور) و
+// «پیش‌پرداخت ارزش افزوده» (ADVANCE_VAT_PAYMENT، سقف = ارزش‌افزوده‌ی فاکتور) که جدا از هم کنترل می‌شوند. تفاوت نرخ ارز هرگز روی مبلغ ارزی
 // تخصیص/مانده‌ی قابل پرداخت اثر نمی‌گذارد؛ فقط هنگام تایید/صدور سند فاکتور (routes/purchaseInvoices.ts)
 // بر اساس «رویه‌ها و تنظیمات حسابداری» (روش شناسایی پیش‌پرداخت ارزی معتبر در تاریخ فاکتور) لحاظ می‌شود.
 // =========================================================================
 
 const TOLERANCE = 0.005;
+
+// دو ماهیت قابل تخصیص (هم‌الگوی فروش، services/salesInvoiceAdvanceService.ts): «پیش‌پرداخت» (سقف = مبلغ فاکتور) و «پیش‌پرداخت ارزش افزوده»
+// (سقف = ارزش‌افزوده‌ی فاکتور). هر ماهیت جدا کنترل می‌شود و هرگز با دیگری جمع نمی‌شود.
+export type PurchaseAdvanceNature = "ADVANCE_PAYMENT" | "ADVANCE_VAT_PAYMENT";
+export const PURCHASE_ADVANCE_NATURES: PurchaseAdvanceNature[] = ["ADVANCE_PAYMENT", "ADVANCE_VAT_PAYMENT"];
+const NATURE_FA: Record<PurchaseAdvanceNature, string> = { ADVANCE_PAYMENT: "پیش‌پرداخت", ADVANCE_VAT_PAYMENT: "پیش‌پرداخت ارزش افزوده" };
 
 // -------------------------------------------------------------------------
 // «نوع فاکتور خرید» — همین منطق تخصیص هم برای فاکتور خرید کالا (GOODS) و هم فاکتور خرید خدمات (SERVICE) به کار می‌رود.
@@ -94,6 +100,16 @@ export async function assertAdvanceEditable(invoiceId: number, kind: PurchaseAdv
   if (reasons.length > 0) throw new Error(reasons.join("\n"));
 }
 
+/**
+ * ارزش‌افزوده‌ی فاکتور به «ارز فاکتور»: vatAmount ردیف‌ها (و ردیف‌های «سایر هزینه‌ها»ی فاکتور خرید کالا) همیشه به ارز مبنا ذخیره می‌شود،
+ * پس برای فاکتور ارزی بر نرخ فاکتور تقسیم می‌شود — دقیقاً همان مقداری که سند حسابداری فاکتور به‌عنوان ارزش‌افزوده‌ی خرید می‌آورد.
+ */
+export function purchaseInvoiceVatTotal(lines: { vatAmount: any }[], fxRate: number): number {
+  const base = lines.reduce((s, l) => s + Number(l.vatAmount || 0), 0);
+  const rate = Number(fxRate) > 0 ? Number(fxRate) : 1;
+  return Math.round((base / rate) * 100) / 100;
+}
+
 /** مبلغ قابل تخصیص فاکتور به ارز فاکتور: جمع (مبلغ − تخفیف) ردیف‌ها (ارزش‌افزوده در این مبلغ نمی‌آید) */
 export function purchaseInvoiceNetTotal(lines: { amount: any; discount: any }[]): number {
   return lines.reduce((s, l) => s + Number(l.amount) - Number(l.discount), 0);
@@ -103,10 +119,13 @@ async function loadInvoice(invoiceId: number, kind: PurchaseAdvanceKind) {
   // ردیف‌های فاکتور کالا (PurchaseInvoiceLine) و خدمات (PurchaseCostLine) هر دو amount/discount دارند
   const invoice = await db[KINDS[kind].model].findUnique({
     where: { id: invoiceId },
-    include: { party: true, currency: true, lines: true },
+    include: { party: true, currency: true, lines: true, ...(kind === "GOODS" ? { otherCostLines: true } : {}) },
   });
   if (!invoice) throw new Error(KINDS[kind].notFound);
-  return invoice as { id: number; number: number; date: Date; partyId: number; currencyId: number; party: any; currency: any; lines: { amount: any; discount: any }[] };
+  const typed = invoice as { id: number; number: number; date: Date; partyId: number; currencyId: number; fxRate: any; party: any; currency: any; lines: { amount: any; discount: any; vatAmount: any }[]; otherCostLines?: { vatAmount: any }[] };
+  // ارزش‌افزوده‌ی فاکتور خرید کالا شامل ردیف‌های «سایر هزینه‌ها» هم هست (همان‌طور که در سند حسابداری و لیست فاکتور می‌آید)
+  const vatTotal = purchaseInvoiceVatTotal([...typed.lines, ...(typed.otherCostLines ?? [])], Number(typed.fxRate));
+  return Object.assign(typed, { vatTotal });
 }
 
 function partyName(p: any): string {
@@ -119,12 +138,13 @@ function partyName(p: any): string {
 export async function getPurchaseInvoiceAdvanceState(invoiceId: number, kind: PurchaseAdvanceKind = "GOODS") {
   const invoice = await loadInvoice(invoiceId, kind);
   const total = purchaseInvoiceNetTotal(invoice.lines);
+  const vatTotal = invoice.vatTotal;
 
   const lines = await prisma.paymentSettlementLine.findMany({
     where: {
       partyId: invoice.partyId,
       currencyId: invoice.currencyId,
-      paymentType: { nature: "ADVANCE_PAYMENT" },
+      paymentType: { nature: { in: PURCHASE_ADVANCE_NATURES } },
       payment: { status: "APPROVED", date: { lte: invoice.date } },
     },
     include: { payment: true, paymentType: true, currency: true, advanceAllocations: true, servicePurchaseAdvanceAllocations: true },
@@ -137,6 +157,8 @@ export async function getPurchaseInvoiceAdvanceState(invoiceId: number, kind: Pu
       const { toThis: allocatedToThis, toOthers: allocatedToOthers } = splitAllocations(l, kind, invoiceId);
       return {
         paymentSettlementLineId: l.id,
+        nature: l.paymentType.nature as PurchaseAdvanceNature,
+        natureTitle: NATURE_FA[l.paymentType.nature as PurchaseAdvanceNature],
         paymentId: l.paymentId,
         paymentNumber: l.payment.number,
         paymentDate: l.payment.date,
@@ -152,7 +174,8 @@ export async function getPurchaseInvoiceAdvanceState(invoiceId: number, kind: Pu
     .filter((c) => c.allocatableAmount > TOLERANCE);
 
   const allocations: any[] = await db[KINDS[kind].alloc].findMany({ where: { [KINDS[kind].fk]: invoiceId }, orderBy: { id: "asc" } });
-  const allocatedTotal = allocations.reduce((s, a) => s + Number(a.amount), 0);
+  const allocatedTotal = allocations.filter((a) => a.nature === "ADVANCE_PAYMENT").reduce((s, a) => s + Number(a.amount), 0);
+  const allocatedVatTotal = allocations.filter((a) => a.nature === "ADVANCE_VAT_PAYMENT").reduce((s, a) => s + Number(a.amount), 0);
 
   return {
     invoice: {
@@ -162,9 +185,12 @@ export async function getPurchaseInvoiceAdvanceState(invoiceId: number, kind: Pu
       partyTitle: partyName(invoice.party),
       currencyTitle: invoice.currency.title,
       total,
+      vatTotal,
     },
     allocatedTotal,
+    allocatedVatTotal,
     payable: total - allocatedTotal,
+    vatPayable: vatTotal - allocatedVatTotal,
     lockReasons: await getAdvanceLockReasons(invoiceId, kind),
     candidates,
   };
@@ -178,13 +204,15 @@ export async function savePurchaseInvoiceAdvanceAllocations(invoiceId: number, i
   await assertAdvanceEditable(invoiceId, kind);
   const invoice = await loadInvoice(invoiceId, kind);
   const total = purchaseInvoiceNetTotal(invoice.lines);
+  const vatTotal = invoice.vatTotal;
 
   if (!Array.isArray(items)) throw new Error("فهرست تخصیص‌ها نامعتبر است");
   const wanted = items.filter((i) => Number(i.amount) > 0);
   const ids = wanted.map((i) => i.paymentSettlementLineId);
   if (new Set(ids).size !== ids.length) throw new Error("یک پیش‌پرداخت نمی‌تواند دو بار در تخصیص یک فاکتور تکرار شود");
 
-  let sum = 0;
+  const sums: Record<PurchaseAdvanceNature, number> = { ADVANCE_PAYMENT: 0, ADVANCE_VAT_PAYMENT: 0 };
+  const natureById = new Map<number, PurchaseAdvanceNature>();
   for (const item of wanted) {
     const amount = Number(item.amount);
     if (!(amount > 0)) throw new Error("مبلغ تخصیص باید عددی مثبت باشد");
@@ -196,7 +224,8 @@ export async function savePurchaseInvoiceAdvanceAllocations(invoiceId: number, i
     if (!line) throw new Error("پیش‌پرداخت انتخاب‌شده یافت نشد");
     const label = `پیش‌پرداخت پرداخت شماره ${line.payment.number}`;
     if (line.partyId !== invoice.partyId) throw new Error(`${label}: طرف حساب با طرف حساب فاکتور یکسان نیست`);
-    if (line.paymentType.nature !== "ADVANCE_PAYMENT") throw new Error(`${label}: نوع پرداخت، ماهیت «پیش‌پرداخت» ندارد`);
+    const nature = line.paymentType.nature as PurchaseAdvanceNature;
+    if (!PURCHASE_ADVANCE_NATURES.includes(nature)) throw new Error(`${label}: نوع پرداخت، ماهیت «پیش‌پرداخت» یا «پیش‌پرداخت ارزش افزوده» ندارد`);
     if (line.payment.status !== "APPROVED") throw new Error(`${label}: پرداخت تایید نشده است`);
     if (line.payment.date.getTime() > invoice.date.getTime()) throw new Error(`${label}: تاریخ پرداخت بعد از تاریخ فاکتور است`);
     if (line.currencyId !== invoice.currencyId) throw new Error(`${label}: ارز پیش‌پرداخت با ارز فاکتور یکسان نیست`);
@@ -205,9 +234,11 @@ export async function savePurchaseInvoiceAdvanceAllocations(invoiceId: number, i
     const allocatable = Number(line.amount) - allocatedToOthers;
     if (!(allocatable > TOLERANCE)) throw new Error(`${label}: مبلغ قابل تخصیصی باقی نمانده است`);
     if (amount > allocatable + TOLERANCE) throw new Error(`${label}: مبلغ تخصیص از مبلغ قابل تخصیص پیش‌پرداخت (${allocatable}) بیشتر است`);
-    sum += amount;
+    sums[nature] += amount;
+    natureById.set(item.paymentSettlementLineId, nature);
   }
-  if (sum > total + TOLERANCE) throw new Error(`مجموع پیش‌پرداخت‌های تخصیص‌یافته (${sum}) از مبلغ قابل تخصیص فاکتور (${total}) بیشتر است`);
+  if (sums.ADVANCE_PAYMENT > total + TOLERANCE) throw new Error(`مجموع پیش‌پرداخت‌های تخصیص‌یافته (${sums.ADVANCE_PAYMENT}) از مبلغ قابل تخصیص فاکتور (${total}) بیشتر است`);
+  if (sums.ADVANCE_VAT_PAYMENT > vatTotal + TOLERANCE) throw new Error(`مجموع پیش‌پرداخت‌های ارزش افزوده‌ی تخصیص‌یافته (${sums.ADVANCE_VAT_PAYMENT}) از ارزش افزوده‌ی فاکتور (${vatTotal}) بیشتر است`);
 
   const { alloc, fk } = KINDS[kind];
   await prisma.$transaction(async (tx) => {
@@ -217,8 +248,8 @@ export async function savePurchaseInvoiceAdvanceAllocations(invoiceId: number, i
       // eslint-disable-next-line no-await-in-loop
       await t[alloc].upsert({
         where: { [`${fk}_paymentSettlementLineId`]: { [fk]: invoiceId, paymentSettlementLineId: item.paymentSettlementLineId } },
-        create: { [fk]: invoiceId, paymentSettlementLineId: item.paymentSettlementLineId, amount: Number(item.amount) },
-        update: { amount: Number(item.amount) },
+        create: { [fk]: invoiceId, paymentSettlementLineId: item.paymentSettlementLineId, amount: Number(item.amount), nature: natureById.get(item.paymentSettlementLineId)! },
+        update: { amount: Number(item.amount), nature: natureById.get(item.paymentSettlementLineId)! },
       });
     }
   });
@@ -232,7 +263,7 @@ export async function assertPaymentAdvanceNotAllocated(paymentId: number, instru
 }
 
 /** پیش از ذخیره‌ی ویرایش فاکتور: تخصیص‌های موجود با طرف‌حساب/ارز/تاریخ/مبلغِ جدید فاکتور ناسازگار نشوند */
-export async function assertAdvanceAllocationsStillValid(invoiceId: number, next: { partyId: number; currencyId: number; date: Date; netTotal: number }, kind: PurchaseAdvanceKind = "GOODS") {
+export async function assertAdvanceAllocationsStillValid(invoiceId: number, next: { partyId: number; currencyId: number; date: Date; netTotal: number; vatTotal: number }, kind: PurchaseAdvanceKind = "GOODS") {
   const allocations: any[] = await db[KINDS[kind].alloc].findMany({
     where: { [KINDS[kind].fk]: invoiceId },
     include: { paymentSettlementLine: { include: { payment: true } } },
@@ -244,8 +275,10 @@ export async function assertAdvanceAllocationsStillValid(invoiceId: number, next
   if (allocations.some((a) => a.paymentSettlementLine.payment.date.getTime() > next.date.getTime())) {
     throw new Error("تاریخ فاکتور نمی‌تواند قبل از تاریخ پرداختِ پیش‌پرداخت‌های تخصیص‌یافته باشد؛ ابتدا تخصیص‌ها را حذف کنید");
   }
-  const allocated = allocations.reduce((s, a) => s + Number(a.amount), 0);
+  const allocated = allocations.filter((a) => a.nature === "ADVANCE_PAYMENT").reduce((s, a) => s + Number(a.amount), 0);
   if (allocated > next.netTotal + TOLERANCE) throw new Error("مبلغ جدید فاکتور از مجموع پیش‌پرداخت تخصیص‌یافته کمتر می‌شود؛ ابتدا تخصیص‌ها را کاهش دهید");
+  const allocatedVat = allocations.filter((a) => a.nature === "ADVANCE_VAT_PAYMENT").reduce((s, a) => s + Number(a.amount), 0);
+  if (allocatedVat > next.vatTotal + TOLERANCE) throw new Error("ارزش افزوده‌ی جدید فاکتور از مجموع پیش‌پرداخت ارزش افزوده‌ی تخصیص‌یافته کمتر می‌شود؛ ابتدا تخصیص‌ها را کاهش دهید");
 }
 
 export interface LineCostResult {
@@ -289,8 +322,9 @@ export async function computePurchaseInvoiceLineCosts(invoiceId: number): Promis
   if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
   if (invoice.currencyId === baseCurrency.id) return noShare();
 
+  // سهم تسعیر در Cost فقط از «پیش‌پرداخت» عادی می‌آید؛ تسعیر «پیش‌پرداخت ارزش افزوده» روی ارزش‌افزوده شناسایی می‌شود (سند حسابداری فاکتور)، نه Cost کالا
   const allocations = await prisma.purchaseInvoiceAdvanceAllocation.findMany({
-    where: { purchaseInvoiceId: invoiceId },
+    where: { purchaseInvoiceId: invoiceId, nature: "ADVANCE_PAYMENT" },
     include: { paymentSettlementLine: true },
   });
   if (allocations.length === 0) return noShare();

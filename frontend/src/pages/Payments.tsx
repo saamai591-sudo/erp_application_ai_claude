@@ -36,7 +36,7 @@ import { DescriptionField } from "../components/DescriptionField";
 
 type InstrumentType = "CASH" | "BANK_TRANSFER" | "CHEQUE" | "CHEQUE_TRANSFER";
 type DocStatus = "DRAFT" | "APPROVED";
-type PaymentNature = "SUPPLIER_PAYMENT" | "ADVANCE_PAYMENT" | "CUSTOMER_PAYMENT" | "OTHER_PAYMENT" | "PURCHASE_VAT" | "SALES_VAT" | "TO_BANK" | "TO_CASH_BOX" | "TO_PETTY_CASH";
+type PaymentNature = "SUPPLIER_PAYMENT" | "ADVANCE_PAYMENT" | "ADVANCE_VAT_PAYMENT" | "CUSTOMER_PAYMENT" | "OTHER_PAYMENT" | "PURCHASE_VAT" | "SALES_VAT" | "TO_BANK" | "TO_CASH_BOX" | "TO_PETTY_CASH";
 // انتخابگرِ «طرف حساب / حساب» ردیف موضوعات پرداخت: برای ماهیت «به بانک» فقط حساب‌های بانکی، «به صندوق» فقط صندوق‌ها، «به تنخواه» فقط تنخواه‌دارها؛ در بقیه‌ی ماهیت‌ها طرف حساب
 function selectorKind(nature?: PaymentNature): "BANK" | "CASH" | "CUSTODIAN" | "PARTY" {
   return nature === "TO_BANK" ? "BANK" : nature === "TO_CASH_BOX" ? "CASH" : nature === "TO_PETTY_CASH" ? "CUSTODIAN" : "PARTY";
@@ -1262,7 +1262,7 @@ function SettlementRowFields({
 
   const eligibleParties =
     !paymentType ? []
-    : paymentType.nature === "SUPPLIER_PAYMENT" || paymentType.nature === "ADVANCE_PAYMENT" ? parties.filter((p) => supplierPartyIds.has(p.id))
+    : paymentType.nature === "SUPPLIER_PAYMENT" || paymentType.nature === "ADVANCE_PAYMENT" || paymentType.nature === "ADVANCE_VAT_PAYMENT" ? parties.filter((p) => supplierPartyIds.has(p.id))
     : paymentType.nature === "CUSTOMER_PAYMENT" ? parties.filter((p) => customerPartyIds.has(p.id))
     : parties;
 
@@ -1304,7 +1304,7 @@ function SettlementRowFields({
     if (rt && selectorKind(rt.nature) === "PARTY" && !partyId && headerPartyId) {
       const headerPartyIdNum = Number(headerPartyId);
       const qualifies =
-        rt.nature === "SUPPLIER_PAYMENT" || rt.nature === "ADVANCE_PAYMENT" ? supplierPartyIds.has(headerPartyIdNum)
+        rt.nature === "SUPPLIER_PAYMENT" || rt.nature === "ADVANCE_PAYMENT" || rt.nature === "ADVANCE_VAT_PAYMENT" ? supplierPartyIds.has(headerPartyIdNum)
         : rt.nature === "CUSTOMER_PAYMENT" ? customerPartyIds.has(headerPartyIdNum)
         : true;
       if (qualifies) {

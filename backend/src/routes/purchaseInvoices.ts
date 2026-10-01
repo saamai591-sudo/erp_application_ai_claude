@@ -20,6 +20,7 @@ import {
   savePurchaseInvoiceAdvanceAllocations,
   assertAdvanceAllocationsStillValid,
   purchaseInvoiceNetTotal,
+  purchaseInvoiceVatTotal,
   computePurchaseInvoiceLineCosts,
 } from "../services/purchaseInvoiceAdvanceService";
 import { getAdvancePaymentMethodForDate } from "../services/accountingSettingsService";
@@ -416,7 +417,7 @@ router.get("/purchase-invoices", can(`${FORM}.view`), async (_req, res) => {
     orderBy: { id: "desc" },
   });
   // جمع پیش‌پرداخت‌های تخصیص‌یافته به هر فاکتور (به ارز فاکتور)؛ برای ستون «پیش‌پرداخت» فهرست و جمع پای گرید
-  const advanceSums = await prisma.purchaseInvoiceAdvanceAllocation.groupBy({ by: ["purchaseInvoiceId"], _sum: { amount: true } });
+  const advanceSums = await prisma.purchaseInvoiceAdvanceAllocation.groupBy({ by: ["purchaseInvoiceId"], where: { nature: "ADVANCE_PAYMENT" }, _sum: { amount: true } });
   const advanceByInvoice = new Map<number, number>(advanceSums.map((a: any) => [a.purchaseInvoiceId, Number(a._sum.amount ?? 0)]));
   res.json(
     items.map((d: any) => ({
@@ -624,7 +625,7 @@ router.put("/purchase-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
     const cleanedLines = await validateLines(body.lines, body.basis, party.detailCode, currency, fxRate, baseCurrency, date, id);
     const cleanedOtherCostLines = await validateOtherCostLines(body.otherCostLines || [], currency, fxRate, baseCurrency, date);
     // اگر تخصیص پیش‌پرداختی برای این فاکتور ثبت شده، ویرایش نباید آن را با طرف‌حساب/ارز/تاریخ/مبلغ جدید ناسازگار کند
-    await assertAdvanceAllocationsStillValid(id, { partyId: body.partyId, currencyId: body.currencyId, date, netTotal: purchaseInvoiceNetTotal(cleanedLines) });
+    await assertAdvanceAllocationsStillValid(id, { partyId: body.partyId, currencyId: body.currencyId, date, netTotal: purchaseInvoiceNetTotal(cleanedLines), vatTotal: purchaseInvoiceVatTotal([...cleanedLines, ...cleanedOtherCostLines], fxRate) });
 
     await prisma.$transaction([
       prisma.purchaseInvoiceLine.deleteMany({ where: { purchaseInvoiceId: id } }),
@@ -1235,15 +1236,20 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
     });
     if (purchaseAdvanceAllocations.length > 0) {
       const invIsBase = invoice.currencyId === baseCurrency.id;
+      // مجموع کل (برای کاهش پرداختنی) + مجموع جدای «پیش‌پرداخت ارزش افزوده» (تسعیرش جدا از پیش‌پرداخت عادی شناسایی می‌شود)
       let cur = 0;
       let inv = 0;
       let hist = 0;
+      let vInv = 0;
+      let vHist = 0;
       for (const a of purchaseAdvanceAllocations) {
         const l = a.paymentSettlementLine;
         const amount = Number(a.amount);
+        const isVatAdv = a.nature === "ADVANCE_VAT_PAYMENT";
+        const natureTitle = isVatAdv ? "پیش‌پرداخت ارزش افزوده" : "پیش‌پرداخت";
         const resolved = await resolvePaymentSubjectAccount(l.paymentType, {});
         if (resolved.error || !resolved.account) {
-          errors.push(`برای نوع پرداخت «${l.paymentType.title}» (پیش‌پرداخت پرداخت شماره ${l.payment.number}) معینِ پیش‌پرداخت تعریف نشده است`);
+          errors.push(`برای نوع پرداخت «${l.paymentType.title}» (${natureTitle} پرداخت شماره ${l.payment.number}) معینِ ${natureTitle} تعریف نشده است`);
           continue;
         }
         const account = resolved.account;
@@ -1253,8 +1259,12 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
         cur += amount;
         inv += rowAtInvoice;
         hist += rowHist;
+        if (isVatAdv) {
+          vInv += rowAtInvoice;
+          vHist += rowHist;
+        }
         const details = resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode);
-        const advDescription = `بابت تخصیص پیش‌پرداخت پرداخت شماره ${l.payment.number} به فاکتور خرید ${invoice.number} ${partyTitle(invoice.party)}`.trim();
+        const advDescription = `بابت تخصیص ${natureTitle} پرداخت شماره ${l.payment.number} به فاکتور خرید ${invoice.number} ${partyTitle(invoice.party)}`.trim();
         if (account.isCurrency && !invIsBase) {
           advanceCreditLines.push({ accountId: account.id, ...details, currencyId: invoice.currencyId, debit: 0, credit: amount, fxRate: rowRate, description: advDescription });
         } else {
@@ -1275,7 +1285,8 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
       }
 
       // اختلاف ارزش ریالی (نرخ تاریخی − نرخ فاکتور): برای فاکتور مبنای رسید انبار + رویه‌ی نرخ تاریخی، از قبل در Cost لحاظ شده
-      const diff = Math.round((hist - inv) * 100) / 100;
+      // اختلاف ارزش ریالی هر ماهیت جدا: پیش‌پرداخت عادی طبق روش معتبر (Cost/تسعیر/اصلاح خرید)، پیش‌پرداخت ارزش افزوده پایین‌تر (جدا)
+      const diff = Math.round(((hist - vHist) - (inv - vInv)) * 100) / 100;
       const alreadyInCost = invoice.basis === "WAREHOUSE_RECEIPT" && invoice.lines.some((l) => Number(l.exchangeRateAdjustmentShare) !== 0);
       if (!invIsBase && Math.abs(diff) > 0.005 && !alreadyInCost) {
         const method = await getAdvancePaymentMethodForDate(invoice.date);
@@ -1307,6 +1318,40 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
             credit: diff < 0 ? -diff : 0,
             fxRate: 1,
             description: `خرید بخش پیش‌پرداخت با نرخ تاریخی — ${description}`,
+          });
+        }
+      }
+      // تسعیر «پیش‌پرداخت ارزش افزوده» (ارزش‌افزوده همیشه به ارز مبنا ثبت می‌شود): نرخ تاریخ معامله ⇐ «سود و زیان تسعیر ارز»؛ نرخ تاریخی ⇐ اصلاح معین «ارزش افزوده خرید»
+      const vatDiff = Math.round((vHist - vInv) * 100) / 100;
+      if (!invIsBase && Math.abs(vatDiff) > 0.005) {
+        const method = await getAdvancePaymentMethodForDate(invoice.date);
+        const firstVatDebit = Array.from(vatDebitByAccount.values())[0];
+        if (!method) {
+          errors.push("روش شناسایی پیش‌پرداخت ارزی خرید برای تاریخ فاکتور در «رویه‌ها و تنظیمات حسابداری» (تنظیمات ارز) تعریف نشده است");
+        } else if (method === "TRANSACTION_DATE_RATE" || !firstVatDebit) {
+          const fxAccount = (await prisma.treasuryAccountSetting.findFirst({ where: { accountType: "FX_GAIN_LOSS" }, include: { account: true } }))?.account;
+          if (!fxAccount) {
+            errors.push("حساب «سود و زیان تسعیر ارز» در «تعیین حسابهای معین» تعریف نشده است");
+          } else {
+            advanceAdjustLines.push({
+              accountId: fxAccount.id,
+              currencyId: baseCurrency.id,
+              debit: vatDiff > 0 ? vatDiff : 0,
+              credit: vatDiff < 0 ? -vatDiff : 0,
+              fxRate: 1,
+              description: `تسعیر پیش‌پرداخت ارزش افزوده تخصیص‌یافته به ${description}`,
+            });
+          }
+        } else {
+          const details = resolveAccountDetailFields(firstVatDebit.account, partyDetailTypeId, partyDetailCode);
+          advanceAdjustLines.push({
+            accountId: firstVatDebit.account.id,
+            ...details,
+            currencyId: baseCurrency.id,
+            debit: vatDiff > 0 ? vatDiff : 0,
+            credit: vatDiff < 0 ? -vatDiff : 0,
+            fxRate: 1,
+            description: `خرید بخش پیش‌پرداخت ارزش افزوده با نرخ تاریخی — ${description}`,
           });
         }
       }

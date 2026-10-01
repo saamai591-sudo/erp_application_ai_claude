@@ -351,7 +351,7 @@ async function validateSubjectLines(
     } else {
       if (!l.partyId) throw new Error(`ردیف ${idx + 1}: طرف حساب الزامی است`);
       rowPartyId = l.partyId;
-      if (paymentType.nature === "SUPPLIER_PAYMENT" || paymentType.nature === "ADVANCE_PAYMENT") {
+      if (paymentType.nature === "SUPPLIER_PAYMENT" || paymentType.nature === "ADVANCE_PAYMENT" || paymentType.nature === "ADVANCE_VAT_PAYMENT") {
         // eslint-disable-next-line no-await-in-loop
         const supplier = await prisma.supplier.findUnique({ where: { partyId: l.partyId } });
         if (!supplier) throw new Error(`ردیف ${idx + 1}: طرف حساب باید در «تامین‌کنندگان» تعریف شده باشد`);
