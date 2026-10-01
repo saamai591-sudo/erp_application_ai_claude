@@ -109,6 +109,7 @@ export const REGISTRY: ModuleDef[] = [
           { key: "currencies", title: "ارز", baseActions: CRUD },
           { key: "rates", title: "نرخ ارز", baseActions: ["view", "create", "delete"] },
           { key: "periods", title: "دوره مالی", baseActions: CRUD },
+          { key: "numbering-patterns", title: "الگوی شماره‌گذاری", baseActions: CRUD },
         ],
       },
     ],

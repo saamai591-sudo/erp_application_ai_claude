@@ -459,6 +459,7 @@ model SalesCenter {
   salesQuotes        SalesQuote[]
   salesOrders        SalesOrder[]
   salesInvoices      SalesInvoice[]
+  numberingPatternItems NumberingPatternItem[]
   salesReturnInvoices SalesReturnInvoice[]
 }
 
@@ -1373,6 +1374,7 @@ model SalesType {
   hasTransactions                Boolean                          @default(false)
   createdAt                      DateTime                         @default(now())
   salesInvoices                  SalesInvoice[]
+  numberingPatternItems          NumberingPatternItem[]
   salesReturnInvoices            SalesReturnInvoice[]
   salesQuotes                    SalesQuote[]
   salesOrders                    SalesOrder[]
@@ -2644,7 +2646,13 @@ model SalesInvoice {
   pettyCashPayments      PettyCashPayment[]
   pettyCashSummaryLines  PettyCashSummaryLine[]
 
-  @@unique([fiscalPeriodId, number])
+  /// الگوی شماره‌گذاری که شماره‌ی این سند را داده (null = شماره‌گذاری قدیمی «آخرین شماره‌ی دوره + ۱»)
+  numberingPatternId     Int?
+  numberingPattern       NumberingPattern?       @relation(fields: [numberingPatternId], references: [id], map: "SalesInvoice_numberingPatternId_fkey")
+
+  // یکتایی شماره: برای اسناد الگودار در محدوده‌ی (الگو، دوره مالی)؛ برای اسناد بدون الگو یک ایندکس یکتای جزئی در migration (WHERE numberingPatternId IS NULL)
+  @@unique([numberingPatternId, fiscalPeriodId, number], map: "SalesInvoice_pattern_period_number_key")
+  @@index([fiscalPeriodId, number])
 }
 
 model SalesInvoiceLine {
@@ -2703,7 +2711,13 @@ model SalesReturnInvoice {
   journalEntry   JournalEntry?            @relation(fields: [journalEntryId], references: [id])
   lines          SalesReturnInvoiceLine[]
 
-  @@unique([fiscalPeriodId, number])
+  /// الگوی شماره‌گذاری که شماره‌ی این سند را داده (null = شماره‌گذاری قدیمی «آخرین شماره‌ی دوره + ۱»)
+  numberingPatternId     Int?
+  numberingPattern       NumberingPattern?       @relation(fields: [numberingPatternId], references: [id], map: "SalesReturnInvoice_numberingPatternId_fkey")
+
+  // یکتایی شماره: برای اسناد الگودار در محدوده‌ی (الگو، دوره مالی)؛ برای اسناد بدون الگو یک ایندکس یکتای جزئی در migration (WHERE numberingPatternId IS NULL)
+  @@unique([numberingPatternId, fiscalPeriodId, number], map: "SalesReturnInvoice_pattern_period_number_key")
+  @@index([fiscalPeriodId, number])
 }
 
 model SalesReturnInvoiceLine {
@@ -3655,6 +3669,7 @@ model FrequentDescription {
 /// «حافظه مالیاتی» (امور مالیاتی › تنظیمات). جفت‌کلید RSA 2048 هنگام اولین ذخیره ساخته می‌شود؛ کلید خصوصی فقط به‌صورت رمزشده (AES-256-GCM،
 /// services/taxMemoryService.ts) ذخیره و هرگز از طریق API/لاگ/UI بیرون نمی‌آید. publicKeyPem/csrPem از روی همان جفت‌کلید تولید می‌شوند و کاربر نمی‌تواند آن‌ها را جایگزین کند.
 model TaxMemory {
+  numberingPatterns   NumberingPattern[]
   id                  Int      @id @default(autoincrement())
   persianCompanyName  String
   englishCompanyName  String
@@ -3670,4 +3685,58 @@ model TaxMemory {
   privateKeyEncrypted String
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+}
+
+enum NumberingForm {
+  SALES_INVOICE
+  SALES_RETURN
+}
+
+/// «الگوی شماره‌گذاری» (تنظیمات): مالکِ دنباله‌ی شماره‌ی مشترک بین همه‌ی اقلام (فرم + نوع فروش + مرکز فروش) خودش است — نه حافظه مالیاتی.
+/// تخصیص شماره‌ی اتمی/امن در برابر هم‌زمانی: services/numberingPatternService.ts (شمارنده‌ی NumberingPatternCounter).
+model NumberingPattern {
+  id                     Int                     @id @default(autoincrement())
+  title                  String                  @unique
+  hasTaxMemory           Boolean                 @default(false)
+  taxMemoryId            Int?
+  /// true = شماره‌گذاری برای هر سال مالی مستقل است و اول هر سال از نو شروع می‌شود
+  resetPerFiscalYear     Boolean                 @default(false)
+  /// true = تاریخ سند جدید نباید از آخرین تاریخ اسناد ثبت‌شده با همین الگو کوچک‌تر باشد
+  restrictEarlierDates   Boolean                 @default(false)
+  /// «آخرین شماره» برای مهاجرت از سیستم قبلی: شماره‌ی بعدی = این مقدار + ۱ (در حالت ریست سالانه فقط برای سال مالیِ seedFiscalPeriodId؛ سال‌های دیگر از صفر)
+  lastNumber             Int                     @default(0)
+  seedFiscalPeriodId     Int?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  taxMemory              TaxMemory?              @relation(fields: [taxMemoryId], references: [id])
+  items                  NumberingPatternItem[]
+  counters               NumberingPatternCounter[]
+  salesInvoices          SalesInvoice[]
+  salesReturnInvoices    SalesReturnInvoice[]
+}
+
+model NumberingPatternItem {
+  id            Int              @id @default(autoincrement())
+  patternId     Int
+  form          NumberingForm
+  salesTypeId   Int
+  salesCenterId Int
+  pattern       NumberingPattern @relation(fields: [patternId], references: [id], onDelete: Cascade)
+  salesType     SalesType        @relation(fields: [salesTypeId], references: [id])
+  salesCenter   SalesCenter      @relation(fields: [salesCenterId], references: [id])
+
+  /// یک ترکیب «فرم + پارامترها» فقط در یک الگو (و فقط یک‌بار) مجاز است — در سطح دیتابیس هم تضمین می‌شود
+  @@unique([form, salesTypeId, salesCenterId])
+}
+
+/// شمارنده‌ی هر الگو (scopeKey = شناسه‌ی دوره مالی در حالت ریست سالانه، وگرنه ۰). افزایش فقط با یک دستور اتمی INSERT … ON CONFLICT DO UPDATE … RETURNING
+/// داخل تراکنشِ ثبت سند انجام می‌شود؛ قفل ردیف تا پایان تراکنش، تخصیص‌های هم‌زمان را پشت سر هم می‌چیند (بدون شماره‌ی تکراری و بدون حفره در صورت rollback).
+model NumberingPatternCounter {
+  id         Int              @id @default(autoincrement())
+  patternId  Int
+  scopeKey   Int
+  lastNumber Int
+  pattern    NumberingPattern @relation(fields: [patternId], references: [id], onDelete: Cascade)
+
+  @@unique([patternId, scopeKey])
 }
