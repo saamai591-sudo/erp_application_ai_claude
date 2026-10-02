@@ -716,7 +716,8 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
   // همان منطق instrumentRemainingBaseCapacity، اما بدون استثنای هیچ ردیفی (اینجا برای انتخابِ ردیفِ
   // تازه است، نه ویرایش ردیف موجود).
   const instrumentPickerRows = instrumentRows
-    .map((r, idx) => ({ ...r, idx }))
+    // id یکتا برای انتخابگر چندگانه: ردیف‌های تازه‌ی ذخیره‌نشده id ندارند و همه با کلید «undefined» یکی حساب می‌شدند (تیک‌زدن یک ردیف همه را تیک می‌زد)؛ clientKey برای هر ردیف یکتاست
+    .map((r, idx) => ({ ...r, idx, id: r.clientKey }))
     .filter((r) => Number(r.amount) > 0)
     .map((r) => {
       const currency = currencies.find((c) => String(c.id) === r.currencyId);
