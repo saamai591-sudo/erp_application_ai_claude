@@ -114,6 +114,30 @@ export function resolveAccountDetailFields(
   return {};
 }
 
+/** آیا معین در یکی از سه سطح تفصیل خود به نوع تفصیلِ داده‌شده وصل است؟ */
+export function accountLinksDetailType(
+  account: { detailType1Id: number | null; detailType2Id: number | null; detailType3Id: number | null },
+  detailTypeId: number | null
+): boolean {
+  if (detailTypeId == null) return false;
+  return account.detailType1Id === detailTypeId || account.detailType2Id === detailTypeId || account.detailType3Id === detailTypeId;
+}
+
+/** چند کد تفصیلی (مثلاً حساب بانکی + طرف‌حسابِ چک) را هم‌زمان روی سطوح تفصیلِ یک معین می‌گذارد؛
+ * هر کد در سطحی که نوع تفصیلش به آن وصل است می‌نشیند (resolveAccountDetailFields برای هر کد) */
+export async function resolveAccountDetailFieldsForCodes(
+  account: { detailType1Id: number | null; detailType2Id: number | null; detailType3Id: number | null },
+  codes: (string | null | undefined)[]
+): Promise<{ detail1Code?: string; detail2Code?: string; detail3Code?: string }> {
+  const out: { detail1Code?: string; detail2Code?: string; detail3Code?: string } = {};
+  for (const code of codes) {
+    if (!code) continue;
+    const typeId = await resolveDetailTypeId(code);
+    Object.assign(out, resolveAccountDetailFields(account, typeId, code));
+  }
+  return out;
+}
+
 // کدِ ثابتِ نوع‌های تفصیلِ عمومی سیستم (فیلد DetailType.code، همان مقادیر هاردکد در routes/parties.ts،
 // routes/pettyCashCustodians.ts، routes/pettyCashes.ts). توجه: این مقدار «کد» است، نه شناسه‌ی ردیف
 // (DetailType.id) در پایگاه‌داده — چون این نوع‌های تفصیل هم مثل هر نوع تفصیل دیگری از همان فرم «نوع تفصیل»

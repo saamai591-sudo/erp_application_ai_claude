@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma";
 import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
+import { buildChequeLedgerLines } from "./chequeCounterpartyLines";
 
 // =========================================================================
 // صدور سند حسابداری «واگذاری چک به بانک» (ChequeDeposit) — اکشن دستی روی سند تاییدشده (هم‌الگوی سند دریافت/پرداخت)،
@@ -10,6 +11,7 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 //
 // بدهکار — یک ردیف به مجموع مبلغ چک‌ها:
 //   معین «اسناد در جریان وصول» حساب بانکیِ مقصد (تعیین حسابهای معین: CHEQUE_IN_COLLECTION) — تفصیل: خودِ حساب بانکی
+//   (اگر معین به نوع تفصیلِ طرف‌حساب هم وصل باشد، طرف‌حسابِ چک نیز ثبت و ردیف به‌ازای هر طرف‌حساب جدا می‌شود — chequeCounterpartyLines)
 // بستانکار — به‌ازای هر چک:
 //   معین «چک دریافتی» به‌ازای نوع همان چک (RECEIVABLE_CHEQUE) — تفصیل: طرف حسابِ چک
 // چک همیشه با ارز پایه است، پس همه‌ی ردیف‌ها به ارز پایه ثبت می‌شوند. هر تفصیل فقط وقتی ست می‌شود که معین در یکی از
@@ -80,8 +82,16 @@ export async function issueChequeDepositJournalEntry(depositId: number) {
   if (!inCollection) {
     errors.push(`برای حساب بانکی «${deposit.bankAccount.accountNumber}»، معین در «تعیین حسابهای معین» (اسناد در جریان وصول) تعریف نشده است`);
   } else {
-    const details = await detailFor(inCollection, deposit.bankAccount.detailCode);
-    debitLines.push({ accountId: inCollection.id, ...details, currencyId: baseCurrency.id, debit: total, credit: 0, fxRate: 1, description });
+    debitLines.push(
+      ...(await buildChequeLedgerLines({
+        account: inCollection,
+        baseDetailCode: deposit.bankAccount.detailCode,
+        cheques: deposit.lines.map((l) => ({ amount: Number(l.chequeItem.amount), party: l.chequeItem.party })),
+        side: "debit",
+        currencyId: baseCurrency.id,
+        description,
+      }))
+    );
   }
 
   if (errors.length > 0) throw new Error(errors.join("\n"));

@@ -3,6 +3,7 @@ import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { findDepositBankByCheque } from "./chequeDepositBankLookup";
+import { buildChequeLedgerLines } from "./chequeCounterpartyLines";
 
 // =========================================================================
 // صدور سند حسابداری «وصول و برگشت چک دریافتنی» (ChequeClearingReceivable) — اکشن دستی روی سند تاییدشده (هم‌الگوی واگذاری به
@@ -49,7 +50,7 @@ export async function issueChequeClearingReceivableJournalEntry(clearingId: numb
   const bankByCheque = await findDepositBankByCheque(doc.lines);
 
   const bounceDebitLines: IssueLineInput[] = [];
-  const totals = new Map<number, { bankAccount: any; all: number; cleared: number }>();
+  const totals = new Map<number, { bankAccount: any; all: number; cleared: number; allCheques: { amount: number; party: any }[]; clearedCheques: { amount: number; party: any }[] }>();
   for (const [idx, l] of doc.lines.entries()) {
     const n = idx + 1;
     const cheque = l.chequeItem;
@@ -59,9 +60,13 @@ export async function issueChequeClearingReceivableJournalEntry(clearingId: numb
     if (!bank) {
       errors.push(`ردیف ${n}: سند واگذاریِ تاییدشده‌ای برای چک شماره ${cheque.number} یافت نشد؛ حساب بانکیِ اسناد در جریان وصول مشخص نیست`);
     } else {
-      const t = totals.get(bank.bankAccountId) ?? { bankAccount: bank.bankAccount, all: 0, cleared: 0 };
+      const t = totals.get(bank.bankAccountId) ?? { bankAccount: bank.bankAccount, all: 0, cleared: 0, allCheques: [], clearedCheques: [] };
       t.all += amount;
-      if (l.outcome === "CLEARED") t.cleared += amount;
+      t.allCheques.push({ amount, party: cheque.party });
+      if (l.outcome === "CLEARED") {
+        t.cleared += amount;
+        t.clearedCheques.push({ amount, party: cheque.party });
+      }
       totals.set(bank.bankAccountId, t);
     }
 
@@ -97,16 +102,18 @@ export async function issueChequeClearingReceivableJournalEntry(clearingId: numb
       if (!bankLedger) {
         errors.push(`برای حساب بانکی «${label}»، معین در «تعیین حسابهای معین» (حساب بانکی) تعریف نشده است`);
       } else {
-        const details = await detailFor(bankLedger, t.bankAccount.detailCode);
-        clearedDebitLines.push({ accountId: bankLedger.id, ...details, currencyId: baseCurrency.id, debit: t.cleared, credit: 0, fxRate: 1, description: `${description} — وصول به حساب ${label}` });
+        clearedDebitLines.push(
+          ...(await buildChequeLedgerLines({ account: bankLedger, baseDetailCode: t.bankAccount.detailCode, cheques: t.clearedCheques, side: "debit", currencyId: baseCurrency.id, description: `${description} — وصول به حساب ${label}` }))
+        );
       }
     }
     const inCollection = treasurySettings.find((s) => s.accountType === "CHEQUE_IN_COLLECTION" && s.bankAccountId === bankAccountId)?.account;
     if (!inCollection) {
       errors.push(`برای حساب بانکی «${label}»، معین در «تعیین حسابهای معین» (اسناد در جریان وصول) تعریف نشده است`);
     } else {
-      const details = await detailFor(inCollection, t.bankAccount.detailCode);
-      creditLines.push({ accountId: inCollection.id, ...details, currencyId: baseCurrency.id, debit: 0, credit: t.all, fxRate: 1, description: `${description} — حساب ${label}` });
+      creditLines.push(
+        ...(await buildChequeLedgerLines({ account: inCollection, baseDetailCode: t.bankAccount.detailCode, cheques: t.allCheques, side: "credit", currencyId: baseCurrency.id, description: `${description} — حساب ${label}` }))
+      );
     }
   }
 
