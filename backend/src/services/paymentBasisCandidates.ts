@@ -127,9 +127,11 @@ export async function pickableBasisDocuments(q: {
   paymentTypeId?: number | null;
   excludePaymentId?: number;
   excludePettyCashPaymentId?: number;
+  /** تاریخ سند فرم (پرداخت/پرداخت تنخواه): فقط اسناد مبنایی که تاریخشان ≤ این تاریخ است */
+  date?: Date | null;
 }): Promise<BasisCandidate[]> {
   if (!q.basisType || q.basisType === "NONE" || !q.partyId) return [];
   const nature = q.paymentTypeId ? (await prisma.paymentType.findUnique({ where: { id: q.paymentTypeId }, select: { nature: true } }))?.nature : null;
   const candidates = await candidatesForBasisType(q.basisType, q.partyId, { excludePaymentId: q.excludePaymentId, excludePettyCashPaymentId: q.excludePettyCashPaymentId, nature });
-  return candidates.filter((c) => c.remaining > 0.001);
+  return candidates.filter((c) => c.remaining > 0.001 && (!q.date || c.date.getTime() <= q.date.getTime()));
 }
