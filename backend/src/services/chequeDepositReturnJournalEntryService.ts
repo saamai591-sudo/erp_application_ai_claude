@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma";
 import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
+import { buildChequeLedgerLines } from "./chequeCounterpartyLines";
 import { findDepositBankByCheque } from "./chequeDepositBankLookup";
 
 // =========================================================================
@@ -48,7 +49,7 @@ export async function issueChequeDepositReturnJournalEntry(returnId: number) {
 
   // ---------- بدهکار: هر چک ----------
   const debitLines: IssueLineInput[] = [];
-  const totalByBank = new Map<number, { bankAccount: any; total: number }>();
+  const totalByBank = new Map<number, { bankAccount: any; total: number; cheques: { amount: number; party: any }[] }>();
   for (const [idx, l] of doc.lines.entries()) {
     const n = idx + 1;
     const cheque = l.chequeItem;
@@ -57,9 +58,10 @@ export async function issueChequeDepositReturnJournalEntry(returnId: number) {
     if (!deposit) {
       errors.push(`ردیف ${n}: سند واگذاریِ تاییدشده‌ای برای چک شماره ${cheque.number} یافت نشد؛ حساب بانکیِ اسناد در جریان وصول مشخص نیست`);
     } else {
-      const prev = totalByBank.get(deposit.bankAccountId);
-      if (prev) prev.total += Number(cheque.amount);
-      else totalByBank.set(deposit.bankAccountId, { bankAccount: deposit.bankAccount, total: Number(cheque.amount) });
+      const prev = totalByBank.get(deposit.bankAccountId) ?? { bankAccount: deposit.bankAccount, total: 0, cheques: [] };
+      prev.total += Number(cheque.amount);
+      prev.cheques.push({ amount: Number(cheque.amount), party: cheque.party });
+      totalByBank.set(deposit.bankAccountId, prev);
     }
 
     if (!cheque.receivableChequeTypeId) {
@@ -85,22 +87,22 @@ export async function issueChequeDepositReturnJournalEntry(returnId: number) {
 
   // ---------- بستانکار: اسناد در جریان وصول به‌ازای هر حساب بانکی ----------
   const creditLines: IssueLineInput[] = [];
-  for (const [bankAccountId, { bankAccount, total }] of totalByBank) {
+  for (const [bankAccountId, { bankAccount, cheques }] of totalByBank) {
     const inCollection = treasurySettings.find((s) => s.accountType === "CHEQUE_IN_COLLECTION" && s.bankAccountId === bankAccountId)?.account;
     if (!inCollection) {
       errors.push(`برای حساب بانکی «${bankAccount.accountNumber}»، معین در «تعیین حسابهای معین» (اسناد در جریان وصول) تعریف نشده است`);
       continue;
     }
-    const details = await detailFor(inCollection, bankAccount.detailCode);
-    creditLines.push({
-      accountId: inCollection.id,
-      ...details,
-      currencyId: baseCurrency.id,
-      debit: 0,
-      credit: total,
-      fxRate: 1,
-      description: `${description} — حساب ${bankAccount.accountNumber}`.trim(),
-    });
+    creditLines.push(
+      ...(await buildChequeLedgerLines({
+        account: inCollection,
+        baseDetailCode: bankAccount.detailCode,
+        cheques,
+        side: "credit",
+        currencyId: baseCurrency.id,
+        description: `${description} — حساب ${bankAccount.accountNumber}`.trim(),
+      }))
+    );
   }
 
   if (errors.length > 0) throw new Error(errors.join("\n"));
