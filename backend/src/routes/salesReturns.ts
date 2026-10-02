@@ -75,7 +75,7 @@ async function sourceLineRemaining(id: number, excludeId?: number) {
   return { line, remaining };
 }
 
-async function validateLines(warehouseId: number, lines: LineInput[], excludeId?: number, existingSerialIds?: Set<number>) {
+async function validateLines(warehouseId: number, lines: LineInput[], partyDetailCode: string | null, excludeId?: number, existingSerialIds?: Set<number>) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("سند برگشت از فروش باید حداقل یک ردیف کالا داشته باشد");
 
   const cleaned: {
@@ -98,6 +98,8 @@ async function validateLines(warehouseId: number, lines: LineInput[], excludeId?
     const info = await sourceLineRemaining(l.sourceSalesDeliveryLineId, excludeId);
     if (!info) throw new Error(`ردیف حواله فروش مبدا برای ردیف ${idx + 1} یافت نشد`);
     if (info.line.document.warehouseId !== warehouseId) throw new Error(`ردیف ${idx + 1}: انبار باید همان انبار حواله فروش مبدا باشد`);
+    // طرف مقابل حواله فروش مبدا باید با طرف مقابل سرصفحه‌ی برگشت یکی باشد (علاوه بر فیلتر انتخابگر، در سرور هم اعمال می‌شود)
+    if (!partyDetailCode || info.line.document.detailCode !== partyDetailCode) throw new Error(`ردیف ${idx + 1}: طرف مقابل حواله فروش مبدا با طرف مقابل انتخاب‌شده در هدر یکسان نیست`);
     if (qty > info.remaining) throw new Error(`مقدار ردیف ${idx + 1} از باقیمانده‌ی قابل برگشت (${info.remaining}) بیشتر است`);
 
     cleaned.push({
@@ -123,8 +125,12 @@ function partyTitle(p: any): string | null {
 
 router.get("/sales-returns/pickable-lines", can(`${FORM}.view`), async (req, res) => {
   const warehouseId = req.query.warehouseId ? Number(req.query.warehouseId) : null;
+  // فقط حواله‌های فروشِ همان طرف مقابل سرصفحه (partyId)؛ بدون طرف مقابل هیچ ردیفی برنمی‌گردد
+  const partyId = req.query.partyId ? Number(req.query.partyId) : null;
+  const party = partyId ? await prisma.party.findUnique({ where: { id: partyId } }) : null;
+  if (!party) return res.json([]);
   const lines = await prisma.inventoryDocumentLine.findMany({
-    where: { document: { documentType: "SALES_DELIVERY", ...(warehouseId ? { warehouseId } : {}) } },
+    where: { document: { documentType: "SALES_DELIVERY", detailCode: party.detailCode, ...(warehouseId ? { warehouseId } : {}) } },
     include: { document: true, goodsItem: true, unit: true, salesReturnLines: { include: { document: true } } },
     orderBy: { id: "desc" },
   });
@@ -253,7 +259,7 @@ router.post("/sales-returns", can(`${FORM}.create`), async (req, res) => {
   try {
     const party = await prisma.party.findUnique({ where: { id: body.partyId } });
     if (!party) throw new Error("طرف مقابل یافت نشد");
-    const cleanedLines = await validateLines(body.warehouseId, body.lines);
+    const cleanedLines = await validateLines(body.warehouseId, body.lines, party.detailCode);
     const date = new Date(body.date);
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
     const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
@@ -333,7 +339,7 @@ router.put("/sales-returns/:id", can(`${FORM}.edit`), async (req, res) => {
 
     const party = await prisma.party.findUnique({ where: { id: body.partyId } });
     if (!party) throw new Error("طرف مقابل یافت نشد");
-    const cleanedLines = await validateLines(body.warehouseId, body.lines, id, existingSerialIds);
+    const cleanedLines = await validateLines(body.warehouseId, body.lines, party.detailCode, id, existingSerialIds);
     const date = new Date(body.date);
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
     const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);

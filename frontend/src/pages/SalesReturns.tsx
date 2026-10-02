@@ -178,12 +178,13 @@ function SalesReturnForm({ editId, basePath }: { editId?: number; basePath: stri
   });
 
   useEffect(() => {
-    if (!header.warehouseId) {
+    if (!header.warehouseId || !header.partyId) {
       setPickableLines([]);
       return;
     }
-    api.get(`/sales-returns/pickable-lines?warehouseId=${header.warehouseId}`).then(setPickableLines).catch(() => setPickableLines([]));
-  }, [header.warehouseId]);
+    // فقط حواله‌های فروشِ همان طرف مقابل سرصفحه (سرور هم هنگام ثبت همین را اعمال می‌کند)
+    api.get(`/sales-returns/pickable-lines?warehouseId=${header.warehouseId}&partyId=${header.partyId}`).then(setPickableLines).catch(() => setPickableLines([]));
+  }, [header.warehouseId, header.partyId]);
 
   const isFinalized = meta?.status === "FINALIZED";
   // طبق تصمیم صریح کاربر: فیلدهای مبلغی تا وقتی سند Finalized نشده، اصلاً نمایش داده نمی‌شوند.

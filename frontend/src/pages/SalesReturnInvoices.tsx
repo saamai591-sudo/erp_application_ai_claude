@@ -228,15 +228,15 @@ function SalesReturnInvoiceForm({ editId }: { editId?: number }) {
   }, [editId]);
 
   useEffect(() => {
-    if (header.basis !== "SALES_RETURN") {
+    if (header.basis !== "SALES_RETURN" || !header.customerId) {
       setPickableLines([]);
       return;
     }
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ customerId: header.customerId });
     if (header.date) params.set("destDate", header.date);
     if (editId) params.set("excludeInvoiceId", String(editId));
     api.get(`/sales-return-invoices/pickable-sales-return-lines?${params.toString()}`).then(setPickableLines).catch(() => setPickableLines([]));
-  }, [header.basis, header.date, editId]);
+  }, [header.basis, header.date, header.customerId, editId]);
 
   // با صدور سند حسابداری، کل فرم (سرصفحه + ردیف‌ها) قفل می‌شود — دقیقاً هم‌الگوی SalesInvoices.tsx.
   const locked = !!meta?.journalEntryId;
