@@ -287,6 +287,7 @@ router.get("/sales-deliveries/pickable-sales-order-lines", can(`${FORM}.view`), 
       return {
         id: l.id,
         sourceLineId: l.id,
+        customerPartyId: party.id,
         sourceSalesOrderLineId: l.id,
         salesOrderId: l.salesOrder.id,
         number: l.salesOrder.number,
