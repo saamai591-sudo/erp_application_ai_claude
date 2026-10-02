@@ -1390,6 +1390,9 @@ fieldset { min-width: 0; }
 }
 .form-toolbar-left { display: flex; align-items: center; gap: 6px; }
 .form-toolbar-right { display: flex; align-items: center; gap: 8px; }
+/* ناوبری اولین/قبلی/بعدی/آخرین رکورد در نوار ابزار فرم ویرایش */
+.record-nav { display: flex; align-items: center; gap: 4px; margin-inline-start: 8px; padding-inline-start: 10px; border-inline-start: 1px solid var(--line); }
+.record-nav-pos { font-size: 12px; color: var(--muted, #64748b); min-width: 52px; text-align: center; white-space: nowrap; }
 .form-toolbar-desc { font-size: 12px; color: var(--ink-soft); margin: 6px 2px 10px; }
 .toolbar-icon-btn {
   background: none;

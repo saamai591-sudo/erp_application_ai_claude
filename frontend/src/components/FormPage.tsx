@@ -39,6 +39,18 @@ function SaveIcon() {
   );
 }
 
+// جهت‌ها برای رابط راست‌به‌چپ: «بعدی» به چپ و «قبلی» به راست اشاره می‌کند؛ «اولین» در انتهای راست و «آخرین» در انتهای چپ
+function NavArrow({ dir, bar }: { dir: "left" | "right"; bar?: boolean }) {
+  const chevron = dir === "left" ? "M14 6l-6 6 6 6" : "M10 6l6 6-6 6";
+  const barX = dir === "left" ? "M5 6v12" : "M19 6v12";
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path d={chevron} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      {bar && <path d={barX} stroke="currentColor" strokeWidth="2" strokeLinecap="round" />}
+    </svg>
+  );
+}
+
 function PlusIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
@@ -84,7 +96,7 @@ export function FormPage({
   children: ReactNode;
 }) {
   const navigate = useNavigate();
-  const { resetActiveTabToNew } = useTabs();
+  const { resetActiveTabToNew, recordNav } = useTabs();
   const [menuOpen, setMenuOpen] = useState(false);
 
   // میان‌بر Ctrl+S (در مک Cmd+S): همان دکمه‌ی «ذخیره»ی نوار ابزار را فعال می‌کند (پس وضعیت غیرفعال بودن ذخیره رعایت می‌شود) و ذخیره‌ی
@@ -142,6 +154,24 @@ export function FormPage({
           <button type="button" className="toolbar-icon-btn" onClick={handleClose} title="بستن">
             <CloseIcon />
           </button>
+          {recordNav && (
+            // ناوبری رکوردهای فهرستی که این فرم از آن باز شده (همان ترتیب فهرست)؛ همین تب با رکورد مقصد جایگزین می‌شود
+            <div className="record-nav" role="group" aria-label="ناوبری رکوردها">
+              <button type="button" className="toolbar-icon-btn" onClick={() => recordNav.go("first")} disabled={!recordNav.canPrev} title="اولین رکورد" data-testid="record-first">
+                <NavArrow dir="right" bar />
+              </button>
+              <button type="button" className="toolbar-icon-btn" onClick={() => recordNav.go("prev")} disabled={!recordNav.canPrev} title="رکورد قبلی" data-testid="record-prev">
+                <NavArrow dir="right" />
+              </button>
+              <span className="record-nav-pos" title="موقعیت در فهرست">{recordNav.position.toLocaleString("fa-IR")} / {recordNav.total.toLocaleString("fa-IR")}</span>
+              <button type="button" className="toolbar-icon-btn" onClick={() => recordNav.go("next")} disabled={!recordNav.canNext} title="رکورد بعدی" data-testid="record-next">
+                <NavArrow dir="left" />
+              </button>
+              <button type="button" className="toolbar-icon-btn" onClick={() => recordNav.go("last")} disabled={!recordNav.canNext} title="آخرین رکورد" data-testid="record-last">
+                <NavArrow dir="left" bar />
+              </button>
+            </div>
+          )}
         </div>
         <div className="form-toolbar-left">
           {description && <InfoHint text={description} title={title} />}

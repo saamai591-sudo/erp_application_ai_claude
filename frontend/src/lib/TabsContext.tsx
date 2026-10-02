@@ -5,6 +5,8 @@ import { clearReviewReportCacheForPath, clearAllReviewReportCaches } from "./rev
 import { clearPersistedStateByPrefix, clearPersistedStateFamily, instanceOfPath } from "./usePersistedState";
 import { refreshTabIfStale } from "./listInvalidation";
 import { clearAllDirty, clearTabDirty, confirmDiscard, isTabDirty } from "./unsavedChanges";
+import { forgetTabScroll } from "./tabScroll";
+import { takeStagedRecordNav, resolveRecordNavTarget, RecordNavContext, RecordNavTarget } from "./recordNav";
 
 export interface Tab {
   id: string;
@@ -29,6 +31,8 @@ interface TabsCtx {
   closeAllTabs: (force?: boolean) => void;
   /** آیا تبی فرمِ دارای تغییر ذخیره‌نشده باز است؟ */
   hasUnsavedTabs: () => boolean;
+  /** ناوبری رکوردهای فرم ویرایشِ تب فعال (اولین/قبلی/بعدی/آخرین) — null وقتی فرم از یک فهرست باز نشده است */
+  recordNav: { position: number; total: number; canPrev: boolean; canNext: boolean; go: (target: RecordNavTarget) => void } | null;
 }
 
 const Ctx = createContext<TabsCtx | null>(null);
@@ -89,6 +93,8 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const initialized = useRef(false);
+  /** زمینه‌ی فهرست هر تب فرم (برای ناوبری اولین/قبلی/بعدی/آخرین) */
+  const recordNavByTab = useRef(new Map<string, RecordNavContext>());
 
   /** اگر مسیر یک «تب فهرست» باشد و کهنه شده باشد (یعنی یکی از Resourceهایی که واقعاً واکشی کرده، از
    * زمان آخرین دیدنش تغییر کرده)، کشش را پاک می‌کند و برای اجبار به remount (حتی اگر همین الان هم تب
@@ -186,6 +192,8 @@ export function TabsProvider({ children }: { children: ReactNode }) {
           // فرم جدید دیگری با همین مسیر باز است: تب تازه با نمونه‌ی یکتا (به‌جای رفتن به تب موجود)
           path = withNewInstance(path);
         } else {
+          const stagedCtx = takeStagedRecordNav(path);
+          if (stagedCtx) recordNavByTab.current.set(existing.id, stagedCtx);
           setActiveTabId(existing.id);
           navigate(existing.path);
           return;
@@ -200,8 +208,34 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     clearReviewReportCacheForPath(base);
 
     const tab: Tab = { id: nextId(), path, title: getTitleForPath(base) };
+    const stagedCtx = takeStagedRecordNav(path);
+    if (stagedCtx) recordNavByTab.current.set(tab.id, stagedCtx);
     setTabs((prev) => [...prev, tab]);
     setActiveTabId(tab.id);
+    navigate(path);
+  }
+
+  /** ناوبری بین رکوردها داخل همان تب (اولین/قبلی/بعدی/آخرین): فرم فعلی با فرم ویرایش رکورد مقصد جایگزین می‌شود، تب جدید باز
+   * نمی‌شود (هم‌الگوی resetActiveTabToNew). اگر مقصد از قبل در تب دیگری باز است (دو تب با یک کلید کش خراب می‌شوند) به همان
+   * تب می‌رویم. تغییر ذخیره‌نشده‌ی فرم فعلی با تایید کاربر دور ریخته می‌شود. */
+  function goToRecord(path: string) {
+    const active = tabs.find((t) => t.id === activeTabId);
+    if (!active || active.path === path) return;
+    if (isTabDirty(active.path) && !confirmDiscard()) return;
+    const ctx = recordNavByTab.current.get(active.id);
+    const other = tabs.find((t) => t.id !== active.id && t.path === path);
+    if (other) {
+      if (ctx && !recordNavByTab.current.has(other.id)) recordNavByTab.current.set(other.id, ctx);
+      setActiveTabId(other.id);
+      navigate(other.path);
+      return;
+    }
+    clearFormState(active.path);
+    clearFormState(path);
+    clearPersistedStateFamily(pathOnly(path));
+    forgetTabScroll(active.id); // اسکرولِ رکورد قبلی روی رکورد تازه اعمال نشود
+    setTabs((prev) => prev.map((t) => (t.id === active.id ? { ...t, path, title: getTitleForPath(pathOnly(path)) } : t)));
+    setRefreshNonce((n) => n + 1); // remount واقعی همین تب با داده‌ی رکورد مقصد
     navigate(path);
   }
 
@@ -239,6 +273,8 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   }
 
   function closeTab(id: string) {
+    forgetTabScroll(id);
+    recordNavByTab.current.delete(id);
     // بستن تبِ یک فرم با تغییر ذخیره‌نشده: تایید کاربر (× تب و کلیک وسط، هر دو از همین‌جا می‌گذرند)
     const target = tabs.find((t) => t.id === id);
     if (target && isFormShapedPath(target.path) && isTabDirty(target.path) && !confirmDiscard()) return;
@@ -282,8 +318,25 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     navigate("/");
   }
 
+  const activeTab = tabs.find((t) => t.id === activeTabId);
+  const navCtx = activeTab ? recordNavByTab.current.get(activeTab.id) : undefined;
+  const navIndex = activeTab && navCtx ? navCtx.paths.indexOf(activeTab.path) : -1;
+  const recordNav: TabsCtx["recordNav"] =
+    activeTab && navCtx && navIndex >= 0 && isFormShapedPath(activeTab.path)
+      ? {
+          position: navIndex + 1,
+          total: navCtx.paths.length,
+          canPrev: navIndex > 0,
+          canNext: navIndex < navCtx.paths.length - 1,
+          go: (target) => {
+            const next = resolveRecordNavTarget(navCtx, activeTab.path, target);
+            if (next) goToRecord(next);
+          },
+        }
+      : null;
+
   return (
-    <Ctx.Provider value={{ tabs, activeTabId, refreshNonce, openTab, resetActiveTabToNew, switchTab, closeTab, closeAllTabs, hasUnsavedTabs }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ tabs, activeTabId, refreshNonce, openTab, resetActiveTabToNew, switchTab, closeTab, closeAllTabs, hasUnsavedTabs, recordNav }}>{children}</Ctx.Provider>
   );
 }
 
