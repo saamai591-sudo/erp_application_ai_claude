@@ -84,7 +84,7 @@ interface LineInput {
   description?: string | null;
 }
 
-async function validateLines(lines: LineInput[], basis: string, currency: ConversionCurrency, fxRate: number, baseCurrency: ConversionCurrency, docDate: Date, excludeInvoiceId?: number) {
+async function validateLines(lines: LineInput[], basis: string, currency: ConversionCurrency, fxRate: number, baseCurrency: ConversionCurrency, docDate: Date, excludeInvoiceId?: number, customerDetailCode?: string | null) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("فاکتور برگشت از فروش باید حداقل یک ردیف کالا داشته باشد");
 
   const cleaned: {
@@ -122,6 +122,8 @@ async function validateLines(lines: LineInput[], basis: string, currency: Conver
       if (!l.sourceInventoryLineId) throw new Error(`ردیف ${idx + 1}: انتخاب ردیف برگشت از فروش الزامی است`);
       const info = await salesReturnLineRemaining(l.sourceInventoryLineId, excludeInvoiceId);
       if (!info) throw new Error(`ردیف برگشت از فروش برای ردیف ${idx + 1} یافت نشد`);
+      // طرف مقابل سند برگشت از فروش مبنا باید با مشتری فاکتور یکی باشد (علاوه بر فیلتر انتخابگر، در سرور هم اعمال می‌شود)
+      if (!customerDetailCode || info.line.document.detailCode !== customerDetailCode) throw new Error(`ردیف ${idx + 1}: طرف مقابل سند برگشت از فروش با مشتری فاکتور یکسان نیست`);
       if (qty > info.remaining) throw new Error(`مقدار ردیف ${idx + 1} از باقیمانده‌ی قابل صورتحساب (${info.remaining}) بیشتر است`);
       sourceInventoryLineId = info.line.id;
       goodsItemId = info.line.goodsItemId;
@@ -167,8 +169,12 @@ async function validateLines(lines: LineInput[], basis: string, currency: Conver
 router.get("/sales-return-invoices/pickable-sales-return-lines", can(`${FORM}.view`), async (req, res) => {
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
   const excludeInvoiceId = req.query.excludeInvoiceId ? Number(req.query.excludeInvoiceId) : null;
+  // فقط اسناد برگشت از فروشِ همان مشتری سرصفحه (customerId → طرف حساب)؛ بدون مشتری هیچ ردیفی برنمی‌گردد
+  const customerId = req.query.customerId ? Number(req.query.customerId) : null;
+  const customer = customerId ? await prisma.customer.findUnique({ where: { id: customerId }, include: { party: true } }) : null;
+  if (!customer) return res.json([]);
   const lines = await prisma.inventoryDocumentLine.findMany({
-    where: { document: { documentType: "SALES_RETURN", ...(destDate ? { date: { lte: destDate } } : {}) } },
+    where: { document: { documentType: "SALES_RETURN", detailCode: customer.party.detailCode, ...(destDate ? { date: { lte: destDate } } : {}) } },
     include: { document: true, goodsItem: true, unit: true, salesReturnInvoiceLines: true },
     orderBy: { id: "desc" },
   });
@@ -313,7 +319,8 @@ router.post("/sales-return-invoices", can(`${FORM}.create`), async (req, res) =>
     if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
     const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
-    const lines = await validateLines(body.lines, body.basis, currency, fxRate, baseCurrency, date);
+    const customerParty = await prisma.party.findUnique({ where: { id: customer.partyId } });
+    const lines = await validateLines(body.lines, body.basis, currency, fxRate, baseCurrency, date, undefined, customerParty?.detailCode ?? null);
 
     // شماره از «الگوی شماره‌گذاری» (اتمی، داخل همین تراکنش) می‌آید؛ اگر برای (نوع فروش، مرکز فروش) الگویی نباشد ذخیره ممنوع است.
     const created = await prisma.$transaction(async (tx: any) => {
@@ -369,7 +376,8 @@ router.put("/sales-return-invoices/:id", can(`${FORM}.edit`), async (req, res) =
     if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
     const fxRate = resolveInvoiceFxRate(body.currencyId, baseCurrency.id, body.fxRate);
 
-    const lines = await validateLines(body.lines, body.basis, currency, fxRate, baseCurrency, date, id);
+    const customerParty = await prisma.party.findUnique({ where: { id: customer.partyId } });
+    const lines = await validateLines(body.lines, body.basis, currency, fxRate, baseCurrency, date, id, customerParty?.detailCode ?? null);
 
     await prisma.$transaction(async (tx: any) => {
       await assertEditAllowed(tx, existing, { form: "SALES_RETURN", salesTypeId: body.salesTypeId, salesCenterId: body.salesCenterId, fiscalPeriodId: fiscalPeriod.id, date });

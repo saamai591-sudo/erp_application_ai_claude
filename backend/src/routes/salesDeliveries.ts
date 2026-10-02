@@ -251,13 +251,22 @@ const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
 // پیکر «باقیمانده» سفارش فروش
 // =========================================================================
 
+// فقط ردیف‌های سندِ مبنایی که مشتریِ آن با «طرف مقابل» سرصفحه‌ی حواله یکی است (partyId → Customer.partyId)؛ بدون partyId یا وقتی
+// طرف مقابل مشتری نیست، هیچ ردیفی برنمی‌گردد. همین قاعده هنگام ثبت هم در validateLines اعمال می‌شود (دفاع دوم در سرور).
+async function customerIdOfQueryParty(req: any): Promise<number | null> {
+  const partyId = req.query.partyId ? Number(req.query.partyId) : null;
+  return partyId ? await resolveCustomerIdForParty(partyId) : null;
+}
+
 router.get("/sales-deliveries/pickable-sales-order-lines", can(`${FORM}.view`), async (req, res) => {
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
+  const customerId = await customerIdOfQueryParty(req);
+  if (!customerId) return res.json([]);
   // حوالهٔ در حال ویرایش از مانده کم نمی‌شود (وگرنه ردیفی که همین حواله کل مانده‌اش را گرفته از انتخابگر حذف می‌شد)
   const excludeDeliveryId = req.query.excludeDeliveryId ? Number(req.query.excludeDeliveryId) : null;
   const lines = await prisma.salesOrderLine.findMany({
     // ردیف خدمت وارد انبار/حواله نمی‌شود — فقط ردیف‌های کالا قابل انتخاب‌اند.
-    where: { goodsItem: { kind: "GOODS" }, salesOrder: { status: "APPROVED", ...(destDate ? { date: { lte: destDate } } : {}) } },
+    where: { goodsItem: { kind: "GOODS" }, salesOrder: { status: "APPROVED", customerId, ...(destDate ? { date: { lte: destDate } } : {}) } },
     include: {
       salesOrder: { include: { customer: { include: { party: true } } } },
       goodsItem: true,
@@ -303,10 +312,12 @@ router.get("/sales-deliveries/pickable-sales-order-lines", can(`${FORM}.view`), 
 
 router.get("/sales-deliveries/pickable-sales-quote-lines", can(`${FORM}.view`), async (req, res) => {
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
+  const customerId = await customerIdOfQueryParty(req);
+  if (!customerId) return res.json([]);
   const excludeDeliveryId = req.query.excludeDeliveryId ? Number(req.query.excludeDeliveryId) : null;
   const lines = await prisma.salesQuoteLine.findMany({
     // ردیف خدمت وارد انبار/حواله نمی‌شود — فقط ردیف‌های کالا قابل انتخاب‌اند.
-    where: { goodsItem: { kind: "GOODS" }, salesQuote: { status: "APPROVED", ...(destDate ? { date: { lte: destDate } } : {}) } },
+    where: { goodsItem: { kind: "GOODS" }, salesQuote: { status: "APPROVED", customerId, ...(destDate ? { date: { lte: destDate } } : {}) } },
     include: {
       salesQuote: { include: { customer: { include: { party: true } } } },
       goodsItem: true,

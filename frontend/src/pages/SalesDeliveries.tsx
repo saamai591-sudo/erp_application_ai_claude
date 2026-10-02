@@ -261,17 +261,19 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
   });
 
   useEffect(() => {
-    if (header.basis === "NO_BASIS") {
+    if (header.basis === "NO_BASIS" || !header.partyId) {
       setPickableLines([]);
       return;
     }
     // سرور مانده‌ی هر ردیف مبنا را با همه‌ی تخصیص‌های ذخیره‌شده (به‌جز همین حواله در حال ویرایش) حساب می‌کند و به ترتیب خودِ سند مبنا برمی‌گرداند
     const params = new URLSearchParams();
     if (header.date) params.set("destDate", header.date);
+    // فقط ردیف‌های سندِ مبنا که مشتری‌شان با طرف مقابل سرصفحه یکی است (سرور هم همین را اعمال می‌کند)
+    params.set("partyId", header.partyId);
     if (editId) params.set("excludeDeliveryId", String(editId));
     const endpoint = header.basis === "SALES_QUOTE" ? "pickable-sales-quote-lines" : "pickable-sales-order-lines";
     api.get(`/sales-deliveries/${endpoint}?${params.toString()}`).then(setPickableLines).catch(() => setPickableLines([]));
-  }, [header.basis, header.date, editId]);
+  }, [header.basis, header.date, header.partyId, editId]);
 
   const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceSalesOrderLineId);
   // طبق طرح جدید چرخه‌ی عمر سند: بعد از «تایید انبار» (که فقط از طریق «تایید انبار» دسته‌ای اتفاق

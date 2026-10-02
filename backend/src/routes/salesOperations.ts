@@ -373,7 +373,7 @@ interface SalesOrderLineInput {
 
 // طبق تصمیم صریح کاربر (۱۴۰۵/۰۶/۲۰، هم‌الگوی SalesQuote): مالیات بر ارزش‌افزوده همیشه به همان ارز هدر
 // محاسبه/ذخیره می‌شود (نه ارز مبنا)، چون این فرم اصلاً fxRate ندارد.
-async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: string, docDate: Date) {
+async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: string, docDate: Date, customerId?: number) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("سفارش فروش باید حداقل یک ردیف کالا داشته باشد");
   const cleaned: {
     sourceSalesQuoteLineId: number | null;
@@ -401,6 +401,8 @@ async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: stri
       const source = await prisma.salesQuoteLine.findUnique({ where: { id: l.sourceSalesQuoteLineId }, include: { salesQuote: true } });
       if (!source) throw new Error(`ردیف پیش‌فاکتور برای ردیف ${idx + 1} یافت نشد`);
       if (source.salesQuote.status !== "APPROVED") throw new Error(`پیش‌فاکتور ردیف ${idx + 1} در وضعیت تایید نیست`);
+      // مشتری پیش‌فاکتور مبنا باید با مشتری سرصفحه‌ی سفارش یکی باشد (علاوه بر فیلتر انتخابگر، در سرور هم اعمال می‌شود)
+      if (!customerId || source.salesQuote.customerId !== customerId) throw new Error(`مشتری پیش‌فاکتور ردیف ${idx + 1} با مشتری انتخاب‌شده در هدر یکسان نیست`);
       sourceSalesQuoteLineId = source.id;
       goodsItemId = source.goodsItemId;
       unitId = source.unitId;
@@ -581,7 +583,7 @@ router.post("/sales-orders", can(`${SALES_ORDERS_FORM}.create`), async (req, res
     if (!salesCenter) throw new Error("مرکز فروش یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
-    const lines = await validateSalesOrderLines(body.lines, body.basis, date);
+    const lines = await validateSalesOrderLines(body.lines, body.basis, date, body.customerId);
 
     const number = await nextNumber(prisma.salesOrder, fiscalPeriod.id);
     const created = await prisma.salesOrder.create({
@@ -627,7 +629,7 @@ router.put("/sales-orders/:id", can(`${SALES_ORDERS_FORM}.edit`), async (req, re
     if (!salesCenter) throw new Error("مرکز فروش یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
-    const lines = await validateSalesOrderLines(body.lines, body.basis, date);
+    const lines = await validateSalesOrderLines(body.lines, body.basis, date, body.customerId);
 
     await prisma.$transaction([
       prisma.salesOrderLine.deleteMany({ where: { salesOrderId: id } }),
