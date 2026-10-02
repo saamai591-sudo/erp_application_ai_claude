@@ -3,7 +3,6 @@ import { prisma } from "../lib/prisma";
 import { resolveDetailTitles } from "../utils/detailValues";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { computeFullAccountCode } from "../utils/accountCode";
-import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
@@ -31,26 +30,6 @@ router.get("/available-lines", can(`${FORM}.view`), async (req, res) => {
   const date = new Date(toDate);
   const fiscalPeriod = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
   if (!fiscalPeriod) return res.status(400).json({ error: "این تاریخ در هیچ دوره مالی تعریف نشده است" });
-
-  // طبق تصمیم صریح کاربر: پیش از بارگذاری اطلاعات، هر انباری که تا تاریخ پایان دوره‌ی انتخاب‌شده در
-  // سرصفحه راه‌اندازی شده (implementationDate آن قبل از این تاریخ باشد) باید حداقل تا همین تاریخ
-  // «تایید انبار» شده باشد (confirmedDate >= تاریخ پایان دوره)؛ وگرنه مانده‌های حسابداریِ بارگذاری‌شده
-  // ممکن است بر مبنای موجودی/قیمت‌گذاری هنوز نهایی‌نشده‌ی انبار باشند.
-  const unconfirmedWarehouses = await prisma.warehouse.findMany({
-    where: {
-      implementationDate: { not: null, lt: date },
-      OR: [{ confirmedDate: null }, { confirmedDate: { lt: date } }],
-    },
-    select: { title: true, confirmedDate: true },
-  });
-  if (unconfirmedWarehouses.length > 0) {
-    const list = unconfirmedWarehouses
-      .map((w) => `«${w.title}» (${w.confirmedDate ? `تایید تا ${formatJalaliDateForMessage(w.confirmedDate)}` : "هرگز تایید نشده"})`)
-      .join("، ");
-    return res.status(400).json({
-      error: `انبارهای زیر تا تاریخ پایان دوره‌ی انتخاب‌شده تایید نشده‌اند؛ ابتدا باید تا این تاریخ «تایید انبار» شوند: ${list}`,
-    });
-  }
 
   const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
   if (!baseCurrency) return res.status(400).json({ error: "ارز پایه تعریف نشده است" });
