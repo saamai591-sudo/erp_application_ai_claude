@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Outlet, Navigate } from "react-router-dom";
 import { useAuth } from "../lib/AuthContext";
 import { useTabs } from "../lib/TabsContext";
+import { useTabScrollRestore } from "../lib/tabScroll";
 import { filterModulesByAccess, ModuleGroup, NavItem } from "../navConfig";
 import { resolveNavBehavior } from "../lib/formTypes";
 import { FitText } from "./FitText";
@@ -504,6 +505,7 @@ function ModuleFlyout({
 export default function Layout() {
   const { user, logout, loading } = useAuth();
   const { openTab, activeTabId, tabs, refreshNonce } = useTabs();
+  useTabScrollRestore(activeTabId, refreshNonce);
   const { hasFormView, loading: permissionsLoading } = usePermissions();
   // آکاردئون: در هر لحظه فقط یک ماژول و یک ساب‌ماژول باز است (به‌صورت پیش‌فرض همه بسته‌اند)
   const [openModule, setOpenModule] = useState<string | null>(null);
