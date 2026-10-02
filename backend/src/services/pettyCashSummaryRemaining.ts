@@ -38,7 +38,8 @@ export async function pickablePettyCashPayments(custodianId: number, excludeSumm
       salesInvoice: { select: { id: true, number: true, date: true } },
       purchaseOrder: { select: { id: true, number: true, date: true } },
     },
-    orderBy: { date: "desc" },
+    // ترتیب ثبت (شناسه‌ی صعودی) — هم فهرست انتخابگر و هم «بارگذاری» به همین ترتیب ردیف می‌سازند
+    orderBy: { id: "asc" },
   });
   const rows = await Promise.all(
     payments.map(async (p: any) => {

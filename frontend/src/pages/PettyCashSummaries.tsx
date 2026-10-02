@@ -490,9 +490,10 @@ function SummaryForm({ editId }: { editId?: number }) {
   }
 
   // آیکن «ردیف جدید» نوار ابزار: برخلاف «بارگذاری» (همه‌ی موارد قابل‌بارگذاری یک‌جا)، این‌جا کاربر خودش
-  // دقیقاً یک پرداخت تنخواه را از میان همان فهرست انتخاب می‌کند
-  function addSelectedPayment(p: PickablePayment) {
-    onLoadPayments([p]);
+  // یک یا چند پرداخت تنخواه را (چندانتخابی، به ترتیب ثبت) از میان همان فهرست انتخاب می‌کند
+  // انتخابگر چندتایی: همه‌ی پرداخت‌های تیک‌خورده یک‌جا و به ترتیب ثبت (ترتیب فهرست) به گرید اضافه می‌شوند
+  function addSelectedPayments(selected: PickablePayment[]) {
+    onLoadPayments(selected);
     setAddPickerOpen(false);
   }
 
@@ -825,7 +826,10 @@ function SummaryForm({ editId }: { editId?: number }) {
           title="انتخاب پرداخت تنخواه"
           rows={addableCandidates}
           columns={ADD_PICKER_COLUMNS}
-          onSelect={addSelectedPayment}
+          multiSelect
+          keepRowOrder
+          onSelect={(p) => addSelectedPayments([p])}
+          onSelectMultiple={addSelectedPayments}
           onClose={() => setAddPickerOpen(false)}
         />
       )}

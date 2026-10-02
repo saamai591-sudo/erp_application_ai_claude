@@ -99,6 +99,7 @@ export function RecordPickerDialog<T extends { id: number | string }>({
   columns,
   multiSelect,
   resultInDisplayOrder,
+  keepRowOrder,
   onSelect,
   onSelectMultiple,
   onClose,
@@ -108,6 +109,8 @@ export function RecordPickerDialog<T extends { id: number | string }>({
   columns: PickerColumn<T>[];
   multiSelect?: boolean;
   resultInDisplayOrder?: boolean;
+  /** true: بدون مرتب‌سازی اولیه، ردیف‌ها به همان ترتیبِ rows نمایش داده می‌شوند (مثلاً ترتیب ثبت)؛ کاربر همچنان می‌تواند با کلیک روی عنوان ستون مرتب کند */
+  keepRowOrder?: boolean;
   onSelect: (row: T) => void;
   onSelectMultiple?: (rows: T[]) => void;
   onClose: () => void;
@@ -116,7 +119,7 @@ export function RecordPickerDialog<T extends { id: number | string }>({
   const [selectedId, setSelectedId] = useState<string | number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string | number>>(new Set());
   const [sort, setSort] = useState<{ header: string; dir: "asc" | "desc" } | null>(
-    columns[0] ? { header: columns[0].header, dir: "asc" } : null
+    columns[0] && !keepRowOrder ? { header: columns[0].header, dir: "asc" } : null
   );
 
   // همه‌ی ردیف‌ها با مرتب‌سازی فعلی (بدون فیلتر) — filteredRows و ترتیب خروجی انتخاب چندتایی از همین می‌آید
