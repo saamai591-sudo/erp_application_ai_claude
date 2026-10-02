@@ -25,6 +25,7 @@ import {
 } from "../services/purchaseInvoiceAdvanceService";
 import { getAdvancePaymentMethodForDate } from "../services/accountingSettingsService";
 import { resolvePaymentSubjectAccount } from "../services/paymentSubjectAccount";
+import { netAllocationAmounts } from "../utils/purchaseDiscount";
 
 const FORM = findFormPrefix("purchase-invoices");
 
@@ -787,7 +788,7 @@ router.post("/purchase-invoices/:id/approve", can(`${FORM}.approve`), async (req
         // (services/purchaseInvoiceAdvanceService.ts#computePurchaseInvoiceLineCosts)، پس بی‌واسطه نوشته می‌شود.
         await setLineAmount(tx, {
           lineId: l.sourceInventoryLineId!,
-          newAmount: Number(costByLineId.get(l.id)?.cost ?? l.baseAmount),
+          newAmount: Number(costByLineId.get(l.id)?.cost ?? Number(l.baseAmount) - Number(l.baseDiscount)),
           priceType: "CROSS_ENTITY",
           createdById: req.user?.id ?? null,
         });
@@ -803,9 +804,11 @@ router.post("/purchase-invoices/:id/approve", can(`${FORM}.approve`), async (req
       // اثر کاملاً مستقل و اضافه‌شونده به CROSS_ENTITY بالاست، نه بخشی از محاسبه‌ی آن.
       for (const cost of invoice.otherCostLines) {
         if (cost.basis !== "WAREHOUSE_RECEIPT") continue;
+        // سهم «خالص» هر تسهیم (مبلغ − تخفیف، به نسبت تسهیم) به بهای رسید اضافه می‌شود — utils/purchaseDiscount.ts
+        const netByAllocation = netAllocationAmounts(cost.allocations, Number(cost.amount), Number(cost.discount), invoice.currency.decimalPlaces);
         for (const a of cost.allocations) {
           const current = await getLineAmount(a.inventoryDocumentLineId, tx);
-          const allocatedBaseAmount = toBaseCurrencyAmount(Number(a.allocatedAmount), fxRate, invoice.currency, baseCurrency);
+          const allocatedBaseAmount = toBaseCurrencyAmount(netByAllocation.get(a.id) ?? Number(a.allocatedAmount), fxRate, invoice.currency, baseCurrency);
           await setLineAmount(tx, {
             lineId: a.inventoryDocumentLineId,
             newAmount: Number(current) + allocatedBaseAmount,
@@ -887,8 +890,9 @@ router.post("/purchase-invoices/:id/unapprove", can(`${FORM}.unapprove`), async 
     // سهم تسعیر پیش‌پرداخت (اگر تایید قبلی محاسبه کرده بود) به صفر برمی‌گردد؛ اگر فاکتور دوباره تایید شود، از نو محاسبه می‌شود
     // — cost به ارز مبناست، پس با baseAmount (نه amount) مقایسه/ریست می‌شود.
     for (const l of invoice.lines) {
-      if (Number(l.exchangeRateAdjustmentShare) !== 0 || Number(l.cost) !== Number(l.baseAmount)) {
-        await tx.purchaseInvoiceLine.update({ where: { id: l.id }, data: { cost: l.baseAmount, exchangeRateAdjustmentShare: 0 } });
+      const netBase = Number(l.baseAmount) - Number(l.baseDiscount);
+      if (Number(l.exchangeRateAdjustmentShare) !== 0 || Number(l.cost) !== netBase) {
+        await tx.purchaseInvoiceLine.update({ where: { id: l.id }, data: { cost: netBase, exchangeRateAdjustmentShare: 0 } });
       }
     }
     for (const lineId of receiptLineIds) {
@@ -907,10 +911,12 @@ router.post("/purchase-invoices/:id/unapprove", can(`${FORM}.unapprove`), async 
       if (cost.basis !== "WAREHOUSE_RECEIPT") continue;
       for (const a of cost.allocations) {
         const current = await getLineAmount(a.inventoryDocumentLineId, tx);
-        const allocatedBaseAmount = toBaseCurrencyAmount(Number(a.allocatedAmount), fxRate, invoice.currency, baseCurrency);
+        // دقیقاً همان مبلغی که تایید به بهای رسید افزوده بود برگردانده می‌شود (مجموع رکوردهای همین تسهیم) — نه محاسبه‌ی دوباره،
+        // تا فاکتورهای تاییدشده‌ی قبل از اصلاح تخفیف (که ناخالص افزوده شده بودند) هم درست برگردند
+        const applied = await tx.documentItemAmount.aggregate({ where: { purchaseCostAllocationId: a.id, priceType: "INBOUND_RELATED_COST" }, _sum: { difference: true } });
         await setLineAmount(tx, {
           lineId: a.inventoryDocumentLineId,
-          newAmount: Number(current) - allocatedBaseAmount,
+          newAmount: Number(current) - Number(applied._sum.difference ?? 0),
           priceType: "INBOUND_RELATED_COST",
           purchaseCostAllocationId: a.id,
           createdById: req.user?.id ?? null,
@@ -1032,8 +1038,9 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
 
     for (const line of invoice.lines) {
       if (!payableSetting) break;
-      const amount = Number(line.amount);
-      const baseAmount = Number(line.baseAmount);
+      // مبنای ثبت = مبلغ − تخفیف (پرداختنی خرید و بدهکار موجودی/کنترل خرید هر دو خالص‌اند) — utils/purchaseDiscount.ts
+      const amount = Number(line.amount) - Number(line.discount);
+      const baseAmount = Number(line.baseAmount) - Number(line.baseDiscount);
       const vatAmount = Number(line.vatAmount);
       const goodsItem = line.goodsItem;
 
@@ -1078,6 +1085,11 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
       // جداگانه لحاظ می‌شود. Cost طبق تصمیم صریح کاربر به ارز مبناست (چون انبار مفهوم ارز ندارد)؛ فقط وقتی خودِ معین
       // موجودی ارزی باشد، برعکس (fromBaseCurrencyAmount) به ارز فاکتور برگردانده می‌شود تا این خط سند به ارز آن معین ثبت شود.
       const costBase = Number(line.cost);
+      // فاکتورِ تاییدشده‌ی قبل از اصلاح تخفیف، Cost ناخالص ذخیره کرده است؛ سند با آن بالانس نمی‌شود — باید برگشت از تایید و تایید مجدد شود
+      if (Number(line.baseDiscount) > 0 && Math.abs(costBase - Number(line.exchangeRateAdjustmentShare) - baseAmount) > 0.01) {
+        errors.push(`ردیف کالای «${goodsItem.title}»: بهای ذخیره‌شده‌ی این فاکتور تخفیف را کسر نکرده است (تایید قبل از اصلاح تخفیف)؛ فاکتور را از تایید برگردانید و دوباره تایید کنید، سپس سند را صادر کنید`);
+        continue;
+      }
       const costInvoiceCcy = costBase === baseAmount ? amount : fromBaseCurrencyAmount(costBase, fxRate, invoice.currency);
       const debitDetails = resolveAccountDetailFields(debitSetting.account, partyDetailTypeId, partyDetailCode);
       const debitIsCurrency = debitSetting.account.isCurrency;
@@ -1121,8 +1133,9 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
     // (creditByAccount/vatDebitByAccount) با ردیف‌های کالا تجمیع می‌شوند.
     for (const cost of invoice.otherCostLines) {
       if (!payableSetting) break;
-      const amount = Number(cost.amount);
-      const baseAmount = Number(cost.baseAmount);
+      // مبنای ثبت = مبلغ − تخفیف (برای بدهکار هزینه/موجودی و بستانکار پرداختنی) — utils/purchaseDiscount.ts
+      const amount = Number(cost.amount) - Number(cost.discount);
+      const baseAmount = Number(cost.baseAmount) - Number(cost.baseDiscount);
       const vatAmount = Number(cost.vatAmount);
       const service = cost.service;
 
@@ -1139,6 +1152,7 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
           continue;
         }
         let hasAllocationError = false;
+        const netByAllocation = netAllocationAmounts(cost.allocations, Number(cost.amount), Number(cost.discount), invoice.currency.decimalPlaces);
         for (const a of cost.allocations) {
           costAllocationIds.push(a.id);
           const goodsItem = a.inventoryDocumentLine.goodsItem;
@@ -1153,10 +1167,19 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
             hasAllocationError = true;
             continue;
           }
-          const allocatedAmount = Number(a.allocatedAmount);
+          // سهم خالص (مبلغ − تخفیف) هر تسهیم — همان مبلغی که تایید به بهای رسید افزوده است
+          const allocatedAmount = netByAllocation.get(a.id) ?? Number(a.allocatedAmount);
           // گرد کردن دقیقاً هم‌الگوی نوشتن مبلغ روی ردیف رسید در approve — تا مبلغ بدهکار «موجودی کالا»
           // اینجا با همان مبلغی که واقعاً به ارزش موجودی افزوده شده یکی باشد.
           const allocatedBaseAmount = toBaseCurrencyAmount(allocatedAmount, fxRate, invoice.currency, baseCurrency);
+          if (Number(cost.discount) > 0) {
+            const applied = await prisma.documentItemAmount.aggregate({ where: { purchaseCostAllocationId: a.id, priceType: "INBOUND_RELATED_COST" }, _sum: { difference: true } });
+            if (Math.abs(Number(applied._sum.difference ?? 0) - allocatedBaseAmount) > 0.01) {
+              errors.push(`ردیف «سایر هزینه‌ها» خدمت «${service.title}»: بهای افزوده‌شده به رسید انبار تخفیف را کسر نکرده است (تایید قبل از اصلاح تخفیف)؛ فاکتور را از تایید برگردانید و دوباره تایید کنید، سپس سند را صادر کنید`);
+              hasAllocationError = true;
+              continue;
+            }
+          }
           const debitDetails = resolveAccountDetailFields(debitSetting.account, partyDetailTypeId, partyDetailCode);
           const debitIsCurrency = debitSetting.account.isCurrency;
           debitLines.push({
