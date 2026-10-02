@@ -1098,15 +1098,19 @@ function SettlementRowFields({
   const instrumentRow = instrumentRows.find((r) => r.clientKey === row.instrumentClientKey);
 
   useEffect(() => {
-    if (!basisType || basisType === "NONE" || !row.partyId) {
+    // بدون تاریخ سند دریافت، هیچ سند مبنایی نمایش داده نمی‌شود (قاعده: تاریخ سند مبنا ≤ تاریخ سند دریافت)
+    if (!basisType || basisType === "NONE" || !row.partyId || !headerDate) {
       setBasisCandidates([]);
       return;
     }
     const excl = editId ? `&excludeReceiptId=${editId}` : "";
+    let stale = false;
+    setBasisCandidates([]);
     api
-      .get(`/receipts/pickable-basis-documents?basisType=${basisType}&partyId=${row.partyId}${excl}&nature=${receiptType?.nature ?? ""}${headerDate ? `&date=${headerDate}` : ""}`)
-      .then((rows: BasisCandidate[]) => setBasisCandidates(rows))
-      .catch(() => setBasisCandidates([]));
+      .get(`/receipts/pickable-basis-documents?basisType=${basisType}&partyId=${row.partyId}${excl}&nature=${receiptType?.nature ?? ""}&date=${headerDate}`)
+      .then((rows: BasisCandidate[]) => { if (!stale) setBasisCandidates(rows.filter((r) => r.date.slice(0, 10) <= headerDate)); })
+      .catch(() => { if (!stale) setBasisCandidates([]); });
+    return () => { stale = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [basisType, row.partyId, editId, receiptType?.nature, headerDate]);
 
