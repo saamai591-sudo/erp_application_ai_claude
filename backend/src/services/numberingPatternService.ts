@@ -14,6 +14,15 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 // کنترل «تاریخ» بعد از گرفتن قفل شمارنده انجام می‌شود تا ثبت هم‌زمان دو سند هم نتواند آن را دور بزند.
 // =========================================================================
 
+// آزادسازی شماره (حذف سند): اگر شماره‌ی سندِ حذف‌شده «آخرین شماره»ی شمارنده باشد، شمارنده یکی کم می‌شود تا شماره برای سند بعدی
+// همان الگو آزاد شود؛ در غیر این صورت شمارنده دست‌نخورده می‌ماند و شماره‌ی حذف‌شده هرگز دوباره استفاده نمی‌شود. شمارنده‌ی هر الگو
+// مشترک بین «فاکتور فروش» و «برگشت از فروش» است (هر دو همین ردیف NumberingPatternCounter را می‌خوانند/می‌نویسند).
+// همزمانی: آزادسازی هم «یک دستور SQL اتمی» است (UPDATE … WHERE lastNumber = شماره‌ی سند) داخل همان تراکنشی که سند را حذف می‌کند؛
+//   • اگر هم‌زمان سند جدیدی شماره گرفته باشد (lastNumber بالا رفته)، شرط WHERE روی مقدار commit‌شده دوباره سنجیده می‌شود و کاهشی انجام نمی‌شود
+//     (شماره‌ی جدید دست‌نخورده می‌ماند، بدون شماره‌ی تکراری)؛
+//   • اگر آزادسازی اول commit شود، تخصیص بعدی همان شماره را می‌گیرد؛
+//   • دو آزادسازی هم‌زمان پشت قفل ردیف شمارنده صف می‌شوند و هرکدام فقط وقتی کم می‌کند که شماره‌اش همچنان آخرین باشد.
+
 export type NumberingFormKey = "SALES_INVOICE" | "SALES_RETURN";
 
 /** پیام ذخیره‌ی سند بدون الگوی شماره‌گذاری (فاکتور فروش / برگشت از فروش) */
@@ -118,4 +127,20 @@ export async function assertEditAllowed(
     await tx.$queryRaw`SELECT 1 FROM "NumberingPatternCounter" WHERE "patternId" = ${nextPattern.id} FOR UPDATE`;
     assertDateAllowed(nextPattern, await latestDocumentDate(tx, nextPattern, next.fiscalPeriodId, { form: next.form, id: existing.id }), next.date);
   }
+}
+
+/**
+ * آزادسازی شماره‌ی سندِ حذف‌شده — باید داخل همان تراکنشی صدا زده شود که سند را حذف می‌کند (و فقط وقتی واقعاً یک ردیف حذف شد، تا حذف
+ * هم‌زمانِ دوباره‌ی یک سند دو بار کم نکند). true = شمارنده کم شد (شماره آزاد شد). سند بدون الگو (شماره‌گذاری قدیمی) کاری نمی‌کند.
+ */
+export async function releaseDocumentNumber(tx: any, doc: { numberingPatternId: number | null; fiscalPeriodId: number; number: number }): Promise<boolean> {
+  if (!doc.numberingPatternId) return false;
+  const pattern = await tx.numberingPattern.findUnique({ where: { id: doc.numberingPatternId }, select: { resetPerFiscalYear: true } });
+  if (!pattern) return false;
+  const scopeKey = scopeOf(pattern, doc.fiscalPeriodId);
+  const updated: number = await tx.$executeRaw`
+    UPDATE "NumberingPatternCounter"
+    SET "lastNumber" = "lastNumber" - 1
+    WHERE "patternId" = ${doc.numberingPatternId} AND "scopeKey" = ${scopeKey} AND "lastNumber" = ${doc.number} AND "lastNumber" > 0`;
+  return updated > 0;
 }

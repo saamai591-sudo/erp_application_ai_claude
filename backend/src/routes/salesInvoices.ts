@@ -7,7 +7,7 @@ import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
 import { getVatRatePercentForDate, getAdvanceReceiptMethodForDate } from "../services/accountingSettingsService";
 import { getSalesInvoiceAdvanceState, saveSalesInvoiceAdvanceAllocations, assertAdvanceAllocationsStillValid, salesInvoiceNetTotal, salesInvoiceVatTotal } from "../services/salesInvoiceAdvanceService";
 import { toBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConversion";
-import { allocateDocumentNumber, assertEditAllowed } from "../services/numberingPatternService";
+import { allocateDocumentNumber, assertEditAllowed, releaseDocumentNumber } from "../services/numberingPatternService";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
@@ -907,7 +907,15 @@ router.delete("/sales-invoices/:id", can(`${FORM}.delete`), async (req, res) => 
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.journalEntryId) return res.status(400).json({ error: "برای این فاکتور سند حسابداری صادر شده؛ ابتدا سند حسابداری را حذف کنید" });
   if (d.status === "VOIDED") return res.status(400).json({ error: "این فاکتور فروش باطل شده است؛ قابل حذف نیست" });
-  await prisma.salesInvoice.delete({ where: { id } });
+  try {
+    // حذف سند و آزادسازی شماره (اگر آخرین شماره‌ی الگو بود) در یک تراکنش؛ شمارنده‌ی الگو مشترک با «برگشت از فروش» است
+    await prisma.$transaction(async (tx: any) => {
+      const removed = await tx.salesInvoice.deleteMany({ where: { id } });
+      if (removed.count === 1) await releaseDocumentNumber(tx, d);
+    });
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message || "خطا در حذف" });
+  }
   res.status(204).send();
 });
 
