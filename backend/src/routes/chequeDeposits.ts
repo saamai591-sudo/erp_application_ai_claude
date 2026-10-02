@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
+import { filterChequesByBaseDate, assertChequeBaseDatesNotAfter } from "../services/chequeBaseDates";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { recomputeBankAccountHasTransactions } from "../utils/treasuryTracking";
@@ -42,7 +43,7 @@ async function resolveFiscalPeriod(date: Date) {
   return fiscalPeriod;
 }
 
-async function validateChequeIds(chequeItemIds: number[]) {
+async function validateChequeIds(chequeItemIds: number[], formDate: Date, excludeDocId?: number) {
   if (!Array.isArray(chequeItemIds) || chequeItemIds.length === 0) {
     throw new Error("سند واگذاری به بانک باید حداقل یک چک داشته باشد");
   }
@@ -56,15 +57,23 @@ async function validateChequeIds(chequeItemIds: number[]) {
       throw new Error(`چک شماره ${cheque.number} در وضعیت «در دست» نیست و قابل واگذاری به بانک نیست`);
     }
   }
+  // تاریخ سند مبنای هر چک (آخرین اتفاق تاییدشده‌ی آن) نباید بعد از تاریخ این سند باشد
+  const labels = new Map<number, string>();
+  for (const id of unique) labels.set(id, `چک شماره ${(await prisma.chequeItem.findUnique({ where: { id }, select: { number: true } }))?.number ?? id}`);
+  await assertChequeBaseDatesNotAfter(unique, formDate, excludeDocId ? { kind: "deposit", id: excludeDocId } : undefined, labels);
   return unique;
 }
 
-router.get("/cheque-deposits/pickable-cheques", can(`${FORM}.view`), async (_req, res) => {
-  const items = await prisma.chequeItem.findMany({
+router.get("/cheque-deposits/pickable-cheques", can(`${FORM}.view`), async (req, res) => {
+  // فقط چک‌هایی که تاریخ سند مبنایشان (آخرین اتفاق تاییدشده‌ی چک) ≤ تاریخ سند فرم است؛ excludeId = سند در حال ویرایش
+  const formDate = req.query.date ? new Date(req.query.date as string) : null;
+  const excludeId = req.query.excludeId ? Number(req.query.excludeId) : undefined;
+  const allItems = await prisma.chequeItem.findMany({
     where: { direction: "RECEIVABLE", status: "IN_HAND" },
     include: { party: true, currency: true },
     orderBy: { id: "desc" },
   });
+  const items = await filterChequesByBaseDate(allItems, formDate, excludeId ? { kind: "deposit", id: excludeId } : undefined);
   res.json(
     items.map((c: any) => ({
       id: c.id,
@@ -150,7 +159,7 @@ router.post("/cheque-deposits", can(`${FORM}.create`), async (req, res) => {
     const bankAccount = await prisma.bankAccount.findUnique({ where: { id: body.bankAccountId } });
     if (!bankAccount) throw new Error("حساب بانکی یافت نشد");
 
-    const chequeItemIds = await validateChequeIds(body.chequeItemIds);
+    const chequeItemIds = await validateChequeIds(body.chequeItemIds, date);
 
     const lastNumber = await prisma.chequeDeposit.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
     const number = lastNumber ? lastNumber.number + 1 : 1;
@@ -193,7 +202,7 @@ router.put("/cheque-deposits/:id", can(`${FORM}.edit`), async (req, res) => {
     const bankAccount = await prisma.bankAccount.findUnique({ where: { id: body.bankAccountId } });
     if (!bankAccount) throw new Error("حساب بانکی یافت نشد");
 
-    const chequeItemIds = await validateChequeIds(body.chequeItemIds);
+    const chequeItemIds = await validateChequeIds(body.chequeItemIds, date, id);
 
     await prisma.$transaction([
       prisma.chequeDepositLine.deleteMany({ where: { chequeDepositId: id } }),

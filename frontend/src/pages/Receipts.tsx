@@ -716,7 +716,8 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
   // همان منطق instrumentRemainingBaseCapacity، اما بدون استثنای هیچ ردیفی (اینجا برای انتخابِ ردیفِ
   // تازه است، نه ویرایش ردیف موجود).
   const instrumentPickerRows = instrumentRows
-    .map((r, idx) => ({ ...r, idx }))
+    // id یکتا برای انتخابگر چندگانه: ردیف‌های تازه‌ی ذخیره‌نشده id ندارند و همه با کلید «undefined» یکی حساب می‌شدند (تیک‌زدن یک ردیف همه را تیک می‌زد)؛ clientKey برای هر ردیف یکتاست
+    .map((r, idx) => ({ ...r, idx, id: r.clientKey }))
     .filter((r) => Number(r.amount) > 0)
     .map((r) => {
       const currency = currencies.find((c) => String(c.id) === r.currencyId);
@@ -1103,11 +1104,11 @@ function SettlementRowFields({
     }
     const excl = editId ? `&excludeReceiptId=${editId}` : "";
     api
-      .get(`/receipts/pickable-basis-documents?basisType=${basisType}&partyId=${row.partyId}${excl}&nature=${receiptType?.nature ?? ""}`)
+      .get(`/receipts/pickable-basis-documents?basisType=${basisType}&partyId=${row.partyId}${excl}&nature=${receiptType?.nature ?? ""}${headerDate ? `&date=${headerDate}` : ""}`)
       .then((rows: BasisCandidate[]) => setBasisCandidates(rows))
       .catch(() => setBasisCandidates([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [basisType, row.partyId, editId, receiptType?.nature]);
+  }, [basisType, row.partyId, editId, receiptType?.nature, headerDate]);
 
   // مانده‌ی واقعاً قابل تسویه‌ی یک سند مبنا برای این ردیف: مانده‌ی گزارش‌شده توسط سرور، منهای مبلغ
   // ردیف‌های خواهرِ همین فرم (هنوز ذخیره‌نشده) که به همان سند مبنا ارجاع می‌دهند — وگرنه انتخاب یک

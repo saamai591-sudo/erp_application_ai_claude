@@ -12,15 +12,16 @@ export interface BasisCandidate { id: number; number: number; date: string; curr
 
 export type BasisSource = "payments" | "petty-cash-payments";
 
-export function usePaymentBasisCandidates(opts: { source: BasisSource; basisType?: string; partyId?: string | number | null; paymentTypeId?: string | number | null; editId?: number }) {
-  const { source, basisType, partyId, paymentTypeId, editId } = opts;
+export function usePaymentBasisCandidates(opts: { source: BasisSource; basisType?: string; partyId?: string | number | null; paymentTypeId?: string | number | null; editId?: number; date?: string }) {
+  const { source, basisType, partyId, paymentTypeId, editId, date } = opts;
   const [candidates, setCandidates] = useState<BasisCandidate[]>([]);
   useEffect(() => {
     if (!basisType || basisType === "NONE" || !partyId) {
       setCandidates([]);
       return;
     }
-    const type = paymentTypeId ? `&paymentTypeId=${paymentTypeId}` : "";
+    // فقط اسناد مبنایی که تاریخشان ≤ تاریخ سند فرم است (سرور هم هنگام ثبت همین را اعمال می‌کند)
+    const type = `${paymentTypeId ? `&paymentTypeId=${paymentTypeId}` : ""}${date ? `&date=${date}` : ""}`;
     const url =
       source === "payments"
         ? `/payments/pickable-basis-documents?basisType=${basisType}&partyId=${partyId}${type}${editId ? `&excludePaymentId=${editId}` : ""}`
@@ -29,7 +30,7 @@ export function usePaymentBasisCandidates(opts: { source: BasisSource; basisType
       .get(url)
       .then((rows: BasisCandidate[]) => setCandidates(rows))
       .catch(() => setCandidates([]));
-  }, [source, basisType, partyId, paymentTypeId, editId]);
+  }, [source, basisType, partyId, paymentTypeId, editId, date]);
   return candidates;
 }
 

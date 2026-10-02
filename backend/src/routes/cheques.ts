@@ -1,3 +1,4 @@
+import { filterChequesByBaseDate } from "../services/chequeBaseDates";
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
@@ -81,12 +82,15 @@ router.get("/cheques", can(`${FORM}.view`), async (req, res) => {
 });
 
 // چک‌های دریافتنی «در دست» — قابل انتخاب برای خرج‌کردن به‌عنوان ابزار پرداخت در یک سند پرداخت جدید
-router.get("/cheques/pickable-receivable", can(`${FORM}.view`), async (_req, res) => {
-  const items = await prisma.chequeItem.findMany({
+router.get("/cheques/pickable-receivable", can(`${FORM}.view`), async (req, res) => {
+  // فقط چک‌هایی که تاریخ سند مبنایشان (آخرین اتفاق تاییدشده‌ی چک) ≤ تاریخ سند پرداخت است
+  const formDate = req.query.date ? new Date(req.query.date as string) : null;
+  const allItems = await prisma.chequeItem.findMany({
     where: { direction: "RECEIVABLE", status: "IN_HAND" },
     include: { bankBranch: true, party: true, currency: true },
     orderBy: { id: "desc" },
   });
+  const items = await filterChequesByBaseDate(allItems, formDate);
   res.json(items.map(chequeSummary));
 });
 

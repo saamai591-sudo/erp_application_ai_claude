@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
+import { filterChequesByBaseDate, assertChequeBaseDatesNotAfter } from "../services/chequeBaseDates";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
@@ -47,7 +48,7 @@ async function resolveFiscalPeriod(date: Date) {
   return fiscalPeriod;
 }
 
-async function validateLines(lines: LineInput[]) {
+async function validateLines(lines: LineInput[], formDate: Date, excludeDocId?: number) {
   if (!Array.isArray(lines) || lines.length === 0) {
     throw new Error("سند نتیجه وصول/برگشت باید حداقل یک چک داشته باشد");
   }
@@ -64,15 +65,23 @@ async function validateLines(lines: LineInput[]) {
     }
     cleaned.push({ chequeItemId: l.chequeItemId, outcome: l.outcome });
   }
+  // تاریخ سند مبنای هر چک (آخرین اتفاق تاییدشده‌ی آن) نباید بعد از تاریخ این سند باشد
+  const labels = new Map<number, string>();
+  for (const l of lines) labels.set(l.chequeItemId, `چک شماره ${(await prisma.chequeItem.findUnique({ where: { id: l.chequeItemId }, select: { number: true } }))?.number ?? l.chequeItemId}`);
+  await assertChequeBaseDatesNotAfter(ids, formDate, excludeDocId ? { kind: "clearingReceivable", id: excludeDocId } : undefined, labels);
   return cleaned;
 }
 
-router.get("/cheque-clearings-receivable/pickable-cheques", can(`${FORM}.view`), async (_req, res) => {
-  const items = await prisma.chequeItem.findMany({
+router.get("/cheque-clearings-receivable/pickable-cheques", can(`${FORM}.view`), async (req, res) => {
+  // فقط چک‌هایی که تاریخ سند مبنایشان (آخرین اتفاق تاییدشده‌ی چک) ≤ تاریخ سند فرم است؛ excludeId = سند در حال ویرایش
+  const formDate = req.query.date ? new Date(req.query.date as string) : null;
+  const excludeId = req.query.excludeId ? Number(req.query.excludeId) : undefined;
+  const allItems = await prisma.chequeItem.findMany({
     where: { direction: "RECEIVABLE", status: "IN_COLLECTION" },
     include: { party: true, currency: true },
     orderBy: { id: "desc" },
   });
+  const items = await filterChequesByBaseDate(allItems, formDate, excludeId ? { kind: "clearingReceivable", id: excludeId } : undefined);
   // حساب بانکیِ اختصاص‌یافته = حساب واگذاریِ تاییدشده‌ای که چک در آن بوده
   const bankByCheque = await findDepositBankByCheque(items.map((c: any) => ({ chequeItemId: c.id, chequeStep: null })));
   res.json(
@@ -155,7 +164,7 @@ router.post("/cheque-clearings-receivable", can(`${FORM}.create`), async (req, r
   try {
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
-    const lines = await validateLines(body.lines);
+    const lines = await validateLines(body.lines, date);
 
     const lastNumber = await prisma.chequeClearingReceivable.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
     const number = lastNumber ? lastNumber.number + 1 : 1;
@@ -193,7 +202,7 @@ router.put("/cheque-clearings-receivable/:id", can(`${FORM}.edit`), async (req, 
     assertRecordNotStale(existing.updatedAt, req.body.updatedAt, "این سند");
     const date = new Date(body.date);
     const fiscalPeriod = await resolveFiscalPeriod(date);
-    const lines = await validateLines(body.lines);
+    const lines = await validateLines(body.lines, date, id);
 
     await prisma.$transaction([
       prisma.chequeClearingReceivableLine.deleteMany({ where: { chequeClearingReceivableId: id } }),

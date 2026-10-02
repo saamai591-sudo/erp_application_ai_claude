@@ -10,7 +10,7 @@ import { issueJournalEntry, IssueLineInput } from "../services/journalEntryServi
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { can } from "../authz/guard";
-import { allocateDocumentNumber, assertEditAllowed } from "../services/numberingPatternService";
+import { allocateDocumentNumber, assertEditAllowed, releaseDocumentNumber } from "../services/numberingPatternService";
 import { findFormPrefix } from "../authz/registry";
 
 const FORM = findFormPrefix("sales-return-invoices");
@@ -401,7 +401,15 @@ router.delete("/sales-return-invoices/:id", can(`${FORM}.delete`), async (req, r
   const d = await prisma.salesReturnInvoice.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.journalEntryId) return res.status(400).json({ error: "برای این فاکتور سند حسابداری صادر شده؛ ابتدا سند حسابداری را حذف کنید" });
-  await prisma.salesReturnInvoice.delete({ where: { id } });
+  try {
+    // حذف سند و آزادسازی شماره (اگر آخرین شماره‌ی الگو بود) در یک تراکنش؛ شمارنده‌ی الگو مشترک با «فاکتور فروش» است
+    await prisma.$transaction(async (tx: any) => {
+      const removed = await tx.salesReturnInvoice.deleteMany({ where: { id } });
+      if (removed.count === 1) await releaseDocumentNumber(tx, d);
+    });
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message || "خطا در حذف" });
+  }
   res.status(204).send();
 });
 

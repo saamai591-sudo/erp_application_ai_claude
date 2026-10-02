@@ -369,9 +369,11 @@ router.get("/receipts/pickable-basis-documents", can(`${FORM}.view`), async (req
   const partyId = req.query.partyId ? Number(req.query.partyId) : null;
   const excludeReceiptId = req.query.excludeReceiptId ? Number(req.query.excludeReceiptId) : undefined;
   const nature = req.query.nature ? String(req.query.nature) : undefined;
+  // فقط اسناد مبنایی که تاریخشان ≤ تاریخ سند دریافت است
+  const receiptDate = req.query.date ? new Date(req.query.date as string) : null;
   if (!basisType || basisType === "NONE" || !partyId) return res.json([]);
   const candidates = await candidatesForBasisType(basisType, partyId, excludeReceiptId, nature);
-  res.json(candidates.filter((c) => c.remaining > 0.001));
+  res.json(candidates.filter((c) => c.remaining > 0.001 && (!receiptDate || c.date.getTime() <= receiptDate.getTime())));
 });
 
 // نگه‌داشته‌شده برای سازگاری با پیکر قدیمی؛ پیکر جدید از /pickable-basis-documents استفاده می‌کند
@@ -379,8 +381,9 @@ router.get("/receipts/pickable-sales-invoices", can(`${FORM}.view`), async (req,
   const partyId = req.query.partyId ? Number(req.query.partyId) : null;
   const excludeReceiptId = req.query.excludeReceiptId ? Number(req.query.excludeReceiptId) : undefined;
   if (!partyId) return res.json([]);
+  const receiptDate = req.query.date ? new Date(req.query.date as string) : null;
   const candidates = await candidatesForBasisType("SALES_INVOICE", partyId, excludeReceiptId, req.query.nature ? String(req.query.nature) : undefined);
-  res.json(candidates.filter((c) => c.remaining > 0.001).map((c) => ({ ...c, salesInvoiceId: c.id })));
+  res.json(candidates.filter((c) => c.remaining > 0.001 && (!receiptDate || c.date.getTime() <= receiptDate.getTime())).map((c) => ({ ...c, salesInvoiceId: c.id })));
 });
 
 // =========================================================================
@@ -398,6 +401,8 @@ async function validateSubjectLines(
   lines: SettlementLineInput[],
   instrumentByKey: Map<string, { id?: number; amount: number; baseAmount: number; currencyId: number; fxRate: number }>,
   baseCurrency: { id: number } & ConversionCurrency,
+  // تاریخ سند دریافت: تاریخ هر سند مبنا باید ≤ این تاریخ باشد
+  receiptDate: Date,
   excludeReceiptId?: number,
   // ردیف‌های موضوعات دریافتِ ذخیره‌شده‌ی ردیف‌های دارای گردش (در «ویرایش مجدد» تغییر نمی‌کنند) — مبلغشان از
   // مانده‌ی اسناد مبنا کم می‌شود تا بیش‌تخصیص رخ ندهد
@@ -411,6 +416,14 @@ async function validateSubjectLines(
   const alreadyUsedTypeIds = new Set<number>(
     excludeReceiptId ? (await prisma.receiptSettlementLine.findMany({ where: { receiptId: excludeReceiptId }, select: { receiptTypeId: true } })).map((x) => x.receiptTypeId) : []
   );
+
+  // سندِ مبنایی که همین رسیدِ موجود قبلاً با آن ثبت شده، در ویرایش بدون تغییر معتبر می‌ماند (داده‌ی قدیمی را نمی‌شکند)؛ سند مبنای تازه باید ≤ تاریخ رسید باشد
+  const alreadyUsedBasis = new Set<string>();
+  if (excludeReceiptId) {
+    for (const x of await prisma.receiptSettlementLine.findMany({ where: { receiptId: excludeReceiptId }, select: { salesInvoiceId: true, purchaseInvoiceId: true, salesOrderId: true, salesQuoteId: true } })) {
+      for (const [f, v] of Object.entries(x)) if (v) alreadyUsedBasis.add(`${f}:${v}`);
+    }
+  }
 
   const cleaned: any[] = [];
   const baseByInstrumentKey = new Map<string, number>();
@@ -492,6 +505,9 @@ async function validateSubjectLines(
       const candidates = await candidatesForBasisType(basisType, l.partyId, excludeReceiptId, receiptType.nature);
       basisInfo = candidates.find((c) => c.id === basisId) || null;
       if (!basisInfo) throw new Error(`ردیف ${idx + 1}: سند مبنای انتخاب‌شده یافت نشد یا متعلق به این طرف حساب نیست`);
+      if (basisInfo.date.getTime() > receiptDate.getTime() && !alreadyUsedBasis.has(`${field}:${basisId}`)) {
+        throw new Error(`ردیف ${idx + 1}: تاریخ سند مبنا (شماره ${basisInfo.number}) بعد از تاریخ سند دریافت است`);
+      }
     }
 
     if (!l.currencyId) throw new Error(`ردیف ${idx + 1}: ارز الزامی است`);
@@ -674,7 +690,7 @@ router.post("/receipts", can(`${FORM}.create`), async (req, res) => {
     const baseCurrency = await getBaseCurrency();
     const instrumentLines = await validateInstrumentLines(body.instrumentLines, baseCurrency);
     const instrumentByKey = new Map(instrumentLines.map((l) => [l.clientKey, l]));
-    const settlementLines = await validateSubjectLines(body.settlementLines, instrumentByKey, baseCurrency);
+    const settlementLines = await validateSubjectLines(body.settlementLines, instrumentByKey, baseCurrency, date);
 
     const lastNumber = await prisma.receipt.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
     const number = lastNumber ? lastNumber.number + 1 : 1;
@@ -736,7 +752,7 @@ router.put("/receipts/:id", can(`${FORM}.edit`), async (req, res) => {
     const baseCurrency = await getBaseCurrency();
     const instrumentLines = await validateInstrumentLines(body.instrumentLines, baseCurrency);
     const instrumentByKey = new Map(instrumentLines.map((l) => [l.clientKey, l]));
-    const settlementLines = await validateSubjectLines(body.settlementLines, instrumentByKey, baseCurrency, id);
+    const settlementLines = await validateSubjectLines(body.settlementLines, instrumentByKey, baseCurrency, date, id);
     assertUsedInstrumentsUnchanged(await prisma.receiptInstrumentLine.findMany({ where: { receiptId: id } }), instrumentLines, settlementLines);
 
     await prisma.$transaction(async (tx: any) => {
@@ -1008,7 +1024,7 @@ router.put("/receipts/:id/re-edit", can(`${FORM}.reEdit`), async (req, res) => {
     }
     const lockedSettlementLines = (existing.settlementLines as any[]).filter((sl) => !editableById.has(sl.instrumentLineId));
     await assertReceiptAdvanceNotAllocated(id, editable.map((l: any) => l.id));
-    const settlementLines = await validateSubjectLines(incomingSettlements, instrumentByKey, baseCurrency, id, lockedSettlementLines, true);
+    const settlementLines = await validateSubjectLines(incomingSettlements, instrumentByKey, baseCurrency, existing.date, id, lockedSettlementLines, true);
 
     await prisma.$transaction(async (tx: any) => {
       // موضوعاتِ ردیف‌های قابل ویرایش (FK محدودکننده) اول پاک و در انتها با مقادیر نهایی ساخته می‌شوند؛

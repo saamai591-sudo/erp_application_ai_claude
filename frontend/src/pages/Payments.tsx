@@ -387,6 +387,15 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [header.date, chequeTypes]);
 
+  // چک‌های دریافتنیِ قابل خرج‌کردن: فقط چک‌هایی که تاریخ سند مبنایشان ≤ تاریخ سند پرداخت است (سرور هم موقع ثبت همین قاعده را اعمال می‌کند)
+  useEffect(() => {
+    if (!header.date) return;
+    api
+      .get(`/cheques/pickable-receivable?date=${header.date}`)
+      .then((c: PickableCheque[]) => setPickableCheques(c))
+      .catch(() => {});
+  }, [header.date]);
+
   function applyDetail(d: Detail) {
     setOwnLeaves(d.ownLeaves ?? []);
     setDocUpdatedAt(d.updatedAt ?? "");
@@ -456,7 +465,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         api.get("/suppliers"),
         fetchSelectedFiscalPeriod(),
         api.get("/payable-cheque-types"),
-        api.get("/cheques/pickable-receivable"),
+        Promise.resolve([] as PickableCheque[]),
         api.get("/cheque-book-leaves/pickable"),
         api.get("/petty-cash-custodians?activeOnly=true"),
       ]);
@@ -784,7 +793,8 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
   // همان منطق instrumentRemainingBaseCapacity، اما بدون استثنای هیچ ردیفی (اینجا برای انتخابِ ردیفِ
   // تازه است، نه ویرایش ردیف موجود).
   const instrumentPickerRows = instrumentRows
-    .map((r, idx) => ({ ...r, idx }))
+    // id یکتا برای انتخابگر چندگانه: ردیف‌های تازه‌ی ذخیره‌نشده id ندارند و همه با کلید «undefined» یکی حساب می‌شدند (تیک‌زدن یک ردیف همه را تیک می‌زد)؛ clientKey برای هر ردیف یکتاست
+    .map((r, idx) => ({ ...r, idx, id: r.clientKey }))
     .filter((r) => Number(r.amount) > 0)
     .map((r) => {
       const currency = currencies.find((c) => String(c.id) === r.currencyId);
@@ -1229,7 +1239,7 @@ function SettlementRowFields({
   const [fxModalOpen, setFxModalOpen] = useState(false);
   const paymentType = paymentTypes.find((t) => String(t.id) === row.paymentTypeId);
   const basisType = paymentType?.basisType;
-  const basisCandidates = usePaymentBasisCandidates({ source: "payments", basisType, partyId: row.partyId, paymentTypeId: row.paymentTypeId, editId });
+  const basisCandidates = usePaymentBasisCandidates({ source: "payments", basisType, partyId: row.partyId, paymentTypeId: row.paymentTypeId, editId, date: headerDate });
   const instrumentRow = instrumentRows.find((r) => r.clientKey === row.instrumentClientKey);
   // حساب بانکیِ مبدأ (ابزار حواله یا چکِ صادرشده) از انتخابگر مقصدِ «به بانک» حذف می‌شود؛ پرداخت از یک حساب به همان حساب مجاز نیست
   const sourceBankAccountId = instrumentRow && (instrumentRow.type === "BANK_TRANSFER" || instrumentRow.type === "CHEQUE") ? instrumentRow.bankAccountId : "";

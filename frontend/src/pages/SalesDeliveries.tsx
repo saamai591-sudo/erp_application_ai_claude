@@ -265,10 +265,13 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
       setPickableLines([]);
       return;
     }
-    const q = header.date ? `?destDate=${header.date}` : "";
+    // سرور مانده‌ی هر ردیف مبنا را با همه‌ی تخصیص‌های ذخیره‌شده (به‌جز همین حواله در حال ویرایش) حساب می‌کند و به ترتیب خودِ سند مبنا برمی‌گرداند
+    const params = new URLSearchParams();
+    if (header.date) params.set("destDate", header.date);
+    if (editId) params.set("excludeDeliveryId", String(editId));
     const endpoint = header.basis === "SALES_QUOTE" ? "pickable-sales-quote-lines" : "pickable-sales-order-lines";
-    api.get(`/sales-deliveries/${endpoint}${q}`).then(setPickableLines).catch(() => setPickableLines([]));
-  }, [header.basis, header.date]);
+    api.get(`/sales-deliveries/${endpoint}?${params.toString()}`).then(setPickableLines).catch(() => setPickableLines([]));
+  }, [header.basis, header.date, editId]);
 
   const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceSalesOrderLineId);
   // طبق طرح جدید چرخه‌ی عمر سند: بعد از «تایید انبار» (که فقط از طریق «تایید انبار» دسته‌ای اتفاق
@@ -306,8 +309,21 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
 
-  function onSourceLineChange(idx: number, sourceSalesOrderLineId: string) {
-    const src = pickableLines.find((l) => String(l.sourceLineId) === sourceSalesOrderLineId);
+  // ردیف‌های قابل انتخاب برای سطر idx: مانده‌ی سرور (همه‌ی تخصیص‌های ذخیره‌شده) منهای مقدار ردیف‌های دیگرِ همین فرم که (در همین جلسه‌ی ویرایش)
+  // به همان ردیف مبنا ارجاع داده‌اند؛ ردیفی که مانده‌اش صفر شده نمایش داده نمی‌شود (جز ردیف انتخاب‌شده‌ی خودِ همین سطر)
+  function availableSourceLines(idx: number): PickableLine[] {
+    const own = rows[idx]?.sourceSalesOrderLineId;
+    return pickableLines
+      .map((l) => {
+        const usedByOthers = rows.reduce((sum, r, i) => (i !== idx && r.sourceSalesOrderLineId === String(l.sourceLineId) ? sum + (Number(r.quantity) || 0) : sum), 0);
+        return { ...l, remaining: Math.round((l.remaining - usedByOthers) * 1e6) / 1e6 };
+      })
+      .filter((l) => l.remaining > 0 || String(l.sourceLineId) === own);
+  }
+
+  function onSourceLineChange(idx: number, picked: PickableLine) {
+    const src: PickableLine | undefined = picked;
+    const sourceSalesOrderLineId = String(picked.sourceLineId);
     updateRow(idx, {
       sourceSalesOrderLineId,
       sourceNumber: src ? String(src.number) : "",
@@ -532,7 +548,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                             title={`انتخاب ردیف ${sourceLabel}`}
                             disabled={coreDisabled}
                             displayValue={sourceDisplay}
-                            rows={pickableLines}
+                            rows={availableSourceLines(idx)}
                             columns={[
                               { header: "شماره", render: (l) => toFaDigits(String(l.number)), filterValue: (l) => String(l.number), width: "70px" },
                               { header: "مشتری", render: (l) => l.customerTitle, filterValue: (l) => l.customerTitle },
@@ -542,7 +558,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                             onOpen={guardRowEntry}
                             multiSelect={header.basis === "SALES_QUOTE"}
                             onSelectMultiple={(ls) => onSourceLinesPicked(idx, ls)}
-                            onSelect={(l) => onSourceLineChange(idx, String(l.sourceLineId))}
+                            onSelect={(l) => onSourceLineChange(idx, l)}
                           />
                         </td>
                       )}
