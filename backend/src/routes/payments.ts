@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
+import { assertChequeBaseDatesNotAfter } from "../services/chequeBaseDates";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { recomputeCashBoxHasTransactions, recomputeBankAccountHasTransactions } from "../utils/treasuryTracking";
@@ -174,6 +175,8 @@ async function cleanOneInstrumentLine(
     if (Math.abs(Number(existing.amount) - amount) > 0.001) {
       throw new Error(`ردیف ${idx + 1}: مبلغ ردیف باید برابر مبلغ چک (${Number(existing.amount)}) باشد`);
     }
+    // تاریخ سند مبنای چک (آخرین اتفاق تاییدشده‌ی آن، مثلاً رسید دریافت) نباید بعد از تاریخ این سند پرداخت باشد
+    await assertChequeBaseDatesNotAfter([existing.id], opts.docDate, undefined, new Map([[existing.id, `ردیف ${idx + 1} (چک شماره ${existing.number})`]]));
     // طبق سند: چک همیشه با ارز پایه ثبت می‌شود (چک ارزی در این کدبیس پشتیبانی نمی‌شود)
     currencyId = baseCurrency.id;
   } else if (l.type === "CHEQUE") {
@@ -248,6 +251,7 @@ router.get("/payments/pickable-basis-documents", can(`${FORM}.view`), async (req
       partyId: req.query.partyId ? Number(req.query.partyId) : null,
       paymentTypeId: req.query.paymentTypeId ? Number(req.query.paymentTypeId) : null,
       excludePaymentId: req.query.excludePaymentId ? Number(req.query.excludePaymentId) : undefined,
+      date: req.query.date ? new Date(req.query.date as string) : null,
     })
   );
 });
@@ -260,6 +264,8 @@ async function validateSubjectLines(
   lines: SettlementLineInput[],
   instrumentByKey: Map<string, { id?: number; amount: number; baseAmount: number; currencyId: number; fxRate: number; bankAccountId?: number | null }>,
   baseCurrency: { id: number } & ConversionCurrency,
+  // تاریخ سند پرداخت: تاریخ هر سند مبنا باید ≤ این تاریخ باشد
+  paymentDate: Date,
   excludePaymentId?: number,
   // ردیف‌های موضوعات پرداختِ ذخیره‌شده‌ی ابزارهای دارای گردش (در «ویرایش مجدد» تغییر نمی‌کنند) — مبلغشان از
   // مانده‌ی اسناد مبنا کم می‌شود تا با ردیف‌های ویرایش‌شده روی یک سند مبنا بیش‌تخصیص رخ ندهد
@@ -268,6 +274,14 @@ async function validateSubjectLines(
 ) {
   if (allowEmpty && (!Array.isArray(lines) || lines.length === 0) && instrumentByKey.size === 0) return [];
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("سند پرداخت باید حداقل یک ردیف موضوعات پرداخت داشته باشد");
+
+  // سندِ مبنایی که همین پرداختِ موجود قبلاً با آن ثبت شده، در ویرایش بدون تغییر معتبر می‌ماند (داده‌ی قدیمی را نمی‌شکند)؛ سند مبنای تازه باید ≤ تاریخ پرداخت باشد
+  const alreadyUsedBasis = new Set<string>();
+  if (excludePaymentId) {
+    for (const x of await prisma.paymentSettlementLine.findMany({ where: { paymentId: excludePaymentId }, select: { purchaseInvoiceId: true, salesInvoiceId: true, purchaseOrderId: true } })) {
+      for (const [f, v] of Object.entries(x)) if (v) alreadyUsedBasis.add(`${f}:${v}`);
+    }
+  }
 
   const cleaned: any[] = [];
   const baseByInstrumentKey = new Map<string, number>();
@@ -384,6 +398,9 @@ async function validateSubjectLines(
       const candidates = await candidatesForBasisType(basisType, l.partyId as number, { excludePaymentId, nature: paymentType.nature });
       basisInfo = candidates.find((c) => c.id === basisId) || null;
       if (!basisInfo) throw new Error(`ردیف ${idx + 1}: سند مبنای انتخاب‌شده یافت نشد یا متعلق به این طرف حساب نیست`);
+      if (basisInfo.date.getTime() > paymentDate.getTime() && !alreadyUsedBasis.has(`${field}:${basisId}`)) {
+        throw new Error(`ردیف ${idx + 1}: تاریخ سند مبنا (شماره ${basisInfo.number}) بعد از تاریخ سند پرداخت است`);
+      }
     }
 
     if (!l.currencyId) throw new Error(`ردیف ${idx + 1}: ارز الزامی است`);
@@ -605,7 +622,7 @@ router.post("/payments", can(`${FORM}.create`), async (req, res) => {
     const baseCurrency = await getBaseCurrency();
     const instrumentLines = await validateInstrumentLines(body.instrumentLines, baseCurrency, date);
     const instrumentByKey = new Map(instrumentLines.map((l) => [l.clientKey, l]));
-    const settlementLines = await validateSubjectLines(body.settlementLines, instrumentByKey, baseCurrency);
+    const settlementLines = await validateSubjectLines(body.settlementLines, instrumentByKey, baseCurrency, date);
 
     const lastNumber = await prisma.payment.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
     const number = lastNumber ? lastNumber.number + 1 : 1;
@@ -683,7 +700,7 @@ router.put("/payments/:id", can(`${FORM}.edit`), async (req, res) => {
     const baseCurrency = await getBaseCurrency();
     const instrumentLines = await validateInstrumentLines(body.instrumentLines, baseCurrency, date);
     const instrumentByKey = new Map(instrumentLines.map((l) => [l.clientKey, l]));
-    const settlementLines = await validateSubjectLines(body.settlementLines, instrumentByKey, baseCurrency, id);
+    const settlementLines = await validateSubjectLines(body.settlementLines, instrumentByKey, baseCurrency, date, id);
     assertUsedInstrumentsUnchanged(await prisma.paymentInstrumentLine.findMany({ where: { paymentId: id } }), instrumentLines, settlementLines);
     await assertPettyCashFundingChangeAllowed(id, settlementLines, date);
 
@@ -1018,7 +1035,7 @@ router.put("/payments/:id/re-edit", can(`${FORM}.reEdit`), async (req, res) => {
     }
     const lockedSettlementLines = (existing.settlementLines as any[]).filter((sl) => !editableById.has(sl.instrumentLineId));
     await assertPaymentAdvanceNotAllocated(id, editable.map((l: any) => l.id));
-    const settlementLines = await validateSubjectLines(incomingSettlements, instrumentByKey, baseCurrency, id, lockedSettlementLines, true);
+    const settlementLines = await validateSubjectLines(incomingSettlements, instrumentByKey, baseCurrency, existing.date, id, lockedSettlementLines, true);
 
     // این سند همچنان APPROVED می‌ماند، پس اگر ردیف‌های موضوعات پرداختِ ماهیت «به تنخواه» در ابزارهای
     // قابل‌ویرایش عوض شوند، شارژِ واقعیِ یک تنخواه ممکن است کم/زیاد شود — قبل از ذخیره، مانده‌ی جاری بررسی می‌شود

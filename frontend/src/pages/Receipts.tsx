@@ -1103,11 +1103,11 @@ function SettlementRowFields({
     }
     const excl = editId ? `&excludeReceiptId=${editId}` : "";
     api
-      .get(`/receipts/pickable-basis-documents?basisType=${basisType}&partyId=${row.partyId}${excl}&nature=${receiptType?.nature ?? ""}`)
+      .get(`/receipts/pickable-basis-documents?basisType=${basisType}&partyId=${row.partyId}${excl}&nature=${receiptType?.nature ?? ""}${headerDate ? `&date=${headerDate}` : ""}`)
       .then((rows: BasisCandidate[]) => setBasisCandidates(rows))
       .catch(() => setBasisCandidates([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [basisType, row.partyId, editId, receiptType?.nature]);
+  }, [basisType, row.partyId, editId, receiptType?.nature, headerDate]);
 
   // مانده‌ی واقعاً قابل تسویه‌ی یک سند مبنا برای این ردیف: مانده‌ی گزارش‌شده توسط سرور، منهای مبلغ
   // ردیف‌های خواهرِ همین فرم (هنوز ذخیره‌نشده) که به همان سند مبنا ارجاع می‌دهند — وگرنه انتخاب یک

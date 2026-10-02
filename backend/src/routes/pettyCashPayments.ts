@@ -98,7 +98,7 @@ async function resolveBasis(
   const info = candidates.find((c) => c.id === basisId);
   if (!info) throw new Error("سند مبنای انتخاب‌شده یافت نشد یا متعلق به این طرف‌حساب نیست");
   if (info.currencyId !== pettyCashCurrencyId) throw new Error("ارز سند مبنا باید با ارز تنخواه یکسان باشد");
-  if (info.date >= date) throw new Error("تاریخ سند مبنا باید از تاریخ پرداخت کوچکتر باشد");
+  if (info.date > date) throw new Error("تاریخ سند مبنا نباید بعد از تاریخ پرداخت باشد");
   if (amount > info.remaining + 0.001) throw new Error(`مبلغ پرداخت از مانده‌ی قابل تسویه‌ی سند مبنا (${info.remaining.toLocaleString("fa-IR")}) بیشتر است`);
   return { purchaseInvoiceId: null, salesInvoiceId: null, purchaseOrderId: null, [field]: basisId } as any;
 }
@@ -254,6 +254,7 @@ router.get("/basis/pickable-documents", can(`${FORM}.view`), async (req, res) =>
       partyId: req.query.partyId ? Number(req.query.partyId) : null,
       paymentTypeId: req.query.paymentTypeId ? Number(req.query.paymentTypeId) : null,
       excludePettyCashPaymentId: req.query.excludeId ? Number(req.query.excludeId) : undefined,
+      date: req.query.date ? new Date(req.query.date as string) : null,
     })
   );
 });
