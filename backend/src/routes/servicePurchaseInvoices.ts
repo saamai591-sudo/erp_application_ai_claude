@@ -21,6 +21,7 @@ import { getLineAmount, getLineAmounts, setLineAmount, enrichLinesWithAmount } f
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
+import { netAllocationAmounts } from "../utils/purchaseDiscount";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, roundToCurrencyDecimals, ConversionCurrency } from "../utils/currencyConversion";
 
 const FORM = findFormPrefix("service-purchase-invoices");
@@ -565,12 +566,14 @@ router.post("/service-purchase-invoices/:id/approve", can(`${FORM}.approve`), as
     await prisma.$transaction(async (tx) => {
       for (const line of invoice.lines) {
         if (line.basis !== "WAREHOUSE_RECEIPT") continue;
+        // سهم «خالص» هر تسهیم (مبلغ − تخفیف، به نسبت تسهیم) به بهای رسید اضافه می‌شود — utils/purchaseDiscount.ts
+        const netByAllocation = netAllocationAmounts(line.allocations, Number(line.amount), Number(line.discount), invoice.currency.decimalPlaces);
         for (const a of line.allocations) {
           const current = await getLineAmount(a.inventoryDocumentLineId, tx);
           // ردیف رسید انبار همیشه به ارز مبنا (ریال) ارزش‌گذاری می‌شود، در حالی که allocatedAmount به
           // ارز فاکتور خدمات است (طبق تصمیم صریح کاربر، فقط بعد از افزودن fxRate/ارز به این فرم، این
           // تبدیل لازم شد؛ پیش‌تر که فرم فقط ارز مبنا را می‌شناخت، جمع مستقیم درست بود).
-          const allocatedBaseAmount = toBaseCurrencyAmount(Number(a.allocatedAmount), fxRate, invoice.currency, baseCurrency);
+          const allocatedBaseAmount = toBaseCurrencyAmount(netByAllocation.get(a.id) ?? Number(a.allocatedAmount), fxRate, invoice.currency, baseCurrency);
           await setLineAmount(tx, {
             lineId: a.inventoryDocumentLineId,
             newAmount: Number(current) + allocatedBaseAmount,
@@ -612,10 +615,12 @@ router.post("/service-purchase-invoices/:id/unapprove", can(`${FORM}.unapprove`)
       if (line.basis !== "WAREHOUSE_RECEIPT") continue;
       for (const a of line.allocations) {
         const current = await getLineAmount(a.inventoryDocumentLineId, tx);
-        const allocatedBaseAmount = toBaseCurrencyAmount(Number(a.allocatedAmount), fxRate, invoice.currency, baseCurrency);
+        // دقیقاً همان مبلغی که تایید به بهای رسید افزوده بود برگردانده می‌شود (مجموع رکوردهای همین تسهیم) — تا فاکتورهای
+        // تاییدشده‌ی قبل از اصلاح تخفیف (ناخالص) هم درست برگردند
+        const applied = await tx.documentItemAmount.aggregate({ where: { purchaseCostAllocationId: a.id, priceType: "INBOUND_RELATED_COST" }, _sum: { difference: true } });
         await setLineAmount(tx, {
           lineId: a.inventoryDocumentLineId,
-          newAmount: Number(current) - allocatedBaseAmount,
+          newAmount: Number(current) - Number(applied._sum.difference ?? 0),
           priceType: "INBOUND_RELATED_COST",
           purchaseCostAllocationId: a.id,
           createdById: req.user?.id ?? null,
@@ -713,8 +718,9 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
 
     for (const line of invoice.lines) {
       if (!payableSetting) break;
-      const amount = Number(line.amount);
-      const baseAmount = Number(line.baseAmount);
+      // مبنای ثبت = مبلغ − تخفیف (بدهکار موجودی/هزینه‌ی خدمت و بستانکار پرداختنی هر دو خالص‌اند) — utils/purchaseDiscount.ts
+      const amount = Number(line.amount) - Number(line.discount);
+      const baseAmount = Number(line.baseAmount) - Number(line.baseDiscount);
       const vatAmount = Number(line.vatAmount);
       const service = line.service;
 
@@ -732,6 +738,7 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
           continue;
         }
         let hasAllocationError = false;
+        const netByAllocation = netAllocationAmounts(line.allocations, Number(line.amount), Number(line.discount), invoice.currency.decimalPlaces);
         for (const a of line.allocations) {
           allocationIds.push(a.id);
           const goodsItem = a.inventoryDocumentLine.goodsItem;
@@ -746,10 +753,19 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
             hasAllocationError = true;
             continue;
           }
-          const allocatedAmount = Number(a.allocatedAmount);
+          // سهم خالص (مبلغ − تخفیف) هر تسهیم — همان مبلغی که تایید به بهای رسید افزوده است
+          const allocatedAmount = netByAllocation.get(a.id) ?? Number(a.allocatedAmount);
           // گرد کردن دقیقاً هم‌الگوی نوشتن مبلغ روی ردیف رسید در approve — تا مبلغ بدهکار «موجودی کالا»
           // اینجا با همان مبلغی که واقعاً به ارزش موجودی افزوده شده یکی باشد.
           const allocatedBaseAmount = toBaseCurrencyAmount(allocatedAmount, fxRate, invoice.currency, baseCurrency);
+          if (Number(line.discount) > 0) {
+            const applied = await prisma.documentItemAmount.aggregate({ where: { purchaseCostAllocationId: a.id, priceType: "INBOUND_RELATED_COST" }, _sum: { difference: true } });
+            if (Math.abs(Number(applied._sum.difference ?? 0) - allocatedBaseAmount) > 0.01) {
+              errors.push(`ردیف خدمت «${service.title}»: بهای افزوده‌شده به رسید انبار تخفیف را کسر نکرده است (تایید قبل از اصلاح تخفیف)؛ فاکتور را از تایید برگردانید و دوباره تایید کنید، سپس سند را صادر کنید`);
+              hasAllocationError = true;
+              continue;
+            }
+          }
           const debitDetails = resolveAccountDetailFields(debitSetting.account, partyDetailTypeId, partyDetailCode);
           const debitIsCurrency = debitSetting.account.isCurrency;
           debitLines.push({
