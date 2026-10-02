@@ -246,7 +246,8 @@ async function candidatesForBasisType(basisType: BasisType, partyId: number, exc
       const total =
         group === "VAT"
           ? inv.lines.reduce((s: number, l: any) => s + Number(l.vatAmount || 0), 0) / fxRateInv
-          : inv.lines.reduce((s: number, l: any) => s + Number(l.amount), 0);
+          // مبنای مانده‌ی قابل دریافت = مبلغ فاکتور − تخفیف (نه مبلغ ناخالص ردیف‌ها)
+          : inv.lines.reduce((s: number, l: any) => s + Number(l.amount) - Number(l.discount || 0), 0);
       // پیش‌دریافت‌های تخصیص‌یافته به فاکتور (تخصیص پیش‌دریافت) هم از مانده‌ی قابل دریافت کم می‌شوند
       const applied =
         inv.receiptSettlementLines
@@ -269,9 +270,10 @@ async function candidatesForBasisType(basisType: BasisType, partyId: number, exc
       })
     );
     return invoices.map((inv: any) => {
+      // مبنای مانده = مبلغ − تخفیف (ردیف‌های کالا و «سایر هزینه‌ها»)
       const total =
-        inv.lines.reduce((s: number, l: any) => s + Number(l.amount), 0) +
-        inv.otherCostLines.reduce((s: number, l: any) => s + Number(l.amount), 0);
+        inv.lines.reduce((s: number, l: any) => s + Number(l.amount) - Number(l.discount || 0), 0) +
+        inv.otherCostLines.reduce((s: number, l: any) => s + Number(l.amount) - Number(l.discount || 0), 0);
       const applied = inv.receiptSettlementLines
         .filter((s: any) => s.receipt.status === "APPROVED" && (!excludeReceiptId || s.receipt.id !== excludeReceiptId))
         .reduce((s: number, l: any) => s + Number(l.amount), 0);

@@ -61,7 +61,8 @@ export async function candidatesForBasisType(
       const total =
         group === "VAT"
           ? [...inv.lines, ...inv.otherCostLines].reduce((s: number, l: any) => s + Number(l.vatAmount || 0), 0) / fxRateInv
-          : inv.lines.reduce((s: number, l: any) => s + Number(l.amount), 0) + inv.otherCostLines.reduce((s: number, l: any) => s + Number(l.amount), 0);
+          // مبنای مانده‌ی قابل پرداخت = مبلغ − تخفیف (ردیف‌های کالا و «سایر هزینه‌ها»)، نه مبلغ ناخالص
+          : inv.lines.reduce((s: number, l: any) => s + Number(l.amount) - Number(l.discount || 0), 0) + inv.otherCostLines.reduce((s: number, l: any) => s + Number(l.amount) - Number(l.discount || 0), 0);
       // پیش‌پرداخت‌های تخصیص‌یافته به همین فاکتور (به ارز فاکتور) هم از مانده کم می‌شوند — هر ماهیت از مانده‌ی گروه خودش:
       //   مبلغ اصلی:   مانده = مبلغ فاکتور − پیش‌پرداخت‌های تخصیص‌یافته − پرداخت‌های عادی
       //   ارزش‌افزوده: مانده = ارزش‌افزوده‌ی فاکتور − پیش‌پرداخت‌های ارزش افزوده‌ی تخصیص‌یافته − پرداخت‌های «ارزش افزوده خرید» (تاییدشده/تنخواه)
@@ -89,7 +90,7 @@ export async function candidatesForBasisType(
       })
     );
     return invoices.map((inv: any) => {
-      const total = inv.lines.reduce((s: number, l: any) => s + Number(l.amount), 0);
+      const total = inv.lines.reduce((s: number, l: any) => s + Number(l.amount) - Number(l.discount || 0), 0); // مبنا = مبلغ − تخفیف
       const applied = sumApplied(inv.paymentSettlementLines, group, excludePaymentId) + sumPettyCashApplied(inv.pettyCashPayments, group, excludePettyCashPaymentId);
       return {
         id: inv.id, number: inv.number, date: inv.date, currencyId: inv.currencyId, currencyTitle: inv.currency.title,
