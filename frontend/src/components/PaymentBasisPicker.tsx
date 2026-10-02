@@ -16,20 +16,28 @@ export function usePaymentBasisCandidates(opts: { source: BasisSource; basisType
   const { source, basisType, partyId, paymentTypeId, editId, date } = opts;
   const [candidates, setCandidates] = useState<BasisCandidate[]>([]);
   useEffect(() => {
-    if (!basisType || basisType === "NONE" || !partyId) {
+    // بدون تاریخ سند فرم، هیچ سند مبنایی نمایش داده نمی‌شود (قاعده: تاریخ سند مبنا ≤ تاریخ سند فرم) — نه «همه‌ی اسناد»
+    if (!basisType || basisType === "NONE" || !partyId || !date) {
       setCandidates([]);
       return;
     }
     // فقط اسناد مبنایی که تاریخشان ≤ تاریخ سند فرم است (سرور هم هنگام ثبت همین را اعمال می‌کند)
-    const type = `${paymentTypeId ? `&paymentTypeId=${paymentTypeId}` : ""}${date ? `&date=${date}` : ""}`;
+    const type = `${paymentTypeId ? `&paymentTypeId=${paymentTypeId}` : ""}&date=${date}`;
     const url =
       source === "payments"
         ? `/payments/pickable-basis-documents?basisType=${basisType}&partyId=${partyId}${type}${editId ? `&excludePaymentId=${editId}` : ""}`
         : `/petty-cash-payments/basis/pickable-documents?basisType=${basisType}&partyId=${partyId}${type}${editId ? `&excludeId=${editId}` : ""}`;
+    // با هر تغییر تاریخ/نوع/طرف‌حساب، فهرست قبلی فوراً پاک می‌شود و پاسخ درخواست کهنه (دیرتر برگشته) نادیده گرفته می‌شود
+    let stale = false;
+    setCandidates([]);
     api
       .get(url)
-      .then((rows: BasisCandidate[]) => setCandidates(rows))
-      .catch(() => setCandidates([]));
+      .then((rows: BasisCandidate[]) => {
+        // دفاع دوم در کلاینت: حتی اگر سرور سندی با تاریخ بعد از تاریخ فرم برگرداند، نمایش داده نمی‌شود
+        if (!stale) setCandidates(rows.filter((r) => r.date.slice(0, 10) <= date));
+      })
+      .catch(() => { if (!stale) setCandidates([]); });
+    return () => { stale = true; };
   }, [source, basisType, partyId, paymentTypeId, editId, date]);
   return candidates;
 }

@@ -13,7 +13,7 @@ import { toBaseCurrencyAmount } from "../utils/currencyConversion";
 //          مشتری مستقیماً به حساب بانکیِ انتخاب‌شده در آن ردیف موضوع پرداخت واگذار و وصول می‌شود، پس همان لحظه‌ی
 //          سند پرداخت ورودی همان حساب است (مبلغ = مبلغ همان ردیف موضوع پرداخت؛ معادل بدهکار شدن معین حساب بانکی
 //          در سند حسابداری، services/paymentJournalEntryService.ts)
-//   خروجی: ردیف ابزار «حواله» سند پرداخت — از حسابِ همان ردیف
+//   خروجی: ردیف ابزار «حواله» سند پرداخت — از حسابِ همان ردیف؛ مبلغ = مبلغ حواله + کارمزد بانکی ردیف
 //          ردیف ابزار «چک» سند پرداخت که نوع چکش «چک روز» است (PayableChequeType.isSameDay) — همان لحظه‌ی سند
 //          پرداخت حساب می‌شود (بدون انتظار برای نتیجه‌ی وصول)؛ چک روز در فرم «نتیجه وصول/برگشت (پرداختنی)» قابل
 //          انتخاب نیست و اگر (از قبل) در چنین سندی باشد، دوباره شمرده نمی‌شود
@@ -128,6 +128,11 @@ export async function getBankMovements(toDate: Date, fromDate?: Date): Promise<B
       include: { payment: { include: { party: true } } },
     });
     for (const l of paymentLines as any[]) {
+      // کارمزد بانکی حواله (به ارز همان ردیف) به مبلغ حواله اضافه می‌شود: برداشت از حساب = مبلغ + کارمزد (معادل پایه‌ی کارمزد
+      // با همان نسبت baseAmount/amount ردیف)
+      const fee = Number(l.feeAmount) || 0;
+      const rowAmount = Number(l.amount);
+      const feeBase = fee > 0 ? (rowAmount > 0 ? (fee * Number(l.baseAmount)) / rowAmount : fee) : 0;
       movements.push({
         key: `P${l.id}`,
         docKey: `PAYMENT:${l.paymentId}`,
@@ -138,11 +143,11 @@ export async function getBankMovements(toDate: Date, fromDate?: Date): Promise<B
         docId: l.paymentId,
         docNumber: l.payment.number,
         partyDisplay: partyDisplay(l.payment.party),
-        description: l.description || l.payment.description,
+        description: (l.description || l.payment.description || "") + (fee > 0 ? `${l.description || l.payment.description ? " — " : ""}شامل کارمزد بانکی` : "") || null,
         inflow: 0,
-        outflow: Number(l.baseAmount),
+        outflow: Number(l.baseAmount) + feeBase,
         currencyInflow: 0,
-        currencyOutflow: Number(l.amount),
+        currencyOutflow: rowAmount + fee,
       });
     }
 

@@ -418,8 +418,11 @@ async function validateSubjectLines(
   );
 
   // سندِ مبنایی که همین رسیدِ موجود قبلاً با آن ثبت شده، در ویرایش بدون تغییر معتبر می‌ماند (داده‌ی قدیمی را نمی‌شکند)؛ سند مبنای تازه باید ≤ تاریخ رسید باشد
+  // این استثنا فقط وقتی برقرار است که تاریخ سند دریافت نسبت به نسخه‌ی ذخیره‌شده تغییر نکرده باشد؛ اگر کاربر تاریخ را عوض کند،
+  // قاعده‌ی «تاریخ سند مبنا ≤ تاریخ سند» برای همه‌ی مبناها از نو اعمال می‌شود.
   const alreadyUsedBasis = new Set<string>();
-  if (excludeReceiptId) {
+  const savedReceiptDate = excludeReceiptId ? (await prisma.receipt.findUnique({ where: { id: excludeReceiptId }, select: { date: true } }))?.date : null;
+  if (excludeReceiptId && savedReceiptDate && savedReceiptDate.getTime() === receiptDate.getTime()) {
     for (const x of await prisma.receiptSettlementLine.findMany({ where: { receiptId: excludeReceiptId }, select: { salesInvoiceId: true, purchaseInvoiceId: true, salesOrderId: true, salesQuoteId: true } })) {
       for (const [f, v] of Object.entries(x)) if (v) alreadyUsedBasis.add(`${f}:${v}`);
     }
