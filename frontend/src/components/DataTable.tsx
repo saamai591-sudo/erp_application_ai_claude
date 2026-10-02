@@ -1,3 +1,4 @@
+import { stageRecordNav } from "../lib/recordNav";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { showError } from "../lib/toast";
 import { createPortal } from "react-dom";
@@ -422,6 +423,9 @@ export function DataTable<T extends { id: number | string }>({
         return;
       }
     }
+    // ناوبری اولین/قبلی/بعدی/آخرین در فرم ویرایش: همه‌ی ردیف‌های قابل‌ویرایشِ فهرست به همان ترتیبِ فعلیِ نمایش (فیلتر و
+    // مرتب‌سازی کاربر؛ در serverPaging همان صفحه‌ی جاری) — lib/recordNav.ts
+    stageRecordNav(sortedRows.filter((r) => !edit.guard || edit.guard(r) === true).map((r) => edit.path(r)));
     openTab(edit.path(row));
   }
 
