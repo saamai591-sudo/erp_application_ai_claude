@@ -16,6 +16,7 @@ import { api } from "../lib/api";
 import { InfoHint } from "../components/InfoHint";
 import { useTabs } from "../lib/TabsContext";
 import { RequiredMark } from "../components/RequiredMark";
+import { useSelectedFiscalPeriod } from "../lib/useSelectedFiscalPeriod";
 
 interface AccountRow {
   id: number;
@@ -153,7 +154,10 @@ function ClosingWizard({ viewId }: { viewId?: number }) {
   const cacheKey = `form:${location.pathname}`;
 
   const [activeStep, setActiveStep] = usePersistedState(`${cacheKey}:step`, 0);
-  const [date, setDate] = usePersistedState(`${cacheKey}:date`, new Date().toISOString().slice(0, 10));
+  // تاریخ پیش‌فرض: «آخرین روز» دوره مالی انتخاب‌شده — دقیقاً مثل فرم «افتتاحیه و اختتامیه» (نوع اختتامیه)، نه امروز که ممکن است
+  // بیرون از دوره باشد (هم‌چنین JalaliDatePicker با fiscalYear به همان دوره محدود می‌شود)
+  const [date, setDate] = usePersistedState(`${cacheKey}:date`, "");
+  const fiscalPeriod = useSelectedFiscalPeriod(!viewId);
   const [availableRows, setAvailableRows] = usePersistedState<LineRow[]>(`${cacheKey}:available`, []);
   const [selectedRows, setSelectedRows] = usePersistedState<LineRow[]>(`${cacheKey}:selected`, []);
   const [destinationAccountId, setDestinationAccountId] = usePersistedState(`${cacheKey}:destAcc`, "");
@@ -172,6 +176,12 @@ function ClosingWizard({ viewId }: { viewId?: number }) {
   useEffect(() => {
     api.get("/accounts").then(setAccounts).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (viewId || date || !fiscalPeriod) return;
+    setDate(fiscalPeriod.toDate.slice(0, 10));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewId, fiscalPeriod]);
 
   useEffect(() => {
     if (!viewId) return;
@@ -238,6 +248,10 @@ function ClosingWizard({ viewId }: { viewId?: number }) {
   }
 
   async function loadAvailable() {
+    if (!date) {
+      setError("تاریخ الزامی است");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
