@@ -5,6 +5,7 @@ import { clearReviewReportCacheForPath, clearAllReviewReportCaches } from "./rev
 import { clearPersistedStateByPrefix, clearPersistedStateFamily, instanceOfPath } from "./usePersistedState";
 import { refreshTabIfStale } from "./listInvalidation";
 import { clearAllDirty, clearTabDirty, confirmDiscard, isTabDirty } from "./unsavedChanges";
+import { forgetTabScroll } from "./tabScroll";
 
 export interface Tab {
   id: string;
@@ -239,6 +240,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   }
 
   function closeTab(id: string) {
+    forgetTabScroll(id);
     // بستن تبِ یک فرم با تغییر ذخیره‌نشده: تایید کاربر (× تب و کلیک وسط، هر دو از همین‌جا می‌گذرند)
     const target = tabs.find((t) => t.id === id);
     if (target && isFormShapedPath(target.path) && isTabDirty(target.path) && !confirmDiscard()) return;
