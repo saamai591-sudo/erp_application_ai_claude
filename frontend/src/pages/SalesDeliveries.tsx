@@ -272,7 +272,15 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
     params.set("partyId", header.partyId);
     if (editId) params.set("excludeDeliveryId", String(editId));
     const endpoint = header.basis === "SALES_QUOTE" ? "pickable-sales-quote-lines" : "pickable-sales-order-lines";
-    api.get(`/sales-deliveries/${endpoint}?${params.toString()}`).then(setPickableLines).catch(() => setPickableLines([]));
+    // با هر تغییر طرف مقابل/مبنا/تاریخ، فهرست قبلی (سندهای طرف مقابل قبلی) فوراً پاک می‌شود و پاسخ درخواستِ کهنه‌ای که دیرتر برمی‌گردد
+    // فهرست جدید را بازنویسی نمی‌کند
+    let stale = false;
+    setPickableLines([]);
+    api
+      .get(`/sales-deliveries/${endpoint}?${params.toString()}`)
+      .then((r: PickableLine[]) => { if (!stale) setPickableLines(r); })
+      .catch(() => { if (!stale) setPickableLines([]); });
+    return () => { stale = true; };
   }, [header.basis, header.date, header.partyId, editId]);
 
   const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceSalesOrderLineId);
@@ -316,6 +324,8 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
   function availableSourceLines(idx: number): PickableLine[] {
     const own = rows[idx]?.sourceSalesOrderLineId;
     return pickableLines
+      // دفاع دوم در کلاینت (هنگام رندر): فقط ردیف‌های سندی که مشتری‌اش همان طرف مقابل سرصفحه است؛ با عوض‌شدن طرف مقابل بلافاصله اعمال می‌شود
+      .filter((l) => String(l.customerPartyId) === header.partyId || String(l.sourceLineId) === own)
       .map((l) => {
         const usedByOthers = rows.reduce((sum, r, i) => (i !== idx && r.sourceSalesOrderLineId === String(l.sourceLineId) ? sum + (Number(r.quantity) || 0) : sum), 0);
         return { ...l, remaining: Math.round((l.remaining - usedByOthers) * 1e6) / 1e6 };
