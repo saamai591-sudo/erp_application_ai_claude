@@ -24,6 +24,7 @@ import { resolvePaymentSubjectAccount } from "./paymentSubjectAccount";
 // هر تفصیل فقط وقتی ست می‌شود که معین در یکی از سطوح تفصیل خود به همان نوع تفصیل وصل باشد.
 //
 // ارز: اگر معین «ارزی» باشد ردیف با ارز و مبلغ ارزی خودش ثبت می‌شود، وگرنه با ارز پایه و معادل پایه.
+// کارمزد بانکی ردیف حواله: بستانکار حساب بانکی = مبلغ + کارمزد؛ بدهکار معین «کارمزد بانکی» (BANK_FEE) همان حساب بانکی به مبلغ کارمزد.
 // تسعیر: بدهکارِ معین طرف‌حساب با نرخ سند مبنا (نه نرخ پرداخت) ثبت می‌شود؛ اختلاف آن با معادل پایه‌ی مبلغ
 // پرداخت روی معین «سود و زیان تسعیر ارز» (FX_GAIN_LOSS) می‌نشیند — برعکس دریافت: زیان بدهکار، سود بستانکار.
 // مقدار این ردیف از باقی‌مانده‌ی بالانس محاسبه می‌شود تا سند همیشه دقیق بالانس باشد.
@@ -75,8 +76,9 @@ export async function issuePaymentJournalEntry(paymentId: number) {
     return resolveAccountDetailFields(account, typeId, detailCode);
   };
 
-  // ---------- بستانکار: ردیف‌های ابزار پرداخت ----------
+  // ---------- بستانکار: ردیف‌های ابزار پرداخت (+ بدهکار کارمزد بانکی حواله) ----------
   const creditLines: IssueLineInput[] = [];
+  const debitLines: IssueLineInput[] = [];
   for (const [idx, l] of payment.instrumentLines.entries()) {
     const n = idx + 1;
     let account: AccountRef | undefined;
@@ -115,15 +117,34 @@ export async function issuePaymentJournalEntry(paymentId: number) {
     const isBaseRow = l.currencyId === baseCurrency.id;
     const baseAmount = isBaseRow ? amount : toBaseCurrencyAmount(amount, fxRate, l.currency, baseCurrency);
     const details = await detailFor(account, detailCode);
+
+    // کارمزد بانکی ردیف حواله (به ارز همان ردیف): به مبلغ حواله اضافه و از حساب بانکی کسر می‌شود (بستانکار معین حساب بانکی =
+    // مبلغ + کارمزد) و هزینه‌ی کارمزد روی معین «کارمزد بانکی» همان حساب بانکی (BANK_FEE) بدهکار می‌شود
+    const fee = l.type === "BANK_TRANSFER" ? Number(l.feeAmount) || 0 : 0;
+    const feeBase = fee > 0 ? (isBaseRow ? fee : toBaseCurrencyAmount(fee, fxRate, l.currency, baseCurrency)) : 0;
+    if (fee > 0) {
+      const feeAccount = treasurySettings.find((s) => s.accountType === "BANK_FEE" && s.bankAccountId === l.bankAccountId)?.account;
+      if (!feeAccount) {
+        errors.push(`ردیف ابزار ${n}: برای حساب بانکی «${l.bankAccount?.accountNumber ?? ""}»، معین در «تعیین حسابهای معین» (کارمزد بانکی) تعریف نشده است؛ کارمزد حواله ثبت نمی‌شود`);
+      } else {
+        const feeDetails = await detailFor(feeAccount, detailCode);
+        const feeDescription = `کارمزد بانکی ${description}`;
+        if (feeAccount.isCurrency && !isBaseRow) {
+          debitLines.push({ accountId: feeAccount.id, ...feeDetails, currencyId: l.currencyId, debit: fee, credit: 0, fxRate, description: feeDescription });
+        } else {
+          debitLines.push({ accountId: feeAccount.id, ...feeDetails, currencyId: baseCurrency.id, debit: feeBase, credit: 0, fxRate: 1, description: feeDescription });
+        }
+      }
+    }
+
     if (account.isCurrency && !isBaseRow) {
-      creditLines.push({ accountId: account.id, ...details, currencyId: l.currencyId, debit: 0, credit: amount, fxRate, description });
+      creditLines.push({ accountId: account.id, ...details, currencyId: l.currencyId, debit: 0, credit: amount + fee, fxRate, description });
     } else {
-      creditLines.push({ accountId: account.id, ...details, currencyId: baseCurrency.id, debit: 0, credit: baseAmount, fxRate: 1, description });
+      creditLines.push({ accountId: account.id, ...details, currencyId: baseCurrency.id, debit: 0, credit: baseAmount + feeBase, fxRate: 1, description });
     }
   }
 
   // ---------- بدهکار: ردیف‌های موضوعات پرداخت ----------
-  const debitLines: IssueLineInput[] = [];
   let fxResidual = 0;
   for (const [idx, l] of payment.settlementLines.entries()) {
     const n = idx + 1;

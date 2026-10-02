@@ -286,7 +286,7 @@ export interface LineCostResult {
   /** به ارز مبنا (تصمیم صریح کاربر) — همان مقداری که در ستون PurchaseInvoiceLine.cost ذخیره و مستقیماً برای
    * قیمت‌گذاری CROSS_ENTITY رسید انبار استفاده می‌شود؛ انبار هرگز هیچ ارزی جز ارز مبنا نمی‌شناسد. */
   cost: number;
-  /** سهم تسعیر هم به همان دلیل به ارز مبناست (cost = baseAmount + exchangeRateAdjustmentShare). */
+  /** سهم تسعیر هم به همان دلیل به ارز مبناست (cost = baseAmount − baseDiscount + exchangeRateAdjustmentShare). */
   exchangeRateAdjustmentShare: number;
 }
 
@@ -315,7 +315,9 @@ export async function computePurchaseInvoiceLineCosts(invoiceId: number): Promis
   });
   if (!invoice) throw new Error("فاکتور خرید یافت نشد");
 
-  const noShare = () => invoice.lines.map((l) => ({ lineId: l.id, cost: Number(l.baseAmount), exchangeRateAdjustmentShare: 0 }));
+  // Cost پایه = مبلغ − تخفیف (به ارز مبنا)، نه مبلغ ناخالص — utils/purchaseDiscount.ts
+  const netBaseOf = (l: { baseAmount: unknown; baseDiscount: unknown }) => Number(l.baseAmount) - Number(l.baseDiscount);
+  const noShare = () => invoice.lines.map((l) => ({ lineId: l.id, cost: netBaseOf(l), exchangeRateAdjustmentShare: 0 }));
   if (invoice.basis !== "WAREHOUSE_RECEIPT") return noShare();
 
   const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
@@ -360,7 +362,7 @@ export async function computePurchaseInvoiceLineCosts(invoiceId: number): Promis
     const isLast = idx === invoice.lines.length - 1;
     const shareBase = isLast ? totalDiffBase - assignedBase : Math.round(((totalDiffBase * net) / netTotal) * 100) / 100;
     assignedBase += shareBase;
-    results.push({ lineId: l.id, cost: Number(l.baseAmount) + shareBase, exchangeRateAdjustmentShare: shareBase });
+    results.push({ lineId: l.id, cost: netBaseOf(l) + shareBase, exchangeRateAdjustmentShare: shareBase });
   });
   return results;
 }

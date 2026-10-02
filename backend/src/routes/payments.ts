@@ -276,8 +276,11 @@ async function validateSubjectLines(
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("سند پرداخت باید حداقل یک ردیف موضوعات پرداخت داشته باشد");
 
   // سندِ مبنایی که همین پرداختِ موجود قبلاً با آن ثبت شده، در ویرایش بدون تغییر معتبر می‌ماند (داده‌ی قدیمی را نمی‌شکند)؛ سند مبنای تازه باید ≤ تاریخ پرداخت باشد
+  // این استثنا فقط وقتی برقرار است که تاریخ سند پرداخت نسبت به نسخه‌ی ذخیره‌شده تغییر نکرده باشد؛ اگر کاربر تاریخ را عوض کند
+  // (مثلاً جلوتر/عقب‌تر)، قاعده‌ی «تاریخ سند مبنا ≤ تاریخ سند» برای همه‌ی مبناها از نو اعمال می‌شود.
   const alreadyUsedBasis = new Set<string>();
-  if (excludePaymentId) {
+  const savedPaymentDate = excludePaymentId ? (await prisma.payment.findUnique({ where: { id: excludePaymentId }, select: { date: true } }))?.date : null;
+  if (excludePaymentId && savedPaymentDate && savedPaymentDate.getTime() === paymentDate.getTime()) {
     for (const x of await prisma.paymentSettlementLine.findMany({ where: { paymentId: excludePaymentId }, select: { purchaseInvoiceId: true, salesInvoiceId: true, purchaseOrderId: true } })) {
       for (const [f, v] of Object.entries(x)) if (v) alreadyUsedBasis.add(`${f}:${v}`);
     }
