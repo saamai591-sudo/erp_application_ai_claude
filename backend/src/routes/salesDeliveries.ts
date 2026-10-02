@@ -87,8 +87,8 @@ async function validateWarehouseAndPeriod(warehouseId: number, date: Date) {
   return { warehouse, fiscalPeriod };
 }
 
-async function salesOrderLineRemaining(id: number, excludeDeliveryId?: number) {
-  const line = await prisma.salesOrderLine.findUnique({
+async function salesOrderLineRemaining(id: number, excludeDeliveryId?: number, db: any = prisma) {
+  const line = await db.salesOrderLine.findUnique({
     where: { id },
     include: { salesOrder: true, inventoryLines: { include: { document: true } } },
   });
@@ -102,8 +102,8 @@ async function salesOrderLineRemaining(id: number, excludeDeliveryId?: number) {
 
 // «مانده»ی ردیف پیش‌فاکتور برای حواله فروش = مقدار ردیف − آنچه به سفارش فروش تبدیل شده − آنچه مستقیماً با حواله فروش تحویل شده
 // (حواله‌ی یک سفارشِ برگرفته از همین پیش‌فاکتور، دوباره از پیش‌فاکتور کم نمی‌شود چون قبلاً در سفارش کم شده است).
-async function salesQuoteLineRemaining(id: number, excludeDeliveryId?: number) {
-  const line = await prisma.salesQuoteLine.findUnique({
+async function salesQuoteLineRemaining(id: number, excludeDeliveryId?: number, db: any = prisma) {
+  const line = await db.salesQuoteLine.findUnique({
     where: { id },
     include: { salesQuote: true, salesOrderLines: true, inventoryLines: { include: { document: true } } },
   });
@@ -113,6 +113,29 @@ async function salesQuoteLineRemaining(id: number, excludeDeliveryId?: number) {
     .filter((d: any) => d.document.documentType === "SALES_DELIVERY" && (!excludeDeliveryId || d.documentId !== excludeDeliveryId))
     .reduce((s: number, d: any) => s + Number(d.quantity), 0);
   return { line, remaining: Number(line.quantity) - ordered - delivered };
+}
+
+/**
+ * کنترل نهایی مانده‌ی سند مبنا (سفارش/پیش‌فاکتور) داخل تراکنش ذخیره — در برابر هم‌زمانی و داده‌ی کهنه‌ی فرانت‌اند:
+ * ردیف‌های مبنای ارجاع‌شده با SELECT … FOR UPDATE (به ترتیب شناسه، بدون بن‌بست) قفل می‌شوند، سپس مانده‌ی هر ردیف از وضعیت commit‌شده
+ * دوباره محاسبه می‌شود (بدون خودِ این حواله) و اگر مجموع مقدار ردیف‌های این حواله از آن بیشتر باشد (مانده منفی شود) ذخیره رد می‌شود.
+ * دو ذخیره‌ی هم‌زمان روی یک ردیف مبنا پشت قفل صف می‌شوند و دومی مانده‌ی بعد از commit اولی را می‌بیند.
+ */
+async function assertSourceBalancesLocked(tx: any, lines: { sourceSalesOrderLineId: number | null; sourceSalesQuoteLineId: number | null; quantity: number }[], excludeDeliveryId?: number) {
+  const orderIds = Array.from(new Set(lines.map((l) => l.sourceSalesOrderLineId).filter((x): x is number => !!x))).sort((a, b) => a - b);
+  const quoteIds = Array.from(new Set(lines.map((l) => l.sourceSalesQuoteLineId).filter((x): x is number => !!x))).sort((a, b) => a - b);
+  for (const id of orderIds) await tx.$queryRaw`SELECT "id" FROM "SalesOrderLine" WHERE "id" = ${id} FOR UPDATE`;
+  for (const id of quoteIds) await tx.$queryRaw`SELECT "id" FROM "SalesQuoteLine" WHERE "id" = ${id} FOR UPDATE`;
+  for (const id of orderIds) {
+    const asked = lines.filter((l) => l.sourceSalesOrderLineId === id).reduce((s, l) => s + l.quantity, 0);
+    const info = await salesOrderLineRemaining(id, excludeDeliveryId, tx);
+    if (!info || asked > info.remaining + 1e-9) throw new Error(`مانده‌ی ردیف سفارش فروش برای این حواله کافی نیست (مانده: ${info ? info.remaining : 0}، درخواست: ${asked}) — احتمالاً هم‌زمان با ثبت حواله‌ی دیگری مصرف شده است؛ صفحه را تازه کنید`);
+  }
+  for (const id of quoteIds) {
+    const asked = lines.filter((l) => l.sourceSalesQuoteLineId === id).reduce((s, l) => s + l.quantity, 0);
+    const info = await salesQuoteLineRemaining(id, excludeDeliveryId, tx);
+    if (!info || asked > info.remaining + 1e-9) throw new Error(`مانده‌ی ردیف پیش‌فاکتور برای این حواله کافی نیست (مانده: ${info ? info.remaining : 0}، درخواست: ${asked}) — احتمالاً هم‌زمان با ثبت حواله‌ی دیگری مصرف شده است؛ صفحه را تازه کنید`);
+  }
 }
 
 async function validateLines(
@@ -230,6 +253,8 @@ const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
 
 router.get("/sales-deliveries/pickable-sales-order-lines", can(`${FORM}.view`), async (req, res) => {
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
+  // حوالهٔ در حال ویرایش از مانده کم نمی‌شود (وگرنه ردیفی که همین حواله کل مانده‌اش را گرفته از انتخابگر حذف می‌شد)
+  const excludeDeliveryId = req.query.excludeDeliveryId ? Number(req.query.excludeDeliveryId) : null;
   const lines = await prisma.salesOrderLine.findMany({
     // ردیف خدمت وارد انبار/حواله نمی‌شود — فقط ردیف‌های کالا قابل انتخاب‌اند.
     where: { goodsItem: { kind: "GOODS" }, salesOrder: { status: "APPROVED", ...(destDate ? { date: { lte: destDate } } : {}) } },
@@ -239,12 +264,13 @@ router.get("/sales-deliveries/pickable-sales-order-lines", can(`${FORM}.view`), 
       unit: true,
       inventoryLines: { include: { document: true } },
     },
-    orderBy: { id: "desc" },
+    // به ترتیب خودِ سفارش: سند (تاریخ، شماره) و سپس ترتیب ردیف‌ها در همان سند — انتخاب چندتایی هم به همین ترتیب به حواله اضافه می‌شود
+    orderBy: [{ salesOrder: { date: "asc" } }, { salesOrder: { number: "asc" } }, { salesOrderId: "asc" }, { rowOrder: "asc" }, { id: "asc" }],
   });
   const result = lines
     .map((l: any) => {
       const done = l.inventoryLines
-        .filter((d: any) => d.document.documentType === "SALES_DELIVERY")
+        .filter((d: any) => d.document.documentType === "SALES_DELIVERY" && (!excludeDeliveryId || d.documentId !== excludeDeliveryId))
         .reduce((s: number, d: any) => s + Number(d.quantity), 0);
       const quantity = Number(l.quantity);
       const remaining = quantity - done;
@@ -277,6 +303,7 @@ router.get("/sales-deliveries/pickable-sales-order-lines", can(`${FORM}.view`), 
 
 router.get("/sales-deliveries/pickable-sales-quote-lines", can(`${FORM}.view`), async (req, res) => {
   const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
+  const excludeDeliveryId = req.query.excludeDeliveryId ? Number(req.query.excludeDeliveryId) : null;
   const lines = await prisma.salesQuoteLine.findMany({
     // ردیف خدمت وارد انبار/حواله نمی‌شود — فقط ردیف‌های کالا قابل انتخاب‌اند.
     where: { goodsItem: { kind: "GOODS" }, salesQuote: { status: "APPROVED", ...(destDate ? { date: { lte: destDate } } : {}) } },
@@ -287,13 +314,14 @@ router.get("/sales-deliveries/pickable-sales-quote-lines", can(`${FORM}.view`), 
       salesOrderLines: true,
       inventoryLines: { include: { document: true } },
     },
-    orderBy: { id: "desc" },
+    // به ترتیب خودِ پیش‌فاکتور: سند (تاریخ، شماره) و سپس ترتیب ردیف‌ها در همان سند — انتخاب چندتایی هم به همین ترتیب به حواله اضافه می‌شود
+    orderBy: [{ salesQuote: { date: "asc" } }, { salesQuote: { number: "asc" } }, { salesQuoteId: "asc" }, { rowOrder: "asc" }, { id: "asc" }],
   });
   const result = lines
     .map((l: any) => {
       const ordered = l.salesOrderLines.reduce((s: number, o: any) => s + Number(o.quantity), 0);
       const done = l.inventoryLines
-        .filter((d: any) => d.document.documentType === "SALES_DELIVERY")
+        .filter((d: any) => d.document.documentType === "SALES_DELIVERY" && (!excludeDeliveryId || d.documentId !== excludeDeliveryId))
         .reduce((s: number, d: any) => s + Number(d.quantity), 0);
       const quantity = Number(l.quantity);
       const remaining = quantity - ordered - done;
@@ -452,6 +480,8 @@ export async function createSalesDelivery(body: HeaderBody) {
   // طبق تصمیم کاربر: دیگر مرحله‌ی جداگانه‌ی «قطعی‌کردن» وجود ندارد — همان لحظه‌ی ذخیره، سند اثر واقعی
   // می‌گذارد (status مستقیم FINALIZED، نه DRAFT).
   return prisma.$transaction(async (tx) => {
+    // کنترل نهایی مانده‌ی سند مبنا با قفل ردیف‌های مبنا (هم‌زمانی/داده‌ی کهنه‌ی فرانت‌اند)
+    await assertSourceBalancesLocked(tx, cleanedLines);
     const doc = await tx.inventoryDocument.create({
       data: {
         documentType: "SALES_DELIVERY",
@@ -535,6 +565,8 @@ router.put("/sales-deliveries/:id", can(`${FORM}.edit`), async (req, res) => {
     await prisma.$transaction(async (tx) => {
       await reverseDocumentEffects(tx, oldDoc);
       await tx.inventoryDocumentLine.deleteMany({ where: { documentId: id } });
+      // کنترل نهایی مانده‌ی سند مبنا با قفل ردیف‌های مبنا (خطوط قبلیِ همین حواله همین‌جا پاک شده‌اند، پس از مانده کم نمی‌شوند)
+      await assertSourceBalancesLocked(tx, cleanedLines, id);
       await tx.inventoryDocument.update({
         where: { id },
         data: {
