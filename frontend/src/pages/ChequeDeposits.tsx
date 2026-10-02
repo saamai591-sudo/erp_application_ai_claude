@@ -178,6 +178,15 @@ function ChequeDepositForm({ editId, reEdit }: { editId?: number; reEdit?: boole
   // «ویرایش مجدد»: updatedAt سند برای کنترل ویرایش هم‌زمان
   const [docUpdatedAt, setDocUpdatedAt] = usePersistedState<string>(`${cacheKey}:updatedAt`, "");
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", bankAccountId: "", description: "" });
+  // چک‌های قابل انتخاب: فقط چک‌هایی که تاریخ سند مبنایشان ≤ تاریخ این سند است؛ با تغییر تاریخ دوباره بارگذاری می‌شود (سرور هم موقع ثبت همین قاعده را اعمال می‌کند)
+  useEffect(() => {
+    if (!header.date) return;
+    api
+      .get(`/cheque-deposits/pickable-cheques?date=${header.date}${editId ? `&excludeId=${editId}` : ""}`)
+      .then((c: PickableCheque[]) => setPickableCheques(c))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [header.date, editId]);
   const [lines, setLines] = usePersistedState<DetailLine[]>(`${cacheKey}:lines`, []);
   const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; fiscalPeriodTitle: string; journalEntryId: number | null; journalEntryReferenceNumber: number | null } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
@@ -196,7 +205,7 @@ function ChequeDepositForm({ editId, reEdit }: { editId?: number; reEdit?: boole
     async function init() {
       const [bas, cheques, fp]: [BankAccountOption[], PickableCheque[], FiscalPeriodRange | null] = await Promise.all([
         api.get("/banking/accounts"),
-        api.get("/cheque-deposits/pickable-cheques"),
+        Promise.resolve([] as PickableCheque[]),
         fetchSelectedFiscalPeriod(),
       ]);
       setBankAccounts(bas);

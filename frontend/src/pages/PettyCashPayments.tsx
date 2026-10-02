@@ -228,7 +228,7 @@ function PettyCashPaymentForm({ editId }: { editId?: number }) {
   const currentBasisId = form.purchaseInvoiceId || form.salesInvoiceId || form.purchaseOrderId;
 
   // اسناد مبنای قابل انتخاب — همان هوک/انتخابگر مشترک «موضوعات پرداخت» (components/PaymentBasisPicker.tsx)
-  const basisCandidates = usePaymentBasisCandidates({ source: "petty-cash-payments", basisType, partyId: form.partyId, paymentTypeId: form.paymentTypeId, editId });
+  const basisCandidates = usePaymentBasisCandidates({ source: "petty-cash-payments", basisType, partyId: form.partyId, paymentTypeId: form.paymentTypeId, editId, date: form.date });
 
   // طرف‌حساب‌های واجد شرایط سند مبنا: فاکتور/سفارش خرید ⇐ باید «تامین‌کننده» باشد، فاکتور فروش ⇐ باید «مشتری» باشد؛ بدون مبنا = همه
   const eligibleParties =
