@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
-import { priceItem, revertItem, PRICING_DOC_TYPES, DOC_TYPE_FA } from "../services/goodsPricingService";
+import { priceItem, revertItem, pricingDocumentWhere, DOC_TYPE_FA } from "../services/goodsPricingService";
 import { validatePriceOperation } from "../services/goodsPricingValidation";
 import { parseFilters, matchesFilterValue } from "../utils/tableFilters";
 import { can, userHasAction } from "../authz/guard";
@@ -68,10 +68,9 @@ router.get("/candidates", can(`${FORM}.view`), async (req, res) => {
   // مجبور به کوئری دوباره‌ی InventoryDocumentLine نباشد.
   const flowLines = await prisma.inventoryDocumentLine.findMany({
     where: {
-      document: {
-        documentType: { in: PRICING_DOC_TYPES as any },
-        date: { gte: period.fiscalPeriod.fromDate, lte: period.toDate },
-      },
+      // پنجره‌ی ارزش‌گذاری (سطح کالا): از شروع دوره مالی تا پایان دوره‌ی گزارشگری، شامل موجودی اول دوره (دستی و سیستمیِ همین سال) — کالایی که
+      // فقط موجودی اول دوره دارد هم فهرست می‌شود تا با پردازش دوره، رکورد ارزش‌گذاری این دوره را بگیرد
+      document: pricingDocumentWhere(period.fiscalPeriod.fromDate, { lte: period.toDate }),
     },
     select: { goodsItemId: true, document: { select: { warehouseId: true } } },
   });

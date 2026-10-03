@@ -190,6 +190,13 @@ const RAW_MODULES: ModuleGroup[] = [
         ],
       },
       {
+        title: "عملیات پایان دوره",
+        items: [
+          { key: "warehousing-quantity-close", label: "بستن تعدادی موجودی", list: "/warehousing/quantity-close", icon: "shield" },
+          { key: "warehousing-accounting-close", label: "بستن حسابداری موجودی", list: "/warehousing/accounting-close", icon: "coin" },
+        ],
+      },
+      {
         // طبق تصمیم صریح کاربر: ماژول مستقل «حسابداری انبار» حذف و به‌عنوان یک ساب‌ماژول همین ماژول
         // ادغام شد (هم‌راستا با اینکه صفحات خودشان از قبل نمای انبارداری/حسابداری انبار را ادغام کرده‌اند)
         title: "حسابداری انبار",

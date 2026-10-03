@@ -90,6 +90,9 @@ model User {
   actions                  UserAction[]
   documentItemAmounts      DocumentItemAmount[]
   goodsPricingStatuses     GoodsPricingStatus[]
+  warehouseQuantityCloses  WarehouseQuantityClose[]
+  inventoryAccountingCloses    InventoryAccountingClose[]
+  inventoryAccountingCloseLogs InventoryAccountingCloseLog[]
   purchaseInvoicesApproved PurchaseInvoice[]       @relation("PurchaseInvoiceApprover")
   servicePurchaseInvoicesApproved ServicePurchaseInvoice[] @relation("ServicePurchaseInvoiceApprover")
 }
@@ -194,6 +197,10 @@ model FiscalPeriod {
   chequeItems                ChequeItem[]
   treasuryOpenings          TreasuryOpening[]
   treasuryYearCloses        TreasuryYearClose[]
+  warehouseQuantityCloses   WarehouseQuantityClose[]
+  inventoryAccountingClose  InventoryAccountingClose? @relation("InventoryAccountingCloseYear")
+  inventoryAccountingCloseNext InventoryAccountingClose[] @relation("InventoryAccountingCloseNextYear")
+  inventoryAccountingCloseLogs InventoryAccountingCloseLog[]
 }
 
 enum ReportingPeriodStatus {
@@ -895,6 +902,7 @@ model Warehouse {
   inventoryDocsAsSource      InventoryDocument[]     @relation("InventoryDocSourceWarehouse")
   inventoryDocsAsDest        InventoryDocument[]     @relation("InventoryDocDestWarehouse")
   confirmationLines          WarehouseConfirmationLine[]
+  quantityCloses             WarehouseQuantityClose[]
   pricingFlowWarehouses      GoodsPricingFlowWarehouse[]
 }
 
@@ -2407,6 +2415,7 @@ model InventoryDocument {
   fiscalPeriod      FiscalPeriod             @relation(fields: [fiscalPeriodId], references: [id])
   lines             InventoryDocumentLine[]
   purchaseCostLines PurchaseCostLine[]
+  quantityClose     WarehouseQuantityClose?
 
   @@unique([documentType, fiscalPeriodId, number])
 }
@@ -2518,6 +2527,62 @@ model WarehouseConfirmationLine {
   @@unique([warehouseId, goodsItemId])
 }
 
+// «بستن تعدادی موجودی انبار» (عملیات پایان دوره، مدیریت موجودی و انبار) — به‌ازای هر انبار و هر دوره مالی دقیقاً یک
+// رکورد؛ وجود آن یعنی «این انبار برای این دوره مالی بسته شده» و یکتایی (warehouseId, fiscalPeriodId) در سطح دیتابیس
+// از بستن مجدد (حتی هم‌زمان) جلوگیری می‌کند. closedAt/closedById برای ممیزی است. openingDocumentId = سند «موجودی اول
+// دوره»ی سیستمی (creationType=SYSTEM، فقط تعداد، بدون مبلغ) که همان بستن برای دوره‌ی بعد ساخته است.
+model WarehouseQuantityClose {
+  id                Int                @id @default(autoincrement())
+  warehouseId       Int
+  fiscalPeriodId    Int
+  closedAt          DateTime           @default(now())
+  closedById        Int?
+  openingDocumentId Int?               @unique
+  lineCount         Int                @default(0)
+  warehouse         Warehouse          @relation(fields: [warehouseId], references: [id])
+  fiscalPeriod      FiscalPeriod       @relation(fields: [fiscalPeriodId], references: [id])
+  closedBy          User?              @relation(fields: [closedById], references: [id])
+  openingDocument   InventoryDocument? @relation(fields: [openingDocumentId], references: [id], onDelete: SetNull)
+
+  @@unique([warehouseId, fiscalPeriodId])
+}
+
+// «بستن حسابداری موجودی» (عملیات پایان دوره، مدیریت موجودی و انبار) — برای کل دوره مالی و همه‌ی انبارهای مشمول یک‌جا؛
+// یک رکورد به‌ازای هر دوره مالی (یکتایی fiscalPeriodId، سد نهایی در برابر بستن مجدد/هم‌زمان). وجود این رکورد برای دوره‌ی
+// مالی N یعنی «مبلغ سندهای موجودی اول دوره‌ی سیستمی دوره N+1 تعیین شده» و ارزش‌گذاری دوره N+1 مجاز است.
+// closedAt/closedById برای ممیزی؛ nextFiscalPeriodId/openingDate همان دوره‌ی بعد و تاریخ اسناد افتتاحیه‌اش هستند
+// (موتور قیمت‌گذاری از همین تاریخ به‌عنوان «لنگر» شروع می‌کند، نگاه کنید به services/inventoryAccountingGuards.ts).
+model InventoryAccountingClose {
+  id                 Int          @id @default(autoincrement())
+  fiscalPeriodId     Int          @unique
+  nextFiscalPeriodId Int
+  openingDate        DateTime     @db.Date
+  closedAt           DateTime     @default(now())
+  closedById         Int?
+  warehouseCount     Int          @default(0)
+  lineCount          Int          @default(0)
+  totalAmount        Decimal      @default(0) @db.Decimal(36, 10)
+  fiscalPeriod       FiscalPeriod @relation("InventoryAccountingCloseYear", fields: [fiscalPeriodId], references: [id])
+  nextFiscalPeriod   FiscalPeriod @relation("InventoryAccountingCloseNextYear", fields: [nextFiscalPeriodId], references: [id])
+  closedBy           User?        @relation(fields: [closedById], references: [id])
+}
+
+enum InventoryAccountingCloseAction {
+  CLOSE
+  REVERSE
+}
+
+// تاریخچه‌ی ممیزی بستن/برگشت بستن حسابداری موجودی (رکورد اصلی با برگشت پاک می‌شود، این لاگ می‌ماند)
+model InventoryAccountingCloseLog {
+  id             Int                            @id @default(autoincrement())
+  fiscalPeriodId Int
+  action         InventoryAccountingCloseAction
+  at             DateTime                       @default(now())
+  userId         Int?
+  fiscalPeriod   FiscalPeriod                   @relation(fields: [fiscalPeriodId], references: [id])
+  user           User?                          @relation(fields: [userId], references: [id])
+}
+
 // طبق مستند «قیمت‌گذاری اسناد انبار» (بند ۱۲): کلید منطقی وضعیت قیمت‌گذاری = ReportingPeriod + Item
 // (بدون انبار). وجود این رکورد یعنی «این کالا در این دوره قیمت‌گذاری شده است».
 model GoodsPricingStatus {
@@ -2553,6 +2618,9 @@ enum DocumentAmountPriceType {
   // تخصیص‌یافته، هرگز newAmount محاسبه‌شده‌ی مطلق)
   INBOUND_RELATED_COST
   MIGRATED         // فقط رکورد یک‌بارِ backfill داده‌های قبل از این مدل
+  // مبلغ ردیف «موجودی اول دوره»ی سیستمی دوره‌ی بعد که «بستن حسابداری موجودی» از کاردکس پایان دوره‌ی مالی قبل
+  // محاسبه و روی همان ردیف موجود ثبت می‌کند؛ «برگشت بستن حسابداری» دقیقاً همین رکوردها را حذف می‌کند.
+  ACCOUNTING_CLOSING
 }
 
 model DocumentItemAmount {

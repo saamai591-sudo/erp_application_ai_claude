@@ -1,19 +1,15 @@
-import { prisma } from "../lib/prisma";
+import { prisma, Db } from "../lib/prisma";
 import { getLineAmounts, setLineAmount } from "./documentItemAmountService";
+import { CARRY_FORWARD_OPENING_WHERE } from "./warehouseStockService";
+import { getPreviousYearAccountingCloseProblem, lockOpeningYearShared, assertFiscalYearNotAccountingClosed } from "./inventoryAccountingGuards";
 
-// طبق مستند «قیمت‌گذاری اسناد انبار»: وضعیت/قفل قیمت‌گذاری (GoodsPricingStatus) در سطح کالا+دوره است
-// (انبار بخشی از کلید آن جدول نیست) — یعنی یک اجرای priceItem همه‌ی انبارهای کالا را با هم قیمت‌گذاری
-// و قفل می‌کند. اما خودِ محاسبه‌ی کاردکس (میانگین موزون متحرک) باید جدا برای هر انبار انجام شود، نه
-// یک‌جا برای کل کالا در همه‌ی انبارها — طبق تأیید صریح کاربر و تأیید موتور مرجع (Documents/
-// pricingAlghoritm.sql: کاردکس با partition by Position اجرا می‌شود، و Position از روی
-// Selected.stuffid + Selected.StockID ساخته می‌شود — یعنی کلید کاردکس (کالا، انبار) است، نه فقط کالا؛
-// نگاه کنید به @ConditionalInnerJoin که صریحاً "Selected.StockID = p.StockID" شرط می‌کند). مخلوط کردن
-// موجودی چند انبار در یک میانگین واحد اشتباه است — یک صادره از انبار X فقط باید بر اساس ورودی‌های خودِ
-// انبار X میانگین‌گیری شود، نه ورودی‌های سایر انبارها با فی متفاوت. به همین دلیل walkKardex به‌جای دو
-// متغیر runningQty/runningValue سراسری، یک وضعیت جدا به ازای هر warehouseId نگه می‌دارد (نگاه کنید به
-// getState) و هر ردیف فقط وضعیت انبارِ خودِ سندش را می‌خواند/به‌روزرسانی می‌کند؛ ترتیب پردازش هنوز
-// سراسری (بر اساس تاریخ در کل کالا) است، چون بعضی روابط (مثل WAREHOUSE_TRANSFER_IN که به ردیف
-// WAREHOUSE_TRANSFER_OUT در انبار مبدا ارجاع می‌دهد) بین‌انباری هستند.
+// ارزش‌گذاری در سطح «کالا» است (تصمیم صریح کاربر، جایگزین کاردکس سطح کالا+انبار قبلی): وضعیت/قفل ارزش‌گذاری (GoodsPricingStatus) در سطح
+// کالا+دوره‌ی گزارشگری است و کلید محاسبه هم فقط «کالا» است — میانگین موزون متحرک روی مجموع همه‌ی انبارهای کالا حساب می‌شود و انبار هیچ
+// نقشی در محاسبه ندارد (اطلاعات انبار روی ردیف‌های سند دست‌نخورده می‌ماند). ردیف‌های انتقال بین انبارها در این استخر واحد اثر ارزشی خالص
+// صفر دارند. داده از شروع دوره مالی تا پایان دوره‌ی گزارشگری بارگذاری می‌شود (حرکت‌های بعد از آن بی‌اثرند)، ولی فقط ردیف‌های داخل خودِ
+// دوره ارزش‌گذاری/نوشته می‌شوند؛ ردیف‌های دوره‌های قبل با مبلغ ثبت‌شده‌شان در استخر می‌آیند. موجودی اول دوره (دستی، یا سیستمیِ مبلغ‌دار پس
+// از «بستن حسابداری موجودی» سال قبل) یک رکورد معتبر است. (مرجع قدیمی Documents/pricingAlghoritm.sql کاردکس را به‌ازای کالا+انبار می‌گرفت؛
+// آن رفتار دیگر مبنا نیست.)
 //
 // طبقه‌بندی جهت هر نوع سند دقیقاً همان جدول SIGNED_TYPES موجود در warehouseStockService.ts است.
 //
@@ -114,8 +110,8 @@ export const DOC_TYPE_FA: Record<string, string> = {
 
 const MAX_ITERATIONS = 25;
 
-async function getBaseCurrencyDecimalPlaces(): Promise<number> {
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
+async function getBaseCurrencyDecimalPlaces(db: Db = prisma): Promise<number> {
+  const baseCurrency = await db.currency.findFirst({ where: { isBase: true } });
   if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است؛ ابتدا یک ارز را به‌عنوان ارز پایه مشخص کنید");
   return baseCurrency.decimalPlaces;
 }
@@ -131,28 +127,25 @@ type Line = {
   amount: any;
   sourceWarehouseReceiptLineId: number | null;
   sourceWarehouseTransferOutLineId: number | null;
-  document: { documentType: string; date: Date; warehouseId: number };
+  document: { documentType: string; date: Date; warehouseId: number; number?: number; creationType?: string };
 };
 
-// یک بار کامل کاردکس را (با یک تخمین فعلی از سهم‌های بازگشتی هر برگشت تامین‌کننده) طی می‌کند
+// یک بار کامل کاردکس سطح کالا را (با یک تخمین فعلی از سهم‌های بازگشتی هر برگشت تامین‌کننده) طی می‌کند.
+// طبق تصمیم صریح کاربر کلید ارزش‌گذاری فقط «کالا» است: همه‌ی انبارها در یک استخر (qty/value) تجمیع می‌شوند و انبار هیچ نقشی در
+// محاسبه ندارد (فقط روی خودِ ردیف‌های سند باقی می‌ماند). ردیف‌های قبل از شروع دوره‌ی گزارشگری (periodFrom) «همان‌طور که
+// هستند» با مبلغ ثبت‌شده‌شان وارد استخر می‌شوند و هرگز بازمحاسبه/بازنویسی نمی‌شوند؛ فقط ردیف‌های داخل دوره محاسبه می‌شوند.
 function walkKardex(
   lines: Line[],
+  periodFrom: Date,
   returningLinesByReceipt: Map<number, Line[]>,
   fixedRemainingAmount: Map<number, number>,
   returnWorkingValue: Map<number, number>,
+  fixedReturnAmount: Map<number, number>,
+  externalTransferOut: Map<number, { qty: number; amount: number }>,
   decimalPlaces: number
 ) {
-  // کاردکس به ازای هر انبار جدا نگه داشته می‌شود (نگاه کنید به یادداشت بالای فایل)؛ ترتیب پردازش
-  // ردیف‌ها هنوز سراسری (بر اساس تاریخ) است، فقط انباشت qty/value هر ردیف در وضعیت انبارِ خودش می‌رود
-  const state = new Map<number, { qty: number; value: number }>();
-  function getState(warehouseId: number) {
-    let s = state.get(warehouseId);
-    if (!s) {
-      s = { qty: 0, value: 0 };
-      state.set(warehouseId, s);
-    }
-    return s;
-  }
+  const state = { qty: 0, value: 0 };
+  const s = state;
 
   const computed = new Map<number, number>();
   const newReturnWorkingValue = new Map<number, number>();
@@ -161,7 +154,7 @@ function walkKardex(
   for (const line of lines) {
     const qty = Number(line.quantity);
     const type = line.document.documentType;
-    const s = getState(line.document.warehouseId);
+    const inPeriod = line.document.date >= periodFrom;
 
     if (IN_GIVEN_TYPES.has(type)) {
       const returningLines = returningLinesByReceipt.get(line.id);
@@ -181,16 +174,28 @@ function walkKardex(
       continue;
     }
 
+    if (!inPeriod) {
+      // دوره‌ی قبلی: مبلغ ثبت‌شده‌ی همین ردیف (که همان دوره محاسبه کرده) بی‌تغییر استفاده می‌شود
+      const amt = Number(line.amount);
+      computed.set(line.id, amt);
+      if (type === "WAREHOUSE_TRANSFER_IN" || IN_COMPUTED_TYPES.has(type)) {
+        s.qty += qty;
+        s.value += amt;
+      } else {
+        s.qty -= qty;
+        s.value -= amt;
+      }
+      continue;
+    }
+
     if (type === "WAREHOUSE_TRANSFER_IN") {
-      // بر خلاف بقیه‌ی ورودی‌ها، فی میانگین جاری کاردکس (انبار مقصد) را نمی‌گیرد؛ سهم متناسب (بر اساس
-      // مقدار) از مبلغِ همان ردیف WAREHOUSE_TRANSFER_OUT مرتبط (در انبار مبدا، کاردکس مستقل خودش) است
-      // — همیشه قبلاً در همین کاردکس محاسبه شده، چون ترتیب تاریخ ارسال<=دریافت در سطح اپلیکیشن اجباری
-      // است (نگاه کنید به یادداشت بالای فایل). فقط qty/value انبار مقصد (s، همین ردیف) به‌روزرسانی
-      // می‌شود؛ انبار مبدا با ردیف OUT خودش (که در محاسبه‌ی خودش، از وضعیت انبار مبدا کم شده) قبلاً
-      // به‌روزرسانی شده است.
+      // مبلغ = سهم متناسب (بر اساس مقدار) از مبلغِ ردیف WAREHOUSE_TRANSFER_OUT مرتبط (قبلاً در همین کاردکس محاسبه/ثبت شده، چون
+      // ترتیب تاریخ ارسال<=دریافت در سطح اپلیکیشن اجباری است). در استخر سطح‌کالا، ارسال و دریافت اثر ارزشی خالص صفر دارند.
       const outLine = line.sourceWarehouseTransferOutLineId ? linesById.get(line.sourceWarehouseTransferOutLineId) : undefined;
-      const outQty = outLine ? Number(outLine.quantity) : 0;
-      const outAmount = outLine ? computed.get(outLine.id) || 0 : 0;
+      // حواله‌ی انتقالیِ مبدا که قبل از شروع پنجره‌ی بارگذاری (سال مالی قبل) ثبت شده: مقدار/مبلغ ثبت‌شده‌ی خودِ آن ردیف
+      const external = !outLine && line.sourceWarehouseTransferOutLineId ? externalTransferOut.get(line.sourceWarehouseTransferOutLineId) : undefined;
+      const outQty = outLine ? Number(outLine.quantity) : external ? external.qty : 0;
+      const outAmount = outLine ? computed.get(outLine.id) || 0 : external ? external.amount : 0;
       const amt = outQty > 0 ? round((outAmount * qty) / outQty, decimalPlaces) : 0;
       computed.set(line.id, amt);
       s.qty += qty;
@@ -208,17 +213,19 @@ function walkKardex(
     }
 
     // OUT_COMPUTED_TYPES + SUPPLIER_RETURN
+    const fixed = fixedReturnAmount.get(line.id);
     const avgCost = s.qty > 0 ? s.value / s.qty : 0;
-    const amt = round(qty * avgCost, decimalPlaces);
+    const amt = fixed !== undefined ? fixed : round(qty * avgCost, decimalPlaces);
     computed.set(line.id, amt);
     s.qty -= qty;
     s.value -= amt;
-    if (type === "SUPPLIER_RETURN") {
+    // فقط برگشت‌هایی که در لوپ همگرایی (رسید و برگشت هر دو داخل دوره) شرکت دارند
+    if (type === "SUPPLIER_RETURN" && returnWorkingValue.has(line.id)) {
       newReturnWorkingValue.set(line.id, amt);
     }
   }
 
-  return { computed, newReturnWorkingValue };
+  return { computed, newReturnWorkingValue, state };
 }
 
 function mapsEqual(a: Map<number, number>, b: Map<number, number>, epsilon: number): boolean {
@@ -227,16 +234,6 @@ function mapsEqual(a: Map<number, number>, b: Map<number, number>, epsilon: numb
     if (Math.abs((a.get(k) || 0) - (b.get(k) || 0)) > epsilon) return false;
   }
   return true;
-}
-
-export async function findPredecessorPeriod(reportingPeriodId: number) {
-  const period = await prisma.reportingPeriod.findUnique({ where: { id: reportingPeriodId } });
-  if (!period) throw new Error("دوره گزارشگری یافت نشد");
-  const predecessor = await prisma.reportingPeriod.findFirst({
-    where: { toDate: { lt: period.fromDate } },
-    orderBy: { toDate: "desc" },
-  });
-  return { period, predecessor };
 }
 
 async function findSuccessorPeriod(reportingPeriodId: number) {
@@ -258,61 +255,94 @@ export async function getPricingStatusMap(goodsItemIds: number[], reportingPerio
   return new Set(rows.map((r) => r.goodsItemId));
 }
 
-export async function priceItem(goodsItemId: number, reportingPeriodId: number, userId?: number) {
-  const { period, predecessor } = await findPredecessorPeriod(reportingPeriodId);
+/**
+ * فیلتر سند برای «پنجره‌ی ارزش‌گذاری»: از شروع دوره مالی تا پایان دوره‌ی گزارشگری (حرکت‌های بعد از آن هیچ اثری ندارند).
+ * سند انتقال مانده‌ی سیستمیِ «بستن تعدادی» فقط وقتی می‌آید که دقیقاً در تاریخ شروع پنجره باشد (افتتاحیه‌ی مبلغ‌دارِ همین سال مالی،
+ * که «بستن حسابداری موجودی» مبلغش را تعیین کرده)؛ افتتاحیه‌ی سال‌های بعد در آن نمی‌آید. موجودی اول دوره (دستی یا سیستمی) یک
+ * رکورد/گردش معتبر است. حد بالای تاریخ با lt هم قابل تنظیم است (برای «قبل از شروع دوره»).
+ */
+export function pricingDocumentWhere(windowFrom: Date, upper: { lte: Date } | { lt: Date }) {
+  return {
+    documentType: { in: PRICING_DOC_TYPES as any },
+    date: { gte: windowFrom, ...upper },
+    OR: [{ NOT: CARRY_FORWARD_OPENING_WHERE }, { date: windowFrom }],
+  };
+}
 
-  const already = await prisma.goodsPricingStatus.findUnique({
-    where: { goodsItemId_reportingPeriodId: { goodsItemId, reportingPeriodId } },
-  });
-  if (already) throw new Error("این کالا قبلاً در این دوره قیمت‌گذاری شده است");
+export interface PricingWindow {
+  /** شروع دوره مالیِ دوره‌ی گزارشگری — شروع بارگذاری */
+  windowFrom: Date;
+  /** شروع دوره‌ی گزارشگری — ردیف‌های قبل از آن فقط با مبلغ ثبت‌شده در استخر می‌آیند، از آن به بعد محاسبه می‌شوند */
+  periodFrom: Date;
+  /** پایان دوره‌ی گزارشگری — بالاترین تاریخ بارگذاری */
+  toDate: Date;
+}
 
-  if (predecessor) {
-    const predecessorPriced = await prisma.goodsPricingStatus.findUnique({
-      where: { goodsItemId_reportingPeriodId: { goodsItemId, reportingPeriodId: predecessor.id } },
-    });
-    if (!predecessorPriced) {
-      throw new Error(`ابتدا باید دوره‌ی «${predecessor.title}» برای این کالا قیمت‌گذاری شود`);
-    }
-  }
-
-  const decimalPlaces = await getBaseCurrencyDecimalPlaces();
+/**
+ * کاردکس کامل یک کالا (طبق تصمیم صریح کاربر فقط «کالا»؛ میانگین موزون متحرک روی مجموع همه‌ی انبارها) در پنجره‌ی
+ * [شروع دوره مالی، پایان دوره‌ی گزارشگری]. تنها محل این محاسبه — هم priceItem و هم «بستن حسابداری موجودی» (مانده‌ی ارزشی پایان
+ * دوره مالی؛ آنجا periodFrom=windowFrom یعنی بازمحاسبه‌ی کل سال) از همین تابع استفاده می‌کنند. firstMovementDate تاریخ اولین
+ * گردشِ کالا در همه‌ی انبارها (شامل افتتاحیه) در همین پنجره است.
+ */
+export async function computeItemKardex(goodsItemId: number, win: PricingWindow, db: Db = prisma) {
+  const decimalPlaces = await getBaseCurrencyDecimalPlaces(db);
   const epsilon = Math.pow(10, -decimalPlaces) / 2;
 
-  const rawLines = await prisma.inventoryDocumentLine.findMany({
-    where: {
-      goodsItemId,
-      document: { date: { lte: period.toDate }, documentType: { in: PRICING_DOC_TYPES as any } },
-    },
+  const rawLines = await db.inventoryDocumentLine.findMany({
+    where: { goodsItemId, document: pricingDocumentWhere(win.windowFrom, { lte: win.toDate }) },
     select: {
       id: true,
       quantity: true,
       sourceWarehouseReceiptLineId: true,
       sourceWarehouseTransferOutLineId: true,
-      document: { select: { documentType: true, date: true, warehouseId: true } },
+      document: { select: { documentType: true, date: true, warehouseId: true, number: true, creationType: true } },
     },
     orderBy: [{ document: { date: "asc" } }, { documentId: "asc" }, { rowOrder: "asc" }, { id: "asc" }],
   });
   // مبلغ فعلی هر ردیف دیگر ستون خام نیست — طبق Documents/WareHouseAmountChanges.md، SUM(Difference)
   // تاریخچه‌ی همان ردیف است؛ یک کوئری batched برای همه‌ی ردیف‌های این اجرا، نه یک کوئری جدا به ازای هرکدام.
-  const currentAmounts = await getLineAmounts(rawLines.map((l) => l.id));
+  const currentAmounts = await getLineAmounts(rawLines.map((l) => l.id), db);
   const lines = rawLines.map((l) => ({ ...l, amount: Number(currentAmounts.get(l.id) ?? 0) })) as Line[];
+  const firstMovementDate = lines.length ? lines[0].document.date : null;
 
-  // پیش‌پردازش برگشت‌های تامین‌کننده: برای هر رسیدی که برگشت(های) به آن ارجاع دارند، سهم ثابتِ
-  // «باقیمانده» و سهم اولیه‌ی هر برگشت (متناسب با مقدار خودش از مبلغ اصلی رسید) یک‌بار محاسبه می‌شود؛
-  // این سهم‌ها هرگز در طول همگرایی دوباره از amount اصلی بازمحاسبه نمی‌شوند
+  // ردیف‌های مرجع بیرون از پنجره (سال مالی قبل): حواله‌ی انتقالیِ مبدا برای رسید انتقال، و رسید خرید برای برگشت به تامین‌کننده —
+  // مقدار/مبلغ ثبت‌شده‌ی خودشان استفاده می‌شود
+  const inSet = new Set(lines.map((l) => l.id));
+  const externalIds = Array.from(
+    new Set(
+      lines.flatMap((l) => [l.sourceWarehouseTransferOutLineId, l.sourceWarehouseReceiptLineId]).filter((id): id is number => !!id && !inSet.has(id))
+    )
+  );
+  const external = new Map<number, { qty: number; amount: number }>();
+  if (externalIds.length) {
+    const outs = await db.inventoryDocumentLine.findMany({ where: { id: { in: externalIds } }, select: { id: true, quantity: true } });
+    const outAmounts = await getLineAmounts(externalIds, db);
+    for (const o of outs) external.set(o.id, { qty: Number(o.quantity), amount: Number(outAmounts.get(o.id) ?? 0) });
+  }
+
+  // پیش‌پردازش برگشت‌های تامین‌کننده (فقط برگشت‌های داخل دوره):
+  //  • رسید و برگشت هر دو داخل دوره: سهم ثابتِ «باقیمانده» و سهم اولیه‌ی هر برگشت (متناسب با مقدار خودش از مبلغ اصلی رسید) و
+  //    لوپ همگرایی (نگاه کنید به یادداشت بالای فایل)؛
+  //  • رسید قبل از دوره (یا بیرون از پنجره): مبلغ برگشت = سهم متناسب از مبلغ ثبت‌شده‌ی رسید، بدون همگرایی.
   const returningLinesByReceipt = new Map<number, Line[]>();
+  const fixedReturnAmount = new Map<number, number>();
+  const lineById = new Map<number, Line>(lines.map((l) => [l.id, l]));
   for (const l of lines) {
-    if (l.document.documentType === "SUPPLIER_RETURN" && l.sourceWarehouseReceiptLineId) {
-      const arr = returningLinesByReceipt.get(l.sourceWarehouseReceiptLineId) || [];
+    if (l.document.documentType !== "SUPPLIER_RETURN" || !l.sourceWarehouseReceiptLineId || l.document.date < win.periodFrom) continue;
+    const receipt = lineById.get(l.sourceWarehouseReceiptLineId);
+    if (receipt && receipt.document.date >= win.periodFrom) {
+      const arr = returningLinesByReceipt.get(receipt.id) || [];
       arr.push(l);
-      returningLinesByReceipt.set(l.sourceWarehouseReceiptLineId, arr);
+      returningLinesByReceipt.set(receipt.id, arr);
+    } else {
+      const src = receipt ? { qty: Number(receipt.quantity), amount: Number(receipt.amount) } : external.get(l.sourceWarehouseReceiptLineId);
+      if (src && src.qty > 0) fixedReturnAmount.set(l.id, round((src.amount * Number(l.quantity)) / src.qty, decimalPlaces));
     }
   }
   const fixedRemainingAmount = new Map<number, number>();
   const initialReturnShare = new Map<number, number>();
   for (const [receiptId, returningLines] of returningLinesByReceipt) {
-    const receipt = lines.find((l) => l.id === receiptId);
-    if (!receipt) continue; // رسید خارج از بازه‌ی این اجرا (نباید معمولاً پیش بیاید)
+    const receipt = lineById.get(receiptId)!;
     const originalAmount = Number(receipt.amount);
     const originalQty = Number(receipt.quantity);
     let sumShares = 0;
@@ -324,12 +354,15 @@ export async function priceItem(goodsItemId: number, reportingPeriodId: number, 
     fixedRemainingAmount.set(receiptId, round(originalAmount - sumShares, decimalPlaces));
   }
 
+  const externalTransferOut = external;
   let returnWorkingValue = new Map<number, number>(initialReturnShare);
   let computed = new Map<number, number>();
+  let state = { qty: 0, value: 0 };
   let converged = false;
   for (let i = 0; i < MAX_ITERATIONS; i++) {
-    const result = walkKardex(lines, returningLinesByReceipt, fixedRemainingAmount, returnWorkingValue, decimalPlaces);
+    const result = walkKardex(lines, win.periodFrom, returningLinesByReceipt, fixedRemainingAmount, returnWorkingValue, fixedReturnAmount, externalTransferOut, decimalPlaces);
     computed = result.computed;
+    state = result.state;
     if (mapsEqual(result.newReturnWorkingValue, returnWorkingValue, epsilon)) {
       returnWorkingValue = result.newReturnWorkingValue;
       converged = true;
@@ -339,49 +372,146 @@ export async function priceItem(goodsItemId: number, reportingPeriodId: number, 
   }
   if (!converged) throw new Error("محاسبه قیمت‌گذاری همگرا نشد؛ لطفاً اسناد کالا را بررسی کنید");
 
-  // نهایی‌سازی: خودِ رسید هرگز توسط قیمت‌گذاری اصلاح نمی‌شود (همیشه با مبلغ اصلی خودش باقی می‌ماند) —
-  // سهم ثابت باقیمانده و همگرایی لوپ فقط برای محاسبه‌ی درستِ سایر ردیف‌های بین رسید و برگشت (مثلاً
-  // مصرف) به کار می‌روند. مبلغ نهایی خودِ برگشت هم مقدار همگراشده‌ی کاردکس نیست؛ سهم متناسب از مبلغ
-  // اصلی رسید است (همان initialReturnShare). بقیه‌ی ردیف‌های محاسبه‌شده از computed خوانده می‌شوند.
-  const changes: { lineId: number; delta: number; newTotal: number; quantity: number; locked: boolean }[] = [];
-  for (const line of lines) {
-    let newTotal: number | undefined;
-    if (line.document.documentType === "SUPPLIER_RETURN" && line.sourceWarehouseReceiptLineId && initialReturnShare.has(line.id)) {
-      newTotal = initialReturnShare.get(line.id)!;
-    } else if (computed.has(line.id)) {
-      newTotal = computed.get(line.id)!;
-    }
-    if (newTotal === undefined) continue;
+  return { lines, computed, initialReturnShare, state, decimalPlaces, epsilon, firstMovementDate };
+}
 
-    // مبلغ «مؤثر فعلی» دیگر نیازی به شاخه‌ی قفل/غیرقفل ندارد — line.amount همین حالا SUM(Difference)ی
-    // کامل تاریخچه‌ی ردیف است (شامل هر اصلاحیه‌ی قبلی، مهم نیست در چه اجرایی نوشته شده)
-    const locked = line.document.date < period.fromDate;
-    const currentEffective = Number(line.amount);
+export interface PreviousValuationProblem {
+  goodsItemId: number;
+  /** دوره‌ی گزارشگری قبلیِ دارای گردش که برای کالا ارزش‌گذاری ندارد */
+  period: { id: number; title: string };
+}
 
-    const delta = round(newTotal - currentEffective, decimalPlaces);
-    if (Math.abs(delta) > epsilon) {
-      changes.push({ lineId: line.id, delta, newTotal, quantity: Number(line.quantity), locked });
-    }
+/**
+ * کنترل «ارزش‌گذاری دوره‌ی گزارشگری قبل» (طبق تصمیم صریح کاربر؛ جدا از کنترل بستن حسابداری سال مالی قبل): کالایی که قبل از شروع
+ * این دوره‌ی گزارشگری، در پنجره‌ی [شروع دوره مالی، شروع دوره) گردشی داشته (اولین گردش، شامل افتتاحیه، قبل از شروع دوره باشد) =
+ * «مشمول ارزش‌گذاری دوره‌ی قبل». برای چنین کالایی آخرین دوره‌ی گزارشگریِ قبلیِ همان سال مالی که در آن گردش داشته — **موجودی اول دوره
+ * هم گردش حساب می‌شود** (کالای فقط‌-افتتاحیه هم در دوره‌ی افتتاحیه پردازش و رکورد می‌گیرد، پس باید همان رکورد را داشته باشد) —
+ * باید رکورد ارزش‌گذاری (GoodsPricingStatus) داشته باشد؛ رکورد یعنی «در آن دوره پردازش شده»، حتی اگر همان دوره گردش جدیدی نداشته.
+ * اگر کالا قبل از شروع دوره هیچ گردشی نداشته باشد (اولین گردشش از شروع دوره یا بعد است)، مشمول نیست. هیچ کنترلی روی سال مالی
+ * قبل نیست.
+ */
+export async function findPreviousValuationProblems(
+  goodsItemIds: number[],
+  period: { fromDate: Date; fiscalPeriodId: number },
+  db: Db = prisma
+): Promise<PreviousValuationProblem[]> {
+  if (goodsItemIds.length === 0) return [];
+  const fiscal = await db.fiscalPeriod.findUnique({ where: { id: period.fiscalPeriodId } });
+  if (!fiscal) return [];
+  const priorPeriods = await db.reportingPeriod.findMany({
+    where: { fiscalPeriodId: period.fiscalPeriodId, toDate: { lt: period.fromDate } },
+    orderBy: { toDate: "desc" },
+  });
+  if (priorPeriods.length === 0) return [];
+
+  const rows = await db.inventoryDocumentLine.findMany({
+    where: { goodsItemId: { in: goodsItemIds }, document: pricingDocumentWhere(fiscal.fromDate, { lt: period.fromDate }) },
+    select: { goodsItemId: true, document: { select: { date: true } } },
+  });
+  const byItem = new Map<number, { date: Date }[]>();
+  for (const r of rows) {
+    const arr = byItem.get(r.goodsItemId) || [];
+    arr.push(r.document);
+    byItem.set(r.goodsItemId, arr);
   }
 
-  const status = await prisma.$transaction(async (tx) => {
-    const created = await tx.goodsPricingStatus.create({
-      data: { goodsItemId, reportingPeriodId, createdById: userId },
-    });
-    for (const c of changes) {
-      await setLineAmount(tx, {
-        lineId: c.lineId,
-        newAmount: c.newTotal,
-        priceType: c.locked ? "ENGINE_CORRECTION" : "ENGINE_PRICING",
-        effectiveDate: period.toDate,
-        goodsPricingStatusId: created.id,
-        createdById: userId ?? null,
-      });
-    }
-    return created;
-  });
+  const required = new Map<number, { id: number; title: string }>();
+  for (const [itemId, docs] of byItem) {
+    const target = priorPeriods.find((rp) => docs.some((d) => d.date >= rp.fromDate && d.date <= rp.toDate));
+    if (target) required.set(itemId, { id: target.id, title: target.title });
+  }
+  if (required.size === 0) return [];
 
-  return { status, adjustmentCount: changes.length };
+  const statuses = await db.goodsPricingStatus.findMany({
+    where: { goodsItemId: { in: Array.from(required.keys()) }, reportingPeriodId: { in: Array.from(new Set(Array.from(required.values()).map((r) => r.id))) } },
+    select: { goodsItemId: true, reportingPeriodId: true },
+  });
+  const valued = new Set(statuses.map((s) => `${s.goodsItemId}:${s.reportingPeriodId}`));
+  const problems: PreviousValuationProblem[] = [];
+  for (const [itemId, rp] of required) {
+    if (!valued.has(`${itemId}:${rp.id}`)) problems.push({ goodsItemId: itemId, period: rp });
+  }
+  return problems;
+}
+
+/**
+ * ارزش‌گذاری یک کالا در یک دوره‌ی گزارشگری — کل کار (قفل، پیش‌نیازها، محاسبه، نوشتن) در یک تراکنش:
+ *  • قفل «مشترک» مبلغ افتتاحیه‌ی دوره مالیِ این دوره‌ی گزارشگری (lockOpeningYearShared) پیش از هر خواندن گرفته می‌شود، پس
+ *    برگشتِ هم‌زمان «بستن حسابداری» (قفل انحصاری همان دوره) یا قبل از شروع ما کامل شده و ما نتیجه‌اش را می‌بینیم، یا تا commit
+ *    ما منتظر می‌ماند و بعد، وجود این ارزش‌گذاری را می‌بیند و رد می‌شود؛
+ *  • پیش‌نیازها: (۱) بستن حسابداری موجودیِ دوره مالی قبل (سطح سال مالی؛ هیچ کنترلی روی ارزش‌گذاری سطح‌کالای سال قبل نیست)،
+ *    (۲) ارزش‌گذاری دوره‌ی گزارشگری قبلیِ دارای گردش برای همین کالا (findPreviousValuationProblems، سطح دوره‌ی گزارشگری)؛
+ *  • داده از شروع دوره مالی تا پایان همین دوره‌ی گزارشگری بارگذاری می‌شود، ولی فقط ردیف‌های داخل دوره ارزش‌گذاری/نوشته می‌شوند؛
+ *    ردیف‌های دوره‌های قبل با مبلغ ثبت‌شده‌شان در استخر می‌آیند و هرگز اصلاحیه (ENGINE_CORRECTION) نمی‌خورند؛
+ *  • کالایی که در این دوره ردیفی ندارد (فقط موجودی اول دوره/گردش دوره‌های قبل) هم رکورد ارزش‌گذاریِ این دوره را می‌گیرد تا دوره‌های
+ *    بعد بدانند «پردازش شده است».
+ */
+export async function priceItem(goodsItemId: number, reportingPeriodId: number, userId?: number) {
+  return prisma.$transaction(
+    async (tx) => {
+      const period = await tx.reportingPeriod.findUnique({ where: { id: reportingPeriodId }, include: { fiscalPeriod: true } });
+      if (!period) throw new Error("دوره گزارشگری یافت نشد");
+
+      await lockOpeningYearShared(tx, period.fiscalPeriodId);
+      await assertFiscalYearNotAccountingClosed(tx, period.fiscalPeriodId, "قیمت‌گذاری");
+      const problem = await getPreviousYearAccountingCloseProblem(period.fiscalPeriodId, tx);
+      if (problem) throw new Error(problem);
+
+      const already = await tx.goodsPricingStatus.findUnique({
+        where: { goodsItemId_reportingPeriodId: { goodsItemId, reportingPeriodId } },
+      });
+      if (already) throw new Error("این کالا قبلاً در این دوره قیمت‌گذاری شده است");
+
+      const [prevProblem] = await findPreviousValuationProblems([goodsItemId], period, tx);
+      if (prevProblem) {
+        throw new Error(`این کالا در دوره‌ی گزارشگری «${prevProblem.period.title}» گردش داشته ولی در آن دوره قیمت‌گذاری نشده است؛ ابتدا آن دوره را برای این کالا قیمت‌گذاری کنید`);
+      }
+
+      const { lines, computed, initialReturnShare, decimalPlaces, epsilon } = await computeItemKardex(
+        goodsItemId,
+        { windowFrom: period.fiscalPeriod.fromDate, periodFrom: period.fromDate, toDate: period.toDate },
+        tx
+      );
+
+      // نهایی‌سازی: خودِ رسید هرگز توسط قیمت‌گذاری اصلاح نمی‌شود (همیشه با مبلغ اصلی خودش باقی می‌ماند) —
+      // سهم ثابت باقیمانده و همگرایی لوپ فقط برای محاسبه‌ی درستِ سایر ردیف‌های بین رسید و برگشت (مثلاً
+      // مصرف) به کار می‌روند. مبلغ نهایی خودِ برگشت هم مقدار همگراشده‌ی کاردکس نیست؛ سهم متناسب از مبلغ
+      // اصلی رسید است (همان initialReturnShare). بقیه‌ی ردیف‌های محاسبه‌شده از computed خوانده می‌شوند.
+      const changes: { lineId: number; delta: number; newTotal: number; quantity: number }[] = [];
+      for (const line of lines) {
+        if (line.document.date < period.fromDate) continue; // دوره‌ی قبل: هرگز بازنویسی نمی‌شود
+        let newTotal: number | undefined;
+        if (line.document.documentType === "SUPPLIER_RETURN" && line.sourceWarehouseReceiptLineId && initialReturnShare.has(line.id)) {
+          newTotal = initialReturnShare.get(line.id)!;
+        } else if (computed.has(line.id)) {
+          newTotal = computed.get(line.id)!;
+        }
+        if (newTotal === undefined) continue;
+
+        // line.amount همین حالا SUM(Difference)ی کامل تاریخچه‌ی ردیف است
+        const delta = round(newTotal - Number(line.amount), decimalPlaces);
+        if (Math.abs(delta) > epsilon) {
+          changes.push({ lineId: line.id, delta, newTotal, quantity: Number(line.quantity) });
+        }
+      }
+
+      const created = await tx.goodsPricingStatus.create({
+        data: { goodsItemId, reportingPeriodId, createdById: userId },
+      });
+      for (const c of changes) {
+        await setLineAmount(tx, {
+          lineId: c.lineId,
+          newAmount: c.newTotal,
+          priceType: "ENGINE_PRICING",
+          effectiveDate: period.toDate,
+          goodsPricingStatusId: created.id,
+          createdById: userId ?? null,
+        });
+      }
+      return { status: created, adjustmentCount: changes.length };
+    },
+    { maxWait: 15000, timeout: 120000 }
+  );
 }
 
 export async function revertItem(goodsItemId: number, reportingPeriodId: number) {
@@ -390,7 +520,7 @@ export async function revertItem(goodsItemId: number, reportingPeriodId: number)
   });
   if (!status) throw new Error("این کالا در این دوره قیمت‌گذاری نشده است");
 
-  const { successor } = await findSuccessorPeriod(reportingPeriodId);
+  const { period: revertPeriod, successor } = await findSuccessorPeriod(reportingPeriodId);
   if (successor) {
     const successorPriced = await prisma.goodsPricingStatus.findUnique({
       where: { goodsItemId_reportingPeriodId: { goodsItemId, reportingPeriodId: successor.id } },
@@ -405,6 +535,8 @@ export async function revertItem(goodsItemId: number, reportingPeriodId: number)
   // مقدار پیش از این اجرا برمی‌گردد. safe به‌خاطر بررسی «ابتدا باید دوره‌ی بعدی برگشت بخورد» بالا: هیچ
   // اجرای دیگری بعد از این یکی، روی همین کالا لایه‌ای اضافه نکرده است.
   await prisma.$transaction(async (tx) => {
+    // سال مالیِ بسته‌شده‌ی حسابداری موجودی: برگشت قیمت‌گذاری هم یک تغییر قیمت است و مجاز نیست
+    await assertFiscalYearNotAccountingClosed(tx, revertPeriod.fiscalPeriodId, "برگشت قیمت‌گذاری");
     await tx.documentItemAmount.deleteMany({ where: { goodsPricingStatusId: status.id } });
     await tx.goodsPricingStatus.delete({ where: { id: status.id } });
   });

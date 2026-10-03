@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma";
 import { resolveDetailTitles } from "../utils/detailValues";
 import { getLineAmounts } from "./documentItemAmountService";
+import { CARRY_FORWARD_OPENING_WHERE } from "./warehouseStockService";
 
 /**
  * سرویس مرکزیِ نرمال‌سازیِ «گردش انبار» برای گزارش «مرور موجودی انبار» (مرور تعدادی/مبلغی).
@@ -119,6 +120,8 @@ export async function getMovements(f: MovementFilters): Promise<Movement[]> {
       ...lineWhere,
       document: {
         date: { lte: f.toDate },
+        // سند انتقال مانده‌ی «بستن تعدادی» فقط رکورد است؛ گردش از روی اسناد سال‌های قبل تجمعی محاسبه می‌شود
+        NOT: CARRY_FORWARD_OPENING_WHERE,
         documentType: {
           in: [
             "INITIAL_INVENTORY",

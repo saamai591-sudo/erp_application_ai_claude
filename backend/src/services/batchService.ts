@@ -1,5 +1,5 @@
 import { prisma } from "../lib/prisma";
-import { SIGNED_TYPES } from "./warehouseStockService";
+import { SIGNED_TYPES, CARRY_FORWARD_OPENING_WHERE } from "./warehouseStockService";
 
 /**
  * سرویس مرکزی بچ، طبق stockAnalysis.md بند ۱۶: «تمام ایجاد و Validation مربوط به Batch باید از یک
@@ -82,7 +82,8 @@ export async function computeBatchAvailableQuantity(batchId: number): Promise<nu
     SIGNED_TYPES.map((rule) =>
       prisma.inventoryLineBatch
         .findMany({
-          where: { batchId, line: { document: { documentType: rule.documentType as any } } },
+          // سند انتقال مانده‌ی سیستمی فقط رکورد توصیفی است (نگاه کنید به CARRY_FORWARD_OPENING_WHERE) — وگرنه مانده‌ی بچ دوبار شمرده می‌شد
+          where: { batchId, line: { document: { documentType: rule.documentType as any, NOT: CARRY_FORWARD_OPENING_WHERE } } },
           select: { quantity: true },
         })
         .then((rows) => rule.sign * rows.reduce((s, r) => s + Number(r.quantity), 0))

@@ -345,6 +345,27 @@ export const REGISTRY: ModuleDef[] = [
         ],
       },
       {
+        key: "period-end",
+        title: "عملیات پایان دوره",
+        forms: [
+          {
+            key: "warehousing-quantity-close",
+            title: "بستن تعدادی موجودی",
+            baseActions: ["view"],
+            actions: [{ key: "close", title: "بستن" }],
+          },
+          {
+            key: "warehousing-accounting-close",
+            title: "بستن حسابداری موجودی",
+            baseActions: ["view"],
+            actions: [
+              { key: "close", title: "بستن" },
+              { key: "reverse", title: "برگشت بستن" },
+            ],
+          },
+        ],
+      },
+      {
         key: "warehouse-accounting",
         title: "حسابداری انبار",
         forms: [

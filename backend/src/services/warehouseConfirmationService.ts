@@ -1,6 +1,6 @@
 import { prisma, Db } from "../lib/prisma";
 import { computeStockAsOf } from "./warehouseStockService";
-import { getRequestContext } from "../lib/requestContext";
+import { getRequestContext, withoutFiscalPeriodScope } from "../lib/requestContext";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 
 /**
@@ -18,7 +18,7 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
  * دوره‌ی قدیمی‌تر (مثلاً برای اصلاح داده‌ی همان دوره) تغییر می‌داد، همچنان با «باید در دوره مالی جاری
  * باشد» روی تاریخ‌های همان دوره مواجه می‌شد.
  */
-async function currentFiscalPeriod() {
+export async function currentFiscalPeriod() {
   const ctx = getRequestContext();
   if (ctx?.fiscalPeriodId) {
     const period = await prisma.fiscalPeriod.findUnique({ where: { id: ctx.fiscalPeriodId } });
@@ -201,7 +201,7 @@ async function assertNoNegativeStockInRange(
 }
 
 // Snapshot همیشه مستقیم از اسناد محاسبه می‌شود، نه از یک Snapshot قبلی.
-async function buildSnapshotLines(warehouseId: number, asOfDate: Date, db: Db) {
+export async function buildSnapshotLines(warehouseId: number, asOfDate: Date, db: Db) {
   const goodsItemIds = await listGoodsItemIdsWithActivity(warehouseId, asOfDate, db);
   const quantities = await Promise.all(goodsItemIds.map((goodsItemId) => computeStockAsOf(warehouseId, goodsItemId, asOfDate, {}, db)));
   return goodsItemIds.map((goodsItemId, idx) => ({ goodsItemId, quantity: quantities[idx] })).filter((l) => l.quantity !== 0);
@@ -237,11 +237,30 @@ interface LockedWarehouseRow {
  * را از پایگاه‌داده می‌خواند. این تنها الگوی قفل صریح در کل پروژه است — عمداً محدود به همین عملیات کم‌تکرار
  * مدیریتی، نه یک الگوی عمومی برای بقیه‌ی اسناد انبار.
  */
-async function lockWarehouseRow(tx: Db, warehouseId: number): Promise<LockedWarehouseRow | null> {
+export async function lockWarehouseRow(tx: Db, warehouseId: number): Promise<LockedWarehouseRow | null> {
   const rows = await tx.$queryRaw<
     LockedWarehouseRow[]
   >`SELECT "id", "title", "confirmedDate", "implementationDate" FROM "Warehouse" WHERE "id" = ${warehouseId} FOR UPDATE`;
   return rows[0] ?? null;
+}
+
+/**
+ * «بستن تعدادی موجودی انبار» (services/warehouseQuantityCloseService.ts) فقط وقتی مجاز است که انبار تا پایان آن دوره مالی
+ * تایید باشد؛ پس برگشت از تاییدی که تاریخ تایید را به قبل از پایان یک دوره‌ی بسته‌شده ببرد، اسناد آن دوره را باز می‌کرد و
+ * سند موجودی اول دوره‌ی سال بعد را کهنه می‌گذاشت — رد می‌شود. زیر قفل ردیف انبار (همان تراکنش برگشت) اجرا می‌شود، پس
+ * با بستنِ هم‌زمان همان انبار هم ترتیب‌بندی می‌شود.
+ */
+async function assertNotQuantityClosedAfter(tx: Db, warehouseId: number, warehouseTitle: string, newConfirmedDate: Date): Promise<void> {
+  const closed = await withoutFiscalPeriodScope(() =>
+    tx.warehouseQuantityClose.findFirst({
+      where: { warehouseId, fiscalPeriod: { toDate: { gt: newConfirmedDate } } },
+      include: { fiscalPeriod: true },
+      orderBy: { fiscalPeriod: { toDate: "asc" } },
+    })
+  );
+  if (closed) {
+    throw new Error(`انبار «${warehouseTitle}» برای دوره مالی «${closed.fiscalPeriod.title}» بسته (بستن تعدادی) شده است؛ برگشت از تایید تا قبل از پایان آن دوره ممکن نیست`);
+  }
 }
 
 /**
@@ -338,6 +357,7 @@ export async function revertWarehouses(warehouseIds: number[], date: Date): Prom
           throw new Error(`انبار «${w.title}» تاریخ تاییدِ بزرگتر از تاریخ وارد‌شده ندارد`);
         }
         assertWarehouseConfirmedWithinCurrentFiscalYear(w, period);
+        await assertNotQuantityClosedAfter(tx, w.id, w.title, newConfirmedDate);
         const lines = await buildSnapshotLines(w.id, newConfirmedDate, tx);
         await replaceSnapshot(tx, w.id, newConfirmedDate, lines);
         await revertFinalizedWarehouseDocumentsAfter(w.id, newConfirmedDate, tx);

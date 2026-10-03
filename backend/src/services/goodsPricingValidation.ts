@@ -1,7 +1,9 @@
 import { prisma } from "../lib/prisma";
-import { findPredecessorPeriod, USER_PRICED_TYPES, DOC_TYPE_FA } from "./goodsPricingService";
+import { USER_PRICED_TYPES, DOC_TYPE_FA, findPreviousValuationProblems } from "./goodsPricingService";
+import { getPreviousYearAccountingCloseProblem } from "./inventoryAccountingGuards";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { getLineAmounts } from "./documentItemAmountService";
+import { CARRY_FORWARD_OPENING_WHERE } from "./warehouseStockService";
 
 export interface ValidationDetailRow {
   code: string;
@@ -34,29 +36,20 @@ export async function validatePriceOperation(reportingPeriodId: number, goodsIte
   const messages: string[] = [];
   const details: ValidationDetailRow[] = [];
 
-  // ۱) ترتیب دوره‌ای: طبق تصمیم صریح کاربر، قیمت‌گذاری باید دوره‌به‌دوره و پشت‌سرهم انجام شود — اگر کالا
-  // در دوره‌ی قبل قیمت‌گذاری نشده باشد، نباید در این دوره قیمت‌گذاری شود (priceItem خودش هم دقیقاً همین
-  // قاعده را دارد؛ اینجا فقط زودتر و به‌صورت دسته‌ای همان بررسی تکرار می‌شود).
-  const { predecessor } = await findPredecessorPeriod(reportingPeriodId);
-  if (predecessor) {
-    const pricedInPredecessor = await prisma.goodsPricingStatus.findMany({
-      where: { reportingPeriodId: predecessor.id, goodsItemId: { in: goodsItemIds } },
-      select: { goodsItemId: true },
-    });
-    const pricedIds = new Set(pricedInPredecessor.map((s) => s.goodsItemId));
-    const notPriced = goodsItemIds.filter((id) => !pricedIds.has(id));
-    if (notPriced.length > 0) {
-      messages.push("برخی از کالاهای انتخاب‌شده در دوره قبل قیمت‌گذاری نشده‌اند.");
-      for (const id of notPriced) {
-        const item = itemById.get(id);
-        if (item) {
-          details.push({
-            code: item.fullCode,
-            title: item.title,
-            reason: `دوره‌ی «${predecessor.title}» برای این کالا هنوز قیمت‌گذاری نشده است.`,
-          });
-        }
-      }
+  // ۱) پیش‌نیاز دوره مالی قبل: طبق تصمیم صریح کاربر، تنها کنترلِ دوره‌ی قبل این است که «بستن حسابداری موجودی» دوره مالیِ قبلِ
+  // این دوره‌ی گزارشگری انجام شده باشد — دیگر هیچ کنترل سطح‌کالای «در دوره‌ی قبل قیمت‌گذاری شده؟» وجود ندارد (priceItem خودش هم
+  // همین یک کنترل را، داخل تراکنش و زیر قفل، دوباره انجام می‌دهد).
+  const previousYearProblem = await getPreviousYearAccountingCloseProblem(period.fiscalPeriodId);
+  if (previousYearProblem) messages.push(previousYearProblem);
+
+  // ۱-ب) ارزش‌گذاری دوره‌ی گزارشگری قبل (سطح کالا، طبق تصمیم صریح کاربر): کالایی که قبل از شروع این دوره گردش داشته، باید در آخرین دوره‌ی
+  // گزارشگریِ قبلیِ دارای گردشش (همان سال مالی) رکورد ارزش‌گذاری داشته باشد؛ نبودنش خطا است و ادامه نمی‌دهد.
+  const previousValuationProblems = await findPreviousValuationProblems(goodsItemIds, period);
+  if (previousValuationProblems.length > 0) {
+    messages.push("برخی از کالاهای انتخاب‌شده در دوره‌ی گزارشگریِ قبلیِ دارای گردشِ خود ارزش‌گذاری نشده‌اند.");
+    for (const pr of previousValuationProblems) {
+      const item = itemById.get(pr.goodsItemId);
+      if (item) details.push({ code: item.fullCode, title: item.title, reason: `این کالا در دوره‌ی گزارشگری «${pr.period.title}» گردش داشته ولی در آن دوره قیمت‌گذاری نشده است.` });
     }
   }
 
@@ -103,10 +96,14 @@ export async function validatePriceOperation(reportingPeriodId: number, goodsIte
   // ۳) مبلغ اسناد کاربر-قیمت‌گذار: موجودی اول دوره/رسید انبار خرید/رسید تولید/اضافات انبارگردانی باید
   // مبلغ واقعی (بزرگ‌تر از صفر) داشته باشند — چون کاردکس این چهار نوع را عیناً (بدون محاسبه) به‌عنوان
   // مبنا می‌گیرد؛ اگر صفر مانده باشند، کل محاسبه‌ی بعدی غلط خواهد شد.
+  // پنجره‌ی ارزش‌گذاری: از شروع دوره مالی تا پایان این دوره‌ی گزارشگری (اسناد سال‌های قبل در محاسبه نمی‌آیند و بررسی نمی‌شوند)
+  const fiscal = await prisma.fiscalPeriod.findUnique({ where: { id: period.fiscalPeriodId } });
+  const windowFrom = fiscal!.fromDate;
   const candidateLines = await prisma.inventoryDocumentLine.findMany({
     where: {
       goodsItemId: { in: goodsItemIds },
-      document: { documentType: { in: Array.from(USER_PRICED_TYPES) as any }, date: { lte: period.toDate } },
+      // سند انتقال مانده‌ی «بستن تعدادی» عمداً بدون مبلغ است و در قیمت‌گذاری شمرده نمی‌شود
+      document: { documentType: { in: Array.from(USER_PRICED_TYPES) as any }, date: { gte: windowFrom, lte: period.toDate }, NOT: CARRY_FORWARD_OPENING_WHERE },
     },
     select: { id: true, goodsItemId: true, document: { select: { documentType: true, number: true, date: true } } },
   });

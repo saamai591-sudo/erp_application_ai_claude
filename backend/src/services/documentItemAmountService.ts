@@ -1,5 +1,6 @@
 import { Prisma, DocumentAmountPriceType } from "@prisma/client";
 import { prisma } from "../lib/prisma";
+import { assertLineAmountChangeAllowed } from "./inventoryAccountingGuards";
 
 // طبق Documents/WareHouseAmountChanges.md: تنها نقطه‌ی خواندن/نوشتن جدول DocumentItemAmount در کل
 // برنامه. هیچ کد دیگری نباید مستقیماً prisma.documentItemAmount را صدا بزند — همه از این‌جا عبور
@@ -54,6 +55,8 @@ export async function setLineAmount(
     createdById?: number | null;
   }
 ): Promise<{ difference: number; amount: number }> {
+  // سال مالیِ بسته‌شده‌ی حسابداری موجودی: هیچ تغییر مبلغی مجاز نیست (ردیف افتتاحیه‌ی خودِ «بستن» مستثناست)
+  if (params.priceType !== "ACCOUNTING_CLOSING") await assertLineAmountChangeAllowed(tx, params.lineId);
   const current = await getLineAmount(params.lineId, tx);
   const difference = params.newAmount - Number(current);
   await tx.documentItemAmount.create({
@@ -80,6 +83,7 @@ export async function setLineAmount(
  * اصلی) برگردد. اگر رکوردی با این lineId+priceType یافت نشود، بی‌صدا نادیده گرفته می‌شود.
  */
 export async function deleteLatestLineAmount(tx: Client, params: { lineId: number; priceType: DocumentAmountPriceType }): Promise<void> {
+  await assertLineAmountChangeAllowed(tx, params.lineId);
   const row = await tx.documentItemAmount.findFirst({
     where: { lineId: params.lineId, priceType: params.priceType },
     orderBy: { id: "desc" },

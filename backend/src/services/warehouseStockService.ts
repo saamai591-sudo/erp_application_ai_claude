@@ -42,6 +42,15 @@ export interface StockExcludeOptions {
   excludeInventoryCountingShortageId?: number;
 }
 
+/**
+ * سند «موجودی اول دوره»ی سیستمی که «بستن تعدادی موجودی انبار» (services/warehouseQuantityCloseService.ts) برای
+ * دوره‌ی مالی بعد می‌سازد. موجودی/گردش در کل سیستم تجمعی و از روی همه‌ی اسناد سال‌های قبل محاسبه می‌شود
+ * (computeStockAsOf، getMovements، موتور قیمت‌گذاری)؛ پس این سند فقط «رکورد انتقال مانده» است و در هیچ‌کدام از آن
+ * جمع‌ها شمرده نمی‌شود — وگرنه مانده‌ی سال قبل دو بار حساب می‌شد (یک‌بار از اسناد قبلی، یک‌بار از این سند).
+ * هر مصرف‌کننده‌ی تجمعی جدیدی باید همین شرط را اعمال کند.
+ */
+export const CARRY_FORWARD_OPENING_WHERE = { documentType: "INITIAL_INVENTORY", creationType: "SYSTEM" } as const;
+
 type WarehouseField = "warehouseId" | "sourceWarehouseId" | "destWarehouseId";
 
 interface SignedTypeRule {
@@ -93,6 +102,8 @@ export async function computeStockAsOf(
             [rule.warehouseField]: warehouseId,
             date: { lte: asOfDate },
             ...(opts[rule.excludeKey] ? { NOT: { id: opts[rule.excludeKey] } } : {}),
+            // سند انتقال مانده‌ی سیستمی در جمع تجمعی نمی‌آید (نگاه کنید به CARRY_FORWARD_OPENING_WHERE)
+            ...(rule.documentType === CARRY_FORWARD_OPENING_WHERE.documentType ? { creationType: "MANUAL" as const } : {}),
           },
         },
         select: { quantity: true },
