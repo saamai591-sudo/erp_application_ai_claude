@@ -2,6 +2,8 @@ import { prisma } from "../lib/prisma";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { currentFiscalPeriod, lockWarehouseRow, buildSnapshotLines } from "./warehouseConfirmationService";
 import { buildOpeningLineSpecs } from "./warehouseOpeningDetailService";
+import { lockOpeningYearExclusive } from "./inventoryAccountingGuards";
+import { withoutFiscalPeriodScope } from "../lib/requestContext";
 
 // =========================================================================
 // «بستن تعدادی موجودی انبار» (مدیریت موجودی و انبار › عملیات پایان دوره). به‌ازای هر انبار و برای دوره مالی جاری:
@@ -46,12 +48,15 @@ export interface QuantityCloseRow {
   closedAt: Date | null;
   closedByName: string | null;
   canClose: boolean;
+  /** «باز کردن» (برگشت بستن تعدادی) فقط برای انبار بسته‌شده و وقتی شرط‌های reopenWarehouseQuantity برقرار باشد */
+  canReopen: boolean;
+  reopenBlockedReason: string | null;
 }
 
 /** فقط انبارهایی که تاریخ راه‌اندازی (OpeningDate) آن‌ها ≤ پایان دوره مالی جاری است (انبار بدون تاریخ راه‌اندازی قابل ارزیابی نیست و نمایش داده نمی‌شود). */
 export async function listQuantityCloseStatus() {
   const { current, next } = await getQuantityCloseContext();
-  const [warehouses, closes] = await Promise.all([
+  const [warehouses, closes, accountingClose] = await Promise.all([
     prisma.warehouse.findMany({
       where: { implementationDate: { not: null, lte: current.toDate } },
       select: { id: true, code: true, title: true, isActive: true, implementationDate: true, confirmedDate: true },
@@ -59,11 +64,17 @@ export async function listQuantityCloseStatus() {
     }),
     // fiscalPeriodId صریح در where است، پس فیلتر خودکار دوره مالی دست‌نخورده می‌ماند
     prisma.warehouseQuantityClose.findMany({ where: { fiscalPeriodId: current.id }, include: { closedBy: { select: { firstName: true, lastName: true } } } }),
+    prisma.inventoryAccountingClose.findUnique({ where: { fiscalPeriodId: current.id }, select: { id: true } }),
   ]);
   const closeByWarehouse = new Map(closes.map((c) => [c.warehouseId, c]));
   const rows: QuantityCloseRow[] = warehouses.map((w) => {
     const close = closeByWarehouse.get(w.id);
     const confirmedThroughYearEnd = !!w.confirmedDate && w.confirmedDate.getTime() >= current.toDate.getTime();
+    // شرط‌های «باز کردن» (همان‌هایی که reopenWarehouseQuantity زیر قفل و داخل تراکنش دوباره کنترل می‌کند)
+    let reopenBlockedReason: string | null = null;
+    if (!close) reopenBlockedReason = "این انبار برای این دوره مالی بسته نشده است";
+    else if (accountingClose) reopenBlockedReason = "بستن حسابداری موجودی این دوره مالی انجام شده است؛ ابتدا «برگشت بستن حسابداری موجودی» را انجام دهید";
+    else if (next && w.confirmedDate && w.confirmedDate.getTime() >= next.fromDate.getTime()) reopenBlockedReason = "انبار در دوره مالی بعد تایید شده است؛ ابتدا «برگشت از تایید» انبار را انجام دهید";
     return {
       warehouseId: w.id,
       code: w.code,
@@ -75,6 +86,8 @@ export async function listQuantityCloseStatus() {
       closedAt: close?.closedAt ?? null,
       closedByName: close?.closedBy ? `${close.closedBy.firstName} ${close.closedBy.lastName}`.trim() : null,
       canClose: !close && confirmedThroughYearEnd && !!next,
+      canReopen: !reopenBlockedReason,
+      reopenBlockedReason,
     };
   });
   return { current, next, rows };
@@ -190,4 +203,71 @@ export async function closeWarehouseQuantity(warehouseId: number, userId: number
     if (e?.code === "P2002") throw new Error("این انبار هم‌زمان توسط عملیات دیگری بسته شد؛ صفحه را بازآوری کنید");
     throw e;
   }
+}
+
+export interface QuantityReopenResult {
+  warehouseId: number;
+  title: string;
+  removedDocumentNumber: number | null;
+}
+
+/**
+ * «باز کردن» انبارِ بسته‌شده‌ی تعدادی (برگشت بستن تعدادی): سند «موجودی اول دوره»ی سیستمی دوره‌ی بعد و رکورد بسته‌شدن حذف می‌شود تا
+ * انبار دوباره قابل بستن شود (و «برگشت از تایید» انبار، که بعد از بستن ممنوع بود، دوباره ممکن می‌شود). قواعد (طبق درخواست صریح کاربر)،
+ * همه زیر قفل و داخل یک تراکنش:
+ *  • در دوره مالی بعد تایید انبار وجود نداشته باشد (confirmedDate < شروع دوره‌ی بعد)؛
+ *  • «بستن حسابداری موجودی» همان دوره مالی انجام نشده باشد (اگر شده، ابتدا برگشت آن)؛
+ *  • انبار برای همین دوره بسته شده باشد و سند افتتاحیه‌اش هنوز همان سند سیستمی ثبت‌شده‌ی بدون مبلغ باشد.
+ * ترتیب قفل‌ها هم‌ترتیب «بستن حسابداری موجودی» است (قفل انحصاری مبلغ افتتاحیه‌ی دوره‌ی بعد → قفل ردیف انبار)، پس با آن بن‌بست نمی‌شود و
+ * بستن حسابداری هم‌زمان یا قبل از ما کامل می‌شود (و ما آن را می‌بینیم و رد می‌کنیم) یا بعد از ما شروع می‌شود و نبودنِ بستن تعدادی را می‌بیند؛
+ * تایید هم‌زمان انبار هم چون قفل ردیف انبار را می‌گیرد، پیش از ما یا پس از ما کامل می‌شود.
+ */
+export async function reopenWarehouseQuantity(warehouseId: number, userId: number | null): Promise<QuantityReopenResult> {
+  const { current, next } = await getQuantityCloseContext();
+  if (!next) throw new Error("دوره مالی بعد تعریف نشده است");
+
+  return prisma.$transaction(
+    async (tx) => {
+      await lockOpeningYearExclusive(tx, next.id);
+      const w = await lockWarehouseRow(tx, warehouseId);
+      if (!w) throw new Error("انبار یافت نشد");
+
+      const close = await withoutFiscalPeriodScope(() => tx.warehouseQuantityClose.findFirst({ where: { warehouseId: w.id, fiscalPeriodId: current.id } }));
+      if (!close) throw new Error(`انبار «${w.title}» برای دوره مالی «${current.title}» بسته نشده است`);
+
+      if (w.confirmedDate && w.confirmedDate.getTime() >= next.fromDate.getTime()) {
+        throw new Error(
+          `انبار «${w.title}» در دوره مالی بعد («${next.title}») تایید شده است (تا ${formatJalaliDateForMessage(w.confirmedDate)})؛ ابتدا «برگشت از تایید» انبار را انجام دهید`
+        );
+      }
+      const accountingClose = await withoutFiscalPeriodScope(() => tx.inventoryAccountingClose.findFirst({ where: { fiscalPeriodId: current.id }, select: { id: true } }));
+      if (accountingClose) {
+        throw new Error(`بستن حسابداری موجودی دوره مالی «${current.title}» انجام شده است؛ ابتدا «برگشت بستن حسابداری موجودی» را انجام دهید`);
+      }
+
+      let removedNumber: number | null = null;
+      if (close.openingDocumentId) {
+        const doc = await withoutFiscalPeriodScope(() =>
+          tx.inventoryDocument.findFirst({
+            where: { id: close.openingDocumentId!, documentType: "INITIAL_INVENTORY", creationType: "SYSTEM", warehouseId: w.id },
+            include: { lines: { select: { id: true } } },
+          })
+        );
+        if (doc) {
+          // سند افتتاحیه باید هنوز دست‌نخورده باشد: مبلغ ندارد (بستن حسابداری انجام نشده) و تاییدشده هم نیست
+          const amounts = await tx.documentItemAmount.count({ where: { lineId: { in: doc.lines.map((l) => l.id) } } });
+          if (amounts > 0 || doc.status !== "REGISTERED") {
+            throw new Error("سند موجودی اول دوره‌ی این انبار دیگر در وضعیت اولیه نیست (مبلغ دارد یا تایید شده)؛ باز کردن ممکن نیست");
+          }
+          removedNumber = doc.number;
+        }
+      }
+
+      // رکورد بسته‌شدن اول حذف می‌شود (کلید خارجی openingDocumentId)، بعد خودِ سند (ردیف‌ها/سریال/بچ با cascade)
+      await tx.warehouseQuantityClose.delete({ where: { id: close.id } });
+      if (close.openingDocumentId) await tx.inventoryDocument.deleteMany({ where: { id: close.openingDocumentId, documentType: "INITIAL_INVENTORY", creationType: "SYSTEM" } });
+      return { warehouseId: w.id, title: w.title, removedDocumentNumber: removedNumber };
+    },
+    { maxWait: 15000, timeout: 60000 }
+  );
 }

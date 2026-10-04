@@ -15,6 +15,12 @@ export interface UserPreferences {
 
 const DEFAULTS: UserPreferences = { font: "vazirmatn", theme: "default", fiscalPeriodId: "" };
 
+/** پس از هر تغییر/بارگذاری تنظیمات روی window پخش می‌شود تا نمایش‌های وابسته (مثل دوره مالی نوار بالا) به‌روز شوند. */
+export const PREFERENCES_CHANGED_EVENT = "app-preferences-changed";
+function notifyChanged() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(PREFERENCES_CHANGED_EVENT));
+}
+
 let cache: UserPreferences = { ...DEFAULTS };
 let loaded = false;
 let inflight: Promise<UserPreferences> | null = null;
@@ -29,6 +35,7 @@ export async function loadPreferences(): Promise<UserPreferences> {
         cache = { ...DEFAULTS, ...raw };
         loaded = true;
         inflight = null;
+        notifyChanged();
         return cache;
       })
       .catch(() => {
@@ -52,9 +59,11 @@ export function getPreferences(): UserPreferences {
  * سپس در پس‌زمینه با بک‌اند هماهنگ می‌شود. */
 export async function savePreferences(patch: Partial<UserPreferences>): Promise<UserPreferences> {
   cache = { ...cache, ...patch };
+  notifyChanged();
   const updated: Record<string, unknown> = await api.put("/me/preferences", patch);
   cache = { ...DEFAULTS, ...updated };
   loaded = true;
+  notifyChanged();
   return cache;
 }
 

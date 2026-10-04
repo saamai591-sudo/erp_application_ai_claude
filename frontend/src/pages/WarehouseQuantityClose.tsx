@@ -24,16 +24,21 @@ interface Row {
   closedAt: string | null;
   closedByName: string | null;
   canClose: boolean;
+  canReopen: boolean;
+  reopenBlockedReason: string | null;
 }
 interface Status { current: Period; next: Period | null; warehouses: Row[] }
 interface CloseResult { title: string; lineCount: number; documentNumber: number }
+interface ReopenResult { title: string; removedDocumentNumber: number | null }
 
 const INFO_TEXT =
   "با «بستن» هر انبار، موجودی نهایی تعدادیِ هر کالا در پایان دوره مالی جاری محاسبه و به‌صورت یک سند «موجودی اول دوره»ی سیستمی برای دوره مالی بعد " +
   "ثبت می‌شود (فقط تعداد؛ مبلغ‌ها تنظیم‌نشده می‌مانند و سند سیستمی قابل ویرایش/حذف نیست). فقط انبارهایی نمایش داده می‌شوند که تاریخ راه‌اندازی‌شان تا " +
   "پایان دوره مالی جاری باشد. بستن فقط وقتی ممکن است که خودِ انبار از «تایید انبار» تا پایان دوره مالی تایید شده باشد؛ این شرط هنگام بستن، دوباره و " +
   "در همان تراکنش از سرور کنترل می‌شود (اگر هم‌زمان کسی تایید را برگردانده باشد، بستن رد می‌شود و هیچ سندی ساخته نمی‌شود). انبارِ بسته‌شده دوباره " +
-  "قابل بستن نیست و برگشت از تاییدِ آن تا قبل از پایان این دوره ممکن نیست. دوره مالی بعد باید از قبل تعریف شده باشد.";
+  "قابل بستن نیست و برگشت از تاییدِ آن تا قبل از پایان این دوره ممکن نیست. دوره مالی بعد باید از قبل تعریف شده باشد. " +
+  "با «باز کردن» انبارِ بسته‌شده دوباره باز می‌شود (سند «موجودی اول دوره»ی سیستمیِ دوره بعد و رکورد بستن حذف می‌شود و برگشت از تایید انبار دوباره ممکن می‌شود)؛ " +
+  "این کار فقط وقتی مجاز است که انبار در دوره مالی بعد تایید نشده باشد و «بستن حسابداری موجودی» همین دوره مالی انجام نشده باشد.";
 
 export default function WarehouseQuantityClose() {
   const [status, setStatus] = useState<Status | null>(null);
@@ -59,6 +64,20 @@ export default function WarehouseQuantityClose() {
     try {
       const res: CloseResult = await api.post(`/warehouse-quantity-close/${row.warehouseId}/close`, {});
       showToast(`بستن انجام شد — ${res.title}: ${toFaDigits(String(res.lineCount))} کالا، سند موجودی اول دوره شماره ${toFaDigits(String(res.documentNumber))}`);
+    } catch (e) {
+      showError((e as ApiError).message);
+    } finally {
+      setBusy(null);
+      await load();
+    }
+  }
+
+  async function runReopen(row: Row) {
+    if (!window.confirm(`انبار «${row.title}» دوباره باز شود؟ سند «موجودی اول دوره»ی سیستمیِ دوره مالی بعد این انبار حذف می‌شود و می‌توانید پس از اصلاح، دوباره آن را ببندید.`)) return;
+    setBusy(row.warehouseId);
+    try {
+      const res: ReopenResult = await api.post(`/warehouse-quantity-close/${row.warehouseId}/reopen`, {});
+      showToast(`انبار «${res.title}» باز شد${res.removedDocumentNumber != null ? ` — سند موجودی اول دوره شماره ${toFaDigits(String(res.removedDocumentNumber))} حذف شد` : ""}`);
     } catch (e) {
       showError((e as ApiError).message);
     } finally {
@@ -138,7 +157,16 @@ export default function WarehouseQuantityClose() {
                       title={w.closedAt ? "این انبار قبلاً بسته شده است" : !w.confirmedThroughYearEnd ? "ابتدا انبار را از «تایید انبار» تا پایان دوره مالی تایید کنید" : undefined}
                       onClick={() => runClose(w)}
                     >
-                      {busy === w.warehouseId ? "در حال بستن..." : "بستن"}
+                      {busy === w.warehouseId ? "در حال انجام..." : "بستن"}
+                    </button>{" "}
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      disabled={!w.canReopen || busy !== null}
+                      title={w.reopenBlockedReason ?? "باز کردن انبار: حذف سند موجودی اول دوره‌ی سیستمی دوره بعد و امکان بستن مجدد"}
+                      onClick={() => runReopen(w)}
+                    >
+                      باز کردن
                     </button>
                   </td>
                 </tr>

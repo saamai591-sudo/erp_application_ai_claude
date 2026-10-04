@@ -352,7 +352,10 @@ export const REGISTRY: ModuleDef[] = [
             key: "warehousing-quantity-close",
             title: "بستن تعدادی موجودی",
             baseActions: ["view"],
-            actions: [{ key: "close", title: "بستن" }],
+            actions: [
+              { key: "close", title: "بستن" },
+              { key: "reopen", title: "باز کردن" },
+            ],
           },
           {
             key: "warehousing-accounting-close",

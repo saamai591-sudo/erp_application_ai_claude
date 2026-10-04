@@ -2,7 +2,7 @@ import { Router } from "express";
 import { AuthedRequest } from "../middleware/auth";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
-import { listQuantityCloseStatus, closeWarehouseQuantity } from "../services/warehouseQuantityCloseService";
+import { listQuantityCloseStatus, closeWarehouseQuantity, reopenWarehouseQuantity } from "../services/warehouseQuantityCloseService";
 
 // =========================================================================
 // «بستن تعدادی موجودی انبار» (مدیریت موجودی و انبار › عملیات پایان دوره). همه‌ی قواعد و هم‌زمانی در
@@ -33,6 +33,16 @@ router.post("/warehouse-quantity-close/:warehouseId/close", can(`${FORM}.close`)
     res.json(await closeWarehouseQuantity(warehouseId, req.user?.id ?? null));
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در بستن تعدادی انبار" });
+  }
+});
+
+router.post("/warehouse-quantity-close/:warehouseId/reopen", can(`${FORM}.reopen`), async (req: AuthedRequest, res) => {
+  const warehouseId = Number(req.params.warehouseId);
+  if (!Number.isInteger(warehouseId) || warehouseId <= 0) return res.status(400).json({ error: "انبار نامعتبر است" });
+  try {
+    res.json(await reopenWarehouseQuantity(warehouseId, req.user?.id ?? null));
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در باز کردن انبار" });
   }
 });
 

@@ -11,6 +11,7 @@ import { usePermissions } from "../lib/usePermissions";
 import { TabsBar } from "./TabsBar";
 import { UserSettingsModal } from "./UserSettingsModal";
 import { AboutModal } from "./AboutModal";
+import { FiscalPeriodBadge } from "./FiscalPeriodBadge";
 import { applyFont, applyTheme } from "../lib/userSettings";
 import { loadPreferences } from "../lib/preferences";
 
@@ -682,6 +683,7 @@ export default function Layout() {
             <div className="user">{user.firstName} {user.lastName}</div>
           </div>
           <div className="topbar-account">
+            <FiscalPeriodBadge />
             <button className="topbar-dock-btn dock-c-blue" onClick={() => setSettingsOpen(true)} title="تنظیمات کاربری">
               <GearIconFilled />
             </button>

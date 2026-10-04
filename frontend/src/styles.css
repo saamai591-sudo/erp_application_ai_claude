@@ -1488,6 +1488,8 @@ fieldset { min-width: 0; }
   flex-shrink: 0;
 }
 .topbar .user { font-size: 11.5px; color: var(--ink-soft); font-weight: 500; }
+/* دوره مالی جاری کاربر، کنار دکمه‌ی تنظیمات کاربری */
+.topbar-fiscal { font-size: 11.5px; color: var(--ink-soft); font-weight: 500; margin-inline-end: 6px; white-space: nowrap; }
 .topbar button.logout {
   background: none; border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
   padding: 6px 12px; font-size: 12px; cursor: pointer; color: var(--ink-soft);
