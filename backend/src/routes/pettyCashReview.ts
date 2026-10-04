@@ -36,8 +36,8 @@ function applyFilters(movements: PettyCashMovement[], pettyCashes: Map<number, P
   return movements.filter(
     (m) =>
       pettyCashes.has(m.pettyCashId) &&
-      // گردش «افتتاحیه» (custodianId = 0) مال خودِ تنخواه است: فقط وقتی فیلتر تنخواه‌دار نیست دیده می‌شود
-      (m.custodianId === 0 ? !f.custodianIds.size : custodians.has(m.custodianId)) &&
+      // گردش «افتتاحیه» هم مال همان تنخواه‌دار است (custodianId واقعی)
+      custodians.has(m.custodianId) &&
       (!f.pettyCashIds.size || f.pettyCashIds.has(m.pettyCashId)) &&
       (!f.custodianIds.size || f.custodianIds.has(m.custodianId))
   );
@@ -81,7 +81,6 @@ router.get("/petty-cash-review/custodians", can(`${FORM}.view`), async (req, res
     const f = parseFilters(req.query as CommonQuery);
     const [movements, pettyCashes, custodians] = await Promise.all([getPettyCashMovements(f.toDate), loadPettyCashes(), loadCustodians()]);
     const buckets = bucketize(applyFilters(movements, pettyCashes, custodians, { pettyCashIds: f.pettyCashIds, custodianIds: new Set() }), (m) => m.custodianId, f.fromDate, f.toDate);
-    buckets.delete(0); // تب «تنخواه‌دار»: افتتاحیه‌ی تنخواه به هیچ تنخواه‌داری تعلق ندارد
     const rows = Array.from(buckets.entries())
       .map(([id, b]) => {
         const c = custodians.get(id)!;

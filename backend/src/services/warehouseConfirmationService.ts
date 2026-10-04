@@ -289,6 +289,25 @@ async function assertNotQuantityClosedAfter(tx: Db, warehouseId: number, warehou
 }
 
 /**
+ * طبق درخواست صریح کاربر: «برگشت از تایید» به تاریخی کوچکتر یا مساوی تاریخ آخرین قیمت‌گذاریِ دوره مالی جاری ممکن نیست. «آخرین قیمت‌گذاری» =
+ * تاریخ پایان آخرین دوره‌ی گزارشگریِ همین دوره مالی که برای حداقل یک کالا قیمت‌گذاری (GoodsPricingStatus) دارد. چون برگشت از تایید به تاریخ d،
+ * اسناد از d به بعد را قابل ویرایش می‌کند و ارزش‌گذاری سطح کالا روی مجموع همه‌ی انبارها حساب می‌شود، هر سندِ تا آن تاریخ که عوض شود قیمت‌های
+ * ثبت‌شده را بی‌اعتبار می‌کرد؛ برای برگشت، ابتدا باید قیمت‌گذاری آن دوره (و بعدی‌ها) برگردانده شود. فقط خواندن است و بدون وابستگی به انبار.
+ */
+async function assertNotPricedThroughDate(db: Db, period: { id: number }, date: Date): Promise<void> {
+  const lastPriced = await db.reportingPeriod.findFirst({
+    where: { fiscalPeriodId: period.id, pricingStatuses: { some: {} } },
+    orderBy: { toDate: "desc" },
+    select: { title: true, toDate: true },
+  });
+  if (lastPriced && date.getTime() <= lastPriced.toDate.getTime()) {
+    throw new Error(
+      `برای دوره مالی جاری تا تاریخ ${formatJalaliDateForMessage(lastPriced.toDate)} (دوره گزارشگری «${lastPriced.title}») قیمت‌گذاری انجام شده است؛ برگشت از تایید به تاریخ ${formatJalaliDateForMessage(date)} (کوچکتر یا مساوی آخرین قیمت‌گذاری) ممکن نیست — ابتدا قیمت‌گذاری را برگردانید یا تاریخ را بعد از ${formatJalaliDateForMessage(lastPriced.toDate)} بگذارید`
+    );
+  }
+}
+
+/**
  * قطعی‌کردن دسته‌ای اسناد انبار تا تاریخ تایید — طبق کامنت مدل InventoryDocument.finalizedAt: رسید انبار
  * خرید فقط با تایید فاکتور خرید مبتنی بر آن قطعی می‌شود (نگاه کنید به warehouseReceipts.ts/
  * purchaseInvoices.ts)، نه با این تایید انبار دسته‌ای؛ پس WAREHOUSE_RECEIPT عمداً از این پویش کنار
@@ -371,6 +390,8 @@ export async function confirmWarehouses(warehouseIds: number[], date: Date): Pro
 export async function revertWarehouses(warehouseIds: number[], date: Date): Promise<WarehouseOperationResult[]> {
   if (!warehouseIds.length) throw new Error("حداقل یک انبار باید انتخاب شود");
   const period = await assertDateInCurrentFiscalPeriod(date);
+  // پیش‌شرط مشترک همه‌ی انبارها (ارزش‌گذاری سطح کالاست): کل درخواست را با یک خطای روشن رد می‌کند؛ داخل تراکنش هر انبار هم دوباره کنترل می‌شود
+  await assertNotPricedThroughDate(prisma, period, date);
 
   const newConfirmedDate = new Date(date);
   newConfirmedDate.setUTCDate(newConfirmedDate.getUTCDate() - 1);
@@ -382,6 +403,7 @@ export async function revertWarehouses(warehouseIds: number[], date: Date): Prom
       await prisma.$transaction(async (tx) => {
         const w = await lockWarehouseRow(tx, warehouseId);
         if (!w) throw new Error("انبار یافت نشد");
+        await assertNotPricedThroughDate(tx, period, date);
         if (!w.confirmedDate || w.confirmedDate.getTime() <= date.getTime()) {
           throw new Error(`انبار «${w.title}» تاریخ تاییدِ بزرگتر از تاریخ وارد‌شده ندارد`);
         }

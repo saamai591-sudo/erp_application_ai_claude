@@ -117,52 +117,52 @@ export async function computeCashClosing(current: { fromDate: Date; toDate: Date
 }
 
 export async function computePettyCashClosing(current: { fromDate: Date; toDate: Date }) {
-  // افتتاحیه‌ی دوره‌ی بعد (تاریخش = آخرین روز همین دوره) در مانده‌ی بستن اثر نمی‌گذارد
-  const [movements, pettyCashes, base] = await Promise.all([
+  // مانده‌ی پایان سال در سطح «تنخواه‌دار» (افتتاحیه‌ی تنخواه هم در سطح تنخواه‌دار است)؛ افتتاحیه‌ی دوره‌ی بعد (تاریخش = آخرین روز همین دوره) در مانده‌ی بستن اثر نمی‌گذارد
+  const [movements, custodians, base] = await Promise.all([
     getPettyCashMovements(current.toDate, { openingsBeforeDate: current.toDate }),
-    prisma.pettyCash.findMany({ select: { id: true, currencyId: true } }),
+    prisma.pettyCashCustodian.findMany({ select: { id: true, pettyCashId: true, pettyCash: { select: { currencyId: true } } } }),
     prisma.currency.findFirst({ where: { isBase: true } }),
   ]);
-  const currencyOf = new Map<number, number>(pettyCashes.map((p: any) => [p.id, p.currencyId]));
+  const infoOf = new Map<number, { pettyCashId: number; currencyId: number }>(custodians.map((c: any) => [c.id, { pettyCashId: c.pettyCashId, currencyId: c.pettyCash.currencyId }]));
   const totals = new Map<number, number>();
   for (const m of movements) {
-    if (!currencyOf.has(m.pettyCashId)) continue;
-    totals.set(m.pettyCashId, (totals.get(m.pettyCashId) || 0) + m.inflow - m.outflow);
+    if (!infoOf.has(m.custodianId)) continue;
+    totals.set(m.custodianId, (totals.get(m.custodianId) || 0) + m.inflow - m.outflow);
   }
   const round = (n: number) => Math.round(n * 100) / 100;
 
-  // نرخ تبدیل تنخواه ارزی: میانگین وزنیِ نرخ ارز ردیف‌های شارژِ تاییدشده؛ در نبودِ شارژ، نسبت مانده‌ی ارز پایه به مانده در آخرین افتتاحیه‌ی همان تنخواه
-  const foreign = Array.from(totals.keys()).filter((id) => currencyOf.get(id) !== base!.id);
+  // نرخ تبدیل تنخواه‌دارِ ارزی: میانگین وزنیِ نرخ ارز ردیف‌های شارژِ تاییدشده‌ی همان تنخواه‌دار؛ در نبودِ شارژ، نسبت مانده‌ی ارز پایه به مانده در آخرین افتتاحیه‌ی همان تنخواه‌دار
+  const foreign = Array.from(totals.keys()).filter((id) => infoOf.get(id)!.currencyId !== base!.id);
   const rates = new Map<number, number>();
   if (foreign.length) {
     const lines: any[] = await withoutFiscalPeriodScope(() =>
       prisma.paymentSettlementLine.findMany({
-        where: { paymentType: { nature: "TO_PETTY_CASH" }, payment: { status: "APPROVED", date: { lte: current.toDate } }, custodian: { pettyCashId: { in: foreign } } },
-        select: { amount: true, fxRate: true, custodian: { select: { pettyCashId: true } } },
+        where: { paymentType: { nature: "TO_PETTY_CASH" }, payment: { status: "APPROVED", date: { lte: current.toDate } }, custodianId: { in: foreign } },
+        select: { amount: true, fxRate: true, custodianId: true },
       })
     );
     const acc = new Map<number, { amount: number; base: number }>();
     for (const l of lines) {
-      const a = acc.get(l.custodian.pettyCashId) || { amount: 0, base: 0 };
+      const a = acc.get(l.custodianId) || { amount: 0, base: 0 };
       a.amount += Number(l.amount);
       a.base += Number(l.amount) * Number(l.fxRate);
-      acc.set(l.custodian.pettyCashId, a);
+      acc.set(l.custodianId, a);
     }
     for (const [id, a] of acc) if (a.amount > 0) rates.set(id, a.base / a.amount);
     const missing = foreign.filter((id) => !rates.has(id));
     if (missing.length) {
       const rows: any[] = await withoutFiscalPeriodScope(() =>
-        prisma.treasuryOpeningPettyCash.findMany({ where: { pettyCashId: { in: missing } }, include: { opening: { include: { fiscalPeriod: true } } } })
+        prisma.treasuryOpeningPettyCash.findMany({ where: { custodianId: { in: missing } }, include: { opening: { include: { fiscalPeriod: true } } } })
       );
       rows.sort((a, b) => a.opening.fiscalPeriod.fromDate.getTime() - b.opening.fiscalPeriod.fromDate.getTime());
-      for (const r of rows) if (Number(r.balance) !== 0 && r.opening.fiscalPeriod.fromDate <= current.fromDate) rates.set(r.pettyCashId, Number(r.baseBalance) / Number(r.balance));
+      for (const r of rows) if (Number(r.balance) !== 0 && r.opening.fiscalPeriod.fromDate <= current.fromDate) rates.set(r.custodianId, Number(r.baseBalance) / Number(r.balance));
     }
   }
   return Array.from(totals.entries())
-    .map(([pettyCashId, total]) => {
-      const currencyId = currencyOf.get(pettyCashId)!;
+    .map(([custodianId, total]) => {
+      const { pettyCashId, currencyId } = infoOf.get(custodianId)!;
       const balance = round(total);
-      return { pettyCashId, currencyId, balance, baseBalance: currencyId === base!.id ? balance : round(balance * (rates.get(pettyCashId) ?? 1)) };
+      return { custodianId, pettyCashId, currencyId, balance, baseBalance: currencyId === base!.id ? balance : round(balance * (rates.get(custodianId) ?? 1)) };
     })
     .filter((r) => r.balance !== 0 || r.baseBalance !== 0);
 }
@@ -214,9 +214,9 @@ export async function closeSection(section: CloseSection): Promise<{ section: Cl
         for (const r of rows) {
           // eslint-disable-next-line no-await-in-loop
           await tx.treasuryOpeningPettyCash.upsert({
-            where: { openingId_pettyCashId: { openingId: opening.id, pettyCashId: r.pettyCashId } },
+            where: { openingId_custodianId: { openingId: opening.id, custodianId: r.custodianId } },
             update: { currencyId: r.currencyId, balance: r.balance, baseBalance: r.baseBalance, isSystemGenerated: true },
-            create: { openingId: opening.id, pettyCashId: r.pettyCashId, currencyId: r.currencyId, balance: r.balance, baseBalance: r.baseBalance, rowOrder: order++, isSystemGenerated: true },
+            create: { openingId: opening.id, pettyCashId: r.pettyCashId, custodianId: r.custodianId, currencyId: r.currencyId, balance: r.balance, baseBalance: r.baseBalance, rowOrder: order++, isSystemGenerated: true },
           });
         }
         await tx.treasuryYearClose.create({ data: { fiscalPeriodId: current.id, section } });

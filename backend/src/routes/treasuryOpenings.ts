@@ -34,7 +34,7 @@ const router = Router();
 const RECEIVABLE_STATUSES = ["IN_HAND", "IN_COLLECTION", "BOUNCED"];
 const PAYABLE_STATUSES = ["ISSUED"];
 
-interface PettyCashLineIn { pettyCashId: number; balance: number; baseBalance?: number }
+interface PettyCashLineIn { custodianId: number; balance: number; baseBalance?: number }
 interface BankLineIn { bankAccountId: number; balance: number; baseBalance?: number }
 interface CashLineIn { cashBoxId: number; currencyId: number; balance: number; baseBalance?: number }
 interface ChequeIn {
@@ -151,6 +151,9 @@ async function serializeOpening(o: any) {
       systemGenerated: l.isSystemGenerated,
     })),
     pettyCashLines: o.pettyCashLines.map((l: any) => ({
+      custodianId: l.custodianId,
+      custodianTitle: partyDisplay(l.custodian?.party),
+      custodianCode: l.custodian?.detailCode ?? "",
       pettyCashId: l.pettyCashId,
       pettyCashTitle: l.pettyCash.title,
       currencyId: l.currencyId,
@@ -177,7 +180,7 @@ const DETAIL_INCLUDE = {
   fiscalPeriod: true,
   bankAccountLines: { include: { bankAccount: true, currency: true }, orderBy: { rowOrder: "asc" } },
   cashBoxLines: { include: { cashBox: true, currency: true }, orderBy: { rowOrder: "asc" } },
-  pettyCashLines: { include: { pettyCash: true, currency: true }, orderBy: { rowOrder: "asc" } },
+  pettyCashLines: { include: { pettyCash: true, currency: true, custodian: { include: { party: true } } }, orderBy: { rowOrder: "asc" } },
 } as const;
 
 router.get("/treasury-openings", can(`${FORM}.view`), async (_req, res) => {
@@ -238,22 +241,23 @@ async function cleanBankLines(lines: BankLineIn[] | undefined, baseCurrencyId: n
 }
 
 async function cleanPettyCashLines(lines: PettyCashLineIn[] | undefined, baseCurrencyId: number) {
-  const out: { pettyCashId: number; currencyId: number; balance: number; baseBalance: number }[] = [];
+  // افتتاحیه‌ی تنخواه در سطح «تنخواه‌دار» ثبت می‌شود؛ تنخواه و ارز از روی تنخواه‌دار معلوم است
+  const out: { pettyCashId: number; custodianId: number; currencyId: number; balance: number; baseBalance: number }[] = [];
   const seen = new Set<number>();
   for (const [idx, l] of (lines || []).entries()) {
-    if (!l.pettyCashId) throw new Error(`تنخواه‌ها — ردیف ${idx + 1}: انتخاب تنخواه الزامی است`);
-    if (seen.has(l.pettyCashId)) throw new Error(`تنخواه‌ها — ردیف ${idx + 1}: یک تنخواه نمی‌تواند دو بار ثبت شود`);
-    seen.add(l.pettyCashId);
+    if (!l.custodianId) throw new Error(`تنخواه‌ها — ردیف ${idx + 1}: انتخاب تنخواه‌دار الزامی است`);
+    if (seen.has(l.custodianId)) throw new Error(`تنخواه‌ها — ردیف ${idx + 1}: یک تنخواه‌دار نمی‌تواند دو بار ثبت شود`);
+    seen.add(l.custodianId);
     // eslint-disable-next-line no-await-in-loop
-    const pc = await prisma.pettyCash.findUnique({ where: { id: l.pettyCashId } });
-    if (!pc) throw new Error(`تنخواه‌ها — ردیف ${idx + 1}: تنخواه یافت نشد`);
+    const cu = await prisma.pettyCashCustodian.findUnique({ where: { id: l.custodianId }, include: { pettyCash: true } });
+    if (!cu) throw new Error(`تنخواه‌ها — ردیف ${idx + 1}: تنخواه‌دار یافت نشد`);
     const balance = Number(l.balance);
     if (Number.isNaN(balance)) throw new Error(`تنخواه‌ها — ردیف ${idx + 1}: مانده نامعتبر است`);
-    if (balance < 0) throw new Error(`تنخواه‌ها — ردیف ${idx + 1}: مانده‌ی تنخواه نمی‌تواند منفی باشد`);
-    // ارز از خودِ تنخواه می‌آید؛ برای ارز غیرپایه مانده‌ی ارز پایه هم الزامی است
-    const baseBalance = pc.currencyId === baseCurrencyId ? balance : Number(l.baseBalance);
+    if (balance < 0) throw new Error(`تنخواه‌ها — ردیف ${idx + 1}: مانده‌ی تنخواه‌دار نمی‌تواند منفی باشد`);
+    // ارز از خودِ تنخواهِ تنخواه‌دار می‌آید؛ برای ارز غیرپایه مانده‌ی ارز پایه هم الزامی است
+    const baseBalance = cu.pettyCash.currencyId === baseCurrencyId ? balance : Number(l.baseBalance);
     if (Number.isNaN(baseBalance)) throw new Error(`تنخواه‌ها — ردیف ${idx + 1}: مانده به ارز پایه الزامی است`);
-    out.push({ pettyCashId: l.pettyCashId, currencyId: pc.currencyId, balance, baseBalance });
+    out.push({ pettyCashId: cu.pettyCashId, custodianId: cu.id, currencyId: cu.pettyCash.currencyId, balance, baseBalance });
   }
   return out;
 }
@@ -415,22 +419,22 @@ async function syncBankLines(tx: any, openingId: number, incoming: { bankAccount
   }
 }
 
-/** ردیف‌های تنخواه: همان قاعده‌ی syncBankLines (کلید ردیف = تنخواه). */
-async function syncPettyCashLines(tx: any, openingId: number, incoming: { pettyCashId: number; currencyId: number; balance: number; baseBalance: number }[]) {
-  const existing = await tx.treasuryOpeningPettyCash.findMany({ where: { openingId, isSystemGenerated: true }, include: { pettyCash: true } });
-  const byId = new Map<number, (typeof incoming)[number]>(incoming.map((l) => [l.pettyCashId, l]));
+/** ردیف‌های تنخواه: همان قاعده‌ی syncBankLines (کلید ردیف = تنخواه‌دار). */
+async function syncPettyCashLines(tx: any, openingId: number, incoming: { pettyCashId: number; custodianId: number; currencyId: number; balance: number; baseBalance: number }[]) {
+  const existing = await tx.treasuryOpeningPettyCash.findMany({ where: { openingId, isSystemGenerated: true }, include: { custodian: { include: { party: true, pettyCash: true } } } });
+  const byId = new Map<number, (typeof incoming)[number]>(incoming.map((l) => [l.custodianId, l]));
   for (const e of existing) {
-    const l = byId.get(e.pettyCashId);
-    const label = `تنخواه‌ها — تنخواه ${e.pettyCash.title}`;
+    const l = byId.get(e.custodianId);
+    const label = `تنخواه‌ها — تنخواه‌دار ${partyDisplay(e.custodian?.party)} (${e.custodian?.pettyCash?.title ?? ""})`;
     if (!l) throw new Error(`${label}: این ردیف توسط «بستن سال» ساخته شده است و قابل حذف نیست`);
     if (Math.abs(l.balance - Number(e.balance)) > 0.005 || Math.abs(l.baseBalance - Number(e.baseBalance)) > 0.005) {
       throw new Error(`${label}: این ردیف توسط «بستن سال» ساخته شده است و قابل ویرایش نیست`);
     }
   }
-  const systemIds = new Set<number>(existing.map((e: any) => e.pettyCashId));
+  const systemIds = new Set<number>(existing.map((e: any) => e.custodianId));
   await tx.treasuryOpeningPettyCash.deleteMany({ where: { openingId, isSystemGenerated: false } });
   for (const [i, l] of incoming.entries()) {
-    if (systemIds.has(l.pettyCashId)) await tx.treasuryOpeningPettyCash.update({ where: { openingId_pettyCashId: { openingId, pettyCashId: l.pettyCashId } }, data: { rowOrder: i } });
+    if (systemIds.has(l.custodianId)) await tx.treasuryOpeningPettyCash.update({ where: { openingId_custodianId: { openingId, custodianId: l.custodianId } }, data: { rowOrder: i } });
     else await tx.treasuryOpeningPettyCash.create({ data: { ...l, openingId, rowOrder: i } });
   }
 }

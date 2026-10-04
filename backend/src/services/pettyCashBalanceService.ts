@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
-import { loadPettyCashOpenings, openingAdjustments } from "./pettyCashReviewService";
+import { loadPettyCashOpenings, custodianOpeningAdjustments } from "./pettyCashReviewService";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 
 // کنترل مانده منفی تنخواه — طبق تصمیم صریح کاربر: باید روی «مانده‌ی جاری» (running balance) در طول زمان
@@ -22,12 +22,15 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 interface BalanceEvent {
   date: Date;
   amount: number; // مثبت = شارژ، منفی = برداشت
+  /** تنخواه‌دارِ صاحب رویداد (برای تعدیل افتتاحیه‌ی همان تنخواه‌دار)؛ رویدادِ درحال‌ذخیره‌ی بی‌تنخواه‌دار در هیچ زنجیره‌ی افتتاحیه‌ای نمی‌آید */
+  custodianId?: number;
 }
 
 export interface PendingBalanceEvent {
   date: Date;
   /** مثبت برای شارژ (ماهیت «به تنخواه»)، منفی برای برداشت (پرداخت تنخواه) */
   amount: number;
+  custodianId?: number;
 }
 
 /**
@@ -58,7 +61,7 @@ export async function assertPettyCashRunningBalanceNotNegative(
         custodianId: { in: custodianIds },
         ...(opts.excludePettyCashPaymentId ? { NOT: { id: opts.excludePettyCashPaymentId } } : {}),
       },
-      select: { date: true, amount: true },
+      select: { date: true, amount: true, custodianId: true },
     }),
     prisma.paymentSettlementLine.findMany({
       where: {
@@ -67,17 +70,17 @@ export async function assertPettyCashRunningBalanceNotNegative(
         ...(opts.excludeSettlementLineId ? { NOT: { id: opts.excludeSettlementLineId } } : {}),
         ...(opts.excludePaymentId ? { paymentId: { not: opts.excludePaymentId } } : {}),
       },
-      select: { amount: true, payment: { select: { date: true } } },
+      select: { amount: true, custodianId: true, payment: { select: { date: true } } },
     }),
   ]));
 
   const events: BalanceEvent[] = [
-    ...payments.map((p) => ({ date: p.date, amount: -Number(p.amount) })),
-    ...fundingLines.map((f) => ({ date: f.payment.date, amount: Number(f.amount) })),
+    ...payments.map((p) => ({ date: p.date, amount: -Number(p.amount), custodianId: p.custodianId })),
+    ...fundingLines.map((f) => ({ date: f.payment.date, amount: Number(f.amount), custodianId: f.custodianId ?? undefined })),
     ...(opts.pendingEvents || []),
   ];
 
-  events.push(...openingAdjustments(events, await loadPettyCashOpenings({ pettyCashId })));
+  events.push(...custodianOpeningAdjustments(events, await loadPettyCashOpenings({ pettyCashId })));
 
   // در تاریخ‌های برابر، شارژ قبل از برداشت اعمال می‌شود (فرض خوش‌بینانه‌ی معمول کسب‌وکار: همان روز که
   // تنخواه شارژ می‌شود، برداشتِ همان روز هم پوشش داده می‌شود) — طبق تصمیم صریح کاربر برای «مانده‌ی جاری»

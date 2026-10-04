@@ -517,6 +517,7 @@ model PettyCashCustodian {
   payments               PettyCashPayment[]
   summaries              PettyCashSummary[]
   paymentSettlementLines PaymentSettlementLine[]
+  openingLines           TreasuryOpeningPettyCash[]
 
   @@unique([pettyCashId, partyId])
 }
@@ -3590,13 +3591,15 @@ model TreasuryOpeningCashBox {
   @@unique([openingId, cashBoxId, currencyId])
 }
 
-/// مانده‌ی اول دوره‌ی یک تنخواه (هم‌الگوی TreasuryOpeningBankAccount): به‌ازای هر تنخواه یک ردیف، به ارز خودِ تنخواه (و ارز پایه). اگر برای دوره ردیفی
-/// باشد، «مانده‌ی جاری» تنخواه در آن دوره از همین مقدار شروع می‌شود (services/pettyCashBalanceService.ts، services/pettyCashReviewService.ts).
+/// مانده‌ی اول دوره‌ی یک «تنخواه‌دار» (هم‌الگوی TreasuryOpeningBankAccount): به‌ازای هر تنخواه‌دار یک ردیف (تنخواهِ او از رابطه‌ی تنخواه‌دار معلوم است و
+/// pettyCashId فقط برای سادگی کوئری نگه داشته می‌شود)، به ارز خودِ تنخواه (و ارز پایه). اگر برای دوره ردیفی
+/// باشد، «مانده‌ی جاری» آن تنخواه‌دار (و در مجموع تنخواه) در آن دوره از همین مقدار شروع می‌شود (services/pettyCashBalanceService.ts، services/pettyCashReviewService.ts).
 model TreasuryOpeningPettyCash {
   id                Int             @id @default(autoincrement())
   openingId         Int
   rowOrder          Int             @default(0)
   pettyCashId       Int
+  custodianId       Int
   currencyId        Int
   balance           Decimal         @db.Decimal(18, 2)
   baseBalance       Decimal         @db.Decimal(18, 2)
@@ -3604,9 +3607,10 @@ model TreasuryOpeningPettyCash {
   isSystemGenerated Boolean         @default(false)
   opening           TreasuryOpening @relation(fields: [openingId], references: [id], onDelete: Cascade)
   pettyCash         PettyCash       @relation(fields: [pettyCashId], references: [id])
+  custodian         PettyCashCustodian @relation(fields: [custodianId], references: [id])
   currency          Currency        @relation(fields: [currencyId], references: [id])
 
-  @@unique([openingId, pettyCashId])
+  @@unique([openingId, custodianId])
 }
 
 // «بستن سال دریافت و پرداخت» — هر بخش به‌صورت مستقل بسته می‌شود؛ ردیف این جدول یعنی آن بخش از دوره‌ی مالیِ fiscalPeriodId

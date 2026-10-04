@@ -675,7 +675,7 @@ async function assertPettyCashFundingChangeAllowed(paymentId: number, newLines: 
       pendingEvents: newDate
         ? pendingLines
             .filter((l) => custodians.find((c: any) => c.id === l.custodianId)?.pettyCashId === pettyCashId)
-            .map((l) => ({ date: newDate, amount: Number(l.amount) }))
+            .map((l) => ({ date: newDate, amount: Number(l.amount), custodianId: l.custodianId ?? undefined }))
         : [],
     });
   }

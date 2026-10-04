@@ -79,7 +79,10 @@ router.put("/receipt-types/:id", can(`${FORM}.edit`), async (req, res) => {
 
   const existing = await prisma.receiptType.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "نوع دریافت یافت نشد" });
-  if (existing.hasTransactions && (body.nature !== undefined || body.basisType !== undefined)) {
+  // گردش فقط جلوی «تغییرِ واقعی» نوع/مبنا را می‌گیرد؛ فرم همیشه مقدار فعلی همین دو فیلد را هم می‌فرستد و غیرفعال/فعال‌کردن (یا تغییر عنوان) نباید به‌خاطر گردش رد شود
+  const natureChanged = body.nature !== undefined && body.nature !== existing.nature;
+  const basisChanged = body.basisType !== undefined && body.basisType !== existing.basisType;
+  if (existing.hasTransactions && (natureChanged || basisChanged)) {
     return res.status(400).json({ error: "این نوع دریافت گردش دارد و نوع/مبنا آن قابل ویرایش نیست" });
   }
 

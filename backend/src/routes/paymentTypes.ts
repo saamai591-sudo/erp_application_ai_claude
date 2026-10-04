@@ -85,7 +85,10 @@ router.put("/payment-types/:id", can(`${FORM}.edit`), async (req, res) => {
 
   const existing = await prisma.paymentType.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "نوع پرداخت یافت نشد" });
-  if (existing.hasTransactions && (body.nature !== undefined || body.basisType !== undefined)) {
+  // گردش فقط جلوی «تغییرِ واقعی» ماهیت/مبنا را می‌گیرد؛ فرم همیشه مقدار فعلی همین دو فیلد را هم می‌فرستد و غیرفعال/فعال‌کردن (یا تغییر عنوان) نباید به‌خاطر گردش رد شود
+  const natureChanged = body.nature !== undefined && body.nature !== existing.nature;
+  const basisChanged = body.basisType !== undefined && body.basisType !== existing.basisType;
+  if (existing.hasTransactions && (natureChanged || basisChanged)) {
     return res.status(400).json({ error: "این نوع پرداخت گردش دارد و ماهیت/مبنا آن قابل ویرایش نیست" });
   }
 

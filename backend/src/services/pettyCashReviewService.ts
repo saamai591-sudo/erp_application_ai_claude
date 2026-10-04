@@ -7,9 +7,10 @@ import { withoutFiscalPeriodScope } from "../lib/requestContext";
 //   ورودی (شارژ): ردیف موضوع پرداختِ ماهیت «به تنخواه» در سند پرداختِ «تایید»شده — به تاریخ سند پرداخت
 //   خروجی (پرداخت): «پرداخت تنخواه» (PettyCashPayment) — به تاریخ خودش (این سند تاییدی ندارد، پس همه‌ی رکوردها حساب می‌شوند)
 // مانده از ابتدای تاریخ‌ها (نه فقط دوره‌ی مالیِ جاری) پیوسته است و مانده‌ی ابتدای بازه = جمع همه‌ی گردش‌های قبل از «از تاریخ»، بدون محدودیت
-// دوره‌ی مالی. «افتتاحیه‌ی تنخواه» (TreasuryOpeningPettyCash — ساخته‌شده با «بستن تنخواه‌ها» در عملیات پایان دوره یا ثبت دستی) مانده‌ی
-// تنخواه را در «یک روز قبل از شروع دوره‌ی مالی» برابر مقدار خودش قرار می‌دهد (openingAdjustments): اگر زنجیره‌ی گردش‌ها همان مقدار را بدهد
-// (حالت عادی بعد از «بستن»)، چیزی اضافه نمی‌شود؛ وگرنه اختلاف به‌صورت یک گردش «افتتاحیه» (docTypeCode = OPENING) ثبت می‌شود.
+// دوره‌ی مالی. «افتتاحیه‌ی تنخواه» (TreasuryOpeningPettyCash — ساخته‌شده با «بستن تنخواه‌ها» در عملیات پایان دوره یا ثبت دستی؛ در سطح «تنخواه‌دار»)
+// مانده‌ی آن تنخواه‌دار را در «یک روز قبل از شروع دوره‌ی مالی» برابر مقدار خودش قرار می‌دهد (openingAdjustments، به‌ازای زنجیره‌ی گردش‌های
+// همان تنخواه‌دار): اگر زنجیره‌ی گردش‌ها همان مقدار را بدهد (حالت عادی بعد از «بستن»)، چیزی اضافه نمی‌شود؛ وگرنه اختلاف به‌صورت یک گردش
+// «افتتاحیه» (docTypeCode = OPENING، با custodianId همان تنخواه‌دار) ثبت می‌شود. مانده‌ی تنخواه = جمع مانده‌ی تنخواه‌دارهایش.
 // =========================================================================
 
 export interface PettyCashMovement {
@@ -41,7 +42,7 @@ export interface CustodianMeta {
   pettyCashId: number;
 }
 
-function partyDisplay(p: any): string {
+export function partyDisplay(p: any): string {
   if (!p) return "";
   return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
 }
@@ -58,28 +59,47 @@ export async function loadCustodians(): Promise<Map<number, CustodianMeta>> {
 
 export interface PettyCashOpeningRef {
   pettyCashId: number;
+  custodianId: number;
   /** یک روز قبل از شروع دوره‌ی مالیِ افتتاحیه */
   date: Date;
   balance: number;
 }
 
 /** افتتاحیه‌های تنخواه (همه‌ی دوره‌های مالی)؛ beforeDate: فقط افتتاحیه‌هایی که تاریخشان از آن کوچک‌تر است (مثلاً برای محاسبه‌ی مانده‌ی بستنِ دوره‌ای که افتتاحیه‌ی بعدی‌اش نباید در آن اثر کند). */
-export async function loadPettyCashOpenings(opts: { pettyCashId?: number; beforeDate?: Date } = {}): Promise<PettyCashOpeningRef[]> {
+export async function loadPettyCashOpenings(opts: { pettyCashId?: number; custodianId?: number; beforeDate?: Date } = {}): Promise<PettyCashOpeningRef[]> {
   return withoutFiscalPeriodScope(async () => {
     const rows = await prisma.treasuryOpeningPettyCash.findMany({
-      where: opts.pettyCashId ? { pettyCashId: opts.pettyCashId } : {},
+      where: { ...(opts.pettyCashId ? { pettyCashId: opts.pettyCashId } : {}), ...(opts.custodianId ? { custodianId: opts.custodianId } : {}) },
       include: { opening: { include: { fiscalPeriod: true } } },
     });
     return (rows as any[])
-      .map((r) => ({ pettyCashId: r.pettyCashId, date: new Date(r.opening.fiscalPeriod.fromDate.getTime() - 86400000), balance: Number(r.balance) }))
+      .map((r) => ({ pettyCashId: r.pettyCashId, custodianId: r.custodianId, date: new Date(r.opening.fiscalPeriod.fromDate.getTime() - 86400000), balance: Number(r.balance) }))
       .filter((r) => !opts.beforeDate || r.date < opts.beforeDate)
       .sort((a, b) => a.date.getTime() - b.date.getTime());
   });
 }
 
 /**
- * اختلاف «مانده‌ی افتتاحیه» با مانده‌ی زنجیره‌ی گردش‌های یک تنخواه در تاریخ افتتاحیه (گردش‌های همان روز و قبل از آن + اختلاف‌های قبلی).
- * events: گردش‌های همان تنخواه (amount مثبت = شارژ). خروجی: گردش‌های تعدیلی با تاریخ افتتاحیه (فقط اختلاف غیرصفر).
+ * تعدیل افتتاحیه‌ی همه‌ی تنخواه‌دارها (هر تنخواه‌دار با زنجیره‌ی گردش‌های خودش، نه کل تنخواه): events هر رویداد custodianId دارد؛ رویداد بدون
+ * custodianId (مثلاً تغییر در حال ذخیره‌ی مجموعِ تنخواه) در هیچ زنجیره‌ای نمی‌آید. خروجی: گردش‌های تعدیلی با custodianId.
+ */
+export function custodianOpeningAdjustments(
+  events: { date: Date; amount: number; custodianId?: number }[],
+  openings: PettyCashOpeningRef[]
+): { date: Date; amount: number; custodianId: number }[] {
+  const out: { date: Date; amount: number; custodianId: number }[] = [];
+  const byCustodian = new Map<number, PettyCashOpeningRef[]>();
+  for (const o of openings) byCustodian.set(o.custodianId, [...(byCustodian.get(o.custodianId) || []), o]);
+  for (const [custodianId, refs] of byCustodian) {
+    const own = events.filter((e) => e.custodianId === custodianId);
+    for (const a of openingAdjustments(own, refs)) out.push({ ...a, custodianId });
+  }
+  return out;
+}
+
+/**
+ * اختلاف «مانده‌ی افتتاحیه» با مانده‌ی زنجیره‌ی گردش‌های یک تنخواه‌دار در تاریخ افتتاحیه (گردش‌های همان روز و قبل از آن + اختلاف‌های قبلی).
+ * events: گردش‌های همان تنخواه‌دار (amount مثبت = شارژ). خروجی: گردش‌های تعدیلی با تاریخ افتتاحیه (فقط اختلاف غیرصفر).
  */
 export function openingAdjustments(events: { date: Date; amount: number }[], openings: PettyCashOpeningRef[]): { date: Date; amount: number }[] {
   const out: { date: Date; amount: number }[] = [];
@@ -145,17 +165,18 @@ export async function getPettyCashMovements(toDate: Date, opts: { openingsBefore
       });
     }
 
-    // تعدیل افتتاحیه‌ی هر تنخواه (تا toDate). گردشِ تعدیلی به تنخواه‌دار خاصی تعلق ندارد (custodianId = 0)
+    // تعدیل افتتاحیه‌ی هر تنخواه‌دار (تا toDate)، بر مبنای زنجیره‌ی گردش‌های خودِ همان تنخواه‌دار؛ گردش تعدیلی به همان تنخواه‌دار تعلق دارد
     const openings = (await loadPettyCashOpenings({ beforeDate: opts.openingsBeforeDate })).filter((o) => o.date <= toDate);
-    const byPettyCash = new Map<number, PettyCashOpeningRef[]>();
-    for (const o of openings) byPettyCash.set(o.pettyCashId, [...(byPettyCash.get(o.pettyCashId) || []), o]);
-    for (const [pettyCashId, refs] of byPettyCash) {
-      const events = movements.filter((m) => m.pettyCashId === pettyCashId).map((m) => ({ date: m.date, amount: m.inflow - m.outflow }));
+    const refsByCustodian = new Map<number, PettyCashOpeningRef[]>();
+    for (const o of openings) refsByCustodian.set(o.custodianId, [...(refsByCustodian.get(o.custodianId) || []), o]);
+    for (const [custodianId, refs] of refsByCustodian) {
+      const pettyCashId = refs[0].pettyCashId;
+      const events = movements.filter((m) => m.custodianId === custodianId).map((m) => ({ date: m.date, amount: m.inflow - m.outflow }));
       for (const [i, a] of openingAdjustments(events, refs).entries()) {
         movements.push({
-          key: `O${pettyCashId}-${i}`,
+          key: `O${custodianId}-${i}`,
           pettyCashId,
-          custodianId: 0,
+          custodianId,
           date: a.date,
           docType: "افتتاحیه",
           docTypeCode: "OPENING",

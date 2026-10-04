@@ -143,7 +143,7 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
     const basisIds = await resolveBasis(basisType, body, undefined, date, amount, custodian.pettyCash.currencyId, paymentType.nature);
 
     if (custodian.controlNegativeBalance) {
-      await assertPettyCashRunningBalanceNotNegative(custodian.pettyCashId, { pendingEvents: [{ date, amount: -amount }] });
+      await assertPettyCashRunningBalanceNotNegative(custodian.pettyCashId, { pendingEvents: [{ date, amount: -amount, custodianId: custodian.id }] });
     }
 
     const created = await prisma.pettyCashPayment.create({
@@ -214,7 +214,7 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
     if (custodian.controlNegativeBalance) {
       await assertPettyCashRunningBalanceNotNegative(custodian.pettyCashId, {
         excludePettyCashPaymentId: id,
-        pendingEvents: [{ date, amount: -amount }],
+        pendingEvents: [{ date, amount: -amount, custodianId: custodian.id }],
       });
     }
 
