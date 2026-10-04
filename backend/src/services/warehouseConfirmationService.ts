@@ -1,6 +1,6 @@
 import { prisma, Db } from "../lib/prisma";
 import { computeStockAsOf, CARRY_FORWARD_OPENING_WHERE } from "./warehouseStockService";
-import { lockOpeningYearShared, findPreviousFiscalPeriod } from "./inventoryAccountingGuards";
+import { findPreviousFiscalPeriod } from "./inventoryAccountingGuards";
 import { getRequestContext, withoutFiscalPeriodScope } from "../lib/requestContext";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 
@@ -343,9 +343,6 @@ export async function confirmWarehouses(warehouseIds: number[], date: Date): Pro
     try {
       // eslint-disable-next-line no-await-in-loop
       await prisma.$transaction(async (tx) => {
-        // قفل مشترک «مبلغ افتتاحیه‌ی همین دوره» (همان کلیدی که بستن/برگشت بستن حسابداری قبل از آن انحصاری می‌گیرند) — پیش از قفل ردیف انبار،
-        // هم‌ترتیب با بستن حسابداری (قفل مشترک → قفل ردیف) تا بن‌بست نشود؛ و برگشت بستنِ هم‌زمان یا قبل از تایید کامل می‌شود یا بعدش آن را می‌بیند
-        await lockOpeningYearShared(tx, period.id);
         const w = await lockWarehouseRow(tx, warehouseId);
         if (!w) throw new Error("انبار یافت نشد");
         if (w.confirmedDate && date.getTime() <= w.confirmedDate.getTime()) {

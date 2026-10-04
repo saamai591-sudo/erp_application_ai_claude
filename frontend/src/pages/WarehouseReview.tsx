@@ -71,9 +71,11 @@ interface LedgerRow {
   id: number;
   direction: "IN" | "OUT";
   docType: string;
-  docId: number;
-  docNumber: number;
+  /** null فقط برای ردیف مصنوعی «موجودی اول دوره» (مانده‌ی قبل از «از تاریخ») */
+  docId: number | null;
+  docNumber: number | null;
   date: string;
+  isOpening?: boolean;
   warehouseCode: number | null;
   warehouseTitle: string | null;
   goodsItemId: number;
@@ -152,6 +154,8 @@ function amountCol(header: string, field: keyof DimRow, outbound = false): Balan
     filterType: "number",
     filterValue: (r) => (r[field] as number) || 0,
     decimal: true,
+    // نمایش صادره منفی (پرانتز/قرمز) است؛ در اکسل هم باید منفی برود
+    exportValue: (r) => (outbound ? -Math.abs((r[field] as number) || 0) : (r[field] as number) || 0),
   };
 }
 
@@ -164,12 +168,12 @@ function ledgerColumns(mode: ReviewMode): (BalanceTableColumn<LedgerRow> & { fie
   const cols: (BalanceTableColumn<LedgerRow> & { field: string })[] = [
     { header: "نوع", field: "direction", render: (r) => <span className="badge">{DIRECTION_FA[r.direction]}</span>, sortValue: (r) => DIRECTION_FA[r.direction], filterType: "string", filterValue: (r) => DIRECTION_FA[r.direction] },
     { header: "نوع سند", field: "docType", render: (r) => r.docType, sortValue: (r) => r.docType, filterType: "string", filterValue: (r) => r.docType },
-    { header: "شماره", field: "docNumber", render: (r) => toFaDigits(String(r.docNumber)), sortValue: (r) => r.docNumber, filterType: "number", filterValue: (r) => r.docNumber },
+    { header: "شماره", field: "docNumber", render: (r) => (r.docNumber != null ? toFaDigits(String(r.docNumber)) : "—"), sortValue: (r) => r.docNumber ?? 0, filterType: "number", filterValue: (r) => r.docNumber },
     { header: "تاریخ", field: "date", render: (r) => formatJalaliDate(r.date), sortValue: (r) => r.date, filterType: "date", filterValue: (r) => r.date?.slice(0, 10) },
     { header: "کد انبار", field: "warehouseCode", render: (r) => (r.warehouseCode != null ? toFaDigits(String(r.warehouseCode)) : "—"), sortValue: (r) => r.warehouseCode ?? 0, filterType: "number", filterValue: (r) => r.warehouseCode },
     { header: "انبار", field: "warehouseTitle", render: (r) => r.warehouseTitle || "—", sortValue: (r) => r.warehouseTitle || "", filterType: "string", filterValue: (r) => r.warehouseTitle || "" },
-    { header: "کد کالا", field: "goodsItemCode", render: (r) => toFaDigits(r.goodsItemCode), sortValue: (r) => r.goodsItemCode, filterType: "string", filterValue: (r) => r.goodsItemCode },
-    { header: "کالا", field: "goodsItemTitle", render: (r) => r.goodsItemTitle, sortValue: (r) => r.goodsItemTitle, filterType: "string", filterValue: (r) => r.goodsItemTitle },
+    { header: "کد کالا", field: "goodsItemCode", render: (r) => (r.goodsItemCode ? toFaDigits(r.goodsItemCode) : "—"), sortValue: (r) => r.goodsItemCode, filterType: "string", filterValue: (r) => r.goodsItemCode },
+    { header: "کالا", field: "goodsItemTitle", render: (r) => r.goodsItemTitle || "—", sortValue: (r) => r.goodsItemTitle, filterType: "string", filterValue: (r) => r.goodsItemTitle },
     {
       header: "مقدار",
       field: "quantity",
@@ -179,6 +183,7 @@ function ledgerColumns(mode: ReviewMode): (BalanceTableColumn<LedgerRow> & { fie
       filterValue: (r) => r.quantity,
       decimal: true,
       totalValue: (r) => (r.direction === "OUT" ? -r.quantity : r.quantity),
+      exportValue: (r) => (r.direction === "OUT" ? -r.quantity : r.quantity),
     },
   ];
   if (mode === "amount") {
@@ -191,6 +196,7 @@ function ledgerColumns(mode: ReviewMode): (BalanceTableColumn<LedgerRow> & { fie
       filterValue: (r) => r.amount,
       decimal: true,
       totalValue: (r) => (r.direction === "OUT" ? -r.amount : r.amount),
+      exportValue: (r) => (r.direction === "OUT" ? -r.amount : r.amount),
     });
   }
   // «مانده در خط» عمداً بدون sortValue/filterType است — یک مقدار تجمعی وابسته به ترتیب پردازش سرور
@@ -546,6 +552,7 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
           columns={ledgerCols}
           selectable={false}
           onRowDoubleClick={(r) => {
+            if (r.docId == null) return; // ردیف مصنوعی «موجودی اول دوره»: سندی ندارد
             const full = DOC_TYPE_FULL_PATH[r.docType];
             if (full) {
               openTab(`${full}/${r.docId}/edit`);

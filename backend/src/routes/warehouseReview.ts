@@ -125,8 +125,9 @@ interface LedgerRow {
   id: number;
   direction: string;
   docType: string;
-  docId: number;
-  docNumber: number;
+  /** null فقط برای ردیف مصنوعی «موجودی اول دوره» (مانده‌ی قبل از «از تاریخ») */
+  docId: number | null;
+  docNumber: number | null;
   date: Date;
   warehouseCode: number | null;
   warehouseTitle: string | null;
@@ -135,6 +136,8 @@ interface LedgerRow {
   goodsItemTitle: string;
   quantity: number;
   amount: number;
+  /** ردیف مصنوعی «موجودی اول دوره» */
+  isOpening?: boolean;
   serialNumber: string | null;
   batchNumber: string | null;
   expiryDate: Date | null;
@@ -487,9 +490,60 @@ router.get("/warehouse-review/ledger", canViewWarehouseReview, async (req: Authe
       req.query.sortDir as string | undefined,
       req.query.sorts
     );
-    const total = filteredSorted.length;
+    // ردیف «موجودی اول دوره»: مانده‌ی (امضادار) همه‌ی گردش‌های قبل از «از تاریخ» که با انتخاب‌های تب‌ها/فیلترهای بالا می‌خوانند — همان مقداری
+    // که «مانده در خط» ردیف اول بازه از آن شروع می‌شود؛ بدون این ردیف، بازه‌ای که از وسط سال یا از سال بعدِ بسته‌شده شروع می‌شود مانده‌ی اولش
+    // هیچ‌جا دیده نمی‌شد (افتتاحیه‌ی سیستمی سال بعد عمداً از گردش‌ها بیرون است و مانده‌اش تجمعی از اسناد قبل می‌آید). فقط وقتی فیلتر ستونی فعال
+    // نیست اضافه می‌شود (فیلتر ستون مانده‌ی اول را معنا نمی‌کند)؛ همیشه اولین ردیف است، مستقل از مرتب‌سازی.
+    let openQty = 0;
+    let openAmount = 0;
+    for (const m of sorted) {
+      if (m.date >= f.fromDate) continue;
+      const sign = m.direction === "IN" ? 1 : -1;
+      openQty += sign * m.quantity;
+      openAmount += sign * m.amount;
+    }
+    let hasColumnFilters = false;
+    if (req.query.filters) {
+      try {
+        const parsed = typeof req.query.filters === "string" ? JSON.parse(req.query.filters) : req.query.filters;
+        hasColumnFilters = !!parsed && typeof parsed === "object" && Object.keys(parsed).length > 0;
+      } catch {
+        hasColumnFilters = true;
+      }
+    }
+    const openingRows: LedgerRow[] =
+      !hasColumnFilters && (Math.abs(openQty) > 1e-9 || Math.abs(openAmount) > 1e-9)
+        ? [
+            {
+              id: -1,
+              direction: openQty >= 0 ? "IN" : "OUT",
+              docType: "موجودی اول دوره",
+              docId: null,
+              docNumber: null,
+              date: f.fromDate,
+              warehouseCode: null,
+              warehouseTitle: null,
+              goodsItemId: 0,
+              goodsItemCode: "",
+              goodsItemTitle: "",
+              quantity: Math.abs(openQty),
+              amount: Math.abs(openAmount),
+              isOpening: true,
+              serialNumber: null,
+              batchNumber: null,
+              expiryDate: null,
+              physicalLocation: null,
+              detailCode: null,
+              detailTitle: null,
+              runningQuantity: openQty,
+              runningAmount: openAmount,
+            },
+          ]
+        : [];
+    const allRows = [...openingRows, ...filteredSorted];
+    const total = allRows.length;
     const start = (page - 1) * pageSize;
-    const rows = redactAmounts(filteredSorted.slice(start, start + pageSize), !!req.canViewAmount, LEDGER_AMOUNT_KEYS);
+    const rows = redactAmounts(allRows.slice(start, start + pageSize), !!req.canViewAmount, LEDGER_AMOUNT_KEYS);
 
     res.json({ rows, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
   } catch (e: any) {

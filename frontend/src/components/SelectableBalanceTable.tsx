@@ -25,6 +25,8 @@ export interface BalanceTableColumn<T> {
   decimal?: boolean;
   /** مقدار خام برای محاسبه‌ی جمع (فقط وقتی decimal=true)؛ اگر ندهید از filterValue استفاده می‌شود */
   totalValue?: (row: T) => string | number | null | undefined;
+  /** مقدار علامت‌دار برای خروجی اکسل/چاپ (مثلاً صادره منفی)؛ نگاه کنید به ExportColumn.exportValue در lib/gridExport.ts */
+  exportValue?: (row: T) => string | number | null | undefined;
 }
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];

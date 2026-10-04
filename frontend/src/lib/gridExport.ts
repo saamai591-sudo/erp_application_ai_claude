@@ -11,6 +11,9 @@ export interface ExportColumn<T> {
   render: (row: T) => any;
   /** مقدار خام قابل‌نمایش وقتی render() چیزی غیر از رشته/عدد (مثلاً JSX یک بج) برمی‌گرداند */
   filterValue?: (row: T) => string | number | null | undefined;
+  /** مقدار خام «علامت‌دار» برای خروجی اکسل/چاپ، وقتی نمایش گرید با filterValue (اندازه‌ی مثبت) فرق دارد — مثلاً ستون «صادره» که در گرید به
+   * فرمت حسابداری (پرانتز و قرمز = منفی) دیده می‌شود: در اکسل باید همان مقدار منفی برود. اگر داده شود بر render/filterValue اولویت دارد. */
+  exportValue?: (row: T) => string | number | null | undefined;
   /** ستون عددی واقعی (از Column<T>): در اکسل عدد می‌ماند، نه متن */
   filterType?: "string" | "number" | "date";
   decimal?: boolean;
@@ -35,6 +38,10 @@ function toDisplayText(value: any): string {
  * می‌بیند)؛ اگر JSX برگرداند (مثل بج وضعیت یا مبلغ رنگی)، به filterValue برمی‌گردد که طبق قرارداد
  * همین کدبیس همیشه معادل متنیِ همان ستون است */
 export function cellText<T>(col: ExportColumn<T>, row: T): string {
+  if (col.exportValue) {
+    const ev = col.exportValue(row);
+    return ev === null || ev === undefined ? "" : toDisplayText(ev);
+  }
   const rendered = col.render(row);
   if (typeof rendered === "string" || typeof rendered === "number") return toDisplayText(rendered);
   if (col.filterValue) {
@@ -102,6 +109,10 @@ export function exportGridToExcel<T>(columns: ExportColumn<T>[], rows: T[], grid
   const dataRows = rows.map((row) =>
     columns.map((c) => {
       const rendered = c.render(row);
+      if (c.exportValue) {
+        const ev = c.exportValue(row);
+        return toExcelCell(ev, cellText(c, row), isNumericColumn(c));
+      }
       const raw = typeof rendered === "string" || typeof rendered === "number" ? rendered : c.filterValue ? c.filterValue(row) : undefined;
       return toExcelCell(raw, cellText(c, row), isNumericColumn(c));
     })

@@ -7,6 +7,7 @@ import { formatJalaliDate } from "../lib/formatDate";
 import { api, ApiError } from "../lib/api";
 import { RequiredMark } from "../components/RequiredMark";
 import { usePersistedState } from "../lib/usePersistedState";
+import { showToast, showError } from "../lib/toast";
 
 // «تایید انبار» — طبق سند Documents/تایید انبار.md. جایگزین کامل «بستن موجودی انبار» قدیمی؛ عمداً
 // بدون تاریخچه/Audit و بدون هیچ عملیات اضافه‌ای فراتر از متن سند.
@@ -103,6 +104,15 @@ export default function WarehouseConfirmation() {
           return r?.success ? { ...c, confirmedDate: newConfirmedDate } : c;
         })
       );
+      // پیام شناور نتیجه: موفقیت (با تعداد انبار) و در صورت وجود، خطای انبارهای ناموفق (علت هر ردیف در ستون «وضعیت» هم هست)
+      const okCount = results.filter((r) => r.success).length;
+      const failed = results.filter((r) => !r.success);
+      if (okCount > 0) {
+        showToast(mode === "CONFIRM" ? `تایید ${toFaDigits(String(okCount))} انبار با موفقیت انجام شد` : `برگشت از تایید ${toFaDigits(String(okCount))} انبار با موفقیت انجام شد`);
+      }
+      if (failed.length > 0) {
+        showError(`${toFaDigits(String(failed.length))} انبار انجام نشد: ${failed[0].error ?? "خطای نامشخص"}`);
+      }
     } catch (e) {
       setError((e as ApiError).message);
     } finally {
