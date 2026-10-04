@@ -514,7 +514,7 @@ export function DataTable<T extends { id: number | string }>({
     setBestFit(null);
   }, [bestFitSignature]);
   function applyBestFit() {
-    const widths = measureBestFitWidths(scrollAreaRef.current?.querySelector("table"));
+    const widths = measureBestFitWidths(scrollAreaRef.current?.querySelector("table"), footerScrollRef.current?.querySelector("table"));
     setBestFit(widths.length ? widths : null);
   }
   useLayoutEffect(() => {

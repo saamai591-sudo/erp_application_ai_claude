@@ -52,6 +52,13 @@ router.get("/:id", async (req, res) => {
   res.json(period);
 });
 
+/** کد بعدی: (بزرگ‌ترین کد عددیِ دوره‌های همین دوره مالی) + ۱؛ اگر کد عددی نیست ۱ */
+async function nextAutoCode(fiscalPeriodId: number): Promise<string> {
+  const existing = await prisma.reportingPeriod.findMany({ where: { fiscalPeriodId }, select: { code: true } });
+  const nums = existing.map((p) => p.code.trim()).filter((c) => /^[0-9]+$/.test(c)).map(Number);
+  return String((nums.length ? Math.max(...nums) : 0) + 1);
+}
+
 router.post("/", can(`${FORM}.create`), async (req, res) => {
   const { code: rawCode, title, toDate: rawToDate, fiscalPeriodId } = req.body as {
     code: string;
@@ -60,16 +67,18 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
     fiscalPeriodId?: number;
   };
 
-  const code = rawCode ? toEnglishDigits(rawCode).trim() : "";
-  if (!code) return res.status(400).json({ error: "کد دوره الزامی است" });
+  // کد اختیاری است: اگر کاربر نزده باشد سیستم تخصیص می‌دهد (پایین، بعد از شناخت دوره مالی)
+  const typedCode = rawCode ? toEnglishDigits(rawCode).trim() : "";
   if (!title || !title.trim()) return res.status(400).json({ error: "عنوان دوره الزامی است" });
   if (!rawToDate) return res.status(400).json({ error: "تاریخ پایان الزامی است" });
 
   const fp = await resolveFiscalPeriod(fiscalPeriodId);
   if (!fp) return res.status(400).json({ error: "دوره مالی تعریف نشده است" });
 
-  const dupCode = await prisma.reportingPeriod.findUnique({ where: { fiscalPeriodId_code: { fiscalPeriodId: fp.id, code } } });
-  if (dupCode) return res.status(400).json({ error: "کد دوره قبلاً استفاده شده است" });
+  if (typedCode) {
+    const dupCode = await prisma.reportingPeriod.findUnique({ where: { fiscalPeriodId_code: { fiscalPeriodId: fp.id, code: typedCode } } });
+    if (dupCode) return res.status(400).json({ error: "کد دوره قبلاً استفاده شده است" });
+  }
 
   const lastPeriod = await prisma.reportingPeriod.findFirst({
     where: { fiscalPeriodId: fp.id },
@@ -86,10 +95,24 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
     return res.status(400).json({ error: "تاریخ پایان باید در محدوده دوره مالی جاری قرار داشته باشد" });
   }
 
-  const period = await prisma.reportingPeriod.create({
-    data: { fiscalPeriodId: fp.id, code, title: title.trim(), fromDate, toDate },
-  });
-  res.status(201).json(period);
+  // کد خودکار: بعد از بزرگ‌ترین کد عددیِ همین دوره مالی (کدهای غیرعددی نادیده گرفته می‌شوند)؛ در رقابتِ هم‌زمان، یکتایی (دوره مالی، کد)
+  // دیتابیس سد نهایی است و تخصیص دوباره تکرار می‌شود. کد تایپ‌شده‌ی کاربر هرگز تغییر نمی‌کند.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = typedCode || (await nextAutoCode(fp.id));
+    try {
+      const period = await prisma.reportingPeriod.create({
+        data: { fiscalPeriodId: fp.id, code, title: title.trim(), fromDate, toDate },
+      });
+      return res.status(201).json(period);
+    } catch (e: any) {
+      if (e?.code === "P2002") {
+        if (typedCode) return res.status(400).json({ error: "کد دوره قبلاً استفاده شده است" });
+        continue;
+      }
+      throw e;
+    }
+  }
+  return res.status(400).json({ error: "تخصیص خودکار کد دوره انجام نشد؛ دوباره تلاش کنید" });
 });
 
 router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
@@ -103,8 +126,8 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
   const fp = await prisma.fiscalPeriod.findUnique({ where: { id: period.fiscalPeriodId } });
   if (!fp) return res.status(400).json({ error: "دوره مالی یافت نشد" });
 
-  const code = rawCode !== undefined ? toEnglishDigits(rawCode).trim() : period.code;
-  if (!code) return res.status(400).json({ error: "کد دوره الزامی است" });
+  // کد خالی (پاک‌شده) = همان کد قبلی نگه داشته می‌شود؛ کد دوره اجباری نیست
+  const code = rawCode !== undefined && toEnglishDigits(rawCode).trim() ? toEnglishDigits(rawCode).trim() : period.code;
   if (title !== undefined && !title.trim()) return res.status(400).json({ error: "عنوان دوره الزامی است" });
   if (!rawToDate) return res.status(400).json({ error: "تاریخ پایان الزامی است" });
 

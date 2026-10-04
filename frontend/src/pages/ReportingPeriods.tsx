@@ -195,8 +195,8 @@ function PeriodForm() {
         <ErrorToast message={formError} />
         <div className="form-grid">
           <div className="form-field">
-            <label>کد دوره<RequiredMark /></label>
-            <input dir="ltr" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} autoFocus />
+            <label>کد دوره</label>
+            <input dir="ltr" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="خالی = تخصیص خودکار توسط سیستم" autoFocus />
           </div>
           <div className="form-field">
             <label>عنوان دوره<RequiredMark /></label>
@@ -284,7 +284,7 @@ function PeriodEditForm({ editId }: { editId: number }) {
         <ErrorToast message={formError} />
         <div className="form-grid">
           <div className="form-field">
-            <label>کد دوره<RequiredMark /></label>
+            <label>کد دوره</label>
             <input dir="ltr" value={code} onChange={(e) => setCode(e.target.value)} />
           </div>
           <div className="form-field">
