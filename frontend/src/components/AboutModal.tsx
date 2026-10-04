@@ -6,6 +6,7 @@ import { toFaDigits } from "../lib/formatAmount";
 interface AboutInfo {
   version: string;
   database: {
+    name: string | null;
     schemaVersion: string | null;
     migration: string | null;
     appliedMigrations: number;
@@ -15,7 +16,7 @@ interface AboutInfo {
   };
 }
 
-/** دیالوگ «درباره»: نسخه‌ی سیستم و نسخه‌ی پایگاه داده (GET /api/about). نسخه‌ها عمداً به‌صورت لاتین (LTR) نشان داده می‌شوند. */
+/** دیالوگ «درباره»: نسخه‌ی سیستم، نام پایگاه داده‌ی متصل و نسخه‌ی اسکیمای آن (GET /api/about). نسخه‌ها عمداً به‌صورت لاتین (LTR) نشان داده می‌شوند. */
 export function AboutModal({ onClose }: { onClose: () => void }) {
   const [info, setInfo] = useState<AboutInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +39,12 @@ export function AboutModal({ onClose }: { onClose: () => void }) {
 
           <div className="about-label">پایگاه داده</div>
           <div className="about-value" dir="ltr">
+            {db?.name || "نامشخص"}
+            <div className="about-sub">{db?.engine ?? ""}</div>
+          </div>
+
+          <div className="about-label">نسخه‌ی پایگاه داده</div>
+          <div className="about-value" dir="ltr">
             {db?.schemaVersion ? (
               <>
                 {db.schemaVersion}
@@ -47,7 +54,7 @@ export function AboutModal({ onClose }: { onClose: () => void }) {
               "نامشخص"
             )}
             <div className="about-sub">
-              {[db?.engine, db && db.appliedMigrations ? `${db.appliedMigrations} migrations` : null].filter(Boolean).join(" · ")}
+              {db && db.appliedMigrations ? `${db.appliedMigrations} migrations` : ""}
             </div>
           </div>
         </div>

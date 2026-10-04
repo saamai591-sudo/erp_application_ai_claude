@@ -50,11 +50,15 @@ router.get("/about", async (_req, res) => {
   let applied: { migration_name: string }[] = [];
   let appliedCount = 0;
   let engine: string | null = null;
+  let name: string | null = null;
   try {
     applied = await prisma.$queryRaw<{ migration_name: string }[]>`
       SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY migration_name DESC LIMIT 1`;
     const cnt = await prisma.$queryRaw<{ n: bigint }[]>`SELECT COUNT(*) AS n FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`;
     appliedCount = Number(cnt[0]?.n ?? 0);
+    // نام دیتابیسی که برنامه همین الان به آن وصل است (برای تشخیص اینکه کدام محیط/دیتابیس را می‌بینیم)
+    const nm = await prisma.$queryRaw<{ db: string }[]>`SELECT current_database() AS db`;
+    name = nm[0]?.db ?? null;
     const v = await prisma.$queryRaw<{ server_version: string }[]>`SHOW server_version`;
     engine = v[0]?.server_version ? `PostgreSQL ${v[0].server_version.split(" ")[0]}` : null;
   } catch {
@@ -65,6 +69,7 @@ router.get("/about", async (_req, res) => {
   res.json({
     version: readVersion(),
     database: {
+      name,
       schemaVersion: cur.schemaVersion,
       migration: cur.title,
       appliedMigrations: appliedCount,
