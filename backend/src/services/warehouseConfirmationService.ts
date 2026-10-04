@@ -1,5 +1,6 @@
 import { prisma, Db } from "../lib/prisma";
-import { computeStockAsOf } from "./warehouseStockService";
+import { computeStockAsOf, CARRY_FORWARD_OPENING_WHERE } from "./warehouseStockService";
+import { lockOpeningYearShared, findPreviousFiscalPeriod } from "./inventoryAccountingGuards";
 import { getRequestContext, withoutFiscalPeriodScope } from "../lib/requestContext";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 
@@ -76,6 +77,30 @@ async function assertWarehouseFiscalYearSequenceForConfirm(
   throw new Error(
     `انبار «${w.title}» تا تاریخ ${formatJalaliDateForMessage(effective)} تایید شده؛ برای تایید در دوره مالی جاری باید ابتدا تا پایان دوره مالی قبل تایید شود`
   );
+}
+
+/**
+ * طبق درخواست صریح کاربر: اگر تاریخ راه‌اندازی انبار قبل از شروع دوره مالیِ تاریخ تایید باشد، تایید در این دوره مالی فقط وقتی مجاز است که
+ * دوره مالی قبل برای آن انبار «بستن تعدادی موجودی» شده باشد (تا سند «موجودی اول دوره»ی سیستمی همین انبار ساخته شده باشد). طبق تصمیم صریح
+ * کاربر «بستن حسابداری موجودی» (سطح کل سال) شرط تایید انبار نیست. انبارِ تازه‌ای که تاریخ راه‌اندازی‌اش داخل همین دوره است، سال قبلی برای
+ * بستن ندارد و کنترل نمی‌شود.
+ */
+async function assertPreviousYearClosedForConfirm(
+  w: { id: number; title: string; implementationDate: Date | null },
+  period: { id: number; fromDate: Date },
+  tx: Db
+): Promise<void> {
+  if (!w.implementationDate || w.implementationDate.getTime() >= period.fromDate.getTime()) return;
+  const prev = await findPreviousFiscalPeriod(period.id, tx);
+  if (!prev) return;
+  const quantityClose = await withoutFiscalPeriodScope(() =>
+    tx.warehouseQuantityClose.findFirst({ where: { warehouseId: w.id, fiscalPeriodId: prev.id }, select: { id: true } })
+  );
+  if (!quantityClose) {
+    throw new Error(
+      `انبار «${w.title}» در دوره مالی قبل («${prev.title}») بسته نشده است؛ ابتدا باید سال مالی قبل برای این انبار از «عملیات پایان دوره › بستن تعدادی موجودی» بسته شود و بعد تایید آن در دوره مالی جاری ممکن است`
+    );
+  }
 }
 
 /** طبق درخواست صریح کاربر: برای «برگشت از تایید»، آخرین تاریخ تایید انبار باید داخل بازه‌ی دوره مالی
@@ -277,6 +302,8 @@ async function finalizeWarehouseDocumentsUpTo(warehouseId: number, date: Date, t
       date: { lte: date },
       status: { not: "FINALIZED" },
       documentType: { not: "WAREHOUSE_RECEIPT" },
+      // موجودی اول دوره‌ی سیستمی فقط با «بستن حسابداری موجودی» (و برگشت آن) تایید/برگشت می‌شود
+      NOT: CARRY_FORWARD_OPENING_WHERE,
     },
     data: { status: "FINALIZED", finalizedAt: new Date() },
   });
@@ -294,6 +321,7 @@ async function revertFinalizedWarehouseDocumentsAfter(warehouseId: number, newCo
       date: { gt: newConfirmedDate },
       status: "FINALIZED",
       documentType: { not: "WAREHOUSE_RECEIPT" },
+      NOT: CARRY_FORWARD_OPENING_WHERE,
     },
     data: { status: "REGISTERED", finalizedAt: null },
   });
@@ -315,12 +343,16 @@ export async function confirmWarehouses(warehouseIds: number[], date: Date): Pro
     try {
       // eslint-disable-next-line no-await-in-loop
       await prisma.$transaction(async (tx) => {
+        // قفل مشترک «مبلغ افتتاحیه‌ی همین دوره» (همان کلیدی که بستن/برگشت بستن حسابداری قبل از آن انحصاری می‌گیرند) — پیش از قفل ردیف انبار،
+        // هم‌ترتیب با بستن حسابداری (قفل مشترک → قفل ردیف) تا بن‌بست نشود؛ و برگشت بستنِ هم‌زمان یا قبل از تایید کامل می‌شود یا بعدش آن را می‌بیند
+        await lockOpeningYearShared(tx, period.id);
         const w = await lockWarehouseRow(tx, warehouseId);
         if (!w) throw new Error("انبار یافت نشد");
         if (w.confirmedDate && date.getTime() <= w.confirmedDate.getTime()) {
           throw new Error(`انبار «${w.title}» قبلاً تا تاریخ ${formatJalaliDateForMessage(w.confirmedDate)} تایید شده؛ تاریخ تایید جدید باید جلوتر باشد`);
         }
         await assertWarehouseFiscalYearSequenceForConfirm(w, period);
+        await assertPreviousYearClosedForConfirm(w, period, tx);
         await assertNoNegativeStockInRange(w.id, w.title, w.confirmedDate, date, tx);
         const lines = await buildSnapshotLines(w.id, date, tx);
         await replaceSnapshot(tx, w.id, date, lines);

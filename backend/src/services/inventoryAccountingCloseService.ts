@@ -100,7 +100,7 @@ export async function getYearEndValuationProblem(fiscal: { id: number; fromDate:
 
 export async function getAccountingCloseStatus() {
   const { current, next } = await getQuantityCloseContext();
-  const [warehouses, qcloses, close, nextClose, pricingInNext] = await Promise.all([
+  const [warehouses, qcloses, close, nextClose, pricingInNext, confirmedInNext] = await Promise.all([
     prisma.warehouse.findMany({
       where: { implementationDate: { not: null, lte: current.toDate } },
       select: { id: true, code: true, title: true },
@@ -111,6 +111,9 @@ export async function getAccountingCloseStatus() {
     prisma.inventoryAccountingClose.findUnique({ where: { fiscalPeriodId: current.id }, include: { closedBy: { select: { firstName: true, lastName: true } } } }),
     next ? prisma.inventoryAccountingClose.findUnique({ where: { fiscalPeriodId: next.id } }) : Promise.resolve(null),
     next ? prisma.goodsPricingStatus.count({ where: { reportingPeriod: { fiscalPeriodId: next.id } } }) : Promise.resolve(0),
+    next
+      ? prisma.warehouse.count({ where: { implementationDate: { not: null, lte: current.toDate }, confirmedDate: { gte: next.fromDate } } })
+      : Promise.resolve(0),
   ]);
   const qcloseByWarehouse = new Map(qcloses.map((q) => [q.warehouseId, q.closedAt]));
   const rows = warehouses.map((w) => ({ warehouseId: w.id, code: w.code, title: w.title, quantityClosedAt: qcloseByWarehouse.get(w.id) ?? null }));
@@ -127,6 +130,7 @@ export async function getAccountingCloseStatus() {
   if (!close) reverseBlockedReason = "بستن حسابداری موجودی این دوره مالی انجام نشده است";
   else if (nextClose) reverseBlockedReason = "بستن حسابداری موجودی دوره مالی بعد انجام شده است؛ ابتدا آن را برگردانید";
   else if (pricingInNext > 0) reverseBlockedReason = "در دوره مالی بعد قیمت‌گذاری موجودی انجام شده است؛ این بستن غیرقابل برگشت است";
+  else if (confirmedInNext > 0) reverseBlockedReason = "برخی انبارها در دوره مالی بعد تایید شده‌اند؛ ابتدا «برگشت از تایید» آن‌ها را انجام دهید";
 
   return {
     current,
@@ -270,6 +274,13 @@ export async function closeInventoryAccounting(userId: number | null): Promise<A
       }
       totalAmount = round(totalAmount, decimalPlaces);
 
+      // ۶-ب) تایید اسناد «موجودی اول دوره»ی دوره‌ی بعد — بعد از مبلغ‌دارشدن، مثل «تایید حسابداری» یک سند موجودی اول دوره به FINALIZED می‌روند
+      // (تا مبلغ در فرم/گزارش‌ها نمایش داده شود و دیگر «ثبت‌شده» نمانند). fiscalPeriodId صریح است چون این اسناد در دوره‌ی بعدند.
+      await tx.inventoryDocument.updateMany({
+        where: { id: { in: targets.map((t) => t.docId) }, fiscalPeriodId: next.id, documentType: "INITIAL_INVENTORY", creationType: "SYSTEM" },
+        data: { status: "FINALIZED", finalizedAt: new Date() },
+      });
+
       // ۷) رکورد بستن + لاگ ممیزی (زمان/کاربر)
       const close = await tx.inventoryAccountingClose.create({
         data: {
@@ -314,10 +325,30 @@ export async function reverseInventoryAccountingClose(userId: number | null): Pr
     const nextClose = await tx.inventoryAccountingClose.findUnique({ where: { fiscalPeriodId: close.nextFiscalPeriodId } });
     if (nextClose) throw new Error("بستن حسابداری موجودی دوره مالی بعد انجام شده است؛ ابتدا آن را برگردانید");
 
-    const qcloses = await tx.warehouseQuantityClose.findMany({ where: { fiscalPeriodId: current.id }, select: { openingDocumentId: true } });
+    const qcloses = await tx.warehouseQuantityClose.findMany({ where: { fiscalPeriodId: current.id }, select: { warehouseId: true, openingDocumentId: true } });
     const docIds = qcloses.map((q) => q.openingDocumentId).filter((x): x is number => x != null);
+
+    // انبار تا دوره‌ی بعد تایید شده باشد، موجودی اول دوره‌اش (تاییدشده/قفل با آن تایید) نباید برگردد؛ ابتدا «برگشت از تایید» انبار لازم است.
+    // قفل ردیف انبارها (هم‌ترتیب با بستن: قفل انحصاریِ کلید → قفل ردیف) تا تاییدِ هم‌زمان انبار قبل از این نقطه کامل شود یا بعدش بستن را ببیند.
+    if (qcloses.length > 0) {
+      const whIds = qcloses.map((q) => Number(q.warehouseId));
+      const whRows = await tx.$queryRawUnsafe<{ id: number; title: string; confirmedDate: Date | null }[]>(
+        `SELECT "id", "title", "confirmedDate" FROM "Warehouse" WHERE "id" IN (${whIds.join(",")}) ORDER BY "id" FOR UPDATE`
+      );
+      const confirmedInNext = whRows.filter((w) => w.confirmedDate && w.confirmedDate.getTime() >= close.openingDate.getTime());
+      if (confirmedInNext.length > 0) {
+        throw new Error(
+          `انبارهای زیر در دوره مالی بعد تایید شده‌اند و موجودی اول دوره‌شان قفل است؛ ابتدا «برگشت از تایید» آن‌ها را انجام دهید: ${namesList(confirmedInNext.map((w) => `«${w.title}»`))}`
+        );
+      }
+    }
     const lines = await tx.inventoryDocumentLine.findMany({ where: { documentId: { in: docIds } }, select: { id: true } });
     const removed = await tx.documentItemAmount.deleteMany({ where: { lineId: { in: lines.map((l) => l.id) }, priceType: "ACCOUNTING_CLOSING" } });
+    // اسناد افتتاحیه به حالت «ثبت‌شده» برمی‌گردند (بدون مبلغ/تایید)
+    await tx.inventoryDocument.updateMany({
+      where: { id: { in: docIds }, fiscalPeriodId: close.nextFiscalPeriodId, documentType: "INITIAL_INVENTORY", creationType: "SYSTEM" },
+      data: { status: "REGISTERED", finalizedAt: null },
+    });
 
     await tx.inventoryAccountingClose.delete({ where: { id: close.id } });
     await tx.inventoryAccountingCloseLog.create({ data: { fiscalPeriodId: current.id, action: "REVERSE", userId } });
