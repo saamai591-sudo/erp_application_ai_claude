@@ -1,26 +1,16 @@
 import { useEffect, useState } from "react";
 import { Modal } from "./Modal";
-import { api } from "../lib/api";
 import { showToast } from "../lib/toast";
-import { useTabs } from "../lib/TabsContext";
-import { confirmDiscard } from "../lib/unsavedChanges";
 import { FONT_OPTIONS, applyFont, THEME_OPTIONS, applyTheme } from "../lib/userSettings";
-import { loadPreferences, savePreferences, getPreference } from "../lib/preferences";
-
-interface FiscalPeriod { id: number; title: string; fromDate: string; toDate: string }
+import { loadPreferences, savePreferences } from "../lib/preferences";
 
 export function UserSettingsModal({ onClose }: { onClose: () => void }) {
-  const { closeAllTabs, hasUnsavedTabs } = useTabs();
-  const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
-  const [periodId, setPeriodId] = useState("");
   const [fontKey, setFontKey] = useState("vazirmatn");
   const [themeKey, setThemeKey] = useState("default");
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    api.get("/fiscal-periods").then(setPeriods).catch(() => {});
     loadPreferences().then((p) => {
-      setPeriodId(p.fiscalPeriodId);
       setFontKey(p.font);
       setThemeKey(p.theme);
     });
@@ -37,21 +27,9 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
   }
 
   function save() {
-    const periodChanged = periodId !== getPreference("fiscalPeriodId");
-    if (periodChanged) {
-      const proceed = window.confirm("با تغییر دوره مالی، همه فرمهای سیستم بسته می شوند. آیا ادامه می دهید؟");
-      if (!proceed) return;
-      // فرمِ دارای تغییر ذخیره‌نشده هم بسته می‌شود: پیش از ذخیره‌ی هر چیزی هشدار می‌دهیم تا انصراف، همه‌چیز را دست‌نخورده بگذارد
-      if (hasUnsavedTabs() && !confirmDiscard()) return;
-    }
     applyFont(fontKey);
     applyTheme(themeKey);
-    savePreferences({ font: fontKey, theme: themeKey, fiscalPeriodId: periodId });
-    if (periodChanged) {
-      closeAllTabs(true);
-      onClose();
-      return;
-    }
+    savePreferences({ font: fontKey, theme: themeKey });
     setSaved(true);
     setTimeout(() => onClose(), 500);
   }
@@ -59,15 +37,6 @@ export function UserSettingsModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="تنظیمات کاربری" onClose={onClose}>
       <div className="form-grid">
-        <div className="form-field full">
-          <label>دوره مالی جاری</label>
-          <select value={periodId} onChange={(e) => setPeriodId(e.target.value)}>
-            <option value="">انتخاب کنید</option>
-            {periods.map((p) => (
-              <option key={p.id} value={p.id}>{p.title}</option>
-            ))}
-          </select>
-        </div>
         <div className="form-field full">
           <label>فونت برنامه</label>
           <select value={fontKey} onChange={(e) => handleFontChange(e.target.value)}>
