@@ -299,6 +299,7 @@ const BASIS_FIELD: Record<Exclude<PaymentBasisType, "NONE">, "purchaseInvoiceId"
 };
 
 interface SettlementRowState {
+  id?: number; // شناسه‌ی ردیف موضوعِ ذخیره‌شده (برای تشخیص موضوعات دست‌نخورده در قفل ابزار سمت سرور)
   instrumentClientKey: string;
   instrumentLabel: string;
   paymentTypeId: string;
@@ -427,6 +428,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
     const instrumentIndexById = new Map(d.instrumentLines.map((l, i) => [l.id, i]));
     setSettlementRows(
       d.settlementLines.map((l) => ({
+        id: l.id,
         instrumentClientKey: String(l.instrumentLineId),
         instrumentLabel: instrumentIndexById.has(l.instrumentLineId)
           ? `ردیف ${toFaDigits(String(instrumentIndexById.get(l.instrumentLineId)! + 1))} - ${TYPE_FA[d.instrumentLines[instrumentIndexById.get(l.instrumentLineId)!].type]}`
@@ -647,6 +649,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
     return settlementRows
       .filter((r) => Number(r.amount) > 0)
       .map((r) => ({
+        id: r.id,
         paymentTypeId: Number(r.paymentTypeId),
         instrumentClientKey: r.instrumentClientKey,
         partyId: r.partyId ? Number(r.partyId) : null,
@@ -814,7 +817,9 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         currency.decimalPlaces
       );
       return { ...r, remainingAmount };
-    });
+    })
+    // ابزاری که کل مبلغش در موضوعات تخصیص یافته (مانده صفر) در انتخابگر نمایش داده نمی‌شود
+    .filter((r) => r.remainingAmount > 0);
 
   return (
     <FormPage

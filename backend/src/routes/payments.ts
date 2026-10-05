@@ -704,7 +704,11 @@ router.put("/payments/:id", can(`${FORM}.edit`), async (req, res) => {
     const instrumentLines = await validateInstrumentLines(body.instrumentLines, baseCurrency, date);
     const instrumentByKey = new Map(instrumentLines.map((l) => [l.clientKey, l]));
     const settlementLines = await validateSubjectLines(body.settlementLines, instrumentByKey, baseCurrency, date, id);
-    assertUsedInstrumentsUnchanged(await prisma.paymentInstrumentLine.findMany({ where: { paymentId: id } }), instrumentLines, settlementLines);
+    // ابزار فقط وقتی قفل است که یکی از ردیف‌های موضوعِ «ذخیره‌شده‌ی» همین سند (با شناسه‌ی خودش) هنوز در ورودی به آن ارجاع دهد؛
+    // موضوعاتی که کاربر حذف و دوباره انتخاب کرده شناسه‌ی ذخیره‌شده ندارند و ابزار را قفل نمی‌کنند.
+    const storedSubjectIds = new Set((await prisma.paymentSettlementLine.findMany({ where: { paymentId: id }, select: { id: true } })).map((x: any) => x.id));
+    const keptSubjects = (Array.isArray(body.settlementLines) ? body.settlementLines : []).filter((s: any) => s && s.id != null && storedSubjectIds.has(Number(s.id)));
+    assertUsedInstrumentsUnchanged(await prisma.paymentInstrumentLine.findMany({ where: { paymentId: id } }), instrumentLines, keptSubjects);
     await assertPettyCashFundingChangeAllowed(id, settlementLines, date);
 
     await prisma.$transaction(async (tx: any) => {
