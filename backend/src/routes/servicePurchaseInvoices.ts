@@ -19,7 +19,7 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmount, getLineAmounts, setLineAmount, enrichLinesWithAmount } from "../services/documentItemAmountService";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
-import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
+import { resolveDetailTypeId, resolveAccountDetailFields, resolveDetailTitles } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { netAllocationAmounts } from "../utils/purchaseDiscount";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, roundToCurrencyDecimals, ConversionCurrency } from "../utils/currencyConversion";
@@ -236,7 +236,9 @@ router.get("/service-purchase-invoices/pickable-receipts", can(`${FORM}.view`), 
     orderBy: { date: "desc" },
     take: 1000,
   });
-  res.json(docs.map((d) => ({ id: d.id, number: d.number, date: d.date, warehouseTitle: d.warehouse?.title || "" })));
+  // عنوان تامین‌کننده‌ی رسید: تفصیل سند (detailCode = کد طرف‌حساب) به عنوان نمایشی
+  const supplierTitles = await resolveDetailTitles(docs.map((d) => d.detailCode));
+  res.json(docs.map((d) => ({ id: d.id, number: d.number, date: d.date, warehouseTitle: d.warehouse?.title || "", supplierTitle: (d.detailCode && supplierTitles[d.detailCode]) || "" })));
 });
 
 router.get("/service-purchase-invoices/receipt-lines/:documentId", can(`${FORM}.view`), async (req, res) => {

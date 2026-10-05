@@ -59,7 +59,7 @@ interface PartyOption {
 }
 interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; decimalPlaces: number; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null }
 interface ServiceOption { id: number; fullCode: string; title: string; kind: string; isSpecial: boolean; taxRate: number | string | null; accountingTreatment?: "EXPENSE" | "INVENTORY_COST" | null }
-interface ReceiptOption { id: number; number: number; date: string; warehouseTitle: string }
+interface ReceiptOption { id: number; number: number; date: string; warehouseTitle: string; supplierTitle?: string }
 interface ReceiptLine { id: number; goodsItemCode: string; goodsItemTitle: string; unitTitle: string; quantity: number; amount: number }
 
 interface ListRow {
@@ -760,6 +760,7 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
                                 { header: "شماره", render: (r) => toFaDigits(String((r as ReceiptOption).number)), filterValue: (r) => String((r as ReceiptOption).number), width: "80px" },
                                 { header: "تاریخ", render: (r) => formatJalaliDate((r as ReceiptOption).date), filterValue: (r) => (r as ReceiptOption).date.slice(0, 10), width: "100px" },
                                 { header: "انبار", render: (r) => (r as ReceiptOption).warehouseTitle, filterValue: (r) => (r as ReceiptOption).warehouseTitle },
+                                { header: "تامین‌کننده", render: (r) => (r as ReceiptOption).supplierTitle || "—", filterValue: (r) => (r as ReceiptOption).supplierTitle || "" },
                               ]}
                               onSelect={(r) => onReceiptSelected(idx, r as ReceiptOption)}
                             />

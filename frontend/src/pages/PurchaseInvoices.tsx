@@ -58,7 +58,7 @@ interface GoodsItemRow {
   isSpecial: boolean; taxRate: number | string | null;
 }
 interface ServiceOption { id: number; fullCode: string; title: string; kind: string; isSpecial: boolean; taxRate: number | string | null; accountingTreatment?: "EXPENSE" | "INVENTORY_COST" | null }
-interface ReceiptOption { id: number; number: number; date: string; warehouseTitle: string }
+interface ReceiptOption { id: number; number: number; date: string; warehouseTitle: string; supplierTitle?: string }
 interface ReceiptLine { id: number; goodsItemCode: string; goodsItemTitle: string; unitTitle: string; quantity: number; amount: number }
 
 const STATUS_FA: Record<Status, string> = { DRAFT: "ثبت", APPROVED: "تایید شده" };
@@ -872,6 +872,9 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
             </div>
           </div>
 
+        </fieldset>
+
+          {/* ردیف تب‌ها عمداً بیرون از fieldset قفل‌شده است تا بعد از تایید هم بتوان بین «اقلام» و «سایر هزینه‌ها» جابه‌جا شد و محتوا را (فقط‌خواندنی) دید */}
           <div className="ar-tabs-row">
             <div className="ar-tabs">
               <button type="button" className={`ar-tab ${activeSection === "items" ? "active" : ""}`} onClick={() => setActiveSection("items")}>
@@ -885,6 +888,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
             </div>
           </div>
 
+        <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
           {activeSection === "items" && (
           <>
           <div className="je-lines-toolbar">
@@ -1074,6 +1078,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                               { header: "شماره", render: (r) => toFaDigits(String((r as ReceiptOption).number)), filterValue: (r) => String((r as ReceiptOption).number), width: "80px" },
                               { header: "تاریخ", render: (r) => formatJalaliDate((r as ReceiptOption).date), filterValue: (r) => (r as ReceiptOption).date.slice(0, 10), width: "100px" },
                               { header: "انبار", render: (r) => (r as ReceiptOption).warehouseTitle, filterValue: (r) => (r as ReceiptOption).warehouseTitle },
+                                { header: "تامین‌کننده", render: (r) => (r as ReceiptOption).supplierTitle || "—", filterValue: (r) => (r as ReceiptOption).supplierTitle || "" },
                             ]}
                             onSelect={(r) => onCostReceiptSelected(idx, r as ReceiptOption)}
                           />
