@@ -96,7 +96,7 @@ export function FormPage({
   children: ReactNode;
 }) {
   const navigate = useNavigate();
-  const { resetActiveTabToNew, recordNav } = useTabs();
+  const { resetActiveTabToNew, recordNav, activeTabId, closeTab } = useTabs();
   const [menuOpen, setMenuOpen] = useState(false);
 
   // میان‌بر Ctrl+S (در مک Cmd+S): همان دکمه‌ی «ذخیره»ی نوار ابزار را فعال می‌کند (پس وضعیت غیرفعال بودن ذخیره رعایت می‌شود) و ذخیره‌ی
@@ -119,7 +119,15 @@ export function FormPage({
     setMenuOpen(false);
     if (!onDelete) return;
     if (!window.confirm("از حذف این رکورد مطمئن هستید؟")) return;
+    const startPath = currentTabPath();
+    const startTabId = activeTabId;
     await onDelete();
+    // رفتار پایه‌ی همه‌ی فرم‌ها بعد از حذفِ موفق: خودِ فرمِ حذف‌شده بسته می‌شود (نه اینکه همان تب با فهرست جایگزین شود و فهرستی که کاربر بسته بود
+    // دوباره باز شود). موفقیت = صفحه بعد از حذف از مسیر فرم رفته؛ اگر فهرست همین فرم در تب دیگری باز است به آن می‌رویم، وگرنه تب همسایه (معمولاً خانه).
+    if (startTabId && currentTabPath() !== startPath) {
+      clearTabDirty(startPath);
+      closeTab(startTabId, { preferPath: closePath });
+    }
   }
 
   async function handleExtraAction(action: { onClick: () => void | Promise<void> }) {

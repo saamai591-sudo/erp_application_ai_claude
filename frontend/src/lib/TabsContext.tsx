@@ -25,7 +25,8 @@ interface TabsCtx {
   /** دکمه‌ی «جدید» داخل یک فرم باز: به‌جای باز کردن تب تازه، همین تب فعال را به حالت «جدید» برمی‌گرداند */
   resetActiveTabToNew: (newPath: string) => void;
   switchTab: (id: string) => void;
-  closeTab: (id: string) => void;
+  /** preferPath: اگر تبی با این مسیر (مثلاً فهرستِ همان فرم) باز باشد، بعد از بستن به آن می‌رود؛ وگرنه تب همسایه */
+  closeTab: (id: string, opts?: { preferPath?: string }) => void;
   /** اگر force نباشد و تبی فرمِ دارای تغییر ذخیره‌نشده باشد، ابتدا تایید می‌گیرد؛ force وقتی است که فراخوان‌کننده
    * خودش پیش‌تر (مثلاً پیش از ذخیره‌ی تنظیمات) تایید گرفته است. */
   closeAllTabs: (force?: boolean) => void;
@@ -272,7 +273,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     navigate(tab.path);
   }
 
-  function closeTab(id: string) {
+  function closeTab(id: string, opts?: { preferPath?: string }) {
     forgetTabScroll(id);
     recordNavByTab.current.delete(id);
     // بستن تبِ یک فرم با تغییر ذخیره‌نشده: تایید کاربر (× تب و کلیک وسط، هر دو از همین‌جا می‌گذرند)
@@ -293,7 +294,8 @@ export function TabsProvider({ children }: { children: ReactNode }) {
           setActiveTabId(null);
           navigate("/");
         } else {
-          const neighbor = next[Math.max(0, idx - 1)] || next[0];
+          const preferred = opts?.preferPath ? next.find((t) => pathOnly(t.path) === pathOnly(opts.preferPath!)) : undefined;
+          const neighbor = preferred || next[Math.max(0, idx - 1)] || next[0];
           maybeRefreshOnVisit(neighbor.path);
           setActiveTabId(neighbor.id);
           navigate(neighbor.path);

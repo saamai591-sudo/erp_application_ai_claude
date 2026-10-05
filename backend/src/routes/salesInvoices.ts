@@ -130,11 +130,13 @@ async function salesOrderLineUninvoiced(id: number, excludeInvoiceId?: number) {
   if (!line) return null;
   let invoicedQty = 0;
   let invoicedAmount = 0;
+  let invoicedDiscount = 0;
   for (const dl of line.inventoryLines) {
     for (const il of dl.salesInvoiceLines) {
       if (excludeInvoiceId && il.salesInvoiceId === excludeInvoiceId) continue;
       invoicedQty += Number(il.quantity);
       invoicedAmount += Number(il.amount);
+      invoicedDiscount += Number(il.discount);
     }
   }
   // ردیف‌های فاکتورِ مستقیماً بر مبنای «سفارش فروش» (مبنای سطح ردیف) هم از مانده کم می‌شوند
@@ -142,10 +144,13 @@ async function salesOrderLineUninvoiced(id: number, excludeInvoiceId?: number) {
     if (excludeInvoiceId && il.salesInvoiceId === excludeInvoiceId) continue;
     invoicedQty += Number(il.quantity);
     invoicedAmount += Number(il.amount);
+    invoicedDiscount += Number(il.discount);
   }
   const totalQty = Number(line.quantity);
   const totalAmount = Number(line.amount);
-  return { line, salesOrder: line.salesOrder, totalQty, totalAmount, remainingQty: totalQty - invoicedQty, remainingAmount: totalAmount - invoicedAmount };
+  // تخفیف دقیقاً با همان فرمولِ «مانده»ی مبلغ: تخفیف ردیف سفارش − تخفیف ردیف‌های فاکتورِ قبلیِ همین ردیف (مستقیم یا از طریق حواله)
+  const totalDiscount = Number(line.discount);
+  return { line, salesOrder: line.salesOrder, totalQty, totalAmount, totalDiscount, remainingQty: totalQty - invoicedQty, remainingAmount: totalAmount - invoicedAmount, remainingDiscount: totalDiscount - invoicedDiscount };
 }
 
 // «مانده‌ی فاکتورنشده»ی یک ردیف پیش‌فاکتور — دقیقاً هم‌الگوی بالا، فقط از سمت SalesQuoteLine (برای
@@ -162,11 +167,13 @@ async function salesQuoteLineUninvoiced(id: number, excludeInvoiceId?: number) {
   if (!line) return null;
   let invoicedQty = 0;
   let invoicedAmount = 0;
+  let invoicedDiscount = 0;
   for (const dl of line.inventoryLines) {
     for (const il of dl.salesInvoiceLines) {
       if (excludeInvoiceId && il.salesInvoiceId === excludeInvoiceId) continue;
       invoicedQty += Number(il.quantity);
       invoicedAmount += Number(il.amount);
+      invoicedDiscount += Number(il.discount);
     }
   }
   // ردیف‌های فاکتورِ مستقیماً بر مبنای «پیش‌فاکتور» (مبنای سطح ردیف) هم از مانده کم می‌شوند
@@ -174,10 +181,12 @@ async function salesQuoteLineUninvoiced(id: number, excludeInvoiceId?: number) {
     if (excludeInvoiceId && il.salesInvoiceId === excludeInvoiceId) continue;
     invoicedQty += Number(il.quantity);
     invoicedAmount += Number(il.amount);
+    invoicedDiscount += Number(il.discount);
   }
   const totalQty = Number(line.quantity);
   const totalAmount = Number(line.amount);
-  return { line, salesQuote: line.salesQuote, totalQty, totalAmount, remainingQty: totalQty - invoicedQty, remainingAmount: totalAmount - invoicedAmount };
+  const totalDiscount = Number(line.discount);
+  return { line, salesQuote: line.salesQuote, totalQty, totalAmount, totalDiscount, remainingQty: totalQty - invoicedQty, remainingAmount: totalAmount - invoicedAmount, remainingDiscount: totalDiscount - invoicedDiscount };
 }
 
 interface DeliveryBaseInfo {
@@ -188,6 +197,8 @@ interface DeliveryBaseInfo {
   salesTypeTitle: string;
   baseAmount: number;
   uninvoicedAmount: number;
+  baseDiscount: number;
+  uninvoicedDiscount: number;
   baseQuantity: number;
   uninvoicedQuantity: number;
 }
@@ -211,6 +222,8 @@ async function deliveryLineBaseInfo(
       salesTypeTitle: info.salesOrder.salesType.title,
       baseAmount: info.totalAmount,
       uninvoicedAmount: info.remainingAmount,
+      baseDiscount: info.totalDiscount,
+      uninvoicedDiscount: info.remainingDiscount,
       baseQuantity: info.totalQty,
       uninvoicedQuantity: info.remainingQty,
     };
@@ -226,6 +239,8 @@ async function deliveryLineBaseInfo(
       salesTypeTitle: info.salesQuote.salesType.title,
       baseAmount: info.totalAmount,
       uninvoicedAmount: info.remainingAmount,
+      baseDiscount: info.totalDiscount,
+      uninvoicedDiscount: info.remainingDiscount,
       baseQuantity: info.totalQty,
       uninvoicedQuantity: info.remainingQty,
     };
@@ -362,6 +377,8 @@ async function validateLines(
     let unitId = l.unitId || 0;
     let unitPrice = Number(l.unitPrice) || 0;
     let amount = Number(l.amount) || 0;
+    // تخفیفِ ردیفِ دارای مبنا (سفارش/پیش‌فاکتور، مستقیم یا از طریق حواله) از سند مبنا حساب می‌شود و ورودی کاربر نادیده گرفته می‌شود؛ null = بدون مبنا (دستی)
+    let computedDiscount: number | null = null;
     let sourceInventoryLineId: number | null = null;
     let sourceSalesOrderLineId: number | null = null;
     let sourceSalesQuoteLineId: number | null = null;
@@ -403,6 +420,8 @@ async function validateLines(
         const unitAmount = base.uninvoicedAmount / base.uninvoicedQuantity;
         unitPrice = Math.round(unitAmount * 10000) / 10000;
         amount = Math.round(unitPrice * qty * 100) / 100;
+        const unitDisc = Math.round((base.uninvoicedDiscount / base.uninvoicedQuantity) * 10000) / 10000;
+        computedDiscount = Math.round(unitDisc * qty * 100) / 100;
       }
     } else if (basis === "SALES_ORDER") {
       if (!l.sourceSalesOrderLineId) throw new Error(`ردیف ${n}: انتخاب ردیف سفارش فروش الزامی است`);
@@ -421,6 +440,7 @@ async function validateLines(
       // فی/مبلغ همیشه از مانده‌ی فاکتورنشده‌ی ردیف سفارش محاسبه می‌شود (مثل مسیر حواله مبتنی بر سفارش)
       unitPrice = Math.round((info.remainingAmount / info.remainingQty) * 10000) / 10000;
       amount = Math.round(unitPrice * qty * 100) / 100;
+      computedDiscount = Math.round((Math.round((info.remainingDiscount / info.remainingQty) * 10000) / 10000) * qty * 100) / 100;
     } else {
       if (!l.sourceSalesQuoteLineId) throw new Error(`ردیف ${n}: انتخاب ردیف پیش‌فاکتور الزامی است`);
       const info = await salesQuoteLineUninvoiced(l.sourceSalesQuoteLineId, excludeInvoiceId);
@@ -438,12 +458,13 @@ async function validateLines(
       unitId = info.line.unitId;
       unitPrice = Math.round((info.totalAmount / info.totalQty) * 10000) / 10000;
       amount = Math.round(unitPrice * qty * 100) / 100;
+      computedDiscount = Math.round((Math.round((info.totalDiscount / info.totalQty) * 10000) / 10000) * qty * 100) / 100;
     }
 
     if (!(unitPrice >= 0)) throw new Error(`فی ردیف ${n} نامعتبر است`);
     if (!(amount >= 0)) throw new Error(`مبلغ ردیف ${n} نامعتبر است`);
 
-    const discount = Number(l.discount) || 0;
+    const discount = computedDiscount !== null ? computedDiscount : Number(l.discount) || 0;
     if (!(discount >= 0)) throw new Error(`تخفیف ردیف ${n} نامعتبر است`);
     if (discount > amount) throw new Error(`تخفیف ردیف ${n} نمی‌تواند از مبلغ ردیف بیشتر باشد`);
 
@@ -522,6 +543,8 @@ interface BasisLineRow {
   /** فی از سند مبنا محاسبه شده و قابل ویرایش نیست */
   priceLocked: boolean;
   unitPrice: number | null;
+  /** تخفیف هر واحد از سند مبنا (همراه فی قفل است)؛ null = بدون مبنا */
+  unitDiscount: number | null;
 }
 
 function round4(n: number) {
@@ -557,6 +580,7 @@ async function basisDocumentLines(type: LineBasis, docId: number, excludeInvoice
         remaining,
         priceLocked: !!base,
         unitPrice: base && base.uninvoicedQuantity > 0 ? round4(base.uninvoicedAmount / base.uninvoicedQuantity) : null,
+        unitDiscount: base && base.uninvoicedQuantity > 0 ? round4(base.uninvoicedDiscount / base.uninvoicedQuantity) : null,
       });
     }
   } else if (type === "SALES_ORDER") {
@@ -584,6 +608,7 @@ async function basisDocumentLines(type: LineBasis, docId: number, excludeInvoice
         remaining: info.remainingQty,
         priceLocked: true,
         unitPrice: round4(info.remainingAmount / info.remainingQty),
+        unitDiscount: round4(info.remainingDiscount / info.remainingQty),
       });
     }
   } else if (type === "SALES_QUOTE") {
@@ -613,6 +638,7 @@ async function basisDocumentLines(type: LineBasis, docId: number, excludeInvoice
         remaining,
         priceLocked: true,
         unitPrice: round4(info.totalAmount / info.totalQty),
+        unitDiscount: round4(info.totalDiscount / info.totalQty),
       });
     }
   }

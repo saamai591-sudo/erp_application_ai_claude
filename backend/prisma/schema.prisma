@@ -2239,6 +2239,8 @@ model SalesQuoteLine {
   quantity        Decimal          @db.Decimal(36, 10)
   unitPrice       Decimal          @db.Decimal(36, 10)
   amount          Decimal          @db.Decimal(36, 10)
+  /// تخفیف ردیف (مبلغی، به ارز هدر)؛ فاکتور فروشِ مبتنی بر این ردیف تخفیف را با همان فرمول «مانده بر مانده»ی مبلغ از آن می‌گیرد
+  discount        Decimal          @default(0) @db.Decimal(36, 10)
   /// مالیات بر ارزش‌افزوده‌ی این ردیف — طبق تصمیم صریح کاربر، برخلاف فاکتور خرید/فاکتور فروش (که همیشه
   /// به ارز مبنا محاسبه می‌شود)، اینجا همیشه به همان ارز هدر (amount) محاسبه/ذخیره می‌شود، چون
   /// پیش‌فاکتور اصلاً fxRate/تبدیل‌ارز ندارد (سندی صرفاً اطلاعاتی، بدون اثر حسابداری).
@@ -2287,6 +2289,8 @@ model SalesOrderLine {
   quantity               Decimal                 @db.Decimal(36, 10)
   unitPrice              Decimal                 @db.Decimal(36, 10)
   amount                 Decimal                 @db.Decimal(36, 10)
+  /// تخفیف ردیف (مبلغی، به ارز هدر)؛ هم‌الگوی SalesQuoteLine.discount
+  discount               Decimal                 @default(0) @db.Decimal(36, 10)
   /// طبق تصمیم صریح کاربر، هم‌الگوی SalesQuoteLine.vatAmount: همیشه به همان ارز هدر محاسبه/ذخیره
   /// می‌شود، نه ارز مبنا — این فرم هم fxRate ندارد.
   vatAmount              Decimal                 @default(0) @db.Decimal(36, 10)

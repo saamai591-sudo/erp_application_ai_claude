@@ -121,6 +121,7 @@ interface SalesQuoteLineInput {
   quantity: number;
   unitPrice: number;
   amount: number;
+  discount?: number;
   vatAmount?: number;
   description?: string | null;
 }
@@ -131,7 +132,7 @@ interface SalesQuoteLineInput {
 // (به ارز هدر) مستقیماً در فرمول مشترک utils/vatCalculation.ts به کار می‌رود.
 async function validateSalesQuoteLines(lines: SalesQuoteLineInput[], docDate: Date) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("پیش‌فاکتور باید حداقل یک ردیف کالا داشته باشد");
-  const cleaned: { goodsItemId: number; unitId: number; quantity: number; unitPrice: number; amount: number; vatAmount: number; description: string | null }[] = [];
+  const cleaned: { goodsItemId: number; unitId: number; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null }[] = [];
   for (const [idx, l] of lines.entries()) {
     const qty = Number(l.quantity);
     if (!(qty > 0)) throw new Error(`مقدار ردیف ${idx + 1} باید عددی مثبت باشد`);
@@ -139,6 +140,9 @@ async function validateSalesQuoteLines(lines: SalesQuoteLineInput[], docDate: Da
     const amount = Number(l.amount) || 0;
     if (!(unitPrice >= 0)) throw new Error(`فی ردیف ${idx + 1} نامعتبر است`);
     if (!(amount >= 0)) throw new Error(`مبلغ ردیف ${idx + 1} نامعتبر است`);
+    const discount = Number(l.discount) || 0;
+    if (!(discount >= 0)) throw new Error(`تخفیف ردیف ${idx + 1} نامعتبر است`);
+    if (discount > amount) throw new Error(`تخفیف ردیف ${idx + 1} نمی‌تواند از مبلغ ردیف بیشتر باشد`);
     if (!l.goodsItemId) throw new Error(`کالا برای ردیف ${idx + 1} الزامی است`);
 
     const item = await prisma.goodsItem.findUnique({ where: { id: l.goodsItemId } });
@@ -147,11 +151,12 @@ async function validateSalesQuoteLines(lines: SalesQuoteLineInput[], docDate: Da
     const unitId = l.unitId || item.mainUnitId;
 
     const vatRatePercent = resolveVatRatePercent(item, await getVatRatePercentForDate(docDate));
-    const suggestedVatAmount = computeLineVat(amount, 0, vatRatePercent);
+    // ارزش‌افزوده روی «مبلغ − تخفیف» (هم‌الگوی فاکتور فروش)
+    const suggestedVatAmount = computeLineVat(amount, discount, vatRatePercent);
     const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
     if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
 
-    cleaned.push({ goodsItemId: l.goodsItemId, unitId, quantity: qty, unitPrice, amount, vatAmount, description: l.description || null });
+    cleaned.push({ goodsItemId: l.goodsItemId, unitId, quantity: qty, unitPrice, amount, discount, vatAmount, description: l.description || null });
   }
   return cleaned;
 }
@@ -185,7 +190,7 @@ router.get("/sales-quotes", can(`${SALES_QUOTES_FORM}.view`), async (_req, res) 
       currencyTitle: d.currency.title,
       status: d.status,
       lineCount: d.lines.length,
-      totalAmount: d.lines.reduce((s: number, l: any) => s + Number(l.amount), 0),
+      totalAmount: d.lines.reduce((s: number, l: any) => s + Number(l.amount) - Number(l.discount), 0),
     }))
   );
 });
@@ -229,6 +234,7 @@ router.get("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.view`), async (req, re
       quantity: Number(l.quantity),
       unitPrice: Number(l.unitPrice),
       amount: Number(l.amount),
+      discount: Number(l.discount),
       vatAmount: Number(l.vatAmount),
       description: l.description,
     })),
@@ -367,6 +373,7 @@ interface SalesOrderLineInput {
   quantity: number;
   unitPrice: number;
   amount: number;
+  discount?: number;
   vatAmount?: number;
   description?: string | null;
 }
@@ -382,6 +389,7 @@ async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: stri
     quantity: number;
     unitPrice: number;
     amount: number;
+    discount: number;
     vatAmount: number;
     description: string | null;
   }[] = [];
@@ -394,6 +402,7 @@ async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: stri
     let unitId = l.unitId || 0;
     let unitPrice = Number(l.unitPrice) || 0;
     let amount = Number(l.amount) || 0;
+    let discount = Number(l.discount) || 0;
     let sourceSalesQuoteLineId: number | null = null;
 
     if (basis === "QUOTE") {
@@ -408,11 +417,15 @@ async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: stri
       unitId = source.unitId;
       unitPrice = Number(source.unitPrice);
       amount = Math.round(unitPrice * qty * 100) / 100;
+      // تخفیف هم مثل فی از ردیف پیش‌فاکتور می‌آید (تخفیف هر واحد × مقدار) و ورودی کاربر نادیده گرفته می‌شود
+      discount = Math.round((Number(source.discount) / Number(source.quantity)) * qty * 100) / 100;
     } else {
       if (!goodsItemId) throw new Error(`کالا برای ردیف ${idx + 1} الزامی است`);
       if (!(unitPrice >= 0)) throw new Error(`فی ردیف ${idx + 1} نامعتبر است`);
       if (!(amount >= 0)) throw new Error(`مبلغ ردیف ${idx + 1} نامعتبر است`);
     }
+    if (!(discount >= 0)) throw new Error(`تخفیف ردیف ${idx + 1} نامعتبر است`);
+    if (discount > amount) throw new Error(`تخفیف ردیف ${idx + 1} نمی‌تواند از مبلغ ردیف بیشتر باشد`);
 
     const item = await prisma.goodsItem.findUnique({ where: { id: goodsItemId } });
     if (!item) throw new Error(`کالای ردیف ${idx + 1} یافت نشد`);
@@ -420,11 +433,11 @@ async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: stri
     if (!unitId) unitId = item.mainUnitId;
 
     const vatRatePercent = resolveVatRatePercent(item, await getVatRatePercentForDate(docDate));
-    const suggestedVatAmount = computeLineVat(amount, 0, vatRatePercent);
+    const suggestedVatAmount = computeLineVat(amount, discount, vatRatePercent);
     const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
     if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
 
-    cleaned.push({ sourceSalesQuoteLineId, goodsItemId, unitId, quantity: qty, unitPrice, amount, vatAmount, description: l.description || null });
+    cleaned.push({ sourceSalesQuoteLineId, goodsItemId, unitId, quantity: qty, unitPrice, amount, discount, vatAmount, description: l.description || null });
   }
   return cleaned;
 }
@@ -475,6 +488,8 @@ router.get("/sales-orders/pickable-quote-lines", can(`${SALES_ORDERS_FORM}.view`
         unitId: l.unitId,
         unitTitle: l.unit.title,
         unitPrice: Number(l.unitPrice),
+        // تخفیف هر واحد ردیف پیش‌فاکتور (سفارش بر مبنای آن، تخفیف را مثل فی از همین می‌گیرد)
+        unitDiscount: quantity > 0 ? Number(l.discount) / quantity : 0,
         quantity,
         done,
         remaining,
@@ -515,7 +530,7 @@ router.get("/sales-orders", can(`${SALES_ORDERS_FORM}.view`), async (_req, res) 
       currencyTitle: d.currency.title,
       status: d.status,
       lineCount: d.lines.length,
-      totalAmount: d.lines.reduce((s: number, l: any) => s + Number(l.amount), 0),
+      totalAmount: d.lines.reduce((s: number, l: any) => s + Number(l.amount) - Number(l.discount), 0),
     }))
   );
 });
@@ -561,6 +576,7 @@ router.get("/sales-orders/:id", can(`${SALES_ORDERS_FORM}.view`), async (req, re
       quantity: Number(l.quantity),
       unitPrice: Number(l.unitPrice),
       amount: Number(l.amount),
+      discount: Number(l.discount),
       vatAmount: Number(l.vatAmount),
       description: l.description,
     })),

@@ -225,7 +225,8 @@ export function basisGroupOf(nature?: string | null): "VAT" | "MAIN" {
 async function candidatesForBasisType(basisType: BasisType, partyId: number, excludeReceiptId?: number, nature?: string | null, includeVoided?: boolean): Promise<BasisCandidate[]> {
   const group = basisGroupOf(nature);
   const sameGroup = (s: any) => basisGroupOf(s.receiptType?.nature) === group;
-  const totalOf = (lines: any[]) => lines.reduce((s: number, l: any) => s + Number(group === "VAT" ? l.vatAmount || 0 : l.amount), 0);
+  // مبنای مانده‌ی سفارش فروش/پیش‌فاکتور: مبلغ − تخفیف ردیف (VAT هم از قبل روی مبلغِ پس از تخفیف حساب شده)
+  const totalOf = (lines: any[]) => lines.reduce((s: number, l: any) => s + (group === "VAT" ? Number(l.vatAmount || 0) : Number(l.amount) - Number(l.discount || 0)), 0);
   if (basisType === "SALES_INVOICE") {
     const customer = await prisma.customer.findUnique({ where: { partyId } });
     if (!customer) return [];

@@ -67,6 +67,8 @@ interface BasisLine {
   remaining: number;
   priceLocked: boolean;
   unitPrice: number | null;
+  /** تخفیف هر واحد از سند مبنا (همراه فی قفل است) */
+  unitDiscount: number | null;
 }
 
 function customerTitle(c: CustomerOption): string {
@@ -194,6 +196,8 @@ interface RowState {
   docNumber: number | null;
   remaining: number | null;
   priceLocked: boolean;
+  /** تخفیف هر واحد از سند مبنا (فقط برای ردیف قفل‌شده؛ نمایشیِ آینه‌ی محاسبه‌ی سرور) */
+  unitDiscount: string;
   goodsItemId: string;
   goodsItemCode: string;
   goodsItemTitle: string;
@@ -208,7 +212,7 @@ interface RowState {
 }
 
 function emptyRow(basis: Basis = "NO_BASIS"): RowState {
-  return { basis, sourceInventoryLineId: "", sourceSalesOrderLineId: "", sourceSalesQuoteLineId: "", docNumber: null, remaining: null, priceLocked: false, goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "" };
+  return { basis, sourceInventoryLineId: "", sourceSalesOrderLineId: "", sourceSalesQuoteLineId: "", docNumber: null, remaining: null, priceLocked: false, unitDiscount: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "" };
 }
 
 type PickLine = BasisLine & { id: string };
@@ -294,6 +298,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
             docNumber: l.source?.documentNumber ?? null,
             remaining: l.source ? l.source.remaining : null,
             priceLocked: !!l.source?.priceLocked,
+            unitDiscount: l.source?.priceLocked && Number(l.quantity) > 0 ? String(Number(l.discount || 0) / Number(l.quantity)) : "",
             goodsItemId: String(l.goodsItemId),
             goodsItemCode: l.goodsItemCode,
             goodsItemTitle: l.goodsItemTitle,
@@ -401,6 +406,9 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   function lineToRow(l: BasisLine): RowState {
     const price = l.priceLocked && l.unitPrice != null ? l.unitPrice : 0;
     const amount = l.priceLocked ? Math.round(price * l.remaining * 100) / 100 : 0;
+    // تخفیف همراه فی از سند مبنا می‌آید: تخفیف هر واحد × مقدار (سرور همین را اعمال می‌کند)
+    const unitDisc = l.priceLocked && l.unitDiscount != null ? l.unitDiscount : 0;
+    const discount = l.priceLocked ? Math.round(unitDisc * l.remaining * 100) / 100 : 0;
     return {
       ...emptyRow(l.basis),
       sourceInventoryLineId: l.sourceInventoryLineId ? String(l.sourceInventoryLineId) : "",
@@ -409,6 +417,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
       docNumber: l.documentNumber,
       remaining: l.remaining,
       priceLocked: l.priceLocked,
+      unitDiscount: l.priceLocked ? String(unitDisc) : "",
       goodsItemId: String(l.goodsItemId),
       goodsItemCode: l.goodsItemCode,
       goodsItemTitle: l.goodsItemTitle,
@@ -417,7 +426,8 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
       quantity: String(l.remaining),
       unitPrice: l.priceLocked && l.unitPrice != null ? String(price) : "",
       amount: l.priceLocked ? String(amount) : "",
-      vatAmount: l.priceLocked ? computeSuggestedVat(amount, 0, String(l.goodsItemId)) : "",
+      discount: l.priceLocked ? String(discount) : "",
+      vatAmount: l.priceLocked ? computeSuggestedVat(amount, discount, String(l.goodsItemId)) : "",
     };
   }
   function basisQuery(extra: Record<string, string>) {
@@ -468,7 +478,9 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     const row = rows[idx];
     if (row.unitPrice) {
       const amount = Math.round(Number(row.unitPrice) * (Number(quantity) || 0) * 100) / 100;
-      updateRow(idx, { quantity, amount: String(amount), vatAmount: computeSuggestedVat(amount, Number(row.discount) || 0, row.goodsItemId) });
+      // ردیف دارای مبنا: تخفیف هم با مقدار عوض می‌شود (تخفیف هر واحد × مقدار)
+      const discount = row.priceLocked && row.unitDiscount !== "" ? Math.round(Number(row.unitDiscount) * (Number(quantity) || 0) * 100) / 100 : Number(row.discount) || 0;
+      updateRow(idx, { quantity, amount: String(amount), ...(row.priceLocked ? { discount: String(discount) } : {}), vatAmount: computeSuggestedVat(amount, discount, row.goodsItemId) });
     } else {
       updateRow(idx, { quantity });
     }
@@ -823,8 +835,8 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
                       <td style={{ minWidth: 120 }} title={priceLocked ? "مبلغ از سند مبنا محاسبه شده و غیرقابل ویرایش است" : undefined}>
                         <AmountInput value={row.amount} onChange={(v) => onAmountChange(idx, v)} allowDecimal disabled={priceLocked} />
                       </td>
-                      <td style={{ minWidth: 120 }}>
-                        <AmountInput value={row.discount} onChange={(v) => onDiscountChange(idx, v)} allowDecimal placeholder="۰" />
+                      <td style={{ minWidth: 120 }} title={priceLocked ? "تخفیف از سند مبنا محاسبه شده و غیرقابل ویرایش است" : undefined}>
+                        <AmountInput value={row.discount} onChange={(v) => onDiscountChange(idx, v)} allowDecimal placeholder="۰" disabled={priceLocked} />
                       </td>
                       <td style={{ minWidth: 120 }}>
                         <AmountInput value={row.vatAmount} onChange={(v) => updateRow(idx, { vatAmount: v })} allowDecimal placeholder="۰" />

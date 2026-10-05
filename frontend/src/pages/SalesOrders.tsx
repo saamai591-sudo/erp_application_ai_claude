@@ -39,14 +39,14 @@ type Status = "DRAFT" | "APPROVED";
 interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null } }
 interface CurrencyOption { id: number; code: string; title: string }
 interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
-interface PickableQuoteLine { id: number; sourceSalesQuoteLineId: number; salesQuoteId: number; number: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; unitPrice: number; quantity: number; done: number; remaining: number }
+interface PickableQuoteLine { id: number; sourceSalesQuoteLineId: number; salesQuoteId: number; number: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; unitPrice: number; unitDiscount: number; quantity: number; done: number; remaining: number }
 
 function customerTitle(c: CustomerOption): string {
   return c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim();
 }
 
 interface ListRow { id: number; number: number; date: string; basis: Basis; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: Status; lineCount: number; totalAmount: number }
-interface DetailLine { id: number; sourceSalesQuoteLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; vatAmount: number; description: string | null }
+interface DetailLine { id: number; sourceSalesQuoteLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null }
 interface Detail extends ListRow { currencyId: number; description: string | null; lines: DetailLine[] }
 
 const STATUS_FA: Record<Status, string> = { DRAFT: "ثبت", APPROVED: "تایید" };
@@ -124,7 +124,7 @@ function SalesOrderList() {
           { header: "مشتری", render: (r) => r.customerTitle, filterType: "string", filterValue: (r) => r.customerTitle },
           { header: "نوع فروش", render: (r) => r.salesTypeTitle || "—", filterType: "string", filterValue: (r) => r.salesTypeTitle || "" },
           { header: "مرکز فروش", render: (r) => r.salesCenterTitle || "—", filterType: "string", filterValue: (r) => r.salesCenterTitle || "" },
-          { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
+          { header: "مبلغ کل (پس از تخفیف)", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
@@ -135,10 +135,10 @@ function SalesOrderList() {
   );
 }
 
-interface RowState { sourceSalesQuoteLineId: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; vatAmount: string; description: string }
+interface RowState { sourceSalesQuoteLineId: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; discount: string; vatAmount: string; description: string }
 
 function emptyRow(): RowState {
-  return { sourceSalesQuoteLineId: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", vatAmount: "", description: "" };
+  return { sourceSalesQuoteLineId: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "" };
 }
 
 function SalesOrderForm({ editId }: { editId?: number }) {
@@ -197,6 +197,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
             quantity: String(l.quantity),
             unitPrice: String(l.unitPrice),
             amount: String(l.amount),
+            discount: String(l.discount || 0),
             vatAmount: String(l.vatAmount || 0),
             description: l.description || "",
           }))
@@ -256,9 +257,9 @@ function SalesOrderForm({ editId }: { editId?: number }) {
   // مقدار پیشنهادی مالیات بر ارزش افزوده — طبق تصمیم صریح کاربر، همیشه به همان ارز هدر محاسبه می‌شود
   // (نه ارز مبنا، چون این فرم fxRate ندارد)؛ فقط پیش‌فرض اولیه است، کاربر می‌تواند بعداً خودش مقدار را
   // ویرایش کند — دقیقاً هم‌الگوی SalesQuotes.tsx.
-  function computeSuggestedVat(amount: number, goodsItemId: string): string {
+  function computeSuggestedVat(amount: number, discount: number, goodsItemId: string): string {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
-    return String(computeLineVat(amount, 0, resolveVatRatePercent(item, vatRateForDate(vatRates, header.date))));
+    return String(computeLineVat(amount, discount, resolveVatRatePercent(item, vatRateForDate(vatRates, header.date))));
   }
   function onSourceLineChange(idx: number, sourceSalesQuoteLineId: string) {
     const src = pickableLines.find((l) => String(l.sourceSalesQuoteLineId) === sourceSalesQuoteLineId);
@@ -266,6 +267,8 @@ function SalesOrderForm({ editId }: { editId?: number }) {
     const quantity = src.remaining;
     const unitPrice = Number(src.unitPrice);
     const amount = Math.round(unitPrice * quantity * 100) / 100;
+    // تخفیف هم مثل فی از ردیف پیش‌فاکتور می‌آید (تخفیف هر واحد × مقدار) — سرور هم همین را اعمال می‌کند
+    const discount = Math.round(Number(src.unitDiscount || 0) * quantity * 100) / 100;
     updateRow(idx, {
       sourceSalesQuoteLineId,
       goodsItemId: String(src.goodsItemId),
@@ -276,14 +279,27 @@ function SalesOrderForm({ editId }: { editId?: number }) {
       quantity: String(quantity),
       unitPrice: String(unitPrice),
       amount: String(amount),
-      vatAmount: computeSuggestedVat(amount, String(src.goodsItemId)),
+      discount: String(discount),
+      vatAmount: computeSuggestedVat(amount, discount, String(src.goodsItemId)),
     });
+  }
+  function onDiscountChange(idx: number, discount: string) {
+    const row = rows[idx];
+    updateRow(idx, { discount, vatAmount: computeSuggestedVat(Number(row.amount) || 0, Number(discount) || 0, row.goodsItemId) });
   }
   function onQuantityChange(idx: number, quantity: string) {
     const row = rows[idx];
     if (row.unitPrice) {
       const amount = Math.round(Number(row.unitPrice) * (Number(quantity) || 0) * 100) / 100;
-      updateRow(idx, { quantity, amount: String(amount), vatAmount: computeSuggestedVat(amount, row.goodsItemId) });
+      // ردیف مبتنی بر پیش‌فاکتور: تخفیف متناسب با مقدار عوض می‌شود (تخفیف هر واحد از ردیف پیش‌فاکتور؛ در نبود آن، نسبت فعلی ردیف)
+      let discount = Number(row.discount) || 0;
+      if (header.basis === "QUOTE") {
+        const src = pickableLines.find((l) => String(l.sourceSalesQuoteLineId) === row.sourceSalesQuoteLineId);
+        const oldQty = Number(row.quantity) || 0;
+        const unitDisc = src ? Number(src.unitDiscount || 0) : oldQty > 0 ? discount / oldQty : 0;
+        discount = Math.round(unitDisc * (Number(quantity) || 0) * 100) / 100;
+      }
+      updateRow(idx, { quantity, amount: String(amount), discount: String(discount), vatAmount: computeSuggestedVat(amount, discount, row.goodsItemId) });
     } else {
       updateRow(idx, { quantity });
     }
@@ -291,13 +307,13 @@ function SalesOrderForm({ editId }: { editId?: number }) {
   function onUnitPriceChange(idx: number, unitPrice: string) {
     const row = rows[idx];
     const amount = Math.round(Number(unitPrice) * (Number(row.quantity) || 0) * 100) / 100;
-    updateRow(idx, { unitPrice, amount: String(amount), vatAmount: computeSuggestedVat(amount, row.goodsItemId) });
+    updateRow(idx, { unitPrice, amount: String(amount), vatAmount: computeSuggestedVat(amount, Number(row.discount) || 0, row.goodsItemId) });
   }
   function onAmountChange(idx: number, amount: string) {
     const row = rows[idx];
     const qty = Number(row.quantity) || 0;
     const unitPrice = qty > 0 ? Math.round((Number(amount) / qty) * 10000) / 10000 : 0;
-    updateRow(idx, { amount, unitPrice: String(unitPrice), vatAmount: computeSuggestedVat(Number(amount) || 0, row.goodsItemId) });
+    updateRow(idx, { amount, unitPrice: String(unitPrice), vatAmount: computeSuggestedVat(Number(amount) || 0, Number(row.discount) || 0, row.goodsItemId) });
   }
   function onGoodsItemChange(idx: number, goodsItemId: string) {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
@@ -311,6 +327,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
   }
 
   const totalAmount = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const totalDiscount = rows.reduce((s, r) => s + (Number(r.discount) || 0), 0);
   const totalVat = rows.reduce((s, r) => s + (Number(r.vatAmount) || 0), 0);
 
   function buildBody() {
@@ -330,6 +347,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
         quantity: Number(r.quantity) || 0,
         unitPrice: Number(r.unitPrice) || 0,
         amount: Number(r.amount) || 0,
+        discount: Number(r.discount) || 0,
         vatAmount: Number(r.vatAmount) || 0,
         description: r.description || null,
       })),
@@ -489,6 +507,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
                   <th>مقدار</th>
                   <th>فی</th>
                   <th>مبلغ</th>
+                  <th>تخفیف</th>
                   <th>مالیات بر ارزش افزوده</th>
                   <th>شرح</th>
                   <th></th>
@@ -547,6 +566,9 @@ function SalesOrderForm({ editId }: { editId?: number }) {
                       <td style={{ minWidth: 120 }}>
                         <AmountInput value={row.amount} onChange={(v) => onAmountChange(idx, v)} allowDecimal disabled={locked || header.basis === "QUOTE"} />
                       </td>
+                      <td style={{ minWidth: 120 }} title={header.basis === "QUOTE" ? "تخفیف از ردیف پیش‌فاکتور محاسبه می‌شود و غیرقابل ویرایش است" : undefined}>
+                        <AmountInput value={row.discount} onChange={(v) => onDiscountChange(idx, v)} allowDecimal placeholder="۰" disabled={locked || header.basis === "QUOTE"} />
+                      </td>
                       <td style={{ minWidth: 120 }}>
                         <AmountInput value={row.vatAmount} onChange={(v) => updateRow(idx, { vatAmount: v })} allowDecimal placeholder="۰" disabled={locked} />
                       </td>
@@ -566,7 +588,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
           </div>
           <div className="grid-footer je-lines-footer">
             <span className="grid-footer-info">{rows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(rows.length))} ردیف`}</span>
-            <span className="je-lines-totals">جمع مبلغ: {formatAmountFa(totalAmount)} — جمع مالیات بر ارزش افزوده: {formatAmountFa(totalVat)}</span>
+            <span className="je-lines-totals">جمع مبلغ: {formatAmountFa(totalAmount)} — جمع تخفیف: {formatAmountFa(totalDiscount)} — جمع مالیات بر ارزش افزوده: {formatAmountFa(totalVat)}</span>
           </div>
         </div>
       </form>
