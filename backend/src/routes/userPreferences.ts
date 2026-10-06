@@ -1,4 +1,5 @@
 import { Router } from "express";
+import bcrypt from "bcryptjs";
 import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
 
@@ -26,6 +27,19 @@ router.put("/me/preferences", async (req: AuthedRequest, res) => {
     select: { preferences: true },
   });
   res.json(updated.preferences);
+});
+
+// تغییر کلمه عبور توسط خودِ کاربر: شناسه از توکن می‌آید و رمز فعلی باید درست وارد شود (بدون permission جدا، مثل تنظیمات کاربری)
+router.post("/me/change-password", async (req: AuthedRequest, res) => {
+  const { currentPassword, newPassword } = req.body as { currentPassword?: string; newPassword?: string };
+  if (!currentPassword || !newPassword) return res.status(400).json({ error: "رمز عبور فعلی و رمز عبور جدید الزامی است" });
+  if (newPassword.length < 6) return res.status(400).json({ error: "رمز عبور جدید باید حداقل ۶ کاراکتر باشد" });
+  const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+  if (!user) return res.status(404).json({ error: "کاربر یافت نشد" });
+  if (!(await bcrypt.compare(currentPassword, user.passwordHash))) return res.status(400).json({ error: "رمز عبور فعلی اشتباه است" });
+  if (await bcrypt.compare(newPassword, user.passwordHash)) return res.status(400).json({ error: "رمز عبور جدید باید با رمز فعلی متفاوت باشد" });
+  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: await bcrypt.hash(newPassword, 10) } });
+  res.json({ ok: true });
 });
 
 export default router;

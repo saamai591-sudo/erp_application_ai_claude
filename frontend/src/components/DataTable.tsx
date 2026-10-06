@@ -335,6 +335,7 @@ export function DataTable<T extends { id: number | string }>({
   edit,
   onDelete,
   onBulkDelete,
+  deleteConfirmMessage,
   bulkActions,
   emptyText,
   bulkActionsContainer,
@@ -348,6 +349,8 @@ export function DataTable<T extends { id: number | string }>({
   onDelete?: (row: T) => void;
   /** اگر مشخص نشود ولی onDelete موجود باشد، حذف گروهی با فراخوانی onDelete برای هر ردیف انجام می‌شود */
   onBulkDelete?: (rows: T[]) => void | Promise<void>;
+  /** متن سفارشی پرسش تایید حذف (پیش‌فرض: «N ردیف انتخاب‌شده حذف شود؟») */
+  deleteConfirmMessage?: (rows: T[]) => string;
   /** عملیات گروهی سفارشی دیگر (مثل بررسی/برگشت از بررسی) که در همان منوی «عملیات» نمایش داده می‌شوند */
   bulkActions?: { label: (count: number) => string; icon?: any; onClick: (rows: T[]) => void | Promise<void>; danger?: boolean;
     /** عملیات سراسری فهرست (مثل «شماره‌گذاری مجدد») که به انتخاب ردیف نیاز ندارد: همیشه فعال است و انتخاب را پاک نمی‌کند */
@@ -568,7 +571,7 @@ export function DataTable<T extends { id: number | string }>({
   async function handleBulkDelete() {
     setBulkMenuOpen(false);
     if (selectedRows.length === 0) return;
-    if (!window.confirm(`${toFaDigits(String(selectedRows.length))} ردیف انتخاب‌شده حذف شود؟`)) return;
+    if (!window.confirm(deleteConfirmMessage ? deleteConfirmMessage(selectedRows) : `${toFaDigits(String(selectedRows.length))} ردیف انتخاب‌شده حذف شود؟`)) return;
     if (onBulkDelete) {
       await onBulkDelete(selectedRows);
     } else if (onDelete) {

@@ -31,6 +31,7 @@ import AccountClosing from "./pages/AccountClosing";
 import AccountingSettings from "./pages/AccountingSettings";
 import OpeningClosing from "./pages/OpeningClosing";
 import DocumentConfirmation from "./pages/DocumentConfirmation";
+import JournalConsolidation from "./pages/JournalConsolidation";
 import AccountsReview from "./pages/AccountsReview";
 import OlapReports from "./pages/OlapReports";
 import UnitsOfMeasure from "./pages/UnitsOfMeasure";
@@ -91,6 +92,7 @@ import TreasuryAccountSettings from "./pages/TreasuryAccountSettings";
 import ChequeBookLeaves from "./pages/ChequeBookLeaves";
 import PettyCashes from "./pages/PettyCashes";
 import TaxMemories from "./pages/TaxMemories";
+import TradeLedgers from "./pages/TradeLedgers";
 import NumberingPatterns from "./pages/NumberingPatterns";
 import PettyCashCustodians from "./pages/PettyCashCustodians";
 import PettyCashPayments from "./pages/PettyCashPayments";
@@ -209,6 +211,9 @@ export default function App() {
             <Route path="/opening-closing/new" element={<OpeningClosing />} />
             <Route path="/opening-closing/:id" element={<OpeningClosing />} />
             <Route path="/document-confirmation" element={<DocumentConfirmation />} />
+            <Route path="/journal-consolidation" element={<JournalConsolidation />} />
+            <Route path="/journal-consolidation/new" element={<JournalConsolidation />} />
+            <Route path="/journal-consolidation/:id/edit" element={<JournalConsolidation />} />
             <Route path="/account-review" element={<AccountsReview />} />
             <Route path="/olap-reports" element={<OlapReports />} />
             <Route path="/olap-reports/new" element={<OlapReports />} />
@@ -398,6 +403,9 @@ export default function App() {
             <Route path="/tax-memories" element={<TaxMemories />} />
             <Route path="/tax-memories/new" element={<TaxMemories />} />
             <Route path="/tax-memories/:id/edit" element={<TaxMemories />} />
+            <Route path="/trade-ledgers" element={<TradeLedgers />} />
+            <Route path="/trade-ledgers/new" element={<TradeLedgers />} />
+            <Route path="/trade-ledgers/:id/edit" element={<TradeLedgers />} />
             <Route path="/petty-cashes" element={<PettyCashes />} />
             <Route path="/petty-cashes/new" element={<PettyCashes />} />
             <Route path="/petty-cashes/:id/edit" element={<PettyCashes />} />

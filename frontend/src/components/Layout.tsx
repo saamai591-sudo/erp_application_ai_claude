@@ -10,6 +10,7 @@ import { FitText } from "./FitText";
 import { usePermissions } from "../lib/usePermissions";
 import { TabsBar } from "./TabsBar";
 import { UserSettingsModal } from "./UserSettingsModal";
+import { ChangePasswordModal } from "./ChangePasswordModal";
 import { AboutModal } from "./AboutModal";
 import { FiscalPeriodBadge } from "./FiscalPeriodBadge";
 import { applyFont, applyTheme } from "../lib/userSettings";
@@ -513,6 +514,7 @@ export default function Layout() {
   const [openSubModule, setOpenSubModule] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
   // طبق تصمیم صریح کاربر: سایدبار قابل جمع‌شدن به یک ستون آیکن است؛ در حالت جمع، کلیک روی آیکن هر ماژول
   // به‌جای آکاردئون داخلی، یک فلای‌اوت شناور (ModuleFlyout) باز می‌کند که زیرماژول‌ها/فرم‌هایش را نشان می‌دهد.
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(getInitialSidebarCollapsed);
@@ -680,7 +682,12 @@ export default function Layout() {
       <div className="main">
         <div className="topbar">
           <div className="topbar-account">
-            <div className="user">{user.firstName} {user.lastName}</div>
+            <button type="button" className="topbar-user-btn" onClick={() => setPasswordOpen(true)} title="تغییر کلمه عبور">
+              <span className="topbar-user-avatar" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="3.6" /><path d="M4.5 20c.8-3.6 3.8-5.6 7.5-5.6s6.7 2 7.5 5.6" /></svg>
+              </span>
+              <span className="user">{user.firstName} {user.lastName}</span>
+            </button>
           </div>
           <div className="topbar-account">
             <FiscalPeriodBadge />
@@ -716,6 +723,7 @@ export default function Layout() {
       </div>
       {settingsOpen && <UserSettingsModal onClose={() => setSettingsOpen(false)} />}
       {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
+      {passwordOpen && <ChangePasswordModal onClose={() => setPasswordOpen(false)} />}
     </div>
   );
 }

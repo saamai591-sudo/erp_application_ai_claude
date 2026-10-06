@@ -87,6 +87,7 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "account-closing", label: "بستن حسابها", list: "/account-closing", create: "/account-closing/new", icon: "layers" },
           { key: "opening-closing", label: "افتتاحیه و اختتامیه", list: "/opening-closing", create: "/opening-closing/new", icon: "layers" },
           { key: "document-confirmation", label: "تایید اسناد", list: "/document-confirmation", icon: "shield" },
+          { key: "journal-consolidation", label: "تجمیع اسناد", list: "/journal-consolidation", create: "/journal-consolidation/new", icon: "layers" },
         ],
       },
       {
@@ -332,6 +333,10 @@ const RAW_MODULES: ModuleGroup[] = [
       {
         title: "تنظیمات",
         items: [{ key: "tax-memories", label: "حافظه مالیاتی", list: "/tax-memories", create: "/tax-memories/new", icon: "shield" }],
+      },
+      {
+        title: "عملیات",
+        items: [{ key: "trade-ledgers", label: "دفاتر تجاری", list: "/trade-ledgers", create: "/trade-ledgers/new", icon: "layers" }],
       },
     ],
   },

@@ -153,6 +153,9 @@ model ExchangeRate {
 
 model FiscalPeriod {
   id                        Int                        @id @default(autoincrement())
+  consolidationRuns         JournalConsolidationRun[]
+  consolidatedDocuments     ConsolidatedDocument[]
+  tradeLedgers              TradeLedger[]
   code                      String                     @unique
   title                     String                     @unique @db.VarChar(4)
   fromDate                  DateTime                   @db.Date
@@ -665,6 +668,7 @@ model DocumentType {
 
 model JournalEntry {
   id                  Int                  @id @default(autoincrement())
+  consolidationSource ConsolidatedDocumentSource?
   fiscalPeriodId      Int
   number              Int
   referenceNumber     Int
@@ -3830,4 +3834,107 @@ model NumberingPatternCounter {
   pattern    NumberingPattern @relation(fields: [patternId], references: [id], onDelete: Cascade)
 
   @@unique([patternId, scopeKey])
+}
+
+/// «تجمیع اسناد» (حسابداری › عملیات): روش انتخاب محدوده‌ی تجمیع — «از تاریخ تا تاریخ» یا «از سند تا سند» (هم‌زمان قابل استفاده نیستند)
+enum ConsolidationRangeMode {
+  BY_DATE
+  BY_DOCUMENT
+}
+
+/// نوع تجمیع: روزانه یا ماهانه (ماه شمسی)
+enum ConsolidationType {
+  DAILY
+  MONTHLY
+}
+
+/// یک بار «صدور اسناد تجمیعی» (کل عملیات در یک تراکنش انجام می‌شود؛ یا همه‌ی اسناد این اجرا ثبت می‌شوند یا هیچ‌کدام)
+model JournalConsolidationRun {
+  id             Int                    @id @default(autoincrement())
+  fiscalPeriodId Int
+  rangeMode      ConsolidationRangeMode
+  type           ConsolidationType
+  fromDate       DateTime?              @db.Date
+  toDate         DateTime?              @db.Date
+  fromNumber     Int?
+  toNumber       Int?
+  createdById    Int?
+  createdAt      DateTime               @default(now())
+  fiscalPeriod   FiscalPeriod           @relation(fields: [fiscalPeriodId], references: [id])
+  documents      ConsolidatedDocument[]
+}
+
+/// سند تجمیعی: فقط «هدر» (بدون آیتم)، جدا از جدول اسناد حسابداری؛ شماره‌گذاری مستقل در هر دوره مالی.
+/// date = تاریخ آخرین سند مبنا؛ fromDate/toDate و fromNumber/toNumber = کمینه/بیشینه‌ی تاریخ و شماره‌ی اسناد مبنا.
+/// boundaryKey = systemKey نوع سند مرزی (OPENING / CLOSING_ACCOUNTS / CLOSING) برای سندی که به‌تنهایی تجمیع شده؛ برای تجمیع عادی null.
+model ConsolidatedDocument {
+  id             Int                          @id @default(autoincrement())
+  fiscalPeriodId Int
+  runId          Int
+  number         Int
+  date           DateTime                     @db.Date
+  type           ConsolidationType
+  boundaryKey    String?
+  description    String?
+  sourceCount    Int
+  fromDate       DateTime                     @db.Date
+  toDate         DateTime                     @db.Date
+  fromNumber     Int
+  toNumber       Int
+  /// گردش بدهکار/بستانکار (ارز پایه) = جمع ردیف‌های اسناد مبنا؛ هنگام صدور محاسبه و همین‌جا ذخیره می‌شود تا در فهرست بار محاسباتی نداشته باشد
+  totalDebit     Decimal                      @default(0) @db.Decimal(18, 2)
+  totalCredit    Decimal                      @default(0) @db.Decimal(18, 2)
+  createdAt      DateTime                     @default(now())
+  fiscalPeriod   FiscalPeriod                 @relation(fields: [fiscalPeriodId], references: [id])
+  run            JournalConsolidationRun      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  sources        ConsolidatedDocumentSource[]
+  tradeLedgerLink TradeLedgerDocument?
+
+  @@unique([fiscalPeriodId, number])
+  @@index([runId])
+}
+
+/// ارتباط دوطرفه‌ی سند تجمیعی با اسناد مبنا (فقط شناسه). یکتایی journalEntryId = هر سند حسابداری فقط یک‌بار تجمیع می‌شود (قفل نهایی برابر همروندی).
+model ConsolidatedDocumentSource {
+  id                     Int                  @id @default(autoincrement())
+  consolidatedDocumentId Int
+  journalEntryId         Int                  @unique
+  consolidatedDocument   ConsolidatedDocument @relation(fields: [consolidatedDocumentId], references: [id], onDelete: Cascade)
+  journalEntry           JournalEntry         @relation(fields: [journalEntryId], references: [id])
+
+  @@index([consolidatedDocumentId])
+}
+
+enum TradeLedgerStatus {
+  DRAFT
+  APPROVED
+}
+
+/// «دفاتر تجاری» (امور مالیاتی › عملیات): گروهی از اسناد تجمیعی یک بازه؛ مبالغ هنگام خروجی CSV از اسناد مبنا به‌ازای حساب کل محاسبه می‌شود
+model TradeLedger {
+  id             Int                   @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  fromDate       DateTime              @db.Date
+  toDate         DateTime              @db.Date
+  status         TradeLedgerStatus     @default(DRAFT)
+  approvedAt     DateTime?
+  approvedById   Int?
+  createdById    Int?
+  createdAt      DateTime              @default(now())
+  fiscalPeriod   FiscalPeriod          @relation(fields: [fiscalPeriodId], references: [id])
+  documents      TradeLedgerDocument[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+/// یکتایی consolidatedDocumentId = هر سند تجمیعی فقط در یک دفتر؛ onDelete پیش‌فرض (Restrict) = سندِ داخل دفتر در سطح پایگاه داده هم حذف‌شدنی نیست
+model TradeLedgerDocument {
+  id                     Int                  @id @default(autoincrement())
+  tradeLedgerId          Int
+  consolidatedDocumentId Int                  @unique
+  tradeLedger            TradeLedger          @relation(fields: [tradeLedgerId], references: [id], onDelete: Cascade)
+  consolidatedDocument   ConsolidatedDocument @relation(fields: [consolidatedDocumentId], references: [id])
+
+  @@index([tradeLedgerId])
 }

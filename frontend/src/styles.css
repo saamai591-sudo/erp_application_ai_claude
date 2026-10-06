@@ -1488,6 +1488,9 @@ fieldset { min-width: 0; }
   flex-shrink: 0;
 }
 .topbar .user { font-size: 11.5px; color: var(--ink-soft); font-weight: 500; }
+.topbar-user-btn { display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; padding: 2px 6px; border-radius: 6px; font-family: inherit; cursor: pointer; }
+.topbar-user-btn:hover { background: var(--row-alt); }
+.topbar-user-avatar { width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid var(--ink-soft); color: var(--ink-soft); display: inline-flex; align-items: center; justify-content: center; }
 /* دوره مالی جاری کاربر، کنار دکمه‌ی تنظیمات کاربری */
 .topbar-fiscal { font-size: 11.5px; color: var(--ink-soft); font-weight: 500; margin-inline-end: 6px; white-space: nowrap; background: none; border: 0; padding: 2px 4px; font-family: inherit; cursor: pointer; border-radius: 4px; }
 .topbar-fiscal:hover { background: var(--row-alt); color: var(--ink); }

@@ -224,6 +224,12 @@ export const REGISTRY: ModuleDef[] = [
             baseActions: ["view"],
             actions: [{ key: "confirm", title: "تایید" }],
           },
+          {
+            key: "journal-consolidation",
+            title: "تجمیع اسناد",
+            baseActions: ["view", "delete"],
+            actions: [{ key: "issue", title: "صدور سند" }],
+          },
         ],
       },
       {
@@ -541,6 +547,22 @@ export const REGISTRY: ModuleDef[] = [
             actions: [
               { key: "downloadPublicKey", title: "دانلود کلید عمومی" },
               { key: "downloadCsr", title: "دانلود CSR" },
+            ],
+          },
+        ],
+      },
+      {
+        key: "operations",
+        title: "عملیات",
+        forms: [
+          {
+            key: "trade-ledgers",
+            title: "دفاتر تجاری",
+            baseActions: ["view", "create", "delete"],
+            actions: [
+              { key: "approve", title: "تایید" },
+              { key: "unapprove", title: "لغو تایید" },
+              { key: "download", title: "دانلود CSV" },
             ],
           },
         ],

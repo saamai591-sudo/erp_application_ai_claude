@@ -6,6 +6,7 @@ import { recordResourceFetch, recordResourceMutation } from "./listInvalidation"
 import { rememberVersion, attachVersion, hasRememberedVersion, forgetVersion } from "./concurrencyToken";
 import { getSavedFiscalPeriodId } from "./userSettings";
 import { getAuthToken } from "./authToken";
+import { scheduleAutoToast } from "./toast";
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:4000/api`;
 
@@ -49,20 +50,75 @@ async function request(path: string, options: RequestInit = {}) {
   return data;
 }
 
+/** گزینه‌ی اختیاری هر درخواست؛ silent: پیام موفقیت خودکار نشان داده نشود */
+export interface MutationOptions {
+  silent?: boolean;
+}
+
+/**
+ * مسیرهایی که با POST/PUT صدا زده می‌شوند ولی «عملیات» نیستند (ورود، اعتبارسنجی/پیش‌بررسی، کوئری گزارش، تنظیمات شخصی).
+ * هر مسیر جدیدی از این نوع باید یا اینجا اضافه شود یا با { silent: true } صدا زده شود؛ بقیه‌ی POST/PUT/DELETEها خودکار پیام موفقیت می‌گیرند.
+ */
+const NON_OPERATION_PATHS = [/^\/auth\//, /^\/me\/preferences/, /\/(check|validate|preview|olap-pivot)(\?|$)/];
+
+const VERB_MESSAGES: Record<string, string> = {
+  approve: "تایید انجام شد",
+  unapprove: "برگشت از تایید انجام شد",
+  review: "بررسی انجام شد",
+  unreview: "برگشت از بررسی انجام شد",
+  "issue-journal-entry": "سند حسابداری صادر شد",
+  "issue-warehouse-journal-entries": "سند حسابداری صادر شد",
+  "journal-entry": "سند حسابداری حذف شد",
+  issue: "صدور انجام شد",
+  "re-edit": "ویرایش مجدد ذخیره شد",
+  void: "ابطال انجام شد",
+  reopen: "باز کردن انجام شد",
+  close: "بستن انجام شد",
+  reverse: "برگشت انجام شد",
+  renumber: "شماره‌گذاری مجدد انجام شد",
+  "accounting-confirm": "تایید حسابداری انجام شد",
+  "accounting-confirm-revert": "برگشت از تایید حسابداری انجام شد",
+  "advance-allocations": "تخصیص پیش‌پرداخت/پیش‌دریافت ذخیره شد",
+  confirm: "تایید انجام شد",
+  move: "جابه‌جایی انجام شد",
+  run: "اجرا انجام شد",
+  transition: "تغییر وضعیت انجام شد",
+  "import-jobs": "درخواست درون‌ریزی ثبت شد",
+};
+
+function successMessage(method: "POST" | "PUT" | "DELETE", path: string): string {
+  const clean = path.split("?")[0].replace(/\/+$/, "");
+  const last = clean.split("/").pop() || "";
+  if (method === "DELETE" && last !== "journal-entry") return "حذف انجام شد";
+  if (VERB_MESSAGES[last]) return VERB_MESSAGES[last];
+  const isRecord = /^\d+$/.test(last);
+  if (method === "PUT") return isRecord ? "تغییرات ذخیره شد" : "ذخیره شد";
+  if (method === "POST") return "ثبت شد";
+  return "عملیات با موفقیت انجام شد";
+}
+
+/** پیام موفقیت خودکار پایه برای هر عملیات تغییردهنده (نگاه کنید به scheduleAutoToast در toast.ts) */
+function notifySuccess(method: "POST" | "PUT" | "DELETE", path: string, options?: MutationOptions) {
+  if (options?.silent || NON_OPERATION_PATHS.some((re) => re.test(path))) return;
+  scheduleAutoToast(successMessage(method, path));
+}
+
 export const api = {
   get: (path: string) => request(path).then((data) => {
     recordResourceFetch(path);
     rememberVersion(path, data);
     return data;
   }),
-  post: (path: string, body?: any) => request(path, { method: "POST", body: JSON.stringify(body) }).then((data) => {
+  post: (path: string, body?: any, options?: MutationOptions) => request(path, { method: "POST", body: JSON.stringify(body) }).then((data) => {
     recordResourceMutation(path);
+    notifySuccess("POST", path, options);
     return data;
   }),
-  put: async (path: string, body?: any) => {
+  put: async (path: string, body?: any, options?: MutationOptions) => {
     const hadVersion = hasRememberedVersion(path);
     const data = await request(path, { method: "PUT", body: JSON.stringify(attachVersion(path, body)) });
     recordResourceMutation(path);
+    notifySuccess("PUT", path, options);
     if (data && typeof data === "object" && typeof data.updatedAt === "string") {
       rememberVersion(path, data);
     } else if (hadVersion) {
@@ -78,8 +134,9 @@ export const api = {
     }
     return data;
   },
-  del: (path: string) => request(path, { method: "DELETE" }).then((data) => {
+  del: (path: string, options?: MutationOptions) => request(path, { method: "DELETE" }).then((data) => {
     recordResourceMutation(path);
+    notifySuccess("DELETE", path, options);
     return data;
   }),
 };
