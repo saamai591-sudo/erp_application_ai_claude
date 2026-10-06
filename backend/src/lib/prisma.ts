@@ -1,3 +1,4 @@
+import { assertLineAmountDecimals } from "../utils/amountDecimals";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { getRequestContext } from "./requestContext";
 
@@ -68,9 +69,55 @@ async function assertJournalEntryDeletable(where: any) {
   if (locked) throw new Error(JOURNAL_ENTRY_LOCKED_DELETE_MESSAGE);
 }
 
+// کنترل رقم اعشار مبالغ ردیف‌های سند حسابداری در «منبع» نوشتن (هر مسیری که ردیف سند می‌نویسد، از جمله ویرایش سند دستی):
+// بدهکار/بستانکار ≤ اعشار ارز ردیف، بدهکار/بستانکار پایه ≤ اعشار ارز پایه. (منطق: utils/amountDecimals.ts؛ صدور سند هم قبل‌تر همین را با برچسب ردیف می‌زند)
+const currencyDecimalsCache: { at: number; map: Map<number, { code: string; title: string; decimalPlaces: number; isBase: boolean }> } = { at: 0, map: new Map() };
+async function currencyDecimalsMap() {
+  if (Date.now() - currencyDecimalsCache.at > 30_000 || currencyDecimalsCache.map.size === 0) {
+    const all = await rawPrisma.currency.findMany({ select: { id: true, code: true, title: true, decimalPlaces: true, isBase: true } });
+    currencyDecimalsCache.map = new Map(all.map((c) => [c.id, c]));
+    currencyDecimalsCache.at = Date.now();
+  }
+  return currencyDecimalsCache.map;
+}
+async function assertJournalLinesDecimals(lines: any[]) {
+  if (!lines.length) return;
+  const map = await currencyDecimalsMap();
+  const base = [...map.values()].find((c) => c.isBase);
+  if (!base) return;
+  for (const [idx, l] of lines.entries()) {
+    const cur = map.get(Number(l?.currencyId));
+    if (!cur) continue;
+    assertLineAmountDecimals(l, cur, base, `ردیف ${idx + 1}`);
+  }
+}
+const nestedLines = (data: any): any[] => {
+  const c = data?.lines?.create;
+  const m = data?.lines?.createMany?.data;
+  return [...(Array.isArray(c) ? c : c ? [c] : []), ...(Array.isArray(m) ? m : m ? [m] : [])];
+};
+
 export const prisma = rawPrisma.$extends({
   query: {
+    journalEntryLine: {
+      async create({ args, query }) {
+        await assertJournalLinesDecimals([args.data]);
+        return query(args);
+      },
+      async createMany({ args, query }) {
+        await assertJournalLinesDecimals(Array.isArray(args.data) ? args.data : [args.data]);
+        return query(args);
+      },
+    },
     journalEntry: {
+      async create({ args, query }) {
+        await assertJournalLinesDecimals(nestedLines(args.data));
+        return query(args);
+      },
+      async update({ args, query }) {
+        await assertJournalLinesDecimals(nestedLines(args.data));
+        return query(args);
+      },
       async delete({ args, query }) {
         await assertJournalEntryDeletable(args.where);
         return query(args);

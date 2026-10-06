@@ -5,7 +5,7 @@ import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation
 import { assertRecordNotStale } from "../utils/concurrency";
 import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
 import { getVatRatePercentForDate } from "../services/accountingSettingsService";
-import { toBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConversion";
+import { toBaseCurrencyAmount, roundToCurrencyDecimals, ConversionCurrency } from "../utils/currencyConversion";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
@@ -141,8 +141,8 @@ async function validateLines(lines: LineInput[], basis: string, currency: Conver
     const baseAmount = toBaseCurrencyAmount(amount, fxRate, currency, baseCurrency);
     const baseDiscount = toBaseCurrencyAmount(discount, fxRate, currency, baseCurrency);
     const vatRatePercent = resolveVatRatePercent(item, await getVatRatePercentForDate(docDate));
-    const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent);
-    const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
+    const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent, baseCurrency.decimalPlaces);
+    const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? roundToCurrencyDecimals(Number(l.vatAmount), baseCurrency.decimalPlaces) : suggestedVatAmount;
     if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
 
     cleaned.push({

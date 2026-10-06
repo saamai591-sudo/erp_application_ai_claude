@@ -390,7 +390,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   // ویرایش کند — دقیقاً هم‌الگوی PurchaseInvoices.tsx.
   function computeSuggestedVat(amount: number, discount: number, goodsItemId: string): string {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
-    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item, vatRateForDate(vatRates, header.date))));
+    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item, vatRateForDate(vatRates, header.date)), baseCurrency?.decimalPlaces ?? 2));
   }
   // مانده‌ی مؤثر یک ردیف بر اساس سند مبنایش: مانده‌ی سرور منهای مقدار سایر ردیف‌های همین فاکتور که به همان ردیف مبنا ارجاع می‌دهند (زنده، با هر تغییر ردیف‌ها)
   function effectiveRemaining(row: RowState, excludeIdx: number): number | null {

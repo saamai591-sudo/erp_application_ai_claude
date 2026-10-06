@@ -165,8 +165,8 @@ async function validateLines(lines: LineInput[], currency: ConversionCurrency, f
     const baseAmount = toBaseCurrencyAmount(amount, fxRate, currency, baseCurrency);
     const baseDiscount = toBaseCurrencyAmount(discount, fxRate, currency, baseCurrency);
     const vatRatePercent = resolveVatRatePercent(service, await getVatRatePercentForDate(docDate));
-    const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent);
-    const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
+    const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent, baseCurrency.decimalPlaces);
+    const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? roundToCurrencyDecimals(Number(l.vatAmount), baseCurrency.decimalPlaces) : suggestedVatAmount;
     if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
 
     // مبنای ردیف از «نحوه حسابداری» خدمت می‌آید: بهای موجودی ⇒ رسید انبار (الزامی)، هزینه ⇒ بدون مبنا (services/serviceAccountingTreatment.ts)

@@ -25,7 +25,9 @@ export function resolveVatRatePercent(goodsItem: VatRateGoodsItem | null | undef
 }
 
 /** مالیات بر ارزش افزوده‌ی یک ردیف سند: (مبلغ − تخفیف) × نرخ مالیات٪ */
-export function computeLineVat(amount: number, discount: number, vatRatePercent: number): number {
+/** decimalPlaces = رقم اعشار ارز پایه (مالیات به ارز پایه ذخیره می‌شود) */
+export function computeLineVat(amount: number, discount: number, vatRatePercent: number, decimalPlaces = 2): number {
   const base = Math.max(0, (Number(amount) || 0) - (Number(discount) || 0));
-  return Math.round(base * (vatRatePercent / 100) * 100) / 100;
+  const factor = Math.pow(10, decimalPlaces);
+  return Math.round(base * (vatRatePercent / 100) * factor) / factor;
 }

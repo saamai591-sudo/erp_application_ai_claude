@@ -36,7 +36,7 @@ import { DescriptionField } from "../components/DescriptionField";
 type Status = "DRAFT" | "APPROVED";
 
 interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null } }
-interface CurrencyOption { id: number; code: string; title: string }
+interface CurrencyOption { id: number; code: string; title: string; decimalPlaces?: number }
 interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
 
 function customerTitle(c: CustomerOption): string {
@@ -219,7 +219,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
   // کار نیست.
   function computeSuggestedVat(amount: number, discount: number, goodsItemId: string): string {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
-    return String(computeLineVat(amount, discount, resolveVatRatePercent(item, vatRateForDate(vatRates, header.date))));
+    return String(computeLineVat(amount, discount, resolveVatRatePercent(item, vatRateForDate(vatRates, header.date)), currencies.find((c) => String(c.id) === String(header.currencyId))?.decimalPlaces ?? 2));
   }
   function onUnitPriceChange(idx: number, unitPrice: string) {
     const row = rows[idx];

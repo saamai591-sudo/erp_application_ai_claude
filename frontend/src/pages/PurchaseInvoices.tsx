@@ -411,7 +411,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   // قابل‌ویرایش است).
   function computeSuggestedVat(amount: number, discount: number, goodsItemId: string): string {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
-    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item, vatRateForDate(vatRates, header.date))));
+    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item, vatRateForDate(vatRates, header.date)), baseCurrency?.decimalPlaces ?? 2));
   }
   function onUnitPriceChange(idx: number, unitPrice: string) {
     const row = rows[idx];
@@ -489,7 +489,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   // تب «سایر هزینه‌ها» — دقیقاً هم‌الگوی ServicePurchaseInvoices.tsx (همان جدول/منطق بک‌اند مشترک است).
   function computeSuggestedVatForCost(amount: number, discount: number, serviceId: string): string {
     const svc = services.find((s) => String(s.id) === serviceId);
-    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(svc, vatRateForDate(vatRates, header.date))));
+    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(svc, vatRateForDate(vatRates, header.date)), baseCurrency?.decimalPlaces ?? 2));
   }
 
   // انتخاب خدمت در «سایر هزینه‌ها»: مبنای ردیف از «نحوه حسابداری» خدمت تعیین می‌شود (بهای موجودی ⇒ رسید انبار الزامی، هزینه ⇒ رسید انبار مجاز نیست)

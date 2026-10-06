@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma";
 import { assertLineHasAmount, assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { toBaseCurrencyAmount } from "../utils/currencyConversion";
+import { assertLineAmountDecimals } from "../utils/amountDecimals";
 
 export type IssuingSystemType = "ACCOUNTING" | "ACCOUNTING_EXCEL_IMPORT" | "ACCOUNT_CLOSING" | "OPENING_CLOSING" | "WAREHOUSE" | "PURCHASE" | "SALES" | "TREASURY";
 
@@ -123,6 +124,8 @@ export async function issueJournalEntry(opts: IssueJournalEntryOptions): Promise
 
     const baseDebit = isBaseLine ? debit : toBaseCurrencyAmount(debit, fxRate, currency, baseCurrency);
     const baseCredit = isBaseLine ? credit : toBaseCurrencyAmount(credit, fxRate, currency, baseCurrency);
+    // کنترل مرکزی رقم اعشار: بدهکار/بستانکار ارزی ≤ اعشار ارز تراکنش، بدهکار/بستانکار ارز پایه ≤ اعشار ارز پایه
+    assertLineAmountDecimals({ debit, credit, baseDebit, baseCredit }, currency, baseCurrency, `ردیف ${idx + 1}`);
     totalDebit += baseDebit;
     totalCredit += baseCredit;
 

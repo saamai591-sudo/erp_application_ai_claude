@@ -6,7 +6,7 @@ import { assertRecordNotStale } from "../utils/concurrency";
 import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
 import { getVatRatePercentForDate, getAdvanceReceiptMethodForDate } from "../services/accountingSettingsService";
 import { getSalesInvoiceAdvanceState, saveSalesInvoiceAdvanceAllocations, assertAdvanceAllocationsStillValid, salesInvoiceNetTotal, salesInvoiceVatTotal } from "../services/salesInvoiceAdvanceService";
-import { toBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConversion";
+import { toBaseCurrencyAmount, roundToCurrencyDecimals, ConversionCurrency } from "../utils/currencyConversion";
 import { allocateDocumentNumber, assertEditAllowed, releaseDocumentNumber } from "../services/numberingPatternService";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
@@ -481,8 +481,8 @@ async function validateLines(
     const baseAmount = toBaseCurrencyAmount(amount, fxRate, currency, baseCurrency);
     const baseDiscount = toBaseCurrencyAmount(discount, fxRate, currency, baseCurrency);
     const vatRatePercent = resolveVatRatePercent(item, await getVatRatePercentForDate(h.date));
-    const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent);
-    const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
+    const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent, baseCurrency.decimalPlaces);
+    const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? roundToCurrencyDecimals(Number(l.vatAmount), baseCurrency.decimalPlaces) : suggestedVatAmount;
     if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${n} نامعتبر است`);
 
     cleaned.push({

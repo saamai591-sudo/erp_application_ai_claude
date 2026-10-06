@@ -350,7 +350,7 @@ function ServicePurchaseInvoiceForm({ editId }: { editId?: number }) {
   // اولیه است، کاربر می‌تواند بعداً خودش مقدار را ویرایش کند — دقیقاً هم‌الگوی PurchaseInvoices.tsx.
   function computeSuggestedVat(amount: number, discount: number, serviceId: string): string {
     const svc = services.find((s) => String(s.id) === serviceId);
-    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(svc, vatRateForDate(vatRates, header.date))));
+    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(svc, vatRateForDate(vatRates, header.date)), baseCurrency?.decimalPlaces ?? 2));
   }
 
   // انتخاب خدمت: مبنای ردیف از نحوه حسابداری خدمت تعیین می‌شود؛ خدمتِ «هزینه» هیچ رسید انبار/تسهیمی نگه نمی‌دارد

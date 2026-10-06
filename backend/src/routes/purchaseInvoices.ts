@@ -223,8 +223,8 @@ async function validateLines(
     // مالیات را ویرایش کند؛ پس اگر کلاینت مقدار صریحی فرستاده باشد (که همیشه می‌فرستد، چون این فیلد در
     // فرم قابل‌ویرایش است)، همان مقدار معتبر ذخیره می‌شود، نه مقدار محاسبه‌شده.
     const vatRatePercent = resolveVatRatePercent(item, await getVatRatePercentForDate(docDate));
-    const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent);
-    const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
+    const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent, baseCurrency.decimalPlaces);
+    const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? roundToCurrencyDecimals(Number(l.vatAmount), baseCurrency.decimalPlaces) : suggestedVatAmount;
     if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
 
     cleaned.push({
@@ -277,8 +277,8 @@ async function validateOtherCostLines(lines: OtherCostInput[], currency: Convers
     const baseAmount = toBaseCurrencyAmount(amount, fxRate, currency, baseCurrency);
     const baseDiscount = toBaseCurrencyAmount(discount, fxRate, currency, baseCurrency);
     const vatRatePercent = resolveVatRatePercent(service, await getVatRatePercentForDate(docDate));
-    const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent);
-    const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Number(l.vatAmount) : suggestedVatAmount;
+    const suggestedVatAmount = computeLineVat(baseAmount, baseDiscount, vatRatePercent, baseCurrency.decimalPlaces);
+    const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? roundToCurrencyDecimals(Number(l.vatAmount), baseCurrency.decimalPlaces) : suggestedVatAmount;
     if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} سایر هزینه‌ها نامعتبر است`);
 
     // مبنای ردیف از «نحوه حسابداری» خدمت می‌آید (بهای موجودی ⇒ رسید انبار، هزینه ⇒ بدون مبنا) — services/serviceAccountingTreatment.ts

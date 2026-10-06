@@ -289,7 +289,7 @@ function SalesReturnInvoiceForm({ editId }: { editId?: number }) {
   }
   function computeSuggestedVat(amount: number, discount: number, goodsItemId: string): string {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
-    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item, vatRateForDate(vatRates, header.date))));
+    return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item, vatRateForDate(vatRates, header.date)), baseCurrency?.decimalPlaces ?? 2));
   }
   function onSourceLineChange(idx: number, sourceInventoryLineId: string) {
     const src = pickableLines.find((l) => String(l.sourceInventoryLineId) === sourceInventoryLineId);
