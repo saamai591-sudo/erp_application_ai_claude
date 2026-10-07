@@ -413,8 +413,8 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
   }
 
   const activationDepsKey = useMemo(
-    () => serializeForDepsKey({ selections: chain.selections, order: chain.order, filters, groupLevels }),
-    [chain.selections, chain.order, filters, groupLevels]
+    () => serializeForDepsKey({ upstream: chain.upstream(activeTab), filters, groupLevels }),
+    [chain.selections, chain.order, activeTab, filters, groupLevels]
   );
   useReviewTabActivation(
     levelsLoaded && !!filters.fromDate,

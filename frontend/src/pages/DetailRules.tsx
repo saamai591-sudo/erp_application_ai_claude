@@ -19,7 +19,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState } from "../lib/usePersistedState";
 import { WAREHOUSE_DOC_TYPE_FA } from "../lib/warehouseDocTypes";
 
-// «قواعد تفصیل» (کالا و خدمت › تنظیمات): هدر = رکورد «حسابداری کالا و خدمت» یا «تعیین حسابهای معین» (موضوع دریافت/پرداخت؛ فقط شرط طرف حساب و منبع «ثابت»/«از سند مبنا») + تاریخ اجرا + شرط‌های تفکیک (انبار / گروه کالا / طرف حساب)،
+// «قواعد تفصیل» (کالا و خدمت › تنظیمات): هدر = رکورد «حسابداری کالا و خدمت» + تاریخ اجرا + شرط‌های تفکیک (انبار / گروه کالا / طرف حساب)،
 // دیتیل = ردیف قاعده: مقدار شرط‌ها + منبع هر سطح تفصیلِ معین (ثابت، یا از سند انبار). هر ردیف یا همه‌ی شرط‌های انتخاب‌شده را پر دارد یا همه را خالی (ردیف «بقیه»).
 // اعمال: صدور سند حسابداری اسناد انبار (services/detailRuleService.ts).
 
@@ -32,18 +32,11 @@ const ACCOUNT_TYPE_FA: Record<string, string> = {
   PURCHASE_VAT: "ارزش افزوده خرید",
   PURCHASE_PAYABLE: "پرداختنی خرید",
   PURCHASE_CONTROL: "کنترل خرید",
-  SALES_RECEIVABLE: "دریافتنی فروش",
 };
-/** منبع «از سند مبنا» (مثلاً پروژه‌ی فاکتور خرید مبنای دریافت/پرداخت) برای حساب‌هایی که ردیف دریافت/پرداخت از آن‌ها معین می‌گیرد */
-const BASE_DOC_GOODS_TYPES = ["PURCHASE_PAYABLE", "SALES_RECEIVABLE"];
 /** شرط «انبار» فقط برای حساب‌هایی که از سند انبار می‌آیند */
 const WAREHOUSE_CONDITION_TYPES = ["INVENTORY", "WAREHOUSE_RECEIPT_CREDIT", "WAREHOUSE_ISSUE_DEBIT"];
 
-type RuleKind = "GOODS" | "TREASURY";
 interface SettingSummary {
-  kind?: RuleKind;
-  treasuryTypeTitle?: string;
-  treasuryTargetTitle?: string;
   id: number;
   accountType: string;
   warehouseDocType: string | null;
@@ -57,7 +50,6 @@ interface SettingSummary {
 
 interface HeaderListRow {
   id: number;
-  kind?: RuleKind;
   setting: SettingSummary;
   effectiveDate: string;
   byWarehouse: boolean;
@@ -70,15 +62,14 @@ interface RuleRowState {
   warehouseId: string;
   goodsGroupId: string;
   partyDetailCode: string;
-  slots: { source: "" | "FIXED" | "FROM_DOCUMENT" | "FROM_BASE_DOCUMENT"; code: string }[];
+  slots: { source: "" | "FIXED" | "FROM_DOCUMENT"; code: string }[];
 }
 
 interface WarehouseOpt { id: number; title: string }
 interface GroupOpt { id: number; parentId: number | null; code: string; title: string }
 
-const settingKey = (s: { kind?: RuleKind; id: number }) => `${s.kind ?? "GOODS"}:${s.id}`;
 const settingLabel = (s: SettingSummary) =>
-  [s.kind === "TREASURY" ? `خزانه — ${s.treasuryTypeTitle}` : ACCOUNT_TYPE_FA[s.accountType] || s.accountType, s.kind === "TREASURY" ? s.treasuryTargetTitle : null, s.accountingGroupTitle, s.warehouseGroupTitle, s.warehouseDocType ? WAREHOUSE_DOC_TYPE_FA[s.warehouseDocType] || s.warehouseDocType : null, `${s.accountCode} - ${s.accountTitle}`, `اجرا ${formatJalaliDate(s.effectiveDate)}`]
+  [ACCOUNT_TYPE_FA[s.accountType] || s.accountType, s.accountingGroupTitle, s.warehouseGroupTitle, s.warehouseDocType ? WAREHOUSE_DOC_TYPE_FA[s.warehouseDocType] || s.warehouseDocType : null, `${s.accountCode} - ${s.accountTitle}`, `اجرا ${formatJalaliDate(s.effectiveDate)}`]
     .filter(Boolean)
     .join(" / ");
 
@@ -126,7 +117,7 @@ function RuleList() {
       {!loading && (
         <DataTable<HeaderListRow>
           columns={[
-            { header: "رکورد حساب (کالا و خدمت / خزانه)", render: (r) => settingLabel(r.setting), filterType: "string", filterValue: (r) => settingLabel(r.setting) },
+            { header: "رکورد حسابداری کالا و خدمت", render: (r) => settingLabel(r.setting), filterType: "string", filterValue: (r) => settingLabel(r.setting) },
             { header: "تاریخ اجرا", render: (r) => formatJalaliDate(r.effectiveDate), width: "120px", filterType: "date", filterValue: (r) => r.effectiveDate.slice(0, 10) },
             { header: "شرط‌ها", render: conds, filterType: "string", filterValue: conds },
             { header: "تعداد ردیف", render: (r) => toFaDigits(String(r.rowCount)), width: "100px", filterType: "number", filterValue: (r) => r.rowCount },
@@ -152,8 +143,7 @@ function RuleForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const { flash } = useSavedFlash();
   const cacheKey = `form:${useLocation().pathname}`;
-  // کلید رکورد: «نوع:شناسه» (شناسه‌ی رکوردهای کالا و خدمت و خزانه ممکن است یکی باشد)
-  const [settingId, setSettingId] = usePersistedState<string>(`${cacheKey}:settingKey`, "");
+  const [settingId, setSettingId] = usePersistedState<string>(`${cacheKey}:settingId`, "");
   const [effectiveDate, setEffectiveDate] = usePersistedState<string>(`${cacheKey}:date`, new Date().toISOString().slice(0, 10));
   const [flags, setFlags] = usePersistedState(`${cacheKey}:flags`, { byWarehouse: false, byGoodsGroup: false, byParty: false });
   const [rows, setRows] = usePersistedState<RuleRowState[]>(`${cacheKey}:rows`, [emptyRow()]);
@@ -168,7 +158,7 @@ function RuleForm({ editId }: { editId?: number }) {
     api.get("/goods-groups").then((g: any[]) => setGroups(g.map((x) => ({ id: x.id, parentId: x.parentId, code: x.code, title: x.title }))));
     if (editId) {
       api.get(`/detail-rules/${editId}`).then((d: any) => {
-        setSettingId(`${d.kind ?? "GOODS"}:${d.settingId}`);
+        setSettingId(String(d.settingId));
         setEffectiveDate(d.effectiveDate.slice(0, 10));
         setFlags({ byWarehouse: d.byWarehouse, byGoodsGroup: d.byGoodsGroup, byParty: d.byParty });
         setRows(
@@ -184,9 +174,7 @@ function RuleForm({ editId }: { editId?: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
 
-  const setting = settings.find((s) => settingKey(s) === settingId) || null;
-  const isTreasury = setting?.kind === "TREASURY";
-  const baseDocAllowed = isTreasury || (!!setting && BASE_DOC_GOODS_TYPES.includes(setting.accountType));
+  const setting = settings.find((s) => String(s.id) === settingId) || null;
 
   function updateRow(i: number, patch: Partial<RuleRowState>) {
     setRows(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
@@ -208,8 +196,7 @@ function RuleForm({ editId }: { editId?: number }) {
     if (!settingId) return showError("رکورد حسابداری کالا و خدمت را انتخاب کنید");
     if (!effectiveDate) return showError("تاریخ اجرا الزامی است");
     const body = {
-      kind: setting?.kind ?? "GOODS",
-      settingId: Number(settingId.split(":")[1]),
+      settingId: Number(settingId),
       effectiveDate,
       ...flags,
       rows: rows.map((r) => ({
@@ -259,21 +246,20 @@ function RuleForm({ editId }: { editId?: number }) {
       <form id="detail-rule-form" onSubmit={onSubmit}>
         <div className="form-grid" style={{ maxWidth: 900 }}>
           <div className="form-field full">
-            <label>رکورد حساب (حسابداری کالا و خدمت / تعیین حسابهای معین)<RequiredMark /></label>
+            <label>رکورد حسابداری کالا و خدمت<RequiredMark /></label>
             <RecordPickerField<SettingSummary>
-              title="انتخاب رکورد حساب"
+              title="انتخاب رکورد حسابداری کالا و خدمت"
               displayValue={setting ? settingLabel(setting) : ""}
               rows={settings}
               disabled={!!editId}
               columns={[
-                { header: "منبع", render: (s) => (s.kind === "TREASURY" ? "تعیین حسابهای معین" : "حسابداری کالا و خدمت"), filterValue: (s) => (s.kind === "TREASURY" ? "تعیین حسابهای معین" : "حسابداری کالا و خدمت") },
-                { header: "نوع حساب", render: (s) => (s.kind === "TREASURY" ? s.treasuryTypeTitle : ACCOUNT_TYPE_FA[s.accountType] || s.accountType), filterValue: (s) => (s.kind === "TREASURY" ? s.treasuryTypeTitle || "" : ACCOUNT_TYPE_FA[s.accountType] || s.accountType) },
-                { header: "گروه حسابداری / مورد", render: (s) => (s.kind === "TREASURY" ? s.treasuryTargetTitle || "—" : s.accountingGroupTitle || "—"), filterValue: (s) => (s.kind === "TREASURY" ? s.treasuryTargetTitle || "" : s.accountingGroupTitle || "") },
+                { header: "نوع حساب", render: (s) => ACCOUNT_TYPE_FA[s.accountType] || s.accountType, filterValue: (s) => ACCOUNT_TYPE_FA[s.accountType] || s.accountType },
+                { header: "گروه حسابداری", render: (s) => s.accountingGroupTitle || "—", filterValue: (s) => s.accountingGroupTitle || "" },
                 { header: "گروه انبار / نوع سند", render: (s) => s.warehouseGroupTitle || (s.warehouseDocType ? WAREHOUSE_DOC_TYPE_FA[s.warehouseDocType] || s.warehouseDocType : "—"), filterValue: (s) => s.warehouseGroupTitle || s.warehouseDocType || "" },
                 { header: "معین", render: (s) => `${s.accountCode} - ${s.accountTitle}`, filterValue: (s) => `${s.accountCode} ${s.accountTitle}` },
                 { header: "تاریخ اجرا", render: (s) => formatJalaliDate(s.effectiveDate), filterValue: (s) => s.effectiveDate.slice(0, 10), width: "110px" },
               ]}
-              onSelect={(s) => setSettingId(settingKey(s))}
+              onSelect={(s) => setSettingId(String(s.id))}
             />
           </div>
           <div className="form-field">
@@ -287,10 +273,10 @@ function RuleForm({ editId }: { editId?: number }) {
           <div className="form-field full">
             <label>شرط‌های تفکیک</label>
             <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
-              {(!setting || (!isTreasury && WAREHOUSE_CONDITION_TYPES.includes(setting.accountType))) && (
+              {(!setting || WAREHOUSE_CONDITION_TYPES.includes(setting.accountType)) && (
                 <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={flags.byWarehouse} onChange={() => toggleFlag("byWarehouse")} /> انبار</label>
               )}
-              {!isTreasury && <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={flags.byGoodsGroup} onChange={() => toggleFlag("byGoodsGroup")} /> گروه کالا (شامل زیرگروه‌ها)</label>}
+              <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={flags.byGoodsGroup} onChange={() => toggleFlag("byGoodsGroup")} /> گروه کالا (شامل زیرگروه‌ها)</label>
               <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={flags.byParty} onChange={() => toggleFlag("byParty")} /> طرف حساب</label>
             </div>
           </div>
@@ -339,7 +325,7 @@ function RuleForm({ editId }: { editId?: number }) {
                   )}
                   {slotTypes.map((t, n) =>
                     t ? (
-                      <SlotCells key={n} typeId={t.id} typeTitle={t.title} slot={r.slots[n]} treasury={isTreasury} baseDoc={baseDocAllowed} onChange={(patch) => updateSlot(i, n, patch)} />
+                      <SlotCells key={n} typeId={t.id} typeTitle={t.title} slot={r.slots[n]} onChange={(patch) => updateSlot(i, n, patch)} />
                     ) : null
                   )}
                   <td>
@@ -359,19 +345,18 @@ function RuleForm({ editId }: { editId?: number }) {
   );
 }
 
-function SlotCells({ typeId, typeTitle, slot, treasury, baseDoc, onChange }: { typeId: number; typeTitle: string; treasury: boolean; baseDoc: boolean; slot: RuleRowState["slots"][number]; onChange: (patch: Partial<RuleRowState["slots"][number]>) => void }) {
+function SlotCells({ typeId, typeTitle, slot, onChange }: { typeId: number; typeTitle: string; slot: RuleRowState["slots"][number]; onChange: (patch: Partial<RuleRowState["slots"][number]>) => void }) {
   return (
     <>
       <td style={{ minWidth: 130 }}>
         <select value={slot.source} onChange={(e) => onChange({ source: e.target.value as any, code: "" })}>
           <option value="">— (پیش‌فرض) —</option>
           <option value="FIXED">ثابت</option>
-          {!treasury && <option value="FROM_DOCUMENT">از سند</option>}
-          {baseDoc && <option value="FROM_BASE_DOCUMENT">از سند مبنا</option>}
+          <option value="FROM_DOCUMENT">از سند</option>
         </select>
       </td>
       <td style={{ minWidth: 200 }}>
-        {slot.source === "FIXED" ? <DetailPicker detailTypeId={typeId} title={typeTitle} value={slot.code} onChange={(c) => onChange({ code: c })} /> : <span style={{ color: "var(--ink-soft)", fontSize: 12 }}>{slot.source === "FROM_DOCUMENT" ? "از هدر یا ردیف سند" : slot.source === "FROM_BASE_DOCUMENT" ? "از تفصیل هدر سند مبنای ردیف (مثلاً پروژه‌ی فاکتور خرید)" : ""}</span>}
+        {slot.source === "FIXED" ? <DetailPicker detailTypeId={typeId} title={typeTitle} value={slot.code} onChange={(c) => onChange({ code: c })} /> : <span style={{ color: "var(--ink-soft)", fontSize: 12 }}>{slot.source === "FROM_DOCUMENT" ? "از هدر یا ردیف سند" : ""}</span>}
       </td>
     </>
   );

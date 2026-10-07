@@ -1500,7 +1500,6 @@ model TreasuryAccountSetting {
   @@unique([accountType, receiptTypeId, effectiveDate])
   @@unique([accountType, paymentTypeId, effectiveDate])
   @@unique([accountType, pettyCashId, effectiveDate])
-  detailRuleHeaders        DetailRuleHeader[]
 }
 
 enum TreasuryAccountType {
@@ -4018,27 +4017,23 @@ model InventoryDocumentDetail {
 enum DetailRuleSource {
   FIXED
   FROM_DOCUMENT
-  /// فقط برای قاعده‌ی رکوردهای «تعیین حسابهای معین» (دریافت/پرداخت): تفصیل از سند مبنای ردیف (مثلاً پروژه‌ی فاکتور خرید) می‌آید
+  /// دیگر استفاده نمی‌شود (قاعده‌ی تفصیل خزانه برداشته شد)؛ مقدار enum در پایگاه داده می‌ماند چون PostgreSQL حذف مقدار enum را پشتیبانی نمی‌کند
   FROM_BASE_DOCUMENT
 }
 
 /// «قواعد تفصیل» (هدر): برای یک رکورد «حسابداری کالا و خدمت» در یک تاریخ اجرا؛ شرط‌های تفکیک (انبار / گروه کالا / طرف حساب) را هدر مشخص می‌کند
 model DetailRuleHeader {
   id            Int             @id @default(autoincrement())
-  /// دقیقاً یکی از settingId (حسابداری کالا و خدمت) یا treasurySettingId (تعیین حسابهای معین) پر است (کنترل در سرور)
-  settingId     Int?
-  treasurySettingId Int?
+  settingId     Int
   effectiveDate DateTime        @db.Date
   byWarehouse   Boolean         @default(false)
   byGoodsGroup  Boolean         @default(false)
   byParty       Boolean         @default(false)
   createdAt     DateTime        @default(now())
-  setting       GoodsServiceAccountingSetting? @relation(fields: [settingId], references: [id], onDelete: Restrict)
-  treasurySetting TreasuryAccountSetting? @relation(fields: [treasurySettingId], references: [id], onDelete: Restrict)
+  setting       GoodsServiceAccountingSetting @relation(fields: [settingId], references: [id], onDelete: Restrict)
   rows          DetailRuleRow[]
 
   @@unique([settingId, effectiveDate])
-  @@unique([treasurySettingId, effectiveDate])
 }
 
 /// دیتیل: مقدار شرط‌ها (همه‌ی شرط‌های انتخاب‌شده‌ی هدر پر، یا همه خالی = ردیف «بقیه») + منبع هر یک از سه سطح تفصیل

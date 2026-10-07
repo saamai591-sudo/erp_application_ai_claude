@@ -6,7 +6,6 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { resolvePaymentSubjectAccount } from "./paymentSubjectAccount";
 import { markSettingsUsed } from "./goodsAccountingSettingService";
 import { EffectiveTreasurySettings, markTreasurySettingsUsed } from "./treasurySettingService";
-import { resolveTreasuryRuleDims } from "./detailRuleService";
 
 // =========================================================================
 // سند حسابداری «پرداخت / اعلامیه پرداخت» (Payment) — هم‌الگوی receiptJournalEntryService.ts با جهت‌های معکوس، در دو مرحله:
@@ -45,9 +44,6 @@ export interface PlannedPaymentLine {
   goodsSettingId?: number;
   /** تفصیل‌های پایه که خودکار در سطح مربوط می‌نشینند (صندوق/حساب بانکی/طرف حساب/تنخواه‌دار) */
   baseDetails: Dims;
-  /** برای قاعده‌ی تفصیل: طرف حساب ردیف و فاکتور خرید مبنا */
-  ruleParty?: string | null;
-  purchaseInvoiceId?: number | null;
   label: string;
   entry: Omit<IssueLineInput, "detail1Code" | "detail2Code" | "detail3Code">;
 }
@@ -208,7 +204,7 @@ export async function buildPaymentPlan(payment: any, treasurySettings: Effective
       debitBase = baseRow + Number(l.exchangeGainLoss);
       entry = { accountId: account.id, currencyId: baseCurrency.id, debit: debitBase, credit: 0, fxRate: 1, description };
     }
-    plan.push({ role: "SUBJECT", settlementLineId: l.id, account, treasurySettingId, goodsSettingId, baseDetails, ruleParty: l.party?.detailCode ?? null, purchaseInvoiceId: l.purchaseInvoiceId ?? null, label: `ردیف موضوعات پرداخت ${n}`, entry });
+    plan.push({ role: "SUBJECT", settlementLineId: l.id, account, treasurySettingId, goodsSettingId, baseDetails, label: `ردیف موضوعات پرداخت ${n}`, entry });
 
     const residual = baseRow - debitBase;
     if (Math.abs(residual) > FX_TOLERANCE) {
@@ -249,17 +245,11 @@ const sourcesOf = (d: { detail1Code?: string | null; detail2Code?: string | null
 
 const keyOf = (r: { role: string; instrumentLineId?: number | null; settlementLineId?: number | null }) => `${r.role}:${r.instrumentLineId ?? ""}:${r.settlementLineId ?? ""}`;
 
-/** تفصیل‌های خودکار (پایه ⊕ قاعده‌ی تفصیل) هر ردیفِ طرح؛ مبنای پر شدن در همگام‌سازی و قفل‌شدن سطح‌ها در پنل */
-async function paymentAutoDims(plan: PlannedPaymentLine[], date: Date) {
-  const ruleDims = await resolveTreasuryRuleDims(
-    plan.filter((p) => p.role === "SUBJECT").map((p) => ({ key: keyOf(p), account: p.account, treasurySettingId: p.treasurySettingId, goodsSettingId: p.goodsSettingId, partyCode: p.ruleParty ?? null, purchaseInvoiceId: p.purchaseInvoiceId })),
-    date
-  );
+/** تفصیل‌های خودکار هر ردیفِ طرح: فقط تفصیل پایه‌ی خود ابزار/موضوع (صندوق، حساب بانکی، طرف حساب، تنخواه‌دار)؛ بقیه‌ی سطح‌ها را حسابدار پر می‌کند */
+async function paymentAutoDims(plan: PlannedPaymentLine[]) {
   const out = new Map<string, Dims>();
   for (const p of plan) {
-    const dims: any = { ...p.baseDetails };
-    for (const [k, v] of Object.entries(ruleDims.get(keyOf(p)) ?? {})) if (v) dims[k] = v;
-    out.set(keyOf(p), dims);
+    out.set(keyOf(p), { ...p.baseDetails });
   }
   return out;
 }
@@ -274,8 +264,8 @@ export async function syncPaymentAccountingLines(paymentId: number) {
   const byKey = new Map(existing.map((e) => [keyOf(e), e]));
   const wanted = new Set<string>();
   const detailsOf = (d: Dims) => ({ detail1Code: d.detail1Code ?? null, detail2Code: d.detail2Code ?? null, detail3Code: d.detail3Code ?? null });
-  // تفصیل‌های خودکار: پایه ⊕ قاعده‌ی تفصیل (تعیین حسابهای معین / حسابداری کالا و خدمت)
-  const autoDims = await paymentAutoDims(plan, payment.date);
+  // تفصیل‌های خودکار: فقط تفصیل پایه‌ی ابزار/موضوع
+  const autoDims = await paymentAutoDims(plan);
 
   await prisma.$transaction(async (tx: any) => {
     for (const p of plan) {

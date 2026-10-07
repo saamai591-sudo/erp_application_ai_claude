@@ -254,7 +254,7 @@ export default function BankAccountReview() {
     loadLedger(1, ledgerPageSize, ledgerSort, f);
   }
 
-  const activationDepsKey = useMemo(() => serializeForDepsKey({ selections: chain.selections, order: chain.order, filters }), [chain.selections, chain.order, filters]);
+  const activationDepsKey = useMemo(() => serializeForDepsKey({ upstream: chain.upstream(activeTab), filters }), [chain.selections, chain.order, activeTab, filters]);
   useReviewTabActivation(
     periodsLoaded && !!filters.fromDate,
     activeTab,

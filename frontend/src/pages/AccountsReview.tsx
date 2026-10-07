@@ -391,8 +391,7 @@ export default function AccountsReview() {
     () =>
       serializeForDepsKey({
         levels,
-        selections: chain.selections,
-        order: chain.order,
+        upstream: chain.upstream(activeTab),
         filterParams: filterParams.toString(),
         detailQuery: detailQuery[activeTab],
         reloadNonce,

@@ -1294,6 +1294,9 @@ function SettlementRowFields({
     const basisCurrency = currencies.find((c) => c.id === candidate.currencyId);
     const allocatedByOthers = allSettlementRows.reduce((sum, r, i) => {
       if (i === idx) return sum;
+      // «ارزش افزوده خرید» و ردیف‌های عادیِ همان فاکتور مانده‌ی جدا دارند (هم‌الگوی سرور: basisGroupOf)؛ مبلغ ردیف عادی از مانده‌ی ارزش‌افزوده کم نمی‌شود
+      const rNature = paymentTypes.find((t) => String(t.id) === r.paymentTypeId)?.nature;
+      if ((rNature === "PURCHASE_VAT") !== (paymentType?.nature === "PURCHASE_VAT")) return sum;
       const rBasisId = (r as any)[field];
       if (!rBasisId || Number(rBasisId) !== candidate.id) return sum;
       const rAmount = Number(r.amount) || 0;

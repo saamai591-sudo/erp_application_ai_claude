@@ -129,7 +129,7 @@ export default function ChequeDocumentsReview({ kind }: { kind: Kind }) {
     );
   }
 
-  const activationDepsKey = useMemo(() => serializeForDepsKey({ selections: chain.selections, order: chain.order, filters }), [chain.selections, chain.order, filters]);
+  const activationDepsKey = useMemo(() => serializeForDepsKey({ upstream: chain.upstream(activeTab), filters }), [chain.selections, chain.order, activeTab, filters]);
   useReviewTabActivation(periodsLoaded && !!filters.fromDate, activeTab, tabLoader.loadedTabs, (tab) => loadTab(tab), activationDepsKey);
 
   function clearFilters() {

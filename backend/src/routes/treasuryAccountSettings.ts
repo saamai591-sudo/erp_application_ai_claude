@@ -147,8 +147,6 @@ router.post("/treasury-account-settings", can(`${FORM}.create`), async (req, res
   }
 });
 
-const TREASURY_RULE_LOCK_MESSAGE = "این تنظیم در «قواعد تفصیل» استفاده شده و قابل ویرایش/حذف نیست؛ برای تغییر حساب، رکورد جدید با تاریخ اجرای جدید ثبت کنید";
-
 router.put("/treasury-account-settings/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const existing = await prisma.treasuryAccountSetting.findUnique({ where: { id } });
@@ -160,7 +158,6 @@ router.put("/treasury-account-settings/:id", can(`${FORM}.edit`), async (req, re
     if (existing.hasTransactions) return res.status(400).json({ error: TREASURY_SETTING_LOCK_MESSAGE });
     const usageMsg = await treasurySettingUsageMessage(id);
     if (usageMsg) return res.status(400).json({ error: usageMsg });
-    if (await prisma.detailRuleHeader.count({ where: { treasurySettingId: id } })) return res.status(400).json({ error: TREASURY_RULE_LOCK_MESSAGE });
     const merged: Body = b.accountType && b.accountType !== existing.accountType ? b : { ...existing, ...b, effectiveDate: b.effectiveDate ?? existing.effectiveDate.toISOString() };
     const data = await buildData(merged, id);
     res.json(await prisma.treasuryAccountSetting.update({ where: { id }, data: data as any, include: INCLUDE }));
@@ -177,7 +174,6 @@ router.delete("/treasury-account-settings/:id", can(`${FORM}.delete`), async (re
   if (existing.hasTransactions) return res.status(400).json({ error: TREASURY_SETTING_LOCK_MESSAGE });
   const usageMsg = await treasurySettingUsageMessage(id);
   if (usageMsg) return res.status(400).json({ error: usageMsg });
-  if (await prisma.detailRuleHeader.count({ where: { treasurySettingId: id } })) return res.status(400).json({ error: TREASURY_RULE_LOCK_MESSAGE });
   await prisma.treasuryAccountSetting.delete({ where: { id } });
   res.status(204).send();
 });

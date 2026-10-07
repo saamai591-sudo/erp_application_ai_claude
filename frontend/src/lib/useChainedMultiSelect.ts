@@ -51,9 +51,17 @@ export function useChainedMultiSelect(initial?: ChainState) {
     return idx === -1 ? state.order : state.order.slice(0, idx);
   }
 
+  /**
+   * «امضای» اثرگذارِ انتخاب‌ها بر یک تب: فقط انتخاب‌های تب‌های بالادستِ آن (tabsBefore). انتخابِ ردیف در خودِ تب (یا تب‌های پایین‌دست)
+   * داده‌ی همان تب را عوض نمی‌کند، پس نباید باعث بارگذاری مجدد (پرش گرید) شود؛ کلیدِ فعال‌سازی تب‌های گزارش‌ها از همین ساخته می‌شود.
+   */
+  function upstream(tabIndex: number): [number, SelectId[]][] {
+    return tabsBefore(tabIndex).map((t) => [t, Array.from(state.selections[t] || []).sort()] as [number, SelectId[]]);
+  }
+
   function reset() {
     setState({ selections: {}, order: [] });
   }
 
-  return { selections: state.selections, order: state.order, toggle, get, tabsBefore, reset };
+  return { selections: state.selections, order: state.order, toggle, get, tabsBefore, upstream, reset };
 }

@@ -5,7 +5,6 @@ import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detail
 import { toBaseCurrencyAmount } from "../utils/currencyConversion";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { EffectiveTreasurySettings } from "./treasurySettingService";
-import { resolveTreasuryRuleDims } from "./detailRuleService";
 
 // =========================================================================
 // سند حسابداری «دریافت» (Receipt) — دو مرحله:
@@ -45,9 +44,6 @@ export interface PlannedReceiptLine {
   goodsSettingId?: number;
   /** کد تفصیلِ پایه که خودکار در سطح مربوط می‌نشیند (صندوق/حساب بانکی/طرف حساب) */
   baseDetailCode: string | null;
-  /** برای قاعده‌ی تفصیل: طرف حساب ردیف و فاکتور خرید مبنا */
-  ruleParty?: string | null;
-  purchaseInvoiceId?: number | null;
   label: string;
   /** خط سند بدون تفصیل */
   entry: Omit<IssueLineInput, "detail1Code" | "detail2Code" | "detail3Code">;
@@ -162,7 +158,7 @@ export async function buildReceiptPlan(receipt: any, treasurySettings: Effective
       creditBase = baseRow - Number(l.exchangeGainLoss);
       entry = { accountId: account.id, currencyId: baseCurrency.id, debit: 0, credit: creditBase, fxRate: 1, description };
     }
-    plan.push({ role: "SUBJECT", settlementLineId: l.id, account, treasurySettingId, goodsSettingId, baseDetailCode: l.party.detailCode, ruleParty: l.party.detailCode, purchaseInvoiceId: l.purchaseInvoiceId ?? null, label: `ردیف موضوعات دریافت ${n}`, entry });
+    plan.push({ role: "SUBJECT", settlementLineId: l.id, account, treasurySettingId, goodsSettingId, baseDetailCode: l.party.detailCode, label: `ردیف موضوعات دریافت ${n}`, entry });
 
     const residual = baseRow - creditBase;
     if (Math.abs(residual) > RECEIPT_ISSUED_TOLERANCE) {
@@ -219,18 +215,12 @@ const sourcesOf = (d: { detail1Code?: string | null; detail2Code?: string | null
 
 const receiptKeyOf = (r: { role: string; instrumentLineId?: number | null; settlementLineId?: number | null }) => `${r.role}:${r.instrumentLineId ?? ""}:${r.settlementLineId ?? ""}`;
 
-/** تفصیل‌های خودکار (پایه ⊕ قاعده‌ی تفصیل) هر ردیفِ طرح؛ مبنای پر شدن در همگام‌سازی و قفل‌شدن سطح‌ها در پنل */
-async function receiptAutoDims(plan: PlannedReceiptLine[], date: Date) {
-  const ruleDims = await resolveTreasuryRuleDims(
-    plan.filter((p) => p.role === "SUBJECT").map((p) => ({ key: receiptKeyOf(p), account: p.account, treasurySettingId: p.treasurySettingId, goodsSettingId: p.goodsSettingId, partyCode: p.ruleParty ?? null, purchaseInvoiceId: p.purchaseInvoiceId })),
-    date
-  );
+/** تفصیل‌های خودکار هر ردیفِ طرح: فقط تفصیل پایه‌ی خود ابزار/موضوع (صندوق، حساب بانکی، طرف حساب)؛ بقیه‌ی سطح‌ها را حسابدار پر می‌کند */
+async function receiptAutoDims(plan: PlannedReceiptLine[]) {
   const out = new Map<string, { detail1Code: string | null; detail2Code: string | null; detail3Code: string | null }>();
   for (const p of plan) {
     const key = receiptKeyOf(p);
-    const auto: any = { ...(await autoDetails(p.account, p.baseDetailCode)) };
-    for (const [k, v] of Object.entries(ruleDims.get(key) ?? {})) if (v) auto[k] = v;
-    out.set(key, auto);
+    out.set(key, await autoDetails(p.account, p.baseDetailCode));
   }
   return out;
 }
@@ -249,7 +239,7 @@ export async function syncReceiptAccountingLines(receiptId: number) {
 
   const existing = await prisma.receiptAccountingLine.findMany({ where: { receiptId } });
   const keyOf = receiptKeyOf;
-  const autoDims = await receiptAutoDims(plan, receipt.date);
+  const autoDims = await receiptAutoDims(plan);
   const byKey = new Map(existing.map((e) => [keyOf(e), e]));
   const wanted = new Set<string>();
 
