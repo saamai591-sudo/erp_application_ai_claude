@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { selectableTypes, typeLabel } from "../lib/typeOptions";
+import { TypePickerField } from "../components/TypePickerFields";
 import { ErrorToast } from "../components/ErrorToast";
 import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -358,10 +358,7 @@ function PettyCashPaymentForm({ editId }: { editId?: number }) {
           </div>
           <div className="form-field">
             <label>نوع پرداخت<RequiredMark /></label>
-            <select value={form.paymentTypeId} onChange={(e) => onPaymentTypeChange(e.target.value)}>
-              <option value="">انتخاب کنید</option>
-              {selectableTypes(paymentTypes, form.paymentTypeId).map((t) => <option key={t.id} value={t.id}>{typeLabel(t)}</option>)}
-            </select>
+            <TypePickerField kind="payment" types={paymentTypes} value={form.paymentTypeId} onChange={onPaymentTypeChange} />
           </div>
           <div className="form-field">
             <label>مبنا</label>

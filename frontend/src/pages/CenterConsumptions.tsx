@@ -22,6 +22,7 @@ import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
+import { CostCenterPickerField } from "../components/TypePickerFields";
 
 // «مصرف مرکز هزینه» — طبق stockAnalysis.md بند ۳۴/۳۹، جایگزین حواله انبار عمومی قدیم (WAREHOUSE_ISSUE)
 // برای طرف‌مقابل «مرکز هزینه» است (نگاه کنید به یادداشت بالای backend/src/routes/centerConsumptions.ts).
@@ -383,12 +384,7 @@ function CenterConsumptionForm({ editId, basePath }: { editId?: number; basePath
             </div>
             <div className="form-field">
               <label>مرکز هزینه<RequiredMark /></label>
-              <select value={header.costCenterId} onChange={(e) => setHeader({ ...header, costCenterId: e.target.value })} disabled={headerDisabled}>
-                <option value="">انتخاب کنید</option>
-                {costCenters.map((c) => (
-                  <option key={c.id} value={c.id}>{toFaDigits(c.detailCode)} — {c.title}</option>
-                ))}
-              </select>
+              <CostCenterPickerField costCenters={costCenters} value={header.costCenterId} onChange={(id) => setHeader({ ...header, costCenterId: id })} disabled={headerDisabled} />
             </div>
             <DocDetailHeaderFields
               config={detailConfig}

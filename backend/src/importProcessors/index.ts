@@ -14,6 +14,7 @@ import { createSalesDelivery } from "../routes/salesDeliveries";
 import { createCenterConsumption } from "../routes/centerConsumptions";
 import { createWarehouseAdjustment } from "../routes/warehouseAdjustments";
 import { createInventoryCountingShortage } from "../routes/inventoryCountingShortages";
+import { createSalesQuote } from "../routes/salesOperations";
 
 const DETAIL_TYPE_PARTY = 1;
 const DETAIL_TYPE_COST_CENTER = 2;
@@ -991,6 +992,77 @@ export function registerAllImportProcessors() {
         return { ok: true };
       } catch (e: any) {
         return { ok: false, error: e.message || "خطا در ثبت سند" };
+      }
+    },
+  });
+
+  // «پیش‌فاکتور» (فروش) — هر ردیف اکسل یک ردیف کالا/خدمت؛ ردیف‌های هم‌شماره+هم‌تاریخ یک پیش‌فاکتور می‌شوند. شماره‌ی سند عیناً از ستون «شماره»
+  // می‌آید (مهاجرت از سیستم قبلی) و باید در دوره مالی یکتا باشد؛ مبلغ = مقدار × فی (گرد به ارز سند) و ارزش‌افزوده مثل فرم دستی خودکار محاسبه
+  // می‌شود (createSalesQuote همان منطق فرم است). ارز خالی = ارز پایه.
+  registerImportEntity("sales-quote", {
+    groupByKey: (row) => `${row.number || ""}__${row.date || ""}`,
+    group: async (groupRows, _ctx) => {
+      try {
+        const first = groupRows[0];
+        const rawNumber = toEnglishDigits(first.number || "").trim();
+        const number = Number(rawNumber);
+        if (!rawNumber || !Number.isInteger(number) || number <= 0) return { ok: false, error: "شماره‌ی پیش‌فاکتور الزامی و باید عدد صحیح مثبت باشد" };
+        if (!first.date) return { ok: false, error: "تاریخ الزامی است" };
+
+        const customerCode = toEnglishDigits(first.customerDetailCode || "").trim();
+        if (!customerCode) return { ok: false, error: "کد تفصیل مشتری الزامی است" };
+        const party = await prisma.party.findFirst({ where: { detailCode: customerCode } });
+        const customer = party ? await prisma.customer.findUnique({ where: { partyId: party.id } }) : null;
+        if (!customer) return { ok: false, error: `مشتری با کد تفصیل «${first.customerDetailCode}» یافت نشد` };
+
+        const salesTypeCode = Number(toEnglishDigits(first.salesTypeCode || "").trim());
+        const salesType = salesTypeCode ? await prisma.salesType.findFirst({ where: { code: salesTypeCode } }) : null;
+        if (!salesType) return { ok: false, error: `نوع فروش با کد «${first.salesTypeCode || ""}» یافت نشد` };
+        const salesCenterCode = Number(toEnglishDigits(first.salesCenterCode || "").trim());
+        const salesCenter = salesCenterCode ? await prisma.salesCenter.findFirst({ where: { code: salesCenterCode } }) : null;
+        if (!salesCenter) return { ok: false, error: `مرکز فروش با کد «${first.salesCenterCode || ""}» یافت نشد` };
+
+        const currencyCode = (first.currencyCode || "").trim();
+        const currency = currencyCode ? await prisma.currency.findFirst({ where: { code: currencyCode } }) : await prisma.currency.findFirst({ where: { isBase: true } });
+        if (!currency) return { ok: false, error: currencyCode ? `ارز با کد «${currencyCode}» یافت نشد` : "ارز پایه تعریف نشده است" };
+
+        // سرصفحه‌ی همه‌ی ردیف‌های یک پیش‌فاکتور باید یکی باشد (وگرنه ردیف‌های دو سند اشتباهاً ادغام می‌شدند)
+        for (const [i, r] of groupRows.entries()) {
+          const same =
+            toEnglishDigits(r.customerDetailCode || "").trim() === customerCode &&
+            Number(toEnglishDigits(r.salesTypeCode || "").trim()) === salesTypeCode &&
+            Number(toEnglishDigits(r.salesCenterCode || "").trim()) === salesCenterCode &&
+            (r.currencyCode || "").trim() === currencyCode;
+          if (!same) return { ok: false, error: `ردیف ${i + 1} از پیش‌فاکتور شماره ${number}: مشتری، نوع فروش، مرکز فروش و ارز همه‌ی ردیف‌های یک پیش‌فاکتور باید یکسان باشد` };
+        }
+
+        const dp = currency.decimalPlaces;
+        const lines: any[] = [];
+        for (const [idx, row] of groupRows.entries()) {
+          const resolvedItem = await resolveGoodsItemByCode(row, idx);
+          if ("error" in resolvedItem) return { ok: false, error: resolvedItem.error };
+          const item = resolvedItem.item;
+          let unitId = item.mainUnitId;
+          if (row.unitTitle && row.unitTitle.trim()) {
+            const unit = await prisma.unitOfMeasure.findFirst({ where: { title: row.unitTitle.trim() } });
+            if (!unit) return { ok: false, error: `ردیف ${idx + 1}: واحد سنجش «${row.unitTitle}» یافت نشد` };
+            unitId = unit.id;
+          }
+          const quantity = Number(toEnglishDigits(row.quantity || "").replace(/,/g, ""));
+          if (!(quantity > 0)) return { ok: false, error: `ردیف ${idx + 1}: مقدار باید عددی مثبت باشد` };
+          const unitPrice = Number(toEnglishDigits(row.unitPrice || "0").replace(/,/g, "")) || 0;
+          const amount = Math.round(unitPrice * quantity * 10 ** dp) / 10 ** dp;
+          const discount = Number(toEnglishDigits(row.discount || "0").replace(/,/g, "")) || 0;
+          lines.push({ goodsItemId: item.id, unitId, quantity, unitPrice, amount, discount, description: row.lineDescription || null });
+        }
+
+        await createSalesQuote(
+          { date: resolveDateString(first.date), customerId: customer.id, salesTypeId: salesType.id, salesCenterId: salesCenter.id, currencyId: currency.id, description: first.description || undefined, lines },
+          number
+        );
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت پیش‌فاکتور" };
       }
     },
   });

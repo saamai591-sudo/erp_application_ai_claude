@@ -22,6 +22,7 @@ import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
+import { CostCenterPickerField } from "../components/TypePickerFields";
 
 // «رسید تولید» — طبق stockAnalysis.md بند ۳۴/۴۲ («دریافت محصول»)؛ این پروژه ماژول «تولید» ندارد، پس
 // این سند همیشه «بدون مبنا» و بدون طرف‌حساب است (نگاه کنید به یادداشت بالای
@@ -402,12 +403,7 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
             </div>
             <div className="form-field">
               <label>مرکز هزینه<RequiredMark /></label>
-              <select value={header.costCenterId} onChange={(e) => setHeader({ ...header, costCenterId: e.target.value })} disabled={coreDisabled}>
-                <option value="">انتخاب کنید</option>
-                {costCenters.map((c) => (
-                  <option key={c.id} value={c.id}>{toFaDigits(c.detailCode)} — {c.title}</option>
-                ))}
-              </select>
+              <CostCenterPickerField costCenters={costCenters} value={header.costCenterId} onChange={(id) => setHeader({ ...header, costCenterId: id })} disabled={coreDisabled} />
             </div>
             <DocDetailHeaderFields
               config={detailConfig}

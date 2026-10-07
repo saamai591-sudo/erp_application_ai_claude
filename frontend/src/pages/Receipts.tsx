@@ -1,5 +1,5 @@
 import { FormEvent, Fragment, useEffect, useState } from "react";
-import { selectableTypes, typeLabel } from "../lib/typeOptions";
+import { TypePickerField } from "../components/TypePickerFields";
 import { ErrorToast } from "../components/ErrorToast";
 import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -1319,12 +1319,7 @@ function SettlementRowFields({
         <span>{row.instrumentLabel || `#${row.instrumentClientKey}`}</span>
       </td>
       <td style={{ minWidth: 160 }}>
-        <select value={row.receiptTypeId} onChange={(e) => onReceiptTypeChange(e.target.value)}>
-          <option value="">انتخاب کنید</option>
-          {selectableTypes(receiptTypes, row.receiptTypeId).map((t) => (
-            <option key={t.id} value={t.id}>{typeLabel(t)}</option>
-          ))}
-        </select>
+        <TypePickerField kind="receipt" types={receiptTypes} value={row.receiptTypeId} onChange={onReceiptTypeChange} />
       </td>
       <td style={{ minWidth: 180 }}>
         <RecordPickerField

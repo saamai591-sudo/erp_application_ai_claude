@@ -9,6 +9,7 @@ import { AmountInput } from "../components/AmountInput";
 import { RecordPickerField } from "../components/RecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
+import { ExcelImportButton } from "../components/ExcelImport";
 import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
@@ -109,6 +110,28 @@ function SalesQuoteList() {
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint text={INFO_TEXT} title="پیش‌فاکتور" />
           <NewRecordButton path="/sales-quotes/new" />
+          <ExcelImportButton
+            entityLabel="پیش‌فاکتور"
+            templateFilename="قالب-پیش-فاکتور"
+            backendEntityType="sales-quote"
+            columns={[
+              { key: "number", label: "شماره", required: true, hint: "شماره‌ی پیش‌فاکتور (مثلاً همان شماره در سیستم قبلی)؛ هم برای گروه‌بندی ردیف‌های یک پیش‌فاکتور (با تاریخ) و هم به‌عنوان شماره‌ی نهایی سند استفاده می‌شود — باید در این دوره مالی یکتا باشد" },
+              { key: "date", label: "تاریخ", required: true, hint: "شمسی (مثلاً 1405/05/06) یا میلادی" },
+              { key: "customerDetailCode", label: "کد تفصیل مشتری", required: true },
+              { key: "salesTypeCode", label: "کد نوع فروش", required: true },
+              { key: "salesCenterCode", label: "کد مرکز فروش", required: true },
+              { key: "currencyCode", label: "کد ارز", hint: "خالی = ارز پایه" },
+              { key: "description", label: "شرح سند" },
+              { key: "goodsItemCode", label: "کد کالا/خدمت" },
+              { key: "goodsItemOldCode", label: "کد کالا (سیستم قدیم)", hint: "برای مهاجرت از سیستم قبلی؛ دقیقاً یکی از این دو ستون باید در هر ردیف پر باشد" },
+              { key: "unitTitle", label: "واحد سنجش", hint: "خالی = واحد اصلی کالا" },
+              { key: "quantity", label: "مقدار", required: true },
+              { key: "unitPrice", label: "فی", required: true, hint: "به ارز سند؛ مبلغ = مقدار × فی و ارزش‌افزوده خودکار محاسبه می‌شود" },
+              { key: "discount", label: "تخفیف", hint: "مبلغ تخفیف ردیف به ارز سند (اختیاری)" },
+              { key: "lineDescription", label: "شرح ردیف" },
+            ]}
+            onDone={reload}
+          />
           <RefreshButton onClick={reload} />
         </div>
       </div>

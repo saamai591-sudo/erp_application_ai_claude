@@ -1,5 +1,5 @@
 import { FormEvent, Fragment, useEffect, useState } from "react";
-import { selectableTypes, typeLabel } from "../lib/typeOptions";
+import { TypePickerField } from "../components/TypePickerFields";
 import { ErrorToast } from "../components/ErrorToast";
 import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -1454,12 +1454,7 @@ function SettlementRowFields({
         <span>{row.instrumentLabel || `#${row.instrumentClientKey}`}</span>
       </td>
       <td style={{ minWidth: 160 }}>
-        <select value={row.paymentTypeId} onChange={(e) => onPaymentTypeChange(e.target.value)}>
-          <option value="">انتخاب کنید</option>
-          {selectableTypes(paymentTypes, row.paymentTypeId).map((t) => (
-            <option key={t.id} value={t.id}>{typeLabel(t)}</option>
-          ))}
-        </select>
+        <TypePickerField kind="payment" types={paymentTypes} value={row.paymentTypeId} onChange={onPaymentTypeChange} />
       </td>
       <td style={{ minWidth: 180 }}>
         {selectorKind(paymentType?.nature) === "BANK" ? (

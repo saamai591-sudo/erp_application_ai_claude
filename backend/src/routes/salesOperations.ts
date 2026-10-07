@@ -241,10 +241,11 @@ router.get("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.view`), async (req, re
   });
 });
 
-router.post("/sales-quotes", can(`${SALES_QUOTES_FORM}.create`), async (req, res) => {
-  const body = req.body as SalesQuoteHeaderBody;
+// تنها منطق ثبت پیش‌فاکتور — هم POST فرم و هم «ورود از اکسل» (importProcessors، نوع sales-quote) از همین تابع استفاده می‌کنند.
+// forcedNumber فقط برای ورود از اکسل (مهاجرت از سیستم قبلی): شماره‌ی سند عیناً حفظ می‌شود و باید در این دوره مالی یکتا باشد؛ بدون آن شماره خودکار است.
+export async function createSalesQuote(body: SalesQuoteHeaderBody, forcedNumber?: number) {
   if (!body.date || !body.customerId || !body.salesTypeId || !body.salesCenterId || !body.currencyId) {
-    return res.status(400).json({ error: "تاریخ، مشتری، نوع فروش، مرکز فروش و ارز الزامی است" });
+    throw new Error("تاریخ، مشتری، نوع فروش، مرکز فروش و ارز الزامی است");
   }
   try {
     const date = new Date(body.date);
@@ -259,8 +260,8 @@ router.post("/sales-quotes", can(`${SALES_QUOTES_FORM}.create`), async (req, res
     if (!currency) throw new Error("ارز یافت نشد");
     const lines = await validateSalesQuoteLines(body.lines, date, currency.decimalPlaces);
 
-    const number = await nextNumber(prisma.salesQuote, fiscalPeriod.id);
-    const created = await prisma.salesQuote.create({
+    const number = forcedNumber ?? (await nextNumber(prisma.salesQuote, fiscalPeriod.id));
+    return await prisma.salesQuote.create({
       data: {
         fiscalPeriodId: fiscalPeriod.id,
         number,
@@ -274,9 +275,16 @@ router.post("/sales-quotes", can(`${SALES_QUOTES_FORM}.create`), async (req, res
         lines: { create: lines.map((l, idx) => ({ ...l, rowOrder: idx })) },
       },
     });
-    res.status(201).json(created);
   } catch (e: any) {
-    if (e.code === "P2002") return res.status(400).json({ error: "شماره سند تکراری است" });
+    if (e.code === "P2002") throw new Error("شماره سند تکراری است");
+    throw e;
+  }
+}
+
+router.post("/sales-quotes", can(`${SALES_QUOTES_FORM}.create`), async (req, res) => {
+  try {
+    res.status(201).json(await createSalesQuote(req.body as SalesQuoteHeaderBody));
+  } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در ثبت پیش‌فاکتور" });
   }
 });

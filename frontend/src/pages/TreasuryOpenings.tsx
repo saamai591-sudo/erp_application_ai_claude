@@ -5,7 +5,7 @@ import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
 import { RecordPickerField } from "../components/RecordPicker";
-import { selectableTypes, typeLabel } from "../lib/typeOptions";
+import { TypePickerField } from "../components/TypePickerFields";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
@@ -430,14 +430,13 @@ function OpeningForm({ editId }: { editId?: number }) {
                     </select>
                   </td>
                   <td style={{ minWidth: 150 }}>
-                    <select
+                    <TypePickerField
+                      kind={kind === "receivable" ? "receipt" : "payment"}
+                      types={kind === "receivable" ? receiptTypes : paymentTypes}
                       value={kind === "receivable" ? r.receiptTypeId : r.paymentTypeId}
                       disabled={r.locked}
-                      onChange={(e) => patchCheque(kind, r.key, kind === "receivable" ? { receiptTypeId: e.target.value } : { paymentTypeId: e.target.value })}
-                    >
-                      <option value="">—</option>
-                      {selectableTypes(kind === "receivable" ? receiptTypes : paymentTypes, Number(kind === "receivable" ? r.receiptTypeId : r.paymentTypeId) || undefined).map((t) => <option key={t.id} value={t.id}>{typeLabel(t)}</option>)}
-                    </select>
+                      onChange={(id) => patchCheque(kind, r.key, kind === "receivable" ? { receiptTypeId: id } : { paymentTypeId: id })}
+                    />
                   </td>
                   {kind === "receivable" && (
                     <td style={{ minWidth: 150 }}>

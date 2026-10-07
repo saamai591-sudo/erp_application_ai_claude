@@ -16,7 +16,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { useTabs } from "../lib/TabsContext";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
-import { selectableTypes, typeLabel } from "../lib/typeOptions";
+import { TypePickerField } from "../components/TypePickerFields";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
@@ -900,10 +900,7 @@ function ModifyPaymentTypeDialog({
       <div className="form-grid">
         <div className="form-field full">
           <label>نوع پرداخت<RequiredMark /></label>
-          <select value={paymentTypeId} onChange={(e) => onPaymentTypeChange(e.target.value)}>
-            <option value="">انتخاب کنید</option>
-            {selectableTypes(paymentTypes, Number(paymentTypeId) || undefined).map((t) => <option key={t.id} value={t.id}>{typeLabel(t)}</option>)}
-          </select>
+          <TypePickerField kind="payment" types={paymentTypes} value={paymentTypeId} onChange={onPaymentTypeChange} />
         </div>
         {basisType !== "NONE" && (
           <div className="form-field full">
