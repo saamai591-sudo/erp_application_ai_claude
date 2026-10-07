@@ -607,7 +607,7 @@ router.post("/sales-return-invoices/:id/issue-journal-entry", can(`${FORM}.issue
       lines: [...debitLines, ...creditLines],
       sources: [{ label: `فاکتور برگشت از فروش شماره ${invoice.number}`, path: `/sales-return-invoices/${invoice.id}/edit` }],
     });
-    await effSettings.markUsed();
+    await effSettings.markUsed(entry.id);
 
     await prisma.salesReturnInvoice.update({ where: { id }, data: { journalEntryId: entry.id } });
 

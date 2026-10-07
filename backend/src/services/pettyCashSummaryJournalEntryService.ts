@@ -141,8 +141,8 @@ export async function issuePettyCashSummaryJournalEntry(summaryId: number) {
   await prisma.pettyCashSummary.update({ where: { id: summaryId }, data: { journalEntryId: entry.id } });
 
 
-  await markTreasurySettingsUsed(usedTreasurySettingIds);
-  await markSettingsUsed([...usedSettingIds]);
+  await markTreasurySettingsUsed(entry.id, usedTreasurySettingIds);
+  await markSettingsUsed(entry.id, [...usedSettingIds]);
   return entry;
 }
 

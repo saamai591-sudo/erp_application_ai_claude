@@ -124,7 +124,6 @@ function SalesQuoteList() {
               { key: "description", label: "شرح سند" },
               { key: "goodsItemCode", label: "کد کالا/خدمت" },
               { key: "goodsItemOldCode", label: "کد کالا (سیستم قدیم)", hint: "برای مهاجرت از سیستم قبلی؛ دقیقاً یکی از این دو ستون باید در هر ردیف پر باشد" },
-              { key: "unitTitle", label: "واحد سنجش", hint: "خالی = واحد اصلی کالا" },
               { key: "quantity", label: "مقدار", required: true },
               { key: "unitPrice", label: "فی", required: true, hint: "به ارز سند؛ مبلغ = مقدار × فی و ارزش‌افزوده خودکار محاسبه می‌شود" },
               { key: "discount", label: "تخفیف", hint: "مبلغ تخفیف ردیف به ارز سند (اختیاری)" },

@@ -1312,8 +1312,8 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
       lines: [...debitLines, ...advanceDebitLines, ...creditLines, ...advanceAdjustLines],
       sources: [{ label: `فاکتور فروش شماره ${invoice.number}`, path: `/sales-invoices/${invoice.id}/edit` }],
     });
-    await effSettings.markUsed();
-    for (const h of treasuryHolders) await h.markUsed();
+    await effSettings.markUsed(entry.id);
+    for (const h of treasuryHolders) await h.markUsed(entry.id);
 
     await prisma.salesInvoice.update({ where: { id }, data: { journalEntryId: entry.id } });
 

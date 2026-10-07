@@ -64,7 +64,7 @@ const TARGET_LABEL: Record<TargetField, string> = {
 
 interface Level { id: number; title: string; order: number }
 interface AccountRow { id: number; parentId: number | null; code: string; title: string; levelId: number; level: Level }
-interface TitledOption { id: number; title: string; basisType?: string; isActive?: boolean }
+interface TitledOption { id: number; title: string; basisType?: string; nature?: string; isActive?: boolean }
 // موضوع دریافت/پرداختی که مبنایش فاکتور است، معین را از سند مبنا می‌گیرد؛ در این فرم نمایش داده نمی‌شود
 // (هم‌راستا با BASIS_FROM_DOCUMENT در بک‌اند routes/treasuryAccountSettings.ts)
 const BASIS_FROM_DOCUMENT = new Set(["SALES_INVOICE", "PURCHASE_INVOICE"]);
@@ -241,7 +241,7 @@ function SettingForm({ editId }: { editId?: number }) {
     : field === "receivableChequeTypeId" ? receivableTypes.map((t) => ({ id: t.id, label: t.title }))
     : field === "payableChequeTypeId" ? payableTypes.map((t) => ({ id: t.id, label: t.title }))
     : field === "receiptTypeId" ? receiptTypes.filter((t) => t.isActive !== false || String(t.id) === form.targetId).filter((t) => !BASIS_FROM_DOCUMENT.has(t.basisType ?? "")).map((t) => ({ id: t.id, label: t.title }))
-    : field === "paymentTypeId" ? paymentTypes.filter((t) => t.isActive !== false || String(t.id) === form.targetId).filter((t) => !BASIS_FROM_DOCUMENT.has(t.basisType ?? "")).map((t) => ({ id: t.id, label: t.title }))
+    : field === "paymentTypeId" ? paymentTypes.filter((t) => t.isActive !== false || String(t.id) === form.targetId).filter((t) => !BASIS_FROM_DOCUMENT.has(t.basisType ?? "")).filter((t) => t.nature !== "TO_BANK") /* «به بانک»: معین از حساب بانکی ردیف می‌آید */.map((t) => ({ id: t.id, label: t.title }))
     : field === "pettyCashId" ? pettyCashes.map((t) => ({ id: t.id, label: t.title }))
     : [];
 

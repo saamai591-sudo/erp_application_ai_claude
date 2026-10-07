@@ -1042,12 +1042,7 @@ export function registerAllImportProcessors() {
           const resolvedItem = await resolveGoodsItemByCode(row, idx);
           if ("error" in resolvedItem) return { ok: false, error: resolvedItem.error };
           const item = resolvedItem.item;
-          let unitId = item.mainUnitId;
-          if (row.unitTitle && row.unitTitle.trim()) {
-            const unit = await prisma.unitOfMeasure.findFirst({ where: { title: row.unitTitle.trim() } });
-            if (!unit) return { ok: false, error: `ردیف ${idx + 1}: واحد سنجش «${row.unitTitle}» یافت نشد` };
-            unitId = unit.id;
-          }
+          const unitId = item.mainUnitId; // واحد همیشه واحد اصلی کالاست (مثل ردیف جدید فرم دستی)
           const quantity = Number(toEnglishDigits(row.quantity || "").replace(/,/g, ""));
           if (!(quantity > 0)) return { ok: false, error: `ردیف ${idx + 1}: مقدار باید عددی مثبت باشد` };
           const unitPrice = Number(toEnglishDigits(row.unitPrice || "0").replace(/,/g, "")) || 0;

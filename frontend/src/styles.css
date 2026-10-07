@@ -1212,7 +1212,6 @@ fieldset { min-width: 0; }
 .picker-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); }
 .picker-table tr:hover td { background: var(--bg); }
 .picker-table tr.active-list td { background: var(--primary-soft); }
-.picker-table tr.picker-cursor td { box-shadow: inset 0 -2px 0 var(--primary); }
 .picker-filter-input {
   width: 100%; padding: 5px 7px; border: 1px solid var(--line-strong); border-radius: 6px;
   font-family: inherit; font-size: 12px; box-sizing: border-box;
@@ -1717,6 +1716,8 @@ tbody tr:hover { background: var(--bg); }
 .picker-table tbody tr:hover td { background: var(--bg); }
 .grid-scroll-area tbody tr.active-list td,
 .picker-table tbody tr.active-list td { background: var(--primary-soft); }
+/* ردیف فعالِ صفحه‌کلید (↑/↓/Enter) در انتخابگرها: هایلایت کل ردیف با سایه‌ای از رنگ اصلیِ همان تم روی سطح (کنتراست مناسب در همه‌ی تم‌ها)، پررنگ‌تر از ردیف انتخاب‌شده (active-list)؛ بدون خط زیرین. */
+.picker-table tbody tr.picker-cursor td { background: color-mix(in srgb, var(--primary) 24%, var(--surface)); }
 /* شماره‌ی اولویت کلید در مرتب‌سازی چندستونه (Ctrl/Shift + کلیک روی سرستون) */
 .sort-priority { font-size: 9px; font-weight: 700; color: var(--primary); background: var(--primary-soft); border-radius: 999px; min-width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; padding: 0 3px; }
 

@@ -136,7 +136,7 @@ export async function issueChequeClearingReceivableJournalEntry(clearingId: numb
   await prisma.chequeClearingReceivable.update({ where: { id: clearingId }, data: { journalEntryId: entry.id } });
 
 
-  await treasurySettings.markUsed();
+  await treasurySettings.markUsed(entry.id);
   return entry;
 }
 

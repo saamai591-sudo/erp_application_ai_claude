@@ -388,8 +388,8 @@ export async function issueReceiptJournalEntry(receiptId: number) {
   });
 
   await prisma.receipt.update({ where: { id: receiptId }, data: { journalEntryId: entry.id } });
-  await treasurySettings.markUsed();
-  await goodsSettings.markUsed();
+  await treasurySettings.markUsed(entry.id);
+  await goodsSettings.markUsed(entry.id);
   return entry;
 }
 

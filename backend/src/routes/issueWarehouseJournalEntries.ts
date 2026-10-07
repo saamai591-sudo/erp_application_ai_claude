@@ -425,7 +425,7 @@ router.post("/issue-warehouse-journal-entries/:id(\\d+)/issue", can(`${FORM}.iss
       lines,
       sources: [{ label: "صدور سند حسابداری اسناد انبار", path: "/warehouse-accounting/issue-journal-entries" }],
     });
-    await effSettings.markUsed();
+    await effSettings.markUsed(entry.id);
 
     await prisma.$transaction([
       prisma.documentItemAmount.updateMany({

@@ -273,7 +273,7 @@ export function RecordPickerDialog<T extends { id: number | string }>({
                 <tr
                   key={row.id}
                   data-row-index={idx}
-                  className={kb.activeIndex === idx ? "active-list" : ""}
+                  className={kb.activeIndex === idx ? "picker-cursor" : ""}
                   onClick={() => kb.setActiveIndex(idx)}
                   onDoubleClick={() => onSelect(row)}
                   style={{ cursor: "pointer" }}

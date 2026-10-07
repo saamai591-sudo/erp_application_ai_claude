@@ -1,8 +1,9 @@
 import { prisma } from "../lib/prisma";
+import { recordSettingUsage } from "./settingUsageService";
 
 // «تعیین حسابهای معین» (TreasuryAccountSetting) — رکورد مؤثر طبق «تاریخ اجرا»: برای یک سند، از میان رکوردهای هم‌هدف (نوع حساب + همان بانک/صندوق/نوع...)
 // آخرین رکوردی که effectiveDate آن ≤ تاریخ سند است مؤثر است. تغییر حساب = رکورد جدید با تاریخ اجرای جدید. همه‌ی صدورهای سند باید رکورد را از همین‌جا بردارند.
-// قفل: رکوردی که در سند حسابداری صادرشده استفاده شده (hasTransactions) یا ردیف حسابداریِ سند خزانه به آن وصل است، قابل ویرایش/حذف نیست.
+// قفل: رکوردی که در سند حسابداری زنده استفاده شده (جدول واسط AccountingSettingUsage؛ services/settingUsageService.ts) یا ردیف حسابداریِ سند خزانه به آن وصل است، قابل ویرایش/حذف نیست.
 
 const day = (d: Date | string) => new Date(d).getTime();
 
@@ -38,14 +39,13 @@ export class EffectiveTreasurySettings {
     return [...this.used];
   }
 
-  async markUsed(db: any = prisma) {
-    await markTreasurySettingsUsed(this.usedIds, db);
+  async markUsed(journalEntryId: number, db: any = prisma) {
+    await markTreasurySettingsUsed(journalEntryId, this.usedIds, db);
   }
 }
 
-export async function markTreasurySettingsUsed(ids: number[], db: any = prisma) {
-  if (ids.length === 0) return;
-  await db.treasuryAccountSetting.updateMany({ where: { id: { in: ids }, hasTransactions: false }, data: { hasTransactions: true } });
+export async function markTreasurySettingsUsed(journalEntryId: number, ids: number[], db: any = prisma) {
+  await recordSettingUsage(journalEntryId, { treasuryIds: ids }, db);
 }
 
 /** معادل findFirst با شرط where: رکورد مؤثر برای تاریخ docDate (با معین) */

@@ -124,7 +124,7 @@ export async function issueChequeDepositReturnJournalEntry(returnId: number) {
   await prisma.chequeDepositReturn.update({ where: { id: returnId }, data: { journalEntryId: entry.id } });
 
 
-  await treasurySettings.markUsed();
+  await treasurySettings.markUsed(entry.id);
   return entry;
 }
 

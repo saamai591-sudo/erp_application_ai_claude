@@ -401,8 +401,8 @@ export async function issuePaymentJournalEntry(paymentId: number) {
   });
 
   await prisma.payment.update({ where: { id: paymentId }, data: { journalEntryId: entry.id } });
-  await markTreasurySettingsUsed(Array.from(new Set(plan.map((p) => p.treasurySettingId).filter((x): x is number => !!x))));
-  await markSettingsUsed(Array.from(new Set(plan.map((p) => p.goodsSettingId).filter((x): x is number => !!x))));
+  await markTreasurySettingsUsed(entry.id, Array.from(new Set(plan.map((p) => p.treasurySettingId).filter((x): x is number => !!x))));
+  await markSettingsUsed(entry.id, Array.from(new Set(plan.map((p) => p.goodsSettingId).filter((x): x is number => !!x))));
   return entry;
 }
 

@@ -1,10 +1,11 @@
 import { prisma } from "../lib/prisma";
+import { recordSettingUsage } from "./settingUsageService";
 
 // «رکورد مؤثر» حسابداری کالا و خدمت — نقطه‌ی مرکزی و یکتا. هر رکورد (GoodsServiceAccountingSetting) یک «تاریخ اجرا» دارد؛
 // برای یک سند، از بین رکوردهای هم‌کلید (نوع حساب / گروه حسابداری / گروه انبار / نوع فروش / نوع خرید / نوع سند / خدمت) آخرین رکوردی
 // که effectiveDate آن ≤ تاریخ سند است مؤثر است. تغییر حساب = ثبت رکورد جدید با تاریخ اجرای جدید (رکورد قدیمی دست‌نخورده می‌ماند).
 // همه‌ی صدور سندها (انبار، فاکتورها، دریافت/پرداخت و ...) باید رکورد را از همین‌جا بردارند، نه با جستجوی مستقیم.
-// قفل: رکوردی که در یک سند حسابداری صادرشده استفاده شده، با markSettingsUsed علامت (hasTransactions) می‌خورد و دیگر قابل ویرایش/حذف نیست.
+// قفل: رکوردی که در یک سند حسابداری زنده استفاده شده (جدول واسط AccountingSettingUsage؛ services/settingUsageService.ts) قابل ویرایش/حذف نیست؛ با حذف سند حسابداری قفل آزاد می‌شود.
 
 export interface EffectiveDated {
   id: number;
@@ -59,16 +60,15 @@ export class EffectiveSettings<T extends EffectiveDated> {
     return [...this.used];
   }
 
-  /** بعد از صدور موفقِ سند حسابداری صدا زده شود */
-  async markUsed(db: any = prisma) {
-    await markSettingsUsed(this.usedIds, db);
+  /** بعد از صدور موفقِ سند حسابداری صدا زده شود؛ رکوردهای مورداستفاده‌ی همین سند را در جدول واسط ثبت می‌کند */
+  async markUsed(journalEntryId: number, db: any = prisma) {
+    await markSettingsUsed(journalEntryId, this.usedIds, db);
   }
 }
 
-/** رکوردهای استفاده‌شده در یک سند حسابداری صادرشده را قفل می‌کند (ماندگار؛ با حذف سند باز نمی‌شود) */
-export async function markSettingsUsed(ids: number[], db: any = prisma) {
-  if (ids.length === 0) return;
-  await db.goodsServiceAccountingSetting.updateMany({ where: { id: { in: ids }, hasTransactions: false }, data: { hasTransactions: true } });
+/** رکوردهای استفاده‌شده در یک سند حسابداری صادرشده را (تا زنده بودن آن سند) قفل می‌کند */
+export async function markSettingsUsed(journalEntryId: number, ids: number[], db: any = prisma) {
+  await recordSettingUsage(journalEntryId, { goodsIds: ids }, db);
 }
 
 /** معادل findFirst با شرط where: رکورد مؤثر برای تاریخ docDate (برای مصرف‌کننده‌های تکی) */

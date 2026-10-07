@@ -675,6 +675,7 @@ model DocumentType {
 model JournalEntry {
   id                  Int                  @id @default(autoincrement())
   consolidationSource ConsolidatedDocumentSource?
+  settingUsages       AccountingSettingUsage[]
   fiscalPeriodId      Int
   number              Int
   referenceNumber     Int
@@ -1191,7 +1192,6 @@ model GoodsServiceAccountingSetting {
   serviceId           Int?
   /// تاریخ اجرا: رکورد مؤثر برای یک سند، آخرین رکوردِ هم‌کلید با effectiveDate ≤ تاریخ سند است (services/goodsAccountingSettingService.ts)
   effectiveDate       DateTime         @default("2000-01-01T00:00:00.000Z") @db.Date
-  hasTransactions     Boolean          @default(false)
   createdAt           DateTime         @default(now())
   service             GoodsItem?       @relation(fields: [serviceId], references: [id], onDelete: Restrict)
   account             Account          @relation(fields: [accountId], references: [id])
@@ -1200,6 +1200,7 @@ model GoodsServiceAccountingSetting {
   purchaseType        PurchaseType?    @relation(fields: [purchaseTypeId], references: [id])
   salesType           SalesType?       @relation(fields: [salesTypeId], references: [id])
   detailRuleHeaders   DetailRuleHeader[]
+  usages              AccountingSettingUsage[]
 }
 
 model GoodsRequestType {
@@ -1481,8 +1482,6 @@ model TreasuryAccountSetting {
   accountId                Int
   /// تاریخ اجرا: رکورد مؤثر یک سند = آخرین رکورد هم‌هدف با effectiveDate ≤ تاریخ سند (services/treasurySettingService.ts)
   effectiveDate            DateTime               @default("2000-01-01T00:00:00.000Z") @db.Date
-  /// رکوردی که در یک سند حسابداری صادرشده استفاده شده؛ ماندگار، قفل ویرایش/حذف
-  hasTransactions          Boolean                @default(false)
   createdAt                DateTime               @default(now())
   account                  Account                @relation(fields: [accountId], references: [id])
   bankAccount              BankAccount?           @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
@@ -1492,6 +1491,7 @@ model TreasuryAccountSetting {
   receiptType              ReceiptType?           @relation(fields: [receiptTypeId], references: [id], onDelete: Restrict)
   paymentType              PaymentType?           @relation(fields: [paymentTypeId], references: [id], onDelete: Restrict)
   pettyCash                PettyCash?             @relation(fields: [pettyCashId], references: [id], onDelete: Restrict)
+  usages                   AccountingSettingUsage[]
 
   @@unique([accountType, bankAccountId, effectiveDate])
   @@unique([accountType, cashBoxId, effectiveDate])
@@ -4162,4 +4162,22 @@ model PaymentAccountingLine {
 enum DetailValueSource {
   AUTO
   MANUAL
+}
+
+/// قفل زنده‌ی رکوردهای «حسابداری کالا و خدمت» و «تعیین حسابهای معین»: هر ردیف = «این سند حسابداری از این رکورد استفاده کرده».
+/// با حذف سند حسابداری ردیف‌ها cascade پاک می‌شوند و قفل خودکار آزاد می‌شود؛ حذف رکورد مورداستفاده با RESTRICT رد می‌شود.
+/// دقیقاً یکی از goodsSettingId / treasurySettingId پر است (CHECK در مایگریشن). (services/settingUsageService.ts)
+model AccountingSettingUsage {
+  id                Int                           @id @default(autoincrement())
+  journalEntryId    Int
+  goodsSettingId    Int?
+  treasurySettingId Int?
+  journalEntry      JournalEntry                  @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  goodsSetting      GoodsServiceAccountingSetting? @relation(fields: [goodsSettingId], references: [id], onDelete: Restrict)
+  treasurySetting   TreasuryAccountSetting?       @relation(fields: [treasurySettingId], references: [id], onDelete: Restrict)
+
+  @@unique([journalEntryId, goodsSettingId])
+  @@unique([journalEntryId, treasurySettingId])
+  @@index([goodsSettingId])
+  @@index([treasurySettingId])
 }
