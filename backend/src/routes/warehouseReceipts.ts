@@ -13,6 +13,7 @@ import { AuthedRequest } from "../middleware/auth";
 import { userHasAction, can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmounts, computeUnitCost } from "../services/documentItemAmountService";
+import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
 
 const FORM = findFormPrefix("warehousing-warehouse-receipts");
 
@@ -448,7 +449,9 @@ router.get("/warehouse-receipts/:id", can(`${FORM}.view`), async (req: AuthedReq
   const party = partyId ? await prisma.party.findUnique({ where: { id: partyId } }) : null;
   const showAmount = canViewAccounting && d.status === "FINALIZED";
   const amountByLineId = await getLineAmounts(d.lines.map((l) => l.id));
+  const extraDetails = await loadDocumentDetails(d.id);
   res.json({
+    details: extraDetails.header,
     id: d.id,
     number: d.number,
     date: d.date,
@@ -478,6 +481,7 @@ router.get("/warehouse-receipts/:id", can(`${FORM}.view`), async (req: AuthedReq
       ...(showAmount ? { unitCost: computeUnitCost(amountByLineId.get(l.id) ?? 0, l.quantity), amount: Number(amountByLineId.get(l.id) ?? 0) } : {}),
       description: l.description,
       ...trackingResponseFields(l),
+      details: extraDetails.byLine.get(l.id) ?? [],
       physicalLocation: l.physicalLocation?.title ?? null,
     })),
   });
@@ -547,6 +551,8 @@ export async function createWarehouseReceipt(body: HeaderBody) {
       },
     });
     await applyDocumentEffects(tx, { id: doc.id, documentType: "WAREHOUSE_RECEIPT", warehouseId: warehouse.id, date }, effectLines);
+
+    await saveDocumentDetails(tx, doc.id, "WAREHOUSE_RECEIPT", body as any);
     return doc;
   });
 }
@@ -637,6 +643,8 @@ router.put("/warehouse-receipts/:id", can(`${FORM}.edit`), async (req: AuthedReq
         },
       });
       await applyDocumentEffects(tx, { id, documentType: "WAREHOUSE_RECEIPT", warehouseId: warehouse.id, date }, newEffectLines);
+
+      await saveDocumentDetails(tx, id, "WAREHOUSE_RECEIPT", body as any);
       const goodsItemIds = [...oldEffectLines.map((l) => l.goodsItemId), ...newEffectLines.map((l) => l.goodsItemId)];
       await recomputeGoodsItemHasTransactions(goodsItemIds, tx);
       await recomputeWarehouseHasTransactions([existing.warehouseId!, warehouse.id], tx);

@@ -4,6 +4,7 @@ import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detail
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { buildChequeLedgerLines } from "./chequeCounterpartyLines";
 import { findDepositBankByCheque } from "./chequeDepositBankLookup";
+import { EffectiveTreasurySettings, findEffectiveTreasurySetting, markTreasurySettingsUsed } from "./treasurySettingService";
 
 // =========================================================================
 // صدور سند حسابداری «برگشت از واگذاری چک» (ChequeDepositReturn) — اکشن دستی روی سند تاییدشده (هم‌الگوی واگذاری به بانک)،
@@ -35,7 +36,7 @@ export async function issueChequeDepositReturnJournalEntry(returnId: number) {
   const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
   if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
 
-  const treasurySettings = await prisma.treasuryAccountSetting.findMany({ include: { account: true } });
+  const treasurySettings = new EffectiveTreasurySettings(await prisma.treasuryAccountSetting.findMany({ include: { account: true } }) as any[]);
   const description = `بابت برگشت چک از واگذاری ${doc.number} ${formatJalaliDateForMessage(doc.date)}`.trim();
   const errors: string[] = [];
 
@@ -68,7 +69,7 @@ export async function issueChequeDepositReturnJournalEntry(returnId: number) {
       errors.push(`ردیف ${n}: نوع چک دریافتیِ چک شماره ${cheque.number} مشخص نیست`);
       continue;
     }
-    const account = treasurySettings.find((s) => s.accountType === "RECEIVABLE_CHEQUE" && s.receivableChequeTypeId === cheque.receivableChequeTypeId)?.account;
+    const account = treasurySettings.find(doc.date, (s: any) => s.accountType === "RECEIVABLE_CHEQUE" && s.receivableChequeTypeId === cheque.receivableChequeTypeId)?.account;
     if (!account) {
       errors.push(`ردیف ${n}: برای نوع چک دریافتیِ چک شماره ${cheque.number}، معین در «تعیین حسابهای معین» (چک دریافتی) تعریف نشده است`);
       continue;
@@ -88,7 +89,7 @@ export async function issueChequeDepositReturnJournalEntry(returnId: number) {
   // ---------- بستانکار: اسناد در جریان وصول به‌ازای هر حساب بانکی ----------
   const creditLines: IssueLineInput[] = [];
   for (const [bankAccountId, { bankAccount, cheques }] of totalByBank) {
-    const inCollection = treasurySettings.find((s) => s.accountType === "CHEQUE_IN_COLLECTION" && s.bankAccountId === bankAccountId)?.account;
+    const inCollection = treasurySettings.find(doc.date, (s: any) => s.accountType === "CHEQUE_IN_COLLECTION" && s.bankAccountId === bankAccountId)?.account;
     if (!inCollection) {
       errors.push(`برای حساب بانکی «${bankAccount.accountNumber}»، معین در «تعیین حسابهای معین» (اسناد در جریان وصول) تعریف نشده است`);
       continue;
@@ -121,6 +122,9 @@ export async function issueChequeDepositReturnJournalEntry(returnId: number) {
   });
 
   await prisma.chequeDepositReturn.update({ where: { id: returnId }, data: { journalEntryId: entry.id } });
+
+
+  await treasurySettings.markUsed();
   return entry;
 }
 

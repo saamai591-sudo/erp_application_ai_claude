@@ -20,6 +20,8 @@ import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
+import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
+import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 
 // طبق تصمیم معماری «ادغام نمای انبارداری/حسابداری انبار»: این فرم دیگر دو مسیر/دو مود جدا ندارد —
 // یک نمای واحد است که ستون‌های مبلغی بر اساس مجوز کاربر نمایش داده می‌شوند، نه بر اساس مسیر URL. دقیقاً
@@ -71,6 +73,7 @@ interface DetailLine {
   serialIds: number[];
   batchAllocations: { batchId: number; batchNumber: string; expiryDate: string | null; quantity: number }[];
   physicalLocation: string | null;
+  details?: DetailValueDto[];
 }
 
 interface Detail {
@@ -86,6 +89,7 @@ interface Detail {
   status: "REGISTERED" | "FINALIZED";
   finalizedAt: string | null;
   lines: DetailLine[];
+  details?: DetailValueDto[];
 }
 
 const CREATION_TYPE_FA: Record<string, string> = { MANUAL: "دستی", SYSTEM: "سیستمی" };
@@ -238,6 +242,7 @@ interface RowState {
   serialIds: string[];
   batchAllocations: { batchId: string; quantity: string }[];
   physicalLocation: string;
+  details?: DetailValues;
 }
 
 function emptyRow(): RowState {
@@ -274,6 +279,7 @@ function mapRows(d: Detail): RowState[] {
     serialIds: l.serialIds.map(String),
     batchAllocations: l.batchAllocations.map((a) => ({ batchId: String(a.batchId), quantity: String(a.quantity) })),
     physicalLocation: l.physicalLocation || "",
+    details: detailsToValues(l.details),
   }));
 }
 
@@ -289,16 +295,17 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
   const [baseDecimalPlaces, setBaseDecimalPlaces] = useState(2);
   const [focusedRow, setFocusedRow] = useState<number | null>(null);
 
+  const detailConfig = useDocDetailConfig("INITIAL_INVENTORY");
   const { header, setHeader, rows, setRows, meta, setMeta, fiscalPeriod, error, setError, loaded, flash, submit, remove } = useDocumentForm<
-    { warehouseId: string; date: string; description: string },
+    { warehouseId: string; date: string; description: string; details: DetailValues },
     RowState,
     Detail
   >({
     endpoint: "initial-inventories",
     editId,
-    emptyHeader: (fp) => ({ warehouseId: "", date: defaultDocumentDate(fp), description: "" }),
+    emptyHeader: (fp) => ({ warehouseId: "", date: defaultDocumentDate(fp), description: "", details: {} }),
     emptyRows: () => [emptyRow(), emptyRow()],
-    mapDetailToHeader: (d) => ({ warehouseId: String(d.warehouseId), date: d.date.slice(0, 10), description: d.description || "" }),
+    mapDetailToHeader: (d) => ({ warehouseId: String(d.warehouseId), date: d.date.slice(0, 10), description: d.description || "", details: detailsToValues(d.details) }),
     mapDetailToRows: mapRows,
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, creationType: d.creationType, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     dateField: "date",
@@ -349,7 +356,7 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
   }
 
   function addRow() {
-    setRows((prev) => [...prev, emptyRow()]);
+    setRows((prev) => [...prev, { ...emptyRow(), details: newRowDetails(detailConfig, header.details) }]);
   }
   function removeRow(idx: number) {
     setRows((prev) => prev.filter((_, i) => i !== idx));
@@ -364,7 +371,9 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
       warehouseId: Number(header.warehouseId),
       date: header.date,
       description: header.description,
+      details: valuesToPayload(header.details),
       lines: nonEmptyRows.map((r) => ({
+        details: valuesToPayload(r.details),
         goodsItemId: Number(r.goodsItemId),
         unitId: Number(r.unitId),
         quantity: Number(r.quantity) || 0,
@@ -502,6 +511,16 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
             <label>تاریخ سند<RequiredMark /></label>
             <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={nonMoneyReadOnly} />
           </div>
+          <DocDetailHeaderFields
+            config={detailConfig}
+            values={header.details}
+            disabled={nonMoneyReadOnly}
+            onChange={(typeId, code) => {
+              const next = changeHeaderDetail(detailConfig, header, rows, typeId, code);
+              setHeader(next.header);
+              setRows(next.rows);
+            }}
+          />
           <div className="form-field full">
             <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} />
           </div>
@@ -535,6 +554,7 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
                 <th>مقدار</th>
                 {showAmount && <th>فی واحد</th>}
                 {showAmount && <th>مبلغ</th>}
+                <DocDetailItemHeadCells config={detailConfig} />
                 {!nonMoneyReadOnly && <th></th>}
               </tr>
             </thead>
@@ -585,6 +605,7 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
                         <AmountInput value={row.amount} onChange={(v) => onAmountChange(idx, v)} allowDecimal placeholder="۰" disabled={!moneyEditable} />
                       </td>
                     )}
+                    <DocDetailItemCells config={detailConfig} values={row.details} disabled={nonMoneyReadOnly} onChange={(typeId, code) => updateRow(idx, { details: { ...(row.details ?? {}), [typeId]: code } })} />
                     {!nonMoneyReadOnly && (
                       <td>
                         <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeRow(idx)} disabled={nonMoneyReadOnly}>

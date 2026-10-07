@@ -1,3 +1,4 @@
+import { EffectiveSettings } from "../services/goodsAccountingSettingService";
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
@@ -13,6 +14,7 @@ import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detail
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
+import { EffectiveTreasurySettings } from "../services/treasurySettingService";
 
 const FORM = findFormPrefix("sales-invoices");
 
@@ -1031,12 +1033,14 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
       where: { OR: [{ accountingGroupId: { in: accountingGroupIds } }, { accountType: "SALES_RECEIVABLE" }] },
       include: { account: true },
     });
+    const effSettings = new EffectiveSettings(settings as any[]);
+    const settingDocDate: Date = invoice.date;
     function findSetting(accountingGroupId: number, accountType: string, match: (s: (typeof settings)[number]) => boolean) {
-      return settings.find((s) => s.accountingGroupId === accountingGroupId && s.accountType === accountType && match(s));
+      return effSettings.find(settingDocDate, (s: any) => s.accountingGroupId === accountingGroupId && s.accountType === accountType && match(s)) as (typeof settings)[number] | undefined;
     }
     // «دریافتنی فروش» فقط با نوع فروش کلید می‌خورد — بدون قید گروه حسابداری.
     function findReceivableSetting(match: (s: (typeof settings)[number]) => boolean) {
-      return settings.find((s) => s.accountType === "SALES_RECEIVABLE" && match(s));
+      return effSettings.find(settingDocDate, (s: any) => s.accountType === "SALES_RECEIVABLE" && match(s)) as (typeof settings)[number] | undefined;
     }
 
     const customerName = partyDisplayName(invoice.customer.party) || "";
@@ -1120,6 +1124,7 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
     //  • نرخ تاریخی پیش‌دریافت: مبلغ فروش برای بخش پیش‌دریافت با نرخ تاریخی ثبت می‌شود (اصلاح درآمد فروش به‌اندازه‌ی اختلاف)، بدون تسعیر جدا
     // مبلغ ارزی تخصیص/مانده‌ی قابل پرداخت هرگز تحت‌تأثیر اختلاف نرخ نیست. سند همیشه بالانس است.
     // «پیش‌دریافت ارزش افزوده» (Documents/تغییرات تخصیص پیش‌دریافت.md) همین منطق را جدا از پیش‌دریافت عادی و روی دریافتنی/ارزش‌افزوده‌ی فاکتور دارد.
+    const treasuryHolders: EffectiveTreasurySettings[] = [];
     const advanceDebitLines: IssueLineInput[] = [];
     const advanceAdjustLines: IssueLineInput[] = [];
     const allocations = await prisma.salesInvoiceAdvanceAllocation.findMany({
@@ -1128,10 +1133,10 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
       orderBy: { id: "asc" },
     });
     if (allocations.length > 0) {
-      const treasurySettings = await prisma.treasuryAccountSetting.findMany({
-        where: { accountType: { in: ["RECEIPT_SUBJECT", "FX_GAIN_LOSS"] } },
-        include: { account: true },
-      });
+      const treasurySettings = new EffectiveTreasurySettings(
+        (await prisma.treasuryAccountSetting.findMany({ where: { accountType: { in: ["RECEIPT_SUBJECT", "FX_GAIN_LOSS"] } }, include: { account: true } })) as any[]
+      );
+      treasuryHolders.push(treasurySettings);
       const invIsBase = invoice.currencyId === baseCurrency.id;
       // مجموع هر ماهیت جدا نگهداری می‌شود («پیش‌دریافت» روی دریافتنیِ مبلغ، «پیش‌دریافت ارزش افزوده» روی دریافتنیِ ارزش‌افزوده) و هرگز با هم جمع نمی‌شوند
       const acc = {
@@ -1144,7 +1149,7 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
         const amount = Number(a.amount);
         const bucket = a.nature === "ADVANCE_VAT_RECEIPT" ? acc.ADVANCE_VAT_RECEIPT : acc.ADVANCE_RECEIPT;
         const natureTitle = a.nature === "ADVANCE_VAT_RECEIPT" ? "پیش‌دریافت ارزش افزوده" : "پیش‌دریافت";
-        const account = treasurySettings.find((s) => s.accountType === "RECEIPT_SUBJECT" && s.receiptTypeId === rt.id)?.account;
+        const account = treasurySettings.find(invoice.date, (s: any) => s.accountType === "RECEIPT_SUBJECT" && s.receiptTypeId === rt.id)?.account;
         if (!account) {
           errors.push(`برای نوع دریافت «${rt.title}» (${natureTitle} رسید شماره ${l.receipt.number}) معینِ ${natureTitle} تعریف نشده است`);
           continue;
@@ -1203,7 +1208,7 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
             { diff: diffRegular, title: "پیش‌دریافت", contra: Array.from(revenueByAccount.values())[0], contraTitle: "درآمد فروش" },
             { diff: diffVat, title: "پیش‌دریافت ارزش افزوده", contra: Array.from(vatCreditByAccount.values())[0], contraTitle: "ارزش‌افزوده فروش" },
           ];
-          const fxAccount = treasurySettings.find((s) => s.accountType === "FX_GAIN_LOSS")?.account;
+          const fxAccount = treasurySettings.find(invoice.date, (s: any) => s.accountType === "FX_GAIN_LOSS")?.account;
           for (const p of parts) {
             if (Math.abs(p.diff) <= 0.005) continue;
             if (method === "TRANSACTION_DATE_RATE") {
@@ -1307,6 +1312,8 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
       lines: [...debitLines, ...advanceDebitLines, ...creditLines, ...advanceAdjustLines],
       sources: [{ label: `فاکتور فروش شماره ${invoice.number}`, path: `/sales-invoices/${invoice.id}/edit` }],
     });
+    await effSettings.markUsed();
+    for (const h of treasuryHolders) await h.markUsed();
 
     await prisma.salesInvoice.update({ where: { id }, data: { journalEntryId: entry.id } });
 

@@ -12,6 +12,7 @@ import { AuthedRequest } from "../middleware/auth";
 import { userHasAction, can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmounts, computeUnitCost } from "../services/documentItemAmountService";
+import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
 
 const FORM = findFormPrefix("production-consumptions");
 const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
@@ -165,7 +166,9 @@ router.get("/production-consumptions/:id", can(`${FORM}.view`), async (req: Auth
   const costCenterId = d.detailCode ? codeToCostCenterId[d.detailCode] ?? null : null;
   const costCenter = costCenterId ? await prisma.costCenter.findUnique({ where: { id: costCenterId } }) : null;
   const amountByLineId = await getLineAmounts(d.lines.map((l) => l.id));
+  const extraDetails = await loadDocumentDetails(d.id);
   res.json({
+    details: extraDetails.header,
     id: d.id,
     number: d.number,
     date: d.date,
@@ -190,6 +193,7 @@ router.get("/production-consumptions/:id", can(`${FORM}.view`), async (req: Auth
       ...((canViewAccounting && d.status === "FINALIZED") ? { unitCost: computeUnitCost(amountByLineId.get(l.id) ?? 0, l.quantity), amount: Number(amountByLineId.get(l.id) ?? 0) } : {}),
       description: l.description,
       ...trackingResponseFields(l),
+      details: extraDetails.byLine.get(l.id) ?? [],
       physicalLocation: l.physicalLocation?.title ?? null,
     })),
   });
@@ -254,6 +258,8 @@ export async function createProductionConsumption(body: HeaderBody) {
       },
     });
     await applyDocumentEffects(tx, { id: doc.id, documentType: "PRODUCTION_CONSUMPTION", warehouseId: warehouse.id, date }, effectLines);
+
+    await saveDocumentDetails(tx, doc.id, "PRODUCTION_CONSUMPTION", body as any);
     return doc;
   });
 }
@@ -327,6 +333,8 @@ router.put("/production-consumptions/:id", can(`${FORM}.edit`), async (req, res)
         },
       });
       await applyDocumentEffects(tx, { id, documentType: "PRODUCTION_CONSUMPTION", warehouseId: warehouse.id, date }, newEffectLines);
+
+      await saveDocumentDetails(tx, id, "PRODUCTION_CONSUMPTION", body as any);
       const goodsItemIds = [...oldEffectLines.map((l) => l.goodsItemId), ...newEffectLines.map((l) => l.goodsItemId)];
       await recomputeGoodsItemHasTransactions(goodsItemIds, tx);
       await recomputeWarehouseHasTransactions([existing.warehouseId!, warehouse.id], tx);

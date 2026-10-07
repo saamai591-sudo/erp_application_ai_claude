@@ -20,6 +20,8 @@ import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
+import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
+import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 
 // «اضافات انبارگردانی» — طبق تصمیم صریح کاربر، دقیقاً هم‌الگوی موجودی اول دوره/رسید تولید:
 // بدون مقایسه با موجودی سیستمی؛ کاربر مستقیماً مقدار مازاد هر ردیف را وارد می‌کند (بدون مبنا). این سند
@@ -74,6 +76,7 @@ interface DetailLine {
   serialIds: number[];
   batchAllocations: { batchId: number; batchNumber: string; expiryDate: string | null; quantity: number }[];
   physicalLocation: string | null;
+  details?: DetailValueDto[];
 }
 
 interface Detail {
@@ -87,6 +90,7 @@ interface Detail {
   status: DocStatus;
   finalizedAt: string | null;
   lines: DetailLine[];
+  details?: DetailValueDto[];
 }
 
 const STATUS_FA: Record<DocStatus, string> = { REGISTERED: "ثبت‌شده", FINALIZED: "تایید حسابداری شده" };
@@ -204,6 +208,7 @@ interface RowState {
   serialIds: string[];
   batchAllocations: { batchId: string; quantity: string }[];
   physicalLocation: string;
+  details?: DetailValues;
 }
 
 function emptyRow(): RowState {
@@ -231,6 +236,7 @@ function mapRows(d: Detail): RowState[] {
     serialIds: l.serialIds.map(String),
     batchAllocations: l.batchAllocations.map((a) => ({ batchId: String(a.batchId), quantity: String(a.quantity) })),
     physicalLocation: l.physicalLocation || "",
+    details: detailsToValues(l.details),
   }));
 }
 
@@ -255,16 +261,17 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [baseDecimalPlaces, setBaseDecimalPlaces] = useState(2);
 
+  const detailConfig = useDocDetailConfig("WAREHOUSE_ADJUSTMENT");
   const { header, setHeader, rows, setRows, meta, setMeta, fiscalPeriod, error, setError, loaded, flash, submit, remove } = useDocumentForm<
-    { date: string; warehouseId: string; description: string },
+    { date: string; warehouseId: string; description: string; details: DetailValues },
     RowState,
     Detail
   >({
     endpoint: "warehouse-adjustments",
     editId,
-    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), warehouseId: "", description: "" }),
+    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), warehouseId: "", description: "", details: {} }),
     emptyRows: () => [emptyRow()],
-    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), warehouseId: String(d.warehouseId), description: d.description || "" }),
+    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), warehouseId: String(d.warehouseId), description: d.description || "", details: detailsToValues(d.details) }),
     mapDetailToRows: mapRows,
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     loadExtra: async () => {
@@ -306,7 +313,7 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
   }
 
   function addRow() {
-    setRows((prev) => [...prev, emptyRow()]);
+    setRows((prev) => [...prev, { ...emptyRow(), details: newRowDetails(detailConfig, header.details) }]);
   }
   function removeRow(idx: number) {
     setRows((prev) => prev.filter((_, i) => i !== idx));
@@ -321,7 +328,9 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
       date: header.date,
       warehouseId: Number(header.warehouseId),
       description: header.description,
+      details: valuesToPayload(header.details),
       lines: nonEmptyRows.map((r) => ({
+        details: valuesToPayload(r.details),
         goodsItemId: Number(r.goodsItemId),
         unitId: Number(r.unitId),
         quantity: Number(r.quantity) || 0,
@@ -443,6 +452,16 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
               <label>تاریخ سند<RequiredMark /></label>
               <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={coreDisabled} />
             </div>
+            <DocDetailHeaderFields
+              config={detailConfig}
+              values={header.details}
+              disabled={coreDisabled}
+              onChange={(typeId, code) => {
+                const next = changeHeaderDetail(detailConfig, header, rows, typeId, code);
+                setHeader(next.header);
+                setRows(next.rows);
+              }}
+            />
             <div className="form-field full">
               <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={coreDisabled} />
             </div>
@@ -476,6 +495,7 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
                   <th>مقدار</th>
                   {showAmount && <th>فی واحد</th>}
                   {showAmount && <th>مبلغ</th>}
+                  <DocDetailItemHeadCells config={detailConfig} />
                   <th>شرح</th>
                   {!coreDisabled && <th></th>}
                 </tr>
@@ -520,6 +540,7 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
                         </td>
                       )}
                       {showAmount && <td style={{ minWidth: 120, color: "var(--ink-soft)" }}>{formatAmountFa(row.amount || "0")}</td>}
+                      <DocDetailItemCells config={detailConfig} values={row.details} disabled={coreDisabled} onChange={(typeId, code) => updateRow(idx, { details: { ...(row.details ?? {}), [typeId]: code } })} />
                       <td style={{ minWidth: 160 }}>
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} disabled={coreDisabled} />
                       </td>

@@ -10,6 +10,7 @@ import { AuthedRequest } from "../middleware/auth";
 import { userHasAction, can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmounts, setLineAmount, computeUnitCost } from "../services/documentItemAmountService";
+import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
 
 const FORM = findFormPrefix("warehousing-initial-inventory");
 const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
@@ -147,7 +148,9 @@ router.get("/:id", can(`${FORM}.view`), async (req: AuthedRequest, res) => {
   if (!d) return res.status(404).json({ error: "سند موجودی اول دوره یافت نشد" });
   const showAmount = canViewAccounting && d.status === "FINALIZED";
   const amountByLineId = await getLineAmounts(d.lines.map((l) => l.id));
+  const extraDetails = await loadDocumentDetails(d.id);
   res.json({
+    details: extraDetails.header,
     id: d.id,
     number: d.number,
     date: d.date,
@@ -170,6 +173,7 @@ router.get("/:id", can(`${FORM}.view`), async (req: AuthedRequest, res) => {
       quantity: Number(l.quantity),
       ...(showAmount ? { unitCost: computeUnitCost(amountByLineId.get(l.id) ?? 0, l.quantity), amount: Number(amountByLineId.get(l.id) ?? 0) } : {}),
       ...trackingResponseFields(l),
+      details: extraDetails.byLine.get(l.id) ?? [],
       physicalLocation: l.physicalLocation?.title ?? null,
     })),
   });
@@ -229,6 +233,8 @@ export async function createInitialInventory(body: HeaderBody) {
       },
     });
     await applyDocumentEffects(tx, { id: doc.id, documentType: "INITIAL_INVENTORY", warehouseId: warehouse.id, date }, effectLines);
+
+    await saveDocumentDetails(tx, doc.id, "INITIAL_INVENTORY", body as any);
     return doc;
   });
 }
@@ -356,6 +362,8 @@ router.put("/:id", can(`${FORM}.edit`), async (req: AuthedRequest, res) => {
         },
       });
       await applyDocumentEffects(tx, { id, documentType: "INITIAL_INVENTORY", warehouseId: warehouse.id, date }, newEffectLines);
+
+      await saveDocumentDetails(tx, id, "INITIAL_INVENTORY", body as any);
       const goodsItemIds = [...oldEffectLines.map((l) => l.goodsItemId), ...newEffectLines.map((l) => l.goodsItemId)];
       await recomputeGoodsItemHasTransactions(goodsItemIds, tx);
       await recomputeWarehouseHasTransactions([existing.warehouseId!, warehouse.id], tx);

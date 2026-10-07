@@ -20,6 +20,8 @@ import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
 import { partyDisplayName } from "./Users";
 import { DescriptionField } from "../components/DescriptionField";
+import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
+import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 
 // «برگشت از فروش» — طبق stockAnalysis.md بند ۳۴؛ نگاه کنید به یادداشت بالای
 // backend/src/routes/salesReturns.ts برای توضیح طراحی (سکوت مستند در این مورد، هم‌الگوی بند ۴۰). طبق
@@ -43,8 +45,8 @@ interface GoodsItemRow { id: number; trackingMethod: "NONE" | "BATCH" | "SERIAL"
 interface PickableLine { id: number; sourceSalesDeliveryLineId: number; number: number; date: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
 
 interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; partyId: number | null; partyTitle: string | null; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number; totalAmount?: number }
-interface DetailLine { id: number; sourceSalesDeliveryLineId: number; sourceNumber: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitCost: number; amount: number; description: string | null; serialIds: number[]; batchAllocations: { batchId: number; batchNumber: string; expiryDate: string | null; quantity: number }[]; physicalLocation: string | null }
-interface Detail { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; partyId: number | null; partyTitle: string | null; description: string | null; status: DocStatus; finalizedAt: string | null; lines: DetailLine[] }
+interface DetailLine { id: number; sourceSalesDeliveryLineId: number; sourceNumber: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitCost: number; amount: number; description: string | null; serialIds: number[]; batchAllocations: { batchId: number; batchNumber: string; expiryDate: string | null; quantity: number }[]; physicalLocation: string | null; details?: DetailValueDto[] }
+interface Detail { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; partyId: number | null; partyTitle: string | null; description: string | null; status: DocStatus; finalizedAt: string | null; details?: DetailValueDto[]; lines: DetailLine[] }
 
 const STATUS_FA: Record<DocStatus, string> = { REGISTERED: "ثبت‌شده", FINALIZED: "تایید انبار شده" };
 const INFO_TEXT = "ثبت برگشت از فروش — هر ردیف باید به یک ردیف حواله فروش قطعی‌شده ارجاع بدهد؛ مقدار برگشتی نمی‌تواند از باقیمانده‌ی قابل برگشت آن ردیف بیشتر باشد.";
@@ -122,7 +124,7 @@ function SalesReturnList({ basePath }: { basePath: string }) {
   );
 }
 
-interface RowState { sourceSalesDeliveryLineId: string; sourceNumber: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitCost: number; amount: number; description: string; serialIds: string[]; batchAllocations: { batchId: string; quantity: string }[]; physicalLocation: string }
+interface RowState { sourceSalesDeliveryLineId: string; sourceNumber: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitCost: number; amount: number; description: string; serialIds: string[]; batchAllocations: { batchId: string; quantity: string }[]; physicalLocation: string; details?: DetailValues }
 
 function emptyRow(): RowState {
   return { sourceSalesDeliveryLineId: "", sourceNumber: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitCost: 0, amount: 0, description: "", serialIds: [], batchAllocations: [], physicalLocation: "" };
@@ -137,16 +139,17 @@ function SalesReturnForm({ editId, basePath }: { editId?: number; basePath: stri
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
+  const detailConfig = useDocDetailConfig("SALES_RETURN");
   const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
-    { date: string; warehouseId: string; partyId: string; description: string },
+    { date: string; warehouseId: string; partyId: string; description: string; details: DetailValues },
     RowState,
     Detail
   >({
     endpoint: "sales-returns",
     editId,
-    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), warehouseId: "", partyId: "", description: "" }),
+    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), warehouseId: "", partyId: "", description: "", details: {} }),
     emptyRows: () => [emptyRow()],
-    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), warehouseId: String(d.warehouseId), partyId: d.partyId ? String(d.partyId) : "", description: d.description || "" }),
+    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), warehouseId: String(d.warehouseId), partyId: d.partyId ? String(d.partyId) : "", description: d.description || "", details: detailsToValues(d.details) }),
     mapDetailToRows: (d) =>
       d.lines.map((l) => ({
         sourceSalesDeliveryLineId: String(l.sourceSalesDeliveryLineId),
@@ -163,6 +166,7 @@ function SalesReturnForm({ editId, basePath }: { editId?: number; basePath: stri
         serialIds: l.serialIds.map(String),
         batchAllocations: l.batchAllocations.map((a) => ({ batchId: String(a.batchId), quantity: String(a.quantity) })),
         physicalLocation: l.physicalLocation || "",
+        details: detailsToValues(l.details),
       })),
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     loadExtra: async () => {
@@ -210,7 +214,7 @@ function SalesReturnForm({ editId, basePath }: { editId?: number; basePath: stri
   }
 
   function addRow() {
-    setRows((prev) => [...prev, emptyRow()]);
+    setRows((prev) => [...prev, { ...emptyRow(), details: newRowDetails(detailConfig, header.details) }]);
   }
   function removeRow(idx: number) {
     setRows((prev) => prev.filter((_, i) => i !== idx));
@@ -226,7 +230,9 @@ function SalesReturnForm({ editId, basePath }: { editId?: number; basePath: stri
       warehouseId: Number(header.warehouseId),
       partyId: header.partyId ? Number(header.partyId) : null,
       description: header.description,
+      details: valuesToPayload(header.details),
       lines: nonEmptyRows.map((r) => ({
+        details: valuesToPayload(r.details),
         sourceSalesDeliveryLineId: Number(r.sourceSalesDeliveryLineId),
         quantity: Number(r.quantity) || 0,
         description: r.description || null,
@@ -325,6 +331,16 @@ function SalesReturnForm({ editId, basePath }: { editId?: number; basePath: stri
                 onSelect={(p) => setHeader({ ...header, partyId: String((p as PartyOption).id) })}
               />
             </div>
+            <DocDetailHeaderFields
+              config={detailConfig}
+              values={header.details}
+              disabled={coreDisabled}
+              onChange={(typeId, code) => {
+                const next = changeHeaderDetail(detailConfig, header, rows, typeId, code);
+                setHeader(next.header);
+                setRows(next.rows);
+              }}
+            />
             <div className="form-field full">
               <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={coreDisabled} />
             </div>
@@ -359,6 +375,7 @@ function SalesReturnForm({ editId, basePath }: { editId?: number; basePath: stri
                   <th>مقدار</th>
                   {showAmount && <th>فی واحد</th>}
                   {showAmount && <th>مبلغ</th>}
+                  <DocDetailItemHeadCells config={detailConfig} />
                   <th>شرح</th>
                   {!coreDisabled && <th></th>}
                 </tr>
@@ -405,6 +422,7 @@ function SalesReturnForm({ editId, basePath }: { editId?: number; basePath: stri
                       </td>
                       {showAmount && <td style={{ minWidth: 110, color: "var(--ink-soft)" }}>{formatAmountFa(row.unitCost)}</td>}
                       {showAmount && <td style={{ minWidth: 120, color: "var(--ink-soft)" }}>{formatAmountFa(row.amount)}</td>}
+                      <DocDetailItemCells config={detailConfig} values={row.details} disabled={coreDisabled} onChange={(typeId, code) => updateRow(idx, { details: { ...(row.details ?? {}), [typeId]: code } })} />
                       <td style={{ minWidth: 160 }}>
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} disabled={coreDisabled} />
                       </td>

@@ -21,6 +21,8 @@ import { partyDisplayName } from "./Users";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
+import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
+import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 
 // «حواله فروش» (مجوز خروج از انبار برای فروش) — سند واقعی حرکت انبار، جدا از حواله انبار مصرفی
 // موجود؛ ساختارش دقیقاً مطابق الگوی «رسید انبار خرید» است (رجوع کنید به یادداشت بالای
@@ -73,8 +75,9 @@ interface DetailLine {
   serialIds: number[];
   batchAllocations: { batchId: number; batchNumber: string; expiryDate: string | null; quantity: number }[];
   physicalLocation: string | null;
+  details?: DetailValueDto[];
 }
-interface Detail { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; basis: Basis; partyId: number | null; partyTitle: string | null; description: string | null; status: DocStatus; finalizedAt: string | null; lines: DetailLine[] }
+interface Detail { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; basis: Basis; partyId: number | null; partyTitle: string | null; description: string | null; status: DocStatus; finalizedAt: string | null; details?: DetailValueDto[]; lines: DetailLine[] }
 
 const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", SALES_ORDER: "سفارش فروش", SALES_QUOTE: "پیش‌فاکتور" };
 const STATUS_FA: Record<DocStatus, string> = { REGISTERED: "ثبت‌شده", FINALIZED: "تایید انبار شده" };
@@ -189,6 +192,7 @@ interface RowState {
   serialIds: string[];
   batchAllocations: { batchId: string; quantity: string }[];
   physicalLocation: string;
+  details?: DetailValues;
 }
 
 function emptyRow(): RowState {
@@ -219,16 +223,17 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
+  const detailConfig = useDocDetailConfig("SALES_DELIVERY");
   const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
-    { date: string; basis: Basis; warehouseId: string; partyId: string; description: string },
+    { date: string; basis: Basis; warehouseId: string; partyId: string; description: string; details: DetailValues },
     RowState,
     Detail
   >({
     endpoint: "sales-deliveries",
     editId,
-    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), basis: "NO_BASIS", warehouseId: "", partyId: "", description: "" }),
+    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), basis: "NO_BASIS", warehouseId: "", partyId: "", description: "", details: {} }),
     emptyRows: () => [emptyRow()],
-    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), basis: d.basis, warehouseId: String(d.warehouseId), partyId: d.partyId ? String(d.partyId) : "", description: d.description || "" }),
+    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), basis: d.basis, warehouseId: String(d.warehouseId), partyId: d.partyId ? String(d.partyId) : "", description: d.description || "", details: detailsToValues(d.details) }),
     mapDetailToRows: (d) =>
       d.lines.map((l) => ({
         // شناسه‌ی ردیف مبنا (بسته به مبنا: ردیف سفارش فروش یا ردیف پیش‌فاکتور) — همین یک فیلد state برای هر دو است
@@ -246,6 +251,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
         serialIds: l.serialIds.map(String),
         batchAllocations: l.batchAllocations.map((a) => ({ batchId: String(a.batchId), quantity: String(a.quantity) })),
         physicalLocation: l.physicalLocation || "",
+        details: detailsToValues(l.details),
       })),
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     loadExtra: async () => {
@@ -365,7 +371,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
   }
 
   function addRow() {
-    setRows((prev) => [...prev, emptyRow()]);
+    setRows((prev) => [...prev, { ...emptyRow(), details: newRowDetails(detailConfig, header.details) }]);
   }
 
   function removeRow(idx: number) {
@@ -383,7 +389,9 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
       warehouseId: Number(header.warehouseId),
       partyId: header.partyId ? Number(header.partyId) : null,
       description: header.description,
+      details: valuesToPayload(header.details),
       lines: nonEmptyRows.map((r) => ({
+        details: valuesToPayload(r.details),
         sourceSalesOrderLineId: header.basis === "SALES_ORDER" && r.sourceSalesOrderLineId ? Number(r.sourceSalesOrderLineId) : null,
         sourceSalesQuoteLineId: header.basis === "SALES_QUOTE" && r.sourceSalesOrderLineId ? Number(r.sourceSalesOrderLineId) : null,
         goodsItemId: r.goodsItemId ? Number(r.goodsItemId) : undefined,
@@ -497,6 +505,16 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                 onSelect={(p) => setHeader({ ...header, partyId: String((p as PartyOption).id) })}
               />
             </div>
+            <DocDetailHeaderFields
+              config={detailConfig}
+              values={header.details}
+              disabled={headerDisabled}
+              onChange={(typeId, code) => {
+                const next = changeHeaderDetail(detailConfig, header, rows, typeId, code);
+                setHeader(next.header);
+                setRows(next.rows);
+              }}
+            />
             <div className="form-field full">
               <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={headerDisabled} />
             </div>
@@ -531,6 +549,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                   <th>مقدار</th>
                   {showAmount && <th>فی واحد</th>}
                   {showAmount && <th>مبلغ</th>}
+                  <DocDetailItemHeadCells config={detailConfig} />
                   <th>شرح</th>
                   {!coreDisabled && <th></th>}
                 </tr>
@@ -598,6 +617,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                       </td>
                       {showAmount && <td style={{ minWidth: 110, color: "var(--ink-soft)" }}>{formatAmountFa(row.unitCost || "0")}</td>}
                       {showAmount && <td style={{ minWidth: 120, color: "var(--ink-soft)" }}>{formatAmountFa(row.amount || "0")}</td>}
+                      <DocDetailItemCells config={detailConfig} values={row.details} disabled={coreDisabled} onChange={(typeId, code) => updateRow(idx, { details: { ...(row.details ?? {}), [typeId]: code } })} />
                       <td style={{ minWidth: 160 }}>
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} disabled={coreDisabled} />
                       </td>

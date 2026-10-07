@@ -11,6 +11,7 @@ import { AuthedRequest } from "../middleware/auth";
 import { userHasAction, can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmounts, computeUnitCost } from "../services/documentItemAmountService";
+import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
 
 const FORM = findFormPrefix("fixed-asset-issues");
 const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
@@ -218,7 +219,9 @@ router.get("/fixed-asset-issues/:id", can(`${FORM}.view`), async (req: AuthedReq
   });
   if (!d) return res.status(404).json({ error: "سند حواله دارایی ثابت یافت نشد" });
   const amountByLineId = await getLineAmounts(d.lines.map((l) => l.id));
+  const extraDetails = await loadDocumentDetails(d.id);
   res.json({
+    details: extraDetails.header,
     id: d.id,
     number: d.number,
     date: d.date,
@@ -243,6 +246,7 @@ router.get("/fixed-asset-issues/:id", can(`${FORM}.view`), async (req: AuthedReq
       ...((canViewAccounting && d.status === "FINALIZED") ? { unitCost: computeUnitCost(amountByLineId.get(l.id) ?? 0, l.quantity), amount: Number(amountByLineId.get(l.id) ?? 0) } : {}),
       description: l.description,
       ...trackingResponseFields(l),
+      details: extraDetails.byLine.get(l.id) ?? [],
       physicalLocation: l.physicalLocation?.title ?? null,
     })),
   });
@@ -296,6 +300,8 @@ router.post("/fixed-asset-issues", can(`${FORM}.create`), async (req, res) => {
         },
       });
       await applyDocumentEffects(tx, { id: doc.id, documentType: "FIXED_ASSET_ISSUE", warehouseId: warehouse.id, date }, effectLines);
+
+      await saveDocumentDetails(tx, doc.id, "FIXED_ASSET_ISSUE", body as any);
       return doc;
     });
 
@@ -364,6 +370,8 @@ router.put("/fixed-asset-issues/:id", can(`${FORM}.edit`), async (req, res) => {
         },
       });
       await applyDocumentEffects(tx, { id, documentType: "FIXED_ASSET_ISSUE", warehouseId: warehouse.id, date }, newEffectLines);
+
+      await saveDocumentDetails(tx, id, "FIXED_ASSET_ISSUE", body as any);
       const goodsItemIds = [...oldEffectLines.map((l) => l.goodsItemId), ...newEffectLines.map((l) => l.goodsItemId)];
       await recomputeGoodsItemHasTransactions(goodsItemIds, tx);
       await recomputeWarehouseHasTransactions([existing.warehouseId!, warehouse.id], tx);

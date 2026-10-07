@@ -123,6 +123,14 @@ function validWarehouseDocType(accountType: string, warehouseDocType?: string | 
 
 // جلوگیری از رکورد تکراری: هر ترکیب (نوع حساب، گروه حسابداری، گروه انبار، نوع فروش، نوع سند انبار، نوع خرید) فقط یک معین می‌تواند داشته باشد
 // (مثلاً «حساب دریافتنی فروش» + نوع فروش «فروش» دو بار تعریف نمی‌شود). مقدارهای خالی (null) با هم برابر حساب می‌شوند.
+/** تاریخ اجرا (الزامی در ثبت): رشته‌ی تاریخ → Date معتبر */
+function parseEffectiveDate(raw: unknown): Date {
+  if (!raw) throw new Error("تاریخ اجرا الزامی است");
+  const d = new Date(String(raw));
+  if (Number.isNaN(d.getTime())) throw new Error("تاریخ اجرا معتبر نیست");
+  return d;
+}
+
 async function assertNoDuplicateSetting(key: {
   accountType: string;
   accountingGroupId: number | null;
@@ -131,6 +139,7 @@ async function assertNoDuplicateSetting(key: {
   warehouseDocType: string | null;
   purchaseTypeId: number | null;
   serviceId?: number | null;
+  effectiveDate: Date;
 }, excludeId?: number) {
   const dup = await prisma.goodsServiceAccountingSetting.findFirst({
     where: {
@@ -141,15 +150,20 @@ async function assertNoDuplicateSetting(key: {
       warehouseDocType: key.warehouseDocType as any,
       purchaseTypeId: key.purchaseTypeId,
       serviceId: key.serviceId ?? null,
+      effectiveDate: key.effectiveDate,
       ...(excludeId ? { NOT: { id: excludeId } } : {}),
     },
   });
-  if (dup) throw new Error("این تنظیم تکراری است: برای همین ترکیب (نوع حساب / گروه حسابداری / گروه انبار / نوع فروش / نوع خرید / نوع سند / خدمت) قبلاً یک معین تعریف شده است");
+  if (dup) throw new Error("این تنظیم تکراری است: برای همین ترکیب (نوع حساب / گروه حسابداری / گروه انبار / نوع فروش / نوع خرید / نوع سند / خدمت) در همین تاریخ اجرا قبلاً یک معین تعریف شده است؛ برای تغییر حساب، رکورد جدید با تاریخ اجرای جدید ثبت کنید");
 }
 
+const RULE_LOCK_MESSAGE = "این تنظیم در «قواعد تفصیل» استفاده شده و قابل ویرایش/حذف نیست؛ برای تغییر حساب، رکورد جدید با تاریخ اجرای جدید ثبت کنید";
+
 router.get("/goods-service-accounting", async (_req, res) => {
+  const ruleCounts = await prisma.detailRuleHeader.groupBy({ by: ["settingId"], _count: { _all: true } });
+  const ruleLocked = new Set(ruleCounts.map((r) => r.settingId));
   res.json(
-    await prisma.goodsServiceAccountingSetting.findMany({
+    (await prisma.goodsServiceAccountingSetting.findMany({
       include: {
         accountingGroup: true,
         warehouseGroup: true,
@@ -159,7 +173,7 @@ router.get("/goods-service-accounting", async (_req, res) => {
         account: { include: { level: true } },
       },
       orderBy: { id: "asc" },
-    })
+    })).map((s) => ({ ...s, ruleLocked: ruleLocked.has(s.id) }))
   );
 });
 
@@ -173,6 +187,7 @@ router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create
     warehouseDocType?: string | null;
     purchaseTypeId?: number | null;
     serviceId?: number | null;
+    effectiveDate?: string;
   };
   if (!body.accountType || !body.accountId) {
     return res.status(400).json({ error: "نوع حساب و معین الزامی است" });
@@ -210,6 +225,7 @@ router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create
       return res.status(400).json({ error: "حساب انتخاب‌شده باید در سطح «معین» باشد" });
     }
 
+    const effectiveDate = parseEffectiveDate(body.effectiveDate);
     await assertNoDuplicateSetting({
       accountType: body.accountType,
       accountingGroupId: groupless ? null : body.accountingGroupId ?? null,
@@ -218,6 +234,7 @@ router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create
       warehouseDocType: body.warehouseDocType || null,
       purchaseTypeId: body.purchaseTypeId || null,
       serviceId: isServicePurchase ? body.serviceId! : null,
+      effectiveDate,
     });
 
     const created = await prisma.goodsServiceAccountingSetting.create({
@@ -230,6 +247,7 @@ router.post("/goods-service-accounting", can(`${GOODS_SERVICE_ACCOUNTING}.create
         warehouseDocType: (body.warehouseDocType || null) as any,
         purchaseTypeId: body.purchaseTypeId || null,
         serviceId: isServicePurchase ? body.serviceId! : null,
+        effectiveDate,
       },
       include: { accountingGroup: true, warehouseGroup: true, purchaseType: true, salesType: true, service: { select: { id: true, fullCode: true, title: true, accountingTreatment: true } }, account: { include: { level: true } } },
     });
@@ -250,13 +268,15 @@ router.put("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.edi
     warehouseDocType?: string | null;
     purchaseTypeId?: number | null;
     serviceId?: number | null;
+    effectiveDate?: string;
   };
 
   const setting = await prisma.goodsServiceAccountingSetting.findUnique({ where: { id } });
   if (!setting) return res.status(404).json({ error: "رکورد یافت نشد" });
   if (setting.hasTransactions) {
-    return res.status(400).json({ error: "این تنظیم برای اسناد صادرشده استفاده شده و قابل ویرایش نیست" });
+    return res.status(400).json({ error: "این تنظیم در اسناد صادرشده استفاده شده و قابل ویرایش نیست؛ برای تغییر حساب، رکورد جدید با تاریخ اجرای جدید ثبت کنید" });
   }
+  if (await prisma.detailRuleHeader.count({ where: { settingId: id } })) return res.status(400).json({ error: RULE_LOCK_MESSAGE });
 
   const accountType = body.accountType ?? setting.accountType;
   const groupless = GROUPLESS_TYPES.has(accountType);
@@ -289,6 +309,7 @@ router.put("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.edi
     const isServicePurchase = accountType === "SERVICE_PURCHASE";
     const nextServiceId = isServicePurchase ? (body.serviceId === undefined ? setting.serviceId : body.serviceId) : null;
     if (isServicePurchase) await assertValidServicePurchaseService(nextServiceId);
+    const nextEffectiveDate = body.effectiveDate === undefined ? setting.effectiveDate : parseEffectiveDate(body.effectiveDate);
     // مقدار نهایی هر فیلد بعد از این ویرایش (فیلدی که در بدنه نیامده، همان مقدار فعلی رکورد است)
     await assertNoDuplicateSetting(
       {
@@ -299,6 +320,7 @@ router.put("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.edi
         warehouseDocType: body.warehouseDocType === undefined ? setting.warehouseDocType : body.warehouseDocType || null,
         purchaseTypeId: body.purchaseTypeId === undefined ? setting.purchaseTypeId : body.purchaseTypeId || null,
         serviceId: nextServiceId,
+        effectiveDate: nextEffectiveDate,
       },
       id
     );
@@ -314,6 +336,7 @@ router.put("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.edi
         warehouseDocType: body.warehouseDocType === undefined ? undefined : ((body.warehouseDocType || null) as any),
         purchaseTypeId: body.purchaseTypeId === undefined ? undefined : body.purchaseTypeId || null,
         serviceId: nextServiceId,
+        effectiveDate: body.effectiveDate === undefined ? undefined : nextEffectiveDate,
       },
       include: { accountingGroup: true, warehouseGroup: true, purchaseType: true, salesType: true, service: { select: { id: true, fullCode: true, title: true, accountingTreatment: true } }, account: { include: { level: true } } },
     });
@@ -328,8 +351,9 @@ router.delete("/goods-service-accounting/:id", can(`${GOODS_SERVICE_ACCOUNTING}.
   const setting = await prisma.goodsServiceAccountingSetting.findUnique({ where: { id } });
   if (!setting) return res.status(404).json({ error: "رکورد یافت نشد" });
   if (setting.hasTransactions) {
-    return res.status(400).json({ error: "این تنظیم برای اسناد صادرشده استفاده شده و قابل حذف نیست" });
+    return res.status(400).json({ error: "این تنظیم در اسناد صادرشده استفاده شده و قابل حذف نیست" });
   }
+  if (await prisma.detailRuleHeader.count({ where: { settingId: id } })) return res.status(400).json({ error: RULE_LOCK_MESSAGE });
   await prisma.goodsServiceAccountingSetting.delete({ where: { id } });
   res.status(204).send();
 });

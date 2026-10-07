@@ -19,6 +19,8 @@ import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
+import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
+import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 
 // «مصرف پروژه» — طبق stockAnalysis.md بند ۳۴/۳۹، جایگزین حواله انبار عمومی قدیم (WAREHOUSE_ISSUE)
 // برای طرف‌مقابل «پروژه» است (نگاه کنید به یادداشت بالای backend/src/routes/projectConsumptions.ts).
@@ -44,8 +46,8 @@ interface GoodsItemRow {
 interface PickableLine { id: number; sourceGoodsRequestLineId: number; number: number; date: string; orgUnitTitle: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
 
 interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; basis: Basis; projectId: number | null; projectTitle: string | null; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number; totalAmount?: number }
-interface DetailLine { id: number; sourceGoodsRequestLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitCost: number; amount: number; description: string | null; serialIds: number[]; batchAllocations: { batchId: number; batchNumber: string; expiryDate: string | null; quantity: number }[]; physicalLocation: string | null }
-interface Detail { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; basis: Basis; projectId: number | null; description: string | null; status: DocStatus; finalizedAt: string | null; lines: DetailLine[] }
+interface DetailLine { id: number; sourceGoodsRequestLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitCost: number; amount: number; description: string | null; serialIds: number[]; batchAllocations: { batchId: number; batchNumber: string; expiryDate: string | null; quantity: number }[]; physicalLocation: string | null; details?: DetailValueDto[] }
+interface Detail { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodId: number; fiscalPeriodTitle: string; basis: Basis; projectId: number | null; description: string | null; status: DocStatus; finalizedAt: string | null; details?: DetailValueDto[]; lines: DetailLine[] }
 
 const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", GOODS_REQUEST: "درخواست کالا" };
 const STATUS_FA: Record<DocStatus, string> = { REGISTERED: "ثبت‌شده", FINALIZED: "تایید انبار شده" };
@@ -124,7 +126,7 @@ function ProjectConsumptionList({ basePath }: { basePath: string }) {
   );
 }
 
-interface RowState { sourceGoodsRequestLineId: string; sourceNumber: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitCost: number; amount: number; description: string; serialIds: string[]; batchAllocations: { batchId: string; quantity: string }[]; physicalLocation: string }
+interface RowState { sourceGoodsRequestLineId: string; sourceNumber: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitCost: number; amount: number; description: string; serialIds: string[]; batchAllocations: { batchId: string; quantity: string }[]; physicalLocation: string; details?: DetailValues }
 
 function emptyRow(): RowState {
   return { sourceGoodsRequestLineId: "", sourceNumber: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitCost: 0, amount: 0, description: "", serialIds: [], batchAllocations: [], physicalLocation: "" };
@@ -139,16 +141,17 @@ function ProjectConsumptionForm({ editId, basePath }: { editId?: number; basePat
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
+  const detailConfig = useDocDetailConfig("PROJECT_CONSUMPTION");
   const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
-    { date: string; basis: Basis; warehouseId: string; projectId: string; description: string },
+    { date: string; basis: Basis; warehouseId: string; projectId: string; description: string; details: DetailValues },
     RowState,
     Detail
   >({
     endpoint: "project-consumptions",
     editId,
-    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), basis: "NO_BASIS", warehouseId: "", projectId: "", description: "" }),
+    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), basis: "NO_BASIS", warehouseId: "", projectId: "", description: "", details: {} }),
     emptyRows: () => [emptyRow()],
-    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), basis: d.basis, warehouseId: String(d.warehouseId), projectId: d.projectId ? String(d.projectId) : "", description: d.description || "" }),
+    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), basis: d.basis, warehouseId: String(d.warehouseId), projectId: d.projectId ? String(d.projectId) : "", description: d.description || "", details: detailsToValues(d.details) }),
     mapDetailToRows: (d) =>
       d.lines.map((l) => ({
         sourceGoodsRequestLineId: l.sourceGoodsRequestLineId ? String(l.sourceGoodsRequestLineId) : "",
@@ -165,6 +168,7 @@ function ProjectConsumptionForm({ editId, basePath }: { editId?: number; basePat
         serialIds: l.serialIds.map(String),
         batchAllocations: l.batchAllocations.map((a) => ({ batchId: String(a.batchId), quantity: String(a.quantity) })),
         physicalLocation: l.physicalLocation || "",
+        details: detailsToValues(l.details),
       })),
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     loadExtra: async () => {
@@ -241,7 +245,7 @@ function ProjectConsumptionForm({ editId, basePath }: { editId?: number; basePat
   }
 
   function addRow() {
-    setRows((prev) => [...prev, emptyRow()]);
+    setRows((prev) => [...prev, { ...emptyRow(), details: newRowDetails(detailConfig, header.details) }]);
   }
   function removeRow(idx: number) {
     setRows((prev) => prev.filter((_, i) => i !== idx));
@@ -258,7 +262,9 @@ function ProjectConsumptionForm({ editId, basePath }: { editId?: number; basePat
       warehouseId: Number(header.warehouseId),
       projectId: header.projectId ? Number(header.projectId) : null,
       description: header.description,
+      details: valuesToPayload(header.details),
       lines: nonEmptyRows.map((r) => ({
+        details: valuesToPayload(r.details),
         sourceGoodsRequestLineId: r.sourceGoodsRequestLineId ? Number(r.sourceGoodsRequestLineId) : null,
         goodsItemId: r.goodsItemId ? Number(r.goodsItemId) : undefined,
         unitId: Number(r.unitId),
@@ -360,6 +366,16 @@ function ProjectConsumptionForm({ editId, basePath }: { editId?: number; basePat
                 ))}
               </select>
             </div>
+            <DocDetailHeaderFields
+              config={detailConfig}
+              values={header.details}
+              disabled={headerDisabled}
+              onChange={(typeId, code) => {
+                const next = changeHeaderDetail(detailConfig, header, rows, typeId, code);
+                setHeader(next.header);
+                setRows(next.rows);
+              }}
+            />
             <div className="form-field full">
               <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={headerDisabled} />
             </div>
@@ -394,6 +410,7 @@ function ProjectConsumptionForm({ editId, basePath }: { editId?: number; basePat
                   <th>مقدار</th>
                   {showAmount && <th>فی واحد</th>}
                   {showAmount && <th>مبلغ</th>}
+                  <DocDetailItemHeadCells config={detailConfig} />
                   <th>شرح</th>
                   {!coreDisabled && <th></th>}
                 </tr>
@@ -459,6 +476,7 @@ function ProjectConsumptionForm({ editId, basePath }: { editId?: number; basePat
                       </td>
                       {showAmount && <td style={{ minWidth: 110, color: "var(--ink-soft)" }}>{formatAmountFa(row.unitCost)}</td>}
                       {showAmount && <td style={{ minWidth: 120, color: "var(--ink-soft)" }}>{formatAmountFa(row.amount)}</td>}
+                      <DocDetailItemCells config={detailConfig} values={row.details} disabled={coreDisabled} onChange={(typeId, code) => updateRow(idx, { details: { ...(row.details ?? {}), [typeId]: code } })} />
                       <td style={{ minWidth: 160 }}>
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} disabled={coreDisabled} />
                       </td>

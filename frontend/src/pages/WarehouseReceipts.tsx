@@ -20,6 +20,8 @@ import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
+import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
+import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 
 // این فرآیند («رسید انبار خرید») مستند تحلیل اختصاصی در پروژه ندارد؛ ساختار این فرم حاصل تصمیم
 // مشترک با کاربر است (نگاه کنید به یادداشت‌های backend/src/routes/warehouseReceipts.ts). طبق تصمیم
@@ -108,6 +110,7 @@ interface DetailLine {
   serialIds: number[];
   batchAllocations: { batchId: number; batchNumber: string; expiryDate: string | null; quantity: number }[];
   physicalLocation: string | null;
+  details?: DetailValueDto[];
 }
 
 interface Detail {
@@ -125,6 +128,7 @@ interface Detail {
   status: DocStatus;
   finalizedAt: string | null;
   lines: DetailLine[];
+  details?: DetailValueDto[];
 }
 
 const BASIS_FA: Record<Basis, string> = {
@@ -273,6 +277,7 @@ interface RowState {
   serialIds: string[];
   batchAllocations: { batchId: string; quantity: string }[];
   physicalLocation: string;
+  details?: DetailValues;
 }
 
 function emptyRow(): RowState {
@@ -314,6 +319,7 @@ function mapRows(d: Detail): RowState[] {
     serialIds: l.serialIds.map(String),
     batchAllocations: l.batchAllocations.map((a) => ({ batchId: String(a.batchId), quantity: String(a.quantity) })),
     physicalLocation: l.physicalLocation || "",
+    details: detailsToValues(l.details),
   }));
 }
 
@@ -326,16 +332,17 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
+  const detailConfig = useDocDetailConfig("WAREHOUSE_RECEIPT");
   const { header, setHeader, rows, setRows, meta, error, setError, loaded, submit, remove } = useDocumentForm<
-    { date: string; basis: Basis; warehouseId: string; partyDetailCode: string; description: string },
+    { date: string; basis: Basis; warehouseId: string; partyDetailCode: string; description: string; details: DetailValues },
     RowState,
     Detail
   >({
     endpoint: "warehouse-receipts",
     editId,
-    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), basis: "NO_BASIS", warehouseId: "", partyDetailCode: "", description: "" }),
+    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), basis: "NO_BASIS", warehouseId: "", partyDetailCode: "", description: "", details: {} }),
     emptyRows: () => [emptyRow()],
-    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), basis: d.basis, warehouseId: String(d.warehouseId), partyDetailCode: d.partyDetailCode || "", description: d.description || "" }),
+    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), basis: d.basis, warehouseId: String(d.warehouseId), partyDetailCode: d.partyDetailCode || "", description: d.description || "", details: detailsToValues(d.details) }),
     mapDetailToRows: mapRows,
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     loadExtra: async () => {
@@ -427,7 +434,7 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
   }
 
   function addRow() {
-    setRows((prev) => [...prev, emptyRow()]);
+    setRows((prev) => [...prev, { ...emptyRow(), details: newRowDetails(detailConfig, header.details) }]);
   }
   function removeRow(idx: number) {
     setRows((prev) => prev.filter((_, i) => i !== idx));
@@ -444,7 +451,9 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
       warehouseId: Number(header.warehouseId),
       partyDetailCode: header.partyDetailCode || null,
       description: header.description,
+      details: valuesToPayload(header.details),
       lines: nonEmptyRows.map((r) => ({
+        details: valuesToPayload(r.details),
         sourceSupplyRequestLineId: r.sourceSupplyRequestLineId ? Number(r.sourceSupplyRequestLineId) : null,
         sourcePurchaseOrderLineId: r.sourcePurchaseOrderLineId ? Number(r.sourcePurchaseOrderLineId) : null,
         sourceDeliveryAuthorizationLineId: r.sourceDeliveryAuthorizationLineId ? Number(r.sourceDeliveryAuthorizationLineId) : null,
@@ -563,6 +572,16 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
                 onSelect={(p) => setHeader({ ...header, partyDetailCode: (p as PartyOption).code })}
               />
             </div>
+            <DocDetailHeaderFields
+              config={detailConfig}
+              values={header.details}
+              disabled={headerDisabled}
+              onChange={(typeId, code) => {
+                const next = changeHeaderDetail(detailConfig, header, rows, typeId, code);
+                setHeader(next.header);
+                setRows(next.rows);
+              }}
+            />
             <div className="form-field full">
               <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={headerDisabled} />
             </div>
@@ -597,6 +616,7 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
                   <th>مقدار</th>
                   {showAmount && <th>فی واحد</th>}
                   {showAmount && <th>مبلغ</th>}
+                  <DocDetailItemHeadCells config={detailConfig} />
                   <th>شرح</th>
                   {!coreDisabled && <th></th>}
                 </tr>
@@ -663,6 +683,7 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
                       </td>
                       {showAmount && <td style={{ minWidth: 110, color: "var(--ink-soft)" }}>{formatAmountFa(row.unitCost || "0")}</td>}
                       {showAmount && <td style={{ minWidth: 120, color: "var(--ink-soft)" }}>{formatAmountFa(row.amount || "0")}</td>}
+                      <DocDetailItemCells config={detailConfig} values={row.details} disabled={coreDisabled} onChange={(typeId, code) => updateRow(idx, { details: { ...(row.details ?? {}), [typeId]: code } })} />
                       <td style={{ minWidth: 160 }}>
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} disabled={coreDisabled} />
                       </td>

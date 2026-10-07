@@ -30,6 +30,8 @@ import { useVatRates, vatRateForDate } from "../lib/useVatRates";
 import { toBaseCurrencyAmount } from "../lib/currencyConversion";
 import { round, allocateProportionally } from "../lib/costAllocation";
 import { DescriptionField } from "../components/DescriptionField";
+import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
+import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 
 // این فرآیند («فاکتور خرید») مستند تحلیل اختصاصی در پروژه ندارد؛ ساختار این فرم حاصل تصمیم مشترک با
 // کاربر است (نگاه کنید به یادداشت‌های backend/src/routes/purchaseInvoices.ts). با تایید فاکتور، مبلغ
@@ -73,14 +75,15 @@ interface ListRow {
 interface DetailLine {
   id: number; sourceInventoryLineId: number | null; sourceWarehouseReceiptNumber: number | null;
   goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string;
-  quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null;
+  quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null; details?: DetailValueDto[];
 }
 interface OtherCostDetail {
   id: number; serviceId: number; serviceCode: string; serviceTitle: string; amount: number; discount: number; vatAmount: number; basis: Basis;
   sourceReceiptDocumentId: number | null; sourceReceiptNumber: number | null; allocationMethod: AllocationMethod | null;
-  description: string | null; allocations: AllocationDetail[];
+  description: string | null; allocations: AllocationDetail[]; details?: DetailValueDto[];
 }
 interface Detail extends ListRow {
+  details?: DetailValueDto[];
   currencyId: number;
   fxRate: number;
   description: string | null;
@@ -192,7 +195,7 @@ function PurchaseInvoiceList() {
 
 interface RowState {
   sourceInventoryLineId: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string;
-  unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; discount: string; vatAmount: string; description: string;
+  unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; discount: string; vatAmount: string; description: string; details?: DetailValues;
 }
 interface CostRowState {
   serviceId: string; serviceCode: string; serviceTitle: string;
@@ -202,6 +205,7 @@ interface CostRowState {
   allocationMethod: AllocationMethod | "";
   description: string;
   allocations: AllocationDetail[];
+  details?: DetailValues;
 }
 
 function emptyRow(): RowState {
@@ -230,7 +234,8 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableWarehouseReceiptLine[]>([]);
   const [receipts, setReceipts] = useState<ReceiptOption[]>([]);
-  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", vendorInvoiceNumber: "", basis: "NO_BASIS" as Basis, partyId: "", purchaseTypeId: "", currencyId: "", fxRate: "", description: "" });
+  const detailConfig = useDocDetailConfig("PURCHASE_INVOICE");
+  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", vendorInvoiceNumber: "", basis: "NO_BASIS" as Basis, partyId: "", purchaseTypeId: "", currencyId: "", fxRate: "", description: "", details: {} as DetailValues });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
   const [costRows, setCostRows] = usePersistedState<CostRowState[]>(`${cacheKey}:costs`, []);
   const [activeSection, setActiveSection] = useState<"items" | "otherCosts">("items");
@@ -291,6 +296,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
           currencyId: String(d.currencyId),
           fxRate: String(d.fxRate),
           description: d.description || "",
+          details: detailsToValues(d.details),
         });
         setRows(
           d.lines.map((l) => ({
@@ -306,6 +312,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
             discount: String(l.discount || 0),
             vatAmount: String(l.vatAmount || 0),
             description: l.description || "",
+            details: detailsToValues(l.details),
           }))
         );
         setCostRows(
@@ -322,10 +329,11 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
             allocationMethod: l.allocationMethod || "",
             description: l.description || "",
             allocations: l.allocations.map((a) => ({ ...a })),
+            details: detailsToValues(l.details),
           }))
         );
       } else {
-        setHeader({ date: defaultDocumentDate(fp), vendorInvoiceNumber: "", basis: "NO_BASIS", partyId: "", purchaseTypeId: "", currencyId: "", fxRate: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), vendorInvoiceNumber: "", basis: "NO_BASIS", partyId: "", purchaseTypeId: "", currencyId: "", fxRate: "", description: "", details: {} });
         setRows([emptyRow()]);
         setCostRows([]);
         setMeta(null);
@@ -471,7 +479,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
     updateRow(idx, { quantity, amount: String(amount), vatAmount: computeSuggestedVat(amount, Number(row.discount) || 0, row.goodsItemId) });
   }
   function addRow() {
-    setRows((prev) => [...prev, emptyRow()]);
+    setRows((prev) => [...prev, { ...emptyRow(), details: newRowDetails(detailConfig, header.details) }]);
   }
   function removeRow(idx: number) {
     setRows((prev) => prev.filter((_, i) => i !== idx));
@@ -480,7 +488,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
     setCostRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
   function addCostRow() {
-    setCostRows((prev) => [...prev, emptyCostRow()]);
+    setCostRows((prev) => [...prev, { ...emptyCostRow(), details: newRowDetails(detailConfig, header.details) }]);
   }
   function removeCostRow(idx: number) {
     setCostRows((prev) => prev.filter((_, i) => i !== idx));
@@ -602,7 +610,9 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       currencyId: Number(header.currencyId),
       fxRate: needsFxRate ? Number(header.fxRate) : 1,
       description: header.description,
+      details: valuesToPayload(header.details),
       lines: nonEmptyRows.map((r) => ({
+        details: valuesToPayload(r.details),
         sourceInventoryLineId: r.sourceInventoryLineId ? Number(r.sourceInventoryLineId) : null,
         goodsItemId: r.goodsItemId ? Number(r.goodsItemId) : undefined,
         unitId: r.unitId ? Number(r.unitId) : undefined,
@@ -616,6 +626,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       otherCostLines: costRows
         .filter((r) => r.serviceId)
         .map((r) => ({
+          details: valuesToPayload(r.details),
           serviceId: Number(r.serviceId),
           amount: Number(r.amount) || 0,
           discount: Number(r.discount) || 0,
@@ -708,6 +719,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
         discount: String(l.discount || 0),
         vatAmount: String(l.vatAmount || 0),
         description: l.description || "",
+        details: detailsToValues(l.details),
       }))
     );
     setCostRows(
@@ -724,6 +736,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
         allocationMethod: l.allocationMethod || "",
         description: l.description || "",
         allocations: l.allocations.map((a) => ({ ...a })),
+        details: detailsToValues(l.details),
       }))
     );
   }
@@ -867,6 +880,18 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                 <AmountInput value={header.fxRate} onChange={(v) => setHeader({ ...header, fxRate: v })} allowDecimal disabled={headerDisabled} />
               </div>
             )}
+            <DocDetailHeaderFields
+              config={detailConfig}
+              values={header.details}
+              onChange={(typeId, code) => {
+                const nextHeader = changeHeaderDetail(detailConfig, header, rows, typeId, code);
+                setHeader(nextHeader.header);
+                setRows(nextHeader.rows);
+                // ردیف‌های «سایر هزینه‌ها» هم همین قاعده‌ی پیش‌فرض را دارند
+                const nextCosts = changeHeaderDetail(detailConfig, header, costRows, typeId, code);
+                setCostRows(nextCosts.rows);
+              }}
+            />
             <div className="form-field full">
               <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={headerDisabled} />
             </div>
@@ -912,6 +937,8 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                   <th>مبلغ</th>
                   <th>تخفیف</th>
                   <th>مالیات بر ارزش افزوده</th>
+                  <DocDetailItemHeadCells config={detailConfig} />
+
                   <th>شرح</th>
                   <th></th>
                 </tr>
@@ -977,6 +1004,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                         با تغییر فی/مقدار دوباره محاسبه می‌شود ولی مستقیماً هم قابل‌ویرایش است */}
                         <AmountInput value={row.vatAmount} onChange={(v) => updateRow(idx, { vatAmount: v })} allowDecimal placeholder="۰" />
                       </td>
+                      <DocDetailItemCells config={detailConfig} values={row.details} onChange={(typeId, code) => updateRow(idx, { details: { ...(row.details ?? {}), [typeId]: code } })} />
                       <td style={{ minWidth: 140 }}>
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} />
                       </td>
@@ -1022,6 +1050,8 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                   <th>مبنا</th>
                   <th>رسید انبار</th>
                   <th>روش تسهیم</th>
+                  <DocDetailItemHeadCells config={detailConfig} />
+
                   <th>شرح</th>
                   <th></th>
                 </tr>
@@ -1107,6 +1137,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                           </div>
                         )}
                       </td>
+                      <DocDetailItemCells config={detailConfig} values={row.details} onChange={(typeId, code) => updateCostRow(idx, { details: { ...(row.details ?? {}), [typeId]: code } })} />
                       <td style={{ minWidth: 140 }}>
                         <input value={row.description} onChange={(e) => updateCostRow(idx, { description: e.target.value })} />
                       </td>

@@ -25,6 +25,8 @@ import { partyDisplayName } from "./Users";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, roundToCurrencyDecimals } from "../lib/currencyConversion";
 import { DescriptionField } from "../components/DescriptionField";
+import { TreasuryAccountingPanel } from "../components/TreasuryAccountingPanel";
+import { usePermissions } from "../lib/usePermissions";
 
 // ماژول «خزانه‌داری» > پرداخت / اعلامیه پرداخت — هم‌الگوی Receipts.tsx (نگاه کنید به یادداشت‌های آن فایل و
 // backend/src/routes/payments.ts): چهار ابزار (نقد/حواله بانکی/چک/چک انتقالی) با ارز و نرخ ارز مستقل هر ردیف،
@@ -44,7 +46,14 @@ function selectorKind(nature?: PaymentNature): "BANK" | "CASH" | "CUSTODIAN" | "
 type PaymentBasisType = "NONE" | "PURCHASE_INVOICE" | "SALES_INVOICE" | "PURCHASE_ORDER";
 
 const TYPE_FA: Record<InstrumentType, string> = { CASH: "نقد", BANK_TRANSFER: "حواله/انتقال بانکی", CHEQUE: "چک", CHEQUE_TRANSFER: "چک انتقالی" };
-const STATUS_FA: Record<DocStatus, string> = { DRAFT: "ثبت", APPROVED: "تایید" };
+const STATUS_FA: Record<DocStatus, string> = { DRAFT: "ثبت", APPROVED: "ثبت" };
+type AccountingStatus = "NONE" | "APPROVED";
+/** وضعیت نمایشی: ثبت (دارای اثر) ← تایید حسابداری ← سند صادرشد (ثبت = اثر بعد از ذخیره؛ تایید حسابداری = مرحله‌ی حسابداری) */
+function statusLabel(status: DocStatus, accountingStatus?: AccountingStatus, hasJournalEntry?: boolean) {
+  if (hasJournalEntry) return "سند صادر شده";
+  if (accountingStatus === "APPROVED") return "تایید حسابداری";
+  return status === "DRAFT" ? "ثبت (اثرگذاری با ذخیره‌ی بعدی)" : "ثبت";
+}
 
 interface PartyOption { id: number; detailCode: string; category: "INDIVIDUAL" | "LEGAL"; isActive: boolean; firstName: string | null; lastName: string | null; name: string | null }
 interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null; decimalPlaces: number }
@@ -74,6 +83,7 @@ interface ListRow {
   fiscalPeriodTitle: string;
   description: string | null;
   status: DocStatus;
+  accountingStatus?: AccountingStatus;
   journalEntryReferenceNumber: number | null;
   totalBaseAmount: number;
 }
@@ -134,6 +144,8 @@ interface Detail {
   fiscalPeriodTitle: string;
   description: string | null;
   status: DocStatus;
+  accountingStatus?: AccountingStatus;
+  accountingLineCount?: number;
   journalEntryId: number | null;
   journalEntryReferenceNumber: number | null;
   instrumentLines: DetailInstrumentLine[];
@@ -152,6 +164,7 @@ function infoText() {
 }
 
 // پیام «تایید»: هم بعد از تایید اولیه به‌صورت toast و هم در دیالوگ راهنما (هنگام ویرایش) نمایش داده می‌شود
+const ACCOUNTING_NOTICE = "این سند «تایید حسابداری» شده است؛ برای تغییر ابتدا «لغو تایید حسابداری» را بزنید. فقط تفصیل‌های بخش «اطلاعات حسابداری» قابل ویرایش‌اند.";
 const APPROVED_NOTICE = "این سند «تایید» شده است و از مسیر «ویرایش» قابل تغییر نیست؛ برای اصلاح آیتم‌های فاقد گردش از «ویرایش مجدد» استفاده کنید، یا برای تغییر کامل ابتدا آن را «برگشت از تایید» کنید.";
 
 export default function Payments() {
@@ -248,7 +261,7 @@ function PaymentList() {
           { header: "طرف حساب", render: (r) => r.partyDisplay, filterType: "string", filterValue: (r) => r.partyDisplay },
           { header: "شرح", render: (r) => r.description || "—", filterType: "string", filterValue: (r) => r.description || "" },
           { header: "جمع (ارز پایه)", render: (r) => formatAmountFa(r.totalBaseAmount), filterType: "number", filterValue: (r) => r.totalBaseAmount, decimal: true },
-          { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
+          { header: "وضعیت", render: (r) => <span className="badge">{statusLabel(r.status, r.accountingStatus, !!r.journalEntryReferenceNumber)}</span>, filterType: "string", filterValue: (r) => statusLabel(r.status, r.accountingStatus, !!r.journalEntryReferenceNumber) },
         ]}
         rows={items}
         edit={{ path: (r) => `/payments/${r.id}/edit` }}
@@ -333,6 +346,7 @@ function emptySettlementRow(instrumentClientKey: string, instrumentLabel: string
 }
 
 function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) {
+  const { hasPermission: perm } = usePermissions();
   const { openTab } = useTabs();
   const navigate = useNavigate();
   const location = useLocation();
@@ -354,7 +368,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", partyId: "", partyDisplay: "", description: "" });
   const [instrumentRows, setInstrumentRows] = usePersistedState<InstrumentRowState[]>(`${cacheKey}:instrumentRows`, []);
   const [settlementRows, setSettlementRows] = usePersistedState<SettlementRowState[]>(`${cacheKey}:settlementRows`, []);
-  const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; fiscalPeriodTitle: string; journalEntryId: number | null; journalEntryReferenceNumber: number | null } | null>(`${cacheKey}:meta`, null);
+  const [meta, setMeta] = usePersistedState<{ number: number; status: DocStatus; accountingStatus?: AccountingStatus; accountingLineCount?: number; fiscalPeriodTitle: string; journalEntryId: number | null; journalEntryReferenceNumber: number | null } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
@@ -400,7 +414,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
   function applyDetail(d: Detail) {
     setOwnLeaves(d.ownLeaves ?? []);
     setDocUpdatedAt(d.updatedAt ?? "");
-    setMeta({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle, journalEntryId: d.journalEntryId ?? null, journalEntryReferenceNumber: d.journalEntryReferenceNumber ?? null });
+    setMeta({ number: d.number, status: d.status, accountingStatus: d.accountingStatus ?? "NONE", accountingLineCount: d.accountingLineCount ?? 0, fiscalPeriodTitle: d.fiscalPeriodTitle, journalEntryId: d.journalEntryId ?? null, journalEntryReferenceNumber: d.journalEntryReferenceNumber ?? null });
     setHeader({ date: d.date.slice(0, 10), partyId: String(d.partyId), partyDisplay: d.partyDisplay, description: d.description || "" });
     setInstrumentRows(
       d.instrumentLines.map((l) => ({
@@ -491,7 +505,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         if (editId) {
           try {
             const d: Detail = await api.get(`/payments/${editId}`);
-            setMeta((prev) => (prev ? { ...prev, status: d.status, journalEntryId: d.journalEntryId ?? null, journalEntryReferenceNumber: d.journalEntryReferenceNumber ?? null } : prev));
+            setMeta((prev) => (prev ? { ...prev, status: d.status, accountingStatus: d.accountingStatus ?? "NONE", accountingLineCount: d.accountingLineCount ?? 0, journalEntryId: d.journalEntryId ?? null, journalEntryReferenceNumber: d.journalEntryReferenceNumber ?? null } : prev));
           } catch {
             // اگر واکشی ناموفق شد، به مقادیر کش‌شده بسنده می‌شود؛ ذخیره‌سازی همچنان توسط سرور اعتبارسنجی می‌شود
           }
@@ -524,11 +538,14 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
   const status: DocStatus = meta?.status || "DRAFT";
   // فقط فیلدهای هدر (تاریخ/طرف حساب) با این معیار قفل می‌شوند — این‌ها هرگز از طریق
   // «ویرایش سند تایید‌شده» قابل تغییر نیستند (فقط شرح، ردیف‌های ابزار قفل‌نشده، و ردیف‌های تسویه).
-  const coreDisabled = !!editId && status !== "DRAFT";
+  // ثبت = اثرگذاری: سند ثبت‌شده با «ذخیره» عادی قابل ویرایش است (سرور اثرها را برمی‌گرداند و دوباره اعمال می‌کند)؛ فقط «تایید حسابداری» و «سند صادرشده» قفل می‌کنند
+  const coreDisabled = false;
+  const accountingApproved = meta?.accountingStatus === "APPROVED";
+  const hasAccountingInfo = (meta?.accountingLineCount ?? 0) > 0;
   // بعد از صدور سند حسابداری، سند پرداخت کاملاً قفل است (هم‌الگوی فاکتور فروش) تا سند حسابداری با آن هم‌خوان بماند
   const jeLocked = !!meta?.journalEntryId;
   // سند «تایید»شده کاملاً قفل است: برای هر تغییری ابتدا باید از تایید برگردانده شود (طبق درخواست کاربر)
-  const formLocked = jeLocked || (status === "APPROVED" && !reEdit);
+  const formLocked = jeLocked || accountingApproved;
 
   function instrumentLabel(row: InstrumentRowState, idx: number) {
     return `ردیف ${toFaDigits(String(idx + 1))} - ${TYPE_FA[row.type]}`;
@@ -627,6 +644,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
     return instrumentRows
       .filter((r) => Number(r.amount) > 0)
       .map((r) => ({
+        id: r.id,
         clientKey: r.clientKey,
         type: r.type,
         amount: Number(r.amount) || 0,
@@ -734,17 +752,6 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
     }
   }
 
-  async function handleApprove() {
-    if (!editId) return;
-    try {
-      await api.post(`/payments/${editId}/approve`, {});
-      const d: Detail = await api.get(`/payments/${editId}`);
-      applyDetail(d);
-      flash(APPROVED_NOTICE);
-    } catch (e) {
-      showError((e as ApiError).message);
-    }
-  }
 
   // «ویرایش مجدد»: نمایش Action فقط به وضعیت «تایید» وابسته است؛ امکان‌سنجی (وجود ابزار فاقد گردش) بعد از کلیک انجام می‌شود
   async function handleReEdit() {
@@ -757,13 +764,36 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
     }
   }
 
-  async function handleUnapprove() {
+
+  async function reloadDetail(message?: string) {
+    const d: Detail = await api.get(`/payments/${editId}`);
+    applyDetail(d);
+    flash(message);
+  }
+  async function handleAccountingApprove() {
     if (!editId) return;
     try {
-      await api.post(`/payments/${editId}/unapprove`, {});
-      const d: Detail = await api.get(`/payments/${editId}`);
-      applyDetail(d);
-      flash();
+      await api.post(`/payments/${editId}/accounting-approve`, {});
+      await reloadDetail("تایید حسابداری انجام شد؛ تفصیل‌ها را کنترل و ذخیره کنید");
+    } catch (e) {
+      showError((e as ApiError).message);
+    }
+  }
+  async function handleAccountingUnapprove() {
+    if (!editId) return;
+    try {
+      await api.post(`/payments/${editId}/accounting-unapprove`, {});
+      await reloadDetail();
+    } catch (e) {
+      showError((e as ApiError).message);
+    }
+  }
+  async function handleDeleteAccountingInfo() {
+    if (!editId) return;
+    if (!window.confirm("اطلاعات حسابداری (معین و تفصیل‌های ردیف‌های حسابداری) این سند حذف می‌شود. ادامه می‌دهید؟")) return;
+    try {
+      await api.post(`/payments/${editId}/delete-accounting-info`, {});
+      await reloadDetail();
     } catch (e) {
       showError((e as ApiError).message);
     }
@@ -824,19 +854,20 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
   return (
     <FormPage
       title={reEdit ? "ویرایش مجدد سند پرداخت" : editId ? "ویرایش سند پرداخت" : "سند پرداخت جدید"}
-      description={reEdit ? "حالت ویرایش مجدد: فقط آیتم‌های فاقد گردش قابل ویرایش هستند. ابزارهای پرداخت دارای گردش و موضوعات مرتبط با آن‌ها نمایش داده نمی‌شوند و بدون تغییر می‌مانند؛ افزودن ابزار پرداخت جدید مجاز نیست، اما برای هر ابزار می‌توانید موضوع پرداخت جدید اضافه کنید و جمع موضوعات هر ابزار باید با مبلغ همان ابزار برابر باشد." : jeLocked ? "برای این سند پرداخت سند حسابداری صادر شده است؛ برای هر تغییری ابتدا سند حسابداری را حذف کنید." : status === "APPROVED" ? APPROVED_NOTICE : undefined}
+      description={reEdit ? "حالت ویرایش مجدد: فقط آیتم‌های فاقد گردش قابل ویرایش هستند. ابزارهای پرداخت دارای گردش و موضوعات مرتبط با آن‌ها نمایش داده نمی‌شوند و بدون تغییر می‌مانند؛ افزودن ابزار پرداخت جدید مجاز نیست، اما برای هر ابزار می‌توانید موضوع پرداخت جدید اضافه کنید و جمع موضوعات هر ابزار باید با مبلغ همان ابزار برابر باشد." : jeLocked ? "برای این سند پرداخت سند حسابداری صادر شده است؛ برای هر تغییری ابتدا سند حسابداری را حذف کنید." : accountingApproved ? ACCOUNTING_NOTICE : undefined}
       formId="payment-form"
       closePath="/payments"
       newPath="/payments/new"
-      onDelete={!reEdit && (!editId || status === "DRAFT") ? handleDelete : undefined}
+      onDelete={!reEdit && !accountingApproved && !jeLocked ? handleDelete : undefined}
       saveDisabled={formLocked}
       extraActions={
         meta && !reEdit
           ? [
-              ...(status === "DRAFT" ? [{ label: "تایید", icon: <CheckIcon />, onClick: handleApprove }] : []),
-              ...(status === "APPROVED" ? [{ label: "ویرایش مجدد", icon: <PlusIcon />, onClick: handleReEdit }] : []),
-              ...(status === "APPROVED" && !jeLocked ? [{ label: "برگشت از تایید", icon: <UndoIcon />, onClick: handleUnapprove }] : []),
-              ...(status === "APPROVED" && !jeLocked ? [{ label: "صدور سند حسابداری", icon: <PlusIcon />, onClick: () => runJournalAction("post") }] : []),
+              ...(status === "APPROVED" && !accountingApproved && !jeLocked ? [{ label: "ویرایش مجدد", icon: <PlusIcon />, onClick: handleReEdit }] : []),
+              ...(status === "APPROVED" && !accountingApproved && !jeLocked && perm("treasury.payment-ops.payments.accountingApprove") ? [{ label: "تایید حسابداری", icon: <CheckIcon />, onClick: handleAccountingApprove }] : []),
+              ...(accountingApproved && !jeLocked && perm("treasury.payment-ops.payments.accountingUnapprove") ? [{ label: "لغو تایید حسابداری", icon: <UndoIcon />, onClick: handleAccountingUnapprove }] : []),
+              ...(status === "APPROVED" && !accountingApproved && !jeLocked && hasAccountingInfo && perm("treasury.payment-ops.payments.deleteAccountingInfo") ? [{ label: "حذف اطلاعات حسابداری", icon: <UndoIcon />, onClick: handleDeleteAccountingInfo }] : []),
+              ...(accountingApproved && !jeLocked ? [{ label: "صدور سند حسابداری", icon: <PlusIcon />, onClick: () => runJournalAction("post") }] : []),
               ...(jeLocked
                 ? [
                     { label: "مشاهده سند حسابداری", icon: <EyeIcon />, onClick: () => openTab(`/journal-entries/${meta?.journalEntryId}/edit`) },
@@ -866,7 +897,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
             </div>
             <div className="form-field">
               <label>وضعیت</label>
-              <div><span className="badge">{STATUS_FA[status]}</span></div>
+              <div><span className="badge">{statusLabel(status, meta?.accountingStatus, jeLocked)}</span></div>
             </div>
             {meta?.journalEntryReferenceNumber && (
               <div className="form-field">
@@ -921,7 +952,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         </div>
 
         <div className="grid-wrap je-lines-wrap">
-          <div className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
+          <div className="je-lines-scroll grid-scroll-area grid-fit" style={{ overflowX: "auto", overflowY: "auto" }}>
             <table className="je-lines-table">
               <thead>
                 <tr>
@@ -1157,7 +1188,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
           />
         </div>
         <div className="grid-wrap je-lines-wrap">
-          <div className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
+          <div className="je-lines-scroll grid-scroll-area grid-fit" style={{ overflowX: "auto", overflowY: "auto" }}>
             <table className="je-lines-table">
               <thead>
                 <tr>
@@ -1213,6 +1244,9 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         </div>
         </fieldset>
       </form>
+      {editId && !reEdit && (accountingApproved || jeLocked) && (
+        <TreasuryAccountingPanel basePath="/payments" docId={editId} editable={accountingApproved && !jeLocked} reloadKey={`${meta?.accountingStatus}-${meta?.journalEntryId ?? ""}`} />
+      )}
     </FormPage>
   );
 }

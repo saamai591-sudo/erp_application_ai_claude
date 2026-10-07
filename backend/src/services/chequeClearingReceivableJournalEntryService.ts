@@ -4,6 +4,7 @@ import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detail
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { findDepositBankByCheque } from "./chequeDepositBankLookup";
 import { buildChequeLedgerLines } from "./chequeCounterpartyLines";
+import { EffectiveTreasurySettings, findEffectiveTreasurySetting, markTreasurySettingsUsed } from "./treasurySettingService";
 
 // =========================================================================
 // صدور سند حسابداری «وصول و برگشت چک دریافتنی» (ChequeClearingReceivable) — اکشن دستی روی سند تاییدشده (هم‌الگوی واگذاری به
@@ -37,7 +38,7 @@ export async function issueChequeClearingReceivableJournalEntry(clearingId: numb
   const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
   if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
 
-  const treasurySettings = await prisma.treasuryAccountSetting.findMany({ include: { account: true } });
+  const treasurySettings = new EffectiveTreasurySettings(await prisma.treasuryAccountSetting.findMany({ include: { account: true } }) as any[]);
   const description = `بابت وصول و برگشت چک دریافتنی ${doc.number} ${formatJalaliDateForMessage(doc.date)}`.trim();
   const errors: string[] = [];
 
@@ -75,7 +76,7 @@ export async function issueChequeClearingReceivableJournalEntry(clearingId: numb
         errors.push(`ردیف ${n}: نوع چک دریافتیِ چک شماره ${cheque.number} مشخص نیست`);
         continue;
       }
-      const account = treasurySettings.find((s) => s.accountType === "RECEIVABLE_CHEQUE" && s.receivableChequeTypeId === cheque.receivableChequeTypeId)?.account;
+      const account = treasurySettings.find(doc.date, (s: any) => s.accountType === "RECEIVABLE_CHEQUE" && s.receivableChequeTypeId === cheque.receivableChequeTypeId)?.account;
       if (!account) {
         errors.push(`ردیف ${n}: برای نوع چک دریافتیِ چک شماره ${cheque.number}، معین در «تعیین حسابهای معین» (چک دریافتی) تعریف نشده است`);
         continue;
@@ -98,7 +99,7 @@ export async function issueChequeClearingReceivableJournalEntry(clearingId: numb
   for (const [bankAccountId, t] of totals) {
     const label = t.bankAccount.accountNumber;
     if (t.cleared > 0) {
-      const bankLedger = treasurySettings.find((s) => s.accountType === "BANK_ACCOUNT" && s.bankAccountId === bankAccountId)?.account;
+      const bankLedger = treasurySettings.find(doc.date, (s: any) => s.accountType === "BANK_ACCOUNT" && s.bankAccountId === bankAccountId)?.account;
       if (!bankLedger) {
         errors.push(`برای حساب بانکی «${label}»، معین در «تعیین حسابهای معین» (حساب بانکی) تعریف نشده است`);
       } else {
@@ -107,7 +108,7 @@ export async function issueChequeClearingReceivableJournalEntry(clearingId: numb
         );
       }
     }
-    const inCollection = treasurySettings.find((s) => s.accountType === "CHEQUE_IN_COLLECTION" && s.bankAccountId === bankAccountId)?.account;
+    const inCollection = treasurySettings.find(doc.date, (s: any) => s.accountType === "CHEQUE_IN_COLLECTION" && s.bankAccountId === bankAccountId)?.account;
     if (!inCollection) {
       errors.push(`برای حساب بانکی «${label}»، معین در «تعیین حسابهای معین» (اسناد در جریان وصول) تعریف نشده است`);
     } else {
@@ -133,6 +134,9 @@ export async function issueChequeClearingReceivableJournalEntry(clearingId: numb
   });
 
   await prisma.chequeClearingReceivable.update({ where: { id: clearingId }, data: { journalEntryId: entry.id } });
+
+
+  await treasurySettings.markUsed();
   return entry;
 }
 

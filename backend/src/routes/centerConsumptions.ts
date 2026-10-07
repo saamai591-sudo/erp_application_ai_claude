@@ -12,6 +12,7 @@ import { AuthedRequest } from "../middleware/auth";
 import { userHasAction, can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmounts, computeUnitCost } from "../services/documentItemAmountService";
+import { saveDocumentDetails, loadDocumentDetails, DetailValueInput } from "../services/docDetailService";
 
 const FORM = findFormPrefix("center-consumptions");
 const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
@@ -38,6 +39,8 @@ interface LineInput {
   serialIds?: number[];
   batchAllocations?: { batchId: number; quantity: number }[];
   physicalLocation?: string | null;
+  /** تفصیل‌های اضافه‌ی ردیف (تنظیم «تفصیل‌های سند انبار») */
+  details?: DetailValueInput[];
 }
 
 interface HeaderBody {
@@ -50,6 +53,8 @@ interface HeaderBody {
   // خودکار بازتولید شود، بلکه همان شماره‌ی سیستم قبلی باید حفظ شود). فرم دستی هرگز این فیلد را
   // نمی‌فرستد؛ در آن حالت مثل قبل، شماره به‌ترتیب خودکار تعیین می‌شود.
   number?: number;
+  /** تفصیل‌های اضافه‌ی هدر (تنظیم «تفصیل‌های سند انبار») */
+  details?: DetailValueInput[];
   lines: LineInput[];
 }
 
@@ -244,12 +249,14 @@ router.get("/center-consumptions/:id", can(`${FORM}.view`), async (req: AuthedRe
   const costCenterId = d.detailCode ? codeToCostCenterId[d.detailCode] ?? null : null;
   const costCenter = costCenterId ? await prisma.costCenter.findUnique({ where: { id: costCenterId } }) : null;
   const amountByLineId = await getLineAmounts(d.lines.map((l) => l.id));
+  const extraDetails = await loadDocumentDetails(d.id);
   res.json({
     id: d.id,
     number: d.number,
     date: d.date,
     warehouseId: d.warehouseId,
     warehouseTitle: d.warehouse!.title,
+    details: extraDetails.header,
     fiscalPeriodId: d.fiscalPeriodId,
     fiscalPeriodTitle: d.fiscalPeriod.title,
     basis: d.basis,
@@ -272,6 +279,7 @@ router.get("/center-consumptions/:id", can(`${FORM}.view`), async (req: AuthedRe
       description: l.description,
       ...trackingResponseFields(l),
       physicalLocation: l.physicalLocation?.title ?? null,
+      details: extraDetails.byLine.get(l.id) ?? [],
     })),
   });
 });
@@ -338,6 +346,7 @@ export async function createCenterConsumption(body: HeaderBody) {
       },
     });
     await applyDocumentEffects(tx, { id: doc.id, documentType: "CENTER_CONSUMPTION", warehouseId: warehouse.id, date }, effectLines);
+    await saveDocumentDetails(tx, doc.id, "CENTER_CONSUMPTION", body);
     return doc;
   });
 }
@@ -413,6 +422,7 @@ router.put("/center-consumptions/:id", can(`${FORM}.edit`), async (req, res) => 
         },
       });
       await applyDocumentEffects(tx, { id, documentType: "CENTER_CONSUMPTION", warehouseId: warehouse.id, date }, newEffectLines);
+      await saveDocumentDetails(tx, id, "CENTER_CONSUMPTION", body);
       const goodsItemIds = [...oldEffectLines.map((l) => l.goodsItemId), ...newEffectLines.map((l) => l.goodsItemId)];
       await recomputeGoodsItemHasTransactions(goodsItemIds, tx);
       await recomputeWarehouseHasTransactions([existing.warehouseId!, warehouse.id], tx);

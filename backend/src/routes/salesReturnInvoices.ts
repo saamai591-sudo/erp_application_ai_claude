@@ -1,3 +1,4 @@
+import { EffectiveSettings } from "../services/goodsAccountingSettingService";
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
@@ -458,11 +459,13 @@ router.post("/sales-return-invoices/:id/issue-journal-entry", can(`${FORM}.issue
       where: { OR: [{ accountingGroupId: { in: accountingGroupIds } }, { accountType: "SALES_RECEIVABLE" }] },
       include: { account: true },
     });
+    const effSettings = new EffectiveSettings(settings as any[]);
+    const settingDocDate: Date = invoice.date;
     function findSetting(accountingGroupId: number, accountType: string, match: (s: (typeof settings)[number]) => boolean) {
-      return settings.find((s) => s.accountingGroupId === accountingGroupId && s.accountType === accountType && match(s));
+      return effSettings.find(settingDocDate, (s: any) => s.accountingGroupId === accountingGroupId && s.accountType === accountType && match(s)) as (typeof settings)[number] | undefined;
     }
     function findReceivableSetting(match: (s: (typeof settings)[number]) => boolean) {
-      return settings.find((s) => s.accountType === "SALES_RECEIVABLE" && match(s));
+      return effSettings.find(settingDocDate, (s: any) => s.accountType === "SALES_RECEIVABLE" && match(s)) as (typeof settings)[number] | undefined;
     }
 
     const customerName = partyDisplayName(invoice.customer.party) || "";
@@ -604,6 +607,7 @@ router.post("/sales-return-invoices/:id/issue-journal-entry", can(`${FORM}.issue
       lines: [...debitLines, ...creditLines],
       sources: [{ label: `فاکتور برگشت از فروش شماره ${invoice.number}`, path: `/sales-return-invoices/${invoice.id}/edit` }],
     });
+    await effSettings.markUsed();
 
     await prisma.salesReturnInvoice.update({ where: { id }, data: { journalEntryId: entry.id } });
 

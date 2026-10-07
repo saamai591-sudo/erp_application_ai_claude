@@ -11,6 +11,7 @@ import { AuthedRequest } from "../middleware/auth";
 import { userHasAction, can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmounts, setLineAmount, computeUnitCost } from "../services/documentItemAmountService";
+import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
 
 const FORM = findFormPrefix("warehousing-warehouse-adjustments");
 const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
@@ -177,7 +178,9 @@ router.get("/warehouse-adjustments/:id", can(`${FORM}.view`), async (req: Authed
   if (!d) return res.status(404).json({ error: "سند انبارگردانی یافت نشد" });
   const showAmount = canViewAccounting && d.status === "FINALIZED";
   const amountByLineId = await getLineAmounts(d.lines.map((l) => l.id));
+  const extraDetails = await loadDocumentDetails(d.id);
   res.json({
+    details: extraDetails.header,
     id: d.id,
     number: d.number,
     date: d.date,
@@ -200,6 +203,7 @@ router.get("/warehouse-adjustments/:id", can(`${FORM}.view`), async (req: Authed
       ...(showAmount ? { unitCost: computeUnitCost(amountByLineId.get(l.id) ?? 0, l.quantity), amount: Number(amountByLineId.get(l.id) ?? 0) } : {}),
       description: l.description,
       ...trackingResponseFields(l),
+      details: extraDetails.byLine.get(l.id) ?? [],
       physicalLocation: l.physicalLocation?.title ?? null,
     })),
   });
@@ -262,6 +266,8 @@ export async function createWarehouseAdjustment(body: HeaderBody) {
       },
     });
     await applyDocumentEffects(tx, { id: doc.id, documentType: "WAREHOUSE_ADJUSTMENT", warehouseId: warehouse.id, date }, effectLines);
+
+    await saveDocumentDetails(tx, doc.id, "WAREHOUSE_ADJUSTMENT", body as any);
     return doc;
   });
 }
@@ -378,6 +384,8 @@ router.put("/warehouse-adjustments/:id", can(`${FORM}.edit`), async (req: Authed
         },
       });
       await applyDocumentEffects(tx, { id, documentType: "WAREHOUSE_ADJUSTMENT", warehouseId: warehouse.id, date }, newEffectLines);
+
+      await saveDocumentDetails(tx, id, "WAREHOUSE_ADJUSTMENT", body as any);
       const goodsItemIds = [...oldEffectLines.map((l) => l.goodsItemId), ...newEffectLines.map((l) => l.goodsItemId)];
       await recomputeGoodsItemHasTransactions(goodsItemIds, tx);
       await recomputeWarehouseHasTransactions([existing.warehouseId!, warehouse.id], tx);

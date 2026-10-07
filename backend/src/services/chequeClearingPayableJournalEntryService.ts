@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma";
 import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
+import { EffectiveTreasurySettings, findEffectiveTreasurySetting, markTreasurySettingsUsed } from "./treasurySettingService";
 
 // =========================================================================
 // صدور سند حسابداری «وصول و برگشت چک پرداختنی» (ChequeClearingPayable) — اکشن دستی روی سند تاییدشده (هم‌الگوی وصول و برگشت
@@ -34,7 +35,7 @@ export async function issueChequeClearingPayableJournalEntry(clearingId: number)
   const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
   if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
 
-  const treasurySettings = await prisma.treasuryAccountSetting.findMany({ include: { account: true } });
+  const treasurySettings = new EffectiveTreasurySettings(await prisma.treasuryAccountSetting.findMany({ include: { account: true } }) as any[]);
   const description = `بابت وصول و برگشت چک پرداختنی ${doc.number} ${formatJalaliDateForMessage(doc.date)}`.trim();
   const errors: string[] = [];
 
@@ -47,7 +48,7 @@ export async function issueChequeClearingPayableJournalEntry(clearingId: number)
   const debitLines: IssueLineInput[] = [];
   const bouncedCreditLines: IssueLineInput[] = [];
   const clearedByBank = new Map<number, { bankAccount: any; total: number }>();
-  const bouncedAccount = treasurySettings.find((s) => s.accountType === "BOUNCED_PAYABLE_CHEQUE")?.account;
+  const bouncedAccount = treasurySettings.find(doc.date, (s: any) => s.accountType === "BOUNCED_PAYABLE_CHEQUE")?.account;
   let bouncedMissingReported = false;
 
   for (const [idx, l] of doc.lines.entries()) {
@@ -60,7 +61,7 @@ export async function issueChequeClearingPayableJournalEntry(clearingId: number)
     if (!cheque.payableChequeTypeId) {
       errors.push(`ردیف ${n}: نوع چک پرداختیِ چک شماره ${cheque.number} مشخص نیست`);
     } else {
-      const account = treasurySettings.find((s) => s.accountType === "PAYABLE_CHEQUE" && s.payableChequeTypeId === cheque.payableChequeTypeId)?.account;
+      const account = treasurySettings.find(doc.date, (s: any) => s.accountType === "PAYABLE_CHEQUE" && s.payableChequeTypeId === cheque.payableChequeTypeId)?.account;
       if (!account) {
         errors.push(`ردیف ${n}: برای نوع چک پرداختیِ چک شماره ${cheque.number}، معین در «تعیین حسابهای معین» (چک پرداختی) تعریف نشده است`);
       } else {
@@ -92,7 +93,7 @@ export async function issueChequeClearingPayableJournalEntry(clearingId: number)
   const clearedCreditLines: IssueLineInput[] = [];
   for (const [bankAccountId, t] of clearedByBank) {
     const label = t.bankAccount.accountNumber;
-    const bankLedger = treasurySettings.find((s) => s.accountType === "BANK_ACCOUNT" && s.bankAccountId === bankAccountId)?.account;
+    const bankLedger = treasurySettings.find(doc.date, (s: any) => s.accountType === "BANK_ACCOUNT" && s.bankAccountId === bankAccountId)?.account;
     if (!bankLedger) {
       errors.push(`برای حساب بانکی «${label}»، معین در «تعیین حسابهای معین» (حساب بانکی) تعریف نشده است`);
       continue;
@@ -117,6 +118,9 @@ export async function issueChequeClearingPayableJournalEntry(clearingId: number)
   });
 
   await prisma.chequeClearingPayable.update({ where: { id: clearingId }, data: { journalEntryId: entry.id } });
+
+
+  await treasurySettings.markUsed();
   return entry;
 }
 

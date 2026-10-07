@@ -211,7 +211,7 @@ router.get("/:id", can(`${FORM}.view`), async (req, res) => {
   const partyTypeId = await resolveSystemDetailTypeId(DETAIL_TYPE_CODE_PARTY);
   const lines = await Promise.all(
     item.lines.map(async (l: any) => {
-      const resolved = await resolvePaymentSubjectAccount(l.paymentType, { purchaseInvoice: l.purchaseInvoice, salesInvoice: l.salesInvoice });
+      const resolved = await resolvePaymentSubjectAccount(l.paymentType, { purchaseInvoice: l.purchaseInvoice, salesInvoice: l.salesInvoice }, item.date);
       const partyDetail = resolved.account ? resolveAccountDetailFields(resolved.account, partyTypeId, l.pettyCashPayment?.party?.detailCode ?? null) : {};
       return { ...l, resolvedAccount: resolved.account, resolvedAccountError: resolved.error || null, partyDetail };
     })

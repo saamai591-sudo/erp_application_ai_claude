@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
+import { treasurySettingUsageMessage, treasurySettingIdsInUse } from "../services/treasurySettingService";
 
 // =========================================================================
 // ماژول «خزانه‌داری» > تنظیمات > تعیین حسابهای معین — طبق Documents/تعیین حسابهای معین.md.
@@ -76,6 +77,7 @@ interface Body {
   receiptTypeId?: number | null;
   paymentTypeId?: number | null;
   pettyCashId?: number | null;
+  effectiveDate?: string;
 }
 
 // اعتبارسنجی مشترک POST/PUT روی مقدار «نهایی» (بدنه‌ی ادغام‌شده با رکورد موجود) و ساخت داده‌ی قابل ذخیره
@@ -90,6 +92,9 @@ async function buildData(b: Body, excludeId?: number) {
     if (!targetId) throw new Error(`برای این نوع حساب، انتخاب ${label} الزامی است`);
   }
   if (!b.accountId) throw new Error("انتخاب حساب معین الزامی است");
+  if (!b.effectiveDate) throw new Error("تاریخ اجرا الزامی است");
+  const effectiveDate = new Date(b.effectiveDate as any);
+  if (Number.isNaN(effectiveDate.getTime())) throw new Error("تاریخ اجرا معتبر نیست");
 
   if (field) {
     const target = await TARGET_EXISTS[field](targetId!);
@@ -113,19 +118,23 @@ async function buildData(b: Body, excludeId?: number) {
   }
 
   const dup = await prisma.treasuryAccountSetting.findFirst({
-    where: { accountType: accountType as any, ...(field ? { [field]: targetId } : {}), ...(excludeId ? { NOT: { id: excludeId } } : {}) },
+    where: { accountType: accountType as any, ...(field ? { [field]: targetId } : {}), effectiveDate, ...(excludeId ? { NOT: { id: excludeId } } : {}) },
   });
-  if (dup) throw new Error(field ? "برای این نوع حساب و این مورد، قبلاً معین تعیین شده است" : "برای این نوع حساب قبلاً معین تعیین شده است");
+  if (dup) throw new Error(field ? "برای این نوع حساب و این مورد در همین تاریخ اجرا قبلاً معین تعیین شده است؛ برای تغییر حساب، رکورد جدید با تاریخ اجرای جدید ثبت کنید" : "برای این نوع حساب در همین تاریخ اجرا قبلاً معین تعیین شده است؛ برای تغییر حساب، رکورد جدید با تاریخ اجرای جدید ثبت کنید");
 
-  const data: Record<string, unknown> = { accountType, accountId: b.accountId };
+  const data: Record<string, unknown> = { accountType, accountId: b.accountId, effectiveDate };
   for (const f of Object.keys(TARGET_LABEL)) data[f] = f === field ? targetId : null;
   return data;
 }
 
+const TREASURY_SETTING_LOCK_MESSAGE = "این تنظیم در سند حسابداری صادرشده استفاده شده و قابل ویرایش/حذف نیست؛ برای تغییر حساب، رکورد جدید با تاریخ اجرای جدید ثبت کنید";
+
 const router = Router();
 
 router.get("/treasury-account-settings", async (_req, res) => {
-  res.json(await prisma.treasuryAccountSetting.findMany({ include: INCLUDE, orderBy: { id: "asc" } }));
+  const inUse = await treasurySettingIdsInUse();
+  const list = await prisma.treasuryAccountSetting.findMany({ include: INCLUDE, orderBy: { id: "asc" } });
+  res.json(list.map((s: any) => ({ ...s, inUse: inUse.has(s.id) })));
 });
 
 router.post("/treasury-account-settings", can(`${FORM}.create`), async (req, res) => {
@@ -138,6 +147,8 @@ router.post("/treasury-account-settings", can(`${FORM}.create`), async (req, res
   }
 });
 
+const TREASURY_RULE_LOCK_MESSAGE = "این تنظیم در «قواعد تفصیل» استفاده شده و قابل ویرایش/حذف نیست؛ برای تغییر حساب، رکورد جدید با تاریخ اجرای جدید ثبت کنید";
+
 router.put("/treasury-account-settings/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
   const existing = await prisma.treasuryAccountSetting.findUnique({ where: { id } });
@@ -145,7 +156,12 @@ router.put("/treasury-account-settings/:id", can(`${FORM}.edit`), async (req, re
   try {
     // اگر نوع حساب عوض شود، هدف قبلی (مربوط به نوع قبلی) نباید به نوع جدید نشت کند؛ فقط بدنه ملاک است
     const b = req.body as Body;
-    const merged: Body = b.accountType && b.accountType !== existing.accountType ? b : { ...existing, ...b };
+    // رکوردِ استفاده‌شده در سند حسابداری صادرشده قفل است (تغییر حساب = رکورد جدید با تاریخ اجرای جدید)
+    if (existing.hasTransactions) return res.status(400).json({ error: TREASURY_SETTING_LOCK_MESSAGE });
+    const usageMsg = await treasurySettingUsageMessage(id);
+    if (usageMsg) return res.status(400).json({ error: usageMsg });
+    if (await prisma.detailRuleHeader.count({ where: { treasurySettingId: id } })) return res.status(400).json({ error: TREASURY_RULE_LOCK_MESSAGE });
+    const merged: Body = b.accountType && b.accountType !== existing.accountType ? b : { ...existing, ...b, effectiveDate: b.effectiveDate ?? existing.effectiveDate.toISOString() };
     const data = await buildData(merged, id);
     res.json(await prisma.treasuryAccountSetting.update({ where: { id }, data: data as any, include: INCLUDE }));
   } catch (e: any) {
@@ -158,6 +174,10 @@ router.delete("/treasury-account-settings/:id", can(`${FORM}.delete`), async (re
   const id = Number(req.params.id);
   const existing = await prisma.treasuryAccountSetting.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "رکورد یافت نشد" });
+  if (existing.hasTransactions) return res.status(400).json({ error: TREASURY_SETTING_LOCK_MESSAGE });
+  const usageMsg = await treasurySettingUsageMessage(id);
+  if (usageMsg) return res.status(400).json({ error: usageMsg });
+  if (await prisma.detailRuleHeader.count({ where: { treasurySettingId: id } })) return res.status(400).json({ error: TREASURY_RULE_LOCK_MESSAGE });
   await prisma.treasuryAccountSetting.delete({ where: { id } });
   res.status(204).send();
 });

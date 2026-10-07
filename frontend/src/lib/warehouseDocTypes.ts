@@ -1,0 +1,23 @@
+/** عنوان فارسی انواع سند انبار (InventoryDocumentType) — مرجع مشترک فرم‌های تنظیم */
+export const WAREHOUSE_DOC_TYPE_FA: Record<string, string> = {
+  INITIAL_INVENTORY: "موجودی اول دوره",
+  WAREHOUSE_RECEIPT: "رسید انبار خرید",
+  WAREHOUSE_TRANSFER_IN: "رسید انتقال",
+  WAREHOUSE_ADJUSTMENT: "اضافات انبارگردانی",
+  SALES_RETURN: "برگشت از فروش",
+  PRODUCTION_RECEIPT: "رسید تولید",
+  CENTER_CONSUMPTION_RETURN: "برگشت مصرف مرکز هزینه",
+  PROJECT_CONSUMPTION_RETURN: "برگشت مصرف پروژه",
+  PRODUCTION_CONSUMPTION_RETURN: "برگشت مصرف تولید",
+  SALES_DELIVERY: "حواله فروش",
+  CENTER_CONSUMPTION: "مصرف مرکز هزینه",
+  PROJECT_CONSUMPTION: "مصرف پروژه",
+  PRODUCTION_CONSUMPTION: "مصرف تولید",
+  SUPPLIER_RETURN: "برگشت به تامین‌کننده",
+  FIXED_ASSET_ISSUE: "حواله دارایی ثابت",
+  WAREHOUSE_TRANSFER_OUT: "حواله انتقالی",
+  INVENTORY_COUNTING_SHORTAGE: "کسری انبارگردانی",
+  // انواع سندِ غیرانبار که «تفصیل‌های سند» دارند (services/docDetailService.ts#DOC_KINDS)
+  SERVICE_PURCHASE_INVOICE: "فاکتور خرید خدمت",
+  PURCHASE_INVOICE: "فاکتور خرید کالا",
+};

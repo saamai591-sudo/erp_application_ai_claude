@@ -14,6 +14,8 @@ import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
+import { JalaliDatePicker } from "../components/JalaliDatePicker";
+import { formatJalaliDate } from "../lib/formatDate";
 
 // «تعیین حسابهای معین» — طبق Documents/تعیین حسابهای معین.md. نوع حساب تعیین می‌کند کدام فیلد هدف
 // نمایش داده شود (TARGET_FIELD — باید دقیقاً هم‌راستا با بک‌اند routes/treasuryAccountSettings.ts بماند)؛
@@ -87,6 +89,12 @@ interface Setting {
   receiptType: TitledOption | null;
   paymentType: TitledOption | null;
   pettyCash: TitledOption | null;
+  /** تاریخ اجرا (ISO)؛ رکورد مؤثر یک سند = آخرین رکورد هم‌هدف با تاریخ اجرای ≤ تاریخ سند */
+  effectiveDate: string;
+  /** در سند حسابداری صادرشده استفاده شده؛ قفل */
+  hasTransactions: boolean;
+  /** ردیف حسابداریِ یک دریافت/پرداخت به آن وصل است؛ قفل */
+  inUse?: boolean;
 }
 
 function targetDisplay(r: Setting): string {
@@ -150,6 +158,7 @@ function SettingList() {
           { header: "نوع حساب", render: (r) => ACCOUNT_TYPE_FA[r.accountType] || r.accountType, filterType: "string", filterValue: (r) => ACCOUNT_TYPE_FA[r.accountType] || r.accountType },
           { header: "مورد", render: (r) => targetDisplay(r), filterType: "string", filterValue: (r) => targetDisplay(r) },
           { header: "معین", render: (r) => `${r.account.code} - ${r.account.title}`, filterType: "string", filterValue: (r) => `${r.account.code} ${r.account.title}` },
+          { header: "تاریخ اجرا", render: (r) => formatJalaliDate(r.effectiveDate), width: "120px", filterType: "date", filterValue: (r) => (r.effectiveDate || "").slice(0, 10) },
         ]}
         rows={items}
         edit={{ path: (r) => `/treasury-account-settings/${r.id}/edit` }}
@@ -159,7 +168,7 @@ function SettingList() {
   );
 }
 
-const DEFAULT_FORM = { accountType: "", targetId: "", accountId: "" };
+const DEFAULT_FORM = { accountType: "", targetId: "", accountId: "", effectiveDate: new Date().toISOString().slice(0, 10) };
 
 function SettingForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
@@ -176,6 +185,7 @@ function SettingForm({ editId }: { editId?: number }) {
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_FORM);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
+  const [locked, setLocked] = useState(false);
   const { flash } = useSavedFlash();
 
   useEffect(() => {
@@ -200,7 +210,8 @@ function SettingForm({ editId }: { editId?: number }) {
       if (found) {
         const tf = TARGET_FIELD[found.accountType];
         const target = tf ? found[tf] : null;
-        setForm({ accountType: found.accountType, targetId: target != null ? String(target) : "", accountId: String(found.accountId) });
+        setLocked(found.hasTransactions || !!found.inUse);
+        setForm({ accountType: found.accountType, targetId: target != null ? String(target) : "", accountId: String(found.accountId), effectiveDate: (found.effectiveDate || "").slice(0, 10) });
       }
       setLoaded(true);
     });
@@ -247,7 +258,8 @@ function SettingForm({ editId }: { editId?: number }) {
     if (!form.accountType) return setError("نوع حساب الزامی است");
     if (field && !form.targetId) return setError(`انتخاب ${TARGET_LABEL[field]} الزامی است`);
     if (!form.accountId) return setError("انتخاب حساب معین الزامی است");
-    const body = { accountType: form.accountType, ...(field ? { [field]: Number(form.targetId) } : {}), accountId: Number(form.accountId) };
+    if (!form.effectiveDate) return setError("تاریخ اجرا الزامی است");
+    const body = { accountType: form.accountType, ...(field ? { [field]: Number(form.targetId) } : {}), accountId: Number(form.accountId), effectiveDate: form.effectiveDate };
     try {
       if (editId) {
         await api.put(`/treasury-account-settings/${editId}`, body);
@@ -280,11 +292,17 @@ function SettingForm({ editId }: { editId?: number }) {
       formId="treasury-account-setting-form"
       closePath="/treasury-account-settings"
       newPath="/treasury-account-settings/new"
-      onDelete={editId ? handleDelete : undefined}
+      onDelete={editId && !locked ? handleDelete : undefined}
+      saveDisabled={locked}
+      description={locked ? "این تنظیم در سند حسابداری صادرشده یا در اطلاعات حسابداری اسناد خزانه استفاده شده و قابل ویرایش نیست؛ برای تغییر حساب، رکورد جدید با تاریخ اجرای جدید ثبت کنید (یا اطلاعات حسابداری اسناد مربوط را حذف کنید)" : undefined}
     >
       <form id="treasury-account-setting-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
         <div className="form-grid">
+          <div className="form-field">
+            <label>تاریخ اجرا<RequiredMark /></label>
+            <JalaliDatePicker value={form.effectiveDate} onChange={(v) => setForm({ ...form, effectiveDate: v })} disabled={locked} />
+          </div>
           <div className="form-field">
             <label>نوع حساب<RequiredMark /></label>
             <select value={form.accountType} onChange={(e) => onAccountTypeChange(e.target.value)}>

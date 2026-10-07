@@ -15,6 +15,7 @@ import { getLineAmounts, computeUnitCost } from "../services/documentItemAmountS
 
 const FORM = findFormPrefix("supplier-returns");
 import { fetchPickableWarehouseReceiptLines } from "../services/warehouseReceiptLineSelector";
+import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
 
 const VIEW_ACCOUNTING_PERMISSION = `${findFormPrefix("supplier-returns")}.viewAccounting`;
 
@@ -208,7 +209,9 @@ router.get("/supplier-returns/:id", can(`${FORM}.view`), async (req: AuthedReque
   const partyId = d.detailCode ? codeToPartyId[d.detailCode] ?? null : null;
   const party = partyId ? await prisma.party.findUnique({ where: { id: partyId } }) : null;
   const amountByLineId = await getLineAmounts(d.lines.map((l) => l.id));
+  const extraDetails = await loadDocumentDetails(d.id);
   res.json({
+    details: extraDetails.header,
     id: d.id,
     number: d.number,
     date: d.date,
@@ -236,6 +239,7 @@ router.get("/supplier-returns/:id", can(`${FORM}.view`), async (req: AuthedReque
       ...((canViewAccounting && d.status === "FINALIZED") ? { unitCost: computeUnitCost(amountByLineId.get(l.id) ?? 0, l.quantity), amount: Number(amountByLineId.get(l.id) ?? 0) } : {}),
       description: l.description,
       ...trackingResponseFields(l),
+      details: extraDetails.byLine.get(l.id) ?? [],
       physicalLocation: l.physicalLocation?.title ?? null,
     })),
   });
@@ -290,6 +294,8 @@ router.post("/supplier-returns", can(`${FORM}.create`), async (req, res) => {
         },
       });
       await applyDocumentEffects(tx, { id: doc.id, documentType: "SUPPLIER_RETURN", warehouseId: warehouse.id, date }, effectLines);
+
+      await saveDocumentDetails(tx, doc.id, "SUPPLIER_RETURN", body as any);
       return doc;
     });
 
@@ -362,6 +368,8 @@ router.put("/supplier-returns/:id", can(`${FORM}.edit`), async (req, res) => {
         },
       });
       await applyDocumentEffects(tx, { id, documentType: "SUPPLIER_RETURN", warehouseId: warehouse.id, date }, newEffectLines);
+
+      await saveDocumentDetails(tx, id, "SUPPLIER_RETURN", body as any);
       const goodsItemIds = [...oldEffectLines.map((l) => l.goodsItemId), ...newEffectLines.map((l) => l.goodsItemId)];
       await recomputeGoodsItemHasTransactions(goodsItemIds, tx);
       await recomputeWarehouseHasTransactions([existing.warehouseId!, warehouse.id], tx);

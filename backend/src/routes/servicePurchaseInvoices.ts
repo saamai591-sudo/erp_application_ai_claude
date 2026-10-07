@@ -1,3 +1,5 @@
+import { EffectiveSettings } from "../services/goodsAccountingSettingService";
+import { DetailRuleIndex, applyRule } from "../services/detailRuleService";
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
@@ -23,6 +25,8 @@ import { resolveDetailTypeId, resolveAccountDetailFields, resolveDetailTitles } 
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { netAllocationAmounts } from "../utils/purchaseDiscount";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, roundToCurrencyDecimals, ConversionCurrency } from "../utils/currencyConversion";
+import { saveDocumentDetails, loadDocumentDetails, DetailValueInput } from "../services/docDetailService";
+import { findEffectiveTreasurySetting } from "../services/treasurySettingService";
 
 const FORM = findFormPrefix("service-purchase-invoices");
 
@@ -332,10 +336,12 @@ router.get("/service-purchase-invoices/:id", can(`${FORM}.view`), async (req, re
     },
   });
   if (!d) return res.status(404).json({ error: "فاکتور خرید خدمات یافت نشد" });
+  const extraDetails = await loadDocumentDetails(d.id, "SERVICE_PURCHASE_INVOICE");
   res.json({
     id: d.id,
     number: d.number,
     date: d.date,
+    details: extraDetails.header,
     vendorInvoiceNumber: d.vendorInvoiceNumber,
     partyId: d.partyId,
     partyTitle: partyTitle(d.party),
@@ -364,6 +370,7 @@ router.get("/service-purchase-invoices/:id", can(`${FORM}.view`), async (req, re
       sourceReceiptNumber: l.sourceReceiptDocument?.number ?? null,
       allocationMethod: l.allocationMethod,
       description: l.description,
+      details: extraDetails.byLine.get(l.id) ?? [],
       allocations: l.allocations.map((a: any) => ({
         inventoryDocumentLineId: a.inventoryDocumentLineId,
         goodsItemCode: a.inventoryDocumentLine.goodsItem.fullCode,
@@ -401,7 +408,8 @@ router.post("/service-purchase-invoices", can(`${FORM}.create`), async (req, res
     const lastNumber = await prisma.servicePurchaseInvoice.findFirst({ where: { fiscalPeriodId: fiscalPeriod.id }, orderBy: { number: "desc" } });
     const number = lastNumber ? lastNumber.number + 1 : 1;
 
-    const created = await prisma.servicePurchaseInvoice.create({
+    const created = await prisma.$transaction(async (tx) => {
+      const inv = await tx.servicePurchaseInvoice.create({
       data: {
         fiscalPeriodId: fiscalPeriod.id,
         number,
@@ -430,6 +438,10 @@ router.post("/service-purchase-invoices", can(`${FORM}.create`), async (req, res
           })),
         },
       },
+      });
+      // تفصیل‌های اضافه‌ی هدر/ردیف (تنظیم «تفصیل‌های سند»، services/docDetailService.ts)
+      await saveDocumentDetails(tx, inv.id, "SERVICE_PURCHASE_INVOICE", body as any);
+      return inv;
     });
 
     res.status(201).json(created);
@@ -470,9 +482,9 @@ router.put("/service-purchase-invoices/:id", can(`${FORM}.edit`), async (req, re
     // اگر تخصیص پیش‌پرداختی برای این فاکتور ثبت شده، ویرایش نباید آن را با طرف‌حساب/ارز/تاریخ/مبلغ جدید ناسازگار کند
     await assertAdvanceAllocationsStillValid(id, { partyId: body.partyId, currencyId: body.currencyId, date, netTotal: purchaseInvoiceNetTotal(cleanedLines), vatTotal: purchaseInvoiceVatTotal(cleanedLines, fxRate) }, "SERVICE");
 
-    await prisma.$transaction([
-      prisma.purchaseCostLine.deleteMany({ where: { servicePurchaseInvoiceId: id } }),
-      prisma.servicePurchaseInvoice.update({
+    await prisma.$transaction(async (tx) => {
+      await tx.purchaseCostLine.deleteMany({ where: { servicePurchaseInvoiceId: id } });
+      await tx.servicePurchaseInvoice.update({
         where: { id },
         data: {
           fiscalPeriodId: fiscalPeriod.id,
@@ -500,8 +512,9 @@ router.put("/service-purchase-invoices/:id", can(`${FORM}.edit`), async (req, re
             })),
           },
         },
-      }),
-    ]);
+      });
+      await saveDocumentDetails(tx, id, "SERVICE_PURCHASE_INVOICE", body as any);
+    });
 
     res.json({ id });
   } catch (e: any) {
@@ -692,14 +705,39 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
       where: { OR: [{ accountingGroupId: { in: accountingGroupIds } }, { accountType: "PURCHASE_PAYABLE" }, { accountType: "SERVICE_PURCHASE", serviceId: { in: serviceIds } }] },
       include: { account: true },
     });
+    const effSettings = new EffectiveSettings(settings as any[]);
+    const settingDocDate: Date = invoice.date;
+
+    // «قواعد تفصیل»: تفصیل‌های هر خط سند طبق قاعده‌ی مؤثر همان رکورد حسابداری کالا و خدمت (services/detailRuleService.ts)؛ «از سند» = تفصیل پایه‌ی
+    // فاکتور (طرف مقابل) یا تفصیل‌های اضافه‌ی هدر/ردیف (تنظیم «تفصیل‌های سند»، نوع SERVICE_PURCHASE_INVOICE)
+    const ruleIndex = await DetailRuleIndex.load(settings.map((s) => s.id));
+    const extraDetails = await loadDocumentDetails(id, "SERVICE_PURCHASE_INVOICE");
+    const headerExtra = new Map<number, string>(extraDetails.header.map((d) => [d.detailTypeId, d.detailCode]));
+    const detailTypeTitles = new Map((await prisma.detailType.findMany({ select: { id: true, title: true } })).map((t) => [t.id, t.title]));
+    const ruleErrors: string[] = [];
+    /** تفصیل‌های پایه (طرف مقابل) + مقدارهای قاعده برای یک خط */
+    function detailsFor(setting: { id: number; account: any }, lineId: number, goodsGroupId: number | null, warehouseId: number | null) {
+      const base = resolveAccountDetailFields(setting.account, partyDetailTypeId, partyDetailCode);
+      const picked = ruleIndex.pick(setting.id, settingDocDate, { warehouseId, goodsGroupId, partyCode: partyDetailCode });
+      if (!picked) return base;
+      const applied = applyRule(
+        picked.row,
+        setting.account,
+        { baseCode: partyDetailCode, baseTypeId: partyDetailTypeId, lineValues: new Map((extraDetails.byLine.get(lineId) ?? []).map((d) => [d.detailTypeId, d.detailCode])), headerValues: headerExtra },
+        detailTypeTitles
+      );
+      for (const m of applied.errors) if (!ruleErrors.includes(m)) ruleErrors.push(m);
+      return { ...base, ...applied.fields };
+    }
+    const detailKey = (accountId: number, d: any) => [accountId, d.detail1Code ?? "", d.detail2Code ?? "", d.detail3Code ?? ""].join("|");
     function findSetting(accountingGroupId: number, accountType: string, match: (s: (typeof settings)[number]) => boolean) {
-      return settings.find((s) => s.accountingGroupId === accountingGroupId && s.accountType === accountType && match(s));
+      return effSettings.find(settingDocDate, (s: any) => s.accountingGroupId === accountingGroupId && s.accountType === accountType && match(s)) as (typeof settings)[number] | undefined;
     }
     function findServicePurchaseSetting(serviceId: number) {
-      return settings.find((s) => s.accountType === "SERVICE_PURCHASE" && s.serviceId === serviceId);
+      return effSettings.find(settingDocDate, (s: any) => s.accountType === "SERVICE_PURCHASE" && s.serviceId === serviceId) as (typeof settings)[number] | undefined;
     }
     function findPayableSetting(match: (s: (typeof settings)[number]) => boolean) {
-      return settings.find((s) => s.accountType === "PURCHASE_PAYABLE" && match(s));
+      return effSettings.find(settingDocDate, (s: any) => s.accountType === "PURCHASE_PAYABLE" && match(s)) as (typeof settings)[number] | undefined;
     }
 
     const vendorInvoiceNumber = invoice.vendorInvoiceNumber || String(invoice.number);
@@ -707,11 +745,11 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
 
     const errors: string[] = [];
     const debitLines: IssueLineInput[] = [];
-    const creditByAccount = new Map<number, { amount: number; baseAmount: number; account: (typeof settings)[number]["account"] }>();
-    const vatDebitByAccount = new Map<number, { amount: number; account: (typeof settings)[number]["account"] }>();
+    const creditByAccount = new Map<string, { amount: number; baseAmount: number; account: (typeof settings)[number]["account"]; details: any }>();
+    const vatDebitByAccount = new Map<string, { amount: number; account: (typeof settings)[number]["account"]; details: any }>();
     const allocationIds: number[] = [];
     // اولین معین بدهکار «هزینه» (برای اصلاح مبلغ بر اساس نرخ تاریخی پیش‌پرداخت)
-    let firstExpenseDebit: { accountId: number; account: any } | null = null;
+    let firstExpenseDebit: { accountId: number; account: any; details: any } | null = null;
 
     const payableSetting = findPayableSetting((s) => s.purchaseTypeId === invoice.purchaseTypeId);
     if (!payableSetting) {
@@ -768,7 +806,7 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
               continue;
             }
           }
-          const debitDetails = resolveAccountDetailFields(debitSetting.account, partyDetailTypeId, partyDetailCode);
+          const debitDetails = detailsFor(debitSetting, line.id, goodsItem.goodsGroupId, warehouseId);
           const debitIsCurrency = debitSetting.account.isCurrency;
           debitLines.push({
             accountId: debitSetting.accountId,
@@ -788,8 +826,8 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
           errors.push(`برای خدمت «${service.title}»، حساب «خرید خدمت» در حسابداری کالا و خدمت تعریف نشده است`);
           continue;
         }
-        if (!firstExpenseDebit) firstExpenseDebit = { accountId: debitSetting.accountId, account: debitSetting.account };
-        const debitDetails = resolveAccountDetailFields(debitSetting.account, partyDetailTypeId, partyDetailCode);
+        const debitDetails = detailsFor(debitSetting, line.id, service.goodsGroupId, null);
+        if (!firstExpenseDebit) firstExpenseDebit = { accountId: debitSetting.accountId, account: debitSetting.account, details: debitDetails };
         const debitIsCurrency = debitSetting.account.isCurrency;
         debitLines.push({
           accountId: debitSetting.accountId,
@@ -817,18 +855,23 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
         creditAmount += fromBaseCurrencyAmount(vatAmount, fxRate, invoice.currency);
         creditBaseAmount += vatAmount;
       }
-      const existingCredit = creditByAccount.get(payableSetting.accountId);
+      // تجمیع بر اساس حساب + تفصیل‌ها: اگر قاعده برای خطوط مختلف تفصیل متفاوت (مثلاً پروژه‌ی متفاوت) بدهد، به‌ازای هر ترکیب یک ردیف می‌شود
+      const creditDetails = detailsFor(payableSetting, line.id, service.goodsGroupId, null);
+      const creditKey = detailKey(payableSetting.accountId, creditDetails);
+      const existingCredit = creditByAccount.get(creditKey);
       if (existingCredit) {
         existingCredit.amount += creditAmount;
         existingCredit.baseAmount += creditBaseAmount;
       } else {
-        creditByAccount.set(payableSetting.accountId, { amount: creditAmount, baseAmount: creditBaseAmount, account: payableSetting.account });
+        creditByAccount.set(creditKey, { amount: creditAmount, baseAmount: creditBaseAmount, account: payableSetting.account, details: creditDetails });
       }
 
       if (vatDebitSetting) {
-        const existingVatDebit = vatDebitByAccount.get(vatDebitSetting.accountId);
+        const vatDetails = detailsFor(vatDebitSetting, line.id, service.goodsGroupId, null);
+        const vatKey = detailKey(vatDebitSetting.accountId, vatDetails);
+        const existingVatDebit = vatDebitByAccount.get(vatKey);
         if (existingVatDebit) existingVatDebit.amount += vatAmount;
-        else vatDebitByAccount.set(vatDebitSetting.accountId, { amount: vatAmount, account: vatDebitSetting.account });
+        else vatDebitByAccount.set(vatKey, { amount: vatAmount, account: vatDebitSetting.account, details: vatDetails });
       }
     }
 
@@ -885,12 +928,19 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
 
       // کاهش بستانکار «پرداختنی خرید» به‌اندازه‌ی پیش‌پرداخت تخصیص‌یافته (ارز فاکتور و ارز پایه با نرخ فاکتور)
       if (cur > 0) {
+        // پرداختنی ممکن است به‌خاطر قاعده‌ی تفصیل به چند ردیف (حساب + تفصیل) شکسته شده باشد؛ پیش‌پرداخت به‌ترتیب از ردیف‌ها کم می‌شود تا تمام شود
+        let remainingCur = cur;
+        let remainingInv = inv;
         for (const [key, entry] of Array.from(creditByAccount.entries())) {
-          entry.amount -= cur;
-          entry.baseAmount -= inv;
-          if (entry.amount < -0.005 || entry.baseAmount < -0.005) errors.push("مجموع پیش‌پرداخت تخصیص‌یافته از مبلغ پرداختنی فاکتور بیشتر است");
+          const takeCur = Math.min(entry.amount, remainingCur);
+          const takeInv = Math.min(entry.baseAmount, remainingInv);
+          entry.amount -= takeCur;
+          entry.baseAmount -= takeInv;
+          remainingCur -= takeCur;
+          remainingInv -= takeInv;
           if (Math.abs(entry.amount) <= 0.005) creditByAccount.delete(key);
         }
+        if (remainingCur > 0.005 || remainingInv > 0.005) errors.push("مجموع پیش‌پرداخت تخصیص‌یافته از مبلغ پرداختنی فاکتور بیشتر است");
       }
 
       // اختلاف ارزش ریالی پیش‌پرداخت عادی (پیش‌پرداخت ارزش افزوده پایین‌تر، جدا)
@@ -900,7 +950,7 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
         if (!method) {
           errors.push("روش شناسایی پیش‌پرداخت ارزی خرید برای تاریخ فاکتور در «رویه‌ها و تنظیمات حسابداری» (تنظیمات ارز) تعریف نشده است");
         } else if (method === "TRANSACTION_DATE_RATE" || !firstExpenseDebit) {
-          const fxAccount = (await prisma.treasuryAccountSetting.findFirst({ where: { accountType: "FX_GAIN_LOSS" }, include: { account: true } }))?.account;
+          const fxAccount = (await findEffectiveTreasurySetting({ accountType: "FX_GAIN_LOSS" }, invoice.date))?.account;
           if (!fxAccount) {
             errors.push("حساب «سود و زیان تسعیر ارز» در «تعیین حسابهای معین» تعریف نشده است");
           } else {
@@ -914,7 +964,7 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
             });
           }
         } else {
-          const details = resolveAccountDetailFields(firstExpenseDebit.account, partyDetailTypeId, partyDetailCode);
+          const details = firstExpenseDebit.details;
           advanceAdjustLines.push({
             accountId: firstExpenseDebit.accountId,
             ...details,
@@ -935,7 +985,7 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
         if (!method) {
           errors.push("روش شناسایی پیش‌پرداخت ارزی خرید برای تاریخ فاکتور در «رویه‌ها و تنظیمات حسابداری» (تنظیمات ارز) تعریف نشده است");
         } else if (method === "TRANSACTION_DATE_RATE" || !firstVatDebit) {
-          const fxAccount = (await prisma.treasuryAccountSetting.findFirst({ where: { accountType: "FX_GAIN_LOSS" }, include: { account: true } }))?.account;
+          const fxAccount = (await findEffectiveTreasurySetting({ accountType: "FX_GAIN_LOSS" }, invoice.date))?.account;
           if (!fxAccount) {
             errors.push("حساب «سود و زیان تسعیر ارز» در «تعیین حسابهای معین» تعریف نشده است");
           } else {
@@ -949,7 +999,7 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
             });
           }
         } else {
-          const details = resolveAccountDetailFields(firstVatDebit.account, partyDetailTypeId, partyDetailCode);
+          const details = firstVatDebit.details;
           advanceAdjustLines.push({
             accountId: firstVatDebit.account.id,
             ...details,
@@ -963,11 +1013,11 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
       }
     }
 
+    errors.push(...ruleErrors);
     if (errors.length > 0) return res.status(400).json({ error: errors.join("\n") });
 
     const creditLines: IssueLineInput[] = [];
-    for (const { amount, baseAmount, account } of creditByAccount.values()) {
-      const creditDetails = resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode);
+    for (const { amount, baseAmount, account, details: creditDetails } of creditByAccount.values()) {
       const creditIsCurrency = account.isCurrency;
       creditLines.push({
         accountId: account.id,
@@ -981,8 +1031,7 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
     }
 
     const vatDebitLines: IssueLineInput[] = [];
-    for (const { amount, account } of vatDebitByAccount.values()) {
-      const vatDetails = resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode);
+    for (const { amount, account, details: vatDetails } of vatDebitByAccount.values()) {
       vatDebitLines.push({
         accountId: account.id,
         ...vatDetails,
@@ -1006,6 +1055,7 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
       lines: [...debitLines, ...vatDebitLines, ...creditLines, ...advanceCreditLines, ...advanceAdjustLines],
       sources: [{ label: `فاکتور خرید خدمات شماره ${invoice.number}`, path: `/service-purchase-invoices/${invoice.id}/edit` }],
     });
+    await effSettings.markUsed();
 
     await prisma.servicePurchaseInvoice.update({ where: { id }, data: { journalEntryId: entry.id } });
 

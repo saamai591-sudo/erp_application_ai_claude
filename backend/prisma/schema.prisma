@@ -264,7 +264,11 @@ model DetailType {
   accountsAsDetail1 Account[]         @relation("AccountDetailType1")
   accountsAsDetail2 Account[]         @relation("AccountDetailType2")
   accountsAsDetail3 Account[]         @relation("AccountDetailType3")
-  codes             DetailCodeUsage[]
+  codes             DetailCodeUsage[]
+  warehouseDocDetailItems  DocDetailSettingItem[]
+  inventoryDocumentDetails InventoryDocumentDetail[]
+  servicePurchaseInvoiceDetails ServicePurchaseInvoiceDetail[]
+  purchaseInvoiceDetails   PurchaseInvoiceDetail[]
 }
 
 model DetailCodeUsage {
@@ -654,7 +658,9 @@ model Account {
   treasuryAccountSettings        TreasuryAccountSetting[]
   lines                          JournalEntryLine[]
 
-  @@unique([parentId, code])
+  @@unique([parentId, code])
+  receiptAccountingLines         ReceiptAccountingLine[]
+  paymentAccountingLines         PaymentAccountingLine[]
 }
 
 model DocumentType {
@@ -908,7 +914,8 @@ model Warehouse {
   inventoryDocsAsDest        InventoryDocument[]     @relation("InventoryDocDestWarehouse")
   confirmationLines          WarehouseConfirmationLine[]
   quantityCloses             WarehouseQuantityClose[]
-  pricingFlowWarehouses      GoodsPricingFlowWarehouse[]
+  pricingFlowWarehouses      GoodsPricingFlowWarehouse[]
+  detailRuleRows      DetailRuleRow[]
 }
 
 // درخت محل فیزیکی — طبق stockAnalysis.md بند ۲۱: هر انبار درخت محل فیزیکی مستقل خودش را دارد
@@ -967,7 +974,8 @@ model GoodsGroup {
   attributes        GoodsGroupAttribute[]
   items             GoodsItem[]
 
-  @@unique([parentId, code])
+  @@unique([parentId, code])
+  detailRuleRows      DetailRuleRow[]
 }
 
 model GoodsGroupAttribute {
@@ -1181,6 +1189,8 @@ model GoodsServiceAccountingSetting {
   purchaseTypeId      Int?
   /// فقط برای accountType=SERVICE_PURCHASE (نوع «خرید خدمت»): خدمتی که این معین برایش تعریف شده (فقط خدمت با نحوه حسابداری «هزینه»)
   serviceId           Int?
+  /// تاریخ اجرا: رکورد مؤثر برای یک سند، آخرین رکوردِ هم‌کلید با effectiveDate ≤ تاریخ سند است (services/goodsAccountingSettingService.ts)
+  effectiveDate       DateTime         @default("2000-01-01T00:00:00.000Z") @db.Date
   hasTransactions     Boolean          @default(false)
   createdAt           DateTime         @default(now())
   service             GoodsItem?       @relation(fields: [serviceId], references: [id], onDelete: Restrict)
@@ -1188,7 +1198,8 @@ model GoodsServiceAccountingSetting {
   accountingGroup     AccountingGroup? @relation(fields: [accountingGroupId], references: [id])
   warehouseGroup      WarehouseGroup?  @relation(fields: [warehouseGroupId], references: [id])
   purchaseType        PurchaseType?    @relation(fields: [purchaseTypeId], references: [id])
-  salesType           SalesType?       @relation(fields: [salesTypeId], references: [id])
+  salesType           SalesType?       @relation(fields: [salesTypeId], references: [id])
+  detailRuleHeaders   DetailRuleHeader[]
 }
 
 model GoodsRequestType {
@@ -1468,6 +1479,10 @@ model TreasuryAccountSetting {
   paymentTypeId            Int?
   pettyCashId              Int?
   accountId                Int
+  /// تاریخ اجرا: رکورد مؤثر یک سند = آخرین رکورد هم‌هدف با effectiveDate ≤ تاریخ سند (services/treasurySettingService.ts)
+  effectiveDate            DateTime               @default("2000-01-01T00:00:00.000Z") @db.Date
+  /// رکوردی که در یک سند حسابداری صادرشده استفاده شده؛ ماندگار، قفل ویرایش/حذف
+  hasTransactions          Boolean                @default(false)
   createdAt                DateTime               @default(now())
   account                  Account                @relation(fields: [accountId], references: [id])
   bankAccount              BankAccount?           @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
@@ -1478,13 +1493,14 @@ model TreasuryAccountSetting {
   paymentType              PaymentType?           @relation(fields: [paymentTypeId], references: [id], onDelete: Restrict)
   pettyCash                PettyCash?             @relation(fields: [pettyCashId], references: [id], onDelete: Restrict)
 
-  @@unique([accountType, bankAccountId])
-  @@unique([accountType, cashBoxId])
-  @@unique([accountType, receivableChequeTypeId])
-  @@unique([accountType, payableChequeTypeId])
-  @@unique([accountType, receiptTypeId])
-  @@unique([accountType, paymentTypeId])
-  @@unique([accountType, pettyCashId])
+  @@unique([accountType, bankAccountId, effectiveDate])
+  @@unique([accountType, cashBoxId, effectiveDate])
+  @@unique([accountType, receivableChequeTypeId, effectiveDate])
+  @@unique([accountType, payableChequeTypeId, effectiveDate])
+  @@unique([accountType, receiptTypeId, effectiveDate])
+  @@unique([accountType, paymentTypeId, effectiveDate])
+  @@unique([accountType, pettyCashId, effectiveDate])
+  detailRuleHeaders        DetailRuleHeader[]
 }
 
 enum TreasuryAccountType {
@@ -2068,7 +2084,8 @@ model PurchaseInvoice {
   pettyCashSummaryLines  PettyCashSummaryLine[]
   advanceAllocations     PurchaseInvoiceAdvanceAllocation[]
 
-  @@unique([fiscalPeriodId, number])
+  @@unique([fiscalPeriodId, number])
+  details                PurchaseInvoiceDetail[]
 }
 
 model PurchaseInvoiceLine {
@@ -2103,7 +2120,8 @@ model PurchaseInvoiceLine {
   goodsItem             GoodsItem              @relation(fields: [goodsItemId], references: [id])
   purchaseInvoice       PurchaseInvoice        @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
   sourceInventoryLine   InventoryDocumentLine? @relation("PurchaseInvoiceSourceInventoryLine", fields: [sourceInventoryLineId], references: [id])
-  unit                  UnitOfMeasure          @relation(fields: [unitId], references: [id])
+  unit                  UnitOfMeasure          @relation(fields: [unitId], references: [id])
+  details                PurchaseInvoiceDetail[]
 }
 
 // طبق Documents/ServicePurchaseAndItsRelationToStockReceipt.md: مدل تسهیم/اثر تایید این سند («افزودن»
@@ -2140,7 +2158,8 @@ model ServicePurchaseInvoice {
   lines               PurchaseCostLine[]
   advanceAllocations  ServicePurchaseInvoiceAdvanceAllocation[]
 
-  @@unique([fiscalPeriodId, number])
+  @@unique([fiscalPeriodId, number])
+  details                ServicePurchaseInvoiceDetail[]
 }
 
 // جدول مشترک «ردیف هزینه» بین دو سند: تب «سایر هزینه‌ها»ی فاکتور خرید کالا (purchaseInvoiceId) و ردیف‌های
@@ -2177,7 +2196,9 @@ model PurchaseCostLine {
   servicePurchaseInvoice   ServicePurchaseInvoice? @relation(fields: [servicePurchaseInvoiceId], references: [id], onDelete: Cascade)
   service                  GoodsItem               @relation(fields: [serviceId], references: [id])
   sourceReceiptDocument    InventoryDocument?      @relation(fields: [sourceReceiptDocumentId], references: [id])
-  allocations              PurchaseCostAllocation[]
+  allocations              PurchaseCostAllocation[]
+  details                  ServicePurchaseInvoiceDetail[]
+  purchaseInvoiceDetails   PurchaseInvoiceDetail[]
 }
 
 // لایه‌ی «Allocation» که مستند صریحاً بین ردیف فاکتور خرید خدمات و AmountLine خواسته (بند ۱۲): هر رکورد
@@ -2426,7 +2447,8 @@ model InventoryDocument {
   purchaseCostLines PurchaseCostLine[]
   quantityClose     WarehouseQuantityClose?
 
-  @@unique([documentType, fiscalPeriodId, number])
+  @@unique([documentType, fiscalPeriodId, number])
+  details           InventoryDocumentDetail[]
 }
 
 model InventoryDocumentLine {
@@ -2490,7 +2512,8 @@ model InventoryDocumentLine {
   // فی واحد = آن مجموع ÷ quantity، همیشه محاسبه‌شده، هرگز ذخیره‌شده — نگاه کنید به
   // services/documentItemAmountService.ts. جایگزین کامل GoodsPricingAdjustment سابق است.
   amounts                            DocumentItemAmount[]
-  purchaseCostAllocations            PurchaseCostAllocation[]
+  purchaseCostAllocations            PurchaseCostAllocation[]
+  details           InventoryDocumentDetail[]
 }
 
 // طبق بند ۱۷-۱۹ سند: یک سطر سند می‌تواند چند سریال داشته باشد (نه یک سطر جدا برای هر سریال). serialStep
@@ -2893,7 +2916,12 @@ model Receipt {
   instrumentLines ReceiptInstrumentLine[]
   settlementLines ReceiptSettlementLine[]
 
-  @@unique([fiscalPeriodId, number])
+  @@unique([fiscalPeriodId, number])
+  /// «تایید حسابداری»: بعد از آن ردیف‌های حسابداری (پیش‌نویس سند در سطح فرم) ساخته/نمایش داده می‌شود و سند قفل است
+  accountingStatus AccountingApprovalStatus @default(NONE)
+  accountingApprovedAt DateTime?
+  accountingApprovedById Int?
+  accountingLines ReceiptAccountingLine[]
 }
 
 // طبق Documents/ReceiptChanges.md: ارز و نرخ ارز از هدر سند به هر ردیف اقلام دریافت منتقل شد. نوع
@@ -2931,7 +2959,8 @@ model ReceiptInstrumentLine {
   chequeItem         ChequeItem?             @relation(fields: [chequeItemId], references: [id])
   chequeType         ReceivableChequeType?   @relation(fields: [chequeTypeId], references: [id], onDelete: Restrict)
   receipt            Receipt                 @relation(fields: [receiptId], references: [id], onDelete: Cascade)
-  settlementLines    ReceiptSettlementLine[]
+  settlementLines    ReceiptSettlementLine[]
+  accountingLines    ReceiptAccountingLine[]
 }
 
 // طبق Documents/ReceiptChanges.md بخش «موضوعات دریافت»: هر ردیف اکنون به یک ReceiptType (نوع دریافت)،
@@ -2963,7 +2992,8 @@ model ReceiptSettlementLine {
   salesQuote        SalesQuote?            @relation(fields: [salesQuoteId], references: [id])
   purchaseInvoice   PurchaseInvoice?       @relation(fields: [purchaseInvoiceId], references: [id])
   currency          Currency               @relation(fields: [currencyId], references: [id])
-  advanceAllocations SalesInvoiceAdvanceAllocation[]
+  advanceAllocations SalesInvoiceAdvanceAllocation[]
+  accountingLines   ReceiptAccountingLine[]
 }
 
 // هم‌الگوی Receipt: ارز و نرخ ارز از هدر به هر ردیف ابزار منتقل شده (ندارد currencyId)، «موضوعات پرداخت» مدل
@@ -2985,7 +3015,12 @@ model Payment {
   instrumentLines PaymentInstrumentLine[]
   settlementLines PaymentSettlementLine[]
 
-  @@unique([fiscalPeriodId, number])
+  @@unique([fiscalPeriodId, number])
+  /// «تایید حسابداری»: بعد از آن ردیف‌های حسابداری (پیش‌نویس سند در سطح فرم) ساخته/نمایش داده می‌شود و سند قفل است
+  accountingStatus AccountingApprovalStatus @default(NONE)
+  accountingApprovedAt DateTime?
+  accountingApprovedById Int?
+  accountingLines PaymentAccountingLine[]
 }
 
 model PaymentInstrumentLine {
@@ -3026,7 +3061,8 @@ model PaymentInstrumentLine {
   currency           Currency              @relation(fields: [currencyId], references: [id])
   payableChequeType  PayableChequeType?    @relation(fields: [payableChequeTypeId], references: [id])
   payment            Payment               @relation(fields: [paymentId], references: [id], onDelete: Cascade)
-  settlementLines    PaymentSettlementLine[]
+  settlementLines    PaymentSettlementLine[]
+  accountingLines    PaymentAccountingLine[]
 }
 
 // هم‌الگوی ReceiptSettlementLine («موضوعات پرداخت»): هر ردیف به یک PaymentType، یک ردیف ابزار (قلم)، یک طرف حساب
@@ -3063,7 +3099,8 @@ model PaymentSettlementLine {
   purchaseOrder     PurchaseOrder?        @relation(fields: [purchaseOrderId], references: [id])
   currency          Currency              @relation(fields: [currencyId], references: [id])
   advanceAllocations PurchaseInvoiceAdvanceAllocation[]
-  servicePurchaseAdvanceAllocations ServicePurchaseInvoiceAdvanceAllocation[]
+  servicePurchaseAdvanceAllocations ServicePurchaseInvoiceAdvanceAllocation[]
+  accountingLines   PaymentAccountingLine[]
 }
 
 enum SalesDocStatus {
@@ -3937,4 +3974,197 @@ model TradeLedgerDocument {
   consolidatedDocument   ConsolidatedDocument @relation(fields: [consolidatedDocumentId], references: [id])
 
   @@index([tradeLedgerId])
+}
+
+/// «تفصیل‌های سند» (هدر): برای هر نوع سند (کلید متنی: انواع InventoryDocumentType و انواع دیگر مثل SERVICE_PURCHASE_INVOICE — services/docDetailService.ts)،
+/// تفصیل‌های اضافه‌ی علاوه بر تفصیل پایه‌ی سند. جدول فیزیکی همان WarehouseDocDetailSetting است (نام قدیمی؛ فقط @@map)
+model DocDetailSetting {
+  id           Int                   @id @default(autoincrement())
+  documentType String                @unique
+  createdAt    DateTime              @default(now())
+  items        DocDetailSettingItem[]
+
+  @@map("WarehouseDocDetailSetting")
+}
+
+/// دیتیل: یک نوع تفصیل اضافه. showInItem=false ⇒ فیلد هدر سند؛ showInItem=true ⇒ هدر (مقدار پیش‌فرض) + ستون ردیف
+model DocDetailSettingItem {
+  id           Int              @id @default(autoincrement())
+  settingId    Int
+  detailTypeId Int
+  showInItem   Boolean          @default(false)
+  setting      DocDetailSetting @relation(fields: [settingId], references: [id], onDelete: Cascade)
+  detailType   DetailType       @relation(fields: [detailTypeId], references: [id])
+
+  @@unique([settingId, detailTypeId])
+  @@map("WarehouseDocDetailSettingItem")
+}
+
+/// مقدار تفصیل‌های اضافه‌ی سند انبار: lineId خالی = مقدار هدر، پر = مقدار ردیف. یکتایی (ایندکس جزئی) در مایگریشن است
+model InventoryDocumentDetail {
+  id           Int                    @id @default(autoincrement())
+  documentId   Int
+  lineId       Int?
+  detailTypeId Int
+  detailCode   String
+  document     InventoryDocument      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  line         InventoryDocumentLine? @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  detailType   DetailType             @relation(fields: [detailTypeId], references: [id])
+
+  @@index([documentId])
+  @@index([lineId])
+}
+
+enum DetailRuleSource {
+  FIXED
+  FROM_DOCUMENT
+  /// فقط برای قاعده‌ی رکوردهای «تعیین حسابهای معین» (دریافت/پرداخت): تفصیل از سند مبنای ردیف (مثلاً پروژه‌ی فاکتور خرید) می‌آید
+  FROM_BASE_DOCUMENT
+}
+
+/// «قواعد تفصیل» (هدر): برای یک رکورد «حسابداری کالا و خدمت» در یک تاریخ اجرا؛ شرط‌های تفکیک (انبار / گروه کالا / طرف حساب) را هدر مشخص می‌کند
+model DetailRuleHeader {
+  id            Int             @id @default(autoincrement())
+  /// دقیقاً یکی از settingId (حسابداری کالا و خدمت) یا treasurySettingId (تعیین حسابهای معین) پر است (کنترل در سرور)
+  settingId     Int?
+  treasurySettingId Int?
+  effectiveDate DateTime        @db.Date
+  byWarehouse   Boolean         @default(false)
+  byGoodsGroup  Boolean         @default(false)
+  byParty       Boolean         @default(false)
+  createdAt     DateTime        @default(now())
+  setting       GoodsServiceAccountingSetting? @relation(fields: [settingId], references: [id], onDelete: Restrict)
+  treasurySetting TreasuryAccountSetting? @relation(fields: [treasurySettingId], references: [id], onDelete: Restrict)
+  rows          DetailRuleRow[]
+
+  @@unique([settingId, effectiveDate])
+  @@unique([treasurySettingId, effectiveDate])
+}
+
+/// دیتیل: مقدار شرط‌ها (همه‌ی شرط‌های انتخاب‌شده‌ی هدر پر، یا همه خالی = ردیف «بقیه») + منبع هر یک از سه سطح تفصیل
+/// (ایندکس یکتای ترکیب شرط‌ها با NULLS NOT DISTINCT در مایگریشن است)
+model DetailRuleRow {
+  id             Int               @id @default(autoincrement())
+  headerId       Int
+  warehouseId    Int?
+  goodsGroupId   Int?
+  partyDetailCode String?
+  slot1Source    DetailRuleSource?
+  slot1Code      String?
+  slot2Source    DetailRuleSource?
+  slot2Code      String?
+  slot3Source    DetailRuleSource?
+  slot3Code      String?
+  header         DetailRuleHeader  @relation(fields: [headerId], references: [id], onDelete: Cascade)
+  warehouse      Warehouse?        @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  goodsGroup     GoodsGroup?       @relation(fields: [goodsGroupId], references: [id], onDelete: Restrict)
+
+  @@index([headerId])
+}
+
+/// مقدار تفصیل‌های اضافه‌ی فاکتور خرید خدمت (تنظیم «تفصیل‌های سند»، نوع SERVICE_PURCHASE_INVOICE): lineId خالی = هدر، پر = ردیف هزینه.
+/// یکتایی (ایندکس جزئی) در مایگریشن است
+model ServicePurchaseInvoiceDetail {
+  id           Int                    @id @default(autoincrement())
+  invoiceId    Int
+  lineId       Int?
+  detailTypeId Int
+  detailCode   String
+  invoice      ServicePurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  line         PurchaseCostLine?      @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  detailType   DetailType             @relation(fields: [detailTypeId], references: [id])
+
+  @@index([invoiceId])
+  @@index([lineId])
+}
+
+/// مقدار تفصیل‌های اضافه‌ی فاکتور خرید کالا (تنظیم «تفصیل‌های سند»، نوع PURCHASE_INVOICE): هدر (هر دو lineId/costLineId خالی)، ردیف کالا (lineId) یا
+/// ردیف «سایر هزینه‌ها» (costLineId). یکتایی (ایندکس جزئی) در مایگریشن است
+model PurchaseInvoiceDetail {
+  id           Int                  @id @default(autoincrement())
+  invoiceId    Int
+  lineId       Int?
+  costLineId   Int?
+  detailTypeId Int
+  detailCode   String
+  invoice      PurchaseInvoice      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  line         PurchaseInvoiceLine? @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  costLine     PurchaseCostLine?    @relation(fields: [costLineId], references: [id], onDelete: Cascade)
+  detailType   DetailType           @relation(fields: [detailTypeId], references: [id])
+
+  @@index([invoiceId])
+  @@index([lineId])
+  @@index([costLineId])
+}
+
+enum AccountingApprovalStatus {
+  NONE
+  APPROVED
+}
+
+/// نقش ردیف حسابداریِ یک ردیف فرم: ابزار (INSTRUMENT)، موضوع (SUBJECT)، تسعیر موضوع (FX)، کارمزد بانکی ابزار پرداخت (FEE)
+enum AccountingLineRole {
+  INSTRUMENT
+  SUBJECT
+  FX
+  FEE
+}
+
+/// «ردیف حسابداری» رسید دریافت = پیش‌نویس سند در سطح فرم: فرزند ردیف ابزار یا ردیف موضوع (حذف پدر ⇒ حذف فرزند). فقط معین و تفصیل‌ها نگه داشته می‌شود؛
+/// مبلغ همیشه از ردیف پدر محاسبه می‌شود (services/receiptAccountingService.ts). یکتایی (پدر، نقش) با ایندکس جزئی در مایگریشن است
+model ReceiptAccountingLine {
+  id                Int                    @id @default(autoincrement())
+  receiptId         Int
+  role              AccountingLineRole
+  instrumentLineId  Int?
+  settlementLineId  Int?
+  accountId         Int
+  /// رکورد «تعیین حسابهای معین» / «حسابداری کالا و خدمت» که معین از آن آمده (برای قفل رکورد و کنترل هم‌خوانی هنگام صدور)
+  treasurySettingId Int?
+  goodsSettingId    Int?
+  detail1Code       String?
+  detail2Code       String?
+  detail3Code       String?
+  /// منبع مقدار هر سطح: AUTO = سیستم پر کرده (پایه/قاعده؛ قفل)، MANUAL = حسابدار (یا خالی)
+  detail1Source     DetailValueSource      @default(MANUAL)
+  detail2Source     DetailValueSource      @default(MANUAL)
+  detail3Source     DetailValueSource      @default(MANUAL)
+  receipt           Receipt                @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  instrumentLine    ReceiptInstrumentLine? @relation(fields: [instrumentLineId], references: [id], onDelete: Cascade)
+  settlementLine    ReceiptSettlementLine? @relation(fields: [settlementLineId], references: [id], onDelete: Cascade)
+  account           Account                @relation(fields: [accountId], references: [id])
+
+  @@index([receiptId])
+  @@index([treasurySettingId])
+}
+
+/// هم‌الگوی ReceiptAccountingLine برای اعلامیه پرداخت
+model PaymentAccountingLine {
+  id                Int                     @id @default(autoincrement())
+  paymentId         Int
+  role              AccountingLineRole
+  instrumentLineId  Int?
+  settlementLineId  Int?
+  accountId         Int
+  treasurySettingId Int?
+  goodsSettingId    Int?
+  detail1Code       String?
+  detail2Code       String?
+  detail3Code       String?
+  /// منبع مقدار هر سطح: AUTO = سیستم پر کرده (پایه/قاعده؛ قفل)، MANUAL = حسابدار (یا خالی)
+  detail1Source     DetailValueSource      @default(MANUAL)
+  detail2Source     DetailValueSource      @default(MANUAL)
+  detail3Source     DetailValueSource      @default(MANUAL)
+  payment           Payment                 @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  instrumentLine    PaymentInstrumentLine?  @relation(fields: [instrumentLineId], references: [id], onDelete: Cascade)
+  settlementLine    PaymentSettlementLine?  @relation(fields: [settlementLineId], references: [id], onDelete: Cascade)
+  account           Account                 @relation(fields: [accountId], references: [id])
+
+  @@index([paymentId])
+  @@index([treasurySettingId])
+}
+
+enum DetailValueSource {
+  AUTO
+  MANUAL
 }

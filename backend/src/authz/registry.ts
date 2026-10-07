@@ -266,6 +266,8 @@ export const REGISTRY: ModuleDef[] = [
           { key: "goods-attributes", title: "ویژگی کالا خدمت", baseActions: CRUD },
           { key: "accounting-groups", title: "گروه حسابداری", baseActions: CRUD },
           { key: "goods-service-accounting", title: "حسابداری کالا و خدمت", baseActions: CRUD },
+          { key: "warehouse-doc-details", title: "تفصیل‌های سند انبار", baseActions: CRUD },
+          { key: "detail-rules", title: "قواعد تفصیل", baseActions: CRUD },
           { key: "goods-request-types", title: "نوع درخواست کالا", baseActions: CRUD },
         ],
       },
@@ -598,6 +600,9 @@ export const REGISTRY: ModuleDef[] = [
             actions: [
               ...APPROVE_UNAPPROVE,
               { key: "reEdit", title: "ویرایش مجدد" },
+              { key: "accountingApprove", title: "تایید حسابداری" },
+              { key: "accountingUnapprove", title: "لغو تایید حسابداری" },
+              { key: "deleteAccountingInfo", title: "حذف اطلاعات حسابداری" },
               { key: "issueJournalEntry", title: "صدور سند حسابداری" },
               { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
             ],
@@ -651,6 +656,9 @@ export const REGISTRY: ModuleDef[] = [
             actions: [
               ...APPROVE_UNAPPROVE,
               { key: "reEdit", title: "ویرایش مجدد" },
+              { key: "accountingApprove", title: "تایید حسابداری" },
+              { key: "accountingUnapprove", title: "لغو تایید حسابداری" },
+              { key: "deleteAccountingInfo", title: "حذف اطلاعات حسابداری" },
               { key: "issueJournalEntry", title: "صدور سند حسابداری" },
               { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
             ],

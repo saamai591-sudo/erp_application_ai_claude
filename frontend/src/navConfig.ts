@@ -116,6 +116,8 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "goods-attributes", label: "ویژگی کالا خدمت", list: "/goods-attributes", create: "/goods-attributes/new", icon: "pin" },
           { key: "accounting-groups", label: "گروه حسابداری", list: "/accounting-groups", create: "/accounting-groups/new", icon: "coin" },
           { key: "goods-service-accounting", label: "حسابداری کالا و خدمت", list: "/goods-service-accounting", create: "/goods-service-accounting/new", icon: "ledger" },
+          { key: "warehouse-doc-details", label: "تفصیل‌های سند", list: "/warehouse-doc-details", create: "/warehouse-doc-details/new", icon: "tag" },
+          { key: "detail-rules", label: "قواعد تفصیل", list: "/detail-rules", create: "/detail-rules/new", icon: "layers" },
           { key: "goods-request-types", label: "نوع درخواست کالا", list: "/goods-request-types", create: "/goods-request-types/new", icon: "file" },
         ],
       },

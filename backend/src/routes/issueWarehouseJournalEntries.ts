@@ -1,3 +1,6 @@
+import { EffectiveSettings } from "../services/goodsAccountingSettingService";
+import { DetailRuleIndex, applyRule } from "../services/detailRuleService";
+import { DETAIL_TYPE_CODE_PARTY, resolveSystemDetailTypeId } from "../utils/detailValues";
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
@@ -284,7 +287,7 @@ router.post("/issue-warehouse-journal-entries/:id(\\d+)/issue", can(`${FORM}.iss
       line: {
         include: {
           document: true,
-          goodsItem: { select: { id: true, fullCode: true, title: true, accountingGroupId: true } },
+          goodsItem: { select: { id: true, fullCode: true, title: true, accountingGroupId: true, goodsGroupId: true } },
         },
       },
     },
@@ -310,8 +313,25 @@ router.post("/issue-warehouse-journal-entries/:id(\\d+)/issue", can(`${FORM}.iss
   const usages = await prisma.detailCodeUsage.findMany({ where: { code: { in: detailCodes } } });
   const detailTypeByCode = new Map(usages.map((u) => [u.code, u.detailTypeId]));
 
-  function findSetting(accountingGroupId: number, accountType: string, match: (s: (typeof settings)[number]) => boolean) {
-    return settings.find((s) => s.accountingGroupId === accountingGroupId && s.accountType === accountType && match(s));
+  // «قواعد تفصیل»: تفصیل‌های سه‌گانه‌ی هر خط سند حسابداری طبق قاعده‌ی مؤثر همان رکورد حسابداری کالا و خدمت (services/detailRuleService.ts)
+  const ruleIndex = await DetailRuleIndex.load(settings.map((s) => s.id));
+  const partyTypeId = await resolveSystemDetailTypeId(DETAIL_TYPE_CODE_PARTY);
+  const extraRows = await prisma.inventoryDocumentDetail.findMany({ where: { documentId: { in: Array.from(new Set(validRows.map((r) => r.line.documentId))) } } });
+  const headerValuesByDoc = new Map<number, Map<number, string>>();
+  const lineValuesByLine = new Map<number, Map<number, string>>();
+  for (const x of extraRows) {
+    const target = x.lineId == null ? headerValuesByDoc : lineValuesByLine;
+    const key = x.lineId == null ? x.documentId : x.lineId;
+    const m = target.get(key) ?? new Map<number, string>();
+    m.set(x.detailTypeId, x.detailCode);
+    target.set(key, m);
+  }
+  const detailTypeTitles = new Map((await prisma.detailType.findMany({ select: { id: true, title: true } })).map((t) => [t.id, t.title]));
+
+  // رکورد مؤثر در تاریخ خودِ سند انبار (تاریخ اجرا) — services/goodsAccountingSettingService.ts
+  const effSettings = new EffectiveSettings(settings as any[]);
+  function findSetting(docDate: Date, accountingGroupId: number, accountType: string, match: (s: (typeof settings)[number]) => boolean) {
+    return effSettings.find(docDate, (s: any) => s.accountingGroupId === accountingGroupId && s.accountType === accountType && match(s)) as (typeof settings)[number] | undefined;
   }
 
   const lines: IssueLineInput[] = [];
@@ -323,9 +343,10 @@ router.post("/issue-warehouse-journal-entries/:id(\\d+)/issue", can(`${FORM}.iss
 
     const inventorySetting =
       warehouseGroupId != null
-        ? findSetting(goodsItem.accountingGroupId, "INVENTORY", (s) => s.warehouseGroupId === warehouseGroupId)
+        ? findSetting(doc.date, goodsItem.accountingGroupId, "INVENTORY", (s) => s.warehouseGroupId === warehouseGroupId)
         : undefined;
     const contraSetting = findSetting(
+      doc.date,
       goodsItem.accountingGroupId,
       direction === "IN" ? "WAREHOUSE_RECEIPT_CREDIT" : "WAREHOUSE_ISSUE_DEBIT",
       (s) => s.warehouseDocType === doc.documentType
@@ -359,8 +380,24 @@ router.post("/issue-warehouse-journal-entries/:id(\\d+)/issue", can(`${FORM}.iss
     const detailTypeId = detailCode ? detailTypeByCode.get(detailCode) ?? null : null;
     const description = `بابت ${DOC_TYPE_FA[doc.documentType] ?? doc.documentType} شماره سند ${doc.number} تاریخ سند ${formatJalaliDateForMessage(doc.date)}`;
 
-    const inventoryDetails = resolveAccountDetailFields(inventorySetting.account, detailTypeId, detailCode);
-    const contraDetails = resolveAccountDetailFields(contraSetting.account, detailTypeId, detailCode);
+    let inventoryDetails = resolveAccountDetailFields(inventorySetting.account, detailTypeId, detailCode);
+    let contraDetails = resolveAccountDetailFields(contraSetting.account, detailTypeId, detailCode);
+
+    const ruleCtx = { warehouseId: doc.warehouseId ?? null, goodsGroupId: goodsItem.goodsGroupId, partyCode: detailTypeId === partyTypeId ? detailCode : null };
+    const docValues = { baseCode: detailCode, baseTypeId: detailTypeId, lineValues: lineValuesByLine.get(r.line.id) ?? new Map<number, string>(), headerValues: headerValuesByDoc.get(doc.id) ?? new Map<number, string>() };
+    let ruleFailed = false;
+    for (const target of [{ setting: inventorySetting, apply: (f: any) => (inventoryDetails = { ...inventoryDetails, ...f }) }, { setting: contraSetting, apply: (f: any) => (contraDetails = { ...contraDetails, ...f }) }]) {
+      const picked = ruleIndex.pick(target.setting.id, doc.date, ruleCtx);
+      if (!picked) continue;
+      const applied = applyRule(picked.row, target.setting.account, docValues, detailTypeTitles);
+      if (applied.errors.length) {
+        for (const reason of applied.errors) errors.push({ itemCode: goodsItem.fullCode, itemTitle: goodsItem.title, documentType: docTypeTitle, documentNumber: doc.number, reason });
+        ruleFailed = true;
+      } else {
+        target.apply(applied.fields);
+      }
+    }
+    if (ruleFailed) continue;
 
     if (direction === "IN") {
       lines.push({ accountId: inventorySetting.accountId, ...inventoryDetails, currencyId: baseCurrency.id, debit: amount, credit: 0, fxRate: 1, description });
@@ -388,6 +425,7 @@ router.post("/issue-warehouse-journal-entries/:id(\\d+)/issue", can(`${FORM}.iss
       lines,
       sources: [{ label: "صدور سند حسابداری اسناد انبار", path: "/warehouse-accounting/issue-journal-entries" }],
     });
+    await effSettings.markUsed();
 
     await prisma.$transaction([
       prisma.documentItemAmount.updateMany({

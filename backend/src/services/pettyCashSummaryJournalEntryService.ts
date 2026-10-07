@@ -3,7 +3,9 @@ import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields, resolveCustodianDetailFields } from "../utils/detailValues";
 import { toBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConversion";
 import { resolvePaymentSubjectAccount } from "./paymentSubjectAccount";
+import { markSettingsUsed } from "./goodsAccountingSettingService";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
+import { EffectiveTreasurySettings, findEffectiveTreasurySetting, markTreasurySettingsUsed } from "./treasurySettingService";
 
 // =========================================================================
 // صدور سند حسابداری «خلاصه تنخواه» — اکشن دستی روی سند تاییدشده، هم‌الگوی services/paymentJournalEntryService.ts:
@@ -44,6 +46,8 @@ export async function issuePettyCashSummaryJournalEntry(summaryId: number) {
 
   const description = `بابت خلاصه تنخواه ${summary.number} ${formatJalaliDateForMessage(summary.date)}`.trim();
   const errors: string[] = [];
+  const usedSettingIds = new Set<number>();
+  const usedTreasurySettingIds: number[] = [];
 
   const debitLines: IssueLineInput[] = [];
   let fxResidual = 0;
@@ -51,7 +55,9 @@ export async function issuePettyCashSummaryJournalEntry(summaryId: number) {
 
   for (const [idx, l] of summary.lines.entries()) {
     const n = idx + 1;
-    const resolved = await resolvePaymentSubjectAccount(l.paymentType, { purchaseInvoice: l.purchaseInvoice, salesInvoice: l.salesInvoice });
+    const resolved = await resolvePaymentSubjectAccount(l.paymentType, { purchaseInvoice: l.purchaseInvoice, salesInvoice: l.salesInvoice }, summary.date);
+    if (resolved.settingId) usedSettingIds.add(resolved.settingId);
+    if (resolved.treasurySettingId) usedTreasurySettingIds.push(resolved.treasurySettingId);
     if (resolved.error) {
       errors.push(`ردیف ${n}: ${resolved.error}`);
       continue;
@@ -86,7 +92,7 @@ export async function issuePettyCashSummaryJournalEntry(summaryId: number) {
 
   // ---------- سود و زیان تسعیر: زیان (باقی‌مانده‌ی مثبت) بدهکار، سود (باقی‌مانده‌ی منفی) بستانکار — هم‌علامت با پرداخت ----------
   if (Math.abs(fxResidual) > FX_TOLERANCE) {
-    const fxAccount = (await prisma.treasuryAccountSetting.findFirst({ where: { accountType: "FX_GAIN_LOSS" }, include: { account: true } }))?.account;
+    const fxAccount = (await findEffectiveTreasurySetting({ accountType: "FX_GAIN_LOSS" }, summary.date))?.account;
     if (!fxAccount) throw new Error("حساب «سود و زیان تسعیر ارز» در «تعیین حسابهای معین» تعریف نشده است");
     debitLines.push({
       accountId: fxAccount.id,
@@ -99,7 +105,8 @@ export async function issuePettyCashSummaryJournalEntry(summaryId: number) {
   }
 
   // ---------- بستانکار: یک ردیف واحد روی معین «تنخواه» ----------
-  const pettyCashSetting = await prisma.treasuryAccountSetting.findFirst({ where: { accountType: "PETTY_CASH", pettyCashId: pettyCash.id }, include: { account: true } });
+  const pettyCashSetting = await findEffectiveTreasurySetting({ accountType: "PETTY_CASH", pettyCashId: pettyCash.id }, summary.date);
+  if (pettyCashSetting) usedTreasurySettingIds.push(pettyCashSetting.id);
   if (!pettyCashSetting) throw new Error(`برای تنخواه «${pettyCash.title}»، معین در «تعیین حسابهای معین» (تنخواه) تعریف نشده است`);
   const creditAccount = pettyCashSetting.account;
   // طبق تصمیم صریح کاربر: تفصیلِ معینِ بستانکار از تنخواه‌دارِ انتخاب‌شده‌ی سند تعیین می‌شود — هر سطح تفصیل
@@ -132,6 +139,10 @@ export async function issuePettyCashSummaryJournalEntry(summaryId: number) {
   });
 
   await prisma.pettyCashSummary.update({ where: { id: summaryId }, data: { journalEntryId: entry.id } });
+
+
+  await markTreasurySettingsUsed(usedTreasurySettingIds);
+  await markSettingsUsed([...usedSettingIds]);
   return entry;
 }
 

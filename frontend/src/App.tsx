@@ -93,6 +93,8 @@ import ChequeBookLeaves from "./pages/ChequeBookLeaves";
 import PettyCashes from "./pages/PettyCashes";
 import TaxMemories from "./pages/TaxMemories";
 import TradeLedgers from "./pages/TradeLedgers";
+import WarehouseDocDetails from "./pages/WarehouseDocDetails";
+import DetailRules from "./pages/DetailRules";
 import NumberingPatterns from "./pages/NumberingPatterns";
 import PettyCashCustodians from "./pages/PettyCashCustodians";
 import PettyCashPayments from "./pages/PettyCashPayments";
@@ -403,6 +405,12 @@ export default function App() {
             <Route path="/tax-memories" element={<TaxMemories />} />
             <Route path="/tax-memories/new" element={<TaxMemories />} />
             <Route path="/tax-memories/:id/edit" element={<TaxMemories />} />
+            <Route path="/detail-rules" element={<DetailRules />} />
+            <Route path="/detail-rules/new" element={<DetailRules />} />
+            <Route path="/detail-rules/:id/edit" element={<DetailRules />} />
+            <Route path="/warehouse-doc-details" element={<WarehouseDocDetails />} />
+            <Route path="/warehouse-doc-details/new" element={<WarehouseDocDetails />} />
+            <Route path="/warehouse-doc-details/:id/edit" element={<WarehouseDocDetails />} />
             <Route path="/trade-ledgers" element={<TradeLedgers />} />
             <Route path="/trade-ledgers/new" element={<TradeLedgers />} />
             <Route path="/trade-ledgers/:id/edit" element={<TradeLedgers />} />

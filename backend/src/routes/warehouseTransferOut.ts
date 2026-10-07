@@ -10,6 +10,7 @@ import { AuthedRequest } from "../middleware/auth";
 import { userHasAction, can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmounts, computeUnitCost } from "../services/documentItemAmountService";
+import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
 
 const FORM = findFormPrefix("warehousing-warehouse-transfer-out");
 const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
@@ -179,7 +180,9 @@ router.get("/warehouse-transfer-out/:id", can(`${FORM}.view`), async (req: Authe
   if (!d) return res.status(404).json({ error: "سند حواله انتقالی یافت نشد" });
   const usedBy = await usedByTransferIn(d.lines.map((l: any) => l.id));
   const amountByLineId = await getLineAmounts(d.lines.map((l) => l.id));
+  const extraDetails = await loadDocumentDetails(d.id);
   res.json({
+    details: extraDetails.header,
     id: d.id,
     number: d.number,
     date: d.date,
@@ -205,6 +208,7 @@ router.get("/warehouse-transfer-out/:id", can(`${FORM}.view`), async (req: Authe
       ...((canViewAccounting && d.status === "FINALIZED") ? { unitCost: computeUnitCost(amountByLineId.get(l.id) ?? 0, l.quantity), amount: Number(amountByLineId.get(l.id) ?? 0) } : {}),
       description: l.description,
       ...trackingResponseFields(l),
+      details: extraDetails.byLine.get(l.id) ?? [],
       physicalLocation: l.physicalLocation?.title ?? null,
     })),
   });
@@ -256,6 +260,8 @@ router.post("/warehouse-transfer-out", can(`${FORM}.create`), async (req, res) =
         },
       });
       await applyDocumentEffects(tx, { id: doc.id, documentType: "WAREHOUSE_TRANSFER_OUT", warehouseId: warehouse.id, date }, effectLines);
+
+      await saveDocumentDetails(tx, doc.id, "WAREHOUSE_TRANSFER_OUT", body as any);
       return doc;
     });
 
@@ -333,6 +339,8 @@ router.put("/warehouse-transfer-out/:id", can(`${FORM}.edit`), async (req, res) 
         },
       });
       await applyDocumentEffects(tx, { id, documentType: "WAREHOUSE_TRANSFER_OUT", warehouseId: warehouse.id, date }, newEffectLines);
+
+      await saveDocumentDetails(tx, id, "WAREHOUSE_TRANSFER_OUT", body as any);
       const goodsItemIds = [...oldEffectLines.map((l) => l.goodsItemId), ...newEffectLines.map((l) => l.goodsItemId)];
       await recomputeGoodsItemHasTransactions(goodsItemIds, tx);
       await recomputeWarehouseHasTransactions([existing.warehouseId!, warehouse.id], tx);

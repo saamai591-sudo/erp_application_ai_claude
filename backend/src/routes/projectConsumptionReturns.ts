@@ -11,6 +11,7 @@ import { AuthedRequest } from "../middleware/auth";
 import { userHasAction, can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmounts, computeUnitCost } from "../services/documentItemAmountService";
+import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
 
 const FORM = findFormPrefix("project-consumption-returns");
 const VIEW_ACCOUNTING_PERMISSION = `${FORM}.viewAccounting`;
@@ -195,7 +196,9 @@ router.get("/project-consumption-returns/:id", can(`${FORM}.view`), async (req: 
   });
   if (!d) return res.status(404).json({ error: "سند برگشت مصرف پروژه یافت نشد" });
   const amountByLineId = await getLineAmounts(d.lines.map((l) => l.id));
+  const extraDetails = await loadDocumentDetails(d.id);
   res.json({
+    details: extraDetails.header,
     id: d.id,
     number: d.number,
     date: d.date,
@@ -220,6 +223,7 @@ router.get("/project-consumption-returns/:id", can(`${FORM}.view`), async (req: 
       ...((canViewAccounting && d.status === "FINALIZED") ? { unitCost: computeUnitCost(amountByLineId.get(l.id) ?? 0, l.quantity), amount: Number(amountByLineId.get(l.id) ?? 0) } : {}),
       description: l.description,
       ...trackingResponseFields(l),
+      details: extraDetails.byLine.get(l.id) ?? [],
       physicalLocation: l.physicalLocation?.title ?? null,
     })),
   });
@@ -271,6 +275,8 @@ router.post("/project-consumption-returns", can(`${FORM}.create`), async (req, r
         },
       });
       await applyDocumentEffects(tx, { id: doc.id, documentType: "PROJECT_CONSUMPTION_RETURN", warehouseId: warehouse.id, date }, effectLines);
+
+      await saveDocumentDetails(tx, doc.id, "PROJECT_CONSUMPTION_RETURN", body as any);
       return doc;
     });
 
@@ -339,6 +345,8 @@ router.put("/project-consumption-returns/:id", can(`${FORM}.edit`), async (req, 
         },
       });
       await applyDocumentEffects(tx, { id, documentType: "PROJECT_CONSUMPTION_RETURN", warehouseId: warehouse.id, date }, newEffectLines);
+
+      await saveDocumentDetails(tx, id, "PROJECT_CONSUMPTION_RETURN", body as any);
       const goodsItemIds = [...oldEffectLines.map((l) => l.goodsItemId), ...newEffectLines.map((l) => l.goodsItemId)];
       await recomputeGoodsItemHasTransactions(goodsItemIds, tx);
       await recomputeWarehouseHasTransactions([existing.warehouseId!, warehouse.id], tx);

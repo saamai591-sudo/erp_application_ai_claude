@@ -19,6 +19,8 @@ import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
+import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
+import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 
 // «انتقال بین انبارها» به دو سند مستقل تقسیم شده — این صفحه («حواله انتقالی») فقط طرف ارسال (خروج از
 // انبار مبدا) را پوشش می‌دهد. با قطعی‌کردن این سند، فقط موجودی انبار مبدا کم می‌شود؛ کالا تا زمانی که
@@ -74,6 +76,7 @@ interface DetailLine {
   serialIds: number[];
   batchAllocations: { batchId: number; batchNumber: string; expiryDate: string | null; quantity: number }[];
   physicalLocation: string | null;
+  details?: DetailValueDto[];
 }
 
 interface Detail {
@@ -90,6 +93,7 @@ interface Detail {
   finalizedAt: string | null;
   usedBy: { id: number; number: number }[];
   lines: DetailLine[];
+  details?: DetailValueDto[];
 }
 
 const STATUS_FA: Record<DocStatus, string> = { REGISTERED: "ثبت‌شده", FINALIZED: "تایید انبار شده" };
@@ -184,6 +188,7 @@ interface RowState {
   serialIds: string[];
   batchAllocations: { batchId: string; quantity: string }[];
   physicalLocation: string;
+  details?: DetailValues;
 }
 
 function emptyRow(): RowState {
@@ -207,21 +212,17 @@ function WarehouseTransferOutForm({ editId, basePath }: { editId?: number; baseP
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
 
+  const detailConfig = useDocDetailConfig("WAREHOUSE_TRANSFER_OUT");
   const { header, setHeader, rows, setRows, meta, fiscalPeriod, error, setError, loaded, submit, remove } = useDocumentForm<
-    { date: string; warehouseId: string; destWarehouseId: string; description: string },
+    { date: string; warehouseId: string; destWarehouseId: string; description: string; details: DetailValues },
     RowState,
     Detail
   >({
     endpoint: "warehouse-transfer-out",
     editId,
-    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), warehouseId: "", destWarehouseId: "", description: "" }),
+    emptyHeader: (fp) => ({ date: defaultDocumentDate(fp), warehouseId: "", destWarehouseId: "", description: "", details: {} }),
     emptyRows: () => [emptyRow()],
-    mapDetailToHeader: (d) => ({
-      date: d.date.slice(0, 10),
-      warehouseId: String(d.warehouseId),
-      destWarehouseId: String(d.destWarehouseId),
-      description: d.description || "",
-    }),
+    mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), warehouseId: String(d.warehouseId), destWarehouseId: String(d.destWarehouseId), description: d.description || "", details: detailsToValues(d.details) }),
     mapDetailToRows: (d) =>
       d.lines.map((l) => ({
         goodsItemId: String(l.goodsItemId),
@@ -233,6 +234,7 @@ function WarehouseTransferOutForm({ editId, basePath }: { editId?: number; baseP
         serialIds: l.serialIds.map(String),
         batchAllocations: l.batchAllocations.map((a) => ({ batchId: String(a.batchId), quantity: String(a.quantity) })),
         physicalLocation: l.physicalLocation || "",
+        details: detailsToValues(l.details),
       })),
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle, usedBy: d.usedBy }),
     loadExtra: async () => {
@@ -265,7 +267,7 @@ function WarehouseTransferOutForm({ editId, basePath }: { editId?: number; baseP
   }
 
   function addRow() {
-    setRows((prev) => [...prev, emptyRow()]);
+    setRows((prev) => [...prev, { ...emptyRow(), details: newRowDetails(detailConfig, header.details) }]);
   }
   function removeRow(idx: number) {
     setRows((prev) => prev.filter((_, i) => i !== idx));
@@ -281,7 +283,9 @@ function WarehouseTransferOutForm({ editId, basePath }: { editId?: number; baseP
       warehouseId: Number(header.warehouseId),
       destWarehouseId: Number(header.destWarehouseId),
       description: header.description,
+      details: valuesToPayload(header.details),
       lines: nonEmptyRows.map((r) => ({
+        details: valuesToPayload(r.details),
         goodsItemId: Number(r.goodsItemId),
         unitId: Number(r.unitId),
         quantity: Number(r.quantity) || 0,
@@ -378,6 +382,16 @@ function WarehouseTransferOutForm({ editId, basePath }: { editId?: number; baseP
                 ))}
               </select>
             </div>
+            <DocDetailHeaderFields
+              config={detailConfig}
+              values={header.details}
+              disabled={coreDisabled}
+              onChange={(typeId, code) => {
+                const next = changeHeaderDetail(detailConfig, header, rows, typeId, code);
+                setHeader(next.header);
+                setRows(next.rows);
+              }}
+            />
             <div className="form-field full">
               <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={coreDisabled} />
             </div>
@@ -411,6 +425,7 @@ function WarehouseTransferOutForm({ editId, basePath }: { editId?: number; baseP
                   <th>مقدار</th>
                   {showAmount && <th>فی واحد</th>}
                   {showAmount && <th>مبلغ</th>}
+                  <DocDetailItemHeadCells config={detailConfig} />
                   <th>شرح</th>
                   {!coreDisabled && <th></th>}
                 </tr>
@@ -451,6 +466,7 @@ function WarehouseTransferOutForm({ editId, basePath }: { editId?: number; baseP
                       </td>
                       {showAmount && <td style={{ minWidth: 110, color: "var(--ink-soft)" }}>{formatAmountFa(row.unitCost)}</td>}
                       {showAmount && <td style={{ minWidth: 120, color: "var(--ink-soft)" }}>{formatAmountFa(row.amount)}</td>}
+                      <DocDetailItemCells config={detailConfig} values={row.details} disabled={coreDisabled} onChange={(typeId, code) => updateRow(idx, { details: { ...(row.details ?? {}), [typeId]: code } })} />
                       <td style={{ minWidth: 160 }}>
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} disabled={coreDisabled} />
                       </td>

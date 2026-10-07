@@ -9,6 +9,7 @@ import { RefreshButton } from "./RefreshButton";
 import { NewRecordButton } from "./NewRecordButton";
 import { InfoHint } from "./InfoHint";
 import { FieldHint } from "./FieldHint";
+import { GoodsGroupPicker } from "./GoodsGroupPicker";
 import { RecordPickerField } from "./RecordPicker";
 import { ExcelImportButton } from "./ExcelImport";
 import { api, ApiError } from "../lib/api";
@@ -503,15 +504,13 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
           <div className="form-grid">
             <div className="form-field full">
               <label>{groupLabel}</label>
-              <RecordPickerField
+              <GoodsGroupPicker
                 title={`انتخاب ${groupLabel}`}
                 disabled={!!editId}
-                displayValue={selectedGroup ? `${toFaDigits(fullGroupCode(selectedGroup, groups))} — ${groupBreadcrumb(selectedGroup, groups)}` : ""}
-                rows={leafGroups}
-                columns={[
-                  { header: "کد", render: (g) => toFaDigits(fullGroupCode(g, groups)), filterValue: (g) => fullGroupCode(g, groups), width: "110px" },
-                  { header: "مسیر", render: (g) => groupBreadcrumb(g, groups), filterValue: (g) => groupBreadcrumb(g, groups) },
-                ]}
+                groups={groups}
+                value={form.goodsGroupId}
+                isVisible={(g) => g.isActive && (!g.rootGroupType || g.rootGroupType === wantedGroupType)}
+                selectable={(g) => g.isLastBranch && g.isActive && (!g.rootGroupType || g.rootGroupType === wantedGroupType)}
                 onSelect={(g) => setForm({ ...form, goodsGroupId: String(g.id) })}
               />
             </div>

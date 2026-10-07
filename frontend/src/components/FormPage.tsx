@@ -156,7 +156,7 @@ export function FormPage({
   }
 
   return (
-    <div onInput={handleInput}>
+    <div onInput={handleInput} className={fillHeight ? undefined : "form-page-scroll"}>
       <div className="form-toolbar">
         <div className="form-toolbar-right">
           <button type="button" className="toolbar-icon-btn" onClick={handleClose} title="بستن">

@@ -12,6 +12,8 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
+import { JalaliDatePicker } from "../components/JalaliDatePicker";
+import { formatJalaliDate } from "../lib/formatDate";
 import { toFaDigits } from "../lib/formatAmount";
 import { AccountingGroup } from "./AccountingGroups";
 import { WarehouseGroup } from "./WarehouseGroups";
@@ -121,6 +123,10 @@ interface GoodsServiceAccountingSetting {
   serviceId: number | null;
   service: { id: number; fullCode: string; title: string; accountingTreatment: string | null } | null;
   hasTransactions: boolean;
+  /** رکورد در «قواعد تفصیل» استفاده شده (قفل) */
+  ruleLocked?: boolean;
+  /** تاریخ اجرا (ISO)؛ رکورد مؤثر یک سند = آخرین رکورد هم‌کلید با تاریخ اجرای ≤ تاریخ سند */
+  effectiveDate: string;
 }
 
 interface ServicePick { id: number; fullCode: string; title: string; isActive: boolean; accountingTreatment: string | null }
@@ -182,6 +188,7 @@ function SettingList() {
                 : r.purchaseType?.title || r.salesType?.title || "—",
           },
           { header: "معین", render: (r) => (r.account ? `${r.account.code} - ${r.account.title}` : "—") },
+          { header: "تاریخ اجرا", render: (r) => formatJalaliDate(r.effectiveDate), width: "120px", filterType: "date", filterValue: (r) => (r.effectiveDate || "").slice(0, 10) },
         ]}
         rows={items}
         edit={{ path: (r) => `/goods-service-accounting/${r.id}/edit` }}
@@ -191,7 +198,10 @@ function SettingList() {
   );
 }
 
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
 const DEFAULT_SETTING_FORM = {
+  effectiveDate: todayIso(),
   accountingGroupId: "",
   accountType: "",
   warehouseGroupId: "",
@@ -241,8 +251,9 @@ function SettingForm({ editId }: { editId?: number }) {
     api.get("/goods-service-accounting").then((items: GoodsServiceAccountingSetting[]) => {
       const found = items.find((i) => i.id === editId);
       if (found) {
-        setHasTransactions(found.hasTransactions);
+        setHasTransactions(found.hasTransactions || !!found.ruleLocked);
         setForm({
+          effectiveDate: (found.effectiveDate || "").slice(0, 10),
           accountingGroupId: found.accountingGroupId != null ? String(found.accountingGroupId) : "",
           accountType: found.accountType,
           warehouseGroupId: found.warehouseGroupId ? String(found.warehouseGroupId) : "",
@@ -289,7 +300,9 @@ function SettingForm({ editId }: { editId?: number }) {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!form.effectiveDate) return setError("تاریخ اجرا الزامی است");
     const body = {
+      effectiveDate: form.effectiveDate,
       accountingGroupId: showAccountingGroup ? Number(form.accountingGroupId) : null,
       accountType: form.accountType,
       warehouseGroupId: showWarehouseGroup && form.warehouseGroupId ? Number(form.warehouseGroupId) : null,
@@ -329,7 +342,7 @@ function SettingForm({ editId }: { editId?: number }) {
   return (
     <FormPage
       title={editId ? "ویرایش حسابداری کالا و خدمت" : "حسابداری کالا و خدمت جدید"}
-      description={hasTransactions ? "این تنظیم برای اسناد صادرشده استفاده شده است و قابل ویرایش نیست" : undefined}
+      description={hasTransactions ? "این تنظیم در اسناد صادرشده استفاده شده و قابل ویرایش نیست؛ برای تغییر حساب، رکورد جدید با تاریخ اجرای جدید ثبت کنید" : undefined}
       formId="goods-service-accounting-form"
       closePath="/goods-service-accounting"
       newPath="/goods-service-accounting/new"
@@ -339,6 +352,10 @@ function SettingForm({ editId }: { editId?: number }) {
       <form id="goods-service-accounting-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
         <div className="form-grid">
+          <div className="form-field">
+            <label>تاریخ اجرا<RequiredMark /></label>
+            <JalaliDatePicker value={form.effectiveDate} onChange={(v) => setForm({ ...form, effectiveDate: v })} disabled={hasTransactions} />
+          </div>
           <div className="form-field">
             <label>نوع حساب<RequiredMark /></label>
             <select

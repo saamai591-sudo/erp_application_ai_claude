@@ -1755,3 +1755,11 @@ table.bestfit-measure th, table.bestfit-measure td {
   white-space: nowrap !important; width: auto !important; min-width: 0 !important; max-width: none !important;
   overflow: visible !important; text-overflow: clip !important; position: static !important; transform: none !important;
 }
+
+/* نوار ابزار فرم‌ها هنگام اسکرول صفحه ثابت می‌ماند (مثلاً بعد از ذخیره‌ی اطلاعات حسابداری پایین فرم، «صدور سند» بدون برگشت به بالا در دسترس است).
+   sticky فقط داخل جعبه‌ی والدش کار می‌کند و ریشه‌ی صفحه (.content > div) به‌صورت پیش‌فرض به ارتفاع .content مقید است و محتوا از آن بیرون می‌زند؛
+   پس ریشه‌ی فرم (غیر fillHeight) با flex-shrink:0 به‌اندازه‌ی کل محتوا رشد می‌کند. */
+.content > div.form-page-scroll { flex: 1 0 auto; }
+.form-page-scroll > .form-toolbar { position: sticky; top: -16px; z-index: 20; box-shadow: var(--shadow-sm); }
+/* گریدهای فرم‌های دریافت/پرداخت (چند بخش پشت‌سرهم): حداقل ارتفاع ۲۰۰px کنار گذاشته می‌شود تا بعد از آخرین ردیف فضای خالی نماند */
+.grid-scroll-area.grid-fit { min-height: 0; }
