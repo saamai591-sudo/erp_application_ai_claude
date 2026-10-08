@@ -25,7 +25,7 @@ import { SalesCenter } from "./SalesCenters";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
 import { useVatRates, vatRateForDate } from "../lib/useVatRates";
-import { toBaseCurrencyAmount } from "../lib/currencyConversion";
+import { toBaseCurrencyAmount, roundToCurrencyDecimals } from "../lib/currencyConversion";
 import { Modal } from "../components/Modal";
 import { DescriptionField } from "../components/DescriptionField";
 import type { InvoiceFromDeliveryPrefill } from "../components/DownstreamDialogs";
@@ -71,6 +71,10 @@ interface BasisLine {
   unitPrice: number | null;
   /** تخفیف هر واحد از سند مبنا (همراه فی قفل است) */
   unitDiscount: number | null;
+  /** فقط ردیف حواله‌ی دارای سند مبنا: مبلغ/تخفیف/مقدار فاکتورنشده‌ی ردیف مبنا (ورودی فرمول مبلغ؛ نگاه کنید به deliveryPrice) */
+  baseUninvoicedAmount?: number | null;
+  baseUninvoicedDiscount?: number | null;
+  baseUninvoicedQuantity?: number | null;
 }
 
 function customerTitle(c: CustomerOption): string {
@@ -80,7 +84,7 @@ function customerTitle(c: CustomerOption): string {
 type SalesInvoiceStatus = "DRAFT" | "VOIDED";
 const SALES_INVOICE_STATUS_FA: Record<SalesInvoiceStatus, string> = { DRAFT: "ثبت", VOIDED: "باطل شده" };
 interface ListRow { id: number; number: number; date: string; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: SalesInvoiceStatus; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number; advanceAmount: number }
-interface DetailLine { id: number; basis: Basis; sourceInventoryLineId: number | null; sourceSalesOrderLineId: number | null; sourceSalesQuoteLineId: number | null; source: { documentId: number; documentNumber: number; documentDate: string; remaining: number; priceLocked: boolean } | null; goodsItemKind: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null }
+interface DetailLine { id: number; basis: Basis; sourceInventoryLineId: number | null; sourceSalesOrderLineId: number | null; sourceSalesQuoteLineId: number | null; source: { documentId: number; documentNumber: number; documentDate: string; remaining: number; priceLocked: boolean; baseUninvoiced?: { amount: number; discount: number; quantity: number } | null } | null; goodsItemKind: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null }
 interface Detail extends ListRow { currencyId: number; fxRate: number; description: string | null; journalEntryId: number | null; journalEntryReferenceNumber: number | null; lines: DetailLine[] }
 
 const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", SALES_DELIVERY: "حواله فروش", SALES_ORDER: "سفارش فروش", SALES_QUOTE: "پیش‌فاکتور" };
@@ -200,6 +204,10 @@ interface RowState {
   priceLocked: boolean;
   /** تخفیف هر واحد از سند مبنا (فقط برای ردیف قفل‌شده؛ نمایشیِ آینه‌ی محاسبه‌ی سرور) */
   unitDiscount: string;
+  /** ردیف حواله‌ی دارای سند مبنا: مبلغ/تخفیف/مقدار فاکتورنشده‌ی ردیف مبنا؛ خالی = فرمول قدیمی (سفارش/پیش‌فاکتور) */
+  baseUninvAmount: string;
+  baseUninvDiscount: string;
+  baseUninvQuantity: string;
   goodsItemId: string;
   goodsItemCode: string;
   goodsItemTitle: string;
@@ -214,7 +222,7 @@ interface RowState {
 }
 
 function emptyRow(basis: Basis = "NO_BASIS"): RowState {
-  return { basis, sourceInventoryLineId: "", sourceSalesOrderLineId: "", sourceSalesQuoteLineId: "", docNumber: null, remaining: null, priceLocked: false, unitDiscount: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "" };
+  return { basis, sourceInventoryLineId: "", sourceSalesOrderLineId: "", sourceSalesQuoteLineId: "", docNumber: null, remaining: null, priceLocked: false, unitDiscount: "", baseUninvAmount: "", baseUninvDiscount: "", baseUninvQuantity: "", goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "" };
 }
 
 type PickLine = BasisLine & { id: string };
@@ -301,6 +309,9 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
             remaining: l.source ? l.source.remaining : null,
             priceLocked: !!l.source?.priceLocked,
             unitDiscount: l.source?.priceLocked && Number(l.quantity) > 0 ? String(Number(l.discount || 0) / Number(l.quantity)) : "",
+            baseUninvAmount: l.source?.baseUninvoiced ? String(l.source.baseUninvoiced.amount) : "",
+            baseUninvDiscount: l.source?.baseUninvoiced ? String(l.source.baseUninvoiced.discount) : "",
+            baseUninvQuantity: l.source?.baseUninvoiced ? String(l.source.baseUninvoiced.quantity) : "",
             goodsItemId: String(l.goodsItemId),
             goodsItemCode: l.goodsItemCode,
             goodsItemTitle: l.goodsItemTitle,
@@ -405,12 +416,23 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   function onBasisChange(idx: number, basis: Basis) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...emptyRow(basis), description: r.description } : r)));
   }
+  // فرمول «فراخوانی قیمت از سند مبنای حواله» (آینه‌ی دقیق validateLines در سرور): ابتدا **مبلغ** = گرد(مانده‌ی مبلغ ÷ مانده‌ی مقدار × مقدار) به تعداد اعشار ارز،
+  // سپس **فی** = گرد(مبلغ ÷ مقدار، ۱۰ رقم)؛ تخفیف مثل مبلغ. ورودی‌ها همان سه عددِ ردیف مبنا است که سرور داده است.
+  const currencyDecimals = selectedCurrency?.decimalPlaces ?? baseCurrency?.decimalPlaces ?? 2;
+  function deliveryPrice(baseAmount: number, baseDiscount: number, baseQty: number, qty: number) {
+    const amount = roundToCurrencyDecimals((baseAmount / baseQty) * qty, currencyDecimals);
+    const unitPrice = qty > 0 ? roundToCurrencyDecimals(amount / qty, 10) : 0;
+    const discount = roundToCurrencyDecimals((baseDiscount / baseQty) * qty, currencyDecimals);
+    return { amount, unitPrice, discount };
+  }
   function lineToRow(l: BasisLine): RowState {
-    const price = l.priceLocked && l.unitPrice != null ? l.unitPrice : 0;
-    const amount = l.priceLocked ? Math.round(price * l.remaining * 100) / 100 : 0;
-    // تخفیف همراه فی از سند مبنا می‌آید: تخفیف هر واحد × مقدار (سرور همین را اعمال می‌کند)
+    const fromBase = l.priceLocked && l.baseUninvoicedQuantity != null && l.baseUninvoicedQuantity > 0;
+    const dp = fromBase ? deliveryPrice(l.baseUninvoicedAmount ?? 0, l.baseUninvoicedDiscount ?? 0, l.baseUninvoicedQuantity as number, l.remaining) : null;
+    const price = dp ? dp.unitPrice : l.priceLocked && l.unitPrice != null ? l.unitPrice : 0;
+    const amount = dp ? dp.amount : l.priceLocked ? Math.round(price * l.remaining * 100) / 100 : 0;
+    // تخفیف همراه فی از سند مبنا می‌آید (سفارش/پیش‌فاکتور: تخفیف هر واحد × مقدار؛ حواله: همان فرمول مبلغ)
     const unitDisc = l.priceLocked && l.unitDiscount != null ? l.unitDiscount : 0;
-    const discount = l.priceLocked ? Math.round(unitDisc * l.remaining * 100) / 100 : 0;
+    const discount = dp ? dp.discount : l.priceLocked ? Math.round(unitDisc * l.remaining * 100) / 100 : 0;
     return {
       ...emptyRow(l.basis),
       sourceInventoryLineId: l.sourceInventoryLineId ? String(l.sourceInventoryLineId) : "",
@@ -420,13 +442,16 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
       remaining: l.remaining,
       priceLocked: l.priceLocked,
       unitDiscount: l.priceLocked ? String(unitDisc) : "",
+      baseUninvAmount: fromBase ? String(l.baseUninvoicedAmount ?? 0) : "",
+      baseUninvDiscount: fromBase ? String(l.baseUninvoicedDiscount ?? 0) : "",
+      baseUninvQuantity: fromBase ? String(l.baseUninvoicedQuantity) : "",
       goodsItemId: String(l.goodsItemId),
       goodsItemCode: l.goodsItemCode,
       goodsItemTitle: l.goodsItemTitle,
       unitId: String(l.unitId),
       unitTitle: l.unitTitle,
       quantity: String(l.remaining),
-      unitPrice: l.priceLocked && l.unitPrice != null ? String(price) : "",
+      unitPrice: l.priceLocked && (dp || l.unitPrice != null) ? String(price) : "",
       amount: l.priceLocked ? String(amount) : "",
       discount: l.priceLocked ? String(discount) : "",
       vatAmount: l.priceLocked ? computeSuggestedVat(amount, discount, String(l.goodsItemId)) : "",
@@ -503,6 +528,12 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
 
   function onQuantityChange(idx: number, quantity: string) {
     const row = rows[idx];
+    if (row.priceLocked && row.baseUninvQuantity !== "" && Number(row.baseUninvQuantity) > 0) {
+      // ردیف حواله‌ی دارای سند مبنا: همان فرمول سرور (مبلغ ← فی)
+      const dp = deliveryPrice(Number(row.baseUninvAmount) || 0, Number(row.baseUninvDiscount) || 0, Number(row.baseUninvQuantity), Number(quantity) || 0);
+      updateRow(idx, { quantity, amount: String(dp.amount), unitPrice: String(dp.unitPrice), discount: String(dp.discount), vatAmount: computeSuggestedVat(dp.amount, dp.discount, row.goodsItemId) });
+      return;
+    }
     if (row.unitPrice) {
       const amount = Math.round(Number(row.unitPrice) * (Number(quantity) || 0) * 100) / 100;
       // ردیف دارای مبنا: تخفیف هم با مقدار عوض می‌شود (تخفیف هر واحد × مقدار)

@@ -195,6 +195,8 @@ interface DeliveryBaseInfo {
   kind: "SALES_ORDER" | "SALES_QUOTE";
   currencyId: number;
   currencyTitle: string;
+  /** تعداد ارقام اعشار ارز مبنا (= ارز فاکتور؛ سرور برابری را کنترل می‌کند) */
+  currencyDecimals: number;
   salesTypeId: number;
   salesTypeTitle: string;
   baseAmount: number;
@@ -220,6 +222,7 @@ async function deliveryLineBaseInfo(
       kind: "SALES_ORDER",
       currencyId: info.salesOrder.currencyId,
       currencyTitle: info.salesOrder.currency.title,
+      currencyDecimals: info.salesOrder.currency.decimalPlaces,
       salesTypeId: info.salesOrder.salesTypeId,
       salesTypeTitle: info.salesOrder.salesType.title,
       baseAmount: info.totalAmount,
@@ -237,6 +240,7 @@ async function deliveryLineBaseInfo(
       kind: "SALES_QUOTE",
       currencyId: info.salesQuote.currencyId,
       currencyTitle: info.salesQuote.currency.title,
+      currencyDecimals: info.salesQuote.currency.decimalPlaces,
       salesTypeId: info.salesQuote.salesTypeId,
       salesTypeTitle: info.salesQuote.salesType.title,
       baseAmount: info.totalAmount,
@@ -419,11 +423,11 @@ async function validateLines(
           baseInfoCache.set(baseKey, base);
         }
         if (!(base.uninvoicedQuantity > 0)) throw new Error(`ردیف ${n}: مانده‌ی مقدار فاکتورنشده‌ی سند مبنا صفر یا منفی است`);
-        const unitAmount = base.uninvoicedAmount / base.uninvoicedQuantity;
-        unitPrice = Math.round(unitAmount * 10000) / 10000;
-        amount = Math.round(unitPrice * qty * 100) / 100;
-        const unitDisc = Math.round((base.uninvoicedDiscount / base.uninvoicedQuantity) * 10000) / 10000;
-        computedDiscount = Math.round(unitDisc * qty * 100) / 100;
+        // فرمول «فراخوانی قیمت از سند مبنای حواله»: ابتدا **مبلغ** (به تعداد اعشار ارز)، سپس **فی** از روی مبلغ (همیشه ۱۰ رقم اعشار)؛ تخفیف هم مثل مبلغ
+        const dec = currency.decimalPlaces;
+        amount = roundToCurrencyDecimals((base.uninvoicedAmount / base.uninvoicedQuantity) * qty, dec);
+        unitPrice = qty > 0 ? roundToCurrencyDecimals(amount / qty, 10) : 0;
+        computedDiscount = roundToCurrencyDecimals((base.uninvoicedDiscount / base.uninvoicedQuantity) * qty, dec);
       }
     } else if (basis === "SALES_ORDER") {
       if (!l.sourceSalesOrderLineId) throw new Error(`ردیف ${n}: انتخاب ردیف سفارش فروش الزامی است`);
@@ -547,6 +551,10 @@ interface BasisLineRow {
   unitPrice: number | null;
   /** تخفیف هر واحد از سند مبنا (همراه فی قفل است)؛ null = بدون مبنا */
   unitDiscount: number | null;
+  /** فقط ردیف حواله‌ی دارای سند مبنا: مبلغ/تخفیف/مقدار فاکتورنشده‌ی ردیف مبنا — فرم با همین سه عدد و همان فرمول سرور مبلغ را زنده حساب می‌کند */
+  baseUninvoicedAmount?: number | null;
+  baseUninvoicedDiscount?: number | null;
+  baseUninvoicedQuantity?: number | null;
 }
 
 function round4(n: number) {
@@ -581,8 +589,18 @@ async function basisDocumentLines(type: LineBasis, docId: number, excludeInvoice
         quantity: Number(l.quantity),
         remaining,
         priceLocked: !!base,
-        unitPrice: base && base.uninvoicedQuantity > 0 ? round4(base.uninvoicedAmount / base.uninvoicedQuantity) : null,
-        unitDiscount: base && base.uninvoicedQuantity > 0 ? round4(base.uninvoicedDiscount / base.uninvoicedQuantity) : null,
+        // فی = مبلغِ کلِ مانده ÷ مقدار مانده (۱۰ رقم اعشار)؛ مبلغ و تخفیف به تعداد اعشار ارز (همان فرمول validateLines)
+        unitPrice:
+          base && base.uninvoicedQuantity > 0
+            ? roundToCurrencyDecimals(roundToCurrencyDecimals((base.uninvoicedAmount / base.uninvoicedQuantity) * remaining, base.currencyDecimals) / remaining, 10)
+            : null,
+        unitDiscount:
+          base && base.uninvoicedQuantity > 0
+            ? roundToCurrencyDecimals(roundToCurrencyDecimals((base.uninvoicedDiscount / base.uninvoicedQuantity) * remaining, base.currencyDecimals) / remaining, 10)
+            : null,
+        baseUninvoicedAmount: base ? base.uninvoicedAmount : null,
+        baseUninvoicedDiscount: base ? base.uninvoicedDiscount : null,
+        baseUninvoicedQuantity: base ? base.uninvoicedQuantity : null,
       });
     }
   } else if (type === "SALES_ORDER") {
@@ -803,7 +821,7 @@ router.get("/sales-invoices/:id", can(`${FORM}.view`), async (req, res) => {
     if (l.basis === "SALES_DELIVERY" && l.sourceInventoryLine) {
       const info = await salesDeliveryLineRemaining(l.sourceInventoryLineId, id);
       const base = info ? await deliveryLineBaseInfo(info.line, id) : null;
-      source = { documentId: l.sourceInventoryLine.document.id, documentNumber: l.sourceInventoryLine.document.number, documentDate: l.sourceInventoryLine.document.date, remaining: info?.remaining ?? 0, priceLocked: !!base };
+      source = { documentId: l.sourceInventoryLine.document.id, documentNumber: l.sourceInventoryLine.document.number, documentDate: l.sourceInventoryLine.document.date, remaining: info?.remaining ?? 0, priceLocked: !!base, baseUninvoiced: base ? { amount: base.uninvoicedAmount, discount: base.uninvoicedDiscount, quantity: base.uninvoicedQuantity } : null };
     } else if (l.basis === "SALES_ORDER" && l.sourceSalesOrderLine) {
       const info = await salesOrderLineUninvoiced(l.sourceSalesOrderLineId, id);
       source = { documentId: l.sourceSalesOrderLine.salesOrder.id, documentNumber: l.sourceSalesOrderLine.salesOrder.number, documentDate: l.sourceSalesOrderLine.salesOrder.date, remaining: info?.remainingQty ?? 0, priceLocked: true };
