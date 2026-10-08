@@ -6,6 +6,7 @@
 //  • «فی» هنگام ساخت دوباره از روی مبلغ ردیف محاسبه می‌شود (مبلغ ملاک است): کوچک‌ترین فیِ ≤ ۸ رقم اعشار که trunc(تعداد × فی) دقیقاً برابر مبلغ ردیف شود
 //  • مالیات همان مبلغ ذخیره‌شده‌ی فاکتور است؛ اگر با فرمول سامانه (قطع‌شده) نخواند فقط «هشدار» می‌دهد (قطع کردن مالیات فاز بعد است)
 //  • نوع ۲ را کاربر آگاهانه انتخاب می‌کند (پیش‌فرض نوع ۱)؛ نوع ۲ همیشه نقدی و بدون اطلاعات خریدار است
+//  • inno = سریال ۱۰ رقمی هگز (همان جزء شماره مالیاتی)؛ نمونه‌ی ارسالیِ سیستم سام تایید کرد
 //  • «موضوع ماده ۹» پیش‌فرض «در موعد» است؛ خارج از موعد ⇒ insr = 1 و indati2m = لحظه‌ی ارسال
 
 import { Prisma } from "@prisma/client";
@@ -109,10 +110,17 @@ function buyerPostalCode(p: Buyer): string {
 export async function buildTaxInvoice(
   inv: LoadedSalesInvoice,
   optionsIn: Partial<TaxInvoiceOptions> = {},
-  ctx: { nowMs?: number; /** فهرست: شماره مالیاتیِ پیش‌نمایش ساخته نشود (یک پرس‌وجو کمتر به‌ازای هر فاکتور) */ skipTaxId?: boolean } = {}
+  ctx: {
+    nowMs?: number;
+    /** فهرست: شماره مالیاتیِ پیش‌نمایش ساخته نشود (یک پرس‌وجو کمتر به‌ازای هر فاکتور) */
+    skipTaxId?: boolean;
+    /** ارسال واقعی: سریالِ رزروشده (به‌جای «سریال بعدیِ بدون رزرو» پیش‌نمایش) */
+    serial?: bigint;
+  } = {}
 ): Promise<BuiltTaxInvoice> {
   const nowMs = ctx.nowMs ?? Date.now();
-  const options: TaxInvoiceOptions = { ...DEFAULT_TAX_OPTIONS, ...optionsIn };
+  // مقدارهای undefined پیش‌فرض را بازنویسی نکنند
+  const options = { ...DEFAULT_TAX_OPTIONS, ...Object.fromEntries(Object.entries(optionsIn).filter(([, v]) => v !== undefined)) } as TaxInvoiceOptions;
   const problems: TaxProblem[] = [];
   const err = (scope: TaxProblem["scope"], message: string, extra: Partial<TaxProblem> = {}) => problems.push({ severity: "error", scope, message, ...extra });
   const warn = (scope: TaxProblem["scope"], message: string, extra: Partial<TaxProblem> = {}) => problems.push({ severity: "warning", scope, message, ...extra });
@@ -248,7 +256,8 @@ export async function buildTaxInvoice(
     if (vra === 0 && !vam.isZero()) lerr("نرخ مالیات صفر است ولی مبلغ مالیات صفر نیست", "vam");
     else if (!vam.eq(expectedVam)) lwarn(`مبلغ مالیات فاکتور (${vam.toString()}) با فرمول سامانه — مبلغ بعد از تخفیف × نرخ ÷ ۱۰۰ با قطع (${expectedVam.toString()}) برابر نیست؛ ممکن است رد شود`, "vam");
 
-    const title = (item.title ?? "").trim();
+    // شرح کالا/خدمت (sstt): «عنوان خام» (بدون پیشوند گروه/ویژگی)، مثل سیستم سام
+    const title = (item.rawTitle ?? item.title ?? "").trim();
     if (title.length > 400) lwarn("شرح کالا/خدمت بیش از ۴۰۰ کاراکتر است و کوتاه شد", "sstt");
 
     const tsstam = adis.add(vam);
@@ -277,9 +286,12 @@ export async function buildTaxInvoice(
   meta.totalAmount = sumTsstam.toNumber();
 
   // ── شماره مالیاتی (پیش‌نمایش با سریال بعدیِ بدون رزرو؛ هنگام ارسال سریال واقعی اتمی گرفته می‌شود)
+  let innoHex: string | null = null; // سریال داخلی (inno) = همان جزء ۱۰ رقمی هگز شماره مالیاتی (مطابق نمونه‌ی سیستم سام)
   if (!ctx.skipTaxId && memoryId && TAX_MEMORY_ID_RE.test(memoryId) && indatim > 0) {
     try {
-      meta.taxId = makeTaxId(memoryId, indatim, await peekNextTaxSerial(memory.id));
+      const serial = ctx.serial ?? (await peekNextTaxSerial(memory.id));
+      meta.taxId = makeTaxId(memoryId, indatim, serial);
+      innoHex = serial.toString(16).toUpperCase().padStart(10, "0");
     } catch (e: any) {
       err("header", e.message, { field: "taxid" });
     }
@@ -293,6 +305,7 @@ export async function buildTaxInvoice(
     warn("header", "صورتحساب «موضوع ماده ۹» ارسال می‌شود: تاریخ و زمان ثبت = لحظه‌ی ارسال؛ فقط اگر واقعاً از مهلت مجاز ارسال گذشته باشد انتخاب شود", { field: "insr" });
   }
   header.inty = options.invoiceType;
+  if (innoHex) header.inno = innoHex;
   header.inp = 1;
   header.ins = 1;
   header.tins = tins;

@@ -2,11 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
 import { DataTable } from "../components/DataTable";
 import { InfoHint } from "../components/InfoHint";
+import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { Modal } from "../components/Modal";
 import { RefreshButton } from "../components/RefreshButton";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { api } from "../lib/api";
+import { fetchSelectedFiscalPeriod } from "../lib/fiscalYearDefaultDate";
+import { usePersistedState } from "../lib/usePersistedState";
 import { showError, showToast } from "../lib/toast";
 import { usePermissions } from "../lib/usePermissions";
 
@@ -41,6 +44,22 @@ interface Opt {
   settlementMethod: 1 | 2;
 }
 const DEFAULT_OPT: Opt = { invoiceType: 1, isArticle9: false, settlementMethod: 1 };
+
+/** بازه‌ی پیش‌فرض فیلتر تاریخ فاکتور: از ۱۲ روز قبل از امروز تا امروز، محدود به دوره‌ی مالیِ انتخاب‌شده */
+const DEFAULT_RANGE_DAYS = 12;
+const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function defaultRange(period: { fromDate: string; toDate: string } | null): { from: string; to: string } {
+  const today = new Date();
+  let to = isoLocal(today);
+  const periodFrom = period?.fromDate.slice(0, 10) ?? "";
+  const periodTo = period?.toDate.slice(0, 10) ?? "";
+  if (periodTo && to > periodTo) to = periodTo;
+  const start = new Date(`${to}T12:00:00`);
+  start.setDate(start.getDate() - DEFAULT_RANGE_DAYS);
+  let from = isoLocal(start);
+  if (periodFrom && from < periodFrom) from = periodFrom;
+  return { from, to };
+}
 
 interface SentRow {
   id: number;
@@ -79,12 +98,25 @@ export default function TaxInvoiceSubmission() {
   const [preview, setPreview] = useState<Preview | null>(null);
   /** شماره‌ی آخرین درخواست اعتبارسنجی هر فاکتور؛ پاسخ دیررسیده‌ی قدیمی‌تر نادیده گرفته می‌شود */
   const seq = useRef<Record<number, number>>({});
+  // فیلتر تاریخ فاکتور (مثل وضعیت گرید، با سوییچ بین تب‌ها حفظ می‌شود)؛ تا خواندن دوره مالی null است
+  const [range, setRange] = usePersistedState<{ from: string; to: string } | null>("/tax-invoice-submission:range", null);
 
+  useEffect(() => {
+    if (range) return;
+    fetchSelectedFiscalPeriod().then((p) => setRange(defaultRange(p)), () => setRange(defaultRange(null)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const rangeKey = range ? `${range.from}|${range.to}` : "";
   const load = useCallback(async () => {
+    if (!range) return;
     setLoading(true);
     setError(null);
     try {
-      const [c, s, st] = await Promise.all([api.get("/tax-invoices/candidates"), api.get("/tax-invoices/sent"), api.get("/tax-invoices/status")]);
+      const qs = new URLSearchParams();
+      if (range.from) qs.set("from", range.from);
+      if (range.to) qs.set("to", range.to);
+      const [c, s, st] = await Promise.all([api.get(`/tax-invoices/candidates?${qs}`), api.get("/tax-invoices/sent"), api.get("/tax-invoices/status")]);
       setRows(c);
       setSent(s);
       setTransport(st);
@@ -94,7 +126,8 @@ export default function TaxInvoiceSubmission() {
     } finally {
       setLoading(false);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rangeKey]);
   useEffect(() => {
     load();
   }, [load]);
@@ -127,9 +160,28 @@ export default function TaxInvoiceSubmission() {
     if (transport && !transport.transportReady) return showError(transport.transportMessage || "ارتباط با سامانه مودیان فعال نیست");
     const bad = selected.filter((r) => (live[r.id]?.errorCount ?? r.errorCount) > 0);
     if (bad.length) return showError(`${toFaDigits(String(bad.length))} فاکتور انتخاب‌شده خطای اعتبارسنجی دارد؛ ابتدا آن‌ها را اصلاح کنید`);
+    // ارسال به سامانه مودیان قانونی و غیرقابل برگشت است (اصلاح بعدی فقط با صورتحساب ابطالی/اصلاحی/برگشت از فروش)
+    if (!window.confirm(`${toFaDigits(String(selected.length))} صورتحساب به سامانه مودیان ارسال می‌شود و قابل برگشت نیست. ادامه می‌دهید؟`)) return;
     try {
-      await api.post("/tax-invoices/send", { items: selected.map((r) => ({ salesInvoiceId: r.id, ...optOf(r.id) })) });
-      showToast("ارسال انجام شد");
+      const r: { results: { invoiceNumber: number | null; ok: boolean; message: string }[]; okCount: number; failCount: number } = await api.post(
+        "/tax-invoices/send",
+        { items: selected.map((x) => ({ salesInvoiceId: x.id, ...optOf(x.id) })) },
+        { silent: true }
+      );
+      if (r.okCount) showToast(`${toFaDigits(String(r.okCount))} صورتحساب ارسال شد؛ نتیجه‌ی اعتبارسنجی در تب «ارسال‌شده‌ها» است`);
+      const fails = r.results.filter((x) => !x.ok);
+      if (fails.length) showError(fails.slice(0, 5).map((x) => `فاکتور ${toFaDigits(String(x.invoiceNumber ?? ""))}: ${x.message}`).join("\n"));
+      await load();
+      if (r.okCount) setTab("sent");
+    } catch (e: any) {
+      showError(e.message);
+    }
+  }
+
+  async function refreshStatuses() {
+    try {
+      const r: { checked: number; updated: number } = await api.post("/tax-invoices/refresh", {}, { silent: true });
+      showToast(`${toFaDigits(String(r.checked))} صورتحساب استعلام شد (${toFaDigits(String(r.updated))} به‌روز شد)`);
       await load();
     } catch (e: any) {
       showError(e.message);
@@ -145,9 +197,22 @@ export default function TaxInvoiceSubmission() {
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint
             title="ارسال صورتحساب به سامانه مودیان"
-            text="فاکتورهای فروشِ دوره‌ی مالی جاری که الگوی شماره‌گذاری‌شان «حافظه مالیاتی» دارد. برای هر فاکتور نوع صورتحساب (۱ با خریدار / ۲ بدون خریدار)، «موضوع ماده ۹» (پیش‌فرض: در موعد) و روش تسویه (پیش‌فرض: نقدی) قابل تنظیم است. «پیش‌نمایش» JSON و مشکلات اعتبارسنجی را نشان می‌دهد."
+            text="فاکتورهای فروشِ دوره‌ی مالی جاری که الگوی شماره‌گذاری‌شان «حافظه مالیاتی» دارد و تاریخ‌شان در بازه‌ی «از تاریخ تا تاریخ» است (پیش‌فرض: ۱۲ روز قبل از امروز تا امروز). برای هر فاکتور نوع صورتحساب (۱ با خریدار / ۲ بدون خریدار)، «موضوع ماده ۹» (پیش‌فرض: در موعد) و روش تسویه (پیش‌فرض: نقدی) قابل تنظیم است. «پیش‌نمایش» JSON و مشکلات اعتبارسنجی را نشان می‌دهد."
           />
+          <label style={{ fontSize: 12.5, marginInlineStart: 8 }}>از تاریخ</label>
+          <div style={{ width: 150 }}>
+            <JalaliDatePicker fiscalYear value={range?.from ?? ""} onChange={(v) => setRange({ from: v, to: range?.to ?? "" })} />
+          </div>
+          <label style={{ fontSize: 12.5 }}>تا تاریخ</label>
+          <div style={{ width: 150 }}>
+            <JalaliDatePicker fiscalYear value={range?.to ?? ""} onChange={(v) => setRange({ from: range?.from ?? "", to: v })} />
+          </div>
           <RefreshButton onClick={load} />
+          {tab === "sent" && hasPermission(SEND_PERMISSION) && (
+            <button type="button" className="btn secondary" style={{ padding: "4px 12px", fontSize: 12 }} onClick={refreshStatuses} title="وضعیت صورتحساب‌های «در حال بررسی» را از سامانه می‌پرسد">
+              استعلام وضعیت
+            </button>
+          )}
         </div>
       </div>
       <ErrorToast message={error} />

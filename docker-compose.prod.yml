@@ -36,6 +36,10 @@ services:
       DATABASE_URL: postgresql://erp:${POSTGRES_PASSWORD}@db:5432/accounting_erp?schema=public
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET را در فایل .env تنظیم کنید}
       PORT: 4000
+      # ارسال صورتحساب به سامانه مودیان — پیش‌فرض خاموش (ارسال واقعی قانونی است). نگاه کنید به .env.example
+      TAX_TRANSPORT_ENABLED: ${TAX_TRANSPORT_ENABLED:-false}
+      TAX_API_BASE_URL: ${TAX_API_BASE_URL:-https://tp.tax.gov.ir/req/api/}
+      TAX_API_INSECURE_TLS: ${TAX_API_INSECURE_TLS:-false}
     ports:
       - "4000:4000"
 

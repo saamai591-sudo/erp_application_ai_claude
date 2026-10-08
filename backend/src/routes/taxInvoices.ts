@@ -4,7 +4,8 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { buildTaxInvoice, DEFAULT_TAX_OPTIONS, invoiceTotalForList, loadSalesInvoiceForTax, TAX_INVOICE_INCLUDE, TaxInvoiceOptions } from "../services/taxInvoiceBuilder";
 import { explainTaxCode } from "../services/taxErrorCodes";
-import { getTaxTransport, TAX_TRANSPORT_READY } from "../services/taxTransport";
+import { isTaxTransportEnabled } from "../services/taxTransport";
+import { refreshTaxInvoiceStatuses, sendTaxInvoices } from "../services/taxInvoiceSendService";
 
 // «ارسال صورتحساب به سامانه مودیان» (امور مالیاتی › عملیات) — ساخت/اعتبارسنجی JSON: services/taxInvoiceBuilder.ts، ارتباط با سامانه: services/taxTransport.ts (هنوز غیرفعال)
 
@@ -21,18 +22,25 @@ function parseOptions(body: any): Partial<TaxInvoiceOptions> {
 
 router.get("/status", can(`${FORM}.view`), (_req, res) => {
   res.json({
-    transportReady: TAX_TRANSPORT_READY,
-    transportMessage: TAX_TRANSPORT_READY ? null : "ارتباط با سامانه مودیان هنوز فعال نشده است؛ فعلاً فقط پیش‌نمایش و اعتبارسنجی ممکن است",
+    transportReady: isTaxTransportEnabled(),
+    transportMessage: isTaxTransportEnabled() ? null : "ارتباط با سامانه مودیان فعال نشده است (TAX_TRANSPORT_ENABLED)؛ فعلاً فقط پیش‌نمایش و اعتبارسنجی ممکن است",
     defaults: DEFAULT_TAX_OPTIONS,
   });
 });
 
 // فاکتورهای فروشِ ارسال‌نشده‌ی دوره‌ی مالی جاری که الگوی شماره‌گذاری‌شان حافظه مالیاتی دارد، با خلاصه‌ی اعتبارسنجی (گزینه‌های پیش‌فرض)
+// فیلتر اختیاری تاریخ فاکتور: ?from=YYYY-MM-DD&to=YYYY-MM-DD (هر دو سر شامل)
 router.get("/candidates", can(`${FORM}.view`), async (req, res) => {
   const taxMemoryId = req.query.taxMemoryId ? Number(req.query.taxMemoryId) : undefined;
+  const isoDate = (v: unknown) => (typeof v === "string" && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(v) ? new Date(v) : undefined);
+  const from = isoDate(req.query.from);
+  const to = isoDate(req.query.to);
+  if ((req.query.from && !from) || (req.query.to && !to)) return res.status(400).json({ error: "تاریخ فیلتر نامعتبر است" });
+  if (from && to && from > to) return res.status(400).json({ error: "«از تاریخ» نباید بعد از «تا تاریخ» باشد" });
   const invoices = await prisma.salesInvoice.findMany({
     where: {
       status: { not: "VOIDED" },
+      ...(from || to ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
       numberingPattern: { hasTaxMemory: true, ...(taxMemoryId ? { taxMemoryId } : {}) },
       taxInvoices: { none: { status: { in: ["IN_PROGRESS", "SUCCESS"] } } },
     },
@@ -71,13 +79,25 @@ router.post("/preview", can(`${FORM}.view`), async (req, res) => {
   res.json(built);
 });
 
-// ارسال به سامانه — تا فعال شدن لایه‌ی ارتباط (services/taxTransport.ts) پیام روشن برمی‌گرداند و هیچ چیزی ذخیره/رزرو نمی‌شود
-router.post("/send", can(`${FORM}.send`), async (_req, res) => {
+// ارسال به سامانه (یک‌به‌یک؛ نتیجه‌ی هر فاکتور جدا برمی‌گردد). فقط با TAX_TRANSPORT_ENABLED=true کار می‌کند
+router.post("/send", can(`${FORM}.send`), async (req, res) => {
+  if (!isTaxTransportEnabled()) return res.status(400).json({ error: "ارتباط با سامانه مودیان فعال نشده است (TAX_TRANSPORT_ENABLED)؛ فعلاً فقط پیش‌نمایش و اعتبارسنجی ممکن است" });
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!items.length) return res.status(400).json({ error: "فاکتوری انتخاب نشده است" });
+  const results = await sendTaxInvoices(
+    items.map((i: any) => ({ salesInvoiceId: Number(i.salesInvoiceId), ...parseOptions(i) }))
+  );
+  res.json({ results, okCount: results.filter((r) => r.ok).length, failCount: results.filter((r) => !r.ok).length });
+});
+
+// «استعلام وضعیت»: صورتحساب‌های در حال بررسی (یا ids مشخص) را از سامانه می‌پرسد
+router.post("/refresh", can(`${FORM}.send`), async (req, res) => {
+  if (!isTaxTransportEnabled()) return res.status(400).json({ error: "ارتباط با سامانه مودیان فعال نشده است (TAX_TRANSPORT_ENABLED)" });
   try {
-    getTaxTransport();
-    res.status(501).json({ error: "ارسال پیاده‌سازی نشده است" });
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number) : undefined;
+    res.json(await refreshTaxInvoiceStatuses(ids));
   } catch (e: any) {
-    res.status(400).json({ error: e.message });
+    res.status(400).json({ error: e.message || "خطا در استعلام وضعیت" });
   }
 });
 

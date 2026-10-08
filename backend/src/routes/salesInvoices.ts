@@ -15,6 +15,7 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { EffectiveTreasurySettings } from "../services/treasurySettingService";
+import { assertNotSentToTax } from "../services/taxInvoiceSendService";
 
 const FORM = findFormPrefix("sales-invoices");
 
@@ -946,6 +947,11 @@ router.put("/sales-invoices/:id", can(`${FORM}.edit`), async (req, res) => {
   const body = req.body as HeaderBody;
   const existing = await prisma.salesInvoice.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "یافت نشد" });
+  try {
+    await assertNotSentToTax(id);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
   if (existing.journalEntryId) return res.status(400).json({ error: "برای این فاکتور سند حسابداری صادر شده؛ ابتدا سند حسابداری را حذف کنید" });
   if (existing.status === "VOIDED") return res.status(400).json({ error: "این فاکتور فروش باطل شده است؛ قابل ویرایش نیست" });
   if (!body.date || !body.customerId || !body.salesTypeId || !body.salesCenterId || !body.currencyId) {
@@ -1005,6 +1011,11 @@ router.delete("/sales-invoices/:id", can(`${FORM}.delete`), async (req, res) => 
   const id = Number(req.params.id);
   const d = await prisma.salesInvoice.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
+  try {
+    await assertNotSentToTax(id);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
   if (d.journalEntryId) return res.status(400).json({ error: "برای این فاکتور سند حسابداری صادر شده؛ ابتدا سند حسابداری را حذف کنید" });
   if (d.status === "VOIDED") return res.status(400).json({ error: "این فاکتور فروش باطل شده است؛ قابل حذف نیست" });
   try {
@@ -1030,6 +1041,11 @@ router.post("/sales-invoices/:id/void", can(`${FORM}.void`), async (req, res) =>
   const id = Number(req.params.id);
   const invoice = await prisma.salesInvoice.findUnique({ where: { id } });
   if (!invoice) return res.status(404).json({ error: "فاکتور فروش یافت نشد" });
+  try {
+    await assertNotSentToTax(id);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
   if (invoice.status === "VOIDED") return res.status(400).json({ error: "این فاکتور فروش قبلاً باطل شده است" });
   if (invoice.journalEntryId) return res.status(400).json({ error: "برای این فاکتور سند حسابداری صادر شده است؛ امکان ابطال وجود ندارد" });
 
