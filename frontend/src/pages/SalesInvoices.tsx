@@ -416,7 +416,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   function onBasisChange(idx: number, basis: Basis) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...emptyRow(basis), description: r.description } : r)));
   }
-  // فرمول «فراخوانی قیمت از سند مبنای حواله» (آینه‌ی دقیق validateLines در سرور): ابتدا **مبلغ** = گرد(مانده‌ی مبلغ ÷ مانده‌ی مقدار × مقدار) به تعداد اعشار ارز،
+  // فرمول «فراخوانی قیمت از سند مبنا» برای هر سه مبنا (حواله/سفارش/پیش‌فاکتور؛ آینه‌ی دقیق priceFromBase در سرور): ابتدا **مبلغ** = گرد(مانده‌ی مبلغ ÷ مانده‌ی مقدار × مقدار) به تعداد اعشار ارز،
   // سپس **فی** = گرد(مبلغ ÷ مقدار، ۱۰ رقم)؛ تخفیف مثل مبلغ. ورودی‌ها همان سه عددِ ردیف مبنا است که سرور داده است.
   const currencyDecimals = selectedCurrency?.decimalPlaces ?? baseCurrency?.decimalPlaces ?? 2;
   function deliveryPrice(baseAmount: number, baseDiscount: number, baseQty: number, qty: number) {

@@ -84,10 +84,16 @@ function resolveInvoiceFxRate(currencyId: number, baseCurrencyId: number, bodyFx
   return fxRate;
 }
 
+/**
+ * ردیف‌های فاکتورِ حسابی: فاکتور ابطال‌شده (VOIDED) در هیچ محاسبه‌ی «مانده‌ی فاکتورنشده»ی حواله/سفارش/پیش‌فاکتور (مقدار، مبلغ، تخفیف) نمی‌آید — حواله‌ی ۱۰۰ با
+ * فاکتور ۱۰۰ که ابطال شده، هنوز ۱۰۰ مانده‌ی فاکتورنشده دارد. همه‌ی includeهای salesInvoiceLines در این فایل از همین تعریف استفاده می‌کنند.
+ */
+const ACTIVE_INVOICE_LINES = { where: { salesInvoice: { status: { not: "VOIDED" as const } } } };
+
 async function salesDeliveryLineRemaining(id: number, excludeInvoiceId?: number) {
   const line = await prisma.inventoryDocumentLine.findFirst({
     where: { id, document: { documentType: "SALES_DELIVERY" } },
-    include: { document: true, salesInvoiceLines: true },
+    include: { document: true, salesInvoiceLines: ACTIVE_INVOICE_LINES },
   });
   if (!line) return null;
   const done = line.salesInvoiceLines
@@ -125,8 +131,8 @@ async function salesOrderLineUninvoiced(id: number, excludeInvoiceId?: number) {
     where: { id },
     include: {
       salesOrder: { include: { currency: true, salesType: true } },
-      inventoryLines: { where: { document: { documentType: "SALES_DELIVERY" } }, include: { salesInvoiceLines: true } },
-      salesInvoiceLines: true,
+      inventoryLines: { where: { document: { documentType: "SALES_DELIVERY" } }, include: { salesInvoiceLines: ACTIVE_INVOICE_LINES } },
+      salesInvoiceLines: ACTIVE_INVOICE_LINES,
     },
   });
   if (!line) return null;
@@ -162,8 +168,8 @@ async function salesQuoteLineUninvoiced(id: number, excludeInvoiceId?: number) {
     where: { id },
     include: {
       salesQuote: { include: { currency: true, salesType: true } },
-      inventoryLines: { where: { document: { documentType: "SALES_DELIVERY" } }, include: { salesInvoiceLines: true } },
-      salesInvoiceLines: true,
+      inventoryLines: { where: { document: { documentType: "SALES_DELIVERY" } }, include: { salesInvoiceLines: ACTIVE_INVOICE_LINES } },
+      salesInvoiceLines: ACTIVE_INVOICE_LINES,
     },
   });
   if (!line) return null;
@@ -297,7 +303,7 @@ async function loadDeliveryDoc(id: number) {
         include: {
           goodsItem: true,
           unit: true,
-          salesInvoiceLines: true,
+          salesInvoiceLines: ACTIVE_INVOICE_LINES,
           sourceSalesOrderLine: { include: { salesOrder: { include: { currency: true, salesType: true, salesCenter: true } } } },
           sourceSalesQuoteLine: { include: { salesQuote: { include: { currency: true, salesType: true, salesCenter: true } } } },
         },
@@ -424,10 +430,10 @@ async function validateLines(
         }
         if (!(base.uninvoicedQuantity > 0)) throw new Error(`ردیف ${n}: مانده‌ی مقدار فاکتورنشده‌ی سند مبنا صفر یا منفی است`);
         // فرمول «فراخوانی قیمت از سند مبنای حواله»: ابتدا **مبلغ** (به تعداد اعشار ارز)، سپس **فی** از روی مبلغ (همیشه ۱۰ رقم اعشار)؛ تخفیف هم مثل مبلغ
-        const dec = currency.decimalPlaces;
-        amount = roundToCurrencyDecimals((base.uninvoicedAmount / base.uninvoicedQuantity) * qty, dec);
-        unitPrice = qty > 0 ? roundToCurrencyDecimals(amount / qty, 10) : 0;
-        computedDiscount = roundToCurrencyDecimals((base.uninvoicedDiscount / base.uninvoicedQuantity) * qty, dec);
+        const p = priceFromBase(base.uninvoicedAmount, base.uninvoicedDiscount, base.uninvoicedQuantity, qty, currency.decimalPlaces);
+        amount = p.amount;
+        unitPrice = p.unitPrice;
+        computedDiscount = p.discount;
       }
     } else if (basis === "SALES_ORDER") {
       if (!l.sourceSalesOrderLineId) throw new Error(`ردیف ${n}: انتخاب ردیف سفارش فروش الزامی است`);
@@ -444,9 +450,10 @@ async function validateLines(
       goodsItemId = info.line.goodsItemId;
       unitId = info.line.unitId;
       // فی/مبلغ همیشه از مانده‌ی فاکتورنشده‌ی ردیف سفارش محاسبه می‌شود (مثل مسیر حواله مبتنی بر سفارش)
-      unitPrice = Math.round((info.remainingAmount / info.remainingQty) * 10000) / 10000;
-      amount = Math.round(unitPrice * qty * 100) / 100;
-      computedDiscount = Math.round((Math.round((info.remainingDiscount / info.remainingQty) * 10000) / 10000) * qty * 100) / 100;
+      const p = priceFromBase(info.remainingAmount, info.remainingDiscount, info.remainingQty, qty, currency.decimalPlaces);
+      amount = p.amount;
+      unitPrice = p.unitPrice;
+      computedDiscount = p.discount;
     } else {
       if (!l.sourceSalesQuoteLineId) throw new Error(`ردیف ${n}: انتخاب ردیف پیش‌فاکتور الزامی است`);
       const info = await salesQuoteLineUninvoiced(l.sourceSalesQuoteLineId, excludeInvoiceId);
@@ -462,9 +469,10 @@ async function validateLines(
       sourceSalesQuoteLineId = info.line.id;
       goodsItemId = info.line.goodsItemId;
       unitId = info.line.unitId;
-      unitPrice = Math.round((info.totalAmount / info.totalQty) * 10000) / 10000;
-      amount = Math.round(unitPrice * qty * 100) / 100;
-      computedDiscount = Math.round((Math.round((info.totalDiscount / info.totalQty) * 10000) / 10000) * qty * 100) / 100;
+      const p = priceFromBase(info.totalAmount, info.totalDiscount, info.totalQty, qty, currency.decimalPlaces);
+      amount = p.amount;
+      unitPrice = p.unitPrice;
+      computedDiscount = p.discount;
     }
 
     if (!(unitPrice >= 0)) throw new Error(`فی ردیف ${n} نامعتبر است`);
@@ -557,8 +565,17 @@ interface BasisLineRow {
   baseUninvoicedQuantity?: number | null;
 }
 
-function round4(n: number) {
-  return Math.round(n * 10000) / 10000;
+/**
+ * فرمول مشترک «فراخوانی قیمت از سند مبنا» برای هر سه مبنا (حواله / سفارش فروش / پیش‌فاکتور) — تنها پیاده‌سازی؛ validateLines و انتخابگر هر دو از اینجا می‌خوانند:
+ *   ابتدا **مبلغ** = گرد(مبلغ مبنا ÷ مقدار مبنا × مقدار، به تعداد اعشار ارز)، سپس **فی** = گرد(مبلغ ÷ مقدار، ۱۰ رقم)؛ تخفیف مثل مبلغ.
+ * سه‌تایی مبنا: حواله = مانده‌ی فاکتورنشده‌ی ردیف سفارش/پیش‌فاکتورِ مبنا؛ سفارش = مانده‌ی فاکتورنشده‌ی ردیف سفارش؛ پیش‌فاکتور = کلِ ردیف پیش‌فاکتور (مثل قبل).
+ * فرم فاکتور (SalesInvoices.tsx#deliveryPrice) آینه‌ی همین تابع است.
+ */
+function priceFromBase(baseAmount: number, baseDiscount: number, baseQty: number, qty: number, decimalPlaces: number) {
+  const amount = roundToCurrencyDecimals((baseAmount / baseQty) * qty, decimalPlaces);
+  const unitPrice = qty > 0 ? roundToCurrencyDecimals(amount / qty, 10) : 0;
+  const discount = roundToCurrencyDecimals((baseDiscount / baseQty) * qty, decimalPlaces);
+  return { amount, unitPrice, discount };
 }
 
 /** ردیف‌های قابل صورتحساب (مانده > ۰) یک سند مبنا */
@@ -590,14 +607,8 @@ async function basisDocumentLines(type: LineBasis, docId: number, excludeInvoice
         remaining,
         priceLocked: !!base,
         // فی = مبلغِ کلِ مانده ÷ مقدار مانده (۱۰ رقم اعشار)؛ مبلغ و تخفیف به تعداد اعشار ارز (همان فرمول validateLines)
-        unitPrice:
-          base && base.uninvoicedQuantity > 0
-            ? roundToCurrencyDecimals(roundToCurrencyDecimals((base.uninvoicedAmount / base.uninvoicedQuantity) * remaining, base.currencyDecimals) / remaining, 10)
-            : null,
-        unitDiscount:
-          base && base.uninvoicedQuantity > 0
-            ? roundToCurrencyDecimals(roundToCurrencyDecimals((base.uninvoicedDiscount / base.uninvoicedQuantity) * remaining, base.currencyDecimals) / remaining, 10)
-            : null,
+        unitPrice: base && base.uninvoicedQuantity > 0 ? priceFromBase(base.uninvoicedAmount, base.uninvoicedDiscount, base.uninvoicedQuantity, remaining, base.currencyDecimals).unitPrice : null,
+        unitDiscount: base && base.uninvoicedQuantity > 0 ? roundToCurrencyDecimals(priceFromBase(base.uninvoicedAmount, base.uninvoicedDiscount, base.uninvoicedQuantity, remaining, base.currencyDecimals).discount / remaining, 10) : null,
         baseUninvoicedAmount: base ? base.uninvoicedAmount : null,
         baseUninvoicedDiscount: base ? base.uninvoicedDiscount : null,
         baseUninvoicedQuantity: base ? base.uninvoicedQuantity : null,
@@ -627,8 +638,11 @@ async function basisDocumentLines(type: LineBasis, docId: number, excludeInvoice
         quantity: info.totalQty,
         remaining: info.remainingQty,
         priceLocked: true,
-        unitPrice: round4(info.remainingAmount / info.remainingQty),
-        unitDiscount: round4(info.remainingDiscount / info.remainingQty),
+        unitPrice: priceFromBase(info.remainingAmount, info.remainingDiscount, info.remainingQty, info.remainingQty, info.salesOrder.currency.decimalPlaces).unitPrice,
+        unitDiscount: roundToCurrencyDecimals(priceFromBase(info.remainingAmount, info.remainingDiscount, info.remainingQty, info.remainingQty, info.salesOrder.currency.decimalPlaces).discount / info.remainingQty, 10),
+        baseUninvoicedAmount: info.remainingAmount,
+        baseUninvoicedDiscount: info.remainingDiscount,
+        baseUninvoicedQuantity: info.remainingQty,
       });
     }
   } else if (type === "SALES_QUOTE") {
@@ -657,8 +671,11 @@ async function basisDocumentLines(type: LineBasis, docId: number, excludeInvoice
         quantity: info.totalQty,
         remaining,
         priceLocked: true,
-        unitPrice: round4(info.totalAmount / info.totalQty),
-        unitDiscount: round4(info.totalDiscount / info.totalQty),
+        unitPrice: priceFromBase(info.totalAmount, info.totalDiscount, info.totalQty, remaining, info.salesQuote.currency.decimalPlaces).unitPrice,
+        unitDiscount: roundToCurrencyDecimals(priceFromBase(info.totalAmount, info.totalDiscount, info.totalQty, remaining, info.salesQuote.currency.decimalPlaces).discount / remaining, 10),
+        baseUninvoicedAmount: info.totalAmount,
+        baseUninvoicedDiscount: info.totalDiscount,
+        baseUninvoicedQuantity: info.totalQty,
       });
     }
   }
@@ -824,11 +841,11 @@ router.get("/sales-invoices/:id", can(`${FORM}.view`), async (req, res) => {
       source = { documentId: l.sourceInventoryLine.document.id, documentNumber: l.sourceInventoryLine.document.number, documentDate: l.sourceInventoryLine.document.date, remaining: info?.remaining ?? 0, priceLocked: !!base, baseUninvoiced: base ? { amount: base.uninvoicedAmount, discount: base.uninvoicedDiscount, quantity: base.uninvoicedQuantity } : null };
     } else if (l.basis === "SALES_ORDER" && l.sourceSalesOrderLine) {
       const info = await salesOrderLineUninvoiced(l.sourceSalesOrderLineId, id);
-      source = { documentId: l.sourceSalesOrderLine.salesOrder.id, documentNumber: l.sourceSalesOrderLine.salesOrder.number, documentDate: l.sourceSalesOrderLine.salesOrder.date, remaining: info?.remainingQty ?? 0, priceLocked: true };
+      source = { documentId: l.sourceSalesOrderLine.salesOrder.id, documentNumber: l.sourceSalesOrderLine.salesOrder.number, documentDate: l.sourceSalesOrderLine.salesOrder.date, remaining: info?.remainingQty ?? 0, priceLocked: true, baseUninvoiced: info ? { amount: info.remainingAmount, discount: info.remainingDiscount, quantity: info.remainingQty } : null };
     } else if (l.basis === "SALES_QUOTE" && l.sourceSalesQuoteLine) {
       const info = await salesQuoteLineUninvoiced(l.sourceSalesQuoteLineId, id);
       const remaining = info ? info.remainingQty - (await quoteLineOrderedQty(l.sourceSalesQuoteLineId)) : 0;
-      source = { documentId: l.sourceSalesQuoteLine.salesQuote.id, documentNumber: l.sourceSalesQuoteLine.salesQuote.number, documentDate: l.sourceSalesQuoteLine.salesQuote.date, remaining, priceLocked: true };
+      source = { documentId: l.sourceSalesQuoteLine.salesQuote.id, documentNumber: l.sourceSalesQuoteLine.salesQuote.number, documentDate: l.sourceSalesQuoteLine.salesQuote.date, remaining, priceLocked: true, baseUninvoiced: info ? { amount: info.totalAmount, discount: info.totalDiscount, quantity: info.totalQty } : null };
     }
     lineDtos.push({
       id: l.id,
