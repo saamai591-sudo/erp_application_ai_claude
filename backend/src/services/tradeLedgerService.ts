@@ -83,7 +83,7 @@ export interface TradeLedgerItem {
   credit: string;
 }
 
-/** آیتم‌های دفتر: به‌ازای هر سند تجمیعی و هر حساب کل، جمع گردش بدهکار/بستانکار (کد/عنوان معین خالی). منبع مشترکِ نمایش فرم و خروجی CSV */
+/** آیتم‌های دفتر: به‌ازای هر سند تجمیعی و هر حساب کل، جمع گردش بدهکار و جمع گردش بستانکار در دو ردیف جدا (کد/عنوان معین خالی). منبع مشترکِ نمایش فرم و خروجی CSV */
 export async function getTradeLedgerItems(ledgerId: number): Promise<TradeLedgerItem[]> {
   const links = await prisma.tradeLedgerDocument.findMany({
     where: { tradeLedgerId: ledgerId },
@@ -133,7 +133,10 @@ export async function getTradeLedgerItems(ledgerId: number): Promise<TradeLedger
       .filter((r) => r.debit !== 0 || r.credit !== 0)
       .sort((a, b) => (a.kol.code < b.kol.code ? -1 : a.kol.code > b.kol.code ? 1 : 0));
     for (const r of rows) {
-      items.push({ number: d.number, date: formatJalaliDateForMessage(d.date), kolCode: r.kol.code, kolTitle: r.kol.title, description: "", debit: fmtAmount(r.debit), credit: fmtAmount(r.credit) });
+      // حساب کلی که در یک سند هم بدهکار و هم بستانکار شده در دو ردیف می‌آید (ردیف بدهکار و ردیف بستانکار)؛ خالی از گردش هرگز نمی‌آید
+      const base = { number: d.number, date: formatJalaliDateForMessage(d.date), kolCode: r.kol.code, kolTitle: r.kol.title, description: "" };
+      if (r.debit !== 0) items.push({ ...base, debit: fmtAmount(r.debit), credit: "0" });
+      if (r.credit !== 0) items.push({ ...base, debit: "0", credit: fmtAmount(r.credit) });
     }
   }
   return items;

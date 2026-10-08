@@ -54,19 +54,15 @@ export default function DocumentConfirmation() {
     setLoading(true);
     try {
       const check = await api.post("/document-confirmation/check", { date });
+      // هشدار غیربازدارنده: اسناد «ثبت» بازه مانع تایید نیستند؛ با ادامه‌ی کاربر، آن‌ها هم تایید می‌شوند (بک‌اند همه‌ی اسناد تاییدنشده‌ی بازه را تایید می‌کند)
+      // اسناد بازه پیش از تایید شماره‌گذاری مجدد می‌شوند؛ خودِ شماره‌گذاری در بک‌اند و با همان سرویس مشترک «شماره‌گذاری مجدد» فهرست اسناد انجام می‌شود
+      const parts: string[] = [];
       if (check.draftCount > 0) {
-        const proceed = window.confirm("برخی از اسناد بازه انتخاب شده در حالت ثبت هستند، آیا ادامه می‌دهید؟");
-        if (!proceed) {
-          setLoading(false);
-          return;
-        }
+        parts.push(`در بازه‌ی انتخاب‌شده ${toFaDigits(String(check.draftCount))} سند در وضعیت «بررسی» نیستند (وضعیت ثبت)؛ با ادامه، این اسناد هم تایید می‌شوند.`);
       }
-      // اسناد بازه (وضعیت ثبت/بررسی) پیش از تایید شماره‌گذاری مجدد می‌شوند؛ خودِ شماره‌گذاری در بک‌اند و با همان سرویس مشترک «شماره‌گذاری مجدد» فهرست اسناد انجام می‌شود
-      const proceedRenumber = window.confirm(
-        `اسناد تا این تاریخ شماره‌گذاری مجدد خواهند شد. (${toFaDigits(String(check.totalInRange))} سند در بازه)
-آیا ادامه می‌دهید؟`
-      );
-      if (!proceedRenumber) {
+      parts.push(`اسناد تا این تاریخ شماره‌گذاری مجدد خواهند شد. (${toFaDigits(String(check.totalInRange))} سند در بازه)`);
+      parts.push("آیا ادامه می‌دهید؟");
+      if (!window.confirm(parts.join("\n"))) {
         setLoading(false);
         return;
       }
