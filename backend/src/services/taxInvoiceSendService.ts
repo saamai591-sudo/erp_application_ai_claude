@@ -85,6 +85,7 @@ export async function sendTaxInvoices(items: SendItemInput[]): Promise<SendItemR
       }
       const memory = inv.numberingPattern!.taxMemory!;
       const transport = transportFor(memory); // اگر ارسال خاموش باشد همین‌جا خطا می‌دهد، پیش از رزرو سریال
+      await transport.prepare(); // آدرس/کلید/توکن اشتباه ← خطا پیش از رزرو سریال و ساخت ردیف (هیچ فاکتوری قفل نمی‌شود)
 
       const nowMs = Date.now();
       const created = await prisma.$transaction(async (tx: any) => {

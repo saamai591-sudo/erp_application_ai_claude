@@ -200,6 +200,11 @@ export class TaxTransport {
     if (!this.token || this.token.expiresAt < Date.now()) await this.requestToken();
   }
 
+  /** آماده‌سازی ارتباط (کلید سازمان + توکن) — پیش از رزرو سریال صدا زده می‌شود تا آدرس/احراز هویت اشتباه هیچ سریالی را نسوزاند و فاکتوری را قفل نکند */
+  async prepare(): Promise<void> {
+    await this.ensureReady(true);
+  }
+
   /** ارسال صورتحساب‌ها (غیرهمگام). نتیجه: شماره پیگیری هر uid */
   async sendInvoices(items: { uid: string; invoice: WireInvoice }[]): Promise<PacketResult[]> {
     if (!items.length) return [];
