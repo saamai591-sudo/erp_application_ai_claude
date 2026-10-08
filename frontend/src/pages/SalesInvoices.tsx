@@ -28,6 +28,8 @@ import { useVatRates, vatRateForDate } from "../lib/useVatRates";
 import { toBaseCurrencyAmount } from "../lib/currencyConversion";
 import { Modal } from "../components/Modal";
 import { DescriptionField } from "../components/DescriptionField";
+import type { InvoiceFromDeliveryPrefill } from "../components/DownstreamDialogs";
+import { takeFormPrefill } from "../lib/formPrefill";
 
 // «فاکتور فروش نهایی» — آخرین سند زنجیره فروش. مبنا: بدون مبنا / حواله فروش. برخلاف فاکتور خرید
 // (که هر ردیف رسید انبار خرید را دقیقاً یک‌بار و کامل مصرف می‌کرد)، اینجا طبق تصمیم صریح کاربر رابطه
@@ -474,6 +476,31 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
       return next;
     });
   }
+  // «صدور فاکتور از حواله» (components/DownstreamDialogs.tsx): هدر پر می‌شود و ردیف‌های قابل‌صورتحسابِ همان حواله با **همان انتخابگر ردیف مبنا** (basis-lines +
+  // onBasisLinesPicked) همین فرم می‌نشیند — دقیقاً مثل اینکه کاربر مبنای ردیف را «حواله فروش» بگذارد و همه‌ی ردیف‌های آن حواله را تیک بزند (قیمت/تخفیف مبنا هم
+  // مثل حالت دستی قفل می‌شود). سندی ساخته نمی‌شود؛ ذخیره از همان POST معمولی (با همه‌ی اعتبارسنجی‌ها و الگوی شماره‌گذاری) است.
+  useEffect(() => {
+    if (!loaded || editId) return;
+    const p = takeFormPrefill<InvoiceFromDeliveryPrefill>(location.pathname);
+    if (!p) return;
+    (async () => {
+      setHeader({ date: p.date, customerId: String(p.customerId), salesTypeId: String(p.salesTypeId), salesCenterId: String(p.salesCenterId), currencyId: String(p.currencyId), fxRate: p.fxRate, description: "" });
+      try {
+        const qs = new URLSearchParams({ type: "SALES_DELIVERY", customerId: String(p.customerId), salesTypeId: String(p.salesTypeId), salesCenterId: String(p.salesCenterId), currencyId: String(p.currencyId), date: p.date });
+        const lines: BasisLine[] = await api.get(`/sales-invoices/basis-lines?${qs.toString()}`);
+        const mine = lines.filter((l) => l.documentId === p.deliveryId && l.remaining > 0);
+        if (mine.length === 0) {
+          setError("هیچ ردیف قابل‌صورتحسابی از این حواله باقی نمانده است");
+          return;
+        }
+        onBasisLinesPicked(0, mine);
+      } catch (e: any) {
+        setError(e.message);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+
   function onQuantityChange(idx: number, quantity: string) {
     const row = rows[idx];
     if (row.unitPrice) {

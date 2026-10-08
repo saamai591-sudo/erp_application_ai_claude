@@ -67,6 +67,7 @@ export function FormPage({
   newPath,
   onDelete,
   extraActions,
+  toolbarExtra,
   saveDisabled,
   wide,
   fillHeight,
@@ -84,6 +85,8 @@ export function FormPage({
   onDelete?: () => void | Promise<void>;
   /** عملیات سفارشی دیگر برای منوی کشویی (مثل بررسی/برگشت از بررسی)، بالای گزینه‌ی حذف */
   extraActions?: { label: string; icon?: ReactNode; onClick: () => void | Promise<void> }[];
+  /** عنصر اضافه در نوار ابزار (کنار «جدید»)، مثل آیکن راهبری به سند بعدی (components/DownstreamMenu.tsx) */
+  toolbarExtra?: ReactNode;
   /** اگر true باشد، دکمه‌ی ذخیره غیرفعال می‌شود (مثلاً برای مشاهده‌ی سند در حال بررسی) */
   saveDisabled?: boolean;
   /** برای فرم‌های عریض (مثل سند حسابداری با جدول ردیف‌ها) سقف عرض ۷۲۰ پیکسل حذف می‌شود */
@@ -191,6 +194,7 @@ export function FormPage({
               <PlusIcon />
             </button>
           )}
+          {toolbarExtra}
           {hasMenu && (
             <div className="toolbar-menu-wrap">
               <button type="button" className="toolbar-icon-btn" onClick={() => setMenuOpen((v) => !v)} title="عملیات بیشتر">

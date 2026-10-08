@@ -21,6 +21,9 @@ import { partyDisplayName } from "./Users";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
 import { DescriptionField } from "../components/DescriptionField";
+import { DownstreamMenu } from "../components/DownstreamMenu";
+import { DELIVERY_DOWNSTREAM_ACTIONS, DeliveryFromQuotePrefill } from "../components/DownstreamDialogs";
+import { takeFormPrefill } from "../lib/formPrefill";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 
@@ -370,6 +373,31 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
     updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "", unitTitle: "" });
   }
 
+  // «صدور حواله از پیش‌فاکتور» (components/DownstreamDialogs.tsx): هدر پر می‌شود و ردیف‌های قابل‌تحویل همان پیش‌فاکتور با **همان انتخابگر ردیف مبنا** (onSourceLinesPicked)
+  // همین فرم می‌نشیند — دقیقاً مثل اینکه کاربر مبنای «پیش‌فاکتور» را بگذارد و همه‌ی ردیف‌های آن پیش‌فاکتور را تیک بزند. سندی ساخته نمی‌شود؛ ذخیره از همان POST معمولی است.
+  const location = useLocation();
+  useEffect(() => {
+    if (!loaded || editId) return;
+    const p = takeFormPrefill<DeliveryFromQuotePrefill>(location.pathname);
+    if (!p) return;
+    (async () => {
+      setHeader((h) => ({ ...h, date: p.date, basis: "SALES_QUOTE", warehouseId: String(p.warehouseId), partyId: String(p.partyId) }));
+      try {
+        const params = new URLSearchParams({ destDate: p.date, partyId: String(p.partyId) });
+        const lines: PickableLine[] = await api.get(`/sales-deliveries/pickable-sales-quote-lines?${params.toString()}`);
+        const mine = lines.filter((l) => l.salesQuoteId === p.quoteId);
+        if (mine.length === 0) {
+          setError("هیچ ردیف قابل‌تحویلی از این پیش‌فاکتور باقی نمانده است");
+          return;
+        }
+        onSourceLinesPicked(0, mine);
+      } catch (e: any) {
+        setError(e.message);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+
   function addRow() {
     setRows((prev) => [...prev, { ...emptyRow(), details: newRowDetails(detailConfig, header.details) }]);
   }
@@ -445,6 +473,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
       newPath="/sales-deliveries/new"
       onDelete={editId && !coreDisabled ? handleDelete : undefined}
       saveDisabled={coreDisabled}
+      toolbarExtra={editId ? <DownstreamMenu actions={DELIVERY_DOWNSTREAM_ACTIONS} sourceId={editId} /> : undefined}
       wide
     >
       <form id="sales-delivery-form" onSubmit={onSubmit}>

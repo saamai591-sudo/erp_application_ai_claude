@@ -10,6 +10,8 @@ import { RecordPickerField } from "../components/RecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { ExcelImportButton } from "../components/ExcelImport";
+import { DownstreamMenu } from "../components/DownstreamMenu";
+import { QUOTE_DOWNSTREAM_ACTIONS } from "../components/DownstreamDialogs";
 import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
@@ -367,6 +369,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
       onDelete={editId && status === "DRAFT" ? handleDelete : undefined}
       saveDisabled={locked}
       extraActions={extraActions}
+      toolbarExtra={editId ? <DownstreamMenu actions={QUOTE_DOWNSTREAM_ACTIONS} sourceId={editId} disabledReason={status !== "APPROVED" ? "پیش‌فاکتور تایید نشده است؛ ابتدا آن را تایید کنید" : null} /> : undefined}
       wide
     >
       <form id="sales-quote-form" onSubmit={onSubmit}>

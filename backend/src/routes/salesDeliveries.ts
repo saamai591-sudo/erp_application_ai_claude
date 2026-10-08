@@ -311,14 +311,15 @@ router.get("/sales-deliveries/pickable-sales-order-lines", can(`${FORM}.view`), 
 // پیکر «باقیمانده» پیش‌فاکتور (مبنای «پیش‌فاکتور»)
 // =========================================================================
 
-router.get("/sales-deliveries/pickable-sales-quote-lines", can(`${FORM}.view`), async (req, res) => {
-  const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
-  const customerId = await customerIdOfQueryParty(req);
-  if (!customerId) return res.json([]);
-  const excludeDeliveryId = req.query.excludeDeliveryId ? Number(req.query.excludeDeliveryId) : null;
+/**
+ * ردیف‌های قابل‌تحویلِ پیش‌فاکتورهای تاییدشده‌ی یک مشتری (مانده > ۰، فقط کالا) — تنها پیاده‌سازی؛ هم انتخابگر ردیف مبنای فرم حواله
+ * (pickable-sales-quote-lines) و هم «صدور حواله از پیش‌فاکتور» (from-quote) از همین تابع استفاده می‌کنند تا نتیجه یکی باشد.
+ * quoteId: فقط ردیف‌های همان یک پیش‌فاکتور.
+ */
+async function pickableSalesQuoteLines(customerId: number, destDate: Date | null, excludeDeliveryId: number | null, quoteId?: number) {
   const lines = await prisma.salesQuoteLine.findMany({
     // ردیف خدمت وارد انبار/حواله نمی‌شود — فقط ردیف‌های کالا قابل انتخاب‌اند.
-    where: { goodsItem: { kind: "GOODS" }, salesQuote: { status: "APPROVED", customerId, ...(destDate ? { date: { lte: destDate } } : {}) } },
+    where: { goodsItem: { kind: "GOODS" }, salesQuote: { status: "APPROVED", customerId, ...(destDate ? { date: { lte: destDate } } : {}), ...(quoteId ? { id: quoteId } : {}) } },
     include: {
       salesQuote: { include: { customer: { include: { party: true } } } },
       goodsItem: true,
@@ -357,7 +358,36 @@ router.get("/sales-deliveries/pickable-sales-quote-lines", can(`${FORM}.view`), 
       };
     })
     .filter((r: any) => r.remaining > 0);
-  res.json(result);
+  return result;
+}
+
+router.get("/sales-deliveries/pickable-sales-quote-lines", can(`${FORM}.view`), async (req, res) => {
+  const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
+  const customerId = await customerIdOfQueryParty(req);
+  if (!customerId) return res.json([]);
+  const excludeDeliveryId = req.query.excludeDeliveryId ? Number(req.query.excludeDeliveryId) : null;
+  res.json(await pickableSalesQuoteLines(customerId, destDate, excludeDeliveryId));
+});
+
+// پیش‌بررسی «صدور حواله از پیش‌فاکتور» (راهبری از فرم پیش‌فاکتور): پیش‌فاکتور تایید شده؟ چه ردیف‌های کالایی با مانده‌ی قابل‌تحویل دارد؟ طرف مقابل حواله = مشتریِ
+// پیش‌فاکتور. خودِ حواله اینجا ساخته نمی‌شود؛ فرم حواله با همان انتخابگر ردیف مبنا پر می‌شود و ذخیره از همان POST معمولی می‌گذرد.
+router.get("/sales-deliveries/from-quote/:quoteId", can(`${FORM}.create`), async (req, res) => {
+  const quoteId = Number(req.params.quoteId);
+  const quote = await prisma.salesQuote.findUnique({ where: { id: quoteId }, include: { customer: { include: { party: true } } } });
+  if (!quote) return res.status(404).json({ error: "پیش‌فاکتور یافت نشد" });
+  const party = quote.customer.party;
+  const base = {
+    quoteId: quote.id,
+    number: quote.number,
+    date: quote.date,
+    status: quote.status,
+    partyId: party.id,
+    partyTitle: party.category === "LEGAL" ? party.name : `${party.firstName || ""} ${party.lastName || ""}`.trim(),
+  };
+  if (quote.status !== "APPROVED") return res.json({ ...base, lines: [], reason: "پیش‌فاکتور تایید نشده است؛ ابتدا آن را تایید کنید" });
+  const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
+  const lines = await pickableSalesQuoteLines(quote.customerId, destDate, null, quote.id);
+  res.json({ ...base, lines, reason: lines.length === 0 ? "هیچ ردیف کالایی با مانده‌ی قابل‌تحویل در این پیش‌فاکتور نیست" : null });
 });
 
 // =========================================================================
