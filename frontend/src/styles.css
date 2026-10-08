@@ -961,6 +961,8 @@ fieldset { min-width: 0; }
 .grid-scroll-area {
   max-height: calc(100vh - 300px);
   min-height: 200px;
+  /* پایه: سقف ارتفاع بدون اسکرول یعنی ردیف‌ها از کادر بیرون می‌زنند (گرید «شکسته»)؛ صفحه‌هایی که inline هم می‌دهند همان را override می‌کنند */
+  overflow: auto;
 }
 
 /* ریشه‌ی برگشتی DataTable (شامل نوار عملیات دسته‌جمعی + grid-wrap) باید خودش هم در ستون فرم‌گیرِ صفحه
@@ -1792,3 +1794,6 @@ table.bestfit-measure th, table.bestfit-measure td {
 }
 .tab-ctx-item:hover:not(:disabled) { background: var(--primary-soft); }
 .tab-ctx-item:disabled { color: var(--ink-soft); opacity: .5; cursor: default; }
+
+/* انتخابگرهای داخل سلول گرید (مثلاً نوع/موضوع ماده ۹/تسویه در «ارسال صورتحساب به سامانه مودیان») */
+.grid-inline-select { padding: 2px 6px; font-size: 12px; min-width: 90px; max-width: 100%; }

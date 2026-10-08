@@ -338,7 +338,10 @@ const RAW_MODULES: ModuleGroup[] = [
       },
       {
         title: "عملیات",
-        items: [{ key: "trade-ledgers", label: "دفاتر تجاری", list: "/trade-ledgers", create: "/trade-ledgers/new", icon: "layers" }],
+        items: [
+          { key: "trade-ledgers", label: "دفاتر تجاری", list: "/trade-ledgers", create: "/trade-ledgers/new", icon: "layers" },
+          { key: "tax-invoice-submission", label: "ارسال صورتحساب به سامانه مودیان", list: "/tax-invoice-submission", icon: "file" },
+        ],
       },
     ],
   },

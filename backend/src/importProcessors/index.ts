@@ -441,8 +441,12 @@ export function registerAllImportProcessors() {
         const dupCode = await prisma.unitOfMeasure.findUnique({ where: { code: finalCode } });
         if (dupCode) return { ok: false, error: "کد تکراری است" };
 
+        // کد مالیاتی واحد (اختیاری): فقط رقم، حداکثر ۸ کاراکتر
+        const taxCode = row.taxCode ? toEnglishDigits(row.taxCode).trim() : "";
+        if (taxCode && !/^[0-9]{1,8}$/.test(taxCode)) return { ok: false, error: "شناسه مالیاتی واحد باید حداکثر ۸ رقم باشد" };
+
         await prisma.unitOfMeasure.create({
-          data: { code: finalCode, title: row.title, isWeight, kgEquivalent: isWeight ? Number(row.kgEquivalent) : null },
+          data: { code: finalCode, title: row.title, isWeight, kgEquivalent: isWeight ? Number(row.kgEquivalent) : null, taxCode: taxCode || null },
         });
         return { ok: true };
       } catch (e: any) {
@@ -653,6 +657,10 @@ export function registerAllImportProcessors() {
           taxRate = Number(toEnglishDigits(row.taxRate));
         }
 
+        // شناسه مالیاتی کالا/خدمت (اختیاری): دقیقاً ۱۳ رقم
+        const taxItemId = row.taxItemId ? toEnglishDigits(row.taxItemId).trim() : "";
+        if (taxItemId && !/^[0-9]{13}$/.test(taxItemId)) return { ok: false, error: "شناسه مالیاتی باید دقیقاً ۱۳ رقم باشد" };
+
         // «نحوه حسابداری» فقط برای خدمت (خالی = هزینه)؛ کالا همیشه null
         let accountingTreatment: "EXPENSE" | "INVENTORY_COST" | null = null;
         if (kind === "SERVICE") {
@@ -696,6 +704,7 @@ export function registerAllImportProcessors() {
             accountingGroupId: accountingGroup.id,
             isSpecial,
             taxRate,
+            taxItemId: taxItemId || null,
             accountingTreatment,
             isActive: row.isActive !== "خیر",
             attributeValues: { create: resolvedAttrs.map((a: AttrSelection) => ({ attributeId: a.attributeId, itemId: a.itemId })) },

@@ -4,6 +4,7 @@ import { getAllowedGoodsTypes } from "../data/warehouseDocNatureMatrix";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
+import { toEnglishDigits } from "../utils/digits";
 
 const FORM = findFormPrefix("goods-items");
 
@@ -175,10 +176,21 @@ interface ItemBody {
   accountingGroupId: number;
   isSpecial?: boolean;
   taxRate?: number | null;
+  /** شناسه ۱۳ رقمی مالیاتی کالا/خدمت (سامانه مودیان) — اختیاری */
+  taxItemId?: string | null;
   /** فقط برای خدمت: EXPENSE (هزینه) | INVENTORY_COST (بهای موجودی)؛ اگر نیاید، هنگام ثبت «هزینه» می‌شود */
   accountingTreatment?: "EXPENSE" | "INVENTORY_COST" | null;
   isActive?: boolean;
   attributes?: AttrSelection[];
+}
+
+/** شناسه مالیاتی کالا/خدمت: خالی ⇒ null؛ وگرنه دقیقاً ۱۳ رقم (ارقام فارسی هم پذیرفته می‌شود) */
+function normalizeTaxItemId(v: unknown): string | null {
+  if (v === undefined || v === null) return null;
+  const s = toEnglishDigits(String(v)).trim();
+  if (!s) return null;
+  if (!/^[0-9]{13}$/.test(s)) throw new Error("شناسه مالیاتی باید دقیقاً ۱۳ رقم باشد");
+  return s;
 }
 
 router.post("/goods-items", can(`${FORM}.create`), async (req, res) => {
@@ -211,6 +223,8 @@ router.post("/goods-items", can(`${FORM}.create`), async (req, res) => {
       if (body.taxRate === undefined || body.taxRate === null) return res.status(400).json({ error: "نرخ مالیات الزامی است" });
       taxRate = Number(body.taxRate);
     }
+
+    const taxItemId = normalizeTaxItemId(body.taxItemId);
 
     const reorderControl = body.kind === "GOODS" ? !!body.reorderControl : false;
     let reorderPoint: number | null = null;
@@ -253,6 +267,7 @@ router.post("/goods-items", can(`${FORM}.create`), async (req, res) => {
         accountingGroupId: body.accountingGroupId,
         isSpecial,
         taxRate,
+        taxItemId,
         accountingTreatment,
         isActive: body.isActive ?? true,
         attributeValues: { create: resolvedAttrs.map((a) => ({ attributeId: a.attributeId, itemId: a.itemId })) },
@@ -314,6 +329,9 @@ router.put("/goods-items/:id", can(`${FORM}.edit`), async (req, res) => {
       taxRate = null;
     }
 
+    // undefined = دست‌نخورده؛ خالی = پاک کردن
+    const taxItemId = body.taxItemId === undefined ? undefined : normalizeTaxItemId(body.taxItemId);
+
     // تغییر «نحوه حسابداری» خدمت: اگر در فاکتور خرید خدمات/سایر هزینه‌ها استفاده شده باشد، ردیف‌های قبلی با مقدار جدید ناسازگار می‌شوند؛
     // و «بهای موجودی» نباید تنظیم «خرید خدمت» (معین خرید جداگانه) داشته باشد.
     let accountingTreatment = existing.accountingTreatment;
@@ -371,6 +389,7 @@ router.put("/goods-items/:id", can(`${FORM}.edit`), async (req, res) => {
         accountingGroupId: body.accountingGroupId ?? existing.accountingGroupId,
         isSpecial,
         taxRate,
+        taxItemId,
         accountingTreatment,
         isActive: body.isActive ?? existing.isActive,
         ...(body.attributes !== undefined

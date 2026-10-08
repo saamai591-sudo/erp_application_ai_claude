@@ -844,6 +844,8 @@ model UnitOfMeasure {
   title                      String                      @unique
   isWeight                   Boolean                     @default(false)
   kgEquivalent               Decimal?                    @db.Decimal(18, 6)
+  /// کد واحد در جدول واحدهای اندازه‌گیری سازمان امور مالیاتی (mu)؛ کاربر خودش وارد/اصلاح می‌کند
+  taxCode                    String?
   hasTransactions            Boolean                     @default(false)
   createdAt                  DateTime                    @default(now())
   deliveryAuthorizationLines DeliveryAuthorizationLine[]
@@ -1036,6 +1038,8 @@ model GoodsItem {
   accountingGroupId             Int
   isSpecial                     Boolean                        @default(false)
   taxRate                       Decimal?                       @db.Decimal(9, 4)
+  /// شناسه ۱۳ رقمی کالا/خدمت در سامانه مودیان (sstid، stuffid.tax.gov.ir)؛ هنگام تعریف اختیاری، هنگام ارسال صورتحساب الزامی
+  taxItemId                     String?
   /// «نحوه حسابداری» خدمت (فقط برای kind=SERVICE؛ برای کالا null): هزینه (حساب از تنظیم «خرید خدمت» همان خدمت) یا بهای موجودی (حتماً به رسید انبار وصل می‌شود)
   accountingTreatment           ServiceAccountingTreatment?
   isActive                      Boolean                        @default(true)
@@ -2739,6 +2743,7 @@ model SalesInvoice {
   advanceAllocations     SalesInvoiceAdvanceAllocation[]
   pettyCashPayments      PettyCashPayment[]
   pettyCashSummaryLines  PettyCashSummaryLine[]
+  taxInvoices            TaxInvoice[]
 
   /// الگوی شماره‌گذاری که شماره‌ی این سند را داده (null = شماره‌گذاری قدیمی «آخرین شماره‌ی دوره + ۱»)
   numberingPatternId     Int?
@@ -3814,8 +3819,50 @@ model TaxMemory {
   csrPem              String
   /// iv:authTag:ciphertext (base64) — کلید خصوصی PKCS#8 PEM که با AES-256-GCM رمز شده
   privateKeyEncrypted String
+  /// آخرین سریال صورتحساب این حافظه (جزء ۱۰ رقمی شماره مالیاتی)؛ صعودی و غیرتکراری — هنگام ارسال اتمی افزایش می‌یابد
+  lastSerial          BigInt   @default(0)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+  taxInvoices         TaxInvoice[]
+}
+
+enum TaxInvoiceStatus {
+  IN_PROGRESS
+  SUCCESS
+  FAILED
+  TIMEOUT
+}
+
+/// صورتحساب الکترونیکی ارسال‌شده به سامانه مودیان: عکس ثابتِ JSON ارسالی + نتیجه‌ی استعلام (services/taxInvoiceBuilder.ts می‌سازد)
+model TaxInvoice {
+  id               Int              @id @default(autoincrement())
+  taxMemoryId      Int
+  salesInvoiceId   Int
+  /// موضوع صورتحساب (ins): ۱ اصلی، ۲ اصلاحی، ۳ ابطالی، ۴ برگشت از فروش — فعلاً فقط ۱
+  subject          Int              @default(1)
+  /// نوع صورتحساب (inty): ۱ یا ۲
+  invoiceType      Int
+  /// روش تسویه (setm): ۱ نقدی، ۲ نسیه
+  settlementMethod Int
+  isArticle9       Boolean          @default(false)
+  taxId            String           @unique
+  serial           BigInt
+  /// تاریخ و زمان صدور (indatim) به میلی‌ثانیه‌ی یونیکس
+  issuedAt         BigInt
+  referenceTaxId   String?
+  payload          Json
+  requestTraceId   String           @unique
+  status           TaxInvoiceStatus @default(IN_PROGRESS)
+  referenceNumber  String?
+  errors           Json?
+  warnings         Json?
+  sentAt           DateTime         @default(now())
+  checkedAt        DateTime?
+  taxMemory        TaxMemory        @relation(fields: [taxMemoryId], references: [id])
+  salesInvoice     SalesInvoice     @relation(fields: [salesInvoiceId], references: [id])
+
+  @@unique([taxMemoryId, serial])
+  @@index([salesInvoiceId])
 }
 
 enum NumberingForm {

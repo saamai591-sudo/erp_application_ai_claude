@@ -2,18 +2,28 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { nextSerialNumber } from "../utils/coding";
 import { can } from "../authz/guard";
+import { toEnglishDigits } from "../utils/digits";
 import { findFormPrefix } from "../authz/registry";
 
 const FORM = findFormPrefix("units-of-measure");
 
 const router = Router();
 
+/** کد مالیاتی واحد (mu): خالی ⇒ null؛ وگرنه فقط رقم و حداکثر ۸ کاراکتر */
+function normalizeTaxCode(v: unknown): string | null {
+  if (v === undefined || v === null) return null;
+  const s = toEnglishDigits(String(v)).trim();
+  if (!s) return null;
+  if (!/^[0-9]{1,8}$/.test(s)) throw new Error("شناسه مالیاتی واحد باید حداکثر ۸ رقم باشد");
+  return s;
+}
+
 router.get("/", async (_req, res) => {
   res.json(await prisma.unitOfMeasure.findMany({ orderBy: { code: "asc" } }));
 });
 
 router.post("/", can(`${FORM}.create`), async (req, res) => {
-  const body = req.body as { code?: number; title: string; isWeight?: boolean; kgEquivalent?: number | string | null };
+  const body = req.body as { code?: number; title: string; isWeight?: boolean; kgEquivalent?: number | string | null; taxCode?: string | null };
   if (!body.title) return res.status(400).json({ error: "عنوان الزامی است" });
   const isWeight = !!body.isWeight;
   if (isWeight && (body.kgEquivalent === undefined || body.kgEquivalent === null || body.kgEquivalent === "")) {
@@ -31,6 +41,7 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
         title: body.title,
         isWeight,
         kgEquivalent: isWeight ? Number(body.kgEquivalent) : null,
+        taxCode: normalizeTaxCode(body.taxCode),
       },
     });
     res.status(201).json(created);
@@ -42,7 +53,7 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
 
 router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
-  const body = req.body as { title?: string; isWeight?: boolean; kgEquivalent?: number | string | null };
+  const body = req.body as { title?: string; isWeight?: boolean; kgEquivalent?: number | string | null; taxCode?: string | null };
 
   const unit = await prisma.unitOfMeasure.findUnique({ where: { id } });
   if (!unit) return res.status(404).json({ error: "واحد سنجش یافت نشد" });
@@ -64,6 +75,7 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
         title: body.title,
         isWeight,
         kgEquivalent: isWeight ? Number(body.kgEquivalent) : null,
+        taxCode: body.taxCode === undefined ? undefined : normalizeTaxCode(body.taxCode),
       },
     });
     res.json(updated);

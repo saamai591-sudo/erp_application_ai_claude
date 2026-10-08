@@ -93,6 +93,7 @@ import ChequeBookLeaves from "./pages/ChequeBookLeaves";
 import PettyCashes from "./pages/PettyCashes";
 import TaxMemories from "./pages/TaxMemories";
 import TradeLedgers from "./pages/TradeLedgers";
+import TaxInvoiceSubmission from "./pages/TaxInvoiceSubmission";
 import WarehouseDocDetails from "./pages/WarehouseDocDetails";
 import DetailRules from "./pages/DetailRules";
 import NumberingPatterns from "./pages/NumberingPatterns";
@@ -411,6 +412,7 @@ export default function App() {
             <Route path="/warehouse-doc-details" element={<WarehouseDocDetails />} />
             <Route path="/warehouse-doc-details/new" element={<WarehouseDocDetails />} />
             <Route path="/warehouse-doc-details/:id/edit" element={<WarehouseDocDetails />} />
+            <Route path="/tax-invoice-submission" element={<TaxInvoiceSubmission />} />
             <Route path="/trade-ledgers" element={<TradeLedgers />} />
             <Route path="/trade-ledgers/new" element={<TradeLedgers />} />
             <Route path="/trade-ledgers/:id/edit" element={<TradeLedgers />} />

@@ -173,7 +173,7 @@ function ItemsGrid({ items }: { items: LedgerItem[] }) {
   return (
     <>
       <h4 style={{ margin: "18px 0 8px" }}>آیتم‌ها (قالب خروجی CSV)</h4>
-      <div className="grid-scroll-area" style={{ maxHeight: 420 }}>
+      <div className="card grid-scroll-area" style={{ maxHeight: 420, overflowX: "auto", overflowY: "auto" }}>
         <table className="data-table">
           <thead>
             <tr>

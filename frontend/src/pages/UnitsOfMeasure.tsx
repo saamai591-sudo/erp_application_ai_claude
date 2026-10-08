@@ -14,6 +14,7 @@ import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
+import { digitsOnly } from "../lib/digits";
 
 interface UnitOfMeasure {
   id: number;
@@ -21,6 +22,7 @@ interface UnitOfMeasure {
   title: string;
   isWeight: boolean;
   kgEquivalent: string | null;
+  taxCode: string | null;
   hasTransactions: boolean;
 }
 
@@ -72,6 +74,7 @@ function UnitList() {
               { key: "isWeight", label: "واحد وزنی است؟", hint: "بله / خیر — پیش‌فرض خیر" },
               { key: "kgEquivalent", label: "معادل به کیلوگرم", hint: "اگر «واحد وزنی است؟» بله باشد الزامی است" },
               { key: "code", label: "کد", hint: "اختیاری — اگر خالی بگذارید خودکار صادر می‌شود" },
+              { key: "taxCode", label: "شناسه مالیاتی", hint: "اختیاری — کد واحد در جدول واحدهای اندازه‌گیری سازمان امور مالیاتی" },
             ]}
             onDone={reload}
           />
@@ -85,6 +88,7 @@ function UnitList() {
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
           { header: "واحد وزنی", render: (r) => (r.isWeight ? "بله" : "خیر"), width: "90px" },
           { header: "معادل به کیلوگرم", render: (r) => (r.kgEquivalent ? toFaDigits(r.kgEquivalent) : "—"), width: "130px" },
+          { header: "شناسه مالیاتی", render: (r) => (r.taxCode ? toFaDigits(r.taxCode) : "—"), width: "110px", filterType: "string", filterValue: (r) => r.taxCode ?? "" },
         ]}
         rows={items}
         edit={{ path: (r) => `/units-of-measure/${r.id}/edit` }}
@@ -94,7 +98,7 @@ function UnitList() {
   );
 }
 
-const DEFAULT_UNIT_FORM = { code: "", title: "", isWeight: false, kgEquivalent: "" };
+const DEFAULT_UNIT_FORM = { code: "", title: "", isWeight: false, kgEquivalent: "", taxCode: "" };
 
 function UnitForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
@@ -121,6 +125,7 @@ function UnitForm({ editId }: { editId?: number }) {
           title: found.title,
           isWeight: found.isWeight,
           kgEquivalent: found.kgEquivalent || "",
+          taxCode: found.taxCode || "",
         });
       }
       setLoaded(true);
@@ -136,6 +141,7 @@ function UnitForm({ editId }: { editId?: number }) {
       title: form.title,
       isWeight: form.isWeight,
       kgEquivalent: form.isWeight ? Number(form.kgEquivalent) : null,
+      taxCode: form.taxCode || null,
     };
     try {
       if (editId) {
@@ -191,6 +197,10 @@ function UnitForm({ editId }: { editId?: number }) {
           <div className={`form-field ${form.isWeight ? "" : "form-field-hidden"}`}>
             <label>معادل به کیلوگرم<RequiredMark /></label>
             <input type="number" step="any" value={form.kgEquivalent} onChange={(e) => setForm({ ...form, kgEquivalent: e.target.value })} />
+          </div>
+          <div className="form-field">
+            <label>شناسه مالیاتی <FieldHint label="شناسه مالیاتی" text="اختیاری — کد این واحد در جدول واحدهای اندازه‌گیری سازمان امور مالیاتی (برای ارسال صورتحساب الکترونیکی)" /></label>
+            <input dir="ltr" maxLength={8} value={form.taxCode} onChange={(e) => setForm({ ...form, taxCode: digitsOnly(e.target.value).slice(0, 8) })} />
           </div>
         </div>
       </form>

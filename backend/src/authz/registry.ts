@@ -567,6 +567,12 @@ export const REGISTRY: ModuleDef[] = [
               { key: "download", title: "دانلود CSV" },
             ],
           },
+          {
+            key: "tax-invoice-submission",
+            title: "ارسال صورتحساب به سامانه مودیان",
+            baseActions: ["view"],
+            actions: [{ key: "send", title: "ارسال به سامانه مودیان" }],
+          },
         ],
       },
     ],

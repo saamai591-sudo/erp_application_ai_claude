@@ -101,6 +101,7 @@ interface ItemRow {
   accountingGroupId: number;
   isSpecial: boolean;
   taxRate: string | null;
+  taxItemId: string | null;
   accountingTreatment: "EXPENSE" | "INVENTORY_COST" | null;
   isActive: boolean;
   hasTransactions: boolean;
@@ -259,6 +260,7 @@ export function GoodsItemList({ kind }: { kind: ItemKind }) {
                 : []),
               { key: "isSpecial", label: `${label} خاص`, hint: "بله / خیر" },
               { key: "taxRate", label: "نرخ مالیات", hint: `اگر «${label} خاص» «بله» باشد الزامی است` },
+              { key: "taxItemId", label: "شناسه مالیاتی", hint: "اختیاری — شناسه ۱۳ رقمی کالا/خدمت در سامانه مودیان" },
               { key: "isActive", label: "فعال", hint: "بله / خیر — پیش‌فرض بله" },
             ]}
             onDone={reload}
@@ -304,6 +306,8 @@ const DEFAULT_FORM = {
   accountingGroupId: "",
   isSpecial: false,
   taxRate: "",
+  // شناسه ۱۳ رقمی کالا/خدمت در سامانه مودیان (sstid)
+  taxItemId: "",
   // فقط برای خدمت: هزینه (معین از تنظیم «خرید خدمت» همان خدمت) یا بهای موجودی (حتماً به رسید انبار وصل می‌شود)
   accountingTreatment: "EXPENSE" as "EXPENSE" | "INVENTORY_COST",
   isActive: true,
@@ -373,6 +377,7 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
         accountingGroupId: String(item.accountingGroupId),
         isSpecial: item.isSpecial,
         taxRate: item.taxRate ?? "",
+        taxItemId: item.taxItemId ?? "",
         accountingTreatment: item.accountingTreatment ?? "EXPENSE",
         isActive: item.isActive,
       });
@@ -430,6 +435,7 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
     }
     if (showWeightFields && form.weightUnitId && !form.weightRatio) return setError("نسبت وزنی الزامی است");
     if (form.isSpecial && !form.taxRate) return setError("نرخ مالیات الزامی است");
+    if (form.taxItemId && form.taxItemId.length !== 13) return setError("شناسه مالیاتی باید دقیقاً ۱۳ رقم باشد");
     if (kind === "GOODS" && form.reorderControl && !form.reorderPoint) return setError("مقدار نقطه سفارش الزامی است");
 
     const body: any = {
@@ -445,6 +451,7 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
       accountingGroupId: Number(form.accountingGroupId),
       isSpecial: form.isSpecial,
       taxRate: form.isSpecial ? Number(form.taxRate) : null,
+      taxItemId: form.taxItemId || null,
       isActive: form.isActive,
       attributes: attrRows.map((r) => ({ attributeId: r.attributeId, itemId: Number(r.selectedItemId) })),
     };
@@ -665,6 +672,10 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
             <div className={`form-field ${form.isSpecial ? "" : "form-field-hidden"}`}>
               <label>نرخ مالیات</label>
               <input type="number" step="any" value={form.taxRate} onChange={(e) => setForm({ ...form, taxRate: e.target.value })} />
+            </div>
+            <div className="form-field">
+              <label>شناسه مالیاتی <FieldHint label="شناسه مالیاتی" text={`شناسه ۱۳ رقمی ${label} در سامانه مودیان (stuffid.tax.gov.ir) — برای ارسال صورتحساب الکترونیکی لازم است`} /></label>
+              <input dir="ltr" maxLength={13} value={form.taxItemId} onChange={(e) => setForm({ ...form, taxItemId: digitsOnly(e.target.value).slice(0, 13) })} />
             </div>
             <div className="form-field">
               <label className="checkbox-row">
