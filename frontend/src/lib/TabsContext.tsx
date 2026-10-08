@@ -30,6 +30,8 @@ interface TabsCtx {
   /** اگر force نباشد و تبی فرمِ دارای تغییر ذخیره‌نشده باشد، ابتدا تایید می‌گیرد؛ force وقتی است که فراخوان‌کننده
    * خودش پیش‌تر (مثلاً پیش از ذخیره‌ی تنظیمات) تایید گرفته است. */
   closeAllTabs: (force?: boolean) => void;
+  /** بستن گروهی تب‌ها (منوی راست‌کلیک تب‌ها): اگر بینشان تبی با تغییر ذخیره‌نشده باشد، یک پیام کلی تایید می‌گیرد. activateId: اگر تب فعال بسته شد، به این تب (اگر هنوز باز است) می‌رود. */
+  closeTabs: (ids: string[], opts?: { activateId?: string }) => void;
   /** آیا تبی فرمِ دارای تغییر ذخیره‌نشده باز است؟ */
   hasUnsavedTabs: () => boolean;
   /** ناوبری رکوردهای فرم ویرایشِ تب فعال (اولین/قبلی/بعدی/آخرین) — null وقتی فرم از یک فهرست باز نشده است */
@@ -50,6 +52,11 @@ function nextId() {
 // فرمِ زیرمجموعه به فرم دیگری (ریشه) می‌رود و حالت/داده‌ی فرم عوض می‌شود.
 function pathOnly(path: string): string {
   return path.split("?")[0];
+}
+
+/** تبِ یک فرم با تغییر ذخیره‌نشده؟ (فهرست‌ها و فرم‌های ذخیره‌شده/دست‌نخورده false‌اند) */
+export function isUnsavedFormTab(path: string): boolean {
+  return isFormShapedPath(path) && isTabDirty(path);
 }
 
 function isFormShapedPath(path: string): boolean {
@@ -320,6 +327,33 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     navigate("/");
   }
 
+  function closeTabs(ids: string[], opts?: { activateId?: string }) {
+    const idSet = new Set(ids);
+    const targets = tabs.filter((t) => idSet.has(t.id));
+    if (targets.length === 0) return;
+    if (targets.some((t) => isUnsavedFormTab(t.path)) && !window.confirm("برخی از تب‌ها اطلاعات ذخیره‌نشده دارند و با بستن از دست می‌روند. ادامه می‌دهید؟")) return;
+    // پاک‌سازی هر تب دقیقاً مثل closeTab
+    for (const t of targets) {
+      forgetTabScroll(t.id);
+      recordNavByTab.current.delete(t.id);
+      clearReviewReportCacheForPath(pathOnly(t.path));
+      if (isFormShapedPath(t.path)) clearFormState(t.path);
+    }
+    const next = tabs.filter((t) => !idSet.has(t.id));
+    setTabs(next);
+    if (activeTabId && idSet.has(activeTabId)) {
+      if (next.length === 0) {
+        setActiveTabId(null);
+        navigate("/");
+      } else {
+        const pick = next.find((t) => t.id === opts?.activateId) || next[0];
+        maybeRefreshOnVisit(pick.path);
+        setActiveTabId(pick.id);
+        navigate(pick.path);
+      }
+    }
+  }
+
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const navCtx = activeTab ? recordNavByTab.current.get(activeTab.id) : undefined;
   const navIndex = activeTab && navCtx ? navCtx.paths.indexOf(activeTab.path) : -1;
@@ -338,7 +372,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
       : null;
 
   return (
-    <Ctx.Provider value={{ tabs, activeTabId, refreshNonce, openTab, resetActiveTabToNew, switchTab, closeTab, closeAllTabs, hasUnsavedTabs, recordNav }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ tabs, activeTabId, refreshNonce, openTab, resetActiveTabToNew, switchTab, closeTab, closeAllTabs, closeTabs, hasUnsavedTabs, recordNav }}>{children}</Ctx.Provider>
   );
 }
 
