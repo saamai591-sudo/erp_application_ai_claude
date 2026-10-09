@@ -4322,3 +4322,82 @@ model AccountingSettingUsage {
   @@index([goodsSettingId])
   @@index([treasurySettingId])
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// قالب‌های چاپ (پیش‌فاکتور و بعداً سایر اسناد) و مشخصات شرکت
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PrintDocumentType {
+  SALES_QUOTE
+  SALES_INVOICE
+}
+
+enum PrintPaper {
+  A4
+  A5
+}
+
+enum PrintOrientation {
+  PORTRAIT
+  LANDSCAPE
+}
+
+/// ارقام خروجی چاپ: انگلیسی (0-9) یا فارسی (۰-۹)
+enum PrintDigits {
+  LATIN
+  PERSIAN
+}
+
+/// تصویر قابل‌استفاده در قالب‌های چاپ و مشخصات شرکت (لوگو، مهر و امضا …)؛ داده‌ی خام در دیتابیس
+model PrintAsset {
+  id          Int              @id @default(autoincrement())
+  name        String
+  mimeType    String
+  data        Bytes
+  createdAt   DateTime         @default(now())
+  logoOf      CompanyProfile[] @relation("CompanyLogo")
+  stampOf     CompanyProfile[] @relation("CompanyStamp")
+}
+
+/// مشخصات شرکت — فقط یک رکورد (id=1) در هر نصب؛ در قالب‌های چاپ به‌عنوان «فروشنده» (company.*) در دسترس است
+model CompanyProfile {
+  id                 Int         @id @default(1)
+  name               String
+  economicCode       String?
+  registrationNumber String?
+  nationalId         String?
+  phone              String?
+  address            String?
+  postalCode         String?
+  website            String?
+  logoAssetId        Int?
+  stampAssetId       Int?
+  /// حساب‌های بانکی قابل چاپ: [{ bankName, branch, accountNumber, iban }]
+  bankAccounts       Json        @default("[]")
+  updatedAt          DateTime    @updatedAt
+  logoAsset          PrintAsset? @relation("CompanyLogo", fields: [logoAssetId], references: [id], onDelete: SetNull)
+  stampAsset         PrintAsset? @relation("CompanyStamp", fields: [stampAssetId], references: [id], onDelete: SetNull)
+}
+
+/// قالب چاپ یک نوع سند: HTML/CSS با متغیرهای Handlebars ({{doc.number}}، {{#each lines}} …). برای هر نوع سند حداکثر یک قالب پیش‌فرض
+/// (ایندکس یکتای جزئی در مایگریشن، Prisma نمی‌تواند مدلش کند)
+model PrintTemplate {
+  id           Int               @id @default(autoincrement())
+  documentType PrintDocumentType
+  title        String
+  paper        PrintPaper        @default(A4)
+  orientation  PrintOrientation  @default(PORTRAIT)
+  /// حاشیه‌ی صفحه (میلی‌متر)
+  marginMm     Int               @default(10)
+  /// ارقام پیش‌فرضِ این قالب؛ کاربر هنگام چاپ می‌تواند عوض کند
+  digits       PrintDigits       @default(PERSIAN)
+  html         String
+  /// متن‌های ثابت قابل‌ویرایش قالب (کلید → متن)، در قالب به‌صورت {{t.کلید}}؛ مثل شرایط فروش، محل تحویل، متن watermark
+  texts        Json              @default("{}")
+  isDefault    Boolean           @default(false)
+  isActive     Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @default(now()) @updatedAt
+
+  @@unique([documentType, title])
+}

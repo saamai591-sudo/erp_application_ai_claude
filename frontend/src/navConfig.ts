@@ -31,6 +31,8 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "rates", label: "نرخ ارز", list: "/exchange-rates", create: "/exchange-rates/new", icon: "trend" },
           { key: "periods", label: "دوره مالی", list: "/fiscal-periods", create: "/fiscal-periods/new", icon: "calendar" },
           { key: "numbering-patterns", label: "الگوی شماره‌گذاری", list: "/numbering-patterns", create: "/numbering-patterns/new", icon: "tag" },
+          { key: "company-profile", label: "مشخصات شرکت", list: "/company-profile", icon: "tag" },
+          { key: "print-templates", label: "قالب‌های چاپ", list: "/print-templates", create: "/print-templates/new", icon: "file" },
           { key: "scheduled-jobs", label: "کارهای زمان‌بندی‌شده", list: "/scheduled-jobs", icon: "calendar" },
         ],
       },

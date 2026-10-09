@@ -11,6 +11,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { ExcelImportButton } from "../components/ExcelImport";
 import { DownstreamMenu } from "../components/DownstreamMenu";
+import { PrintButton } from "../components/PrintButton";
 import { QUOTE_DOWNSTREAM_ACTIONS } from "../components/DownstreamDialogs";
 import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
@@ -369,7 +370,12 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
       onDelete={editId && status === "DRAFT" ? handleDelete : undefined}
       saveDisabled={locked}
       extraActions={extraActions}
-      toolbarExtra={editId ? <DownstreamMenu actions={QUOTE_DOWNSTREAM_ACTIONS} sourceId={editId} disabledReason={status !== "APPROVED" ? "پیش‌فاکتور تایید نشده است؛ ابتدا آن را تایید کنید" : null} /> : undefined}
+      toolbarExtra={editId ? (
+        <>
+          <PrintButton docType="SALES_QUOTE" sourceId={editId} title="چاپ پیش‌فاکتور" />
+          <DownstreamMenu actions={QUOTE_DOWNSTREAM_ACTIONS} sourceId={editId} disabledReason={status !== "APPROVED" ? "پیش‌فاکتور تایید نشده است؛ ابتدا آن را تایید کنید" : null} />
+        </>
+      ) : undefined}
       wide
     >
       <form id="sales-quote-form" onSubmit={onSubmit}>

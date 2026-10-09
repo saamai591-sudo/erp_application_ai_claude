@@ -110,6 +110,8 @@ export const REGISTRY: ModuleDef[] = [
           { key: "rates", title: "نرخ ارز", baseActions: ["view", "create", "delete"] },
           { key: "periods", title: "دوره مالی", baseActions: CRUD },
           { key: "numbering-patterns", title: "الگوی شماره‌گذاری", baseActions: CRUD },
+          { key: "company-profile", title: "مشخصات شرکت", baseActions: ["view", "edit"] },
+          { key: "print-templates", title: "قالب‌های چاپ", baseActions: CRUD },
           {
             key: "scheduled-jobs",
             title: "کارهای زمان‌بندی‌شده",

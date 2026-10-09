@@ -4,6 +4,7 @@ import { showError, showToast } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
+import { PrintButton } from "../components/PrintButton";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
 import { RecordPickerField, PickerColumn } from "../components/RecordPicker";
@@ -728,6 +729,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
       onDelete={editId && !locked ? handleDelete : undefined}
       saveDisabled={locked}
       extraActions={extraActions}
+      toolbarExtra={editId ? <PrintButton docType="SALES_INVOICE" sourceId={editId} title="چاپ فاکتور فروش" /> : undefined}
       wide
     >
       <form id="sales-invoice-form" onSubmit={onSubmit}>
