@@ -125,11 +125,12 @@ router.get("/accounts", async (_req, res) => {
 });
 
 router.post("/accounts", can(`${BANK_ACCOUNTS}.create`), async (req, res) => {
-  const { accountTypeId, bankBranchId, accountNumber, currencyId } = req.body as {
+  const { accountTypeId, bankBranchId, accountNumber, currencyId, isActive } = req.body as {
     accountTypeId: number;
     bankBranchId: number;
     accountNumber: string;
     currencyId?: number;
+    isActive?: boolean;
   };
   if (!accountTypeId || !bankBranchId || !accountNumber) {
     return res.status(400).json({ error: "نوع حساب، شعبه بانک و شماره حساب الزامی است" });
@@ -158,6 +159,7 @@ router.post("/accounts", can(`${BANK_ACCOUNTS}.create`), async (req, res) => {
       accountNumber,
       currencyId: finalCurrencyId,
       bankPartyId: branch.bankPartyId,
+      isActive: isActive !== false,
     },
   });
   await registerDetailCode(code, detailTypeId, "BankAccount", created.id);
@@ -166,10 +168,11 @@ router.post("/accounts", can(`${BANK_ACCOUNTS}.create`), async (req, res) => {
 
 router.put("/accounts/:id", can(`${BANK_ACCOUNTS}.edit`), async (req, res) => {
   const id = Number(req.params.id);
-  const { accountTypeId, accountNumber, currencyId } = req.body as {
+  const { accountTypeId, accountNumber, currencyId, isActive } = req.body as {
     accountTypeId?: number;
     accountNumber?: string;
     currencyId?: number;
+    isActive?: boolean;
   };
 
   const account = await prisma.bankAccount.findUnique({ where: { id } });
@@ -184,7 +187,7 @@ router.put("/accounts/:id", can(`${BANK_ACCOUNTS}.edit`), async (req, res) => {
 
   const updated = await prisma.bankAccount.update({
     where: { id },
-    data: { accountTypeId, accountNumber, currencyId },
+    data: { accountTypeId, accountNumber, currencyId, ...(typeof isActive === "boolean" ? { isActive } : {}) },
   });
   res.json(updated);
 });

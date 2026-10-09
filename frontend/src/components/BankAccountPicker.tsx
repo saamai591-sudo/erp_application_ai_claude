@@ -12,6 +12,8 @@ export interface BankAccountRow {
   id: number;
   detailCode: string;
   detailTitle: string;
+  /** حساب غیرفعال برای انتخاب تازه نمایش داده نمی‌شود (مگر مقدار فعلیِ همین فیلد باشد) */
+  isActive?: boolean;
 }
 
 export function bankAccountLabel(a: { detailCode: string; detailTitle: string }): string {
@@ -53,7 +55,9 @@ export function BankAccountPicker<T extends BankAccountRow>({
   }, [accounts]);
 
   const all = accounts ?? loaded;
-  const rows = filter ? all.filter(filter) : all;
+  // حساب بانکیِ غیرفعال فقط وقتی دیده می‌شود که مقدار فعلیِ همین فیلد باشد (اسناد قبلی بدون تغییر نمایش داده می‌شوند، انتخاب تازه ممکن نیست)
+  const activeOnly = all.filter((a) => a.isActive !== false || String(a.id) === value);
+  const rows = filter ? activeOnly.filter(filter) : activeOnly;
   const selected = value ? all.find((a) => String(a.id) === value) : undefined;
 
   return (

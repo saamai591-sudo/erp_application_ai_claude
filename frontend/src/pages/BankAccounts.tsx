@@ -10,6 +10,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { FieldHint } from "../components/FieldHint";
 import { ExcelImportButton } from "../components/ExcelImport";
 import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
@@ -22,6 +23,7 @@ interface Account {
   accountNumber: string;
   accountTypeId?: number;
   bankBranchId?: number;
+  isActive?: boolean;
   accountType: AccountType;
   bankBranch: Branch;
 }
@@ -89,6 +91,7 @@ function AccountList() {
           { header: "نوع حساب", render: (r) => r.accountType?.title, filterType: "string", filterValue: (r) => r.accountType?.title },
           { header: "شعبه", render: (r) => r.bankBranch?.title, filterType: "string", filterValue: (r) => r.bankBranch?.title },
           { header: "شماره حساب", render: (r) => r.accountNumber, filterType: "string", filterValue: (r) => r.accountNumber },
+          { header: "فعال", render: (r) => (r.isActive === false ? "خیر" : "بله"), width: "80px", filterType: "string", filterValue: (r) => (r.isActive === false ? "خیر" : "بله") },
         ]}
         rows={accounts}
         edit={{ path: (r) => `/bank-accounts/${r.id}/edit` }}
@@ -104,7 +107,7 @@ function AccountForm({ editId }: { editId?: number }) {
   const cacheKey = `form:${location.pathname}:form`;
   const [types, setTypes] = useState<AccountType[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [form, setForm] = usePersistedState(cacheKey, { accountTypeId: "", bankBranchId: "", accountNumber: "" });
+  const [form, setForm] = usePersistedState(cacheKey, { accountTypeId: "", bankBranchId: "", accountNumber: "", isActive: true });
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const { flash } = useSavedFlash();
@@ -123,6 +126,7 @@ function AccountForm({ editId }: { editId?: number }) {
           accountTypeId: String(found.accountTypeId ?? found.accountType?.id ?? ""),
           bankBranchId: String(found.bankBranchId ?? found.bankBranch?.id ?? ""),
           accountNumber: found.accountNumber,
+          isActive: found.isActive !== false,
         });
       }
       setLoaded(true);
@@ -138,6 +142,7 @@ function AccountForm({ editId }: { editId?: number }) {
         await api.put(`/banking/accounts/${editId}`, {
           accountTypeId: Number(form.accountTypeId),
           accountNumber: form.accountNumber,
+          isActive: form.isActive,
         });
         flash();
       } else {
@@ -145,6 +150,7 @@ function AccountForm({ editId }: { editId?: number }) {
           accountTypeId: Number(form.accountTypeId),
           bankBranchId: Number(form.bankBranchId),
           accountNumber: form.accountNumber,
+          isActive: form.isActive,
         });
         flash();
         navigate(`/bank-accounts/${created.id}/edit`);
@@ -194,6 +200,13 @@ function AccountForm({ editId }: { editId?: number }) {
           <div className="form-field full">
             <label>شماره حساب<RequiredMark /></label>
             <input dir="ltr" value={form.accountNumber} onChange={(e) => setForm({ ...form, accountNumber: e.target.value })} />
+          </div>
+          <div className="form-field">
+            <label className="checkbox-row">
+              <input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} />
+              فعال
+              <FieldHint label="فعال" text="حساب بانکیِ غیرفعال (و تفصیل مرتبط با آن) در انتخابگرها نمایش داده نمی‌شود؛ اسناد قبلی دست‌نخورده می‌مانند" />
+            </label>
           </div>
         </div>
       </form>

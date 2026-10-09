@@ -100,7 +100,10 @@ const DETAIL_SORT_FIELD_MAP: Record<string, string> = {
   "جمع بستانکار": "totalCredit",
 };
 
-const DEFAULT_DETAIL_QUERY: DetailQueryState = { page: 1, pageSize: 25, sort: null, filters: {} };
+// مرتب‌سازی پیش‌فرض همه‌ی تب‌ها به‌جز «گردش»: بر اساس «کد» صعودی (کاربر می‌تواند ستون دیگری را مرتب کند)
+const CODE_SORT: { header: string; dir: "asc" | "desc" } = { header: "کد", dir: "asc" };
+
+const DEFAULT_DETAIL_QUERY: DetailQueryState = { page: 1, pageSize: 25, sort: CODE_SORT, filters: {} };
 
 // ستون‌های تب «گردش» — دقیقاً هم‌الگوی balanceColumns/detailBalanceColumns بالا، حالا از طریق
 // SelectableBalanceTable (به‌جای <table> دستی قبلی) رندر می‌شوند. کلیدها (field) باید دقیقاً با
@@ -423,15 +426,14 @@ export default function AccountsReview() {
 
   function resetAll() {
     setReloadNonce((n) => n + 1);
-    chain.reset();
     setTabData({});
-    tabView.reset();
-    setDetailQuery({});
+    // فیلتر/مرتب‌سازیِ تب‌های تفصیل می‌ماند؛ فقط صفحه به ۱ برمی‌گردد (تعداد ردیف‌های بازه‌ی جدید فرق دارد)
+    setDetailQuery((prev) => Object.fromEntries(Object.entries(prev).map(([k, q]) => [k, { ...q, page: 1 }])));
     setDetailTotal({});
     setLedgerPage(1);
     tabLoader.resetLoaded();
-    // تب فعال عمداً تغییر نمی‌کند: تغییر تاریخ/فیلتر پیشرفته (و رفرش) باید روی همان تبی که کاربر در آن است بماند و داده‌ی همان تب
-    // دوباره بارگذاری شود (reloadNonce)؛ فقط «حذف همه فیلترها» (clearFilters) به اولین تب برمی‌گردد.
+    // تغییر تاریخ/فیلتر پیشرفته فقط داده را باطل می‌کند (reloadNonce)؛ انتخاب‌های زنجیره‌ای، فیلتر/مرتب‌سازی گریدها و تب فعال می‌مانند
+    // و داده‌ی همان تب دوباره بارگذاری می‌شود. فقط «حذف همه فیلترها» (clearFilters) همه را پاک می‌کند و به اولین تب برمی‌گردد.
   }
 
   /** دکمه‌ی «حذف همه فیلترها» — طبق اصلاح صریح کاربر (۱۴۰۵/۰۶/۱۹): انتخاب یک ردیف در یک تب (که فیلتر
@@ -504,11 +506,11 @@ export default function AccountsReview() {
         <div style={{ display: "flex", alignItems: "flex-end", gap: 14 }}>
           <div className="form-field-inline">
             <label>از تاریخ</label>
-            <JalaliDatePicker value={filters.fromDate} onChange={(v) => { setFilters((p) => ({ ...p, fromDate: v })); resetAll(); }} />
+            <JalaliDatePicker value={filters.fromDate} onChange={(v) => { if (v === filters.fromDate) return; setFilters((p) => ({ ...p, fromDate: v })); resetAll(); }} />
           </div>
           <div className="form-field-inline">
             <label>تا تاریخ</label>
-            <JalaliDatePicker value={filters.toDate} onChange={(v) => { setFilters((p) => ({ ...p, toDate: v })); resetAll(); }} />
+            <JalaliDatePicker value={filters.toDate} onChange={(v) => { if (v === filters.toDate) return; setFilters((p) => ({ ...p, toDate: v })); resetAll(); }} />
           </div>
           <span style={{ flex: 1 }} />
           <AdvancedFilterButton count={extraFilterCount} onClick={openAdvancedFilters} />
@@ -569,7 +571,7 @@ export default function AccountsReview() {
           onToggle={onToggleRow}
           loading={tabLoader.loading}
           restoreFilters={tabView.restoreFilters}
-          restoreSort={tabView.restoreSort}
+          restoreSort={tabView.restoreSort ?? CODE_SORT}
           onFiltersChange={tabView.onFiltersChange}
           onSortChange={tabView.onSortChange}
         />

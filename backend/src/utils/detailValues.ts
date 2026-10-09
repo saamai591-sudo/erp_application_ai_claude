@@ -37,11 +37,23 @@ async function titleForEntity(entityTable: string, entityId: number): Promise<st
   }
 }
 
-/** فهرست گزینه‌های قابل انتخاب برای یک نوع تفصیل خاص (برای دراپ‌داون ردیف سند) */
-export async function getDetailOptions(detailTypeId: number): Promise<{ code: string; title: string }[]> {
+/**
+ * فهرست گزینه‌های یک نوع تفصیل خاص (برای دراپ‌داون ردیف سند). موجودیتِ غیرفعال (فعلاً حساب بانکیِ غیرفعال) هم در فهرست می‌آید ولی با
+ * `inactive: true` علامت می‌خورد: انتخابگرها آن را فقط وقتی نشان می‌دهند که مقدار فعلیِ همان ردیف باشد (lib/detailOptions.ts#selectableDetailOptions)؛
+ * بدین‌ترتیب اسناد قدیمی که این تفصیل را دارند عنوانشان را درست نشان می‌دهند ولی برای سند/ردیف تازه قابل انتخاب نیست.
+ */
+export async function getDetailOptions(detailTypeId: number): Promise<{ code: string; title: string; inactive?: boolean }[]> {
   const usages = await prisma.detailCodeUsage.findMany({ where: { detailTypeId }, orderBy: { code: "asc" } });
+  const bankIds = usages.filter((u: any) => u.entityTable === "BankAccount").map((u: any) => u.entityId as number);
+  const inactiveBankIds = new Set<number>(
+    bankIds.length ? (await prisma.bankAccount.findMany({ where: { id: { in: bankIds }, isActive: false }, select: { id: true } })).map((b) => b.id) : []
+  );
   const options = await Promise.all(
-    usages.map(async (u: any) => ({ code: u.code, title: await titleForEntity(u.entityTable, u.entityId) }))
+    usages.map(async (u: any) => ({
+      code: u.code,
+      title: await titleForEntity(u.entityTable, u.entityId),
+      ...(u.entityTable === "BankAccount" && inactiveBankIds.has(u.entityId) ? { inactive: true } : {}),
+    }))
   );
   return options;
 }

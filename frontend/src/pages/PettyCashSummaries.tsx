@@ -7,6 +7,7 @@ import { FormPage } from "../components/FormPage";
 import { Modal } from "../components/Modal";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
+import { selectableDetailOptions } from "../lib/detailOptions";
 import { RecordPickerField, RecordPickerDialog, type PickerColumn } from "../components/RecordPicker";
 import { LineGridToolbar } from "../components/LineGridToolbar";
 import type { ExportColumn } from "../lib/gridExport";
@@ -72,7 +73,7 @@ interface PickablePayment {
 }
 interface BasisCandidate { id: number; number: number; date: string; currencyId: number; remaining: number; kind?: "GOODS" | "SERVICE" }
 interface ResolvedAccount { id: number; code: string; title: string; isCurrency: boolean; detailType1Id: number | null; detailType2Id: number | null; detailType3Id: number | null }
-interface DetailOption { code: string; title: string }
+interface DetailOption { code: string; title: string; inactive?: boolean }
 
 interface Summary {
   id: number;
@@ -734,7 +735,7 @@ function SummaryForm({ editId }: { editId?: number }) {
                 <tbody>
                   {grid.visibleEntries.map(({ row, idx }) => {
                     const remaining = liveRemaining(row.pettyCashPaymentId, row.clientKey);
-                    const detailOpts = (typeId: number | null) => (typeId ? detailOptions[typeId] || [] : []);
+                    const detailOpts = (typeId: number | null, current?: string | null) => (typeId ? selectableDetailOptions(detailOptions[typeId], current) : []);
                     return (
                       <tr
                         key={row.clientKey}
@@ -766,7 +767,7 @@ function SummaryForm({ editId }: { editId?: number }) {
                                 <RecordPickerField
                                   title={`انتخاب تفصیل ${toFaDigits(String(i + 1))}`}
                                   displayValue={row[field] ? toFaDigits(row[field]) : ""}
-                                  rows={detailOpts(typeId).map((o) => ({ id: o.code, ...o }))}
+                                  rows={detailOpts(typeId, row[field]).map((o) => ({ id: o.code, ...o }))}
                                   columns={[
                                     { header: "کد", render: (o: any) => toFaDigits(o.code), filterValue: (o: any) => o.code, width: "90px" },
                                     { header: "عنوان", render: (o: any) => o.title, filterValue: (o: any) => o.title },

@@ -7,6 +7,7 @@ import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
 import { FxAmountDialog } from "../components/FxAmountDialog";
+import { selectableDetailOptions } from "../lib/detailOptions";
 import { RecordPickerField } from "../components/RecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
@@ -888,7 +889,7 @@ function EntryForm({ editId }: { editId?: number }) {
                         <RecordPickerField
                           title="انتخاب تفصیل سطح ۱"
                           displayValue={row.detail1Code ? toFaDigits(row.detail1Code) : ""}
-                          rows={(detailOptions[account.detailType1Id] || []).map((o) => ({ id: o.code, ...o }))}
+                          rows={selectableDetailOptions(detailOptions[account.detailType1Id], row.detail1Code).map((o) => ({ id: o.code, ...o }))}
                           columns={[
                             { header: "کد", render: (o) => toFaDigits(o.code), filterValue: (o) => o.code, width: "90px" },
                             { header: "عنوان", render: (o) => o.title, filterValue: (o) => o.title },
@@ -903,7 +904,7 @@ function EntryForm({ editId }: { editId?: number }) {
                         <RecordPickerField
                           title="انتخاب تفصیل سطح ۲"
                           displayValue={row.detail2Code ? toFaDigits(row.detail2Code) : ""}
-                          rows={(detailOptions[account.detailType2Id] || []).map((o) => ({ id: o.code, ...o }))}
+                          rows={selectableDetailOptions(detailOptions[account.detailType2Id], row.detail2Code).map((o) => ({ id: o.code, ...o }))}
                           columns={[
                             { header: "کد", render: (o) => toFaDigits(o.code), filterValue: (o) => o.code, width: "90px" },
                             { header: "عنوان", render: (o) => o.title, filterValue: (o) => o.title },
@@ -918,7 +919,7 @@ function EntryForm({ editId }: { editId?: number }) {
                         <RecordPickerField
                           title="انتخاب تفصیل سطح ۳"
                           displayValue={row.detail3Code ? toFaDigits(row.detail3Code) : ""}
-                          rows={(detailOptions[account.detailType3Id] || []).map((o) => ({ id: o.code, ...o }))}
+                          rows={selectableDetailOptions(detailOptions[account.detailType3Id], row.detail3Code).map((o) => ({ id: o.code, ...o }))}
                           columns={[
                             { header: "کد", render: (o) => toFaDigits(o.code), filterValue: (o) => o.code, width: "90px" },
                             { header: "عنوان", render: (o) => o.title, filterValue: (o) => o.title },

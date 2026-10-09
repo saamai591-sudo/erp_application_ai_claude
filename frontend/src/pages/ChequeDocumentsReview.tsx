@@ -140,6 +140,13 @@ export default function ChequeDocumentsReview({ kind }: { kind: Kind }) {
     setActiveTab(0);
   }
 
+  // تغییر بازه‌ی تاریخ بالای گزارش فقط داده‌ی بارگذاری‌شده را باطل می‌کند (داده‌ی تب فعال با تغییر امضای وابستگی‌ها دوباره از سرور می‌آید و تب‌های دیگر
+  // هنگام ورود)؛ انتخاب ردیف‌های زنجیره‌ای، فیلتر/مرتب‌سازی گریدها و تب فعال دست‌نخورده می‌مانند. «حذف همه فیلترها» (clearFilters) همه را پاک می‌کند.
+  function invalidateData() {
+    setTabData({});
+    tabLoader.resetLoaded();
+  }
+
   function onDateChange(field: "fromDate" | "toDate", value: string) {
     const next = { ...filters, [field]: value };
     const msg = rangeError(next);
@@ -147,8 +154,9 @@ export default function ChequeDocumentsReview({ kind }: { kind: Kind }) {
       setError(msg);
       return;
     }
+    if (value === filters[field]) return;
     setFilters(next);
-    clearFilters();
+    invalidateData();
   }
 
   const tabDefs = TAB_LABELS.map((label, idx) => ({ key: `chq-${idx}`, label, count: idx === DETAIL_TAB ? 0 : chain.get(idx).size }));

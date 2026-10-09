@@ -8,6 +8,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { Wizard, WizardStepDef } from "../components/Wizard";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
+import { selectableDetailOptions } from "../lib/detailOptions";
 import { RecordPickerField } from "../components/RecordPicker";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
@@ -478,7 +479,7 @@ function ClosingWizard({ viewId }: { viewId?: number }) {
                   <RecordPickerField
                     title="انتخاب تفصیل سطح ۱"
                     displayValue={detail1Code ? toFaDigits(detail1Code) : ""}
-                    rows={(detailOptions[destAccount.detailType1Id] || []).map((o) => ({ id: o.code, ...o }))}
+                    rows={selectableDetailOptions(detailOptions[destAccount.detailType1Id], detail1Code).map((o) => ({ id: o.code, ...o }))}
                     columns={[
                       { header: "کد", render: (o) => toFaDigits(o.code), filterValue: (o) => o.code, width: "90px" },
                       { header: "عنوان", render: (o) => o.title, filterValue: (o) => o.title },
@@ -493,7 +494,7 @@ function ClosingWizard({ viewId }: { viewId?: number }) {
                   <RecordPickerField
                     title="انتخاب تفصیل سطح ۲"
                     displayValue={detail2Code ? toFaDigits(detail2Code) : ""}
-                    rows={(detailOptions[destAccount.detailType2Id] || []).map((o) => ({ id: o.code, ...o }))}
+                    rows={selectableDetailOptions(detailOptions[destAccount.detailType2Id], detail2Code).map((o) => ({ id: o.code, ...o }))}
                     columns={[
                       { header: "کد", render: (o) => toFaDigits(o.code), filterValue: (o) => o.code, width: "90px" },
                       { header: "عنوان", render: (o) => o.title, filterValue: (o) => o.title },
@@ -508,7 +509,7 @@ function ClosingWizard({ viewId }: { viewId?: number }) {
                   <RecordPickerField
                     title="انتخاب تفصیل سطح ۳"
                     displayValue={detail3Code ? toFaDigits(detail3Code) : ""}
-                    rows={(detailOptions[destAccount.detailType3Id] || []).map((o) => ({ id: o.code, ...o }))}
+                    rows={selectableDetailOptions(detailOptions[destAccount.detailType3Id], detail3Code).map((o) => ({ id: o.code, ...o }))}
                     columns={[
                       { header: "کد", render: (o) => toFaDigits(o.code), filterValue: (o) => o.code, width: "90px" },
                       { header: "عنوان", render: (o) => o.title, filterValue: (o) => o.title },

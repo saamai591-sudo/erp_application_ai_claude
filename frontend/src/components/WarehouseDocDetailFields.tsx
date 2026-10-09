@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { DetailValues, DocDetailConfig } from "../lib/warehouseDocDetails";
+import { selectableDetailOptions } from "../lib/detailOptions";
 import { RecordPickerField } from "./RecordPicker";
 import { toFaDigits } from "../lib/formatAmount";
 
@@ -40,7 +41,7 @@ export function DetailPicker({ detailTypeId, title, value, onChange, disabled }:
     <RecordPickerField<Option>
       title={`انتخاب ${title}`}
       displayValue={value ? (selected ? `${toFaDigits(selected.code)} — ${selected.title}` : toFaDigits(value)) : ""}
-      rows={options}
+      rows={selectableDetailOptions(options, value)}
       disabled={disabled}
       columns={[
         { header: "کد", render: (o) => toFaDigits(o.code), filterValue: (o) => o.code, width: "110px" },

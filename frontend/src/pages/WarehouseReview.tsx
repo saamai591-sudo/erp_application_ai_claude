@@ -448,6 +448,15 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
     setActiveTab(0);
   }
 
+  // تغییر بازه‌ی تاریخ بالای گزارش فقط داده‌ی بارگذاری‌شده را باطل می‌کند (داده‌ی تب فعال با تغییر امضای وابستگی‌ها دوباره از سرور می‌آید و تب‌های دیگر
+  // هنگام ورود)؛ انتخاب ردیف‌های زنجیره‌ای، فیلتر/مرتب‌سازی گریدها و تب فعال دست‌نخورده می‌مانند. «حذف همه فیلترها» (resetAll) همه را پاک می‌کند.
+  function invalidateData() {
+    setTabData({});
+    setLedgerRows([]);
+    setLedgerPage(1);
+    tabLoader.resetLoaded();
+  }
+
   // دکمه‌ی «حذف همه فیلترها» — طبق اصلاح صریح کاربر (۱۴۰۵/۰۶/۱۹): انتخاب یک ردیف در یک تب هم خودش یک
   // «فیلتر» زنجیره‌ای است، نه چیزی جدا از فیلترهای ستونی گرید — پس با این دکمه هم باید پاک شود (و
   // کاربر به اولین تب برگردد). این دقیقاً همان resetAll موجود است (که فقط بازه‌ی تاریخ بالای گزارش را
@@ -508,11 +517,11 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
         <div style={{ display: "flex", alignItems: "flex-end", gap: 14 }}>
           <div className="form-field-inline">
             <label>از تاریخ</label>
-            <JalaliDatePicker value={filters.fromDate} onChange={(v) => { setFilters((p) => ({ ...p, fromDate: v })); resetAll(); }} />
+            <JalaliDatePicker value={filters.fromDate} onChange={(v) => { if (v === filters.fromDate) return; setFilters((p) => ({ ...p, fromDate: v })); invalidateData(); }} />
           </div>
           <div className="form-field-inline">
             <label>تا تاریخ</label>
-            <JalaliDatePicker value={filters.toDate} onChange={(v) => { setFilters((p) => ({ ...p, toDate: v })); resetAll(); }} />
+            <JalaliDatePicker value={filters.toDate} onChange={(v) => { if (v === filters.toDate) return; setFilters((p) => ({ ...p, toDate: v })); invalidateData(); }} />
           </div>
         </div>
       </div>

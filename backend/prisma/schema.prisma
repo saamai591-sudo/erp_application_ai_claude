@@ -385,6 +385,8 @@ model BankAccount {
   currencyId             Int?
   bankPartyId            Int?
   hasTransactions        Boolean                 @default(false)
+  /// غیرفعال: حساب بانکی و تفصیل مرتبط با آن در انتخابگرها نمایش داده نمی‌شود (اسناد قبلی دست‌نخورده می‌مانند)
+  isActive               Boolean                 @default(true)
   accountType            BankAccountType         @relation(fields: [accountTypeId], references: [id])
   bankBranch             BankBranch              @relation(fields: [bankBranchId], references: [id])
   bankParty              Party?                  @relation("BankAccountBankParty", fields: [bankPartyId], references: [id])
