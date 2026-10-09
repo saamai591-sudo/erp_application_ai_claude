@@ -3,6 +3,7 @@ import { runWithRequestContext, withoutFiscalPeriodScope } from "../lib/requestC
 import { JOBS, getJobDefinition } from "./registry";
 import { computeNextRun, ScheduleSpec, validateSchedule } from "./schedule";
 import { defaultParamValue, normalizeParams, resolveParams, validateForLive } from "./params";
+import { missingActionKeys, missingActionsMessage } from "./permissions";
 import { tehranDate } from "./time";
 import type { JobContext, JobDefinition, JobItem } from "./types";
 
@@ -35,6 +36,8 @@ export function rowSchedule(row: { scheduleType: string; intervalMinutes: number
 
 /** برای هر کار ثبت‌شده در کد، اگر ردیف تنظیمات ندارد با پیش‌فرض‌های تعریف کار ساخته می‌شود (حالت: خاموش) */
 export async function ensureJobRows(): Promise<void> {
+  // ردیف کاری که از کد حذف شده (با تاریخچه‌ی اجراهایش، cascade) پاک می‌شود تا باقی نماند
+  await prisma.scheduledJob.deleteMany({ where: { key: { notIn: JOBS.map((j) => j.key) } } });
   for (const def of JOBS) {
     // eslint-disable-next-line no-await-in-loop
     const existing = await prisma.scheduledJob.findUnique({ where: { key: def.key }, select: { id: true } });
@@ -98,6 +101,10 @@ export async function beginRun(key: string, opts: BeginOptions): Promise<{ runId
   const { values, errors: paramErrors } = normalizeParams(def.params, row.params);
   const configErrors = [...paramErrors, ...(dryRun ? [] : validateForLive(def.params, values))];
   if (!dryRun && !row.runAsUserId) configErrors.push("برای حالت «واقعی»، کاربر اجراکننده باید انتخاب شده باشد");
+  if (!dryRun && row.runAsUserId) {
+    const missing = await missingActionKeys(def, values, row.runAsUserId);
+    if (missing.length > 0) configErrors.push(missingActionsMessage(missing));
+  }
   const resolved = resolveParams(def.params, values, today);
 
   let run;
@@ -155,6 +162,10 @@ export async function beginRun(key: string, opts: BeginOptions): Promise<{ runId
       withoutFiscalScope: (fn) => withoutFiscalPeriodScope(fn),
     };
     try {
+      if (dryRun && row.runAsUserId) {
+        const missing = await missingActionKeys(def, values, row.runAsUserId);
+        if (missing.length > 0) ctx.item({ ref: "دسترسی کاربر اجراکننده", result: "SKIPPED", message: `${missingActionsMessage(missing)}؛ در حالت واقعی این کار اجرا نمی‌شود` });
+      }
       // زمینه‌ی درخواست خالی: «دوره مالی» از درخواست‌کننده‌ی دستی به کار نشت نکند (اجرای دستی و زمان‌بندی‌شده رفتار یکسان داشته باشند)
       await runWithRequestContext({}, () => def.run(ctx));
     } catch (e: any) {

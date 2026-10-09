@@ -1,3 +1,4 @@
+import { findFormPrefix } from "../authz/registry";
 import { prisma } from "../lib/prisma";
 import { buildTaxInvoice, TAX_INVOICE_INCLUDE, TaxInvoiceOptions } from "../services/taxInvoiceBuilder";
 import { refreshTaxInvoiceStatuses, sendTaxInvoices } from "../services/taxInvoiceSendService";
@@ -16,6 +17,7 @@ import { defineJob } from "./types";
 //  • روش تسویه برای همه نقدی/نسیه‌ی ثابتِ پارامتر است (فاکتور فروش نشانه‌ای از نقدی یا نسیه بودن ندارد)؛ نسیه‌ها را دستی بفرستید.
 // حالت آزمایشی همین گزارش را بدون ارسال می‌دهد.
 
+const FORM = findFormPrefix("tax-invoice-submission");
 const CONSECUTIVE_FAILURE_LIMIT = 3;
 
 const fa = (iso: string) => formatJalaliDateForMessage(isoToDate(iso));
@@ -26,6 +28,8 @@ export default defineJob({
   description:
     "فاکتورهای فروشِ ارسال‌نشده‌ی داخل بازه (مثلاً از ۱۲ روز قبل تا ۵ روز قبل) را با نوع ۱ و روش تسویه‌ی انتخابی به سامانه مودیان می‌فرستد. فاکتور دارای خطا، خارج از بازه یا با ارسال قبلی رد می‌شود و دلیلش در تاریخچه می‌آید. در حالت آزمایشی فقط گزارش می‌دهد و چیزی ارسال نمی‌شود.",
   supportsLive: true,
+  // همان دسترسی دکمه‌ی «ارسال» فرم ارسال صورتحساب به سامانه مودیان
+  requiredActions: () => [`${FORM}.send`],
   defaultSchedule: { type: "WEEKLY", timeOfDay: "08:00", weekdays: [0] },
   params: [
     {

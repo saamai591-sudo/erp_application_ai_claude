@@ -2,7 +2,7 @@
 
 زیرساخت: `registry.ts` (فهرست کارها)، `runner.ts` (اجرا + قفل + تاریخچه)، `scheduler.ts` (حلقه‌ی هر‌دقیقه)، `schedule.ts` (محاسبه‌ی زمان اجرا به وقت تهران)،
 `params.ts` (پارامترها و بازه‌های نسبی)، `routes/scheduledJobs.ts` (API)، `frontend/src/pages/ScheduledJobs.tsx` (صفحه‌ی مدیریت — تنظیمات › عملیات).
-کارهای نمونه‌ی مرجع: `taxInvoiceReadiness.ts` (فقط گزارش) و `paymentJournalEntries.ts` (دارای حالت واقعی: پیش‌بینی فقط‌خواندنی ← اجرای همان توابع دکمه‌های دستی ← برگرداندن تغییر اجرا در صورت شکست).
+کارهای نمونه‌ی مرجع: `taxInvoiceSend.ts` و `paymentJournalEntries.ts` (دارای حالت واقعی: پیش‌بینی فقط‌خواندنی ← اجرای همان توابع دکمه‌های دستی ← برگرداندن تغییر اجرا در صورت شکست).
 
 ## افزودن یک کار
 
@@ -16,6 +16,7 @@ export default defineJob({
   title: "صدور سند اعلامیه‌های پرداخت",
   description: "…",
   supportsLive: true,                       // false = فقط خاموش/آزمایشی
+  requiredActions: (p) => [`${FORM}.issueJournalEntry`], // دسترسی‌های لازم «کاربر اجراکننده» (کلید Action فرم‌ها)؛ کار بدون HTTP اجرا می‌شود و can() مسیرها اجرا نمی‌شود
   defaultSchedule: { type: "DAILY", timeOfDay: "20:00" },   // INTERVAL | DAILY | WEEKLY (weekdays: ۰=شنبه … ۶=جمعه)
   params: [
     // بازه‌ی نسبی: «از N روز قبل تا M روز قبل» (هر سر اختیاری). فرم تنظیمات خودکار ساخته می‌شود.

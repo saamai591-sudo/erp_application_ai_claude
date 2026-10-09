@@ -8,6 +8,7 @@ import { JOBS, getJobDefinition } from "../jobs/registry";
 import { beginRun, ensureJobRows, JobBusyError, JobConfigError, rowSchedule } from "../jobs/runner";
 import { computeNextRun, maxGapDays, validateSchedule, ScheduleSpec } from "../jobs/schedule";
 import { normalizeParams, paramWarnings, resolveParams, validateForLive } from "../jobs/params";
+import { missingActionKeys, missingActionsMessage } from "../jobs/permissions";
 import { isSchedulerEnabled } from "../jobs/scheduler";
 import { tehranDate } from "../jobs/time";
 import type { JobDefinition } from "../jobs/types";
@@ -148,6 +149,10 @@ router.put("/scheduled-jobs/:key", can(`${FORM}.edit`), async (req, res) => {
       const user = await prisma.user.findUnique({ where: { id: runAsUserId }, select: { isActive: true } });
       if (!user) errors.push("کاربر اجراکننده یافت نشد");
       else if (!user.isActive) errors.push("کاربر اجراکننده غیرفعال است");
+      else if (mode === "LIVE") {
+        const missing = await missingActionKeys(def, values, runAsUserId);
+        if (missing.length > 0) errors.push(missingActionsMessage(missing));
+      }
     }
     if (mode === "LIVE" && !runAsUserId) errors.push("برای حالت «واقعی»، کاربر اجراکننده را انتخاب کنید");
     if (errors.length > 0) return res.status(400).json({ error: errors.join("\n") });

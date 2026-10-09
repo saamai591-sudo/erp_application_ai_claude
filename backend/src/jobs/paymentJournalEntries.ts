@@ -1,3 +1,4 @@
+import { findFormPrefix } from "../authz/registry";
 import { prisma } from "../lib/prisma";
 import { accountingApprovePayment, issuePaymentJournalEntry, previewPaymentIssuance } from "../services/paymentJournalEntryService";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
@@ -11,6 +12,8 @@ import { defineJob } from "./types";
 // تاریخچه می‌آید؛ هیچ تغییری روی آن داده نمی‌شود. اگر صدور بعد از «تایید حسابداریِ همین اجرا» شکست بخورد، تایید حسابداری برگردانده می‌شود
 // تا اعلامیه به همان حالت قبل بماند.
 
+const FORM = findFormPrefix("payments");
+
 const fa = (iso: string) => formatJalaliDateForMessage(isoToDate(iso));
 
 export default defineJob({
@@ -19,6 +22,8 @@ export default defineJob({
   description:
     "اعلامیه‌های پرداختِ ثبت‌شده‌ی داخل بازه که هنوز سند حسابداری ندارند را بررسی می‌کند و (در حالت واقعی) تایید حسابداری و صدور سند را مثل دکمه‌های دستی فرم انجام می‌دهد. اعلامیه‌ای که مانع دارد (مثلاً تفصیل دستی لازم یا معین تعریف‌نشده) رد می‌شود و دلیلش در تاریخچه می‌آید.",
   supportsLive: true,
+  // همان دسترسی‌های دکمه‌های «تایید حسابداری» (فقط وقتی پارامتر آن روشن است) و «صدور سند حسابداری» فرم اعلامیه پرداخت
+  requiredActions: (p) => [...(p.autoAccountingApprove ? [`${FORM}.accountingApprove`] : []), `${FORM}.issueJournalEntry`],
   defaultSchedule: { type: "DAILY", timeOfDay: "21:00" },
   params: [
     {
