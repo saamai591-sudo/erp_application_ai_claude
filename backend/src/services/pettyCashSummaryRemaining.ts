@@ -35,6 +35,7 @@ export async function pickablePettyCashPayments(custodianId: number, excludeSumm
       party: true,
       paymentType: true,
       purchaseInvoice: { select: { id: true, number: true, date: true } },
+      servicePurchaseInvoice: { select: { id: true, number: true, date: true } },
       salesInvoice: { select: { id: true, number: true, date: true } },
       purchaseOrder: { select: { id: true, number: true, date: true } },
     },

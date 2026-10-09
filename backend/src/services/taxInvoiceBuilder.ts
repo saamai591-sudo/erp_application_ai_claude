@@ -183,13 +183,15 @@ export async function buildTaxInvoice(
   const header: Record<string, any> = {};
   const buyerFields: Record<string, any> = {};
   if (options.invoiceType === 1) {
-    const eco = digits(party.economicCode);
+    let eco = digits(party.economicCode);
     const nid = digits(tob === 4 ? party.foreignId : party.nationalId);
     const postal = buyerPostalCode(party);
+    // خریدار حقوقی بدون شماره اقتصادی: شناسه ملی ۱۱ رقمی به‌جای آن در tinb فرستاده می‌شود (تصمیم کاربر: «شناسه ملی فعلاً کافی است»)
+    if (!eco && tob === 2 && isEconomicCode(nid)) eco = nid;
     const ecoOk = isEconomicCode(eco);
     if (eco && !ecoOk) err("buyer", `شماره اقتصادی خریدار «${eco}» باید ۱۱ یا ۱۴ رقم باشد (${customerTitle})`, { field: "tinb" });
     if (tob === 2 || tob === 3) {
-      if (!ecoOk) err("buyer", `برای خریدار ${TOB_FA[tob]} در صورتحساب نوع اول، شماره اقتصادی (۱۱ یا ۱۴ رقم) الزامی است (${customerTitle})`, { field: "tinb" });
+      if (!ecoOk) err("buyer", `برای خریدار ${TOB_FA[tob]} در صورتحساب نوع اول، شماره اقتصادی (۱۱ یا ۱۴ رقم)${tob === 2 ? " یا شناسه ملی ۱۱ رقمی" : ""} الزامی است (${customerTitle})`, { field: "tinb" });
     } else {
       const idLen = tob === 1 ? 10 : 12;
       const idOk = nid.length === idLen;
@@ -319,7 +321,9 @@ export async function buildTaxInvoice(
   header.tvam = sumVam.toNumber();
   header.todam = 0;
   header.tbill = sumTsstam.toNumber();
-  header.setm = settlement;
+  // فیلد «روش تسویه» در جدول فیلدهای دستورالعمل برای صورتحساب نوع دوم «خارج از الگو» است (سامانه هشدار ۱۴۰۲۸ می‌دهد)؛
+  // نوع دوم ذاتاً نقدی است و نباید ارسال شود.
+  if (options.invoiceType === 1) header.setm = settlement;
   if (options.isArticle9) header.insr = 1;
 
   return finish({ header, body, payments: [] });

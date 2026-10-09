@@ -87,6 +87,7 @@ model User {
   supplyRequestsReviewed   SupplyRequest[]         @relation("SupplyRequestReviewer")
   party                    Party?                  @relation(fields: [partyId], references: [id])
   roles                    UserRole[]
+  scheduledJobs            ScheduledJob[]
   actions                  UserAction[]
   documentItemAmounts      DocumentItemAmount[]
   goodsPricingStatuses     GoodsPricingStatus[]
@@ -264,7 +265,7 @@ model DetailType {
   accountsAsDetail1 Account[]         @relation("AccountDetailType1")
   accountsAsDetail2 Account[]         @relation("AccountDetailType2")
   accountsAsDetail3 Account[]         @relation("AccountDetailType3")
-  codes             DetailCodeUsage[]
+  codes             DetailCodeUsage[]
   warehouseDocDetailItems  DocDetailSettingItem[]
   inventoryDocumentDetails InventoryDocumentDetail[]
   servicePurchaseInvoiceDetails ServicePurchaseInvoiceDetail[]
@@ -543,6 +544,8 @@ model PettyCashPayment {
   partyId           Int
   paymentTypeId     Int
   purchaseInvoiceId Int?
+  /// فاکتور خرید خدمات (ServicePurchaseInvoice) به‌عنوان سند مبنا — در کنار purchaseInvoiceId (فاکتور خرید کالا) برای نوع پرداخت با مبنای «فاکتور خرید»؛ حداکثر یکی از این دو
+  servicePurchaseInvoiceId Int?
   salesInvoiceId    Int?
   purchaseOrderId   Int?
   amount            Decimal  @db.Decimal(18, 2)
@@ -554,6 +557,7 @@ model PettyCashPayment {
   party             Party            @relation(fields: [partyId], references: [id])
   paymentType       PaymentType      @relation(fields: [paymentTypeId], references: [id])
   purchaseInvoice   PurchaseInvoice? @relation(fields: [purchaseInvoiceId], references: [id])
+  servicePurchaseInvoice ServicePurchaseInvoice? @relation(fields: [servicePurchaseInvoiceId], references: [id], onDelete: Restrict)
   salesInvoice      SalesInvoice?    @relation(fields: [salesInvoiceId], references: [id])
   purchaseOrder     PurchaseOrder?   @relation(fields: [purchaseOrderId], references: [id])
   summaryLines      PettyCashSummaryLine[]
@@ -598,6 +602,7 @@ model PettyCashSummaryLine {
   pettyCashPaymentId Int
   paymentTypeId      Int
   purchaseInvoiceId  Int?
+  servicePurchaseInvoiceId Int?
   salesInvoiceId     Int?
   purchaseOrderId    Int?
   detail1Code        String?
@@ -610,6 +615,7 @@ model PettyCashSummaryLine {
   pettyCashPayment   PettyCashPayment @relation(fields: [pettyCashPaymentId], references: [id])
   paymentType        PaymentType      @relation(fields: [paymentTypeId], references: [id])
   purchaseInvoice    PurchaseInvoice? @relation(fields: [purchaseInvoiceId], references: [id])
+  servicePurchaseInvoice ServicePurchaseInvoice? @relation(fields: [servicePurchaseInvoiceId], references: [id], onDelete: Restrict)
   salesInvoice       SalesInvoice?    @relation(fields: [salesInvoiceId], references: [id])
   purchaseOrder      PurchaseOrder?   @relation(fields: [purchaseOrderId], references: [id])
 }
@@ -658,7 +664,7 @@ model Account {
   treasuryAccountSettings        TreasuryAccountSetting[]
   lines                          JournalEntryLine[]
 
-  @@unique([parentId, code])
+  @@unique([parentId, code])
   receiptAccountingLines         ReceiptAccountingLine[]
   paymentAccountingLines         PaymentAccountingLine[]
 }
@@ -917,7 +923,7 @@ model Warehouse {
   inventoryDocsAsDest        InventoryDocument[]     @relation("InventoryDocDestWarehouse")
   confirmationLines          WarehouseConfirmationLine[]
   quantityCloses             WarehouseQuantityClose[]
-  pricingFlowWarehouses      GoodsPricingFlowWarehouse[]
+  pricingFlowWarehouses      GoodsPricingFlowWarehouse[]
   detailRuleRows      DetailRuleRow[]
 }
 
@@ -977,7 +983,7 @@ model GoodsGroup {
   attributes        GoodsGroupAttribute[]
   items             GoodsItem[]
 
-  @@unique([parentId, code])
+  @@unique([parentId, code])
   detailRuleRows      DetailRuleRow[]
 }
 
@@ -1202,7 +1208,7 @@ model GoodsServiceAccountingSetting {
   accountingGroup     AccountingGroup? @relation(fields: [accountingGroupId], references: [id])
   warehouseGroup      WarehouseGroup?  @relation(fields: [warehouseGroupId], references: [id])
   purchaseType        PurchaseType?    @relation(fields: [purchaseTypeId], references: [id])
-  salesType           SalesType?       @relation(fields: [salesTypeId], references: [id])
+  salesType           SalesType?       @relation(fields: [salesTypeId], references: [id])
   detailRuleHeaders   DetailRuleHeader[]
   usages              AccountingSettingUsage[]
 }
@@ -1503,7 +1509,7 @@ model TreasuryAccountSetting {
   @@unique([accountType, payableChequeTypeId, effectiveDate])
   @@unique([accountType, receiptTypeId, effectiveDate])
   @@unique([accountType, paymentTypeId, effectiveDate])
-  @@unique([accountType, pettyCashId, effectiveDate])
+  @@unique([accountType, pettyCashId, effectiveDate])
 }
 
 enum TreasuryAccountType {
@@ -2087,7 +2093,7 @@ model PurchaseInvoice {
   pettyCashSummaryLines  PettyCashSummaryLine[]
   advanceAllocations     PurchaseInvoiceAdvanceAllocation[]
 
-  @@unique([fiscalPeriodId, number])
+  @@unique([fiscalPeriodId, number])
   details                PurchaseInvoiceDetail[]
 }
 
@@ -2123,7 +2129,7 @@ model PurchaseInvoiceLine {
   goodsItem             GoodsItem              @relation(fields: [goodsItemId], references: [id])
   purchaseInvoice       PurchaseInvoice        @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
   sourceInventoryLine   InventoryDocumentLine? @relation("PurchaseInvoiceSourceInventoryLine", fields: [sourceInventoryLineId], references: [id])
-  unit                  UnitOfMeasure          @relation(fields: [unitId], references: [id])
+  unit                  UnitOfMeasure          @relation(fields: [unitId], references: [id])
   details                PurchaseInvoiceDetail[]
 }
 
@@ -2160,8 +2166,11 @@ model ServicePurchaseInvoice {
   journalEntry        JournalEntry?                @relation(fields: [journalEntryId], references: [id])
   lines               PurchaseCostLine[]
   advanceAllocations  ServicePurchaseInvoiceAdvanceAllocation[]
+  paymentSettlementLines PaymentSettlementLine[]
+  pettyCashPayments   PettyCashPayment[]
+  pettyCashSummaryLines PettyCashSummaryLine[]
 
-  @@unique([fiscalPeriodId, number])
+  @@unique([fiscalPeriodId, number])
   details                ServicePurchaseInvoiceDetail[]
 }
 
@@ -2199,7 +2208,7 @@ model PurchaseCostLine {
   servicePurchaseInvoice   ServicePurchaseInvoice? @relation(fields: [servicePurchaseInvoiceId], references: [id], onDelete: Cascade)
   service                  GoodsItem               @relation(fields: [serviceId], references: [id])
   sourceReceiptDocument    InventoryDocument?      @relation(fields: [sourceReceiptDocumentId], references: [id])
-  allocations              PurchaseCostAllocation[]
+  allocations              PurchaseCostAllocation[]
   details                  ServicePurchaseInvoiceDetail[]
   purchaseInvoiceDetails   PurchaseInvoiceDetail[]
 }
@@ -2450,7 +2459,7 @@ model InventoryDocument {
   purchaseCostLines PurchaseCostLine[]
   quantityClose     WarehouseQuantityClose?
 
-  @@unique([documentType, fiscalPeriodId, number])
+  @@unique([documentType, fiscalPeriodId, number])
   details           InventoryDocumentDetail[]
 }
 
@@ -2515,7 +2524,7 @@ model InventoryDocumentLine {
   // فی واحد = آن مجموع ÷ quantity، همیشه محاسبه‌شده، هرگز ذخیره‌شده — نگاه کنید به
   // services/documentItemAmountService.ts. جایگزین کامل GoodsPricingAdjustment سابق است.
   amounts                            DocumentItemAmount[]
-  purchaseCostAllocations            PurchaseCostAllocation[]
+  purchaseCostAllocations            PurchaseCostAllocation[]
   details           InventoryDocumentDetail[]
 }
 
@@ -2920,7 +2929,7 @@ model Receipt {
   instrumentLines ReceiptInstrumentLine[]
   settlementLines ReceiptSettlementLine[]
 
-  @@unique([fiscalPeriodId, number])
+  @@unique([fiscalPeriodId, number])
   /// «تایید حسابداری»: بعد از آن ردیف‌های حسابداری (پیش‌نویس سند در سطح فرم) ساخته/نمایش داده می‌شود و سند قفل است
   accountingStatus AccountingApprovalStatus @default(NONE)
   accountingApprovedAt DateTime?
@@ -2963,7 +2972,7 @@ model ReceiptInstrumentLine {
   chequeItem         ChequeItem?             @relation(fields: [chequeItemId], references: [id])
   chequeType         ReceivableChequeType?   @relation(fields: [chequeTypeId], references: [id], onDelete: Restrict)
   receipt            Receipt                 @relation(fields: [receiptId], references: [id], onDelete: Cascade)
-  settlementLines    ReceiptSettlementLine[]
+  settlementLines    ReceiptSettlementLine[]
   accountingLines    ReceiptAccountingLine[]
 }
 
@@ -2996,7 +3005,7 @@ model ReceiptSettlementLine {
   salesQuote        SalesQuote?            @relation(fields: [salesQuoteId], references: [id])
   purchaseInvoice   PurchaseInvoice?       @relation(fields: [purchaseInvoiceId], references: [id])
   currency          Currency               @relation(fields: [currencyId], references: [id])
-  advanceAllocations SalesInvoiceAdvanceAllocation[]
+  advanceAllocations SalesInvoiceAdvanceAllocation[]
   accountingLines   ReceiptAccountingLine[]
 }
 
@@ -3019,7 +3028,7 @@ model Payment {
   instrumentLines PaymentInstrumentLine[]
   settlementLines PaymentSettlementLine[]
 
-  @@unique([fiscalPeriodId, number])
+  @@unique([fiscalPeriodId, number])
   /// «تایید حسابداری»: بعد از آن ردیف‌های حسابداری (پیش‌نویس سند در سطح فرم) ساخته/نمایش داده می‌شود و سند قفل است
   accountingStatus AccountingApprovalStatus @default(NONE)
   accountingApprovedAt DateTime?
@@ -3065,7 +3074,7 @@ model PaymentInstrumentLine {
   currency           Currency              @relation(fields: [currencyId], references: [id])
   payableChequeType  PayableChequeType?    @relation(fields: [payableChequeTypeId], references: [id])
   payment            Payment               @relation(fields: [paymentId], references: [id], onDelete: Cascade)
-  settlementLines    PaymentSettlementLine[]
+  settlementLines    PaymentSettlementLine[]
   accountingLines    PaymentAccountingLine[]
 }
 
@@ -3085,6 +3094,8 @@ model PaymentSettlementLine {
   custodianId       Int?
   salesInvoiceId    Int?
   purchaseInvoiceId Int?
+  /// فاکتور خرید خدمات به‌عنوان سند مبنا (برای نوع پرداخت با مبنای «فاکتور خرید»؛ هم‌زمان با purchaseInvoiceId پر نمی‌شود)
+  servicePurchaseInvoiceId Int?
   purchaseOrderId   Int?
   currencyId        Int
   fxRate            Decimal               @default(1) @db.Decimal(18, 6)
@@ -3100,10 +3111,11 @@ model PaymentSettlementLine {
   custodian         PettyCashCustodian?   @relation(fields: [custodianId], references: [id], onDelete: Restrict)
   salesInvoice      SalesInvoice?         @relation(fields: [salesInvoiceId], references: [id])
   purchaseInvoice   PurchaseInvoice?      @relation(fields: [purchaseInvoiceId], references: [id])
+  servicePurchaseInvoice ServicePurchaseInvoice? @relation(fields: [servicePurchaseInvoiceId], references: [id], onDelete: Restrict)
   purchaseOrder     PurchaseOrder?        @relation(fields: [purchaseOrderId], references: [id])
   currency          Currency              @relation(fields: [currencyId], references: [id])
   advanceAllocations PurchaseInvoiceAdvanceAllocation[]
-  servicePurchaseAdvanceAllocations ServicePurchaseInvoiceAdvanceAllocation[]
+  servicePurchaseAdvanceAllocations ServicePurchaseInvoiceAdvanceAllocation[]
   accountingLines   PaymentAccountingLine[]
 }
 
@@ -3834,6 +3846,86 @@ enum TaxInvoiceStatus {
 }
 
 /// صورتحساب الکترونیکی ارسال‌شده به سامانه مودیان: عکس ثابتِ JSON ارسالی + نتیجه‌ی استعلام (services/taxInvoiceBuilder.ts می‌سازد)
+/// حالت یک «کار زمان‌بندی‌شده»: خاموش، آزمایشی (فقط گزارش؛ هیچ نوشتنی ندارد) یا واقعی
+enum ScheduledJobMode {
+  OFF
+  DRY_RUN
+  LIVE
+}
+
+enum ScheduledJobScheduleType {
+  /// هر N دقیقه
+  INTERVAL
+  /// هر روز در ساعت مشخص
+  DAILY
+  /// روزهای مشخصِ هفته در ساعت مشخص
+  WEEKLY
+}
+
+enum ScheduledJobRunStatus {
+  RUNNING
+  SUCCESS
+  /// بعضی موارد شکست خورده‌اند
+  PARTIAL
+  /// کل اجرا با خطا متوقف شد
+  FAILED
+}
+
+enum ScheduledJobTrigger {
+  SCHEDULE
+  MANUAL
+}
+
+/// تنظیمات یک کار زمان‌بندی‌شده. خودِ کار در کد تعریف می‌شود (backend/src/jobs، با کلید یکتای key)؛ این رکورد فقط
+/// حالت، زمان‌بندی (به وقت تهران) و مقدار پارامترهای قابل‌تنظیم آن را نگه می‌دارد. نگاه کنید به jobs/runner.ts.
+model ScheduledJob {
+  id              Int                       @id @default(autoincrement())
+  key             String                    @unique
+  mode            ScheduledJobMode          @default(OFF)
+  scheduleType    ScheduledJobScheduleType  @default(WEEKLY)
+  intervalMinutes Int?
+  /// "HH:mm" به وقت تهران (DAILY/WEEKLY)
+  timeOfDay       String?
+  /// روزهای هفته برای WEEKLY: ۰=شنبه … ۶=جمعه
+  weekdays        Int[]
+  /// مقدار پارامترهای کار به‌همان شکلی که کاربر وارد کرده (مثلاً بازه‌ی نسبیِ «از N روز قبل تا M روز قبل»)
+  params          Json                      @default("{}")
+  /// کاربری که اجرای زمان‌بندی‌شده با نام او ثبت می‌شود
+  runAsUserId     Int?
+  nextRunAt       DateTime?
+  lastRunAt       DateTime?
+  lastRunStatus   ScheduledJobRunStatus?
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  runAsUser       User?                     @relation(fields: [runAsUserId], references: [id], onDelete: SetNull)
+  runs            ScheduledJobRun[]
+}
+
+/// یک بار اجرای یک کار. از هر کار حداکثر یک اجرای RUNNING وجود دارد (ایندکس یکتای جزئی در migration — Prisma آن را مدل نمی‌کند).
+model ScheduledJobRun {
+  id          Int                     @id @default(autoincrement())
+  jobId       Int
+  trigger     ScheduledJobTrigger
+  /// آزمایشی بودن همین اجرا (هیچ تغییری روی داده‌ها نمی‌دهد)
+  dryRun      Boolean
+  status      ScheduledJobRunStatus   @default(RUNNING)
+  startedAt   DateTime                @default(now())
+  finishedAt  DateTime?
+  startedById Int?
+  runAsUserId Int?
+  /// مقدار واقعی پارامترها در این اجرا (بازه‌های نسبی به تاریخ مشخص تبدیل شده‌اند)
+  params      Json                    @default("{}")
+  summary     String?
+  /// {done, wouldDo, skipped, failed}
+  counts      Json?
+  /// ریز موارد پردازش‌شده: [{ref, label, result, message}] (با سقف تعداد)
+  items       Json?
+  error       String?
+  job         ScheduledJob            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, startedAt])
+}
+
 model TaxInvoice {
   id               Int              @id @default(autoincrement())
   taxMemoryId      Int

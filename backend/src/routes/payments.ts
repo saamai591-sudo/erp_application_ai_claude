@@ -10,7 +10,7 @@ import { assertChequeNotUsedElsewhere, findChequeUses } from "../utils/chequeUsa
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, ConversionCurrency } from "../utils/currencyConversion";
 import { issuePaymentJournalEntry, revertPaymentJournalEntry, syncPaymentAccountingLines, getPaymentAccountingView, savePaymentAccountingDetails } from "../services/paymentJournalEntryService";
-import { candidatesForBasisType, pickableBasisDocuments, basisGroupOf, BasisType, BasisCandidate } from "../services/paymentBasisCandidates";
+import { candidatesForBasisType, pickableBasisDocuments, basisGroupOf, rowBasisTypeOf, BasisType, RowBasisType, BasisCandidate } from "../services/paymentBasisCandidates";
 import { assertPettyCashRunningBalanceNotNegative } from "../services/pettyCashBalanceService";
 import { assertPaymentAdvanceNotAllocated } from "../services/purchaseInvoiceAdvanceService";
 import { can } from "../authz/guard";
@@ -89,6 +89,8 @@ interface SettlementLineInput {
   custodianId?: number | null; // فقط برای ماهیت «به تنخواه»
   salesInvoiceId?: number | null;
   purchaseInvoiceId?: number | null;
+  /** فاکتور خرید خدمات — برای نوع پرداخت با مبنای «فاکتور خرید» به‌جای purchaseInvoiceId (فاکتور خرید کالا) */
+  servicePurchaseInvoiceId?: number | null;
   purchaseOrderId?: number | null;
   currencyId: number;
   fxRate?: number | null;
@@ -104,8 +106,9 @@ interface HeaderBody {
   settlementLines: SettlementLineInput[];
 }
 
-const BASIS_FIELD: Record<Exclude<BasisType, "NONE">, "purchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
+const BASIS_FIELD: Record<Exclude<RowBasisType, "NONE">, "purchaseInvoiceId" | "servicePurchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
   PURCHASE_INVOICE: "purchaseInvoiceId",
+  SERVICE_PURCHASE_INVOICE: "servicePurchaseInvoiceId",
   SALES_INVOICE: "salesInvoiceId",
   PURCHASE_ORDER: "purchaseOrderId",
 };
@@ -293,7 +296,7 @@ async function validateSubjectLines(
   const alreadyUsedBasis = new Set<string>();
   const savedPaymentDate = excludePaymentId ? (await prisma.payment.findUnique({ where: { id: excludePaymentId }, select: { date: true } }))?.date : null;
   if (excludePaymentId && savedPaymentDate && savedPaymentDate.getTime() === paymentDate.getTime()) {
-    for (const x of await prisma.paymentSettlementLine.findMany({ where: { paymentId: excludePaymentId }, select: { purchaseInvoiceId: true, salesInvoiceId: true, purchaseOrderId: true } })) {
+    for (const x of await prisma.paymentSettlementLine.findMany({ where: { paymentId: excludePaymentId }, select: { purchaseInvoiceId: true, servicePurchaseInvoiceId: true, salesInvoiceId: true, purchaseOrderId: true } })) {
       for (const [f, v] of Object.entries(x)) if (v) alreadyUsedBasis.add(`${f}:${v}`);
     }
   }
@@ -314,9 +317,9 @@ async function validateSubjectLines(
   }
 
   for (const sl of lockedSettlementLines) {
-    const lockedBasisId = sl.purchaseInvoiceId || sl.salesInvoiceId || sl.purchaseOrderId;
+    const lockedBasisId = sl.purchaseInvoiceId || sl.servicePurchaseInvoiceId || sl.salesInvoiceId || sl.purchaseOrderId;
     if (!lockedBasisId) continue;
-    const lockedBasisType: BasisType = sl.purchaseInvoiceId ? "PURCHASE_INVOICE" : sl.salesInvoiceId ? "SALES_INVOICE" : "PURCHASE_ORDER";
+    const lockedBasisType: RowBasisType = sl.purchaseInvoiceId ? "PURCHASE_INVOICE" : sl.servicePurchaseInvoiceId ? "SERVICE_PURCHASE_INVOICE" : sl.salesInvoiceId ? "SALES_INVOICE" : "PURCHASE_ORDER";
     // eslint-disable-next-line no-await-in-loop
     const lockedNature = (await prisma.paymentType.findUnique({ where: { id: sl.paymentTypeId }, select: { nature: true } }))?.nature;
     // eslint-disable-next-line no-await-in-loop
@@ -395,22 +398,25 @@ async function validateSubjectLines(
     let basisInfo: BasisCandidate | null = null;
     const basisIds = {
       purchaseInvoiceId: l.purchaseInvoiceId || null,
+      servicePurchaseInvoiceId: l.servicePurchaseInvoiceId || null,
       salesInvoiceId: l.salesInvoiceId || null,
       purchaseOrderId: l.purchaseOrderId || null,
     };
+    // «فاکتور خرید»: ردیف می‌تواند فاکتور خرید کالا (purchaseInvoiceId) یا فاکتور خرید خدمات (servicePurchaseInvoiceId) داشته باشد، نه هر دو
+    const rowBasisType = rowBasisTypeOf(basisType, basisIds);
     if (basisType === "NONE") {
-      if (l.purchaseInvoiceId || l.salesInvoiceId || l.purchaseOrderId) {
+      if (l.purchaseInvoiceId || l.servicePurchaseInvoiceId || l.salesInvoiceId || l.purchaseOrderId) {
         throw new Error(`ردیف ${idx + 1}: نوع پرداخت انتخاب‌شده «بدون مبنا» است؛ سند مبنا نباید انتخاب شود`);
       }
     } else {
-      const field = BASIS_FIELD[basisType];
+      const field = BASIS_FIELD[rowBasisType as Exclude<RowBasisType, "NONE">];
       const basisId = (l as any)[field];
       if (!basisId) throw new Error(`ردیف ${idx + 1}: انتخاب سند مبنا الزامی است`);
       for (const [f, v] of Object.entries(basisIds)) {
         if (f !== field && v) throw new Error(`ردیف ${idx + 1}: فقط سند مبنای متناسب با نوع پرداخت باید انتخاب شود`);
       }
       // eslint-disable-next-line no-await-in-loop
-      const candidates = await candidatesForBasisType(basisType, l.partyId as number, { excludePaymentId, nature: paymentType.nature });
+      const candidates = await candidatesForBasisType(rowBasisType, l.partyId as number, { excludePaymentId, nature: paymentType.nature });
       basisInfo = candidates.find((c) => c.id === basisId) || null;
       if (!basisInfo) throw new Error(`ردیف ${idx + 1}: سند مبنای انتخاب‌شده یافت نشد یا متعلق به این طرف حساب نیست`);
       if (basisInfo.date.getTime() > paymentDate.getTime() && !alreadyUsedBasis.has(`${field}:${basisId}`)) {
@@ -427,7 +433,7 @@ async function validateSubjectLines(
     const amount = Number(l.amount);
     if (!(amount > 0)) throw new Error(`ردیف ${idx + 1}: مبلغ باید عددی مثبت باشد`);
     if (basisInfo) {
-      const basisKey = `${basisType}:${basisInfo.id}:${basisGroupOf(paymentType.nature)}`;
+      const basisKey = `${rowBasisType}:${basisInfo.id}:${basisGroupOf(paymentType.nature)}`;
       // eslint-disable-next-line no-await-in-loop
       const basisCurrency = await getBasisCurrency(basisInfo.currencyId);
       const amountInBasisCurrency =
@@ -443,7 +449,7 @@ async function validateSubjectLines(
     // تسعیر فقط وقتی معنا دارد که سند مبنا نرخ ارز خودش را داشته باشد (فاکتور خرید/فروش)؛ سفارش خرید اصلاً
     // fxRate ندارد، پس نرخ مبنایی برای مقایسه وجود ندارد و تسعیر صفر است. علامت «پرداخت»: زیان منفی است.
     const exchangeGainLoss =
-      basisInfo && (basisType === "PURCHASE_INVOICE" || basisType === "SALES_INVOICE")
+      basisInfo && (rowBasisType === "PURCHASE_INVOICE" || rowBasisType === "SERVICE_PURCHASE_INVOICE" || rowBasisType === "SALES_INVOICE")
         ? calculateExchangeGainLoss("PAYMENT", amount, fxRate, basisInfo.fxRate, currency, baseCurrency)
         : 0;
 
@@ -456,7 +462,8 @@ async function validateSubjectLines(
       bankAccountId: rowBankAccountId,
       cashBoxId: rowCashBoxId,
       custodianId: rowCustodianId,
-      purchaseInvoiceId: basisType === "PURCHASE_INVOICE" ? basisIds.purchaseInvoiceId : null,
+      purchaseInvoiceId: rowBasisType === "PURCHASE_INVOICE" ? basisIds.purchaseInvoiceId : null,
+      servicePurchaseInvoiceId: rowBasisType === "SERVICE_PURCHASE_INVOICE" ? basisIds.servicePurchaseInvoiceId : null,
       salesInvoiceId: basisType === "SALES_INVOICE" ? basisIds.salesInvoiceId : null,
       purchaseOrderId: basisType === "PURCHASE_ORDER" ? basisIds.purchaseOrderId : null,
       currencyId: l.currencyId,
@@ -531,6 +538,7 @@ const PAYMENT_DETAIL_INCLUDE = {
       custodian: { include: { party: true, pettyCash: true } },
       currency: true,
       purchaseInvoice: true,
+      servicePurchaseInvoice: true,
       salesInvoice: true,
       purchaseOrder: true,
     },
@@ -606,6 +614,8 @@ function serializePayment(d: any) {
               : "",
       purchaseInvoiceId: l.purchaseInvoiceId,
       purchaseInvoiceNumber: l.purchaseInvoice?.number,
+      servicePurchaseInvoiceId: l.servicePurchaseInvoiceId,
+      servicePurchaseInvoiceNumber: l.servicePurchaseInvoice?.number,
       salesInvoiceId: l.salesInvoiceId,
       salesInvoiceNumber: l.salesInvoice?.number,
       purchaseOrderId: l.purchaseOrderId,
@@ -831,9 +841,9 @@ async function paymentApproveHandler(req: any, res: any) {
     const approveBasisAllocated = new Map<string, number>();
     const approveBasisCurrencyCache = new Map<number, ConversionCurrency>();
     for (const s of d.settlementLines) {
-      const basisId = s.purchaseInvoiceId || s.salesInvoiceId || s.purchaseOrderId;
+      const basisId = s.purchaseInvoiceId || s.servicePurchaseInvoiceId || s.salesInvoiceId || s.purchaseOrderId;
       if (!basisId) continue;
-      const basisType: BasisType = s.purchaseInvoiceId ? "PURCHASE_INVOICE" : s.salesInvoiceId ? "SALES_INVOICE" : "PURCHASE_ORDER";
+      const basisType: RowBasisType = s.purchaseInvoiceId ? "PURCHASE_INVOICE" : s.servicePurchaseInvoiceId ? "SERVICE_PURCHASE_INVOICE" : s.salesInvoiceId ? "SALES_INVOICE" : "PURCHASE_ORDER";
       // eslint-disable-next-line no-await-in-loop
       const approveNature = (await prisma.paymentType.findUnique({ where: { id: s.paymentTypeId }, select: { nature: true } }))?.nature;
       // eslint-disable-next-line no-await-in-loop

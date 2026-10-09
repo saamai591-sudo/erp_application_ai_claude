@@ -1,6 +1,6 @@
 import { api } from "./api";
 import { getSavedFiscalPeriodId } from "./userSettings";
-import { formatJalaliDate } from "./formatDate";
+import { formatJalaliDate, localTodayIso } from "./formatDate";
 
 export interface FiscalPeriodRange {
   id: number;
@@ -48,7 +48,7 @@ export function resolveReviewDateRange(periods: FiscalPeriodRange[]): { fromDate
  */
 export function defaultDocumentDate(period: FiscalPeriodRange | null): string {
   if (!period) return "";
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localTodayIso();
   const from = period.fromDate.slice(0, 10);
   const to = period.toDate.slice(0, 10);
   return today >= from && today <= to ? today : "";

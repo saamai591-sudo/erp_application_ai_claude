@@ -101,7 +101,7 @@ export async function sendTaxInvoices(items: SendItemInput[]): Promise<SendItemR
             salesInvoiceId: inv.id,
             subject: 1,
             invoiceType: built.payload.header.inty,
-            settlementMethod: built.payload.header.setm,
+            settlementMethod: built.payload.header.setm ?? 1, // نوع دوم: setm فرستاده نمی‌شود و نقدی ثبت می‌شود
             isArticle9: !!options.isArticle9,
             taxId: built.meta.taxId,
             serial,

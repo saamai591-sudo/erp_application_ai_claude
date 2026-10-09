@@ -26,7 +26,7 @@ export async function issuePettyCashSummaryJournalEntry(summaryId: number) {
     include: {
       custodian: { include: { pettyCash: { include: { currency: true } }, party: true } },
       lines: {
-        include: { paymentType: true, purchaseInvoice: true, salesInvoice: true, purchaseOrder: true },
+        include: { paymentType: true, purchaseInvoice: true, servicePurchaseInvoice: true, salesInvoice: true, purchaseOrder: true },
         orderBy: { rowOrder: "asc" },
       },
     },
@@ -55,7 +55,7 @@ export async function issuePettyCashSummaryJournalEntry(summaryId: number) {
 
   for (const [idx, l] of summary.lines.entries()) {
     const n = idx + 1;
-    const resolved = await resolvePaymentSubjectAccount(l.paymentType, { purchaseInvoice: l.purchaseInvoice, salesInvoice: l.salesInvoice }, summary.date);
+    const resolved = await resolvePaymentSubjectAccount(l.paymentType, { purchaseInvoice: l.purchaseInvoice ?? l.servicePurchaseInvoice, salesInvoice: l.salesInvoice }, summary.date);
     if (resolved.settingId) usedSettingIds.add(resolved.settingId);
     if (resolved.treasurySettingId) usedTreasurySettingIds.push(resolved.treasurySettingId);
     if (resolved.error) {

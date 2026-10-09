@@ -25,6 +25,7 @@ import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { partyDisplayName } from "./Users";
 import { DescriptionField } from "../components/DescriptionField";
+import { basisKeyOf, rowBasisKey, basisDisplayOf } from "../components/PaymentBasisPicker";
 
 // «خلاصه تنخواه» (مدیریت خزانه › پرداخت): پرداخت‌های تنخواهِ ثبت‌شده‌ی یک تنخواه‌دار را به حساب‌های حسابداری وصل می‌کند.
 // دو مرحله‌ای هم‌الگوی سند پرداخت: «تایید» سند را قفل و تسعیر ردیف‌های مبنادار را محاسبه می‌کند؛ «صدور سند حسابداری»
@@ -65,10 +66,11 @@ interface PickablePayment {
   paymentTypeId: number;
   paymentType: PaymentTypeOption;
   purchaseInvoiceId: number | null;
+  servicePurchaseInvoiceId: number | null;
   salesInvoiceId: number | null;
   purchaseOrderId: number | null;
 }
-interface BasisCandidate { id: number; number: number; date: string; currencyId: number; remaining: number }
+interface BasisCandidate { id: number; number: number; date: string; currencyId: number; remaining: number; kind?: "GOODS" | "SERVICE" }
 interface ResolvedAccount { id: number; code: string; title: string; isCurrency: boolean; detailType1Id: number | null; detailType2Id: number | null; detailType3Id: number | null }
 interface DetailOption { code: string; title: string }
 
@@ -93,9 +95,11 @@ interface SummaryLineDto {
   paymentTypeId: number;
   paymentType: PaymentTypeOption;
   purchaseInvoiceId: number | null;
+  servicePurchaseInvoiceId: number | null;
   salesInvoiceId: number | null;
   purchaseOrderId: number | null;
   purchaseInvoice: { id: number; number: number; date: string } | null;
+  servicePurchaseInvoice: { id: number; number: number; date: string } | null;
   salesInvoice: { id: number; number: number; date: string } | null;
   purchaseOrder: { id: number; number: number; date: string } | null;
   detail1Code: string | null;
@@ -181,6 +185,7 @@ interface LineState {
   paymentTypeTitle: string;
   basisType: BasisType;
   purchaseInvoiceId: string;
+  servicePurchaseInvoiceId: string;
   salesInvoiceId: string;
   purchaseOrderId: string;
   basisDisplay: string;
@@ -259,12 +264,14 @@ function partyDetailLockedSlot(pd: PartyDetail | undefined): LineState["partyDet
 async function resolveAccountFor(
   paymentTypeId: string,
   purchaseInvoiceId: string,
+  servicePurchaseInvoiceId: string,
   salesInvoiceId: string,
   partyDetailCode?: string | null
 ): Promise<{ account: ResolvedAccount | null; error: string; partyDetail: PartyDetail }> {
   if (!paymentTypeId) return { account: null, error: "", partyDetail: {} };
   const params = new URLSearchParams({ paymentTypeId });
   if (purchaseInvoiceId) params.set("purchaseInvoiceId", purchaseInvoiceId);
+  if (servicePurchaseInvoiceId) params.set("servicePurchaseInvoiceId", servicePurchaseInvoiceId);
   if (salesInvoiceId) params.set("salesInvoiceId", salesInvoiceId);
   if (partyDetailCode) params.set("partyDetailCode", partyDetailCode);
   try {
@@ -288,6 +295,7 @@ function lineFromPayment(p: PickablePayment): Omit<LineState, "account" | "accou
     paymentTypeTitle: p.paymentType?.title || "",
     basisType: p.paymentType?.basisType || "NONE",
     purchaseInvoiceId: p.purchaseInvoiceId ? String(p.purchaseInvoiceId) : "",
+    servicePurchaseInvoiceId: p.servicePurchaseInvoiceId ? String(p.servicePurchaseInvoiceId) : "",
     salesInvoiceId: p.salesInvoiceId ? String(p.salesInvoiceId) : "",
     purchaseOrderId: p.purchaseOrderId ? String(p.purchaseOrderId) : "",
     basisDisplay: "",
@@ -302,8 +310,8 @@ function lineFromPayment(p: PickablePayment): Omit<LineState, "account" | "accou
 }
 
 function lineFromDto(l: SummaryLineDto): LineState {
-  const basisId = l.purchaseInvoiceId || l.salesInvoiceId || l.purchaseOrderId;
-  const basisDoc = l.purchaseInvoice || l.salesInvoice || l.purchaseOrder;
+  const basisId = l.purchaseInvoiceId || l.servicePurchaseInvoiceId || l.salesInvoiceId || l.purchaseOrderId;
+  const basisDoc = l.purchaseInvoice || l.servicePurchaseInvoice || l.salesInvoice || l.purchaseOrder;
   return {
     clientKey: nextClientKey(),
     pettyCashPaymentId: String(l.pettyCashPaymentId),
@@ -316,9 +324,10 @@ function lineFromDto(l: SummaryLineDto): LineState {
     paymentTypeTitle: l.paymentType?.title || "",
     basisType: l.paymentType?.basisType || "NONE",
     purchaseInvoiceId: l.purchaseInvoiceId ? String(l.purchaseInvoiceId) : "",
+    servicePurchaseInvoiceId: l.servicePurchaseInvoiceId ? String(l.servicePurchaseInvoiceId) : "",
     salesInvoiceId: l.salesInvoiceId ? String(l.salesInvoiceId) : "",
     purchaseOrderId: l.purchaseOrderId ? String(l.purchaseOrderId) : "",
-    basisDisplay: basisId && basisDoc ? toFaDigits(String(basisDoc.number)) : "",
+    basisDisplay: basisId && basisDoc ? basisDisplayOf(basisDoc.number, l.servicePurchaseInvoice ? "SERVICE" : undefined) : "",
     account: l.resolvedAccount,
     accountError: l.resolvedAccountError || "",
     detail1Code: l.partyDetail?.detail1Code || l.detail1Code || "",
@@ -460,7 +469,7 @@ function SummaryForm({ editId }: { editId?: number }) {
     for (const p of selected) {
       const base = lineFromPayment(p);
       // eslint-disable-next-line no-await-in-loop
-      const { account, error: accErr, partyDetail } = await resolveAccountFor(base.paymentTypeId, base.purchaseInvoiceId, base.salesInvoiceId, p.party.detailCode);
+      const { account, error: accErr, partyDetail } = await resolveAccountFor(base.paymentTypeId, base.purchaseInvoiceId, base.servicePurchaseInvoiceId, base.salesInvoiceId, p.party.detailCode);
       preloadDetailOptionsFor(account);
       newLines.push({
         ...base,
@@ -517,6 +526,7 @@ function SummaryForm({ editId }: { editId?: number }) {
         pettyCashPaymentId: Number(l.pettyCashPaymentId),
         paymentTypeId: Number(l.paymentTypeId),
         purchaseInvoiceId: l.purchaseInvoiceId ? Number(l.purchaseInvoiceId) : null,
+        servicePurchaseInvoiceId: l.servicePurchaseInvoiceId ? Number(l.servicePurchaseInvoiceId) : null,
         salesInvoiceId: l.salesInvoiceId ? Number(l.salesInvoiceId) : null,
         purchaseOrderId: l.purchaseOrderId ? Number(l.purchaseOrderId) : null,
         detail1Code: l.detail1Code || null,
@@ -804,6 +814,7 @@ function SummaryForm({ editId }: { editId?: number }) {
             const { account, error: accErr, partyDetail } = await resolveAccountFor(
               patch.paymentTypeId,
               patch.purchaseInvoiceId,
+              patch.servicePurchaseInvoiceId,
               patch.salesInvoiceId,
               lines[modifyIdx].paymentPartyDetailCode
             );
@@ -848,11 +859,12 @@ function ModifyPaymentTypeDialog({
 }: {
   row: LineState;
   onClose: () => void;
-  onConfirm: (patch: { paymentTypeId: string; basisType: BasisType; purchaseInvoiceId: string; salesInvoiceId: string; purchaseOrderId: string; basisDisplay: string; paymentTypeTitle: string }) => void;
+  onConfirm: (patch: { paymentTypeId: string; basisType: BasisType; purchaseInvoiceId: string; servicePurchaseInvoiceId: string; salesInvoiceId: string; purchaseOrderId: string; basisDisplay: string; paymentTypeTitle: string }) => void;
 }) {
   const [paymentTypes, setPaymentTypes] = useState<PaymentTypeOption[]>([]);
   const [paymentTypeId, setPaymentTypeId] = useState(row.paymentTypeId);
-  const [basisId, setBasisId] = useState(row.purchaseInvoiceId || row.salesInvoiceId || row.purchaseOrderId);
+  // کلید سند مبنا (فاکتور خرید خدمات با پیشوند S — نگاه کنید به basisKeyOf)
+  const [basisId, setBasisId] = useState(rowBasisKey(row));
   const [basisDisplay, setBasisDisplay] = useState(row.basisDisplay);
   const [candidates, setCandidates] = useState<BasisCandidate[]>([]);
 
@@ -884,10 +896,13 @@ function ModifyPaymentTypeDialog({
     if (!paymentTypeId) return showError("نوع پرداخت الزامی است");
     if (basisType !== "NONE" && !basisId) return showError("انتخاب سند مبنا الزامی است");
     const field = basisType !== "NONE" ? BASIS_FIELD[basisType as Exclude<BasisType, "NONE">] : null;
+    const isService = basisId.startsWith("S");
+    const rawId = isService ? basisId.slice(1) : basisId;
     onConfirm({
       paymentTypeId,
       basisType,
-      purchaseInvoiceId: field === "purchaseInvoiceId" ? basisId : "",
+      purchaseInvoiceId: field === "purchaseInvoiceId" && !isService ? rawId : "",
+      servicePurchaseInvoiceId: field === "purchaseInvoiceId" && isService ? rawId : "",
       salesInvoiceId: field === "salesInvoiceId" ? basisId : "",
       purchaseOrderId: field === "purchaseOrderId" ? basisId : "",
       basisDisplay,
@@ -911,10 +926,11 @@ function ModifyPaymentTypeDialog({
               rows={candidates}
               columns={[
                 { header: "شماره", render: (c) => toFaDigits(String(c.number)), filterValue: (c) => String(c.number), width: "70px" },
+                ...(candidates.some((c) => c.kind) ? [{ header: "نوع", render: (c: BasisCandidate) => (c.kind === "SERVICE" ? "خدمات" : "کالا"), filterValue: (c: BasisCandidate) => (c.kind === "SERVICE" ? "خدمات" : "کالا"), width: "70px" }] : []),
                 { header: "تاریخ", render: (c) => formatJalaliDate(c.date), filterValue: (c) => c.date.slice(0, 10), width: "100px" },
                 { header: "مانده", render: (c) => formatAmountFa(c.remaining), filterValue: (c) => String(c.remaining), width: "110px" },
               ]}
-              onSelect={(c) => { setBasisId(String(c.id)); setBasisDisplay(toFaDigits(String(c.number))); }}
+              onSelect={(c) => { setBasisId(basisKeyOf(c)); setBasisDisplay(basisDisplayOf(c.number, c.kind)); }}
             />
           </div>
         )}

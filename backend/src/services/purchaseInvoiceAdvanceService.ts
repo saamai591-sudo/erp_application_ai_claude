@@ -59,9 +59,8 @@ export const PURCHASE_INVOICE_ADVANCE_LOCKS: InvoiceFlowLock[] = [
     // گردش پرداخت مستقیم (نه پیش‌پرداخت): هر ردیف موضوع پرداختی که مستقیماً (basisType=PURCHASE_INVOICE) به این فاکتور ارجاع داده باشد
     key: "PAYMENT_FLOW",
     check: async (invoiceId, kind) => {
-      // ردیف موضوع پرداخت فقط می‌تواند مستقیم به فاکتور خرید کالا ارجاع بدهد
-      if (kind !== "GOODS") return null;
-      const payments = await prisma.paymentSettlementLine.count({ where: { purchaseInvoiceId: invoiceId } });
+      // ردیف موضوع پرداخت می‌تواند مستقیم به فاکتور خرید کالا (purchaseInvoiceId) یا فاکتور خرید خدمات (servicePurchaseInvoiceId) ارجاع بدهد
+      const payments = await prisma.paymentSettlementLine.count({ where: kind === "GOODS" ? { purchaseInvoiceId: invoiceId } : { servicePurchaseInvoiceId: invoiceId } });
       return payments > 0
         ? "برای این فاکتور گردش پرداخت مستقیم ثبت شده است؛ امکان ایجاد، ویرایش یا حذف تخصیص پیش‌پرداخت وجود ندارد"
         : null;

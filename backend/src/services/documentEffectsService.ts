@@ -48,10 +48,10 @@ function signAndExcludeKey(documentType: InventoryDocumentType): { sign: 1 | -1;
   return { sign: rule.sign, excludeKey: rule.excludeKey };
 }
 
-// طبق کد فعلیِ هر ۱۶ Route (نه یک قاعده‌ی یکدست، بلکه رفتار موجودِ هرکدام که این‌جا عیناً حفظ می‌شود):
-// کنترل موجودی منفی برای اکثر انواع سند با پرچم warehouse.stockControl دروازه‌بانی می‌شود (اگر خاموش
-// باشد، اصلاً چک نمی‌شود)، به‌جز این سه نوع که همیشه — صرف‌نظر از stockControl — چک می‌شوند.
-const ALWAYS_CHECK_REGARDLESS_OF_STOCK_CONTROL = new Set<InventoryDocumentType>(["WAREHOUSE_RECEIPT", "WAREHOUSE_TRANSFER_IN", "INITIAL_INVENTORY"]);
+// قاعده‌ی یکدست: کنترل موجودی منفی برای همه‌ی انواع سند فقط با پرچم warehouse.stockControl («کنترل موجودی» انبار)
+// انجام می‌شود؛ اگر خاموش باشد هیچ سندی (صدور، ویرایش یا حذف) به‌خاطر منفی شدن موجودی رد نمی‌شود.
+// (پیش‌تر رسید انبار، ورود انتقال و موجودی اولیه صرف‌نظر از این پرچم همیشه چک می‌شدند؛ در نتیجه با پرچم خاموش
+// حواله‌ها آزاد بودند ولی حذف/ویرایش رسید رد می‌شد.)
 
 function mergeLinesByGoods(lines: EffectLine[]): EffectLine[] {
   const byGoods = new Map<number, number>();
@@ -60,11 +60,10 @@ function mergeLinesByGoods(lines: EffectLine[]): EffectLine[] {
 }
 
 /** فقط‌خواندنی — پیش از هرگونه نوشتن فراخوانی شود. اگر پرتاب کند، فراخوان نباید هیچ جهشی انجام دهد.
- * warehouseStockControl: مقدار فعلیِ Warehouse.stockControl همان انبار (برای دروازه‌بانی چک موجودی منفی
- * — نگاه کنید به توضیح بالای ALWAYS_CHECK_REGARDLESS_OF_STOCK_CONTROL). */
+ * warehouseStockControl: مقدار فعلیِ Warehouse.stockControl همان انبار (چک موجودی منفی فقط وقتی روشن است). */
 export async function assertSafeToReverseEffects(db: Db, doc: EffectDoc, lines: EffectLine[], warehouseStockControl: boolean): Promise<void> {
   await assertSerialsRevertible(db, doc.id);
-  if (!warehouseStockControl && !ALWAYS_CHECK_REGARDLESS_OF_STOCK_CONTROL.has(doc.documentType)) return;
+  if (!warehouseStockControl) return;
   const { sign } = signAndExcludeKey(doc.documentType);
   // چند ردیف از یک کالا (مثلاً تفکیک به‌خاطر سریال/بچ/محل) باید با هم سنجیده شوند، نه هر ردیف مستقل با کل موجودی
   for (const line of mergeLinesByGoods(lines)) {
@@ -89,7 +88,7 @@ export async function assertSafeToApplyEffects(
   warehouseStockControl: boolean,
   excludeSelfId?: number
 ): Promise<void> {
-  if (!warehouseStockControl && !ALWAYS_CHECK_REGARDLESS_OF_STOCK_CONTROL.has(doc.documentType)) return;
+  if (!warehouseStockControl) return;
   const { sign, excludeKey } = signAndExcludeKey(doc.documentType);
   const excludeOpts: StockExcludeOptions = excludeSelfId != null ? { [excludeKey]: excludeSelfId } : {};
   for (const line of mergeLinesByGoods(lines)) {

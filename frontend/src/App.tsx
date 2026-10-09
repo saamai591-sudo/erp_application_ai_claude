@@ -97,6 +97,7 @@ import TaxInvoiceSubmission from "./pages/TaxInvoiceSubmission";
 import WarehouseDocDetails from "./pages/WarehouseDocDetails";
 import DetailRules from "./pages/DetailRules";
 import NumberingPatterns from "./pages/NumberingPatterns";
+import ScheduledJobs from "./pages/ScheduledJobs";
 import PettyCashCustodians from "./pages/PettyCashCustodians";
 import PettyCashPayments from "./pages/PettyCashPayments";
 import PettyCashSummaries from "./pages/PettyCashSummaries";
@@ -403,6 +404,7 @@ export default function App() {
             <Route path="/numbering-patterns" element={<NumberingPatterns />} />
             <Route path="/numbering-patterns/new" element={<NumberingPatterns />} />
             <Route path="/numbering-patterns/:id/edit" element={<NumberingPatterns />} />
+            <Route path="/scheduled-jobs" element={<ScheduledJobs />} />
             <Route path="/tax-memories" element={<TaxMemories />} />
             <Route path="/tax-memories/new" element={<TaxMemories />} />
             <Route path="/tax-memories/:id/edit" element={<TaxMemories />} />

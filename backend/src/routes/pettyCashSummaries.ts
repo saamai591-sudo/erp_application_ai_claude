@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertWithinCurrentFiscalPeriod, assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
-import { candidatesForBasisType, BasisType } from "../services/paymentBasisCandidates";
+import { candidatesForBasisType, rowBasisTypeOf, BasisType, RowBasisType } from "../services/paymentBasisCandidates";
 import { resolvePaymentSubjectAccount } from "../services/paymentSubjectAccount";
 import { remainingOfPettyCashPayment, pickablePettyCashPayments } from "../services/pettyCashSummaryRemaining";
 import { issuePettyCashSummaryJournalEntry, revertPettyCashSummaryJournalEntry } from "../services/pettyCashSummaryJournalEntryService";
@@ -17,8 +17,9 @@ import { findFormPrefix } from "../authz/registry";
 // هر ردیف گرید به یک PettyCashPayment ثبت‌شده وصل است؛ نوع پرداخت/سند مبنای هر ردیف مستقل از پرداخت اصلی قابل تغییر
 // است («تغییر نوع پرداخت» — کاملاً سمت کلاینت، چون کل سند یک‌جا با PUT ذخیره می‌شود، هم‌الگوی سند حسابداری/پرداخت).
 
-const BASIS_FIELD: Record<Exclude<BasisType, "NONE">, "purchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
+const BASIS_FIELD: Record<Exclude<RowBasisType, "NONE">, "purchaseInvoiceId" | "servicePurchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
   PURCHASE_INVOICE: "purchaseInvoiceId",
+  SERVICE_PURCHASE_INVOICE: "servicePurchaseInvoiceId",
   SALES_INVOICE: "salesInvoiceId",
   PURCHASE_ORDER: "purchaseOrderId",
 };
@@ -30,6 +31,8 @@ interface LineInput {
   pettyCashPaymentId: number;
   paymentTypeId: number;
   purchaseInvoiceId?: number | null;
+  /** فاکتور خرید خدمات — برای نوع پرداخت با مبنای «فاکتور خرید» به‌جای purchaseInvoiceId (فاکتور خرید کالا) */
+  servicePurchaseInvoiceId?: number | null;
   salesInvoiceId?: number | null;
   purchaseOrderId?: number | null;
   detail1Code?: string | null;
@@ -56,6 +59,7 @@ const DETAIL_INCLUDE = {
       pettyCashPayment: { include: { party: true, paymentType: true } },
       paymentType: true,
       purchaseInvoice: { select: { id: true, number: true, date: true, purchaseTypeId: true, currencyId: true, fxRate: true } },
+      servicePurchaseInvoice: { select: { id: true, number: true, date: true, purchaseTypeId: true, currencyId: true, fxRate: true } },
       salesInvoice: { select: { id: true, number: true, date: true, salesTypeId: true, currencyId: true, fxRate: true } },
       purchaseOrder: { select: { id: true, number: true, date: true } },
     },
@@ -108,26 +112,29 @@ async function validateLines(body: Body, custodianId: number, excludeSummaryId?:
     }
 
     const basisType = paymentType.basisType as BasisType;
-    const ids = { purchaseInvoiceId: l.purchaseInvoiceId || null, salesInvoiceId: l.salesInvoiceId || null, purchaseOrderId: l.purchaseOrderId || null };
-    let purchaseInvoice: any = null;
+    const ids = { purchaseInvoiceId: l.purchaseInvoiceId || null, servicePurchaseInvoiceId: l.servicePurchaseInvoiceId || null, salesInvoiceId: l.salesInvoiceId || null, purchaseOrderId: l.purchaseOrderId || null };
+    // «فاکتور خرید»: فاکتور خرید کالا یا فاکتور خرید خدمات (نه هر دو)
+    const rowBasisType = rowBasisTypeOf(basisType, ids);
+    let purchaseInvoice: any = null; // فاکتور خرید کالا یا خدمات (هر دو purchaseTypeId/currencyId/fxRate دارند)
     let salesInvoice: any = null;
     let purchaseOrder: any = null;
     if (basisType === "NONE") {
-      if (ids.purchaseInvoiceId || ids.salesInvoiceId || ids.purchaseOrderId) {
+      if (ids.purchaseInvoiceId || ids.servicePurchaseInvoiceId || ids.salesInvoiceId || ids.purchaseOrderId) {
         throw new Error(`ردیف ${n}: نوع پرداخت انتخاب‌شده «بدون مبنا» است؛ سند مبنا نباید انتخاب شود`);
       }
     } else {
-      const field = BASIS_FIELD[basisType];
+      const field = BASIS_FIELD[rowBasisType as Exclude<RowBasisType, "NONE">];
       const basisId = ids[field];
       if (!basisId) throw new Error(`ردیف ${n}: انتخاب سند مبنا الزامی است`);
       for (const [f, v] of Object.entries(ids)) {
         if (f !== field && v) throw new Error(`ردیف ${n}: فقط سند مبنای متناسب با نوع پرداخت باید انتخاب شود`);
       }
       // طرف‌حساب سند مبنا همیشه طرف‌حساب خودِ پرداخت تنخواه است (فیلد جدایی در ردیف نیست)
-      const candidates = await candidatesForBasisType(basisType, payment.partyId, { nature: paymentType.nature });
+      const candidates = await candidatesForBasisType(rowBasisType, payment.partyId, { nature: paymentType.nature });
       const info = candidates.find((c) => c.id === basisId);
       if (!info) throw new Error(`ردیف ${n}: سند مبنای انتخاب‌شده یافت نشد یا متعلق به طرف‌حساب این پرداخت تنخواه نیست`);
-      if (basisType === "PURCHASE_INVOICE") purchaseInvoice = await prisma.purchaseInvoice.findUnique({ where: { id: basisId } });
+      if (rowBasisType === "PURCHASE_INVOICE") purchaseInvoice = await prisma.purchaseInvoice.findUnique({ where: { id: basisId } });
+      if (rowBasisType === "SERVICE_PURCHASE_INVOICE") purchaseInvoice = await prisma.servicePurchaseInvoice.findUnique({ where: { id: basisId } });
       if (basisType === "SALES_INVOICE") salesInvoice = await prisma.salesInvoice.findUnique({ where: { id: basisId } });
       if (basisType === "PURCHASE_ORDER") purchaseOrder = await prisma.purchaseOrder.findUnique({ where: { id: basisId } });
     }
@@ -146,7 +153,8 @@ async function validateLines(body: Body, custodianId: number, excludeSummaryId?:
     cleaned.push({
       pettyCashPaymentId: payment.id,
       paymentTypeId: paymentType.id,
-      purchaseInvoiceId: basisType === "PURCHASE_INVOICE" ? ids.purchaseInvoiceId : null,
+      purchaseInvoiceId: rowBasisType === "PURCHASE_INVOICE" ? ids.purchaseInvoiceId : null,
+      servicePurchaseInvoiceId: rowBasisType === "SERVICE_PURCHASE_INVOICE" ? ids.servicePurchaseInvoiceId : null,
       salesInvoiceId: basisType === "SALES_INVOICE" ? ids.salesInvoiceId : null,
       purchaseOrderId: basisType === "PURCHASE_ORDER" ? ids.purchaseOrderId : null,
       detail1Code: l.detail1Code || null,
@@ -190,8 +198,13 @@ router.get("/resolve-account", can(`${FORM}.view`), async (req, res) => {
     return res.status(400).json({ error: "این ماهیت نوع پرداخت (به بانک/به صندوق/به تنخواه) برای خلاصه تنخواه قابل استفاده نیست" });
   }
   const purchaseInvoiceId = req.query.purchaseInvoiceId ? Number(req.query.purchaseInvoiceId) : null;
+  const servicePurchaseInvoiceId = req.query.servicePurchaseInvoiceId ? Number(req.query.servicePurchaseInvoiceId) : null;
   const salesInvoiceId = req.query.salesInvoiceId ? Number(req.query.salesInvoiceId) : null;
-  const purchaseInvoice = purchaseInvoiceId ? await prisma.purchaseInvoice.findUnique({ where: { id: purchaseInvoiceId } }) : null;
+  const purchaseInvoice = purchaseInvoiceId
+    ? await prisma.purchaseInvoice.findUnique({ where: { id: purchaseInvoiceId } })
+    : servicePurchaseInvoiceId
+      ? await prisma.servicePurchaseInvoice.findUnique({ where: { id: servicePurchaseInvoiceId } })
+      : null;
   const salesInvoice = salesInvoiceId ? await prisma.salesInvoice.findUnique({ where: { id: salesInvoiceId } }) : null;
   const resolved = await resolvePaymentSubjectAccount(paymentType, { purchaseInvoice, salesInvoice });
   if (resolved.error) return res.status(400).json({ error: resolved.error });
@@ -211,7 +224,7 @@ router.get("/:id", can(`${FORM}.view`), async (req, res) => {
   const partyTypeId = await resolveSystemDetailTypeId(DETAIL_TYPE_CODE_PARTY);
   const lines = await Promise.all(
     item.lines.map(async (l: any) => {
-      const resolved = await resolvePaymentSubjectAccount(l.paymentType, { purchaseInvoice: l.purchaseInvoice, salesInvoice: l.salesInvoice }, item.date);
+      const resolved = await resolvePaymentSubjectAccount(l.paymentType, { purchaseInvoice: l.purchaseInvoice ?? l.servicePurchaseInvoice, salesInvoice: l.salesInvoice }, item.date);
       const partyDetail = resolved.account ? resolveAccountDetailFields(resolved.account, partyTypeId, l.pettyCashPayment?.party?.detailCode ?? null) : {};
       return { ...l, resolvedAccount: resolved.account, resolvedAccountError: resolved.error || null, partyDetail };
     })
@@ -333,7 +346,7 @@ router.post("/:id/approve", can(`${FORM}.approve`), async (req, res) => {
   const id = Number(req.params.id);
   const d = await prisma.pettyCashSummary.findUnique({
     where: { id },
-    include: { custodian: { include: { pettyCash: { include: { currency: true } } } }, lines: { include: { paymentType: true, purchaseInvoice: true, salesInvoice: true } } },
+    include: { custodian: { include: { pettyCash: { include: { currency: true } } } }, lines: { include: { paymentType: true, purchaseInvoice: true, servicePurchaseInvoice: true, salesInvoice: true } } },
   });
   if (!d) return res.status(404).json({ error: "خلاصه تنخواه یافت نشد" });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط اسناد در وضعیت «ثبت» قابل تایید هستند" });
@@ -354,8 +367,9 @@ router.post("/:id/approve", can(`${FORM}.approve`), async (req, res) => {
     for (const l of d.lines) {
       const basisType = l.paymentType.basisType;
       let exchangeGainLoss = 0;
-      if (basisType === "PURCHASE_INVOICE" && l.purchaseInvoice) {
-        exchangeGainLoss = calculateExchangeGainLoss("PAYMENT", Number(l.amount), headerFxRate, Number(l.purchaseInvoice.fxRate), pettyCashCurrency, baseCurrency);
+      const purchaseBasis = l.purchaseInvoice ?? l.servicePurchaseInvoice; // فاکتور خرید کالا یا خدمات
+      if (basisType === "PURCHASE_INVOICE" && purchaseBasis) {
+        exchangeGainLoss = calculateExchangeGainLoss("PAYMENT", Number(l.amount), headerFxRate, Number(purchaseBasis.fxRate), pettyCashCurrency, baseCurrency);
       } else if (basisType === "SALES_INVOICE" && l.salesInvoice) {
         exchangeGainLoss = calculateExchangeGainLoss("PAYMENT", Number(l.amount), headerFxRate, Number(l.salesInvoice.fxRate), pettyCashCurrency, baseCurrency);
       }

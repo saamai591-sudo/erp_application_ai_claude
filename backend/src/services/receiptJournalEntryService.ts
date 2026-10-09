@@ -5,6 +5,7 @@ import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detail
 import { toBaseCurrencyAmount } from "../utils/currencyConversion";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { EffectiveTreasurySettings } from "./treasurySettingService";
+import { autoSlotRefreshPatch } from "./accountingLineDims";
 
 // =========================================================================
 // سند حسابداری «دریافت» (Receipt) — دو مرحله:
@@ -228,7 +229,8 @@ async function receiptAutoDims(plan: PlannedReceiptLine[]) {
 /**
  * همگام‌سازی ردیف‌های حسابداری با ردیف‌های فرم (idempotent؛ هم برای اولین «تایید حسابداری» و هم برای تایید مجدد):
  *  - ردیفِ حسابداری که وجود ندارد درج می‌شود (تفصیل‌های خودکار)؛
- *  - ردیفِ موجود: اگر معین عوض شده، معین به‌روز و تفصیل‌ها به مقدار خودکار برمی‌گردد (انتخاب‌های دستی پاک می‌شود)؛ اگر همان معین است، دست‌نخورده می‌ماند؛
+ *  - ردیفِ موجود: اگر معین عوض شده، معین به‌روز و تفصیل‌ها به مقدار خودکار برمی‌گردد (انتخاب‌های دستی پاک می‌شود)؛ اگر همان معین است،
+ *    سطح‌های «خودکار» با مقدار فعلی ابزار/موضوع به‌روز می‌شوند و سطح‌های «دستی» (واردشده توسط حسابدار) دست‌نخورده می‌مانند (autoSlotRefreshPatch)؛
  *  - ردیفِ حسابداریِ دیگر موردانتظار نیست (مثلاً تسعیر که حذف شد) پاک می‌شود. (حذف ردیف پدر خودش فرزند را حذف کرده است.)
  */
 export async function syncReceiptAccountingLines(receiptId: number) {
@@ -255,9 +257,16 @@ export async function syncReceiptAccountingLines(receiptId: number) {
         });
       } else if (cur.accountId !== p.account.id) {
         await tx.receiptAccountingLine.update({ where: { id: cur.id }, data: { accountId: p.account.id, treasurySettingId: p.treasurySettingId ?? null, goodsSettingId: p.goodsSettingId ?? null, ...auto, ...sourcesOf(auto) } });
-      } else if (cur.treasurySettingId !== (p.treasurySettingId ?? null) || cur.goodsSettingId !== (p.goodsSettingId ?? null)) {
-        // همان معین ولی رکوردِ تنظیمِ مؤثر عوض شده (تاریخ اجرای جدید): فقط ارجاع تنظیم به‌روز می‌شود، تفصیل‌ها دست‌نخورده
-        await tx.receiptAccountingLine.update({ where: { id: cur.id }, data: { treasurySettingId: p.treasurySettingId ?? null, goodsSettingId: p.goodsSettingId ?? null } });
+      } else {
+        // همان معین: ارجاع تنظیم مؤثر (تاریخ اجرای جدید) به‌روز می‌شود و سطح‌های تفصیلِ «خودکار» با مقدار فعلی ابزار/موضوع هم‌گام می‌شوند؛ سطح‌های «دستی» دست‌نخورده
+        const patch = autoSlotRefreshPatch(cur as any, auto);
+        const refsChanged = cur.treasurySettingId !== (p.treasurySettingId ?? null) || cur.goodsSettingId !== (p.goodsSettingId ?? null);
+        if (refsChanged || Object.keys(patch).length > 0) {
+          await tx.receiptAccountingLine.update({
+            where: { id: cur.id },
+            data: { ...(refsChanged ? { treasurySettingId: p.treasurySettingId ?? null, goodsSettingId: p.goodsSettingId ?? null } : {}), ...patch },
+          });
+        }
       }
     }
     const stale = existing.filter((e) => !wanted.has(keyOf(e))).map((e) => e.id);

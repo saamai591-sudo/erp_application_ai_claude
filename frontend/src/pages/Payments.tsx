@@ -7,7 +7,7 @@ import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
-import { PaymentBasisPicker, usePaymentBasisCandidates, BasisCandidate } from "../components/PaymentBasisPicker";
+import { PaymentBasisPicker, usePaymentBasisCandidates, BasisCandidate, basisKeyOf, rowBasisKey, basisFieldPatch, basisDisplayOf } from "../components/PaymentBasisPicker";
 import { RecordPickerField } from "../components/RecordPicker";
 import { Modal } from "../components/Modal";
 import { RefreshButton } from "../components/RefreshButton";
@@ -126,6 +126,8 @@ interface DetailSettlementLine {
   salesInvoiceNumber?: number;
   purchaseInvoiceId: number | null;
   purchaseInvoiceNumber?: number;
+  servicePurchaseInvoiceId?: number | null;
+  servicePurchaseInvoiceNumber?: number;
   purchaseOrderId: number | null;
   purchaseOrderNumber?: number;
   currencyId: number;
@@ -323,6 +325,8 @@ interface SettlementRowState {
   custodianId: string;
   salesInvoiceId: string;
   purchaseInvoiceId: string;
+  /** فاکتور خرید خدمات (مبنای «فاکتور خرید» می‌تواند کالا یا خدمات باشد؛ حداکثر یکی از این دو پر است) */
+  servicePurchaseInvoiceId: string;
   purchaseOrderId: string;
   basisDisplay: string;
   currencyId: string;
@@ -339,7 +343,7 @@ interface SettlementRowState {
 function emptySettlementRow(instrumentClientKey: string, instrumentLabel: string, instrumentCurrencyId: string): SettlementRowState {
   return {
     instrumentClientKey, instrumentLabel, paymentTypeId: "", partyId: "", partyDisplay: "", bankAccountId: "", cashBoxId: "", custodianId: "",
-    salesInvoiceId: "", purchaseInvoiceId: "", purchaseOrderId: "", basisDisplay: "",
+    salesInvoiceId: "", purchaseInvoiceId: "", servicePurchaseInvoiceId: "", purchaseOrderId: "", basisDisplay: "",
     currencyId: instrumentCurrencyId, fxRate: "", amount: "", description: "",
     exchangeGainLoss: 0,
   };
@@ -455,8 +459,9 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         partyDisplay: l.accountDisplay || l.partyDisplay,
         salesInvoiceId: l.salesInvoiceId ? String(l.salesInvoiceId) : "",
         purchaseInvoiceId: l.purchaseInvoiceId ? String(l.purchaseInvoiceId) : "",
+        servicePurchaseInvoiceId: l.servicePurchaseInvoiceId ? String(l.servicePurchaseInvoiceId) : "",
         purchaseOrderId: l.purchaseOrderId ? String(l.purchaseOrderId) : "",
-        basisDisplay: toFaDigits(String(l.salesInvoiceNumber ?? l.purchaseInvoiceNumber ?? l.purchaseOrderNumber ?? "")),
+        basisDisplay: l.servicePurchaseInvoiceNumber != null ? basisDisplayOf(l.servicePurchaseInvoiceNumber, "SERVICE") : toFaDigits(String(l.salesInvoiceNumber ?? l.purchaseInvoiceNumber ?? l.purchaseOrderNumber ?? "")),
         currencyId: String(l.currencyId),
         fxRate: String(l.fxRate),
         amount: String(l.amount),
@@ -676,6 +681,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         custodianId: r.custodianId ? Number(r.custodianId) : null,
         salesInvoiceId: r.salesInvoiceId ? Number(r.salesInvoiceId) : null,
         purchaseInvoiceId: r.purchaseInvoiceId ? Number(r.purchaseInvoiceId) : null,
+        servicePurchaseInvoiceId: r.servicePurchaseInvoiceId ? Number(r.servicePurchaseInvoiceId) : null,
         purchaseOrderId: r.purchaseOrderId ? Number(r.purchaseOrderId) : null,
         currencyId: r.currencyId ? Number(r.currencyId) : undefined,
         fxRate: r.fxRate ? Number(r.fxRate) : undefined,
@@ -1297,7 +1303,8 @@ function SettlementRowFields({
       // «ارزش افزوده خرید» و ردیف‌های عادیِ همان فاکتور مانده‌ی جدا دارند (هم‌الگوی سرور: basisGroupOf)؛ مبلغ ردیف عادی از مانده‌ی ارزش‌افزوده کم نمی‌شود
       const rNature = paymentTypes.find((t) => String(t.id) === r.paymentTypeId)?.nature;
       if ((rNature === "PURCHASE_VAT") !== (paymentType?.nature === "PURCHASE_VAT")) return sum;
-      const rBasisId = (r as any)[field];
+      // فاکتور خرید خدمات شناسه‌ی جدا دارد (شناسه‌ی دو جدول ممکن است یکی باشد): کلید با نوع سند مبنا مقایسه می‌شود
+      const rBasisId = candidate.kind === "SERVICE" ? (r as any).servicePurchaseInvoiceId : candidate.kind === "GOODS" ? (r as any).purchaseInvoiceId : (r as any)[field];
       if (!rBasisId || Number(rBasisId) !== candidate.id) return sum;
       const rAmount = Number(r.amount) || 0;
       if (!rAmount) return sum;
@@ -1321,7 +1328,7 @@ function SettlementRowFields({
   const rowCurrency = currencies.find((c) => String(c.id) === row.currencyId);
   const isBaseCurrencyRow = !row.currencyId || Number(row.currencyId) === baseCurrency.id;
 
-  const currentBasisId = row.salesInvoiceId || row.purchaseInvoiceId || row.purchaseOrderId;
+  const currentBasisId = rowBasisKey(row);
 
   // مانده‌ی واقعاً باقی‌مانده‌ی خودِ ردیف ابزار پرداخت (قلم) برای این ردیف موضوع پرداخت: baseAmount قلم
   // منهای مبلغ (به ارز پایه) ردیف‌های خواهرِ همین فرم که به همان قلم ارجاع می‌دهند (به‌جز خودِ این ردیف).
@@ -1383,7 +1390,7 @@ function SettlementRowFields({
     onChange({
       paymentTypeId,
       partyId, partyDisplay, bankAccountId, cashBoxId, custodianId,
-      salesInvoiceId: "", purchaseInvoiceId: "", purchaseOrderId: "", basisDisplay: "",
+      salesInvoiceId: "", purchaseInvoiceId: "", servicePurchaseInvoiceId: "", purchaseOrderId: "", basisDisplay: "",
       ...amountPatch,
     });
   }
@@ -1395,7 +1402,6 @@ function SettlementRowFields({
   // می‌کند) اختصاص یافته؛ چون چند ردیف تازه در یک عمل ساخته می‌شوند و هنوز در allSettlementRows نیستند.
   function computeBasisPatch(basis: BasisCandidate, extraConsumedBase: number): Partial<SettlementRowState> {
     if (!basisType || basisType === "NONE") return {};
-    const field = BASIS_FIELD[basisType];
     const currency = currencies.find((c) => c.id === basis.currencyId);
     if (!currency) return {};
     let amount = "";
@@ -1418,8 +1424,8 @@ function SettlementRowFields({
       }
     }
     return {
-      [field]: String(basis.id),
-      basisDisplay: toFaDigits(String(basis.number)),
+      ...basisFieldPatch(basisType, basis),
+      basisDisplay: basisDisplayOf(basis.number, basis.kind),
       fxRate: "1",
       amount,
       exchangeGainLoss: 0,
@@ -1493,7 +1499,7 @@ function SettlementRowFields({
             { header: "کد", render: (p) => toFaDigits(p.detailCode), filterValue: (p) => p.detailCode, width: "100px" },
             { header: "نام", render: (p) => partyDisplayName(p), filterValue: (p) => partyDisplayName(p) },
           ]}
-          onSelect={(p) => onChange({ partyId: String(p.id), partyDisplay: partyDisplayName(p), salesInvoiceId: "", purchaseInvoiceId: "", purchaseOrderId: "", basisDisplay: "" })}
+          onSelect={(p) => onChange({ partyId: String(p.id), partyDisplay: partyDisplayName(p), salesInvoiceId: "", purchaseInvoiceId: "", servicePurchaseInvoiceId: "", purchaseOrderId: "", basisDisplay: "" })}
         />
         )}
       </td>
@@ -1518,7 +1524,7 @@ function SettlementRowFields({
               currencyId: e.target.value,
               fxRate,
               ...(hasBasisSet
-                ? { salesInvoiceId: "", purchaseInvoiceId: "", purchaseOrderId: "", basisDisplay: "", amount: "", exchangeGainLoss: 0 }
+                ? { salesInvoiceId: "", purchaseInvoiceId: "", servicePurchaseInvoiceId: "", purchaseOrderId: "", basisDisplay: "", amount: "", exchangeGainLoss: 0 }
                 : {}),
             });
           }}
@@ -1553,7 +1559,7 @@ function SettlementRowFields({
               {fxModalOpen && (
                 <PaymentForeignBasisModal
                   candidates={basisCandidates.filter(
-                    (c) => c.currencyId === rowCurrency.id && c.date.slice(0, 10) <= headerDate && (effectiveRemaining(c) > 0.001 || String(c.id) === currentBasisId)
+                    (c) => c.currencyId === rowCurrency.id && c.date.slice(0, 10) <= headerDate && (effectiveRemaining(c) > 0.001 || basisKeyOf(c) === currentBasisId)
                   )}
                   instrumentRow={instrumentRow}
                   rowCurrency={rowCurrency}
@@ -1565,15 +1571,14 @@ function SettlementRowFields({
                   onClose={() => setFxModalOpen(false)}
                   onConfirm={(basis, fxRate, amount) => {
                     if (!basisType) return;
-                    const field = BASIS_FIELD[basisType as Exclude<PaymentBasisType, "NONE">];
                     // طبق بند ۴ سند: تسعیر فقط همین‌جا، یک‌بار، بعد از تایید مودال محاسبه می‌شود.
                     const exchangeGainLoss =
                       basisType === "SALES_INVOICE" || basisType === "PURCHASE_INVOICE"
                         ? calculateExchangeGainLoss("PAYMENT", Number(amount) || 0, Number(fxRate) || 1, basis.fxRate, rowCurrency, baseCurrency)
                         : 0;
                     onChange({
-                      [field]: String(basis.id),
-                      basisDisplay: toFaDigits(String(basis.number)),
+                      ...basisFieldPatch(basisType, basis),
+                      basisDisplay: basisDisplayOf(basis.number, basis.kind),
                       fxRate,
                       amount,
                       exchangeGainLoss,
@@ -1643,12 +1648,12 @@ function PaymentForeignBasisModal({
   const [amount, setAmount] = useState(initialAmount);
   const [error, setError] = useState<string | null>(null);
 
-  const selected = candidates.find((c) => String(c.id) === basisId);
+  const selected = candidates.find((c) => basisKeyOf(c) === basisId);
 
   // طبق بند ۳: اگر ارز فاکتور انتخاب‌شده با ارز قلم پرداخت یکسان باشد، نرخ از همان قلم پیش‌فرض می‌شود
   // (قابل ویرایش)؛ در غیر این‌صورت کاربر باید دستی وارد کند — دقیقاً هم‌قاعده‌ی بند ۵ سند ReceiptChanges.
   function selectBasis(basis: BasisCandidate) {
-    setBasisId(String(basis.id));
+    setBasisId(basisKeyOf(basis));
     setError(null);
     const matchesInstrumentCurrency = !!instrumentRow && String(basis.currencyId) === instrumentRow.currencyId;
     setFxRate(matchesInstrumentCurrency ? instrumentRow!.fxRate : "");
@@ -1689,11 +1694,12 @@ function PaymentForeignBasisModal({
           <label>سند مبنا<RequiredMark /></label>
           <RecordPickerField
             title="انتخاب سند مبنا"
-            displayValue={selected ? toFaDigits(String(selected.number)) : ""}
+            displayValue={selected ? basisDisplayOf(selected.number, selected.kind) : ""}
             placeholder="انتخاب سند مبنا"
             rows={candidates}
             columns={[
               { header: "شماره", render: (c) => toFaDigits(String(c.number)), filterValue: (c) => String(c.number), width: "70px" },
+              ...(candidates.some((c) => c.kind) ? [{ header: "نوع", render: (c: BasisCandidate) => (c.kind === "SERVICE" ? "خدمات" : "کالا"), filterValue: (c: BasisCandidate) => (c.kind === "SERVICE" ? "خدمات" : "کالا"), width: "70px" }] : []),
               { header: "تاریخ", render: (c) => formatJalaliDate(c.date), filterValue: (c) => c.date.slice(0, 10), width: "100px" },
               { header: "مانده", render: (c) => formatAmountFa(c.remaining), filterValue: (c) => String(c.remaining), width: "110px" },
             ]}

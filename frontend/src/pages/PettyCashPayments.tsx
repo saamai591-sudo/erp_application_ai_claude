@@ -7,7 +7,7 @@ import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
-import { PaymentBasisPicker, usePaymentBasisCandidates, BasisCandidate } from "../components/PaymentBasisPicker";
+import { PaymentBasisPicker, usePaymentBasisCandidates, BasisCandidate, rowBasisKey, basisFieldPatch, basisDisplayOf } from "../components/PaymentBasisPicker";
 import { RecordPickerField } from "../components/RecordPicker";
 import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
@@ -54,12 +54,6 @@ interface PaymentTypeOption {
 // انواع پرداختِ «به بانک»/«به صندوق» معین را از حساب بانکی/صندوقِ خودِ ردیف می‌گیرند که این فرم و «خلاصه
 // تنخواه» ندارند؛ پس این دو ماهیت اصلاً در انتخابگر نوع پرداخت تنخواه ارائه نمی‌شوند (تصمیم صریح کاربر)
 const PETTY_CASH_INELIGIBLE_NATURES = new Set(["TO_BANK", "TO_CASH_BOX", "TO_PETTY_CASH"]);
-type BasisType = Exclude<PaymentTypeOption["basisType"], "NONE">;
-const BASIS_FIELD: Record<BasisType, "purchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
-  PURCHASE_INVOICE: "purchaseInvoiceId",
-  SALES_INVOICE: "salesInvoiceId",
-  PURCHASE_ORDER: "purchaseOrderId",
-};
 const BASIS_TITLE_FA: Record<PaymentTypeOption["basisType"], string> = {
   NONE: "بدون مبنا",
   PURCHASE_INVOICE: "فاکتور خرید",
@@ -77,9 +71,11 @@ interface PettyCashPayment {
   paymentTypeId: number;
   paymentType: PaymentTypeOption;
   purchaseInvoiceId: number | null;
+  servicePurchaseInvoiceId: number | null;
   salesInvoiceId: number | null;
   purchaseOrderId: number | null;
   purchaseInvoice: { id: number; number: number; date: string } | null;
+  servicePurchaseInvoice: { id: number; number: number; date: string } | null;
   salesInvoice: { id: number; number: number; date: string } | null;
   purchaseOrder: { id: number; number: number; date: string } | null;
   amount: string;
@@ -98,7 +94,7 @@ export default function PettyCashPayments() {
 }
 
 function basisDoc(r: PettyCashPayment) {
-  return r.purchaseInvoice || r.salesInvoice || r.purchaseOrder;
+  return r.purchaseInvoice || r.servicePurchaseInvoice || r.salesInvoice || r.purchaseOrder;
 }
 
 function PettyCashPaymentList() {
@@ -155,7 +151,7 @@ function PettyCashPaymentList() {
 
 const DEFAULT_FORM = {
   date: "", custodianId: "", partyId: "", partyDisplay: "", paymentTypeId: "",
-  purchaseInvoiceId: "", salesInvoiceId: "", purchaseOrderId: "", basisDisplay: "",
+  purchaseInvoiceId: "", servicePurchaseInvoiceId: "", salesInvoiceId: "", purchaseOrderId: "", basisDisplay: "",
   amount: "", description: "",
 };
 
@@ -207,9 +203,10 @@ function PettyCashPaymentForm({ editId }: { editId?: number }) {
           partyDisplay: partyDisplayName(d.party),
           paymentTypeId: String(d.paymentTypeId),
           purchaseInvoiceId: d.purchaseInvoiceId ? String(d.purchaseInvoiceId) : "",
+          servicePurchaseInvoiceId: d.servicePurchaseInvoiceId ? String(d.servicePurchaseInvoiceId) : "",
           salesInvoiceId: d.salesInvoiceId ? String(d.salesInvoiceId) : "",
           purchaseOrderId: d.purchaseOrderId ? String(d.purchaseOrderId) : "",
-          basisDisplay: basisDoc(d) ? toFaDigits(String(basisDoc(d)!.number)) : "",
+          basisDisplay: basisDoc(d) ? basisDisplayOf(basisDoc(d)!.number, d.servicePurchaseInvoice ? "SERVICE" : undefined) : "",
           amount: String(Number(d.amount)),
           description: d.description || "",
         });
@@ -225,7 +222,7 @@ function PettyCashPaymentForm({ editId }: { editId?: number }) {
   const custodian = custodians.find((c) => String(c.id) === form.custodianId);
   const paymentType = paymentTypes.find((t) => String(t.id) === form.paymentTypeId);
   const basisType = paymentType?.basisType;
-  const currentBasisId = form.purchaseInvoiceId || form.salesInvoiceId || form.purchaseOrderId;
+  const currentBasisId = rowBasisKey(form);
 
   // اسناد مبنای قابل انتخاب — همان هوک/انتخابگر مشترک «موضوعات پرداخت» (components/PaymentBasisPicker.tsx)
   const basisCandidates = usePaymentBasisCandidates({ source: "petty-cash-payments", basisType, partyId: form.partyId, paymentTypeId: form.paymentTypeId, editId, date: form.date });
@@ -248,25 +245,24 @@ function PettyCashPaymentForm({ editId }: { editId?: number }) {
       ...form,
       paymentTypeId,
       ...(stillEligible ? {} : { partyId: "", partyDisplay: "" }),
-      purchaseInvoiceId: "", salesInvoiceId: "", purchaseOrderId: "", basisDisplay: "",
+      purchaseInvoiceId: "", servicePurchaseInvoiceId: "", salesInvoiceId: "", purchaseOrderId: "", basisDisplay: "",
     });
   }
 
   function onBasisSelect(basis: BasisCandidate) {
     if (!basisType || basisType === "NONE") return;
-    const field = BASIS_FIELD[basisType as BasisType];
     setForm({
       ...form,
-      purchaseInvoiceId: "", salesInvoiceId: "", purchaseOrderId: "",
-      [field]: String(basis.id),
-      basisDisplay: toFaDigits(String(basis.number)),
+      purchaseInvoiceId: "", servicePurchaseInvoiceId: "", salesInvoiceId: "", purchaseOrderId: "",
+      ...basisFieldPatch(basisType, basis),
+      basisDisplay: basisDisplayOf(basis.number, basis.kind),
       // پیش‌فرض مبلغ: مانده‌ی قابل تسویه‌ی سند مبنا (کاربر می‌تواند کمتر وارد کند)
       amount: form.amount || String(basis.remaining),
     });
   }
 
   function onBasisClear() {
-    setForm({ ...form, purchaseInvoiceId: "", salesInvoiceId: "", purchaseOrderId: "", basisDisplay: "" });
+    setForm({ ...form, purchaseInvoiceId: "", servicePurchaseInvoiceId: "", salesInvoiceId: "", purchaseOrderId: "", basisDisplay: "" });
   }
 
   async function onSubmit(e: FormEvent) {
@@ -287,6 +283,7 @@ function PettyCashPaymentForm({ editId }: { editId?: number }) {
       partyId: Number(form.partyId),
       paymentTypeId: Number(form.paymentTypeId),
       purchaseInvoiceId: form.purchaseInvoiceId ? Number(form.purchaseInvoiceId) : null,
+      servicePurchaseInvoiceId: form.servicePurchaseInvoiceId ? Number(form.servicePurchaseInvoiceId) : null,
       salesInvoiceId: form.salesInvoiceId ? Number(form.salesInvoiceId) : null,
       purchaseOrderId: form.purchaseOrderId ? Number(form.purchaseOrderId) : null,
       amount: Number(form.amount),
@@ -375,7 +372,7 @@ function PettyCashPaymentForm({ editId }: { editId?: number }) {
                 { header: "کد", render: (p) => toFaDigits(p.detailCode), filterValue: (p) => p.detailCode, width: "100px" },
                 { header: "نام", render: (p) => partyDisplayName(p), filterValue: (p) => partyDisplayName(p) },
               ]}
-              onSelect={(p) => setForm({ ...form, partyId: String(p.id), partyDisplay: partyDisplayName(p), purchaseInvoiceId: "", salesInvoiceId: "", purchaseOrderId: "", basisDisplay: "" })}
+              onSelect={(p) => setForm({ ...form, partyId: String(p.id), partyDisplay: partyDisplayName(p), purchaseInvoiceId: "", servicePurchaseInvoiceId: "", salesInvoiceId: "", purchaseOrderId: "", basisDisplay: "" })}
             />
           </div>
           {basisType && basisType !== "NONE" && (

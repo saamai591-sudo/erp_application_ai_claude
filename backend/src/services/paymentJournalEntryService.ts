@@ -6,6 +6,7 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { resolvePaymentSubjectAccount } from "./paymentSubjectAccount";
 import { markSettingsUsed } from "./goodsAccountingSettingService";
 import { EffectiveTreasurySettings, markTreasurySettingsUsed } from "./treasurySettingService";
+import { autoSlotRefreshPatch } from "./accountingLineDims";
 
 // =========================================================================
 // سند حسابداری «پرداخت / اعلامیه پرداخت» (Payment) — هم‌الگوی receiptJournalEntryService.ts با جهت‌های معکوس، در دو مرحله:
@@ -60,6 +61,7 @@ const PAYMENT_PLAN_INCLUDE = {
       custodian: { include: { pettyCash: true, party: true } },
       currency: true,
       purchaseInvoice: true,
+      servicePurchaseInvoice: true,
       salesInvoice: true,
     },
     orderBy: { rowOrder: "asc" as const },
@@ -177,7 +179,7 @@ export async function buildPaymentPlan(payment: any, treasurySettings: Effective
         custodianDetails = await resolveCustodianDetailFields(account, { pettyCash: l.custodian.pettyCash?.detailCode, custodian: l.custodian.detailCode, party: l.custodian.party?.detailCode });
       }
     } else {
-      const resolved = await resolvePaymentSubjectAccount(pt, { purchaseInvoice: l.purchaseInvoice, salesInvoice: l.salesInvoice }, payment.date);
+      const resolved = await resolvePaymentSubjectAccount(pt, { purchaseInvoice: l.purchaseInvoice ?? l.servicePurchaseInvoice, salesInvoice: l.salesInvoice }, payment.date);
       if (resolved.error) errors.push(`ردیف موضوعات پرداخت ${n}: ${resolved.error}`);
       account = (resolved.account as AccountRef | null) ?? undefined;
       basisFx = resolved.basisFx;
@@ -278,8 +280,13 @@ export async function syncPaymentAccountingLines(paymentId: number) {
         await tx.paymentAccountingLine.create({ data: { paymentId, role: p.role, instrumentLineId: p.instrumentLineId ?? null, settlementLineId: p.settlementLineId ?? null, accountId: p.account.id, ...refs, ...detailsOf(dims), ...sourcesOf(dims) } });
       } else if (cur.accountId !== p.account.id) {
         await tx.paymentAccountingLine.update({ where: { id: cur.id }, data: { accountId: p.account.id, ...refs, ...detailsOf(dims), ...sourcesOf(dims) } });
-      } else if (cur.treasurySettingId !== refs.treasurySettingId || cur.goodsSettingId !== refs.goodsSettingId) {
-        await tx.paymentAccountingLine.update({ where: { id: cur.id }, data: refs });
+      } else {
+        // همان معین: ارجاع تنظیم مؤثر به‌روز می‌شود و سطح‌های تفصیلِ «خودکار» با مقدار فعلی ابزار/موضوع هم‌گام می‌شوند؛ سطح‌های «دستی» دست‌نخورده
+        const patch = autoSlotRefreshPatch(cur as any, dims);
+        const refsChanged = cur.treasurySettingId !== refs.treasurySettingId || cur.goodsSettingId !== refs.goodsSettingId;
+        if (refsChanged || Object.keys(patch).length > 0) {
+          await tx.paymentAccountingLine.update({ where: { id: cur.id }, data: { ...(refsChanged ? refs : {}), ...patch } });
+        }
       }
     }
     const stale = existing.filter((e) => !wanted.has(keyOf(e))).map((e) => e.id);

@@ -7,6 +7,17 @@ import { withoutFiscalPeriodScope } from "../lib/requestContext";
 
 export type BasisType = "NONE" | "PURCHASE_INVOICE" | "SALES_INVOICE" | "PURCHASE_ORDER";
 
+// نوع مبنا در سطح «ردیف»: نوع پرداخت با مبنای «فاکتور خرید» (PURCHASE_INVOICE) می‌تواند هم فاکتور خرید کالا و هم فاکتور خرید خدمات را
+// بپذیرد؛ ردیف‌هایی که فاکتور خدمات دارند (servicePurchaseInvoiceId) با SERVICE_PURCHASE_INVOICE دنبال می‌شوند تا شناسه‌ی دو جدول
+// (که ممکن است یکسان باشد) در کلید مانده/تخصیص قاطی نشود.
+export type RowBasisType = BasisType | "SERVICE_PURCHASE_INVOICE";
+export type PurchaseInvoiceKind = "GOODS" | "SERVICE";
+
+/** نوع مبنای واقعیِ یک ردیف: «فاکتور خرید» با servicePurchaseInvoiceId پرشده ⇒ فاکتور خرید خدمات */
+export function rowBasisTypeOf(basisType: BasisType, ids: { servicePurchaseInvoiceId?: number | null }): RowBasisType {
+  return basisType === "PURCHASE_INVOICE" && ids.servicePurchaseInvoiceId ? "SERVICE_PURCHASE_INVOICE" : basisType;
+}
+
 export interface BasisCandidate {
   id: number;
   number: number;
@@ -18,6 +29,8 @@ export interface BasisCandidate {
   total: number;
   applied: number;
   remaining: number;
+  /** فقط برای مبنای «فاکتور خرید»: کالا یا خدمات (شناسه‌ها فقط درون هر نوع یکتا هستند) */
+  kind?: PurchaseInvoiceKind;
 }
 
 // «تسویه ارزش افزوده خرید» (nature=PURCHASE_VAT) روی فاکتور خرید فقط «ارزش‌افزوده‌ی» فاکتور را پرداخت می‌کند نه مبلغ آن را؛ پس سقف و مانده‌ی آن
@@ -41,7 +54,7 @@ function sumPettyCashApplied(pettyCashPayments: any[], group: BasisGroup, exclud
 }
 
 export async function candidatesForBasisType(
-  basisType: BasisType,
+  basisType: RowBasisType,
   partyId: number,
   opts: { excludePaymentId?: number; excludePettyCashPaymentId?: number; includeVoided?: boolean; nature?: string | null } = {}
 ): Promise<BasisCandidate[]> {
@@ -72,7 +85,31 @@ export async function candidatesForBasisType(
       const applied = advanceApplied + sumApplied(inv.paymentSettlementLines, group, excludePaymentId) + sumPettyCashApplied(inv.pettyCashPayments, group, excludePettyCashPaymentId);
       return {
         id: inv.id, number: inv.number, date: inv.date, currencyId: inv.currencyId, currencyTitle: inv.currency.title,
-        fxRate: Number(inv.fxRate), partyId, total, applied, remaining: total - applied,
+        fxRate: Number(inv.fxRate), partyId, total, applied, remaining: total - applied, kind: "GOODS" as const,
+      };
+    });
+  }
+  if (basisType === "SERVICE_PURCHASE_INVOICE") {
+    // فاکتور خرید خدمات: دقیقاً هم‌الگوی فاکتور خرید کالا (مبلغ − تخفیف، یا ارزش‌افزوده‌ی ردیف‌ها ÷ نرخ فاکتور؛ منهای پیش‌پرداخت‌های
+    // تخصیص‌یافته و پرداخت‌های تاییدشده/تنخواه‌ی همان گروه) — فقط ردیف‌های آن PurchaseCostLine است و «سایر هزینه‌ها»یی ندارد
+    const invoices = await withoutFiscalPeriodScope(() =>
+      prisma.servicePurchaseInvoice.findMany({
+        where: { partyId, status: "APPROVED" },
+        include: { lines: true, currency: true, paymentSettlementLines: { include: { payment: true, paymentType: true } }, pettyCashPayments: { include: { paymentType: true } }, advanceAllocations: true },
+      })
+    );
+    return invoices.map((inv: any) => {
+      const fxRateInv = Number(inv.fxRate) > 0 ? Number(inv.fxRate) : 1;
+      const total =
+        group === "VAT"
+          ? inv.lines.reduce((s: number, l: any) => s + Number(l.vatAmount || 0), 0) / fxRateInv
+          : inv.lines.reduce((s: number, l: any) => s + Number(l.amount) - Number(l.discount || 0), 0);
+      const advanceNature = group === "VAT" ? "ADVANCE_VAT_PAYMENT" : "ADVANCE_PAYMENT";
+      const advanceApplied = inv.advanceAllocations.filter((a: any) => a.nature === advanceNature).reduce((s: number, a: any) => s + Number(a.amount), 0);
+      const applied = advanceApplied + sumApplied(inv.paymentSettlementLines, group, excludePaymentId) + sumPettyCashApplied(inv.pettyCashPayments, group, excludePettyCashPaymentId);
+      return {
+        id: inv.id, number: inv.number, date: inv.date, currencyId: inv.currencyId, currencyTitle: inv.currency.title,
+        fxRate: Number(inv.fxRate), partyId, total, applied, remaining: total - applied, kind: "SERVICE" as const,
       };
     });
   }
@@ -133,6 +170,11 @@ export async function pickableBasisDocuments(q: {
 }): Promise<BasisCandidate[]> {
   if (!q.basisType || q.basisType === "NONE" || !q.partyId) return [];
   const nature = q.paymentTypeId ? (await prisma.paymentType.findUnique({ where: { id: q.paymentTypeId }, select: { nature: true } }))?.nature : null;
-  const candidates = await candidatesForBasisType(q.basisType, q.partyId, { excludePaymentId: q.excludePaymentId, excludePettyCashPaymentId: q.excludePettyCashPaymentId, nature });
+  const opts = { excludePaymentId: q.excludePaymentId, excludePettyCashPaymentId: q.excludePettyCashPaymentId, nature };
+  // مبنای «فاکتور خرید»: فاکتورهای خرید کالا و خرید خدمات هر دو در یک فهرست (ستون «نوع» آن‌ها را جدا می‌کند)
+  const candidates =
+    q.basisType === "PURCHASE_INVOICE"
+      ? [...(await candidatesForBasisType("PURCHASE_INVOICE", q.partyId, opts)), ...(await candidatesForBasisType("SERVICE_PURCHASE_INVOICE", q.partyId, opts))]
+      : await candidatesForBasisType(q.basisType, q.partyId, opts);
   return candidates.filter((c) => c.remaining > 0.001 && (!q.date || c.date.getTime() <= q.date.getTime()));
 }

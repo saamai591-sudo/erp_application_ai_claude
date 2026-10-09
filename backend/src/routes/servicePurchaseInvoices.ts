@@ -621,6 +621,15 @@ router.post("/service-purchase-invoices/:id/unapprove", can(`${FORM}.unapprove`)
   if (invoice.journalEntryId) {
     return res.status(400).json({ error: "برای این فاکتور سند حسابداری صادر شده؛ ابتدا سند حسابداری را حذف کنید" });
   }
+  // فاکتوری که سند مبنای یک پرداخت (اعلامیه پرداخت / پرداخت تنخواه / خلاصه‌ی تنخواه) است، از تایید برنمی‌گردد؛ پرداخت فقط برای فاکتور تاییدشده معتبر است
+  const [paymentRows, pettyRows, pettySummaryRows] = await Promise.all([
+    prisma.paymentSettlementLine.count({ where: { servicePurchaseInvoiceId: id } }),
+    prisma.pettyCashPayment.count({ where: { servicePurchaseInvoiceId: id } }),
+    prisma.pettyCashSummaryLine.count({ where: { servicePurchaseInvoiceId: id } }),
+  ]);
+  if (paymentRows + pettyRows + pettySummaryRows > 0) {
+    return res.status(400).json({ error: "این فاکتور سند مبنای یک پرداخت (اعلامیه پرداخت، پرداخت تنخواه یا خلاصه تنخواه) است؛ ابتدا باید آن پرداخت‌ها حذف یا اصلاح شوند" });
+  }
 
   const baseCurrency = await getBaseCurrency();
   const fxRate = Number(invoice.fxRate);

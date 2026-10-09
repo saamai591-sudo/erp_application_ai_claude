@@ -8,7 +8,7 @@ import gregorian_en from "react-date-object/locales/gregorian_en";
 import { digitsOnly } from "../lib/digits";
 import { toFaDigits } from "../lib/formatAmount";
 import { useSelectedFiscalPeriod } from "../lib/useSelectedFiscalPeriod";
-import { formatJalaliDate } from "../lib/formatDate";
+import { formatJalaliDate, localTodayIso } from "../lib/formatDate";
 import { showError } from "../lib/toast";
 
 function CalendarIcon() {
@@ -109,7 +109,7 @@ export function JalaliDatePicker({
   const toJalali = (iso: string) =>
     new DateObject({ date: iso, format: "YYYY-MM-DD", calendar: gregorian, locale: gregorian_en }).convert(persian, persian_fa);
   // بدون مقدار، تقویم به‌جای «امروز» روی دوره مالی انتخاب‌شده باز می‌شود: امروز اگر در بازه باشد، وگرنه روز شروع دوره (سال شروع دوره مالی)
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = localTodayIso();
   // بدون مقدار، یا وقتی مقدار فعلی بیرون از دوره مالی است (مثلاً پیش‌فرضِ امروز)، تقویم روی دوره مالی باز می‌شود: امروز اگر در بازه باشد، وگرنه نزدیک‌ترین مرز بازه
   const viewIso =
     fromIso && toIso

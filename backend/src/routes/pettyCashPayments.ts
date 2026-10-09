@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
-import { candidatesForBasisType, pickableBasisDocuments, BasisType } from "../services/paymentBasisCandidates";
+import { candidatesForBasisType, pickableBasisDocuments, rowBasisTypeOf, BasisType, RowBasisType } from "../services/paymentBasisCandidates";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertPettyCashRunningBalanceNotNegative } from "../services/pettyCashBalanceService";
@@ -17,8 +17,9 @@ import { assertPettyCashRunningBalanceNotNegative } from "../services/pettyCashB
 // کنترل مانده منفی: اگر تنخواه‌دارِ انتخاب‌شده controlNegativeBalance=true باشد، مانده‌ی جاریِ تنخواه (از صفر شروع
 // می‌شود، نه از سقف تنخواه — services/pettyCashBalanceService.ts) در هیچ لحظه‌ای از ترتیب زمانیِ تراکنش‌ها نباید منفی شود.
 
-const BASIS_FIELD: Record<Exclude<BasisType, "NONE">, "purchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
+const BASIS_FIELD: Record<Exclude<RowBasisType, "NONE">, "purchaseInvoiceId" | "servicePurchaseInvoiceId" | "salesInvoiceId" | "purchaseOrderId"> = {
   PURCHASE_INVOICE: "purchaseInvoiceId",
+  SERVICE_PURCHASE_INVOICE: "servicePurchaseInvoiceId",
   SALES_INVOICE: "salesInvoiceId",
   PURCHASE_ORDER: "purchaseOrderId",
 };
@@ -38,6 +39,7 @@ const INCLUDE = {
   party: { select: { id: true, detailCode: true, category: true, firstName: true, lastName: true, name: true } },
   paymentType: { select: { id: true, title: true, nature: true, basisType: true } },
   purchaseInvoice: { select: { id: true, number: true, date: true } },
+  servicePurchaseInvoice: { select: { id: true, number: true, date: true } },
   salesInvoice: { select: { id: true, number: true, date: true } },
   purchaseOrder: { select: { id: true, number: true, date: true } },
 };
@@ -58,6 +60,8 @@ interface Body {
   partyId: number;
   paymentTypeId: number;
   purchaseInvoiceId?: number | null;
+  /** فاکتور خرید خدمات — برای نوع پرداخت با مبنای «فاکتور خرید» به‌جای purchaseInvoiceId (فاکتور خرید کالا) */
+  servicePurchaseInvoiceId?: number | null;
   salesInvoiceId?: number | null;
   purchaseOrderId?: number | null;
   amount: number | string;
@@ -76,31 +80,34 @@ async function resolveBasis(
   amount: number,
   pettyCashCurrencyId: number,
   nature?: string | null
-): Promise<{ purchaseInvoiceId: number | null; salesInvoiceId: number | null; purchaseOrderId: number | null }> {
+): Promise<{ purchaseInvoiceId: number | null; servicePurchaseInvoiceId: number | null; salesInvoiceId: number | null; purchaseOrderId: number | null }> {
   const ids = {
     purchaseInvoiceId: body.purchaseInvoiceId || null,
+    servicePurchaseInvoiceId: body.servicePurchaseInvoiceId || null,
     salesInvoiceId: body.salesInvoiceId || null,
     purchaseOrderId: body.purchaseOrderId || null,
   };
   if (basisType === "NONE") {
-    if (ids.purchaseInvoiceId || ids.salesInvoiceId || ids.purchaseOrderId) {
+    if (ids.purchaseInvoiceId || ids.servicePurchaseInvoiceId || ids.salesInvoiceId || ids.purchaseOrderId) {
       throw new Error("نوع پرداخت انتخاب‌شده «بدون مبنا» است؛ سند مبنا نباید انتخاب شود");
     }
-    return { purchaseInvoiceId: null, salesInvoiceId: null, purchaseOrderId: null };
+    return { purchaseInvoiceId: null, servicePurchaseInvoiceId: null, salesInvoiceId: null, purchaseOrderId: null };
   }
-  const field = BASIS_FIELD[basisType];
+  // «فاکتور خرید»: فاکتور خرید کالا یا فاکتور خرید خدمات (نه هر دو)
+  const rowBasisType = rowBasisTypeOf(basisType, ids);
+  const field = BASIS_FIELD[rowBasisType as Exclude<RowBasisType, "NONE">];
   const basisId = ids[field];
   if (!basisId) throw new Error("انتخاب سند مبنا الزامی است");
   for (const [f, v] of Object.entries(ids)) {
     if (f !== field && v) throw new Error("فقط سند مبنای متناسب با نوع پرداخت باید انتخاب شود");
   }
-  const candidates = await candidatesForBasisType(basisType, body.partyId, { excludePettyCashPaymentId, nature });
+  const candidates = await candidatesForBasisType(rowBasisType, body.partyId, { excludePettyCashPaymentId, nature });
   const info = candidates.find((c) => c.id === basisId);
   if (!info) throw new Error("سند مبنای انتخاب‌شده یافت نشد یا متعلق به این طرف‌حساب نیست");
   if (info.currencyId !== pettyCashCurrencyId) throw new Error("ارز سند مبنا باید با ارز تنخواه یکسان باشد");
   if (info.date > date) throw new Error("تاریخ سند مبنا نباید بعد از تاریخ پرداخت باشد");
   if (amount > info.remaining + 0.001) throw new Error(`مبلغ پرداخت از مانده‌ی قابل تسویه‌ی سند مبنا (${info.remaining.toLocaleString("fa-IR")}) بیشتر است`);
-  return { purchaseInvoiceId: null, salesInvoiceId: null, purchaseOrderId: null, [field]: basisId } as any;
+  return { purchaseInvoiceId: null, servicePurchaseInvoiceId: null, salesInvoiceId: null, purchaseOrderId: null, [field]: basisId } as any;
 }
 
 router.post("/", can(`${FORM}.create`), async (req, res) => {

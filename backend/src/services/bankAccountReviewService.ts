@@ -9,10 +9,9 @@ import { toBaseCurrencyAmount } from "../utils/currencyConversion";
 //   ورودی: ردیف ابزار «حواله/پوز» سند دریافت — به حسابِ همان ردیف
 //          نتیجه‌ی وصول چک دریافتنی با نتیجه‌ی «وصول‌شده» — به حساب بانکی همان واگذاری به بانکی که چک آخرین بار در
 //          آن (تاییدشده) بوده
-//          ردیف ابزار «چک انتقالی» (خرج‌کردن چک دریافتنی) سند پرداخت که ردیف موضوع پرداختش ماهیت «به بانک» دارد — چک
-//          مشتری مستقیماً به حساب بانکیِ انتخاب‌شده در آن ردیف موضوع پرداخت واگذار و وصول می‌شود، پس همان لحظه‌ی
-//          سند پرداخت ورودی همان حساب است (مبلغ = مبلغ همان ردیف موضوع پرداخت؛ معادل بدهکار شدن معین حساب بانکی
-//          در سند حسابداری، services/paymentJournalEntryService.ts)
+//          هر ردیف موضوعِ سند پرداخت با ماهیت «به بانک» (ابزار نقد، حواله یا چک انتقالی) — به حساب بانکیِ انتخاب‌شده در همان
+//          ردیف موضوع، همان لحظه‌ی سند پرداخت (چک انتقالی مشتری مستقیماً به همان حساب واگذار و وصول می‌شود؛ مبلغ = مبلغ
+//          همان ردیف موضوع پرداخت؛ معادل بدهکار شدن معین حساب بانکی در سند حسابداری، services/paymentJournalEntryService.ts)
 //   خروجی: ردیف ابزار «حواله» سند پرداخت — از حسابِ همان ردیف؛ مبلغ = مبلغ حواله + کارمزد بانکی ردیف
 //          ردیف ابزار «چک» سند پرداخت که نوع چکش «چک روز» است (PayableChequeType.isSameDay) — همان لحظه‌ی سند
 //          پرداخت حساب می‌شود (بدون انتظار برای نتیجه‌ی وصول)؛ چک روز در فرم «نتیجه وصول/برگشت (پرداختنی)» قابل
@@ -151,22 +150,25 @@ export async function getBankMovements(toDate: Date, fromDate?: Date): Promise<B
       });
     }
 
-    // چک انتقالی با موضوع پرداخت «به بانک»: ورودی به حساب بانکی انتخاب‌شده در ردیف موضوع پرداخت (نه حساب ردیف ابزار —
-    // چک انتقالی حساب بانکی ندارد). چک همیشه ارز پایه است؛ مبلغ از خودِ ردیف موضوع پرداخت می‌آید چون یک چک ممکن است
-    // بین چند ردیف موضوع (مثلاً بخشی به بانک، بخشی به تامین‌کننده) تقسیم شده باشد.
-    const chequeToBankLines = await prisma.paymentSettlementLine.findMany({
+    // ردیف موضوع پرداخت با ماهیت «به بانک» (با هر نوع ابزار: نقد، حواله یا چک انتقالی): ورودی به حساب بانکی انتخاب‌شده در
+    // ردیف موضوع پرداخت (نه حساب ردیف ابزار — مثلاً چک انتقالی حساب بانکی ندارد). مبلغ از خودِ ردیف موضوع پرداخت می‌آید
+    // چون یک ابزار (مثلاً یک چک) ممکن است بین چند ردیف موضوع (مثلاً بخشی به بانک، بخشی به تامین‌کننده) تقسیم شده باشد؛
+    // معادل بدهکار شدن معین حساب بانکی در سند حسابداری (services/paymentJournalEntryService.ts).
+    const toBankLines = await prisma.paymentSettlementLine.findMany({
       where: {
         bankAccountId: { not: null },
         paymentType: { nature: "TO_BANK" },
-        instrumentLine: { type: "CHEQUE_TRANSFER" },
         payment: { status: "APPROVED", date: dateRange },
       },
       include: { payment: { include: { party: true } }, currency: true, instrumentLine: { include: { chequeItem: { include: { party: true } } } } },
     });
-    for (const l of chequeToBankLines as any[]) {
+    for (const l of toBankLines as any[]) {
       const amount = Number(l.amount);
       const base = baseCurrency && l.currencyId !== baseCurrency.id ? toBaseCurrencyAmount(amount, Number(l.fxRate), l.currency, baseCurrency) : amount;
       const cheque = l.instrumentLine.chequeItem;
+      // حساب ارزیِ هم‌ارز ردیف: مبلغ خودِ ردیف؛ وگرنه همان قاعده‌ی چک (فقط حساب ارز پایه/بدون ارز مبلغ می‌گیرد)
+      const acct = accounts.get(l.bankAccountId);
+      const currencyInflow = acct?.currencyId != null && acct.currencyId === l.currencyId ? amount : chequeCurrencyAmount(l.bankAccountId, base);
       movements.push({
         key: `PTB${l.id}`,
         docKey: `PAYMENT:${l.paymentId}`,
@@ -176,11 +178,14 @@ export async function getBankMovements(toDate: Date, fromDate?: Date): Promise<B
         docTypeCode: "PAYMENT",
         docId: l.paymentId,
         docNumber: l.payment.number,
-        partyDisplay: partyDisplay(cheque?.party ?? l.payment.party),
-        description: l.description || `چک انتقالی شماره ${cheque?.number ?? ""} به حساب بانکی`.trim(),
+        partyDisplay: partyDisplay(l.instrumentLine.type === "CHEQUE_TRANSFER" ? cheque?.party ?? l.payment.party : l.payment.party),
+        description:
+          l.description ||
+          (l.instrumentLine.type === "CHEQUE_TRANSFER" ? `چک انتقالی شماره ${cheque?.number ?? ""} به حساب بانکی`.trim() : l.payment.description) ||
+          null,
         inflow: base,
         outflow: 0,
-        currencyInflow: chequeCurrencyAmount(l.bankAccountId, base),
+        currencyInflow,
         currencyOutflow: 0,
       });
     }

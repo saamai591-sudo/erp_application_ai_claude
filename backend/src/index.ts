@@ -70,6 +70,8 @@ import pettyCashRoutes from "./routes/pettyCashes";
 import taxMemoryRoutes from "./routes/taxMemories";
 import tradeLedgerRoutes from "./routes/tradeLedgers";
 import taxInvoiceRoutes from "./routes/taxInvoices";
+import scheduledJobRoutes from "./routes/scheduledJobs";
+import { startScheduler } from "./jobs/scheduler";
 import warehouseDocDetailSettingRoutes from "./routes/warehouseDocDetailSettings";
 import detailRuleRoutes from "./routes/detailRules";
 import numberingPatternRoutes from "./routes/numberingPatterns";
@@ -159,6 +161,7 @@ app.use("/api/petty-cashes", pettyCashRoutes);
 app.use("/api/tax-memories", taxMemoryRoutes);
 app.use("/api/trade-ledgers", tradeLedgerRoutes);
 app.use("/api/tax-invoices", taxInvoiceRoutes);
+app.use("/api", scheduledJobRoutes);
 app.use("/api/warehouse-doc-detail-settings", warehouseDocDetailSettingRoutes);
 app.use("/api/detail-rules", detailRuleRoutes);
 app.use("/api/numbering-patterns", numberingPatternRoutes);
@@ -271,6 +274,8 @@ syncRegistryToDb()
   .then(() => {
     app.listen(port, () => {
       console.log(`Backend listening on port ${port}`);
+      // زمان‌بند کارها (فقط با SCHEDULER_ENABLED=true روشن می‌شود) — نگاه کنید به jobs/scheduler.ts
+      startScheduler().catch((e) => console.error("[scheduler] خطا در راه‌اندازی", e));
     });
   })
   .catch((err) => {

@@ -7,7 +7,8 @@
 
 services:
   db:
-    image: postgres:16-alpine
+    # روی سرورهایی که به Docker Hub دسترسی ندارند (مثلاً داخل ایران) DB_IMAGE را روی ایمیج postgres:16-alpine داخل ریجستری خودتان بگذارید (.env.example)
+    image: ${DB_IMAGE:-postgres:16-alpine}
     restart: unless-stopped
     environment:
       POSTGRES_USER: erp
@@ -35,11 +36,15 @@ services:
     environment:
       DATABASE_URL: postgresql://erp:${POSTGRES_PASSWORD}@db:5432/accounting_erp?schema=public
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET را در فایل .env تنظیم کنید}
+      # کلید رمزنگاری کلید خصوصی «حافظه مالیاتی»؛ خالی ⇒ از JWT_SECRET مشتق می‌شود. برای عوض‌کردن JWT_SECRET بدون از دست دادن کلید، اینجا مقدار «قدیمیِ» JWT_SECRET را بگذارید
+      TAX_KEY_ENCRYPTION_SECRET: ${TAX_KEY_ENCRYPTION_SECRET:-}
       PORT: 4000
       # ارسال صورتحساب به سامانه مودیان — پیش‌فرض خاموش (ارسال واقعی قانونی است). نگاه کنید به .env.example
       TAX_TRANSPORT_ENABLED: ${TAX_TRANSPORT_ENABLED:-false}
       TAX_API_BASE_URL: ${TAX_API_BASE_URL:-https://tp.tax.gov.ir/req/api/}
       TAX_API_INSECURE_TLS: ${TAX_API_INSECURE_TLS:-false}
+      # زمان‌بند «کارهای زمان‌بندی‌شده» — پیش‌فرض خاموش؛ فقط روی محیطی که باید خودکار کار کند true شود. نگاه کنید به .env.example
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-false}
     ports:
       - "4000:4000"
 
