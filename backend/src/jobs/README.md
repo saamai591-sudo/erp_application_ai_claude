@@ -2,7 +2,7 @@
 
 زیرساخت: `registry.ts` (فهرست کارها)، `runner.ts` (اجرا + قفل + تاریخچه)، `scheduler.ts` (حلقه‌ی هر‌دقیقه)، `schedule.ts` (محاسبه‌ی زمان اجرا به وقت تهران)،
 `params.ts` (پارامترها و بازه‌های نسبی)، `routes/scheduledJobs.ts` (API)، `frontend/src/pages/ScheduledJobs.tsx` (صفحه‌ی مدیریت — تنظیمات › عملیات).
-کار نمونه‌ی مرجع: `taxInvoiceReadiness.ts` (فقط گزارش).
+کارهای نمونه‌ی مرجع: `taxInvoiceReadiness.ts` (فقط گزارش) و `paymentJournalEntries.ts` (دارای حالت واقعی: پیش‌بینی فقط‌خواندنی ← اجرای همان توابع دکمه‌های دستی ← برگرداندن تغییر اجرا در صورت شکست).
 
 ## افزودن یک کار
 

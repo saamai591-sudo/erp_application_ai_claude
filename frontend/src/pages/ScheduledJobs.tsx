@@ -185,6 +185,7 @@ export default function ScheduledJobs() {
           <div key={job.key} className="card" style={{ padding: 14 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <strong style={{ fontSize: 14 }}>{job.title}</strong>
+              <InfoHint title={job.title} text={job.description} />
               <span className={`badge ${MODE_BADGE[job.mode]}`}>{MODE_FA[job.mode]}</span>
               {job.lastRunStatus && <span className={`badge ${STATUS_BADGE[job.lastRunStatus]}`} title="وضعیت آخرین اجرا">آخرین اجرا: {STATUS_FA[job.lastRunStatus]}</span>}
               <span style={{ flex: 1 }} />
@@ -207,8 +208,7 @@ export default function ScheduledJobs() {
                 </button>
               )}
             </div>
-            <p style={{ margin: "6px 0 8px", fontSize: 12.5, color: "var(--ink-soft)" }}>{job.description}</p>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "4px 20px", fontSize: 12.5 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "4px 20px", fontSize: 12.5, marginTop: 8 }}>
               <div><span style={{ color: "var(--ink-soft)" }}>زمان‌بندی: </span>{describeSchedule(job.schedule)}</div>
               <div><span style={{ color: "var(--ink-soft)" }}>اجرای بعدی: </span>{job.mode === "OFF" ? "— (خاموش)" : fmtDateTime(job.nextRunAt)}</div>
               <div><span style={{ color: "var(--ink-soft)" }}>آخرین اجرا: </span>{fmtDateTime(job.lastRunAt)}</div>
@@ -397,8 +397,15 @@ function SettingsModal({ jobKey, today, onClose, onSaved }: { jobKey: string; to
 }
 
 function ParamField({ def, value, today, onChange }: { def: ParamDef; value: any; today: string; onChange: (v: any) => void }) {
-  const hint = def.help ? <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 2 }}>{def.help}</div> : null;
   const required = "requiredForLive" in def && def.requiredForLive ? <span style={{ color: "var(--ink-soft)", fontSize: 11 }}> (برای حالت واقعی الزامی)</span> : null;
+  // برچسب پارامتر با آیکن راهنما (متن راهنما فقط با کلیک روی آیکن باز می‌شود تا فرم شلوغ نشود)
+  const labelEl = (
+    <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, fontWeight: 600 }}>
+      {def.label}
+      {required}
+      <InfoHint title={def.label} text={def.help} />
+    </div>
+  );
   if (def.type === "dateWindow") {
     const w: DateWindow = value ?? { fromDaysAgo: null, toDaysAgo: null };
     const num = (v: string) => (v === "" ? null : Number(v));
@@ -406,10 +413,7 @@ function ParamField({ def, value, today, onChange }: { def: ParamDef; value: any
     const to = w.toDaysAgo === null ? null : addDaysIso(today, -w.toDaysAgo);
     return (
       <div>
-        <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-          {def.label}
-          {required}
-        </div>
+        {labelEl}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
           <span style={{ fontSize: 12.5 }}>از</span>
           <input type="number" min={0} dir="ltr" style={{ width: 80 }} value={w.fromDaysAgo ?? ""} placeholder="بدون حد" onChange={(e) => onChange({ ...w, fromDaysAgo: num(e.target.value) })} />
@@ -420,17 +424,13 @@ function ParamField({ def, value, today, onChange }: { def: ParamDef; value: any
         <div style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 2 }}>
           اگر همین امروز اجرا شود: {windowText({ from, to })}
         </div>
-        {hint}
       </div>
     );
   }
   if (def.type === "date") {
     return (
       <div>
-        <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-          {def.label}
-          {required}
-        </div>
+        {labelEl}
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
           <div style={{ width: 160 }}>
             <JalaliDatePicker value={value ?? ""} onChange={(v) => onChange(v || null)} />
@@ -441,28 +441,26 @@ function ParamField({ def, value, today, onChange }: { def: ParamDef; value: any
             </button>
           )}
         </div>
-        {hint}
       </div>
     );
   }
   if (def.type === "boolean") {
     return (
       <div>
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
-          <input type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked)} />
-          {def.label}
-        </label>
-        {hint}
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
+            <input type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked)} />
+            {def.label}
+          </label>
+          <InfoHint title={def.label} text={def.help} />
+        </div>
       </div>
     );
   }
   if (def.type === "select") {
     return (
       <div>
-        <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-          {def.label}
-          {required}
-        </div>
+        {labelEl}
         <select value={value ?? ""} onChange={(e) => onChange(e.target.value || null)} style={{ marginTop: 4 }}>
           <option value="">— انتخاب نشده —</option>
           {def.options.map((o) => (
@@ -471,18 +469,13 @@ function ParamField({ def, value, today, onChange }: { def: ParamDef; value: any
             </option>
           ))}
         </select>
-        {hint}
       </div>
     );
   }
   return (
     <div>
-      <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-        {def.label}
-        {required}
-      </div>
+      {labelEl}
       <input type="number" dir="ltr" style={{ width: 140, marginTop: 4 }} value={value ?? ""} min={def.min} max={def.max} onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))} />
-      {hint}
     </div>
   );
 }

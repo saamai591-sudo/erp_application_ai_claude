@@ -413,6 +413,45 @@ export async function issuePaymentJournalEntry(paymentId: number) {
   return entry;
 }
 
+/**
+ * «تایید حسابداری» یک اعلامیه پرداخت: همگام‌سازی ردیف‌های حسابداری + ثبت وضعیت. منطق مشترک مسیر API
+ * (POST /payments/:id/accounting-approve) و کار زمان‌بندی‌شده‌ی «صدور سند اعلامیه‌های پرداخت». پیش‌شرط‌ها (اثرگذار بودن،
+ * نداشتن سند، تایید‌نشده بودن) را فراخواننده بررسی می‌کند.
+ */
+export async function accountingApprovePayment(paymentId: number, userId: number | null) {
+  await syncPaymentAccountingLines(paymentId);
+  await prisma.payment.update({ where: { id: paymentId }, data: { accountingStatus: "APPROVED", accountingApprovedAt: new Date(), accountingApprovedById: userId } });
+}
+
+/**
+ * پیش‌بینی فقط‌خواندنیِ صدور سند: فهرست موانع (خالی = اگر «تایید حسابداری» انجام شود و سند صادر شود، موفق می‌شود). همان قواعدی را اعمال
+ * می‌کند که syncPaymentAccountingLines + issuePaymentJournalEntry اعمال می‌کنند — معین‌ها باید پیدا شوند و هر سطح تفصیلی که معین دارد
+ * باید مقدار داشته باشد (مقدار خودکار از ابزار/موضوع، یا مقدار دستیِ ذخیره‌شده‌ی حسابدار). هیچ‌چیز نمی‌نویسد.
+ */
+export async function previewPaymentIssuance(paymentId: number): Promise<string[]> {
+  const payment = await loadPaymentForPlan(paymentId);
+  const { plan, errors } = await buildPaymentPlan(payment, await newTreasurySettings());
+  if (errors.length > 0) return errors;
+  const problems: string[] = [];
+  const children = await prisma.paymentAccountingLine.findMany({ where: { paymentId } });
+  const byKey = new Map(children.map((c) => [keyOf(c), c]));
+  const autoDims = await paymentAutoDims(plan);
+  for (const p of plan) {
+    const key = keyOf(p);
+    const c = byKey.get(key);
+    const auto = autoDims.get(key) ?? {};
+    // مثل sync: ردیف با همان معین ⇒ سطح خودکار از مقدار فعلی ابزار/موضوع، سطح دستی همان ذخیره‌شده؛ معین عوض شده یا ردیف نو ⇒ مقدار خودکار
+    const keep = !!c && c.accountId === p.account.id;
+    for (const n of [1, 2, 3] as const) {
+      if (!(p.account as any)[`detailType${n}Id`]) continue;
+      const autoCode = ((auto as any)[`detail${n}Code`] as string | null | undefined) ?? null;
+      const stored = keep ? ((c as any)[`detail${n}Source`] === "AUTO" ? autoCode : ((c as any)[`detail${n}Code`] as string | null) ?? null) : autoCode;
+      if (!stored) problems.push(`«${p.label}»: تفصیل سطح ${n} مقدار ندارد و باید دستی در «تایید حسابداری» وارد شود`);
+    }
+  }
+  return problems;
+}
+
 export async function revertPaymentJournalEntry(paymentId: number) {
   const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
   if (!payment) throw new Error("سند پرداخت یافت نشد");

@@ -9,7 +9,7 @@ import { assertRecordNotStale } from "../utils/concurrency";
 import { assertChequeNotUsedElsewhere, findChequeUses } from "../utils/chequeUsage";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, ConversionCurrency } from "../utils/currencyConversion";
-import { issuePaymentJournalEntry, revertPaymentJournalEntry, syncPaymentAccountingLines, getPaymentAccountingView, savePaymentAccountingDetails } from "../services/paymentJournalEntryService";
+import { issuePaymentJournalEntry, revertPaymentJournalEntry, accountingApprovePayment, getPaymentAccountingView, savePaymentAccountingDetails } from "../services/paymentJournalEntryService";
 import { candidatesForBasisType, pickableBasisDocuments, basisGroupOf, rowBasisTypeOf, BasisType, RowBasisType, BasisCandidate } from "../services/paymentBasisCandidates";
 import { assertPettyCashRunningBalanceNotNegative } from "../services/pettyCashBalanceService";
 import { assertPaymentAdvanceNotAllocated } from "../services/purchaseInvoiceAdvanceService";
@@ -1253,8 +1253,7 @@ router.post("/payments/:id/accounting-approve", can(`${FORM}.accountingApprove`)
   if (d.status !== "APPROVED") return res.status(400).json({ error: "سند هنوز اثرگذار نشده است؛ ابتدا آن را ذخیره کنید" });
   if (d.accountingStatus === "APPROVED") return res.status(400).json({ error: "این سند قبلاً تایید حسابداری شده است" });
   try {
-    await syncPaymentAccountingLines(id);
-    await prisma.payment.update({ where: { id }, data: { accountingStatus: "APPROVED", accountingApprovedAt: new Date(), accountingApprovedById: req.user?.id ?? null } });
+    await accountingApprovePayment(id, req.user?.id ?? null);
     res.json({ id, accountingStatus: "APPROVED" });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در تایید حسابداری" });
