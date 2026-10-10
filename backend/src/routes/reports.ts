@@ -178,22 +178,62 @@ router.get("/trial-balance", can(`${ACCOUNT_REVIEW}.view`), async (req, res) => 
 
   const results: any[] = [];
   const byId = buildAccountByIdMap(allAccounts as any);
+
+  // درخت حساب‌ها یک‌بار ساخته می‌شود؛ برگ‌های هر حسابِ سطح یک‌جا (با حافظه) به‌دست می‌آیند.
+  const childrenMap = new Map<number, number[]>();
+  for (const a of allAccounts) {
+    if (a.parentId) {
+      const list = childrenMap.get(a.parentId);
+      if (list) list.push(a.id);
+      else childrenMap.set(a.parentId, [a.id]);
+    }
+  }
+  const leafMemo = new Map<number, number[]>();
+  const leavesOf = (id: number): number[] => {
+    const hit = leafMemo.get(id);
+    if (hit) return hit;
+    const kids = childrenMap.get(id);
+    const out = !kids || kids.length === 0 ? [id] : kids.flatMap(leavesOf);
+    leafMemo.set(id, out);
+    return out;
+  };
+
+  // به‌جای یک aggregate برای هر حساب (N رفت‌وبرگشت پشت‌سرهم به دیتابیس که روی سرور کند بود)، جمع بدهکار/بستانکار همه‌ی برگ‌های لازم
+  // در «یک» پرس‌وجوی groupBy گرفته و در حافظه روی هر حسابِ سطح جمع می‌شود. نتیجه با روش قبلی یکسان است.
+  const leafIdsByAccount = new Map<number, number[]>();
+  const allLeafIds = new Set<number>();
   for (const acc of rowsAtLevel) {
-    const leafIds = collectLeafDescendants(acc.id, allAccounts);
-    const hasChildren = allAccounts.some((a: any) => a.parentId === acc.id);
-    const agg = await prisma.journalEntryLine.aggregate({
-      where: { accountId: { in: leafIds }, ...lineWhere, journalEntry: entryWhere },
+    const leaves = leavesOf(acc.id);
+    leafIdsByAccount.set(acc.id, leaves);
+    leaves.forEach((l) => allLeafIds.add(l));
+  }
+  const sums = new Map<number, { debit: number; credit: number }>();
+  if (allLeafIds.size > 0) {
+    const grouped = await prisma.journalEntryLine.groupBy({
+      by: ["accountId"],
+      where: { accountId: { in: Array.from(allLeafIds) }, ...lineWhere, journalEntry: entryWhere },
       _sum: { baseDebit: true, baseCredit: true },
     });
-    const totalDebit = Number(agg._sum.baseDebit || 0);
-    const totalCredit = Number(agg._sum.baseCredit || 0);
+    for (const g of grouped) sums.set(g.accountId, { debit: Number(g._sum.baseDebit || 0), credit: Number(g._sum.baseCredit || 0) });
+  }
+
+  for (const acc of rowsAtLevel) {
+    let totalDebit = 0;
+    let totalCredit = 0;
+    for (const leafId of leafIdsByAccount.get(acc.id) ?? []) {
+      const s = sums.get(leafId);
+      if (s) {
+        totalDebit += s.debit;
+        totalCredit += s.credit;
+      }
+    }
     if (totalDebit === 0 && totalCredit === 0) continue;
     const diff = totalDebit - totalCredit;
     results.push({
       id: acc.id,
       code: computeFullAccountCode(acc.id, byId),
       title: acc.title,
-      hasChildren,
+      hasChildren: childrenMap.has(acc.id),
       totalDebit,
       totalCredit,
       balance: Math.abs(diff),
