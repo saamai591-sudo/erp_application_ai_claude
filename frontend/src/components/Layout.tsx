@@ -35,7 +35,7 @@ function getInitialSidebarCollapsed(): boolean {
 
 /** آیکن+رنگ اختصاصی هر ماژول اصلی (بر اساس عنوان ماژول در navConfig) — طبق تصمیم صریح کاربر، هر ماژول
  * باید آیکنی یکتا و کاملاً قابل‌تمایز از بقیه داشته باشد (نگاه کنید به رنگ‌های --nc-mod-* در styles.css) */
-const MODULE_ICON: Record<string, string> = {
+export const MODULE_ICON: Record<string, string> = {
   "تنظیمات": "gear",
   "اطلاعات پایه": "database",
   "حسابداری": "calculator",
@@ -92,7 +92,7 @@ function FolderOpenIcon() {
 }
 
 /** آیکن اختصاصی هر فرم؛ طبق کلید icon تعریف‌شده در navConfig — سبک توپر/پررنگ (نه خطی) برای تنوع و وضوح بیشتر رنگ */
-function NavIcon({ name }: { name: string }) {
+export function NavIcon({ name }: { name: string }) {
   const common = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "currentColor", stroke: "none" };
   switch (name) {
     case "shield":
@@ -535,6 +535,20 @@ export default function Layout() {
     }
     mql.addEventListener("change", onChange);
     return () => mql.removeEventListener("change", onChange);
+  }, []);
+
+  // کارت‌های ماژول در صفحه‌ی خانه (pages/Welcome.tsx) با این رویداد ماژول را در منوی کناری باز می‌کنند
+  useEffect(() => {
+    function onOpenModule(e: Event) {
+      const title = (e as CustomEvent<string>).detail;
+      if (!title) return;
+      setSidebarCollapsed(false);
+      setFlyoutAnchor(null);
+      setOpenModule(title);
+      setOpenSubModule(null);
+    }
+    window.addEventListener("erp:open-module", onOpenModule);
+    return () => window.removeEventListener("erp:open-module", onOpenModule);
   }, []);
 
   function toggleSidebarCollapsed() {

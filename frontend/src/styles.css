@@ -685,18 +685,6 @@ body {
 
 .nav-flyout .nav-item { margin-bottom: 2px; }
 
-.welcome-page {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 60vh;
-  text-align: center;
-  color: var(--ink-soft);
-}
-.welcome-page h2 { color: var(--ink); font-size: 20px; margin-bottom: 6px; font-weight: 700; }
-.welcome-page p { font-size: 13px; max-width: 420px; line-height: 1.9; }
-
 .form-page-actions {
   display: flex;
   gap: 10px;
@@ -1805,3 +1793,84 @@ table.bestfit-measure th, table.bestfit-measure td {
 
 /* زیرسیستم ارزی (FX): وقتی در لایسنس نیست، همه‌ی فیلدها/ستون‌های علامت‌خورده با .fx-only پنهان می‌شوند (فقط نمایش؛ سرور همه‌چیز را با ارز پایه می‌پذیرد) */
 html[data-fx="off"] .fx-only { display: none !important; }
+
+/* ===================================================================
+   صفحه‌ی خانه (داشبورد) و آیکن ماژول‌ها — طرح‌های erp_dashboard_preview و erp_icons_vivid_soft (Documents/).
+   همه‌ی رنگ‌ها از متغیرهای تم می‌آیند (--surface/--line/--ink و --nc-mod-*)؛ کاشی آیکن با color-mix از رنگ خودِ ماژول ساخته می‌شود.
+   =================================================================== */
+.dash { max-width: 1180px; margin: 0 auto; padding: 4px 0 28px; display: flex; flex-direction: column; gap: 18px; }
+.dash-hero {
+  position: relative; overflow: hidden; min-height: 140px; display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  padding: 24px 30px; border: 1px solid var(--line); border-radius: 15px;
+  background: linear-gradient(105deg, var(--primary-soft) 0%, var(--surface) 70%);
+}
+.dash-hero::before, .dash-hero::after { content: ""; position: absolute; border-radius: 50%; background: var(--primary); opacity: .06; }
+.dash-hero::before { width: 330px; height: 330px; left: -70px; top: -210px; }
+.dash-hero::after { width: 220px; height: 220px; left: 180px; bottom: -175px; }
+.dash-hero-text { position: relative; z-index: 1; text-align: right; }
+.dash-hero-text h1 { margin: 0 0 6px; font-size: 22px; line-height: 1.6; font-weight: 800; color: var(--ink); }
+.dash-hero-text p { margin: 0; font-size: 13px; color: var(--ink-soft); }
+.dash-hero-date { margin-top: 10px; font-size: 12px; color: var(--ink-soft); }
+.dash-hero-art { position: relative; z-index: 1; width: 190px; height: 100px; flex-shrink: 0; display: flex; align-items: flex-end; justify-content: center; }
+.dash-hero-chart {
+  width: 128px; height: 80px; border-radius: 12px 12px 4px 4px; background: var(--surface); border: 2px solid var(--primary);
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--primary) 22%, transparent); position: relative; padding: 16px 12px 8px;
+  display: flex; align-items: flex-end; gap: 8px;
+}
+.dash-hero-chart::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 11px; background: var(--primary); border-radius: 8px 8px 0 0; opacity: .85; }
+.dash-hero-chart i { flex: 1; border-radius: 4px 4px 0 0; background: var(--primary); opacity: .75; display: block; }
+.dash-hero-chart i:nth-child(1) { height: 22px; } .dash-hero-chart i:nth-child(2) { height: 36px; }
+.dash-hero-chart i:nth-child(3) { height: 48px; } .dash-hero-chart i:nth-child(4) { height: 60px; }
+.dash-hero-pie {
+  position: absolute; bottom: 0; left: 4px; width: 52px; height: 52px; border-radius: 15px; background: var(--surface);
+  box-shadow: 0 5px 15px color-mix(in srgb, var(--primary) 18%, transparent); display: grid; place-items: center; color: var(--accent);
+}
+.dash-hero-leaf { position: absolute; left: 0; bottom: 0; width: 38px; height: 66px; background: var(--accent); opacity: .25; border-radius: 100% 0 100% 0; transform: rotate(-25deg); }
+.dash-section { background: var(--surface); border: 1px solid var(--line); border-radius: 15px; padding: 17px 18px; box-shadow: 0 5px 18px rgba(22, 55, 86, .05); }
+.dash-section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 10px; flex-wrap: wrap; }
+.dash-section-head h2 { margin: 0; font-size: 16px; font-weight: 800; color: var(--ink); }
+.dash-hint { font-size: 12px; color: var(--ink-soft); }
+.dash-empty { padding: 24px; text-align: center; color: var(--ink-soft); font-size: 13px; }
+.dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.dash-card {
+  --mod: var(--primary);
+  font: inherit; cursor: pointer; text-align: center; color: var(--ink);
+  border: 1px solid color-mix(in srgb, var(--mod) 28%, var(--line)); border-radius: 13px; min-height: 142px; padding: 16px 9px 12px;
+  background: color-mix(in srgb, var(--mod) 8%, var(--surface));
+  display: flex; flex-direction: column; align-items: center; gap: 7px; transition: transform .15s, box-shadow .15s;
+}
+.dash-card:hover { transform: translateY(-3px); box-shadow: 0 8px 18px color-mix(in srgb, var(--mod) 20%, transparent); }
+.dash-card-icon {
+  width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center; margin-bottom: 2px;
+  color: var(--mod); background: color-mix(in srgb, var(--mod) 20%, var(--surface)); filter: saturate(1.35);
+}
+.dash-card-icon svg { width: 26px; height: 26px; }
+.dash-card strong { font-size: 14px; font-weight: 700; }
+.dash-card small { font-size: 11px; line-height: 1.7; color: var(--ink-soft); }
+.dash-card-go {
+  margin-top: auto; width: 25px; height: 25px; border-radius: 50%; display: grid; place-items: center;
+  color: var(--mod); background: var(--surface); border: 1px solid var(--mod);
+}
+.dash-card.mod-ic-gear { --mod: var(--nc-mod-settings); }
+.dash-card.mod-ic-database { --mod: var(--nc-mod-info); }
+.dash-card.mod-ic-calculator { --mod: var(--nc-mod-accounting); }
+.dash-card.mod-ic-box { --mod: var(--nc-mod-goods); }
+.dash-card.mod-ic-warehouse { --mod: var(--nc-mod-warehouse); }
+.dash-card.mod-ic-truck { --mod: var(--nc-mod-supply); }
+.dash-card.mod-ic-cart { --mod: var(--nc-mod-sales); }
+.dash-card.mod-ic-wallet { --mod: var(--nc-mod-treasury); }
+.dash-card.mod-ic-receipt { --mod: var(--nc-mod-tax); }
+@media (max-width: 700px) {
+  .dash-hero { padding: 18px; }
+  .dash-hero-art { display: none; }
+  .dash-hero-text h1 { font-size: 18px; }
+}
+
+/* آیکن ماژول در منوی کناری و فلای‌اوت: کاشی نرم و پررنگ (soft + saturate) به‌جای آیکن لخت */
+.module-title .module-icon, .module-icon-btn .module-icon, .nav-flyout-header .module-icon {
+  width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0; display: inline-grid; place-items: center;
+  background: rgba(128, 128, 128, .16);
+  background: color-mix(in srgb, currentColor 18%, transparent);
+  filter: saturate(1.3);
+}
+.module-title .module-icon svg, .module-icon-btn .module-icon svg, .nav-flyout-header .module-icon svg { width: 17px; height: 17px; }
