@@ -6,6 +6,13 @@ import { readFileSync } from "node:fs";
 // با نسخه‌ی سرور مقایسه می‌کند تا ناهماهنگیِ ایمیج‌های frontend و backend دیده شود.
 const appVersion: string = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version;
 
+// دامنه‌هایی که dev-server Vite به Host آن‌ها پاسخ می‌دهد (Vite ≥ ۵٫۴٫۱۲ بقیه را ۴۰۳ می‌کند). دامنه‌ی خودِ مشتری را از متغیر محیطی ALLOWED_HOSTS
+// (جداشده با کاما، مثلاً erp.example.ir) بدهید تا نیازی به ساخت ایمیج تازه نباشد.
+const extraHosts = (process.env.ALLOWED_HOSTS ?? "")
+  .split(",")
+  .map((h) => h.trim())
+  .filter(Boolean);
+
 export default defineConfig({
   plugins: [react()],
   define: { __APP_VERSION__: JSON.stringify(appVersion) },
@@ -16,6 +23,6 @@ export default defineConfig({
     host: true,
     port: 5173,
     watch: { usePolling: true, interval: 300 },
-    allowedHosts: ["erp.greenbits.ir"],
+    allowedHosts: ["erp.greenbits.ir", ...extraHosts],
   },
 });
