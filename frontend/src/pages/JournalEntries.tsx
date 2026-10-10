@@ -4,6 +4,7 @@ import { showError, showToast } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable, ActiveFilter } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
+import { PrintButton } from "../components/PrintButton";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
 import { FxAmountDialog } from "../components/FxAmountDialog";
@@ -755,6 +756,7 @@ function EntryForm({ editId }: { editId?: number }) {
       newPath="/journal-entries/new"
       onDelete={editId && !isReadOnly ? handleDelete : undefined}
       saveDisabled={isReadOnly}
+      toolbarExtra={editId ? <PrintButton docType="JOURNAL_ENTRY" sourceId={editId} title="چاپ سند حسابداری" /> : undefined}
       extraActions={
         entryMeta
           ? [

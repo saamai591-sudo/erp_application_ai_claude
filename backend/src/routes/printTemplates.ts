@@ -4,7 +4,7 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { DEFAULT_PRINT_TEMPLATES } from "../data/printDefaultTemplates";
-import { ensureDefaultPrintTemplates, getPrintDocType, PRINT_DOC_TYPES, renderPrintDocument, renderSavedTemplate } from "../services/printService";
+import { ensureDefaultPrintTemplates, getPrintDocType, PRINT_DOC_TYPES, printLayout, renderPrintDocument, renderSavedTemplate } from "../services/printService";
 
 // «قالب‌های چاپ» (تنظیمات › عملیات) + «چاپ سند» (دکمه‌ی چاپ فرم‌ها). قالب = HTML/CSS با متغیرهای Handlebars (services/printService.ts).
 // چاپ هر سند فقط مجوز «مشاهده»ی همان سند را می‌خواهد؛ طراحی قالب مجوز فرم «قالب‌های چاپ» را.
@@ -15,6 +15,7 @@ const FORM = findFormPrefix("print-templates");
 const VIEW_GUARD_BY_TYPE: Record<string, ReturnType<typeof can>> = {
   SALES_QUOTE: can(`${findFormPrefix("sales-quotes")}.view`),
   SALES_INVOICE: can(`${findFormPrefix("sales-invoices")}.view`),
+  JOURNAL_ENTRY: can(`${findFormPrefix("journal-entries")}.view`),
 };
 
 const router = Router();
@@ -224,11 +225,12 @@ router.post("/print-templates/preview", can(`${FORM}.view`), async (req, res) =>
     validateBody({ ...b, title: b.title || "پیش‌نمایش", documentType: b.documentType ?? "" }, true);
     const def = getPrintDocType(String(b.documentType));
     const sourceId = b.sourceId ?? (await def.latestSourceId());
-    const data = sourceId ? await def.load(Number(sourceId)) : def.sample();
-    const html = renderPrintDocument(
-      { html: String(b.html), texts: cleanTexts(b.texts), paper: (b.paper as any) ?? "A4", orientation: (b.orientation as any) ?? "PORTRAIT", marginMm: b.marginMm !== undefined ? Number(b.marginMm) : 10, digits: (b.digits as any) ?? "PERSIAN" },
-      data
-    );
+    const paper = (b.paper as any) ?? "A4";
+    const orientation = (b.orientation as any) ?? "PORTRAIT";
+    const marginMm = b.marginMm !== undefined ? Number(b.marginMm) : 10;
+    const layout = printLayout(paper, orientation, marginMm);
+    const data = sourceId ? await def.load(Number(sourceId), layout) : def.sample(layout);
+    const html = renderPrintDocument({ html: String(b.html), texts: cleanTexts(b.texts), paper, orientation, marginMm, digits: (b.digits as any) ?? "PERSIAN" }, data);
     res.json({ html, usedSample: !sourceId });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در پیش‌نمایش" });

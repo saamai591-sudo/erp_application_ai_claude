@@ -5,6 +5,8 @@ import { prisma } from "../lib/prisma";
 import { DEFAULT_PRINT_TEMPLATES } from "../data/printDefaultTemplates";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { amountInWords } from "../utils/numberToWords";
+import { resolveDetailTitles } from "../utils/detailValues";
+import { buildJournalPrint, journalCapacityMm, type JeAccountNode, type JeLineInput } from "./printJournalEntry";
 
 // چاپ اسناد با «قالب چاپ»: قالب = HTML/CSS با متغیرهای Handlebars؛ داده‌ی هر نوع سند را سرور می‌سازد (دیکشنری فیلد، PRINT_DOC_TYPES) و سرور
 // آن را در قالب جاگذاری می‌کند. خروجی یک سند HTML کامل (فونت وزیرمتن داخل خودش، بدون هیچ منبع بیرونی) است که هم در پیش‌نمایش/چاپ مرورگر
@@ -30,10 +32,34 @@ interface PrintDocTypeDef {
   textKeys: { key: string; title: string }[];
   /** نام پیش‌فرض فایل (Handlebars؛ وقتی متن ثابت fileName قالب خالی است) */
   defaultFileName: string;
-  load(sourceId: number): Promise<PrintData>;
+  /** layout = اندازه‌ی کاربردی صفحه‌ی قالب؛ فقط نوع‌هایی که خودشان صفحه‌بندی می‌کنند (سند حسابداری) از آن استفاده می‌کنند */
+  load(sourceId: number, layout?: PrintLayout): Promise<PrintData>;
   latestSourceId(): Promise<number | null>;
-  sample(): PrintData;
+  sample(layout?: PrintLayout): PrintData;
 }
+
+/** اندازه‌ی صفحه‌ی چاپیِ قالب (میلی‌متر): کاغذ و جهت منهای حاشیه‌ها؛ در قالب با {{layout.contentHeightMm}} هم در دسترس است */
+export interface PrintLayout {
+  widthMm: number;
+  heightMm: number;
+  contentWidthMm: number;
+  /** یک میلی‌متر کمتر از ارتفاع واقعی تا گردکردن مرورگر صفحه‌ی خالیِ اضافه نسازد */
+  contentHeightMm: number;
+}
+
+const PAPER_MM: Record<string, [number, number]> = { A4: [210, 297], A5: [148, 210] };
+
+export function printLayout(paper: string, orientation: string, marginMm: number): PrintLayout {
+  const [w0, h0] = PAPER_MM[paper] ?? PAPER_MM.A4;
+  const landscape = orientation === "LANDSCAPE";
+  const widthMm = landscape ? h0 : w0;
+  const heightMm = landscape ? w0 : h0;
+  const m = Math.max(0, Math.min(40, Number(marginMm) || 0));
+  return { widthMm, heightMm, contentWidthMm: widthMm - 2 * m, contentHeightMm: heightMm - 2 * m - 1 };
+}
+
+const DEFAULT_LAYOUT: PrintLayout = printLayout("A4", "PORTRAIT", 8);
+
 
 // ─── کمک‌ها ────────────────────────────────────────────────────────────────
 
@@ -290,6 +316,111 @@ function sampleSalesQuote(): PrintData {
   };
 }
 
+// ─── سند حسابداری ───────────────────────────────────────────────────────────
+
+const JE_STATUS_FA: Record<string, string> = { DRAFT: "ثبت", REVIEW: "بررسی", APPROVED: "تایید" };
+
+const DOC_FIELDS_JOURNAL: PrintFieldDoc[] = [
+  { path: "doc.number", title: "شماره سند", group: "سند" },
+  { path: "doc.referenceNumber", title: "شماره عطف", group: "سند" },
+  { path: "doc.dailyNumber", title: "شماره روزانه", group: "سند" },
+  { path: "doc.date", title: "تاریخ سند (شمسی)", group: "سند" },
+  { path: "doc.status", title: "وضعیت سند (ثبت / بررسی / تایید)", group: "سند" },
+  { path: "doc.description", title: "شرح کلی سند", group: "سند" },
+  { path: "doc.documentType", title: "نوع سند", group: "سند" },
+  { path: "pages", title: "صفحه‌های چاپی (داخل {{#each pages}} … {{/each}}؛ سطرهای هر صفحه از قبل جدا شده‌اند)", group: "صفحه‌ها", list: true },
+  { path: "pageNo", title: "صفحه: شماره صفحه", group: "صفحه‌ها" },
+  { path: "pageCount", title: "صفحه: تعداد کل صفحه‌ها", group: "صفحه‌ها" },
+  { path: "isLast", title: "صفحه: آخرین صفحه است ({{#if isLast}})", group: "صفحه‌ها" },
+  { path: "multiPage", title: "صفحه: سند بیش از یک صفحه است ({{#if multiPage}})", group: "صفحه‌ها" },
+  { path: "debit", title: "صفحه: جمع بدهکار همین صفحه", group: "صفحه‌ها" },
+  { path: "credit", title: "صفحه: جمع بستانکار همین صفحه", group: "صفحه‌ها" },
+  { path: "rows", title: "سطرهای جدول هر صفحه (داخل {{#each rows}} … {{/each}})", group: "سطرها", list: true },
+  { path: "kind", title: "سطر: نوع (kol کل، mid میانی، leaf معین، detail تفصیلی، desc شرح)", group: "سطرها" },
+  { path: "no", title: "سطر: شماره ردیف (فقط روی سطر شرحِ اول هر بلوک)", group: "سطرها" },
+  { path: "code", title: "سطر: شماره حساب / کد تفصیلی", group: "سطرها" },
+  { path: "text", title: "سطر: عنوان حساب / تفصیلی / شرح ردیف", group: "سطرها" },
+  { path: "part", title: "سطر: مبلغ جزء (روی سطر شرح)", group: "سطرها" },
+  { path: "debit", title: "سطر: بدهکارِ بلوک (روی سطر کل)", group: "سطرها" },
+  { path: "credit", title: "سطر: بستانکارِ بلوک (روی سطر کل)", group: "سطرها" },
+  { path: "totals.debit", title: "جمع بدهکار سند (ارز پایه)", group: "جمع‌ها" },
+  { path: "totals.credit", title: "جمع بستانکار سند (ارز پایه)", group: "جمع‌ها" },
+  { path: "totals.inWords", title: "جمع سند به حروف (با نام ارز پایه)", group: "جمع‌ها" },
+  { path: "lines", title: "ردیف‌های ساده‌ی سند بدون گروه‌بندی (داخل {{#each lines}}؛ row، accountCode، accountTitle، detail1Code/Title … description، debit، credit)", group: "ردیف‌ها", list: true },
+  { path: "layout.contentHeightMm", title: "ارتفاع کاربردی صفحه (میلی‌متر؛ از کاغذ، جهت و حاشیه‌ی قالب)", group: "صفحه‌ها" },
+];
+
+async function loadJournalEntry(id: number, layout: PrintLayout = DEFAULT_LAYOUT): Promise<PrintData> {
+  const e = await prisma.journalEntry.findUnique({
+    where: { id },
+    include: { documentType: true, lines: { include: { currency: true }, orderBy: [{ rowOrder: "asc" }, { id: "asc" }] } },
+  });
+  if (!e) throw new Error("سند حسابداری یافت نشد");
+  const base = await prisma.currency.findFirst({ where: { isBase: true } });
+  const dec = base?.decimalPlaces ?? 0;
+
+  const accRows = await prisma.account.findMany({ select: { id: true, parentId: true, code: true, title: true, level: { select: { order: true } } } });
+  const accounts = new Map<number, JeAccountNode>(accRows.map((a) => [a.id, { id: a.id, parentId: a.parentId, code: a.code, title: a.title, levelOrder: a.level.order }]));
+  const titles = await resolveDetailTitles(e.lines.flatMap((l) => [l.detail1Code, l.detail2Code, l.detail3Code]));
+
+  const lines: JeLineInput[] = e.lines.map((l) => {
+    const foreign = !!base && l.currencyId !== base.id;
+    const amount = Number(l.debit) || Number(l.credit);
+    return {
+      accountId: l.accountId,
+      details: [l.detail1Code, l.detail2Code, l.detail3Code].filter((c): c is string => !!c).map((c) => ({ code: c, title: titles[c] ?? "" })),
+      description: l.description ?? "",
+      baseDebit: Number(l.baseDebit),
+      baseCredit: Number(l.baseCredit),
+      fxNote: foreign ? `${fmtNumber(amount, l.currency.decimalPlaces ?? 0)} ${l.currency.title} — نرخ ${fmtNumber(Number(l.fxRate), 6)}` : "",
+    };
+  });
+  const built = buildJournalPrint({ lines, accounts, decimals: dec, capacity: journalCapacityMm(layout.contentHeightMm), fmt: fmtNumber });
+  return {
+    company: await loadCompany(),
+    doc: {
+      number: e.number,
+      referenceNumber: e.referenceNumber,
+      dailyNumber: e.dailyNumber,
+      date: formatJalaliDateForMessage(e.date),
+      status: JE_STATUS_FA[e.status] ?? e.status,
+      description: e.description ?? "",
+      documentType: e.documentType.title,
+    },
+    pages: built.pages,
+    lines: built.lines,
+    totals: { debit: built.totals.debit, credit: built.totals.credit, inWords: amountInWords(built.totals.debitValue, dec, base?.title ?? "") },
+  };
+}
+
+function sampleJournalEntry(layout: PrintLayout = DEFAULT_LAYOUT): PrintData {
+  const accounts = new Map<number, JeAccountNode>([
+    [1, { id: 1, parentId: null, code: "1", title: "دارایی‌ها", levelOrder: 1 }],
+    [2, { id: 2, parentId: 1, code: "110", title: "موجودی نقد و بانک", levelOrder: 2 }],
+    [3, { id: 3, parentId: 2, code: "01", title: "بانک‌های ریالی", levelOrder: 3 }],
+    [4, { id: 4, parentId: null, code: "6", title: "درآمدها و هزینه‌ها", levelOrder: 1 }],
+    [5, { id: 5, parentId: 4, code: "401", title: "درآمدها و هزینه‌های غیرعملیاتی", levelOrder: 2 }],
+    [6, { id: 6, parentId: 5, code: "01", title: "سود سپرده بانکی", levelOrder: 3 }],
+  ]);
+  const built = buildJournalPrint({
+    lines: [
+      { accountId: 3, details: [{ code: "00001", title: "بانک نمونه 470-01086923-606" }], description: "دریافت از بانک نمونه", baseDebit: 2261329, baseCredit: 0, fxNote: "" },
+      { accountId: 6, details: [], description: "دریافت از بانک نمونه بابت سود علی‌الحساب", baseDebit: 0, baseCredit: 2261329, fxNote: "" },
+    ],
+    accounts,
+    decimals: 0,
+    capacity: journalCapacityMm(layout.contentHeightMm),
+    fmt: fmtNumber,
+  });
+  return {
+    company: { name: "شرکت نمونه", economicCode: "", registrationNumber: "", nationalId: "", phone: "", address: "", postalCode: "", website: "", logo: "", stamp: "", bankAccounts: [] },
+    doc: { number: 2, referenceNumber: 1, dailyNumber: 1, date: "1405/01/21", status: "تایید", description: "", documentType: "سند عمومی" },
+    pages: built.pages,
+    lines: built.lines,
+    totals: { debit: built.totals.debit, credit: built.totals.credit, inWords: amountInWords(built.totals.debitValue, 0, "ریال") },
+  };
+}
+
 export const PRINT_DOC_TYPES: Record<string, PrintDocTypeDef> = {
   SALES_QUOTE: {
     title: "پیش‌فاکتور",
@@ -320,6 +451,24 @@ PRINT_DOC_TYPES.SALES_INVOICE = {
     const d = sampleSalesQuote();
     return { ...d, doc: { number: 101, date: "1405/01/01", description: "", currency: "ریال", status: "ثبت", taxId: "" } };
   },
+};
+
+PRINT_DOC_TYPES.JOURNAL_ENTRY = {
+  title: "سند حسابداری",
+  fields: [...DOC_FIELDS_JOURNAL, ...COMPANY_FIELDS],
+  textKeys: [
+    { key: "title", title: "عنوان سند" },
+    { key: "preparedBy", title: "نام تهیه‌کننده (بعد از «تهیه کننده:» چاپ می‌شود)" },
+    { key: "reviewedBy", title: "نام بررسی‌کننده" },
+    { key: "approvedBy", title: "نام تاییدکننده" },
+    { key: "ratifiedBy", title: "نام تصویب‌کننده" },
+    { key: "watermark", title: "متن watermark (خالی = بدون watermark)" },
+    { key: "fileName", title: "نام فایل هنگام ذخیره به‌صورت PDF (مثلاً {{doc.number}})" },
+  ],
+  defaultFileName: "سند حسابداری {{doc.number}} - {{company.name}}",
+  load: loadJournalEntry,
+  latestSourceId: async () => (await prisma.journalEntry.findFirst({ orderBy: { id: "desc" }, select: { id: true } }))?.id ?? null,
+  sample: sampleJournalEntry,
 };
 
 export function getPrintDocType(type: string): PrintDocTypeDef {
@@ -409,7 +558,7 @@ const CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-
 export function renderPrintDocument(input: RenderInput, data: PrintData): string {
   let body: string;
   try {
-    body = hb.compile(input.html, { strict: false })({ ...data, t: input.texts ?? {} });
+    body = hb.compile(input.html, { strict: false })({ ...data, t: input.texts ?? {}, layout: printLayout(input.paper, input.orientation, input.marginMm) });
   } catch (e: any) {
     throw new Error(`خطا در قالب چاپ: ${String(e?.message ?? e).split("\n")[0]}`);
   }
@@ -430,7 +579,7 @@ export async function renderSavedTemplate(templateId: number, sourceId: number, 
   const tpl = await prisma.printTemplate.findUnique({ where: { id: templateId } });
   if (!tpl) throw new Error("قالب چاپ یافت نشد");
   const def = getPrintDocType(tpl.documentType);
-  const data = await def.load(sourceId);
+  const data = await def.load(sourceId, printLayout(tpl.paper, tpl.orientation, tpl.marginMm));
   const texts: Record<string, string> = (tpl.texts as any) ?? {};
   const fileName = buildPrintFileName(texts.fileName ?? "", data, def.defaultFileName);
   const html = renderPrintDocument({ title: fileName, html: tpl.html, texts, paper: tpl.paper, orientation: tpl.orientation, marginMm: tpl.marginMm, digits: digits ?? tpl.digits }, data);

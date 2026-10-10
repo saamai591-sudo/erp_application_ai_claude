@@ -2,7 +2,7 @@
 // قالب = HTML/CSS با متغیرهای Handlebars؛ فهرست متغیرهای هر نوع سند در services/printService.ts (فیلدهای دیکشنری) آمده است.
 
 export interface DefaultPrintTemplate {
-  documentType: "SALES_QUOTE" | "SALES_INVOICE";
+  documentType: "SALES_QUOTE" | "SALES_INVOICE" | "JOURNAL_ENTRY";
   title: string;
   paper: "A4" | "A5";
   orientation: "PORTRAIT" | "LANDSCAPE";
@@ -149,6 +149,101 @@ const SALES_INVOICE_HTML = SALES_QUOTE_HTML.replace(
   '      {{#if doc.taxId}}<div><b>شماره منحصربه‌فرد مالیاتی:</b> {{doc.taxId}}</div>{{/if}}\n'
 );
 
+// سند حسابداری — A4 عمودی؛ بازسازی فرمت «Documents/سند حسابداری.pdf»: سربرگ سه‌بخشی (شماره سند و تاریخ | شرکت، عنوان و وضعیت | شماره عطف و شماره صفحه)،
+// جدول «ردیف / شماره حساب / شرح / مبلغ جزء / بدهکار / بستانکار» با خطوط عمودیِ تا ته صفحه، جمع (با مبلغ به حروف) و چهار امضا.
+// ردیف‌های هر حساب کل یک بلوک‌اند (کل ← معین ← تفصیلی‌ها ← شرح و مبلغ جزء)؛ صفحه‌بندی را سرور انجام می‌دهد (printJournalEntry.ts).
+const JOURNAL_ENTRY_HTML = `<style>
+  /* ارتفاع صفحه از کاغذ/جهت/حاشیه‌ی همین قالب می‌آید ({{layout.contentHeightMm}}). ظرفیت ردیف هر صفحه را سرور از همین ارتفاع و فضای سربرگ/پاورقیِ این قالب (حدود ۶۴ میلی‌متر) برآورد می‌کند؛ اگر سربرگ یا امضا را بزرگ‌تر کردید، خروجی به ورق بعد می‌رود و چیزی بریده نمی‌شود. */
+  .page { box-sizing: border-box; min-height: {{layout.contentHeightMm}}mm; border: 0.35mm solid #222; display: flex; flex-direction: column; position: relative; page-break-after: always; break-after: page; }
+  .page:last-child { page-break-after: auto; break-after: auto; }
+  .wm { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); white-space: nowrap; font-size: 80pt; font-weight: 700; color: rgba(0, 0, 0, 0.055); z-index: 0; pointer-events: none; }
+  .hd { display: flex; justify-content: space-between; align-items: flex-start; padding: 3.5mm 4mm 2.5mm; min-height: 21mm; position: relative; z-index: 1; }
+  .hd .side { width: 52mm; font-size: 9pt; font-weight: 700; }
+  .hd .side .r { display: flex; align-items: center; gap: 2mm; margin-bottom: 2.2mm; min-height: 11mm; }
+  .hd .side .r.s { min-height: 0; margin-bottom: 0; }
+  .hd .ell { box-sizing: border-box; min-width: 17mm; height: 11mm; padding: 0 2.5mm; border: 0.3mm solid #222; border-radius: 50%; background: #efefef; display: flex; align-items: center; justify-content: center; font-size: 11pt; font-weight: 700; }
+  .hd .mid { flex: 1; text-align: center; line-height: 1.75; }
+  .hd .mid .co { font-size: 13.5pt; font-weight: 700; }
+  .hd .mid .ttl { font-size: 10.5pt; font-weight: 700; }
+  .hd .mid .st { font-size: 9.5pt; font-weight: 700; }
+  table.g { width: 100%; border-collapse: collapse; table-layout: fixed; position: relative; z-index: 1; }
+  table.g th { border-top: 0.35mm solid #222; border-bottom: 0.35mm solid #222; font-size: 9pt; font-weight: 700; padding: 1.1mm 0; text-align: center; }
+  table.g td { padding: 0.45mm 1.6mm; font-size: 8.5pt; line-height: 1.5; vertical-align: top; }
+  .grid { position: relative; flex: 1; display: flex; flex-direction: column; }
+  .grid .vl { position: absolute; top: 0; bottom: 0; width: 0; border-right: 0.25mm solid #222; z-index: 0; }
+  .body { position: relative; flex: 1; }
+  .body table.g { position: relative; z-index: 1; }
+  td.c-no { text-align: center; }
+  td.c-acc { text-align: center; }
+  td.c-text { text-align: right; }
+  td.c-n { text-align: center; direction: ltr; }
+  tr.r-kol td.c-acc, tr.r-kol td.c-text { text-decoration: underline; font-size: 8pt; }
+  tr.r-kol td.c-n { font-weight: 700; }
+  tr.r-mid td.c-acc, tr.r-mid td.c-text { font-size: 8.5pt; }
+  tr.r-leaf td.c-acc, tr.r-leaf td.c-text { font-weight: 700; font-size: 9.5pt; }
+  tr.r-detail td.c-text { text-decoration: underline; }
+  tr.r-desc td { padding-bottom: 1.6mm; }
+  tr.r-kol td { padding-top: 1.6mm; }
+  .ft { position: relative; z-index: 1; border-top: 0.35mm solid #222; }
+  table.g.sum td { font-size: 9pt; font-weight: 700; padding: 1.6mm 1.6mm; vertical-align: middle; }
+  table.g.sum td.c-n { text-align: center; }
+  .sign { display: flex; justify-content: space-between; padding: 2.5mm 4mm 2mm; min-height: 16mm; font-size: 9pt; font-weight: 700; border-top: 0.2mm solid #888; }
+  .sign div { flex: 1; text-align: right; }
+</style>
+{{#if t.watermark}}<div class="wm">{{t.watermark}}</div>{{/if}}
+{{#each pages}}
+<div class="page">
+  <div class="hd">
+    <div class="side">
+      <div class="r"><span>شماره سند:</span><span class="ell">{{@root.doc.number}}</span></div>
+      <div class="r s"><span>تاریخ سند:</span><span>{{@root.doc.date}}</span></div>
+    </div>
+    <div class="mid">
+      <div class="co">{{@root.company.name}}</div>
+      <div class="ttl">{{@root.t.title}}</div>
+      <div class="st">وضعیت سند: {{@root.doc.status}}</div>
+    </div>
+    <div class="side">
+      <div class="r"><span>شماره عطف:</span><span class="ell">{{@root.doc.referenceNumber}}</span></div>
+      <div class="r s"><span>شماره صفحه:</span><span>{{pageNo}}{{#if multiPage}} از {{pageCount}}{{/if}}</span></div>
+    </div>
+  </div>
+  <div class="grid">
+  <span class="vl" style="right:6%"></span><span class="vl" style="right:20%"></span><span class="vl" style="right:58%"></span><span class="vl" style="right:72%"></span><span class="vl" style="right:86%"></span>
+  <table class="g">
+    <colgroup><col style="width:6%"><col style="width:14%"><col style="width:38%"><col style="width:14%"><col style="width:14%"><col style="width:14%"></colgroup>
+    <thead><tr><th>ردیف</th><th>شماره حساب</th><th>شرح</th><th>مبلغ جزء</th><th>بدهکار</th><th>بستانکار</th></tr></thead>
+  </table>
+  <div class="body">
+    <table class="g">
+      <colgroup><col style="width:6%"><col style="width:14%"><col style="width:38%"><col style="width:14%"><col style="width:14%"><col style="width:14%"></colgroup>
+      <tbody>
+        {{#each rows}}
+        <tr class="r-{{kind}}"><td class="c-no">{{no}}</td><td class="c-acc">{{code}}</td><td class="c-text">{{text}}</td><td class="c-n">{{part}}</td><td class="c-n">{{debit}}</td><td class="c-n">{{credit}}</td></tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </div>
+  </div>
+  <div class="ft">
+    <table class="g sum">
+      <colgroup><col style="width:6%"><col style="width:14%"><col style="width:38%"><col style="width:14%"><col style="width:14%"><col style="width:14%"></colgroup>
+      <tr>
+        <td colspan="4" class="c-text">{{#if isLast}}جمع: {{@root.totals.inWords}}{{else}}جمع این صفحه (ادامه در صفحه بعد){{/if}}</td>
+        <td class="c-n">{{#if isLast}}{{@root.totals.debit}}{{else}}{{debit}}{{/if}}</td>
+        <td class="c-n">{{#if isLast}}{{@root.totals.credit}}{{else}}{{credit}}{{/if}}</td>
+      </tr>
+    </table>
+    <div class="sign">
+      <div>تهیه کننده: {{@root.t.preparedBy}}</div>
+      <div>بررسی کننده: {{@root.t.reviewedBy}}</div>
+      <div>تایید کننده: {{@root.t.approvedBy}}</div>
+      <div>تصویب کننده: {{@root.t.ratifiedBy}}</div>
+    </div>
+  </div>
+</div>
+{{/each}}`;
+
 export const DEFAULT_PRINT_TEMPLATES: DefaultPrintTemplate[] = [
   {
     documentType: "SALES_QUOTE",
@@ -182,6 +277,24 @@ export const DEFAULT_PRINT_TEMPLATES: DefaultPrintTemplate[] = [
       deliveryPlace: "درب انبار فروشنده",
       watermark: "صورتحساب نهایی",
       fileName: "صورتحساب فروش {{customer.name}} - {{company.name}}",
+    },
+  },
+  {
+    documentType: "JOURNAL_ENTRY",
+    title: "سند حسابداری (A4 عمودی)",
+    paper: "A4",
+    orientation: "PORTRAIT",
+    marginMm: 8,
+    digits: "PERSIAN",
+    html: JOURNAL_ENTRY_HTML,
+    texts: {
+      title: "سند حسابداری",
+      preparedBy: "",
+      reviewedBy: "",
+      approvedBy: "",
+      ratifiedBy: "",
+      watermark: "",
+      fileName: "سند حسابداری {{doc.number}} - {{company.name}}",
     },
   },
 ];

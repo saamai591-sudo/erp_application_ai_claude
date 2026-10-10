@@ -4339,6 +4339,7 @@ model AccountingSettingUsage {
 enum PrintDocumentType {
   SALES_QUOTE
   SALES_INVOICE
+  JOURNAL_ENTRY
 }
 
 enum PrintPaper {
