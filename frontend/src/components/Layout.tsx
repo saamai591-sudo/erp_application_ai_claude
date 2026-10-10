@@ -93,144 +93,172 @@ function FolderOpenIcon() {
 
 /** آیکن اختصاصی هر فرم؛ طبق کلید icon تعریف‌شده در navConfig — سبک توپر/پررنگ (نه خطی) برای تنوع و وضوح بیشتر رنگ */
 function NavIcon({ name }: { name: string }) {
-  const common = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "currentColor", stroke: "none" };
-  // سبک «Outline رنگی»: همه‌ی آیکن‌های خطی با همین ضخامت/اندازه؛ رنگ از currentColor (رنگ ماژول) می‌آید و داخل آیکن پر نمی‌شود
-  const outline = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.1, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+  // سبک «Outline رنگی» (به‌سبک Lucide/FontAwesome-regular): همه‌ی آیکن‌ها خطی‌اند، با همین ضخامت/اندازه/سرخط؛ رنگ از currentColor
+  // (رنگ ماژول) می‌آید و داخل آیکن هیچ‌وقت پر نمی‌شود. آیکن جدید هم باید همین props را بگیرد.
+  const o = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.1, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   switch (name) {
     case "shield":
-      return <svg {...common}><path d="M12 2.2 19.5 5.3V11c0 5.3-3.1 9.1-7.5 10.8C7.6 20.1 4.5 16.3 4.5 11V5.3L12 2.2Z" /></svg>;
+      return (
+        <svg {...o}>
+          <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+        </svg>
+      );
     case "user":
-      return <svg {...common}><circle cx="12" cy="7.6" r="3.6" /><path d="M4.6 20.8a7.4 7.4 0 0 1 14.8 0Z" /></svg>;
+      return (
+        <svg {...o}>
+          <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+          <circle cx="12" cy="7" r="4" />
+        </svg>
+      );
     case "coin":
       return (
-        <svg {...common}>
-          <path fillRule="evenodd" d="M12 2.5a9.5 9.5 0 1 0 0 19 9.5 9.5 0 0 0 0-19Zm0 3a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13Z" />
-          <rect x="11" y="7" width="2" height="10" rx="1" />
+        <svg {...o}>
+          <circle cx="12" cy="12" r="10" />
+          <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8" />
+          <path d="M12 18V6" />
         </svg>
       );
     case "trend":
       return (
-        <svg {...common}>
-          <rect x="3" y="14" width="3.4" height="7" rx="1" />
-          <rect x="8.3" y="10" width="3.4" height="11" rx="1" />
-          <rect x="13.6" y="6" width="3.4" height="15" rx="1" />
-          <path d="M15 3 21 3 21 9 18.5 6.5 14 11 11.5 8.5Z" />
+        <svg {...o}>
+          <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
+          <polyline points="16 7 22 7 22 13" />
         </svg>
       );
     case "calendar":
       return (
-        <svg {...common}>
-          <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
-          <rect x="3.5" y="5" width="17" height="4.6" rx="2.5" fillOpacity="0.55" />
-          <rect x="7.3" y="2.3" width="1.8" height="4" rx="0.9" />
-          <rect x="14.9" y="2.3" width="1.8" height="4" rx="0.9" />
+        <svg {...o}>
+          <path d="M8 2v4" />
+          <path d="M16 2v4" />
+          <rect width="18" height="18" x="3" y="4" rx="2" />
+          <path d="M3 10h18" />
         </svg>
       );
     case "sitemap":
       return (
-        <svg {...common}>
-          <rect x="9" y="3" width="6" height="4.4" rx="1" />
-          <rect x="3" y="16" width="6" height="4.4" rx="1" />
-          <rect x="15" y="16" width="6" height="4.4" rx="1" />
-          <path d="M12 7.4V11M6 16v-3a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v3" stroke="currentColor" strokeWidth="1.6" fill="none" />
+        <svg {...o}>
+          <rect x="16" y="16" width="6" height="6" rx="1" />
+          <rect x="2" y="16" width="6" height="6" rx="1" />
+          <rect x="9" y="2" width="6" height="6" rx="1" />
+          <path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3" />
+          <path d="M12 12V8" />
         </svg>
       );
     case "pin":
-      return <svg {...common}><path fillRule="evenodd" d="M12 2C7.6 2 4 5.6 4 10c0 6 8 12 8 12s8-6 8-12c0-4.4-3.6-8-8-8Zm0 4.8a3.2 3.2 0 1 1 0 6.4 3.2 3.2 0 0 1 0-6.4Z" /></svg>;
+      return (
+        <svg {...o}>
+          <path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0" />
+          <circle cx="12" cy="10" r="3" />
+        </svg>
+      );
     case "tag":
-      return <svg {...common}><path fillRule="evenodd" d="M11.4 3H6a2 2 0 0 0-2 2v5.4a2 2 0 0 0 .6 1.4l9.6 9.6a2 2 0 0 0 2.8 0l5.4-5.4a2 2 0 0 0 0-2.8L12.8 3.6a2 2 0 0 0-1.4-.6ZM8 8.6a1.6 1.6 0 1 1 0-3.2 1.6 1.6 0 0 1 0 3.2Z" /></svg>;
+      return (
+        <svg {...o}>
+          <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" />
+          <circle cx="7.5" cy="7.5" r=".5" />
+        </svg>
+      );
     case "building":
       return (
-        <svg {...common}>
-          <rect x="4" y="3" width="10.5" height="18" rx="1" />
-          <rect x="15" y="10" width="5.5" height="11" rx="1" />
+        <svg {...o}>
+          <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" />
+          <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" />
+          <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" />
+          <path d="M10 6h4" />
+          <path d="M10 10h4" />
+          <path d="M10 14h4" />
+          <path d="M10 18h4" />
         </svg>
       );
     case "wallet":
       return (
-        <svg {...common}>
-          <rect x="3" y="6" width="18" height="13" rx="2.5" />
-          <rect x="3" y="6" width="18" height="4.5" rx="2.5" fillOpacity="0.55" />
-          <circle cx="16.5" cy="14.2" r="1.5" />
+        <svg {...o}>
+          <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1" />
+          <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" />
         </svg>
       );
     case "card":
       return (
-        <svg {...common}>
-          <rect x="3" y="5.5" width="18" height="13" rx="2.5" />
-          <rect x="3" y="9" width="18" height="3" fillOpacity="0.55" />
+        <svg {...o}>
+          <rect width="20" height="14" x="2" y="5" rx="2" />
+          <line x1="2" x2="22" y1="10" y2="10" />
         </svg>
       );
     case "bank":
       return (
-        <svg {...common}>
-          <path d="M12 2.5 3 8.5h18Z" />
-          <rect x="3" y="9.5" width="18" height="9" rx="1" />
-          <rect x="2" y="18.5" width="20" height="2" rx="1" />
+        <svg {...o}>
+          <line x1="3" x2="21" y1="22" y2="22" />
+          <line x1="6" x2="6" y1="18" y2="11" />
+          <line x1="10" x2="10" y1="18" y2="11" />
+          <line x1="14" x2="14" y1="18" y2="11" />
+          <line x1="18" x2="18" y1="18" y2="11" />
+          <polygon points="12 2 20 7 4 7" />
         </svg>
       );
     case "briefcase":
       return (
-        <svg {...common}>
-          <path d="M8.2 8V6.2a3.8 3.8 0 0 1 7.6 0V8h-2V6.2a1.8 1.8 0 0 0-3.6 0V8Z" />
-          <rect x="3.5" y="8" width="17" height="11.5" rx="2" />
+        <svg {...o}>
+          <path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+          <rect width="20" height="14" x="2" y="6" rx="2" />
         </svg>
       );
     case "layers":
       return (
-        <svg {...common}>
-          <path d="M12 3 21 7.5 12 12 3 7.5Z" />
-          <path d="M12 7.3 21 11.8 12 16.3 3 11.8Z" fillOpacity="0.7" />
-          <path d="M12 11.6 21 16.1 12 20.6 3 16.1Z" fillOpacity="0.45" />
+        <svg {...o}>
+          <path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z" />
+          <path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65" />
+          <path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65" />
         </svg>
       );
     case "tree":
       return (
-        <svg {...common}>
-          <circle cx="12" cy="4.5" r="2.3" />
-          <circle cx="6" cy="12" r="2.3" />
-          <circle cx="18" cy="12" r="2.3" />
-          <circle cx="6" cy="19.5" r="2.3" />
-          <circle cx="18" cy="19.5" r="2.3" />
-          <path d="M12 6.8V10.5M6 14.3V17.2M18 14.3V17.2M8.8 10.5 6 12M15.2 10.5 18 12" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+        <svg {...o}>
+          <path d="M21 12h-8" />
+          <path d="M21 6H8" />
+          <path d="M21 18h-8" />
+          <path d="M3 6v4c0 1.1.9 2 2 2h3" />
+          <path d="M3 10v6c0 1.1.9 2 2 2h3" />
         </svg>
       );
     case "file":
       return (
-        <svg {...common}>
-          <path d="M6.5 2.5h8.5l5 5v13.3a1.7 1.7 0 0 1-1.7 1.7H6.5a1.7 1.7 0 0 1-1.7-1.7V4.2a1.7 1.7 0 0 1 1.7-1.7Z" />
-          <path d="M15 2.5 20 7.5h-3.3a1.7 1.7 0 0 1-1.7-1.7Z" fillOpacity="0.5" />
-          <rect x="8" y="13" width="8" height="1.6" rx="0.8" fillOpacity="0.5" />
-          <rect x="8" y="16.3" width="8" height="1.6" rx="0.8" fillOpacity="0.5" />
+        <svg {...o}>
+          <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+          <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+          <path d="M10 9H8" />
+          <path d="M16 13H8" />
+          <path d="M16 17H8" />
         </svg>
       );
     case "ledger":
       return (
-        <svg {...common}>
-          <rect x="4" y="3" width="16" height="18" rx="1.8" />
-          <rect x="4" y="3" width="3.5" height="18" rx="1.8" fillOpacity="0.6" />
-          <rect x="10" y="8" width="7" height="1.4" rx="0.7" fillOpacity="0.55" />
-          <rect x="10" y="12" width="7" height="1.4" rx="0.7" fillOpacity="0.55" />
-          <rect x="10" y="16" width="5" height="1.4" rx="0.7" fillOpacity="0.55" />
+        <svg {...o}>
+          <path d="M2 6h4" />
+          <path d="M2 10h4" />
+          <path d="M2 14h4" />
+          <path d="M2 18h4" />
+          <rect width="16" height="20" x="4" y="2" rx="2" />
+          <path d="M16 2v20" />
         </svg>
       );
     case "gear":
       return (
-        <svg {...outline}>
+        <svg {...o}>
           <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
           <circle cx="12" cy="12" r="3" />
         </svg>
       );
     case "database":
       return (
-        <svg {...common}>
-          <path d="M4 5c0-1.7 3.6-3 8-3s8 1.3 8 3v14c0 1.7-3.6 3-8 3s-8-1.3-8-3V5Z" />
-          <path d="M4 5c0 1.7 3.6 3 8 3s8-1.3 8-3" fill="none" stroke="currentColor" strokeWidth="1.2" strokeOpacity="0.5" />
+        <svg {...o}>
+          <ellipse cx="12" cy="5" rx="9" ry="3" />
+          <path d="M3 5V19A9 3 0 0 0 21 19V5" />
+          <path d="M3 12A9 3 0 0 0 21 12" />
         </svg>
       );
     case "calculator":
       return (
-        <svg {...outline}>
+        <svg {...o}>
           <rect width="16" height="20" x="4" y="2" rx="2" />
           <line x1="8" x2="16" y1="6" y2="6" />
           <line x1="16" x2="16" y1="14" y2="18" />
@@ -239,17 +267,22 @@ function NavIcon({ name }: { name: string }) {
       );
     case "box":
       return (
-        <svg {...common}>
-          <path d="M12 2 20 6 12 10 4 6Z" />
-          <path d="M4 6v10l8 4V12Z" fillOpacity="0.75" />
-          <path d="M20 6v10l-8 4V12Z" fillOpacity="0.5" />
+        <svg {...o}>
+          <path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z" />
+          <path d="M12 22V12" />
+          <polyline points="3.29 7 12 12 20.71 7" />
+          <path d="m7.5 4.27 9 5.15" />
         </svg>
       );
     case "bolt":
-      return <svg {...common}><path d="M13 2 4 14h6l-1 8 10-13h-6l1-7Z" /></svg>;
+      return (
+        <svg {...o}>
+          <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" />
+        </svg>
+      );
     case "warehouse":
       return (
-        <svg {...outline}>
+        <svg {...o}>
           <path d="M22 8.35V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8.35A2 2 0 0 1 3.26 6.5l8-3.2a2 2 0 0 1 1.48 0l8 3.2A2 2 0 0 1 22 8.35Z" />
           <path d="M6 18h12" />
           <path d="M6 14h12" />
@@ -258,23 +291,25 @@ function NavIcon({ name }: { name: string }) {
       );
     case "truck":
       return (
-        <svg {...common}>
-          <rect x="2" y="7" width="12.5" height="10" rx="1" />
-          <path d="M14.5 10.2h4l3 3.3V17h-7Z" fillOpacity="0.8" />
-          <circle cx="7" cy="18.3" r="2.1" />
-          <circle cx="17.3" cy="18.3" r="2.1" />
+        <svg {...o}>
+          <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2" />
+          <path d="M15 18H9" />
+          <path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14" />
+          <circle cx="17" cy="18" r="2" />
+          <circle cx="7" cy="18" r="2" />
         </svg>
       );
     case "receipt":
       return (
-        <svg {...common}>
-          <path d="M6 3h12v18l-2.4-1.6L13.2 21 12 20.2 10.8 21l-2.4-1.6L6 21V3Z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-          <path d="M9 8h6M9 12h6M9 16h3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <svg {...o}>
+          <path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z" />
+          <path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8" />
+          <path d="M12 17.5v-11" />
         </svg>
       );
     case "cart":
       return (
-        <svg {...outline}>
+        <svg {...o}>
           <circle cx="8" cy="21" r="1" />
           <circle cx="19" cy="21" r="1" />
           <path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12" />
@@ -282,26 +317,33 @@ function NavIcon({ name }: { name: string }) {
       );
     case "sliders":
       return (
-        <svg {...common}>
-          <rect x="3" y="5.6" width="18" height="1.8" rx="0.9" fillOpacity="0.35" />
-          <circle cx="15" cy="6.5" r="2.6" />
-          <rect x="3" y="11.6" width="18" height="1.8" rx="0.9" fillOpacity="0.35" />
-          <circle cx="9" cy="12.5" r="2.6" />
-          <rect x="3" y="17.6" width="18" height="1.8" rx="0.9" fillOpacity="0.35" />
-          <circle cx="17" cy="18.5" r="2.6" />
+        <svg {...o}>
+          <line x1="21" x2="14" y1="4" y2="4" />
+          <line x1="10" x2="3" y1="4" y2="4" />
+          <line x1="21" x2="12" y1="12" y2="12" />
+          <line x1="8" x2="3" y1="12" y2="12" />
+          <line x1="21" x2="16" y1="20" y2="20" />
+          <line x1="12" x2="3" y1="20" y2="20" />
+          <line x1="14" x2="14" y1="2" y2="6" />
+          <line x1="8" x2="8" y1="10" y2="14" />
+          <line x1="16" x2="16" y1="18" y2="22" />
         </svg>
       );
     case "chart":
       return (
-        <svg {...common}>
-          <rect x="3" y="13" width="3.2" height="8" rx="1" />
-          <rect x="8.2" y="8" width="3.2" height="13" rx="1" />
-          <rect x="13.4" y="4" width="3.2" height="17" rx="1" />
-          <rect x="18.6" y="10" width="3.2" height="11" rx="1" fillOpacity="0.6" />
+        <svg {...o}>
+          <path d="M3 3v16a2 2 0 0 0 2 2h16" />
+          <path d="M18 17V9" />
+          <path d="M13 17V5" />
+          <path d="M8 17v-3" />
         </svg>
       );
     default:
-      return <svg {...common}><circle cx="12" cy="12" r="8" /></svg>;
+      return (
+        <svg {...o}>
+          <circle cx="12" cy="12" r="8" />
+        </svg>
+      );
   }
 }
 

@@ -59,23 +59,23 @@
 
   /* پالت دسته‌بندی‌شده‌ی حرفه‌ای برای آیکن هر فرم (سایدبار تیره) — جایگزین طیف رنگین‌کمانیِ قبلی با
      مجموعه‌ای هماهنگ و کم‌اشباع‌تر که هم‌خانواده‌ی هویت سرمه‌ای/سبز پروژه است */
-  --nc-shield: #f0a3a3;
-  --nc-user: #f0c08e;
-  --nc-coin: #e8cf7a;
-  --nc-trend: #a8d98a;
-  --nc-calendar: #8fcf9e;
-  --nc-sitemap: #7fc9c9;
-  --nc-pin: #7fb8d9;
-  --nc-tag: #7fa3d9;
-  --nc-building: #94a3d9;
-  --nc-wallet: #a894d9;
-  --nc-card: #bb94d9;
-  --nc-bank: #cf94cf;
-  --nc-briefcase: #d994b3;
-  --nc-layers: #d9a3a3;
-  --nc-tree: #e0b48f;
-  --nc-file: #cbb87a;
-  --nc-ledger: #a3c98f;
+  --nc-shield: #ff7b86;
+  --nc-user: #ffa94d;
+  --nc-coin: #ffd23f;
+  --nc-trend: #8ee23a;
+  --nc-calendar: #3ddc97;
+  --nc-sitemap: #2fd9d0;
+  --nc-pin: #4cc9f0;
+  --nc-tag: #5ab8ff;
+  --nc-building: #8b9bff;
+  --nc-wallet: #b69cff;
+  --nc-card: #cc8bff;
+  --nc-bank: #e684ff;
+  --nc-briefcase: #ff7fb8;
+  --nc-layers: #ff8f6b;
+  --nc-tree: #ffbf47;
+  --nc-file: #7dd3fc;
+  --nc-ledger: #a3e635;
 
   /* رنگ اختصاصی هر ماژول/زیرماژول — برای تمایز بصری بین ماژول‌ها، از همان پالت هماهنگ بالا */
   --nc-mod-settings: #a894d9;
@@ -87,10 +87,10 @@
   --nc-mod-sales: #e8cf7a;
   --nc-mod-treasury: #cf94cf;
   --nc-mod-tax: #f2b66d;
-  --nc-sub-ops: #e8cf7a;
-  --nc-sub-structure: #7fa3d9;
-  --nc-sub-report: #d994b3;
-  --nc-sub-config: #a8d98a;
+  --nc-sub-ops: #ffd23f;
+  --nc-sub-structure: #5ab8ff;
+  --nc-sub-report: #ff7fb8;
+  --nc-sub-config: #8ee23a;
   --info-icon: #d9a441;
 }
 
@@ -136,23 +136,23 @@
   --menu-form-icon: #8fa6bd;
   --menu-form-icon-hover: #c7d2e0;
 
-  --nc-shield: #f0a3a3;
-  --nc-user: #f0c08e;
-  --nc-coin: #e8cf7a;
-  --nc-trend: #a8d98a;
-  --nc-calendar: #8fcf9e;
-  --nc-sitemap: #7fc9c9;
-  --nc-pin: #7fb8d9;
-  --nc-tag: #7fa3d9;
-  --nc-building: #94a3d9;
-  --nc-wallet: #a894d9;
-  --nc-card: #bb94d9;
-  --nc-bank: #cf94cf;
-  --nc-briefcase: #d994b3;
-  --nc-layers: #d9a3a3;
-  --nc-tree: #e0b48f;
-  --nc-file: #cbb87a;
-  --nc-ledger: #a3c98f;
+  --nc-shield: #ff7b86;
+  --nc-user: #ffa94d;
+  --nc-coin: #ffd23f;
+  --nc-trend: #8ee23a;
+  --nc-calendar: #3ddc97;
+  --nc-sitemap: #2fd9d0;
+  --nc-pin: #4cc9f0;
+  --nc-tag: #5ab8ff;
+  --nc-building: #8b9bff;
+  --nc-wallet: #b69cff;
+  --nc-card: #cc8bff;
+  --nc-bank: #e684ff;
+  --nc-briefcase: #ff7fb8;
+  --nc-layers: #ff8f6b;
+  --nc-tree: #ffbf47;
+  --nc-file: #7dd3fc;
+  --nc-ledger: #a3e635;
 
   --nc-mod-settings: #a894d9;
   --nc-mod-info: #7fb8d9;
@@ -163,10 +163,10 @@
   --nc-mod-sales: #e8cf7a;
   --nc-mod-treasury: #cf94cf;
   --nc-mod-tax: #f2b66d;
-  --nc-sub-ops: #e8cf7a;
-  --nc-sub-structure: #7fa3d9;
-  --nc-sub-report: #d994b3;
-  --nc-sub-config: #a8d98a;
+  --nc-sub-ops: #ffd23f;
+  --nc-sub-structure: #5ab8ff;
+  --nc-sub-report: #ff7fb8;
+  --nc-sub-config: #8ee23a;
   --info-icon: #d9a441;
 }
 
@@ -209,23 +209,23 @@
   --menu-form-icon-hover: #1e3a5f;
 
   /* رنگ اختصاصی هر آیکن فرم (سایدبار روشن) — تیره‌تر از نسخه‌ی تیره تا روی پس‌زمینه‌ی سفید خوانا بماند */
-  --nc-shield: #a13d3d;
-  --nc-user: #a3691f;
-  --nc-coin: #8a7318;
-  --nc-trend: #4d8a2f;
-  --nc-calendar: #2f8a52;
-  --nc-sitemap: #1f8a8a;
-  --nc-pin: #1f6f8a;
-  --nc-tag: #1f5a8a;
-  --nc-building: #3a4d8a;
-  --nc-wallet: #5a3a8a;
-  --nc-card: #713a8a;
-  --nc-bank: #8a3a7d;
-  --nc-briefcase: #8a3a5a;
-  --nc-layers: #8a4d3a;
-  --nc-tree: #8a641f;
-  --nc-file: #736a1f;
-  --nc-ledger: #4d7a2f;
+  --nc-shield: #d62839;
+  --nc-user: #d9680b;
+  --nc-coin: #b07a00;
+  --nc-trend: #3f9a0b;
+  --nc-calendar: #0b8f5a;
+  --nc-sitemap: #0b8a90;
+  --nc-pin: #0a7fb0;
+  --nc-tag: #1769c7;
+  --nc-building: #3b4fd1;
+  --nc-wallet: #6d3fd1;
+  --nc-card: #8a3fd1;
+  --nc-bank: #a43bb5;
+  --nc-briefcase: #c72a7d;
+  --nc-layers: #d1480f;
+  --nc-tree: #b3640d;
+  --nc-file: #0284c7;
+  --nc-ledger: #4d7c0f;
 
   --nc-mod-settings: #5a3a8a;
   --nc-mod-info: #1f5a8a;
@@ -236,10 +236,10 @@
   --nc-mod-sales: #8a7318;
   --nc-mod-treasury: #8a3a7d;
   --nc-mod-tax: #9a5b12;
-  --nc-sub-ops: #8a7318;
-  --nc-sub-structure: #1f5a8a;
-  --nc-sub-report: #8a3a5a;
-  --nc-sub-config: #4d8a2f;
+  --nc-sub-ops: #b07a00;
+  --nc-sub-structure: #1769c7;
+  --nc-sub-report: #c72a7d;
+  --nc-sub-config: #3f9a0b;
   --info-icon: #b4740f;
 }
 [data-theme="light"] .sidebar { border-left: 1px solid var(--line); }
@@ -283,23 +283,23 @@
   --menu-form-icon: #8fa6bd;
   --menu-form-icon-hover: #cdd8e6;
 
-  --nc-shield: #f0a3a3;
-  --nc-user: #f0c08e;
-  --nc-coin: #e8cf7a;
-  --nc-trend: #a8d98a;
-  --nc-calendar: #8fcf9e;
-  --nc-sitemap: #7fc9c9;
-  --nc-pin: #7fb8d9;
-  --nc-tag: #7fa3d9;
-  --nc-building: #94a3d9;
-  --nc-wallet: #a894d9;
-  --nc-card: #bb94d9;
-  --nc-bank: #cf94cf;
-  --nc-briefcase: #d994b3;
-  --nc-layers: #d9a3a3;
-  --nc-tree: #e0b48f;
-  --nc-file: #cbb87a;
-  --nc-ledger: #a3c98f;
+  --nc-shield: #ff7b86;
+  --nc-user: #ffa94d;
+  --nc-coin: #ffd23f;
+  --nc-trend: #8ee23a;
+  --nc-calendar: #3ddc97;
+  --nc-sitemap: #2fd9d0;
+  --nc-pin: #4cc9f0;
+  --nc-tag: #5ab8ff;
+  --nc-building: #8b9bff;
+  --nc-wallet: #b69cff;
+  --nc-card: #cc8bff;
+  --nc-bank: #e684ff;
+  --nc-briefcase: #ff7fb8;
+  --nc-layers: #ff8f6b;
+  --nc-tree: #ffbf47;
+  --nc-file: #7dd3fc;
+  --nc-ledger: #a3e635;
 
   --nc-mod-settings: #a894d9;
   --nc-mod-info: #7fb8d9;
@@ -310,10 +310,10 @@
   --nc-mod-sales: #e8cf7a;
   --nc-mod-treasury: #cf94cf;
   --nc-mod-tax: #f2b66d;
-  --nc-sub-ops: #e8cf7a;
-  --nc-sub-structure: #7fa3d9;
-  --nc-sub-report: #d994b3;
-  --nc-sub-config: #a8d98a;
+  --nc-sub-ops: #ffd23f;
+  --nc-sub-structure: #5ab8ff;
+  --nc-sub-report: #ff7fb8;
+  --nc-sub-config: #8ee23a;
   --info-icon: #f0b054;
 }
 
@@ -355,23 +355,23 @@
   --menu-form-icon: #2f7d8f;
   --menu-form-icon-hover: #1c5c6b;
 
-  --nc-shield: #a13d3d;
-  --nc-user: #a3691f;
-  --nc-coin: #8a7318;
-  --nc-trend: #4d8a2f;
-  --nc-calendar: #2f8a52;
-  --nc-sitemap: #1f8a8a;
-  --nc-pin: #1f6f8a;
-  --nc-tag: #1f5a8a;
-  --nc-building: #3a4d8a;
-  --nc-wallet: #5a3a8a;
-  --nc-card: #713a8a;
-  --nc-bank: #8a3a7d;
-  --nc-briefcase: #8a3a5a;
-  --nc-layers: #8a4d3a;
-  --nc-tree: #8a641f;
-  --nc-file: #736a1f;
-  --nc-ledger: #4d7a2f;
+  --nc-shield: #d62839;
+  --nc-user: #d9680b;
+  --nc-coin: #b07a00;
+  --nc-trend: #3f9a0b;
+  --nc-calendar: #0b8f5a;
+  --nc-sitemap: #0b8a90;
+  --nc-pin: #0a7fb0;
+  --nc-tag: #1769c7;
+  --nc-building: #3b4fd1;
+  --nc-wallet: #6d3fd1;
+  --nc-card: #8a3fd1;
+  --nc-bank: #a43bb5;
+  --nc-briefcase: #c72a7d;
+  --nc-layers: #d1480f;
+  --nc-tree: #b3640d;
+  --nc-file: #0284c7;
+  --nc-ledger: #4d7c0f;
 
   --nc-mod-settings: #5a3a8a;
   --nc-mod-info: #1f5a8a;
@@ -382,10 +382,10 @@
   --nc-mod-sales: #8a7318;
   --nc-mod-treasury: #8a3a7d;
   --nc-mod-tax: #9a5b12;
-  --nc-sub-ops: #8a7318;
-  --nc-sub-structure: #1f5a8a;
-  --nc-sub-report: #8a3a5a;
-  --nc-sub-config: #4d8a2f;
+  --nc-sub-ops: #b07a00;
+  --nc-sub-structure: #1769c7;
+  --nc-sub-report: #c72a7d;
+  --nc-sub-config: #3f9a0b;
   --info-icon: #b4740f;
 }
 [data-theme="blue"] .sidebar { border-left: 1px solid var(--line); }
