@@ -190,7 +190,7 @@ export function ManagementBackup({ token, onUnauthorized }: { token: string; onU
   const field: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4 };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14, borderTop: "1px solid var(--line, #ddd)", paddingTop: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <h3 style={{ margin: 0 }}>پشتیبان‌گیری خودکار</h3>
         <span className={`badge ${data.policy.enabled ? "success" : "warning"}`}>{data.policy.enabled ? "روشن" : "خاموش"}</span>

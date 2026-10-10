@@ -96,6 +96,22 @@ export default function Management() {
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
+  // منوی سمت راست پس از ورود: «لایسنس» | «تنظیمات پشتیبان‌گیری»؛ انتخاب در نشست مرورگر می‌ماند
+  const [section, setSectionState] = useState<"license" | "backup">(() => {
+    try {
+      return sessionStorage.getItem("management-section") === "backup" ? "backup" : "license";
+    } catch {
+      return "license";
+    }
+  });
+  const setSection = (s: "license" | "backup") => {
+    setSectionState(s);
+    try {
+      sessionStorage.setItem("management-section", s);
+    } catch {
+      /* فقط در حافظه */
+    }
+  };
   const [password, setPassword] = useState("");
   const [fileText, setFileText] = useState<string | null>(null);
   const [fileName, setFileName] = useState("");
@@ -263,6 +279,14 @@ export default function Management() {
 
         {/* ── بعد از ورود: وضعیت ───────────────────────────────────────── */}
         {loggedIn && status && (
+          <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
+            {/* منوی سمت راست (راست‌به‌چپ: اولین فرزند در سمت راست است) */}
+            <nav style={{ flex: "0 0 170px", display: "flex", flexDirection: "column", gap: 6 }} aria-label="منوی مدیریت">
+              <button type="button" className={section === "license" ? "btn" : "btn secondary"} style={{ textAlign: "right" }} onClick={() => setSection("license")}>لایسنس</button>
+              <button type="button" className={section === "backup" ? "btn" : "btn secondary"} style={{ textAlign: "right" }} onClick={() => setSection("backup")}>تنظیمات پشتیبان‌گیری</button>
+            </nav>
+            <div style={{ flex: "1 1 420px", minWidth: 0, display: "flex", flexDirection: "column", gap: 14 }}>
+            {section === "license" && (
           <>
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               <strong>وضعیت:</strong>
@@ -297,8 +321,11 @@ export default function Management() {
                 بارگذاری لایسنس تازه
               </button>
             </div>
-            {token && <ManagementBackup token={token} onUnauthorized={() => saveToken(null)} />}
           </>
+            )}
+            {section === "backup" && token && <ManagementBackup token={token} onUnauthorized={() => saveToken(null)} />}
+            </div>
+          </div>
         )}
 
         {/* ── لایسنس معتبر ثبت شده ولی هنوز وارد نشده: ورود با کلمه‌ی عبور ───── */}
@@ -329,7 +356,7 @@ export default function Management() {
         )}
 
         {/* ── فعال‌سازی / بارگذاری لایسنس ──────────────────────────────── */}
-        {pub && uploadSection && (
+        {pub && uploadSection && (!loggedIn || section === "license") && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14, borderTop: activated ? "1px solid var(--line, #ddd)" : "none", paddingTop: activated ? 14 : 0 }}>
             {!activated && (
               <>
