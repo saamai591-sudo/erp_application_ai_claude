@@ -82,15 +82,9 @@ const balanceColumns = [
   },
 ];
 
-// نسخه‌ی ستون‌های تب‌های تفصیل: مثل balanceColumns ولی «مانده بدهکار»/«مانده بستانکار» فاقد sortValue/filterValue هستند
-// چون این دو، نمایش تفکیک‌شده‌ی یک مقدار محاسبه‌شده (balance/balanceNature) هستند و سمت سرور قابل مرتب‌سازی/فیلتر نیستند
-// (مرتب‌سازی و فیلتر واقعی روی «جمع بدهکار»/«جمع بستانکار» که مقادیر مستقیم دیتابیس هستند، همچنان کاملاً پشتیبانی می‌شود)
-// — decimal/totalValue عمداً حفظ می‌شوند: جمع پای گرید کاملاً سمت کلاینت است، به فیلتر/مرتب‌سازی سمت سرور نیازی ندارد.
-const detailBalanceColumns = balanceColumns.map((c) =>
-  c.header === "مانده بدهکار" || c.header === "مانده بستانکار"
-    ? { header: c.header, render: c.render, width: (c as any).width, decimal: (c as any).decimal, totalValue: (c as any).totalValue }
-    : c
-);
+// ستون‌های تب‌های تفصیل همان balanceColumns هستند؛ فیلتر/مرتب‌سازی همه‌ی ستون‌ها (از جمله «مانده بدهکار/بستانکار») سمت سرور و
+// روی نتیجه‌ی تجمیع‌شده‌ی /reports/detail-summary انجام می‌شود (فیلدهای balanceDebit/balanceCredit). جمع پای گرید سمت کلاینت است.
+const detailBalanceColumns = balanceColumns;
 
 // نگاشت عنوان فارسی ستون به نام فیلد سمت سرور (route بک‌اند /reports/detail-summary)
 const DETAIL_SORT_FIELD_MAP: Record<string, string> = {
@@ -98,6 +92,8 @@ const DETAIL_SORT_FIELD_MAP: Record<string, string> = {
   "عنوان": "title",
   "جمع بدهکار": "totalDebit",
   "جمع بستانکار": "totalCredit",
+  "مانده بدهکار": "balanceDebit",
+  "مانده بستانکار": "balanceCredit",
 };
 
 // مرتب‌سازی پیش‌فرض همه‌ی تب‌ها به‌جز «گردش»: بر اساس «کد» صعودی (کاربر می‌تواند ستون دیگری را مرتب کند)

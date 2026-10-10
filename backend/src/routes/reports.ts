@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { resolveDetailTitles } from "../utils/detailValues";
 import { computeFullAccountCode, buildAccountByIdMap } from "../utils/accountCode";
-import { parseFilters, stringWhere, numberWhere, dateWhere, matchesFilterValue, parseSorts } from "../utils/tableFilters";
+import { parseFilters, stringWhere, numberWhere, dateWhere, matchesFilterValue, parseSorts, applyServerFilterSort, ServerColumnDef } from "../utils/tableFilters";
 import { toJalaliYearMonth } from "../utils/jalaliDate";
 import { can, userHasAction } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
@@ -244,7 +244,6 @@ router.get("/trial-balance", can(`${ACCOUNT_REVIEW}.view`), async (req, res) => 
   res.json(results);
 });
 
-const DETAIL_SUMMARY_SORT_FIELDS = new Set(["code", "title", "totalDebit", "totalCredit"]);
 
 // این endpoint هم مرور حسابها (AccountsReview.tsx) و هم گزارش تحلیلی OLAP (OlapReports.tsx، برای
 // انتخابگر slot) را تغذیه می‌کند؛ چون یک route نمی‌تواند دو کلید متفاوت را هم‌زمان به can() بدهد،
@@ -312,45 +311,32 @@ router.get("/detail-summary", async (req: AuthedRequest, res) => {
         totalCredit,
         balance: Math.abs(diff),
         balanceNature: diff >= 0 ? "DEBIT" : "CREDIT",
+        // دو ستون «مانده بدهکار/بستانکار» جدول: همان balance به تفکیک ماهیت (برای فیلتر و مرتب‌سازی سمت سرور)
+        balanceDebit: diff > 0 ? diff : 0,
+        balanceCredit: diff < 0 ? -diff : 0,
       };
     })
     .filter((r) => r.totalDebit > 0 || r.totalCredit > 0);
 
-  // فیلتر ستونی (آیکن فیلتر هدر جدول تفصیل در فرانت‌اند) — چون این endpoint خودش نتیجه را در حافظه
-  // تجمیع می‌کند (نه یک کوئری مستقیم دیتابیس)، فیلتر هم روی همین آرایه‌ی نهایی با matchesFilterValue اعمال می‌شود
-  const DETAIL_FILTER_TYPES: Record<string, "string" | "number"> = { code: "string", title: "string", totalDebit: "number", totalCredit: "number" };
-  const colFilters = parseFilters(q.filters);
-  const filtered = Object.keys(colFilters).length
-    ? results.filter((r: any) =>
-        Object.entries(colFilters).every(([field, f]) => {
-          const type = DETAIL_FILTER_TYPES[field];
-          if (!type) return true;
-          return matchesFilterValue(r[field], type, f);
-        })
-      )
-    : results;
+  // فیلتر و مرتب‌سازی ستونی (هدر جدول تفصیل در فرانت‌اند) — چون این endpoint خودش نتیجه را در حافظه تجمیع می‌کند (نه یک کوئری مستقیم
+  // دیتابیس)، هر دو روی همین آرایه‌ی نهایی و با همان ابزار مشترک سایر گزارش‌ها اعمال می‌شود. مرتب‌سازی باید روی نتیجه‌ی «فیلترشده» باشد
+  // (نسخه‌ی قبلی روی نتیجه‌ی فیلترنشده مرتب می‌کرد و چون مرتب‌سازی پیش‌فرض «کد» همیشه فعال است، هیچ فیلتری اثر نمی‌کرد).
+  const DETAIL_COLUMNS: Record<string, ServerColumnDef<(typeof results)[number]>> = {
+    code: { type: "string", get: (r) => r.code },
+    title: { type: "string", get: (r) => r.title },
+    totalDebit: { type: "number", get: (r) => r.totalDebit },
+    totalCredit: { type: "number", get: (r) => r.totalCredit },
+    balanceDebit: { type: "number", get: (r) => r.balanceDebit },
+    balanceCredit: { type: "number", get: (r) => r.balanceCredit },
+  };
 
   // سازگاری با نسخه‌ی قبلی: بدون پارامتر page، آرایه‌ی خام (بدون صفحه‌بندی) برگردانده می‌شود
   if (q.page === undefined) {
-    res.json(filtered);
+    res.json(applyServerFilterSort(results, DETAIL_COLUMNS, q.filters));
     return;
   }
 
-  // مرتب‌سازی روی کل نتیجه (که همین‌جا در حافظه محاسبه شده) انجام می‌شود؛ سپس فقط همان صفحه برگردانده می‌شود
-  let sorted = filtered;
-  const summarySortKeys = parseSorts(q.sorts, q.sortField, q.sortDir).filter((k) => DETAIL_SUMMARY_SORT_FIELDS.has(k.field));
-  if (summarySortKeys.length) {
-    sorted = [...results].sort((a, b) => {
-      for (const k of summarySortKeys) {
-        const field = k.field as "code" | "title" | "totalDebit" | "totalCredit";
-        const av = a[field];
-        const bv = b[field];
-        const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv), "fa");
-        if (cmp !== 0) return k.dir === "asc" ? cmp : -cmp;
-      }
-      return 0;
-    });
-  }
+  const sorted = applyServerFilterSort(results, DETAIL_COLUMNS, q.filters, q.sortField, q.sortDir, q.sorts);
 
   const page = Math.max(1, parseInt(q.page as any, 10) || 1);
   const pageSize = Math.min(500, Math.max(1, parseInt(q.pageSize as any, 10) || 25));
