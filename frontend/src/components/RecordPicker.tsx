@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { Modal } from "./Modal";
 import { usePickerKeyboard } from "./pickerKeyboard";
+import { useFxEnabled } from "../lib/useEntitlements";
 
 export interface PickerColumn<T> {
   header: string;
   render: (row: T) => any;
   filterValue: (row: T) => string;
   width?: string;
+  /** ستونِ مربوط به زیرسیستم ارزی؛ وقتی FX در لایسنس نیست حذف می‌شود */
+  fxOnly?: boolean;
 }
 
 export function RecordPickerField<T extends { id: number | string }>({
@@ -96,7 +99,7 @@ export function RecordPickerField<T extends { id: number | string }>({
 export function RecordPickerDialog<T extends { id: number | string }>({
   title,
   rows,
-  columns,
+  columns: columnsProp,
   multiSelect,
   resultInDisplayOrder,
   keepRowOrder,
@@ -115,6 +118,8 @@ export function RecordPickerDialog<T extends { id: number | string }>({
   onSelectMultiple?: (rows: T[]) => void;
   onClose: () => void;
 }) {
+  const fxEnabled = useFxEnabled();
+  const columns = fxEnabled ? columnsProp : columnsProp.filter((c) => !c.fxOnly);
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [selectedId, setSelectedId] = useState<string | number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string | number>>(new Set());

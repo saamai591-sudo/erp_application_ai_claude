@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Modal } from "./Modal";
 import { usePickerKeyboard } from "./pickerKeyboard";
+import { useFxEnabled } from "../lib/useEntitlements";
 import { PickerColumn } from "./RecordPicker";
 import { SortIcon } from "./DataTable";
 
@@ -23,7 +24,7 @@ function AddIcon() {
 export function MultiPickerDialog<T extends { id: number | string }>({
   title,
   rows,
-  columns,
+  columns: columnsProp,
   initialChecked,
   onConfirm,
   onClose,
@@ -39,6 +40,8 @@ export function MultiPickerDialog<T extends { id: number | string }>({
   onConfirm: (checked: Set<T["id"]>) => void;
   onClose: () => void;
 }) {
+  const fxEnabled = useFxEnabled();
+  const columns = fxEnabled ? columnsProp : columnsProp.filter((c) => !c.fxOnly);
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [sort, setSort] = useState<{ header: string; dir: "asc" | "desc" } | null>(
     columns[0] ? { header: columns[0].header, dir: "asc" } : null

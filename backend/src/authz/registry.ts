@@ -40,6 +40,8 @@ export interface FormDef {
   title: string;
   baseActions: BaseAction[];
   actions?: CustomActionDef[];
+  /** فرم فقط وقتی در لایسنس این «قابلیت» (مثلاً FX) فعال باشد دیده می‌شود/قابل استفاده است */
+  requiresFeature?: string;
 }
 
 export interface SubModuleDef {
@@ -106,8 +108,8 @@ export const REGISTRY: ModuleDef[] = [
         key: "operations",
         title: "عملیات",
         forms: [
-          { key: "currencies", title: "ارز", baseActions: CRUD },
-          { key: "rates", title: "نرخ ارز", baseActions: ["view", "create", "delete"] },
+          { key: "currencies", title: "ارز", baseActions: CRUD, requiresFeature: "FX" },
+          { key: "rates", title: "نرخ ارز", baseActions: ["view", "create", "delete"], requiresFeature: "FX" },
           { key: "periods", title: "دوره مالی", baseActions: CRUD },
           { key: "numbering-patterns", title: "الگوی شماره‌گذاری", baseActions: CRUD },
           { key: "company-profile", title: "مشخصات شرکت", baseActions: ["view", "edit"] },
@@ -804,6 +806,17 @@ export function getActionKeySet(): Set<string> {
 
 export function isRegisteredActionKey(key: string): boolean {
   return getActionKeySet().has(key);
+}
+
+// پیشوند فرم (module.sub.form) ← قابلیت لازم؛ فقط فرم‌های دارای requiresFeature
+let featureByFormPrefix: Map<string, string> | null = null;
+/** قابلیتِ لازمِ یک کلید دسترسی (یا undefined اگر محدود به قابلیت نیست) */
+export function requiredFeatureOfActionKey(key: string): string | undefined {
+  if (!featureByFormPrefix) {
+    featureByFormPrefix = new Map();
+    for (const mod of REGISTRY) for (const sub of mod.subModules) for (const f of sub.forms) if (f.requiresFeature) featureByFormPrefix.set(`${mod.key}.${sub.key}.${f.key}`, f.requiresFeature);
+  }
+  return featureByFormPrefix.get(key.split(".").slice(0, 3).join("."));
 }
 
 /**

@@ -524,7 +524,7 @@ function SalesReturnInvoiceForm({ editId }: { editId?: number }) {
               {salesCenters.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
             </select>
           </div>
-          <div className="form-field">
+          <div className="form-field fx-only">
             <label>ارز<RequiredMark /></label>
             <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value, fxRate: "" })} disabled={headerDisabled}>
               <option value="">انتخاب کنید</option>
@@ -532,7 +532,7 @@ function SalesReturnInvoiceForm({ editId }: { editId?: number }) {
             </select>
           </div>
           {needsFxRate && (
-            <div className="form-field">
+            <div className="form-field fx-only">
               <label>نرخ ارز<RequiredMark /></label>
               <AmountInput value={header.fxRate} onChange={(v) => setHeader({ ...header, fxRate: v })} allowDecimal disabled={headerDisabled} />
             </div>

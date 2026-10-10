@@ -310,13 +310,13 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
                   {Object.entries(BALANCE_NATURE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </div>
-              <div className="form-field">
+              <div className="form-field fx-only">
                 <label className="checkbox-row">
                   <input type="checkbox" checked={form.isCurrency} disabled={hasTx} onChange={(e) => setForm({ ...form, isCurrency: e.target.checked })} />
                   ارزی
                 </label>
               </div>
-              <div className="form-field">
+              <div className="form-field fx-only">
                 <label className="checkbox-row">
                   <input type="checkbox" checked={form.isRevaluable} disabled={hasTx} onChange={(e) => setForm({ ...form, isRevaluable: e.target.checked })} />
                   تسعیرپذیر

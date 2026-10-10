@@ -502,9 +502,9 @@ function OpeningForm({ editId }: { editId?: number }) {
               <tr>
                 <th>ردیف</th>
                 <th>حساب بانکی<RequiredMark /></th>
-                <th>ارز</th>
+                <th className="fx-only">ارز</th>
                 <th>مانده اول دوره به ارز حساب</th>
-                <th>مانده اول دوره به ارز پایه</th>
+                <th className="fx-only">مانده اول دوره به ارز پایه</th>
                 <th></th>
               </tr>
             </thead>
@@ -519,11 +519,11 @@ function OpeningForm({ editId }: { editId?: number }) {
                     <td style={{ minWidth: 220 }}>
                       <BankAccountPicker accounts={bankAccounts} value={r.bankAccountId} disabled={r.systemGenerated} onChange={(id) => setBankRows((p) => p.map((x) => (x.key === r.key ? { ...x, bankAccountId: id } : x)))} />
                     </td>
-                    <td style={{ minWidth: 100 }}>{acc ? acc.currency?.title ?? baseCur.title : "—"}</td>
+                    <td className="fx-only" style={{ minWidth: 100 }}>{acc ? acc.currency?.title ?? baseCur.title : "—"}</td>
                     <td style={{ minWidth: 160 }}>
                       <SignedInput value={r.balance} disabled={r.systemGenerated} onChange={(v) => setBankRows((p) => p.map((x) => (x.key === r.key ? { ...x, balance: v, baseBalance: isBase ? v : x.baseBalance } : x)))} />
                     </td>
-                    <td style={{ minWidth: 160 }}>
+                    <td className="fx-only" style={{ minWidth: 160 }}>
                       <SignedInput value={isBase ? r.balance : r.baseBalance} disabled={isBase || r.systemGenerated} onChange={(v) => setBankRows((p) => p.map((x) => (x.key === r.key ? { ...x, baseBalance: v } : x)))} />
                     </td>
                     <td>{r.systemGenerated ? systemBadge() : <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => setBankRows((p) => p.filter((x) => x.key !== r.key))}>حذف</button>}</td>
@@ -555,9 +555,9 @@ function OpeningForm({ editId }: { editId?: number }) {
               <tr>
                 <th>ردیف</th>
                 <th>تنخواه‌دار — تنخواه<RequiredMark /></th>
-                <th>ارز</th>
+                <th className="fx-only">ارز</th>
                 <th>مانده اول دوره به ارز تنخواه</th>
-                <th>مانده اول دوره به ارز پایه</th>
+                <th className="fx-only">مانده اول دوره به ارز پایه</th>
                 <th></th>
               </tr>
             </thead>
@@ -583,11 +583,11 @@ function OpeningForm({ editId }: { editId?: number }) {
                         onSelect={(c: CustodianOption) => setPettyRows((p) => p.map((x) => (x.key === r.key ? { ...x, custodianId: String(c.id) } : x)))}
                       />
                     </td>
-                    <td style={{ minWidth: 100 }}>{cu ? cu.pettyCash.currency.title : "—"}</td>
+                    <td className="fx-only" style={{ minWidth: 100 }}>{cu ? cu.pettyCash.currency.title : "—"}</td>
                     <td style={{ minWidth: 160 }}>
                       <SignedInput value={r.balance} disabled={r.systemGenerated} onChange={(v) => setPettyRows((p) => p.map((x) => (x.key === r.key ? { ...x, balance: v, baseBalance: isBase ? v : x.baseBalance } : x)))} />
                     </td>
-                    <td style={{ minWidth: 160 }}>
+                    <td className="fx-only" style={{ minWidth: 160 }}>
                       <SignedInput value={isBase ? r.balance : r.baseBalance} disabled={isBase || r.systemGenerated} onChange={(v) => setPettyRows((p) => p.map((x) => (x.key === r.key ? { ...x, baseBalance: v } : x)))} />
                     </td>
                     <td>{r.systemGenerated ? systemBadge() : <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => setPettyRows((p) => p.filter((x) => x.key !== r.key))}>حذف</button>}</td>
@@ -619,9 +619,9 @@ function OpeningForm({ editId }: { editId?: number }) {
               <tr>
                 <th>ردیف</th>
                 <th>صندوق<RequiredMark /></th>
-                <th>ارز<RequiredMark /></th>
+                <th className="fx-only">ارز<RequiredMark /></th>
                 <th>مانده اول دوره به ارز صندوق</th>
-                <th>مانده اول دوره به ارز پایه</th>
+                <th className="fx-only">مانده اول دوره به ارز پایه</th>
                 <th></th>
               </tr>
             </thead>
@@ -637,7 +637,7 @@ function OpeningForm({ editId }: { editId?: number }) {
                         {cashBoxes.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
                       </select>
                     </td>
-                    <td style={{ minWidth: 130 }}>
+                    <td className="fx-only" style={{ minWidth: 130 }}>
                       <select value={r.currencyId} disabled={r.systemGenerated} onChange={(e) => setCashRows((p) => p.map((x) => (x.key === r.key ? { ...x, currencyId: e.target.value, baseBalance: Number(e.target.value) === baseCur.id ? x.balance : x.baseBalance } : x)))}>
                         {currencies.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
                       </select>
@@ -645,7 +645,7 @@ function OpeningForm({ editId }: { editId?: number }) {
                     <td style={{ minWidth: 160 }}>
                       <SignedInput value={r.balance} disabled={r.systemGenerated} onChange={(v) => setCashRows((p) => p.map((x) => (x.key === r.key ? { ...x, balance: v, baseBalance: isBase ? v : x.baseBalance } : x)))} />
                     </td>
-                    <td style={{ minWidth: 160 }}>
+                    <td className="fx-only" style={{ minWidth: 160 }}>
                       <SignedInput value={isBase ? r.balance : r.baseBalance} disabled={isBase || r.systemGenerated} onChange={(v) => setCashRows((p) => p.map((x) => (x.key === r.key ? { ...x, baseBalance: v } : x)))} />
                     </td>
                     <td>{r.systemGenerated ? systemBadge() : <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => setCashRows((p) => p.filter((x) => x.key !== r.key))}>حذف</button>}</td>

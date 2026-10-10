@@ -349,7 +349,7 @@ function PettyCashPaymentForm({ editId }: { editId?: number }) {
               onSelect={(c) => setForm({ ...form, custodianId: String(c.id) })}
             />
           </div>
-          <div className="form-field">
+          <div className="form-field fx-only">
             <label>ارز تنخواه</label>
             <input disabled dir="ltr" value={custodian?.pettyCash?.currency?.title || ""} />
           </div>

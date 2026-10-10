@@ -855,11 +855,11 @@ function EntryForm({ editId }: { editId?: number }) {
                 <th>تفصیل ۱</th>
                 <th>تفصیل ۲</th>
                 <th>تفصیل ۳</th>
-                <th>ارز</th>
+                <th className="fx-only">ارز</th>
                 <th>بدهکار</th>
                 <th>بستانکار</th>
-                <th>بدهکار ارزی</th>
-                <th>بستانکار ارزی</th>
+                <th className="fx-only">بدهکار ارزی</th>
+                <th className="fx-only">بستانکار ارزی</th>
                 <th>شرح ردیف</th>
                 <th></th>
               </tr>
@@ -929,7 +929,7 @@ function EntryForm({ editId }: { editId?: number }) {
                         />
                       ) : <span style={{ color: "var(--ink-soft)" }}>—</span>}
                     </td>
-                    <td style={{ minWidth: 100 }}>
+                    <td className="fx-only" style={{ minWidth: 100 }}>
                       <select
                         value={row.currencyId}
                         disabled={!account?.isCurrency}
@@ -966,7 +966,7 @@ function EntryForm({ editId }: { editId?: number }) {
                       )}
                     </td>
                     {/* بدهکار ارزی */}
-                    <td style={{ minWidth: 130 }}>
+                    <td className="fx-only" style={{ minWidth: 130 }}>
                       {foreign ? (
                         <div className="fx-cell">
                           <span className="fx-value">{row.debit ? formatAmountFa(row.debit) : "—"}</span>
@@ -979,7 +979,7 @@ function EntryForm({ editId }: { editId?: number }) {
                       )}
                     </td>
                     {/* بستانکار ارزی */}
-                    <td style={{ minWidth: 130 }}>
+                    <td className="fx-only" style={{ minWidth: 130 }}>
                       {foreign ? (
                         <div className="fx-cell">
                           <span className="fx-value">{row.credit ? formatAmountFa(row.credit) : "—"}</span>

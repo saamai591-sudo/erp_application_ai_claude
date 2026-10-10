@@ -277,7 +277,7 @@ export default function PettyCashReview() {
     return [
       { header: "کد", render: (r) => toFaDigits(r.code), sortValue: (r) => r.code, width: "100px", filterType: strFilter, filterValue: (r) => r.code },
       { header: "عنوان", render: (r) => r.title, sortValue: (r) => r.title, filterType: strFilter, filterValue: (r) => r.title },
-      { header: "ارز", render: (r) => r.currencyTitle, sortValue: (r) => r.currencyTitle, width: "90px", filterType: strFilter, filterValue: (r) => r.currencyTitle },
+      { header: "ارز", fxOnly: true, render: (r) => r.currencyTitle, sortValue: (r) => r.currencyTitle, width: "90px", filterType: strFilter, filterValue: (r) => r.currencyTitle },
       numCol<PettyCashRow>("مانده ابتدا", "openingBalance", true),
       numCol<PettyCashRow>("شارژ", "inflow"),
       numCol<PettyCashRow>("پرداخت", "outflow"),
@@ -291,7 +291,7 @@ export default function PettyCashReview() {
       { header: "کد", render: (r) => toFaDigits(r.code), sortValue: (r) => r.code, width: "100px", filterType: strFilter, filterValue: (r) => r.code },
       { header: "تنخواه‌دار", render: (r) => r.title, sortValue: (r) => r.title, filterType: strFilter, filterValue: (r) => r.title },
       { header: "تنخواه", render: (r) => r.pettyCashTitle, sortValue: (r) => r.pettyCashTitle, filterType: strFilter, filterValue: (r) => r.pettyCashTitle },
-      { header: "ارز", render: (r) => r.currencyTitle, sortValue: (r) => r.currencyTitle, width: "90px", filterType: strFilter, filterValue: (r) => r.currencyTitle },
+      { header: "ارز", fxOnly: true, render: (r) => r.currencyTitle, sortValue: (r) => r.currencyTitle, width: "90px", filterType: strFilter, filterValue: (r) => r.currencyTitle },
       numCol<CustodianRow>("مانده ابتدا", "openingBalance", true),
       numCol<CustodianRow>("شارژ", "inflow"),
       numCol<CustodianRow>("پرداخت", "outflow"),

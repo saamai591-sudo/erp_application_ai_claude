@@ -277,12 +277,12 @@ function DeliveryToInvoiceDialog({ sourceId, onClose }: { sourceId: number; onCl
               <label>مرکز فروش<RequiredMark /></label>
               {picker("انتخاب مرکز فروش", salesCenters, salesCenterId, setSalesCenterId)}
             </div>
-            <div className="form-field">
+            <div className="form-field fx-only">
               <label>ارز<RequiredMark /></label>
               {picker("انتخاب ارز", currencies, currencyId, (v) => { setCurrencyId(v); setFxRate(""); })}
             </div>
             {needsFxRate && (
-              <div className="form-field">
+              <div className="form-field fx-only">
                 <label>نرخ ارز<RequiredMark /></label>
                 <AmountInput value={fxRate} onChange={setFxRate} allowDecimal disabled={!!info.reason} />
               </div>

@@ -459,7 +459,7 @@ function ChequeDepositReturnForm({ editId, reEdit }: { editId?: number; reEdit?:
                       <td>{l.chequeNumber}</td>
                       <td>{formatJalaliDate(l.chequeDueDate)}</td>
                       <td>{l.chequePartyDisplay}</td>
-                      <td>{formatAmountFa(l.chequeAmount)} {l.chequeCurrencyTitle}</td>
+                      <td>{formatAmountFa(l.chequeAmount)} <span className="fx-only">{l.chequeCurrencyTitle}</span></td>
                       <td>
                         <button type="button" className="btn danger" disabled={linesLocked} style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeLine(l.chequeItemId)}>
                             حذف

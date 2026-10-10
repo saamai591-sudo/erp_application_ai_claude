@@ -262,7 +262,7 @@ function PaymentList() {
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
           { header: "طرف حساب", render: (r) => r.partyDisplay, filterType: "string", filterValue: (r) => r.partyDisplay },
           { header: "شرح", render: (r) => r.description || "—", filterType: "string", filterValue: (r) => r.description || "" },
-          { header: "جمع (ارز پایه)", render: (r) => formatAmountFa(r.totalBaseAmount), filterType: "number", filterValue: (r) => r.totalBaseAmount, decimal: true },
+          { header: "جمع (ارز پایه)", fxOnly: true, render: (r) => formatAmountFa(r.totalBaseAmount), filterType: "number", filterValue: (r) => r.totalBaseAmount, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{statusLabel(r.status, r.accountingStatus, !!r.journalEntryReferenceNumber)}</span>, filterType: "string", filterValue: (r) => statusLabel(r.status, r.accountingStatus, !!r.journalEntryReferenceNumber) },
         ]}
         rows={items}
@@ -966,10 +966,10 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                   <th>نوع</th>
                   {hasChequeRow && <th>نوع چک<RequiredMark /></th>}
                   <th>جزئیات</th>
-                  <th>ارز</th>
+                  <th className="fx-only">ارز</th>
                   <th>مبلغ</th>
                   {hasBankTransferRow && <th>کارمزد پرداخت</th>}
-                  <th>نرخ ارز</th>
+                  <th className="fx-only">نرخ ارز</th>
                   <th>شرح</th>
                   <th></th>
                 </tr>
@@ -1119,7 +1119,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                           />
                         )}
                       </td>
-                      <td style={{ minWidth: 130 }}>
+                      <td className="fx-only" style={{ minWidth: 130 }}>
                         {row.type === "CASH" && (
                           <select value={row.currencyId} onChange={(e) => updateInstrumentRow(idx, { currencyId: e.target.value, fxRate: Number(e.target.value) === baseCurrency.id ? "1" : row.fxRate })}>
                             <option value="">انتخاب ارز</option>
@@ -1141,7 +1141,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                           )}
                         </td>
                       )}
-                      <td style={{ minWidth: 100 }}>
+                      <td className="fx-only" style={{ minWidth: 100 }}>
                         {isBaseCurrencyRow ? (
                           <input dir="ltr" value={toFaDigits("1")} disabled />
                         ) : (
@@ -1202,11 +1202,11 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                   <th>قلم</th>
                   <th>نوع پرداخت</th>
                   <th>طرف حساب / حساب</th>
-                  <th>ارز</th>
+                  <th className="fx-only">ارز</th>
                   <th>مبنا</th>
-                  <th>نرخ ارز</th>
+                  <th className="fx-only">نرخ ارز</th>
                   <th>مبلغ</th>
-                  <th>تسعیر</th>
+                  <th className="fx-only">تسعیر</th>
                   <th>شرح</th>
                   <th></th>
                 </tr>
@@ -1503,7 +1503,7 @@ function SettlementRowFields({
         />
         )}
       </td>
-      <td style={{ minWidth: 110 }}>
+      <td className="fx-only" style={{ minWidth: 110 }}>
         <select
           value={row.currencyId}
           onChange={(e) => {
@@ -1595,7 +1595,7 @@ function SettlementRowFields({
           <span style={{ color: "var(--ink-soft)" }}>بدون مبنا</span>
         )}
       </td>
-      <td style={{ minWidth: 100 }}>
+      <td className="fx-only" style={{ minWidth: 100 }}>
         {isBaseCurrencyRow ? (
           <input dir="ltr" value={toFaDigits("1")} disabled />
         ) : (
@@ -1609,7 +1609,7 @@ function SettlementRowFields({
           <input dir="ltr" value={row.amount ? formatAmountFa(row.amount) : "—"} disabled />
         )}
       </td>
-      <td style={{ minWidth: 110, color: row.exchangeGainLoss > 0 ? "var(--success, #2e7d32)" : row.exchangeGainLoss < 0 ? "var(--danger, #c0392b)" : undefined }}>
+      <td className="fx-only" style={{ minWidth: 110, color: row.exchangeGainLoss > 0 ? "var(--success, #2e7d32)" : row.exchangeGainLoss < 0 ? "var(--danger, #c0392b)" : undefined }}>
         {formatAmountFa(row.exchangeGainLoss)}
       </td>
       <td style={{ minWidth: 140 }}>

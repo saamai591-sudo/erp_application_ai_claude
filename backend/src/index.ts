@@ -75,6 +75,7 @@ import companyProfileRoutes from "./routes/companyProfile";
 import printTemplateRoutes from "./routes/printTemplates";
 import managementRoutes from "./routes/management";
 import { licenseGate } from "./license/licenseGate";
+import { fxOffBodyNormalizer } from "./license/fxOff";
 import { startScheduler } from "./jobs/scheduler";
 import warehouseDocDetailSettingRoutes from "./routes/warehouseDocDetailSettings";
 import detailRuleRoutes from "./routes/detailRules";
@@ -152,6 +153,8 @@ app.use("/api", requireAuth);
 // خودکار لیست موجودیت‌های دارای fiscalPeriodId را به همان دوره محدود کند — نگاه کنید به
 // middleware/fiscalScope.ts و lib/requestContext.ts.
 app.use("/api", fiscalScopeContext);
+// بدون قابلیت FX در لایسنس: بدنه‌ی هر ثبت/ویرایش به ارز پایه (و نرخ ۱) نرمال می‌شود
+app.use("/api", fxOffBodyNormalizer);
 app.use("/api", authzRoutes);
 app.use("/api", userPreferencesRoutes);
 app.use("/api/journal-consolidation", journalConsolidationRoutes);

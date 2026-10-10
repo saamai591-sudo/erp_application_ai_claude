@@ -76,7 +76,7 @@ function PettyCashList() {
         columns={[
           { header: "کد تفصیلی", render: (r) => toFaDigits(r.detailCode), width: "110px", filterType: "string", filterValue: (r) => r.detailCode },
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
-          { header: "ارز", render: (r) => r.currency?.title || "—", width: "120px", filterType: "string", filterValue: (r) => r.currency?.title || "" },
+          { header: "ارز", fxOnly: true, render: (r) => r.currency?.title || "—", width: "120px", filterType: "string", filterValue: (r) => r.currency?.title || "" },
           {
             header: "سقف تنخواه",
             render: (r) => formatAmountFa(r.limitAmount),
@@ -200,7 +200,7 @@ function PettyCashForm({ editId }: { editId?: number }) {
             <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
           </div>
-          <div className="form-field">
+          <div className="form-field fx-only">
             <label>
               ارز
               <RequiredMark />

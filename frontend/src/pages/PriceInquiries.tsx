@@ -389,7 +389,7 @@ function PriceInquiryForm({ editId }: { editId?: number }) {
               <label>تاریخ اعتبار<RequiredMark /></label>
               <JalaliDatePicker value={header.validUntil} onChange={(v) => setHeader({ ...header, validUntil: v })} />
             </div>
-            <div className="form-field">
+            <div className="form-field fx-only">
               <label>ارز<RequiredMark /></label>
               <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value })}>
                 <option value="">انتخاب کنید</option>

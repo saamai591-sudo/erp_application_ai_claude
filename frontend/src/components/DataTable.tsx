@@ -6,6 +6,7 @@ import { useLocation } from "react-router-dom";
 import { JalaliDatePicker } from "./JalaliDatePicker";
 import { toFaDigits, formatAmountFa } from "../lib/formatAmount";
 import { useTabs } from "../lib/TabsContext";
+import { useFxEnabled } from "../lib/useEntitlements";
 import { usePersistedState } from "../lib/usePersistedState";
 import { exportGridToCsv, printGrid, deriveGridName, ExportColumn } from "../lib/gridExport";
 import { measureBestFitWidths, sumWidths } from "../lib/bestFit";
@@ -44,6 +45,8 @@ export interface Column<T> {
    * سرور پشتیبانی نمی‌شود، اما باید بتوان همچنان جمعشان را روی همان صفحه‌ی فعلی نمایش داد.
    */
   totalValue?: (row: T) => string | number | null | undefined;
+  /** ستونِ مربوط به زیرسیستم ارزی (ارز، نرخ ارز، مبلغ ارزی…): وقتی FX در لایسنس نیست ستون اصلاً ساخته نمی‌شود */
+  fxOnly?: boolean;
 }
 
 /**
@@ -370,7 +373,8 @@ export function DataTable<T extends { id: number | string }>({
   stateKey?: string;
 }) {
   const { openTab } = useTabs();
-  const columns = withJournalEntryColumn(columnsProp, rows);
+  const fxEnabled = useFxEnabled();
+  const columns = withJournalEntryColumn(fxEnabled ? columnsProp : columnsProp.filter((c) => !c.fxOnly), rows);
   const location = useLocation();
   const gridName = deriveGridName(location.pathname);
   // کلید پایه‌ی وضعیتِ همین گرید — با پیشوند مسیر صفحه، تا هم با clearPersistedStateByPrefix(مسیر) در

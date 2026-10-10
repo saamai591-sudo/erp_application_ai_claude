@@ -1,8 +1,8 @@
 import { NextFunction, Response } from "express";
 import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
-import { getEntitlements } from "../license/licenseService";
-import { isRegisteredActionKey } from "./registry";
+import { getEntitlements, isFeatureEnabled } from "../license/licenseService";
+import { isRegisteredActionKey, requiredFeatureOfActionKey } from "./registry";
 
 /**
  * اجتماع (union) کدهای Action ای که کاربر از طریق نقش‌هایش (RoleAction) و/یا اعطای مستقیم
@@ -25,9 +25,15 @@ export async function getUserActionKeys(userId: number): Promise<Set<string>> {
   for (const ua of directActions) codes.add(ua.action.key);
   // ماژول‌های خارج از لایسنس: کلیدشان اصلاً وجود ندارد ⇒ منو پنهان، can() رد، مجوزهای ذخیره‌شده بی‌اثر (داده‌ها در جدول‌ها می‌ماند)
   const ent = await getEntitlements();
-  if (!ent.modules) return codes;
-  const allowedModules = new Set(ent.modules);
-  return new Set(Array.from(codes).filter((k) => allowedModules.has(k.split(".")[0])));
+  if (!ent.modules && !ent.features) return codes;
+  const allowedModules = ent.modules ? new Set(ent.modules) : null;
+  return new Set(
+    Array.from(codes).filter((k) => {
+      if (allowedModules && !allowedModules.has(k.split(".")[0])) return false;
+      const feature = requiredFeatureOfActionKey(k);
+      return !feature || isFeatureEnabled(ent, feature);
+    })
+  );
 }
 
 export async function userHasAction(userId: number, actionKey: string): Promise<boolean> {
@@ -56,6 +62,10 @@ export function can(actionKey: string) {
     const ent = await getEntitlements();
     if (ent.modules && !ent.modules.includes(actionKey.split(".")[0])) {
       return res.status(403).json({ error: "این بخش در لایسنس شما فعال نیست", code: "MODULE_NOT_LICENSED" });
+    }
+    const feature = requiredFeatureOfActionKey(actionKey);
+    if (feature && !isFeatureEnabled(ent, feature)) {
+      return res.status(403).json({ error: "این بخش در لایسنس شما فعال نیست", code: "FEATURE_NOT_LICENSED" });
     }
     const allowed = await userHasAction(req.user.id, actionKey);
     if (!allowed) return res.status(403).json({ error: "دسترسی لازم برای این عملیات را ندارید" });

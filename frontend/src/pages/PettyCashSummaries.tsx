@@ -665,11 +665,11 @@ function SummaryForm({ editId }: { editId?: number }) {
                 }}
               />
             </div>
-            <div className="form-field">
+            <div className="form-field fx-only">
               <label>ارز تنخواه</label>
               <input disabled dir="ltr" value={custodian?.pettyCash?.currency?.title || ""} />
             </div>
-            <div className="form-field">
+            <div className="form-field fx-only">
               <label>نرخ ارز<RequiredMark /></label>
               {/* ارز پایه همیشه نرخ ۱ دارد (هم‌الگوی سند حسابداری/فاکتور) — سرور هم هر مقدار دیگری را نادیده می‌گیرد */}
               <AmountInput

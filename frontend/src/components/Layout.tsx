@@ -8,6 +8,7 @@ import { filterModulesByAccess, ModuleGroup, NavItem } from "../navConfig";
 import { resolveNavBehavior } from "../lib/formTypes";
 import { FitText } from "./FitText";
 import { usePermissions } from "../lib/usePermissions";
+import { prefetchEntitlements } from "../lib/useEntitlements";
 import { TabsBar } from "./TabsBar";
 import { UserSettingsModal } from "./UserSettingsModal";
 import { ChangePasswordModal } from "./ChangePasswordModal";
@@ -509,6 +510,10 @@ export default function Layout() {
   const { openTab, activeTabId, tabs, refreshNonce } = useTabs();
   useTabScrollRestore(activeTabId, refreshNonce);
   const { hasFormView, loading: permissionsLoading } = usePermissions();
+  // ماژول‌ها/قابلیت‌های لایسنس (مثلاً FX) را زود می‌خواند تا فیلدهای ارزی پیش از رندر صفحه‌ها پنهان شوند
+  useEffect(() => {
+    if (user) prefetchEntitlements();
+  }, [user?.id]);
   // آکاردئون: در هر لحظه فقط یک ماژول و یک ساب‌ماژول باز است (به‌صورت پیش‌فرض همه بسته‌اند)
   const [openModule, setOpenModule] = useState<string | null>(null);
   const [openSubModule, setOpenSubModule] = useState<string | null>(null);

@@ -220,7 +220,7 @@ function CustodianForm({ editId }: { editId?: number }) {
               columns={[
                 { header: "کد", render: (p) => toFaDigits(p.detailCode), filterValue: (p) => p.detailCode, width: "90px" },
                 { header: "عنوان", render: (p) => p.title, filterValue: (p) => p.title },
-                { header: "ارز", render: (p) => p.currency?.title, filterValue: (p) => p.currency?.title || "", width: "110px" },
+                { header: "ارز", fxOnly: true, render: (p) => p.currency?.title, filterValue: (p) => p.currency?.title || "", width: "110px" },
               ]}
               onSelect={(p) => setForm({ ...form, pettyCashId: String(p.id) })}
             />

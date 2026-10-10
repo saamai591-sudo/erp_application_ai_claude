@@ -263,3 +263,8 @@ export async function getEntitlements(): Promise<Entitlements> {
     return all;
   }
 }
+
+/** آیا قابلیت (مثلاً FX) در لایسنس فعال است؟ features=null (قفل خاموش/لایسنس قدیمی) یعنی همه‌ی قابلیت‌ها */
+export function isFeatureEnabled(ent: Entitlements, feature: string): boolean {
+  return !ent.features || ent.features.includes(feature);
+}

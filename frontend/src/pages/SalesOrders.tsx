@@ -475,7 +475,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
                 {salesCenters.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
               </select>
             </div>
-            <div className="form-field">
+            <div className="form-field fx-only">
               <label>ارز<RequiredMark /></label>
               <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value })} disabled={headerDisabled}>
                 <option value="">انتخاب کنید</option>

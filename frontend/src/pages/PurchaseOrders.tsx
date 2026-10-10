@@ -401,7 +401,7 @@ function PurchaseOrderForm({ editId }: { editId?: number }) {
                 onSelect={(x) => setHeader({ ...header, supplierId: String(x.id) })}
               />
             </div>
-            <div className="form-field">
+            <div className="form-field fx-only">
               <label>ارز<RequiredMark /></label>
               <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value })} disabled={headerDisabled}>
                 <option value="">انتخاب کنید</option>

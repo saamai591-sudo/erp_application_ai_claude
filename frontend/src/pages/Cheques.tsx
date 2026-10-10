@@ -126,7 +126,7 @@ function ChequeList() {
           { header: "طرف حساب", render: (r) => r.partyDisplay, filterType: "string", filterValue: (r) => r.partyDisplay },
           { header: "شعبه بانک", render: (r) => r.bankBranchTitle || "—", filterType: "string", filterValue: (r) => r.bankBranchTitle || "" },
           { header: "مبلغ", render: (r) => formatAmountFa(r.amount), filterType: "number", filterValue: (r) => r.amount, decimal: true },
-          { header: "ارز", render: (r) => r.currencyTitle, filterType: "string", filterValue: (r) => r.currencyTitle },
+          { header: "ارز", fxOnly: true, render: (r) => r.currencyTitle, filterType: "string", filterValue: (r) => r.currencyTitle },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
         ]}
         rows={items}
@@ -223,7 +223,7 @@ function ChequeDetail({ id }: { id: number }) {
           <label>مبلغ</label>
           <input value={formatAmountFa(detail.amount)} disabled />
         </div>
-        <div className="form-field">
+        <div className="form-field fx-only">
           <label>ارز</label>
           <input value={detail.currencyTitle} disabled />
         </div>

@@ -1802,3 +1802,6 @@ table.bestfit-measure th, table.bestfit-measure td {
 .kv-table { border-collapse: collapse; font-size: 13px; }
 .kv-table th, .kv-table td { border: 1px solid var(--line); padding: 6px 10px; text-align: right; vertical-align: top; }
 .kv-table th { background: var(--bg); font-weight: 600; white-space: nowrap; }
+
+/* زیرسیستم ارزی (FX): وقتی در لایسنس نیست، همه‌ی فیلدها/ستون‌های علامت‌خورده با .fx-only پنهان می‌شوند (فقط نمایش؛ سرور همه‌چیز را با ارز پایه می‌پذیرد) */
+html[data-fx="off"] .fx-only { display: none !important; }

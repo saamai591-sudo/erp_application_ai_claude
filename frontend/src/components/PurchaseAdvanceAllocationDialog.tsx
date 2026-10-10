@@ -81,7 +81,7 @@ export function PurchaseAdvanceAllocationDialog({ basePath, invoiceId, onClose, 
     { header: "ماهیت", render: (c) => c.natureTitle, filterValue: (c) => c.natureTitle },
     { header: "شماره پرداخت", render: (c) => toFaDigits(String(c.paymentNumber)), filterValue: (c) => String(c.paymentNumber) },
     { header: "تاریخ پرداخت", render: (c) => formatJalaliDate(c.paymentDate), filterValue: (c) => formatJalaliDate(c.paymentDate) },
-    { header: "ارز", render: (c) => c.currencyTitle, filterValue: (c) => c.currencyTitle },
+    { header: "ارز", fxOnly: true, render: (c) => c.currencyTitle, filterValue: (c) => c.currencyTitle },
     { header: "مبلغ اولیه", render: (c) => formatAmountFa(c.originalAmount), filterValue: (c) => String(c.originalAmount) },
     { header: "مبلغ تخصیص‌یافته", render: (c) => formatAmountFa(c.allocatedAmount), filterValue: (c) => String(c.allocatedAmount) },
     { header: "مبلغ قابل تخصیص", render: (c) => formatAmountFa(c.allocatableAmount), filterValue: (c) => String(c.allocatableAmount) },
@@ -142,7 +142,7 @@ export function PurchaseAdvanceAllocationDialog({ basePath, invoiceId, onClose, 
       {state && (
         <>
           <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 10, fontSize: 13 }}>
-            <span>فاکتور شماره {toFaDigits(String(state.invoice.number))} — ارز: {state.invoice.currencyTitle}</span>
+            <span>فاکتور شماره {toFaDigits(String(state.invoice.number))}<span className="fx-only"> — ارز: {state.invoice.currencyTitle}</span></span>
             <span>مبلغ قابل تخصیص فاکتور: <b>{formatAmountFa(state.invoice.total)}</b></span>
             <span>مجموع تخصیص: <b style={{ color: overInvoice ? "var(--danger)" : undefined }}>{formatAmountFa(sum)}</b></span>
             <span>مانده قابل پرداخت: <b>{formatAmountFa(state.invoice.total - sum)}</b></span>
@@ -171,7 +171,7 @@ export function PurchaseAdvanceAllocationDialog({ basePath, invoiceId, onClose, 
                   <th>ماهیت پیش‌پرداخت</th>
                   <th>شماره پرداخت</th>
                   <th>تاریخ پرداخت</th>
-                  <th>ارز</th>
+                  <th className="fx-only">ارز</th>
                   <th>مبلغ اولیه</th>
                   <th>مبلغ تخصیص‌یافته</th>
                   <th>مبلغ قابل تخصیص</th>
@@ -192,7 +192,7 @@ export function PurchaseAdvanceAllocationDialog({ basePath, invoiceId, onClose, 
                     <td>{c.natureTitle}</td>
                     <td>{toFaDigits(String(c.paymentNumber))}</td>
                     <td>{formatJalaliDate(c.paymentDate)}</td>
-                    <td>{c.currencyTitle}</td>
+                    <td className="fx-only">{c.currencyTitle}</td>
                     <td>{formatAmountFa(c.originalAmount)}</td>
                     <td>{formatAmountFa(c.allocatedAmount)}</td>
                     <td>{formatAmountFa(c.allocatableAmount)}</td>

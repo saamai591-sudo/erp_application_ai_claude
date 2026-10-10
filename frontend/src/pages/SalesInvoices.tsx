@@ -787,7 +787,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
               {salesCenters.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
             </select>
           </div>
-          <div className="form-field">
+          <div className="form-field fx-only">
             <label>ارز<RequiredMark /></label>
             <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value, fxRate: "" })} disabled={headerDisabled}>
               <option value="">انتخاب کنید</option>
@@ -795,7 +795,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
             </select>
           </div>
           {needsFxRate && (
-            <div className="form-field">
+            <div className="form-field fx-only">
               <label>نرخ ارز<RequiredMark /></label>
               <AmountInput value={header.fxRate} onChange={(v) => setHeader({ ...header, fxRate: v })} allowDecimal disabled={headerDisabled} />
             </div>
@@ -1010,7 +1010,7 @@ function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: n
     { header: "ماهیت پیش‌دریافت", render: (c) => c.natureTitle, filterValue: (c) => c.natureTitle },
     { header: "شماره پیش‌دریافت", render: (c) => toFaDigits(String(c.receiptNumber)), filterValue: (c) => String(c.receiptNumber) },
     { header: "تاریخ دریافت", render: (c) => formatJalaliDate(c.receiptDate), filterValue: (c) => formatJalaliDate(c.receiptDate) },
-    { header: "ارز", render: (c) => c.currencyTitle, filterValue: (c) => c.currencyTitle },
+    { header: "ارز", fxOnly: true, render: (c) => c.currencyTitle, filterValue: (c) => c.currencyTitle },
     { header: "مبلغ اولیه", render: (c) => formatAmountFa(c.originalAmount), filterValue: (c) => String(c.originalAmount) },
     { header: "مبلغ تخصیص‌یافته", render: (c) => formatAmountFa(c.allocatedAmount), filterValue: (c) => String(c.allocatedAmount) },
     { header: "مبلغ قابل تخصیص", render: (c) => formatAmountFa(c.allocatableAmount), filterValue: (c) => String(c.allocatableAmount) },
@@ -1070,7 +1070,7 @@ function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: n
       {state && (
         <>
           <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 10, fontSize: 13 }}>
-            <span>فاکتور شماره {toFaDigits(String(state.invoice.number))} — ارز: {state.invoice.currencyTitle}</span>
+            <span>فاکتور شماره {toFaDigits(String(state.invoice.number))}<span className="fx-only"> — ارز: {state.invoice.currencyTitle}</span></span>
             <span>مبلغ فاکتور: <b>{formatAmountFa(state.invoice.total)}</b></span>
             <span>مجموع تخصیص: <b style={{ color: overInvoice ? "var(--danger)" : undefined }}>{formatAmountFa(sum)}</b></span>
             <span>مانده قابل پرداخت: <b>{formatAmountFa(state.invoice.total - sum)}</b></span>
@@ -1099,7 +1099,7 @@ function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: n
                   <th>ماهیت پیش‌دریافت</th>
                   <th>شماره پیش‌دریافت</th>
                   <th>تاریخ دریافت</th>
-                  <th>ارز</th>
+                  <th className="fx-only">ارز</th>
                   <th>مبلغ اولیه</th>
                   <th>مبلغ تخصیص‌یافته</th>
                   <th>مبلغ قابل تخصیص</th>
@@ -1120,7 +1120,7 @@ function AdvanceAllocationDialog({ invoiceId, onClose, onSaved }: { invoiceId: n
                     <td>{c.natureTitle}</td>
                     <td>{toFaDigits(String(c.receiptNumber))}</td>
                     <td>{formatJalaliDate(c.receiptDate)}</td>
-                    <td>{c.currencyTitle}</td>
+                    <td className="fx-only">{c.currencyTitle}</td>
                     <td>{formatAmountFa(c.originalAmount)}</td>
                     <td>{formatAmountFa(c.allocatedAmount)}</td>
                     <td>{formatAmountFa(c.allocatableAmount)}</td>

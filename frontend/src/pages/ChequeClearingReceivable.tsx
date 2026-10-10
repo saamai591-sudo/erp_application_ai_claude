@@ -469,7 +469,7 @@ function ChequeClearingReceivableForm({ editId, reEdit }: { editId?: number; reE
                       <td>{formatJalaliDate(l.chequeDueDate)}</td>
                       <td>{l.chequePartyDisplay}</td>
                       <td>{l.chequeBankAccountDisplay || "—"}</td>
-                      <td>{formatAmountFa(l.chequeAmount)} {l.chequeCurrencyTitle}</td>
+                      <td>{formatAmountFa(l.chequeAmount)} <span className="fx-only">{l.chequeCurrencyTitle}</span></td>
                       <td>
                         <select value={l.outcome} disabled={linesLocked} onChange={(e) => setOutcome(l.chequeItemId, e.target.value as Outcome)}>
                             <option value="CLEARED">{OUTCOME_FA.CLEARED}</option>

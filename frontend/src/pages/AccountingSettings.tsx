@@ -10,6 +10,7 @@ import { toFaDigits } from "../lib/formatAmount";
 import { usePersistedState } from "../lib/usePersistedState";
 import { showError, showToast } from "../lib/toast";
 import { api, ApiError } from "../lib/api";
+import { useFxEnabled } from "../lib/useEntitlements";
 
 // «رویه‌ها و تنظیمات حسابداری» — طبق Documents/رویه ها و تنظیمات حسابداری.md. یک فرم با چند زبانه (فعلاً «تنظیمات ارز» و «ارزش افزوده») که همه‌ی
 // تنظیمات آن تاریخ‌محورند: هر رکورد یک «تاریخ شروع اعتبار» یکتا دارد و مقدار معتبر برای هر تاریخ، آخرین رکوردِ با تاریخ شروع ≤ آن تاریخ است.
@@ -121,7 +122,11 @@ const TABS: { key: TabKey; label: string }[] = [
 ];
 
 export default function AccountingSettings() {
-  const [tab, setTab] = usePersistedState<TabKey>("/accounting-settings:tab", "currency");
+  const [storedTab, setTab] = usePersistedState<TabKey>("/accounting-settings:tab", "currency");
+  // بدون قابلیت FX در لایسنس، زبانه‌های «تنظیمات ارز فروش/خرید» معنایی ندارند و نمایش داده نمی‌شوند
+  const fxEnabled = useFxEnabled();
+  const tabs = fxEnabled ? TABS : TABS.filter((t) => t.key === "vat");
+  const tab: TabKey = tabs.some((t) => t.key === storedTab) ? storedTab : "vat";
   return (
     <div>
       <div className="page-header">
@@ -133,7 +138,7 @@ export default function AccountingSettings() {
         </div>
       </div>
       <div className="party-tabs">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button key={t.key} type="button" className={`party-tab ${tab === t.key ? "active" : ""}`} onClick={() => setTab(t.key)}>
             {t.label}
           </button>

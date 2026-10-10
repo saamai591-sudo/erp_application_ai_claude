@@ -16,6 +16,7 @@ import { RequiredMark } from "../components/RequiredMark";
 import { toFaDigits } from "../lib/formatAmount";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { formatJalaliDate } from "../lib/formatDate";
+import { useFxEnabled } from "../lib/useEntitlements";
 
 // «تعیین حسابهای معین» — طبق Documents/تعیین حسابهای معین.md. نوع حساب تعیین می‌کند کدام فیلد هدف
 // نمایش داده شود (TARGET_FIELD — باید دقیقاً هم‌راستا با بک‌اند routes/treasuryAccountSettings.ts بماند)؛
@@ -171,6 +172,7 @@ function SettingList() {
 const DEFAULT_FORM = { accountType: "", targetId: "", accountId: "", effectiveDate: new Date().toISOString().slice(0, 10) };
 
 function SettingForm({ editId }: { editId?: number }) {
+  const fxEnabled = useFxEnabled();
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
@@ -307,7 +309,9 @@ function SettingForm({ editId }: { editId?: number }) {
             <label>نوع حساب<RequiredMark /></label>
             <select value={form.accountType} onChange={(e) => onAccountTypeChange(e.target.value)}>
               <option value="">انتخاب کنید</option>
-              {Object.entries(ACCOUNT_TYPE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              {Object.entries(ACCOUNT_TYPE_FA)
+                .filter(([k]) => k !== "FX_GAIN_LOSS" || fxEnabled || form.accountType === k)
+                .map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </div>
           {field && (

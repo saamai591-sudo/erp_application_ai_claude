@@ -8,6 +8,7 @@ import { toFaDigits, formatAmountFa } from "../lib/formatAmount";
 import { exportGridToCsv, printGrid, deriveGridName, ExportColumn } from "../lib/gridExport";
 import { useAutoPortalTarget } from "../lib/useAutoPortalTarget";
 import { GridSort, nextSort, sortStateOf, makeComparator } from "../lib/gridSort";
+import { useFxEnabled } from "../lib/useEntitlements";
 import { ActiveFilter, ColumnFilterType, FilterIcon, FilterPopover, matchesFilter } from "./DataTable";
 
 export interface BalanceTableColumn<T> {
@@ -27,6 +28,8 @@ export interface BalanceTableColumn<T> {
   totalValue?: (row: T) => string | number | null | undefined;
   /** مقدار علامت‌دار برای خروجی اکسل/چاپ (مثلاً صادره منفی)؛ نگاه کنید به ExportColumn.exportValue در lib/gridExport.ts */
   exportValue?: (row: T) => string | number | null | undefined;
+  /** ستونِ مربوط به زیرسیستم ارزی؛ وقتی FX در لایسنس نیست حذف می‌شود */
+  fxOnly?: boolean;
 }
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -99,7 +102,7 @@ function NOOP_TOGGLE() {}
 
 export function SelectableBalanceTable<T extends { id: SelectId }>({
   rows,
-  columns,
+  columns: columnsProp,
   selected = EMPTY_SELECTION,
   onToggle = NOOP_TOGGLE,
   selectable = true,
@@ -163,6 +166,8 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
   onFiltersChange?: (filters: Record<string, ActiveFilter>) => void;
   onSortChange?: (sort: GridSort | null) => void;
 }) {
+  const fxEnabled = useFxEnabled();
+  const columns = fxEnabled ? columnsProp : columnsProp.filter((c) => !c.fxOnly);
   const [sort, setSort] = useState<GridSort | null>(null);
   const [filters, setFilters] = useState<Record<string, ActiveFilter>>({});
   const [openFilterFor, setOpenFilterFor] = useState<string | null>(null);

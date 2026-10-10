@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
 import { REGISTRY, BASE_ACTION_TITLES, sortSubModules } from "../authz/registry";
 import { getUserActionKeys } from "../authz/guard";
-import { getEntitlements } from "../license/licenseService";
+import { getEntitlements, isFeatureEnabled } from "../license/licenseService";
 
 const router = Router();
 
@@ -24,7 +24,9 @@ router.get("/authz/tree", async (_req, res) => {
     subModules: sortSubModules(mod.subModules).map((sub) => ({
       key: sub.key,
       title: sub.title,
-      forms: sub.forms.map((form) => {
+      forms: sub.forms
+        .filter((form) => !form.requiresFeature || isFeatureEnabled(ent, form.requiresFeature))
+        .map((form) => {
         const prefix = `${mod.key}.${sub.key}.${form.key}`;
         const baseActions = form.baseActions.map((b) => ({
           key: `${prefix}.${b}`,

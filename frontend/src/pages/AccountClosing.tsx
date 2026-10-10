@@ -79,8 +79,8 @@ const lineColumns = [
   { header: "تفصیل ۳", render: (r: LineRow) => r.detail3Title || "—", filterType: "string" as const, filterValue: (r: LineRow) => r.detail3Title || "" },
   { header: "بدهکار", render: (r: LineRow) => (r.debit ? formatAmountFa(r.debit) : "—"), filterType: "number" as const, filterValue: (r: LineRow) => r.debit, decimal: true },
   { header: "بستانکار", render: (r: LineRow) => (r.credit ? formatAmountFa(r.credit) : "—"), filterType: "number" as const, filterValue: (r: LineRow) => r.credit, decimal: true },
-  { header: "بدهکار ارزی", render: (r: LineRow) => (r.debitFx ? formatAmountFa(r.debitFx) : "—"), filterType: "number" as const, filterValue: (r: LineRow) => r.debitFx, decimal: true },
-  { header: "بستانکار ارزی", render: (r: LineRow) => (r.creditFx ? formatAmountFa(r.creditFx) : "—"), filterType: "number" as const, filterValue: (r: LineRow) => r.creditFx, decimal: true },
+  { header: "بدهکار ارزی", fxOnly: true, render: (r: LineRow) => (r.debitFx ? formatAmountFa(r.debitFx) : "—"), filterType: "number" as const, filterValue: (r: LineRow) => r.debitFx, decimal: true },
+  { header: "بستانکار ارزی", fxOnly: true, render: (r: LineRow) => (r.creditFx ? formatAmountFa(r.creditFx) : "—"), filterType: "number" as const, filterValue: (r: LineRow) => r.creditFx, decimal: true },
 ];
 
 const STEPS: WizardStepDef[] = [
