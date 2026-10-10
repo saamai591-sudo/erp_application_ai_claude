@@ -19,7 +19,7 @@ interface Status {
   state: State;
   message: string;
   installId: string;
-  license: { licenseNumber: string; sequence: number; customer: string; model: "PERPETUAL" | "SUBSCRIPTION"; issuedAt: string; startsAt: string; supportUntil: string | null; validUntil: string | null; maxUsers: number | null; modules: string[] | null } | null;
+  license: { licenseNumber: string; sequence: number; customer: string; model: "PERPETUAL" | "SUBSCRIPTION"; issuedAt: string; startsAt: string; supportUntil: string | null; validUntil: string | null; maxUsers: number | null; modules: string[] | null; features: string[] | null } | null;
   match: { ok: boolean; rows: MatchRow[]; reasons: string[] } | null;
 }
 
@@ -44,6 +44,17 @@ const STATE_BADGE: Record<State, string> = {
   EXPIRED: "danger",
 };
 const MODEL_FA = { PERPETUAL: "فروش دائمی (با پشتیبانی سالانه)", SUBSCRIPTION: "اشتراک سالانه" } as const;
+
+// ماژول‌های پایه همیشه روشن‌اند و در لایسنس نمی‌آیند
+const MODULE_FA: Record<string, string> = {
+  "goods-services": "کالا و خدمت",
+  inventory: "مدیریت موجودی و انبار",
+  "supply-chain": "زنجیره تامین",
+  sales: "فروش",
+  treasury: "مدیریت خزانه",
+  "tax-affairs": "امور مالیاتی",
+};
+const FEATURE_FA: Record<string, string> = { FX: "زیرسیستم ارزی" };
 
 /** مقدار واردشده را به قالب نمایشی XXXX-XXXX-XXXX درمی‌آورد (حروف بزرگ، فقط حرف/عدد، حداکثر ۱۲ نویسه) */
 function formatInput(v: string): string {
@@ -271,7 +282,8 @@ export default function Management() {
                     <tr><th>اعتبار اشتراک تا</th><td>{dateFa(status.license.validUntil)}</td></tr>
                   )}
                   <tr><th>سقف کاربر</th><td>{status.license.maxUsers ?? "نامحدود"}</td></tr>
-                  <tr><th>ماژول‌ها</th><td>{status.license.modules ? status.license.modules.join("، ") : "همه"}</td></tr>
+                  <tr><th>ماژول‌ها (علاوه بر پایه: تنظیمات، اطلاعات پایه، حسابداری)</th><td>{status.license.modules ? (status.license.modules.map((m) => MODULE_FA[m] ?? m).join("، ") || "هیچ‌کدام") : "همه"}</td></tr>
+                  <tr><th>قابلیت‌ها</th><td>{status.license.features ? (status.license.features.map((f) => FEATURE_FA[f] ?? f).join("، ") || "هیچ‌کدام") : "همه"}</td></tr>
                 </tbody>
               </table>
             )}

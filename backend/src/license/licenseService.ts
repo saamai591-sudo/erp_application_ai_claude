@@ -51,6 +51,7 @@ export interface LicenseSummary {
   validUntil: string | null;
   maxUsers: number | null;
   modules: string[] | null;
+  features: string[] | null;
 }
 
 export interface LicenseStatus {
@@ -88,6 +89,7 @@ function summarize(p: LicensePayload): LicenseSummary {
     validUntil: p.validUntil ?? null,
     maxUsers: p.maxUsers,
     modules: p.modules,
+    features: p.features,
   };
 }
 
@@ -228,5 +230,36 @@ export async function checkLicenseGate(): Promise<GateResult> {
     // خطای موقت دیتابیس: خودِ درخواست هم به همان دیتابیس می‌رسد؛ دروازه را به‌خاطر آن نمی‌بندیم
     console.error("[license] ارزیابی لایسنس ناموفق بود", e);
     return { enforced, allowed: true, state: "ACTIVE", message: "" };
+  }
+}
+
+// ── ماژول‌ها و قابلیت‌های فعال ───────────────────────────────────────────────────────────────────────────────────────────────────────
+// ماژول‌های پایه همیشه روشن‌اند؛ بقیه فقط اگر در لایسنس باشند. modules/features = null یعنی «همه» (قفل خاموش، ساخت بدون کلید، لایسنس نبودن
+// [در آن حالت دروازه‌ی قفل جلوی همه‌چیز را می‌گیرد] یا لایسنسِ بدون محدودیت). داده‌ی ماژول خاموش‌شده در جدول‌ها می‌ماند؛ فقط دسترسی/منو بسته می‌شود.
+export const CORE_MODULES = ["settings", "master-data", "accounting"];
+
+export interface Entitlements {
+  enforced: boolean;
+  /** کلید ماژول‌های فعال (شامل پایه)؛ null = همه */
+  modules: string[] | null;
+  /** قابلیت‌های فعال؛ null = همه */
+  features: string[] | null;
+}
+
+export async function getEntitlements(): Promise<Entitlements> {
+  const enforced = isEnforcementEnabled();
+  const all: Entitlements = { enforced, modules: null, features: null };
+  if (!enforced) return all;
+  try {
+    const s = await getCachedStatus();
+    if (s.state === "UNCONFIGURED" || !s.license || !isStateAllowed(s.state)) return all;
+    return {
+      enforced,
+      modules: s.license.modules ? Array.from(new Set([...CORE_MODULES, ...s.license.modules])) : null,
+      features: s.license.features,
+    };
+  } catch (e) {
+    console.error("[license] خواندن امکانات لایسنس ناموفق بود", e);
+    return all;
   }
 }

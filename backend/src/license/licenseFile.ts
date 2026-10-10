@@ -38,8 +38,10 @@ export interface LicensePayload {
   validUntil?: string | null;
   /** null = نامحدود */
   maxUsers: number | null;
-  /** کلید ماژول‌های مجاز؛ null = همه */
+  /** کلید ماژول‌های «اختیاری» مجاز (ماژول‌های پایه settings/master-data/accounting همیشه روشن‌اند)؛ null = همه */
   modules: string[] | null;
+  /** قابلیت‌های مشترک بین ماژول‌ها (مثلاً FX = زیرسیستم ارزی)؛ null = همه */
+  features: string[] | null;
   binding: LicenseBinding;
   /** هش scrypt کلمه‌ی عبور مدیریت (قالب در managementPassword.ts) — خودِ کلمه‌ی عبور داخل فایل نیست */
   managementPasswordHash: string;
@@ -75,11 +77,12 @@ function validatePayload(p: any): LicensePayload {
   if (p.model === "SUBSCRIPTION" && !p.validUntil) throw new Error("لایسنس اشتراک باید تاریخ پایان داشته باشد");
   if (p.maxUsers != null && !(Number.isInteger(p.maxUsers) && p.maxUsers > 0)) throw new Error("سقف کاربر لایسنس نامعتبر است");
   if (p.modules != null && !(Array.isArray(p.modules) && p.modules.every((m: any) => typeof m === "string"))) throw new Error("فهرست ماژول‌های لایسنس نامعتبر است");
+  if (p.features != null && !(Array.isArray(p.features) && p.features.every((m: any) => typeof m === "string"))) throw new Error("فهرست قابلیت‌های لایسنس نامعتبر است");
   const b = p.binding;
   if (!b || typeof b !== "object" || typeof b.databaseName !== "string" || !b.databaseName) throw new Error("نام دیتابیس در لایسنس نیست");
   if (typeof b.databaseSystemId !== "string" || !b.databaseSystemId) throw new Error("شناسه‌ی دیتابیس در لایسنس نیست");
   if (typeof p.managementPasswordHash !== "string" || !p.managementPasswordHash.startsWith("scrypt$")) throw new Error("کلمه‌ی عبور مدیریت در لایسنس نیست");
-  return p as LicensePayload;
+  return { ...p, features: p.features ?? null } as LicensePayload;
 }
 
 /** متن فایل لایسنس را می‌خواند و امضا را می‌سنجد؛ خطای ساختار با پیام فارسی پرتاب می‌شود (امضای نامعتبر خطا نیست، signatureOk=false است) */

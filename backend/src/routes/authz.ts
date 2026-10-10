@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
 import { REGISTRY, BASE_ACTION_TITLES, sortSubModules } from "../authz/registry";
 import { getUserActionKeys } from "../authz/guard";
+import { getEntitlements } from "../license/licenseService";
 
 const router = Router();
 
@@ -13,7 +14,11 @@ router.get("/authz/tree", async (_req, res) => {
   const dbActions = await prisma.action.findMany();
   const idByKey = new Map(dbActions.map((a) => [a.key, a.id]));
 
-  const tree = REGISTRY.map((mod) => ({
+  // درخت نقش‌ها فقط ماژول‌های لایسنس‌شده را نشان می‌دهد
+  const ent = await getEntitlements();
+  const visibleModules = REGISTRY.filter((mod) => !ent.modules || ent.modules.includes(mod.key));
+
+  const tree = visibleModules.map((mod) => ({
     key: mod.key,
     title: mod.title,
     subModules: sortSubModules(mod.subModules).map((sub) => ({
@@ -43,6 +48,11 @@ router.get("/authz/tree", async (_req, res) => {
 // واکشی و کش می‌کند (نگاه کنید به frontend/src/lib/usePermissions.ts) تا تصمیم بگیرد
 // دکمه‌ها/ستون‌ها/آیتم‌های منو را نشان بدهد یا نه. اجرای واقعیِ کنترل دسترسی همیشه سمت بک‌اند
 // (can() در authz/guard.ts) است؛ این فقط برای تجربه‌ی کاربری (نمایش/عدم‌نمایش) است.
+// ماژول‌ها و قابلیت‌های فعال لایسنس (برای فرانت‌اند: مثلاً پنهان‌کردن فیلدهای ارزی وقتی FX فعال نیست)
+router.get("/me/entitlements", async (_req, res) => {
+  res.json(await getEntitlements());
+});
+
 router.get("/me/permissions", async (req, res) => {
   const codes = await getUserActionKeys((req as AuthedRequest).user!.id);
   res.json(Array.from(codes));

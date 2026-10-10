@@ -1,6 +1,7 @@
 import { NextFunction, Response } from "express";
 import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
+import { getEntitlements } from "../license/licenseService";
 import { isRegisteredActionKey } from "./registry";
 
 /**
@@ -22,7 +23,11 @@ export async function getUserActionKeys(userId: number): Promise<Set<string>> {
     for (const ra of ur.role.actions) codes.add(ra.action.key);
   }
   for (const ua of directActions) codes.add(ua.action.key);
-  return codes;
+  // ماژول‌های خارج از لایسنس: کلیدشان اصلاً وجود ندارد ⇒ منو پنهان، can() رد، مجوزهای ذخیره‌شده بی‌اثر (داده‌ها در جدول‌ها می‌ماند)
+  const ent = await getEntitlements();
+  if (!ent.modules) return codes;
+  const allowedModules = new Set(ent.modules);
+  return new Set(Array.from(codes).filter((k) => allowedModules.has(k.split(".")[0])));
 }
 
 export async function userHasAction(userId: number, actionKey: string): Promise<boolean> {
@@ -47,6 +52,11 @@ export function can(actionKey: string) {
   }
   return async (req: AuthedRequest, res: Response, next: NextFunction) => {
     if (!req.user) return res.status(401).json({ error: "توکن احراز هویت ارسال نشده است" });
+    // ماژول در لایسنس نیست ⇒ پیام مشخص (نه «دسترسی ندارید»)
+    const ent = await getEntitlements();
+    if (ent.modules && !ent.modules.includes(actionKey.split(".")[0])) {
+      return res.status(403).json({ error: "این بخش در لایسنس شما فعال نیست", code: "MODULE_NOT_LICENSED" });
+    }
     const allowed = await userHasAction(req.user.id, actionKey);
     if (!allowed) return res.status(403).json({ error: "دسترسی لازم برای این عملیات را ندارید" });
     next();
