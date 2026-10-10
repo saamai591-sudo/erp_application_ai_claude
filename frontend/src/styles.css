@@ -1832,41 +1832,50 @@ html[data-fx="off"] .fx-only { display: none !important; }
   .dash-hero-text h1 { font-size: 18px; }
 }
 
-/* آیکن ماژول در منوی کناری، ستون جمع‌شده و فلای‌اوت: کاشی «پررنگ» ۳۲پیکسلی با رنگ کامل ماژول و آیکن سفید ۲۰پیکسلی (حالت bold طرح
-   erp_icons_vivid_soft). رنگ کاشی مستقل از تم و از پالت «عمیق» --tile-* است تا هم روی سایدبار تیره و هم سفید برجسته و با کنتراست کافی باشد. */
+/* آیکن‌های منو — سبک «Outline رنگی»: آیکن خطی (ضخامت ۲٫۱، بدون پر‌شدگی) با رنگ زنده‌ی هر ماژول روی کاشی روشن و ملایم؛ بدون opacity و فیلتر.
+   رنگ‌ها: پالت روشن‌تر برای سایدبار تیره (پیش‌فرض/کلاسیک/تیره) و پالت عمیق‌تر برای سایدبار سفید (روشن/آبی)؛ هر ماژول یک رنگ ثابت. */
 :root {
-  --tile-settings: #7a4fd0;
-  --tile-info: #1e7bc7;
-  --tile-accounting: #0f9b63;
-  --tile-goods: #b86f1a;
-  --tile-warehouse: #0e8c91;
-  --tile-supply: #d0434d;
-  --tile-sales: #b8790a;
-  --tile-treasury: #a64ab0;
-  --tile-tax: #d36a0c;
+  --ico-settings: #b69cff;
+  --ico-info: #5ab8ff;
+  --ico-accounting: #3ddc97;
+  --ico-goods: #ffb454;
+  --ico-warehouse: #2fd9d0;
+  --ico-supply: #ff7b86;
+  --ico-sales: #ffd23f;
+  --ico-treasury: #e684ff;
+  --ico-tax: #ff9340;
 }
-.module-icon.mod-ic-gear { --tile: var(--tile-settings); }
-.module-icon.mod-ic-database { --tile: var(--tile-info); }
-.module-icon.mod-ic-calculator { --tile: var(--tile-accounting); }
-.module-icon.mod-ic-box { --tile: var(--tile-goods); }
-.module-icon.mod-ic-warehouse { --tile: var(--tile-warehouse); }
-.module-icon.mod-ic-truck { --tile: var(--tile-supply); }
-.module-icon.mod-ic-cart { --tile: var(--tile-sales); }
-.module-icon.mod-ic-wallet { --tile: var(--tile-treasury); }
-.module-icon.mod-ic-receipt { --tile: var(--tile-tax); }
+[data-theme="light"], [data-theme="blue"] {
+  --ico-settings: #6d3fd1;
+  --ico-info: #1769c7;
+  --ico-accounting: #0b8f5a;
+  --ico-goods: #b3640d;
+  --ico-warehouse: #0b8a90;
+  --ico-supply: #cf2f3d;
+  --ico-sales: #b07a00;
+  --ico-treasury: #a43bb5;
+  --ico-tax: #cf5f00;
+}
+.module-icon.mod-ic-gear { --ico: var(--ico-settings); }
+.module-icon.mod-ic-database { --ico: var(--ico-info); }
+.module-icon.mod-ic-calculator { --ico: var(--ico-accounting); }
+.module-icon.mod-ic-box { --ico: var(--ico-goods); }
+.module-icon.mod-ic-warehouse { --ico: var(--ico-warehouse); }
+.module-icon.mod-ic-truck { --ico: var(--ico-supply); }
+.module-icon.mod-ic-cart { --ico: var(--ico-sales); }
+.module-icon.mod-ic-wallet { --ico: var(--ico-treasury); }
+.module-icon.mod-ic-receipt { --ico: var(--ico-tax); }
 .module-title .module-icon, .module-icon-btn .module-icon, .nav-flyout-header .module-icon {
-  width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0; display: inline-grid; place-items: center;
-  background: var(--tile, var(--primary)); color: #ffffff; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+  width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0; display: inline-grid; place-items: center;
+  color: var(--ico, var(--primary));
+  background: rgba(128, 128, 128, 0.14);
+  background: color-mix(in srgb, var(--ico, var(--primary)) 15%, transparent);
 }
-.module-title .module-icon svg, .module-icon-btn .module-icon svg, .nav-flyout-header .module-icon svg { width: 20px; height: 20px; color: #ffffff; }
+.module-title .module-icon svg, .module-icon-btn .module-icon svg, .nav-flyout-header .module-icon svg { width: 22px; height: 22px; color: inherit; }
 
-/* آیکن فرم‌ها و زیرماژول‌ها: درشت‌تر (۲۲/۲۰ پیکسل به‌جای ۱۸) و پراشباع‌تر؛ شکل آیکن‌ها تغییری نکرده */
-.nav-form-icon { filter: saturate(1.5); }
+/* آیکن فرم‌ها و زیرماژول‌ها: ۲۲/۲۱ پیکسل، بدون فیلتر (وضوح کامل) */
 .nav-form-icon svg { width: 22px; height: 22px; }
-.submodule-title .submodule-icon { filter: saturate(1.5); }
-.submodule-title .submodule-icon svg { width: 20px; height: 20px; }
-[data-theme="light"] .nav-form-icon, [data-theme="blue"] .nav-form-icon,
-[data-theme="light"] .submodule-title .submodule-icon, [data-theme="blue"] .submodule-title .submodule-icon { filter: saturate(1.25); }
+.submodule-title .submodule-icon svg { width: 21px; height: 21px; }
 
 /* تم «داشبورد» — طرح erp_dashboard_preview (Documents/): بوم آبی‌خاکستریِ روشن، سایدبار سفید با هدر سرمه‌ای، تاکید آبی و آیکن‌های بدون رنگ
    (همه‌ی آیکن‌های منو یک رنگ آبی‌خاکستری: --icon-mono). */
