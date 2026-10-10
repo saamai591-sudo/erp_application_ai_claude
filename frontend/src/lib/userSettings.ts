@@ -25,6 +25,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
   { key: "light", label: "روشن", swatch: ["#f6f8fa", "#1e3a5f", "#ffffff"] },
   { key: "dark", label: "تیره", swatch: ["#0d1420", "#5b8fc7", "#34d399"] },
   { key: "blue", label: "آبی (Blue Opal)", swatch: ["#eef6f8", "#0e7a90", "#2dd4bf"] },
+  { key: "dashboard", label: "داشبورد (سرمه‌ای/آبی، آیکن بدون رنگ)", swatch: ["#f4f8fc", "#123f63", "#2376d8"] },
 ];
 
 // این فایل دیگر خودش جایی برای ذخیره‌سازی نیست — فقط یک لایه‌ی نازک روی preferences.ts (که مقدار

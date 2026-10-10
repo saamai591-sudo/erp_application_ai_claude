@@ -1826,40 +1826,6 @@ html[data-fx="off"] .fx-only { display: none !important; }
   box-shadow: 0 5px 15px color-mix(in srgb, var(--primary) 18%, transparent); display: grid; place-items: center; color: var(--accent);
 }
 .dash-hero-leaf { position: absolute; left: 0; bottom: 0; width: 38px; height: 66px; background: var(--accent); opacity: .25; border-radius: 100% 0 100% 0; transform: rotate(-25deg); }
-.dash-section { background: var(--surface); border: 1px solid var(--line); border-radius: 15px; padding: 17px 18px; box-shadow: 0 5px 18px rgba(22, 55, 86, .05); }
-.dash-section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 10px; flex-wrap: wrap; }
-.dash-section-head h2 { margin: 0; font-size: 16px; font-weight: 800; color: var(--ink); }
-.dash-hint { font-size: 12px; color: var(--ink-soft); }
-.dash-empty { padding: 24px; text-align: center; color: var(--ink-soft); font-size: 13px; }
-.dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
-.dash-card {
-  --mod: var(--primary);
-  font: inherit; cursor: pointer; text-align: center; color: var(--ink);
-  border: 1px solid color-mix(in srgb, var(--mod) 28%, var(--line)); border-radius: 13px; min-height: 142px; padding: 16px 9px 12px;
-  background: color-mix(in srgb, var(--mod) 8%, var(--surface));
-  display: flex; flex-direction: column; align-items: center; gap: 7px; transition: transform .15s, box-shadow .15s;
-}
-.dash-card:hover { transform: translateY(-3px); box-shadow: 0 8px 18px color-mix(in srgb, var(--mod) 20%, transparent); }
-.dash-card-icon {
-  width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center; margin-bottom: 2px;
-  color: var(--mod); background: color-mix(in srgb, var(--mod) 20%, var(--surface)); filter: saturate(1.35);
-}
-.dash-card-icon svg { width: 26px; height: 26px; }
-.dash-card strong { font-size: 14px; font-weight: 700; }
-.dash-card small { font-size: 11px; line-height: 1.7; color: var(--ink-soft); }
-.dash-card-go {
-  margin-top: auto; width: 25px; height: 25px; border-radius: 50%; display: grid; place-items: center;
-  color: var(--mod); background: var(--surface); border: 1px solid var(--mod);
-}
-.dash-card.mod-ic-gear { --mod: var(--nc-mod-settings); }
-.dash-card.mod-ic-database { --mod: var(--nc-mod-info); }
-.dash-card.mod-ic-calculator { --mod: var(--nc-mod-accounting); }
-.dash-card.mod-ic-box { --mod: var(--nc-mod-goods); }
-.dash-card.mod-ic-warehouse { --mod: var(--nc-mod-warehouse); }
-.dash-card.mod-ic-truck { --mod: var(--nc-mod-supply); }
-.dash-card.mod-ic-cart { --mod: var(--nc-mod-sales); }
-.dash-card.mod-ic-wallet { --mod: var(--nc-mod-treasury); }
-.dash-card.mod-ic-receipt { --mod: var(--nc-mod-tax); }
 @media (max-width: 700px) {
   .dash-hero { padding: 18px; }
   .dash-hero-art { display: none; }
@@ -1874,3 +1840,89 @@ html[data-fx="off"] .fx-only { display: none !important; }
   filter: saturate(1.3);
 }
 .module-title .module-icon svg, .module-icon-btn .module-icon svg, .nav-flyout-header .module-icon svg { width: 17px; height: 17px; }
+
+/* تم «داشبورد» — طرح erp_dashboard_preview (Documents/): بوم آبی‌خاکستریِ روشن، سایدبار سفید با هدر سرمه‌ای، تاکید آبی و آیکن‌های بدون رنگ
+   (همه‌ی آیکن‌های منو یک رنگ آبی‌خاکستری: --icon-mono). */
+[data-theme="dashboard"] {
+  --icon-mono: #52708d;
+  --bg: #f4f8fc;
+  --surface: #ffffff;
+  --ink: #172b43;
+  --ink-soft: #71839a;
+  --line: #e3ebf3;
+  --row-alt: #f8fbfe;
+  --line-strong: #cbd8e5;
+  --primary: #2376d8;
+  --primary-ink: #ffffff;
+  --primary-soft: #e7f1ff;
+  --accent: #0b8790;
+  --accent-soft: #e5f7f4;
+  --danger: #d64550;
+  --danger-soft: #fdecee;
+  --warning: #b96b08;
+  --warning-soft: #fff3e2;
+  --sidebar-bg: #ffffff;
+  --sidebar-ink: #314b65;
+  --menu-title-ink: #172b43;
+  --menu-hover-bg: #f1f6fb;
+  --menu-accent-1: #2c7cda;
+  --menu-accent-1-bg: #e7f1ff;
+  --menu-accent-1-bg-hover: #dbeaff;
+  --menu-accent-2: #0b8790;
+  --menu-accent-2-bg: #edf7f5;
+  --menu-accent-2-bg-hover: #e1f2ef;
+  --menu-accent-2-text: #176d70;
+  --menu-accent-2-text-hover: #0f5659;
+  --menu-item-bg: transparent;
+  --menu-item-bg-hover: #f1f6fb;
+  --menu-item-bg-active: #e7f1ff;
+  --menu-item-text: #60758d;
+  --menu-folder-icon: #90a0b2;
+  --menu-form-icon: #52708d;
+  --menu-form-icon-hover: #1559a7;
+  --nc-shield: var(--icon-mono);
+  --nc-user: var(--icon-mono);
+  --nc-coin: var(--icon-mono);
+  --nc-trend: var(--icon-mono);
+  --nc-calendar: var(--icon-mono);
+  --nc-sitemap: var(--icon-mono);
+  --nc-pin: var(--icon-mono);
+  --nc-tag: var(--icon-mono);
+  --nc-building: var(--icon-mono);
+  --nc-wallet: var(--icon-mono);
+  --nc-card: var(--icon-mono);
+  --nc-bank: var(--icon-mono);
+  --nc-briefcase: var(--icon-mono);
+  --nc-layers: var(--icon-mono);
+  --nc-tree: var(--icon-mono);
+  --nc-file: var(--icon-mono);
+  --nc-ledger: var(--icon-mono);
+  --nc-mod-settings: var(--icon-mono);
+  --nc-mod-info: var(--icon-mono);
+  --nc-mod-accounting: var(--icon-mono);
+  --nc-mod-goods: var(--icon-mono);
+  --nc-mod-warehouse: var(--icon-mono);
+  --nc-mod-supply: var(--icon-mono);
+  --nc-mod-sales: var(--icon-mono);
+  --nc-mod-treasury: var(--icon-mono);
+  --nc-mod-tax: var(--icon-mono);
+  --nc-sub-ops: var(--icon-mono);
+  --nc-sub-structure: var(--icon-mono);
+  --nc-sub-report: var(--icon-mono);
+  --nc-sub-config: var(--icon-mono);
+  --info-icon: #52708d;
+}
+[data-theme="dashboard"] .sidebar { border-left: 1px solid var(--line); }
+/* هدر سایدبار: نوار سرمه‌ای با متن سفید (مثل برند طرح) */
+[data-theme="dashboard"] .sidebar-head {
+  margin: -20px -14px 14px; padding: 0 14px; height: 54px;
+  background: linear-gradient(120deg, #0b3555, #123f63); color: #ffffff;
+}
+[data-theme="dashboard"] .sidebar-collapsed .sidebar-head { margin: -14px -8px 12px; padding: 0 8px; }
+[data-theme="dashboard"] .sidebar-head h1 { color: #ffffff; font-weight: 800; }
+[data-theme="dashboard"] .sidebar-toggle-btn { color: #ffffff; opacity: 1; background: rgba(255, 255, 255, 0.14); }
+[data-theme="dashboard"] .sidebar-toggle-btn:hover { background: rgba(255, 255, 255, 0.24); }
+/* آیکن‌ها بدون رنگ: کاشی رنگی قبلی حذف می‌شود */
+[data-theme="dashboard"] .module-title .module-icon,
+[data-theme="dashboard"] .module-icon-btn .module-icon,
+[data-theme="dashboard"] .nav-flyout-header .module-icon { background: transparent; filter: none; }
