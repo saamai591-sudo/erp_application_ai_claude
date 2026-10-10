@@ -13,7 +13,7 @@ import { formatJalaliDate } from "../lib/formatDate";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { DownstreamAction } from "./DownstreamMenu";
 
-// دیالوگ‌های «راهبری» (فاز اول: پیش‌فاکتور ← حواله فروش، حواله فروش ← فاکتور فروش). هر دیالوگ فقط اطلاعاتی را می‌گیرد که سند مبدأ ندارد، سپس داده‌ی پیش‌پر را
+// دیالوگ‌های «راهبری» (پیش‌فاکتور ← حواله فروش، حواله فروش ← فاکتور فروش، رسید انبار خرید ← فاکتور خرید). هر دیالوگ فقط اطلاعاتی را می‌گیرد که سند مبدأ ندارد، سپس داده‌ی پیش‌پر را
 // stage می‌کند و تبِ «جدید» فرم مقصد را باز می‌کند؛ ردیف‌ها را خودِ فرم مقصد با همان انتخابگر مبنای خودش می‌گذارد (SalesDeliveries.tsx / SalesInvoices.tsx،
 // مصرف takeFormPrefill) و ذخیره از همان POST معمولی می‌گذرد — پس صدور از راهبری و صدور مستقل نتیجه‌ی یکسان دارند.
 
@@ -34,8 +34,19 @@ export interface InvoiceFromDeliveryPrefill {
   fxRate: string;
 }
 
+export interface PurchaseInvoiceFromReceiptPrefill {
+  receiptId: number;
+  date: string;
+  vendorInvoiceNumber: string;
+  partyId: number;
+  purchaseTypeId: number;
+  currencyId: number;
+  fxRate: string;
+}
+
 const NEW_DELIVERY_PATH = "/sales-deliveries/new";
 const NEW_INVOICE_PATH = "/sales-invoices/new";
+const NEW_PURCHASE_INVOICE_PATH = "/purchase-invoices/new";
 
 /** تاریخ پیش‌فرض: امروز (اگر در دوره مالی انتخاب‌شده است)، و حداقل تاریخ سند مبدأ */
 function initialDate(fp: FiscalPeriodRange | null, sourceDate: string): string {
@@ -301,6 +312,150 @@ function DeliveryToInvoiceDialog({ sourceId, onClose }: { sourceId: number; onCl
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
+// رسید انبار خرید ← فاکتور خرید
+// ---------------------------------------------------------------------------------------------------------------------------
+
+interface ReceiptInfo {
+  receiptId: number;
+  number: number;
+  date: string;
+  warehouseTitle: string;
+  partyId: number | null;
+  partyTitle: string | null;
+  remainingLineCount: number;
+  reason: string | null;
+}
+
+function ReceiptToPurchaseInvoiceDialog({ sourceId, onClose }: { sourceId: number; onClose: () => void }) {
+  const { openTab } = useTabs();
+  const [info, setInfo] = useState<ReceiptInfo | null>(null);
+  const [purchaseTypes, setPurchaseTypes] = useState<TitledOption[]>([]);
+  const [currencies, setCurrencies] = useState<TitledOption[]>([]);
+  const [fp, setFp] = useState<FiscalPeriodRange | null>(null);
+  const [date, setDate] = useState("");
+  const [vendorInvoiceNumber, setVendorInvoiceNumber] = useState("");
+  const [purchaseTypeId, setPurchaseTypeId] = useState("");
+  const [currencyId, setCurrencyId] = useState("");
+  const [fxRate, setFxRate] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([api.get(`/purchase-invoices/from-receipt/${sourceId}`), api.get("/purchase-types"), api.get("/currencies"), fetchSelectedFiscalPeriod()])
+      .then(([r, pt, cu, period]: [ReceiptInfo, TitledOption[], TitledOption[], FiscalPeriodRange | null]) => {
+        if (!alive) return;
+        setInfo(r);
+        setPurchaseTypes(pt);
+        setCurrencies(cu);
+        setFp(period);
+        setDate(initialDate(period, r.date));
+        const base = cu.find((c) => c.isBase);
+        if (base) setCurrencyId(String(base.id));
+      })
+      .catch((e) => {
+        showError(e.message);
+        onClose();
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceId]);
+
+  const currency = currencies.find((c) => String(c.id) === currencyId);
+  const needsFxRate = !!currency && !currency.isBase;
+
+  function confirm() {
+    if (!info) return;
+    if (info.reason) return showError(info.reason);
+    if (!date) return showError("تاریخ الزامی است");
+    if (date < info.date.slice(0, 10)) return showError("تاریخ فاکتور نمی‌تواند قبل از تاریخ رسید باشد");
+    const dateError = validateDocumentDate(date, fp);
+    if (dateError) return showError(dateError);
+    if (!purchaseTypeId) return showError("نوع خرید الزامی است");
+    if (!currencyId) return showError("ارز الزامی است");
+    if (needsFxRate && !(Number(fxRate) > 0)) return showError("نرخ ارز الزامی است");
+    const prefill: PurchaseInvoiceFromReceiptPrefill = {
+      receiptId: info.receiptId,
+      date,
+      vendorInvoiceNumber: vendorInvoiceNumber.trim(),
+      partyId: info.partyId as number,
+      purchaseTypeId: Number(purchaseTypeId),
+      currencyId: Number(currencyId),
+      fxRate: needsFxRate ? fxRate : "",
+    };
+    stageFormPrefill(NEW_PURCHASE_INVOICE_PATH, prefill);
+    openTab(NEW_PURCHASE_INVOICE_PATH);
+    onClose();
+  }
+
+  const picker = (title: string, rows: TitledOption[], value: string, set: (v: string) => void) => {
+    const cur = rows.find((r) => String(r.id) === value);
+    return (
+      <RecordPickerField<TitledOption>
+        title={title}
+        displayValue={cur ? cur.title : ""}
+        rows={rows}
+        columns={[
+          ...(rows.some((r) => r.code != null) ? [{ header: "کد", render: (r: TitledOption) => toFaDigits(String(r.code ?? "")), filterValue: (r: TitledOption) => String(r.code ?? ""), width: "90px" }] : []),
+          { header: "عنوان", render: (r) => r.title, filterValue: (r) => r.title },
+        ]}
+        onSelect={(r) => set(String(r.id))}
+        disabled={!!info?.reason}
+      />
+    );
+  };
+
+  return (
+    <Modal title="صدور فاکتور خرید از رسید انبار" onClose={onClose}>
+      {!info ? (
+        <p style={{ color: "var(--ink-soft)" }}>در حال بارگذاری…</p>
+      ) : (
+        <>
+          <p style={{ margin: "0 0 10px", fontSize: 13, lineHeight: 1.9 }}>
+            رسید انبار شماره {toFaDigits(String(info.number))} — {formatJalaliDate(info.date)}
+            {info.warehouseTitle ? ` — ${info.warehouseTitle}` : ""}
+            <br />
+            طرف مقابل: <b>{info.partyTitle || "—"}</b>
+            <br />
+            ردیف‌های قابل‌فاکتور: <b>{toFaDigits(String(info.remainingLineCount))}</b>
+          </p>
+          {info.reason && <p style={{ color: "var(--danger, #c0392b)", fontSize: 13 }}>{info.reason}</p>}
+          <div className="form-grid">
+            <div className="form-field">
+              <label>تاریخ فاکتور<RequiredMark /></label>
+              <JalaliDatePicker fiscalYear value={date} onChange={setDate} disabled={!!info.reason} />
+            </div>
+            <div className="form-field">
+              <label>شماره فاکتور فروشنده</label>
+              <input value={vendorInvoiceNumber} onChange={(e) => setVendorInvoiceNumber(e.target.value)} disabled={!!info.reason} />
+            </div>
+            <div className="form-field">
+              <label>نوع خرید<RequiredMark /></label>
+              {picker("انتخاب نوع خرید", purchaseTypes, purchaseTypeId, setPurchaseTypeId)}
+            </div>
+            <div className="form-field fx-only">
+              <label>ارز<RequiredMark /></label>
+              {picker("انتخاب ارز", currencies, currencyId, (v) => { setCurrencyId(v); setFxRate(""); })}
+            </div>
+            {needsFxRate && (
+              <div className="form-field fx-only">
+                <label>نرخ ارز<RequiredMark /></label>
+                <AmountInput value={fxRate} onChange={setFxRate} allowDecimal disabled={!!info.reason} />
+              </div>
+            )}
+          </div>
+          <p style={{ fontSize: 12, color: "var(--ink-soft)", margin: "6px 0 0" }}>با تایید، فرم «فاکتور خرید جدید» با مبنای «رسید انبار خرید» و همه‌ی ردیف‌های قابل‌فاکتور همین رسید باز می‌شود؛ فی و مبلغ را در فاکتور وارد می‌کنید و سند تا «ذخیره» ساخته نمی‌شود.</p>
+          <div className="actions">
+            <button type="button" className="btn" onClick={confirm} disabled={!!info.reason}>تایید</button>
+            <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------
 // اقدام‌های هر فرم مبدأ (کلید مجوز = ایجاد فرم مقصد)
 // ---------------------------------------------------------------------------------------------------------------------------
 
@@ -310,4 +465,8 @@ export const QUOTE_DOWNSTREAM_ACTIONS: DownstreamAction[] = [
 
 export const DELIVERY_DOWNSTREAM_ACTIONS: DownstreamAction[] = [
   { key: "invoice", label: "صدور فاکتور فروش", permission: "sales.operations.sales-invoices.create", Dialog: DeliveryToInvoiceDialog },
+];
+
+export const RECEIPT_DOWNSTREAM_ACTIONS: DownstreamAction[] = [
+  { key: "purchase-invoice", label: "صدور فاکتور خرید", permission: "supply-chain.operations.purchase-invoices.create", Dialog: ReceiptToPurchaseInvoiceDialog },
 ];

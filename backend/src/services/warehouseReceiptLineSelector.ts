@@ -2,6 +2,8 @@ import { prisma } from "../lib/prisma";
 
 export interface PickableWarehouseReceiptLine {
   id: number;
+  /** شناسه‌ی سند رسید (برای راهبری «صدور فاکتور از رسید»: فقط ردیف‌های همان رسید) */
+  documentId: number;
   number: number;
   date: Date;
   goodsItemId: number;
@@ -51,6 +53,7 @@ export async function fetchPickableWarehouseReceiptLines(opts: {
   return lines
     .map((l: any) => ({
       id: l.id,
+      documentId: l.documentId,
       number: l.document.number,
       date: l.document.date,
       goodsItemId: l.goodsItemId,

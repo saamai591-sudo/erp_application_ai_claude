@@ -22,6 +22,8 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { useDefaultBaseCurrency } from "../lib/useDefaultBaseCurrency";
 import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
+import { takeFormPrefill } from "../lib/formPrefill";
+import type { PurchaseInvoiceFromReceiptPrefill } from "../components/DownstreamDialogs";
 import { partyDisplayName } from "./Users";
 import { PurchaseType } from "./PurchaseTypes";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
@@ -355,6 +357,40 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       .then(setPickableLines)
       .catch(() => setPickableLines([]));
   }, [header.basis, header.partyId, header.date, editId]);
+
+  // «صدور فاکتور خرید از رسید» (components/DownstreamDialogs.tsx): هدر پر می‌شود و ردیف‌های قابل‌فاکتورِ همان رسید با **همان انتخابگر ردیف مبنا**
+  // (pickable-warehouse-receipt-lines + onSourceLinesSelected) همین فرم می‌نشیند — دقیقاً مثل اینکه کاربر مبنا را «رسید انبار خرید» بگذارد و همه‌ی ردیف‌های آن
+  // رسید را تیک بزند. فی/مبلغ خالی می‌ماند تا کاربر وارد کند؛ سندی ساخته نمی‌شود و ذخیره از همان POST معمولی (با همه‌ی اعتبارسنجی‌ها) است.
+  useEffect(() => {
+    if (!loaded || editId) return;
+    const p = takeFormPrefill<PurchaseInvoiceFromReceiptPrefill>(location.pathname);
+    if (!p) return;
+    (async () => {
+      setHeader({
+        date: p.date,
+        vendorInvoiceNumber: p.vendorInvoiceNumber,
+        basis: "WAREHOUSE_RECEIPT",
+        partyId: String(p.partyId),
+        purchaseTypeId: String(p.purchaseTypeId),
+        currencyId: String(p.currencyId),
+        fxRate: p.fxRate,
+        description: "",
+        details: {},
+      });
+      try {
+        const lines: PickableWarehouseReceiptLine[] = await api.get(`/purchase-invoices/pickable-warehouse-receipt-lines?partyId=${p.partyId}&date=${p.date}`);
+        const mine = lines.filter((l) => l.documentId === p.receiptId && l.remaining > 0);
+        if (mine.length === 0) {
+          setError("هیچ ردیف قابل‌فاکتوری از این رسید باقی نمانده است");
+          return;
+        }
+        onSourceLinesSelected(0, mine);
+      } catch (e: any) {
+        setError(e.message);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
 
   const status: Status = meta?.status || "DRAFT";
   const locked = status === "APPROVED";

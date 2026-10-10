@@ -19,6 +19,8 @@ import { api, ApiError } from "../lib/api";
 import { usePermissions } from "../lib/usePermissions";
 import { defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
 import { useDocumentForm } from "../lib/useDocumentForm";
+import { DownstreamMenu } from "../components/DownstreamMenu";
+import { RECEIPT_DOWNSTREAM_ACTIONS } from "../components/DownstreamDialogs";
 import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
@@ -515,6 +517,7 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
       newPath={`${basePath}/new`}
       onDelete={editId && !isFinalized ? handleDelete : undefined}
       saveDisabled={isFinalized}
+      toolbarExtra={editId ? <DownstreamMenu actions={RECEIPT_DOWNSTREAM_ACTIONS} sourceId={editId} disabledReason={isFinalized ? "این رسید قبلاً با فاکتور خرید قطعی شده است" : null} /> : undefined}
       wide
     >
       <form id="warehouse-receipt-form" onSubmit={onSubmit}>

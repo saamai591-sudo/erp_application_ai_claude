@@ -4,6 +4,7 @@ import { formatJalaliDate } from "../lib/formatDate";
 
 export interface PickableWarehouseReceiptLine {
   id: number;
+  documentId?: number;
   number: number;
   date: string;
   goodsItemId: number;

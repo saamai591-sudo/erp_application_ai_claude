@@ -403,6 +403,43 @@ router.get("/purchase-invoices/pickable-warehouse-receipt-lines", can(`${FORM}.v
   res.json(result);
 });
 
+// «صدور فاکتور خرید از رسید انبار» (راهبری، components/DownstreamDialogs.tsx): پیش‌نمایشِ فقط‌خواندنی برای دیالوگ — طرف مقابل رسید و تعداد ردیف‌های قابل‌فاکتور،
+// با همان تابع پایه‌ی انتخابگر (fetchPickableWarehouseReceiptLines) و همان قاعده‌ی «هر ردیف فقط یک‌بار» که فرم و ذخیره‌ی فاکتور استفاده می‌کنند؛ پس آنچه این‌جا
+// «قابل‌فاکتور» شمرده می‌شود دقیقاً همان چیزی است که انتخابگر ردیف مبنا نشان می‌دهد. چیزی ساخته نمی‌شود.
+router.get("/purchase-invoices/from-receipt/:id", can(`${FORM}.view`), async (req, res) => {
+  const id = Number(req.params.id);
+  const doc = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "WAREHOUSE_RECEIPT" }, include: { warehouse: true } });
+  if (!doc) return res.status(404).json({ error: "رسید انبار خرید یافت نشد" });
+  const party = doc.detailCode ? await prisma.party.findFirst({ where: { detailCode: doc.detailCode }, include: { supplier: true } }) : null;
+
+  let reason: string | null = null;
+  let remainingLineCount = 0;
+  if (!party) reason = "طرف مقابل این رسید مشخص نیست؛ فاکتور خرید به طرف مقابل نیاز دارد";
+  else if (!party.supplier) reason = "طرف مقابل این رسید «تامین‌کننده» نیست؛ فاکتور خرید فقط برای تامین‌کننده صادر می‌شود";
+  else if (doc.status === "FINALIZED") reason = "این رسید قبلاً با فاکتور خرید قطعی شده است";
+  else {
+    const lines = await fetchPickableWarehouseReceiptLines({
+      formDate: doc.date,
+      documentWhere: { id: doc.id, detailCode: doc.detailCode },
+      include: { purchaseInvoiceLine: true },
+      computeRemaining: (l: any) => (l.purchaseInvoiceLine ? 0 : Number(l.quantity)),
+    });
+    remainingLineCount = lines.length;
+    if (remainingLineCount === 0) reason = "همه‌ی ردیف‌های این رسید قبلاً در فاکتور خرید استفاده شده است";
+  }
+
+  res.json({
+    receiptId: doc.id,
+    number: doc.number,
+    date: doc.date,
+    warehouseTitle: doc.warehouse?.title || "",
+    partyId: party?.id ?? null,
+    partyTitle: party ? partyTitle(party) : null,
+    remainingLineCount,
+    reason,
+  });
+});
+
 // =========================================================================
 // CRUD
 // =========================================================================
