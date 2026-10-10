@@ -26,6 +26,8 @@ export interface LicenseBinding {
 export interface LicensePayload {
   v: number;
   licenseNumber: string;
+  /** سریال ۶نویسه‌ی زنجیره‌ی لایسنس (با تمدید و انتقال به سرور جدید ثابت می‌ماند)؛ null = لایسنس قدیمی بدون سریال */
+  serial: string | null;
   /** شماره‌ی ترتیب صعودی برای هر نصب؛ لایسنس با شماره‌ی کوچک‌تر از لایسنس ثبت‌شده‌ی همان نصب پذیرفته نمی‌شود */
   sequence: number;
   customer: string;
@@ -69,6 +71,7 @@ function validatePayload(p: any): LicensePayload {
   if (!p || typeof p !== "object") throw new Error("محتوای لایسنس نامعتبر است");
   if (p.v !== LICENSE_VERSION) throw new Error("نسخه‌ی فرمت لایسنس پشتیبانی نمی‌شود");
   if (typeof p.licenseNumber !== "string" || !p.licenseNumber) throw new Error("شماره‌ی لایسنس نامعتبر است");
+  if (p.serial != null && !(typeof p.serial === "string" && /^[A-Z0-9]{6}$/.test(p.serial))) throw new Error("سریال لایسنس نامعتبر است");
   if (!(Number.isInteger(p.sequence) && p.sequence >= 1)) throw new Error("شماره‌ی ترتیب لایسنس نامعتبر است");
   if (typeof p.customer !== "string" || !p.customer) throw new Error("نام مشتری در لایسنس نیست");
   if (p.model !== "PERPETUAL" && p.model !== "SUBSCRIPTION") throw new Error("نوع لایسنس نامعتبر است");
@@ -82,7 +85,7 @@ function validatePayload(p: any): LicensePayload {
   if (!b || typeof b !== "object" || typeof b.databaseName !== "string" || !b.databaseName) throw new Error("نام دیتابیس در لایسنس نیست");
   if (typeof b.databaseSystemId !== "string" || !b.databaseSystemId) throw new Error("شناسه‌ی دیتابیس در لایسنس نیست");
   if (typeof p.managementPasswordHash !== "string" || !p.managementPasswordHash.startsWith("scrypt$")) throw new Error("کلمه‌ی عبور مدیریت در لایسنس نیست");
-  return { ...p, features: p.features ?? null } as LicensePayload;
+  return { ...p, serial: p.serial ?? null, features: p.features ?? null } as LicensePayload;
 }
 
 /** متن فایل لایسنس را می‌خواند و امضا را می‌سنجد؛ خطای ساختار با پیام فارسی پرتاب می‌شود (امضای نامعتبر خطا نیست، signatureOk=false است) */

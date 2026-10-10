@@ -7,6 +7,7 @@
 import crypto from "crypto";
 import { prisma } from "../lib/prisma";
 import { decryptPrivateKey } from "../services/taxMemoryService";
+import { currentLicenseSerialOrNull } from "../license/licenseService";
 import { TaxTransport } from "../services/taxTransport";
 
 const norm = (pem: string) => pem.replace(/\s+/g, "");
@@ -21,9 +22,9 @@ async function main() {
 
   let privatePem: string;
   try {
-    privatePem = decryptPrivateKey(m.privateKeyEncrypted);
+    privatePem = decryptPrivateKey(m.privateKeyEncrypted, await currentLicenseSerialOrNull());
   } catch {
-    console.log("✗ کلید خصوصی با رمز این محیط باز نشد (TAX_KEY_ENCRYPTION_SECRET / JWT_SECRET با سرور یکی نیست)");
+    console.log("✗ کلید خصوصی باز نشد (TAX_KEY_ENCRYPTION_SECRET / JWT_SECRET با سرور یکی نیست، یا حافظه با لایسنس دیگری ساخته شده است)");
     process.exit(1);
   }
   const derived = crypto.createPublicKey(privatePem).export({ type: "spki", format: "pem" }) as string;

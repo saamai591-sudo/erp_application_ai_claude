@@ -4,6 +4,7 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { toEnglishDigits } from "../utils/digits";
 import { TAX_COUNTRY, generateTaxKeyMaterial, rebuildCsr } from "../services/taxMemoryService";
+import { currentLicenseSerialOrNull } from "../license/licenseService";
 
 // =========================================================================
 // «حافظه مالیاتی» (امور مالیاتی › تنظیمات). منطق کلید/CSR: services/taxMemoryService.ts.
@@ -26,6 +27,7 @@ function serialize(m: any) {
     email: m.email,
     taxMemoryUniqueId: m.taxMemoryUniqueId,
     hasKeyPair: !!m.publicKeyPem,
+    licenseSerial: m.licenseSerial ?? null,
     createdAt: m.createdAt,
     updatedAt: m.updatedAt,
   };
@@ -78,8 +80,10 @@ router.get("/:id", can(`${FORM}.view`), async (req, res) => {
 router.post("/", can(`${FORM}.create`), async (req, res) => {
   try {
     const data = clean(req.body as Body);
-    const material = generateTaxKeyMaterial(data);
-    const created = await prisma.taxMemory.create({ data: { ...data, countryId: TAX_COUNTRY, ...material } });
+    // با لایسنس معتبرِ دارای سریال ساخته شود، حافظه همان لحظه به آن سریال گره می‌خورد؛ وگرنه بعداً (اولین لایسنسِ دارای سریال) علامت می‌خورد
+    const serial = await currentLicenseSerialOrNull();
+    const material = generateTaxKeyMaterial(data, serial);
+    const created = await prisma.taxMemory.create({ data: { ...data, countryId: TAX_COUNTRY, ...material, licenseSerial: serial } });
     res.status(201).json(serialize(created));
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در ثبت حافظه مالیاتی" });
@@ -100,7 +104,7 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
       data.email !== existing.email;
     const updated = await prisma.taxMemory.update({
       where: { id },
-      data: { ...data, countryId: TAX_COUNTRY, ...(subjectChanged ? { csrPem: rebuildCsr(existing.privateKeyEncrypted, data) } : {}) },
+      data: { ...data, countryId: TAX_COUNTRY, ...(subjectChanged ? { csrPem: rebuildCsr(existing.privateKeyEncrypted, data, await currentLicenseSerialOrNull()) } : {}) },
     });
     res.json(serialize(updated));
   } catch (e: any) {

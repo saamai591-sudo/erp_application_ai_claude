@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { prisma } from "../lib/prisma";
 import { tehranDate } from "../jobs/time";
 import { collectFingerprint, Fingerprint } from "./fingerprint";
@@ -42,6 +42,8 @@ export function matchBinding(binding: LicenseBinding, fp: Fingerprint): BindingM
 
 export interface LicenseSummary {
   licenseNumber: string;
+  /** سریال زنجیره‌ی لایسنس؛ null = لایسنس قدیمی */
+  serial: string | null;
   sequence: number;
   customer: string;
   model: LicenseModel;
@@ -80,6 +82,7 @@ export async function getInstallId(): Promise<string> {
 function summarize(p: LicensePayload): LicenseSummary {
   return {
     licenseNumber: p.licenseNumber,
+    serial: p.serial ?? null,
     sequence: p.sequence,
     customer: p.customer,
     model: p.model,
@@ -267,4 +270,41 @@ export async function getEntitlements(): Promise<Entitlements> {
 /** آیا قابلیت (مثلاً FX) در لایسنس فعال است؟ features=null (قفل خاموش/لایسنس قدیمی) یعنی همه‌ی قابلیت‌ها */
 export function isFeatureEnabled(ent: Entitlements, feature: string): boolean {
   return !ent.features || ent.features.includes(feature);
+}
+
+// ── سریال لایسنس و مجوز ارسال به مودیان ─────────────────────────────────────────────────────────────────────────────────────────────
+// حافظه‌ی مالیاتی به «سریال» لایسنس گره می‌خورد (نه به شماره‌ی تجاری یا فایل لایسنس): تمدید و انتقال به سرور جدید سریال را نگه می‌دارند و
+// فروشنده فقط با صدور لایسنسِ همان سریال انتقال را مجاز می‌کند. خودِ مسیر ارسال بدون وابستگی به دروازه‌ی عمومی و بدون کش، سخت‌گیرانه می‌سنجد.
+
+export interface TaxSendingLicense {
+  serial: string;
+  licenseNumber: string;
+  /** هش هویت سرور (نام دیتابیس|شناسه‌ی کلاستر|شناسه‌ی نصب) — فقط برای ممیزی روی TaxInvoice */
+  bindingHash: string;
+}
+
+/**
+ * پیش از هر ارسال/استعلام به مودیان صدا زده می‌شود. لایسنس را تازه (بدون کش، مستقل از LICENSE_ENFORCEMENT) از دیتابیس می‌خواند، امضا و
+ * انطباق با هویت زنده‌ی سرور را می‌سنجد و فقط وضعیت «فعال» یا «فروش دائمی با پشتیبانی منقضی» را می‌پذیرد. هر خطا (از جمله خطای دیتابیس)
+ * ⇒ ارسال رد می‌شود (برخلاف دروازه‌ی عمومی که برای خطای موقت اجازه می‌دهد).
+ */
+export async function assertTaxSendingLicensed(): Promise<TaxSendingLicense> {
+  const s = await evaluateLicense();
+  if (s.state === "UNCONFIGURED") throw new Error("این ساخت کلید لایسنس ندارد؛ ارسال به سامانه مودیان فعال نیست");
+  if (s.state !== "ACTIVE" && s.state !== "SUPPORT_EXPIRED") throw new Error(`ارسال به سامانه مودیان ممکن نیست: ${s.message}`);
+  const serial = s.license?.serial;
+  if (!serial) throw new Error("لایسنس فعلی «سریال» ندارد؛ برای ارسال به سامانه مودیان لایسنس تازه (دارای سریال) از فروشنده بگیرید و در صفحه‌ی مدیریت ثبت کنید");
+  const bindingHash = createHash("sha256").update(`${s.fingerprint.databaseName}|${s.fingerprint.databaseSystemId}|${s.installId}`).digest("hex");
+  return { serial, licenseNumber: s.license!.licenseNumber, bindingHash };
+}
+
+/** سریال لایسنس جاری وقتی لایسنس معتبر و دارای سریال است؛ وگرنه null (خطا پرتاب نمی‌کند) */
+export async function currentLicenseSerialOrNull(): Promise<string | null> {
+  try {
+    const s = await evaluateLicense();
+    if (s.state !== "ACTIVE" && s.state !== "SUPPORT_EXPIRED") return null;
+    return s.license?.serial ?? null;
+  } catch {
+    return null;
+  }
 }

@@ -3835,8 +3835,10 @@ model TaxMemory {
   taxMemoryUniqueId   String?
   publicKeyPem        String
   csrPem              String
-  /// iv:authTag:ciphertext (base64) — کلید خصوصی PKCS#8 PEM که با AES-256-GCM رمز شده
+  /// کلید خصوصی PKCS#8 PEM رمزشده با AES-256-GCM. قالب v1: iv:tag:data. قالب v2: v2:<سریال لایسنس>:iv:tag:data با سریال به‌عنوان داده‌ی احرازشده (AAD)
   privateKeyEncrypted String
+  /// سریال لایسنسی که این حافظه با آن ساخته/علامت‌گذاری شده؛ ارسال فقط وقتی مجاز است که با سریال لایسنس جاری یکی باشد (null = قدیمی، هنگام اولین لایسنسِ دارای سریال علامت می‌خورد)
+  licenseSerial       String?
   /// آخرین سریال صورتحساب این حافظه (جزء ۱۰ رقمی شماره مالیاتی)؛ صعودی و غیرتکراری — هنگام ارسال اتمی افزایش می‌یابد
   lastSerial          BigInt   @default(0)
   createdAt           DateTime @default(now())
@@ -3956,6 +3958,9 @@ model TaxInvoice {
   warnings         Json?
   sentAt           DateTime         @default(now())
   checkedAt        DateTime?
+  /// ممیزی: سریال لایسنس و هش هویت سرور هنگام ارسال
+  licenseSerial    String?
+  serverBindingHash String?
   taxMemory        TaxMemory        @relation(fields: [taxMemoryId], references: [id])
   salesInvoice     SalesInvoice     @relation(fields: [salesInvoiceId], references: [id])
 

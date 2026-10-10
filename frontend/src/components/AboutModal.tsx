@@ -5,6 +5,7 @@ import { toFaDigits } from "../lib/formatAmount";
 
 interface AboutInfo {
   version: string;
+  license?: { serial: string | null; licenseNumber: string | null; state: string } | null;
   database: {
     name: string | null;
     schemaVersion: string | null;
@@ -36,6 +37,12 @@ export function AboutModal({ onClose }: { onClose: () => void }) {
         <div className="about-grid">
           <div className="about-label">نسخه</div>
           <div className="about-value" dir="ltr">{info.version}</div>
+
+          <div className="about-label">سریال لایسنس</div>
+          <div className="about-value" dir="ltr">
+            {info.license?.serial ? <b style={{ letterSpacing: 1 }}>{info.license.serial}</b> : "ندارد (لایسنس قدیمی)"}
+            {info.license?.licenseNumber ? <div className="about-sub">{info.license.licenseNumber}</div> : null}
+          </div>
 
           <div className="about-label">پایگاه داده</div>
           <div className="about-value" dir="ltr">

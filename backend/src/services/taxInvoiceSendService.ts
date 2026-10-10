@@ -12,6 +12,8 @@ import { prisma } from "../lib/prisma";
 import { buildTaxInvoice, loadSalesInvoiceForTax, TaxInvoiceOptions } from "./taxInvoiceBuilder";
 import { allocateTaxSerial } from "./taxId";
 import { decryptPrivateKey } from "./taxMemoryService";
+import { ensureMemoryMatchesLicense } from "./taxMemoryLicense";
+import { assertTaxSendingLicensed } from "../license/licenseService";
 import { createTaxTransport, InquiryResult, TaxApiError, TaxTransport } from "./taxTransport";
 import { toWireInvoice } from "./taxWire";
 
@@ -29,13 +31,13 @@ export interface SendItemResult {
 const transports = new Map<number, { key: string; transport: TaxTransport }>();
 
 /** ترانسپورت حافظه‌ی مالیاتی (یک‌بار ساخته و تا تغییر شناسه/کلید نگه‌داشته می‌شود) */
-function transportFor(memory: { id: number; taxMemoryUniqueId: string | null; privateKeyEncrypted: string }): TaxTransport {
+function transportFor(memory: { id: number; taxMemoryUniqueId: string | null; privateKeyEncrypted: string }, licenseSerial: string): TaxTransport {
   const fiscalId = (memory.taxMemoryUniqueId ?? "").trim().toUpperCase();
   if (!fiscalId) throw new TaxApiError("شناسه یکتای حافظه مالیاتی ثبت نشده است");
   const cacheKey = `${fiscalId}|${memory.privateKeyEncrypted.length}`;
   const hit = transports.get(memory.id);
   if (hit && hit.key === cacheKey) return hit.transport;
-  const transport = createTaxTransport({ fiscalId, privateKeyPem: decryptPrivateKey(memory.privateKeyEncrypted) });
+  const transport = createTaxTransport({ fiscalId, privateKeyPem: decryptPrivateKey(memory.privateKeyEncrypted, licenseSerial) });
   transports.set(memory.id, { key: cacheKey, transport });
   return transport;
 }
@@ -67,6 +69,14 @@ export async function sendTaxInvoices(items: SendItemInput[]): Promise<SendItemR
   const results: SendItemResult[] = [];
   const pending: { taxInvoiceId: number; referenceNumber: string; memoryId: number }[] = [];
 
+  // مجوز لایسنس در خودِ مسیر ارسال (نه فقط دروازه‌ی عمومی): تازه، بدون کش، مستقل از LICENSE_ENFORCEMENT؛ خطا ⇒ هیچ فاکتوری فرستاده نمی‌شود
+  let lic;
+  try {
+    lic = await assertTaxSendingLicensed();
+  } catch (e: any) {
+    return items.map((it) => ({ salesInvoiceId: it.salesInvoiceId, invoiceNumber: null, ok: false, message: e.message || "مجوز لایسنس برای ارسال تایید نشد" }));
+  }
+
   for (const it of items) {
     const base: SendItemResult = { salesInvoiceId: it.salesInvoiceId, invoiceNumber: null, ok: false, message: "" };
     try {
@@ -83,8 +93,9 @@ export async function sendTaxInvoices(items: SendItemInput[]): Promise<SendItemR
         results.push({ ...base, message: pre.problems.filter((p) => p.severity === "error").map((p) => p.message).join(" | ") });
         continue;
       }
-      const memory = inv.numberingPattern!.taxMemory!;
-      const transport = transportFor(memory); // اگر ارسال خاموش باشد همین‌جا خطا می‌دهد، پیش از رزرو سریال
+      // حافظه باید با سریال لایسنس جاری بخواند (علامت‌گذاری حافظه‌ی قدیمی یا رد با پیام انتقال)
+      const memory = await ensureMemoryMatchesLicense(inv.numberingPattern!.taxMemory!, lic.serial);
+      const transport = transportFor(memory, lic.serial); // اگر ارسال خاموش باشد همین‌جا خطا می‌دهد، پیش از رزرو سریال
       await transport.prepare(); // آدرس/کلید/توکن اشتباه ← خطا پیش از رزرو سریال و ساخت ردیف (هیچ فاکتوری قفل نمی‌شود)
 
       const nowMs = Date.now();
@@ -109,6 +120,8 @@ export async function sendTaxInvoices(items: SendItemInput[]): Promise<SendItemR
             payload: toJson(wire),
             requestTraceId: crypto.randomUUID(),
             status: "IN_PROGRESS",
+            licenseSerial: lic.serial,
+            serverBindingHash: lic.bindingHash,
           },
         });
         return { row, wire };
@@ -143,18 +156,19 @@ export async function sendTaxInvoices(items: SendItemInput[]): Promise<SendItemR
   // استعلام نتیجه‌ی ارسال‌های موفق (با کمی مهلت برای پردازش سامانه)
   if (pending.length) {
     await new Promise((r) => setTimeout(r, 1500));
-    await inquirePending(pending).catch(() => undefined);
+    await inquirePending(pending, lic.serial).catch(() => undefined);
   }
   return results;
 }
 
-async function inquirePending(pending: { taxInvoiceId: number; referenceNumber: string; memoryId: number }[]) {
+async function inquirePending(pending: { taxInvoiceId: number; referenceNumber: string; memoryId: number }[], licenseSerial: string) {
   const byMemory = new Map<number, typeof pending>();
   for (const p of pending) byMemory.set(p.memoryId, [...(byMemory.get(p.memoryId) ?? []), p]);
   for (const [memoryId, list] of byMemory) {
-    const memory = await prisma.taxMemory.findUnique({ where: { id: memoryId } });
-    if (!memory) continue;
-    const transport = transportFor(memory);
+    const found = await prisma.taxMemory.findUnique({ where: { id: memoryId } });
+    if (!found) continue;
+    const memory = await ensureMemoryMatchesLicense(found, licenseSerial);
+    const transport = transportFor(memory, licenseSerial);
     for (let i = 0; i < list.length; i += 100) {
       const chunk = list.slice(i, i + 100);
       const res = await transport.inquiryByReferenceNumbers(chunk.map((c) => c.referenceNumber));
@@ -168,6 +182,7 @@ async function inquirePending(pending: { taxInvoiceId: number; referenceNumber: 
 
 /** «استعلام وضعیت»: صورتحساب‌های در حال بررسی (یا مشخص‌شده) را از سامانه می‌پرسد؛ بدون شماره پیگیری با uid استعلام می‌شود */
 export async function refreshTaxInvoiceStatuses(ids?: number[]): Promise<{ checked: number; updated: number }> {
+  const lic = await assertTaxSendingLicensed();
   const rows = await prisma.taxInvoice.findMany({
     where: ids?.length ? { id: { in: ids } } : { status: "IN_PROGRESS" },
     include: { taxMemory: true },
@@ -177,7 +192,8 @@ export async function refreshTaxInvoiceStatuses(ids?: number[]): Promise<{ check
   const byMemory = new Map<number, typeof rows>();
   for (const r of rows) byMemory.set(r.taxMemoryId, [...(byMemory.get(r.taxMemoryId) ?? []), r]);
   for (const [, list] of byMemory) {
-    const transport = transportFor(list[0].taxMemory);
+    const memory = await ensureMemoryMatchesLicense(list[0].taxMemory, lic.serial);
+    const transport = transportFor(memory, lic.serial);
     const withRef = list.filter((r) => r.referenceNumber);
     const withoutRef = list.filter((r) => !r.referenceNumber);
     for (let i = 0; i < withRef.length; i += 100) {

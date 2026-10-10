@@ -20,7 +20,7 @@ interface Status {
   state: State;
   message: string;
   installId: string;
-  license: { licenseNumber: string; sequence: number; customer: string; model: "PERPETUAL" | "SUBSCRIPTION"; issuedAt: string; startsAt: string; supportUntil: string | null; validUntil: string | null; maxUsers: number | null; modules: string[] | null; features: string[] | null } | null;
+  license: { licenseNumber: string; serial?: string | null; sequence: number; customer: string; model: "PERPETUAL" | "SUBSCRIPTION"; issuedAt: string; startsAt: string; supportUntil: string | null; validUntil: string | null; maxUsers: number | null; modules: string[] | null; features: string[] | null } | null;
   match: { ok: boolean; rows: MatchRow[]; reasons: string[] } | null;
 }
 
@@ -296,6 +296,7 @@ export default function Management() {
             {status.license && (
               <table className="kv-table" style={{ width: "100%" }}>
                 <tbody>
+                  <tr><th>سریال لایسنس</th><td dir="ltr"><b>{status.license.serial || "ندارد (لایسنس قدیمی)"}</b></td></tr>
                   <tr><th>شماره لایسنس</th><td dir="ltr">{status.license.licenseNumber} (ترتیب {status.license.sequence})</td></tr>
                   <tr><th>مشتری</th><td>{status.license.customer}</td></tr>
                   <tr><th>نوع</th><td>{MODEL_FA[status.license.model]}</td></tr>

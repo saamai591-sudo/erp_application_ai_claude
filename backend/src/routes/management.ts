@@ -4,6 +4,7 @@ import path from "path";
 import { NextFunction, Request, Response, Router } from "express";
 import jwt from "jsonwebtoken";
 import { collectFingerprint } from "../license/fingerprint";
+import { stampUnmarkedTaxMemories } from "../services/taxMemoryLicense";
 import { normalizePassword, verifyPassword } from "../license/managementPassword";
 import {
   ACTIVATED_STATES,
@@ -145,6 +146,8 @@ router.post("/management/activate", async (req, res) => {
     }
     failures = [];
     const status = await storeLicenseText(text);
+    // حافظه‌های مالیاتیِ بدون سریال با سریال لایسنس تازه علامت می‌خورند (خطا فعال‌سازی را خراب نمی‌کند)
+    await stampUnmarkedTaxMemories().catch((e) => console.error("[tax-memory] علامت‌گذاری ناموفق", e));
     res.json({ token: signManagementToken(), status });
   } catch (e: any) {
     const code = e instanceof LicenseRejectedError ? 400 : 500;

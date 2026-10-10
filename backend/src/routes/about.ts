@@ -2,6 +2,7 @@ import { Router } from "express";
 import fs from "fs";
 import path from "path";
 import { prisma } from "../lib/prisma";
+import { evaluateLicense } from "../license/licenseService";
 
 // «درباره‌ی سیستم» — نسخه‌ی سیستم و نسخه‌ی پایگاه داده برای دیالوگ About در نوار بالای برنامه.
 //
@@ -66,8 +67,17 @@ router.get("/about", async (_req, res) => {
   }
   const current = applied[0]?.migration_name ?? null;
   const cur = splitMigrationName(current);
+  // سریال لایسنس (شناسه‌ی زنجیره‌ی لایسنس مشتری) برای تماس با پشتیبانی
+  let license: { serial: string | null; licenseNumber: string | null; state: string } | null = null;
+  try {
+    const st = await evaluateLicense();
+    license = { serial: st.license?.serial ?? null, licenseNumber: st.license?.licenseNumber ?? null, state: st.state };
+  } catch {
+    license = null;
+  }
   res.json({
     version: readVersion(),
+    license,
     database: {
       name,
       schemaVersion: cur.schemaVersion,

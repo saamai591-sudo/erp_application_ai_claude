@@ -21,17 +21,48 @@ function encryptionKey(): Buffer {
   return crypto.scryptSync(secret, SALT, 32);
 }
 
-export function encryptPrivateKey(privateKeyPem: string): string {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", encryptionKey(), iv);
-  const enc = Buffer.concat([cipher.update(privateKeyPem, "utf8"), cipher.final()]);
-  return [iv.toString("base64"), cipher.getAuthTag().toString("base64"), enc.toString("base64")].join(":");
+/** خطای ناهم‌خوانی سریال لایسنس با حافظه‌ی مالیاتی */
+export class TaxMemorySerialMismatchError extends Error {}
+
+// قالب v1 (قدیمی): iv:tag:data. قالب v2: v2:<سریال>:iv:tag:data — سریال به‌عنوان AAD در AES-GCM هم می‌رود، پس با ویرایش مستقیمِ دیتابیس
+// (تغییر ستون یا رشته‌ی سریال) رمزگشایی شکست می‌خورد؛ ساختن پاکتِ تازه نیازمند راز محیط و اسکریپت سفارشی است.
+const AAD_PREFIX = "erp-tax-key-v2|";
+
+/** سریال داخل پاکت v2 (null برای قالب قدیمی) */
+export function envelopeSerial(stored: string): string | null {
+  const p = stored.split(":");
+  return p.length === 5 && p[0] === "v2" ? p[1] : null;
 }
 
-export function decryptPrivateKey(stored: string): string {
-  const [iv, tag, data] = stored.split(":");
+export function encryptPrivateKey(privateKeyPem: string, licenseSerial: string | null = null): string {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", encryptionKey(), iv);
+  if (licenseSerial) cipher.setAAD(Buffer.from(AAD_PREFIX + licenseSerial, "utf8"));
+  const enc = Buffer.concat([cipher.update(privateKeyPem, "utf8"), cipher.final()]);
+  const parts = [iv.toString("base64"), cipher.getAuthTag().toString("base64"), enc.toString("base64")];
+  return (licenseSerial ? ["v2", licenseSerial, ...parts] : parts).join(":");
+}
+
+/** expectedSerial = سریال لایسنس جاری؛ برای قالب v2 باید با سریال داخل پاکت یکی باشد (قالب قدیمی بدون سریال باز می‌شود) */
+export function decryptPrivateKey(stored: string, expectedSerial: string | null = null): string {
+  const p = stored.split(":");
+  let serial: string | null = null;
+  let iv: string | undefined;
+  let tag: string | undefined;
+  let data: string | undefined;
+  if (p.length === 5 && p[0] === "v2") {
+    [, serial, iv, tag, data] = p;
+  } else {
+    [iv, tag, data] = p;
+  }
   if (!iv || !tag || !data) throw new Error("کلید خصوصی ذخیره‌شده نامعتبر است");
+  if (serial !== null && serial !== expectedSerial) {
+    throw new TaxMemorySerialMismatchError(
+      `این حافظه مالیاتی با لایسنسی با سریال ${serial} ساخته شده است${expectedSerial ? ` ولی لایسنس فعلی سریال ${expectedSerial} دارد` : ""}؛ برای انتقال سرور، فروشنده باید لایسنسِ «انتقال» با همان سریال صادر کند`
+    );
+  }
   const decipher = crypto.createDecipheriv("aes-256-gcm", encryptionKey(), Buffer.from(iv, "base64"));
+  if (serial) decipher.setAAD(Buffer.from(AAD_PREFIX + serial, "utf8"));
   decipher.setAuthTag(Buffer.from(tag, "base64"));
   return Buffer.concat([decipher.update(Buffer.from(data, "base64")), decipher.final()]).toString("utf8");
 }
@@ -66,18 +97,18 @@ export function buildCsr(privateKeyPem: string, c: CompanySubject): string {
 }
 
 /** جفت‌کلید RSA 2048 تازه: کلید خصوصی (PKCS#8 PEM — فقط برای رمزکردن و ساخت CSR)، کلید عمومی (SPKI PEM «BEGIN PUBLIC KEY») و CSR از همان جفت‌کلید */
-export function generateTaxKeyMaterial(subject: CompanySubject) {
+export function generateTaxKeyMaterial(subject: CompanySubject, licenseSerial: string | null = null) {
   const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", { modulusLength: RSA_BITS });
   const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
   const publicKeyPem = publicKey.export({ type: "spki", format: "pem" }) as string;
   return {
     publicKeyPem,
     csrPem: buildCsr(privateKeyPem, subject),
-    privateKeyEncrypted: encryptPrivateKey(privateKeyPem),
+    privateKeyEncrypted: encryptPrivateKey(privateKeyPem, licenseSerial),
   };
 }
 
 /** CSR جدید با همان جفت‌کلید ذخیره‌شده (وقتی اطلاعات شرکت ویرایش شود) — کلید عمومی تغییر نمی‌کند */
-export function rebuildCsr(privateKeyEncrypted: string, subject: CompanySubject): string {
-  return buildCsr(decryptPrivateKey(privateKeyEncrypted), subject);
+export function rebuildCsr(privateKeyEncrypted: string, subject: CompanySubject, licenseSerial: string | null = null): string {
+  return buildCsr(decryptPrivateKey(privateKeyEncrypted, licenseSerial), subject);
 }
