@@ -70,7 +70,7 @@ function hasValidManagementToken(req: Request): boolean {
   }
 }
 
-function requireManagement(req: Request, res: Response, next: NextFunction) {
+export function requireManagement(req: Request, res: Response, next: NextFunction) {
   if (!hasValidManagementToken(req)) return res.status(401).json({ error: "نشست مدیریت معتبر نیست؛ دوباره وارد شوید" });
   next();
 }

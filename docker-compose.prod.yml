@@ -45,6 +45,9 @@ services:
       TAX_API_INSECURE_TLS: ${TAX_API_INSECURE_TLS:-false}
       # زمان‌بند «کارهای زمان‌بندی‌شده» — پیش‌فرض خاموش؛ فقط روی محیطی که باید خودکار کار کند true شود. نگاه کنید به .env.example
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-false}
+    volumes:
+      # پشتیبان‌های خودکار (سیاست از صفحه‌ی /management)؛ volume جدا تا با ساخت دوباره‌ی کانتینر پاک نشوند
+      - backups:/backups
     ports:
       - "4000:4000"
 
@@ -63,3 +66,4 @@ services:
 
 volumes:
   db_data:
+  backups:

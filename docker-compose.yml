@@ -32,6 +32,8 @@ services:
     volumes:
       - ./backend:/app
       - /app/node_modules
+      # پشتیبان‌های خودکار (سیاست از صفحه‌ی /management)؛ volume جدا تا با ساخت دوباره‌ی کانتینر پاک نشوند
+      - backups:/backups
 
   frontend:
     build: ./frontend
@@ -51,3 +53,4 @@ services:
 
 volumes:
   db_data:
+  backups:

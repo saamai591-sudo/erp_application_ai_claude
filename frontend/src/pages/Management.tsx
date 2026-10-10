@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatJalaliDate } from "../lib/formatDate";
+import { ManagementBackup } from "../components/ManagementBackup";
 
 // «مدیریت» (/management) — صفحه‌ی مستقل از ورود ERP برای فعال‌سازی و دیدن وضعیت لایسنس، با کلمه‌ی عبور خودش (در لایسنس است، نه کاربران ERP).
 //   ۱) لایسنس معتبری ثبت نشده: «دانلود فایل اطلاعات سرور» + «بارگذاری فایل لایسنس». فیلد کلمه‌ی عبور بعد از انتخاب فایل باز می‌شود و همان
@@ -234,13 +235,13 @@ export default function Management() {
   const uploadSection = !activated || showUpload;
   const passwordOk = password.replace(/-/g, "").length === 12;
 
-  const card: React.CSSProperties = { width: "100%", maxWidth: 560, padding: 20, display: "flex", flexDirection: "column", gap: 14 };
+  const card: React.CSSProperties = { width: "100%", maxWidth: loggedIn ? 920 : 560, padding: 20, display: "flex", flexDirection: "column", gap: 14 };
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px 16px", background: "var(--bg, #f6f7f9)" }} dir="rtl">
       <div className="card" style={card}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h2 style={{ margin: 0 }}>مدیریت لایسنس</h2>
+          <h2 style={{ margin: 0 }}>{loggedIn ? "مدیریت" : "مدیریت لایسنس"}</h2>
           {loggedIn && <button type="button" className="btn secondary" onClick={logout}>خروج</button>}
         </div>
 
@@ -296,6 +297,7 @@ export default function Management() {
                 بارگذاری لایسنس تازه
               </button>
             </div>
+            {token && <ManagementBackup token={token} onUnauthorized={() => saveToken(null)} />}
           </>
         )}
 

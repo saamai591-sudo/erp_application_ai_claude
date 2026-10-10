@@ -4414,3 +4414,70 @@ model AppLicense {
   activatedAt DateTime?
   updatedAt   DateTime  @updatedAt
 }
+
+/// سیاست پشتیبان‌گیری خودکار (یک ردیف، id=1). فقط از صفحه‌ی «مدیریت» (/management) تنظیم می‌شود، نه از منوی ERP.
+/// frequency: INTERVAL = هر intervalHours ساعت، DAILY = هر روز در timeOfDay، WEEKLY = روزهای weekdays (۰=شنبه) در timeOfDay؛ همه به وقت تهران.
+model BackupPolicy {
+  id                  Int             @id @default(1)
+  enabled             Boolean         @default(false)
+  frequency           BackupFrequency @default(DAILY)
+  intervalHours       Int             @default(24)
+  timeOfDay           String          @default("02:00")
+  weekdays            Int[]
+  /// تعداد نسخه‌ی موفقِ اخیر که همیشه نگه داشته می‌شود (حداقل ۲)
+  keepRecent          Int             @default(7)
+  /// علاوه بر آن، جدیدترین نسخه‌ی هر یک از این تعداد ماه اخیر (۰ = غیرفعال)
+  keepMonthly         Int             @default(0)
+  nextRunAt           DateTime?
+  /// جای مقصد بیرون از سرور (مثلاً SFTP)؛ فعلاً استفاده نمی‌شود (null)
+  externalDestination Json?
+  updatedAt           DateTime        @updatedAt
+}
+
+enum BackupFrequency {
+  INTERVAL
+  DAILY
+  WEEKLY
+}
+
+/// تاریخچه‌ی اجرای پشتیبان‌ها؛ فایل پشتیبان با fileName داخل پوشه‌ی BACKUP_DIR است (fileDeleted = توسط سیاست نگه‌داری حذف شده)
+model BackupRun {
+  id           Int             @id @default(autoincrement())
+  trigger      BackupTrigger
+  status       BackupRunStatus @default(RUNNING)
+  startedAt    DateTime        @default(now())
+  finishedAt   DateTime?
+  fileName     String?
+  sizeBytes    BigInt?
+  appVersion   String?
+  errorMessage String?
+  fileDeleted  Boolean         @default(false)
+  /// نتیجه‌ی آخرین «تست بازگردانی» روی همین فایل
+  testedAt     DateTime?
+  testOk       Boolean?
+  testMessage  String?
+
+  @@index([startedAt])
+}
+
+enum BackupTrigger {
+  SCHEDULED
+  MANUAL
+}
+
+enum BackupRunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+/// ثبت رویدادهای مدیریتیِ پشتیبان‌گیری: تغییر سیاست، اجرای دستی، دانلود، تست بازگردانی
+model BackupAuditLog {
+  id     Int      @id @default(autoincrement())
+  at     DateTime @default(now())
+  action String
+  detail String?
+  ip     String?
+
+  @@index([at])
+}

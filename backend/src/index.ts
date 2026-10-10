@@ -75,6 +75,8 @@ import companyProfileRoutes from "./routes/companyProfile";
 import printTemplateRoutes from "./routes/printTemplates";
 import managementRoutes from "./routes/management";
 import { licenseGate } from "./license/licenseGate";
+import managementBackupRoutes from "./routes/managementBackup";
+import { startBackupScheduler } from "./services/backupService";
 import { fxOffBodyNormalizer } from "./license/fxOff";
 import { startScheduler } from "./jobs/scheduler";
 import warehouseDocDetailSettingRoutes from "./routes/warehouseDocDetailSettings";
@@ -141,6 +143,8 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 // «مدیریت» (لایسنس): جدا از ورود ERP و مجوزهایش؛ باید قبل از دروازه‌ی لایسنس و requireAuth ثبت شود
 app.use("/api", managementRoutes);
+// پشتیبان‌گیری خودکار (سیاست و دانلود) — فقط با نشست مدیریت؛ قبل از دروازه‌ی لایسنس تا انقضای لایسنس دسترسی به پشتیبان را نبندد
+app.use("/api", managementBackupRoutes);
 // قفل کامل بدون لایسنس معتبر (همه‌ی مسیرها به‌جز health و management)
 app.use("/api", licenseGate);
 
@@ -290,6 +294,8 @@ syncRegistryToDb()
       console.log(`Backend listening on port ${port}`);
       // زمان‌بند کارها (فقط با SCHEDULER_ENABLED=true روشن می‌شود) — نگاه کنید به jobs/scheduler.ts
       startScheduler().catch((e) => console.error("[scheduler] خطا در راه‌اندازی", e));
+      // زمان‌سنج پشتیبان‌گیری (مستقل از SCHEDULER_ENABLED؛ فقط وقتی سیاست از «مدیریت» روشن شود کار می‌کند)
+      startBackupScheduler().catch((e) => console.error("[backup] خطا در راه‌اندازی", e));
     });
   })
   .catch((err) => {

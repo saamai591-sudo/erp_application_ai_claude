@@ -1,6 +1,7 @@
 FROM node:20-alpine
 WORKDIR /app
-RUN apk add --no-cache openssl
+# postgresql16-client: pg_dump/pg_restore/psql برای پشتیبان‌گیری خودکار (هم‌نسخه با ایمیج دیتابیس postgres:16)
+RUN apk add --no-cache openssl postgresql16-client
 # package-lock.json هم کپی می‌شود و npm ci (نه npm install) استفاده می‌شود — بدون این دو، npm در build
 # لینوکسی بدون توجه به نسخه‌های قفل‌شده‌ی package-lock.json دوباره resolve می‌کند و می‌تواند برای وابستگی‌های
 # پلتفرمی (مثل باینری‌های esbuild) نسخه‌ای متفاوت از نسخه‌ی بسته‌ی اصلی نصب کند (خطای زمان اجرای esbuild:
