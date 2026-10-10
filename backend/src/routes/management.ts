@@ -9,6 +9,8 @@ import {
   ACTIVATED_STATES,
   evaluateLicense,
   getInstallId,
+  isEnforcementEnabled,
+  isStateAllowed,
   LicenseRejectedError,
   readStoredLicense,
   storeLicenseText,
@@ -93,7 +95,15 @@ async function isActivated(): Promise<boolean> {
 // وضعیت کلی برای صفحه‌ی ورود مدیریت (بدون جزئیات)
 router.get("/management/state", async (_req, res) => {
   const s = await evaluateLicense();
-  res.json({ activated: ACTIVATED_STATES.includes(s.state), state: s.state, message: s.message, publicKeyConfigured: s.publicKeyConfigured });
+  res.json({
+    activated: ACTIVATED_STATES.includes(s.state),
+    state: s.state,
+    message: s.message,
+    publicKeyConfigured: s.publicKeyConfigured,
+    // قفل: آیا نرم‌افزار اکنون قابل استفاده است؟
+    enforced: isEnforcementEnabled(),
+    allowed: !isEnforcementEnabled() || isStateAllowed(s.state),
+  });
 });
 
 // فایل اطلاعات سرور: وقتی لایسنس معتبری ثبت نیست آزاد است؛ وگرنه نشست مدیریت لازم است

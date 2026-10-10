@@ -177,5 +177,56 @@ export async function validateIncomingLicense(text: string): Promise<LicensePayl
 export async function storeLicenseText(text: string): Promise<LicenseStatus> {
   await getInstallId();
   await prisma.appLicense.update({ where: { id: 1 }, data: { licenseText: text, activatedAt: new Date() } });
+  invalidateLicenseCache();
   return evaluateLicense();
+}
+
+// ── قفل کامل (طبق تصمیم کارفرما: بدون لایسنس معتبر هیچ استفاده‌ای ممکن نیست، دوره‌ی آزمایشی هم نیست) ─────────────────────────────────────
+// وضعیت‌های مجاز: ACTIVE، SUPPORT_EXPIRED (فروش دائمی؛ پایان پشتیبانی فقط هشدار است) و UNCONFIGURED (ساخت بدون کلید لایسنس = توسعه).
+// NO_LICENSE / INVALID / MISMATCH / NOT_STARTED / EXPIRED ⇒ قفل. مسیرهای /api/management/* و /api/health همیشه باز می‌مانند.
+// متغیر محیطی LICENSE_ENFORCEMENT=off فقط برای محیط توسعه‌ی خودِ فروشنده است (در .env.example و مستندات مشتری نیامده).
+const ALLOWED_STATES: LicenseState[] = ["ACTIVE", "SUPPORT_EXPIRED", "UNCONFIGURED"];
+
+export function isStateAllowed(state: LicenseState): boolean {
+  return ALLOWED_STATES.includes(state);
+}
+
+export function isEnforcementEnabled(): boolean {
+  const v = (process.env.LICENSE_ENFORCEMENT ?? "on").trim().toLowerCase();
+  return !["off", "false", "0", "no"].includes(v);
+}
+
+const CACHE_MS = 30_000;
+let cached: { at: number; status: LicenseStatus } | null = null;
+
+export function invalidateLicenseCache(): void {
+  cached = null;
+}
+
+async function getCachedStatus(): Promise<LicenseStatus> {
+  if (cached && Date.now() - cached.at < CACHE_MS) return cached.status;
+  const status = await evaluateLicense();
+  cached = { at: Date.now(), status };
+  return status;
+}
+
+export interface GateResult {
+  enforced: boolean;
+  allowed: boolean;
+  state: LicenseState;
+  message: string;
+}
+
+/** آیا استفاده از برنامه مجاز است؟ (کش ۳۰ ثانیه‌ای؛ با ثبت لایسنس تازه فوراً پاک می‌شود) */
+export async function checkLicenseGate(): Promise<GateResult> {
+  const enforced = isEnforcementEnabled();
+  if (!enforced) return { enforced, allowed: true, state: "ACTIVE", message: "" };
+  try {
+    const s = await getCachedStatus();
+    return { enforced, allowed: isStateAllowed(s.state), state: s.state, message: s.message };
+  } catch (e) {
+    // خطای موقت دیتابیس: خودِ درخواست هم به همان دیتابیس می‌رسد؛ دروازه را به‌خاطر آن نمی‌بندیم
+    console.error("[license] ارزیابی لایسنس ناموفق بود", e);
+    return { enforced, allowed: true, state: "ACTIVE", message: "" };
+  }
 }

@@ -13,7 +13,7 @@ const TOKEN_KEY = "management-token";
 
 type State = "UNCONFIGURED" | "NO_LICENSE" | "INVALID" | "MISMATCH" | "NOT_STARTED" | "ACTIVE" | "SUPPORT_EXPIRED" | "EXPIRED";
 
-interface PublicState { activated: boolean; state: State; message: string; publicKeyConfigured: boolean }
+interface PublicState { activated: boolean; state: State; message: string; publicKeyConfigured: boolean; enforced: boolean; allowed: boolean }
 interface MatchRow { key: string; label: string; licensed: string; current: string; ok: boolean }
 interface Status {
   state: State;
@@ -236,6 +236,16 @@ export default function Management() {
         {error && <div className="alert error">{error}</div>}
         {info && <div className="alert">{info}</div>}
         {keyMissing && <div className="alert">این ساخت کلید لایسنس ندارد؛ فایل لایسنس تایید نمی‌شود (نسخه‌ی توسعه/آزمایشی).</div>}
+        {pub && pub.enforced && !pub.allowed && (
+          <div className="alert error">
+            ورود به نرم‌افزار تا فعال‌سازی لایسنس معتبر بسته است. {pub.message}
+          </div>
+        )}
+        {pub && pub.allowed && pub.activated && (
+          <div>
+            <a href="/login">ورود به نرم‌افزار</a>
+          </div>
+        )}
 
         {!pub && !error && <div>در حال بارگذاری…</div>}
 

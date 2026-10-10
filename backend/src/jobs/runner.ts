@@ -3,6 +3,7 @@ import { runWithRequestContext, withoutFiscalPeriodScope } from "../lib/requestC
 import { JOBS, getJobDefinition } from "./registry";
 import { computeNextRun, ScheduleSpec, validateSchedule } from "./schedule";
 import { defaultParamValue, normalizeParams, resolveParams, validateForLive } from "./params";
+import { checkLicenseGate } from "../license/licenseService";
 import { missingActionKeys, missingActionsMessage } from "./permissions";
 import { tehranDate } from "./time";
 import type { JobContext, JobDefinition, JobItem } from "./types";
@@ -87,6 +88,9 @@ export interface BeginOptions {
 export async function beginRun(key: string, opts: BeginOptions): Promise<{ runId: number; execute: () => Promise<RunOutcome> }> {
   const def = getJobDefinition(key);
   if (!def) throw new JobConfigError("کار یافت نشد");
+  // قفل لایسنس: بدون لایسنس معتبر هیچ کاری اجرا نمی‌شود (زمان‌بند خودکار هم از همین‌جا می‌گذرد)
+  const gate = await checkLicenseGate();
+  if (!gate.allowed) throw new JobConfigError(`لایسنس معتبر نیست؛ کارهای زمان‌بندی‌شده اجرا نمی‌شوند (${gate.message})`);
   await ensureJobRows();
   const row = await prisma.scheduledJob.findUnique({ where: { key } });
   if (!row) throw new JobConfigError("تنظیمات کار یافت نشد");

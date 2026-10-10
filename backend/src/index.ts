@@ -74,6 +74,7 @@ import scheduledJobRoutes from "./routes/scheduledJobs";
 import companyProfileRoutes from "./routes/companyProfile";
 import printTemplateRoutes from "./routes/printTemplates";
 import managementRoutes from "./routes/management";
+import { licenseGate } from "./license/licenseGate";
 import { startScheduler } from "./jobs/scheduler";
 import warehouseDocDetailSettingRoutes from "./routes/warehouseDocDetailSettings";
 import detailRuleRoutes from "./routes/detailRules";
@@ -137,10 +138,13 @@ app.use(express.json({ limit: "50mb" }));
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
+// «مدیریت» (لایسنس): جدا از ورود ERP و مجوزهایش؛ باید قبل از دروازه‌ی لایسنس و requireAuth ثبت شود
+app.use("/api", managementRoutes);
+// قفل کامل بدون لایسنس معتبر (همه‌ی مسیرها به‌جز health و management)
+app.use("/api", licenseGate);
+
 // عمومی (بدون نیاز به ورود)
 app.use("/api/auth", authRoutes);
-// «مدیریت» (لایسنس): جدا از ورود ERP و مجوزهایش؛ باید قبل از requireAuth ثبت شود
-app.use("/api", managementRoutes);
 
 // همه مسیرهای زیر نیازمند احراز هویت هستند
 app.use("/api", requireAuth);

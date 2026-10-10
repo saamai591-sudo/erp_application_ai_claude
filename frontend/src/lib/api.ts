@@ -45,6 +45,10 @@ async function request(path: string, options: RequestInit = {}) {
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
+    // قفل لایسنس: نرم‌افزار فعال نیست ⇒ صفحه‌ی مدیریت (فعال‌سازی)
+    if (res.status === 403 && data.code === "LICENSE_REQUIRED" && !window.location.pathname.startsWith("/management")) {
+      window.location.assign("/management");
+    }
     throw new ApiError(data.error || "خطای ناشناخته رخ داد", data.warning, data.details);
   }
   return data;
