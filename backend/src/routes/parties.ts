@@ -47,6 +47,7 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
     nationalId?: string;
     foreignId?: string;
     economicCode?: string;
+    registrationNumber?: string;
     firstName?: string;
     lastName?: string;
     legalType?: "LEGAL" | "SPECIAL_PARTNERSHIP" | "BANK";
@@ -109,6 +110,7 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
         nationalId: body.nationality === "FOREIGN" ? null : body.nationalId,
         foreignId: body.nationality === "FOREIGN" ? body.foreignId : null,
         economicCode: body.economicCode || null,
+        registrationNumber: body.registrationNumber || null,
         firstName: body.category === "INDIVIDUAL" ? body.firstName : null,
         lastName: body.category === "INDIVIDUAL" ? body.lastName : null,
         legalType: body.category === "LEGAL" ? body.legalType : null,
@@ -148,6 +150,7 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
     nationalId?: string;
     foreignId?: string;
     economicCode?: string;
+    registrationNumber?: string;
     firstName?: string;
     lastName?: string;
     legalType?: "LEGAL" | "SPECIAL_PARTNERSHIP" | "BANK";
@@ -170,6 +173,7 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
       nationalId: body.nationality === "FOREIGN" ? null : body.nationalId,
       foreignId: body.nationality === "FOREIGN" ? body.foreignId : null,
       economicCode: body.economicCode,
+      registrationNumber: body.registrationNumber === undefined ? undefined : body.registrationNumber || null,
       firstName: party.category === "INDIVIDUAL" ? body.firstName : undefined,
       lastName: party.category === "INDIVIDUAL" ? body.lastName : undefined,
       legalType: party.category === "LEGAL" ? body.legalType : undefined,

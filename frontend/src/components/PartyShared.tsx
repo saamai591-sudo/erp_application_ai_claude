@@ -25,6 +25,7 @@ export interface Party {
   legalType: "LEGAL" | "SPECIAL_PARTNERSHIP" | "BANK" | null;
   nationalId: string | null;
   economicCode: string | null;
+  registrationNumber?: string | null;
   hasTransactions: boolean;
   isActive: boolean;
 }
@@ -188,6 +189,7 @@ export function PartyForm({
       name: p.name,
       nationalId: p.nationalId,
       economicCode: p.economicCode,
+      registrationNumber: p.registrationNumber,
       isActive: p.isActive ?? true,
     });
   }
@@ -355,6 +357,10 @@ export function PartyForm({
               <div className="form-field">
                 <label>کد اقتصادی</label>
                 <input dir="ltr" value={form.economicCode || ""} onChange={(e) => setForm({ ...form, economicCode: e.target.value })} />
+              </div>
+              <div className="form-field">
+                <label>شماره ثبت</label>
+                <input dir="ltr" value={form.registrationNumber || ""} onChange={(e) => setForm({ ...form, registrationNumber: e.target.value })} />
               </div>
             </div>
           )}

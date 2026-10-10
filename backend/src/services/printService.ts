@@ -4,6 +4,7 @@ import Handlebars from "handlebars";
 import { prisma } from "../lib/prisma";
 import { DEFAULT_PRINT_TEMPLATES } from "../data/printDefaultTemplates";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
+import { amountInWords } from "../utils/numberToWords";
 
 // چاپ اسناد با «قالب چاپ»: قالب = HTML/CSS با متغیرهای Handlebars؛ داده‌ی هر نوع سند را سرور می‌سازد (دیکشنری فیلد، PRINT_DOC_TYPES) و سرور
 // آن را در قالب جاگذاری می‌کند. خروجی یک سند HTML کامل (فونت وزیرمتن داخل خودش، بدون هیچ منبع بیرونی) است که هم در پیش‌نمایش/چاپ مرورگر
@@ -122,12 +123,13 @@ const QUOTE_LINE_FIELDS: PrintFieldDoc[] = [
   { path: "totals.afterDiscount", title: "جمع مبلغ پس از تخفیف", group: "جمع‌ها" },
   { path: "totals.vat", title: "جمع ارزش افزوده", group: "جمع‌ها" },
   { path: "totals.net", title: "جمع خالص", group: "جمع‌ها" },
+  { path: "totals.netInWords", title: "جمع خالص به حروف (با نام ارز)", group: "جمع‌ها" },
 ];
 
 const DOC_FIELDS_QUOTE: PrintFieldDoc[] = [
   { path: "doc.number", title: "شماره پیش‌فاکتور", group: "سند" },
   { path: "doc.date", title: "تاریخ (شمسی)", group: "سند" },
-  { path: "doc.validUntil", title: "تاریخ اعتبار (فعلاً خالی)", group: "سند" },
+  { path: "doc.validUntil", title: "تاریخ اعتبار (شمسی؛ اگر ثبت نشده خالی)", group: "سند" },
   { path: "doc.description", title: "توضیحات سند", group: "سند" },
   { path: "doc.currency", title: "ارز", group: "سند" },
   { path: "doc.status", title: "وضعیت", group: "سند" },
@@ -185,14 +187,14 @@ async function loadSalesInvoice(id: number): Promise<PrintData> {
     customer: {
       name: partyName(party),
       economicCode: party.economicCode ?? "",
-      registrationNumber: "",
+      registrationNumber: party.registrationNumber ?? "",
       nationalId: party.nationalId ?? "",
       phone: phone?.number ?? "",
       address: addr ? [addr.city?.title, addr.address].filter(Boolean).join("، ") : "",
       postalCode: addr?.postalCode ?? "",
     },
     lines,
-    totals: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, fmtNumber(v, dec)])),
+    totals: { ...Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, fmtNumber(v, dec)])), netInWords: amountInWords(totals.net, dec, d.currency.title) },
   };
 }
 
@@ -249,18 +251,18 @@ async function loadSalesQuote(id: number): Promise<PrintData> {
   });
   return {
     company: await loadCompany(),
-    doc: { number: d.number, date: formatJalaliDateForMessage(d.date), validUntil: "", description: d.description ?? "", currency: d.currency.title, status: DOC_STATUS_FA[d.status] ?? d.status },
+    doc: { number: d.number, date: formatJalaliDateForMessage(d.date), validUntil: d.validUntil ? formatJalaliDateForMessage(d.validUntil) : "", description: d.description ?? "", currency: d.currency.title, status: DOC_STATUS_FA[d.status] ?? d.status },
     customer: {
       name: partyName(party),
       economicCode: party.economicCode ?? "",
-      registrationNumber: "",
+      registrationNumber: party.registrationNumber ?? "",
       nationalId: party.nationalId ?? "",
       phone: phone?.number ?? "",
       address: addr ? [addr.city?.title, addr.address].filter(Boolean).join("، ") : "",
       postalCode: addr?.postalCode ?? "",
     },
     lines,
-    totals: Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, fmtNumber(v, dec)])),
+    totals: { ...Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, fmtNumber(v, dec)])), netInWords: amountInWords(totals.net, dec, d.currency.title) },
   };
 }
 
@@ -284,7 +286,7 @@ function sampleSalesQuote(): PrintData {
     lines: [
       { row: 1, code: "1001", title: "کالای نمونه", description: "", quantity: "100", unit: "عدد", unitPrice: "1,000,000", amount: "100,000,000", discount: "0", afterDiscount: "100,000,000", vat: "10,000,000", net: "110,000,000" },
     ],
-    totals: { amount: "100,000,000", discount: "0", afterDiscount: "100,000,000", vat: "10,000,000", net: "110,000,000" },
+    totals: { amount: "100,000,000", discount: "0", afterDiscount: "100,000,000", vat: "10,000,000", net: "110,000,000", netInWords: "یکصد و ده میلیون ریال" },
   };
 }
 
@@ -378,7 +380,8 @@ export function toPersianDigitsInHtml(html: string): string {
   return html.replace(/(<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>|<[^>]*>)|([^<]+)/gi, (_m, markup: string | undefined, text: string | undefined) => {
     if (markup !== undefined) return markup;
     return (text ?? "")
-      .replace(/&#?[A-Za-z0-9]+;|[0-9]/g, (t) => (t.length === 1 ? PERSIAN_DIGITS[Number(t)] : t))
+      // موجودیت‌های HTML و توکن‌های حرفی‑عددی لاتین (شناسه‌ی مالیاتی، شبا، کد انگلیسی) دست‌نخورده می‌مانند؛ فقط ارقام جدا/عدد خالص فارسی می‌شوند
+      .replace(/&#?[A-Za-z0-9]+;|[A-Za-z0-9]*[A-Za-z][A-Za-z0-9]*|[0-9]/g, (t) => (/^[0-9]$/.test(t) ? PERSIAN_DIGITS[Number(t)] : t))
       .replace(/([۰-۹]),(?=[۰-۹])/g, "$1٬")
       .replace(/([۰-۹])\.(?=[۰-۹])/g, "$1٫");
   });

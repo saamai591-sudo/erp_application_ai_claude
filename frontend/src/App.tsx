@@ -100,6 +100,7 @@ import NumberingPatterns from "./pages/NumberingPatterns";
 import ScheduledJobs from "./pages/ScheduledJobs";
 import CompanyProfile from "./pages/CompanyProfile";
 import PrintTemplates from "./pages/PrintTemplates";
+import Management from "./pages/Management";
 import PettyCashCustodians from "./pages/PettyCashCustodians";
 import PettyCashPayments from "./pages/PettyCashPayments";
 import PettyCashSummaries from "./pages/PettyCashSummaries";
@@ -137,6 +138,8 @@ export default function App() {
         <TabsProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
+          {/* «مدیریت» (لایسنس): جدا از ورود ERP، با کلمه‌ی عبور خودش */}
+          <Route path="/management" element={<Management />} />
           <Route element={<Layout />}>
             <Route index element={<Welcome />} />
 

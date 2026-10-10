@@ -26,10 +26,10 @@ const SALES_QUOTE_HTML = `<style>
   .head .meta b { font-weight: 700; }
   .sec-title { background: #e9e9e9; border: 0.2mm solid #666; border-bottom: none; font-weight: 700; font-size: 9pt; padding: 0.6mm 2mm; margin-top: 1.6mm; }
   table.kv, table.items, table.totals { width: 100%; border-collapse: collapse; }
-  table.kv td { border: 0.2mm solid #666; padding: 0.8mm 2mm; font-size: 8.5pt; vertical-align: top; }
+  table.kv td { border: 0.2mm solid #666; padding: 0.5mm 2mm; font-size: 8.5pt; vertical-align: top; }
   table.kv td .k { color: #333; }
-  table.items th { background: #f1f1f1; border: 0.2mm solid #666; font-size: 8.5pt; padding: 1.2mm 1mm; font-weight: 700; text-align: center; }
-  table.items td { border: 0.2mm solid #666; font-size: 8.5pt; padding: 1.1mm 1.2mm; text-align: center; }
+  table.items th { background: #f1f1f1; border: 0.2mm solid #666; font-size: 8.5pt; padding: 0.9mm 1mm; font-weight: 700; text-align: center; }
+  table.items td { border: 0.2mm solid #666; font-size: 8.5pt; padding: 0.8mm 1.2mm; text-align: center; }
   table.items td.t { text-align: right; }
   table.items td.n { direction: ltr; unicode-bidi: plaintext; }
   table.items tfoot td { background: #f7f7f7; font-weight: 700; }
@@ -118,6 +118,7 @@ const SALES_QUOTE_HTML = `<style>
         <td class="n">{{totals.amount}}</td><td class="n">{{totals.discount}}</td>
         <td class="n">{{totals.afterDiscount}}</td><td class="n">{{totals.vat}}</td><td class="n">{{totals.net}}</td>
       </tr>
+      <tr><td colspan="10" class="t">مبلغ کل به حروف: {{totals.netInWords}}</td></tr>
     </tfoot>
   </table>
 
@@ -143,7 +144,10 @@ const SALES_QUOTE_HTML = `<style>
 </div>`;
 
 // صورتحساب فروش — همان قالب پیش‌فاکتور بدون «تاریخ اعتبار» (عنوان و watermark از متن‌های ثابت قالب می‌آید)
-const SALES_INVOICE_HTML = SALES_QUOTE_HTML.replace('      <div><b>تاریخ اعتبار:</b> {{doc.validUntil}}</div>\n', "");
+const SALES_INVOICE_HTML = SALES_QUOTE_HTML.replace(
+  '      <div><b>تاریخ اعتبار:</b> {{doc.validUntil}}</div>\n',
+  '      {{#if doc.taxId}}<div><b>شماره منحصربه‌فرد مالیاتی:</b> {{doc.taxId}}</div>{{/if}}\n'
+);
 
 export const DEFAULT_PRINT_TEMPLATES: DefaultPrintTemplate[] = [
   {

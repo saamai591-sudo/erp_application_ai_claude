@@ -113,12 +113,41 @@ function TemplateForm({ editId }: { editId?: number }) {
     }
     if (hasPersistedState(cacheKey)) return;
     api.get(`/print-templates/${editId}`).then((t: any) => {
-      setWasDefault(t.isDefault);
-      setForm({ documentType: t.documentType, title: t.title, paper: t.paper, orientation: t.orientation, marginMm: String(t.marginMm), digits: t.digits ?? "PERSIAN", html: t.html, texts: t.texts ?? {}, isDefault: t.isDefault, isActive: t.isActive });
+      applyTemplate(t);
       setLoaded(true);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
+
+  function applyTemplate(t: any) {
+    setWasDefault(t.isDefault);
+    setForm({ documentType: t.documentType, title: t.title, paper: t.paper, orientation: t.orientation, marginMm: String(t.marginMm), digits: t.digits ?? "PERSIAN", html: t.html, texts: t.texts ?? {}, isDefault: t.isDefault, isActive: t.isActive });
+  }
+
+  /** ساخت قالب تازه از روی همین قالب (ذخیره‌شده‌ی فعلی) و رفتن به فرم آن */
+  async function copyTemplate() {
+    if (!editId) return;
+    setError(null);
+    try {
+      const created = await api.post(`/print-templates/${editId}/copy`);
+      navigate(`/print-templates/${created.id}/edit`);
+    } catch (err) {
+      showError((err as ApiError).message);
+    }
+  }
+
+  /** برگرداندن HTML، متن‌های ثابت، کاغذ، حاشیه و ارقام به مقدار قالب پیش‌فرض نصب (عنوان و پیش‌فرض/فعال‌بودن می‌ماند) */
+  async function resetToInstallDefault() {
+    if (!editId) return;
+    if (!window.confirm("محتوای این قالب (متن HTML، متن‌های ثابت، کاغذ، حاشیه و ارقام) با قالب پیش‌فرض نصب جایگزین می‌شود و تغییرات فعلی از بین می‌رود. ادامه می‌دهید؟")) return;
+    setError(null);
+    try {
+      const t = await api.post(`/print-templates/${editId}/reset-to-install-default`);
+      applyTemplate(t);
+    } catch (err) {
+      showError((err as ApiError).message);
+    }
+  }
 
   const docMeta = meta.find((m) => m.type === form.documentType);
 
@@ -205,6 +234,14 @@ function TemplateForm({ editId }: { editId?: number }) {
       closePath="/print-templates"
       newPath="/print-templates/new"
       onDelete={editId && !wasDefault ? handleDelete : undefined}
+      extraActions={
+        editId
+          ? [
+              { label: "ایجاد کپی", onClick: copyTemplate },
+              { label: "بازگردانی به قالب پیش‌فرض نصب", onClick: resetToInstallDefault },
+            ]
+          : undefined
+      }
       toolbarExtra={
         <button type="button" className="toolbar-icon-btn" onClick={showPreview} disabled={previewBusy} title="پیش‌نمایش">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none">

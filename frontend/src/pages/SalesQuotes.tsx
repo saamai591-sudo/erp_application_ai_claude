@@ -49,7 +49,7 @@ function customerTitle(c: CustomerOption): string {
 
 interface ListRow { id: number; number: number; date: string; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: Status; lineCount: number; totalAmount: number }
 interface DetailLine { id: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null }
-interface Detail extends ListRow { currencyId: number; description: string | null; lines: DetailLine[] }
+interface Detail extends ListRow { currencyId: number; description: string | null; validUntil?: string | null; lines: DetailLine[] }
 
 const STATUS_FA: Record<Status, string> = { DRAFT: "ثبت", APPROVED: "تایید" };
 const INFO_TEXT = "ثبت پیش‌فاکتور/استعلام قیمت برای مشتری — بالاترین سند زنجیره فروش. پس از تایید، می‌توان از آن سفارش فروش ایجاد کرد.";
@@ -172,7 +172,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
   const [salesCenters, setSalesCenters] = useState<SalesCenter[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
-  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", description: "" });
+  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", description: "", validUntil: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
   const [meta, setMeta] = usePersistedState<{ number: number; status: Status } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
@@ -205,7 +205,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
       if (editId) {
         const d: Detail = await api.get(`/sales-quotes/${editId}`);
         setMeta({ number: d.number, status: d.status });
-        setHeader({ date: d.date.slice(0, 10), customerId: String(d.customerId), salesTypeId: String(d.salesTypeId), salesCenterId: String(d.salesCenterId), currencyId: String(d.currencyId), description: d.description || "" });
+        setHeader({ date: d.date.slice(0, 10), customerId: String(d.customerId), salesTypeId: String(d.salesTypeId), salesCenterId: String(d.salesCenterId), currencyId: String(d.currencyId), description: d.description || "", validUntil: d.validUntil ? String(d.validUntil).slice(0, 10) : "" });
         setRows(
           d.lines.map((l) => ({
             goodsItemId: String(l.goodsItemId),
@@ -222,7 +222,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
           }))
         );
       } else {
-        setHeader({ date: defaultDocumentDate(fp), customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", description: "" });
+        setHeader({ date: defaultDocumentDate(fp), customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", description: "", validUntil: "" });
         setRows([emptyRow()]);
         setMeta(null);
       }
@@ -294,6 +294,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
       salesCenterId: Number(header.salesCenterId),
       currencyId: Number(header.currencyId),
       description: header.description,
+      validUntil: header.validUntil || null,
       lines: nonEmptyRows.map((r) => ({
         goodsItemId: Number(r.goodsItemId),
         unitId: Number(r.unitId),
@@ -393,6 +394,10 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
             <div className="form-field">
               <label>تاریخ<RequiredMark /></label>
               <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
+            </div>
+            <div className="form-field">
+              <label>تاریخ اعتبار <InfoHint text="اختیاری — تا این تاریخ پیش‌فاکتور معتبر است؛ در چاپ پیش‌فاکتور می‌آید. نباید قبل از تاریخ پیش‌فاکتور باشد." title="تاریخ اعتبار" /></label>
+              <JalaliDatePicker value={header.validUntil} onChange={(v) => setHeader({ ...header, validUntil: v })} />
             </div>
             <div className="form-field">
               <label>مشتری<RequiredMark /></label>

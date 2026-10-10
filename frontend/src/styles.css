@@ -1797,3 +1797,8 @@ table.bestfit-measure th, table.bestfit-measure td {
 
 /* انتخابگرهای داخل سلول گرید (مثلاً نوع/موضوع ماده ۹/تسویه در «ارسال صورتحساب به سامانه مودیان») */
 .grid-inline-select { padding: 2px 6px; font-size: 12px; min-width: 90px; max-width: 100%; }
+
+/* جدول کلید/مقدار صفحه‌ی لایسنس */
+.kv-table { border-collapse: collapse; font-size: 13px; }
+.kv-table th, .kv-table td { border: 1px solid var(--line); padding: 6px 10px; text-align: right; vertical-align: top; }
+.kv-table th { background: var(--bg); font-weight: 600; white-space: nowrap; }

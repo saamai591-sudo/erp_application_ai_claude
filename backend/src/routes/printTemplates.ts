@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
+import { DEFAULT_PRINT_TEMPLATES } from "../data/printDefaultTemplates";
 import { ensureDefaultPrintTemplates, getPrintDocType, PRINT_DOC_TYPES, renderPrintDocument, renderSavedTemplate } from "../services/printService";
 
 // «قالب‌های چاپ» (تنظیمات › عملیات) + «چاپ سند» (دکمه‌ی چاپ فرم‌ها). قالب = HTML/CSS با متغیرهای Handlebars (services/printService.ts).
@@ -169,6 +170,51 @@ router.delete("/print-templates/:id", can(`${FORM}.delete`), async (req, res) =>
   if (existing.isDefault) return res.status(400).json({ error: "قالب پیش‌فرض را نمی‌توان حذف کرد؛ ابتدا قالب دیگری را «پیش‌فرض» کنید" });
   await prisma.printTemplate.delete({ where: { id } });
   res.json({ ok: true });
+});
+
+// کپی قالب: همه‌ی تنظیمات و متن همین قالب، با عنوان «… (کپی)»؛ پیش‌فرض نمی‌شود
+router.post("/print-templates/:id/copy", can(`${FORM}.create`), async (req, res) => {
+  try {
+    const src = await prisma.printTemplate.findUnique({ where: { id: Number(req.params.id) } });
+    if (!src) return res.status(404).json({ error: "قالب یافت نشد" });
+    const existing = new Set((await prisma.printTemplate.findMany({ where: { documentType: src.documentType }, select: { title: true } })).map((t) => t.title));
+    let title = `${src.title} (کپی)`;
+    for (let n = 2; existing.has(title); n += 1) title = `${src.title} (کپی ${n})`;
+    const created = await prisma.printTemplate.create({
+      data: {
+        documentType: src.documentType,
+        title: title.slice(0, 200),
+        paper: src.paper,
+        orientation: src.orientation,
+        marginMm: src.marginMm,
+        digits: src.digits,
+        html: src.html,
+        texts: (src.texts as any) ?? {},
+        isDefault: false,
+        isActive: true,
+      },
+    });
+    res.status(201).json(serialize(created));
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در کپی قالب" });
+  }
+});
+
+// بازگردانی محتوای قالب به قالب پیش‌فرض نصب همان نوع سند (عنوان، پیش‌فرض‌بودن و فعال‌بودن دست‌نخورده می‌ماند)
+router.post("/print-templates/:id/reset-to-install-default", can(`${FORM}.edit`), async (req, res) => {
+  try {
+    const existing = await prisma.printTemplate.findUnique({ where: { id: Number(req.params.id) } });
+    if (!existing) return res.status(404).json({ error: "قالب یافت نشد" });
+    const def = DEFAULT_PRINT_TEMPLATES.find((t) => t.documentType === existing.documentType);
+    if (!def) return res.status(400).json({ error: "برای این نوع سند قالب پیش‌فرض نصب تعریف نشده است" });
+    const updated = await prisma.printTemplate.update({
+      where: { id: existing.id },
+      data: { paper: def.paper, orientation: def.orientation, marginMm: def.marginMm, digits: def.digits, html: def.html, texts: def.texts },
+    });
+    res.json(serialize(updated));
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در بازگردانی قالب" });
+  }
 });
 
 // پیش‌نمایش قالبِ در حال ویرایش (ذخیره‌نشده) روی یک سند واقعی (آخرین سند، یا sourceId) یا داده‌ی نمونه

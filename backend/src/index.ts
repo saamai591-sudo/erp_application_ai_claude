@@ -73,6 +73,7 @@ import taxInvoiceRoutes from "./routes/taxInvoices";
 import scheduledJobRoutes from "./routes/scheduledJobs";
 import companyProfileRoutes from "./routes/companyProfile";
 import printTemplateRoutes from "./routes/printTemplates";
+import managementRoutes from "./routes/management";
 import { startScheduler } from "./jobs/scheduler";
 import warehouseDocDetailSettingRoutes from "./routes/warehouseDocDetailSettings";
 import detailRuleRoutes from "./routes/detailRules";
@@ -138,6 +139,8 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 // عمومی (بدون نیاز به ورود)
 app.use("/api/auth", authRoutes);
+// «مدیریت» (لایسنس): جدا از ورود ERP و مجوزهایش؛ باید قبل از requireAuth ثبت شود
+app.use("/api", managementRoutes);
 
 // همه مسیرهای زیر نیازمند احراز هویت هستند
 app.use("/api", requireAuth);

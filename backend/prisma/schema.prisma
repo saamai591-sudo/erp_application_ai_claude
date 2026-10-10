@@ -290,6 +290,8 @@ model Party {
   nationalId         String?
   foreignId          String?
   economicCode       String?
+  /// شماره ثبت (برای اشخاص حقوقی)؛ در چاپ اسناد به‌عنوان «شماره ثبت» خریدار می‌آید
+  registrationNumber String?
   firstName          String?
   lastName           String?
   legalType          LegalPartyType?
@@ -2250,6 +2252,8 @@ model SalesQuote {
   fiscalPeriodId Int
   number         Int
   date           DateTime         @db.Date
+  /// تاریخ اعتبار پیش‌فاکتور (اختیاری؛ نباید قبل از تاریخ پیش‌فاکتور باشد)
+  validUntil     DateTime?        @db.Date
   customerId     Int
   salesTypeId    Int
   salesCenterId  Int
@@ -4400,4 +4404,13 @@ model PrintTemplate {
   updatedAt    DateTime          @default(now()) @updatedAt
 
   @@unique([documentType, title])
+}
+
+/// لایسنس این نصب (یک ردیف، id=1): شناسه‌ی نصب برنامه (اولین بالا آمدن ساخته می‌شود) و متن فایل لایسنس امضاشده‌ی ثبت‌شده
+model AppLicense {
+  id          Int       @id @default(1)
+  installId   String    @unique
+  licenseText String?
+  activatedAt DateTime?
+  updatedAt   DateTime  @updatedAt
 }

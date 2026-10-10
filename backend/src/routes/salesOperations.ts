@@ -168,7 +168,18 @@ interface SalesQuoteHeaderBody {
   salesCenterId: number;
   currencyId: number;
   description?: string;
+  /** تاریخ اعتبار (اختیاری، YYYY-MM-DD) */
+  validUntil?: string | null;
   lines: SalesQuoteLineInput[];
+}
+
+/** تاریخ اعتبار پیش‌فاکتور: خالی = ندارد؛ نباید قبل از تاریخ پیش‌فاکتور باشد */
+function parseQuoteValidUntil(raw: string | null | undefined, docDate: Date): Date | null {
+  if (raw === undefined || raw === null || String(raw).trim() === "") return null;
+  const d = new Date(String(raw));
+  if (Number.isNaN(d.getTime())) throw new Error("تاریخ اعتبار نامعتبر است");
+  if (d.getTime() < docDate.getTime()) throw new Error("تاریخ اعتبار نباید قبل از تاریخ پیش‌فاکتور باشد");
+  return d;
 }
 
 router.get("/sales-quotes", can(`${SALES_QUOTES_FORM}.view`), async (_req, res) => {
@@ -222,6 +233,7 @@ router.get("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.view`), async (req, re
     currencyId: d.currencyId,
     fiscalPeriodId: d.fiscalPeriodId,
     description: d.description,
+    validUntil: d.validUntil ? d.validUntil.toISOString().slice(0, 10) : null,
     status: d.status,
     updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
@@ -259,6 +271,7 @@ export async function createSalesQuote(body: SalesQuoteHeaderBody, forcedNumber?
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
     const lines = await validateSalesQuoteLines(body.lines, date, currency.decimalPlaces);
+    const validUntil = parseQuoteValidUntil(body.validUntil, date);
 
     const number = forcedNumber ?? (await nextNumber(prisma.salesQuote, fiscalPeriod.id));
     return await prisma.salesQuote.create({
@@ -271,6 +284,7 @@ export async function createSalesQuote(body: SalesQuoteHeaderBody, forcedNumber?
         salesCenterId: body.salesCenterId,
         currencyId: body.currencyId,
         description: body.description || null,
+        validUntil,
         status: "DRAFT",
         lines: { create: lines.map((l, idx) => ({ ...l, rowOrder: idx })) },
       },
@@ -311,6 +325,7 @@ router.put("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.edit`), async (req, re
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
     const lines = await validateSalesQuoteLines(body.lines, date, currency.decimalPlaces);
+    const validUntil = parseQuoteValidUntil(body.validUntil, date);
 
     await prisma.$transaction([
       prisma.salesQuoteLine.deleteMany({ where: { salesQuoteId: id } }),
@@ -324,6 +339,7 @@ router.put("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.edit`), async (req, re
           salesCenterId: body.salesCenterId,
           currencyId: body.currencyId,
           description: body.description || null,
+          validUntil,
           lines: { create: lines.map((l, idx) => ({ ...l, rowOrder: idx })) },
         },
       }),
