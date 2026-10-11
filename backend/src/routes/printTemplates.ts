@@ -4,9 +4,11 @@ import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
+import type { AuthedRequest } from "../middleware/auth";
 import { DEFAULT_PRINT_TEMPLATES } from "../data/printDefaultTemplates";
 import { ensureDefaultPrintTemplates, getDesignSchema, getPrintDocType, PRINT_DOC_TYPES, printLayout, renderPrintDocument, renderSavedTemplate } from "../services/printService";
 import { defaultDesign, normalizeDesign } from "../services/printDesign";
+import { createShareLink, listShareLinks, revokeShareLink, SHARE_DEFAULT_DAYS } from "../services/printShareService";
 
 // «قالب‌های چاپ» (تنظیمات › عملیات) + «چاپ سند» (دکمه‌ی چاپ فرم‌ها). قالب = HTML/CSS با متغیرهای Handlebars (services/printService.ts).
 // چاپ هر سند فقط مجوز «مشاهده»ی همان سند را می‌خواهد؛ طراحی قالب مجوز فرم «قالب‌های چاپ» را.
@@ -288,25 +290,69 @@ router.get("/print/:docType/templates", guardByType, async (req, res) => {
   res.json(rows.map((t) => ({ id: t.id, title: t.title, isDefault: t.isDefault, paper: t.paper, orientation: t.orientation, digits: t.digits })));
 });
 
+/** قالب انتخاب‌شده (یا پیش‌فرض نوع سند) را اعتبارسنجی می‌کند و شناسه‌اش را می‌دهد */
+async function resolveTemplateId(docType: string, raw: unknown): Promise<number> {
+  await ensureDefaultPrintTemplates();
+  const requested = raw ? Number(raw) : null;
+  if (!requested) {
+    const def = await prisma.printTemplate.findFirst({ where: { documentType: docType as any, isDefault: true, isActive: true } });
+    if (!def) throw new Error("قالب پیش‌فرضی برای این نوع سند تعریف نشده است");
+    return def.id;
+  }
+  const t = await prisma.printTemplate.findUnique({ where: { id: requested } });
+  if (!t || t.documentType !== docType) throw new Error("قالب انتخاب‌شده برای این نوع سند نیست");
+  if (!t.isActive) throw new Error("قالب انتخاب‌شده غیرفعال است");
+  return t.id;
+}
+
+function parseDigits(raw: unknown): "LATIN" | "PERSIAN" | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const d = String(raw);
+  if (!DIGITS.includes(d)) throw new Error("نوع ارقام نامعتبر است");
+  return d as "LATIN" | "PERSIAN";
+}
+
 router.get("/print/:docType/:id/render", guardByType, async (req, res) => {
   try {
-    await ensureDefaultPrintTemplates();
-    const docType = String(req.params.docType);
-    let templateId = req.query.templateId ? Number(req.query.templateId) : null;
-    if (!templateId) {
-      const def = await prisma.printTemplate.findFirst({ where: { documentType: docType as any, isDefault: true, isActive: true } });
-      if (!def) throw new Error("قالب پیش‌فرضی برای این نوع سند تعریف نشده است");
-      templateId = def.id;
-    } else {
-      const t = await prisma.printTemplate.findUnique({ where: { id: templateId } });
-      if (!t || t.documentType !== docType) throw new Error("قالب انتخاب‌شده برای این نوع سند نیست");
-      if (!t.isActive) throw new Error("قالب انتخاب‌شده غیرفعال است");
-    }
-    const digits = req.query.digits === undefined || req.query.digits === "" ? undefined : String(req.query.digits);
-    if (digits !== undefined && !DIGITS.includes(digits)) throw new Error("نوع ارقام نامعتبر است");
-    res.json(await renderSavedTemplate(templateId, Number(req.params.id), digits as any));
+    const templateId = await resolveTemplateId(String(req.params.docType), req.query.templateId);
+    res.json(await renderSavedTemplate(templateId, Number(req.params.id), parseDigits(req.query.digits)));
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در تولید چاپ" });
+  }
+});
+
+// ─── لینک اشتراک‌گذاری با مشتری (عکس‌فوری HTML با انقضا؛ نمایش عمومی در routes/printShare.ts) ───
+
+router.get("/print/:docType/:id/share-links", guardByType, async (req, res) => {
+  res.json(await listShareLinks(String(req.params.docType), Number(req.params.id)));
+});
+
+// توکن فقط در همین پاسخ برمی‌گردد (در دیتابیس فقط هش آن است)
+router.post("/print/:docType/:id/share-links", guardByType, async (req: any, res) => {
+  try {
+    const docType = String(req.params.docType);
+    const templateId = await resolveTemplateId(docType, req.body?.templateId);
+    const days = req.body?.days === undefined ? SHARE_DEFAULT_DAYS : Number(req.body.days);
+    const r = await createShareLink({
+      documentType: docType,
+      sourceId: Number(req.params.id),
+      templateId,
+      digits: parseDigits(req.body?.digits),
+      days,
+      userId: (req as AuthedRequest).user?.id ?? null,
+    });
+    res.status(201).json(r);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در ساخت لینک" });
+  }
+});
+
+router.post("/print/:docType/:id/share-links/:linkId/revoke", guardByType, async (req, res) => {
+  try {
+    await revokeShareLink(String(req.params.docType), Number(req.params.id), Number(req.params.linkId));
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در لغو لینک" });
   }
 });
 

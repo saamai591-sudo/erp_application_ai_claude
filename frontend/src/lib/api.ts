@@ -10,6 +10,11 @@ import { scheduleAutoToast } from "./toast";
 
 const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:4000/api`;
 
+/** آدرس کاملِ (قابل‌اشتراک) یک مسیر API، مثل لینک نمایش عمومی سند: https://دامنه/api/share/… */
+export function absoluteApiUrl(path: string): string {
+  return new URL(`${API_URL}${path}`, window.location.origin).href;
+}
+
 export class ApiError extends Error {
   warning?: boolean;
   /** فرمت استاندارد خطای عملیات دسته‌ای (bulk) — وقتی بک‌اند به‌جای یک پیام تکی، فهرست ساختاریافته‌ای

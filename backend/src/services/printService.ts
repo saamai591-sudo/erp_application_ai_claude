@@ -567,6 +567,8 @@ export interface RenderInput {
   /** نوع سند و تنظیمات «طراح ساده»؛ اگر نوع طراح داشته باشد متغیر design به قالب داده می‌شود */
   documentType?: string;
   design?: unknown;
+  /** برای عکس‌فوریِ لینک اشتراک‌گذاری: فونت داخل HTML نمی‌آید و جایش یک نشانگر می‌ماند (hydrateSharedHtml هنگام نمایش پرش می‌کند) */
+  fontPlaceholder?: boolean;
 }
 
 let fontCss: string | null = null;
@@ -616,6 +618,26 @@ export function buildPrintFileName(pattern: string, data: PrintData, fallback: s
 
 const CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:";
 
+// ─── عکس‌فوری برای لینک اشتراک‌گذاری ────────────────────────────────────────────
+// فونت (چند صد کیلوبایت base64) و لوگو/مهر شرکت در هر عکس‌فوری ذخیره نمی‌شود؛ به‌جایشان نشانگر می‌ماند و هنگام نمایش از نسخه‌ی مشترک
+// (فایل فونت و آخرین لوگو/مهر) پر می‌شود. بقیه‌ی محتوا (مبالغ، اقلام، نام‌ها) همان لحظه‌ی ساخت لینک ثابت می‌ماند.
+const SHARE_FONT_MARK = "/*__ERP_FONT__*/";
+const SHARE_LOGO_MARK = "__ERP_LOGO__";
+const SHARE_STAMP_MARK = "__ERP_STAMP__";
+
+/** CSP داخل سند (meta) و عبارتی که صفحه‌ی اشتراک‌گذاری برای افزودن اسکریپتِ nonce‌دارِ دکمه‌ی چاپ جایگزین می‌کند */
+export const PRINT_CSP_META = `<meta http-equiv="Content-Security-Policy" content="${CSP}">`;
+
+/** نشانگرهای فونت/لوگو/مهر را با داده‌ی فعلی پر می‌کند */
+export async function hydrateSharedHtml(html: string): Promise<string> {
+  let out = html.split(SHARE_FONT_MARK).join(embeddedFontCss());
+  if (out.includes(SHARE_LOGO_MARK) || out.includes(SHARE_STAMP_MARK)) {
+    const c = await prisma.companyProfile.findUnique({ where: { id: 1 }, include: { logoAsset: true, stampAsset: true } });
+    out = out.split(SHARE_LOGO_MARK).join(dataUri(c?.logoAsset)).split(SHARE_STAMP_MARK).join(dataUri(c?.stampAsset));
+  }
+  return out;
+}
+
 /** سند HTML کامل برای چاپ؛ خطای نحوی قالب با پیام فارسی پرتاب می‌شود */
 export function renderPrintDocument(input: RenderInput, data: PrintData): string {
   let body: string;
@@ -630,7 +652,7 @@ export function renderPrintDocument(input: RenderInput, data: PrintData): string
   const margin = Math.max(0, Math.min(40, Number(input.marginMm) || 0));
   const digits: PrintDigitsMode = input.digits === "PERSIAN" ? "PERSIAN" : "LATIN";
   if (digits === "PERSIAN") body = toPersianDigitsInHtml(body);
-  return `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(input.title ?? "")}</title><style>${embeddedFontCss()}
+  return `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(input.title ?? "")}</title><style>${input.fontPlaceholder ? SHARE_FONT_MARK : embeddedFontCss()}
 @page { size: ${size}; margin: ${margin}mm; }
 html, body { margin: 0; padding: 0; }
 /* پیش‌نمایش روی صفحه هم حاشیه‌ی چاپی را نشان بدهد (در چاپ، @page حاشیه را اعمال می‌کند) */
@@ -639,16 +661,27 @@ body { font-family: "Vazirmatn", Tahoma, sans-serif; font-size: 9pt; color: #111
 </style></head><body>${body}</body></html>`;
 }
 
-export async function renderSavedTemplate(templateId: number, sourceId: number, digits?: PrintDigitsMode): Promise<{ html: string; title: string; fileName: string }> {
+export async function renderSavedTemplate(
+  templateId: number,
+  sourceId: number,
+  digits?: PrintDigitsMode,
+  opts?: { forShare?: boolean }
+): Promise<{ html: string; title: string; fileName: string }> {
   const tpl = await prisma.printTemplate.findUnique({ where: { id: templateId } });
   if (!tpl) throw new Error("قالب چاپ یافت نشد");
   const def = getPrintDocType(tpl.documentType);
   const data = await def.load(sourceId, printLayout(tpl.paper, tpl.orientation, tpl.marginMm));
   const texts: Record<string, string> = (tpl.texts as any) ?? {};
   const fileName = buildPrintFileName(texts.fileName ?? "", data, def.defaultFileName);
-  const html = renderPrintDocument(
-    { title: fileName, html: tpl.html, texts, paper: tpl.paper, orientation: tpl.orientation, marginMm: tpl.marginMm, digits: digits ?? tpl.digits, documentType: tpl.documentType, design: tpl.design },
+  let html = renderPrintDocument(
+    { title: fileName, html: tpl.html, texts, paper: tpl.paper, orientation: tpl.orientation, marginMm: tpl.marginMm, digits: digits ?? tpl.digits, documentType: tpl.documentType, design: tpl.design, fontPlaceholder: !!opts?.forShare },
     data
   );
+  if (opts?.forShare) {
+    const logo: string = data.company?.logo ?? "";
+    const stamp: string = data.company?.stamp ?? "";
+    if (logo) html = html.split(logo).join(SHARE_LOGO_MARK);
+    if (stamp) html = html.split(stamp).join(SHARE_STAMP_MARK);
+  }
   return { html, title: `${def.title} ${data.doc?.number ?? ""}`.trim(), fileName };
 }

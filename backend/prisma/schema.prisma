@@ -4414,6 +4414,28 @@ model PrintTemplate {
   @@unique([documentType, title])
 }
 
+/// لینک اشتراک‌گذاریِ یک سند چاپی با مشتری: توکن تصادفی (فقط هش SHA-256 ذخیره می‌شود)، عکس‌فوریِ gzip‌شده‌ی HTML (بدون فونت و لوگو/مهر؛
+/// هنگام نمایش از نسخه‌ی مشترک پر می‌شوند)، تاریخ انقضا و آمار بازدید. محتوا بعد از انقضا/لغو پاک می‌شود (contentGz = null) و ردیف برای آمار می‌ماند
+model PrintShareLink {
+  id            Int               @id @default(autoincrement())
+  tokenHash     String            @unique
+  documentType  PrintDocumentType
+  sourceId      Int
+  title         String
+  fileName      String
+  contentGz     Bytes?
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  createdById   Int?
+  createdAt     DateTime          @default(now())
+  firstViewedAt DateTime?
+  lastViewedAt  DateTime?
+  viewCount     Int               @default(0)
+
+  @@index([documentType, sourceId])
+  @@index([expiresAt])
+}
+
 /// لایسنس این نصب (یک ردیف، id=1): شناسه‌ی نصب برنامه (اولین بالا آمدن ساخته می‌شود) و متن فایل لایسنس امضاشده‌ی ثبت‌شده
 model AppLicense {
   id          Int       @id @default(1)

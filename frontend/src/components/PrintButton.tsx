@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Modal } from "./Modal";
-import { api, ApiError } from "../lib/api";
+import { absoluteApiUrl, api, ApiError } from "../lib/api";
+import { formatJalaliDate } from "../lib/formatDate";
 
 // دکمه‌ی «چاپ» نوار ابزار فرم‌ها (toolbarExtra): قالب‌های فعالِ همان نوع سند را می‌آورد، سند را با قالب انتخابی در سرور رندر می‌کند و در
 // یک iframe بدون اسکریپت (sandbox + CSP داخل خود سند) نشان می‌دهد؛ «چاپ» همان iframe را با چاپ مرورگر می‌فرستد (اندازه‌ی کاغذ را @page خود قالب تعیین می‌کند).
@@ -47,6 +48,141 @@ export function printFrame(frame: HTMLIFrameElement | null, fileName?: string) {
   if (fileName) setTimeout(restore, 60_000);
 }
 
+interface ShareLinkRow {
+  id: number;
+  status: "ACTIVE" | "EXPIRED" | "REVOKED";
+  createdAt: string;
+  createdByName: string;
+  expiresAt: string;
+  firstViewedAt: string | null;
+  lastViewedAt: string | null;
+  viewCount: number;
+}
+
+const SHARE_STATUS_FA: Record<ShareLinkRow["status"], string> = { ACTIVE: "فعال", EXPIRED: "منقضی", REVOKED: "لغوشده" };
+
+/**
+ * لینک اشتراک‌گذاری با مشتری: از همین قالب/ارقامِ انتخاب‌شده یک عکس‌فوری می‌سازد که مشتری بدون ورود تا تاریخ انقضا می‌بیند.
+ * لینک فقط همین لحظه‌ی ساخت نمایش داده می‌شود (سرور فقط هش آن را نگه می‌دارد)؛ گم‌شده را باید دوباره ساخت.
+ */
+function ShareDialog({ docType, sourceId, templateId, digits, title, onClose }: { docType: string; sourceId: number; templateId: number | null; digits: string; title: string; onClose: () => void }) {
+  const [days, setDays] = useState(7);
+  const [links, setLinks] = useState<ShareLinkRow[]>([]);
+  const [created, setCreated] = useState<{ url: string; expiresAt: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const base = `/print/${docType}/${sourceId}/share-links`;
+
+  const load = () =>
+    api.get(base).then((r: ShareLinkRow[]) => setLinks(r)).catch((e) => setError((e as ApiError).message));
+  useEffect(() => {
+    load();
+  }, [docType, sourceId]);
+
+  async function create() {
+    setBusy(true);
+    setError(null);
+    setCopied(false);
+    try {
+      const r = await api.post(base, { templateId, digits: digits || undefined, days }, { silent: true });
+      setCreated({ url: absoluteApiUrl(`/share/${r.token}`), expiresAt: r.expiresAt });
+      await load();
+    } catch (e) {
+      setError((e as ApiError).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revoke(id: number) {
+    if (!window.confirm("این لینک لغو شود؟ مشتری دیگر نمی‌تواند آن را باز کند.")) return;
+    try {
+      await api.post(`${base}/${id}/revoke`, {}, { silent: true });
+      await load();
+    } catch (e) {
+      setError((e as ApiError).message);
+    }
+  }
+
+  async function copy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      // مرورگرهای بدون clipboard: کاربر متن را دستی انتخاب می‌کند
+      setCopied(false);
+    }
+  }
+
+  return (
+    <Modal title="لینک اشتراک‌گذاری با مشتری" onClose={onClose} wide>
+      <p style={{ marginTop: 0 }}>
+        مشتری با این لینک نسخه‌ی همین لحظه‌ی سند را بدون ورود به سیستم می‌بیند و تا تاریخ انقضا می‌تواند چاپ یا PDF بگیرد.
+        ویرایش بعدی سند، لینک ساخته‌شده را تغییر نمی‌دهد.
+      </p>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+        <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          مدت اعتبار
+          <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
+            {[1, 3, 7, 14, 30, 60].map((d) => (
+              <option key={d} value={d}>{d} روز</option>
+            ))}
+          </select>
+        </label>
+        <button type="button" className="btn" disabled={busy || templateId === null} onClick={create}>ساخت لینک</button>
+        <span style={{ flex: 1 }} />
+        <button type="button" className="btn secondary" onClick={onClose}>بستن</button>
+      </div>
+      {error && <div className="alert error" style={{ marginBottom: 8 }}>{error}</div>}
+      {created && (
+        <div className="alert" style={{ marginBottom: 8 }}>
+          <div style={{ marginBottom: 6 }}>لینک ساخته شد (تا {formatJalaliDate(created.expiresAt)} معتبر است). این لینک فقط همین‌جا نمایش داده می‌شود:</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <input readOnly dir="ltr" value={created.url} style={{ flex: 1, minWidth: 260 }} onFocus={(e) => e.currentTarget.select()} />
+            <button type="button" className="btn" onClick={() => copy(created.url)}>{copied ? "کپی شد" : "کپی"}</button>
+            <a className="btn secondary" target="_blank" rel="noreferrer" href={`https://t.me/share/url?url=${encodeURIComponent(created.url)}&text=${encodeURIComponent(title)}`}>تلگرام</a>
+            <a className="btn secondary" target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(title + "\n" + created.url)}`}>واتساپ</a>
+          </div>
+        </div>
+      )}
+      <h4 style={{ margin: "12px 0 6px" }}>لینک‌های ساخته‌شده برای این سند</h4>
+      {links.length === 0 ? (
+        <div style={{ color: "var(--muted, #666)" }}>هنوز لینکی ساخته نشده است.</div>
+      ) : (
+        <table className="data-table" style={{ width: "100%" }}>
+          <thead>
+            <tr>
+              <th>وضعیت</th>
+              <th>ساخته‌شده</th>
+              <th>توسط</th>
+              <th>انقضا</th>
+              <th>بازدید</th>
+              <th>اولین بازدید</th>
+              <th>آخرین بازدید</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {links.map((l) => (
+              <tr key={l.id}>
+                <td>{SHARE_STATUS_FA[l.status]}</td>
+                <td>{formatJalaliDate(l.createdAt)}</td>
+                <td>{l.createdByName || "—"}</td>
+                <td>{formatJalaliDate(l.expiresAt)}</td>
+                <td>{l.viewCount}</td>
+                <td>{formatJalaliDate(l.firstViewedAt)}</td>
+                <td>{formatJalaliDate(l.lastViewedAt)}</td>
+                <td>{l.status === "ACTIVE" && <button type="button" className="btn secondary" onClick={() => revoke(l.id)}>لغو</button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Modal>
+  );
+}
+
 function PrintDialog({ docType, sourceId, onClose }: { docType: string; sourceId: number; onClose: () => void }) {
   const [templates, setTemplates] = useState<TemplateOption[]>([]);
   const [templateId, setTemplateId] = useState<number | null>(null);
@@ -56,6 +192,7 @@ function PrintDialog({ docType, sourceId, onClose }: { docType: string; sourceId
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [shareOpen, setShareOpen] = useState(false);
   const frameRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
@@ -120,12 +257,16 @@ function PrintDialog({ docType, sourceId, onClose }: { docType: string; sourceId
           </select>
         </label>
         <span style={{ flex: 1 }} />
+        <button type="button" className="btn secondary" disabled={!html || loading || templateId === null} onClick={() => setShareOpen(true)}>اشتراک‌گذاری با مشتری</button>
         <button type="button" className="btn" disabled={!html || loading} onClick={() => printFrame(frameRef.current, fileName)}>چاپ</button>
         <button type="button" className="btn secondary" onClick={onClose}>بستن</button>
       </div>
       {error && <div className="alert error" style={{ marginBottom: 8 }}>{error}</div>}
       {loading && !error && <div style={{ padding: 12 }}>در حال آماده‌سازی…</div>}
       {html && !error && <PrintFrame html={html} frameRef={frameRef} />}
+      {shareOpen && (
+        <ShareDialog docType={docType} sourceId={sourceId} templateId={templateId} digits={digits} title={fileName} onClose={() => setShareOpen(false)} />
+      )}
     </Modal>
   );
 }

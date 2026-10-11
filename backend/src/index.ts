@@ -73,6 +73,7 @@ import taxInvoiceRoutes from "./routes/taxInvoices";
 import scheduledJobRoutes from "./routes/scheduledJobs";
 import companyProfileRoutes from "./routes/companyProfile";
 import printTemplateRoutes from "./routes/printTemplates";
+import printShareRoutes from "./routes/printShare";
 import managementRoutes from "./routes/management";
 import { licenseGate } from "./license/licenseGate";
 import managementBackupRoutes from "./routes/managementBackup";
@@ -151,6 +152,8 @@ app.use("/api", licenseGate);
 
 // عمومی (بدون نیاز به ورود)
 app.use("/api/auth", authRoutes);
+// نمایش عمومی لینک اشتراک‌گذاری سند چاپی (توکن تصادفی؛ فقط همان یک عکس‌فوری)
+app.use("/api/share", printShareRoutes);
 
 // همه مسیرهای زیر نیازمند احراز هویت هستند
 app.use("/api", requireAuth);
