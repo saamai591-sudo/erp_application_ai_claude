@@ -8,6 +8,8 @@
 (نگاه کنید به بخش «انتشار نسخه» در `CLAUDE.md`).
 
 ## [Unreleased]
+
+## [1.30.0] - 2026-10-11
 ### Changed
 - **ایمیج‌های تحویل کامپایل‌شده**: backend فقط بایت‌کد V8 دارد (نه سورس TypeScript، نه JS خوانا، نه tsx/typescript) و frontend خروجی build با nginx ثابت است (نه dev-server ویت؛ بدون source map). آدرس API در زمان اجرا از متغیر `VITE_API_URL` کانتینر در `config.js` نوشته می‌شود و `ALLOWED_HOSTS` دیگر لازم نیست (نصب‌های قبلی: خط mount فایل `vite.config.ts` را از `docker-compose.override.yml` بردارید). ساخت: `node scripts/build-release.mjs`. کانتینر frontend همچنان روی پورت ۵۱۷۳ گوش می‌دهد.
 
