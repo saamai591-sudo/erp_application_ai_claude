@@ -28,6 +28,9 @@ import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, vali
 import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
 import { useVatRates, vatRateForDate } from "../lib/useVatRates";
 import { DescriptionField } from "../components/DescriptionField";
+import { stageFormPrefill, takeFormPrefill } from "../lib/formPrefill";
+import { useTabs } from "../lib/TabsContext";
+import { usePermissions } from "../lib/usePermissions";
 
 // «پیش‌فاکتور» — بالاترین سند زنجیره فروش (پیش‌فاکتور > سفارش فروش > حواله فروش > فاکتور فروش)؛ این
 // ماژول هیچ مستند تحلیل اختصاصی در پروژه ندارد (رجوع کنید به یادداشت بالای schema.prisma و
@@ -158,6 +161,33 @@ function SalesQuoteList() {
 
 interface RowState { goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; discount: string; vatAmount: string; description: string }
 
+/** داده‌ی «تکثیر پیش‌فاکتور» که فرم مبدأ در حافظه می‌گذارد و تبِ «جدید» برمی‌دارد (lib/formPrefill.ts) */
+interface QuoteDuplicatePrefill {
+  sourceDate: string;
+  validDays: number | null;
+  customerId: string;
+  salesTypeId: string;
+  salesCenterId: string;
+  currencyId: string;
+  description: string;
+  rows: RowState[];
+}
+
+function addDaysIso(iso: string, days: number): string {
+  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function DuplicateIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="2" />
+      <path d="M5 15V6a2 2 0 012-2h9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function emptyRow(): RowState {
   return { goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "" };
 }
@@ -180,6 +210,8 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
   useDefaultBaseCurrency({ enabled: !editId && loaded, currencies, current: header.currencyId, apply: (id) => setHeader((h) => ({ ...h, currencyId: id })) });
   const [fiscalPeriod, setFiscalPeriod] = useState<FiscalPeriodRange | null>(null);
   const { flash } = useSavedFlash();
+  const { openTab } = useTabs();
+  const { hasPermission } = usePermissions();
 
   useEffect(() => {
     async function init() {
@@ -231,6 +263,56 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
+
+  // «تکثیر» (دکمه‌ی نوار ابزار پیش‌فاکتورِ ذخیره‌شده): تبِ «جدید» با همان مشتری/نوع و مرکز فروش/ارز/شرح و ردیف‌ها باز می‌شود، با تاریخ پیش‌فرض امروز، بدون شماره
+  // و در وضعیت ثبت‌نشده؛ سندی ساخته نمی‌شود تا کاربر «ذخیره» بزند (POST معمولی با همه‌ی اعتبارسنجی‌های سرور). تاریخ اعتبار با همان فاصله‌ی قبلی از تاریخ سند
+  // به تاریخ جدید منتقل می‌شود. اگر نرخ ارزش افزوده در تاریخ جدید با تاریخ سند مبدأ فرق داشته باشد، ارزش افزوده‌ی ردیف‌ها دوباره پیشنهاد می‌شود.
+  useEffect(() => {
+    if (!loaded || editId) return;
+    const p = takeFormPrefill<QuoteDuplicatePrefill>(location.pathname);
+    if (!p) return;
+    setHeader((h) => ({
+      ...h,
+      customerId: p.customerId,
+      salesTypeId: p.salesTypeId,
+      salesCenterId: p.salesCenterId,
+      currencyId: p.currencyId,
+      description: p.description,
+      validUntil: p.validDays !== null && h.date ? addDaysIso(h.date, p.validDays) : "",
+    }));
+    const rateChanged = vatRateForDate(vatRates, p.sourceDate) !== vatRateForDate(vatRates, header.date);
+    const dec = currencies.find((c) => String(c.id) === p.currencyId)?.decimalPlaces ?? 2;
+    setRows(
+      p.rows.length === 0
+        ? [emptyRow()]
+        : p.rows.map((r) => {
+            if (!rateChanged || !r.goodsItemId) return { ...r };
+            const item = goodsItems.find((g) => g.id === Number(r.goodsItemId));
+            const vat = computeLineVat(Number(r.amount) || 0, Number(r.discount) || 0, resolveVatRatePercent(item, vatRateForDate(vatRates, header.date)), dec);
+            return { ...r, vatAmount: String(vat) };
+          })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+
+  function duplicateQuote() {
+    const validDays =
+      header.validUntil && header.date
+        ? Math.round((new Date(`${header.validUntil.slice(0, 10)}T00:00:00Z`).getTime() - new Date(`${header.date.slice(0, 10)}T00:00:00Z`).getTime()) / 86_400_000)
+        : null;
+    const payload: QuoteDuplicatePrefill = {
+      sourceDate: header.date,
+      validDays: validDays !== null && validDays >= 0 ? validDays : null,
+      customerId: header.customerId,
+      salesTypeId: header.salesTypeId,
+      salesCenterId: header.salesCenterId,
+      currencyId: header.currencyId,
+      description: header.description,
+      rows: rows.filter((r) => r.goodsItemId).map((r) => ({ ...r })),
+    };
+    stageFormPrefill("/sales-quotes/new", payload);
+    openTab("/sales-quotes/new");
+  }
 
   const status: Status = meta?.status || "DRAFT";
   const locked = status !== "DRAFT";
@@ -374,6 +456,11 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
       toolbarExtra={editId ? (
         <>
           <PrintButton docType="SALES_QUOTE" sourceId={editId} title="چاپ پیش‌فاکتور" />
+          {hasPermission("sales.operations.sales-quotes.create") && (
+            <button type="button" className="toolbar-icon-btn" onClick={duplicateQuote} title="تکثیر پیش‌فاکتور (نسخه‌ی جدید با تاریخ امروز، ذخیره‌نشده)">
+              <DuplicateIcon />
+            </button>
+          )}
           <DownstreamMenu actions={QUOTE_DOWNSTREAM_ACTIONS} sourceId={editId} disabledReason={status !== "APPROVED" ? "پیش‌فاکتور تایید نشده است؛ ابتدا آن را تایید کنید" : null} />
         </>
       ) : undefined}
