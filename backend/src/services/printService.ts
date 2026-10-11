@@ -15,6 +15,8 @@ import { buildJournalPrint, journalCapacityMm, type JeAccountNode, type JeLineIn
 // مجوز «قالب‌های چاپ» می‌نویسد و چون خروجی در iframe با sandbox (بدون allow-scripts) و CSP بدون script نمایش داده می‌شود، اسکریپت اجرا نمی‌شود.
 
 const hb = Handlebars.create();
+// {{#if (eq a b)}} در قالب‌ها (مثلاً مقایسه‌ی کلید ستون در سطر جمع)
+hb.registerHelper("eq", (a: unknown, b: unknown) => a === b);
 
 export interface PrintFieldDoc {
   path: string;
@@ -355,6 +357,7 @@ const DOC_FIELDS_JOURNAL: PrintFieldDoc[] = [
   { path: "totals.inWords", title: "جمع سند به حروف (با نام ارز پایه)", group: "جمع‌ها" },
   { path: "lines", title: "ردیف‌های ساده‌ی سند بدون گروه‌بندی (داخل {{#each lines}}؛ row، accountCode، accountTitle، detail1Code/Title … description، debit، credit)", group: "ردیف‌ها", list: true },
   { path: "layout.contentHeightMm", title: "ارتفاع کاربردی صفحه (میلی‌متر؛ از کاغذ، جهت و حاشیه‌ی قالب)", group: "صفحه‌ها" },
+  { path: "design", title: "تنظیمات «طراح ساده» (design.columns، design.vlines، design.footer، design.accent، design.fontPt، design.show.signatures)", group: "طراحی" },
 ];
 
 async function loadJournalEntry(id: number, layout: PrintLayout = DEFAULT_LAYOUT): Promise<PrintData> {
@@ -454,6 +457,22 @@ const SALES_DOC_DESIGN: PrintDesignSchema = {
   ],
 };
 
+/** طراح ساده‌ی سند حسابداری: ستون‌های جدول (نمایش/ترتیب/عنوان/عرض نسبی) و نمایش امضاها؛ کلید ستون = فیلد سطرهای صفحه */
+const JOURNAL_DESIGN: PrintDesignSchema = {
+  accent: "#ffffff",
+  fontPt: 8.5,
+  normalizeWidths: true,
+  columns: [
+    { key: "no", title: "ردیف", widthPct: 6, visible: true, cls: "c-no" },
+    { key: "code", title: "شماره حساب", widthPct: 14, visible: true, cls: "c-acc" },
+    { key: "text", title: "شرح", widthPct: 38, visible: true, cls: "c-text" },
+    { key: "part", title: "مبلغ جزء", widthPct: 14, visible: true, cls: "c-n" },
+    { key: "debit", title: "بدهکار", widthPct: 14, visible: true, cls: "c-n", sum: true },
+    { key: "credit", title: "بستانکار", widthPct: 14, visible: true, cls: "c-n", sum: true },
+  ],
+  sections: [{ key: "signatures", title: "امضاها (تهیه/بررسی/تایید/تصویب کننده)", visible: true }],
+};
+
 export function getDesignSchema(type: string): PrintDesignSchema | undefined {
   return PRINT_DOC_TYPES[type]?.designSchema;
 }
@@ -493,6 +512,7 @@ PRINT_DOC_TYPES.SALES_INVOICE = {
 };
 
 PRINT_DOC_TYPES.JOURNAL_ENTRY = {
+  designSchema: JOURNAL_DESIGN,
   title: "سند حسابداری",
   fields: [...DOC_FIELDS_JOURNAL, ...COMPANY_FIELDS],
   textKeys: [

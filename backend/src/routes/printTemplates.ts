@@ -112,7 +112,9 @@ router.get("/print-templates/meta", can(`${FORM}.view`), async (_req, res) => {
       fields: d.fields,
       textKeys: d.textKeys,
       // طراح ساده: تعریف ستون‌ها/بخش‌ها (برای نمایش فرم) و طراحی پیش‌فرض؛ نبودنش = این نوع طراح ندارد
-      designSchema: d.designSchema ? { columns: d.designSchema.columns, sections: d.designSchema.sections, defaults: defaultDesign(d.designSchema) } : null,
+      designSchema: d.designSchema
+        ? { columns: d.designSchema.columns, sections: d.designSchema.sections, normalizeWidths: !!d.designSchema.normalizeWidths, defaults: defaultDesign(d.designSchema) }
+        : null,
     }))
   );
 });

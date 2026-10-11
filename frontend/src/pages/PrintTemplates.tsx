@@ -26,6 +26,7 @@ interface Design { accent: string; fontPt: number; columns: DesignColumn[]; sect
 interface DesignSchemaMeta {
   columns: { key: string; title: string }[];
   sections: { key: string; title: string; locked?: boolean }[];
+  normalizeWidths?: boolean;
   defaults: Design;
 }
 interface DocTypeMeta { type: string; title: string; fields: FieldDoc[]; textKeys: { key: string; title: string }[]; designSchema: DesignSchemaMeta | null }
@@ -399,6 +400,7 @@ function TemplateForm({ editId }: { editId?: number }) {
                       ))}
                     </tbody>
                   </table>
+                  {designSchema.normalizeWidths && <div style={{ fontSize: 11, color: "#666", marginTop: 4 }}>عرض‌ها نسبی‌اند؛ جمع ستون‌های نمایش‌داده‌شده خودکار به ۱۰۰٪ می‌رسد.</div>}
                 </div>
                 <div>
                   <div style={{ fontWeight: 700, marginBottom: 4 }}>بخش‌های صفحه</div>

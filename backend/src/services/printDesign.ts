@@ -15,6 +15,8 @@ export interface DesignColumnDef {
   numeric?: boolean;
   /** ستون متنیِ بلند (راست‌چین) */
   text?: boolean;
+  /** کلاس CSS سلول (اگر قالب کلاس‌های خودش را دارد؛ جایگزین کلاس مشتق‌شده از text/numeric) */
+  cls?: string;
 }
 
 export interface DesignSectionDef {
@@ -28,6 +30,8 @@ export interface DesignSectionDef {
 export interface PrintDesignSchema {
   accent: string;
   fontPt: number;
+  /** عرض ستون‌های دیده‌شده به نسبت و با جمع ۱۰۰٪ نرمال می‌شود و خطوط عمودی جدول (design.vlines) محاسبه می‌شود؛ ستون عرضِ «خودکار» ندارد */
+  normalizeWidths?: boolean;
   columns: DesignColumnDef[];
   sections: DesignSectionDef[];
 }
@@ -116,28 +120,40 @@ export function buildDesignContext(schema: PrintDesignSchema, raw: unknown, tota
   const d = normalizeDesign(schema, raw);
   const defs = new Map(schema.columns.map((c) => [c.key, c]));
 
-  const columns = d.columns
-    .filter((c) => c.visible)
-    .map((c) => {
-      const def = defs.get(c.key)!;
-      return {
-        key: c.key,
-        title: c.title,
-        width: c.widthPct > 0 ? `${c.widthPct}%` : "",
-        cls: def.text ? "t" : def.numeric ? "n" : "",
-        sum: !!def.sum,
-      };
-    });
+  const visible = d.columns.filter((c) => c.visible);
+  // عرض نرمال‌شده (به نسبت، جمع ۱۰۰٪)؛ عرض ۰ → عرض پیش‌فرض ستون
+  const rel = visible.map((c) => (c.widthPct > 0 ? c.widthPct : defs.get(c.key)!.widthPct || 10));
+  const relSum = rel.reduce((a, b) => a + b, 0) || 1;
+  const columns = visible.map((c, i) => {
+    const def = defs.get(c.key)!;
+    return {
+      key: c.key,
+      title: c.title,
+      width: schema.normalizeWidths ? `${Math.round((rel[i] / relSum) * 10000) / 100}%` : c.widthPct > 0 ? `${c.widthPct}%` : "",
+      cls: def.cls ?? (def.text ? "t" : def.numeric ? "n" : ""),
+      sum: !!def.sum,
+    };
+  });
+  // فاصله‌ی خط عمودی بعد از هر ستون (به‌جز آخری) از لبه‌ی راست؛ فقط برای جدول‌هایی که خودشان خط عمودی می‌کشند
+  const vlines: { offset: string }[] = [];
+  if (schema.normalizeWidths) {
+    let acc = 0;
+    for (let i = 0; i < visible.length - 1; i += 1) {
+      acc += rel[i];
+      vlines.push({ offset: `${Math.round((acc / relSum) * 10000) / 100}%` });
+    }
+  }
 
   // سطر جمع: سلول برچسب «جمع کل» روی ستون‌های ابتدایی (تا اولین ستون جمع‌شدنی)، سپس برای هر ستون یا جمع آن یا خالی
-  const footer: { span: number; text: string; cls: string }[] = [];
+  // سلول برچسب key خالی دارد؛ سلول‌های ستونی key و sum دارند (قالبی که جمع هر صفحه را جدا می‌خواهد با key مقدار خودش را می‌گذارد)
+  const footer: { span: number; text: string; cls: string; key: string; sum: boolean }[] = [];
   const firstSum = columns.findIndex((c) => c.sum);
   if (firstSum === -1) {
-    footer.push({ span: columns.length, text: "جمع کل", cls: "" });
+    footer.push({ span: columns.length, text: "جمع کل", cls: "", key: "", sum: false });
   } else {
-    if (firstSum > 0) footer.push({ span: firstSum, text: "جمع کل", cls: "" });
+    if (firstSum > 0) footer.push({ span: firstSum, text: "جمع کل", cls: "", key: "", sum: false });
     for (const c of columns.slice(firstSum)) {
-      footer.push({ span: 1, text: c.sum ? String(totals?.[c.key] ?? "") : "", cls: c.sum ? "n" : "" });
+      footer.push({ span: 1, text: c.sum ? String(totals?.[c.key] ?? "") : "", cls: c.sum ? "n" : "", key: c.key, sum: c.sum });
     }
   }
 
@@ -154,6 +170,7 @@ export function buildDesignContext(schema: PrintDesignSchema, raw: unknown, tota
     fontPt: d.fontPt,
     columns,
     columnCount: columns.length,
+    vlines,
     footer,
     show,
     order,

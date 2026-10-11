@@ -157,7 +157,7 @@ const SALES_INVOICE_HTML = SALES_QUOTE_HTML.replace(
 // ردیف‌های هر حساب کل یک بلوک‌اند (کل ← معین ← تفصیلی‌ها ← شرح و مبلغ جزء)؛ صفحه‌بندی را سرور انجام می‌دهد (printJournalEntry.ts).
 const JOURNAL_ENTRY_HTML = `<style>
   /* ارتفاع صفحه از کاغذ/جهت/حاشیه‌ی همین قالب می‌آید ({{layout.contentHeightMm}}). ظرفیت ردیف هر صفحه را سرور از همین ارتفاع و فضای سربرگ/پاورقیِ این قالب (حدود ۶۴ میلی‌متر) برآورد می‌کند؛ اگر سربرگ یا امضا را بزرگ‌تر کردید، خروجی به ورق بعد می‌رود و چیزی بریده نمی‌شود. */
-  .page { box-sizing: border-box; min-height: {{layout.contentHeightMm}}mm; border: 0.35mm solid #222; display: flex; flex-direction: column; position: relative; page-break-after: always; break-after: page; }
+  .page { box-sizing: border-box; min-height: {{layout.contentHeightMm}}mm; border: 0.35mm solid #222; display: flex; flex-direction: column; position: relative; page-break-after: always; break-after: page; font-size: {{design.fontPt}}pt; }
   .page:last-child { page-break-after: auto; break-after: auto; }
   .wm { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); white-space: nowrap; font-size: 80pt; font-weight: 700; color: rgba(0, 0, 0, 0.055); z-index: 0; pointer-events: none; }
   .hd { display: flex; justify-content: space-between; align-items: flex-start; padding: 3.5mm 4mm 2.5mm; min-height: 21mm; position: relative; z-index: 1; }
@@ -170,7 +170,7 @@ const JOURNAL_ENTRY_HTML = `<style>
   .hd .mid .ttl { font-size: 10.5pt; font-weight: 700; }
   .hd .mid .st { font-size: 9.5pt; font-weight: 700; }
   table.g { width: 100%; border-collapse: collapse; table-layout: fixed; position: relative; z-index: 1; }
-  table.g th { border-top: 0.35mm solid #222; border-bottom: 0.35mm solid #222; font-size: 9pt; font-weight: 700; padding: 1.1mm 0; text-align: center; }
+  table.g th { background: {{design.accent}}; color: {{design.accentText}}; border-top: 0.35mm solid #222; border-bottom: 0.35mm solid #222; font-size: 1.06em; font-weight: 700; padding: 1.1mm 0; text-align: center; }
   table.g td { padding: 0.45mm 1.6mm; font-size: 1em; line-height: 1.5; vertical-align: top; }
   .grid { position: relative; flex: 1; display: flex; flex-direction: column; }
   .grid .vl { position: absolute; top: 0; bottom: 0; width: 0; border-right: 0.25mm solid #222; z-index: 0; }
@@ -180,17 +180,17 @@ const JOURNAL_ENTRY_HTML = `<style>
   td.c-acc { text-align: center; }
   td.c-text { text-align: right; }
   td.c-n { text-align: center; direction: ltr; }
-  tr.r-kol td.c-acc, tr.r-kol td.c-text { text-decoration: underline; font-size: 8pt; }
+  tr.r-kol td.c-acc, tr.r-kol td.c-text { text-decoration: underline; font-size: 0.94em; }
   tr.r-kol td.c-n { font-weight: 700; }
   tr.r-mid td.c-acc, tr.r-mid td.c-text { font-size: 1em; }
-  tr.r-leaf td.c-acc, tr.r-leaf td.c-text { font-weight: 700; font-size: 9.5pt; }
+  tr.r-leaf td.c-acc, tr.r-leaf td.c-text { font-weight: 700; font-size: 1.12em; }
   tr.r-detail td.c-text { text-decoration: underline; }
   tr.r-desc td { padding-bottom: 1.6mm; }
   tr.r-kol td { padding-top: 1.6mm; }
   .ft { position: relative; z-index: 1; border-top: 0.35mm solid #222; }
-  table.g.sum td { font-size: 9pt; font-weight: 700; padding: 1.6mm 1.6mm; vertical-align: middle; }
+  table.g.sum td { font-size: 1.06em; font-weight: 700; padding: 1.6mm 1.6mm; vertical-align: middle; }
   table.g.sum td.c-n { text-align: center; }
-  .sign { display: flex; justify-content: space-between; padding: 2.5mm 4mm 2mm; min-height: 16mm; font-size: 9pt; font-weight: 700; border-top: 0.2mm solid #888; }
+  .sign { display: flex; justify-content: space-between; padding: 2.5mm 4mm 2mm; min-height: 16mm; font-size: 1.06em; font-weight: 700; border-top: 0.2mm solid #888; }
   .sign div { flex: 1; text-align: right; }
 </style>
 {{#if t.watermark}}<div class="wm">{{t.watermark}}</div>{{/if}}
@@ -212,17 +212,18 @@ const JOURNAL_ENTRY_HTML = `<style>
     </div>
   </div>
   <div class="grid">
-  <span class="vl" style="right:6%"></span><span class="vl" style="right:20%"></span><span class="vl" style="right:58%"></span><span class="vl" style="right:72%"></span><span class="vl" style="right:86%"></span>
+  {{!-- ستون‌ها، عرض‌ها و خطوط عمودی از «طراح ساده» (design) می‌آید --}}
+  {{#each @root.design.vlines}}<span class="vl" style="right:{{offset}}"></span>{{/each}}
   <table class="g">
-    <colgroup><col style="width:6%"><col style="width:14%"><col style="width:38%"><col style="width:14%"><col style="width:14%"><col style="width:14%"></colgroup>
-    <thead><tr><th>ردیف</th><th>شماره حساب</th><th>شرح</th><th>مبلغ جزء</th><th>بدهکار</th><th>بستانکار</th></tr></thead>
+    <colgroup>{{#each @root.design.columns}}<col style="width:{{width}}">{{/each}}</colgroup>
+    <thead><tr>{{#each @root.design.columns}}<th>{{title}}</th>{{/each}}</tr></thead>
   </table>
   <div class="body">
     <table class="g">
-      <colgroup><col style="width:6%"><col style="width:14%"><col style="width:38%"><col style="width:14%"><col style="width:14%"><col style="width:14%"></colgroup>
+      <colgroup>{{#each @root.design.columns}}<col style="width:{{width}}">{{/each}}</colgroup>
       <tbody>
         {{#each rows}}
-        <tr class="r-{{kind}}"><td class="c-no">{{no}}</td><td class="c-acc">{{code}}</td><td class="c-text">{{text}}</td><td class="c-n">{{part}}</td><td class="c-n">{{debit}}</td><td class="c-n">{{credit}}</td></tr>
+        <tr class="r-{{kind}}">{{#each @root.design.columns}}<td class="{{cls}}">{{lookup ../this key}}</td>{{/each}}</tr>
         {{/each}}
       </tbody>
     </table>
@@ -230,19 +231,25 @@ const JOURNAL_ENTRY_HTML = `<style>
   </div>
   <div class="ft">
     <table class="g sum">
-      <colgroup><col style="width:6%"><col style="width:14%"><col style="width:38%"><col style="width:14%"><col style="width:14%"><col style="width:14%"></colgroup>
+      <colgroup>{{#each @root.design.columns}}<col style="width:{{width}}">{{/each}}</colgroup>
       <tr>
-        <td colspan="4" class="c-text">{{#if isLast}}جمع: {{@root.totals.inWords}}{{else}}جمع این صفحه (ادامه در صفحه بعد){{/if}}</td>
-        <td class="c-n">{{#if isLast}}{{@root.totals.debit}}{{else}}{{debit}}{{/if}}</td>
-        <td class="c-n">{{#if isLast}}{{@root.totals.credit}}{{else}}{{credit}}{{/if}}</td>
+        {{#each @root.design.footer}}
+        {{#if key}}
+        <td class="c-n">{{#if sum}}{{#if (eq key "debit")}}{{#if ../isLast}}{{@root.totals.debit}}{{else}}{{../debit}}{{/if}}{{/if}}{{#if (eq key "credit")}}{{#if ../isLast}}{{@root.totals.credit}}{{else}}{{../credit}}{{/if}}{{/if}}{{/if}}</td>
+        {{else}}
+        <td colspan="{{span}}" class="c-text">{{#if ../isLast}}جمع: {{@root.totals.inWords}}{{else}}جمع این صفحه (ادامه در صفحه بعد){{/if}}</td>
+        {{/if}}
+        {{/each}}
       </tr>
     </table>
+    {{#if @root.design.show.signatures}}
     <div class="sign">
       <div>تهیه کننده: {{@root.t.preparedBy}}</div>
       <div>بررسی کننده: {{@root.t.reviewedBy}}</div>
       <div>تایید کننده: {{@root.t.approvedBy}}</div>
       <div>تصویب کننده: {{@root.t.ratifiedBy}}</div>
     </div>
+    {{/if}}
   </div>
 </div>
 {{/each}}`;
