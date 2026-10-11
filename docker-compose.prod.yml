@@ -58,11 +58,8 @@ services:
     depends_on:
       - backend
     environment:
-      # frontend/src/lib/api.ts در نبود این متغیر، آدرس بک‌اند را از روی hostname مرورگر می‌سازد
-      # (http://<همان آدرسی که فرانت‌اند رویش باز شده>:4000/api) — پس معمولاً نیازی به تنظیم نیست.
-      CI: "true"
-      # دامنه‌ی برنامه پشت پراکسی (مثلاً erp.example.ir؛ چند دامنه با کاما). بدون آن dev-server Vite به Host ناشناخته ۴۰۳ می‌دهد. نگاه کنید به .env.example
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+      # ایمیج frontend یک nginx ثابت (خروجی build) است؛ آدرس API هنگام بالا آمدن کانتینر در config.js نوشته می‌شود.
+      # در نبود این متغیر، آدرس بک‌اند از روی hostname مرورگر ساخته می‌شود (http://<همان آدرسی که فرانت‌اند رویش باز شده>:4000/api).
       # پشت پراکسی با یک دامنه (HTTPS) /api بگذارید و پراکسی مسیر /api را به backend:4000 بفرستد؛ خالی = http://<hostname>:4000/api
       VITE_API_URL: ${VITE_API_URL:-}
     ports:

@@ -4,7 +4,7 @@ import { formatJalaliDate } from "../lib/formatDate";
 // بخش «پشتیبان‌گیری خودکار» صفحه‌ی مدیریت (/management). سیاست فقط اینجا تنظیم می‌شود و فقط با نشست مدیریت (کلمه‌ی عبور لایسنس)؛
 // مثل بقیه‌ی صفحه‌ی مدیریت عمداً از `api` و توکن ERP استفاده نمی‌کند.
 
-const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:4000/api`;
+import { API_URL } from "../lib/apiUrl";
 const WEEKDAYS = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"];
 
 type Frequency = "INTERVAL" | "DAILY" | "WEEKLY";

@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "build-tsc",
+    "sourceMap": true,
+    "noEmitOnError": true
+  },
+  "include": ["src", "prisma/seed.ts"]
+}

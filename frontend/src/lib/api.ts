@@ -7,8 +7,7 @@ import { rememberVersion, attachVersion, hasRememberedVersion, forgetVersion } f
 import { getSavedFiscalPeriodId } from "./userSettings";
 import { getAuthToken } from "./authToken";
 import { scheduleAutoToast } from "./toast";
-
-const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:4000/api`;
+import { API_URL } from "./apiUrl";
 
 /** آدرس کاملِ (قابل‌اشتراک) یک مسیر API، مثل لینک نمایش عمومی سند: https://دامنه/api/share/… */
 export function absoluteApiUrl(path: string): string {

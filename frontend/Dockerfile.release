@@ -1,0 +1,16 @@
+# ایمیج «تحویل» frontend: فقط خروجی build (minify، بدون source map) با nginx ثابت؛ سورس و dev-server داخل آن نیست.
+# ساخت: scripts/build-release.mjs (Dockerfile عادی همین پوشه برای توسعه است و عوض نشده).
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM nginx:1.27-alpine
+RUN rm -f /etc/nginx/conf.d/default.conf
+COPY release/nginx.conf /etc/nginx/conf.d/erp.conf
+COPY release/40-erp-config.sh /docker-entrypoint.d/40-erp-config.sh
+RUN sed -i 's/\r$//' /docker-entrypoint.d/40-erp-config.sh && chmod +x /docker-entrypoint.d/40-erp-config.sh
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 5173

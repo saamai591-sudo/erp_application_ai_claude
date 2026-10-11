@@ -9,7 +9,7 @@ import { ManagementBackup } from "../components/ManagementBackup";
 //   ۳) بعد از ورود: وضعیت لایسنس و بارگذاری لایسنس بعدی.
 // این صفحه عمداً از `api` و توکن ERP استفاده نمی‌کند (نشست مدیریت جدا در sessionStorage).
 
-const API_URL = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:4000/api`;
+import { API_URL } from "../lib/apiUrl";
 const TOKEN_KEY = "management-token";
 
 type State = "UNCONFIGURED" | "NO_LICENSE" | "INVALID" | "MISMATCH" | "NOT_STARTED" | "ACTIVE" | "SUPPORT_EXPIRED" | "EXPIRED";

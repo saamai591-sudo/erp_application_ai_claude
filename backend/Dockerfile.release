@@ -1,0 +1,32 @@
+# ایمیج «تحویل» backend: بایت‌کد V8 (bytenode)؛ نه سورس TypeScript، نه JS خوانا، نه tsx/typescript داخل آن هست.
+# ساخت: scripts/build-release.mjs (Dockerfile عادی همین پوشه برای توسعه است و عوض نشده).
+# هر دو مرحله با یک تگ Node ساخته می‌شوند چون بایت‌کد به نسخه‌ی V8 وابسته است؛ در زمان اجرا هیچ فلگ V8 هم نباید اضافه شود.
+FROM node:20-alpine AS build
+WORKDIR /app
+RUN apk add --no-cache openssl
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npx prisma generate
+RUN npx tsc -p tsconfig.release.json
+RUN node release/compile-bytecode.cjs build-tsc dist dist-maps \
+ && cp -r src/assets dist/src/assets \
+ && cp package.json dist/package.json
+
+# فقط برای استخراج source map‌ها: docker build --target maps --output type=local,dest=<پوشه>
+FROM scratch AS maps
+COPY --from=build /app/dist-maps /
+
+FROM node:20-alpine AS runtime
+WORKDIR /app
+# postgresql16-client: pg_dump/pg_restore/psql برای پشتیبان‌گیری خودکار (هم‌نسخه با ایمیج دیتابیس postgres:16)
+RUN apk add --no-cache openssl postgresql16-client
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+COPY prisma/schema.prisma ./prisma/schema.prisma
+COPY prisma/migrations ./prisma/migrations
+RUN npx prisma generate
+COPY --from=build /app/dist ./dist
+EXPOSE 4000
+# seed (upsert-محور و امن برای هر بار اجرا) و سپس سرور؛ -r bytenode = بارگذار فایل‌های .jsc
+CMD ["sh", "-c", "npx prisma migrate deploy && node -r bytenode dist/prisma/seed.jsc && node -r bytenode dist/src/index.jsc"]

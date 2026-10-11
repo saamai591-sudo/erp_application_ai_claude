@@ -5,3 +5,5 @@ dist
 !.env.example
 npm-debug.log*
 .git
+build-tsc
+dist-maps
