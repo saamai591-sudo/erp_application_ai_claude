@@ -1,10 +1,12 @@
 import { Router } from "express";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { DEFAULT_PRINT_TEMPLATES } from "../data/printDefaultTemplates";
-import { ensureDefaultPrintTemplates, getPrintDocType, PRINT_DOC_TYPES, printLayout, renderPrintDocument, renderSavedTemplate } from "../services/printService";
+import { ensureDefaultPrintTemplates, getDesignSchema, getPrintDocType, PRINT_DOC_TYPES, printLayout, renderPrintDocument, renderSavedTemplate } from "../services/printService";
+import { defaultDesign, normalizeDesign } from "../services/printDesign";
 
 // «قالب‌های چاپ» (تنظیمات › عملیات) + «چاپ سند» (دکمه‌ی چاپ فرم‌ها). قالب = HTML/CSS با متغیرهای Handlebars (services/printService.ts).
 // چاپ هر سند فقط مجوز «مشاهده»ی همان سند را می‌خواهد؛ طراحی قالب مجوز فرم «قالب‌های چاپ» را.
@@ -34,6 +36,21 @@ function cleanTexts(raw: unknown): Record<string, string> {
   return out;
 }
 
+/** طراحیِ کامل و معتبر یک قالب (برای نوع‌های دارای طراح)؛ نوع بدون طراح → null */
+function designOf(t: any) {
+  const schema = getDesignSchema(t.documentType);
+  return schema ? normalizeDesign(schema, t.design) : null;
+}
+
+/** مقدار design برای ذخیره: undefined = بدون تغییر، null = پیش‌فرض، وگرنه نرمال‌شده (نوع بدون طراح نادیده گرفته می‌شود) */
+function designForSave(documentType: string, raw: unknown) {
+  if (raw === undefined) return undefined;
+  const schema = getDesignSchema(documentType);
+  if (!schema) return undefined;
+  if (raw === null) return Prisma.JsonNull;
+  return normalizeDesign(schema, raw) as any;
+}
+
 function serialize(t: any, withHtml = true) {
   return {
     id: t.id,
@@ -44,7 +61,7 @@ function serialize(t: any, withHtml = true) {
     orientation: t.orientation,
     marginMm: t.marginMm,
     digits: t.digits,
-    ...(withHtml ? { html: t.html, texts: t.texts ?? {} } : {}),
+    ...(withHtml ? { html: t.html, texts: t.texts ?? {}, design: designOf(t) } : {}),
     isDefault: t.isDefault,
     isActive: t.isActive,
     updatedAt: t.updatedAt,
@@ -60,6 +77,7 @@ interface TemplateBody {
   digits?: string;
   html?: string;
   texts?: Record<string, string>;
+  design?: unknown;
   isDefault?: boolean;
   isActive?: boolean;
 }
@@ -88,7 +106,14 @@ router.get("/print-templates", can(`${FORM}.view`), async (_req, res) => {
 // دیکشنری فیلدها و کلیدهای متن‌های ثابت هر نوع سند (برای فرم قالب)
 router.get("/print-templates/meta", can(`${FORM}.view`), async (_req, res) => {
   res.json(
-    Object.entries(PRINT_DOC_TYPES).map(([type, d]) => ({ type, title: d.title, fields: d.fields, textKeys: d.textKeys }))
+    Object.entries(PRINT_DOC_TYPES).map(([type, d]) => ({
+      type,
+      title: d.title,
+      fields: d.fields,
+      textKeys: d.textKeys,
+      // طراح ساده: تعریف ستون‌ها/بخش‌ها (برای نمایش فرم) و طراحی پیش‌فرض؛ نبودنش = این نوع طراح ندارد
+      designSchema: d.designSchema ? { columns: d.designSchema.columns, sections: d.designSchema.sections, defaults: defaultDesign(d.designSchema) } : null,
+    }))
   );
 });
 
@@ -116,6 +141,7 @@ router.post("/print-templates", can(`${FORM}.create`), async (req, res) => {
           digits: (b.digits as any) ?? "PERSIAN",
           html: String(b.html),
           texts: cleanTexts(b.texts),
+          design: designForSave(b.documentType as string, b.design),
           isDefault: makeDefault,
           isActive: makeDefault ? true : b.isActive ?? true,
         },
@@ -152,6 +178,7 @@ router.put("/print-templates/:id", can(`${FORM}.edit`), async (req, res) => {
           digits: b.digits as any,
           html: b.html !== undefined ? String(b.html) : undefined,
           texts: b.texts !== undefined ? cleanTexts(b.texts) : undefined,
+          design: designForSave(existing.documentType, b.design),
           isDefault: makeDefault ? true : undefined,
           isActive: b.isActive,
         },
@@ -191,6 +218,7 @@ router.post("/print-templates/:id/copy", can(`${FORM}.create`), async (req, res)
         digits: src.digits,
         html: src.html,
         texts: (src.texts as any) ?? {},
+        design: (src.design as any) ?? Prisma.JsonNull,
         isDefault: false,
         isActive: true,
       },
@@ -210,7 +238,7 @@ router.post("/print-templates/:id/reset-to-install-default", can(`${FORM}.edit`)
     if (!def) return res.status(400).json({ error: "برای این نوع سند قالب پیش‌فرض نصب تعریف نشده است" });
     const updated = await prisma.printTemplate.update({
       where: { id: existing.id },
-      data: { paper: def.paper, orientation: def.orientation, marginMm: def.marginMm, digits: def.digits, html: def.html, texts: def.texts },
+      data: { paper: def.paper, orientation: def.orientation, marginMm: def.marginMm, digits: def.digits, html: def.html, texts: def.texts, design: Prisma.JsonNull },
     });
     res.json(serialize(updated));
   } catch (e: any) {
@@ -230,7 +258,10 @@ router.post("/print-templates/preview", can(`${FORM}.view`), async (req, res) =>
     const marginMm = b.marginMm !== undefined ? Number(b.marginMm) : 10;
     const layout = printLayout(paper, orientation, marginMm);
     const data = sourceId ? await def.load(Number(sourceId), layout) : def.sample(layout);
-    const html = renderPrintDocument({ html: String(b.html), texts: cleanTexts(b.texts), paper, orientation, marginMm, digits: (b.digits as any) ?? "PERSIAN" }, data);
+    const html = renderPrintDocument(
+      { html: String(b.html), texts: cleanTexts(b.texts), paper, orientation, marginMm, digits: (b.digits as any) ?? "PERSIAN", documentType: String(b.documentType), design: b.design },
+      data
+    );
     res.json({ html, usedSample: !sourceId });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در پیش‌نمایش" });

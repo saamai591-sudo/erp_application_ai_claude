@@ -20,7 +20,15 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 // فهرست متغیرهای قابل‌استفاده‌ی هر نوع سند از سرور می‌آید (دیکشنری فیلد)؛ «پیش‌نمایش» قالبِ ذخیره‌نشده را روی آخرین سند واقعی (یا داده‌ی نمونه) نشان می‌دهد.
 
 interface FieldDoc { path: string; title: string; group: string; list?: boolean }
-interface DocTypeMeta { type: string; title: string; fields: FieldDoc[]; textKeys: { key: string; title: string }[] }
+interface DesignColumn { key: string; title: string; widthPct: number; visible: boolean }
+interface DesignSection { key: string; visible: boolean }
+interface Design { accent: string; fontPt: number; columns: DesignColumn[]; sections: DesignSection[] }
+interface DesignSchemaMeta {
+  columns: { key: string; title: string }[];
+  sections: { key: string; title: string; locked?: boolean }[];
+  defaults: Design;
+}
+interface DocTypeMeta { type: string; title: string; fields: FieldDoc[]; textKeys: { key: string; title: string }[]; designSchema: DesignSchemaMeta | null }
 interface TemplateRow { id: number; documentType: string; documentTypeTitle: string; title: string; paper: "A4" | "A5"; orientation: "PORTRAIT" | "LANDSCAPE"; marginMm: number; isDefault: boolean; isActive: boolean }
 
 const PAPER_FA: Record<string, string> = { A4: "A4", A5: "A5" };
@@ -82,7 +90,16 @@ function TemplateList() {
   );
 }
 
-const DEFAULT_FORM = { documentType: "", title: "", paper: "A4", orientation: "LANDSCAPE", marginMm: "10", digits: "PERSIAN", html: "", texts: {} as Record<string, string>, isDefault: false, isActive: true };
+const DEFAULT_FORM = { documentType: "", title: "", paper: "A4", orientation: "LANDSCAPE", marginMm: "10", digits: "PERSIAN", html: "", texts: {} as Record<string, string>, design: null as Design | null, isDefault: false, isActive: true };
+
+/** جابه‌جایی یک عنصر آرایه به بالا/پایین (کپی جدید) */
+function moveItem<T>(list: T[], idx: number, delta: -1 | 1): T[] {
+  const to = idx + delta;
+  if (to < 0 || to >= list.length) return list;
+  const next = [...list];
+  [next[idx], next[to]] = [next[to], next[idx]];
+  return next;
+}
 
 function TemplateForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
@@ -121,7 +138,7 @@ function TemplateForm({ editId }: { editId?: number }) {
 
   function applyTemplate(t: any) {
     setWasDefault(t.isDefault);
-    setForm({ documentType: t.documentType, title: t.title, paper: t.paper, orientation: t.orientation, marginMm: String(t.marginMm), digits: t.digits ?? "PERSIAN", html: t.html, texts: t.texts ?? {}, isDefault: t.isDefault, isActive: t.isActive });
+    setForm({ documentType: t.documentType, title: t.title, paper: t.paper, orientation: t.orientation, marginMm: String(t.marginMm), digits: t.digits ?? "PERSIAN", html: t.html, texts: t.texts ?? {}, design: t.design ?? null, isDefault: t.isDefault, isActive: t.isActive });
   }
 
   /** ساخت قالب تازه از روی همین قالب (ذخیره‌شده‌ی فعلی) و رفتن به فرم آن */
@@ -139,7 +156,7 @@ function TemplateForm({ editId }: { editId?: number }) {
   /** برگرداندن HTML، متن‌های ثابت، کاغذ، حاشیه و ارقام به مقدار قالب پیش‌فرض نصب (عنوان و پیش‌فرض/فعال‌بودن می‌ماند) */
   async function resetToInstallDefault() {
     if (!editId) return;
-    if (!window.confirm("محتوای این قالب (متن HTML، متن‌های ثابت، کاغذ، حاشیه و ارقام) با قالب پیش‌فرض نصب جایگزین می‌شود و تغییرات فعلی از بین می‌رود. ادامه می‌دهید؟")) return;
+    if (!window.confirm("محتوای این قالب (متن HTML، متن‌های ثابت، طراحی ساده، کاغذ، حاشیه و ارقام) با قالب پیش‌فرض نصب جایگزین می‌شود و تغییرات فعلی از بین می‌رود. ادامه می‌دهید؟")) return;
     setError(null);
     try {
       const t = await api.post(`/print-templates/${editId}/reset-to-install-default`);
@@ -161,9 +178,19 @@ function TemplateForm({ editId }: { editId?: number }) {
       digits: form.digits,
       html: form.html,
       texts: form.texts,
+      design: form.design,
       isDefault: form.isDefault,
       isActive: form.isActive,
     };
+  }
+
+  // طراح ساده: فقط برای نوع‌هایی که schema دارند و HTML قالب واقعاً از design.* استفاده می‌کند
+  const designSchema = docMeta?.designSchema ?? null;
+  const usesDesign = /\bdesign\./.test(form.html);
+  const design: Design | null = designSchema ? form.design ?? designSchema.defaults : null;
+  function setDesign(patch: Partial<Design>) {
+    if (!design) return;
+    setForm({ ...form, design: { ...design, ...patch } });
   }
 
   async function onSubmit(e: FormEvent) {
@@ -257,7 +284,7 @@ function TemplateForm({ editId }: { editId?: number }) {
         <div className="form-grid">
           <div className="form-field">
             <label>نوع سند<RequiredMark /></label>
-            <select value={form.documentType} disabled={!!editId} onChange={(e) => setForm({ ...form, documentType: e.target.value, texts: {} })}>
+            <select value={form.documentType} disabled={!!editId} onChange={(e) => setForm({ ...form, documentType: e.target.value, texts: {}, design: null })}>
               {meta.map((m) => <option key={m.type} value={m.type}>{m.title}</option>)}
             </select>
           </div>
@@ -315,6 +342,102 @@ function TemplateForm({ editId }: { editId?: number }) {
                     <input value={form.texts[k.key] ?? ""} onChange={(e) => setForm({ ...form, texts: { ...form.texts, [k.key]: e.target.value } })} />
                   </label>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {designSchema && design && (
+            <div className="form-field full">
+              <label>
+                طراحی ساده
+                <FieldHint label="طراحی ساده" text="ستون‌های جدول اقلام (نمایش، ترتیب، عنوان، عرض)، بخش‌های صفحه (نمایش و ترتیب)، رنگ تاکید و اندازه‌ی فونت را بدون ویرایش HTML تنظیم کنید. با «پیش‌نمایش» اثر را ببینید و با «ذخیره» اعمال می‌شود. فقط قالب‌هایی که از متغیرهای design استفاده می‌کنند (قالب پیش‌فرض نصب) اثر می‌گیرند." />
+              </label>
+              {!usesDesign && (
+                <div className="alert" style={{ marginBottom: 8, width: "100%" }}>
+                  HTML این قالب از متغیرهای طراحی استفاده نمی‌کند، پس تنظیمات این بخش اثری ندارد. برای استفاده از طراح، از منوی عملیات «بازگردانی به قالب پیش‌فرض نصب» را بزنید (یا در HTML از {"{{design.…}}"} استفاده کنید).
+                </div>
+              )}
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.6fr) minmax(0, 1fr)", gap: 16, width: "100%", opacity: usesDesign ? 1 : 0.6 }}>
+                <div>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>ستون‌های جدول اقلام</div>
+                  <table className="je-lines-table" style={{ width: "100%", fontSize: 12 }}>
+                    <thead>
+                      <tr><th style={{ width: 40 }}>نمایش</th><th>عنوان ستون</th><th style={{ width: 90 }}>عرض (٪)</th><th style={{ width: 70 }}></th></tr>
+                    </thead>
+                    <tbody>
+                      {design.columns.map((c, i) => (
+                        <tr key={c.key}>
+                          <td style={{ textAlign: "center" }}>
+                            <input type="checkbox" checked={c.visible} onChange={(e) => setDesign({ columns: design.columns.map((x, j) => (j === i ? { ...x, visible: e.target.checked } : x)) })} />
+                          </td>
+                          <td>
+                            <input
+                              value={c.title}
+                              maxLength={40}
+                              style={{ width: "100%" }}
+                              onChange={(e) => setDesign({ columns: design.columns.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)) })}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              dir="ltr"
+                              min={0}
+                              max={60}
+                              step={0.5}
+                              value={c.widthPct}
+                              title="۰ = باقی‌مانده‌ی عرض جدول (خودکار)"
+                              style={{ width: "100%" }}
+                              onChange={(e) => setDesign({ columns: design.columns.map((x, j) => (j === i ? { ...x, widthPct: Number(e.target.value) || 0 } : x)) })}
+                            />
+                          </td>
+                          <td style={{ whiteSpace: "nowrap", textAlign: "center" }}>
+                            <button type="button" className="btn secondary" style={{ padding: "0 6px" }} disabled={i === 0} onClick={() => setDesign({ columns: moveItem(design.columns, i, -1) })} title="بالا">↑</button>{" "}
+                            <button type="button" className="btn secondary" style={{ padding: "0 6px" }} disabled={i === design.columns.length - 1} onClick={() => setDesign({ columns: moveItem(design.columns, i, 1) })} title="پایین">↓</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>بخش‌های صفحه</div>
+                  <table className="je-lines-table" style={{ width: "100%", fontSize: 12, marginBottom: 12 }}>
+                    <tbody>
+                      {design.sections.map((sec, i) => {
+                        const def = designSchema.sections.find((d) => d.key === sec.key);
+                        return (
+                          <tr key={sec.key}>
+                            <td style={{ width: 40, textAlign: "center" }}>
+                              <input
+                                type="checkbox"
+                                checked={sec.visible}
+                                disabled={!!def?.locked}
+                                onChange={(e) => setDesign({ sections: design.sections.map((x, j) => (j === i ? { ...x, visible: e.target.checked } : x)) })}
+                              />
+                            </td>
+                            <td>{def?.title ?? sec.key}</td>
+                            <td style={{ whiteSpace: "nowrap", textAlign: "center", width: 70 }}>
+                              <button type="button" className="btn secondary" style={{ padding: "0 6px" }} disabled={i === 0} onClick={() => setDesign({ sections: moveItem(design.sections, i, -1) })} title="بالا">↑</button>{" "}
+                              <button type="button" className="btn secondary" style={{ padding: "0 6px" }} disabled={i === design.sections.length - 1} onClick={() => setDesign({ sections: moveItem(design.sections, i, 1) })} title="پایین">↓</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 12 }}>
+                      رنگ تاکید (سرستون‌ها)
+                      <input type="color" value={design.accent} onChange={(e) => setDesign({ accent: e.target.value })} style={{ width: 70, height: 30, padding: 0 }} />
+                    </label>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 12 }}>
+                      اندازه‌ی فونت (پوینت)
+                      <input type="number" dir="ltr" min={6} max={14} step={0.5} value={design.fontPt} onChange={(e) => setDesign({ fontPt: Number(e.target.value) || designSchema.defaults.fontPt })} style={{ width: 80 }} />
+                    </label>
+                    <button type="button" className="btn secondary" onClick={() => setForm({ ...form, design: null })}>بازنشانی طراحی</button>
+                  </div>
+                </div>
               </div>
             </div>
           )}

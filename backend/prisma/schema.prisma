@@ -4404,6 +4404,8 @@ model PrintTemplate {
   html         String
   /// متن‌های ثابت قابل‌ویرایش قالب (کلید → متن)، در قالب به‌صورت {{t.کلید}}؛ مثل شرایط فروش، محل تحویل، متن watermark
   texts        Json              @default("{}")
+  /// تنظیمات «طراح ساده» (ستون‌ها/بخش‌ها/رنگ/فونت؛ services/printDesign.ts)؛ null = پیش‌فرض نوع سند. فقط قالب‌هایی که در HTML از design.* استفاده می‌کنند اثر می‌گیرند
+  design       Json?
   isDefault    Boolean           @default(false)
   isActive     Boolean           @default(true)
   createdAt    DateTime          @default(now())

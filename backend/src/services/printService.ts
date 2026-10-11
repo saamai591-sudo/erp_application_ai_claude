@@ -6,6 +6,7 @@ import { DEFAULT_PRINT_TEMPLATES } from "../data/printDefaultTemplates";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { amountInWords } from "../utils/numberToWords";
 import { resolveDetailTitles } from "../utils/detailValues";
+import { buildDesignContext, type PrintDesignSchema } from "./printDesign";
 import { buildJournalPrint, journalCapacityMm, type JeAccountNode, type JeLineInput } from "./printJournalEntry";
 
 // چاپ اسناد با «قالب چاپ»: قالب = HTML/CSS با متغیرهای Handlebars؛ داده‌ی هر نوع سند را سرور می‌سازد (دیکشنری فیلد، PRINT_DOC_TYPES) و سرور
@@ -32,6 +33,8 @@ interface PrintDocTypeDef {
   textKeys: { key: string; title: string }[];
   /** نام پیش‌فرض فایل (Handlebars؛ وقتی متن ثابت fileName قالب خالی است) */
   defaultFileName: string;
+  /** تنظیمات «طراح ساده»؛ نبودنش یعنی این نوع سند طراح ندارد */
+  designSchema?: PrintDesignSchema;
   /** layout = اندازه‌ی کاربردی صفحه‌ی قالب؛ فقط نوع‌هایی که خودشان صفحه‌بندی می‌کنند (سند حسابداری) از آن استفاده می‌کنند */
   load(sourceId: number, layout?: PrintLayout): Promise<PrintData>;
   latestSourceId(): Promise<number | null>;
@@ -134,6 +137,7 @@ const QUOTE_LINE_FIELDS: PrintFieldDoc[] = [
   { path: "row", title: "ردیف: شماره ردیف", group: "ردیف‌ها" },
   { path: "code", title: "ردیف: کد کالا/خدمت", group: "ردیف‌ها" },
   { path: "title", title: "ردیف: عنوان کالا/خدمت (بدون عنوان گروه‌ها)", group: "ردیف‌ها" },
+  { path: "titleDesc", title: "ردیف: عنوان کالا/خدمت همراه توضیحات ردیف (عنوان - توضیحات)", group: "ردیف‌ها" },
   { path: "fullTitle", title: "ردیف: عنوان کامل کالا/خدمت (با عنوان گروه‌ها)", group: "ردیف‌ها" },
   { path: "description", title: "ردیف: توضیحات ردیف", group: "ردیف‌ها" },
   { path: "quantity", title: "ردیف: تعداد", group: "ردیف‌ها" },
@@ -150,6 +154,7 @@ const QUOTE_LINE_FIELDS: PrintFieldDoc[] = [
   { path: "totals.vat", title: "جمع ارزش افزوده", group: "جمع‌ها" },
   { path: "totals.net", title: "جمع خالص", group: "جمع‌ها" },
   { path: "totals.netInWords", title: "جمع خالص به حروف (با نام ارز)", group: "جمع‌ها" },
+  { path: "design", title: "تنظیمات «طراح ساده» (design.columns، design.footer، design.accent، design.accentText، design.fontPt، design.show.<بخش>، design.order.<بخش>)", group: "طراحی" },
 ];
 
 const DOC_FIELDS_QUOTE: PrintFieldDoc[] = [
@@ -195,6 +200,7 @@ async function loadSalesInvoice(id: number): Promise<PrintData> {
       row: i + 1,
       code: l.goodsItem.fullCode,
       title: l.goodsItem.rawTitle,
+      titleDesc: l.description ? `${l.goodsItem.rawTitle} - ${l.description}` : l.goodsItem.rawTitle,
       fullTitle: l.goodsItem.title,
       description: l.description ?? "",
       quantity: fmtNumber(Number(l.quantity), 6),
@@ -263,6 +269,7 @@ async function loadSalesQuote(id: number): Promise<PrintData> {
       row: i + 1,
       code: l.goodsItem.fullCode,
       title: l.goodsItem.rawTitle,
+      titleDesc: l.description ? `${l.goodsItem.rawTitle} - ${l.description}` : l.goodsItem.rawTitle,
       fullTitle: l.goodsItem.title,
       description: l.description ?? "",
       quantity: fmtNumber(Number(l.quantity), 6),
@@ -310,7 +317,7 @@ function sampleSalesQuote(): PrintData {
     doc: { number: 101, date: "1405/01/01", validUntil: "", description: "", currency: "ریال", status: "ثبت" },
     customer: { name: "مشتری نمونه", economicCode: "", registrationNumber: "", nationalId: "10000000001", phone: "02100000001", address: "تهران، خیابان مشتری", postalCode: "1234567891" },
     lines: [
-      { row: 1, code: "1001", title: "کالای نمونه", description: "", quantity: "100", unit: "عدد", unitPrice: "1,000,000", amount: "100,000,000", discount: "0", afterDiscount: "100,000,000", vat: "10,000,000", net: "110,000,000" },
+      { row: 1, code: "1001", title: "کالای نمونه", titleDesc: "کالای نمونه", description: "", quantity: "100", unit: "عدد", unitPrice: "1,000,000", amount: "100,000,000", discount: "0", afterDiscount: "100,000,000", vat: "10,000,000", net: "110,000,000" },
     ],
     totals: { amount: "100,000,000", discount: "0", afterDiscount: "100,000,000", vat: "10,000,000", net: "110,000,000", netInWords: "یکصد و ده میلیون ریال" },
   };
@@ -421,8 +428,39 @@ function sampleJournalEntry(layout: PrintLayout = DEFAULT_LAYOUT): PrintData {
   };
 }
 
+/** طراح ساده‌ی پیش‌فاکتور/فاکتور فروش: ستون‌های جدول اقلام و بخش‌های صفحه (کلید ستون = فیلد هم‌نام در lines؛ ستون‌های sum از totals جمع می‌خورند) */
+const SALES_DOC_DESIGN: PrintDesignSchema = {
+  accent: "#e9e9e9",
+  fontPt: 8.5,
+  columns: [
+    { key: "row", title: "ردیف", widthPct: 4, visible: true },
+    { key: "code", title: "کد", widthPct: 7, visible: false },
+    { key: "titleDesc", title: "شرح کالا/خدمت", widthPct: 0, visible: true, text: true },
+    { key: "quantity", title: "تعداد", widthPct: 7, visible: true, numeric: true },
+    { key: "unit", title: "واحد", widthPct: 5, visible: true },
+    { key: "unitPrice", title: "مبلغ واحد", widthPct: 9, visible: true, numeric: true },
+    { key: "amount", title: "مبلغ کل", widthPct: 11, visible: true, numeric: true, sum: true },
+    { key: "discount", title: "مبلغ تخفیف", widthPct: 10, visible: true, numeric: true, sum: true },
+    { key: "afterDiscount", title: "مبلغ پس از تخفیف", widthPct: 11, visible: true, numeric: true, sum: true },
+    { key: "vat", title: "ارزش افزوده", widthPct: 10, visible: true, numeric: true, sum: true },
+    { key: "net", title: "خالص فاکتور", widthPct: 11, visible: true, numeric: true, sum: true },
+  ],
+  sections: [
+    { key: "seller", title: "مشخصات فروشنده", visible: true },
+    { key: "buyer", title: "مشخصات خریدار", visible: true },
+    { key: "items", title: "جدول اقلام", visible: true, locked: true },
+    { key: "terms", title: "شرایط فروش و حساب‌های بانکی", visible: true },
+    { key: "sign", title: "کادر مهر و امضا", visible: true },
+  ],
+};
+
+export function getDesignSchema(type: string): PrintDesignSchema | undefined {
+  return PRINT_DOC_TYPES[type]?.designSchema;
+}
+
 export const PRINT_DOC_TYPES: Record<string, PrintDocTypeDef> = {
   SALES_QUOTE: {
+    designSchema: SALES_DOC_DESIGN,
     title: "پیش‌فاکتور",
     fields: [...DOC_FIELDS_QUOTE, ...COMPANY_FIELDS, ...CUSTOMER_FIELDS, ...QUOTE_LINE_FIELDS],
     textKeys: [
@@ -441,6 +479,7 @@ export const PRINT_DOC_TYPES: Record<string, PrintDocTypeDef> = {
 };
 
 PRINT_DOC_TYPES.SALES_INVOICE = {
+  designSchema: SALES_DOC_DESIGN,
   title: "فاکتور فروش",
   fields: [...DOC_FIELDS_INVOICE, ...COMPANY_FIELDS, ...CUSTOMER_FIELDS, ...QUOTE_LINE_FIELDS],
   textKeys: PRINT_DOC_TYPES.SALES_QUOTE.textKeys,
@@ -505,6 +544,9 @@ export interface RenderInput {
   digits?: PrintDigitsMode;
   /** عنوان سند HTML؛ مرورگر آن را پیشنهادِ نام فایل «ذخیره به‌صورت PDF» می‌گیرد */
   title?: string;
+  /** نوع سند و تنظیمات «طراح ساده»؛ اگر نوع طراح داشته باشد متغیر design به قالب داده می‌شود */
+  documentType?: string;
+  design?: unknown;
 }
 
 let fontCss: string | null = null;
@@ -558,7 +600,9 @@ const CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-
 export function renderPrintDocument(input: RenderInput, data: PrintData): string {
   let body: string;
   try {
-    body = hb.compile(input.html, { strict: false })({ ...data, t: input.texts ?? {}, layout: printLayout(input.paper, input.orientation, input.marginMm) });
+    const schema = input.documentType ? PRINT_DOC_TYPES[input.documentType]?.designSchema : undefined;
+    const design = schema ? buildDesignContext(schema, input.design, data.totals) : undefined;
+    body = hb.compile(input.html, { strict: false })({ ...data, t: input.texts ?? {}, layout: printLayout(input.paper, input.orientation, input.marginMm), design });
   } catch (e: any) {
     throw new Error(`خطا در قالب چاپ: ${String(e?.message ?? e).split("\n")[0]}`);
   }
@@ -582,6 +626,9 @@ export async function renderSavedTemplate(templateId: number, sourceId: number, 
   const data = await def.load(sourceId, printLayout(tpl.paper, tpl.orientation, tpl.marginMm));
   const texts: Record<string, string> = (tpl.texts as any) ?? {};
   const fileName = buildPrintFileName(texts.fileName ?? "", data, def.defaultFileName);
-  const html = renderPrintDocument({ title: fileName, html: tpl.html, texts, paper: tpl.paper, orientation: tpl.orientation, marginMm: tpl.marginMm, digits: digits ?? tpl.digits }, data);
+  const html = renderPrintDocument(
+    { title: fileName, html: tpl.html, texts, paper: tpl.paper, orientation: tpl.orientation, marginMm: tpl.marginMm, digits: digits ?? tpl.digits, documentType: tpl.documentType, design: tpl.design },
+    data
+  );
   return { html, title: `${def.title} ${data.doc?.number ?? ""}`.trim(), fileName };
 }

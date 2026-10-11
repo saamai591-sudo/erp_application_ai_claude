@@ -15,33 +15,33 @@ export interface DefaultPrintTemplate {
 // پیش‌فاکتور کالا و خدمات — A4 افقی؛ بازسازی فرمت چاپی شرکت (سربرگ با لوگو، مشخصات فروشنده/خریدار، جدول ۱۰ ستونی، شرایط، دو حساب بانکی،
 // کادر مهر و امضا و watermark) با فونت وزیرمتن.
 const SALES_QUOTE_HTML = `<style>
-  .sheet { position: relative; }
+  .sheet { position: relative; display: flex; flex-direction: column; font-size: {{design.fontPt}}pt; }
   .top-note { display: flex; justify-content: space-between; font-size: 7.5pt; color: #444; padding-bottom: 1mm; }
   .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 0.4mm solid #333; padding-bottom: 1.2mm; margin-bottom: 1mm; }
   .head .brand { display: flex; align-items: center; gap: 4mm; }
   .head .brand img { height: 14mm; width: auto; }
   .head .brand .co { font-size: 13.5pt; font-weight: 700; }
   .head .brand .ttl { font-size: 11pt; font-weight: 700; margin-top: 1mm; }
-  .head .meta { font-size: 8.5pt; line-height: 1.8; text-align: right; }
+  .head .meta { font-size: 1em; line-height: 1.8; text-align: right; }
   .head .meta b { font-weight: 700; }
-  .sec-title { background: #e9e9e9; border: 0.2mm solid #666; border-bottom: none; font-weight: 700; font-size: 9pt; padding: 0.6mm 2mm; margin-top: 1.6mm; }
+  .sec-title { background: {{design.accent}}; color: {{design.accentText}}; border: 0.2mm solid #666; border-bottom: none; font-weight: 700; font-size: 9pt; padding: 0.6mm 2mm; margin-top: 1.6mm; }
   table.kv, table.items, table.totals { width: 100%; border-collapse: collapse; }
-  table.kv td { border: 0.2mm solid #666; padding: 0.5mm 2mm; font-size: 8.5pt; vertical-align: top; }
+  table.kv td { border: 0.2mm solid #666; padding: 0.5mm 2mm; font-size: 1em; vertical-align: top; }
   table.kv td .k { color: #333; }
-  table.items th { background: #f1f1f1; border: 0.2mm solid #666; font-size: 8.5pt; padding: 0.9mm 1mm; font-weight: 700; text-align: center; }
-  table.items td { border: 0.2mm solid #666; font-size: 8.5pt; padding: 0.8mm 1.2mm; text-align: center; }
+  table.items th { background: {{design.accent}}; color: {{design.accentText}}; border: 0.2mm solid #666; font-size: 1em; padding: 0.9mm 1mm; font-weight: 700; text-align: center; }
+  table.items td { border: 0.2mm solid #666; font-size: 1em; padding: 0.8mm 1.2mm; text-align: center; }
   table.items td.t { text-align: right; }
   table.items td.n { direction: ltr; unicode-bidi: plaintext; }
   table.items tfoot td { background: #f7f7f7; font-weight: 700; }
   table.items thead { display: table-header-group; }
   table.items tr { page-break-inside: avoid; }
-  .banks .terms { font-size: 8.5pt; line-height: 1.7; }
-  .banks { display: flex; gap: 6mm; margin-top: 1.5mm; font-size: 8.5pt; line-height: 1.6; }
+  .banks .terms { font-size: 1em; line-height: 1.7; }
+  .banks { display: flex; gap: 6mm; margin-top: 1.5mm; font-size: 1em; line-height: 1.6; }
   .banks .bank { flex: 1; }
   .banks .bank .h { font-weight: 700; }
   .banks .ltr { direction: ltr; unicode-bidi: plaintext; text-align: right; display: inline-block; }
   .sign { display: flex; gap: 6mm; margin-top: 2.5mm; page-break-inside: avoid; }
-  .sign .box { flex: 1; border: 0.2mm solid #666; height: 34mm; font-size: 8.5pt; padding: 1.5mm 2mm; position: relative; }
+  .sign .box { flex: 1; border: 0.2mm solid #666; height: 34mm; font-size: 1em; padding: 1.5mm 2mm; position: relative; }
   /* اندازه‌ی واقعی مهر و امضا مثل نمونه (ارتفاع ۴۲ میلی‌متر، بدون تغییر نسبت)؛ در صورت نیاز از کادر بیرون می‌زند */
   .sign .box img { position: absolute; left: 50%; top: -4mm; transform: translateX(-50%); height: 42mm; width: auto; max-width: none; }
   .wm { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); white-space: nowrap; font-size: 80pt; font-weight: 700; color: rgba(0, 0, 0, 0.055); z-index: 0; pointer-events: none; }
@@ -64,6 +64,8 @@ const SALES_QUOTE_HTML = `<style>
     </div>
   </div>
 
+  {{#if design.show.seller}}
+  <div class="blk" style="order:{{design.order.seller}}">
   <div class="sec-title">مشخصات فروشنده</div>
   <table class="kv">
     <tr>
@@ -78,7 +80,11 @@ const SALES_QUOTE_HTML = `<style>
     </tr>
     <tr><td colspan="3"><span class="k">نشانی:</span> {{company.address}}</td></tr>
   </table>
+  </div>
+  {{/if}}
 
+  {{#if design.show.buyer}}
+  <div class="blk" style="order:{{design.order.buyer}}">
   <div class="sec-title">مشخصات خریدار</div>
   <table class="kv">
     <tr>
@@ -93,36 +99,30 @@ const SALES_QUOTE_HTML = `<style>
     </tr>
     <tr><td colspan="3"><span class="k">نشانی:</span> {{customer.address}}</td></tr>
   </table>
+  </div>
+  {{/if}}
 
+  {{!-- ستون‌ها و ترتیب/نمایش بخش‌ها از «طراح ساده» (design) می‌آید --}}
+  <div class="blk" style="order:{{design.order.items}}">
   <div class="sec-title">مشخصات کالا یا خدمات</div>
   <table class="items">
     <thead>
-      <tr>
-        <th style="width:4%">ردیف</th><th>شرح کالا/خدمت</th><th style="width:7%">تعداد</th><th style="width:5%">واحد</th>
-        <th style="width:9%">مبلغ واحد</th><th style="width:11%">مبلغ کل</th><th style="width:10%">مبلغ تخفیف</th>
-        <th style="width:11%">مبلغ پس از تخفیف</th><th style="width:10%">ارزش افزوده</th><th style="width:11%">خالص فاکتور</th>
-      </tr>
+      <tr>{{#each design.columns}}<th{{#if width}} style="width:{{width}}"{{/if}}>{{title}}</th>{{/each}}</tr>
     </thead>
     <tbody>
       {{#each lines}}
-      <tr>
-        <td>{{row}}</td><td class="t">{{title}}{{#if description}} - {{description}}{{/if}}</td><td class="n">{{quantity}}</td><td>{{unit}}</td>
-        <td class="n">{{unitPrice}}</td><td class="n">{{amount}}</td><td class="n">{{discount}}</td>
-        <td class="n">{{afterDiscount}}</td><td class="n">{{vat}}</td><td class="n">{{net}}</td>
-      </tr>
+      <tr>{{#each @root.design.columns}}<td{{#if cls}} class="{{cls}}"{{/if}}>{{lookup ../this key}}</td>{{/each}}</tr>
       {{/each}}
     </tbody>
     <tfoot>
-      <tr>
-        <td colspan="5">جمع کل</td>
-        <td class="n">{{totals.amount}}</td><td class="n">{{totals.discount}}</td>
-        <td class="n">{{totals.afterDiscount}}</td><td class="n">{{totals.vat}}</td><td class="n">{{totals.net}}</td>
-      </tr>
-      <tr><td colspan="10" class="t">مبلغ کل به حروف: {{totals.netInWords}}</td></tr>
+      <tr>{{#each design.footer}}<td colspan="{{span}}"{{#if cls}} class="{{cls}}"{{/if}}>{{text}}</td>{{/each}}</tr>
+      <tr><td colspan="{{design.columnCount}}" class="t">مبلغ کل به حروف: {{totals.netInWords}}</td></tr>
     </tfoot>
   </table>
+  </div>
 
-  <div class="banks">
+  {{#if design.show.terms}}
+  <div class="banks" style="order:{{design.order.terms}}">
     <div class="terms">
       <div><b>شرایط و نحوه فروش:</b> {{t.salesTerms}}</div>
       <div><b>محل تحویل:</b> {{t.deliveryPlace}}</div>
@@ -136,11 +136,14 @@ const SALES_QUOTE_HTML = `<style>
     </div>
     {{/each}}
   </div>
+  {{/if}}
 
-  <div class="sign">
+  {{#if design.show.sign}}
+  <div class="sign" style="order:{{design.order.sign}}">
     <div class="box">مهر و امضاء فروشنده:{{#if company.stamp}}<img src="{{company.stamp}}" alt="">{{/if}}</div>
     <div class="box">مهر و امضاء خریدار:</div>
   </div>
+  {{/if}}
 </div>`;
 
 // صورتحساب فروش — همان قالب پیش‌فاکتور بدون «تاریخ اعتبار» (عنوان و watermark از متن‌های ثابت قالب می‌آید)
@@ -168,7 +171,7 @@ const JOURNAL_ENTRY_HTML = `<style>
   .hd .mid .st { font-size: 9.5pt; font-weight: 700; }
   table.g { width: 100%; border-collapse: collapse; table-layout: fixed; position: relative; z-index: 1; }
   table.g th { border-top: 0.35mm solid #222; border-bottom: 0.35mm solid #222; font-size: 9pt; font-weight: 700; padding: 1.1mm 0; text-align: center; }
-  table.g td { padding: 0.45mm 1.6mm; font-size: 8.5pt; line-height: 1.5; vertical-align: top; }
+  table.g td { padding: 0.45mm 1.6mm; font-size: 1em; line-height: 1.5; vertical-align: top; }
   .grid { position: relative; flex: 1; display: flex; flex-direction: column; }
   .grid .vl { position: absolute; top: 0; bottom: 0; width: 0; border-right: 0.25mm solid #222; z-index: 0; }
   .body { position: relative; flex: 1; }
@@ -179,7 +182,7 @@ const JOURNAL_ENTRY_HTML = `<style>
   td.c-n { text-align: center; direction: ltr; }
   tr.r-kol td.c-acc, tr.r-kol td.c-text { text-decoration: underline; font-size: 8pt; }
   tr.r-kol td.c-n { font-weight: 700; }
-  tr.r-mid td.c-acc, tr.r-mid td.c-text { font-size: 8.5pt; }
+  tr.r-mid td.c-acc, tr.r-mid td.c-text { font-size: 1em; }
   tr.r-leaf td.c-acc, tr.r-leaf td.c-text { font-weight: 700; font-size: 9.5pt; }
   tr.r-detail td.c-text { text-decoration: underline; }
   tr.r-desc td { padding-bottom: 1.6mm; }
