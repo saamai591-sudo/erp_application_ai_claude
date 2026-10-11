@@ -105,6 +105,17 @@ function ShareDialog({ docType, sourceId, templateId, digits, title, onClose }: 
     }
   }
 
+  // منوی اشتراک‌گذاری خودِ سیستم‌عامل (موبایل و برخی مرورگرهای دسکتاپ): هر پیام‌رسان نصب‌شده (بله، ایتا، روبیکا، تلگرام …) در آن هست
+  const canNativeShare = typeof navigator !== "undefined" && typeof (navigator as any).share === "function";
+  async function nativeShare(url: string) {
+    try {
+      await (navigator as any).share({ title, text: title, url });
+    } catch (e: any) {
+      // بستن منو توسط کاربر خطا نیست
+      if (e?.name !== "AbortError") setError("اشتراک‌گذاری انجام نشد؛ لینک را کپی کنید");
+    }
+  }
+
   async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -141,9 +152,13 @@ function ShareDialog({ docType, sourceId, templateId, digits, title, onClose }: 
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
             <input readOnly dir="ltr" value={created.url} style={{ flex: 1, minWidth: 260 }} onFocus={(e) => e.currentTarget.select()} />
             <button type="button" className="btn" onClick={() => copy(created.url)}>{copied ? "کپی شد" : "کپی"}</button>
+            {canNativeShare && (
+              <button type="button" className="btn secondary" title="باز کردن منوی اشتراک‌گذاری دستگاه (بله، ایتا، روبیکا و …)" onClick={() => nativeShare(created.url)}>بله و سایر برنامه‌ها</button>
+            )}
             <a className="btn secondary" target="_blank" rel="noreferrer" href={`https://t.me/share/url?url=${encodeURIComponent(created.url)}&text=${encodeURIComponent(title)}`}>تلگرام</a>
             <a className="btn secondary" target="_blank" rel="noreferrer" href={`https://wa.me/?text=${encodeURIComponent(title + "\n" + created.url)}`}>واتساپ</a>
           </div>
+          <div style={{ marginTop: 6, fontSize: "0.9em", color: "var(--muted, #666)" }}>برای بله روی دسکتاپ: لینک را کپی کنید و در گفتگوی بله جای‌گذاری کنید.</div>
         </div>
       )}
       <h4 style={{ margin: "12px 0 6px" }}>لینک‌های ساخته‌شده برای این سند</h4>
