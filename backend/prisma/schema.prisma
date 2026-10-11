@@ -4406,6 +4406,8 @@ model PrintTemplate {
   texts        Json              @default("{}")
   /// تنظیمات «طراح ساده» (ستون‌ها/بخش‌ها/رنگ/فونت؛ services/printDesign.ts)؛ null = پیش‌فرض نوع سند. فقط قالب‌هایی که در HTML از design.* استفاده می‌کنند اثر می‌گیرند
   design       Json?
+  /// چیدمان «طراحی بصری» (services/printLayout.ts)؛ null = قالب HTML دستی. اگر مقدار دارد، html از همین چیدمان تولید و ذخیره می‌شود
+  layout       Json?
   isDefault    Boolean           @default(false)
   isActive     Boolean           @default(true)
   createdAt    DateTime          @default(now())

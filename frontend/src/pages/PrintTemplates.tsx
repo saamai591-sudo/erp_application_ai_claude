@@ -5,6 +5,7 @@ import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { Modal } from "../components/Modal";
 import { PrintFrame } from "../components/PrintButton";
+import { PrintLayoutDesigner, type VisualLayout } from "../components/PrintLayoutDesigner";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
@@ -29,8 +30,8 @@ interface DesignSchemaMeta {
   normalizeWidths?: boolean;
   defaults: Design;
 }
-interface DocTypeMeta { type: string; title: string; fields: FieldDoc[]; textKeys: { key: string; title: string }[]; designSchema: DesignSchemaMeta | null }
-interface TemplateRow { id: number; documentType: string; documentTypeTitle: string; title: string; paper: "A4" | "A5"; orientation: "PORTRAIT" | "LANDSCAPE"; marginMm: number; isDefault: boolean; isActive: boolean }
+interface DocTypeMeta { type: string; title: string; fields: FieldDoc[]; textKeys: { key: string; title: string }[]; designSchema: DesignSchemaMeta | null; visualLayout: boolean }
+interface TemplateRow { id: number; documentType: string; documentTypeTitle: string; title: string; paper: "A4" | "A5"; orientation: "PORTRAIT" | "LANDSCAPE"; marginMm: number; isDefault: boolean; isActive: boolean; visual?: boolean }
 
 const PAPER_FA: Record<string, string> = { A4: "A4", A5: "A5" };
 const ORIENTATION_FA: Record<string, string> = { PORTRAIT: "عمودی", LANDSCAPE: "افقی" };
@@ -80,6 +81,7 @@ function TemplateList() {
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
           { header: "نوع سند", render: (r) => r.documentTypeTitle, filterType: "string", filterValue: (r) => r.documentTypeTitle },
           { header: "کاغذ", render: (r) => `${PAPER_FA[r.paper]} ${ORIENTATION_FA[r.orientation]}`, width: "140px" },
+          { header: "نوع قالب", render: (r) => (r.visual ? "طراحی بصری" : "HTML"), width: "110px", filterType: "string", filterValue: (r) => (r.visual ? "طراحی بصری" : "HTML") },
           { header: "پیش‌فرض", render: (r) => (r.isDefault ? "بله" : "خیر"), width: "90px" },
           { header: "فعال", render: (r) => (r.isActive ? "بله" : "خیر"), width: "80px" },
         ]}
@@ -91,7 +93,17 @@ function TemplateList() {
   );
 }
 
-const DEFAULT_FORM = { documentType: "", title: "", paper: "A4", orientation: "LANDSCAPE", marginMm: "10", digits: "PERSIAN", html: "", texts: {} as Record<string, string>, design: null as Design | null, isDefault: false, isActive: true };
+const DEFAULT_FORM = { documentType: "", title: "", paper: "A4", orientation: "LANDSCAPE", marginMm: "10", digits: "PERSIAN", html: "", texts: {} as Record<string, string>, design: null as Design | null, layout: null as VisualLayout | null, isDefault: false, isActive: true };
+
+const PAPER_MM: Record<string, [number, number]> = { A4: [210, 297], A5: [148, 210] };
+
+/** محدوده‌ی محتوای صفحه (میلی‌متر)، همان محاسبه‌ی printLayout در backend */
+function contentBox(paper: string, orientation: string, marginMm: number) {
+  const [w0, h0] = PAPER_MM[paper] ?? PAPER_MM.A4;
+  const landscape = orientation === "LANDSCAPE";
+  const m = Math.max(0, Math.min(40, Number(marginMm) || 0));
+  return { w: (landscape ? h0 : w0) - 2 * m, h: (landscape ? w0 : h0) - 2 * m - 1 };
+}
 
 /** جابه‌جایی یک عنصر آرایه به بالا/پایین (کپی جدید) */
 function moveItem<T>(list: T[], idx: number, delta: -1 | 1): T[] {
@@ -139,7 +151,7 @@ function TemplateForm({ editId }: { editId?: number }) {
 
   function applyTemplate(t: any) {
     setWasDefault(t.isDefault);
-    setForm({ documentType: t.documentType, title: t.title, paper: t.paper, orientation: t.orientation, marginMm: String(t.marginMm), digits: t.digits ?? "PERSIAN", html: t.html, texts: t.texts ?? {}, design: t.design ?? null, isDefault: t.isDefault, isActive: t.isActive });
+    setForm({ documentType: t.documentType, title: t.title, paper: t.paper, orientation: t.orientation, marginMm: String(t.marginMm), digits: t.digits ?? "PERSIAN", html: t.html, texts: t.texts ?? {}, design: t.design ?? null, layout: t.layout ?? null, isDefault: t.isDefault, isActive: t.isActive });
   }
 
   /** ساخت قالب تازه از روی همین قالب (ذخیره‌شده‌ی فعلی) و رفتن به فرم آن */
@@ -180,6 +192,7 @@ function TemplateForm({ editId }: { editId?: number }) {
       html: form.html,
       texts: form.texts,
       design: form.design,
+      layout: form.layout,
       isDefault: form.isDefault,
       isActive: form.isActive,
     };
@@ -199,10 +212,12 @@ function TemplateForm({ editId }: { editId?: number }) {
     setError(null);
     if (!form.documentType) return setError("نوع سند الزامی است");
     if (!form.title.trim()) return setError("عنوان الزامی است");
-    if (!form.html.trim()) return setError("متن قالب الزامی است");
+    if (!form.layout && !form.html.trim()) return setError("متن قالب الزامی است");
     try {
       if (editId) {
-        await api.put(`/print-templates/${editId}`, body());
+        const saved = await api.put(`/print-templates/${editId}`, body());
+        // چیدمان نرمال‌شده‌ی سرور (بلوک‌های بیرون از محدوده جمع شده‌اند) جایگزین می‌شود
+        if (saved?.layout) setForm((f: typeof DEFAULT_FORM) => ({ ...f, layout: saved.layout }));
         flash();
         if (form.isDefault) setWasDefault(true);
       } else {
@@ -222,6 +237,37 @@ function TemplateForm({ editId }: { editId?: number }) {
       navigate("/print-templates");
     } catch (err) {
       showError((err as ApiError).message);
+    }
+  }
+
+  /** شروع طراحی بصری از روی چیدمان پیش‌فرض نوع سند (با کاغذ/جهت/حاشیه‌ی فعلی فرم) */
+  async function startVisual() {
+    if (!form.documentType) return;
+    if (form.html.trim() && editId && !window.confirm("با ذخیره، متن HTML فعلی این قالب با چیدمان بصری جایگزین می‌شود (برای برگشت، «بازگشت به HTML» را بزنید که HTML تولیدشده را می‌دهد، نه HTML دستی فعلی). ادامه می‌دهید؟")) return;
+    setError(null);
+    try {
+      const q = new URLSearchParams({ documentType: form.documentType, paper: form.paper, orientation: form.orientation, marginMm: String(Number(form.marginMm) || 0) });
+      const r = await api.get(`/print-templates/default-layout?${q.toString()}`);
+      setForm({ ...form, layout: r.layout });
+    } catch (err) {
+      setError((err as ApiError).message);
+    }
+  }
+
+  /** برگشت به قالب HTML دستی: HTML تولیدشده از چیدمان فعلی در ویرایشگر HTML قرار می‌گیرد */
+  async function backToHtml() {
+    if (!form.layout) return;
+    if (!window.confirm("چیدمان بصری کنار گذاشته می‌شود و HTML تولیدشده از آن، قابل ویرایش دستی می‌شود. ادامه می‌دهید؟")) return;
+    setError(null);
+    try {
+      const r = await api.post(
+        "/print-templates/layout-html",
+        { documentType: form.documentType, paper: form.paper, orientation: form.orientation, marginMm: Number(form.marginMm) || 0, layout: form.layout },
+        { silent: true }
+      );
+      setForm({ ...form, html: r.html, layout: null });
+    } catch (err) {
+      setError((err as ApiError).message);
     }
   }
 
@@ -285,7 +331,7 @@ function TemplateForm({ editId }: { editId?: number }) {
         <div className="form-grid">
           <div className="form-field">
             <label>نوع سند<RequiredMark /></label>
-            <select value={form.documentType} disabled={!!editId} onChange={(e) => setForm({ ...form, documentType: e.target.value, texts: {}, design: null })}>
+            <select value={form.documentType} disabled={!!editId} onChange={(e) => setForm({ ...form, documentType: e.target.value, texts: {}, design: null, layout: null })}>
               {meta.map((m) => <option key={m.type} value={m.type}>{m.title}</option>)}
             </select>
           </div>
@@ -347,7 +393,37 @@ function TemplateForm({ editId }: { editId?: number }) {
             </div>
           )}
 
-          {designSchema && design && (
+          {docMeta?.visualLayout && (
+            <div className="form-field full">
+              <label>
+                طراحی بصری
+                <FieldHint label="طراحی بصری" text="صفحه را با کشیدن و رها کردن بلوک‌ها (متن، کادر، خط، لوگو، مهر، جمع‌ها، حساب‌های بانکی) طراحی کنید. جدول اقلام با تعداد سطر بلندتر می‌شود و بلوک‌های «بعد از جدول» و «پایین صفحه» همراه آن جابه‌جا می‌شوند. با «پیش‌نمایش» چاپ واقعی را روی آخرین سند ببینید و با «ذخیره» اعمال می‌شود." />
+              </label>
+              {!form.layout ? (
+                <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  <button type="button" className="btn" onClick={startVisual}>شروع طراحی بصری</button>
+                  <span style={{ fontSize: 12, color: "#666" }}>از چیدمان پیش‌فرض این نوع سند شروع می‌شود؛ HTML دستی فعلی تا ذخیره دست‌نخورده می‌ماند.</span>
+                </div>
+              ) : (
+                <div style={{ width: "100%" }}>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "center", flexWrap: "wrap" }}>
+                    <button type="button" className="btn secondary" onClick={backToHtml}>بازگشت به HTML دستی</button>
+                    <span style={{ fontSize: 12, color: "#666" }}>اندازه‌ی کاغذ، جهت و حاشیه را از بالا تغییر دهید؛ بلوک‌هایی که از محدوده بیرون بزنند هنگام ذخیره جمع می‌شوند.</span>
+                  </div>
+                  <PrintLayoutDesigner
+                    layout={form.layout}
+                    onChange={(l: VisualLayout) => setForm((f: typeof DEFAULT_FORM) => ({ ...f, layout: l }))}
+                    fields={docMeta.fields}
+                    textKeys={docMeta.textKeys}
+                    contentW={contentBox(form.paper, form.orientation, Number(form.marginMm)).w}
+                    contentH={contentBox(form.paper, form.orientation, Number(form.marginMm)).h}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {designSchema && design && !form.layout && (
             <div className="form-field full">
               <label>
                 طراحی ساده
@@ -444,6 +520,12 @@ function TemplateForm({ editId }: { editId?: number }) {
             </div>
           )}
 
+          {form.layout && (
+            <div className="form-field full">
+              <div style={{ fontSize: 12, color: "#666" }}>HTML این قالب از چیدمان بصری بالا تولید می‌شود؛ برای ویرایش دستی HTML از «بازگشت به HTML دستی» استفاده کنید.</div>
+            </div>
+          )}
+          {!form.layout && (
           <div className="form-field full">
             <label>
               متن قالب (HTML و CSS)<RequiredMark />
@@ -481,6 +563,7 @@ function TemplateForm({ editId }: { editId?: number }) {
               </div>
             </div>
           </div>
+          )}
         </div>
       </form>
       {preview && (

@@ -8,6 +8,7 @@ import type { AuthedRequest } from "../middleware/auth";
 import { DEFAULT_PRINT_TEMPLATES } from "../data/printDefaultTemplates";
 import { ensureDefaultPrintTemplates, getDesignSchema, getPrintDocType, PRINT_DOC_TYPES, printLayout, renderPrintDocument, renderSavedTemplate } from "../services/printService";
 import { defaultDesign, normalizeDesign } from "../services/printDesign";
+import { defaultSalesLayout, layoutToHtml, normalizeLayout, VISUAL_LAYOUT_TYPES } from "../services/printLayout";
 import { createShareLink, listShareLinks, revokeShareLink, SHARE_DEFAULT_DAYS } from "../services/printShareService";
 
 // «قالب‌های چاپ» (تنظیمات › عملیات) + «چاپ سند» (دکمه‌ی چاپ فرم‌ها). قالب = HTML/CSS با متغیرهای Handlebars (services/printService.ts).
@@ -53,6 +54,15 @@ function designForSave(documentType: string, raw: unknown) {
   return normalizeDesign(schema, raw) as any;
 }
 
+/** چیدمان بصری (خام) → { layout نرمال‌شده، html تولیدشده } برای یک نوع سند و کاغذ؛ نوع بدون طراحی بصری خطا می‌دهد */
+function buildVisual(documentType: string, rawLayout: unknown, paper: string, orientation: string, marginMm: number) {
+  const schema = getDesignSchema(documentType);
+  if (!schema || !VISUAL_LAYOUT_TYPES.has(documentType)) throw new Error("طراحی بصری برای این نوع سند پشتیبانی نمی‌شود");
+  const geo = printLayout(paper, orientation, marginMm);
+  const layout = normalizeLayout(schema, rawLayout, geo);
+  return { layout, html: layoutToHtml(schema, layout, geo) };
+}
+
 function serialize(t: any, withHtml = true) {
   return {
     id: t.id,
@@ -63,7 +73,8 @@ function serialize(t: any, withHtml = true) {
     orientation: t.orientation,
     marginMm: t.marginMm,
     digits: t.digits,
-    ...(withHtml ? { html: t.html, texts: t.texts ?? {}, design: designOf(t) } : {}),
+    visual: !!t.layout,
+    ...(withHtml ? { html: t.html, texts: t.texts ?? {}, design: designOf(t), layout: t.layout ?? null } : {}),
     isDefault: t.isDefault,
     isActive: t.isActive,
     updatedAt: t.updatedAt,
@@ -80,6 +91,8 @@ interface TemplateBody {
   html?: string;
   texts?: Record<string, string>;
   design?: unknown;
+  /** چیدمان طراحی بصری (object) یا null = برگشت به HTML دستی */
+  layout?: unknown;
   isDefault?: boolean;
   isActive?: boolean;
 }
@@ -94,7 +107,9 @@ function validateBody(b: TemplateBody, isNew: boolean) {
   if (b.marginMm !== undefined && !(Number(b.marginMm) >= 0 && Number(b.marginMm) <= 40)) throw new Error("حاشیه باید بین ۰ تا ۴۰ میلی‌متر باشد");
   if (b.digits !== undefined && !DIGITS.includes(b.digits)) throw new Error("نوع ارقام نامعتبر است");
   if (b.html !== undefined && String(b.html).length > 500_000) throw new Error("حجم قالب بیش از حد مجاز است");
-  if ((isNew && !String(b.html ?? "").trim()) || (b.html !== undefined && !String(b.html).trim())) throw new Error("متن قالب (HTML) الزامی است");
+  // با چیدمان بصری، html از چیدمان تولید می‌شود و در بدنه لازم نیست
+  const hasLayout = b.layout !== undefined && b.layout !== null;
+  if (!hasLayout && ((isNew && !String(b.html ?? "").trim()) || (b.html !== undefined && !String(b.html).trim()))) throw new Error("متن قالب (HTML) الزامی است");
 }
 
 // ─── مدیریت قالب‌ها ─────────────────────────────────────────────────────────
@@ -113,12 +128,40 @@ router.get("/print-templates/meta", can(`${FORM}.view`), async (_req, res) => {
       title: d.title,
       fields: d.fields,
       textKeys: d.textKeys,
+      visualLayout: VISUAL_LAYOUT_TYPES.has(type),
       // طراح ساده: تعریف ستون‌ها/بخش‌ها (برای نمایش فرم) و طراحی پیش‌فرض؛ نبودنش = این نوع طراح ندارد
       designSchema: d.designSchema
         ? { columns: d.designSchema.columns, sections: d.designSchema.sections, normalizeWidths: !!d.designSchema.normalizeWidths, defaults: defaultDesign(d.designSchema) }
         : null,
     }))
   );
+});
+
+// چیدمان پیش‌فرض بصری (هم‌ظاهر قالب پیش‌فرض نصب) برای شروع طراحی بصری؛ هندسه از کاغذ/جهت/حاشیه
+router.get("/print-templates/default-layout", can(`${FORM}.view`), async (req, res) => {
+  try {
+    const documentType = String(req.query.documentType ?? "");
+    const schema = getDesignSchema(documentType);
+    if (!schema || !VISUAL_LAYOUT_TYPES.has(documentType)) throw new Error("طراحی بصری برای این نوع سند پشتیبانی نمی‌شود");
+    const paper = PAPERS.includes(String(req.query.paper)) ? String(req.query.paper) : "A4";
+    const orientation = ORIENTATIONS.includes(String(req.query.orientation)) ? String(req.query.orientation) : "LANDSCAPE";
+    const marginMm = req.query.marginMm !== undefined ? Number(req.query.marginMm) : 10;
+    const geo = printLayout(paper, orientation, marginMm);
+    res.json({ layout: normalizeLayout(schema, defaultSalesLayout(schema, geo, documentType), geo) });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا" });
+  }
+});
+
+// HTML تولیدشده از یک چیدمان (برای «بازگشت به HTML دستی» و مشاهده)
+router.post("/print-templates/layout-html", can(`${FORM}.view`), async (req, res) => {
+  try {
+    const b = req.body as TemplateBody;
+    const r = buildVisual(String(b.documentType), b.layout, String(b.paper ?? "A4"), String(b.orientation ?? "LANDSCAPE"), b.marginMm !== undefined ? Number(b.marginMm) : 10);
+    res.json({ html: r.html, layout: r.layout });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا" });
+  }
 });
 
 router.get("/print-templates/:id", can(`${FORM}.view`), async (req, res) => {
@@ -135,6 +178,10 @@ router.post("/print-templates", can(`${FORM}.create`), async (req, res) => {
       const hasAny = (await tx.printTemplate.count({ where: { documentType: b.documentType as any } })) > 0;
       const makeDefault = b.isDefault === true || !hasAny;
       if (makeDefault) await tx.printTemplate.updateMany({ where: { documentType: b.documentType as any, isDefault: true }, data: { isDefault: false } });
+      const visual =
+        b.layout !== undefined && b.layout !== null
+          ? buildVisual(String(b.documentType), b.layout, b.paper ?? "A4", b.orientation ?? "PORTRAIT", b.marginMm !== undefined ? Number(b.marginMm) : 10)
+          : null;
       return tx.printTemplate.create({
         data: {
           documentType: b.documentType as any,
@@ -143,7 +190,8 @@ router.post("/print-templates", can(`${FORM}.create`), async (req, res) => {
           orientation: (b.orientation as any) ?? "PORTRAIT",
           marginMm: b.marginMm !== undefined ? Number(b.marginMm) : 10,
           digits: (b.digits as any) ?? "PERSIAN",
-          html: String(b.html),
+          html: visual ? visual.html : String(b.html),
+          layout: visual ? (visual.layout as any) : undefined,
           texts: cleanTexts(b.texts),
           design: designForSave(b.documentType as string, b.design),
           isDefault: makeDefault,
@@ -170,6 +218,17 @@ router.put("/print-templates/:id", can(`${FORM}.edit`), async (req, res) => {
     const makeDefault = b.isDefault === true && !existing.isDefault;
     if (b.isDefault === false && existing.isDefault) throw new Error("برای تغییر قالب پیش‌فرض، قالب دیگری را «پیش‌فرض» کنید");
     if (b.isActive === false && (existing.isDefault || makeDefault)) throw new Error("قالب پیش‌فرض را نمی‌توان غیرفعال کرد");
+    // چیدمان بصری: object = ذخیره و html را از آن بساز؛ null = برگشت به HTML دستی؛ undefined = دست‌نخورده
+    const visual =
+      b.layout !== undefined && b.layout !== null
+        ? buildVisual(
+            existing.documentType,
+            b.layout,
+            b.paper ?? existing.paper,
+            b.orientation ?? existing.orientation,
+            b.marginMm !== undefined ? Number(b.marginMm) : existing.marginMm
+          )
+        : null;
     const updated = await prisma.$transaction(async (tx) => {
       if (makeDefault) await tx.printTemplate.updateMany({ where: { documentType: existing.documentType, isDefault: true }, data: { isDefault: false } });
       return tx.printTemplate.update({
@@ -180,7 +239,8 @@ router.put("/print-templates/:id", can(`${FORM}.edit`), async (req, res) => {
           orientation: b.orientation as any,
           marginMm: b.marginMm !== undefined ? Number(b.marginMm) : undefined,
           digits: b.digits as any,
-          html: b.html !== undefined ? String(b.html) : undefined,
+          html: visual ? visual.html : b.html !== undefined ? String(b.html) : undefined,
+          layout: visual ? (visual.layout as any) : b.layout === null ? Prisma.JsonNull : undefined,
           texts: b.texts !== undefined ? cleanTexts(b.texts) : undefined,
           design: designForSave(existing.documentType, b.design),
           isDefault: makeDefault ? true : undefined,
@@ -223,6 +283,7 @@ router.post("/print-templates/:id/copy", can(`${FORM}.create`), async (req, res)
         html: src.html,
         texts: (src.texts as any) ?? {},
         design: (src.design as any) ?? Prisma.JsonNull,
+        layout: (src.layout as any) ?? Prisma.JsonNull,
         isDefault: false,
         isActive: true,
       },
@@ -242,7 +303,7 @@ router.post("/print-templates/:id/reset-to-install-default", can(`${FORM}.edit`)
     if (!def) return res.status(400).json({ error: "برای این نوع سند قالب پیش‌فرض نصب تعریف نشده است" });
     const updated = await prisma.printTemplate.update({
       where: { id: existing.id },
-      data: { paper: def.paper, orientation: def.orientation, marginMm: def.marginMm, digits: def.digits, html: def.html, texts: def.texts, design: Prisma.JsonNull },
+      data: { paper: def.paper, orientation: def.orientation, marginMm: def.marginMm, digits: def.digits, html: def.html, texts: def.texts, design: Prisma.JsonNull, layout: Prisma.JsonNull },
     });
     res.json(serialize(updated));
   } catch (e: any) {
@@ -262,8 +323,10 @@ router.post("/print-templates/preview", can(`${FORM}.view`), async (req, res) =>
     const marginMm = b.marginMm !== undefined ? Number(b.marginMm) : 10;
     const layout = printLayout(paper, orientation, marginMm);
     const data = sourceId ? await def.load(Number(sourceId), layout) : def.sample(layout);
+    // قالب بصری: HTML از چیدمانِ همین لحظه (ذخیره‌نشده) تولید می‌شود
+    const templateHtml = b.layout !== undefined && b.layout !== null ? buildVisual(String(b.documentType), b.layout, paper, orientation, marginMm).html : String(b.html);
     const html = renderPrintDocument(
-      { html: String(b.html), texts: cleanTexts(b.texts), paper, orientation, marginMm, digits: (b.digits as any) ?? "PERSIAN", documentType: String(b.documentType), design: b.design },
+      { html: templateHtml, texts: cleanTexts(b.texts), paper, orientation, marginMm, digits: (b.digits as any) ?? "PERSIAN", documentType: String(b.documentType), design: b.design },
       data
     );
     res.json({ html, usedSample: !sourceId });
