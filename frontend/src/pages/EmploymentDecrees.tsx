@@ -325,8 +325,8 @@ function DecreeForm({ editId }: { editId?: number }) {
   if (!loaded) return null;
   const emp = employees.find((x) => String(x.id) === form.employeeId);
   const usedIds = new Set(form.lines.map((l) => l.componentId).filter(Boolean));
-  const canApprove = !!editId && !locked && hasPermission("hr.personnel.employment-decrees.approve");
-  const canUnapprove = !!editId && locked && hasPermission("hr.personnel.employment-decrees.unapprove");
+  const canApprove = !!editId && !locked && hasPermission("hr.decrees.employment-decrees.approve");
+  const canUnapprove = !!editId && locked && hasPermission("hr.decrees.employment-decrees.unapprove");
 
   return (
     <FormPage

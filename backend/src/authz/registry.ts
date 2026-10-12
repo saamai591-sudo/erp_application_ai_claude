@@ -562,6 +562,15 @@ export const REGISTRY: ModuleDef[] = [
           { key: "employee-education", title: "سوابق تحصیلی", baseActions: CRUD },
           { key: "employee-veteran", title: "سوابق ایثارگری", baseActions: CRUD },
           { key: "employee-marital", title: "سوابق تاهل", baseActions: CRUD },
+          { key: "employment-types", title: "نوع همکاری", baseActions: CRUD },
+          { key: "education-levels", title: "مدرک تحصیلی", baseActions: CRUD },
+          { key: "termination-reasons", title: "دلایل خاتمه همکاری", baseActions: CRUD },
+        ],
+      },
+      {
+        key: "decrees",
+        title: "حکم کارگزینی",
+        forms: [
           { key: "decree-components", title: "اجزای حکم", baseActions: CRUD },
           {
             key: "employment-decrees",
@@ -572,9 +581,6 @@ export const REGISTRY: ModuleDef[] = [
               { key: "unapprove", title: "برگشت از تایید" },
             ],
           },
-          { key: "employment-types", title: "نوع همکاری", baseActions: CRUD },
-          { key: "education-levels", title: "مدرک تحصیلی", baseActions: CRUD },
-          { key: "termination-reasons", title: "دلایل خاتمه همکاری", baseActions: CRUD },
         ],
       },
     ],
