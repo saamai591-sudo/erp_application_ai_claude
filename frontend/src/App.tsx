@@ -96,6 +96,7 @@ import Employees from "./pages/Employees";
 import Positions from "./pages/Positions";
 import { EmploymentTypes, EducationLevels, TerminationReasons, DecreeComponents } from "./pages/HrMasters";
 import EmploymentDecrees from "./pages/EmploymentDecrees";
+import LegalParameters from "./pages/LegalParameters";
 import { EmployeeEducation, EmployeeVeteran, EmployeeMarital } from "./pages/HrRecords";
 import TradeLedgers from "./pages/TradeLedgers";
 import TaxInvoiceSubmission from "./pages/TaxInvoiceSubmission";
@@ -434,6 +435,9 @@ export default function App() {
             <Route path="/employment-decrees" element={<EmploymentDecrees />} />
             <Route path="/employment-decrees/new" element={<EmploymentDecrees />} />
             <Route path="/employment-decrees/:id/edit" element={<EmploymentDecrees />} />
+            <Route path="/legal-parameters" element={<LegalParameters />} />
+            <Route path="/legal-parameters/new" element={<LegalParameters />} />
+            <Route path="/legal-parameters/:id/edit" element={<LegalParameters />} />
             <Route path="/employee-education" element={<EmployeeEducation />} />
             <Route path="/employee-education/new" element={<EmployeeEducation />} />
             <Route path="/employee-education/:id/edit" element={<EmployeeEducation />} />

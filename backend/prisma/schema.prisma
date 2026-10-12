@@ -4837,3 +4837,57 @@ model EmploymentDecreeLine {
 
   @@unique([decreeId, componentId])
 }
+
+// ─── حقوق و دستمزد › تنظیمات › پارامترهای قانونی ──────────────────────────────────────────────────────────────────────────────
+// تعریف پارامتر (کلید ثابت، نوع) + مقدارهای تاریخ‌دار؛ مقدار معتبر هر تاریخ = آخرین مقدار با تاریخ شروع ≤ آن تاریخ.
+// تنها خواننده‌ی مقدار: services/payrollParameterService.ts (فرمول‌ها/محاسبه‌ی حقوق از همان می‌خوانند).
+
+enum PayrollParamType {
+  NUMBER
+  PERCENT
+  AMOUNT
+  BRACKETS
+}
+
+model PayrollParameter {
+  id          Int                     @id @default(autoincrement())
+  /// کلید ثابت برای ارجاع فرمول‌ها (حروف بزرگ انگلیسی)؛ پارامترهای سیستمی تغییر یا حذف نمی‌شوند
+  key         String                  @unique
+  title       String
+  type        PayrollParamType
+  description String?
+  isSystem    Boolean                 @default(false)
+  isActive    Boolean                 @default(true)
+  createdAt   DateTime                @default(now())
+  values      PayrollParameterValue[]
+}
+
+model PayrollParameterValue {
+  id            Int                       @id @default(autoincrement())
+  parameterId   Int
+  effectiveDate DateTime                  @db.Date
+  /// مقدار عددی (NUMBER/PERCENT/AMOUNT)؛ برای BRACKETS خالی است
+  value         Decimal?                  @db.Decimal(20, 4)
+  /// مقدار پیش‌فرضِ نصب که هنوز کاربر آن را تایید/ویرایش نکرده است
+  isProvisional Boolean                   @default(false)
+  note          String?
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+  parameter     PayrollParameter          @relation(fields: [parameterId], references: [id], onDelete: Cascade)
+  brackets      PayrollParameterBracket[]
+
+  @@unique([parameterId, effectiveDate])
+}
+
+/// پله‌ی جدول پلکانی: از (شامل) تا (خالی = بی‌نهایت) با نرخ درصدی
+model PayrollParameterBracket {
+  id        Int                   @id @default(autoincrement())
+  valueId   Int
+  position  Int
+  fromAmount Decimal              @db.Decimal(20, 4)
+  toAmount  Decimal?              @db.Decimal(20, 4)
+  rate      Decimal               @db.Decimal(7, 4)
+  value     PayrollParameterValue @relation(fields: [valueId], references: [id], onDelete: Cascade)
+
+  @@unique([valueId, position])
+}

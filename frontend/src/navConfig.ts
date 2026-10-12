@@ -373,8 +373,16 @@ const RAW_MODULES: ModuleGroup[] = [
       },
     ],
   },
-  // دو ماژول بعدی هنوز فرمی ندارند؛ تا اولین فرم، منو آن‌ها را نمایش نمی‌دهد (filterModulesByAccess ماژول بی‌آیتم را پنهان می‌کند)
-  { title: "حقوق و دستمزد", subModules: [] },
+  // «مدیریت تردد» هنوز فرمی ندارد؛ تا اولین فرم، منو آن را نمایش نمی‌دهد (filterModulesByAccess ماژول بی‌آیتم را پنهان می‌کند)
+  {
+    title: "حقوق و دستمزد",
+    subModules: [
+      {
+        title: "تنظیمات",
+        items: [{ key: "legal-parameters", label: "پارامترهای قانونی", list: "/legal-parameters", create: "/legal-parameters/new", icon: "sliders" }],
+      },
+    ],
+  },
   { title: "مدیریت تردد", subModules: [] },
 ];
 

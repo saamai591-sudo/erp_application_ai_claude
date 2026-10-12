@@ -586,6 +586,17 @@ export const REGISTRY: ModuleDef[] = [
     ],
   },
   {
+    key: "payroll",
+    title: "حقوق و دستمزد",
+    subModules: [
+      {
+        key: "settings",
+        title: "تنظیمات",
+        forms: [{ key: "legal-parameters", title: "پارامترهای قانونی", baseActions: CRUD }],
+      },
+    ],
+  },
+  {
     key: "tax-affairs",
     title: "امور مالیاتی",
     subModules: [
