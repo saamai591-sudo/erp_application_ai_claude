@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
+import { loadCurrentRecords } from "../services/employeeRecordService";
 
 // منابع انسانی › پرسنلی › کارمندان.
 // SSOT: کارمند یک «نقش» روی Party است (مثل مشتری/تامین‌کننده)؛ نام، کد ملی، نشانی، تلفن و حساب بانکی همان Party هستند و تفصیلی کارمند
@@ -210,6 +211,7 @@ router.get("/employees/:id", async (req, res) => {
   const { photo, party, periods, assignments, dependents, ...rest } = e;
   res.json({
     ...rest,
+    current: await loadCurrentRecords(id),
     party: { ...party, fullName: partyDisplayName(party), birthDate: day(party.birthDate) },
     photo: photo ? `data:${photo.mimeType};base64,${Buffer.from(photo.data).toString("base64")}` : null,
     periods: periods.map((p) => ({ ...p, startDate: day(p.startDate), endDate: day(p.endDate) })),
@@ -234,6 +236,10 @@ router.post("/employees", can(`${FORM}.create`), async (req, res) => {
     await checkRefs(b);
     await checkAssignmentRefs(b);
     const photo = decodePhoto(b.photo);
+    // مقدار اولیه‌ی تحصیلات، تاهل و ایثارگری اجباری است؛ سرور اولین سابقه‌ی هر کدام را با تاریخ شروع همکاری می‌سازد
+    if (!b.educationLevelId) throw new HrError("مدرک تحصیلی الزامی است");
+    if (!b.maritalStatus) throw new HrError("وضعیت تاهل الزامی است");
+    if (typeof b.isVeteran !== "boolean") throw new HrError("وضعیت ایثارگری الزامی است");
     if (b.salaryBankAccountId) {
       const acc = await prisma.partyBankAccount.findUnique({ where: { id: Number(b.salaryBankAccountId) } });
       if (!acc || acc.partyId !== partyId) throw new HrError("حساب دریافت حقوق باید از حساب‌های بانکی همین شخص باشد");
@@ -259,19 +265,20 @@ router.post("/employees", can(`${FORM}.create`), async (req, res) => {
               birthCertificateNumber: str(b.birthCertificateNumber),
               birthPlaceId: b.birthPlaceId ? Number(b.birthPlaceId) : null,
               issuePlaceId: b.issuePlaceId ? Number(b.issuePlaceId) : null,
-              maritalStatus: b.maritalStatus || null,
-              educationLevelId: b.educationLevelId || null,
-              educationField: str(b.educationField),
               militaryStatus: b.militaryStatus || null,
               insuranceNumber: str(b.insuranceNumber),
               hasDisability: !!b.hasDisability,
-              isVeteran: !!b.isVeteran,
               notes: str(b.notes),
               salaryBankAccountId: b.salaryBankAccountId ? Number(b.salaryBankAccountId) : null,
             },
           });
           await tx.employeePhoto.create({ data: { employeeId: emp.id, ...photo } });
           await tx.employmentPeriod.create({ data: { employeeId: emp.id, startDate } });
+          await tx.employeeEducationRecord.create({
+            data: { employeeId: emp.id, effectiveDate: startDate, educationLevelId: Number(b.educationLevelId), field: str(b.educationField) },
+          });
+          await tx.employeeMaritalRecord.create({ data: { employeeId: emp.id, effectiveDate: startDate, maritalStatus: b.maritalStatus } });
+          await tx.employeeVeteranRecord.create({ data: { employeeId: emp.id, effectiveDate: startDate, isVeteran: b.isVeteran } });
           await tx.employeeAssignment.create({
             data: {
               employeeId: emp.id,
@@ -283,7 +290,7 @@ router.post("/employees", can(`${FORM}.create`), async (req, res) => {
           });
           await tx.position.update({ where: { id: Number(b.positionId) }, data: { hasTransactions: true } });
           if (b.employmentTypeId) await tx.employmentType.update({ where: { id: b.employmentTypeId }, data: { hasTransactions: true } });
-          if (b.educationLevelId) await tx.educationLevel.update({ where: { id: b.educationLevelId }, data: { hasTransactions: true } });
+          await tx.educationLevel.update({ where: { id: Number(b.educationLevelId) }, data: { hasTransactions: true } });
           return emp;
         });
         return res.status(201).json({ id: created.id, personnelCode: created.personnelCode });
@@ -330,13 +337,9 @@ router.put("/employees/:id", can(`${FORM}.edit`), async (req, res) => {
           birthCertificateNumber: has("birthCertificateNumber") ? str(b.birthCertificateNumber) : undefined,
           birthPlaceId: has("birthPlaceId") ? (b.birthPlaceId ? Number(b.birthPlaceId) : null) : undefined,
           issuePlaceId: has("issuePlaceId") ? (b.issuePlaceId ? Number(b.issuePlaceId) : null) : undefined,
-          maritalStatus: has("maritalStatus") ? b.maritalStatus || null : undefined,
-          educationLevelId: has("educationLevelId") ? b.educationLevelId || null : undefined,
-          educationField: has("educationField") ? str(b.educationField) : undefined,
           militaryStatus: has("militaryStatus") ? b.militaryStatus || null : undefined,
           insuranceNumber: has("insuranceNumber") ? str(b.insuranceNumber) : undefined,
           hasDisability: has("hasDisability") ? !!b.hasDisability : undefined,
-          isVeteran: has("isVeteran") ? !!b.isVeteran : undefined,
           notes: has("notes") ? str(b.notes) : undefined,
           salaryBankAccountId: has("salaryBankAccountId") ? (b.salaryBankAccountId ? Number(b.salaryBankAccountId) : null) : undefined,
         },
@@ -349,7 +352,6 @@ router.put("/employees/:id", can(`${FORM}.edit`), async (req, res) => {
         });
       }
       if (b.employmentTypeId) await tx.employmentType.update({ where: { id: b.employmentTypeId }, data: { hasTransactions: true } });
-      if (b.educationLevelId) await tx.educationLevel.update({ where: { id: b.educationLevelId }, data: { hasTransactions: true } });
     });
     res.json({ ok: true });
   } catch (e: any) {

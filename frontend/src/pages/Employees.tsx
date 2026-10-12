@@ -93,6 +93,11 @@ interface Detail {
   periods: { id: number; startDate: string; endDate: string | null; terminationReason: { title: string } | null; note: string | null }[];
   assignments: Assignment[];
   currentAssignment: Assignment | null;
+  current: {
+    education: { levelTitle: string; field: string | null; effectiveDate: string } | null;
+    veteran: { isVeteran: boolean; percent: string | null; effectiveDate: string } | null;
+    marital: { maritalStatus: string; effectiveDate: string } | null;
+  } | null;
   dependents: Dependent[];
   [k: string]: any;
 }
@@ -174,6 +179,20 @@ function EmployeeList() {
   );
 }
 
+/** مقدار فعلیِ یک سابقه‌ی تاریخ‌دار (فقط خواندنی) + لینک به فهرست سوابق همین کارمند و ثبت سابقه‌ی جدید */
+function RecordLinkField({ label, text, path, employeeId, openTab }: { label: string; text: string; path: string; employeeId: number; openTab: (p: string) => void }) {
+  return (
+    <div className="form-field">
+      <label>{label} <span style={{ opacity: 0.7 }}>(مقدار فعلی)</span></label>
+      <input disabled value={text} />
+      <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
+        <button type="button" className="link-btn" onClick={() => openTab(`${path}?employeeId=${employeeId}`)}>مشاهده سوابق</button>
+        <button type="button" className="link-btn" onClick={() => openTab(`${path}/new?employeeId=${employeeId}`)}>ثبت سابقه‌ی جدید</button>
+      </div>
+    </div>
+  );
+}
+
 // ── انتخابگر ساده‌ی لیست (پست/واحد/مرکز هزینه/پروژه) ──
 function OptPicker({ title, rows, value, onChange, onClear, disabled }: { title: string; rows: Opt[]; value: string; onChange: (id: string) => void; onClear?: () => void; disabled?: boolean }) {
   const cur = rows.find((r) => String(r.id) === value);
@@ -222,7 +241,7 @@ const EMPTY = {
   militaryStatus: "",
   insuranceNumber: "",
   hasDisability: false,
-  isVeteran: false,
+  isVeteran: "",
   notes: "",
   salaryBankAccountId: "",
 };
@@ -286,13 +305,9 @@ function EmployeeForm({ editId }: { editId?: number }) {
       birthCertificateNumber: d.birthCertificateNumber ?? "",
       birthPlaceId: d.birthPlaceId ? String(d.birthPlaceId) : "",
       issuePlaceId: d.issuePlaceId ? String(d.issuePlaceId) : "",
-      maritalStatus: d.maritalStatus ?? "",
-      educationLevelId: d.educationLevelId ? String(d.educationLevelId) : "",
-      educationField: d.educationField ?? "",
       militaryStatus: d.militaryStatus ?? "",
       insuranceNumber: d.insuranceNumber ?? "",
       hasDisability: !!d.hasDisability,
-      isVeteran: !!d.isVeteran,
       notes: d.notes ?? "",
       salaryBankAccountId: d.salaryBankAccountId ? String(d.salaryBankAccountId) : "",
     });
@@ -342,13 +357,9 @@ function EmployeeForm({ editId }: { editId?: number }) {
       birthCertificateNumber: form.birthCertificateNumber,
       birthPlaceId: form.birthPlaceId ? Number(form.birthPlaceId) : null,
       issuePlaceId: form.issuePlaceId ? Number(form.issuePlaceId) : null,
-      maritalStatus: form.maritalStatus || null,
-      educationLevelId: form.educationLevelId ? Number(form.educationLevelId) : null,
-      educationField: form.educationField,
       militaryStatus: form.militaryStatus || null,
       insuranceNumber: form.insuranceNumber,
       hasDisability: form.hasDisability,
-      isVeteran: form.isVeteran,
       notes: form.notes,
       salaryBankAccountId: form.salaryBankAccountId ? Number(form.salaryBankAccountId) : null,
     };
@@ -368,8 +379,16 @@ function EmployeeForm({ editId }: { editId?: number }) {
         if (!form.positionId) return setError("پست الزامی است");
         if (!form.orgUnitId) return setError("واحد سازمانی الزامی است");
         if (!photo) return setError("عکس کارمند الزامی است");
+        if (!form.educationLevelId) return setError("مدرک تحصیلی الزامی است");
+        if (!form.maritalStatus) return setError("وضعیت تاهل الزامی است");
+        if (!form.isVeteran) return setError("وضعیت ایثارگری الزامی است");
         const created = await api.post("/employees", {
           ...common,
+          // مقدار اولیه‌ی سوابق تاریخ‌دار: سرور اولین سابقه‌ی هر کدام را با تاریخ شروع همکاری می‌سازد؛ بعداً فقط از فرم‌های «سوابق» تغییر می‌کنند
+          educationLevelId: Number(form.educationLevelId),
+          educationField: form.educationField,
+          maritalStatus: form.maritalStatus,
+          isVeteran: form.isVeteran === "YES",
           partyId: Number(form.partyId),
           startDate: form.startDate,
           positionId: Number(form.positionId),
@@ -544,24 +563,45 @@ function EmployeeForm({ editId }: { editId?: number }) {
             <label>محل صدور</label>
             <OptPicker title="انتخاب محل صدور (شهر)" rows={cities} value={form.issuePlaceId} onChange={(v) => set("issuePlaceId", v)} onClear={() => set("issuePlaceId", "")} />
           </div>
-          <div className="form-field">
-            <label>وضعیت تاهل</label>
-            <select value={form.maritalStatus} onChange={(e) => set("maritalStatus", e.target.value)}>
-              <option value="">—</option>
-              {Object.entries(MARITAL_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-          </div>
-          <div className="form-field">
-            <label>مدرک تحصیلی</label>
-            <select value={form.educationLevelId} onChange={(e) => set("educationLevelId", e.target.value)}>
-              <option value="">—</option>
-              {levels.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
-            </select>
-          </div>
-          <div className="form-field">
-            <label>رشته تحصیلی</label>
-            <input value={form.educationField} onChange={(e) => set("educationField", e.target.value)} />
-          </div>
+          {!editId ? (
+            <>
+              <div className="form-field">
+                <label>وضعیت تاهل<RequiredMark /> <FieldHint label="وضعیت تاهل" text="مقدار اولیه؛ تغییرات بعدی از فرم «سوابق تاهل» ثبت می‌شود" /></label>
+                <select value={form.maritalStatus} onChange={(e) => set("maritalStatus", e.target.value)}>
+                  <option value="">—</option>
+                  {Object.entries(MARITAL_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </div>
+              <div className="form-field">
+                <label>مدرک تحصیلی<RequiredMark /> <FieldHint label="مدرک تحصیلی" text="مقدار اولیه؛ تغییرات بعدی از فرم «سوابق تحصیلی» ثبت می‌شود" /></label>
+                <select value={form.educationLevelId} onChange={(e) => set("educationLevelId", e.target.value)}>
+                  <option value="">—</option>
+                  {levels.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+                </select>
+              </div>
+              <div className="form-field">
+                <label>رشته تحصیلی</label>
+                <input value={form.educationField} onChange={(e) => set("educationField", e.target.value)} />
+              </div>
+              <div className="form-field">
+                <label>ایثارگر<RequiredMark /> <FieldHint label="ایثارگر" text="مقدار اولیه؛ تغییرات بعدی از فرم «سوابق ایثارگری» ثبت می‌شود" /></label>
+                <select value={form.isVeteran} onChange={(e) => set("isVeteran", e.target.value)}>
+                  <option value="">—</option>
+                  <option value="NO">خیر</option>
+                  <option value="YES">بله</option>
+                </select>
+              </div>
+            </>
+          ) : (
+            <>
+              <RecordLinkField label="وضعیت تاهل" path="/employee-marital" employeeId={editId} openTab={openTab}
+                text={detail?.current?.marital ? `${MARITAL_FA[detail.current.marital.maritalStatus]} (از ${formatJalaliDate(detail.current.marital.effectiveDate)})` : "—"} />
+              <RecordLinkField label="مدرک تحصیلی" path="/employee-education" employeeId={editId} openTab={openTab}
+                text={detail?.current?.education ? `${detail.current.education.levelTitle}${detail.current.education.field ? " — " + detail.current.education.field : ""} (از ${formatJalaliDate(detail.current.education.effectiveDate)})` : "—"} />
+              <RecordLinkField label="ایثارگری" path="/employee-veteran" employeeId={editId} openTab={openTab}
+                text={detail?.current?.veteran ? `${detail.current.veteran.isVeteran ? "ایثارگر" + (detail.current.veteran.percent ? " — " + toFaDigits(detail.current.veteran.percent) + "٪" : "") : "غیر ایثارگر"} (از ${formatJalaliDate(detail.current.veteran.effectiveDate)})` : "—"} />
+            </>
+          )}
           <div className="form-field">
             <label>وضعیت نظام وظیفه</label>
             <select value={form.militaryStatus} onChange={(e) => set("militaryStatus", e.target.value)}>
@@ -577,12 +617,6 @@ function EmployeeForm({ editId }: { editId?: number }) {
             <label className="checkbox-row">
               <input type="checkbox" checked={form.hasDisability} onChange={(e) => set("hasDisability", e.target.checked)} />
               دارای معلولیت
-            </label>
-          </div>
-          <div className="form-field">
-            <label className="checkbox-row">
-              <input type="checkbox" checked={form.isVeteran} onChange={(e) => set("isVeteran", e.target.checked)} />
-              ایثارگر
             </label>
           </div>
           <div className="form-field" style={{ gridColumn: "1 / -1" }}>

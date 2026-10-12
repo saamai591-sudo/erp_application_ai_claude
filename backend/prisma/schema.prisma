@@ -4585,7 +4585,7 @@ model EducationLevel {
   title           String     @unique
   isActive        Boolean    @default(true)
   hasTransactions Boolean    @default(false)
-  employees       Employee[]
+  records         EmployeeEducationRecord[]
 }
 
 model TerminationReason {
@@ -4623,14 +4623,10 @@ model Employee {
   birthCertificateNumber String?
   birthPlaceId           Int?
   issuePlaceId           Int?
-  maritalStatus          MaritalStatus?
-  educationLevelId       Int?
-  educationField         String?
   militaryStatus         MilitaryStatus?
   /// شماره بیمه تامین اجتماعی
   insuranceNumber        String?
   hasDisability          Boolean              @default(false)
-  isVeteran              Boolean              @default(false)
   notes                  String?
   /// حساب دریافت حقوق: ارجاع به یکی از حساب‌های بانکی همان طرف‌حساب
   salaryBankAccountId    Int?
@@ -4639,11 +4635,13 @@ model Employee {
   updatedAt              DateTime             @updatedAt
   party                  Party                @relation(fields: [partyId], references: [id])
   employmentType         EmploymentType?      @relation(fields: [employmentTypeId], references: [id])
-  educationLevel         EducationLevel?      @relation(fields: [educationLevelId], references: [id])
   salaryBankAccount      PartyBankAccount?    @relation(fields: [salaryBankAccountId], references: [id], onDelete: SetNull)
   birthPlace             GeoRegion?           @relation("EmployeeBirthPlace", fields: [birthPlaceId], references: [id])
   issuePlace             GeoRegion?           @relation("EmployeeIssuePlace", fields: [issuePlaceId], references: [id])
   photo                  EmployeePhoto?
+  educationRecords        EmployeeEducationRecord[]
+  veteranRecords         EmployeeVeteranRecord[]
+  maritalRecords         EmployeeMaritalRecord[]
   periods                EmploymentPeriod[]
   assignments            EmployeeAssignment[]
   dependents             EmployeeDependent[]
@@ -4709,4 +4707,52 @@ model EmployeeDependent {
   employee                  Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([employeeId])
+}
+
+// ─── سوابق تاریخ‌دار پرسنلی (موجودیت مستقل؛ مقدار هر تاریخ = آخرین سابقه با تاریخ اعمال ≤ آن تاریخ) ───
+// مقدار «فعلی» هرگز روی Employee ذخیره نمی‌شود (SSOT). برای هر کارمند حداقل یک سابقه‌ی هر نوع لازم است (در ثبت کارمند ساخته می‌شود).
+
+/// سابقه‌ی تحصیلی
+model EmployeeEducationRecord {
+  id               Int            @id @default(autoincrement())
+  employeeId       Int
+  effectiveDate    DateTime       @db.Date
+  educationLevelId Int
+  field            String?
+  note             String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  employee         Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  educationLevel   EducationLevel @relation(fields: [educationLevelId], references: [id])
+
+  @@unique([employeeId, effectiveDate])
+}
+
+/// سابقه‌ی ایثارگری (درصد اختیاری)
+model EmployeeVeteranRecord {
+  id            Int      @id @default(autoincrement())
+  employeeId    Int
+  effectiveDate DateTime @db.Date
+  isVeteran     Boolean
+  percent       Decimal? @db.Decimal(5, 2)
+  note          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, effectiveDate])
+}
+
+/// سابقه‌ی وضعیت تاهل
+model EmployeeMaritalRecord {
+  id            Int           @id @default(autoincrement())
+  employeeId    Int
+  effectiveDate DateTime      @db.Date
+  maritalStatus MaritalStatus
+  note          String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  employee      Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, effectiveDate])
 }

@@ -95,6 +95,7 @@ import TaxMemories from "./pages/TaxMemories";
 import Employees from "./pages/Employees";
 import Positions from "./pages/Positions";
 import { EmploymentTypes, EducationLevels, TerminationReasons } from "./pages/HrMasters";
+import { EmployeeEducation, EmployeeVeteran, EmployeeMarital } from "./pages/HrRecords";
 import TradeLedgers from "./pages/TradeLedgers";
 import TaxInvoiceSubmission from "./pages/TaxInvoiceSubmission";
 import WarehouseDocDetails from "./pages/WarehouseDocDetails";
@@ -426,6 +427,15 @@ export default function App() {
             <Route path="/positions" element={<Positions />} />
             <Route path="/positions/new" element={<Positions />} />
             <Route path="/positions/:id/edit" element={<Positions />} />
+            <Route path="/employee-education" element={<EmployeeEducation />} />
+            <Route path="/employee-education/new" element={<EmployeeEducation />} />
+            <Route path="/employee-education/:id/edit" element={<EmployeeEducation />} />
+            <Route path="/employee-veteran" element={<EmployeeVeteran />} />
+            <Route path="/employee-veteran/new" element={<EmployeeVeteran />} />
+            <Route path="/employee-veteran/:id/edit" element={<EmployeeVeteran />} />
+            <Route path="/employee-marital" element={<EmployeeMarital />} />
+            <Route path="/employee-marital/new" element={<EmployeeMarital />} />
+            <Route path="/employee-marital/:id/edit" element={<EmployeeMarital />} />
             <Route path="/employment-types" element={<EmploymentTypes />} />
             <Route path="/employment-types/new" element={<EmploymentTypes />} />
             <Route path="/employment-types/:id/edit" element={<EmploymentTypes />} />
