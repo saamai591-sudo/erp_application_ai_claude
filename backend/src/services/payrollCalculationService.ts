@@ -98,7 +98,7 @@ export async function validateFactorMethod(cand: CandidateMethod): Promise<void>
   const refs = allRefs(parsed);
   const [decree, comps, params] = await Promise.all([
     prisma.decreeComponent.findMany({ select: { code: true, title: true } }),
-    prisma.payrollComponent.findMany({ select: { key: true, title: true } }),
+    prisma.payrollComponent.findMany({ select: { key: true, title: true, kind: true } }),
     prisma.payrollParameter.findMany({ select: { key: true } }),
   ]);
   const dCodes = new Set(decree.map((d) => String(d.code)));
@@ -113,13 +113,15 @@ export async function validateFactorMethod(cand: CandidateMethod): Promise<void>
 
   // گراف وابستگی با آخرین روش هر عامل + نامزد
   const latest = await prisma.payrollFactorMethod.findMany({ orderBy: { effectiveDate: "desc" }, include: { decreeComponent: { select: { code: true } }, payrollComponent: { select: { key: true } } } });
+  // طبقه از خود عامل می‌آید (عامل حکم همیشه «پرداختی» است)
+  const kindByNode = new Map<string, Kind>([...decree.map((d) => [`D:${d.code}`, "EARNING" as Kind] as [string, Kind]), ...comps.map((x) => [`C:${x.key}`, x.kind as Kind] as [string, Kind])]);
   const seen = new Set<string>();
   const nodes: { node: string; kind: Kind; method: Method; cond: string | null; formula: string | null }[] = [];
   for (const m of latest) {
     const node = m.decreeComponent ? `D:${m.decreeComponent.code}` : `C:${m.payrollComponent!.key}`;
     if (seen.has(node) || node === cand.node) continue;
     seen.add(node);
-    nodes.push({ node, kind: m.kind as Kind, method: m.method as Method, cond: m.conditionText, formula: m.formulaText });
+    nodes.push({ node, kind: (kindByNode.get(node) ?? "INFO") as Kind, method: m.method as Method, cond: m.conditionText, formula: m.formulaText });
   }
   nodes.push({ node: cand.node, kind: cand.kind, method: cand.method, cond: cand.conditionText, formula: cand.formulaText });
   const kindNodes = nodes.map((n) => ({ node: n.node, kind: n.kind }));
@@ -163,7 +165,6 @@ interface LineOut {
 interface MethodRow {
   id: number;
   method: Method;
-  kind: Kind;
   valueType: string;
   fixedValue: number | null;
   conditionText: string | null;
@@ -176,6 +177,7 @@ interface FactorNode {
   source: "DECREE_COMPONENT" | "PAYROLL_COMPONENT";
   refId: number;
   title: string;
+  kind: Kind;
   method: MethodRow | null;
   parsed: { cond: Cond | null; formula: Node | null } | null;
   parseError: string | null;
@@ -229,7 +231,6 @@ export async function calculatePayroll(
   const toRow = (m: (typeof methods)[number]): MethodRow => ({
     id: m.id,
     method: m.method as Method,
-    kind: m.kind as Kind,
     valueType: m.valueType,
     fixedValue: m.fixedValue === null ? null : Number(m.fixedValue),
     conditionText: m.conditionText,
@@ -258,6 +259,7 @@ export async function calculatePayroll(
       const m = payrollMethod(c.id);
       if (!m || !INPUT_METHODS.includes(m.method)) throw new PayrollCalcError(`عامل «${c.title}» روش ورودی ندارد`);
       if (!isFinite(i.value) || i.value < 0) throw new PayrollCalcError(`مقدار «${c.title}» نامعتبر است`);
+      if (m.valueType === "DAYS" && i.value > range.days) throw new PayrollCalcError(`مقدار «${c.title}» (${i.value}) از تعداد روزهای ماه (${range.days}) بیشتر است`);
       await prisma.payrollFactorInput.upsert({
         where: { employeeId_year_month_componentId: { employeeId, year, month, componentId: c.id } },
         create: { employeeId, year, month, componentId: c.id, value: i.value },
@@ -290,6 +292,7 @@ export async function calculatePayroll(
         source: "DECREE_COMPONENT",
         refId: l.component.id,
         title: l.component.title,
+        kind: "EARNING",
         method: decreeMethod(l.component.id),
         decreeValue: Number(l.value),
         decreeValueType: l.component.valueType,
@@ -302,9 +305,9 @@ export async function calculatePayroll(
       warnings.push(`برای عامل حقوق «${c.title}» روش محاسبه‌ای تعریف نشده است؛ در محاسبه نیامد`);
       continue;
     }
-    nodes.push(mk({ node: `C:${c.key}`, source: "PAYROLL_COMPONENT", refId: c.id, title: c.title, method: m }));
+    nodes.push(mk({ node: `C:${c.key}`, source: "PAYROLL_COMPONENT", refId: c.id, title: c.title, kind: c.kind as Kind, method: m }));
   }
-  const kindNodes = nodes.map((n) => ({ node: n.node, kind: (n.method?.kind ?? "INFO") as Kind }));
+  const kindNodes = nodes.map((n) => ({ node: n.node, kind: n.kind }));
   for (const n of nodes) n.deps = edgesOf(n.node, n.refs, kindNodes);
 
   // ترتیب توپولوژیک
@@ -422,7 +425,7 @@ export async function calculatePayroll(
       if (ns === "S") {
         let sum = 0;
         for (const n of nodes) {
-          if ((n.method?.kind ?? "INFO") !== key) continue;
+          if (n.kind !== key) continue;
           if (errored.has(n.node)) throw new FormulaError(`«${n.title}» خطا دارد و در جمع ${KIND_FA[key]} نمی‌آید`);
           sum += amounts.get(n.node) ?? 0;
         }
@@ -516,7 +519,7 @@ export async function calculatePayroll(
     }
     trace.valueType = m?.valueType;
     lines.push({
-      kind: (m?.kind ?? "INFO") as Kind,
+      kind: n.kind,
       source: n.source,
       refId: n.refId,
       title: n.title,

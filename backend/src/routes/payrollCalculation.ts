@@ -51,7 +51,7 @@ router.get("/payroll-components", can(`${F_COMP}.view`), async (_req, res) => {
       isSystem: c.isSystem,
       isActive: c.isActive,
       method: c.methods[0]?.method ?? null,
-      kind: c.methods[0]?.kind ?? null,
+      kind: c.kind,
     }))
   );
 });
@@ -61,13 +61,14 @@ router.post("/payroll-components", can(`${F_COMP}.create`), async (req, res) => 
   try {
     const title = str(b.title);
     if (!title) throw new PayrollCalcError("عنوان الزامی است");
+    if (!KINDS.includes(b.kind)) throw new PayrollCalcError("طبقه را انتخاب کنید");
     if (await prisma.payrollComponent.findFirst({ where: { title } })) throw new PayrollCalcError("عامل دیگری با همین عنوان وجود دارد");
     // کلید داخلی را سیستم می‌سازد (به کاربر نمایش داده نمی‌شود)
     const last = await prisma.payrollComponent.findFirst({ orderBy: { id: "desc" }, select: { id: true } });
     let n = (last?.id ?? 0) + 1;
     let key = `F${n}`;
     while (await prisma.payrollComponent.findUnique({ where: { key } })) key = `F${++n}`;
-    const created = await prisma.payrollComponent.create({ data: { key, title, description: str(b.description), isActive: b.isActive ?? true } });
+    const created = await prisma.payrollComponent.create({ data: { key, title, kind: b.kind, description: str(b.description), isActive: b.isActive ?? true } });
     res.status(201).json({ id: created.id });
   } catch (e) {
     fail(res, e, "خطا در ثبت عامل");
@@ -83,7 +84,12 @@ router.put("/payroll-components/:id", can(`${F_COMP}.edit`), async (req, res) =>
     const title = str(b.title);
     if (!title) throw new PayrollCalcError("عنوان الزامی است");
     if (await prisma.payrollComponent.findFirst({ where: { title, NOT: { id } } })) throw new PayrollCalcError("عامل دیگری با همین عنوان وجود دارد");
-    await prisma.payrollComponent.update({ where: { id }, data: { title, description: str(b.description), isActive: c.isSystem ? undefined : b.isActive } });
+    if (b.kind !== undefined && !KINDS.includes(b.kind)) throw new PayrollCalcError("طبقه نامعتبر است");
+    // تغییر طبقه‌ی عاملی که در فیش‌ها استفاده شده جمع‌های قبلی را بی‌معنا می‌کند
+    if (b.kind && b.kind !== c.kind && (await prisma.payrollSlipLine.count({ where: { source: "PAYROLL_COMPONENT", refId: id } }))) {
+      throw new PayrollCalcError("این عامل در فیش‌های محاسبه‌شده استفاده شده و طبقه‌اش قابل تغییر نیست");
+    }
+    await prisma.payrollComponent.update({ where: { id }, data: { title, kind: b.kind ?? undefined, description: str(b.description), isActive: c.isSystem ? undefined : b.isActive } });
     res.json({ ok: true });
   } catch (e) {
     fail(res, e, "خطا در ویرایش عامل");
@@ -114,7 +120,6 @@ const shapeMethod = (m: any, today: Date) => ({
   factorId: m.decreeComponentId ?? m.payrollComponentId,
   factorTitle: m.decreeComponent?.title ?? m.payrollComponent?.title ?? "",
   method: m.method,
-  kind: m.kind,
   valueType: m.valueType,
   issueYear: m.issueYear,
   issueMonth: m.issueMonth,
@@ -164,7 +169,7 @@ router.get("/payroll-methods/palette", can(`${F_METH}.view`), async (_req, res) 
     const kinds = KINDS.map((k) => ({
       kind: k,
       title: KIND_FA[k],
-      factors: comps.filter((c) => latest.get(c.id)?.method === method && latest.get(c.id)?.kind === k).map((c) => ({ key: c.key, title: c.title, valueType: latest.get(c.id)!.valueType })),
+      factors: comps.filter((c) => latest.get(c.id)?.method === method && c.kind === k).map((c) => ({ key: c.key, title: c.title, valueType: latest.get(c.id)!.valueType })),
     }));
     return kinds.filter((k) => k.factors.length > 0);
   };
@@ -188,6 +193,7 @@ router.post("/payroll-methods/validate", can(`${F_METH}.view`), async (req, res)
   const b = req.body as any;
   try {
     let node: string;
+    let kindOfFactor = "EARNING";
     if (b.basis === "decree") {
       const d = await prisma.decreeComponent.findUnique({ where: { id: Number(b.factorId) } });
       if (!d) throw new PayrollCalcError("عامل حکم را انتخاب کنید");
@@ -195,10 +201,11 @@ router.post("/payroll-methods/validate", can(`${F_METH}.view`), async (req, res)
     } else {
       const comp = b.factorId ? await prisma.payrollComponent.findUnique({ where: { id: Number(b.factorId) } }) : null;
       node = `C:${comp?.key ?? "NEW_FACTOR"}`;
+      kindOfFactor = comp?.kind ?? "EARNING";
     }
     await validateFactorMethod({
       node,
-      kind: KINDS.includes(b.kind) ? b.kind : "EARNING",
+      kind: kindOfFactor as any,
       method: b.basis === "decree" ? "CALCULATED" : b.method ?? "CALCULATED",
       conditionText: str(b.conditionText),
       formulaText: str(b.formulaText),
@@ -225,18 +232,20 @@ async function methodData(b: any, existingId: number | null) {
   const factorId = Number(b.factorId);
   if (!factorId) throw new PayrollCalcError("عامل را انتخاب کنید");
   let node: string;
+  let kind: string;
   if (basis === "decree") {
     const d = await prisma.decreeComponent.findUnique({ where: { id: factorId } });
     if (!d) throw new PayrollCalcError("عامل حکم یافت نشد");
     node = `D:${d.code}`;
+    kind = "EARNING";
   } else {
     const c = await prisma.payrollComponent.findUnique({ where: { id: factorId } });
     if (!c) throw new PayrollCalcError("عامل حقوق یافت نشد");
     node = `C:${c.key}`;
+    kind = c.kind;
   }
   const method = basis === "decree" ? "CALCULATED" : b.method;
   if (!METHODS.includes(method)) throw new PayrollCalcError("روش را انتخاب کنید");
-  if (!KINDS.includes(b.kind)) throw new PayrollCalcError("طبقه را انتخاب کنید");
   if (!VALUE_TYPES.includes(b.valueType)) throw new PayrollCalcError("نوع پارامتر را انتخاب کنید");
   const iy = Number(b.issueYear), im = Number(b.issueMonth), ey = Number(b.execYear), em = Number(b.execMonth);
   for (const [y, m, label] of [[iy, im, "ماه صدور"], [ey, em, "ماه اجرا"]] as const) {
@@ -253,14 +262,13 @@ async function methodData(b: any, existingId: number | null) {
   }
   const conditionText = str(b.conditionText);
   const formulaText = str(b.formulaText);
-  await validateFactorMethod({ node, kind: b.kind, method, conditionText, formulaText });
+  await validateFactorMethod({ node, kind: kind as any, method, conditionText, formulaText });
   const isCalc = method === "CALCULATED";
   return {
     basis,
     factorId,
     data: {
       method,
-      kind: b.kind,
       valueType: b.valueType,
       issueYear: iy,
       issueMonth: im,

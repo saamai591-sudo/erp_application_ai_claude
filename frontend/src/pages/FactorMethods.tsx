@@ -14,7 +14,7 @@ import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
-import { KIND_FA, METHOD_FA, MONTHS_FA, VALUE_TYPE_FA, currentJalaliYearMonth } from "../lib/payrollLabels";
+import { METHOD_FA, MONTHS_FA, VALUE_TYPE_FA, currentJalaliYearMonth } from "../lib/payrollLabels";
 import { toFaDigits } from "../lib/formatAmount";
 
 // حقوق و دستمزد › تنظیمات › روش محاسبه عامل: برای هر عامل (حکم یا حقوق) مشخص می‌شود چگونه به محاسبه‌ی ماه وارد می‌شود. رکوردها تاریخ‌دارند
@@ -26,7 +26,6 @@ interface Row {
   factorId: number;
   factorTitle: string;
   method: string;
-  kind: string;
   valueType: string;
   issueYear: number;
   issueMonth: number;
@@ -78,7 +77,7 @@ function MethodList() {
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint
-            text="روش محاسبه هر عامل (حکم یا حقوق): محاسباتی با فرمول، مقدار ثابت، ورود دستی یا ورود از سیستم تردد/خزانه‌داری، همراه طبقه و نوع پارامتر. هر رکورد از «ماه اجرا» به بعد معتبر است؛ برای تغییر، رکورد جدید با ماه اجرای بعدی ثبت کنید."
+            text="روش محاسبه هر عامل (حکم یا حقوق): محاسباتی با فرمول، مقدار ثابت، ورود دستی یا ورود از سیستم تردد/خزانه‌داری، همراه نوع پارامتر. هر رکورد از «ماه اجرا» به بعد معتبر است؛ مثلاً برای عاملی که تا امروز دستی وارد می‌شد، رکورد جدید با روش «ورود از سیستم تردد» و ماه اجرای بعدی ثبت کنید؛ نیازی به تعریف عامل تازه نیست."
             title="روش محاسبه عامل"
           />
           <NewRecordButton path="/factor-methods/new" />
@@ -91,7 +90,6 @@ function MethodList() {
           { header: "مبنا", ...s((r) => (r.basis === "decree" ? "عامل حکم" : "عامل حقوق")), width: "100px" },
           { header: "عامل", ...s((r) => r.factorTitle) },
           { header: "روش", ...s((r) => (r.basis === "decree" ? "محاسباتی" : METHOD_FA[r.method])), width: "170px" },
-          { header: "طبقه", ...s((r) => KIND_FA[r.kind]), width: "120px" },
           { header: "نوع پارامتر", ...s((r) => VALUE_TYPE_FA[r.valueType]), width: "110px" },
           { header: "ماه صدور", ...s((r) => ym(r.issueYear, r.issueMonth)), width: "130px" },
           { header: "ماه اجرا", ...s((r) => ym(r.execYear, r.execMonth)), width: "130px" },
@@ -125,7 +123,6 @@ function MethodForm({ editId }: { editId?: number }) {
     basis: "payroll" as "decree" | "payroll",
     factorId: "",
     method: "CALCULATED",
-    kind: "EARNING",
     valueType: "AMOUNT",
     issueYear: cur.year,
     issueMonth: cur.month,
@@ -151,7 +148,6 @@ function MethodForm({ editId }: { editId?: number }) {
           basis: r.basis,
           factorId: String(r.factorId),
           method: r.method,
-          kind: r.kind,
           valueType: r.valueType,
           issueYear: r.issueYear,
           issueMonth: r.issueMonth,
@@ -244,12 +240,6 @@ function MethodForm({ editId }: { editId?: number }) {
             </div>
           )}
           <div className="form-field">
-            <label>طبقه<RequiredMark /></label>
-            <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
-              {Object.entries(KIND_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-          </div>
-          <div className="form-field">
             <label>نوع پارامتر<RequiredMark /> <FieldHint label="نوع پارامتر" text="نوع مقدار این عامل: عدد، ساعت دقیقه، روز یا مبلغ" /></label>
             <select value={form.valueType} onChange={(e) => setForm({ ...form, valueType: e.target.value })}>
               {Object.entries(VALUE_TYPE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -292,7 +282,6 @@ function MethodForm({ editId }: { editId?: number }) {
           basis={form.basis}
           factorId={form.factorId}
           method={form.method}
-          kind={form.kind}
           conditionText={form.conditionText}
           formulaText={form.formulaText}
           onClose={() => setBuilder(false)}

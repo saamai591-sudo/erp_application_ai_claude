@@ -6,12 +6,13 @@ import { FormPage } from "../components/FormPage";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
-import { KIND_FA, METHOD_FA } from "../lib/payrollLabels";
+import { KIND_FA } from "../lib/payrollLabels";
 
 // حقوق و دستمزد › تنظیمات › عامل حقوق: فقط هویت عامل (عنوان). کلید داخلی را سیستم خودکار می‌سازد و نمایش داده نمی‌شود؛
 // طبقه، روش و فرمول در «روش محاسبه عامل» (تاریخ‌دار) تعریف می‌شود.
@@ -23,7 +24,7 @@ interface Comp {
   isSystem: boolean;
   isActive: boolean;
   method: string | null;
-  kind: string | null;
+  kind: string;
 }
 
 export default function PayrollComponents() {
@@ -59,7 +60,7 @@ function CompList() {
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint
-            text="عامل حقوق هر موردی است که در محاسبه‌ی ماهانه می‌آید (اضافه‌کار، بیمه، مالیات، روز کارکرد، وام و …). اینجا فقط عنوان عامل تعریف می‌شود؛ طبقه، روش محاسبه و فرمول در «روش محاسبه عامل» ثبت می‌شود."
+            text="عامل حقوق هر موردی است که در محاسبه‌ی ماهانه می‌آید (اضافه‌کار، بیمه، مالیات، روز کارکرد، وام و …). اینجا عنوان و طبقه‌ی عامل تعریف می‌شود؛ روش محاسبه (محاسباتی، مقدار ثابت، ورود دستی/تردد/خزانه‌داری) و فرمول به‌صورت تاریخ‌دار در «روش محاسبه عامل» ثبت می‌شود."
             title="عامل حقوق"
           />
           <NewRecordButton path="/payroll-components/new" />
@@ -70,8 +71,7 @@ function CompList() {
       <DataTable
         columns={[
           { header: "عنوان", ...s((r) => r.title) },
-          { header: "روش", ...s((r) => (r.method ? METHOD_FA[r.method] : "تعریف نشده")), width: "170px" },
-          { header: "طبقه", ...s((r) => (r.kind ? KIND_FA[r.kind] : "—")), width: "130px" },
+          { header: "طبقه", ...s((r) => (r.kind ? KIND_FA[r.kind] : "—")), width: "140px" },
           { header: "سیستمی", ...s((r) => (r.isSystem ? "بله" : "")), width: "80px" },
           { header: "فعال", ...s((r) => (r.isActive ? "بله" : "خیر")), width: "70px" },
         ]}
@@ -83,7 +83,7 @@ function CompList() {
   );
 }
 
-const DEFAULT_FORM = { title: "", description: "", isActive: true };
+const DEFAULT_FORM = { title: "", kind: "", description: "", isActive: true };
 
 function CompForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
@@ -101,7 +101,7 @@ function CompForm({ editId }: { editId?: number }) {
       const c = rows.find((r) => r.id === editId);
       if (c) {
         setIsSystem(c.isSystem);
-        if (!hasPersistedState(cacheKey)) setForm({ title: c.title, description: c.description ?? "", isActive: c.isActive });
+        if (!hasPersistedState(cacheKey)) setForm({ title: c.title, kind: c.kind, description: c.description ?? "", isActive: c.isActive });
       }
       setLoaded(true);
     });
@@ -112,6 +112,7 @@ function CompForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
     if (!form.title.trim()) return setError("عنوان الزامی است");
+    if (!form.kind) return setError("طبقه را انتخاب کنید");
     try {
       if (editId) {
         await api.put(`/payroll-components/${editId}`, form);
@@ -152,6 +153,13 @@ function CompForm({ editId }: { editId?: number }) {
           <div className="form-field">
             <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
+          </div>
+          <div className="form-field">
+            <label>طبقه<RequiredMark /> <FieldHint label="طبقه" text="پرداختی: به جمع پرداختی‌ها می‌رود. کسر: از خالص پرداختی کم می‌شود. هزینه کارفرما: هزینه‌ی کارفرما و بدون اثر بر خالص. اطلاعاتی: فقط نمایش (مثل روز کارکرد). طبقه‌ی عامل با زمان تغییر نمی‌کند." /></label>
+            <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
+              <option value="">انتخاب کنید</option>
+              {Object.entries(KIND_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
           </div>
           {editId && !isSystem && (
             <div className="form-field">

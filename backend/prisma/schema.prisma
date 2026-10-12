@@ -4916,6 +4916,8 @@ model PayrollComponent {
   id          Int                   @id @default(autoincrement())
   key         String                @unique
   title       String
+  /// طبقه‌ی عامل (پرداختی/کسر/هزینه کارفرما/اطلاعاتی)؛ با زمان عوض نمی‌شود، پس روی خود عامل است نه روش محاسبه
+  kind        PayrollComponentKind
   description String?
   isSystem    Boolean               @default(false)
   isActive    Boolean               @default(true)
@@ -4992,7 +4994,6 @@ model PayrollFactorMethod {
   decreeComponentId  Int?
   payrollComponentId Int?
   method             PayrollMethod        @default(CALCULATED)
-  kind               PayrollComponentKind
   valueType          PayrollValueType     @default(AMOUNT)
   issueYear          Int
   issueMonth         Int

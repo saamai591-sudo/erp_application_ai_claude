@@ -35,7 +35,6 @@ export function FormulaBuilder({
   basis,
   factorId,
   method,
-  kind,
   conditionText,
   formulaText,
   onClose,
@@ -44,7 +43,6 @@ export function FormulaBuilder({
   basis: "decree" | "payroll";
   factorId: string;
   method: string;
-  kind: string;
   conditionText: string;
   formulaText: string;
   onClose: () => void;
@@ -132,7 +130,7 @@ export function FormulaBuilder({
   async function check() {
     setErr(null);
     try {
-      const r = await api.post("/payroll-methods/validate", { basis, factorId: Number(factorId) || null, method, kind, conditionText: cond.join(" "), formulaText: calc.join(" ") }, { silent: true } as any);
+      const r = await api.post("/payroll-methods/validate", { basis, factorId: Number(factorId) || null, method, conditionText: cond.join(" "), formulaText: calc.join(" ") }, { silent: true } as any);
       if (r.ok) setOk(true);
       else setErr(r.error);
     } catch (e) {
@@ -178,7 +176,7 @@ export function FormulaBuilder({
 
   const chipsArea = (a: Area, title: string, ops: string[], logic: boolean) => (
     <div style={{ marginBottom: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
+      <div dir="ltr" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
         <b>{title}</b>
         {ops.map((o) => (
           <button key={o} type="button" className="btn secondary" style={{ padding: "1px 8px" }} onClick={() => { setActive(a); set(a, [...get(a), o]); }}>
@@ -191,7 +189,7 @@ export function FormulaBuilder({
             <button type="button" className="btn secondary" style={{ padding: "1px 8px" }} onClick={() => { setActive(a); set(a, [...get(a), "OR"]); }}>یا</button>
           </>
         )}
-        <span style={{ marginInlineStart: "auto", display: "flex", gap: 8 }}>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           <button type="button" className="link-btn" title="کپی" onClick={() => copy(a)}>کپی</button>
           <button type="button" className="link-btn" title="چسباندن" onClick={() => paste(a)}>چسباندن</button>
           <button type="button" className="link-btn" title="حذف آخرین" onClick={() => set(a, get(a).slice(0, -1))}>⌫</button>
@@ -200,9 +198,10 @@ export function FormulaBuilder({
       </div>
       <div
         onClick={() => setActive(a)}
-        dir="rtl"
+        dir="ltr"
         style={{
           minHeight: 62,
+          textAlign: "left",
           border: `2px solid ${active === a ? "var(--primary, #4f46e5)" : "var(--line)"}`,
           borderRadius: 8,
           padding: 6,
@@ -212,7 +211,7 @@ export function FormulaBuilder({
           alignContent: "flex-start",
         }}
       >
-        {get(a).length === 0 && <span style={{ opacity: 0.45 }}>{a === "cond" ? "بدون شرط (همیشه برقرار)" : "عبارت محاسباتی را از پایین بسازید"}</span>}
+        {get(a).length === 0 && <span dir="rtl" style={{ opacity: 0.45 }}>{a === "cond" ? "بدون شرط (همیشه برقرار)" : "عبارت محاسباتی را از پایین بسازید"}</span>}
         {get(a).map((t, i) => {
           const c = chipText(t);
           const style =
@@ -224,7 +223,7 @@ export function FormulaBuilder({
               ? { background: "#0f766e", color: "#fff", borderRadius: 14, padding: "2px 10px" }
               : { padding: "2px 4px", fontWeight: 700 };
           return (
-            <span key={i} title="حذف با دوبار کلیک" onDoubleClick={() => set(a, get(a).filter((_, k) => k !== i))} style={{ ...style, fontSize: 13, direction: "rtl" }}>
+            <span key={i} title="حذف با دوبار کلیک" onDoubleClick={() => set(a, get(a).filter((_, k) => k !== i))} style={{ ...style, fontSize: 13, direction: "rtl", unicodeBidi: "isolate" }}>
               {c.text}
             </span>
           );
