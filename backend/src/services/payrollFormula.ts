@@ -1,41 +1,66 @@
-// موتور فرمول حقوق: متن فرمول → درخت → ارزیابی امن (بدون eval). عملوندها با نام‌فضا و کلید می‌آیند:
-//   [D:<کد جزء حکم>]  مبلغ محاسبه‌شده‌ی جزء حکم در همین ماه
-//   [C:<کلید جزء حقوق>]  مبلغ محاسبه‌شده‌ی جزء حقوق دیگر (ترتیب محاسبه از همین وابستگی می‌آید)
-//   [P:<کلید پارامتر قانونی>]  مقدار معتبر پارامتر در تاریخ ماه (جدول پلکانی فقط داخل PROGRESSIVE)
-//   [V:<متغیر ماه>]  WORK_DAYS, MONTH_DAYS, OVERTIME_HOURS, OVERTIME_BASE_TOTAL, INSURABLE_TOTAL, TAXABLE_TOTAL, EARNINGS_TOTAL
+// موتور فرمول حقوق: متن فرمول/شرط → درخت → ارزیابی امن (بدون eval). عملوندها با نام‌فضا می‌آیند:
+//   [D:<کد عامل حکم>[:نوع]]   LAST آخرین مقدار حکم، AVG میانگین حکم، VALUE مقدار محاسبه‌شده (پیش‌فرض)، YTD_PREV سال تا ماه قبل، ALL_PREV تا ماه قبل، PREV ماه قبل
+//   [C:<کلید عامل حقوق>[:نوع]]  VALUE مقدار (پیش‌فرض)، YTD سال تا ماه (با ماه جاری)، YTD_PREV، ALL_PREV، PREV
+//   [P:<کلید پارامتر قانونی>]   مقدار معتبر پارامتر (جدول پلکانی فقط داخل PROGRESSIVE)
+//   [B:<اطلاعات پایه>]          MONTH_DAYS, YEAR_DAYS, SERVICE_DAYS, SERVICE_YEARS, MONTH_NO
+//   [S:<طبقه>]                  جمع همه‌ی عوامل آن طبقه در همین ماه: EARNING (پرداختی)، DEDUCTION (کسر)، EMPLOYER_COST (هزینه کارفرما)، INFO (اطلاعاتی)
 // توابع: MIN(...), MAX(...), ROUND(x[, ارقام]), PROGRESSIVE([P:جدول], مبلغ). عملگرها: + - * / و پرانتز.
+// شرط: مقایسه‌ها (> >= < <= = <>) با AND/OR (و/یا) و پرانتز؛ شرط خالی = همیشه برقرار.
+
+export type Ns = "D" | "C" | "P" | "B" | "S";
 
 export type Node =
   | { t: "num"; v: number }
-  | { t: "ref"; ns: "D" | "C" | "P" | "V"; key: string }
+  | { t: "ref"; ns: Ns; key: string; variant: string }
   | { t: "neg"; a: Node }
   | { t: "bin"; op: "+" | "-" | "*" | "/"; a: Node; b: Node }
   | { t: "fn"; name: string; args: Node[] };
 
+export type Cond =
+  | { t: "cmp"; op: ">" | ">=" | "<" | "<=" | "=" | "<>"; a: Node; b: Node }
+  | { t: "and" | "or"; a: Cond; b: Cond };
+
 export class FormulaError extends Error {}
 
-/** متغیرهایی که جمع «مزایا»ی نهایی را می‌خوانند؛ فقط برای اجزای غیر مزیت مجازند */
-export const TOTAL_VARS = ["INSURABLE_TOTAL", "TAXABLE_TOTAL", "EARNINGS_TOTAL"];
-export const VARIABLES: Record<string, string> = {
-  WORK_DAYS: "روز کارکرد",
-  MONTH_DAYS: "روزهای ماه",
-  OVERTIME_HOURS: "ساعت اضافه‌کار",
-  OVERTIME_BASE_TOTAL: "مبنای اضافه‌کار (جمع ماهانه‌ی اجزای مشمول)",
-  INSURABLE_TOTAL: "جمع مشمول بیمه",
-  TAXABLE_TOTAL: "جمع مشمول مالیات",
-  EARNINGS_TOTAL: "جمع مزایا",
+export const BASE_INFO: Record<string, string> = {
+  MONTH_DAYS: "تعداد روزهای ماه",
+  YEAR_DAYS: "تعداد روزهای سال",
+  SERVICE_DAYS: "مدت همکاری (روز)",
+  SERVICE_YEARS: "مدت همکاری (سال)",
+  MONTH_NO: "شماره ماه محاسبه",
 };
+export const KIND_FA: Record<string, string> = { EARNING: "پرداختی", DEDUCTION: "کسر", EMPLOYER_COST: "هزینه کارفرما", INFO: "اطلاعاتی" };
+
+export const DECREE_VARIANTS: Record<string, string> = {
+  LAST: "آخرین مقدار حکم",
+  AVG: "میانگین حکم",
+  VALUE: "مقدار محاسبه‌شده",
+  YTD_PREV: "مقدار سال تا ماه قبل",
+  ALL_PREV: "مقدار تا ماه قبل",
+  PREV: "مقدار ماه قبل",
+};
+export const FACTOR_VARIANTS: Record<string, string> = {
+  VALUE: "مقدار",
+  YTD: "مقدار سال تا ماه",
+  YTD_PREV: "مقدار سال تا ماه قبل",
+  ALL_PREV: "مقدار تا ماه قبل",
+  PREV: "مقدار ماه قبل",
+};
+
 const FUNCTIONS: Record<string, { min: number; max: number }> = { MIN: { min: 2, max: 8 }, MAX: { min: 2, max: 8 }, ROUND: { min: 1, max: 2 }, PROGRESSIVE: { min: 2, max: 2 } };
 
 // ── تجزیه ──
-type Tok = { k: "num" | "ref" | "id" | "op" | "lp" | "rp" | "comma"; s: string };
+type Tok = { k: "num" | "ref" | "id" | "op" | "cmp" | "lp" | "rp" | "comma"; s: string };
 
 function tokenize(src: string): Tok[] {
   const out: Tok[] = [];
   let i = 0;
   while (i < src.length) {
     const c = src[i];
-    if (/\s/.test(c)) { i++; continue; }
+    if (/\s/.test(c)) {
+      i++;
+      continue;
+    }
     if (c === "[") {
       const j = src.indexOf("]", i);
       if (j < 0) throw new FormulaError("کروشه‌ی عملوند بسته نشده است");
@@ -57,96 +82,208 @@ function tokenize(src: string): Tok[] {
       i = j;
       continue;
     }
-    if ("+-*/".includes(c)) { out.push({ k: "op", s: c }); i++; continue; }
-    if (c === "(") { out.push({ k: "lp", s: c }); i++; continue; }
-    if (c === ")") { out.push({ k: "rp", s: c }); i++; continue; }
-    if (c === ",") { out.push({ k: "comma", s: c }); i++; continue; }
-    throw new FormulaError(`نویسه‌ی نامعتبر «${c}» در فرمول`);
+    const two = src.slice(i, i + 2);
+    if (two === ">=" || two === "<=" || two === "<>" || two === "!=" || two === "==") {
+      out.push({ k: "cmp", s: two === "!=" ? "<>" : two === "==" ? "=" : two });
+      i += 2;
+      continue;
+    }
+    if (c === ">" || c === "<" || c === "=") {
+      out.push({ k: "cmp", s: c });
+      i++;
+      continue;
+    }
+    if ("+-*/".includes(c)) {
+      out.push({ k: "op", s: c });
+      i++;
+      continue;
+    }
+    if (c === "(") {
+      out.push({ k: "lp", s: c });
+      i++;
+      continue;
+    }
+    if (c === ")") {
+      out.push({ k: "rp", s: c });
+      i++;
+      continue;
+    }
+    if (c === ",") {
+      out.push({ k: "comma", s: c });
+      i++;
+      continue;
+    }
+    throw new FormulaError(`نویسه‌ی نامعتبر «${c}»`);
   }
   return out;
 }
 
-export function parseFormula(src: string): Node {
-  const toks = tokenize(src);
-  if (toks.length === 0) throw new FormulaError("فرمول خالی است");
-  let p = 0;
-  const peek = () => toks[p];
-  const next = () => toks[p++];
+class Parser {
+  p = 0;
+  constructor(public toks: Tok[]) {}
+  peek() {
+    return this.toks[this.p];
+  }
+  next() {
+    return this.toks[this.p++];
+  }
 
-  function expr(): Node {
-    let n = term();
-    while (peek() && peek().k === "op" && (peek().s === "+" || peek().s === "-")) {
-      const op = next().s as "+" | "-";
-      n = { t: "bin", op, a: n, b: term() };
+  expr(): Node {
+    let n = this.term();
+    while (this.peek() && this.peek().k === "op" && (this.peek().s === "+" || this.peek().s === "-")) {
+      const op = this.next().s as "+" | "-";
+      n = { t: "bin", op, a: n, b: this.term() };
     }
     return n;
   }
-  function term(): Node {
-    let n = factor();
-    while (peek() && peek().k === "op" && (peek().s === "*" || peek().s === "/")) {
-      const op = next().s as "*" | "/";
-      n = { t: "bin", op, a: n, b: factor() };
+  term(): Node {
+    let n = this.factor();
+    while (this.peek() && this.peek().k === "op" && (this.peek().s === "*" || this.peek().s === "/")) {
+      const op = this.next().s as "*" | "/";
+      n = { t: "bin", op, a: n, b: this.factor() };
     }
     return n;
   }
-  function factor(): Node {
-    const t = next();
-    if (!t) throw new FormulaError("فرمول ناقص است");
-    if (t.k === "op" && t.s === "-") return { t: "neg", a: factor() };
+  factor(): Node {
+    const t = this.next();
+    if (!t) throw new FormulaError("عبارت ناقص است");
+    if (t.k === "op" && t.s === "-") return { t: "neg", a: this.factor() };
     if (t.k === "num") {
       const v = Number(t.s);
       if (!isFinite(v)) throw new FormulaError(`عدد نامعتبر «${t.s}»`);
       return { t: "num", v };
     }
-    if (t.k === "ref") {
-      const m = /^([DCPV]):([A-Za-z0-9_]+)$/.exec(t.s.trim());
-      if (!m) throw new FormulaError(`عملوند نامعتبر [${t.s}] — شکل درست: [D:کد] [C:کلید] [P:کلید] [V:کلید]`);
-      const ns = m[1] as "D" | "C" | "P" | "V";
-      const key = ns === "D" ? m[2] : m[2].toUpperCase();
-      if (ns === "V" && !VARIABLES[key]) throw new FormulaError(`متغیر ناشناخته [V:${key}]`);
-      return { t: "ref", ns, key };
-    }
+    if (t.k === "ref") return parseRef(t.s);
     if (t.k === "lp") {
-      const n = expr();
-      if (!next() || toks[p - 1].k !== "rp") throw new FormulaError("پرانتز بسته نشده است");
+      const n = this.expr();
+      const c = this.next();
+      if (!c || c.k !== "rp") throw new FormulaError("پرانتز بسته نشده است");
       return n;
     }
     if (t.k === "id") {
       const spec = FUNCTIONS[t.s];
       if (!spec) throw new FormulaError(`تابع ناشناخته «${t.s}»`);
-      if (!peek() || peek().k !== "lp") throw new FormulaError(`بعد از ${t.s} پرانتز لازم است`);
-      next();
+      const lp = this.next();
+      if (!lp || lp.k !== "lp") throw new FormulaError(`بعد از ${t.s} پرانتز لازم است`);
       const args: Node[] = [];
-      if (peek() && peek().k === "rp") throw new FormulaError(`تابع ${t.s} آرگومان لازم دارد`);
       for (;;) {
-        args.push(expr());
-        const s = next();
+        args.push(this.expr());
+        const s = this.next();
         if (!s) throw new FormulaError("پرانتز تابع بسته نشده است");
         if (s.k === "rp") break;
         if (s.k !== "comma") throw new FormulaError("بین آرگومان‌ها ویرگول لازم است");
       }
       if (args.length < spec.min || args.length > spec.max) throw new FormulaError(`تعداد آرگومان‌های ${t.s} نامعتبر است`);
       if (t.s === "PROGRESSIVE" && !(args[0].t === "ref" && args[0].ns === "P")) {
-        throw new FormulaError("آرگومان اول PROGRESSIVE باید یک پارامتر جدولی مثل [P:TAX_BRACKETS] باشد");
+        throw new FormulaError("آرگومان اول PROGRESSIVE باید یک جدول پلکانی قانونی باشد");
       }
       return { t: "fn", name: t.s, args };
     }
     throw new FormulaError(`جای نامعتبر برای «${t.s}»`);
   }
 
-  const n = expr();
-  if (p < toks.length) throw new FormulaError(`بخش اضافه در انتهای فرمول: «${toks[p].s}»`);
+  // شرط
+  cond(): Cond {
+    let n = this.andC();
+    while (this.peek() && this.peek().k === "id" && this.peek().s === "OR") {
+      this.next();
+      n = { t: "or", a: n, b: this.andC() };
+    }
+    return n;
+  }
+  andC(): Cond {
+    let n = this.cmp();
+    while (this.peek() && this.peek().k === "id" && this.peek().s === "AND") {
+      this.next();
+      n = { t: "and", a: n, b: this.cmp() };
+    }
+    return n;
+  }
+  cmp(): Cond {
+    if (this.peek() && this.peek().k === "lp") {
+      const save = this.p;
+      try {
+        this.next();
+        const c = this.cond();
+        const r = this.next();
+        if (r && r.k === "rp") return c;
+      } catch {
+        /* پرانتز مربوط به عبارت محاسباتی است */
+      }
+      this.p = save;
+    }
+    const a = this.expr();
+    const o = this.next();
+    if (!o || o.k !== "cmp") throw new FormulaError("در شرط، بین دو مقدار یک عملگر مقایسه (> < = …) لازم است");
+    const b = this.expr();
+    return { t: "cmp", op: o.s as any, a, b };
+  }
+}
+
+function parseRef(raw: string): Node {
+  const m = /^([DCPBS]):([A-Za-z0-9_]+)(?::([A-Za-z_]+))?$/.exec(raw.trim());
+  if (!m) throw new FormulaError(`عملوند نامعتبر [${raw}]`);
+  const ns = m[1] as Ns;
+  const key = ns === "D" ? m[2] : m[2].toUpperCase();
+  const variant = (m[3] ?? "").toUpperCase();
+  if (ns === "D") {
+    const v = variant || "VALUE";
+    if (!DECREE_VARIANTS[v]) throw new FormulaError(`نوع مقدار [${raw}] برای عامل حکم نامعتبر است`);
+    return { t: "ref", ns, key, variant: v };
+  }
+  if (ns === "C") {
+    const v = variant || "VALUE";
+    if (!FACTOR_VARIANTS[v]) throw new FormulaError(`نوع مقدار [${raw}] برای عامل حقوق نامعتبر است`);
+    return { t: "ref", ns, key, variant: v };
+  }
+  if (ns === "B" && !BASE_INFO[key]) throw new FormulaError(`اطلاعات پایه‌ی ناشناخته [${raw}]`);
+  if (ns === "S" && !KIND_FA[key]) throw new FormulaError(`طبقه‌ی ناشناخته [${raw}]`);
+  if (variant) throw new FormulaError(`[${raw}] نوع مقدار ندارد`);
+  return { t: "ref", ns, key, variant: "" };
+}
+
+export function parseFormula(src: string): Node {
+  const toks = tokenize(src);
+  if (toks.length === 0) throw new FormulaError("فرمول خالی است");
+  const ps = new Parser(toks);
+  const n = ps.expr();
+  if (ps.p < toks.length) throw new FormulaError(`بخش اضافه در انتهای فرمول: «${toks[ps.p].s}»`);
   return n;
 }
 
-/** همه‌ی عملوندهای درخت (برای وابستگی و اعتبارسنجی) */
-export function collectRefs(n: Node, out: { ns: "D" | "C" | "P" | "V"; key: string }[] = []) {
-  if (n.t === "ref") out.push({ ns: n.ns, key: n.key });
-  else if (n.t === "neg") collectRefs(n.a, out);
+export function parseCondition(src: string): Cond {
+  const toks = tokenize(src);
+  const ps = new Parser(toks);
+  const c = ps.cond();
+  if (ps.p < toks.length) throw new FormulaError(`بخش اضافه در انتهای شرط: «${toks[ps.p].s}»`);
+  return c;
+}
+
+export interface RefInfo {
+  ns: Ns;
+  key: string;
+  variant: string;
+}
+function refsOfNode(n: Node, out: RefInfo[]) {
+  if (n.t === "ref") out.push({ ns: n.ns, key: n.key, variant: n.variant });
+  else if (n.t === "neg") refsOfNode(n.a, out);
   else if (n.t === "bin") {
-    collectRefs(n.a, out);
-    collectRefs(n.b, out);
-  } else if (n.t === "fn") n.args.forEach((a) => collectRefs(a, out));
+    refsOfNode(n.a, out);
+    refsOfNode(n.b, out);
+  } else if (n.t === "fn") n.args.forEach((a) => refsOfNode(a, out));
+}
+export function collectRefs(n: Node, out: RefInfo[] = []) {
+  refsOfNode(n, out);
+  return out;
+}
+export function collectCondRefs(c: Cond, out: RefInfo[] = []) {
+  if (c.t === "cmp") {
+    refsOfNode(c.a, out);
+    refsOfNode(c.b, out);
+  } else {
+    collectCondRefs(c.a, out);
+    collectCondRefs(c.b, out);
+  }
   return out;
 }
 
@@ -157,23 +294,19 @@ export interface Bracket {
   rate: number;
 }
 export interface EvalEnv {
-  /** مقدار عملوند؛ خطا (FormulaError) = مقدار ناموجود */
-  scalar: (ns: "D" | "C" | "P" | "V", key: string) => number;
-  /** جدول پلکانی پارامتر */
+  scalar: (ns: Ns, key: string, variant: string) => number;
   brackets: (key: string) => Bracket[];
-  label: (ns: "D" | "C" | "P" | "V", key: string) => string;
+  label: (ns: Ns, key: string, variant: string) => string;
 }
 export interface Operand {
   ref: string;
   label: string;
   value: number | null;
-  /** برای جدول پلکانی: ریز محاسبه‌ی هر پله */
   steps?: { from: number; to: number | null; rate: number; taxable: number; tax: number }[];
 }
 export interface EvalResult {
   value: number;
   operands: Operand[];
-  /** فرمول با مقدارهای جایگزین‌شده، برای نمایش در گزارش */
   expression: string;
 }
 
@@ -181,8 +314,9 @@ const fmt = (v: number) => {
   const r = Math.round(v * 10000) / 10000;
   return Math.abs(r) >= 1000 ? r.toLocaleString("en-US", { maximumFractionDigits: 4 }) : String(r);
 };
+const refText = (n: { ns: Ns; key: string; variant: string }) => `[${n.ns}:${n.key}${n.variant && n.variant !== "VALUE" ? ":" + n.variant : ""}]`;
 
-export function evaluate(root: Node, env: EvalEnv): EvalResult {
+function makeEvaluator(env: EvalEnv) {
   const operands: Operand[] = [];
   const seen = new Set<string>();
   const note = (o: Operand) => {
@@ -190,15 +324,13 @@ export function evaluate(root: Node, env: EvalEnv): EvalResult {
     seen.add(o.ref);
     operands.push(o);
   };
-
-  // هر گره: [مقدار، متن جایگزین‌شده]
   function ev(n: Node): [number, string] {
     switch (n.t) {
       case "num":
         return [n.v, fmt(n.v)];
       case "ref": {
-        const v = env.scalar(n.ns, n.key);
-        note({ ref: `[${n.ns}:${n.key}]`, label: env.label(n.ns, n.key), value: v });
+        const v = env.scalar(n.ns, n.key, n.variant);
+        note({ ref: refText(n), label: env.label(n.ns, n.key, n.variant), value: v });
         return [v, fmt(v)];
       }
       case "neg": {
@@ -226,7 +358,7 @@ export function evaluate(root: Node, env: EvalEnv): EvalResult {
             steps.push({ from: b.from, to: b.to, rate: b.rate, taxable, tax: t });
             tax += t;
           }
-          note({ ref: `[P:${key}]`, label: env.label("P", key), value: null, steps });
+          note({ ref: `[P:${key}]`, label: env.label("P", key, ""), value: null, steps });
           return [tax, `PROGRESSIVE(جدول، ${sa})`];
         }
         const vals = n.args.map(ev);
@@ -235,15 +367,37 @@ export function evaluate(root: Node, env: EvalEnv): EvalResult {
         if (n.name === "MIN") return [Math.min(...nums), `MIN(${strs})`];
         if (n.name === "MAX") return [Math.max(...nums), `MAX(${strs})`];
         if (n.name === "ROUND") {
-          const d = nums[1] ?? 0;
-          const f = Math.pow(10, d);
+          const f = Math.pow(10, nums[1] ?? 0);
           return [Math.round(nums[0] * f) / f, `ROUND(${strs})`];
         }
         throw new FormulaError(`تابع ${n.name} پشتیبانی نمی‌شود`);
       }
     }
   }
-  const [value, expression] = ev(root);
+  function cond(c: Cond): [boolean, string] {
+    if (c.t === "cmp") {
+      const [a, sa] = ev(c.a);
+      const [b, sb] = ev(c.b);
+      const eps = 1e-9;
+      const r = c.op === ">" ? a > b : c.op === ">=" ? a >= b : c.op === "<" ? a < b : c.op === "<=" ? a <= b : c.op === "=" ? Math.abs(a - b) < eps : Math.abs(a - b) >= eps;
+      return [r, `${sa} ${c.op} ${sb}`];
+    }
+    const [x, sx] = cond(c.a);
+    const [y, sy] = cond(c.b);
+    return c.t === "and" ? [x && y, `(${sx} و ${sy})`] : [x || y, `(${sx} یا ${sy})`];
+  }
+  return { operands, ev, cond };
+}
+
+export function evaluate(root: Node, env: EvalEnv): EvalResult {
+  const m = makeEvaluator(env);
+  const [value, expression] = m.ev(root);
   if (!isFinite(value)) throw new FormulaError("نتیجه‌ی فرمول عدد معتبر نیست");
-  return { value, operands, expression };
+  return { value, operands: m.operands, expression };
+}
+
+export function evaluateCondition(c: Cond, env: EvalEnv): { value: boolean; operands: Operand[]; expression: string } {
+  const m = makeEvaluator(env);
+  const [value, expression] = m.cond(c);
+  return { value, operands: m.operands, expression };
 }

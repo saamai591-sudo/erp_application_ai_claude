@@ -95,15 +95,15 @@ async function buildDraft(b: any, employeeId: number) {
     if (!isFinite(weeklyHours) || weeklyHours <= 0 || weeklyHours > 168) throw new HrError("ساعت کار هفتگی باید بین ۰ و ۱۶۸ باشد");
   }
   const lines: { componentId: number; value: number }[] = Array.isArray(b.lines) ? b.lines : [];
-  if (lines.length === 0) throw new HrError("حکم باید حداقل یک جزء داشته باشد");
+  if (lines.length === 0) throw new HrError("حکم باید حداقل یک عامل داشته باشد");
   const seen = new Set<number>();
   const out: { componentId: number; value: number }[] = [];
   for (const l of lines) {
     const componentId = Number(l.componentId);
     const comp = componentId ? await prisma.decreeComponent.findUnique({ where: { id: componentId } }) : null;
-    if (!comp) throw new HrError("جزء حکم یافت نشد");
-    if (!comp.isActive) throw new HrError(`جزء «${comp.title}» غیرفعال است`);
-    if (seen.has(componentId)) throw new HrError(`جزء «${comp.title}» بیش از یک‌بار آمده است`);
+    if (!comp) throw new HrError("عامل حکم یافت نشد");
+    if (!comp.isActive) throw new HrError(`عامل «${comp.title}» غیرفعال است`);
+    if (seen.has(componentId)) throw new HrError(`عامل «${comp.title}» بیش از یک‌بار آمده است`);
     seen.add(componentId);
     const value = Number(l.value);
     if (!isFinite(value) || value < 0) throw new HrError(`مقدار «${comp.title}» نامعتبر است`);

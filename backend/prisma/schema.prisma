@@ -4648,7 +4648,7 @@ model Employee {
   assignments            EmployeeAssignment[]
   dependents             EmployeeDependent[]
   payrollSlips           PayrollSlip[]
-  payrollWorks           PayrollMonthlyWork[]
+  payrollInputs          PayrollFactorInput[]
 }
 
 /// عکس کارمند (حداکثر ۳۰۰ کیلوبایت)؛ جدا از Employee تا فهرست‌ها داده‌ی باینری نخوانند
@@ -4794,7 +4794,7 @@ model DecreeComponent {
   isActive        Boolean              @default(true)
   hasTransactions Boolean              @default(false)
   lines           EmploymentDecreeLine[]
-  profiles        PayrollItemProfile[]
+  methods         PayrollFactorMethod[]
 }
 
 model EmploymentDecree {
@@ -4910,54 +4910,18 @@ enum PayrollSectionKind {
   PAYROLL_COMPONENT
 }
 
-/// جزء حقوق: هر ماه با فرمول محاسبه می‌شود (اضافه‌کار، بیمه، مالیات، کسورات…). فرمول متنی است و در services/payrollFormula.ts تجزیه می‌شود.
+/// عامل حقوق (هویت): عنوان + کلید داخلی که سیستم خودکار می‌سازد و به کاربر نمایش داده نمی‌شود. طبقه، روش و فرمول در رکوردهای تاریخ‌دار
+/// «روش محاسبه عامل» (PayrollFactorMethod) می‌آید.
 model PayrollComponent {
-  id          Int                  @id @default(autoincrement())
-  key         String               @unique
+  id          Int                   @id @default(autoincrement())
+  key         String                @unique
   title       String
-  kind        PayrollComponentKind
-  formula     String
   description String?
-  isSystem    Boolean              @default(false)
-  isActive    Boolean              @default(true)
-  createdAt   DateTime             @default(now())
-  profiles    PayrollItemProfile[]
-}
-
-/// مشخصات محاسبه‌ی تاریخ‌دار یک جزء (جزء حکم یا جزء حقوق): تناسب با روز کارکرد، مشمولیت بیمه/مالیات، مبنای اضافه‌کار.
-/// دقیقاً یکی از decreeComponentId / payrollComponentId پر است (CHECK در migration).
-model PayrollItemProfile {
-  id                 Int               @id @default(autoincrement())
-  decreeComponentId  Int?
-  payrollComponentId Int?
-  effectiveDate      DateTime          @db.Date
-  prorate            Boolean           @default(true)
-  insurable          Boolean           @default(false)
-  taxable            Boolean           @default(false)
-  overtimeBase       Boolean           @default(false)
-  isProvisional      Boolean           @default(false)
-  note               String?
-  decreeComponent    DecreeComponent?  @relation(fields: [decreeComponentId], references: [id], onDelete: Cascade)
-  payrollComponent   PayrollComponent? @relation(fields: [payrollComponentId], references: [id], onDelete: Cascade)
-
-  @@unique([decreeComponentId, effectiveDate])
-  @@unique([payrollComponentId, effectiveDate])
-}
-
-/// کارکرد ماهانه‌ی کارمند (ورودی محاسبه)
-model PayrollMonthlyWork {
-  id            Int      @id @default(autoincrement())
-  employeeId    Int
-  year          Int
-  month         Int
-  workDays      Decimal  @db.Decimal(5, 2)
-  overtimeHours Decimal  @default(0) @db.Decimal(7, 2)
-  note          String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-
-  @@unique([employeeId, year, month])
+  isSystem    Boolean               @default(false)
+  isActive    Boolean               @default(true)
+  createdAt   DateTime              @default(now())
+  methods     PayrollFactorMethod[]
+  inputs      PayrollFactorInput[]
 }
 
 /// نتیجه‌ی محاسبه‌ی یک کارمند در یک ماه (با همه‌ی ورودی‌ها و ریز هر جزء برای گزارش)
@@ -4968,8 +4932,6 @@ model PayrollSlip {
   month         Int
   decreeId      Int?
   monthDays     Int
-  workDays      Decimal           @db.Decimal(5, 2)
-  overtimeHours Decimal           @db.Decimal(7, 2)
   earnings      Decimal           @db.Decimal(20, 4)
   deductions    Decimal           @db.Decimal(20, 4)
   employerCosts Decimal           @db.Decimal(20, 4)
@@ -5005,4 +4967,64 @@ model PayrollSlipLine {
   slip        PayrollSlip          @relation(fields: [slipId], references: [id], onDelete: Cascade)
 
   @@unique([slipId, seq])
+}
+
+enum PayrollMethod {
+  CALCULATED
+  FIXED
+  MANUAL
+  ATTENDANCE
+  TREASURY
+}
+
+/// نوع پارامتر (نوع مقدار) عامل
+enum PayrollValueType {
+  NUMBER
+  TIME
+  DAYS
+  AMOUNT
+}
+
+/// روش محاسبه‌ی عامل (تاریخ‌دار با «ماه اجرا»): مبنا = عامل حکم (decreeComponentId) یا عامل حقوق (payrollComponentId)؛ دقیقاً یکی (CHECK).
+/// برای عامل حکم، فرمول تعیین می‌کند مقدار حکم چگونه به مبلغ پرداختی ماه تبدیل شود. شرط (اختیاری) اگر برقرار نباشد مقدار عامل صفر است.
+model PayrollFactorMethod {
+  id                 Int                  @id @default(autoincrement())
+  decreeComponentId  Int?
+  payrollComponentId Int?
+  method             PayrollMethod        @default(CALCULATED)
+  kind               PayrollComponentKind
+  valueType          PayrollValueType     @default(AMOUNT)
+  issueYear          Int
+  issueMonth         Int
+  execYear           Int
+  execMonth          Int
+  /// اولین روز ماه اجرا (میلادی) برای کوئری مؤثر؛ مقدار مؤثر هر ماه = آخرین رکورد با این تاریخ ≤ پایان ماه
+  effectiveDate      DateTime             @db.Date
+  fixedValue         Decimal?             @db.Decimal(20, 4)
+  conditionText      String?
+  formulaText        String?
+  isProvisional      Boolean              @default(false)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  decreeComponent    DecreeComponent?     @relation(fields: [decreeComponentId], references: [id], onDelete: Cascade)
+  payrollComponent   PayrollComponent?    @relation(fields: [payrollComponentId], references: [id], onDelete: Cascade)
+
+  @@unique([decreeComponentId, effectiveDate])
+  @@unique([payrollComponentId, effectiveDate])
+}
+
+/// مقدار ورودی ماهانه‌ی عوامل با روش «ورود دستی / ورود از تردد / ورود از خزانه‌داری» برای هر کارمند
+model PayrollFactorInput {
+  id          Int              @id @default(autoincrement())
+  employeeId  Int
+  year        Int
+  month       Int
+  componentId Int
+  value       Decimal          @db.Decimal(20, 4)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  employee    Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  component   PayrollComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, year, month, componentId])
 }

@@ -571,7 +571,7 @@ export const REGISTRY: ModuleDef[] = [
         key: "decrees",
         title: "حکم کارگزینی",
         forms: [
-          { key: "decree-components", title: "اجزای حکم", baseActions: CRUD },
+          { key: "decree-components", title: "عامل حکم", baseActions: CRUD },
           {
             key: "employment-decrees",
             title: "حکم کارگزینی",
@@ -594,8 +594,8 @@ export const REGISTRY: ModuleDef[] = [
         title: "تنظیمات",
         forms: [
           { key: "legal-parameters", title: "پارامترهای قانونی", baseActions: CRUD },
-          { key: "payroll-components", title: "اجزای حقوق", baseActions: CRUD },
-          { key: "calc-profiles", title: "مشخصات محاسبه اجزا", baseActions: ["view", "edit", "delete"] },
+          { key: "payroll-components", title: "عامل حقوق", baseActions: CRUD },
+          { key: "factor-methods", title: "روش محاسبه عامل", baseActions: CRUD },
         ],
       },
       {

@@ -172,7 +172,7 @@ function MasterForm({ cfg, editId }: { cfg: MasterConfig; editId?: number }) {
           </div>
           {cfg.valueTypes && (
             <div className="form-field">
-              <label>نوع مقدار<RequiredMark /> <FieldHint label="نوع مقدار" text="مقدار این جزء در حکم به چه صورتی وارد می‌شود؛ پس از استفاده در حکم قابل تغییر نیست" /></label>
+              <label>نوع مقدار<RequiredMark /> <FieldHint label="نوع مقدار" text="مقدار این عامل در حکم به چه صورتی وارد می‌شود؛ پس از استفاده در حکم قابل تغییر نیست" /></label>
               <select value={form.valueType} onChange={(e) => setForm({ ...form, valueType: e.target.value })}>
                 <option value="">انتخاب کنید</option>
                 {Object.entries(cfg.valueTypes).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -215,8 +215,8 @@ export const DECREE_VALUE_TYPE_FA: Record<string, string> = {
 };
 const DECREE_COMPONENTS: MasterConfig = {
   path: "decree-components",
-  singular: "جزء حکم",
-  hint: "اجزایی که در حکم کارگزینی مقدار می‌گیرند (حقوق پایه، مسکن، بن، حق اولاد و …). روش محاسبه و مشمولیت بیمه و مالیات در ماژول حقوق تعریف می‌شود.",
+  singular: "عامل حکم",
+  hint: "عوامل حکم، مواردی‌اند که در حکم کارگزینی مقدار می‌گیرند (حقوق پایه، مسکن، بن، حق اولاد و …). روش محاسبه‌ی هر عامل در ماژول حقوق و دستمزد، فرم «روش محاسبه عامل» تعریف می‌شود.",
   valueTypes: DECREE_VALUE_TYPE_FA,
 };
 

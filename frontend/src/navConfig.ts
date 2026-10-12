@@ -367,7 +367,7 @@ const RAW_MODULES: ModuleGroup[] = [
       {
         title: "حکم کارگزینی",
         items: [
-          { key: "decree-components", label: "اجزای حکم", list: "/decree-components", create: "/decree-components/new", icon: "tag" },
+          { key: "decree-components", label: "عامل حکم", list: "/decree-components", create: "/decree-components/new", icon: "tag" },
           { key: "employment-decrees", label: "حکم کارگزینی", list: "/employment-decrees", create: "/employment-decrees/new", icon: "file" },
         ],
       },
@@ -381,8 +381,8 @@ const RAW_MODULES: ModuleGroup[] = [
         title: "تنظیمات",
         items: [
           { key: "legal-parameters", label: "پارامترهای قانونی", list: "/legal-parameters", create: "/legal-parameters/new", icon: "sliders" },
-          { key: "payroll-components", label: "اجزای حقوق", list: "/payroll-components", create: "/payroll-components/new", icon: "tag" },
-          { key: "calc-profiles", label: "مشخصات محاسبه اجزا", list: "/calc-profiles", icon: "sliders", type: "operational" },
+          { key: "payroll-components", label: "عامل حقوق", list: "/payroll-components", create: "/payroll-components/new", icon: "tag" },
+          { key: "factor-methods", label: "روش محاسبه عامل", list: "/factor-methods", create: "/factor-methods/new", icon: "sliders" },
         ],
       },
       {

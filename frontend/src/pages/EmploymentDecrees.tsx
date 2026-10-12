@@ -112,7 +112,7 @@ function DecreeList() {
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint
-            text="حکم کارگزینی: نوع همکاری، بازه‌ی اعتبار، اجزای حقوق و (اختیاری) تغییر پست یک کارمند از تاریخ اعمال به بعد. حکم تاییدشده تغییر نمی‌کند؛ برای تغییر حقوق حکم جدید صادر کنید."
+            text="حکم کارگزینی: نوع همکاری، بازه‌ی اعتبار، عوامل حقوق و (اختیاری) تغییر پست یک کارمند از تاریخ اعمال به بعد. حکم تاییدشده تغییر نمی‌کند؛ برای تغییر حقوق حکم جدید صادر کنید."
             title="حکم کارگزینی"
           />
           <NewRecordButton path={`/employment-decrees/new${employeeId ? `?employeeId=${employeeId}` : ""}`} />
@@ -285,7 +285,7 @@ function DecreeForm({ editId }: { editId?: number }) {
     if (!form.employeeId) return setError("کارمند را انتخاب کنید");
     if (!form.effectiveDate) return setError("تاریخ اعمال الزامی است");
     if (!form.employmentTypeId) return setError("نوع همکاری الزامی است");
-    if (form.lines.filter((l) => l.componentId).length === 0) return setError("حکم باید حداقل یک جزء داشته باشد");
+    if (form.lines.filter((l) => l.componentId).length === 0) return setError("حکم باید حداقل یک عامل داشته باشد");
     if (form.changeAssignment && !form.positionId) return setError("پست را انتخاب کنید یا «تغییر انتصاب» را بردارید");
     try {
       if (editId) {
@@ -397,14 +397,14 @@ function DecreeForm({ editId }: { editId?: number }) {
             </div>
           </div>
 
-          <h3 className="hr-section">اجزای حکم</h3>
+          <h3 className="hr-section">عوامل حکم</h3>
           <table className="hr-table">
             <thead>
-              <tr><th style={{ width: 40 }}>#</th><th>جزء</th><th style={{ width: 120 }}>نوع مقدار</th><th style={{ width: 200 }}>مقدار</th><th style={{ width: 60 }} /></tr>
+              <tr><th style={{ width: 40 }}>#</th><th>عامل</th><th style={{ width: 120 }}>نوع مقدار</th><th style={{ width: 200 }}>مقدار</th><th style={{ width: 60 }} /></tr>
             </thead>
             <tbody>
               {form.lines.length === 0 && (
-                <tr><td colSpan={5} style={{ textAlign: "center", opacity: 0.7 }}>جزئی افزوده نشده است</td></tr>
+                <tr><td colSpan={5} style={{ textAlign: "center", opacity: 0.7 }}>عاملی افزوده نشده است</td></tr>
               )}
               {form.lines.map((l, i) => {
                 const comp = components.find((c) => String(c.id) === l.componentId);
@@ -433,7 +433,7 @@ function DecreeForm({ editId }: { editId?: number }) {
           </table>
           {!locked && (
             <button type="button" className="btn secondary" onClick={() => set({ lines: [...form.lines, { componentId: "", value: "" }] })}>
-              افزودن جزء
+              افزودن عامل
             </button>
           )}
 
