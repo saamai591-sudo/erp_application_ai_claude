@@ -4,6 +4,7 @@ import { FormPage } from "../components/FormPage";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { api, ApiError } from "../lib/api";
+import { refreshBranding } from "../lib/branding";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState } from "../lib/usePersistedState";
 
@@ -113,6 +114,8 @@ export default function CompanyProfile() {
     try {
       await api.put("/company-profile", { ...form, logo: toPayload(logo), stamp: toPayload(stamp) });
       flash();
+      // عنوان/آیکن تب با نام و لوگوی تازه هماهنگ شود
+      void refreshBranding();
       await load();
     } catch (err) {
       setError((err as ApiError).message);

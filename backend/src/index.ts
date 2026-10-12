@@ -74,6 +74,7 @@ import scheduledJobRoutes from "./routes/scheduledJobs";
 import companyProfileRoutes from "./routes/companyProfile";
 import printTemplateRoutes from "./routes/printTemplates";
 import printShareRoutes from "./routes/printShare";
+import brandingRoutes from "./routes/branding";
 import managementRoutes from "./routes/management";
 import { licenseGate } from "./license/licenseGate";
 import managementBackupRoutes from "./routes/managementBackup";
@@ -142,6 +143,8 @@ app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
+// نام و لوگوی شرکت برای عنوان/آیکن تب (عمومی، قبل از دروازه‌ی لایسنس)
+app.use("/api/branding", brandingRoutes);
 
 // «مدیریت» (لایسنس): جدا از ورود ERP و مجوزهایش؛ باید قبل از دروازه‌ی لایسنس و requireAuth ثبت شود
 app.use("/api", managementRoutes);
