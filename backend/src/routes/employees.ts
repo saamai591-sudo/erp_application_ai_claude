@@ -4,6 +4,8 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { loadCurrentRecords } from "../services/employeeRecordService";
+import { HrError, checkAssignmentRefs, changeAssignment } from "../services/employeeAssignmentService";
+import { getEffectiveDecree, getEffectiveDecrees } from "../services/employmentDecreeService";
 
 // منابع انسانی › پرسنلی › کارمندان.
 // SSOT: کارمند یک «نقش» روی Party است (مثل مشتری/تامین‌کننده)؛ نام، کد ملی، نشانی، تلفن و حساب بانکی همان Party هستند و تفصیلی کارمند
@@ -24,7 +26,6 @@ const RELATIONS = ["SPOUSE", "CHILD", "FATHER", "MOTHER", "SIBLING", "OTHER"];
 const PHOTO_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const PHOTO_MAX_BYTES = 300 * 1024;
 
-class HrError extends Error {}
 
 function parseDay(v: unknown, label: string, required = true): Date | null {
   if (v === undefined || v === null || v === "") {
@@ -74,14 +75,10 @@ function decodePhoto(photo: any): { mimeType: string; data: Buffer } {
 async function checkRefs(b: {
   birthPlaceId?: number | null;
   issuePlaceId?: number | null;
-  employmentTypeId?: number | null;
   educationLevelId?: number | null;
   maritalStatus?: string | null;
   militaryStatus?: string | null;
 }) {
-  if (b.employmentTypeId && !(await prisma.employmentType.findUnique({ where: { id: b.employmentTypeId } }))) {
-    throw new HrError("نوع همکاری یافت نشد");
-  }
   if (b.educationLevelId && !(await prisma.educationLevel.findUnique({ where: { id: b.educationLevelId } }))) {
     throw new HrError("مدرک تحصیلی یافت نشد");
   }
@@ -93,20 +90,6 @@ async function checkRefs(b: {
   }
   if (b.maritalStatus && !MARITAL.includes(b.maritalStatus)) throw new HrError("وضعیت تاهل نامعتبر است");
   if (b.militaryStatus && !MILITARY.includes(b.militaryStatus)) throw new HrError("وضعیت نظام وظیفه نامعتبر است");
-}
-
-/** واحد سازمانیِ انتصاب = واحد خودِ پست؛ فقط اگر پست واحد نداشت (مثل پست پیش‌فرض) از کاربر گرفته می‌شود. نتیجه را در a.orgUnitId می‌نویسد */
-async function checkAssignmentRefs(a: { positionId?: number; orgUnitId?: number; costCenterId?: number | null }) {
-  if (!a.positionId) throw new HrError("پست الزامی است");
-  const pos = await prisma.position.findUnique({ where: { id: Number(a.positionId) } });
-  if (!pos) throw new HrError("پست یافت نشد");
-  if (!pos.isActive) throw new HrError("پست انتخاب‌شده غیرفعال است");
-  if (pos.orgUnitId) a.orgUnitId = pos.orgUnitId;
-  if (!a.orgUnitId) throw new HrError("این پست واحد سازمانی ندارد؛ واحد سازمانی را انتخاب کنید");
-  if (!(await prisma.orgUnit.findUnique({ where: { id: Number(a.orgUnitId) } }))) throw new HrError("واحد سازمانی یافت نشد");
-  if (a.costCenterId && !(await prisma.costCenter.findUnique({ where: { id: a.costCenterId } }))) {
-    throw new HrError("مرکز هزینه یافت نشد");
-  }
 }
 
 function fail(res: any, e: any, fallback: string) {
@@ -136,15 +119,16 @@ router.get("/employees", async (_req, res) => {
   const rows = await prisma.employee.findMany({
     include: {
       party: { select: { id: true, detailCode: true, firstName: true, lastName: true, name: true, nationalId: true } },
-      employmentType: { select: { id: true, title: true } },
       assignments: { where: { toDate: null }, select: assignmentSelect, take: 1 },
       photo: { select: { employeeId: true } },
     },
     orderBy: { personnelCode: "asc" },
   });
+  const decrees = await getEffectiveDecrees(rows.map((r) => r.id));
   res.json(
     rows.map((e) => {
       const cur = e.assignments[0];
+      const dec = decrees.get(e.id);
       return {
         id: e.id,
         personnelCode: e.personnelCode,
@@ -153,7 +137,8 @@ router.get("/employees", async (_req, res) => {
         detailCode: e.party.detailCode,
         fullName: partyDisplayName(e.party),
         nationalId: e.party.nationalId,
-        employmentTypeTitle: e.employmentType?.title ?? null,
+        employmentTypeTitle: dec?.decree?.employmentType.title ?? null,
+        decreeValidity: dec?.validity ?? "NONE",
         positionTitle: cur?.position.title ?? null,
         orgUnitTitle: cur?.orgUnit.title ?? null,
         costCenterTitle: cur?.costCenter?.title ?? null,
@@ -187,6 +172,20 @@ router.get("/employees/next-code", async (_req, res) => {
   res.json({ code: await nextPersonnelCode() });
 });
 
+async function decreeSummary(employeeId: number) {
+  const { decree, validity } = await getEffectiveDecree(employeeId);
+  return {
+    validity,
+    id: decree?.id ?? null,
+    number: decree?.number ?? null,
+    type: decree?.type ?? null,
+    effectiveDate: day(decree?.effectiveDate),
+    endDate: day(decree?.endDate),
+    employmentTypeTitle: decree?.employmentType.title ?? null,
+    weeklyHours: decree?.weeklyHours?.toString() ?? null,
+  };
+}
+
 // ── جزئیات ──
 router.get("/employees/:id", async (req, res) => {
   const id = Number(req.params.id);
@@ -212,6 +211,7 @@ router.get("/employees/:id", async (req, res) => {
   res.json({
     ...rest,
     current: await loadCurrentRecords(id),
+    decree: await decreeSummary(id),
     party: { ...party, fullName: partyDisplayName(party), birthDate: day(party.birthDate) },
     photo: photo ? `data:${photo.mimeType};base64,${Buffer.from(photo.data).toString("base64")}` : null,
     periods: periods.map((p) => ({ ...p, startDate: day(p.startDate), endDate: day(p.endDate) })),
@@ -260,7 +260,6 @@ router.post("/employees", can(`${FORM}.create`), async (req, res) => {
               personnelCode: code,
               partyId,
               status: "ACTIVE",
-              employmentTypeId: b.employmentTypeId || null,
               fatherName: str(b.fatherName),
               birthCertificateNumber: str(b.birthCertificateNumber),
               birthPlaceId: b.birthPlaceId ? Number(b.birthPlaceId) : null,
@@ -289,7 +288,6 @@ router.post("/employees", can(`${FORM}.create`), async (req, res) => {
             },
           });
           await tx.position.update({ where: { id: Number(b.positionId) }, data: { hasTransactions: true } });
-          if (b.employmentTypeId) await tx.employmentType.update({ where: { id: b.employmentTypeId }, data: { hasTransactions: true } });
           await tx.educationLevel.update({ where: { id: Number(b.educationLevelId) }, data: { hasTransactions: true } });
           return emp;
         });
@@ -332,7 +330,6 @@ router.put("/employees/:id", can(`${FORM}.edit`), async (req, res) => {
         where: { id },
         data: {
           personnelCode: code,
-          employmentTypeId: has("employmentTypeId") ? b.employmentTypeId || null : undefined,
           fatherName: has("fatherName") ? str(b.fatherName) : undefined,
           birthCertificateNumber: has("birthCertificateNumber") ? str(b.birthCertificateNumber) : undefined,
           birthPlaceId: has("birthPlaceId") ? (b.birthPlaceId ? Number(b.birthPlaceId) : null) : undefined,
@@ -351,7 +348,6 @@ router.put("/employees/:id", can(`${FORM}.edit`), async (req, res) => {
           update: photo,
         });
       }
-      if (b.employmentTypeId) await tx.employmentType.update({ where: { id: b.employmentTypeId }, data: { hasTransactions: true } });
     });
     res.json({ ok: true });
   } catch (e: any) {
@@ -369,24 +365,7 @@ router.post("/employees/:id/assignments", can(`${FORM}.edit`), async (req, res) 
     if (isEnded(emp.status)) throw new HrError("همکاری این کارمند پایان یافته است؛ ابتدا او را مجدداً شاغل کنید");
     const fromDate = parseDay(b.fromDate, "تاریخ شروع انتصاب")!;
     await checkAssignmentRefs(b);
-    const open = await prisma.employeeAssignment.findFirst({ where: { employeeId: id, toDate: null } });
-    await prisma.$transaction(async (tx) => {
-      if (open) {
-        if (fromDate <= open.fromDate) throw new HrError("تاریخ انتصاب جدید باید بعد از شروع انتصاب فعلی باشد");
-        const prev = new Date(fromDate.getTime() - 86400000);
-        await tx.employeeAssignment.update({ where: { id: open.id }, data: { toDate: prev } });
-      }
-      await tx.employeeAssignment.create({
-        data: {
-          employeeId: id,
-          positionId: Number(b.positionId),
-          orgUnitId: Number(b.orgUnitId),
-          costCenterId: b.costCenterId || null,
-          fromDate,
-        },
-      });
-      await tx.position.update({ where: { id: Number(b.positionId) }, data: { hasTransactions: true } });
-    });
+    await prisma.$transaction((tx) => changeAssignment(tx, id, b, fromDate));
     res.status(201).json({ ok: true });
   } catch (e: any) {
     fail(res, e, "خطا در ثبت انتصاب");

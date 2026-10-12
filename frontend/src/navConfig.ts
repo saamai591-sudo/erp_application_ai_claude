@@ -359,6 +359,8 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "employee-education", label: "سوابق تحصیلی", list: "/employee-education", create: "/employee-education/new", icon: "file" },
           { key: "employee-veteran", label: "سوابق ایثارگری", list: "/employee-veteran", create: "/employee-veteran/new", icon: "file" },
           { key: "employee-marital", label: "سوابق تاهل", list: "/employee-marital", create: "/employee-marital/new", icon: "file" },
+          { key: "decree-components", label: "اجزای حکم", list: "/decree-components", create: "/decree-components/new", icon: "tag" },
+          { key: "employment-decrees", label: "حکم کارگزینی", list: "/employment-decrees", create: "/employment-decrees/new", icon: "file" },
           { key: "employment-types", label: "نوع همکاری", list: "/employment-types", create: "/employment-types/new", icon: "tag" },
           { key: "education-levels", label: "مدرک تحصیلی", list: "/education-levels", create: "/education-levels/new", icon: "tag" },
           { key: "termination-reasons", label: "دلایل خاتمه همکاری", list: "/termination-reasons", create: "/termination-reasons/new", icon: "tag" },

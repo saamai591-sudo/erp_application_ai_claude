@@ -32,6 +32,7 @@ export const EMPLOYEE_STATUS_FA: Record<string, string> = {
   SUSPENDED: "تعلیق",
   ABANDONED: "ترک کار",
 };
+const DECREE_VALIDITY_FA: Record<string, string> = { VALID: "معتبر", EXPIRED: "منقضی", NONE: "بدون حکم" };
 const ENDED = ["TERMINATED", "RETIRED", "ABANDONED"];
 const MARITAL_FA: Record<string, string> = { SINGLE: "مجرد", MARRIED: "متاهل", DIVORCED: "مطلقه", WIDOWED: "همسر فوت‌شده" };
 const MILITARY_FA: Record<string, string> = {
@@ -53,6 +54,7 @@ interface ListRow {
   fullName: string;
   nationalId: string | null;
   employmentTypeTitle: string | null;
+  decreeValidity: string;
   positionTitle: string | null;
   orgUnitTitle: string | null;
   costCenterTitle: string | null;
@@ -66,7 +68,7 @@ interface PartyOpt {
   birthDate: string | null;
   gender: string | null;
 }
-interface Opt {
+export interface Opt {
   id: number;
   title: string;
   code?: number;
@@ -93,6 +95,7 @@ interface Detail {
   periods: { id: number; startDate: string; endDate: string | null; terminationReason: { title: string } | null; note: string | null }[];
   assignments: Assignment[];
   currentAssignment: Assignment | null;
+  decree: { validity: string; number: number | null; effectiveDate: string | null; endDate: string | null; employmentTypeTitle: string | null; weeklyHours: string | null } | null;
   current: {
     education: { levelTitle: string; field: string | null; effectiveDate: string } | null;
     veteran: { isVeteran: boolean; percent: string | null; effectiveDate: string } | null;
@@ -167,6 +170,7 @@ function EmployeeList() {
           { header: "کد ملی", render: (r) => (r.nationalId ? toFaDigits(r.nationalId) : "—"), filterType: "string", filterValue: (r) => r.nationalId ?? "" },
           { header: "وضعیت", render: (r) => EMPLOYEE_STATUS_FA[r.status] ?? r.status, filterType: "string", filterValue: (r) => EMPLOYEE_STATUS_FA[r.status] ?? r.status },
           { header: "نوع همکاری", ...str((r) => r.employmentTypeTitle) },
+          { header: "وضعیت حکم", render: (r: ListRow) => DECREE_VALIDITY_FA[r.decreeValidity] ?? "", filterType: "string" as const, filterValue: (r: ListRow) => DECREE_VALIDITY_FA[r.decreeValidity] ?? "" },
           { header: "پست", ...str((r) => r.positionTitle) },
           { header: "واحد سازمانی", ...str((r) => r.orgUnitTitle) },
           { header: "مرکز هزینه", ...str((r) => r.costCenterTitle) },
@@ -180,21 +184,21 @@ function EmployeeList() {
 }
 
 /** مقدار فعلیِ یک سابقه‌ی تاریخ‌دار (فقط خواندنی) + لینک به فهرست سوابق همین کارمند و ثبت سابقه‌ی جدید */
-function RecordLinkField({ label, text, path, employeeId, openTab }: { label: string; text: string; path: string; employeeId: number; openTab: (p: string) => void }) {
+function RecordLinkField({ label, text, path, employeeId, openTab, newLabel }: { label: string; text: string; path: string; employeeId: number; openTab: (p: string) => void; newLabel?: string }) {
   return (
     <div className="form-field">
       <label>{label} <span style={{ opacity: 0.7 }}>(مقدار فعلی)</span></label>
       <input disabled value={text} />
       <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
         <button type="button" className="link-btn" onClick={() => openTab(`${path}?employeeId=${employeeId}`)}>مشاهده سوابق</button>
-        <button type="button" className="link-btn" onClick={() => openTab(`${path}/new?employeeId=${employeeId}`)}>ثبت سابقه‌ی جدید</button>
+        <button type="button" className="link-btn" onClick={() => openTab(`${path}/new?employeeId=${employeeId}`)}>{newLabel ?? "ثبت سابقه‌ی جدید"}</button>
       </div>
     </div>
   );
 }
 
 // ── انتخابگر ساده‌ی لیست (پست/واحد/مرکز هزینه/پروژه) ──
-function OptPicker({ title, rows, value, onChange, onClear, disabled }: { title: string; rows: Opt[]; value: string; onChange: (id: string) => void; onClear?: () => void; disabled?: boolean }) {
+export function OptPicker({ title, rows, value, onChange, onClear, disabled }: { title: string; rows: Opt[]; value: string; onChange: (id: string) => void; onClear?: () => void; disabled?: boolean }) {
   const cur = rows.find((r) => String(r.id) === value);
   const code = (r: Opt) => (r.detailCode ?? (r.code != null ? String(r.code) : ""));
   return (
@@ -214,11 +218,11 @@ function OptPicker({ title, rows, value, onChange, onClear, disabled }: { title:
 }
 
 /** پستِ دارای واحد سازمانی؟ (آن‌گاه واحد از پست می‌آید و قابل‌ویرایش نیست) */
-function positionHasUnit(positions: Opt[], positionId: string): boolean {
+export function positionHasUnit(positions: Opt[], positionId: string): boolean {
   return !!positions.find((p) => String(p.id) === positionId)?.orgUnitId;
 }
 /** با انتخاب پست، واحد سازمانی آن پست ست می‌شود؛ پستِ بدون واحد مقدار فعلی را نگه می‌دارد */
-function unitOfPosition(positions: Opt[], positionId: string, current: string): { orgUnitId: string } {
+export function unitOfPosition(positions: Opt[], positionId: string, current: string): { orgUnitId: string } {
   const u = positions.find((p) => String(p.id) === positionId)?.orgUnitId;
   return { orgUnitId: u ? String(u) : current };
 }
@@ -230,7 +234,6 @@ const EMPTY = {
   positionId: "",
   orgUnitId: "",
   costCenterId: "",
-  employmentTypeId: "",
   fatherName: "",
   birthCertificateNumber: "",
   birthPlaceId: "",
@@ -262,7 +265,6 @@ function EmployeeForm({ editId }: { editId?: number }) {
   const [orgUnits, setOrgUnits] = useState<Opt[]>([]);
   const [costCenters, setCostCenters] = useState<Opt[]>([]);
   const [cities, setCities] = useState<Opt[]>([]);
-  const [types, setTypes] = useState<Opt[]>([]);
   const [levels, setLevels] = useState<Opt[]>([]);
   const [reasons, setReasons] = useState<Opt[]>([]);
   const [nextCode, setNextCode] = useState("");
@@ -272,12 +274,11 @@ function EmployeeForm({ editId }: { editId?: number }) {
   const { flash } = useSavedFlash();
 
   async function loadLookups() {
-    const [pos, ou, cc, geo, ty, lv, rs] = await Promise.all([
+    const [pos, ou, cc, geo, lv, rs] = await Promise.all([
       api.get("/positions?activeOnly=true"),
       api.get("/org-units"),
       api.get("/cost-centers"),
       api.get("/geo-regions"),
-      api.get("/employment-types?activeOnly=true"),
       api.get("/education-levels?activeOnly=true"),
       api.get("/termination-reasons?activeOnly=true"),
     ]);
@@ -286,7 +287,6 @@ function EmployeeForm({ editId }: { editId?: number }) {
     setCostCenters(cc.filter((c: any) => c.isActive !== false));
     // محل تولد/صدور: فقط آخرین سطح مناطق جغرافیایی (شهر)
     setCities(geo.filter((g: any) => g.level === "CITY").map((g: any) => ({ id: g.id, title: g.title, code: Number(g.code) || undefined })));
-    setTypes(ty);
     setLevels(lv);
     setReasons(rs);
     if (!editId) {
@@ -300,7 +300,6 @@ function EmployeeForm({ editId }: { editId?: number }) {
       ...EMPTY,
       partyId: String(d.party.id),
       personnelCode: d.personnelCode,
-      employmentTypeId: d.employmentTypeId ? String(d.employmentTypeId) : "",
       fatherName: d.fatherName ?? "",
       birthCertificateNumber: d.birthCertificateNumber ?? "",
       birthPlaceId: d.birthPlaceId ? String(d.birthPlaceId) : "",
@@ -352,7 +351,6 @@ function EmployeeForm({ editId }: { editId?: number }) {
     setError(null);
     const common = {
       personnelCode: form.personnelCode.trim() || undefined,
-      employmentTypeId: form.employmentTypeId ? Number(form.employmentTypeId) : null,
       fatherName: form.fatherName,
       birthCertificateNumber: form.birthCertificateNumber,
       birthPlaceId: form.birthPlaceId ? Number(form.birthPlaceId) : null,
@@ -540,13 +538,20 @@ function EmployeeForm({ editId }: { editId?: number }) {
             <label>کد پرسنلی <FieldHint label="کد پرسنلی" text={editId ? "یکتا در کل شرکت" : `اختیاری — اگر خالی باشد آخرین کد + ۱ با همان طول داده می‌شود${nextCode ? ` (پیشنهاد: ${toFaDigits(nextCode)})` : ""}`} /></label>
             <input dir="ltr" value={form.personnelCode} placeholder={editId ? "" : nextCode} onChange={(e) => set("personnelCode", e.target.value)} />
           </div>
-          <div className="form-field">
-            <label>نوع همکاری</label>
-            <select value={form.employmentTypeId} onChange={(e) => set("employmentTypeId", e.target.value)}>
-              <option value="">—</option>
-              {types.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
-            </select>
-          </div>
+          {editId && (
+            <RecordLinkField
+              label="حکم جاری / نوع همکاری"
+              path="/employment-decrees"
+              employeeId={editId}
+              openTab={openTab}
+              text={
+                detail?.decree && detail.decree.validity !== "NONE"
+                  ? `${detail.decree.employmentTypeTitle ?? ""} — حکم ${toFaDigits(String(detail.decree.number))} (از ${formatJalaliDate(detail.decree.effectiveDate ?? "")}${detail.decree.endDate ? " تا " + formatJalaliDate(detail.decree.endDate) : ""})${detail.decree.validity === "EXPIRED" ? " — منقضی شده" : ""}`
+                  : "بدون حکم معتبر"
+              }
+              newLabel="صدور حکم جدید"
+            />
+          )}
           <div className="form-field">
             <label>نام پدر</label>
             <input value={form.fatherName} onChange={(e) => set("fatherName", e.target.value)} />

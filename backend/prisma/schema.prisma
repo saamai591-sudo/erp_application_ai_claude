@@ -451,6 +451,7 @@ model CostCenter {
   goodsRequestLines GoodsRequestLine[]
   warehouseIssues   WarehouseIssue[]
   employeeAssignments EmployeeAssignment[]
+  employmentDecrees   EmploymentDecree[]
 }
 
 model OrgUnit {
@@ -462,6 +463,7 @@ model OrgUnit {
   costCenters      CostCenter[]
   positions        Position[]
   employeeAssignments EmployeeAssignment[]
+  employmentDecrees   EmploymentDecree[]
   goodsRequests    GoodsRequest[]
   orgStructure     OrgStructure      @relation(fields: [orgStructureId], references: [id])
   purchaseRequests PurchaseRequest[]
@@ -4576,7 +4578,7 @@ model EmploymentType {
   title           String     @unique
   isActive        Boolean    @default(true)
   hasTransactions Boolean    @default(false)
-  employees       Employee[]
+  decrees         EmploymentDecree[]
 }
 
 model EducationLevel {
@@ -4610,6 +4612,7 @@ model Position {
   createdAt       DateTime             @default(now())
   orgUnit         OrgUnit?             @relation(fields: [orgUnitId], references: [id])
   assignments     EmployeeAssignment[]
+  employmentDecrees   EmploymentDecree[]
 }
 
 model Employee {
@@ -4618,7 +4621,6 @@ model Employee {
   personnelCode          String               @unique
   partyId                Int                  @unique
   status                 EmployeeStatus       @default(ACTIVE)
-  employmentTypeId       Int?
   fatherName             String?
   birthCertificateNumber String?
   birthPlaceId           Int?
@@ -4634,12 +4636,12 @@ model Employee {
   createdAt              DateTime             @default(now())
   updatedAt              DateTime             @updatedAt
   party                  Party                @relation(fields: [partyId], references: [id])
-  employmentType         EmploymentType?      @relation(fields: [employmentTypeId], references: [id])
   salaryBankAccount      PartyBankAccount?    @relation(fields: [salaryBankAccountId], references: [id], onDelete: SetNull)
   birthPlace             GeoRegion?           @relation("EmployeeBirthPlace", fields: [birthPlaceId], references: [id])
   issuePlace             GeoRegion?           @relation("EmployeeIssuePlace", fields: [issuePlaceId], references: [id])
   photo                  EmployeePhoto?
   educationRecords        EmployeeEducationRecord[]
+  decrees                EmploymentDecree[]
   veteranRecords         EmployeeVeteranRecord[]
   maritalRecords         EmployeeMaritalRecord[]
   periods                EmploymentPeriod[]
@@ -4685,6 +4687,7 @@ model EmployeeAssignment {
   position     Position    @relation(fields: [positionId], references: [id])
   orgUnit      OrgUnit     @relation(fields: [orgUnitId], references: [id])
   costCenter   CostCenter? @relation(fields: [costCenterId], references: [id])
+  appliedByDecrees EmploymentDecree[] @relation("DecreeAppliedAssignment")
 
   @@index([employeeId])
 }
@@ -4755,4 +4758,82 @@ model EmployeeMaritalRecord {
   employee      Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@unique([employeeId, effectiveDate])
+}
+
+// ─── حکم کارگزینی (قرارداد و حکم یک سند است — تصمیم کاربر) ───────────────────────────────────────────────────────────────────
+// اجزای حکم در منابع انسانی تعریف می‌شوند؛ روش محاسبه/مشمولیت بیمه و مالیات در ماژول حقوق (لایه‌ی تاریخ‌دار جدا) می‌آید.
+// حکم تاییدشده تغییر نمی‌کند؛ اعتبار آن از تاریخ اعمال تا min(تاریخ پایان، روز قبل از تاریخ اعمال حکم بعدی) محاسبه می‌شود (ذخیره نمی‌شود).
+
+enum DecreeValueType {
+  MONTHLY_AMOUNT
+  DAILY_AMOUNT
+  HOURLY_AMOUNT
+  PERCENT
+}
+
+enum DecreeType {
+  HIRE
+  RENEWAL
+  ANNUAL_RAISE
+  PROMOTION
+  AMENDMENT
+}
+
+enum DecreeStatus {
+  DRAFT
+  APPROVED
+}
+
+model DecreeComponent {
+  id              Int                  @id @default(autoincrement())
+  code            Int                  @unique
+  title           String               @unique
+  valueType       DecreeValueType
+  isActive        Boolean              @default(true)
+  hasTransactions Boolean              @default(false)
+  lines           EmploymentDecreeLine[]
+}
+
+model EmploymentDecree {
+  id                   Int                  @id @default(autoincrement())
+  number               Int                  @unique
+  employeeId           Int
+  type                 DecreeType
+  issueDate            DateTime             @db.Date
+  effectiveDate        DateTime             @db.Date
+  /// پایان اعتبار (قرارداد)؛ خالی = دائم/بدون پایان
+  endDate              DateTime?            @db.Date
+  employmentTypeId     Int
+  weeklyHours          Decimal?             @db.Decimal(5, 2)
+  description          String?
+  status               DecreeStatus         @default(DRAFT)
+  /// تغییر انتصاب همراه حکم (اختیاری): هنگام تایید با همان تابع انتصاب اعمال می‌شود
+  positionId           Int?
+  orgUnitId            Int?
+  costCenterId         Int?
+  appliedAssignmentId  Int?
+  previousAssignmentId Int?
+  approvedAt           DateTime?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  employee             Employee             @relation(fields: [employeeId], references: [id])
+  employmentType       EmploymentType       @relation(fields: [employmentTypeId], references: [id])
+  position             Position?            @relation(fields: [positionId], references: [id])
+  orgUnit              OrgUnit?             @relation(fields: [orgUnitId], references: [id])
+  costCenter           CostCenter?          @relation(fields: [costCenterId], references: [id])
+  appliedAssignment    EmployeeAssignment?  @relation("DecreeAppliedAssignment", fields: [appliedAssignmentId], references: [id], onDelete: SetNull)
+  lines                EmploymentDecreeLine[]
+
+  @@index([employeeId, effectiveDate])
+}
+
+model EmploymentDecreeLine {
+  id          Int              @id @default(autoincrement())
+  decreeId    Int
+  componentId Int
+  value       Decimal          @db.Decimal(20, 4)
+  decree      EmploymentDecree @relation(fields: [decreeId], references: [id], onDelete: Cascade)
+  component   DecreeComponent  @relation(fields: [componentId], references: [id])
+
+  @@unique([decreeId, componentId])
 }

@@ -23,6 +23,7 @@ interface MasterRow {
   title: string;
   isActive: boolean;
   hasTransactions: boolean;
+  valueType?: string;
 }
 
 interface MasterConfig {
@@ -31,6 +32,8 @@ interface MasterConfig {
   /** عنوان یک رکورد (مفرد) */
   singular: string;
   hint: string;
+  /** اگر داده شود، فرم یک فیلد انتخابی اجباری «نوع مقدار» هم دارد (کلید → عنوان) */
+  valueTypes?: Record<string, string>;
 }
 
 function MasterPage({ cfg }: { cfg: MasterConfig }) {
@@ -77,6 +80,9 @@ function MasterList({ cfg }: { cfg: MasterConfig }) {
         columns={[
           { header: "کد", render: (r) => toFaDigits(String(r.code)), width: "80px", filterType: "number", filterValue: (r) => r.code },
           { header: "عنوان", render: (r) => r.title, filterType: "string", filterValue: (r) => r.title },
+          ...(cfg.valueTypes
+            ? [{ header: "نوع مقدار", render: (r: MasterRow) => cfg.valueTypes![r.valueType ?? ""] ?? "", width: "140px", filterType: "string" as const, filterValue: (r: MasterRow) => cfg.valueTypes![r.valueType ?? ""] ?? "" }]
+            : []),
           { header: "فعال", render: (r) => (r.isActive ? "بله" : "خیر"), width: "80px", filterType: "string", filterValue: (r) => (r.isActive ? "بله" : "خیر") },
         ]}
         rows={items}
@@ -87,7 +93,7 @@ function MasterList({ cfg }: { cfg: MasterConfig }) {
   );
 }
 
-const DEFAULT_FORM = { code: "", title: "", isActive: true };
+const DEFAULT_FORM = { code: "", title: "", isActive: true, valueType: "" };
 
 function MasterForm({ cfg, editId }: { cfg: MasterConfig; editId?: number }) {
   const navigate = useNavigate();
@@ -106,7 +112,7 @@ function MasterForm({ cfg, editId }: { cfg: MasterConfig; editId?: number }) {
     if (hasPersistedState(cacheKey)) return;
     api.get(`/${cfg.path}`).then((items: MasterRow[]) => {
       const f = items.find((i) => i.id === editId);
-      if (f) setForm({ code: String(f.code), title: f.title, isActive: f.isActive });
+      if (f) setForm({ code: String(f.code), title: f.title, isActive: f.isActive, valueType: f.valueType ?? "" });
       setLoaded(true);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -116,7 +122,8 @@ function MasterForm({ cfg, editId }: { cfg: MasterConfig; editId?: number }) {
     e.preventDefault();
     setError(null);
     if (!form.title.trim()) return setError("عنوان الزامی است");
-    const body = { code: form.code ? Number(form.code) : undefined, title: form.title, isActive: form.isActive };
+    if (cfg.valueTypes && !form.valueType) return setError("نوع مقدار الزامی است");
+    const body = { code: form.code ? Number(form.code) : undefined, title: form.title, isActive: form.isActive, ...(cfg.valueTypes ? { valueType: form.valueType } : {}) };
     try {
       if (editId) {
         await api.put(`/${cfg.path}/${editId}`, body);
@@ -163,6 +170,15 @@ function MasterForm({ cfg, editId }: { cfg: MasterConfig; editId?: number }) {
             <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
           </div>
+          {cfg.valueTypes && (
+            <div className="form-field">
+              <label>نوع مقدار<RequiredMark /> <FieldHint label="نوع مقدار" text="مقدار این جزء در حکم به چه صورتی وارد می‌شود؛ پس از استفاده در حکم قابل تغییر نیست" /></label>
+              <select value={form.valueType} onChange={(e) => setForm({ ...form, valueType: e.target.value })}>
+                <option value="">انتخاب کنید</option>
+                {Object.entries(cfg.valueTypes).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
+          )}
           <div className="form-field">
             <label className="checkbox-row">
               <input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} />
@@ -191,6 +207,20 @@ const TERMINATION_REASONS: MasterConfig = {
   hint: "تعریف دلایل خاتمه همکاری؛ هنگام «خاتمه همکاری» کارمند یکی از آن‌ها انتخاب می‌شود",
 };
 
+export const DECREE_VALUE_TYPE_FA: Record<string, string> = {
+  MONTHLY_AMOUNT: "مبلغ ماهانه",
+  DAILY_AMOUNT: "مبلغ روزانه",
+  HOURLY_AMOUNT: "مبلغ ساعتی",
+  PERCENT: "درصد",
+};
+const DECREE_COMPONENTS: MasterConfig = {
+  path: "decree-components",
+  singular: "جزء حکم",
+  hint: "اجزایی که در حکم کارگزینی مقدار می‌گیرند (حقوق پایه، مسکن، بن، حق اولاد و …). روش محاسبه و مشمولیت بیمه و مالیات در ماژول حقوق تعریف می‌شود.",
+  valueTypes: DECREE_VALUE_TYPE_FA,
+};
+
+export const DecreeComponents = () => <MasterPage cfg={DECREE_COMPONENTS} />;
 export const EmploymentTypes = () => <MasterPage cfg={EMPLOYMENT_TYPES} />;
 export const EducationLevels = () => <MasterPage cfg={EDUCATION_LEVELS} />;
 export const TerminationReasons = () => <MasterPage cfg={TERMINATION_REASONS} />;
