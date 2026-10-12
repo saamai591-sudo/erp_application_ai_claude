@@ -71,6 +71,8 @@ function decodePhoto(photo: any): { mimeType: string; data: Buffer } {
 }
 
 async function checkRefs(b: {
+  birthPlaceId?: number | null;
+  issuePlaceId?: number | null;
   employmentTypeId?: number | null;
   educationLevelId?: number | null;
   maritalStatus?: string | null;
@@ -82,24 +84,27 @@ async function checkRefs(b: {
   if (b.educationLevelId && !(await prisma.educationLevel.findUnique({ where: { id: b.educationLevelId } }))) {
     throw new HrError("مدرک تحصیلی یافت نشد");
   }
+  for (const [id, label] of [[b.birthPlaceId, "محل تولد"], [b.issuePlaceId, "محل صدور"]] as const) {
+    if (!id) continue;
+    const g = await prisma.geoRegion.findUnique({ where: { id: Number(id) } });
+    if (!g) throw new HrError(`${label} یافت نشد`);
+    if (g.level !== "CITY") throw new HrError(`${label} باید یک شهر (آخرین سطح مناطق جغرافیایی) باشد`);
+  }
   if (b.maritalStatus && !MARITAL.includes(b.maritalStatus)) throw new HrError("وضعیت تاهل نامعتبر است");
   if (b.militaryStatus && !MILITARY.includes(b.militaryStatus)) throw new HrError("وضعیت نظام وظیفه نامعتبر است");
 }
 
-async function checkAssignmentRefs(a: { positionId?: number; orgUnitId?: number; costCenterId?: number | null; projectId?: number | null }) {
+/** واحد سازمانیِ انتصاب = واحد خودِ پست؛ فقط اگر پست واحد نداشت (مثل پست پیش‌فرض) از کاربر گرفته می‌شود. نتیجه را در a.orgUnitId می‌نویسد */
+async function checkAssignmentRefs(a: { positionId?: number; orgUnitId?: number; costCenterId?: number | null }) {
   if (!a.positionId) throw new HrError("پست الزامی است");
-  if (!a.orgUnitId) throw new HrError("واحد سازمانی الزامی است");
-  const pos = await prisma.position.findUnique({ where: { id: a.positionId } });
+  const pos = await prisma.position.findUnique({ where: { id: Number(a.positionId) } });
   if (!pos) throw new HrError("پست یافت نشد");
   if (!pos.isActive) throw new HrError("پست انتخاب‌شده غیرفعال است");
-  if (!(await prisma.orgUnit.findUnique({ where: { id: a.orgUnitId } }))) throw new HrError("واحد سازمانی یافت نشد");
+  if (pos.orgUnitId) a.orgUnitId = pos.orgUnitId;
+  if (!a.orgUnitId) throw new HrError("این پست واحد سازمانی ندارد؛ واحد سازمانی را انتخاب کنید");
+  if (!(await prisma.orgUnit.findUnique({ where: { id: Number(a.orgUnitId) } }))) throw new HrError("واحد سازمانی یافت نشد");
   if (a.costCenterId && !(await prisma.costCenter.findUnique({ where: { id: a.costCenterId } }))) {
     throw new HrError("مرکز هزینه یافت نشد");
-  }
-  if (a.projectId) {
-    const pr = await prisma.project.findUnique({ where: { id: a.projectId } });
-    if (!pr) throw new HrError("پروژه یافت نشد");
-    if (!pr.isActive) throw new HrError("پروژه‌ی انتخاب‌شده غیرفعال است");
   }
 }
 
@@ -114,13 +119,11 @@ const assignmentSelect = {
   positionId: true,
   orgUnitId: true,
   costCenterId: true,
-  projectId: true,
   fromDate: true,
   toDate: true,
   position: { select: { id: true, code: true, title: true } },
   orgUnit: { select: { id: true, code: true, title: true } },
   costCenter: { select: { id: true, detailCode: true, title: true } },
-  project: { select: { id: true, detailCode: true, title: true } },
 } as const;
 
 function shapeAssignment(a: any) {
@@ -153,7 +156,6 @@ router.get("/employees", async (_req, res) => {
         positionTitle: cur?.position.title ?? null,
         orgUnitTitle: cur?.orgUnit.title ?? null,
         costCenterTitle: cur?.costCenter?.title ?? null,
-        projectTitle: cur?.project?.title ?? null,
         hasPhoto: !!e.photo,
       };
     })
@@ -197,6 +199,8 @@ router.get("/employees/:id", async (req, res) => {
         },
       },
       photo: true,
+      birthPlace: { select: { id: true, title: true } },
+      issuePlace: { select: { id: true, title: true } },
       periods: { orderBy: { startDate: "asc" }, include: { terminationReason: { select: { id: true, title: true } } } },
       assignments: { orderBy: [{ fromDate: "asc" }, { id: "asc" }], select: assignmentSelect },
       dependents: { orderBy: { id: "asc" } },
@@ -230,8 +234,6 @@ router.post("/employees", can(`${FORM}.create`), async (req, res) => {
     await checkRefs(b);
     await checkAssignmentRefs(b);
     const photo = decodePhoto(b.photo);
-    const birthDate = b.birthDate !== undefined ? parseDay(b.birthDate, "تاریخ تولد", false) : undefined;
-    if (b.gender && b.gender !== "MALE" && b.gender !== "FEMALE") throw new HrError("جنسیت نامعتبر است");
     if (b.salaryBankAccountId) {
       const acc = await prisma.partyBankAccount.findUnique({ where: { id: Number(b.salaryBankAccountId) } });
       if (!acc || acc.partyId !== partyId) throw new HrError("حساب دریافت حقوق باید از حساب‌های بانکی همین شخص باشد");
@@ -255,8 +257,8 @@ router.post("/employees", can(`${FORM}.create`), async (req, res) => {
               employmentTypeId: b.employmentTypeId || null,
               fatherName: str(b.fatherName),
               birthCertificateNumber: str(b.birthCertificateNumber),
-              birthPlace: str(b.birthPlace),
-              issuePlace: str(b.issuePlace),
+              birthPlaceId: b.birthPlaceId ? Number(b.birthPlaceId) : null,
+              issuePlaceId: b.issuePlaceId ? Number(b.issuePlaceId) : null,
               maritalStatus: b.maritalStatus || null,
               educationLevelId: b.educationLevelId || null,
               educationField: str(b.educationField),
@@ -276,16 +278,9 @@ router.post("/employees", can(`${FORM}.create`), async (req, res) => {
               positionId: Number(b.positionId),
               orgUnitId: Number(b.orgUnitId),
               costCenterId: b.costCenterId || null,
-              projectId: b.projectId || null,
               fromDate: startDate,
             },
           });
-          if (birthDate !== undefined || b.gender !== undefined) {
-            await tx.party.update({
-              where: { id: partyId },
-              data: { ...(birthDate !== undefined ? { birthDate } : {}), ...(b.gender !== undefined ? { gender: b.gender || null } : {}) },
-            });
-          }
           await tx.position.update({ where: { id: Number(b.positionId) }, data: { hasTransactions: true } });
           if (b.employmentTypeId) await tx.employmentType.update({ where: { id: b.employmentTypeId }, data: { hasTransactions: true } });
           if (b.educationLevelId) await tx.educationLevel.update({ where: { id: b.educationLevelId }, data: { hasTransactions: true } });
@@ -319,8 +314,6 @@ router.put("/employees/:id", can(`${FORM}.edit`), async (req, res) => {
     }
     let photo: { mimeType: string; data: Buffer } | undefined;
     if (b.photo !== undefined && b.photo !== null) photo = decodePhoto(b.photo);
-    const birthDate = b.birthDate !== undefined ? parseDay(b.birthDate, "تاریخ تولد", false) : undefined;
-    if (b.gender && b.gender !== "MALE" && b.gender !== "FEMALE") throw new HrError("جنسیت نامعتبر است");
     if (b.salaryBankAccountId) {
       const acc = await prisma.partyBankAccount.findUnique({ where: { id: Number(b.salaryBankAccountId) } });
       if (!acc || acc.partyId !== emp.partyId) throw new HrError("حساب دریافت حقوق باید از حساب‌های بانکی همین شخص باشد");
@@ -335,8 +328,8 @@ router.put("/employees/:id", can(`${FORM}.edit`), async (req, res) => {
           employmentTypeId: has("employmentTypeId") ? b.employmentTypeId || null : undefined,
           fatherName: has("fatherName") ? str(b.fatherName) : undefined,
           birthCertificateNumber: has("birthCertificateNumber") ? str(b.birthCertificateNumber) : undefined,
-          birthPlace: has("birthPlace") ? str(b.birthPlace) : undefined,
-          issuePlace: has("issuePlace") ? str(b.issuePlace) : undefined,
+          birthPlaceId: has("birthPlaceId") ? (b.birthPlaceId ? Number(b.birthPlaceId) : null) : undefined,
+          issuePlaceId: has("issuePlaceId") ? (b.issuePlaceId ? Number(b.issuePlaceId) : null) : undefined,
           maritalStatus: has("maritalStatus") ? b.maritalStatus || null : undefined,
           educationLevelId: has("educationLevelId") ? b.educationLevelId || null : undefined,
           educationField: has("educationField") ? str(b.educationField) : undefined,
@@ -353,12 +346,6 @@ router.put("/employees/:id", can(`${FORM}.edit`), async (req, res) => {
           where: { employeeId: id },
           create: { employeeId: id, ...photo },
           update: photo,
-        });
-      }
-      if (birthDate !== undefined || has("gender")) {
-        await tx.party.update({
-          where: { id: emp.partyId },
-          data: { ...(birthDate !== undefined ? { birthDate } : {}), ...(has("gender") ? { gender: b.gender || null } : {}) },
         });
       }
       if (b.employmentTypeId) await tx.employmentType.update({ where: { id: b.employmentTypeId }, data: { hasTransactions: true } });
@@ -393,7 +380,6 @@ router.post("/employees/:id/assignments", can(`${FORM}.edit`), async (req, res) 
           positionId: Number(b.positionId),
           orgUnitId: Number(b.orgUnitId),
           costCenterId: b.costCenterId || null,
-          projectId: b.projectId || null,
           fromDate,
         },
       });
@@ -460,7 +446,6 @@ router.post("/employees/:id/status", can(`${FORM}.changeStatus`), async (req, re
             positionId: Number(b.positionId),
             orgUnitId: Number(b.orgUnitId),
             costCenterId: b.costCenterId || null,
-            projectId: b.projectId || null,
             fromDate: date,
           },
         });

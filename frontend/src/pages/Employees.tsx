@@ -56,7 +56,6 @@ interface ListRow {
   positionTitle: string | null;
   orgUnitTitle: string | null;
   costCenterTitle: string | null;
-  projectTitle: string | null;
   hasPhoto: boolean;
 }
 interface PartyOpt {
@@ -73,6 +72,8 @@ interface Opt {
   code?: number;
   detailCode?: string;
   isActive?: boolean;
+  orgUnitId?: number | null;
+  level?: string;
 }
 interface Assignment {
   id: number;
@@ -81,7 +82,6 @@ interface Assignment {
   position: { title: string };
   orgUnit: { title: string };
   costCenter: { title: string } | null;
-  project: { title: string } | null;
 }
 interface Detail {
   id: number;
@@ -165,7 +165,6 @@ function EmployeeList() {
           { header: "پست", ...str((r) => r.positionTitle) },
           { header: "واحد سازمانی", ...str((r) => r.orgUnitTitle) },
           { header: "مرکز هزینه", ...str((r) => r.costCenterTitle) },
-          { header: "پروژه", ...str((r) => r.projectTitle) },
         ]}
         rows={items}
         edit={{ path: (r) => `/employees/${r.id}/edit` }}
@@ -195,6 +194,16 @@ function OptPicker({ title, rows, value, onChange, onClear, disabled }: { title:
   );
 }
 
+/** پستِ دارای واحد سازمانی؟ (آن‌گاه واحد از پست می‌آید و قابل‌ویرایش نیست) */
+function positionHasUnit(positions: Opt[], positionId: string): boolean {
+  return !!positions.find((p) => String(p.id) === positionId)?.orgUnitId;
+}
+/** با انتخاب پست، واحد سازمانی آن پست ست می‌شود؛ پستِ بدون واحد مقدار فعلی را نگه می‌دارد */
+function unitOfPosition(positions: Opt[], positionId: string, current: string): { orgUnitId: string } {
+  const u = positions.find((p) => String(p.id) === positionId)?.orgUnitId;
+  return { orgUnitId: u ? String(u) : current };
+}
+
 const EMPTY = {
   partyId: "",
   personnelCode: "",
@@ -202,12 +211,11 @@ const EMPTY = {
   positionId: "",
   orgUnitId: "",
   costCenterId: "",
-  projectId: "",
   employmentTypeId: "",
   fatherName: "",
   birthCertificateNumber: "",
-  birthPlace: "",
-  issuePlace: "",
+  birthPlaceId: "",
+  issuePlaceId: "",
   maritalStatus: "",
   educationLevelId: "",
   educationField: "",
@@ -217,8 +225,6 @@ const EMPTY = {
   isVeteran: false,
   notes: "",
   salaryBankAccountId: "",
-  birthDate: "",
-  gender: "",
 };
 
 function EmployeeForm({ editId }: { editId?: number }) {
@@ -236,7 +242,7 @@ function EmployeeForm({ editId }: { editId?: number }) {
   const [positions, setPositions] = useState<Opt[]>([]);
   const [orgUnits, setOrgUnits] = useState<Opt[]>([]);
   const [costCenters, setCostCenters] = useState<Opt[]>([]);
-  const [projects, setProjects] = useState<Opt[]>([]);
+  const [cities, setCities] = useState<Opt[]>([]);
   const [types, setTypes] = useState<Opt[]>([]);
   const [levels, setLevels] = useState<Opt[]>([]);
   const [reasons, setReasons] = useState<Opt[]>([]);
@@ -247,11 +253,11 @@ function EmployeeForm({ editId }: { editId?: number }) {
   const { flash } = useSavedFlash();
 
   async function loadLookups() {
-    const [pos, ou, cc, pr, ty, lv, rs] = await Promise.all([
+    const [pos, ou, cc, geo, ty, lv, rs] = await Promise.all([
       api.get("/positions?activeOnly=true"),
       api.get("/org-units"),
       api.get("/cost-centers"),
-      api.get("/projects"),
+      api.get("/geo-regions"),
       api.get("/employment-types?activeOnly=true"),
       api.get("/education-levels?activeOnly=true"),
       api.get("/termination-reasons?activeOnly=true"),
@@ -259,7 +265,8 @@ function EmployeeForm({ editId }: { editId?: number }) {
     setPositions(pos);
     setOrgUnits(ou);
     setCostCenters(cc.filter((c: any) => c.isActive !== false));
-    setProjects(pr.filter((p: any) => p.isActive !== false));
+    // محل تولد/صدور: فقط آخرین سطح مناطق جغرافیایی (شهر)
+    setCities(geo.filter((g: any) => g.level === "CITY").map((g: any) => ({ id: g.id, title: g.title, code: Number(g.code) || undefined })));
     setTypes(ty);
     setLevels(lv);
     setReasons(rs);
@@ -277,8 +284,8 @@ function EmployeeForm({ editId }: { editId?: number }) {
       employmentTypeId: d.employmentTypeId ? String(d.employmentTypeId) : "",
       fatherName: d.fatherName ?? "",
       birthCertificateNumber: d.birthCertificateNumber ?? "",
-      birthPlace: d.birthPlace ?? "",
-      issuePlace: d.issuePlace ?? "",
+      birthPlaceId: d.birthPlaceId ? String(d.birthPlaceId) : "",
+      issuePlaceId: d.issuePlaceId ? String(d.issuePlaceId) : "",
       maritalStatus: d.maritalStatus ?? "",
       educationLevelId: d.educationLevelId ? String(d.educationLevelId) : "",
       educationField: d.educationField ?? "",
@@ -288,8 +295,6 @@ function EmployeeForm({ editId }: { editId?: number }) {
       isVeteran: !!d.isVeteran,
       notes: d.notes ?? "",
       salaryBankAccountId: d.salaryBankAccountId ? String(d.salaryBankAccountId) : "",
-      birthDate: d.party.birthDate ?? "",
-      gender: d.party.gender ?? "",
     });
   }
 
@@ -335,8 +340,8 @@ function EmployeeForm({ editId }: { editId?: number }) {
       employmentTypeId: form.employmentTypeId ? Number(form.employmentTypeId) : null,
       fatherName: form.fatherName,
       birthCertificateNumber: form.birthCertificateNumber,
-      birthPlace: form.birthPlace,
-      issuePlace: form.issuePlace,
+      birthPlaceId: form.birthPlaceId ? Number(form.birthPlaceId) : null,
+      issuePlaceId: form.issuePlaceId ? Number(form.issuePlaceId) : null,
       maritalStatus: form.maritalStatus || null,
       educationLevelId: form.educationLevelId ? Number(form.educationLevelId) : null,
       educationField: form.educationField,
@@ -346,8 +351,6 @@ function EmployeeForm({ editId }: { editId?: number }) {
       isVeteran: form.isVeteran,
       notes: form.notes,
       salaryBankAccountId: form.salaryBankAccountId ? Number(form.salaryBankAccountId) : null,
-      birthDate: form.birthDate || null,
-      gender: form.gender || null,
     };
     try {
       if (editId) {
@@ -372,7 +375,6 @@ function EmployeeForm({ editId }: { editId?: number }) {
           positionId: Number(form.positionId),
           orgUnitId: Number(form.orgUnitId),
           costCenterId: form.costCenterId ? Number(form.costCenterId) : null,
-          projectId: form.projectId ? Number(form.projectId) : null,
           photo: { mimeType: photo.mimeType, dataBase64: photo.dataBase64 },
         });
         flash();
@@ -463,26 +465,28 @@ function EmployeeForm({ editId }: { editId?: number }) {
                   { header: "نام و نام خانوادگی", render: (p) => p.fullName, filterValue: (p) => p.fullName },
                   { header: "کد ملی", render: (p) => (p.nationalId ? toFaDigits(p.nationalId) : "—"), filterValue: (p) => p.nationalId ?? "" },
                 ]}
-                onSelect={(p) => setForm({ ...form, partyId: String(p.id), birthDate: p.birthDate ?? "", gender: p.gender ?? "" })}
+                onSelect={(p) => setForm({ ...form, partyId: String(p.id) })}
               />
               <button type="button" className="link-btn" style={{ marginTop: 4, whiteSpace: "nowrap" }} onClick={() => openTab("/parties/individual/new")}>
                 تعریف شخص جدید
               </button>
             </div>
           )}
-          <div className="form-field">
-            <label>تاریخ تولد</label>
-            <JalaliDatePicker value={form.birthDate} onChange={(v) => set("birthDate", v)} />
-          </div>
-          <div className="form-field">
-            <label>جنسیت</label>
-            <select value={form.gender} onChange={(e) => set("gender", e.target.value)}>
-              <option value="">—</option>
-              {Object.entries(GENDER_FA).map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
-              ))}
-            </select>
-          </div>
+          {(() => {
+            const p = editId ? detail?.party : partyOpt;
+            return (
+              <>
+                <div className="form-field">
+                  <label>تاریخ تولد <FieldHint label="تاریخ تولد" text="از فرم «شخص حقیقی» خوانده می‌شود؛ برای تغییر، همان‌جا ویرایش کنید" /></label>
+                  <input disabled value={p?.birthDate ? formatJalaliDate(p.birthDate) : ""} />
+                </div>
+                <div className="form-field">
+                  <label>جنسیت</label>
+                  <input disabled value={p?.gender ? GENDER_FA[p.gender] : ""} />
+                </div>
+              </>
+            );
+          })()}
           {editId && detail && (
             <div className="form-field">
               <label>حساب دریافت حقوق</label>
@@ -534,11 +538,11 @@ function EmployeeForm({ editId }: { editId?: number }) {
           </div>
           <div className="form-field">
             <label>محل تولد</label>
-            <input value={form.birthPlace} onChange={(e) => set("birthPlace", e.target.value)} />
+            <OptPicker title="انتخاب محل تولد (شهر)" rows={cities} value={form.birthPlaceId} onChange={(v) => set("birthPlaceId", v)} onClear={() => set("birthPlaceId", "")} />
           </div>
           <div className="form-field">
             <label>محل صدور</label>
-            <input value={form.issuePlace} onChange={(e) => set("issuePlace", e.target.value)} />
+            <OptPicker title="انتخاب محل صدور (شهر)" rows={cities} value={form.issuePlaceId} onChange={(v) => set("issuePlaceId", v)} onClear={() => set("issuePlaceId", "")} />
           </div>
           <div className="form-field">
             <label>وضعیت تاهل</label>
@@ -597,19 +601,15 @@ function EmployeeForm({ editId }: { editId?: number }) {
               </div>
               <div className="form-field">
                 <label>پست<RequiredMark /> <FieldHint label="پست" text="برای شرکتی که از پست استفاده نمی‌کند «پست پیش‌فرض» را انتخاب کنید" /></label>
-                <OptPicker title="انتخاب پست" rows={positions} value={form.positionId} onChange={(v) => set("positionId", v)} />
+                <OptPicker title="انتخاب پست" rows={positions} value={form.positionId} onChange={(v) => setForm({ ...form, positionId: v, ...unitOfPosition(positions, v, form.orgUnitId) })} />
               </div>
               <div className="form-field">
-                <label>واحد سازمانی<RequiredMark /></label>
-                <OptPicker title="انتخاب واحد سازمانی" rows={orgUnits} value={form.orgUnitId} onChange={(v) => set("orgUnitId", v)} />
+                <label>واحد سازمانی<RequiredMark /> {positionHasUnit(positions, form.positionId) && <FieldHint label="واحد سازمانی" text="از روی پست انتخاب‌شده تعیین می‌شود" />}</label>
+                <OptPicker title="انتخاب واحد سازمانی" rows={orgUnits} value={form.orgUnitId} disabled={positionHasUnit(positions, form.positionId)} onChange={(v) => set("orgUnitId", v)} />
               </div>
               <div className="form-field">
                 <label>مرکز هزینه</label>
                 <OptPicker title="انتخاب مرکز هزینه" rows={costCenters} value={form.costCenterId} onChange={(v) => set("costCenterId", v)} onClear={() => set("costCenterId", "")} />
-              </div>
-              <div className="form-field">
-                <label>پروژه</label>
-                <OptPicker title="انتخاب پروژه" rows={projects} value={form.projectId} onChange={(v) => set("projectId", v)} onClear={() => set("projectId", "")} />
               </div>
             </div>
           </>
@@ -626,7 +626,7 @@ function EmployeeForm({ editId }: { editId?: number }) {
           </h3>
           <table className="hr-table">
             <thead>
-              <tr><th>از تاریخ</th><th>تا تاریخ</th><th>پست</th><th>واحد سازمانی</th><th>مرکز هزینه</th><th>پروژه</th></tr>
+              <tr><th>از تاریخ</th><th>تا تاریخ</th><th>پست</th><th>واحد سازمانی</th><th>مرکز هزینه</th></tr>
             </thead>
             <tbody>
               {[...detail.assignments].reverse().map((a) => (
@@ -636,7 +636,6 @@ function EmployeeForm({ editId }: { editId?: number }) {
                   <td>{a.position.title}</td>
                   <td>{a.orgUnit.title}</td>
                   <td>{a.costCenter?.title ?? "—"}</td>
-                  <td>{a.project?.title ?? "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -704,7 +703,6 @@ function EmployeeForm({ editId }: { editId?: number }) {
           positions={positions}
           orgUnits={orgUnits}
           costCenters={costCenters}
-          projects={projects}
           onClose={() => setStatusDlg(false)}
           onDone={async () => {
             setStatusDlg(false);
@@ -718,7 +716,6 @@ function EmployeeForm({ editId }: { editId?: number }) {
           positions={positions}
           orgUnits={orgUnits}
           costCenters={costCenters}
-          projects={projects}
           onClose={() => setAssignDlg(false)}
           onDone={async () => {
             setAssignDlg(false);
@@ -745,7 +742,6 @@ interface LookupProps {
   positions: Opt[];
   orgUnits: Opt[];
   costCenters: Opt[];
-  projects: Opt[];
 }
 
 function AssignmentFields({ f, setF, lk }: { f: any; setF: (v: any) => void; lk: LookupProps }) {
@@ -753,19 +749,15 @@ function AssignmentFields({ f, setF, lk }: { f: any; setF: (v: any) => void; lk:
     <>
       <div className="form-field">
         <label>پست<RequiredMark /></label>
-        <OptPicker title="انتخاب پست" rows={lk.positions} value={f.positionId} onChange={(v) => setF({ ...f, positionId: v })} />
+        <OptPicker title="انتخاب پست" rows={lk.positions} value={f.positionId} onChange={(v) => setF({ ...f, positionId: v, ...unitOfPosition(lk.positions, v, f.orgUnitId) })} />
       </div>
       <div className="form-field">
         <label>واحد سازمانی<RequiredMark /></label>
-        <OptPicker title="انتخاب واحد سازمانی" rows={lk.orgUnits} value={f.orgUnitId} onChange={(v) => setF({ ...f, orgUnitId: v })} />
+        <OptPicker title="انتخاب واحد سازمانی" rows={lk.orgUnits} value={f.orgUnitId} disabled={positionHasUnit(lk.positions, f.positionId)} onChange={(v) => setF({ ...f, orgUnitId: v })} />
       </div>
       <div className="form-field">
         <label>مرکز هزینه</label>
         <OptPicker title="انتخاب مرکز هزینه" rows={lk.costCenters} value={f.costCenterId} onChange={(v) => setF({ ...f, costCenterId: v })} onClear={() => setF({ ...f, costCenterId: "" })} />
-      </div>
-      <div className="form-field">
-        <label>پروژه</label>
-        <OptPicker title="انتخاب پروژه" rows={lk.projects} value={f.projectId} onChange={(v) => setF({ ...f, projectId: v })} onClear={() => setF({ ...f, projectId: "" })} />
       </div>
     </>
   );
@@ -775,11 +767,10 @@ const toAssignBody = (f: any) => ({
   positionId: Number(f.positionId),
   orgUnitId: Number(f.orgUnitId),
   costCenterId: f.costCenterId ? Number(f.costCenterId) : null,
-  projectId: f.projectId ? Number(f.projectId) : null,
 });
 
 function AssignmentDialog({ employeeId, onClose, onDone, ...lk }: LookupProps & { employeeId: number; onClose: () => void; onDone: () => void }) {
-  const [f, setF] = useState({ fromDate: localTodayIso(), positionId: "", orgUnitId: "", costCenterId: "", projectId: "" });
+  const [f, setF] = useState({ fromDate: localTodayIso(), positionId: "", orgUnitId: "", costCenterId: "" });
   const [err, setErr] = useState<string | null>(null);
   async function save() {
     setErr(null);
@@ -812,7 +803,7 @@ function AssignmentDialog({ employeeId, onClose, onDone, ...lk }: LookupProps & 
 function StatusDialog({ detail, reasons, onClose, onDone, ...lk }: LookupProps & { detail: Detail; reasons: Opt[]; onClose: () => void; onDone: () => void }) {
   const wasEnded = ENDED.includes(detail.status);
   const options = wasEnded ? ["ACTIVE"] : Object.keys(EMPLOYEE_STATUS_FA).filter((s) => s !== detail.status);
-  const [f, setF] = useState({ status: options[0], date: localTodayIso(), terminationReasonId: "", note: "", positionId: "", orgUnitId: "", costCenterId: "", projectId: "" });
+  const [f, setF] = useState({ status: options[0], date: localTodayIso(), terminationReasonId: "", note: "", positionId: "", orgUnitId: "", costCenterId: "" });
   const [err, setErr] = useState<string | null>(null);
   const toEnded = ENDED.includes(f.status);
   const rehire = wasEnded && f.status === "ACTIVE";

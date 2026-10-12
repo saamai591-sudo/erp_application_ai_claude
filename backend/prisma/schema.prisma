@@ -250,6 +250,8 @@ model GeoRegion {
   parent    GeoRegion?     @relation("GeoTree", fields: [parentId], references: [id])
   children  GeoRegion[]    @relation("GeoTree")
   addresses PartyAddress[]
+  employeesBornHere      Employee[] @relation("EmployeeBirthPlace")
+  employeesIssuedHere    Employee[] @relation("EmployeeIssuePlace")
 
   @@unique([parentId, code])
 }
@@ -1281,7 +1283,6 @@ model Project {
   createdAt         DateTime           @default(now())
   goodsRequestLines GoodsRequestLine[]
   warehouseIssues   WarehouseIssue[]
-  employeeAssignments EmployeeAssignment[]
 }
 
 model GoodsRequest {
@@ -4620,8 +4621,8 @@ model Employee {
   employmentTypeId       Int?
   fatherName             String?
   birthCertificateNumber String?
-  birthPlace             String?
-  issuePlace             String?
+  birthPlaceId           Int?
+  issuePlaceId           Int?
   maritalStatus          MaritalStatus?
   educationLevelId       Int?
   educationField         String?
@@ -4640,6 +4641,8 @@ model Employee {
   employmentType         EmploymentType?      @relation(fields: [employmentTypeId], references: [id])
   educationLevel         EducationLevel?      @relation(fields: [educationLevelId], references: [id])
   salaryBankAccount      PartyBankAccount?    @relation(fields: [salaryBankAccountId], references: [id], onDelete: SetNull)
+  birthPlace             GeoRegion?           @relation("EmployeeBirthPlace", fields: [birthPlaceId], references: [id])
+  issuePlace             GeoRegion?           @relation("EmployeeIssuePlace", fields: [issuePlaceId], references: [id])
   photo                  EmployeePhoto?
   periods                EmploymentPeriod[]
   assignments            EmployeeAssignment[]
@@ -4677,7 +4680,6 @@ model EmployeeAssignment {
   positionId   Int
   orgUnitId    Int
   costCenterId Int?
-  projectId    Int?
   fromDate     DateTime    @db.Date
   toDate       DateTime?   @db.Date
   createdAt    DateTime    @default(now())
@@ -4685,7 +4687,6 @@ model EmployeeAssignment {
   position     Position    @relation(fields: [positionId], references: [id])
   orgUnit      OrgUnit     @relation(fields: [orgUnitId], references: [id])
   costCenter   CostCenter? @relation(fields: [costCenterId], references: [id])
-  project      Project?    @relation(fields: [projectId], references: [id])
 
   @@index([employeeId])
 }
