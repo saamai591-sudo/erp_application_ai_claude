@@ -1,5 +1,5 @@
 import { SelectId } from "./useChainedMultiSelect";
-import { registerReviewReportCache } from "./reviewReportCache";
+import { registerReviewReportCache, TabScopedStore } from "./reviewReportCache";
 import { TabViewState } from "./useReviewTabLoader";
 import { ActiveFilter } from "../components/DataTable";
 
@@ -20,18 +20,18 @@ export interface PettyCashReviewSnapshot {
 }
 
 // دقیقاً هم‌الگوی salesReviewCache.ts — یک نمونه‌ی واحد؛ با بستن تب گزارش پاک می‌شود.
-let cached: PettyCashReviewSnapshot | null = null;
+const store = new TabScopedStore<PettyCashReviewSnapshot>();
 
 export function getPettyCashReviewSnapshot(): PettyCashReviewSnapshot | null {
-  return cached;
+  return store.get();
 }
 
 export function setPettyCashReviewSnapshot(snapshot: PettyCashReviewSnapshot) {
-  cached = snapshot;
+  store.set(snapshot);
 }
 
 export function clearPettyCashReviewSnapshot() {
-  cached = null;
+  store.clearAll();
 }
 
 registerReviewReportCache("/petty-cash-review", clearPettyCashReviewSnapshot);

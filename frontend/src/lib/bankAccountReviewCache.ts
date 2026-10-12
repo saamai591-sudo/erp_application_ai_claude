@@ -1,5 +1,5 @@
 import { SelectId } from "./useChainedMultiSelect";
-import { registerReviewReportCache } from "./reviewReportCache";
+import { registerReviewReportCache, TabScopedStore } from "./reviewReportCache";
 import { TabViewState } from "./useReviewTabLoader";
 import { ActiveFilter } from "../components/DataTable";
 
@@ -20,18 +20,18 @@ export interface BankAccountReviewSnapshot {
 }
 
 // دقیقاً هم‌الگوی salesReviewCache.ts — یک نمونه‌ی واحد؛ با بستن تب گزارش پاک می‌شود.
-let cached: BankAccountReviewSnapshot | null = null;
+const store = new TabScopedStore<BankAccountReviewSnapshot>();
 
 export function getBankAccountReviewSnapshot(): BankAccountReviewSnapshot | null {
-  return cached;
+  return store.get();
 }
 
 export function setBankAccountReviewSnapshot(snapshot: BankAccountReviewSnapshot) {
-  cached = snapshot;
+  store.set(snapshot);
 }
 
 export function clearBankAccountReviewSnapshot() {
-  cached = null;
+  store.clearAll();
 }
 
 registerReviewReportCache("/bank-account-review", clearBankAccountReviewSnapshot);

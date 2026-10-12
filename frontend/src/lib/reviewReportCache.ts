@@ -8,6 +8,41 @@
  * قبلی را از کش نشان می‌داد. با این ثبت‌نام، هر گزارش Review تازه‌ای که بعداً اضافه شود فقط باید خودش
  * را این‌جا register کند — TabsContext.tsx دیگر هرگز نیازی به دانستن اسم/مسیر هر گزارش ندارد.
  */
+// snapshot هر گزارش Review **به تفکیک تب** نگه داشته می‌شود (کلید = شناسه‌ی تبِ فعال). قبلاً هر گزارش یک نمونه‌ی واحد در ماژول بود؛ با دو تب
+// باز از یک گزارش (مثلاً دو «مرور حسابها»)، هر تغییر فیلتر روی snapshot مشترک می‌نشست و هنگام برگشت به تب دیگر آن را هم عوض می‌کرد.
+// تنها تبِ فعال کامپوننتش mount است، پس get/set بدون تغییر صفحه‌ها با «شناسه‌ی تبِ فعال» (TabsContext همزمان در رندر تنظیمش می‌کند) کار می‌کند.
+let activeTabId = "";
+export function setActiveReviewTabId(id: string | null | undefined) {
+  activeTabId = id ?? "";
+}
+
+const allStores: TabScopedStore<any>[] = [];
+
+export class TabScopedStore<T> {
+  private items = new Map<string, T>();
+  constructor() {
+    allStores.push(this);
+  }
+  get(): T | null {
+    return this.items.get(activeTabId) ?? null;
+  }
+  set(value: T) {
+    this.items.set(activeTabId, value);
+  }
+  /** همه‌ی تب‌ها */
+  clearAll() {
+    this.items.clear();
+  }
+  forgetTab(tabId: string) {
+    this.items.delete(tabId);
+  }
+}
+
+/** با بستن یک تب: snapshot همان تب از همه‌ی گزارش‌ها پاک می‌شود و تب‌های دیگر دست‌نخورده می‌مانند */
+export function forgetReviewReportTab(tabId: string) {
+  for (const s of allStores) s.forgetTab(tabId);
+}
+
 interface Registration {
   pathPrefix: string;
   clear: () => void;

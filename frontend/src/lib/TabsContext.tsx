@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getTitleForPath } from "./tabTitle";
-import { clearReviewReportCacheForPath, clearAllReviewReportCaches } from "./reviewReportCache";
+import { clearAllReviewReportCaches, forgetReviewReportTab, setActiveReviewTabId } from "./reviewReportCache";
 import { clearPersistedStateByPrefix, clearPersistedStateFamily, instanceOfPath } from "./usePersistedState";
 import { refreshTabIfStale } from "./listInvalidation";
 import { clearAllDirty, clearTabDirty, confirmDiscard, isTabDirty } from "./unsavedChanges";
@@ -99,6 +99,8 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  // snapshot گزارش‌های Review به تفکیک تبِ فعال است؛ باید در همین رندر (قبل از mount شدن صفحه‌ی تبِ تازه) تنظیم شود (lib/reviewReportCache.ts)
+  setActiveReviewTabId(activeTabId);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const initialized = useRef(false);
   /** زمینه‌ی فهرست هر تب فرم (برای ناوبری اولین/قبلی/بعدی/آخرین) */
@@ -213,7 +215,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     // «/accounts» همه‌ی فرم‌های /accounts/new و /accounts/:id/edit را هم پاک می‌کرد.
     clearFormState(path);
     clearPersistedStateFamily(base);
-    clearReviewReportCacheForPath(base);
+    // snapshot گزارش‌های Review به تفکیک شناسه‌ی تب است؛ تبِ تازه خودش خالی شروع می‌کند و تب‌های دیگر را نباید پاک کرد
 
     const tab: Tab = { id: nextId(), path, title: getTitleForPath(base) };
     const stagedCtx = takeStagedRecordNav(path);
@@ -289,7 +291,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     setTabs((prev) => {
       const closed = prev.find((t) => t.id === id);
       if (closed) {
-        clearReviewReportCacheForPath(pathOnly(closed.path));
+        forgetReviewReportTab(closed.id);
         // فرمِ بسته‌شده کشش را با خودش می‌برد؛ فرم دیگری تحت تاثیر قرار نمی‌گیرد (clearFormState فقط خانواده‌ی دقیق را پاک می‌کند)
         if (isFormShapedPath(closed.path)) clearFormState(closed.path);
       }
@@ -336,7 +338,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     for (const t of targets) {
       forgetTabScroll(t.id);
       recordNavByTab.current.delete(t.id);
-      clearReviewReportCacheForPath(pathOnly(t.path));
+      forgetReviewReportTab(t.id);
       if (isFormShapedPath(t.path)) clearFormState(t.path);
     }
     const next = tabs.filter((t) => !idSet.has(t.id));

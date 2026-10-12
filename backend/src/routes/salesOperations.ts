@@ -350,11 +350,31 @@ router.put("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.edit`), async (req, re
   }
 });
 
+/**
+ * گردش پیش‌فاکتور (هم گردش «آیتم»: سفارش فروش، حواله فروش و فاکتور فروش که از ردیف‌های آن ساخته شده‌اند؛ هم گردش «هدر»: دریافتی که
+ * پیش‌فاکتور مبنای آن است). فاکتور ابطال‌شده هم گردش حساب می‌شود، چون هنوز به ردیف پیش‌فاکتور ارجاع دارد.
+ * خروجی: عنوان فارسی انواع گردش موجود (خالی = بدون گردش).
+ */
+async function salesQuoteDownstreamUsages(salesQuoteId: number): Promise<string[]> {
+  const [orders, deliveries, invoices, receipts] = await Promise.all([
+    prisma.salesOrderLine.count({ where: { sourceSalesQuoteLine: { salesQuoteId } } }),
+    // حواله فروش مستقیم بر مبنای پیش‌فاکتور هم مصرف پیش‌فاکتور است
+    prisma.inventoryDocumentLine.count({ where: { sourceSalesQuoteLine: { salesQuoteId } } }),
+    // فاکتور فروش با مبنای مستقیم پیش‌فاکتور (خدمات)
+    prisma.salesInvoiceLine.count({ where: { sourceSalesQuoteLine: { salesQuoteId } } }),
+    // دریافت (پیش‌دریافت/پیش‌دریافت ارزش افزوده) با مبنای پیش‌فاکتور
+    prisma.receiptSettlementLine.count({ where: { salesQuoteId } }),
+  ]);
+  const used: string[] = [];
+  if (orders > 0) used.push("سفارش فروش");
+  if (deliveries > 0) used.push("حواله فروش");
+  if (invoices > 0) used.push("فاکتور فروش");
+  if (receipts > 0) used.push("دریافت");
+  return used;
+}
+
 async function salesQuoteHasDownstreamUsage(salesQuoteId: number) {
-  const count = await prisma.salesOrderLine.count({ where: { sourceSalesQuoteLine: { salesQuoteId } } });
-  // حواله فروش مستقیم بر مبنای پیش‌فاکتور هم مصرف پیش‌فاکتور است
-  const deliveryCount = await prisma.inventoryDocumentLine.count({ where: { sourceSalesQuoteLine: { salesQuoteId } } });
-  return count > 0 || deliveryCount > 0;
+  return (await salesQuoteDownstreamUsages(salesQuoteId)).length > 0;
 }
 
 router.delete("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.delete`), async (req, res) => {
@@ -381,7 +401,10 @@ router.post("/sales-quotes/:id/unapprove", can(`${SALES_QUOTES_FORM}.unapprove`)
   const d = await prisma.salesQuote.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "APPROVED") return res.status(400).json({ error: "فقط در وضعیت تایید قابل برگشت است" });
-  if (await salesQuoteHasDownstreamUsage(id)) return res.status(400).json({ error: "این فرم گردش دارد و امکان برگشت تایید وجود ندارد" });
+  {
+    const used = await salesQuoteDownstreamUsages(id);
+    if (used.length > 0) return res.status(400).json({ error: `این پیش‌فاکتور گردش دارد (${used.join("، ")}) و امکان برگشت تایید وجود ندارد` });
+  }
   await prisma.salesQuote.update({ where: { id }, data: { status: "DRAFT" } });
   res.json({ id, status: "DRAFT" });
 });

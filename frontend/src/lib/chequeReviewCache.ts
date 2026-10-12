@@ -1,5 +1,5 @@
 import { SelectId } from "./useChainedMultiSelect";
-import { registerReviewReportCache } from "./reviewReportCache";
+import { registerReviewReportCache, TabScopedStore } from "./reviewReportCache";
 import { TabViewState } from "./useReviewTabLoader";
 
 export interface ChequeReviewSnapshot {
@@ -12,18 +12,18 @@ export interface ChequeReviewSnapshot {
 }
 
 // هم‌الگوی cashReviewCache.ts — برای هر یک از دو گزارش (دریافتنی/پرداختنی) یک نمونه؛ با بستن تب گزارش پاک می‌شود.
-const cached: Record<string, ChequeReviewSnapshot | null> = { receivable: null, payable: null };
+const stores = { receivable: new TabScopedStore<ChequeReviewSnapshot>(), payable: new TabScopedStore<ChequeReviewSnapshot>() };
 
 export function getChequeReviewSnapshot(kind: "receivable" | "payable"): ChequeReviewSnapshot | null {
-  return cached[kind];
+  return stores[kind].get();
 }
 export function setChequeReviewSnapshot(kind: "receivable" | "payable", snapshot: ChequeReviewSnapshot) {
-  cached[kind] = snapshot;
+  stores[kind].set(snapshot);
 }
 
 registerReviewReportCache("/receivable-documents-review", () => {
-  cached.receivable = null;
+  stores.receivable.clearAll();
 });
 registerReviewReportCache("/payable-documents-review", () => {
-  cached.payable = null;
+  stores.payable.clearAll();
 });

@@ -1,5 +1,5 @@
 import { SelectId } from "./useChainedMultiSelect";
-import { registerReviewReportCache } from "./reviewReportCache";
+import { registerReviewReportCache, TabScopedStore } from "./reviewReportCache";
 import { TabViewState } from "./useReviewTabLoader";
 import { ActiveFilter } from "../components/DataTable";
 
@@ -20,18 +20,18 @@ export interface SalesReviewSnapshot {
 }
 
 // دقیقاً هم‌الگوی warehouseReviewCache.ts — یک نمونه‌ی واحد (این گزارش برخلاف مرور انبار، دو نما/mode ندارد).
-let cached: SalesReviewSnapshot | null = null;
+const store = new TabScopedStore<SalesReviewSnapshot>();
 
 export function getSalesReviewSnapshot(): SalesReviewSnapshot | null {
-  return cached;
+  return store.get();
 }
 
 export function setSalesReviewSnapshot(snapshot: SalesReviewSnapshot) {
-  cached = snapshot;
+  store.set(snapshot);
 }
 
 export function clearSalesReviewSnapshot() {
-  cached = null;
+  store.clearAll();
 }
 
 registerReviewReportCache("/sales-review", clearSalesReviewSnapshot);

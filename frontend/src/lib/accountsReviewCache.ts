@@ -1,6 +1,6 @@
 import { SelectId } from "./useChainedMultiSelect";
 import { ActiveFilter } from "../components/DataTable";
-import { registerReviewReportCache } from "./reviewReportCache";
+import { registerReviewReportCache, TabScopedStore } from "./reviewReportCache";
 import { TabViewState } from "./useReviewTabLoader";
 
 export interface DetailQueryState {
@@ -37,18 +37,18 @@ export interface AccountsReviewSnapshot {
   loadedTabs: number[];
 }
 
-let cached: AccountsReviewSnapshot | null = null;
+const store = new TabScopedStore<AccountsReviewSnapshot>();
 
 export function getAccountsReviewSnapshot(): AccountsReviewSnapshot | null {
-  return cached;
+  return store.get();
 }
 
 export function setAccountsReviewSnapshot(snapshot: AccountsReviewSnapshot) {
-  cached = snapshot;
+  store.set(snapshot);
 }
 
 export function clearAccountsReviewSnapshot() {
-  cached = null;
+  store.clearAll();
 }
 
 registerReviewReportCache("/account-review", clearAccountsReviewSnapshot);

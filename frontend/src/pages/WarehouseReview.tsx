@@ -98,8 +98,9 @@ const GROUP_LEVEL_TAB_START = 1;
 
 const DIRECTION_FA: Record<string, string> = { IN: "وارده", OUT: "صادره" };
 
-// نگاشت نوع سند (متن فارسی برگشتی از بک‌اند) به مسیر ویرایش، برای دابل‌کلیک روی ردیف گردش — این ۵ نوع
-// نمای «حسابداری انبار» مجزا هم دارند، پس فقط بخش قابل الحاق به basePath ذخیره می‌شود
+// نگاشت نوع سند (متن فارسی برگشتی از بک‌اند) به مسیر ویرایش، برای دابل‌کلیک روی ردیف گردش — این ۵ نوع زیر «/warehousing» هستند.
+// هر دو نمای «مرور تعدادی» و «مرور مبلغی» همین مسیر را باز می‌کنند (برای سند انبار، مسیری زیر /warehouse-accounting وجود ندارد؛
+// قبلاً در «مرور مبلغی» به آن مسیر می‌رفت و صفحه‌ی خالی باز می‌شد)
 const DOC_TYPE_PATH: Record<string, string> = {
   "موجودی اول دوره": "initial-inventory",
   "رسید انبار خرید": "warehouse-receipts",
@@ -108,9 +109,9 @@ const DOC_TYPE_PATH: Record<string, string> = {
   "اضافات انبارگردانی": "warehouse-adjustments",
 };
 
-// طبق stockAnalysis.md بند ۳۴ — این ۱۰ نوع سند جدید برخلاف ۵ نوع بالا نمای «حسابداری انبار» مجزا
-// ندارند (فقط انبارداری)، پس مسیر کامل (نه فقط بخش قابل الحاق به basePath) ذخیره می‌شود
+// سایر انواع سند: مسیر کامل فرم (بیرون از /warehousing)
 const DOC_TYPE_FULL_PATH: Record<string, string> = {
+  "حواله فروش": "/sales-deliveries",
   "مصرف مرکز هزینه": "/center-consumptions",
   "مصرف پروژه": "/project-consumptions",
   "مصرف تولید": "/production-consumptions",
@@ -215,7 +216,6 @@ const LEDGER_SORT_FIELD_MAP: Record<string, string> = Object.fromEntries(ledgerC
 
 export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
   const { openTab } = useTabs();
-  const basePath = mode === "qty" ? "/warehousing" : "/warehouse-accounting";
   const snapshot = getWarehouseReviewSnapshot(mode);
   const [periods, setPeriods] = useState<FiscalPeriodRange[]>([]);
   const [groupLevels, setGroupLevels] = useState<GroupLevel[]>([]);
@@ -568,7 +568,7 @@ export default function WarehouseReview({ mode }: { mode: ReviewMode }) {
               return;
             }
             const seg = DOC_TYPE_PATH[r.docType];
-            if (seg) openTab(`${basePath}/${seg}/${r.docId}/edit`);
+            if (seg) openTab(`/warehousing/${seg}/${r.docId}/edit`);
           }}
           loading={tabLoader.loading}
           emptyText="گردشی یافت نشد"
