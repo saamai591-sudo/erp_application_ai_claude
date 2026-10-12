@@ -83,7 +83,7 @@ export default function Login() {
           </div>
           <div className="lg-brand-text">
             <h2 className="lg-company">{companyName || DEFAULT_TITLE}</h2>
-            <p className="lg-product">{companyName ? DEFAULT_TITLE : "سامانه مدیریت منابع سازمانی"}</p>
+            {companyName && <p className="lg-product">{DEFAULT_TITLE}</p>}
           </div>
         </aside>
 
@@ -136,6 +136,11 @@ export default function Login() {
           </button>
         </form>
       </div>
+
+      <footer className="lg-footer">
+        <img src="/favicon-64.png" alt="" width={22} height={22} />
+        <span>وب افزار سام، تمامی حقوق محفوظ است</span>
+      </footer>
     </div>
   );
 }

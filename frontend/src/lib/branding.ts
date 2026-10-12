@@ -4,7 +4,7 @@
 
 import { API_URL } from "./apiUrl";
 
-export const DEFAULT_TITLE = "نرم‌افزار حسابداری";
+export const DEFAULT_TITLE = "سامانه مدیریت منابع سازمانی";
 
 export interface Branding {
   name: string;

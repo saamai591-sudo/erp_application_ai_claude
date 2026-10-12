@@ -1660,7 +1660,7 @@ tbody tr:hover { background: var(--bg); }
 
 /* صفحه‌ی ورود: بخش برند (لوگو و نام شرکت) + فرم؛ در عرض کم زیر هم قرار می‌گیرند */
 .lg-page {
-  min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px;
+  min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; padding: 24px 16px;
   background:
     radial-gradient(900px 500px at 85% -10%, color-mix(in srgb, var(--primary) 16%, transparent), transparent 70%),
     radial-gradient(700px 480px at -5% 110%, color-mix(in srgb, var(--primary) 12%, transparent), transparent 70%),
@@ -1670,6 +1670,8 @@ tbody tr:hover { background: var(--bg); }
   width: 100%; max-width: 920px; min-height: 520px; display: grid; grid-template-columns: 1fr 1fr;
   background: var(--surface); border-radius: 22px; overflow: hidden; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.16), 0 2px 8px rgba(15, 23, 42, 0.06);
 }
+.lg-footer { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--ink-soft); font-size: 12.5px; }
+.lg-footer img { display: block; opacity: 0.9; }
 .lg-brand {
   position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 40px 32px; text-align: center; color: #fff; overflow: hidden;
   background: linear-gradient(155deg, color-mix(in srgb, var(--primary) 82%, #ffffff) 0%, var(--primary) 45%, color-mix(in srgb, var(--primary) 55%, #000000) 100%);
