@@ -322,6 +322,11 @@ model Party {
   warehouseReceipts  WarehouseReceipt[]
   batchesAsSupplier  Batch[]            @relation("BatchSupplier")
   pettyCashCustodians PettyCashCustodian[]
+  /// واقعیت‌های «شخص» (فقط شخص حقیقی): تاریخ تولد و جنسیت
+  birthDate          DateTime?          @db.Date
+  gender             Gender?
+  /// نقش «کارمند» (منابع انسانی)
+  employee           Employee?
 }
 
 model PartyAddress {
@@ -353,6 +358,7 @@ model PartyBankAccount {
   iban          String?
   cardNumber    String?
   party         Party   @relation(fields: [partyId], references: [id], onDelete: Cascade)
+  salaryEmployees Employee[]
 }
 
 model BankAccountType {
@@ -442,6 +448,7 @@ model CostCenter {
   orgUnit           OrgUnit            @relation(fields: [orgUnitId], references: [id])
   goodsRequestLines GoodsRequestLine[]
   warehouseIssues   WarehouseIssue[]
+  employeeAssignments EmployeeAssignment[]
 }
 
 model OrgUnit {
@@ -451,6 +458,8 @@ model OrgUnit {
   orgStructureId   Int
   hasTransactions  Boolean           @default(false)
   costCenters      CostCenter[]
+  positions        Position[]
+  employeeAssignments EmployeeAssignment[]
   goodsRequests    GoodsRequest[]
   orgStructure     OrgStructure      @relation(fields: [orgStructureId], references: [id])
   purchaseRequests PurchaseRequest[]
@@ -1272,6 +1281,7 @@ model Project {
   createdAt         DateTime           @default(now())
   goodsRequestLines GoodsRequestLine[]
   warehouseIssues   WarehouseIssue[]
+  employeeAssignments EmployeeAssignment[]
 }
 
 model GoodsRequest {
@@ -4512,4 +4522,190 @@ model BackupAuditLog {
   ip     String?
 
   @@index([at])
+}
+
+// ─── منابع انسانی › پرسنلی ─────────────────────────────────────────────────────
+// اصل SSOT: هر واقعیت یک خانه دارد. شخص (نام، کد ملی، تاریخ تولد، جنسیت، نشانی، تلفن، حساب بانکی) روی Party؛ «کارمند» فقط واقعیت‌های
+// استخدامی و بقیه‌ی مشخصات شخصیِ مرتبط با پرونده‌ی پرسنلی را دارد. کد تفصیلی کارمند همان Party.detailCode است (کد دوم نداریم).
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum MaritalStatus {
+  SINGLE
+  MARRIED
+  DIVORCED
+  WIDOWED
+}
+
+enum MilitaryStatus {
+  NOT_APPLICABLE
+  COMPLETED
+  EXEMPT
+  SUBJECT
+  IN_SERVICE
+}
+
+/// وضعیت استخدام (منطق محاسبات به آن وابسته است، پس ثابت است): شاغل، مرخصی بدون حقوق، مرخصی استعلاجی، خاتمه همکاری، بازنشسته، تعلیق، ترک کار
+enum EmployeeStatus {
+  ACTIVE
+  UNPAID_LEAVE
+  SICK_LEAVE
+  TERMINATED
+  RETIRED
+  SUSPENDED
+  ABANDONED
+}
+
+enum DependentRelation {
+  SPOUSE
+  CHILD
+  FATHER
+  MOTHER
+  SIBLING
+  OTHER
+}
+
+/// نوع همکاری (دائم، قرارداد معین، …)؛ فهرست قابل‌تعریف هر شرکت
+model EmploymentType {
+  id              Int        @id @default(autoincrement())
+  code            Int        @unique
+  title           String     @unique
+  isActive        Boolean    @default(true)
+  hasTransactions Boolean    @default(false)
+  employees       Employee[]
+}
+
+model EducationLevel {
+  id              Int        @id @default(autoincrement())
+  code            Int        @unique
+  title           String     @unique
+  isActive        Boolean    @default(true)
+  hasTransactions Boolean    @default(false)
+  employees       Employee[]
+}
+
+model TerminationReason {
+  id              Int                @id @default(autoincrement())
+  code            Int                @unique
+  title           String             @unique
+  isActive        Boolean            @default(true)
+  hasTransactions Boolean            @default(false)
+  periods         EmploymentPeriod[]
+}
+
+/// پست سازمانی. انتصاب هر کارمند همیشه به یک پست است؛ شرکتی که پست ندارد از «پست پیش‌فرض» (isDefault، دقیقاً یکی، حذف‌نشدنی) استفاده می‌کند
+/// تا بعداً با شروع استفاده از پست‌ها، داده‌ی یک‌دست بماند (ایندکس یکتای جزئی در مایگریشن).
+model Position {
+  id              Int                  @id @default(autoincrement())
+  code            Int                  @unique
+  title           String               @unique
+  orgUnitId       Int?
+  isDefault       Boolean              @default(false)
+  isActive        Boolean              @default(true)
+  hasTransactions Boolean              @default(false)
+  createdAt       DateTime             @default(now())
+  orgUnit         OrgUnit?             @relation(fields: [orgUnitId], references: [id])
+  assignments     EmployeeAssignment[]
+}
+
+model Employee {
+  id                     Int                  @id @default(autoincrement())
+  /// کد پرسنلی (دستی؛ خالی = آخرین کد عددی + ۱ با همان طول)
+  personnelCode          String               @unique
+  partyId                Int                  @unique
+  status                 EmployeeStatus       @default(ACTIVE)
+  employmentTypeId       Int?
+  fatherName             String?
+  birthCertificateNumber String?
+  birthPlace             String?
+  issuePlace             String?
+  maritalStatus          MaritalStatus?
+  educationLevelId       Int?
+  educationField         String?
+  militaryStatus         MilitaryStatus?
+  /// شماره بیمه تامین اجتماعی
+  insuranceNumber        String?
+  hasDisability          Boolean              @default(false)
+  isVeteran              Boolean              @default(false)
+  notes                  String?
+  /// حساب دریافت حقوق: ارجاع به یکی از حساب‌های بانکی همان طرف‌حساب
+  salaryBankAccountId    Int?
+  hasTransactions        Boolean              @default(false)
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  party                  Party                @relation(fields: [partyId], references: [id])
+  employmentType         EmploymentType?      @relation(fields: [employmentTypeId], references: [id])
+  educationLevel         EducationLevel?      @relation(fields: [educationLevelId], references: [id])
+  salaryBankAccount      PartyBankAccount?    @relation(fields: [salaryBankAccountId], references: [id], onDelete: SetNull)
+  photo                  EmployeePhoto?
+  periods                EmploymentPeriod[]
+  assignments            EmployeeAssignment[]
+  dependents             EmployeeDependent[]
+}
+
+/// عکس کارمند (حداکثر ۳۰۰ کیلوبایت)؛ جدا از Employee تا فهرست‌ها داده‌ی باینری نخوانند
+model EmployeePhoto {
+  employeeId Int      @id
+  mimeType   String
+  data       Bytes
+  updatedAt  DateTime @updatedAt
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+}
+
+/// دوره‌ی همکاری؛ استخدام مجدد = دوره‌ی تازه روی همان Employee (کد پرسنلی و سابقه می‌ماند). حداکثر یک دوره‌ی باز (endDate خالی) برای هر کارمند
+model EmploymentPeriod {
+  id                  Int                @id @default(autoincrement())
+  employeeId          Int
+  startDate           DateTime           @db.Date
+  endDate             DateTime?          @db.Date
+  terminationReasonId Int?
+  note                String?
+  createdAt           DateTime           @default(now())
+  employee            Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  terminationReason   TerminationReason? @relation(fields: [terminationReasonId], references: [id])
+
+  @@index([employeeId])
+}
+
+/// انتصاب تاریخ‌دار: کارمند × پست × واحد سازمانی × (مرکز هزینه / پروژه). یک انتصاب فعال (toDate خالی) در هر زمان؛ تغییر = بستن قبلی + ردیف تازه
+model EmployeeAssignment {
+  id           Int         @id @default(autoincrement())
+  employeeId   Int
+  positionId   Int
+  orgUnitId    Int
+  costCenterId Int?
+  projectId    Int?
+  fromDate     DateTime    @db.Date
+  toDate       DateTime?   @db.Date
+  createdAt    DateTime    @default(now())
+  employee     Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  position     Position    @relation(fields: [positionId], references: [id])
+  orgUnit      OrgUnit     @relation(fields: [orgUnitId], references: [id])
+  costCenter   CostCenter? @relation(fields: [costCenterId], references: [id])
+  project      Project?    @relation(fields: [projectId], references: [id])
+
+  @@index([employeeId])
+}
+
+/// فرد تحت تکفل؛ به‌ازای هر کارمند جدا ثبت می‌شود (تصمیم کاربر: بدون نگهداری مشترک)
+model EmployeeDependent {
+  id                        Int               @id @default(autoincrement())
+  employeeId                Int
+  relation                  DependentRelation
+  firstName                 String
+  lastName                  String
+  nationalId                String?
+  birthDate                 DateTime?         @db.Date
+  gender                    Gender?
+  /// مشمول حق اولاد (فقط برای فرزند معنی دارد)
+  eligibleForChildAllowance Boolean           @default(false)
+  isStudent                 Boolean           @default(false)
+  hasDisability             Boolean           @default(false)
+  note                      String?
+  employee                  Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
 }

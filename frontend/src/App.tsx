@@ -92,6 +92,9 @@ import TreasuryAccountSettings from "./pages/TreasuryAccountSettings";
 import ChequeBookLeaves from "./pages/ChequeBookLeaves";
 import PettyCashes from "./pages/PettyCashes";
 import TaxMemories from "./pages/TaxMemories";
+import Employees from "./pages/Employees";
+import Positions from "./pages/Positions";
+import { EmploymentTypes, EducationLevels, TerminationReasons } from "./pages/HrMasters";
 import TradeLedgers from "./pages/TradeLedgers";
 import TaxInvoiceSubmission from "./pages/TaxInvoiceSubmission";
 import WarehouseDocDetails from "./pages/WarehouseDocDetails";
@@ -417,6 +420,21 @@ export default function App() {
             <Route path="/tax-memories" element={<TaxMemories />} />
             <Route path="/tax-memories/new" element={<TaxMemories />} />
             <Route path="/tax-memories/:id/edit" element={<TaxMemories />} />
+            <Route path="/employees" element={<Employees />} />
+            <Route path="/employees/new" element={<Employees />} />
+            <Route path="/employees/:id/edit" element={<Employees />} />
+            <Route path="/positions" element={<Positions />} />
+            <Route path="/positions/new" element={<Positions />} />
+            <Route path="/positions/:id/edit" element={<Positions />} />
+            <Route path="/employment-types" element={<EmploymentTypes />} />
+            <Route path="/employment-types/new" element={<EmploymentTypes />} />
+            <Route path="/employment-types/:id/edit" element={<EmploymentTypes />} />
+            <Route path="/education-levels" element={<EducationLevels />} />
+            <Route path="/education-levels/new" element={<EducationLevels />} />
+            <Route path="/education-levels/:id/edit" element={<EducationLevels />} />
+            <Route path="/termination-reasons" element={<TerminationReasons />} />
+            <Route path="/termination-reasons/new" element={<TerminationReasons />} />
+            <Route path="/termination-reasons/:id/edit" element={<TerminationReasons />} />
             <Route path="/detail-rules" element={<DetailRules />} />
             <Route path="/detail-rules/new" element={<DetailRules />} />
             <Route path="/detail-rules/:id/edit" element={<DetailRules />} />

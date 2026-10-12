@@ -13,6 +13,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { InfoHint } from "./InfoHint";
 import { RecordPickerField } from "./RecordPicker";
 import { toFaDigits } from "../lib/formatAmount";
+import { JalaliDatePicker } from "./JalaliDatePicker";
 
 export interface Party {
   id: number;
@@ -26,6 +27,8 @@ export interface Party {
   nationalId: string | null;
   economicCode: string | null;
   registrationNumber?: string | null;
+  birthDate?: string | null;
+  gender?: "MALE" | "FEMALE" | null;
   hasTransactions: boolean;
   isActive: boolean;
 }
@@ -190,6 +193,8 @@ export function PartyForm({
       nationalId: p.nationalId,
       economicCode: p.economicCode,
       registrationNumber: p.registrationNumber,
+      birthDate: p.birthDate ? p.birthDate.slice(0, 10) : "",
+      gender: p.gender || "",
       isActive: p.isActive ?? true,
     });
   }
@@ -342,6 +347,18 @@ export function PartyForm({
               <div className="form-field">
                 <label>کد اقتصادی</label>
                 <input dir="ltr" value={form.economicCode || ""} onChange={(e) => setForm({ ...form, economicCode: e.target.value })} />
+              </div>
+              <div className="form-field">
+                <label>تاریخ تولد</label>
+                <JalaliDatePicker value={form.birthDate || ""} onChange={(v) => setForm({ ...form, birthDate: v })} />
+              </div>
+              <div className="form-field">
+                <label>جنسیت</label>
+                <select value={form.gender || ""} onChange={(e) => setForm({ ...form, gender: e.target.value })}>
+                  <option value="">—</option>
+                  <option value="MALE">مرد</option>
+                  <option value="FEMALE">زن</option>
+                </select>
               </div>
             </div>
           ) : (

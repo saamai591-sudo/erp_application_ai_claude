@@ -348,6 +348,24 @@ const RAW_MODULES: ModuleGroup[] = [
       },
     ],
   },
+  {
+    title: "منابع انسانی",
+    subModules: [
+      {
+        title: "پرسنلی",
+        items: [
+          { key: "employees", label: "کارمندان", list: "/employees", create: "/employees/new", icon: "users" },
+          { key: "positions", label: "پست‌های سازمانی", list: "/positions", create: "/positions/new", icon: "briefcase" },
+          { key: "employment-types", label: "نوع همکاری", list: "/employment-types", create: "/employment-types/new", icon: "tag" },
+          { key: "education-levels", label: "مدرک تحصیلی", list: "/education-levels", create: "/education-levels/new", icon: "tag" },
+          { key: "termination-reasons", label: "دلایل خاتمه همکاری", list: "/termination-reasons", create: "/termination-reasons/new", icon: "tag" },
+        ],
+      },
+    ],
+  },
+  // دو ماژول بعدی هنوز فرمی ندارند؛ تا اولین فرم، منو آن‌ها را نمایش نمی‌دهد (filterModulesByAccess ماژول بی‌آیتم را پنهان می‌کند)
+  { title: "حقوق و دستمزد", subModules: [] },
+  { title: "مدیریت تردد", subModules: [] },
 ];
 
 // قاعده‌ی عمومی ترتیب زیرماژول‌ها در همه‌ی ماژول‌ها: «تنظیمات» اول، بقیه (عملیات و گروه‌های عملیاتی) به همان ترتیب تعریف در وسط،

@@ -10,6 +10,24 @@ const FORM = findFormPrefix("parties");
 
 const router = Router();
 
+/** تاریخ تولد (YYYY-MM-DD یا خالی) و جنسیت فقط برای شخص حقیقی معنی دارند */
+function personFacts(body: { birthDate?: string | null; gender?: string | null }) {
+  const out: { birthDate?: Date | null; gender?: "MALE" | "FEMALE" | null } = {};
+  if (body.birthDate !== undefined) {
+    if (!body.birthDate) out.birthDate = null;
+    else {
+      const d = new Date(`${body.birthDate}T00:00:00.000Z`);
+      if (isNaN(d.getTime())) throw new Error("تاریخ تولد نامعتبر است");
+      out.birthDate = d;
+    }
+  }
+  if (body.gender !== undefined) {
+    if (body.gender && body.gender !== "MALE" && body.gender !== "FEMALE") throw new Error("جنسیت نامعتبر است");
+    out.gender = (body.gender || null) as "MALE" | "FEMALE" | null;
+  }
+  return out;
+}
+
 router.get("/", async (req, res) => {
   const { category, customersOnly, suppliersOnly } = req.query as {
     category?: "INDIVIDUAL" | "LEGAL";
@@ -55,6 +73,8 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
     confirmDuplicate?: boolean;
     detailCode?: string;
     isActive?: boolean;
+    birthDate?: string | null;
+    gender?: string | null;
   };
 
   if (body.category === "INDIVIDUAL") {
@@ -101,6 +121,7 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
   let code: string, detailTypeId: number;
   try {
     ({ code, detailTypeId } = await resolveDetailCode(DETAIL_TYPE_PARTY, body.detailCode));
+    const facts = body.category === "INDIVIDUAL" ? personFacts(body) : {};
 
     const party = await prisma.party.create({
       data: {
@@ -116,6 +137,7 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
         legalType: body.category === "LEGAL" ? body.legalType : null,
         name: body.category === "LEGAL" ? body.name : null,
         isActive: body.isActive ?? true,
+        ...facts,
       },
     });
     await registerDetailCode(code, detailTypeId, "Party", party.id);
@@ -135,6 +157,9 @@ router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
   if (!party) return res.status(404).json({ error: "طرف‌حساب یافت نشد" });
   if (party.hasTransactions) {
     return res.status(400).json({ error: "این طرف‌حساب گردش دارد و قابل حذف نیست" });
+  }
+  if (await prisma.employee.findUnique({ where: { partyId: id }, select: { id: true } })) {
+    return res.status(400).json({ error: "این شخص به‌عنوان کارمند ثبت شده است؛ ابتدا کارمند را حذف کنید" });
   }
   await prisma.$transaction([
     prisma.detailCodeUsage.deleteMany({ where: { entityTable: "Party", entityId: id } }),
@@ -156,6 +181,8 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
     legalType?: "LEGAL" | "SPECIAL_PARTNERSHIP" | "BANK";
     name?: string;
     isActive?: boolean;
+    birthDate?: string | null;
+    gender?: string | null;
   };
 
   const party = await prisma.party.findUnique({ where: { id } });
@@ -166,9 +193,17 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
     return res.status(400).json({ error: e.message });
   }
 
+  let facts: ReturnType<typeof personFacts> = {};
+  try {
+    if (party.category === "INDIVIDUAL") facts = personFacts(body);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
+
   const updated = await prisma.party.update({
     where: { id },
     data: {
+      ...facts,
       nationality: body.nationality,
       nationalId: body.nationality === "FOREIGN" ? null : body.nationalId,
       foreignId: body.nationality === "FOREIGN" ? body.foreignId : null,

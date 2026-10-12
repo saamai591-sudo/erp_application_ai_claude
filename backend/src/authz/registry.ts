@@ -545,6 +545,28 @@ export const REGISTRY: ModuleDef[] = [
     ],
   },
   {
+    key: "hr",
+    title: "منابع انسانی",
+    subModules: [
+      {
+        key: "personnel",
+        title: "پرسنلی",
+        forms: [
+          {
+            key: "employees",
+            title: "کارمندان",
+            baseActions: CRUD,
+            actions: [{ key: "changeStatus", title: "تغییر وضعیت همکاری" }],
+          },
+          { key: "positions", title: "پست‌های سازمانی", baseActions: CRUD },
+          { key: "employment-types", title: "نوع همکاری", baseActions: CRUD },
+          { key: "education-levels", title: "مدرک تحصیلی", baseActions: CRUD },
+          { key: "termination-reasons", title: "دلایل خاتمه همکاری", baseActions: CRUD },
+        ],
+      },
+    ],
+  },
+  {
     key: "tax-affairs",
     title: "امور مالیاتی",
     subModules: [
