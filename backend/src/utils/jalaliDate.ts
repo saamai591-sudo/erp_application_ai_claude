@@ -53,3 +53,13 @@ export function formatJalaliDateForMessage(date: Date): string {
   const j = new DateObject({ date, calendar: gregorian, locale: gregorian_en }).convert(persian, persian_fa);
   return `${String(j.year).padStart(4, "0")}/${String(j.month.number).padStart(2, "0")}/${String(j.day).padStart(2, "0")}`;
 }
+
+/** بازه‌ی یک ماه شمسی: اولین و آخرین روز (میلادی، UTC نیمه‌شب) و تعداد روزهای ماه */
+export function jalaliMonthRange(year: number, month: number): { start: Date; end: Date; days: number } {
+  const first = new DateObject({ calendar: persian, locale: persian_fa, year, month, day: 1 });
+  const days = first.month.length;
+  const g = first.convert(gregorian, gregorian_en);
+  const start = new Date(Date.UTC(g.year, g.month.number - 1, g.day));
+  const end = new Date(start.getTime() + (days - 1) * 86400000);
+  return { start, end, days };
+}

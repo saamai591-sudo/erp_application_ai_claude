@@ -278,6 +278,8 @@ router.post("/employment-decrees/:id/unapprove", can(`${FORM}.unapprove`), async
       const d = await tx.employmentDecree.findUnique({ where: { id } });
       if (!d) throw new HrError("حکم یافت نشد");
       if (d.status !== "APPROVED") throw new HrError("این حکم تایید نشده است");
+      const slip = await tx.payrollSlip.findFirst({ where: { decreeId: id }, select: { year: true, month: true } });
+      if (slip) throw new HrError(`این حکم در محاسبه‌ی حقوق ${slip.year}/${slip.month} استفاده شده است؛ ابتدا آن محاسبه را حذف کنید`);
       await tx.$queryRaw`SELECT "id" FROM "Employee" WHERE "id" = ${d.employeeId} FOR UPDATE`;
       const later = await tx.employmentDecree.findFirst({
         where: { employeeId: d.employeeId, status: "APPROVED", effectiveDate: { gt: d.effectiveDate } },

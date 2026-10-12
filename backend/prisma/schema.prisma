@@ -4647,6 +4647,8 @@ model Employee {
   periods                EmploymentPeriod[]
   assignments            EmployeeAssignment[]
   dependents             EmployeeDependent[]
+  payrollSlips           PayrollSlip[]
+  payrollWorks           PayrollMonthlyWork[]
 }
 
 /// عکس کارمند (حداکثر ۳۰۰ کیلوبایت)؛ جدا از Employee تا فهرست‌ها داده‌ی باینری نخوانند
@@ -4792,6 +4794,7 @@ model DecreeComponent {
   isActive        Boolean              @default(true)
   hasTransactions Boolean              @default(false)
   lines           EmploymentDecreeLine[]
+  profiles        PayrollItemProfile[]
 }
 
 model EmploymentDecree {
@@ -4825,6 +4828,7 @@ model EmploymentDecree {
   lines                EmploymentDecreeLine[]
 
   @@index([employeeId, effectiveDate])
+  payrollSlips         PayrollSlip[]
 }
 
 model EmploymentDecreeLine {
@@ -4890,4 +4894,115 @@ model PayrollParameterBracket {
   value     PayrollParameterValue @relation(fields: [valueId], references: [id], onDelete: Cascade)
 
   @@unique([valueId, position])
+}
+
+// ─── حقوق و دستمزد › اجزا، مشخصات محاسبه، کارکرد و فیش ────────────────────────────────────────────────────────────────────────
+
+enum PayrollComponentKind {
+  EARNING
+  DEDUCTION
+  EMPLOYER_COST
+  INFO
+}
+
+enum PayrollSectionKind {
+  DECREE_COMPONENT
+  PAYROLL_COMPONENT
+}
+
+/// جزء حقوق: هر ماه با فرمول محاسبه می‌شود (اضافه‌کار، بیمه، مالیات، کسورات…). فرمول متنی است و در services/payrollFormula.ts تجزیه می‌شود.
+model PayrollComponent {
+  id          Int                  @id @default(autoincrement())
+  key         String               @unique
+  title       String
+  kind        PayrollComponentKind
+  formula     String
+  description String?
+  isSystem    Boolean              @default(false)
+  isActive    Boolean              @default(true)
+  createdAt   DateTime             @default(now())
+  profiles    PayrollItemProfile[]
+}
+
+/// مشخصات محاسبه‌ی تاریخ‌دار یک جزء (جزء حکم یا جزء حقوق): تناسب با روز کارکرد، مشمولیت بیمه/مالیات، مبنای اضافه‌کار.
+/// دقیقاً یکی از decreeComponentId / payrollComponentId پر است (CHECK در migration).
+model PayrollItemProfile {
+  id                 Int               @id @default(autoincrement())
+  decreeComponentId  Int?
+  payrollComponentId Int?
+  effectiveDate      DateTime          @db.Date
+  prorate            Boolean           @default(true)
+  insurable          Boolean           @default(false)
+  taxable            Boolean           @default(false)
+  overtimeBase       Boolean           @default(false)
+  isProvisional      Boolean           @default(false)
+  note               String?
+  decreeComponent    DecreeComponent?  @relation(fields: [decreeComponentId], references: [id], onDelete: Cascade)
+  payrollComponent   PayrollComponent? @relation(fields: [payrollComponentId], references: [id], onDelete: Cascade)
+
+  @@unique([decreeComponentId, effectiveDate])
+  @@unique([payrollComponentId, effectiveDate])
+}
+
+/// کارکرد ماهانه‌ی کارمند (ورودی محاسبه)
+model PayrollMonthlyWork {
+  id            Int      @id @default(autoincrement())
+  employeeId    Int
+  year          Int
+  month         Int
+  workDays      Decimal  @db.Decimal(5, 2)
+  overtimeHours Decimal  @default(0) @db.Decimal(7, 2)
+  note          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, year, month])
+}
+
+/// نتیجه‌ی محاسبه‌ی یک کارمند در یک ماه (با همه‌ی ورودی‌ها و ریز هر جزء برای گزارش)
+model PayrollSlip {
+  id            Int               @id @default(autoincrement())
+  employeeId    Int
+  year          Int
+  month         Int
+  decreeId      Int?
+  monthDays     Int
+  workDays      Decimal           @db.Decimal(5, 2)
+  overtimeHours Decimal           @db.Decimal(7, 2)
+  earnings      Decimal           @db.Decimal(20, 4)
+  deductions    Decimal           @db.Decimal(20, 4)
+  employerCosts Decimal           @db.Decimal(20, 4)
+  netPay        Decimal           @db.Decimal(20, 4)
+  hasErrors     Boolean           @default(false)
+  /// {key: {title, type, effectiveDate, isProvisional, value|brackets}} پارامترهای استفاده‌شده
+  parameters    Json
+  warnings      Json
+  calculatedAt  DateTime          @default(now())
+  employee      Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  decree        EmploymentDecree? @relation(fields: [decreeId], references: [id], onDelete: Restrict)
+  lines         PayrollSlipLine[]
+
+  @@unique([employeeId, year, month])
+}
+
+model PayrollSlipLine {
+  id          Int                  @id @default(autoincrement())
+  slipId      Int
+  seq         Int
+  kind        PayrollComponentKind
+  source      PayrollSectionKind
+  /// شناسه‌ی جزء حکم / جزء حقوق (فقط برای مرجع؛ عنوان و فرمول در همین ردیف کپی شده‌اند)
+  refId       Int?
+  title       String
+  formula     String?
+  insurable   Boolean              @default(false)
+  taxable     Boolean              @default(false)
+  amount      Decimal              @db.Decimal(20, 4)
+  error       String?
+  /// {expression, operands[], note}
+  trace       Json
+  slip        PayrollSlip          @relation(fields: [slipId], references: [id], onDelete: Cascade)
+
+  @@unique([slipId, seq])
 }

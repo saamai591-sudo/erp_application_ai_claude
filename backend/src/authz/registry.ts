@@ -592,7 +592,28 @@ export const REGISTRY: ModuleDef[] = [
       {
         key: "settings",
         title: "تنظیمات",
-        forms: [{ key: "legal-parameters", title: "پارامترهای قانونی", baseActions: CRUD }],
+        forms: [
+          { key: "legal-parameters", title: "پارامترهای قانونی", baseActions: CRUD },
+          { key: "payroll-components", title: "اجزای حقوق", baseActions: CRUD },
+          { key: "calc-profiles", title: "مشخصات محاسبه اجزا", baseActions: ["view", "edit", "delete"] },
+        ],
+      },
+      {
+        key: "operations",
+        title: "عملیات",
+        forms: [
+          {
+            key: "payroll-calculation",
+            title: "محاسبه حقوق",
+            baseActions: ["view", "delete"],
+            actions: [{ key: "calculate", title: "محاسبه" }],
+          },
+        ],
+      },
+      {
+        key: "reports",
+        title: "گزارش",
+        forms: [{ key: "payroll-calculation-report", title: "گزارش محاسبات حقوق", baseActions: ["view"] }],
       },
     ],
   },

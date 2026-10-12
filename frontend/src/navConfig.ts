@@ -379,7 +379,19 @@ const RAW_MODULES: ModuleGroup[] = [
     subModules: [
       {
         title: "تنظیمات",
-        items: [{ key: "legal-parameters", label: "پارامترهای قانونی", list: "/legal-parameters", create: "/legal-parameters/new", icon: "sliders" }],
+        items: [
+          { key: "legal-parameters", label: "پارامترهای قانونی", list: "/legal-parameters", create: "/legal-parameters/new", icon: "sliders" },
+          { key: "payroll-components", label: "اجزای حقوق", list: "/payroll-components", create: "/payroll-components/new", icon: "tag" },
+          { key: "calc-profiles", label: "مشخصات محاسبه اجزا", list: "/calc-profiles", icon: "sliders", type: "operational" },
+        ],
+      },
+      {
+        title: "عملیات",
+        items: [{ key: "payroll-calculation", label: "محاسبه حقوق", list: "/payroll-calculation", icon: "banknote", type: "operational" }],
+      },
+      {
+        title: "گزارش",
+        items: [{ key: "payroll-calculation-report", label: "گزارش محاسبات حقوق", list: "/payroll-calculation-report", icon: "tree", type: "report" }],
       },
     ],
   },
