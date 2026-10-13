@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ErrorToast } from "../components/ErrorToast";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
+import { AmountInput } from "../components/AmountInput";
 import { Modal } from "../components/Modal";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
@@ -365,7 +366,7 @@ function ValueDialog({ param, value, onClose, onDone }: { param: ParamDetail; va
         {!isBr && (
           <div className="form-field">
             <label>مقدار{param.type === "PERCENT" ? " (درصد)" : ""}<RequiredMark /></label>
-            <input dir="ltr" inputMode="decimal" value={val} onChange={(e) => setVal(num(e.target.value))} autoFocus />
+            <AmountInput value={val} onChange={setVal} allowDecimal />
           </div>
         )}
         <div className="form-field" style={{ gridColumn: "1 / -1" }}>
@@ -383,9 +384,9 @@ function ValueDialog({ param, value, onClose, onDone }: { param: ParamDetail; va
               {rows.map((r, i) => (
                 <tr key={i}>
                   <td>{toFaDigits(String(i + 1))}</td>
-                  <td><input dir="ltr" disabled value={r.from} readOnly /></td>
-                  <td><input dir="ltr" inputMode="decimal" value={r.to} onChange={(e) => setRow(i, { to: num(e.target.value) })} /></td>
-                  <td><input dir="ltr" inputMode="decimal" value={r.rate} onChange={(e) => setRow(i, { rate: num(e.target.value) })} /></td>
+                  <td><AmountInput value={r.from} onChange={() => {}} allowDecimal disabled /></td>
+                  <td><AmountInput value={r.to} onChange={(v) => setRow(i, { to: v })} allowDecimal /></td>
+                  <td><AmountInput value={r.rate} onChange={(v) => setRow(i, { rate: v })} allowDecimal /></td>
                   <td>
                     {rows.length > 1 && i === rows.length - 1 && (
                       <button type="button" className="link-btn" onClick={() => setRows(rows.slice(0, -1))}>حذف</button>

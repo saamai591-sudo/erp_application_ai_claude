@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams, useSearchParams } from "react-rout
 import { ErrorToast } from "../components/ErrorToast";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
+import { AmountInput } from "../components/AmountInput";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
@@ -421,7 +422,7 @@ function DecreeForm({ editId }: { editId?: number }) {
                     </td>
                     <td>{comp ? DECREE_VALUE_TYPE_FA[comp.valueType] : "—"}</td>
                     <td>
-                      <input dir="ltr" inputMode="decimal" value={l.value} onChange={(e) => setLine(i, { value: e.target.value.replace(/[^0-9.]/g, "") })} />
+                      <AmountInput value={l.value} onChange={(v) => setLine(i, { value: v })} allowDecimal disabled={locked} />
                     </td>
                     <td>
                       {!locked && <button type="button" className="link-btn" onClick={() => set({ lines: form.lines.filter((_, k) => k !== i) })}>حذف</button>}

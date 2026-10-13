@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ErrorToast } from "../components/ErrorToast";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
+import { AmountInput } from "../components/AmountInput";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
@@ -256,7 +257,7 @@ function MethodForm({ editId }: { editId?: number }) {
           {form.basis === "payroll" && form.method === "FIXED" && (
             <div className="form-field">
               <label>مقدار ثابت<RequiredMark /></label>
-              <input dir="ltr" inputMode="decimal" value={form.fixedValue} onChange={(e) => setForm({ ...form, fixedValue: e.target.value.replace(/[^0-9.]/g, "") })} />
+              <AmountInput value={form.fixedValue} onChange={(v) => setForm({ ...form, fixedValue: v })} allowDecimal />
             </div>
           )}
           <div className="form-field">
