@@ -281,6 +281,7 @@ function MethodForm({ editId }: { editId?: number }) {
         <FormulaBuilder
           basis={form.basis}
           factorId={form.factorId}
+          factorTitle={picked?.title ?? ""}
           method={form.method}
           conditionText={form.conditionText}
           formulaText={form.formulaText}

@@ -50,6 +50,7 @@ const OPS_COND = [">", ">=", "<", "<=", "=", "<>"];
 export function FormulaBuilder({
   basis,
   factorId,
+  factorTitle,
   method,
   conditionText,
   formulaText,
@@ -58,6 +59,8 @@ export function FormulaBuilder({
 }: {
   basis: "decree" | "payroll";
   factorId: string;
+  /** عنوان عاملی که فرمولش تعریف می‌شود؛ در عنوان پنجره نمایش داده می‌شود */
+  factorTitle: string;
   method: string;
   conditionText: string;
   formulaText: string;
@@ -284,7 +287,7 @@ export function FormulaBuilder({
   );
 
   return (
-    <Modal title="فرمول" onClose={onClose} wide>
+    <Modal title={factorTitle ? `فرمول عامل «${factorTitle}»` : "فرمول"} onClose={onClose} wide>
       <ErrorToast message={err} />
       {chipsArea("cond", "عبارت شرطی", OPS_COND, true)}
       {chipsArea("calc", "عبارت محاسباتی", OPS_CALC, false)}
