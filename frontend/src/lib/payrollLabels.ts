@@ -2,6 +2,7 @@
 
 /** طبقه‌ی عامل */
 export const KIND_FA: Record<string, string> = {
+  WORK: "کارکرد",
   EARNING: "پرداختی",
   DEDUCTION: "کسر",
   EMPLOYER_COST: "هزینه کارفرما",

@@ -30,7 +30,7 @@ import { jalaliMonthRange } from "../utils/jalaliDate";
 
 export class PayrollCalcError extends Error {}
 
-type Kind = "EARNING" | "DEDUCTION" | "EMPLOYER_COST" | "INFO";
+type Kind = "WORK" | "EARNING" | "DEDUCTION" | "EMPLOYER_COST" | "INFO";
 type Method = "CALCULATED" | "FIXED" | "MANUAL" | "ATTENDANCE" | "TREASURY";
 
 export const METHOD_FA: Record<string, string> = {
@@ -551,7 +551,7 @@ export async function calculatePayroll(
   }
 
   // ترتیب نمایش: طبقه‌ها (پرداختی، کسر، هزینه کارفرما، اطلاعاتی) و داخل هر طبقه به ترتیب محاسبه
-  const kindOrder: Kind[] = ["EARNING", "DEDUCTION", "EMPLOYER_COST", "INFO"];
+  const kindOrder: Kind[] = ["WORK", "EARNING", "DEDUCTION", "EMPLOYER_COST", "INFO"];
   const sorted = [...lines].sort((a, b) => kindOrder.indexOf(a.kind) - kindOrder.indexOf(b.kind));
 
   const slip = await prisma.$transaction(async (tx) => {

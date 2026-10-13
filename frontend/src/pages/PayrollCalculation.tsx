@@ -223,7 +223,7 @@ function Page({ mode }: { mode: "calculate" | "report" }) {
 }
 
 function SlipView({ slip }: { slip: Slip }) {
-  const kinds = ["EARNING", "DEDUCTION", "EMPLOYER_COST", "INFO"];
+  const kinds = ["WORK", "EARNING", "DEDUCTION", "EMPLOYER_COST", "INFO"];
   const isTimeLine = (l: SlipLine) => l.trace.valueType === "TIME";
   return (
     <div>

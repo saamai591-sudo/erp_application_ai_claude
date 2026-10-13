@@ -4899,6 +4899,7 @@ model PayrollParameterBracket {
 // ─── حقوق و دستمزد › اجزا، مشخصات محاسبه، کارکرد و فیش ────────────────────────────────────────────────────────────────────────
 
 enum PayrollComponentKind {
+  WORK
   EARNING
   DEDUCTION
   EMPLOYER_COST

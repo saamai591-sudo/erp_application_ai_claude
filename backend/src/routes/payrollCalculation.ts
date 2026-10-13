@@ -20,7 +20,7 @@ const str = (v: unknown) => {
   const t = typeof v === "string" ? v.trim() : "";
   return t || null;
 };
-const KINDS = ["EARNING", "DEDUCTION", "EMPLOYER_COST", "INFO"];
+const KINDS = ["WORK", "EARNING", "DEDUCTION", "EMPLOYER_COST", "INFO"];
 const METHODS = ["CALCULATED", "FIXED", "MANUAL", "ATTENDANCE", "TREASURY"];
 const VALUE_TYPES = ["NUMBER", "TIME", "DAYS", "AMOUNT"];
 

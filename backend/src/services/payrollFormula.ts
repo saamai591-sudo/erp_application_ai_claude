@@ -29,7 +29,7 @@ export const BASE_INFO: Record<string, string> = {
   SERVICE_YEARS: "مدت همکاری (سال)",
   MONTH_NO: "شماره ماه محاسبه",
 };
-export const KIND_FA: Record<string, string> = { EARNING: "پرداختی", DEDUCTION: "کسر", EMPLOYER_COST: "هزینه کارفرما", INFO: "اطلاعاتی" };
+export const KIND_FA: Record<string, string> = { WORK: "کارکرد", EARNING: "پرداختی", DEDUCTION: "کسر", EMPLOYER_COST: "هزینه کارفرما", INFO: "اطلاعاتی" };
 
 export const DECREE_VARIANTS: Record<string, string> = {
   LAST: "آخرین مقدار حکم",
