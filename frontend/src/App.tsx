@@ -97,6 +97,7 @@ import Positions from "./pages/Positions";
 import { EmploymentTypes, EducationLevels, TerminationReasons, DecreeComponents } from "./pages/HrMasters";
 import EmploymentDecrees from "./pages/EmploymentDecrees";
 import LegalParameters from "./pages/LegalParameters";
+import PayrollDataEntry from "./pages/PayrollDataEntry";
 import PayrollComponents from "./pages/PayrollComponents";
 import FactorMethods from "./pages/FactorMethods";
 import { PayrollCalculationPage, PayrollReportPage } from "./pages/PayrollCalculation";
@@ -447,6 +448,7 @@ export default function App() {
             <Route path="/factor-methods" element={<FactorMethods />} />
             <Route path="/factor-methods/new" element={<FactorMethods />} />
             <Route path="/factor-methods/:id/edit" element={<FactorMethods />} />
+            <Route path="/payroll-data-entry" element={<PayrollDataEntry />} />
             <Route path="/payroll-calculation" element={<PayrollCalculationPage />} />
             <Route path="/payroll-calculation-report" element={<PayrollReportPage />} />
             <Route path="/employee-education" element={<EmployeeEducation />} />

@@ -387,7 +387,10 @@ const RAW_MODULES: ModuleGroup[] = [
       },
       {
         title: "عملیات",
-        items: [{ key: "payroll-calculation", label: "محاسبه حقوق", list: "/payroll-calculation", icon: "banknote", type: "operational" }],
+        items: [
+          { key: "payroll-data-entry", label: "ورود اطلاعات", list: "/payroll-data-entry", icon: "file", type: "operational" },
+          { key: "payroll-calculation", label: "محاسبه حقوق", list: "/payroll-calculation", icon: "banknote", type: "operational" },
+        ],
       },
       {
         title: "گزارش",

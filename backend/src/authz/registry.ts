@@ -602,6 +602,7 @@ export const REGISTRY: ModuleDef[] = [
         key: "operations",
         title: "عملیات",
         forms: [
+          { key: "payroll-data-entry", title: "ورود اطلاعات", baseActions: ["view", "edit"] },
           {
             key: "payroll-calculation",
             title: "محاسبه حقوق",
