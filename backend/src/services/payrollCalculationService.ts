@@ -458,10 +458,12 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
         amount = m.fixedValue;
         trace = { expression: String(m.fixedValue), operands: [], method: METHOD_FA.FIXED };
       } else if (n.source === "PAYROLL_COMPONENT" && INPUT_METHODS.includes(m.method)) {
-        const v = inputByComp.get(compId);
-        if (v === undefined) throw new FormulaError(`مقدار ورودی (${METHOD_FA[m.method]}) برای این ماه ثبت نشده است`);
+        const stored = inputByComp.get(compId);
+        // ورود دستی: مقدار ثبت‌نشده = صفر (ISNULL(x, 0)). ورود از تردد/خزانه: نبودن مقدار یعنی خوراک سیستم نرسیده؛ خطای روشن می‌دهد
+        if (stored === undefined && m.method !== "MANUAL") throw new FormulaError(`مقدار ورودی (${METHOD_FA[m.method]}) برای این ماه ثبت نشده است`);
+        const v = stored ?? 0;
         amount = v;
-        trace = { expression: String(v), operands: [], method: METHOD_FA[m.method] };
+        trace = { expression: String(v), operands: [], method: METHOD_FA[m.method], note: stored === undefined ? "مقداری در «ورود اطلاعات» ثبت نشده بود؛ صفر در نظر گرفته شد" : undefined };
       } else {
         if (n.parseError) throw new FormulaError(n.parseError);
         const p = n.parsed!;
