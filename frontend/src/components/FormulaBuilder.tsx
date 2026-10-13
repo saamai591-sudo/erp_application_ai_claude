@@ -23,9 +23,25 @@ interface Palette {
 
 type Area = "cond" | "calc";
 
+/** ارقام فارسی/عربی → انگلیسی؛ «٫» (جداکننده‌ی اعشار فارسی) → «.» */
+function normalizeDigits(s: string): string {
+  return s
+    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
+    .replace(/٫/g, ".");
+}
+
 /** متن فرمول → فهرست توکن‌ها (هر توکن یک رشته) */
 function tokenize(src: string): string[] {
+  src = normalizeDigits(src);
   return src.match(/\[[^\]]+\]|\d+(?:\.\d+)?|\.\d+|>=|<=|<>|[+\-*/(),<>=]|[A-Za-z_]+/g) ?? [];
+}
+
+/** ورودی عدد: فقط رقم و یک اعشار (ارقام فارسی و «٫» و «/» هم قبول است) */
+function cleanNumber(raw: string): string {
+  const t = normalizeDigits(raw).replace(/\//g, ".").replace(/[^0-9.]/g, "");
+  const i = t.indexOf(".");
+  return i < 0 ? t : t.slice(0, i + 1) + t.slice(i + 1).replace(/\./g, "");
 }
 
 const OPS_CALC = ["+", "-", "*", "/", "(", ")", ","];
@@ -111,6 +127,38 @@ export function FormulaBuilder({
     a === "cond" ? setCond(v) : setCalc(v);
   };
   const push = (...t: string[]) => set(active, [...get(active), ...t]);
+
+  /** تایپ مستقیم در ناحیه‌ی عبارت: ارقام (فارسی یا انگلیسی)، نقطه/«/»/«٫» به‌عنوان اعشار، عملگرها و Backspace */
+  function typeKey(a: Area, e: React.KeyboardEvent) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = normalizeDigits(e.key);
+    const toks = get(a);
+    const last = toks[toks.length - 1];
+    const lastIsNum = last !== undefined && /^\d*\.?\d*$/.test(last) && last !== "";
+    if (/^[0-9]$/.test(k)) {
+      e.preventDefault();
+      set(a, lastIsNum ? [...toks.slice(0, -1), last + k] : [...toks, k]);
+    } else if (k === "." || k === "/" && lastIsNum && !last.includes(".")) {
+      // «/» بعد از عدد = اعشار فارسی؛ بدون عدد قبلی عملگر تقسیم است
+      e.preventDefault();
+      if (lastIsNum) {
+        if (!last.includes(".")) set(a, [...toks.slice(0, -1), last + "."]);
+      } else set(a, [...toks, "0."]);
+    } else if (["+", "-", "*", "/", "(", ")", ","].includes(k)) {
+      e.preventDefault();
+      set(a, [...toks, k]);
+    } else if (a === "cond" && [">", "<", "="].includes(k)) {
+      e.preventDefault();
+      // > یا < بعد از = (یا برعکس) به عملگر دو نویسه‌ای ترکیب می‌شود
+      if (k === "=" && (last === ">" || last === "<")) set(a, [...toks.slice(0, -1), last + "="]);
+      else if (k === ">" && last === "<") set(a, [...toks.slice(0, -1), "<>"]);
+      else set(a, [...toks, k]);
+    } else if (k === "Backspace") {
+      e.preventDefault();
+      if (lastIsNum && last.length > 1) set(a, [...toks.slice(0, -1), last.slice(0, -1)]);
+      else set(a, toks.slice(0, -1));
+    }
+  }
 
   function copy(a: Area) {
     clipRef.current = [...get(a)];
@@ -198,6 +246,9 @@ export function FormulaBuilder({
       </div>
       <div
         onClick={() => setActive(a)}
+        onFocus={() => setActive(a)}
+        tabIndex={0}
+        onKeyDown={(e) => typeKey(a, e)}
         dir="ltr"
         style={{
           minHeight: 62,
@@ -223,7 +274,7 @@ export function FormulaBuilder({
               ? { background: "#0f766e", color: "#fff", borderRadius: 14, padding: "2px 10px" }
               : { padding: "2px 4px", fontWeight: 700 };
           return (
-            <span key={i} title="حذف با دوبار کلیک" onDoubleClick={() => set(a, get(a).filter((_, k) => k !== i))} style={{ ...style, fontSize: 13, direction: "rtl", unicodeBidi: "isolate" }}>
+            <span key={i} title="حذف با دوبار کلیک" onDoubleClick={() => set(a, get(a).filter((_, k) => k !== i))} style={{ ...style, fontSize: 13, direction: c.kind === "ref" || c.kind === "fn" ? "rtl" : "ltr", unicodeBidi: "isolate" }}>
               {c.text}
             </span>
           );
@@ -302,8 +353,8 @@ export function FormulaBuilder({
       {tab === "constants" && (
         <div>
           <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-            <input dir="ltr" inputMode="decimal" placeholder="عدد" value={num} onChange={(e) => setNum(e.target.value.replace(/[^0-9.]/g, ""))} style={{ maxWidth: 160 }} />
-            <button type="button" className="btn secondary" disabled={!num} onClick={() => { push(num); setNum(""); }}>افزودن عدد</button>
+            <input dir="ltr" inputMode="decimal" placeholder="عدد" value={num} onChange={(e) => setNum(cleanNumber(e.target.value))} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (num && !num.endsWith(".")) { push(num); setNum(""); } } }} style={{ maxWidth: 160 }} />
+            <button type="button" className="btn secondary" disabled={!num || num === "." || num.endsWith(".")} onClick={() => { push(num); setNum(""); }}>افزودن عدد</button>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 6 }}>
             {pal?.params.filter((p) => p.type !== "BRACKETS").map((p) => (
