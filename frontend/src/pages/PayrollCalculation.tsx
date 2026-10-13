@@ -46,7 +46,7 @@ interface Slip {
   totals: { earnings: string; deductions: string; employerCosts: string; netPay: string };
   hasErrors: boolean;
   warnings: string[];
-  parameters: Record<string, { title: string; type: string; effectiveDate: string; isProvisional: boolean; value: number | null; brackets: { from: number; to: number | null; rate: number }[] }>;
+  parameters: Record<string, { title: string; type: string; effectiveDate: string; value: number | null; brackets: { from: number; to: number | null; rate: number }[] }>;
   calculatedAt: string;
   lines: SlipLine[];
 }
@@ -252,9 +252,9 @@ function SlipView({ slip }: { slip: Slip }) {
 
       <h3 className="hr-section">پارامترهای مبنا استفاده‌شده</h3>
       <table className="hr-table">
-        <thead><tr><th>پارامتر</th><th>مقدار</th><th style={{ width: 130 }}>تاریخ شروع مقدار</th><th style={{ width: 160 }}>وضعیت</th></tr></thead>
+        <thead><tr><th>پارامتر</th><th>مقدار</th><th style={{ width: 130 }}>تاریخ شروع مقدار</th></tr></thead>
         <tbody>
-          {Object.entries(slip.parameters).length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", opacity: 0.7 }}>—</td></tr>}
+          {Object.entries(slip.parameters).length === 0 && <tr><td colSpan={3} style={{ textAlign: "center", opacity: 0.7 }}>—</td></tr>}
           {Object.entries(slip.parameters).map(([k, p]) => (
             <tr key={k}>
               <td>{p.title}</td>
@@ -264,7 +264,6 @@ function SlipView({ slip }: { slip: Slip }) {
                   : p.type === "PERCENT" ? `${num(p.value)}٪` : num(p.value)}
               </td>
               <td>{formatJalaliDate(p.effectiveDate)}</td>
-              <td>{p.isProvisional ? "موقت — نیاز به تایید" : "تاییدشده"}</td>
             </tr>
           ))}
         </tbody>

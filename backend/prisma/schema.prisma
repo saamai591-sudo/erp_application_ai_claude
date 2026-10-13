@@ -4872,8 +4872,6 @@ model PayrollParameterValue {
   effectiveDate DateTime                  @db.Date
   /// مقدار عددی (NUMBER/PERCENT/AMOUNT)؛ برای BRACKETS خالی است
   value         Decimal?                  @db.Decimal(20, 4)
-  /// مقدار پیش‌فرضِ نصب که هنوز کاربر آن را تایید/ویرایش نکرده است
-  isProvisional Boolean                   @default(false)
   note          String?
   createdAt     DateTime                  @default(now())
   updatedAt     DateTime                  @updatedAt
@@ -4940,7 +4938,7 @@ model PayrollSlip {
   employerCosts Decimal           @db.Decimal(20, 4)
   netPay        Decimal           @db.Decimal(20, 4)
   hasErrors     Boolean           @default(false)
-  /// {key: {title, type, effectiveDate, isProvisional, value|brackets}} پارامترهای استفاده‌شده
+  /// {key: {title, type, effectiveDate, value|brackets}} پارامترهای استفاده‌شده
   parameters    Json
   warnings      Json
   calculatedAt  DateTime          @default(now())

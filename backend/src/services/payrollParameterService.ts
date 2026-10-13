@@ -14,7 +14,6 @@ export interface ParameterValue {
   key: string;
   type: "NUMBER" | "PERCENT" | "AMOUNT" | "BRACKETS";
   effectiveDate: Date;
-  isProvisional: boolean;
   value: number | null;
   brackets: Bracket[];
 }
@@ -27,7 +26,6 @@ function shape(p: { id: number; key: string; type: any }, v: any): ParameterValu
     key: p.key,
     type: p.type,
     effectiveDate: v.effectiveDate,
-    isProvisional: v.isProvisional,
     value: v.value === null ? null : Number(v.value),
     brackets: (v.brackets ?? []).map((b: any) => ({ from: Number(b.fromAmount), to: b.toAmount === null ? null : Number(b.toAmount), rate: Number(b.rate) })),
   };

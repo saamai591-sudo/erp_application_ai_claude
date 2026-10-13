@@ -52,7 +52,6 @@ function shapeValue(v: any, lock?: { locked: boolean; reason: string | null }) {
     locked: lock?.locked ?? false,
     lockedReason: lock?.reason ?? null,
     value: v.value === null ? null : v.value.toString(),
-    isProvisional: v.isProvisional,
     note: v.note,
     brackets: (v.brackets ?? []).map((b: any) => ({ from: b.fromAmount.toString(), to: b.toAmount === null ? null : b.toAmount.toString(), rate: b.rate.toString() })),
   };
@@ -251,23 +250,13 @@ router.put("/payroll-parameters/values/:valueId", can(`${FORM}.edit`), async (re
       prisma.payrollParameterBracket.deleteMany({ where: { valueId } }),
       prisma.payrollParameterValue.update({
         where: { id: valueId },
-        // ثبت توسط کاربر، مقدار «موقت» را تایید‌شده می‌کند
-        data: { effectiveDate, value: built.value, note: str(b.note), isProvisional: false, brackets: { create: built.brackets } },
+        data: { effectiveDate, value: built.value, note: str(b.note), brackets: { create: built.brackets } },
       }),
     ]);
     res.json({ ok: true });
   } catch (e) {
     fail(res, e, "خطا در ویرایش مقدار");
   }
-});
-
-// تایید مقدار پیش‌فرض نصب بدون تغییر
-router.post("/payroll-parameters/values/:valueId/confirm", can(`${FORM}.edit`), async (req, res) => {
-  const valueId = Number(req.params.valueId);
-  const v = await prisma.payrollParameterValue.findUnique({ where: { id: valueId } });
-  if (!v) return res.status(404).json({ error: "مقدار یافت نشد" });
-  await prisma.payrollParameterValue.update({ where: { id: valueId }, data: { isProvisional: false } });
-  res.json({ ok: true });
 });
 
 router.delete("/payroll-parameters/values/:valueId", can(`${FORM}.delete`), async (req, res) => {

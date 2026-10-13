@@ -530,11 +530,9 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
       title: paramDefs.get(k)?.title ?? k,
       type: pv.type,
       effectiveDate: pv.effectiveDate.toISOString().slice(0, 10),
-      isProvisional: pv.isProvisional,
       value: pv.value,
       brackets: pv.brackets,
     };
-    if (pv.isProvisional) warnings.push(`پارامتر مبنا «${paramDefs.get(k)?.title ?? k}» پیش‌فرض نصب و تاییدنشده است`);
   }
 
   // ترتیب نمایش: طبقه‌ها (پرداختی، کسر، هزینه کارفرما، اطلاعاتی) و داخل هر طبقه به ترتیب محاسبه

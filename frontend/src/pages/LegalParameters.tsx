@@ -38,7 +38,6 @@ interface ValueRow {
   locked: boolean;
   lockedReason: string | null;
   value: string | null;
-  isProvisional: boolean;
   note: string | null;
   brackets: BracketRow[];
 }
@@ -109,7 +108,7 @@ function ParamList() {
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint
-            text="پارامترهای مبنا حقوق (نرخ بیمه، سقف بیمه، حداقل دستمزد، ضریب اضافه‌کار، جدول مالیات). هر پارامتر مقدارهای تاریخ‌دار دارد؛ برای تغییر سالانه، مقدار جدید با ماه اجرای جدید ثبت کنید (ماه اجرا باید بعد از آخرین ماهِ محاسبه‌شده باشد). مقداری که در محاسبه‌ی حقوق استفاده شده قابل ویرایش و حذف نیست. مقدارهای «موقت» پیش‌فرض نصب‌اند و باید با قانون جاری تطبیق و تایید شوند."
+            text="پارامترهای مبنا حقوق (نرخ بیمه، سقف بیمه، حداقل دستمزد، ضریب اضافه‌کار، جدول مالیات). هر پارامتر مقدارهای تاریخ‌دار دارد؛ برای تغییر سالانه، مقدار جدید با ماه اجرای جدید ثبت کنید (ماه اجرا باید بعد از آخرین ماهِ محاسبه‌شده باشد). مقداری که در محاسبه‌ی حقوق استفاده شده قابل ویرایش و حذف نیست. با ثبت هر ردیف، مقدار معتبر است و نیازی به تایید ندارد."
             title="پارامترهای مبنا"
           />
           <NewRecordButton path="/legal-parameters/new" />
@@ -123,7 +122,6 @@ function ParamList() {
           { header: "نوع", ...s((r) => TYPE_FA[r.type]), width: "110px" },
           { header: "مقدار فعلی", ...s((r) => valueText(r.type, r.current)), width: "150px" },
           { header: "ماه اجرا", ...s((r) => (r.current ? monthText(r.current.execYear, r.current.execMonth) : "—")), width: "130px" },
-          { header: "وضعیت", ...s((r) => (!r.current ? "نیازمند تعریف" : r.current.isProvisional ? "موقت — نیاز به تایید" : "تاییدشده")), width: "170px" },
           { header: "سیستمی", ...s((r) => (r.isSystem ? "بله" : "")), width: "80px" },
         ]}
         rows={items}
@@ -196,14 +194,6 @@ function ParamForm({ editId }: { editId?: number }) {
       showError((e as ApiError).message);
     }
   }
-  async function confirmValue(v: ValueRow) {
-    try {
-      await api.post(`/payroll-parameters/values/${v.id}/confirm`, {});
-      await reload(false);
-    } catch (e) {
-      showError((e as ApiError).message);
-    }
-  }
 
   if (!loaded) return null;
   const canEdit = hasPermission("payroll.settings.legal-parameters.edit");
@@ -257,11 +247,11 @@ function ParamForm({ editId }: { editId?: number }) {
           </h3>
           <table className="hr-table">
             <thead>
-              <tr><th style={{ width: 150 }}>ماه اجرا</th><th>مقدار</th><th style={{ width: 170 }}>وضعیت</th><th>توضیح</th><th style={{ width: 170 }} /></tr>
+              <tr><th style={{ width: 150 }}>ماه اجرا</th><th>مقدار</th><th>توضیح</th><th style={{ width: 170 }} /></tr>
             </thead>
             <tbody>
               {detail.values.length === 0 && (
-                <tr><td colSpan={5} style={{ textAlign: "center", opacity: 0.7 }}>هنوز مقداری ثبت نشده است</td></tr>
+                <tr><td colSpan={4} style={{ textAlign: "center", opacity: 0.7 }}>هنوز مقداری ثبت نشده است</td></tr>
               )}
               {detail.values.map((v, i) => (
                 <tr key={v.id}>
@@ -276,13 +266,11 @@ function ParamForm({ editId }: { editId?: number }) {
                       valueText(detail.type, v)
                     )}
                   </td>
-                  <td>{v.isProvisional ? "موقت — نیاز به تایید" : "تاییدشده"}</td>
                   <td>{v.note ?? ""}</td>
                   <td>
                     {canEdit && (
                       <>
                         <button type="button" className="link-btn" disabled={v.locked} title={v.locked ? v.lockedReason ?? "" : undefined} onClick={() => setValueDlg({ value: v })}>ویرایش</button>{" "}
-                        {v.isProvisional && <button type="button" className="link-btn" onClick={() => confirmValue(v)}>تایید مقدار</button>}{" "}
                         <button type="button" className="link-btn" disabled={v.locked} title={v.locked ? v.lockedReason ?? "" : undefined} onClick={() => removeValue(v)}>حذف</button>
                       </>
                     )}
