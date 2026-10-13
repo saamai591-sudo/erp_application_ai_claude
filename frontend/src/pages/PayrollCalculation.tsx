@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { ErrorToast } from "../components/ErrorToast";
 import { InfoHint } from "../components/InfoHint";
 import { RecordPickerField } from "../components/RecordPicker";
@@ -6,8 +7,7 @@ import { toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { api, ApiError } from "../lib/api";
 import { usePersistedState } from "../lib/usePersistedState";
-import { usePermissions } from "../lib/usePermissions";
-import { KIND_FA, MONTHS_FA, currentJalaliYearMonth, hoursToHm, parseHours } from "../lib/payrollLabels";
+import { KIND_FA, MONTHS_FA, currentJalaliYearMonth, hoursToHm } from "../lib/payrollLabels";
 
 // حقوق و دستمزد › محاسبه حقوق (عملیات) و گزارش محاسبات حقوق (گزارش): یک کارمند و یک ماه شمسی را انتخاب می‌کنید؛ محاسبه (فقط در حالت عملیات)
 // فیش را می‌سازد و گزارش، ریز ورودی‌ها و محاسبه‌ی تک‌تک عوامل (شرط، فرمول، مقدار عملوندها، نتیجه) را نشان می‌دهد.
@@ -18,13 +18,6 @@ interface EmpOpt {
   id: number;
   personnelCode: string;
   fullName: string;
-}
-interface InputRow {
-  componentId: number;
-  title: string;
-  methodTitle: string;
-  valueType: string;
-  value: string | null;
 }
 interface Operand {
   ref: string;
@@ -60,82 +53,42 @@ interface Slip {
 const money = (v: string | number | null) => (v === null ? "—" : toFaDigits(Math.round(Number(v)).toLocaleString("en-US")));
 const num = (v: number | null) => (v === null ? "—" : toFaDigits(Number(v).toLocaleString("en-US", { maximumFractionDigits: 4 })));
 
-export function PayrollCalculationPage() {
-  return <Page mode="calculate" />;
-}
 export function PayrollReportPage() {
-  return <Page mode="report" />;
-}
-
-function Page({ mode }: { mode: "calculate" | "report" }) {
-  const { hasPermission } = usePermissions();
+  const [params] = useSearchParams();
   const cur = currentJalaliYearMonth();
-  const [sel, setSel] = usePersistedState(`/payroll-${mode}:sel`, { employeeId: "", year: String(cur.year), month: String(cur.month) });
+  const [sel, setSel] = usePersistedState("/payroll-report:sel", { employeeId: "", year: String(cur.year), month: String(cur.month) });
   const [employees, setEmployees] = useState<EmpOpt[]>([]);
-  const [inputs, setInputs] = useState<InputRow[]>([]);
-  const [values, setValues] = useState<Record<number, string>>({});
   const [slip, setSlip] = useState<Slip | null>(null);
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.get("/employees").then((rows: any[]) => setEmployees(rows.map((r) => ({ id: r.id, personnelCode: r.personnelCode, fullName: r.fullName })))).catch(() => {});
   }, []);
 
-  const isTime = (t: string) => t === "TIME";
-  const show = (r: InputRow, v: string | null) => (v === null ? "" : isTime(r.valueType) ? hoursToHm(Number(v)) : String(Number(v)));
-
-  // عوامل ورودی ماه (دستی/تردد/خزانه) با مقدار ثبت‌شده‌ی کارمند
+  // ورود از فرم «محاسبه حقوق» (?employeeId=&year=&month=): انتخاب‌ها اعمال و فیش نمایش داده می‌شود
   useEffect(() => {
-    if (mode !== "calculate" || !sel.year || !sel.month) return;
-    api
-      .get(`/payroll-calculations/inputs?employeeId=${sel.employeeId || 0}&year=${sel.year}&month=${sel.month}`)
-      .then((rows: InputRow[]) => {
-        setInputs(rows);
-        const v: Record<number, string> = {};
-        rows.forEach((r) => (v[r.componentId] = show(r, r.value)));
-        setValues(v);
-      })
-      .catch(() => {});
+    const e = params.get("employeeId");
+    const y = params.get("year");
+    const m = params.get("month");
+    if (e && y && m) {
+      setSel({ employeeId: e, year: y, month: m });
+      void load(e, y, m);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, sel.employeeId, sel.year, sel.month]);
+  }, []);
 
   const emp = employees.find((e) => String(e.id) === sel.employeeId);
-  const canCalc = mode === "calculate" && hasPermission("payroll.operations.payroll-calculation.calculate");
 
-  async function load() {
+  async function load(employeeId = sel.employeeId, year = sel.year, month = sel.month) {
     setError(null);
-    if (!sel.employeeId) return setError("کارمند را انتخاب کنید");
+    if (!employeeId) return setError("کارمند را انتخاب کنید");
     try {
-      const f = await api.get(`/payroll-calculations/find?employeeId=${sel.employeeId}&year=${sel.year}&month=${sel.month}`);
+      const f = await api.get(`/payroll-calculations/find?employeeId=${employeeId}&year=${year}&month=${month}`);
       setSlip(f.id ? await api.get(`/payroll-calculations/${f.id}`) : null);
       setSearched(true);
     } catch (e) {
       setError((e as ApiError).message);
-    }
-  }
-
-  async function calculate() {
-    setError(null);
-    if (!sel.employeeId) return setError("کارمند را انتخاب کنید");
-    const payload: { componentId: number; value: number }[] = [];
-    for (const r of inputs) {
-      const raw = values[r.componentId] ?? "";
-      if (raw.trim() === "") continue;
-      const n = isTime(r.valueType) ? parseHours(raw) : Number(raw.replace(/[^0-9.]/g, ""));
-      if (n === null || !isFinite(n)) return setError(`مقدار «${r.title}» نامعتبر است`);
-      payload.push({ componentId: r.componentId, value: n });
-    }
-    setBusy(true);
-    try {
-      const r = await api.post("/payroll-calculations/calculate", { employeeId: Number(sel.employeeId), year: Number(sel.year), month: Number(sel.month), inputs: payload });
-      setSlip(await api.get(`/payroll-calculations/${r.slipId}`));
-      setSearched(true);
-    } catch (e) {
-      setError((e as ApiError).message);
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -149,12 +102,8 @@ function Page({ mode }: { mode: "calculate" | "report" }) {
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint
-            text={
-              mode === "calculate"
-                ? "کارمند و ماه را انتخاب کنید، مقدار عوامل ورودی (مثل روز کارکرد و ساعت اضافه‌کار) را وارد کنید و «محاسبه» بزنید. نتیجه با ریز همه‌ی عوامل ذخیره می‌شود و در «گزارش محاسبات حقوق» هم دیده می‌شود."
-                : "ریز محاسبه‌ی همه‌ی عوامل حقوق یک کارمند در یک ماه: ورودی‌ها، شرط، فرمول، مقدار هر عملوند و نتیجه. محاسبه‌ی تازه از فرم «محاسبه حقوق» انجام می‌شود."
-            }
-            title={mode === "calculate" ? "محاسبه حقوق" : "گزارش محاسبات حقوق"}
+            text="ریز محاسبه‌ی همه‌ی عوامل حقوق یک کارمند در یک ماه: ورودی‌ها، شرط، فرمول، مقدار هر عملوند و نتیجه. محاسبه‌ی تازه از فرم «محاسبه حقوق» انجام می‌شود."
+            title="گزارش محاسبات حقوق"
           />
         </div>
       </div>
@@ -189,34 +138,12 @@ function Page({ mode }: { mode: "calculate" | "report" }) {
             </select>
           </div>
         </div>
-        {mode === "calculate" && inputs.length > 0 && (
-          <>
-            <div className="hr-section" style={{ marginTop: 10 }}>مقدار عوامل ورودی این ماه</div>
-            <div className="form-grid">
-              {inputs.map((r) => (
-                <div className="form-field" key={r.componentId}>
-                  <label>
-                    {r.title} <span style={{ opacity: 0.6 }}>({r.methodTitle}{isTime(r.valueType) ? " — ساعت:دقیقه" : ""})</span>
-                  </label>
-                  <input
-                    dir="ltr"
-                    inputMode="decimal"
-                    placeholder={r.value === null ? "" : show(r, r.value)}
-                    value={values[r.componentId] ?? ""}
-                    onChange={(e) => setValues({ ...values, [r.componentId]: e.target.value })}
-                  />
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-          <button type="button" className="btn secondary" onClick={load}>نمایش</button>
-          {canCalc && <button type="button" className="btn" disabled={busy} onClick={calculate}>{busy ? "در حال محاسبه..." : "محاسبه"}</button>}
+        <div style={{ marginTop: 8 }}>
+          <button type="button" className="btn secondary" onClick={() => load()}>نمایش</button>
         </div>
       </div>
 
-      {searched && !slip && <p>برای این کارمند و ماه محاسبه‌ای ذخیره نشده است{canCalc ? "؛ «محاسبه» را بزنید." : "."}</p>}
+      {searched && !slip && <p>برای این کارمند و ماه محاسبه‌ای ذخیره نشده است؛ از «محاسبه حقوق» محاسبه کنید.</p>}
       {slip && <SlipView slip={slip} />}
     </div>
   );

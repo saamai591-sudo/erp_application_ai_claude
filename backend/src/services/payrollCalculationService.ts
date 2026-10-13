@@ -193,12 +193,7 @@ function prevMonth(y: number, m: number) {
   return m === 1 ? { y: y - 1, m: 12 } : { y, m: m - 1 };
 }
 
-export async function calculatePayroll(
-  employeeId: number,
-  year: number,
-  month: number,
-  inputs?: { componentId: number; value: number }[]
-): Promise<{ slipId: number }> {
+export async function calculatePayroll(employeeId: number, year: number, month: number): Promise<{ slipId: number }> {
   if (!Number.isInteger(year) || year < 1300 || year > 1600 || !Number.isInteger(month) || month < 1 || month > 12) {
     throw new PayrollCalcError("سال یا ماه نامعتبر است");
   }
@@ -251,22 +246,7 @@ export async function calculatePayroll(
   const decreeByCode = new Map(allDecreeComps.map((d) => [String(d.code), d]));
   const compByKey = new Map(payrollComps.map((c) => [c.key, c]));
 
-  // ── ورودی‌های ماه (و ذخیره‌ی ورودی‌های ارسالی) ──
-  if (inputs && inputs.length) {
-    for (const i of inputs) {
-      const c = payrollComps.find((x) => x.id === i.componentId);
-      if (!c) throw new PayrollCalcError("عامل ورودی یافت نشد");
-      const m = payrollMethod(c.id);
-      if (!m || !INPUT_METHODS.includes(m.method)) throw new PayrollCalcError(`عامل «${c.title}» روش ورودی ندارد`);
-      if (!isFinite(i.value) || i.value < 0) throw new PayrollCalcError(`مقدار «${c.title}» نامعتبر است`);
-      if (m.valueType === "DAYS" && i.value > range.days) throw new PayrollCalcError(`مقدار «${c.title}» (${i.value}) از تعداد روزهای ماه (${range.days}) بیشتر است`);
-      await prisma.payrollFactorInput.upsert({
-        where: { employeeId_year_month_componentId: { employeeId, year, month, componentId: c.id } },
-        create: { employeeId, year, month, componentId: c.id, value: i.value },
-        update: { value: i.value },
-      });
-    }
-  }
+  // ── ورودی‌های ماه (ثبت‌شده در «ورود اطلاعات») ──
   const inputRows = await prisma.payrollFactorInput.findMany({ where: { employeeId, year, month } });
   const inputByComp = new Map(inputRows.map((r) => [r.componentId, Number(r.value)]));
 

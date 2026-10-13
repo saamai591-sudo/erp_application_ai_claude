@@ -3,7 +3,9 @@ import { prisma } from "../lib/prisma";
 import { can, userHasAction } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { AuthedRequest } from "../middleware/auth";
-import { INPUT_METHODS, METHOD_FA, PayrollCalcError, calculatePayroll, validateFactorMethod } from "../services/payrollCalculationService";
+import { METHOD_FA, PayrollCalcError, calculatePayroll, validateFactorMethod } from "../services/payrollCalculationService";
+import { getEffectiveDecrees } from "../services/employmentDecreeService";
+import { jalaliMonthRange } from "../utils/jalaliDate";
 import { BASE_INFO, DECREE_VARIANTS, FACTOR_VARIANTS, KIND_FA } from "../services/payrollFormula";
 
 // حقوق و دستمزد: عامل‌های حقوق (هویت)، «روش محاسبه عامل» (تاریخ‌دار با ماه اجرا؛ مبنا = عامل حکم یا عامل حقوق)، ورودی ماهانه‌ی عوامل،
@@ -330,37 +332,56 @@ router.delete("/payroll-methods/:id", can(`${F_METH}.delete`), async (req, res) 
   res.status(204).send();
 });
 
-// ════════════ ورودی ماهانه‌ی عوامل ════════════
-// عوامل با روش ورودی (دستی/تردد/خزانه) که در ماه مؤثرند + مقدار ثبت‌شده‌ی کارمند
-router.get("/payroll-calculations/inputs", canAny(`${F_CALC}.view`, `${F_CALC}.calculate`), async (req, res) => {
-  const employeeId = Number(req.query.employeeId);
-  const year = Number(req.query.year);
-  const month = Number(req.query.month);
-  const { jalaliMonthRange } = await import("../utils/jalaliDate");
-  if (!year || !month) return res.json([]);
-  const end = jalaliMonthRange(year, month).end;
-  const comps = await prisma.payrollComponent.findMany({ where: { isActive: true }, orderBy: { id: "asc" } });
-  const methods = await prisma.payrollFactorMethod.findMany({ where: { payrollComponentId: { in: comps.map((c) => c.id) }, effectiveDate: { lte: end } }, orderBy: { effectiveDate: "desc" } });
-  const inputs = employeeId ? await prisma.payrollFactorInput.findMany({ where: { employeeId, year, month } }) : [];
-  const out: unknown[] = [];
-  for (const c of comps) {
-    const m = methods.find((x) => x.payrollComponentId === c.id);
-    if (!m || !(INPUT_METHODS as string[]).includes(m.method)) continue;
-    const v = inputs.find((i) => i.componentId === c.id);
-    out.push({ componentId: c.id, title: c.title, method: m.method, methodTitle: METHOD_FA[m.method], valueType: m.valueType, value: v ? v.value.toString() : null });
+// ════════════ محاسبه و گزارش ════════════
+// فهرست کارمندانِ دارای همکاری در ماه (برای فرم «محاسبه حقوق») با وضعیت حکم و آخرین محاسبه‌ی همان ماه
+router.get("/payroll-calculations/month", canAny(`${F_CALC}.view`, `${F_CALC}.calculate`), async (req, res) => {
+  try {
+    const year = Number(req.query.year);
+    const month = Number(req.query.month);
+    if (!Number.isInteger(year) || year < 1300 || year > 1600 || !Number.isInteger(month) || month < 1 || month > 12) throw new PayrollCalcError("سال یا ماه نامعتبر است");
+    const range = jalaliMonthRange(year, month);
+    const emps = await prisma.employee.findMany({
+      where: { periods: { some: { startDate: { lte: range.end }, OR: [{ endDate: null }, { endDate: { gte: range.start } }] } } },
+      include: { party: { select: { firstName: true, lastName: true, name: true } } },
+      orderBy: { personnelCode: "asc" },
+    });
+    const slips = await prisma.payrollSlip.findMany({ where: { year, month, employeeId: { in: emps.map((e) => e.id) } } });
+    const decrees = await getEffectiveDecrees(emps.map((e) => e.id), range.end);
+    res.json({
+      monthDays: range.days,
+      rows: emps.map((e) => {
+        const s = slips.find((x) => x.employeeId === e.id);
+        return {
+          employeeId: e.id,
+          personnelCode: e.personnelCode,
+          fullName: [e.party.firstName, e.party.lastName].filter(Boolean).join(" ") || e.party.name || "",
+          decreeValidity: decrees.get(e.id)?.validity ?? "NONE",
+          slip: s ? { id: s.id, netPay: s.netPay.toString(), hasErrors: s.hasErrors, calculatedAt: s.calculatedAt } : null,
+        };
+      }),
+    });
+  } catch (e) {
+    fail(res, e, "خطا در بارگذاری فهرست پرسنل");
   }
-  res.json(out);
 });
 
-// ════════════ محاسبه و گزارش ════════════
+// محاسبه‌ی گروهیِ کارمندان انتخاب‌شده در یک ماه؛ هر کارمند مستقل است و خطای یکی مانع بقیه نمی‌شود
 router.post("/payroll-calculations/calculate", can(`${F_CALC}.calculate`), async (req, res) => {
-  const b = req.body as any;
+  const b = req.body as { year: number; month: number; employeeIds: number[] };
   try {
-    const inputs = Array.isArray(b.inputs)
-      ? b.inputs.filter((i: any) => i && i.value !== "" && i.value !== null && i.value !== undefined).map((i: any) => ({ componentId: Number(i.componentId), value: Number(i.value) }))
-      : undefined;
-    const r = await calculatePayroll(Number(b.employeeId), Number(b.year), Number(b.month), inputs);
-    res.json(r);
+    const ids = Array.isArray(b.employeeIds) ? [...new Set(b.employeeIds.map(Number).filter(Boolean))] : [];
+    if (ids.length === 0) throw new PayrollCalcError("هیچ کارمندی انتخاب نشده است");
+    if (ids.length > 500) throw new PayrollCalcError("حداکثر ۵۰۰ کارمند در هر بار محاسبه");
+    const results: { employeeId: number; ok: boolean; slipId?: number; error?: string }[] = [];
+    for (const employeeId of ids) {
+      try {
+        const r = await calculatePayroll(employeeId, Number(b.year), Number(b.month));
+        results.push({ employeeId, ok: true, slipId: r.slipId });
+      } catch (e: any) {
+        results.push({ employeeId, ok: false, error: e?.message || "خطا در محاسبه" });
+      }
+    }
+    res.json({ results });
   } catch (e) {
     fail(res, e, "خطا در محاسبه‌ی حقوق");
   }

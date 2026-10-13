@@ -100,7 +100,8 @@ import LegalParameters from "./pages/LegalParameters";
 import PayrollDataEntry from "./pages/PayrollDataEntry";
 import PayrollComponents from "./pages/PayrollComponents";
 import FactorMethods from "./pages/FactorMethods";
-import { PayrollCalculationPage, PayrollReportPage } from "./pages/PayrollCalculation";
+import { PayrollReportPage } from "./pages/PayrollCalculation";
+import PayrollCalculateMonth from "./pages/PayrollCalculateMonth";
 import { EmployeeEducation, EmployeeVeteran, EmployeeMarital } from "./pages/HrRecords";
 import TradeLedgers from "./pages/TradeLedgers";
 import TaxInvoiceSubmission from "./pages/TaxInvoiceSubmission";
@@ -449,7 +450,7 @@ export default function App() {
             <Route path="/factor-methods/new" element={<FactorMethods />} />
             <Route path="/factor-methods/:id/edit" element={<FactorMethods />} />
             <Route path="/payroll-data-entry" element={<PayrollDataEntry />} />
-            <Route path="/payroll-calculation" element={<PayrollCalculationPage />} />
+            <Route path="/payroll-calculation" element={<PayrollCalculateMonth />} />
             <Route path="/payroll-calculation-report" element={<PayrollReportPage />} />
             <Route path="/employee-education" element={<EmployeeEducation />} />
             <Route path="/employee-education/new" element={<EmployeeEducation />} />
