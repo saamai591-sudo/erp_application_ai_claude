@@ -176,6 +176,15 @@ router.get("/employment-decrees/effective", async (req, res) => {
   res.json({ validity, decree: shape(full) });
 });
 
+// آخرین حکم کارمند (برای پیش‌پر کردن حکم جدید): آخرین حکم تاییدشده با تاریخ اعمال، وگرنه آخرین حکمِ هر وضعیت
+router.get("/employment-decrees/latest", async (req, res) => {
+  const employeeId = Number(req.query.employeeId);
+  if (!employeeId) return res.status(400).json({ error: "کارمند الزامی است" });
+  const approved = await prisma.employmentDecree.findFirst({ where: { employeeId, status: "APPROVED" }, orderBy: [{ effectiveDate: "desc" }, { id: "desc" }], include });
+  const d = approved ?? (await prisma.employmentDecree.findFirst({ where: { employeeId }, orderBy: [{ effectiveDate: "desc" }, { id: "desc" }], include }));
+  res.json({ decree: d ? shape(d) : null });
+});
+
 router.get("/employment-decrees/:id", async (req, res) => {
   const d = await prisma.employmentDecree.findUnique({ where: { id: Number(req.params.id) }, include });
   if (!d) return res.status(404).json({ error: "حکم یافت نشد" });

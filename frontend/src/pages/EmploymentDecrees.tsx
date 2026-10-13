@@ -178,7 +178,7 @@ function DecreeForm({ editId }: { editId?: number }) {
   });
   const [meta, setMeta] = useState<{ number?: number; status: string; updatedAt?: string }>({ status: "DRAFT" });
   const [employees, setEmployees] = useState<EmpOpt[]>([]);
-  const [components, setComponents] = useState<(Opt & { valueType: string })[]>([]);
+  const [components, setComponents] = useState<(Opt & { valueType: string; isActive: boolean })[]>([]);
   const [empTypes, setEmpTypes] = useState<Opt[]>([]);
   const [positions, setPositions] = useState<Opt[]>([]);
   const [orgUnits, setOrgUnits] = useState<Opt[]>([]);
@@ -214,7 +214,7 @@ function DecreeForm({ editId }: { editId?: number }) {
   useEffect(() => {
     Promise.all([
       api.get("/employees"),
-      api.get("/decree-components?activeOnly=true"),
+      api.get("/decree-components"),
       api.get("/employment-types?activeOnly=true"),
       api.get("/positions?activeOnly=true"),
       api.get("/org-units"),
@@ -222,7 +222,7 @@ function DecreeForm({ editId }: { editId?: number }) {
     ])
       .then(([emps, comps, types, pos, ou, cc]) => {
         setEmployees(emps.map((r: any) => ({ id: r.id, personnelCode: r.personnelCode, fullName: r.fullName })));
-        setComponents(comps.map((c: any) => ({ id: c.id, title: c.title, code: c.code, valueType: c.valueType })));
+        setComponents(comps.map((c: any) => ({ id: c.id, title: c.title, code: c.code, valueType: c.valueType, isActive: c.isActive })));
         setEmpTypes(types);
         setPositions(pos);
         setOrgUnits(ou);
@@ -239,28 +239,43 @@ function DecreeForm({ editId }: { editId?: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
 
-  // حکم جدید: با انتخاب کارمند، نوع همکاری و اجزای حکم مؤثر فعلی کپی می‌شود تا کاربر فقط تغییرات را بزند
-  async function onPickEmployee(id: string) {
-    const next = { ...form, employeeId: id };
-    if (!editId && form.lines.length === 0) {
-      try {
-        const r = await api.get(`/employment-decrees/effective?employeeId=${id}`);
-        if (r.decree) {
-          next.employmentTypeId = String(r.decree.employmentTypeId);
-          next.weeklyHours = r.decree.weeklyHours ?? "";
-          next.type = "ANNUAL_RAISE";
-          next.lines = r.decree.lines.map((l: any) => ({ componentId: String(l.componentId), value: String(Number(l.value)) }));
-        }
-      } catch {
-        /* پیش‌پر کردن اختیاری است */
+  // حکم جدید: با انتخاب کارمند، نوع همکاری، ساعت کار و مبلغ همه‌ی عامل‌ها از «آخرین حکم» همان کارمند کپی می‌شود تا کاربر فقط مبالغ لازم را ویرایش کند
+  async function prefillFromLatest(employeeId: string, base: typeof EMPTY): Promise<typeof EMPTY> {
+    const next = { ...base, employeeId };
+    try {
+      const r = await api.get(`/employment-decrees/latest?employeeId=${employeeId}`);
+      if (r.decree) {
+        next.employmentTypeId = String(r.decree.employmentTypeId);
+        next.weeklyHours = r.decree.weeklyHours ?? "";
+        next.type = "ANNUAL_RAISE";
+        next.lines = r.decree.lines.map((l: any) => ({ componentId: String(l.componentId), value: String(Number(l.value)) }));
       }
+    } catch {
+      /* پیش‌پر کردن اختیاری است */
     }
-    setForm(next);
+    return next;
+  }
+  async function onPickEmployee(id: string) {
+    setForm(editId ? { ...form, employeeId: id } : await prefillFromLatest(id, form));
+  }
+  // ورود با ?employeeId= (از فرم کارمند): همان پیش‌فرض اعمال می‌شود
+  useEffect(() => {
+    if (editId || !form.employeeId || form.lines.length > 0) return;
+    prefillFromLatest(form.employeeId, form).then(setForm);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** مقدار یک عامل در ردیف‌های حکم (رشته‌ی خالی = وارد نشده) */
+  const valueOf = (componentId: number) => form.lines.find((l) => l.componentId === String(componentId))?.value ?? "";
+  function setValueOf(componentId: number, v: string) {
+    const id = String(componentId);
+    const rest = form.lines.filter((l) => l.componentId !== id);
+    setForm({ ...form, lines: v === "" ? rest : [...rest, { componentId: id, value: v }] });
   }
 
   const locked = meta.status === "APPROVED";
+  const shownComponents = components.filter((c) => c.isActive || form.lines.some((l) => l.componentId === String(c.id)));
   const set = (p: Partial<typeof EMPTY>) => setForm({ ...form, ...p });
-  const setLine = (i: number, p: Partial<Line>) => set({ lines: form.lines.map((l, k) => (k === i ? { ...l, ...p } : l)) });
 
   function body() {
     return {
@@ -275,7 +290,7 @@ function DecreeForm({ editId }: { editId?: number }) {
       positionId: form.changeAssignment && form.positionId ? Number(form.positionId) : null,
       orgUnitId: form.changeAssignment && form.orgUnitId ? Number(form.orgUnitId) : null,
       costCenterId: form.changeAssignment && form.costCenterId ? Number(form.costCenterId) : null,
-      lines: form.lines.filter((l) => l.componentId).map((l) => ({ componentId: Number(l.componentId), value: Number(l.value || 0) })),
+      lines: form.lines.filter((l) => l.componentId && Number(l.value || 0) > 0).map((l) => ({ componentId: Number(l.componentId), value: Number(l.value) })),
       updatedAt: meta.updatedAt,
     };
   }
@@ -286,7 +301,7 @@ function DecreeForm({ editId }: { editId?: number }) {
     if (!form.employeeId) return setError("کارمند را انتخاب کنید");
     if (!form.effectiveDate) return setError("تاریخ اعمال الزامی است");
     if (!form.employmentTypeId) return setError("نوع همکاری الزامی است");
-    if (form.lines.filter((l) => l.componentId).length === 0) return setError("حکم باید حداقل یک عامل داشته باشد");
+    if (form.lines.filter((l) => Number(l.value || 0) > 0).length === 0) return setError("حداقل برای یک عامل مبلغ وارد کنید");
     if (form.changeAssignment && !form.positionId) return setError("پست را انتخاب کنید یا «تغییر انتصاب» را بردارید");
     try {
       if (editId) {
@@ -325,7 +340,6 @@ function DecreeForm({ editId }: { editId?: number }) {
 
   if (!loaded) return null;
   const emp = employees.find((x) => String(x.id) === form.employeeId);
-  const usedIds = new Set(form.lines.map((l) => l.componentId).filter(Boolean));
   const canApprove = !!editId && !locked && hasPermission("hr.decrees.employment-decrees.approve");
   const canUnapprove = !!editId && locked && hasPermission("hr.decrees.employment-decrees.unapprove");
 
@@ -401,42 +415,27 @@ function DecreeForm({ editId }: { editId?: number }) {
           <h3 className="hr-section">عوامل حکم</h3>
           <table className="hr-table">
             <thead>
-              <tr><th style={{ width: 40 }}>#</th><th>عامل</th><th style={{ width: 120 }}>نوع مقدار</th><th style={{ width: 200 }}>مقدار</th><th style={{ width: 60 }} /></tr>
+              <tr><th style={{ width: 40 }}>#</th><th>عامل</th><th style={{ width: 130 }}>نوع مقدار</th><th style={{ width: 220 }}>مقدار</th></tr>
             </thead>
             <tbody>
-              {form.lines.length === 0 && (
-                <tr><td colSpan={5} style={{ textAlign: "center", opacity: 0.7 }}>عاملی افزوده نشده است</td></tr>
+              {shownComponents.length === 0 && (
+                <tr><td colSpan={4} style={{ textAlign: "center", opacity: 0.7 }}>عاملی تعریف نشده است؛ ابتدا «عامل حکم» تعریف کنید</td></tr>
               )}
-              {form.lines.map((l, i) => {
-                const comp = components.find((c) => String(c.id) === l.componentId);
-                return (
-                  <tr key={i}>
-                    <td>{toFaDigits(String(i + 1))}</td>
-                    <td>
-                      <select value={l.componentId} onChange={(e) => setLine(i, { componentId: e.target.value })}>
-                        <option value="">انتخاب کنید</option>
-                        {components.filter((c) => !usedIds.has(String(c.id)) || String(c.id) === l.componentId).map((c) => (
-                          <option key={c.id} value={c.id}>{c.title}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>{comp ? DECREE_VALUE_TYPE_FA[comp.valueType] : "—"}</td>
-                    <td>
-                      <AmountInput value={l.value} onChange={(v) => setLine(i, { value: v })} allowDecimal disabled={locked} />
-                    </td>
-                    <td>
-                      {!locked && <button type="button" className="link-btn" onClick={() => set({ lines: form.lines.filter((_, k) => k !== i) })}>حذف</button>}
-                    </td>
-                  </tr>
-                );
-              })}
+              {shownComponents.map((c, i) => (
+                <tr key={c.id}>
+                  <td>{toFaDigits(String(i + 1))}</td>
+                  <td>{c.title}{!c.isActive && <span style={{ opacity: 0.6 }}> (غیرفعال)</span>}</td>
+                  <td>{DECREE_VALUE_TYPE_FA[c.valueType]}</td>
+                  <td>
+                    <AmountInput value={valueOf(c.id)} onChange={(v) => setValueOf(c.id, v)} allowDecimal disabled={locked} />
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
-          {!locked && (
-            <button type="button" className="btn secondary" onClick={() => set({ lines: [...form.lines, { componentId: "", value: "" }] })}>
-              افزودن عامل
-            </button>
-          )}
+          <p style={{ opacity: 0.7, fontSize: 12, margin: "4px 0 0" }}>
+            مبلغ عامل‌هایی که نمی‌خواهید در این حکم بیاید را خالی بگذارید.
+          </p>
 
           <h3 className="hr-section">تغییر پست / انتصاب</h3>
           <div className="form-grid">
