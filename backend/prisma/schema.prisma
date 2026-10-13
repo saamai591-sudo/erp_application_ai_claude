@@ -4959,6 +4959,8 @@ model PayrollSlipLine {
   source      PayrollSectionKind
   /// شناسه‌ی جزء حکم / جزء حقوق (فقط برای مرجع؛ عنوان و فرمول در همین ردیف کپی شده‌اند)
   refId       Int?
+  /// شناسه‌ی «روش محاسبه عامل»ی که این ردیف با آن محاسبه شده؛ تا وقتی فیش هست آن روش قفل است
+  methodId    Int?
   title       String
   formula     String?
   insurable   Boolean              @default(false)
@@ -4970,6 +4972,7 @@ model PayrollSlipLine {
   slip        PayrollSlip          @relation(fields: [slipId], references: [id], onDelete: Cascade)
 
   @@unique([slipId, seq])
+  @@index([methodId])
 }
 
 enum PayrollMethod {

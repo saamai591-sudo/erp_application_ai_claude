@@ -5,6 +5,7 @@ import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { HrError, checkAssignmentRefs, changeAssignment } from "../services/employeeAssignmentService";
 import { getEffectiveDecree } from "../services/employmentDecreeService";
+import { jalaliMonthRange } from "../utils/jalaliDate";
 
 // منابع انسانی › پرسنلی › حکم کارگزینی (قرارداد و حکم یک سند است).
 // پیش‌نویس ⇄ تایید؛ حکم تاییدشده تغییر نمی‌کند (حکم جدید با تاریخ اعمال جدید صادر می‌شود). اعتبار از تاریخ اعمال تا min(پایان، روز قبل از حکم بعدی)
@@ -31,6 +32,12 @@ function parseDay(v: unknown, label: string, required = true): Date | null {
 function fullName(p: { firstName: string | null; lastName: string | null; name: string | null }) {
   return [p.firstName, p.lastName].filter(Boolean).join(" ") || p.name || "";
 }
+/** پیام قفل اگر این حکم مبنای محاسبه‌ی حقوق بوده است (فیش ثبت‌شده)؛ null = قفل نیست */
+async function payrollLockMessage(decreeId: number): Promise<string | null> {
+  const slip = await prisma.payrollSlip.findFirst({ where: { decreeId }, select: { year: true, month: true }, orderBy: [{ year: "asc" }, { month: "asc" }] });
+  return slip ? `این حکم مبنای محاسبه‌ی حقوق ${slip.year}/${slip.month} بوده و قفل است؛ ابتدا آن محاسبه‌ها را حذف کنید` : null;
+}
+
 function fail(res: any, e: any, fallback: string) {
   if (e instanceof HrError) return res.status(400).json({ error: e.message });
   if (e?.code === "P2002") return res.status(400).json({ error: "شماره حکم یا تاریخ اعمال تکراری است؛ دوباره تلاش کنید" });
@@ -188,7 +195,8 @@ router.get("/employment-decrees/latest", async (req, res) => {
 router.get("/employment-decrees/:id", async (req, res) => {
   const d = await prisma.employmentDecree.findUnique({ where: { id: Number(req.params.id) }, include });
   if (!d) return res.status(404).json({ error: "حکم یافت نشد" });
-  res.json(shape(d));
+  const lock = await payrollLockMessage(d.id);
+  res.json({ ...shape(d), payrollLocked: !!lock, payrollLockMessage: lock });
 });
 
 // ── ایجاد (پیش‌نویس) ──
@@ -224,6 +232,8 @@ router.put("/employment-decrees/:id", can(`${FORM}.edit`), async (req, res) => {
   try {
     const existing = await prisma.employmentDecree.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ error: "حکم یافت نشد" });
+    const lockMsg = await payrollLockMessage(id);
+    if (lockMsg) throw new HrError(lockMsg);
     if (existing.status !== "DRAFT") throw new HrError("حکم تاییدشده قابل ویرایش نیست؛ ابتدا برگشت از تایید یا حکم جدید صادر کنید");
     assertRecordNotStale(existing.updatedAt, b.updatedAt, "این حکم");
     const { header, lines } = await buildDraft(b, existing.employeeId); // کارمند حکم تغییر نمی‌کند
@@ -251,6 +261,10 @@ router.post("/employment-decrees/:id/approve", can(`${FORM}.approve`), async (re
       const periods = await tx.employmentPeriod.findMany({ where: { employeeId: d.employeeId } });
       const inside = periods.some((p) => p.startDate <= d.effectiveDate && (!p.endDate || p.endDate >= d.effectiveDate));
       if (!inside) throw new HrError("تاریخ اعمال حکم داخل هیچ دوره‌ی همکاری کارمند نیست");
+      // حکمی که از ماهِ دارای محاسبه (یا قبل از آن) اجرا می‌شود مبنای فیش ثبت‌شده را عوض می‌کند
+      const slips = await tx.payrollSlip.findMany({ where: { employeeId: d.employeeId }, select: { year: true, month: true } });
+      const hit = slips.find((x) => jalaliMonthRange(x.year, x.month).end >= d.effectiveDate);
+      if (hit) throw new HrError(`برای این کارمند حقوق ${hit.year}/${hit.month} محاسبه شده است؛ برای تایید حکمی با تاریخ اعمال قبل از پایان آن ماه، ابتدا محاسبه را حذف کنید`);
       const same = await tx.employmentDecree.findFirst({
         where: { employeeId: d.employeeId, status: "APPROVED", effectiveDate: d.effectiveDate, NOT: { id } },
         select: { number: true },
@@ -323,6 +337,8 @@ router.delete("/employment-decrees/:id", can(`${FORM}.delete`), async (req, res)
   const id = Number(req.params.id);
   const d = await prisma.employmentDecree.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "حکم یافت نشد" });
+  const lockMsg = await payrollLockMessage(id);
+  if (lockMsg) return res.status(400).json({ error: lockMsg });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "حکم تاییدشده قابل حذف نیست؛ ابتدا برگشت از تایید کنید" });
   await prisma.employmentDecree.delete({ where: { id } });
   res.status(204).send();

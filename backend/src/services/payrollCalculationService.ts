@@ -155,6 +155,7 @@ interface LineOut {
   kind: Kind;
   source: "DECREE_COMPONENT" | "PAYROLL_COMPONENT";
   refId: number;
+  methodId: number | null;
   title: string;
   formula: string | null;
   amount: number;
@@ -199,6 +200,9 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
   }
   const emp = await prisma.employee.findUnique({ where: { id: employeeId } });
   if (!emp) throw new PayrollCalcError("کارمند یافت نشد");
+  if (await prisma.payrollSlip.findUnique({ where: { employeeId_year_month: { employeeId, year, month } }, select: { id: true } })) {
+    throw new PayrollCalcError("برای این کارمند در این ماه محاسبه انجام شده است؛ ابتدا محاسبه را حذف کنید");
+  }
   const range = jalaliMonthRange(year, month);
   const yearDays = jalaliMonthRange(year, 12).days === 30 ? 366 : 365;
   const warnings: string[] = [];
@@ -504,6 +508,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
       kind: n.kind,
       source: n.source,
       refId: n.refId,
+      methodId: m?.id ?? null,
       title: n.title,
       formula: m?.formulaText ?? null,
       amount: error ? 0 : amount,
@@ -537,7 +542,10 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
   const sorted = [...lines].sort((a, b) => kindOrder.indexOf(a.kind) - kindOrder.indexOf(b.kind));
 
   const slip = await prisma.$transaction(async (tx) => {
-    await tx.payrollSlip.deleteMany({ where: { employeeId, year, month } });
+    // محاسبه‌ی مجدد روی ردیف محاسبه‌شده ممنوع است؛ کاربر باید ابتدا «حذف محاسبه» کند
+    if (await tx.payrollSlip.findUnique({ where: { employeeId_year_month: { employeeId, year, month } }, select: { id: true } })) {
+      throw new PayrollCalcError("برای این کارمند در این ماه محاسبه انجام شده است؛ ابتدا محاسبه را حذف کنید");
+    }
     return tx.payrollSlip.create({
       data: {
         employeeId,
@@ -558,6 +566,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
             kind: l.kind,
             source: l.source,
             refId: l.refId,
+            methodId: l.methodId,
             title: l.title,
             formula: l.formula,
             amount: l.amount,
@@ -569,4 +578,39 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
     });
   });
   return { slipId: slip.id };
+}
+
+/**
+ * پیام قفل «روش محاسبه عامل»: اگر هر ردیفِ فیشی با این روش محاسبه شده باشد (یا ردیف قدیمیِ بدون methodId برای همان عامل)، تا حذف آن فیش‌ها
+ * روش قابل ویرایش/حذف/تایید نیست. null = قفل نیست.
+ */
+export async function methodLockMessage(method: { id: number; decreeComponentId: number | null; payrollComponentId: number | null }): Promise<string | null> {
+  const factor = method.decreeComponentId
+    ? { source: "DECREE_COMPONENT" as const, refId: method.decreeComponentId }
+    : { source: "PAYROLL_COMPONENT" as const, refId: method.payrollComponentId! };
+  const line = await prisma.payrollSlipLine.findFirst({
+    where: { OR: [{ methodId: method.id }, { methodId: null, source: factor.source, refId: factor.refId }] },
+    select: { slip: { select: { year: true, month: true } } },
+    orderBy: { id: "asc" },
+  });
+  if (!line) return null;
+  return `این روش در محاسبه‌ی حقوق ${line.slip.year}/${line.slip.month} استفاده شده و قفل است؛ ابتدا محاسبه‌های مربوط را حذف کنید`;
+}
+
+/** مجموعه‌ی شناسه‌ی روش‌های قفل‌شده (برای فهرست) */
+export async function lockedMethodIds(): Promise<Set<number>> {
+  const lines = await prisma.payrollSlipLine.findMany({ distinct: ["methodId", "source", "refId"], select: { methodId: true, source: true, refId: true } });
+  const ids = new Set<number>();
+  const legacy: { source: string; refId: number | null }[] = [];
+  for (const l of lines) {
+    if (l.methodId !== null) ids.add(l.methodId);
+    else legacy.push({ source: l.source, refId: l.refId });
+  }
+  if (legacy.length) {
+    const methods = await prisma.payrollFactorMethod.findMany({ select: { id: true, decreeComponentId: true, payrollComponentId: true } });
+    for (const m of methods) {
+      if (legacy.some((l) => (l.source === "DECREE_COMPONENT" ? l.refId === m.decreeComponentId : l.refId === m.payrollComponentId))) ids.add(m.id);
+    }
+  }
+  return ids;
 }

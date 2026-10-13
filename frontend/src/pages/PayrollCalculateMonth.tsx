@@ -72,8 +72,30 @@ export default function PayrollCalculateMonth() {
     }
   }
 
+  const pickedRows = (rows ?? []).filter((r) => picked.has(r.employeeId));
+  const hasCalculatedPicked = pickedRows.some((r) => r.slip);
+  const hasUncalculatedPicked = pickedRows.some((r) => !r.slip);
+
+  async function remove() {
+    const targets = pickedRows.filter((r) => r.slip);
+    if (targets.length === 0) return;
+    if (!window.confirm(`محاسبه‌ی حقوق ${toFaDigits(String(targets.length))} نفر حذف شود؟ پس از حذف می‌توانید اطلاعات ماهانه را ویرایش و دوباره محاسبه کنید.`)) return;
+    setError(null);
+    setBusy(true);
+    try {
+      await api.post("/payroll-calculations/delete", { year: Number(sel.year), month: Number(sel.month), employeeIds: targets.map((r) => r.employeeId) });
+      const d = await api.get(`/payroll-calculations/month?year=${sel.year}&month=${sel.month}`);
+      setRows(d.rows);
+      setOutcomes({});
+    } catch (e) {
+      showError((e as ApiError).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function calculate() {
-    if (picked.size === 0) return;
+    if (picked.size === 0 || hasCalculatedPicked) return;
     setError(null);
     setBusy(true);
     try {
@@ -104,19 +126,30 @@ export default function PayrollCalculateMonth() {
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 6 }}>
           <InfoHint
-            text="ماه را انتخاب کنید و «لود اطلاعات» بزنید تا فهرست پرسنل بیاید؛ پرسنل مورد نظر را تیک بزنید و روی «محاسبه» (نوار ابزار) کلیک کنید. مقدار عوامل ورودی را قبلاً در «ورود اطلاعات» ثبت کنید. ریز محاسبه‌ی هر نفر در «گزارش محاسبات حقوق» دیده می‌شود."
+            text="ماه را انتخاب کنید و «لود اطلاعات» بزنید تا فهرست پرسنل بیاید؛ پرسنل مورد نظر را تیک بزنید و روی «محاسبه» (نوار ابزار) کلیک کنید؛ ردیفِ محاسبه‌شده دوباره محاسبه نمی‌شود، ابتدا «حذف محاسبه» بزنید. مقدار عوامل ورودی را قبلاً در «ورود اطلاعات» ثبت کنید و بعد از محاسبه، اطلاعات ماهانه‌ی آن کارمند قفل می‌شود. ریز محاسبه‌ی هر نفر در «گزارش محاسبات حقوق» دیده می‌شود."
             title="محاسبه حقوق"
           />
           {canCalc && (
             <button
               type="button"
               className="btn"
-              disabled={busy || picked.size === 0}
+              disabled={busy || picked.size === 0 || hasCalculatedPicked}
               onClick={calculate}
-              title={picked.size === 0 ? "ابتدا پرسنل را انتخاب کنید" : "محاسبه‌ی حقوق پرسنل انتخاب‌شده"}
+              title={picked.size === 0 ? "ابتدا پرسنل را انتخاب کنید" : hasCalculatedPicked ? "ردیف‌های محاسبه‌شده را ابتدا حذف کنید یا از انتخاب خارج کنید" : "محاسبه‌ی حقوق پرسنل انتخاب‌شده"}
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
             >
-              <CalcIcon /> محاسبه{picked.size ? ` (${toFaDigits(String(picked.size))})` : ""}
+              <CalcIcon /> محاسبه{hasUncalculatedPicked && picked.size ? ` (${toFaDigits(String(picked.size))})` : ""}
+            </button>
+          )}
+          {hasPermission("payroll.operations.payroll-calculation.delete") && (
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={busy || !hasCalculatedPicked}
+              onClick={remove}
+              title={hasCalculatedPicked ? "حذف محاسبه‌ی ردیف‌های محاسبه‌شده‌ی انتخاب‌شده" : "ردیف محاسبه‌شده‌ای انتخاب نشده است"}
+            >
+              حذف محاسبه
             </button>
           )}
         </div>

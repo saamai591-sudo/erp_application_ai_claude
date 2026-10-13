@@ -176,7 +176,7 @@ function DecreeForm({ editId }: { editId?: number }) {
     issueDate: today,
     effectiveDate: today,
   });
-  const [meta, setMeta] = useState<{ number?: number; status: string; updatedAt?: string }>({ status: "DRAFT" });
+  const [meta, setMeta] = useState<{ number?: number; status: string; updatedAt?: string; lock?: string | null }>({ status: "DRAFT" });
   const [employees, setEmployees] = useState<EmpOpt[]>([]);
   const [components, setComponents] = useState<(Opt & { valueType: string; isActive: boolean })[]>([]);
   const [empTypes, setEmpTypes] = useState<Opt[]>([]);
@@ -188,7 +188,7 @@ function DecreeForm({ editId }: { editId?: number }) {
   const { flash } = useSavedFlash();
 
   function fromDetail(d: DecreeDetail) {
-    setMeta({ number: d.number, status: d.status, updatedAt: d.updatedAt });
+    setMeta({ number: d.number, status: d.status, updatedAt: d.updatedAt, lock: (d as any).payrollLocked ? (d as any).payrollLockMessage : null });
     setForm({
       employeeId: String(d.employeeId),
       type: d.type,
@@ -231,7 +231,7 @@ function DecreeForm({ editId }: { editId?: number }) {
       .catch(() => {});
     if (editId) {
       if (hasPersistedState(cacheKey)) {
-        api.get(`/employment-decrees/${editId}`).then((d: DecreeDetail) => setMeta({ number: d.number, status: d.status, updatedAt: d.updatedAt }));
+        api.get(`/employment-decrees/${editId}`).then((d: DecreeDetail) => setMeta({ number: d.number, status: d.status, updatedAt: d.updatedAt, lock: (d as any).payrollLocked ? (d as any).payrollLockMessage : null }));
       } else {
         reload().then(() => setLoaded(true));
       }
@@ -341,7 +341,7 @@ function DecreeForm({ editId }: { editId?: number }) {
   if (!loaded) return null;
   const emp = employees.find((x) => String(x.id) === form.employeeId);
   const canApprove = !!editId && !locked && hasPermission("hr.decrees.employment-decrees.approve");
-  const canUnapprove = !!editId && locked && hasPermission("hr.decrees.employment-decrees.unapprove");
+  const canUnapprove = !!editId && locked && !meta.lock && hasPermission("hr.decrees.employment-decrees.unapprove");
 
   return (
     <FormPage
@@ -361,6 +361,7 @@ function DecreeForm({ editId }: { editId?: number }) {
     >
       <form id="decree-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
+        {meta.lock && <div className="alert error" style={{ marginBottom: 8 }}>{meta.lock}</div>}
         <fieldset disabled={locked} style={{ border: "none", padding: 0, margin: 0 }}>
           <div className="form-grid">
             <div className="form-field">

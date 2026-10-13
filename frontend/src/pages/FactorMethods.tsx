@@ -37,6 +37,8 @@ interface Row {
   formulaText: string | null;
   isProvisional: boolean;
   isCurrent: boolean;
+  locked?: boolean;
+  lockMessage?: string | null;
 }
 interface Factor {
   id: number;
@@ -94,7 +96,7 @@ function MethodList() {
           { header: "نوع پارامتر", ...s((r) => VALUE_TYPE_FA[r.valueType]), width: "110px" },
           { header: "ماه صدور", ...s((r) => ym(r.issueYear, r.issueMonth)), width: "130px" },
           { header: "ماه اجرا", ...s((r) => ym(r.execYear, r.execMonth)), width: "130px" },
-          { header: "وضعیت", ...s((r) => (r.isProvisional ? "موقت — نیاز به تایید" : r.isCurrent ? "جاری" : "")), width: "160px" },
+          { header: "وضعیت", ...s((r) => (r.locked ? "قفل (مبنای محاسبه)" : r.isProvisional ? "موقت — نیاز به تایید" : r.isCurrent ? "جاری" : "")), width: "160px" },
         ]}
         rows={items}
         edit={{ path: (r: Row) => `/factor-methods/${r.id}/edit` }}
@@ -135,6 +137,7 @@ function MethodForm({ editId }: { editId?: number }) {
   });
   const [factors, setFactors] = useState<{ decree: Factor[]; payroll: Factor[] }>({ decree: [], payroll: [] });
   const [builder, setBuilder] = useState(false);
+  const [lockMessage, setLockMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const { flash } = useSavedFlash();
@@ -143,6 +146,7 @@ function MethodForm({ editId }: { editId?: number }) {
     Promise.all([api.get("/decree-components"), api.get("/payroll-components")])
       .then(([d, p]) => setFactors({ decree: d.map((x: any) => ({ id: x.id, title: x.title })), payroll: p.filter((x: any) => x.isActive).map((x: any) => ({ id: x.id, title: x.title })) }))
       .catch(() => {});
+    if (editId) api.get(`/payroll-methods/${editId}`).then((r: Row) => setLockMessage(r.locked ? r.lockMessage ?? "این روش در محاسبه‌ی حقوق استفاده شده و قفل است" : null)).catch(() => {});
     if (editId && !hasPersistedState(cacheKey)) {
       api.get(`/payroll-methods/${editId}`).then((r: Row) => {
         setForm({
@@ -205,10 +209,13 @@ function MethodForm({ editId }: { editId?: number }) {
       formId="factor-method-form"
       closePath="/factor-methods"
       newPath="/factor-methods/new"
-      onDelete={editId ? handleDelete : undefined}
+      onDelete={editId && !lockMessage ? handleDelete : undefined}
+      saveDisabled={!!lockMessage}
     >
       <form id="factor-method-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
+        {lockMessage && <div className="alert error" style={{ marginBottom: 8 }}>{lockMessage}</div>}
+        <fieldset disabled={!!lockMessage} style={{ border: "none", padding: 0, margin: 0 }}>
         <div className="form-grid">
           <div className="form-field">
             <label>مبنا<RequiredMark /></label>
@@ -277,6 +284,7 @@ function MethodForm({ editId }: { editId?: number }) {
             </div>
           </div>
         </div>
+        </fieldset>
       </form>
       {builder && (
         <FormulaBuilder

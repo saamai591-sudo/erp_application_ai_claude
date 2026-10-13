@@ -21,6 +21,8 @@ interface Row {
   employeeId: number;
   personnelCode: string;
   fullName: string;
+  /** حقوق این ماه محاسبه شده؛ اطلاعات ماهانه قفل است */
+  locked: boolean;
   values: Record<string, string | null>;
 }
 interface Data {
@@ -121,6 +123,7 @@ export default function PayrollDataEntry() {
     const k = key(r.employeeId, c.componentId);
     const v = cells[k] ?? "";
     const set = (nv: string) => setCells({ ...cells, [k]: nv });
+    if (r.locked) return <span style={{ opacity: 0.8 }}>{v === "" ? "—" : c.valueType === "TIME" ? v : toFaDigits(v)}</span>;
     if (c.valueType === "TIME") return <TimeCell value={v} onChange={set} />;
     if (c.valueType === "DAYS") {
       return (
@@ -204,7 +207,7 @@ export default function PayrollDataEntry() {
               {data.rows.map((r) => (
                 <tr key={r.employeeId}>
                   <td>{toFaDigits(r.personnelCode)}</td>
-                  <td>{r.fullName}</td>
+                  <td>{r.fullName}{r.locked && <span title="حقوق این ماه محاسبه شده؛ برای ویرایش، ابتدا محاسبه را حذف کنید" style={{ marginInlineStart: 6, opacity: 0.7, fontSize: 12 }}>🔒 محاسبه‌شده</span>}</td>
                   {data.columns.map((c) => (
                     <td key={c.componentId}>{cell(r, c)}</td>
                   ))}

@@ -60,6 +60,9 @@ router.get("/payroll-data-entry", can(`${F}.view`), async (req, res) => {
       where: { year, month, employeeId: { in: emps.map((e) => e.id) }, componentId: { in: columns.map((c) => c.componentId) } },
     });
     const byKey = new Map(inputs.map((i) => [`${i.employeeId}:${i.componentId}`, i.value.toString()]));
+    // کارمندی که حقوق این ماهش محاسبه شده، اطلاعات ماهانه‌اش قفل است
+    const slips = await prisma.payrollSlip.findMany({ where: { year, month, employeeId: { in: emps.map((e) => e.id) } }, select: { employeeId: true } });
+    const calculated = new Set(slips.map((x) => x.employeeId));
     res.json({
       monthDays: range.days,
       decimals,
@@ -68,6 +71,7 @@ router.get("/payroll-data-entry", can(`${F}.view`), async (req, res) => {
         employeeId: e.id,
         personnelCode: e.personnelCode,
         fullName: [e.party.firstName, e.party.lastName].filter(Boolean).join(" ") || e.party.name || "",
+        locked: calculated.has(e.id),
         values: Object.fromEntries(columns.map((c) => [String(c.componentId), byKey.get(`${e.id}:${c.componentId}`) ?? null])),
       })),
     });
@@ -126,6 +130,9 @@ router.put("/payroll-data-entry", can(`${F}.edit`), async (req, res) => {
     });
     const validSet = new Set(valid.map((v) => v.id));
     for (const p of parsed) if (!validSet.has(p.employeeId)) throw new DErr("کارمندی در این ماه همکاری ندارد یا یافت نشد");
+    // محاسبه‌شده‌ها قابل ویرایش نیستند: ابتدا حذف محاسبه
+    const calc = await prisma.payrollSlip.findMany({ where: { year, month, employeeId: { in: empIds } }, include: { employee: { select: { personnelCode: true } } } });
+    if (calc.length) throw new DErr(`حقوق این ماه برای کارمند ${calc[0].employee.personnelCode} محاسبه شده است؛ برای ویرایش اطلاعات ماهانه ابتدا محاسبه را حذف کنید`);
 
     await prisma.$transaction(async (tx) => {
       for (const p of parsed) {

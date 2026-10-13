@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma";
 import { can, userHasAction } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { AuthedRequest } from "../middleware/auth";
-import { METHOD_FA, PayrollCalcError, calculatePayroll, validateFactorMethod } from "../services/payrollCalculationService";
+import { METHOD_FA, PayrollCalcError, calculatePayroll, validateFactorMethod, methodLockMessage, lockedMethodIds } from "../services/payrollCalculationService";
 import { getEffectiveDecrees } from "../services/employmentDecreeService";
 import { jalaliMonthRange } from "../utils/jalaliDate";
 import { BASE_INFO, DECREE_VARIANTS, FACTOR_VARIANTS, KIND_FA } from "../services/payrollFormula";
@@ -144,8 +144,9 @@ router.get("/payroll-methods", can(`${F_METH}.view`), async (_req, res) => {
   });
   // «جاری» = آخرین رکورد هر عامل با تاریخ اجرای ≤ امروز
   const cur = new Set<string>();
+  const locked = await lockedMethodIds();
   const out = rows.map((m) => {
-    const s = shapeMethod(m, today);
+    const s = { ...shapeMethod(m, today), locked: locked.has(m.id) };
     const k = `${s.basis}:${s.factorId}`;
     if (m.effectiveDate <= today && !cur.has(k)) {
       cur.add(k);
@@ -225,7 +226,8 @@ router.get("/payroll-methods/:id", can(`${F_METH}.view`), async (req, res) => {
   });
   if (!m) return res.status(404).json({ error: "روش یافت نشد" });
   const { _eff, _today, ...rest } = shapeMethod(m, new Date());
-  res.json(rest);
+  const lockMsg = await methodLockMessage(m);
+  res.json({ ...rest, locked: !!lockMsg, lockMessage: lockMsg });
 });
 
 async function methodData(b: any, existingId: number | null) {
@@ -305,6 +307,8 @@ router.put("/payroll-methods/:id", can(`${F_METH}.edit`), async (req, res) => {
   try {
     const m = await prisma.payrollFactorMethod.findUnique({ where: { id } });
     if (!m) return res.status(404).json({ error: "روش یافت نشد" });
+    const lockMsg = await methodLockMessage(m);
+    if (lockMsg) throw new PayrollCalcError(lockMsg);
     // عامل و مبنای یک رکورد تغییر نمی‌کند
     const body = { ...req.body, basis: m.decreeComponentId ? "decree" : "payroll", factorId: m.decreeComponentId ?? m.payrollComponentId };
     const { data } = await methodData(body, id);
@@ -323,12 +327,20 @@ router.put("/payroll-methods/:id", can(`${F_METH}.edit`), async (req, res) => {
 });
 
 router.post("/payroll-methods/:id/confirm", can(`${F_METH}.edit`), async (req, res) => {
-  await prisma.payrollFactorMethod.updateMany({ where: { id: Number(req.params.id) }, data: { isProvisional: false } });
+  const m = await prisma.payrollFactorMethod.findUnique({ where: { id: Number(req.params.id) } });
+  if (!m) return res.status(404).json({ error: "روش یافت نشد" });
+  const lockMsg = await methodLockMessage(m);
+  if (lockMsg) return res.status(400).json({ error: lockMsg });
+  await prisma.payrollFactorMethod.update({ where: { id: m.id }, data: { isProvisional: false } });
   res.json({ ok: true });
 });
 
 router.delete("/payroll-methods/:id", can(`${F_METH}.delete`), async (req, res) => {
-  await prisma.payrollFactorMethod.deleteMany({ where: { id: Number(req.params.id) } });
+  const m = await prisma.payrollFactorMethod.findUnique({ where: { id: Number(req.params.id) } });
+  if (!m) return res.status(204).send();
+  const lockMsg = await methodLockMessage(m);
+  if (lockMsg) return res.status(400).json({ error: lockMsg });
+  await prisma.payrollFactorMethod.delete({ where: { id: m.id } });
   res.status(204).send();
 });
 
@@ -460,6 +472,19 @@ router.get("/payroll-calculations/:id", canAny(`${F_CALC}.view`, `${F_REPORT}.vi
       trace: l.trace,
     })),
   });
+});
+
+// حذف محاسبه‌ی کارمندان انتخاب‌شده‌ی یک ماه (بدون حذف، محاسبه‌ی مجدد ممکن نیست)
+router.post("/payroll-calculations/delete", can(`${F_CALC}.delete`), async (req, res) => {
+  const b = req.body as { year: number; month: number; employeeIds: number[] };
+  try {
+    const ids = Array.isArray(b.employeeIds) ? [...new Set(b.employeeIds.map(Number).filter(Boolean))] : [];
+    if (ids.length === 0) throw new PayrollCalcError("هیچ کارمندی انتخاب نشده است");
+    const r = await prisma.payrollSlip.deleteMany({ where: { year: Number(b.year), month: Number(b.month), employeeId: { in: ids } } });
+    res.json({ deleted: r.count });
+  } catch (e) {
+    fail(res, e, "خطا در حذف محاسبه");
+  }
 });
 
 router.delete("/payroll-calculations/:id", can(`${F_CALC}.delete`), async (req, res) => {
