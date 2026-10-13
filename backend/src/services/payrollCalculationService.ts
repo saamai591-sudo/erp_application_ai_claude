@@ -26,7 +26,7 @@ import { jalaliMonthRange } from "../utils/jalaliDate";
 //  • ترتیب محاسبه از وابستگی عملوندها (و جمع طبقه [S:…]) به‌دست می‌آید؛ دور رد می‌شود؛
 //  • عامل با روش ورودی (دستی/تردد/خزانه) مقدارش را از PayrollFactorInput همین ماه می‌گیرد؛ مقدار ثابت از خود روش؛
 //  • شرط اگر برقرار نباشد مقدار عامل صفر است. هر مبلغ به ریال گرد می‌شود.
-// حکم و پارامترهای قانونی در «آخرین روز ماه» خوانده می‌شوند. نتیجه با همه‌ی ورودی‌ها و ریز عملوندها ذخیره می‌شود تا گزارش نیازی به محاسبه‌ی دوباره نداشته باشد.
+// حکم و پارامترهای مبنا در «آخرین روز ماه» خوانده می‌شوند. نتیجه با همه‌ی ورودی‌ها و ریز عملوندها ذخیره می‌شود تا گزارش نیازی به محاسبه‌ی دوباره نداشته باشد.
 
 export class PayrollCalcError extends Error {}
 
@@ -108,7 +108,7 @@ export async function validateFactorMethod(cand: CandidateMethod): Promise<void>
   for (const r of refs) {
     if (r.ns === "D" && !dCodes.has(r.key)) throw new PayrollCalcError("عامل حکم انتخاب‌شده در فرمول وجود ندارد");
     if (r.ns === "C" && !cKeys.has(r.key)) throw new PayrollCalcError("عامل حقوق انتخاب‌شده در فرمول وجود ندارد");
-    if (r.ns === "P" && !pKeys.has(r.key)) throw new PayrollCalcError("پارامتر قانونی انتخاب‌شده در فرمول تعریف نشده است");
+    if (r.ns === "P" && !pKeys.has(r.key)) throw new PayrollCalcError("پارامتر مبنا انتخاب‌شده در فرمول تعریف نشده است");
   }
 
   // گراف وابستگی با آخرین روش هر عامل + نامزد
@@ -402,7 +402,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
         const pv = params.get(key);
         const def = paramDefs.get(key);
         if (!def) throw new FormulaError(`پارامتر ${key} تعریف نشده است`);
-        if (!pv || pv.value === null) throw new FormulaError(`پارامتر قانونی «${def.title}» برای این ماه مقدار ندارد (در «پارامترهای قانونی» تعریف کنید)`);
+        if (!pv || pv.value === null) throw new FormulaError(`پارامتر مبنا «${def.title}» برای این ماه مقدار ندارد (در «پارامترهای مبنا» تعریف کنید)`);
         usedParams.set(key, pv);
         return pv.value;
       }
@@ -534,7 +534,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
       value: pv.value,
       brackets: pv.brackets,
     };
-    if (pv.isProvisional) warnings.push(`پارامتر قانونی «${paramDefs.get(k)?.title ?? k}» پیش‌فرض نصب و تاییدنشده است`);
+    if (pv.isProvisional) warnings.push(`پارامتر مبنا «${paramDefs.get(k)?.title ?? k}» پیش‌فرض نصب و تاییدنشده است`);
   }
 
   // ترتیب نمایش: طبقه‌ها (پرداختی، کسر، هزینه کارفرما، اطلاعاتی) و داخل هر طبقه به ترتیب محاسبه

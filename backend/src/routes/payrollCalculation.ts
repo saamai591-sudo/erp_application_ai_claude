@@ -159,7 +159,7 @@ router.get("/payroll-methods", can(`${F_METH}.view`), async (_req, res) => {
   res.json(out);
 });
 
-// داده‌ی پنجره‌ی فرمول‌نویس: دسته‌بندی عوامل، طبقه‌ها، متغیرها و پارامترهای قانونی
+// داده‌ی پنجره‌ی فرمول‌نویس: دسته‌بندی عوامل، طبقه‌ها، متغیرها و پارامترهای مبنا
 router.get("/payroll-methods/palette", can(`${F_METH}.view`), async (_req, res) => {
   const [decree, comps, params, methods] = await Promise.all([
     prisma.decreeComponent.findMany({ orderBy: { code: "asc" } }),

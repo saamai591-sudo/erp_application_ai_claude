@@ -18,7 +18,7 @@ import { usePermissions } from "../lib/usePermissions";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { MONTHS_FA, currentJalaliYearMonth } from "../lib/payrollLabels";
 
-// حقوق و دستمزد › تنظیمات › پارامترهای قانونی: هر پارامتر یک تعریف (کلید ثابت، نوع) + مقدارهای تاریخ‌دار است. مقدار معتبر هر تاریخ، آخرین مقدار با
+// حقوق و دستمزد › تنظیمات › پارامترهای مبنا: هر پارامتر یک تعریف (کلید ثابت، نوع) + مقدارهای تاریخ‌دار است. مقدار معتبر هر تاریخ، آخرین مقدار با
 // ماه اجرا ≤ آن تاریخ است؛ تغییر سالانه‌ی قانون = یک مقدار جدید با ماه اجرای جدید (بدون تغییر کد). مقداری که در محاسبه استفاده شده قفل است
 // و مقدار جدید فقط برای ماهی بعد از آخرین ماهِ محاسبه‌شده ثبت می‌شود.
 
@@ -109,8 +109,8 @@ function ParamList() {
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint
-            text="پارامترهای قانونی حقوق (نرخ بیمه، سقف بیمه، حداقل دستمزد، ضریب اضافه‌کار، جدول مالیات). هر پارامتر مقدارهای تاریخ‌دار دارد؛ برای تغییر سالانه، مقدار جدید با ماه اجرای جدید ثبت کنید (ماه اجرا باید بعد از آخرین ماهِ محاسبه‌شده باشد). مقداری که در محاسبه‌ی حقوق استفاده شده قابل ویرایش و حذف نیست. مقدارهای «موقت» پیش‌فرض نصب‌اند و باید با قانون جاری تطبیق و تایید شوند."
-            title="پارامترهای قانونی"
+            text="پارامترهای مبنا حقوق (نرخ بیمه، سقف بیمه، حداقل دستمزد، ضریب اضافه‌کار، جدول مالیات). هر پارامتر مقدارهای تاریخ‌دار دارد؛ برای تغییر سالانه، مقدار جدید با ماه اجرای جدید ثبت کنید (ماه اجرا باید بعد از آخرین ماهِ محاسبه‌شده باشد). مقداری که در محاسبه‌ی حقوق استفاده شده قابل ویرایش و حذف نیست. مقدارهای «موقت» پیش‌فرض نصب‌اند و باید با قانون جاری تطبیق و تایید شوند."
+            title="پارامترهای مبنا"
           />
           <NewRecordButton path="/legal-parameters/new" />
           <RefreshButton onClick={reload} />
@@ -120,7 +120,6 @@ function ParamList() {
       <DataTable
         columns={[
           { header: "عنوان", ...s((r) => r.title) },
-          { header: "کلید", ...s((r) => r.key), width: "260px" },
           { header: "نوع", ...s((r) => TYPE_FA[r.type]), width: "110px" },
           { header: "مقدار فعلی", ...s((r) => valueText(r.type, r.current)), width: "150px" },
           { header: "ماه اجرا", ...s((r) => (r.current ? monthText(r.current.execYear, r.current.execMonth) : "—")), width: "130px" },
@@ -140,7 +139,7 @@ function ParamForm({ editId }: { editId?: number }) {
   const location = useLocation();
   const { hasPermission } = usePermissions();
   const cacheKey = `form:${location.pathname}:form`;
-  const [form, setForm] = usePersistedState(cacheKey, { key: "", title: "", type: "NUMBER", description: "", isActive: true });
+  const [form, setForm] = usePersistedState(cacheKey, { title: "", type: "NUMBER", description: "", isActive: true });
   const [detail, setDetail] = useState<ParamDetail | null>(null);
   const [valueDlg, setValueDlg] = useState<{ value: ValueRow | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -151,7 +150,7 @@ function ParamForm({ editId }: { editId?: number }) {
     if (!editId) return;
     const d: ParamDetail = await api.get(`/payroll-parameters/${editId}`);
     setDetail(d);
-    if (fillForm) setForm({ key: d.key, title: d.title, type: d.type, description: d.description ?? "", isActive: d.isActive });
+    if (fillForm) setForm({ title: d.title, type: d.type, description: d.description ?? "", isActive: d.isActive });
   }
 
   useEffect(() => {
@@ -169,8 +168,7 @@ function ParamForm({ editId }: { editId?: number }) {
         flash();
         await reload(false);
       } else {
-        if (!form.key.trim()) return setError("کلید الزامی است");
-        const created = await api.post("/payroll-parameters", { key: form.key, title: form.title, type: form.type, description: form.description });
+        const created = await api.post("/payroll-parameters", { title: form.title, type: form.type, description: form.description });
         flash();
         navigate(`/legal-parameters/${created.id}/edit`);
       }
@@ -214,7 +212,7 @@ function ParamForm({ editId }: { editId?: number }) {
 
   return (
     <FormPage
-      title={editId ? `پارامتر قانونی${detail ? ` — ${detail.title}` : ""}` : "پارامتر قانونی جدید"}
+      title={editId ? `پارامتر مبنا${detail ? ` — ${detail.title}` : ""}` : "پارامتر مبنا جدید"}
       formId="legal-param-form"
       closePath="/legal-parameters"
       newPath="/legal-parameters/new"
@@ -224,10 +222,6 @@ function ParamForm({ editId }: { editId?: number }) {
       <form id="legal-param-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
         <div className="form-grid">
-          <div className="form-field">
-            <label>کلید<RequiredMark /> <FieldHint label="کلید" text="شناسه‌ی ثابت پارامتر برای ارجاع در فرمول‌ها؛ حروف بزرگ انگلیسی، عدد و _ . بعد از ثبت قابل تغییر نیست." /></label>
-            <input dir="ltr" disabled={!!editId} value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value.toUpperCase() })} />
-          </div>
           <div className="form-field">
             <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />

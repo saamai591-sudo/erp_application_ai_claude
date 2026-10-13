@@ -250,7 +250,7 @@ function SlipView({ slip }: { slip: Slip }) {
         </table>
       </div>
 
-      <h3 className="hr-section">پارامترهای قانونی استفاده‌شده</h3>
+      <h3 className="hr-section">پارامترهای مبنا استفاده‌شده</h3>
       <table className="hr-table">
         <thead><tr><th>پارامتر</th><th>مقدار</th><th style={{ width: 130 }}>تاریخ شروع مقدار</th><th style={{ width: 160 }}>وضعیت</th></tr></thead>
         <tbody>

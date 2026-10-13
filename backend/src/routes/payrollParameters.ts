@@ -5,7 +5,7 @@ import { findFormPrefix } from "../authz/registry";
 import { jalaliMonthRange, toJalaliYearMonth } from "../utils/jalaliDate";
 import { assertParameterValueNotLocked, execMonthBeforeLastCalculation, lastCalculatedMonth, usedValueDates } from "../services/payrollParameterService";
 
-// حقوق و دستمزد › تنظیمات › پارامترهای قانونی: تعریف پارامتر + مقدارهای تاریخ‌دار (مقدار ساده یا جدول پلکانی).
+// حقوق و دستمزد › تنظیمات › پارامترهای مبنا: تعریف پارامتر + مقدارهای تاریخ‌دار (مقدار ساده یا جدول پلکانی).
 // هر مقدار «ماه اجرا» دارد (سال+ماه شمسی؛ تاریخ شروعِ ذخیره‌شده = روز اول همان ماه). ماه اجرای مقدار جدید باید بعد از آخرین مقدار همان پارامتر
 // و بعد از آخرین ماهِ محاسبه‌شده‌ی حقوق باشد؛ مقداری که در محاسبه استفاده شده قابل ویرایش و حذف نیست؛ تغییر ماه نباید مقدار را در تاریخچه جابه‌جا کند.
 
@@ -142,12 +142,15 @@ router.get("/payroll-parameters/:id", async (req, res) => {
 router.post("/payroll-parameters", can(`${FORM}.create`), async (req, res) => {
   const b = req.body as any;
   try {
-    const key = String(b.key ?? "").trim().toUpperCase();
-    if (!/^[A-Z][A-Z0-9_]{2,59}$/.test(key)) throw new PErr("کلید باید با حرف انگلیسی شروع شود و فقط حروف بزرگ انگلیسی، عدد و _ داشته باشد (حداقل ۳ نویسه)");
     const title = str(b.title);
     if (!title) throw new PErr("عنوان الزامی است");
     if (!TYPES.includes(b.type)) throw new PErr("نوع پارامتر نامعتبر است");
-    if (await prisma.payrollParameter.findUnique({ where: { key } })) throw new PErr("این کلید قبلاً تعریف شده است");
+    if (await prisma.payrollParameter.findFirst({ where: { title } })) throw new PErr("پارامتر دیگری با همین عنوان وجود دارد");
+    // کلید داخلی (برای ارجاع در فرمول‌ها) را سیستم می‌سازد و به کاربر نمایش داده نمی‌شود؛ هر کلیدی که از کلاینت بیاید نادیده گرفته می‌شود
+    const last = await prisma.payrollParameter.findFirst({ orderBy: { id: "desc" }, select: { id: true } });
+    let n = (last?.id ?? 0) + 1;
+    let key = `PARAM_${n}`;
+    while (await prisma.payrollParameter.findUnique({ where: { key } })) key = `PARAM_${++n}`;
     const created = await prisma.payrollParameter.create({ data: { key, title, type: b.type, description: str(b.description), isSystem: false } });
     res.status(201).json({ id: created.id });
   } catch (e) {

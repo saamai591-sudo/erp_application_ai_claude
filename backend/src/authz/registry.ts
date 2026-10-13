@@ -593,7 +593,7 @@ export const REGISTRY: ModuleDef[] = [
         key: "settings",
         title: "تنظیمات",
         forms: [
-          { key: "legal-parameters", title: "پارامترهای قانونی", baseActions: CRUD },
+          { key: "legal-parameters", title: "پارامترهای مبنا", baseActions: CRUD },
           { key: "payroll-components", title: "عامل حقوق", baseActions: CRUD },
           { key: "factor-methods", title: "روش محاسبه عامل", baseActions: CRUD },
         ],

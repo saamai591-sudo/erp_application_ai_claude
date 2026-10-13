@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma";
 
-// پارامترهای قانونی حقوق (تاریخ‌دار). تنها محل خواندن مقدار برای محاسبات: مقدار معتبر هر تاریخ = آخرین مقدار با تاریخ شروع ≤ آن تاریخ.
+// پارامترهای مبنا حقوق (تاریخ‌دار). تنها محل خواندن مقدار برای محاسبات: مقدار معتبر هر تاریخ = آخرین مقدار با تاریخ شروع ≤ آن تاریخ.
 // ماژول محاسبه‌ی حقوق (و فرمول‌ها) فقط از getParameterValue/getParameterValues می‌خوانند، نه مستقیم از جدول‌ها.
 
 export interface Bracket {
@@ -36,7 +36,7 @@ function shape(p: { id: number; key: string; type: any }, v: any): ParameterValu
 /** مقدار معتبر یک پارامتر در تاریخ؛ null = پارامتر مقداری برای آن تاریخ ندارد (فراخواننده باید خطای روشن بدهد) */
 export async function getParameterValue(key: string, onDate: Date): Promise<ParameterValue | null> {
   const p = await prisma.payrollParameter.findUnique({ where: { key } });
-  if (!p) throw new Error(`پارامتر قانونی ${key} تعریف نشده است`);
+  if (!p) throw new Error(`پارامتر مبنا ${key} تعریف نشده است`);
   const v = await prisma.payrollParameterValue.findFirst({
     where: { parameterId: p.id, effectiveDate: { lte: toDay(onDate) } },
     orderBy: { effectiveDate: "desc" },
