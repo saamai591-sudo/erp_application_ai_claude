@@ -10,17 +10,17 @@ import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
-import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { toFaDigits } from "../lib/formatAmount";
-import { formatJalaliDate, localTodayIso } from "../lib/formatDate";
 import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePermissions } from "../lib/usePermissions";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { MONTHS_FA, currentJalaliYearMonth } from "../lib/payrollLabels";
 
 // حقوق و دستمزد › تنظیمات › پارامترهای قانونی: هر پارامتر یک تعریف (کلید ثابت، نوع) + مقدارهای تاریخ‌دار است. مقدار معتبر هر تاریخ، آخرین مقدار با
-// تاریخ شروع ≤ آن تاریخ است؛ تغییر سالانه‌ی قانون = یک مقدار جدید با تاریخ شروع جدید (بدون تغییر کد).
+// ماه اجرا ≤ آن تاریخ است؛ تغییر سالانه‌ی قانون = یک مقدار جدید با ماه اجرای جدید (بدون تغییر کد). مقداری که در محاسبه استفاده شده قفل است
+// و مقدار جدید فقط برای ماهی بعد از آخرین ماهِ محاسبه‌شده ثبت می‌شود.
 
 const TYPE_FA: Record<string, string> = { NUMBER: "عدد", PERCENT: "درصد", AMOUNT: "مبلغ", BRACKETS: "جدول پلکانی" };
 
@@ -32,6 +32,11 @@ interface BracketRow {
 interface ValueRow {
   id: number;
   effectiveDate: string;
+  execYear: number;
+  execMonth: number;
+  /** در محاسبه‌ی حقوق استفاده شده؛ ویرایش و حذف ممنوع */
+  locked: boolean;
+  lockedReason: string | null;
   value: string | null;
   isProvisional: boolean;
   note: string | null;
@@ -56,9 +61,11 @@ interface ParamDetail {
   description: string | null;
   isSystem: boolean;
   isActive: boolean;
+  lastCalculated: { year: number; month: number } | null;
   values: ValueRow[];
 }
 
+const monthText = (y: number, m: number) => `${MONTHS_FA[m - 1]} ${toFaDigits(String(y))}`;
 const fmtNum = (v: string | null) => (v === null ? "" : toFaDigits(Number(v).toLocaleString("en-US", { maximumFractionDigits: 4 })));
 function valueText(type: string, v: ValueRow | null): string {
   if (!v) return "تعریف نشده";
@@ -102,7 +109,7 @@ function ParamList() {
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint
-            text="پارامترهای قانونی حقوق (نرخ بیمه، سقف بیمه، حداقل دستمزد، ضریب اضافه‌کار، جدول مالیات). هر پارامتر مقدارهای تاریخ‌دار دارد؛ برای تغییر سالانه، مقدار جدید با تاریخ شروع جدید ثبت کنید. مقدارهای «موقت» پیش‌فرض نصب‌اند و باید با قانون جاری تطبیق و تایید شوند."
+            text="پارامترهای قانونی حقوق (نرخ بیمه، سقف بیمه، حداقل دستمزد، ضریب اضافه‌کار، جدول مالیات). هر پارامتر مقدارهای تاریخ‌دار دارد؛ برای تغییر سالانه، مقدار جدید با ماه اجرای جدید ثبت کنید (ماه اجرا باید بعد از آخرین ماهِ محاسبه‌شده باشد). مقداری که در محاسبه‌ی حقوق استفاده شده قابل ویرایش و حذف نیست. مقدارهای «موقت» پیش‌فرض نصب‌اند و باید با قانون جاری تطبیق و تایید شوند."
             title="پارامترهای قانونی"
           />
           <NewRecordButton path="/legal-parameters/new" />
@@ -116,7 +123,7 @@ function ParamList() {
           { header: "کلید", ...s((r) => r.key), width: "260px" },
           { header: "نوع", ...s((r) => TYPE_FA[r.type]), width: "110px" },
           { header: "مقدار فعلی", ...s((r) => valueText(r.type, r.current)), width: "150px" },
-          { header: "از تاریخ", ...s((r) => (r.current ? formatJalaliDate(r.current.effectiveDate) : "—")), width: "120px" },
+          { header: "ماه اجرا", ...s((r) => (r.current ? monthText(r.current.execYear, r.current.execMonth) : "—")), width: "130px" },
           { header: "وضعیت", ...s((r) => (!r.current ? "نیازمند تعریف" : r.current.isProvisional ? "موقت — نیاز به تایید" : "تاییدشده")), width: "170px" },
           { header: "سیستمی", ...s((r) => (r.isSystem ? "بله" : "")), width: "80px" },
         ]}
@@ -183,7 +190,7 @@ function ParamForm({ editId }: { editId?: number }) {
   }
 
   async function removeValue(v: ValueRow) {
-    if (!window.confirm(`مقدار با تاریخ شروع ${formatJalaliDate(v.effectiveDate)} حذف شود؟`)) return;
+    if (!window.confirm(`مقدار با ماه اجرای ${monthText(v.execYear, v.execMonth)} حذف شود؟`)) return;
     try {
       await api.del(`/payroll-parameters/values/${v.id}`);
       await reload(false);
@@ -256,7 +263,7 @@ function ParamForm({ editId }: { editId?: number }) {
           </h3>
           <table className="hr-table">
             <thead>
-              <tr><th style={{ width: 130 }}>تاریخ شروع</th><th>مقدار</th><th style={{ width: 170 }}>وضعیت</th><th>توضیح</th><th style={{ width: 170 }} /></tr>
+              <tr><th style={{ width: 150 }}>ماه اجرا</th><th>مقدار</th><th style={{ width: 170 }}>وضعیت</th><th>توضیح</th><th style={{ width: 170 }} /></tr>
             </thead>
             <tbody>
               {detail.values.length === 0 && (
@@ -264,7 +271,10 @@ function ParamForm({ editId }: { editId?: number }) {
               )}
               {detail.values.map((v, i) => (
                 <tr key={v.id}>
-                  <td>{formatJalaliDate(v.effectiveDate)}{i === 0 ? " (آخرین)" : ""}</td>
+                  <td>
+                    {monthText(v.execYear, v.execMonth)}{i === 0 ? " (آخرین)" : ""}
+                    {v.locked && <span title={v.lockedReason ?? ""} style={{ marginInlineStart: 6, opacity: 0.75, fontSize: 12 }}>🔒 استفاده‌شده</span>}
+                  </td>
                   <td>
                     {detail.type === "BRACKETS" ? (
                       <BracketsView rows={v.brackets} />
@@ -277,9 +287,9 @@ function ParamForm({ editId }: { editId?: number }) {
                   <td>
                     {canEdit && (
                       <>
-                        <button type="button" className="link-btn" onClick={() => setValueDlg({ value: v })}>ویرایش</button>{" "}
+                        <button type="button" className="link-btn" disabled={v.locked} title={v.locked ? v.lockedReason ?? "" : undefined} onClick={() => setValueDlg({ value: v })}>ویرایش</button>{" "}
                         {v.isProvisional && <button type="button" className="link-btn" onClick={() => confirmValue(v)}>تایید مقدار</button>}{" "}
-                        <button type="button" className="link-btn" onClick={() => removeValue(v)}>حذف</button>
+                        <button type="button" className="link-btn" disabled={v.locked} title={v.locked ? v.lockedReason ?? "" : undefined} onClick={() => removeValue(v)}>حذف</button>
                       </>
                     )}
                   </td>
@@ -319,7 +329,17 @@ function BracketsView({ rows }: { rows: BracketRow[] }) {
 
 function ValueDialog({ param, value, onClose, onDone }: { param: ParamDetail; value: ValueRow | null; onClose: () => void; onDone: () => void }) {
   const isBr = param.type === "BRACKETS";
-  const [date, setDate] = useState(value?.effectiveDate ?? localTodayIso());
+  // پیش‌فرض ماه اجرای مقدار جدید: ماهِ بعد از آخرین مقدار و بعد از آخرین ماهِ محاسبه‌شده (و نه قبل از ماه جاری)
+  const [exec, setExec] = useState<{ year: number; month: number }>(() => {
+    if (value) return { year: value.execYear, month: value.execMonth };
+    const cur = currentJalaliYearMonth();
+    let k = cur.year * 12 + cur.month - 1;
+    const after = (y: number, m: number) => { k = Math.max(k, y * 12 + m); };
+    const latest = param.values[0];
+    if (latest) after(latest.execYear, latest.execMonth);
+    if (param.lastCalculated) after(param.lastCalculated.year, param.lastCalculated.month);
+    return { year: Math.floor(k / 12), month: (k % 12) + 1 };
+  });
   const [val, setVal] = useState(value?.value !== null && value?.value !== undefined ? String(Number(value.value)) : "");
   const [note, setNote] = useState(value?.note ?? "");
   const [rows, setRows] = useState<{ from: string; to: string; rate: string }[]>(
@@ -343,7 +363,7 @@ function ValueDialog({ param, value, onClose, onDone }: { param: ParamDetail; va
 
   async function save() {
     setErr(null);
-    const body: any = { effectiveDate: date, note };
+    const body: any = { execYear: exec.year, execMonth: exec.month, note };
     if (isBr) body.brackets = rows.map((r) => ({ from: r.from, to: r.to === "" ? null : r.to, rate: r.rate }));
     else body.value = val;
     try {
@@ -360,8 +380,16 @@ function ValueDialog({ param, value, onClose, onDone }: { param: ParamDetail; va
       <ErrorToast message={err} />
       <div className="form-grid">
         <div className="form-field">
-          <label>تاریخ شروع<RequiredMark /> <FieldHint label="تاریخ شروع" text="از این تاریخ به بعد این مقدار معتبر است؛ باید بعد از تاریخ شروع آخرین مقدار باشد" /></label>
-          <JalaliDatePicker value={date} onChange={setDate} />
+          <label>ماه اجرا<RequiredMark /> <FieldHint label="ماه اجرا" text="از ابتدای این ماه به بعد این مقدار در محاسبه به کار می‌رود (تا مقدار بعدی)؛ باید بعد از ماه اجرای آخرین مقدار و بعد از آخرین ماهِ محاسبه‌شده‌ی حقوق باشد" /></label>
+          <div style={{ display: "flex", gap: 6 }}>
+            <select value={exec.month} onChange={(e) => setExec({ ...exec, month: Number(e.target.value) })} style={{ flex: 1 }}>
+              {MONTHS_FA.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+            </select>
+            <input dir="ltr" inputMode="numeric" value={exec.year || ""} onChange={(e) => setExec({ ...exec, year: Number(e.target.value.replace(/D/g, "")) || 0 })} style={{ width: 80 }} />
+          </div>
+          {param.lastCalculated && (
+            <div style={{ opacity: 0.7, fontSize: 12, marginTop: 2 }}>آخرین ماهِ محاسبه‌شده: {monthText(param.lastCalculated.year, param.lastCalculated.month)}</div>
+          )}
         </div>
         {!isBr && (
           <div className="form-field">

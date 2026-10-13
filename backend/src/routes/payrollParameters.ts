@@ -2,10 +2,12 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
-import { assertParameterValueNotLocked } from "../services/payrollParameterService";
+import { jalaliMonthRange, toJalaliYearMonth } from "../utils/jalaliDate";
+import { assertParameterValueNotLocked, execMonthBeforeLastCalculation, lastCalculatedMonth, usedValueDates } from "../services/payrollParameterService";
 
 // حقوق و دستمزد › تنظیمات › پارامترهای قانونی: تعریف پارامتر + مقدارهای تاریخ‌دار (مقدار ساده یا جدول پلکانی).
-// مقدار جدید باید تاریخ شروعی بعد از آخرین مقدار همان پارامتر داشته باشد؛ ویرایش تاریخ نباید مقدار را در تاریخچه جابه‌جا کند.
+// هر مقدار «ماه اجرا» دارد (سال+ماه شمسی؛ تاریخ شروعِ ذخیره‌شده = روز اول همان ماه). ماه اجرای مقدار جدید باید بعد از آخرین مقدار همان پارامتر
+// و بعد از آخرین ماهِ محاسبه‌شده‌ی حقوق باشد؛ مقداری که در محاسبه استفاده شده قابل ویرایش و حذف نیست؛ تغییر ماه نباید مقدار را در تاریخچه جابه‌جا کند.
 
 const FORM = findFormPrefix("legal-parameters");
 const router = Router();
@@ -18,24 +20,37 @@ const str = (v: unknown) => {
   const t = typeof v === "string" ? v.trim() : "";
   return t || null;
 };
-function parseDay(v: unknown): Date {
-  if (!v) throw new PErr("تاریخ شروع الزامی است");
-  const d = new Date(`${String(v)}T00:00:00.000Z`);
-  if (isNaN(d.getTime())) throw new PErr("تاریخ شروع نامعتبر است");
-  return d;
+const ymKey = (y: number, m: number) => y * 12 + (m - 1);
+const MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
+const monthLabel = (d: Date) => {
+  const { year, month } = toJalaliYearMonth(d);
+  return `${MONTHS[month - 1]} ${year}`;
+};
+/** «ماه اجرا» از بدنه (execYear/execMonth) → سال/ماه + روز اول ماه به‌عنوان تاریخ شروع */
+function parseExec(b: any): { year: number; month: number; date: Date } {
+  const year = Number(b.execYear);
+  const month = Number(b.execMonth);
+  if (!Number.isInteger(year) || !Number.isInteger(month)) throw new PErr("ماه اجرا الزامی است");
+  if (year < 1300 || year > 1600 || month < 1 || month > 12) throw new PErr("ماه اجرا نامعتبر است");
+  return { year, month, date: jalaliMonthRange(year, month).start };
 }
 function fail(res: any, e: any, fallback: string) {
   if (e instanceof PErr) return res.status(400).json({ error: e.message });
-  if (e?.code === "P2002") return res.status(400).json({ error: "برای این پارامتر در همین تاریخ قبلاً مقداری ثبت شده است" });
+  if (e?.code === "P2002") return res.status(400).json({ error: "برای این پارامتر در همین ماه اجرا قبلاً مقداری ثبت شده است" });
   return res.status(400).json({ error: e?.message || fallback });
 }
 
 const valueInclude = { brackets: { orderBy: { position: "asc" as const } } };
 
-function shapeValue(v: any) {
+function shapeValue(v: any, lock?: { locked: boolean; reason: string | null }) {
+  const ym = toJalaliYearMonth(v.effectiveDate);
   return {
     id: v.id,
     effectiveDate: day(v.effectiveDate),
+    execYear: ym.year,
+    execMonth: ym.month,
+    locked: lock?.locked ?? false,
+    lockedReason: lock?.reason ?? null,
     value: v.value === null ? null : v.value.toString(),
     isProvisional: v.isProvisional,
     note: v.note,
@@ -103,7 +118,24 @@ router.get("/payroll-parameters/:id", async (req, res) => {
     include: { values: { orderBy: { effectiveDate: "desc" }, include: valueInclude } },
   });
   if (!p) return res.status(404).json({ error: "پارامتر یافت نشد" });
-  res.json({ id: p.id, key: p.key, title: p.title, type: p.type, description: p.description, isSystem: p.isSystem, isActive: p.isActive, values: p.values.map(shapeValue) });
+  const [used, last] = await Promise.all([usedValueDates(p.key), lastCalculatedMonth()]);
+  res.json({
+    id: p.id,
+    key: p.key,
+    title: p.title,
+    type: p.type,
+    description: p.description,
+    isSystem: p.isSystem,
+    isActive: p.isActive,
+    lastCalculated: last,
+    values: p.values.map((v) => {
+      const hit = used.get(day(v.effectiveDate)!);
+      return shapeValue(v, {
+        locked: !!hit,
+        reason: hit ? `در محاسبه‌ی حقوق (از ماه ${MONTHS[hit.month - 1]} ${hit.year}) استفاده شده است؛ برای ویرایش یا حذف ابتدا محاسبه‌های مربوط را حذف کنید` : null,
+      });
+    }),
+  });
 });
 
 // ── پارامتر اختصاصی کاربر ──
@@ -163,12 +195,18 @@ router.post("/payroll-parameters/:id/values", can(`${FORM}.edit`), async (req, r
   try {
     const p = await prisma.payrollParameter.findUnique({ where: { id } });
     if (!p) return res.status(404).json({ error: "پارامتر یافت نشد" });
-    const effectiveDate = parseDay(b.effectiveDate);
+    const exec = parseExec(b);
+    const effectiveDate = exec.date;
     const built = buildValue(p.type, b);
     const latest = await prisma.payrollParameterValue.findFirst({ where: { parameterId: id }, orderBy: { effectiveDate: "desc" } });
-    if (latest && effectiveDate <= latest.effectiveDate) {
-      throw new PErr(`تاریخ شروع مقدار جدید باید بعد از آخرین مقدار این پارامتر (${day(latest.effectiveDate)}) باشد`);
+    if (latest) {
+      const l = toJalaliYearMonth(latest.effectiveDate);
+      if (ymKey(exec.year, exec.month) <= ymKey(l.year, l.month)) {
+        throw new PErr(`ماه اجرای مقدار جدید باید بعد از ماه اجرای آخرین مقدار این پارامتر (${monthLabel(latest.effectiveDate)}) باشد`);
+      }
     }
+    const lastCalc = await execMonthBeforeLastCalculation(exec.year, exec.month);
+    if (lastCalc) throw new PErr(lastCalc);
     const created = await prisma.payrollParameterValue.create({
       data: { parameterId: id, effectiveDate, value: built.value, note: str(b.note), brackets: { create: built.brackets } },
     });
@@ -185,15 +223,27 @@ router.put("/payroll-parameters/values/:valueId", can(`${FORM}.edit`), async (re
     const v = await prisma.payrollParameterValue.findUnique({ where: { id: valueId }, include: { parameter: true } });
     if (!v) return res.status(404).json({ error: "مقدار یافت نشد" });
     await assertParameterValueNotLocked(valueId);
-    const effectiveDate = parseDay(b.effectiveDate);
+    const exec = parseExec(b);
+    const effectiveDate = exec.date;
     const built = buildValue(v.parameter.type, b);
-    // تغییر تاریخ نباید مقدار را در تاریخچه جابه‌جا کند
+    // تغییر ماه اجرا نباید مقدار را در تاریخچه جابه‌جا کند و نباید به ماه‌های محاسبه‌شده برسد
+    const cur = toJalaliYearMonth(v.effectiveDate);
+    if (ymKey(exec.year, exec.month) !== ymKey(cur.year, cur.month)) {
+      const lastCalc = await execMonthBeforeLastCalculation(exec.year, exec.month);
+      if (lastCalc) throw new PErr(lastCalc);
+    }
     const [prev, next] = await Promise.all([
       prisma.payrollParameterValue.findFirst({ where: { parameterId: v.parameterId, effectiveDate: { lt: v.effectiveDate } }, orderBy: { effectiveDate: "desc" } }),
       prisma.payrollParameterValue.findFirst({ where: { parameterId: v.parameterId, effectiveDate: { gt: v.effectiveDate } }, orderBy: { effectiveDate: "asc" } }),
     ]);
-    if (prev && effectiveDate <= prev.effectiveDate) throw new PErr(`تاریخ باید بعد از مقدار قبلی (${day(prev.effectiveDate)}) بماند`);
-    if (next && effectiveDate >= next.effectiveDate) throw new PErr(`تاریخ باید قبل از مقدار بعدی (${day(next.effectiveDate)}) بماند`);
+    if (prev) {
+      const p0 = toJalaliYearMonth(prev.effectiveDate);
+      if (ymKey(exec.year, exec.month) <= ymKey(p0.year, p0.month)) throw new PErr(`ماه اجرا باید بعد از مقدار قبلی (${monthLabel(prev.effectiveDate)}) بماند`);
+    }
+    if (next) {
+      const n0 = toJalaliYearMonth(next.effectiveDate);
+      if (ymKey(exec.year, exec.month) >= ymKey(n0.year, n0.month)) throw new PErr(`ماه اجرا باید قبل از مقدار بعدی (${monthLabel(next.effectiveDate)}) بماند`);
+    }
     await prisma.$transaction([
       prisma.payrollParameterBracket.deleteMany({ where: { valueId } }),
       prisma.payrollParameterValue.update({
