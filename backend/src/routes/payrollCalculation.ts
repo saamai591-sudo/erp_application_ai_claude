@@ -5,6 +5,7 @@ import { findFormPrefix } from "../authz/registry";
 import { AuthedRequest } from "../middleware/auth";
 import { METHOD_FA, PayrollCalcError, calculatePayroll, validateFactorMethod, methodLockMessage, lockedMethodIds } from "../services/payrollCalculationService";
 import { getEffectiveDecrees } from "../services/employmentDecreeService";
+import { buildPayrollSlipsPrint } from "../services/payrollSlipPrint";
 import { jalaliMonthRange } from "../utils/jalaliDate";
 import { BASE_INFO, DECREE_VARIANTS, FACTOR_VARIANTS, KIND_FA } from "../services/payrollFormula";
 
@@ -472,6 +473,21 @@ router.get("/payroll-calculations/:id", canAny(`${F_CALC}.view`, `${F_REPORT}.vi
       trace: l.trace,
     })),
   });
+});
+
+// چاپ فیش حقوقی یک یا چند کارمند از فیش‌های محاسبه‌شده‌ی یک ماه؛ سند HTML آماده‌ی چاپ برمی‌گرداند
+router.post("/payroll-calculations/print", canAny(`${F_CALC}.view`, `${F_REPORT}.view`), async (req, res) => {
+  const b = req.body as { year: number; month: number; employeeIds: number[]; digits?: string };
+  try {
+    const ids = Array.isArray(b.employeeIds) ? [...new Set(b.employeeIds.map(Number).filter(Boolean))] : [];
+    if (ids.length === 0) throw new PayrollCalcError("هیچ کارمندی انتخاب نشده است");
+    if (ids.length > 500) throw new PayrollCalcError("حداکثر ۵۰۰ فیش در هر بار چاپ");
+    const r = await buildPayrollSlipsPrint(Number(b.year), Number(b.month), ids, b.digits === "LATIN" ? "LATIN" : "PERSIAN");
+    if (r.count === 0) throw new PayrollCalcError("برای کارمندان انتخاب‌شده در این ماه محاسبه‌ای ثبت نشده است؛ ابتدا محاسبه کنید");
+    res.json(r);
+  } catch (e) {
+    fail(res, e, "خطا در آماده‌سازی چاپ فیش");
+  }
 });
 
 // حذف محاسبه‌ی کارمندان انتخاب‌شده‌ی یک ماه (بدون حذف، محاسبه‌ی مجدد ممکن نیست)

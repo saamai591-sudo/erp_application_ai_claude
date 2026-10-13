@@ -638,16 +638,12 @@ export async function hydrateSharedHtml(html: string): Promise<string> {
   return out;
 }
 
-/** سند HTML کامل برای چاپ؛ خطای نحوی قالب با پیام فارسی پرتاب می‌شود */
-export function renderPrintDocument(input: RenderInput, data: PrintData): string {
-  let body: string;
-  try {
-    const schema = input.documentType ? PRINT_DOC_TYPES[input.documentType]?.designSchema : undefined;
-    const design = schema ? buildDesignContext(schema, input.design, data.totals) : undefined;
-    body = hb.compile(input.html, { strict: false })({ ...data, t: input.texts ?? {}, layout: printLayout(input.paper, input.orientation, input.marginMm), design });
-  } catch (e: any) {
-    throw new Error(`خطا در قالب چاپ: ${String(e?.message ?? e).split("\n")[0]}`);
-  }
+/** قاب سند چاپی (فونت، CSP، @page، ارقام فارسی اختیاری) دور یک بدنه‌ی HTML آماده؛ برای سندهایی که قالب DB ندارند (مثل فیش حقوقی) */
+export function wrapPrintHtml(
+  bodyHtml: string,
+  input: { title?: string; paper: "A4" | "A5"; orientation: "PORTRAIT" | "LANDSCAPE"; marginMm: number; digits?: PrintDigitsMode; fontPlaceholder?: boolean }
+): string {
+  let body = bodyHtml;
   const size = `${input.paper} ${input.orientation === "LANDSCAPE" ? "landscape" : "portrait"}`;
   const margin = Math.max(0, Math.min(40, Number(input.marginMm) || 0));
   const digits: PrintDigitsMode = input.digits === "PERSIAN" ? "PERSIAN" : "LATIN";
@@ -659,6 +655,19 @@ html, body { margin: 0; padding: 0; }
 @media screen { body { padding: ${margin}mm; box-sizing: border-box; } }
 body { font-family: "Vazirmatn", Tahoma, sans-serif; font-size: 9pt; color: #111; direction: rtl; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 </style></head><body>${body}</body></html>`;
+}
+
+/** سند HTML کامل برای چاپ؛ خطای نحوی قالب با پیام فارسی پرتاب می‌شود */
+export function renderPrintDocument(input: RenderInput, data: PrintData): string {
+  let body: string;
+  try {
+    const schema = input.documentType ? PRINT_DOC_TYPES[input.documentType]?.designSchema : undefined;
+    const design = schema ? buildDesignContext(schema, input.design, data.totals) : undefined;
+    body = hb.compile(input.html, { strict: false })({ ...data, t: input.texts ?? {}, layout: printLayout(input.paper, input.orientation, input.marginMm), design });
+  } catch (e: any) {
+    throw new Error(`خطا در قالب چاپ: ${String(e?.message ?? e).split("\n")[0]}`);
+  }
+  return wrapPrintHtml(body, input);
 }
 
 export async function renderSavedTemplate(

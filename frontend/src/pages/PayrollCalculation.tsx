@@ -8,6 +8,7 @@ import { formatJalaliDate } from "../lib/formatDate";
 import { api, ApiError } from "../lib/api";
 import { usePersistedState } from "../lib/usePersistedState";
 import { KIND_FA, MONTHS_FA, currentJalaliYearMonth, hoursToHm } from "../lib/payrollLabels";
+import { PayrollSlipPrintDialog } from "../components/PayrollSlipPrint";
 
 // حقوق و دستمزد › محاسبه حقوق (عملیات) و گزارش محاسبات حقوق (گزارش): یک کارمند و یک ماه شمسی را انتخاب می‌کنید؛ محاسبه (فقط در حالت عملیات)
 // فیش را می‌سازد و گزارش، ریز ورودی‌ها و محاسبه‌ی تک‌تک عوامل (شرط، فرمول، مقدار عملوندها، نتیجه) را نشان می‌دهد.
@@ -61,6 +62,7 @@ export function PayrollReportPage() {
   const [slip, setSlip] = useState<Slip | null>(null);
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [printing, setPrinting] = useState(false);
 
   useEffect(() => {
     api.get("/employees").then((rows: any[]) => setEmployees(rows.map((r) => ({ id: r.id, personnelCode: r.personnelCode, fullName: r.fullName })))).catch(() => {});
@@ -139,12 +141,14 @@ export function PayrollReportPage() {
           </div>
         </div>
         <div style={{ marginTop: 8 }}>
-          <button type="button" className="btn secondary" onClick={() => load()}>نمایش</button>
+          <button type="button" className="btn secondary" onClick={() => load()}>نمایش</button>{" "}
+          {slip && <button type="button" className="btn secondary" onClick={() => setPrinting(true)}>چاپ فیش</button>}
         </div>
       </div>
 
       {searched && !slip && <p>برای این کارمند و ماه محاسبه‌ای ذخیره نشده است؛ از «محاسبه حقوق» محاسبه کنید.</p>}
       {slip && <SlipView slip={slip} />}
+      {printing && slip && <PayrollSlipPrintDialog year={slip.year} month={slip.month} employeeIds={[slip.employee.id]} onClose={() => setPrinting(false)} />}
     </div>
   );
 }

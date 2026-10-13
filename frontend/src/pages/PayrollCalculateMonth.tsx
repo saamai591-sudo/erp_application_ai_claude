@@ -8,6 +8,7 @@ import { useTabs } from "../lib/TabsContext";
 import { usePermissions } from "../lib/usePermissions";
 import { usePersistedState } from "../lib/usePersistedState";
 import { MONTHS_FA, currentJalaliYearMonth } from "../lib/payrollLabels";
+import { PayrollSlipPrintDialog } from "../components/PayrollSlipPrint";
 
 // حقوق و دستمزد › عملیات › محاسبه حقوق: ماه را انتخاب می‌کنید، «لود اطلاعات» فهرست پرسنل را می‌آورد، پرسنل مورد نظر را تیک می‌زنید و دکمهٔ
 // «محاسبه»ی نوار ابزار حقوق آن‌ها را (با ورودی‌های ثبت‌شده در «ورود اطلاعات») محاسبه می‌کند. ریز محاسبات در «گزارش محاسبات حقوق» است.
@@ -54,6 +55,7 @@ export default function PayrollCalculateMonth() {
   const [outcomes, setOutcomes] = useState<Record<number, Outcome>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   const canCalc = hasPermission("payroll.operations.payroll-calculation.calculate");
 
@@ -141,6 +143,15 @@ export default function PayrollCalculateMonth() {
               <CalcIcon /> محاسبه{hasUncalculatedPicked && picked.size ? ` (${toFaDigits(String(picked.size))})` : ""}
             </button>
           )}
+          <button
+            type="button"
+            className="btn secondary"
+            disabled={busy || !hasCalculatedPicked}
+            onClick={() => setPrinting(true)}
+            title={hasCalculatedPicked ? "چاپ فیش حقوقی کارمندان انتخاب‌شده (فقط محاسبه‌شده‌ها)" : "ردیف محاسبه‌شده‌ای انتخاب نشده است"}
+          >
+            چاپ فیش
+          </button>
           {hasPermission("payroll.operations.payroll-calculation.delete") && (
             <button
               type="button"
@@ -173,6 +184,15 @@ export default function PayrollCalculateMonth() {
           <button type="button" className="btn secondary" disabled={busy} onClick={load}>لود اطلاعات</button>
         </div>
       </div>
+
+      {printing && (
+        <PayrollSlipPrintDialog
+          year={Number(sel.year)}
+          month={Number(sel.month)}
+          employeeIds={pickedRows.filter((r) => r.slip).map((r) => r.employeeId)}
+          onClose={() => setPrinting(false)}
+        />
+      )}
 
       {rows && (
         <div style={{ overflowX: "auto" }}>
