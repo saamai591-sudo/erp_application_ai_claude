@@ -2118,4 +2118,13 @@ html[data-fx="off"] .fx-only { display: none !important; }
   .topbar .user { display: none; }
   .topbar-account { gap: 6px; min-width: 0; }
   .topbar-fiscal { max-width: 118px; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; margin-inline-end: 0; }
+
+  /* دکمه‌ی «ردیف جدید» گرید فرم‌های سند (class: mobile-fab): در موبایل یک دکمه‌ی شناور ثابت پایین-چپ صفحه می‌شود تا بعد از هر ردیف
+     مجبور به اسکرول برگشتن نباشیم؛ پایین گرید برای آن فضای خالی می‌ماند. */
+  .toolbar-icon-btn.mobile-fab {
+    position: fixed; bottom: 20px; left: 16px; z-index: 40; width: 56px; height: 56px; padding: 0; border-radius: 50%;
+    align-items: center; justify-content: center; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+  }
+  .toolbar-icon-btn.mobile-fab svg { width: 26px; height: 26px; }
+  .je-lines-wrap { padding-bottom: 84px; }
 }

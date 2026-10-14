@@ -358,6 +358,12 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
   }
   function addRow() {
     setRows((prev) => [...prev, emptyRow()]);
+    // موبایل: کارت ردیف تازه به دید بیاید تا کاربر مستقیم پر کند (روی دسکتاپ گرید خودش اسکرول می‌شود)
+    if (window.matchMedia("(max-width: 700px)").matches) {
+      window.setTimeout(() => {
+        document.querySelector(".je-lines-table.mobile-cards tbody tr:last-child")?.scrollIntoView({ block: "center", behavior: "smooth" });
+      }, 60);
+    }
   }
   function removeRow(idx: number) {
     setRows((prev) => prev.filter((_, i) => i !== idx));
@@ -530,7 +536,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
 
           <div className="je-lines-toolbar">
             <span className="je-lines-title">اقلام</span>
-            <button type="button" className="toolbar-icon-btn primary" onClick={addRow} title="ردیف جدید">
+            <button type="button" className="toolbar-icon-btn primary mobile-fab" onClick={addRow} title="ردیف جدید">
               <PlusIcon />
             </button>
           </div>
