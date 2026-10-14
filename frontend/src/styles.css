@@ -2102,4 +2102,20 @@ html[data-fx="off"] .fx-only { display: none !important; }
   .modal-overlay { padding: 10px 8px; }
   .modal { padding: 14px; }
   .modal .actions { flex-wrap: wrap; }
+
+  /* فرم‌های پایه (.form-grid / .form-field): تک‌ستونه با برچسب بالای فیلد — برای همه‌ی فرم‌ها از جمله اشخاص حقیقی و حقوقی */
+  .form-grid { grid-template-columns: 1fr; gap: 10px; }
+  .form-field { flex-direction: column; align-items: stretch; gap: 4px; margin-bottom: 0; }
+  .form-field label { min-width: 0; white-space: normal; }
+  .form-field.form-field-hidden { display: none; }
+  .form-field input:not([type="checkbox"]):not([type="radio"]), .form-field select, .form-field textarea { padding: 9px 10px; }
+  .party-tabs { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+  .party-tab { flex: 0 0 auto; padding: 10px 12px; }
+  .sub-list-item { flex-wrap: wrap; }
+
+  /* نوار بالا: نام کاربر فقط آیکن می‌ماند و عنوان دوره مالی کوتاه می‌شود تا دکمه‌ی «خروج» از صفحه بیرون نزند */
+  .topbar { padding: 0 8px; }
+  .topbar .user { display: none; }
+  .topbar-account { gap: 6px; min-width: 0; }
+  .topbar-fiscal { max-width: 118px; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; margin-inline-end: 0; }
 }
