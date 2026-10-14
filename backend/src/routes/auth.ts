@@ -1,7 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { prisma } from "../lib/prisma";
-import { signToken } from "../middleware/auth";
+import { SESSION_IDLE_MINUTES, SESSION_MAX_HOURS, signToken, verifyToken } from "../middleware/auth";
 
 const router = Router();
 
@@ -24,8 +24,28 @@ router.post("/login", async (req, res) => {
   const token = signToken({ id: user.id, mobile: user.mobile });
   res.json({
     token,
+    idleMinutes: SESSION_IDLE_MINUTES,
     user: { id: user.id, mobile: user.mobile, firstName: user.firstName, lastName: user.lastName },
   });
+});
+
+// تمدیدِ نشست: فقط با توکن هنوز معتبر؛ سقف مطلق نشست از لحظه‌ی ورود (SESSION_MAX_HOURS) رعایت می‌شود.
+// کلاینت فقط وقتی کاربر واقعاً کار کرده این را صدا می‌زند، پس درخواست‌های پس‌زمینه نشست را زنده نگه نمی‌دارند.
+router.post("/refresh", async (req, res) => {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith("Bearer ")) return res.status(401).json({ error: "توکن احراز هویت ارسال نشده است" });
+  try {
+    const p = verifyToken(header.slice("Bearer ".length));
+    const authAt = p.authAt ?? p.iat ?? Math.floor(Date.now() / 1000);
+    if (Date.now() / 1000 - authAt > SESSION_MAX_HOURS * 3600) {
+      return res.status(401).json({ error: "مدت مجاز نشست به پایان رسید؛ دوباره وارد شوید" });
+    }
+    const user = await prisma.user.findUnique({ where: { id: p.id }, select: { id: true, mobile: true, isActive: true } });
+    if (!user || !user.isActive) return res.status(401).json({ error: "کاربر غیرفعال است" });
+    res.json({ token: signToken({ id: user.id, mobile: user.mobile }, authAt), idleMinutes: SESSION_IDLE_MINUTES });
+  } catch {
+    res.status(401).json({ error: "توکن نامعتبر یا منقضی شده است" });
+  }
 });
 
 export default router;

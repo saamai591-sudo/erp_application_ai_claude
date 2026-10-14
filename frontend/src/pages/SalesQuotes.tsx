@@ -538,7 +538,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
 
         <div className="grid-wrap je-lines-wrap">
           <div className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
-            <table className="je-lines-table">
+            <table className="je-lines-table mobile-cards">
               <thead>
                 <tr>
                   <th>ردیف</th>
@@ -559,8 +559,8 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
                   const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
                   return (
                     <tr key={idx}>
-                      <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
-                      <td style={{ minWidth: 200 }}>
+                      <td data-label="ردیف" style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
+                      <td data-label="کالا" style={{ minWidth: 200 }}>
                         <RecordPickerField
                           title="انتخاب کالا"
                           disabled={locked}
@@ -573,26 +573,26 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
                           onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
                         />
                       </td>
-                      <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>
-                      <td style={{ minWidth: 120 }}>
+                      <td data-label="واحد" style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>
+                      <td data-label="مقدار" style={{ minWidth: 120 }}>
                         <AmountInput value={row.quantity} onChange={(v) => onQuantityChange(idx, v)} allowDecimal disabled={locked} />
                       </td>
-                      <td style={{ minWidth: 120 }}>
+                      <td data-label="فی" style={{ minWidth: 120 }}>
                         <AmountInput value={row.unitPrice} onChange={(v) => onUnitPriceChange(idx, v)} allowDecimal disabled={locked} />
                       </td>
-                      <td style={{ minWidth: 120 }}>
+                      <td data-label="مبلغ" style={{ minWidth: 120 }}>
                         <AmountInput value={row.amount} onChange={(v) => onAmountChange(idx, v)} allowDecimal disabled={locked} />
                       </td>
-                      <td style={{ minWidth: 120 }}>
+                      <td data-label="تخفیف" style={{ minWidth: 120 }}>
                         <AmountInput value={row.discount} onChange={(v) => onDiscountChange(idx, v)} allowDecimal placeholder="۰" disabled={locked} />
                       </td>
-                      <td style={{ minWidth: 120 }}>
+                      <td data-label="ارزش افزوده" style={{ minWidth: 120 }}>
                         <AmountInput value={row.vatAmount} onChange={(v) => updateRow(idx, { vatAmount: v })} allowDecimal placeholder="۰" disabled={locked} />
                       </td>
-                      <td style={{ minWidth: 140 }}>
+                      <td data-label="شرح" style={{ minWidth: 140 }}>
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} disabled={locked} />
                       </td>
-                      <td>
+                      <td data-label="" className="mc-actions">
                         <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeRow(idx)} disabled={locked}>
                           حذف
                         </button>

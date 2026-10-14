@@ -28,6 +28,12 @@ export class ApiError extends Error {
   }
 }
 
+/** وقتی سرور ۴۰۱ بدهد (توکن منقضی/نامعتبر) فراخوانی می‌شود؛ AuthProvider آن را به خروج از سیستم وصل می‌کند */
+let unauthorizedHandler: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  unauthorizedHandler = fn;
+}
+
 async function request(path: string, options: RequestInit = {}) {
   const token = getAuthToken();
   const fiscalPeriodId = getSavedFiscalPeriodId();
@@ -49,6 +55,8 @@ async function request(path: string, options: RequestInit = {}) {
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
+    // نشست منقضی شد (عدم فعالیت/پایان سقف نشست): خروج و بازگشت به صفحه‌ی ورود. خطای خودِ ورود (رمز اشتباه) مستثناست.
+    if (res.status === 401 && token && !path.startsWith("/auth/login")) unauthorizedHandler?.();
     // قفل لایسنس: نرم‌افزار فعال نیست ⇒ صفحه‌ی مدیریت (فعال‌سازی)
     if (res.status === 403 && data.code === "LICENSE_REQUIRED" && !window.location.pathname.startsWith("/management")) {
       window.location.assign("/management");

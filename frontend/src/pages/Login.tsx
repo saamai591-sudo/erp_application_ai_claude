@@ -35,7 +35,7 @@ function EyeIcon({ off }: { off: boolean }) {
 }
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, notice } = useAuth();
   const navigate = useNavigate();
   const [mobile, setMobile] = useState("");
   const [password, setPassword] = useState("");
@@ -91,6 +91,11 @@ export default function Login() {
           <h1>ورود به سیستم</h1>
           <p className="lg-sub">برای ورود، شماره همراه و رمز عبور خود را وارد کنید</p>
           <ErrorToast message={error} />
+          {notice && !error && (
+            <div className="alert warn" style={{ marginBottom: 14 }}>
+              {notice}
+            </div>
+          )}
           {locked && (
             <div className="alert error" style={{ marginBottom: 14 }}>
               نرم‌افزار فعال نشده است: {locked}.<br />

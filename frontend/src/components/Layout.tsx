@@ -764,7 +764,7 @@ export default function Layout() {
             <button className="topbar-dock-btn dock-c-slate" onClick={() => setAboutOpen(true)} title="درباره" aria-label="درباره">
               <InfoIconFilled />
             </button>
-            <button className="topbar-dock-btn dock-c-red" onClick={logout} title="خروج">
+            <button className="topbar-dock-btn dock-c-red" onClick={() => logout()} title="خروج">
               <PowerIconFilled />
             </button>
           </div>

@@ -2058,3 +2058,48 @@ html[data-fx="off"] .fx-only { display: none !important; }
 .hr-table th { background: var(--bg); font-weight: 600; }
 .link-btn { background: none; border: none; padding: 0; color: var(--primary); cursor: pointer; font: inherit; }
 .link-btn:hover { text-decoration: underline; }
+
+/* ===== موبایل (≤ ۷۰۰px) — پایه‌ی مشترک؛ هیچ فرمی استایل جدا نمی‌گیرد =====
+   ۱) فیلدها ۱۶px (iOS روی فیلد کوچک‌تر زوم می‌کند) و هدف لمسی بزرگ‌تر برای دکمه‌های نوار ابزار.
+   ۲) سرصفحه‌ی فرم‌های سند (.je-header-grid) تک‌ستونه می‌شود.
+   ۳) گرید ردیف‌هایی که class «mobile-cards» دارند (+ data-label روی هر td) به کارت تبدیل می‌شوند: هر ردیف یک کارت با برچسب و مقدار
+      کنار هم، بدون اسکرول افقی. فرم جدید فقط همین class و data-labelها را می‌گیرد. */
+@media (max-width: 700px) {
+  .content { padding: 10px; }
+  .content input:not([type="checkbox"]):not([type="radio"]), .content select, .content textarea,
+  .modal input:not([type="checkbox"]):not([type="radio"]), .modal select { font-size: 16px; }
+  .toolbar-icon-btn { padding: 9px; }
+  .form-toolbar { padding: 4px 6px; }
+  .form-toolbar-left, .form-toolbar-right { gap: 2px; }
+  .card { padding: 12px !important; }
+
+  .je-header-grid { grid-template-columns: 1fr; gap: 10px; }
+  .je-header-grid .form-field { flex-direction: column; align-items: stretch; gap: 4px; }
+  .je-header-grid .form-field label { min-width: 0; }
+  .je-header-grid input, .je-header-grid select, .je-header-grid .jalali-date-input { padding: 9px 10px; font-size: 16px; }
+
+  .je-lines-scroll { border: 0; overflow: visible !important; max-height: none !important; }
+  .je-lines-table.mobile-cards, .je-lines-table.mobile-cards tbody { display: block; width: 100%; }
+  .je-lines-table.mobile-cards thead { display: none; }
+  .je-lines-table.mobile-cards tr {
+    display: block; border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+    margin-bottom: 10px; padding: 6px 10px; background: var(--surface);
+  }
+  .je-lines-table.mobile-cards tbody tr:nth-child(even) td, .je-lines-table.mobile-cards tbody tr:hover td { background: transparent; }
+  .je-lines-table.mobile-cards td {
+    display: flex; align-items: center; gap: 10px; border: 0; padding: 5px 0;
+    min-width: 0 !important; width: auto !important; text-align: right !important;
+  }
+  .je-lines-table.mobile-cards td::before {
+    content: attr(data-label); flex: 0 0 82px; font-size: 12px; color: var(--ink-soft); font-weight: 600;
+  }
+  .je-lines-table.mobile-cards td[data-label=""]::before { display: none; }
+  .je-lines-table.mobile-cards td > * { flex: 1 1 auto; min-width: 0; }
+  .je-lines-table.mobile-cards td select, .je-lines-table.mobile-cards td input { padding: 9px 10px; font-size: 16px; }
+  .je-lines-table.mobile-cards td.mc-actions { justify-content: flex-end; }
+  .je-lines-table.mobile-cards td.mc-actions > * { flex: 0 0 auto; }
+  .je-lines-footer { flex-direction: column; align-items: stretch; gap: 4px; }
+  .modal-overlay { padding: 10px 8px; }
+  .modal { padding: 14px; }
+  .modal .actions { flex-wrap: wrap; }
+}
