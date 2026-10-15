@@ -12,28 +12,36 @@ export function AmountInput({
   onChange,
   placeholder,
   allowDecimal = false,
+  allowNegative = false,
   disabled = false,
 }: {
   value: string;
   onChange: (rawValue: string) => void;
   placeholder?: string;
   allowDecimal?: boolean;
+  /** اجازه‌ی علامت منفی ابتدای عدد (مثلاً درصد کسر)؛ مقدار برگشتی با «-» شروع می‌شود */
+  allowNegative?: boolean;
   disabled?: boolean;
 }) {
   function handleChange(e: ChangeEvent<HTMLInputElement>) {
     // ابتدا ارقام فارسی/عربی احتمالی (مقدار نمایشی همیشه با ارقام فارسی رندر می‌شود) به انگلیسی
     // تبدیل می‌شود تا regexهای زیر (که فقط \d انگلیسی را تشخیص می‌دهند) درست کار کنند — قبلاً این
     // تبدیل قبل از تشخیص نقطه‌ی اعشار انجام نمی‌شد و باعث می‌شد نقطه همیشه حذف شود.
-    const normalized = toEnglishDigits(e.target.value.replace(/,/g, "")).replace(/٫/g, ".");
+    let sign = "";
+    let normalized = toEnglishDigits(e.target.value.replace(/,/g, "")).replace(/٫/g, ".");
+    if (allowNegative && /^\s*[-\u2212\u2013]/.test(normalized)) {
+      sign = "-";
+      normalized = normalized.replace(/^\s*[-\u2212\u2013]/, "");
+    }
     if (allowDecimal) {
       // اجازه به یک نقطه اعشار (کاربر ممکن است از / یا . استفاده کند)
       const decimalMatch = normalized.match(/^(\d*)\.(\d*)$/);
       if (decimalMatch) {
-        onChange(`${decimalMatch[1]}.${decimalMatch[2]}`);
+        onChange(`${sign}${decimalMatch[1]}.${decimalMatch[2]}`);
         return;
       }
     }
-    onChange(normalized.replace(/[^\d]/g, ""));
+    onChange(sign + normalized.replace(/[^\d]/g, ""));
   }
 
   const display = value ? formatAmountFa(value) : "";

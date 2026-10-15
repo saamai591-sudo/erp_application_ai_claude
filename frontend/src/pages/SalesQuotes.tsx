@@ -51,7 +51,7 @@ function customerTitle(c: CustomerOption): string {
 }
 
 interface ListRow { id: number; number: number; date: string; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: Status; lineCount: number; totalAmount: number }
-interface DetailLine { id: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null }
+interface DetailLine { id: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null; listPrice?: number | null }
 interface Detail extends ListRow { currencyId: number; description: string | null; validUntil?: string | null; lines: DetailLine[] }
 
 const STATUS_FA: Record<Status, string> = { DRAFT: "ثبت", APPROVED: "تایید" };
@@ -159,7 +159,18 @@ function SalesQuoteList() {
   );
 }
 
-interface RowState { goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; discount: string; vatAmount: string; description: string }
+/** listPrice = قیمتی که سیستم (اعلامیه قیمت) برای مقدار ردیف پیشنهاد داده؛ unitPrice فی نهایی است و کاربر می‌تواند عوضش کند */
+interface RowState { goodsItemId: string; goodsItemCode: string; goodsItemTitle: string; unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; discount: string; vatAmount: string; description: string; listPrice: string }
+
+/** فی پایه و پله‌های یک کالا از اعلامیه‌ی مؤثر (GET /sales-price-lists/resolve) */
+interface PriceInfo { basePrice: number; tiers: { minQuantity: number; effect: string; value: number; price: number }[] }
+
+/** آینه‌ی services/salesPriceService.ts#computePrice (فقط نمایش؛ مرجع نهایی سرور است): پله‌ی برنده = بزرگ‌ترین «از مقدار» ≤ مقدار ردیف */
+function computeListPrice(info: PriceInfo, qty: number): number {
+  let winner: PriceInfo["tiers"][number] | null = null;
+  for (const t of info.tiers) if (t.minQuantity <= qty && (!winner || t.minQuantity > winner.minQuantity)) winner = t;
+  return winner ? winner.price : info.basePrice;
+}
 
 /** داده‌ی «تکثیر پیش‌فاکتور» که فرم مبدأ در حافظه می‌گذارد و تبِ «جدید» برمی‌دارد (lib/formPrefill.ts) */
 interface QuoteDuplicatePrefill {
@@ -189,7 +200,7 @@ function DuplicateIcon() {
 }
 
 function emptyRow(): RowState {
-  return { goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "" };
+  return { goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "", listPrice: "" };
 }
 
 function SalesQuoteForm({ editId }: { editId?: number }) {
@@ -251,6 +262,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
             discount: String(l.discount || 0),
             vatAmount: String(l.vatAmount || 0),
             description: l.description || "",
+            listPrice: l.listPrice === null || l.listPrice === undefined ? "" : String(l.listPrice),
           }))
         );
       } else {
@@ -286,10 +298,10 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
       p.rows.length === 0
         ? [emptyRow()]
         : p.rows.map((r) => {
-            if (!rateChanged || !r.goodsItemId) return { ...r };
+            if (!rateChanged || !r.goodsItemId) return { ...r, listPrice: "" };
             const item = goodsItems.find((g) => g.id === Number(r.goodsItemId));
             const vat = computeLineVat(Number(r.amount) || 0, Number(r.discount) || 0, resolveVatRatePercent(item, vatRateForDate(vatRates, header.date)), dec);
-            return { ...r, vatAmount: String(vat) };
+            return { ...r, vatAmount: String(vat), listPrice: "" };
           })
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -328,6 +340,68 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
     return String(computeLineVat(amount, discount, resolveVatRatePercent(item, vatRateForDate(vatRates, header.date)), currencies.find((c) => String(c.id) === String(header.currencyId))?.decimalPlaces ?? 2));
   }
+  // ── فراخوانی قیمت از اعلامیه (فی پایه + پله‌ها): کلید زمینه = مرکز/نوع/ارز/تاریخ؛ جدول پله‌ی هر کالا یک‌بار می‌آید و تغییر مقدار بدون درخواست شبکه محاسبه می‌شود
+  const priceKey = header.salesCenterId && header.salesTypeId && header.currencyId && header.date ? `${header.salesCenterId}|${header.salesTypeId}|${header.currencyId}|${header.date}` : "";
+  const [priceCache, setPriceCache] = useState<{ key: string; items: Record<string, PriceInfo | null> }>({ key: "", items: {} });
+  const priceItems = priceCache.key === priceKey ? priceCache.items : {};
+
+  async function ensurePricing(ids: string[], force = false): Promise<Record<string, PriceInfo | null>> {
+    if (!priceKey) return {};
+    const have = priceCache.key === priceKey && !force ? priceCache.items : {};
+    const missing = [...new Set(ids.filter((id) => id && !(id in have)))];
+    if (missing.length === 0) return have;
+    try {
+      const r = await api.get(
+        `/sales-price-lists/resolve?salesCenterId=${header.salesCenterId}&salesTypeId=${header.salesTypeId}&currencyId=${header.currencyId}&date=${header.date}&goodsItemIds=${missing.join(",")}`
+      );
+      const merged: Record<string, PriceInfo | null> = { ...have };
+      for (const id of missing) merged[id] = (r.items && r.items[id]) || null;
+      setPriceCache({ key: priceKey, items: merged });
+      return merged;
+    } catch {
+      return have; // خطای شبکه/دسترسی: فی دستی می‌ماند، مانع کار کاربر نشود
+    }
+  }
+
+  // کش پله‌ها برای همه‌ی ردیف‌های دارای کالا پر می‌شود تا تغییر مقدار بدون درخواست شبکه با پله هماهنگ شود. در فرم جدید/تکثیر، قیمت سیستمِ ردیف‌هایی که
+  // هنوز ندارند فقط نمایش داده می‌شود (فی نهایی دست‌نخورده)؛ در ویرایش، قیمت سیستمِ ذخیره‌شده‌ی ردیف (مرجع حسابرسی) عوض نمی‌شود.
+  const rowItemIds = rows.map((r) => r.goodsItemId).filter(Boolean).join(",");
+  useEffect(() => {
+    if (!loaded || locked || !priceKey || !rowItemIds) return;
+    let cancelled = false;
+    ensurePricing(rowItemIds.split(",")).then((map) => {
+      if (cancelled || editId) return;
+      setRows((prev) =>
+        prev.map((r) => {
+          const info = r.goodsItemId ? map[r.goodsItemId] : null;
+          return info && r.listPrice === "" ? { ...r, listPrice: String(computeListPrice(info, Number(r.quantity) || 0)) } : r;
+        })
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, priceKey, rowItemIds]);
+
+  async function recallPrices() {
+    const ids = rows.map((r) => r.goodsItemId).filter(Boolean);
+    if (ids.length === 0) return;
+    const map = await ensurePricing(ids, true);
+    const manual = rows.filter((r) => r.goodsItemId && map[r.goodsItemId] && r.listPrice !== "" && Number(r.unitPrice) !== Number(r.listPrice)).length;
+    if (manual > 0 && !window.confirm(`فی ${toFaDigits(String(manual))} ردیف به‌صورت دستی تغییر کرده است؛ با بازفراخوانی به قیمت اعلامیه برمی‌گردد. ادامه می‌دهید؟`)) return;
+    setRows((prev) =>
+      prev.map((r) => {
+        const info = r.goodsItemId ? map[r.goodsItemId] : null;
+        if (!info) return r;
+        const qty = Number(r.quantity) || 0;
+        const lp = computeListPrice(info, qty);
+        const amount = Math.round(lp * qty * 100) / 100;
+        return { ...r, listPrice: String(lp), unitPrice: String(lp), amount: String(amount), vatAmount: computeSuggestedVat(amount, Number(r.discount) || 0, r.goodsItemId) };
+      })
+    );
+  }
+
   function onUnitPriceChange(idx: number, unitPrice: string) {
     const row = rows[idx];
     const amount = Math.round(Number(unitPrice) * (Number(row.quantity) || 0) * 100) / 100;
@@ -345,6 +419,16 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
   }
   function onQuantityChange(idx: number, quantity: string) {
     const row = rows[idx];
+    const info = row.goodsItemId ? priceItems[row.goodsItemId] : null;
+    if (info) {
+      const qty = Number(quantity) || 0;
+      const lp = computeListPrice(info, qty);
+      const follows = row.unitPrice === "" || Number(row.unitPrice) === Number(row.listPrice);
+      const unitPrice = follows ? String(lp) : row.unitPrice;
+      const amount = Math.round(Number(unitPrice) * qty * 100) / 100;
+      updateRow(idx, { quantity, listPrice: String(lp), unitPrice, amount: String(amount), vatAmount: computeSuggestedVat(amount, Number(row.discount) || 0, row.goodsItemId) });
+      return;
+    }
     if (row.unitPrice) {
       const amount = Math.round(Number(row.unitPrice) * (Number(quantity) || 0) * 100) / 100;
       updateRow(idx, { quantity, amount: String(amount), vatAmount: computeSuggestedVat(amount, Number(row.discount) || 0, row.goodsItemId) });
@@ -352,9 +436,21 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
       updateRow(idx, { quantity });
     }
   }
-  function onGoodsItemChange(idx: number, goodsItemId: string) {
+  async function onGoodsItemChange(idx: number, goodsItemId: string) {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
-    updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "" });
+    updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "", listPrice: "" });
+    if (!goodsItemId) return;
+    const info = (await ensurePricing([goodsItemId]))[goodsItemId];
+    if (!info) return;
+    setRows((prev) =>
+      prev.map((r, i) => {
+        if (i !== idx || r.goodsItemId !== goodsItemId) return r;
+        const qty = Number(r.quantity) || 0;
+        const lp = computeListPrice(info, qty);
+        const amount = Math.round(lp * qty * 100) / 100;
+        return { ...r, listPrice: String(lp), unitPrice: String(lp), amount: String(amount), vatAmount: computeSuggestedVat(amount, Number(r.discount) || 0, goodsItemId) };
+      })
+    );
   }
   function addRow() {
     setRows((prev) => [...prev, emptyRow()]);
@@ -536,6 +632,9 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
 
           <div className="je-lines-toolbar">
             <span className="je-lines-title">اقلام</span>
+            <button type="button" className="btn secondary" style={{ marginInlineStart: "auto", marginInlineEnd: 8, padding: "4px 10px", fontSize: 12 }} onClick={recallPrices} disabled={locked} title="فی ردیف‌ها را دوباره از اعلامیه قیمت (برای مرکز، نوع فروش، ارز و تاریخ همین سند) فراخوانی می‌کند">
+              بازفراخوانی قیمت
+            </button>
             <button type="button" className="toolbar-icon-btn primary mobile-fab" onClick={addRow} title="ردیف جدید">
               <PlusIcon />
             </button>
@@ -552,6 +651,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
                   <th>واحد</th>
                   <th>مقدار</th>
                   <th>فی</th>
+                  <th>قیمت اعلامیه</th>
                   <th>مبلغ</th>
                   <th>تخفیف</th>
                   <th>مالیات بر ارزش افزوده</th>
@@ -585,6 +685,13 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
                       </td>
                       <td data-label="فی" style={{ minWidth: 120 }}>
                         <AmountInput value={row.unitPrice} onChange={(v) => onUnitPriceChange(idx, v)} allowDecimal disabled={locked} />
+                      </td>
+                      <td
+                        data-label="قیمت اعلامیه"
+                        style={{ minWidth: 110, color: row.listPrice !== "" && Number(row.unitPrice) !== Number(row.listPrice) ? "var(--warning, #b7791f)" : "var(--ink-soft)", whiteSpace: "nowrap" }}
+                        title={row.listPrice !== "" && Number(row.unitPrice) !== Number(row.listPrice) ? "فی نهایی با قیمت اعلامیه فرق دارد (فی دستی)" : undefined}
+                      >
+                        {row.listPrice === "" ? "—" : formatAmountFa(row.listPrice)}
                       </td>
                       <td data-label="مبلغ" style={{ minWidth: 120 }}>
                         <AmountInput value={row.amount} onChange={(v) => onAmountChange(idx, v)} allowDecimal disabled={locked} />

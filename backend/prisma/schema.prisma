@@ -139,6 +139,7 @@ model Currency {
   treasuryOpeningBankAccounts TreasuryOpeningBankAccount[]
   treasuryOpeningPettyCashLines TreasuryOpeningPettyCash[]
   treasuryOpeningCashBoxes TreasuryOpeningCashBox[]
+  salesPriceLists SalesPriceList[]
 }
 
 model ExchangeRate {
@@ -493,6 +494,7 @@ model SalesCenter {
   salesInvoices      SalesInvoice[]
   numberingPatternItems NumberingPatternItem[]
   salesReturnInvoices SalesReturnInvoice[]
+  priceListScopes SalesPriceListScope[]
 }
 
 model CashBox {
@@ -1105,6 +1107,8 @@ model GoodsItem {
   pricingFlowWarehouses         GoodsPricingFlowWarehouse[]
 
   @@unique([goodsGroupId, code])
+  salesPriceListLines SalesPriceListLine[]
+  salesPriceRules SalesPriceRule[]
 }
 
 model GoodsItemAttributeValue {
@@ -1429,6 +1433,7 @@ model SalesType {
   salesQuotes                    SalesQuote[]
   salesOrders                    SalesOrder[]
   goodsServiceAccountingSettings GoodsServiceAccountingSetting[]
+  priceListScopes SalesPriceListScope[]
 }
 
 // طبق Documents/ReceiptType.md: مستر «نوع دریافت» — نوع دریافت (nature) تعیین می‌کند این دریافت اساساً
@@ -2302,12 +2307,97 @@ model SalesQuoteLine {
   /// پیش‌فاکتور اصلاً fxRate/تبدیل‌ارز ندارد (سندی صرفاً اطلاعاتی، بدون اثر حسابداری).
   vatAmount       Decimal          @default(0) @db.Decimal(36, 10)
   description     String?
+  /// منبع فی نهایی (unitPrice): LIST = دقیقاً قیمت پایه‌ی اعلامیه، RULE = قیمت پس از قاعده‌ی پله‌ای، MANUAL = کاربر عوض کرده یا قیمتی در اعلامیه نبوده
+  priceSource     SalesQuotePriceSource @default(MANUAL)
+  /// قیمت پایه‌ی اعلامیه (فریز در لحظه‌ی ثبت)
+  basePrice       Decimal?         @db.Decimal(36, 10)
+  /// قیمت سیستم پس از اعمال قاعده؛ فی نهایی (unitPrice) ممکن است با آن فرق کند (فی دستی)
+  listPrice       Decimal?         @db.Decimal(36, 10)
+  priceListId     Int?
+  priceRuleId     Int?
+  priceList       SalesPriceList?  @relation(fields: [priceListId], references: [id], onDelete: Restrict)
+  priceRule       SalesPriceRule?  @relation(fields: [priceRuleId], references: [id], onDelete: Restrict)
   salesOrderLines SalesOrderLine[] @relation("SalesOrderSourceSalesQuoteLine")
   salesInvoiceLines SalesInvoiceLine[] @relation("SalesInvoiceSourceSalesQuoteLine")
   inventoryLines  InventoryDocumentLine[] @relation("InventoryLineSourceSalesQuoteLine")
   goodsItem       GoodsItem        @relation(fields: [goodsItemId], references: [id])
   salesQuote      SalesQuote       @relation(fields: [salesQuoteId], references: [id], onDelete: Cascade)
   unit            UnitOfMeasure    @relation(fields: [unitId], references: [id])
+}
+
+enum SalesPriceRuleEffect {
+  ABSOLUTE
+  PERCENT
+}
+
+enum SalesQuotePriceSource {
+  MANUAL
+  LIST
+  RULE
+}
+
+/// اعلامیه قیمت فروش: ارز + تاریخ اجرا + مجموعه‌ی (مرکز فروش × نوع فروش)؛ تغییر با اعلامیه‌ی جدید و بعد از اولین استفاده قفل است
+model SalesPriceList {
+  id            Int      @id @default(autoincrement())
+  number        Int      @unique
+  title         String
+  currencyId    Int
+  effectiveDate DateTime @db.Date
+  isActive      Boolean  @default(true)
+  description   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  currency      Currency @relation(fields: [currencyId], references: [id])
+  scopes        SalesPriceListScope[]
+  lines         SalesPriceListLine[]
+  rules         SalesPriceRule[]
+  quoteLines    SalesQuoteLine[]
+}
+
+model SalesPriceListScope {
+  id            Int      @id @default(autoincrement())
+  priceListId   Int
+  salesCenterId Int
+  salesTypeId   Int
+  /// کپی ارز و تاریخ اجرای اعلامیه، فقط برای یکتایی در دیتابیس (هر ترکیب مرکز×نوع×ارز×تاریخ فقط یک اعلامیه)
+  currencyId    Int
+  effectiveDate DateTime @db.Date
+  priceList     SalesPriceList @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  salesCenter   SalesCenter    @relation(fields: [salesCenterId], references: [id])
+  salesType     SalesType      @relation(fields: [salesTypeId], references: [id])
+
+  @@unique([priceListId, salesCenterId, salesTypeId])
+  @@unique([salesCenterId, salesTypeId, currencyId, effectiveDate])
+  @@index([salesCenterId, salesTypeId, effectiveDate])
+}
+
+model SalesPriceListLine {
+  id          Int      @id @default(autoincrement())
+  priceListId Int
+  goodsItemId Int
+  /// فی پایه به ازای واحد اصلی کالا
+  price       Decimal  @db.Decimal(36, 10)
+  priceList   SalesPriceList @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  goodsItem   GoodsItem      @relation(fields: [goodsItemId], references: [id])
+
+  @@unique([priceListId, goodsItemId])
+  @@index([goodsItemId])
+}
+
+/// پله‌ی مقدار: برای مقدار ردیف ≥ minQuantity، فی = value (ABSOLUTE) یا فی پایه × (۱ + value/100) (PERCENT؛ منفی = کاهش)
+model SalesPriceRule {
+  id          Int      @id @default(autoincrement())
+  priceListId Int
+  goodsItemId Int
+  minQuantity Decimal  @db.Decimal(36, 10)
+  effect      SalesPriceRuleEffect
+  value       Decimal  @db.Decimal(36, 10)
+  priceList   SalesPriceList @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  goodsItem   GoodsItem      @relation(fields: [goodsItemId], references: [id])
+  quoteLines  SalesQuoteLine[]
+
+  @@unique([priceListId, goodsItemId, minQuantity])
+  @@index([goodsItemId])
 }
 
 model SalesOrder {

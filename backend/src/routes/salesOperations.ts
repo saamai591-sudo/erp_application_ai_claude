@@ -8,6 +8,7 @@ import { resolveVatRatePercent, computeLineVat } from "../utils/vatCalculation";
 import { getVatRatePercentForDate } from "../services/accountingSettingsService";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
+import { computePrice, findEffectivePriceListId, loadItemPricing } from "../services/salesPriceService";
 
 const CUSTOMERS_FORM = findFormPrefix("customers");
 const SALES_QUOTES_FORM = findFormPrefix("sales-quotes");
@@ -130,9 +131,34 @@ interface SalesQuoteLineInput {
 // همیشه به همان ارز هدر (نه ارز مبنا) محاسبه/ذخیره می‌شود — چون پیش‌فاکتور اصلاً fxRate ندارد (سندی
 // صرفاً اطلاعاتی، بدون اثر حسابداری)، پس نیازی به تبدیل به ارز مبنا هم نیست؛ amount همان‌جا که هست
 // (به ارز هدر) مستقیماً در فرمول مشترک utils/vatCalculation.ts به کار می‌رود.
-async function validateSalesQuoteLines(lines: SalesQuoteLineInput[], docDate: Date, decimalPlaces = 2) {
+/** ممیزی قیمت ردیف: فی نهایی همان unitPrice است؛ اینجا «قیمت سیستم» در لحظه‌ی ثبت کنارش فریز می‌شود */
+interface QuotePriceAudit {
+  priceSource: "MANUAL" | "LIST" | "RULE";
+  basePrice: number | null;
+  listPrice: number | null;
+  priceListId: number | null;
+  priceRuleId: number | null;
+}
+
+interface QuotePricingContext {
+  salesCenterId: number;
+  salesTypeId: number;
+  currencyId: number;
+  /** ردیف‌های ذخیره‌شده‌ی همین پیش‌فاکتور (فقط وقتی سرصفحه‌ی قیمت‌گذاری تغییر نکرده) تا مرجع قیمت ردیف بدون تغییرِ کالا/مقدار عوض نشود */
+  keepFrom?: { goodsItemId: number; quantity: number; basePrice: number | null; listPrice: number | null; priceListId: number | null; priceRuleId: number | null }[];
+}
+
+const PRICE_EPS = 1e-9;
+
+async function validateSalesQuoteLines(lines: SalesQuoteLineInput[], docDate: Date, decimalPlaces = 2, pricing?: QuotePricingContext) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("پیش‌فاکتور باید حداقل یک ردیف کالا داشته باشد");
-  const cleaned: { goodsItemId: number; unitId: number; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null }[] = [];
+  const cleaned: ({ goodsItemId: number; unitId: number; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null } & QuotePriceAudit)[] = [];
+  // اعلامیه‌ی مؤثر و قیمت‌های همه‌ی کالاها یک‌جا (دو کوئری، نه یکی برای هر ردیف)
+  const priceListId = pricing ? await findEffectivePriceListId({ salesCenterId: pricing.salesCenterId, salesTypeId: pricing.salesTypeId, currencyId: pricing.currencyId, date: docDate }) : null;
+  const priceMap = priceListId
+    ? await loadItemPricing(priceListId, [...new Set(lines.map((l) => Number(l.goodsItemId)).filter((x) => x > 0))], decimalPlaces)
+    : new Map();
+  const keepPool = [...(pricing?.keepFrom ?? [])];
   for (const [idx, l] of lines.entries()) {
     const qty = Number(l.quantity);
     if (!(qty > 0)) throw new Error(`مقدار ردیف ${idx + 1} باید عددی مثبت باشد`);
@@ -156,7 +182,22 @@ async function validateSalesQuoteLines(lines: SalesQuoteLineInput[], docDate: Da
     const vatAmount = l.vatAmount !== undefined && l.vatAmount !== null ? Math.round(Number(l.vatAmount) * 10 ** decimalPlaces) / 10 ** decimalPlaces : suggestedVatAmount;
     if (!(vatAmount >= 0)) throw new Error(`مالیات بر ارزش افزوده ردیف ${idx + 1} نامعتبر است`);
 
-    cleaned.push({ goodsItemId: l.goodsItemId, unitId, quantity: qty, unitPrice, amount, discount, vatAmount, description: l.description || null });
+    // ممیزی قیمت: ردیف ذخیره‌شده‌ی بدون تغییر کالا/مقدار مرجع قبلی را نگه می‌دارد، وگرنه از اعلامیه‌ی مؤثر محاسبه می‌شود
+    let audit: QuotePriceAudit = { priceSource: "MANUAL", basePrice: null, listPrice: null, priceListId: null, priceRuleId: null };
+    const keptIdx = keepPool.findIndex((k) => k.goodsItemId === l.goodsItemId && Math.abs(k.quantity - qty) < PRICE_EPS);
+    if (keptIdx >= 0) {
+      const k = keepPool.splice(keptIdx, 1)[0];
+      audit = { ...audit, basePrice: k.basePrice, listPrice: k.listPrice, priceListId: k.priceListId, priceRuleId: k.priceRuleId };
+    } else {
+      const entry = priceMap.get(l.goodsItemId);
+      if (entry) {
+        const c = computePrice(entry, qty);
+        audit = { ...audit, basePrice: c.basePrice, listPrice: c.listPrice, priceListId: c.priceListId, priceRuleId: c.ruleId };
+      }
+    }
+    if (audit.listPrice !== null && Math.abs(unitPrice - audit.listPrice) < PRICE_EPS) audit.priceSource = audit.priceRuleId ? "RULE" : "LIST";
+
+    cleaned.push({ goodsItemId: l.goodsItemId, unitId, quantity: qty, unitPrice, amount, discount, vatAmount, description: l.description || null, ...audit });
   }
   return cleaned;
 }
@@ -249,6 +290,9 @@ router.get("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.view`), async (req, re
       discount: Number(l.discount),
       vatAmount: Number(l.vatAmount),
       description: l.description,
+      priceSource: l.priceSource,
+      basePrice: l.basePrice === null ? null : Number(l.basePrice),
+      listPrice: l.listPrice === null ? null : Number(l.listPrice),
     })),
   });
 });
@@ -270,7 +314,7 @@ export async function createSalesQuote(body: SalesQuoteHeaderBody, forcedNumber?
     if (!salesCenter) throw new Error("مرکز فروش یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
-    const lines = await validateSalesQuoteLines(body.lines, date, currency.decimalPlaces);
+    const lines = await validateSalesQuoteLines(body.lines, date, currency.decimalPlaces, { salesCenterId: body.salesCenterId, salesTypeId: body.salesTypeId, currencyId: body.currencyId });
     const validUntil = parseQuoteValidUntil(body.validUntil, date);
 
     const number = forcedNumber ?? (await nextNumber(prisma.salesQuote, fiscalPeriod.id));
@@ -324,7 +368,23 @@ router.put("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.edit`), async (req, re
     if (!salesCenter) throw new Error("مرکز فروش یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
-    const lines = await validateSalesQuoteLines(body.lines, date, currency.decimalPlaces);
+    // مرجع قیمت ردیف‌های بدون تغییر فقط وقتی حفظ می‌شود که سرصفحه‌ی قیمت‌گذاری (مرکز/نوع/ارز/تاریخ) همان باشد
+    const sameContext =
+      existing.salesCenterId === body.salesCenterId &&
+      existing.salesTypeId === body.salesTypeId &&
+      existing.currencyId === body.currencyId &&
+      existing.date.toISOString().slice(0, 10) === date.toISOString().slice(0, 10);
+    const keepFrom = sameContext
+      ? (await prisma.salesQuoteLine.findMany({ where: { salesQuoteId: id }, select: { goodsItemId: true, quantity: true, basePrice: true, listPrice: true, priceListId: true, priceRuleId: true } })).map((k) => ({
+          goodsItemId: k.goodsItemId,
+          quantity: Number(k.quantity),
+          basePrice: k.basePrice === null ? null : Number(k.basePrice),
+          listPrice: k.listPrice === null ? null : Number(k.listPrice),
+          priceListId: k.priceListId,
+          priceRuleId: k.priceRuleId,
+        }))
+      : undefined;
+    const lines = await validateSalesQuoteLines(body.lines, date, currency.decimalPlaces, { salesCenterId: body.salesCenterId, salesTypeId: body.salesTypeId, currencyId: body.currencyId, keepFrom });
     const validUntil = parseQuoteValidUntil(body.validUntil, date);
 
     await prisma.$transaction([

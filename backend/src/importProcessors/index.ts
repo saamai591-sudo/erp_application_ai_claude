@@ -15,6 +15,7 @@ import { createCenterConsumption } from "../routes/centerConsumptions";
 import { createWarehouseAdjustment } from "../routes/warehouseAdjustments";
 import { createInventoryCountingShortage } from "../routes/inventoryCountingShortages";
 import { createSalesQuote } from "../routes/salesOperations";
+import { isPriceListUsed } from "../services/salesPriceService";
 
 const DETAIL_TYPE_PARTY = 1;
 const DETAIL_TYPE_COST_CENTER = 2;
@@ -1068,6 +1069,61 @@ export function registerAllImportProcessors() {
       } catch (e: any) {
         return { ok: false, error: e.message || "خطا در ثبت پیش‌فاکتور" };
       }
+    },
+  });
+
+  // «اعلامیه قیمت فروش» — هر ردیف اکسل یک ردیف قیمت و/یا یک پله‌ی مقدار برای کالا در یک اعلامیه‌ی از قبل ساخته‌شده است (سربرگ: عنوان/ارز/تاریخ/
+  // مرکز و نوع فروش را کاربر در فرم می‌سازد؛ ورود فقط قیمت‌ها و پله‌ها را پر می‌کند، تکرارپذیر: دوباره ورود = به‌روزرسانی همان ردیف/پله).
+  // اعلامیه‌ی استفاده‌شده قفل است و رد می‌شود. ستون «فی پایه» ردیف قیمت می‌سازد؛ سه ستون «از مقدار/نوع اثر/مقدار اثر» با هم یک پله می‌سازند
+  // (کالا باید فی پایه داشته باشد: همین ردیف یا ردیف قبلی). هر ردیف مستقل است و خطاها ردیف‌به‌ردیف گزارش می‌شود.
+  registerImportEntity("sales-price-list", {
+    row: async (row, _ctx) => {
+      const number = Number(toEnglishDigits(row.priceListNumber || "").trim());
+      if (!Number.isInteger(number) || number <= 0) return { ok: false, error: "شماره‌ی اعلامیه الزامی و باید عدد صحیح مثبت باشد" };
+      const list = await prisma.salesPriceList.findUnique({ where: { number }, select: { id: true } });
+      if (!list) return { ok: false, error: `اعلامیه‌ای با شماره ${number} یافت نشد؛ ابتدا اعلامیه را در فرم بسازید` };
+      if (await isPriceListUsed(list.id)) return { ok: false, error: `اعلامیه‌ی شماره ${number} در پیش‌فاکتور استفاده شده و قفل است؛ اعلامیه‌ی جدید بسازید` };
+
+      const resolved = await resolveGoodsItemByCode(row, 0);
+      if ("error" in resolved) return { ok: false, error: resolved.error.replace(/^ردیف \d+: /, "") };
+      const item = resolved.item;
+      if (!item.isActive) return { ok: false, error: `کالای «${item.title}» غیرفعال است` };
+
+      const rawPrice = toEnglishDigits(row.price || "").replace(/,/g, "").trim();
+      const rawMin = toEnglishDigits(row.tierMinQuantity || "").replace(/,/g, "").trim();
+      const rawEffect = (row.tierEffect || "").trim();
+      const rawValue = toEnglishDigits(row.tierValue || "").replace(/,/g, "").trim();
+      const hasTier = !!(rawMin || rawEffect || rawValue);
+      if (!rawPrice && !hasTier) return { ok: false, error: "«فی پایه» یا مشخصات پله (از مقدار، نوع اثر، مقدار اثر) باید پر باشد" };
+
+      if (rawPrice) {
+        const price = Number(rawPrice);
+        if (!Number.isFinite(price) || price < 0) return { ok: false, error: "فی پایه نامعتبر است" };
+        await prisma.salesPriceListLine.upsert({
+          where: { priceListId_goodsItemId: { priceListId: list.id, goodsItemId: item.id } },
+          create: { priceListId: list.id, goodsItemId: item.id, price },
+          update: { price },
+        });
+      }
+      if (hasTier) {
+        if (!rawMin || !rawEffect || !rawValue) return { ok: false, error: "پله باید هر سه ستون «از مقدار»، «نوع اثر» و «مقدار اثر» را داشته باشد" };
+        const minQuantity = Number(rawMin);
+        if (!(minQuantity > 0)) return { ok: false, error: "«از مقدار» باید عددی مثبت باشد" };
+        const effect = ({ "قیمت مطلق": "ABSOLUTE", "مطلق": "ABSOLUTE", ABSOLUTE: "ABSOLUTE", "درصد": "PERCENT", PERCENT: "PERCENT" } as Record<string, "ABSOLUTE" | "PERCENT">)[rawEffect];
+        if (!effect) return { ok: false, error: "«نوع اثر» باید «قیمت مطلق» یا «درصد» باشد" };
+        const value = Number(rawValue);
+        if (!Number.isFinite(value)) return { ok: false, error: "«مقدار اثر» نامعتبر است" };
+        if (effect === "ABSOLUTE" && value < 0) return { ok: false, error: "قیمت مطلق نمی‌تواند منفی باشد" };
+        if (effect === "PERCENT" && value <= -100) return { ok: false, error: "درصد کسر باید بیشتر از ۱۰۰- باشد" };
+        const base = await prisma.salesPriceListLine.findUnique({ where: { priceListId_goodsItemId: { priceListId: list.id, goodsItemId: item.id } }, select: { id: true } });
+        if (!base) return { ok: false, error: `کالای «${item.title}» در اعلامیه فی پایه ندارد؛ ابتدا فی پایه را وارد کنید` };
+        await prisma.salesPriceRule.upsert({
+          where: { priceListId_goodsItemId_minQuantity: { priceListId: list.id, goodsItemId: item.id, minQuantity } },
+          create: { priceListId: list.id, goodsItemId: item.id, minQuantity, effect, value },
+          update: { effect, value },
+        });
+      }
+      return { ok: true };
     },
   });
 

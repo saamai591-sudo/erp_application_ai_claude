@@ -506,6 +506,7 @@ export const REGISTRY: ModuleDef[] = [
           { key: "customers", title: "مشتری", baseActions: CRUD },
           { key: "sales-types", title: "نوع فروش", baseActions: CRUD },
           { key: "sales-centers", title: "مرکز فروش", baseActions: CRUD },
+          { key: "sales-price-lists", title: "اعلامیه قیمت فروش", baseActions: CRUD },
         ],
       },
       {
