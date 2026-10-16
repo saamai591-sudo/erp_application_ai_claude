@@ -2128,3 +2128,15 @@ html[data-fx="off"] .fx-only { display: none !important; }
   .toolbar-icon-btn.mobile-fab svg { width: 26px; height: 26px; }
   .je-lines-wrap { padding-bottom: 84px; }
 }
+
+/* فرم شخص: بخش‌های زیر هم (کارت) + چیپ‌های پرش به بخش */
+.party-nav-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.party-nav-chip { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 4px 14px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.party-nav-chip:hover { border-color: var(--primary); color: var(--primary); }
+.party-nav-count { margin-inline-start: 6px; font-size: 11px; color: var(--ink-soft); }
+.party-section-card { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 14px 16px; margin-bottom: 14px; scroll-margin-top: 48px; }
+.party-section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.party-section-head h3 { margin: 0; font-size: 14px; }
+.party-row { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.party-row-head { display: flex; align-items: center; margin-bottom: 6px; }
+.party-empty { color: var(--ink-soft); font-size: 12.5px; padding: 4px 0; }

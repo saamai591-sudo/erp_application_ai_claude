@@ -18,6 +18,28 @@ export class PartyWarning extends Error {}
 const PARTY_DETAIL_TYPE = 1;
 const PARTY_LOCK_KEY = 7100006;
 
+export interface AddressInput {
+  id?: number;
+  type: string;
+  cityId: number;
+  address?: string | null;
+  postalCode?: string | null;
+  isPrimary?: boolean;
+}
+export interface PhoneInput {
+  id?: number;
+  type: string;
+  number: string;
+  isPrimary?: boolean;
+}
+export interface BankAccountInput {
+  id?: number;
+  bankPartyId?: number | null;
+  accountNumber?: string | null;
+  iban?: string | null;
+  cardNumber?: string | null;
+}
+
 export interface PartyInput {
   category?: "INDIVIDUAL" | "LEGAL";
   nationality?: "LOCAL" | "FOREIGN";
@@ -36,6 +58,13 @@ export interface PartyInput {
   detailTitle?: string | null;
   /** کد تفصیل دستی (اختیاری؛ فقط هنگام ساخت) */
   detailCode?: string | null;
+  /**
+   * بخش‌های فرزند: آرایه‌ی ارسال‌شده = «مجموعه‌ی کامل» همان بخش (ردیف بدون id جدید، ردیف دارای id ویرایش، ردیف حذف‌شده از آرایه پاک می‌شود)؛
+   * undefined = آن بخش دست‌نخورده. همه با خودِ شخص در یک تراکنش ذخیره می‌شوند.
+   */
+  addresses?: AddressInput[];
+  phones?: PhoneInput[];
+  bankAccounts?: BankAccountInput[];
 }
 
 /** حروف عربی→فارسی، فاصله‌های اضافه حذف؛ عنوان تفصیل همیشه به همین شکل نرمال ذخیره و مقایسه می‌شود */
@@ -103,7 +132,124 @@ async function softDuplicateWarning(tx: Tx, p: { economicCode: string | null; fo
   return dup ? "قبلاً طرف‌حساب دیگری با همین کد اقتصادی/کد فراگیر تعریف شده است. آیا ادامه می‌دهید؟" : null;
 }
 
+const ADDRESS_TYPES = ["HEAD_OFFICE", "FACTORY", "WAREHOUSE", "HOME"];
+const PHONE_TYPES = ["MOBILE", "HEAD_OFFICE", "FACTORY", "WAREHOUSE", "HOME"];
+
+interface CleanChildren {
+  addresses?: { id?: number; type: string; cityId: number; address: string | null; postalCode: string | null; isPrimary: boolean }[];
+  phones?: { id?: number; type: string; number: string; isPrimary: boolean }[];
+  bankAccounts?: { id?: number; bankPartyId: number | null; accountNumber: string | null; iban: string | null; cardNumber: string | null }[];
+}
+
+/** «هر بخش یک اصلی»: بخش غیرخالی دقیقاً یک ردیف اصلی دارد؛ هیچ‌کدام علامت نخورده ⇒ ردیف اول؛ بیش از یکی ⇒ خطا */
+function normalizePrimary<T extends { isPrimary: boolean }>(rows: T[], label: string): T[] {
+  if (rows.length === 0) return rows;
+  const primaries = rows.filter((r) => r.isPrimary).length;
+  if (primaries > 1) throw new PartyError(`در بخش ${label} فقط یک ردیف می‌تواند «اصلی» باشد`);
+  if (primaries === 0) rows[0].isPrimary = true;
+  return rows;
+}
+
+async function cleanChildren(input: PartyInput): Promise<CleanChildren> {
+  const out: CleanChildren = {};
+  if (input.addresses !== undefined) {
+    const rows = input.addresses.map((a, i) => {
+      if (!ADDRESS_TYPES.includes(a.type)) throw new PartyError(`نوع نشانی ردیف ${i + 1} نامعتبر است`);
+      if (!Number.isInteger(Number(a.cityId)) || Number(a.cityId) <= 0) throw new PartyError(`شهر نشانی ردیف ${i + 1} الزامی است`);
+      return {
+        id: a.id ? Number(a.id) : undefined,
+        type: a.type,
+        cityId: Number(a.cityId),
+        address: a.address?.trim() || null,
+        postalCode: toEnglishDigits(a.postalCode ?? "").replace(/\s+/g, "") || null,
+        isPrimary: !!a.isPrimary,
+      };
+    });
+    const cityIds = [...new Set(rows.map((r) => r.cityId))];
+    if (cityIds.length && (await prisma.geoRegion.count({ where: { id: { in: cityIds }, level: "CITY" } })) !== cityIds.length) throw new PartyError("یکی از شهرهای نشانی نامعتبر است");
+    out.addresses = normalizePrimary(rows, "نشانی‌ها");
+  }
+  if (input.phones !== undefined) {
+    const rows = input.phones.map((p, i) => {
+      if (!PHONE_TYPES.includes(p.type)) throw new PartyError(`نوع تلفن ردیف ${i + 1} نامعتبر است`);
+      const number = toEnglishDigits(p.number ?? "").replace(/\s+/g, "");
+      if (!number) throw new PartyError(`شماره تلفن ردیف ${i + 1} الزامی است`);
+      return { id: p.id ? Number(p.id) : undefined, type: p.type, number, isPrimary: !!p.isPrimary };
+    });
+    out.phones = normalizePrimary(rows, "تلفن‌ها");
+  }
+  if (input.bankAccounts !== undefined) {
+    const rows = input.bankAccounts.map((b, i) => {
+      const accountNumber = toEnglishDigits(b.accountNumber ?? "").replace(/\s+/g, "") || null;
+      const iban = toEnglishDigits(b.iban ?? "").replace(/\s+/g, "").toUpperCase() || null;
+      const cardNumber = toEnglishDigits(b.cardNumber ?? "").replace(/[\s-]+/g, "") || null;
+      if (!accountNumber && !iban && !cardNumber) throw new PartyError(`حساب بانکی ردیف ${i + 1}: حداقل یکی از شماره حساب، شبا یا شماره کارت لازم است`);
+      return { id: b.id ? Number(b.id) : undefined, bankPartyId: b.bankPartyId ? Number(b.bankPartyId) : null, accountNumber, iban, cardNumber };
+    });
+    const bankIds = [...new Set(rows.map((r) => r.bankPartyId).filter((x): x is number => !!x))];
+    if (bankIds.length && (await prisma.party.count({ where: { id: { in: bankIds }, legalType: "BANK" } })) !== bankIds.length) throw new PartyError("بانک انتخاب‌شده باید یک «بانک/موسسه مالی» باشد");
+    out.bankAccounts = rows;
+  }
+  return out;
+}
+
+/** هم‌گام‌سازی فرزندان با مجموعه‌ی ارسالی (داخل تراکنش شخص). ردیف‌های دارای id با همان شناسه ویرایش می‌شوند (حساب بانکی ممکن است به کارمند وصل باشد) */
+async function syncChildren(tx: Tx, partyId: number, c: CleanChildren) {
+  async function sync<T extends { id?: number }>(
+    label: string,
+    existing: { id: number }[],
+    incoming: T[],
+    del: (ids: number[]) => Promise<unknown>,
+    upd: (id: number, row: T) => Promise<unknown>,
+    add: (row: T) => Promise<unknown>,
+    beforeDelete?: (ids: number[]) => Promise<void>
+  ) {
+    const own = new Set(existing.map((e) => e.id));
+    for (const r of incoming) if (r.id && !own.has(r.id)) throw new PartyError(`ردیف نامعتبر در بخش ${label} (متعلق به این شخص نیست)`);
+    const keep = new Set(incoming.filter((r) => r.id).map((r) => r.id as number));
+    const removed = [...own].filter((id) => !keep.has(id));
+    if (removed.length) {
+      if (beforeDelete) await beforeDelete(removed);
+      await del(removed);
+    }
+    for (const r of incoming) (r.id ? await upd(r.id, r) : await add(r));
+  }
+  if (c.addresses)
+    await sync(
+      "نشانی‌ها",
+      await tx.partyAddress.findMany({ where: { partyId }, select: { id: true } }),
+      c.addresses,
+      (ids) => tx.partyAddress.deleteMany({ where: { id: { in: ids } } }),
+      (id, r) => tx.partyAddress.update({ where: { id }, data: { type: r.type as any, cityId: r.cityId, address: r.address, postalCode: r.postalCode, isPrimary: r.isPrimary } }),
+      (r) => tx.partyAddress.create({ data: { partyId, type: r.type as any, cityId: r.cityId, address: r.address, postalCode: r.postalCode, isPrimary: r.isPrimary } })
+    );
+  if (c.phones)
+    await sync(
+      "تلفن‌ها",
+      await tx.partyPhone.findMany({ where: { partyId }, select: { id: true } }),
+      c.phones,
+      (ids) => tx.partyPhone.deleteMany({ where: { id: { in: ids } } }),
+      (id, r) => tx.partyPhone.update({ where: { id }, data: { type: r.type as any, number: r.number, isPrimary: r.isPrimary } }),
+      (r) => tx.partyPhone.create({ data: { partyId, type: r.type as any, number: r.number, isPrimary: r.isPrimary } })
+    );
+  if (c.bankAccounts)
+    await sync(
+      "حساب‌های بانکی",
+      await tx.partyBankAccount.findMany({ where: { partyId }, select: { id: true } }),
+      c.bankAccounts,
+      (ids) => tx.partyBankAccount.deleteMany({ where: { id: { in: ids } } }),
+      (id, r) => tx.partyBankAccount.update({ where: { id }, data: { bankPartyId: r.bankPartyId, accountNumber: r.accountNumber, iban: r.iban, cardNumber: r.cardNumber } }),
+      (r) => tx.partyBankAccount.create({ data: { partyId, bankPartyId: r.bankPartyId, accountNumber: r.accountNumber, iban: r.iban, cardNumber: r.cardNumber } }),
+      async (ids) => {
+        // حساب بانکی‌ای که کارمندی برای دریافت حقوق انتخاب کرده حذف نمی‌شود (پشتوانه‌ی دیتابیسی: FK با Restrict)
+        const used = await tx.employee.findFirst({ where: { salaryBankAccountId: { in: ids } }, select: { party: { select: { detailTitle: true } } } });
+        if (used) throw new PartyError(`یکی از حساب‌های بانکی حذف‌شده توسط کارمند «${used.party.detailTitle}» برای دریافت حقوق استفاده شده است و قابل حذف نیست`);
+      }
+    );
+}
+
 function mapP2002(e: any): never {
+  if (e?.code === "P2003") throw new PartyError("این ردیف در جای دیگری استفاده شده و قابل حذف نیست");
   if (e?.code === "P2002") {
     const target = String(e?.meta?.target ?? "");
     if (target.includes("detailTitle")) throw new PartyError("عنوان تفصیل تکراری است؛ عنوان را تفکیک کنید");
@@ -126,6 +272,7 @@ export async function createParty(input: PartyInput, opts: { confirmDuplicate?: 
   let detailTitle = normalizeTitle(input.detailTitle) || defaultDetailTitle({ category, firstName: input.firstName, lastName: input.lastName, name: input.name });
   if (!detailTitle) throw new PartyError("عنوان تفصیل الزامی است");
   const facts = category === "INDIVIDUAL" ? personFacts(input) : {};
+  const children = await cleanChildren(input);
   const { code, detailTypeId } = await resolveDetailCode(PARTY_DETAIL_TYPE, input.detailCode);
 
   let party;
@@ -141,7 +288,7 @@ export async function createParty(input: PartyInput, opts: { confirmDuplicate?: 
         const warn = await softDuplicateWarning(tx, { economicCode, foreignId });
         if (warn) throw new PartyWarning(warn);
       }
-      return tx.party.create({
+      const created = await tx.party.create({
         data: {
           detailCode: code,
           detailTitle,
@@ -159,6 +306,8 @@ export async function createParty(input: PartyInput, opts: { confirmDuplicate?: 
           ...facts,
         },
       });
+      await syncChildren(tx, created.id, children);
+      return created;
     });
   } catch (e) {
     mapP2002(e);
@@ -186,6 +335,7 @@ export async function updateParty(id: number, input: PartyInput & { updatedAt?: 
   const detailTitle = input.detailTitle !== undefined ? normalizeTitle(input.detailTitle) : party.detailTitle;
   if (!detailTitle) throw new PartyError("عنوان تفصیل الزامی است");
   const facts = category === "INDIVIDUAL" ? personFacts(input) : {};
+  const children = await cleanChildren(input);
 
   try {
     return await prisma.$transaction(async (tx) => {
@@ -196,7 +346,7 @@ export async function updateParty(id: number, input: PartyInput & { updatedAt?: 
         const warn = await softDuplicateWarning(tx, { economicCode, foreignId }, id);
         if (warn) throw new PartyWarning(warn);
       }
-      return tx.party.update({
+      const updated = await tx.party.update({
         where: { id },
         data: {
           ...facts,
@@ -213,6 +363,8 @@ export async function updateParty(id: number, input: PartyInput & { updatedAt?: 
           isActive: input.isActive,
         },
       });
+      await syncChildren(tx, id, children);
+      return updated;
     });
   } catch (e) {
     return mapP2002(e);

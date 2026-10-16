@@ -4728,7 +4728,7 @@ model Employee {
   createdAt              DateTime             @default(now())
   updatedAt              DateTime             @updatedAt
   party                  Party                @relation(fields: [partyId], references: [id])
-  salaryBankAccount      PartyBankAccount?    @relation(fields: [salaryBankAccountId], references: [id], onDelete: SetNull)
+  salaryBankAccount      PartyBankAccount?    @relation(fields: [salaryBankAccountId], references: [id], onDelete: Restrict)
   birthPlace             GeoRegion?           @relation("EmployeeBirthPlace", fields: [birthPlaceId], references: [id])
   issuePlace             GeoRegion?           @relation("EmployeeIssuePlace", fields: [issuePlaceId], references: [id])
   photo                  EmployeePhoto?

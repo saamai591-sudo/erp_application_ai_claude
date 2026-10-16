@@ -16,6 +16,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { partyDisplayName } from "./Users";
 import { PartyQuickDialog, QuickParty, EMPTY_QUICK_PARTY } from "../components/PartyQuickDialog";
+import { childrenFromDetail, childrenPayload } from "../components/PartySections";
 
 // «مشتری» — طبق تصمیم صریح کاربر، طرف‌حساب ساده، دقیقاً مثل «تامین‌کننده» ولی عمداً بدون
 // گروه/کارشناس فروش (بدون تنظیمات اضافه). رجوع کنید به Suppliers.tsx برای الگوی مرجع.
@@ -52,9 +53,10 @@ function quickToPayload(p: QuickParty) {
     economicCode: p.economicCode,
     registrationNumber: p.registrationNumber,
     detailTitle: p.detailTitle,
+    ...childrenPayload(p.children),
   };
 }
-function partyToQuick(p: PartyOption): QuickParty {
+function partyToQuick(p: PartyOption & { addresses?: any[]; phones?: any[]; bankAccounts?: any[] }): QuickParty {
   return {
     ...EMPTY_QUICK_PARTY,
     category: p.category,
@@ -68,6 +70,7 @@ function partyToQuick(p: PartyOption): QuickParty {
     economicCode: p.economicCode || "",
     registrationNumber: p.registrationNumber || "",
     detailTitle: p.detailTitle || "",
+    children: childrenFromDetail(p),
   };
 }
 
@@ -149,6 +152,8 @@ function CustomerForm({ editId }: { editId?: number }) {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const [dialog, setDialog] = useState<"create" | "edit" | null>(null);
+  // جزئیات کامل شخص (با نشانی/تلفن/حساب بانکی و updatedAt) برای دیالوگ ویرایش
+  const [editParty, setEditParty] = useState<any>(null);
   const { flash } = useSavedFlash();
 
   function loadParties() {
@@ -208,7 +213,7 @@ function CustomerForm({ editId }: { editId?: number }) {
   }
   // ویرایش آزادِ هویتِ شخصِ همین مشتری (برای شخصِ دارای چند نقش روی همه‌ی نقش‌ها اثر می‌گذارد)
   async function editQuick(p: QuickParty, confirmDuplicate: boolean) {
-    await api.put(`/customers/${editId}`, { party: { ...quickToPayload(p), updatedAt: selectedParty?.updatedAt }, confirmDuplicate });
+    await api.put(`/customers/${editId}`, { party: { ...quickToPayload(p), updatedAt: editParty?.updatedAt }, confirmDuplicate });
     flash();
     setDialog(null);
     await loadParties();
@@ -266,7 +271,18 @@ function CustomerForm({ editId }: { editId?: number }) {
                 </button>
               )}
               {editId && selectedParty && (
-                <button type="button" className="link-btn" onClick={() => setDialog("edit")}>
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={async () => {
+                    try {
+                      setEditParty(await api.get(`/parties/${selectedParty.id}`));
+                      setDialog("edit");
+                    } catch (e) {
+                      showError((e as Error).message);
+                    }
+                  }}
+                >
                   ویرایش مشخصات شخص
                 </button>
               )}
@@ -291,7 +307,7 @@ function CustomerForm({ editId }: { editId?: number }) {
           onClose={() => setDialog(null)}
         />
       )}
-      {dialog === "edit" && selectedParty && <PartyQuickDialog mode="edit" initial={partyToQuick(selectedParty)} onSubmit={editQuick} onClose={() => setDialog(null)} />}
+      {dialog === "edit" && editParty && <PartyQuickDialog mode="edit" initial={partyToQuick(editParty)} onSubmit={editQuick} onClose={() => setDialog(null)} />}
     </FormPage>
   );
 }

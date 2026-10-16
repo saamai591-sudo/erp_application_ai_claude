@@ -4,9 +4,10 @@ import { ErrorToast } from "./ErrorToast";
 import { RequiredMark } from "./RequiredMark";
 import { api, ApiError } from "../lib/api";
 import { toFaDigits } from "../lib/formatAmount";
+import { PartySections, PartyChildren, EMPTY_CHILDREN, validateChildren } from "./PartySections";
 
 // «تعریف سریع / ویرایش شخص» از فرم‌های نقش (فعلاً مشتری؛ بعداً تامین‌کننده/کارمند/...): همان فیلدهای تب «اطلاعات اصلی» فرم شخص حقیقی/حقوقی،
-// بدون نشانی/تلفن/حساب بانکی (آن‌ها را بعداً می‌شود در فرم اطلاعات پایه افزود). ذخیره از طریق همان سرویس مشترک بک‌اند انجام می‌شود (SSOT).
+// و زیر آن بخش‌های نشانی/تلفن/حساب بانکی (همان کامپوننت فرم شخص) که همراه شخص ذخیره می‌شوند. ذخیره از طریق همان سرویس مشترک بک‌اند انجام می‌شود (SSOT).
 // کد ملی/شناسه ملی و عنوان تفصیل تکراری بازدارنده است؛ با تایپ کد ملی، اگر شخص قبلاً (با هر نقشی) ثبت شده باشد پیشنهاد استفاده از همان شخص می‌آید.
 
 export interface QuickParty {
@@ -21,6 +22,8 @@ export interface QuickParty {
   economicCode: string;
   registrationNumber: string;
   detailTitle: string;
+  /** نشانی‌ها/تلفن‌ها/حساب‌های بانکی (مجموعه‌ی کامل هر بخش) */
+  children: PartyChildren;
 }
 
 export const EMPTY_QUICK_PARTY: QuickParty = {
@@ -35,6 +38,7 @@ export const EMPTY_QUICK_PARTY: QuickParty = {
   economicCode: "",
   registrationNumber: "",
   detailTitle: "",
+  children: EMPTY_CHILDREN,
 };
 
 interface Found {
@@ -103,6 +107,8 @@ export function PartyQuickDialog({
     if (p.category === "INDIVIDUAL" && (!p.firstName.trim() || !p.lastName.trim())) return setError("نام و نام خانوادگی الزامی است");
     if (p.category === "LEGAL" && !p.name.trim()) return setError("نام الزامی است");
     if (!p.detailTitle.trim()) return setError("عنوان تفصیل الزامی است");
+    const childError = validateChildren(p.children);
+    if (childError) return setError(childError);
     setBusy(true);
     try {
       await onSubmit(p, confirmDuplicate);
@@ -217,9 +223,10 @@ export function PartyQuickDialog({
           />
         </div>
         <p className="full" style={{ fontSize: 11.5, opacity: 0.75, gridColumn: "1 / -1", margin: 0 }}>
-          عنوان تفصیل یکتاست و در سند حسابداری و گزارش‌ها نمایش داده می‌شود؛ دو شخص هم‌نام باید عنوان متفاوت داشته باشند. نشانی، تلفن و حساب بانکی را بعداً در «اطلاعات پایه ← اشخاص» اضافه کنید.
+          عنوان تفصیل یکتاست و در سند حسابداری و گزارش‌ها نمایش داده می‌شود؛ دو شخص هم‌نام باید عنوان متفاوت داشته باشند.
         </p>
       </div>
+      <PartySections value={p.children} onChange={(children) => setP((cur) => ({ ...cur, children }))} />
       <div className="actions">
         <button type="button" className="btn" disabled={busy} onClick={() => save(false)}>{mode === "create" ? "ثبت شخص" : "ذخیره"}</button>
         <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
