@@ -16,6 +16,7 @@ import { createWarehouseAdjustment } from "../routes/warehouseAdjustments";
 import { createInventoryCountingShortage } from "../routes/inventoryCountingShortages";
 import { createSalesQuote } from "../routes/salesOperations";
 import { isPriceListUsed } from "../services/salesPriceService";
+import { createParty } from "../services/partyService";
 
 const DETAIL_TYPE_PARTY = 1;
 const DETAIL_TYPE_COST_CENTER = 2;
@@ -232,38 +233,29 @@ async function resolveWarehouseDocGroup(
 }
 
 export function registerAllImportProcessors() {
+  // طرف‌حساب: از همان سرویس مشترک فرم‌ها می‌گذرد (کد/شناسه ملی تکراری ⇒ خطا؛ عنوان تفصیل پیش‌فرض = نام و با «اجازه‌ی تکرار» عنوان هم‌نام‌ها با کد تفصیل تفکیک می‌شود)
   registerImportEntity("party", {
     row: async (row, ctx) => {
       try {
         const category = row.category === "LEGAL" ? "LEGAL" : "INDIVIDUAL";
         const nationality = row.nationality === "خارجی" ? "FOREIGN" : "LOCAL";
-        const data: any = { category, nationality };
-        if (category === "INDIVIDUAL") {
-          if (!row.firstName || !row.lastName) return { ok: false, error: "نام و نام خانوادگی الزامی است" };
-          data.firstName = row.firstName;
-          data.lastName = row.lastName;
-          data.nationalId = row.nationalId || null;
-        } else {
-          if (!row.name) return { ok: false, error: "نام الزامی است" };
-          data.name = row.name;
-          data.legalType = LEGAL_TYPE_FA_REVERSE[row.legalType] || "LEGAL";
-          data.nationalId = row.nationalId || null;
-          data.economicCode = row.economicCode || null;
-        }
-
-        if (!ctx.allowDuplicates) {
-          const dup = await prisma.party.findFirst({
-            where: category === "INDIVIDUAL" ? { firstName: data.firstName, lastName: data.lastName } : { name: data.name },
-          });
-          if (dup) return { ok: false, error: "طرف‌حساب مشابه (هم‌نام) از قبل موجود است" };
-        }
-
-        const { code, detailTypeId } = await resolveDetailCode(DETAIL_TYPE_PARTY, row.detailCode);
-        const party = await prisma.party.create({ data: { ...data, detailCode: code } });
-        await registerDetailCode(code, detailTypeId, "Party", party.id);
+        await createParty(
+          {
+            category,
+            nationality,
+            firstName: row.firstName,
+            lastName: row.lastName,
+            name: row.name,
+            legalType: category === "LEGAL" ? (LEGAL_TYPE_FA_REVERSE[row.legalType] as any) || "LEGAL" : undefined,
+            nationalId: row.nationalId,
+            economicCode: category === "LEGAL" ? row.economicCode : undefined,
+            detailTitle: row.detailTitle,
+            detailCode: row.detailCode,
+          },
+          { confirmDuplicate: ctx.allowDuplicates, autoDisambiguate: ctx.allowDuplicates }
+        );
         return { ok: true };
       } catch (e: any) {
-        if (e.code === "P2002") return { ok: false, error: "یکی از فیلدهای یکتا (کد ملی/شناسه ملی/کد اقتصادی/کد تفصیل) تکراری است" };
         return { ok: false, error: e.message || "خطا در ثبت طرف‌حساب" };
       }
     },

@@ -15,6 +15,7 @@ import { api, ApiError } from "../lib/api";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { partyDisplayName } from "./Users";
+import { PartyQuickDialog, QuickParty, EMPTY_QUICK_PARTY } from "../components/PartyQuickDialog";
 
 // «مشتری» — طبق تصمیم صریح کاربر، طرف‌حساب ساده، دقیقاً مثل «تامین‌کننده» ولی عمداً بدون
 // گروه/کارشناس فروش (بدون تنظیمات اضافه). رجوع کنید به Suppliers.tsx برای الگوی مرجع.
@@ -27,6 +28,47 @@ interface PartyOption {
   firstName: string | null;
   lastName: string | null;
   name: string | null;
+  detailTitle?: string | null;
+  nationality?: "LOCAL" | "FOREIGN";
+  nationalId?: string | null;
+  foreignId?: string | null;
+  economicCode?: string | null;
+  registrationNumber?: string | null;
+  legalType?: "LEGAL" | "SPECIAL_PARTNERSHIP" | "BANK" | null;
+  updatedAt?: string;
+}
+
+/** فیلدهای شخص برای ارسال به سرور (سرویس مشترک طرف‌حساب) */
+function quickToPayload(p: QuickParty) {
+  return {
+    category: p.category,
+    nationality: p.nationality,
+    firstName: p.firstName,
+    lastName: p.lastName,
+    name: p.name,
+    legalType: p.legalType,
+    nationalId: p.nationalId,
+    foreignId: p.foreignId,
+    economicCode: p.economicCode,
+    registrationNumber: p.registrationNumber,
+    detailTitle: p.detailTitle,
+  };
+}
+function partyToQuick(p: PartyOption): QuickParty {
+  return {
+    ...EMPTY_QUICK_PARTY,
+    category: p.category,
+    nationality: p.nationality || "LOCAL",
+    firstName: p.firstName || "",
+    lastName: p.lastName || "",
+    name: p.name || "",
+    legalType: p.legalType || "LEGAL",
+    nationalId: p.nationalId || "",
+    foreignId: p.foreignId || "",
+    economicCode: p.economicCode || "",
+    registrationNumber: p.registrationNumber || "",
+    detailTitle: p.detailTitle || "",
+  };
 }
 
 interface CustomerRow {
@@ -106,10 +148,14 @@ function CustomerForm({ editId }: { editId?: number }) {
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_FORM);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
+  const [dialog, setDialog] = useState<"create" | "edit" | null>(null);
   const { flash } = useSavedFlash();
 
+  function loadParties() {
+    return api.get("/parties").then((p: PartyOption[]) => setParties(p.filter((x) => x.isActive))).catch(() => {});
+  }
   useEffect(() => {
-    api.get("/parties").then((p: PartyOption[]) => setParties(p.filter((x) => x.isActive))).catch(() => {});
+    loadParties();
   }, []);
 
   useEffect(() => {
@@ -151,6 +197,21 @@ function CustomerForm({ editId }: { editId?: number }) {
     } catch (e) {
       setError((e as ApiError).message);
     }
+  }
+
+  // تعریف سریع: شخص و مشتری با هم در یک درخواست ساخته می‌شوند (سرویس مشترک طرف‌حساب؛ کد/شناسه ملی و عنوان تفصیل تکراری رد می‌شود)
+  async function createQuick(p: QuickParty, confirmDuplicate: boolean) {
+    const created = await api.post("/customers", { code: form.code ? Number(form.code) : undefined, isActive: form.isActive, party: quickToPayload(p), confirmDuplicate });
+    flash();
+    setDialog(null);
+    navigate(`/customers/${created.id}/edit`);
+  }
+  // ویرایش آزادِ هویتِ شخصِ همین مشتری (برای شخصِ دارای چند نقش روی همه‌ی نقش‌ها اثر می‌گذارد)
+  async function editQuick(p: QuickParty, confirmDuplicate: boolean) {
+    await api.put(`/customers/${editId}`, { party: { ...quickToPayload(p), updatedAt: selectedParty?.updatedAt }, confirmDuplicate });
+    flash();
+    setDialog(null);
+    await loadParties();
   }
 
   async function handleDelete() {
@@ -198,6 +259,18 @@ function CustomerForm({ editId }: { editId?: number }) {
               ]}
               onSelect={(p) => setForm({ ...form, partyId: String(p.id) })}
             />
+            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+              {!editId && (
+                <button type="button" className="link-btn" onClick={() => setDialog("create")}>
+                  + تعریف شخص جدید
+                </button>
+              )}
+              {editId && selectedParty && (
+                <button type="button" className="link-btn" onClick={() => setDialog("edit")}>
+                  ویرایش مشخصات شخص
+                </button>
+              )}
+            </div>
           </div>
           <div className="form-field">
             <label className="checkbox-row">
@@ -207,6 +280,18 @@ function CustomerForm({ editId }: { editId?: number }) {
           </div>
         </div>
       </form>
+      {dialog === "create" && (
+        <PartyQuickDialog
+          mode="create"
+          onSubmit={createQuick}
+          onPickExisting={(id) => {
+            setForm({ ...form, partyId: String(id) });
+            setDialog(null);
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+      {dialog === "edit" && selectedParty && <PartyQuickDialog mode="edit" initial={partyToQuick(selectedParty)} onSubmit={editQuick} onClose={() => setDialog(null)} />}
     </FormPage>
   );
 }

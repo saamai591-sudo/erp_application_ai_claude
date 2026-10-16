@@ -1,32 +1,12 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
-import { generateDetailCode, registerDetailCode, resolveDetailCode } from "../utils/coding";
-import { assertRecordNotStale } from "../utils/concurrency";
+import { createParty, updateParty, findPartyByNationalId, PartyError, PartyWarning } from "../services/partyService";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 
-const DETAIL_TYPE_PARTY = 1;
 const FORM = findFormPrefix("parties");
 
 const router = Router();
-
-/** تاریخ تولد (YYYY-MM-DD یا خالی) و جنسیت فقط برای شخص حقیقی معنی دارند */
-function personFacts(body: { birthDate?: string | null; gender?: string | null }) {
-  const out: { birthDate?: Date | null; gender?: "MALE" | "FEMALE" | null } = {};
-  if (body.birthDate !== undefined) {
-    if (!body.birthDate) out.birthDate = null;
-    else {
-      const d = new Date(`${body.birthDate}T00:00:00.000Z`);
-      if (isNaN(d.getTime())) throw new Error("تاریخ تولد نامعتبر است");
-      out.birthDate = d;
-    }
-  }
-  if (body.gender !== undefined) {
-    if (body.gender && body.gender !== "MALE" && body.gender !== "FEMALE") throw new Error("جنسیت نامعتبر است");
-    out.gender = (body.gender || null) as "MALE" | "FEMALE" | null;
-  }
-  return out;
-}
 
 router.get("/", async (req, res) => {
   const { category, customersOnly, suppliersOnly } = req.query as {
@@ -58,96 +38,24 @@ router.get("/:id", async (req, res) => {
   res.json(party);
 });
 
+// جستجوی شخص با کد ملی/شناسه ملی (فرم‌های تعریف سریع: «این شخص قبلاً ثبت شده؟»)؛ نقش‌های فعلی شخص هم برمی‌گردد
+router.get("/lookup/by-national-id", async (req, res) => {
+  const found = await findPartyByNationalId(String(req.query.nationalId ?? ""));
+  res.json(found);
+});
+
+function partyFail(res: any, e: any, fallback: string) {
+  if (e instanceof PartyWarning) return res.status(409).json({ warning: true, error: e.message });
+  if (e instanceof PartyError) return res.status(400).json({ error: e.message });
+  return res.status(400).json({ error: e?.message || fallback });
+}
+
 router.post("/", can(`${FORM}.create`), async (req, res) => {
-  const body = req.body as {
-    category: "INDIVIDUAL" | "LEGAL";
-    nationality?: "LOCAL" | "FOREIGN";
-    nationalId?: string;
-    foreignId?: string;
-    economicCode?: string;
-    registrationNumber?: string;
-    firstName?: string;
-    lastName?: string;
-    legalType?: "LEGAL" | "SPECIAL_PARTNERSHIP" | "BANK";
-    name?: string;
-    confirmDuplicate?: boolean;
-    detailCode?: string;
-    isActive?: boolean;
-    birthDate?: string | null;
-    gender?: string | null;
-  };
-
-  if (body.category === "INDIVIDUAL") {
-    if (!body.firstName || !body.lastName) {
-      return res.status(400).json({ error: "نام و نام خانوادگی الزامی است" });
-    }
-  } else if (body.category === "LEGAL") {
-    if (!body.name) return res.status(400).json({ error: "نام شخص حقوقی الزامی است" });
-  } else {
-    return res.status(400).json({ error: "نوع طرف‌حساب نامعتبر است" });
-  }
-
-  // کنترل نام تکراری (هشدار غیر بازدارنده)
-  if (!body.confirmDuplicate) {
-    const dup =
-      body.category === "INDIVIDUAL"
-        ? await prisma.party.findFirst({ where: { firstName: body.firstName, lastName: body.lastName } })
-        : await prisma.party.findFirst({ where: { name: body.name } });
-    if (dup) {
-      return res.status(409).json({
-        warning: true,
-        error: "قبلا طرف‌حساب دیگری با همین عنوان تعریف شده است. آیا ادامه می‌دهید؟",
-      });
-    }
-  }
-
-  // کنترل تکراری بودن کد ملی / شناسه ملی / کد اقتصادی / شناسه فراگیر (هشدار غیر بازدارنده)
-  if (!body.confirmDuplicate) {
-    const orConds: any[] = [];
-    if (body.nationalId) orConds.push({ nationalId: body.nationalId });
-    if (body.foreignId) orConds.push({ foreignId: body.foreignId });
-    if (body.economicCode) orConds.push({ economicCode: body.economicCode });
-    if (orConds.length) {
-      const dup = await prisma.party.findFirst({ where: { OR: orConds } });
-      if (dup) {
-        return res.status(409).json({
-          warning: true,
-          error: "قبلا طرف‌حساب دیگری با همین کد ملی/شناسه ملی/کد اقتصادی تعریف شده است. آیا ادامه می‌دهید؟",
-        });
-      }
-    }
-  }
-
-  let code: string, detailTypeId: number;
   try {
-    ({ code, detailTypeId } = await resolveDetailCode(DETAIL_TYPE_PARTY, body.detailCode));
-    const facts = body.category === "INDIVIDUAL" ? personFacts(body) : {};
-
-    const party = await prisma.party.create({
-      data: {
-        detailCode: code,
-        category: body.category,
-        nationality: body.nationality ?? "LOCAL",
-        nationalId: body.nationality === "FOREIGN" ? null : body.nationalId,
-        foreignId: body.nationality === "FOREIGN" ? body.foreignId : null,
-        economicCode: body.economicCode || null,
-        registrationNumber: body.registrationNumber || null,
-        firstName: body.category === "INDIVIDUAL" ? body.firstName : null,
-        lastName: body.category === "INDIVIDUAL" ? body.lastName : null,
-        legalType: body.category === "LEGAL" ? body.legalType : null,
-        name: body.category === "LEGAL" ? body.name : null,
-        isActive: body.isActive ?? true,
-        ...facts,
-      },
-    });
-    await registerDetailCode(code, detailTypeId, "Party", party.id);
-
+    const party = await createParty(req.body, { confirmDuplicate: !!req.body.confirmDuplicate });
     res.status(201).json(party);
   } catch (e: any) {
-    if (e.code === "P2002") {
-      return res.status(400).json({ error: "یکی از فیلدهای یکتا (کد ملی/شناسه ملی/کد اقتصادی/کد تفصیل) تکراری است" });
-    }
-    res.status(400).json({ error: e.message || "خطا در ثبت طرف‌حساب" });
+    partyFail(res, e, "خطا در ثبت طرف‌حساب");
   }
 });
 
@@ -169,54 +77,13 @@ router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
 });
 
 router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
-  const id = Number(req.params.id);
-  const body = req.body as {
-    nationality?: "LOCAL" | "FOREIGN";
-    nationalId?: string;
-    foreignId?: string;
-    economicCode?: string;
-    registrationNumber?: string;
-    firstName?: string;
-    lastName?: string;
-    legalType?: "LEGAL" | "SPECIAL_PARTNERSHIP" | "BANK";
-    name?: string;
-    isActive?: boolean;
-    birthDate?: string | null;
-    gender?: string | null;
-  };
-
-  const party = await prisma.party.findUnique({ where: { id } });
-  if (!party) return res.status(404).json({ error: "طرف‌حساب یافت نشد" });
   try {
-    assertRecordNotStale(party.updatedAt, req.body.updatedAt, "این طرف‌حساب");
+    const updated = await updateParty(Number(req.params.id), req.body, { confirmDuplicate: !!req.body.confirmDuplicate });
+    res.json(updated);
   } catch (e: any) {
-    return res.status(400).json({ error: e.message });
+    if (e instanceof PartyError && e.message === "طرف‌حساب یافت نشد") return res.status(404).json({ error: e.message });
+    partyFail(res, e, "خطا در ویرایش طرف‌حساب");
   }
-
-  let facts: ReturnType<typeof personFacts> = {};
-  try {
-    if (party.category === "INDIVIDUAL") facts = personFacts(body);
-  } catch (e: any) {
-    return res.status(400).json({ error: e.message });
-  }
-
-  const updated = await prisma.party.update({
-    where: { id },
-    data: {
-      ...facts,
-      nationality: body.nationality,
-      nationalId: body.nationality === "FOREIGN" ? null : body.nationalId,
-      foreignId: body.nationality === "FOREIGN" ? body.foreignId : null,
-      economicCode: body.economicCode,
-      registrationNumber: body.registrationNumber === undefined ? undefined : body.registrationNumber || null,
-      firstName: party.category === "INDIVIDUAL" ? body.firstName : undefined,
-      lastName: party.category === "INDIVIDUAL" ? body.lastName : undefined,
-      legalType: party.category === "LEGAL" ? body.legalType : undefined,
-      name: party.category === "LEGAL" ? body.name : undefined,
-      isActive: body.isActive,
-    },
-  });
-  res.json(updated);
 });
 
 // --- تب نشانی ---

@@ -288,6 +288,8 @@ model DetailCodeUsage {
 model Party {
   id                 Int                @id @default(autoincrement())
   detailCode         String             @unique
+  /// عنوان تفصیل: یکتا و قابل ویرایش (پیش‌فرض: نام)؛ دو شخص هم‌نام باید عنوان تفصیل متفاوت داشته باشند
+  detailTitle        String             @unique
   category           PartyCategory
   nationality        Nationality        @default(LOCAL)
   nationalId         String?

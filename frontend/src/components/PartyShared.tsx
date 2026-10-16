@@ -18,6 +18,8 @@ import { JalaliDatePicker } from "./JalaliDatePicker";
 export interface Party {
   id: number;
   detailCode: string;
+  /** عنوان تفصیل (یکتا، قابل ویرایش) */
+  detailTitle?: string;
   category: "INDIVIDUAL" | "LEGAL";
   nationality: "LOCAL" | "FOREIGN";
   firstName: string | null;
@@ -144,6 +146,7 @@ export function PartyList({ category, title, description }: { category: "INDIVID
               ? [{ header: "نوع", render: (r: Party) => LEGAL_TYPE_FA[r.legalType || "LEGAL"], filterType: "string" as const, filterValue: (r: Party) => LEGAL_TYPE_FA[r.legalType || "LEGAL"] }]
               : []),
             { header: "نام", render: (r) => (category === "INDIVIDUAL" ? `${r.firstName} ${r.lastName}` : r.name), filterType: "string", filterValue: (r) => (category === "INDIVIDUAL" ? `${r.firstName} ${r.lastName}` : r.name) },
+            { header: "عنوان تفصیل", render: (r) => r.detailTitle || "—", filterType: "string", filterValue: (r) => r.detailTitle || "" },
             { header: "تابعیت", render: (r) => (r.nationality === "LOCAL" ? "محلی" : "خارجی"), filterType: "string", filterValue: (r) => (r.nationality === "LOCAL" ? "محلی" : "خارجی") },
             { header: "کد ملی / اقتصادی", render: (r) => r.nationalId || r.economicCode || "—", filterType: "string", filterValue: (r) => r.nationalId || r.economicCode || "" },
           ]}
@@ -178,7 +181,16 @@ export function PartyForm({
   const [detail, setDetail] = usePersistedState<PartyFull | null>(`${cacheKey}:detail`, null);
   const [formError, setFormError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  // عنوان تفصیل تا وقتی کاربر دستی ویرایشش نکرده (و شخص قبلاً ذخیره نشده) از نام پیشنهاد می‌شود
+  const [titleTouched, setTitleTouched] = useState(!!editId);
   const { flash } = useSavedFlash();
+  function setNames(patch: Record<string, string>) {
+    setForm((f: any) => {
+      const next = { ...f, ...patch };
+      if (!titleTouched) next.detailTitle = (category === "INDIVIDUAL" ? `${next.firstName || ""} ${next.lastName || ""}` : next.name || "").replace(/\s+/g, " ").trim();
+      return next;
+    });
+  }
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(`${cacheKey}:form`));
 
   async function reloadDetail(id: number) {
@@ -190,7 +202,9 @@ export function PartyForm({
       firstName: p.firstName,
       lastName: p.lastName,
       name: p.name,
+      detailTitle: p.detailTitle || "",
       nationalId: p.nationalId,
+      foreignId: (p as any).foreignId || "",
       economicCode: p.economicCode,
       registrationNumber: p.registrationNumber,
       birthDate: p.birthDate ? p.birthDate.slice(0, 10) : "",
@@ -327,11 +341,11 @@ export function PartyForm({
             <div className="form-grid">
               <div className="form-field">
                 <label>نام</label>
-                <input value={form.firstName || ""} onChange={(e) => setForm({ ...form, firstName: e.target.value })} autoFocus />
+                <input value={form.firstName || ""} onChange={(e) => setNames({ firstName: e.target.value })} autoFocus />
               </div>
               <div className="form-field">
                 <label>نام خانوادگی</label>
-                <input value={form.lastName || ""} onChange={(e) => setForm({ ...form, lastName: e.target.value })} />
+                <input value={form.lastName || ""} onChange={(e) => setNames({ lastName: e.target.value })} />
               </div>
               {form.nationality === "LOCAL" ? (
                 <div className="form-field">
@@ -365,7 +379,7 @@ export function PartyForm({
             <div className="form-grid">
               <div className="form-field">
                 <label>نام</label>
-                <input value={form.name || ""} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus />
+                <input value={form.name || ""} onChange={(e) => setNames({ name: e.target.value })} autoFocus />
               </div>
               <div className={`form-field ${form.nationality === "LOCAL" ? "" : "form-field-hidden"}`}>
                 <label>شناسه ملی</label>
@@ -381,6 +395,22 @@ export function PartyForm({
               </div>
             </div>
           )}
+
+          <div className="form-grid" style={{ marginTop: 14 }}>
+            <div className="form-field full">
+              <label>عنوان تفصیل</label>
+              <input
+                value={form.detailTitle || ""}
+                onChange={(e) => {
+                  setTitleTouched(true);
+                  setForm({ ...form, detailTitle: e.target.value });
+                }}
+              />
+            </div>
+          </div>
+          <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 6 }}>
+            عنوان تفصیل یکتاست و در سند حسابداری و گزارش‌ها نمایش داده می‌شود. دو شخص هم‌نام مجازند ولی عنوان تفصیلشان باید تفکیک شود. کد ملی / شناسه ملی هم تکراری نمی‌تواند باشد.
+          </p>
 
           {!currentId && (
             <p style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 10 }}>

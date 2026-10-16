@@ -48,7 +48,7 @@ import { takeFormPrefill } from "../lib/formPrefill";
 // «مبنا» در سطح ردیف است (نه هدر): هر ردیف مبنای خودش را دارد و مبنا تعیین می‌کند چه سندی/اقلامی قابل انتخاب است
 type Basis = "NO_BASIS" | "SALES_DELIVERY" | "SALES_ORDER" | "SALES_QUOTE";
 
-interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null } }
+interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null; detailTitle?: string | null } }
 interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; decimalPlaces: number; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null }
 interface GoodsItemRow { id: number; kind?: "GOODS" | "SERVICE"; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
 // ردیف قابل صورتحسابِ یک سند مبنا (پاسخ GET /sales-invoices/basis-lines)
@@ -79,6 +79,7 @@ interface BasisLine {
 }
 
 function customerTitle(c: CustomerOption): string {
+  if (c.party.detailTitle) return c.party.detailTitle;
   return c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim();
 }
 

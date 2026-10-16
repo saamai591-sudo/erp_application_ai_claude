@@ -28,10 +28,13 @@ interface PartyOption {
   firstName: string | null;
   lastName: string | null;
   name: string | null;
+  /** عنوان تفصیل (یکتا)؛ اگر باشد به‌جای نام نمایش داده می‌شود تا اشخاص هم‌نام از هم تفکیک شوند */
+  detailTitle?: string | null;
 }
 
 export function partyDisplayName(p: PartyOption | null | undefined): string {
   if (!p) return "—";
+  if (p.detailTitle) return p.detailTitle;
   return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
 }
 

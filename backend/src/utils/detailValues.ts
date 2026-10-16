@@ -8,9 +8,9 @@ export function bankAccountDetailTitle(accountNumber: string): string {
 async function titleForEntity(entityTable: string, entityId: number): Promise<string> {
   switch (entityTable) {
     case "Party": {
-      const p = await prisma.party.findUnique({ where: { id: entityId } });
-      if (!p) return "—";
-      return p.category === "INDIVIDUAL" ? `${p.firstName} ${p.lastName}` : p.name || "—";
+      // عنوان تفصیلِ ذخیره‌شده (یکتا و قابل ویرایش)؛ نه نام شخص — دو شخص هم‌نام با همین عنوان از هم تفکیک می‌شوند
+      const p = await prisma.party.findUnique({ where: { id: entityId }, select: { detailTitle: true } });
+      return p?.detailTitle || "—";
     }
     case "CashBox": {
       const c = await prisma.cashBox.findUnique({ where: { id: entityId } });

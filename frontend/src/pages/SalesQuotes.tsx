@@ -42,11 +42,12 @@ import { usePermissions } from "../lib/usePermissions";
 
 type Status = "DRAFT" | "APPROVED";
 
-interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null } }
+interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null; detailTitle?: string | null } }
 interface CurrencyOption { id: number; code: string; title: string; decimalPlaces?: number }
 interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
 
 function customerTitle(c: CustomerOption): string {
+  if (c.party.detailTitle) return c.party.detailTitle;
   return c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim();
 }
 

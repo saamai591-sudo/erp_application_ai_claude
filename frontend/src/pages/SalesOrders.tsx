@@ -36,12 +36,13 @@ import { DescriptionField } from "../components/DescriptionField";
 type Basis = "NO_BASIS" | "QUOTE";
 type Status = "DRAFT" | "APPROVED";
 
-interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null } }
+interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null; detailTitle?: string | null } }
 interface CurrencyOption { id: number; code: string; title: string; decimalPlaces?: number }
 interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
 interface PickableQuoteLine { id: number; sourceSalesQuoteLineId: number; salesQuoteId: number; number: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; unitPrice: number; unitDiscount: number; quantity: number; done: number; remaining: number }
 
 function customerTitle(c: CustomerOption): string {
+  if (c.party.detailTitle) return c.party.detailTitle;
   return c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim();
 }
 

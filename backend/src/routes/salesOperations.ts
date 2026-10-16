@@ -9,6 +9,7 @@ import { getVatRatePercentForDate } from "../services/accountingSettingsService"
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { computePrice, findEffectivePriceListId, loadItemPricing } from "../services/salesPriceService";
+import { createParty, updateParty, PartyError, PartyWarning, PartyInput } from "../services/partyService";
 
 const CUSTOMERS_FORM = findFormPrefix("customers");
 const SALES_QUOTES_FORM = findFormPrefix("sales-quotes");
@@ -64,31 +65,47 @@ router.get("/customers", async (_req, res) => {
   );
 });
 
+/** خطای سرویس طرف‌حساب (هشدار غیربازدارنده ⇒ ۴۰۹ با warning) */
+function partyErrorResponse(res: any, e: any, fallback: string) {
+  if (e instanceof PartyWarning) return res.status(409).json({ warning: true, error: e.message });
+  if (e instanceof PartyError) return res.status(400).json({ error: e.message });
+  if (e?.code === "P2002") return res.status(400).json({ error: "کد تکراری است" });
+  return res.status(400).json({ error: e?.message || fallback });
+}
+
+// مشتری یا با «طرف‌حساب موجود» (partyId) ساخته می‌شود یا با «تعریف سریع شخص» (party: همان فیلدهای فرم اطلاعات پایه) — هر دو راه از همان سرویس مشترک
+// ساخت/ویرایش طرف‌حساب می‌گذرند (یک شخص = یک Party؛ کد/شناسه ملی و عنوان تفصیل تکراری بازدارنده است). ساخت و ویرایش هویت آزاد است (فقط دسترسی مشتری لازم است).
 router.post("/customers", can(`${CUSTOMERS_FORM}.create`), async (req, res) => {
-  const body = req.body as { code?: number; partyId: number; isActive?: boolean };
-  if (!body.partyId) return res.status(400).json({ error: "طرف حساب الزامی است" });
+  const body = req.body as { code?: number; partyId?: number; party?: PartyInput; confirmDuplicate?: boolean; isActive?: boolean };
+  if (!body.partyId && !body.party) return res.status(400).json({ error: "طرف حساب الزامی است" });
   try {
-    const party = await prisma.party.findUnique({ where: { id: body.partyId } });
-    if (!party) return res.status(404).json({ error: "طرف حساب یافت نشد" });
-
-    const dup = await prisma.customer.findUnique({ where: { partyId: body.partyId } });
-    if (dup) return res.status(400).json({ error: "این طرف حساب قبلاً به‌عنوان مشتری تعریف شده است" });
-
+    let partyId = body.partyId;
     const finalCode = body.code ?? (await nextSerialNumber(prisma.customer, "code"));
-    const created = await prisma.customer.create({ data: { code: finalCode, partyId: body.partyId, isActive: body.isActive ?? true } });
+    if (partyId) {
+      const party = await prisma.party.findUnique({ where: { id: partyId } });
+      if (!party) return res.status(404).json({ error: "طرف حساب یافت نشد" });
+      const dup = await prisma.customer.findUnique({ where: { partyId } });
+      if (dup) return res.status(400).json({ error: "این طرف حساب قبلاً به‌عنوان مشتری تعریف شده است" });
+    } else {
+      // کد مشتری پیش از ساخت شخص بررسی می‌شود تا شخص بی‌نقش (یتیم) نماند
+      if (body.code && (await prisma.customer.findUnique({ where: { code: body.code }, select: { id: true } }))) return res.status(400).json({ error: "کد تکراری است" });
+      partyId = (await createParty(body.party!, { confirmDuplicate: !!body.confirmDuplicate })).id;
+    }
+    const created = await prisma.customer.create({ data: { code: finalCode, partyId: partyId!, isActive: body.isActive ?? true } });
     res.status(201).json(created);
   } catch (e: any) {
-    if (e.code === "P2002") return res.status(400).json({ error: "کد تکراری است" });
-    res.status(400).json({ error: e.message || "خطا در ثبت مشتری" });
+    partyErrorResponse(res, e, "خطا در ثبت مشتری");
   }
 });
 
 router.put("/customers/:id", can(`${CUSTOMERS_FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
-  const body = req.body as { partyId?: number; isActive?: boolean };
+  const body = req.body as { partyId?: number; isActive?: boolean; party?: PartyInput & { updatedAt?: string }; confirmDuplicate?: boolean };
   const existing = await prisma.customer.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "مشتری یافت نشد" });
   try {
+    // ویرایش آزادِ هویت شخصِ همین مشتری از همین فرم (همان سرویس مشترک؛ برای شخصِ دارای چند نقش روی همه‌ی نقش‌ها اثر دارد)
+    if (body.party) await updateParty(existing.partyId, body.party, { confirmDuplicate: !!body.confirmDuplicate });
     if (body.partyId && body.partyId !== existing.partyId) {
       if (existing.hasTransactions) return res.status(400).json({ error: "این مشتری گردش دارد و طرف حساب آن قابل تغییر نیست" });
       const party = await prisma.party.findUnique({ where: { id: body.partyId } });
@@ -99,7 +116,7 @@ router.put("/customers/:id", can(`${CUSTOMERS_FORM}.edit`), async (req, res) => 
     const updated = await prisma.customer.update({ where: { id }, data: { partyId: body.partyId, isActive: body.isActive } });
     res.json(updated);
   } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در ویرایش مشتری" });
+    partyErrorResponse(res, e, "خطا در ویرایش مشتری");
   }
 });
 
