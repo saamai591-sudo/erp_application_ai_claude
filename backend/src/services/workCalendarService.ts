@@ -88,14 +88,18 @@ export async function missingMonthMessage(year: number, month: number): Promise<
   return row ? null : `ماه ${month} سال ${year} در «تقویم کاری» تعریف نشده است؛ ابتدا تقویم کاری آن سال را بسازید`;
 }
 
-/** ماه‌های استفاده‌شده‌ی یک سال: فیش محاسبه‌شده، ورودی ماهانه یا روش محاسبه (ماه صدور یا اجرا) */
+/** ماه‌های استفاده‌شده‌ی یک سال: فیش محاسبه‌شده، ورودی ماهانه یا روش محاسبه (ماه صدور یا اجرا) یا وام (شروع قسط، اصلاح، تعلیق) */
 export async function usedMonths(year: number): Promise<Set<number>> {
-  const [slips, inputs, execs, issues, values] = await Promise.all([
+  const [slips, inputs, execs, issues, values, loanStarts, adjMonths, suspFrom, suspTo] = await Promise.all([
     prisma.payrollSlip.findMany({ where: { year }, distinct: ["month"], select: { month: true } }),
     prisma.payrollFactorInput.findMany({ where: { year }, distinct: ["month"], select: { month: true } }),
     prisma.payrollFactorMethod.findMany({ where: { execCalendarMonth: { year } }, select: { execCalendarMonth: { select: { month: true } } } }),
     prisma.payrollFactorMethod.findMany({ where: { issueCalendarMonth: { year } }, select: { issueCalendarMonth: { select: { month: true } } } }),
     prisma.payrollParameterValue.findMany({ where: { execCalendarMonth: { year } }, select: { execCalendarMonth: { select: { month: true } } } }),
+    prisma.loan.findMany({ where: { startMonth: { year } }, select: { startMonth: { select: { month: true } } } }),
+    prisma.loanAdjustment.findMany({ where: { fromMonth: { year } }, select: { fromMonth: { select: { month: true } } } }),
+    prisma.loanSuspension.findMany({ where: { fromMonth: { year } }, select: { fromMonth: { select: { month: true } } } }),
+    prisma.loanSuspension.findMany({ where: { toMonth: { year } }, select: { toMonth: { select: { month: true } } } }),
   ]);
   return new Set<number>([
     ...slips.map((x) => x.month),
@@ -103,5 +107,9 @@ export async function usedMonths(year: number): Promise<Set<number>> {
     ...execs.map((x) => x.execCalendarMonth!.month),
     ...issues.map((x) => x.issueCalendarMonth!.month),
     ...values.map((x) => x.execCalendarMonth!.month),
+    ...loanStarts.map((x) => x.startMonth.month),
+    ...adjMonths.map((x) => x.fromMonth.month),
+    ...suspFrom.map((x) => x.fromMonth.month),
+    ...suspTo.map((x) => x.toMonth.month),
   ]);
 }

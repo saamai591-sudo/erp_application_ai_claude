@@ -399,6 +399,15 @@ const RAW_MODULES: ModuleGroup[] = [
         ],
       },
       {
+        title: "وام",
+        items: [
+          { key: "loan-types", label: "نوع وام", list: "/loan-types", create: "/loan-types/new", icon: "tag" },
+          { key: "loan-payments", label: "پرداخت وام", list: "/loan-payments", create: "/loan-payments/new", icon: "banknote" },
+          { key: "loan-adjustments", label: "اصلاح مانده و قسط وام", list: "/loan-adjustments", create: "/loan-adjustments/new", icon: "sliders" },
+          { key: "loan-suspensions", label: "تعلیق وام", list: "/loan-suspensions", create: "/loan-suspensions/new", icon: "file" },
+        ],
+      },
+      {
         title: "گزارش",
         items: [{ key: "payroll-calculation-report", label: "گزارش محاسبات حقوق", list: "/payroll-calculation-report", icon: "tree", type: "report" }],
       },

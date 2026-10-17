@@ -10,6 +10,8 @@ import {
   DECREE_VARIANTS,
   FACTOR_VARIANTS,
   KIND_FA,
+  LOAN_SUM_KEY,
+  LOAN_SUM_LABEL,
   collectCondRefs,
   collectRefs,
   evaluate,
@@ -21,6 +23,7 @@ import {
 } from "./payrollFormula";
 import { jalaliMonthRange } from "../utils/jalaliDate";
 import { getCalendarMonth, missingMonthMessage } from "./workCalendarService";
+import { computeLoanMonth, loanChainMessage, storedLoanSum, type LoanMonthItem } from "./payrollLoanService";
 
 // محاسبه‌ی حقوق یک کارمند در یک ماه شمسی بر اساس «روش محاسبه عامل»ها:
 //  • هر عامل حکم موجود در حکم مؤثر و هر عامل حقوق فعال، روش مؤثر خودش را (آخرین رکورد با ماه اجرا ≤ پایان ماه) دارد؛
@@ -273,6 +276,8 @@ export async function getBaseCalcType() {
 /** حذف فیش «حقوق ماهانه» وقتی فیش نوع دیگری برای همان کارمند و ماه هست ممنوع است؛ پیام برای اولین مورد، null = آزاد */
 export async function dependentSlipMessage(baseSlips: { employeeId: number; year: number; month: number }[]): Promise<string | null> {
   if (baseSlips.length === 0) return null;
+  const chain = await loanChainMessage(baseSlips);
+  if (chain) return chain;
   const dep = await prisma.payrollSlip.findFirst({
     where: { calcType: { isBase: false }, OR: baseSlips.map((b) => ({ employeeId: b.employeeId, year: b.year, month: b.month })) },
     select: { calcType: { select: { title: true } }, employee: { select: { personnelCode: true } }, year: true, month: true },
@@ -407,6 +412,9 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
     nodes.push(mk({ node: `C:${c.key}`, source: "PAYROLL_COMPONENT", refId: c.id, title: c.title, kind: c.kind as Kind, method: m }));
   }
   const kindNodes = nodes.map((n) => ({ node: n.node, kind: n.kind }));
+  // اقساط وام: حقوق ماهانه از وضعیت وام‌ها محاسبه می‌کند و مانده را ثبت می‌کند؛ نوع‌های دیگر مقدار ثبت‌شده‌ی همان فیش ماهانه را می‌خوانند
+  const loanItems: LoanMonthItem[] = isBase ? await computeLoanMonth(employeeId, year, month) : [];
+  const loanSum = isBase ? loanItems.reduce((a, x) => a + x.installment, 0) : baseSlip ? await storedLoanSum(baseSlip.id) : 0;
   for (const n of nodes) n.deps = edgesOf(n.node, n.refs, kindNodes);
 
   // ترتیب توپولوژیک
@@ -503,7 +511,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
     if (ns === "C") return compByKey.get(key)?.title ?? key;
     if (ns === "P") return paramDefs.get(key)?.title ?? key;
     if (ns === "B") return BASE_INFO[key] ?? key;
-    return `جمع ${KIND_FA[key] ?? key}`;
+    return key === LOAN_SUM_KEY ? LOAN_SUM_LABEL : `جمع ${KIND_FA[key] ?? key}`;
   };
   const env: EvalEnv = {
     label(ns, key, variant) {
@@ -525,6 +533,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
         usedParams.set(key, pv);
         return pv.value;
       }
+      if (ns === "S" && key === LOAN_SUM_KEY) return loanSum;
       if (ns === "S") {
         let sum = 0;
         for (const n of nodes) {
@@ -668,6 +677,9 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
       trace,
     });
   }
+  if (isBase && loanItems.some((x) => x.installment > 0) && !nodes.some((n) => n.refs.some((r) => r.ns === "S" && r.key === LOAN_SUM_KEY))) {
+    warnings.push("کارمند قسط وام دارد و مانده‌ی وام کم شد، ولی هیچ عاملی از «جمع اقساط وام» در فرمولش استفاده نمی‌کند؛ قسط در فیش کسر نشد");
+  }
   for (const t of provisionalNotes) warnings.push(`روش محاسبه‌ی «${t}» پیش‌فرض نصب و تاییدنشده است`);
 
   const sum = (k: Kind) => lines.filter((l) => l.kind === k && !l.error).reduce((a, l) => a + l.amount, 0);
@@ -700,7 +712,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
     if (!isBase && !(await tx.payrollSlip.findUnique({ where: { employeeId_year_month_calcTypeId: { employeeId, year, month, calcTypeId: baseType.id } }, select: { id: true } }))) {
       throw new PayrollCalcError(`ابتدا «${baseType.title}» این کارمند برای همین ماه را محاسبه کنید`);
     }
-    return tx.payrollSlip.create({
+    const created = await tx.payrollSlip.create({
       data: {
         employeeId,
         year,
@@ -731,6 +743,13 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
         },
       },
     });
+    // مانده‌ی ماهانه‌ی وام‌ها (با حذف فیش خودکار پاک می‌شود)
+    if (loanItems.length > 0) {
+      await tx.loanMonthlyBalance.createMany({
+        data: loanItems.map((x) => ({ loanId: x.loanId, slipId: created.id, year, month, installment: x.installment, balanceBefore: x.balanceBefore, balanceAfter: x.balanceAfter })),
+      });
+    }
+    return created;
   });
   return { slipId: slip.id };
 }

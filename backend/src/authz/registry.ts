@@ -619,6 +619,16 @@ export const REGISTRY: ModuleDef[] = [
         ],
       },
       {
+        key: "loans",
+        title: "وام",
+        forms: [
+          { key: "loan-types", title: "نوع وام", baseActions: CRUD },
+          { key: "loan-payments", title: "پرداخت وام", baseActions: CRUD },
+          { key: "loan-adjustments", title: "اصلاح مانده و قسط وام", baseActions: CRUD },
+          { key: "loan-suspensions", title: "تعلیق وام", baseActions: CRUD },
+        ],
+      },
+      {
         key: "reports",
         title: "گزارش",
         forms: [{ key: "payroll-calculation-report", title: "گزارش محاسبات حقوق", baseActions: ["view"] }],

@@ -9,7 +9,7 @@ import { getEffectiveDecrees } from "../services/employmentDecreeService";
 import { buildPayrollSlipsPrint } from "../services/payrollSlipPrint";
 import { jalaliMonthRange } from "../utils/jalaliDate";
 import { getCalendarMonth, missingMonthMessage } from "../services/workCalendarService";
-import { BASE_INFO, DECREE_VARIANTS, FACTOR_VARIANTS, KIND_FA } from "../services/payrollFormula";
+import { BASE_INFO, DECREE_VARIANTS, FACTOR_VARIANTS, KIND_FA, LOAN_SUM_KEY, LOAN_SUM_LABEL } from "../services/payrollFormula";
 
 // حقوق و دستمزد: عامل‌های حقوق (هویت)، «روش محاسبه عامل» (تاریخ‌دار با ماه اجرا؛ مبنا = عامل حکم یا عامل حقوق)، ورودی ماهانه‌ی عوامل،
 // محاسبه‌ی فیش یک کارمند و جزئیات آن برای گزارش.
@@ -266,7 +266,7 @@ router.get("/payroll-methods/palette", can(`${F_METH}.view`), async (req, res) =
       { method: "FIXED", title: "عامل مقدار ثابت", classes: byMethod("FIXED"), variants: ["VALUE", "YTD_PREV", "ALL_PREV", "PREV"].map((k) => ({ key: k, title: FACTOR_VARIANTS[k] })) },
     ],
     baseInfo: Object.entries(BASE_INFO).map(([k, t]) => ({ key: k, title: t })),
-    classTotals: KINDS.map((k) => ({ key: k, title: `جمع ${KIND_FA[k]}` })),
+    classTotals: [...KINDS.map((k) => ({ key: k, title: `جمع ${KIND_FA[k]}` })), { key: LOAN_SUM_KEY, title: LOAN_SUM_LABEL }],
     params: params.map((p) => ({ key: p.key, title: p.title, type: p.type })),
   });
 });

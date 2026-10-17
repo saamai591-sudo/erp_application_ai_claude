@@ -306,6 +306,7 @@ model Party {
   hasTransactions    Boolean            @default(false)
   isActive           Boolean            @default(true)
   bankAccountsAsBank BankAccount[]      @relation("BankAccountBankParty")
+  loanTypes          LoanType[]
   bankBranches       BankBranch[]       @relation("BankParty")
   cheques            ChequeItem[]
   customer           Customer?
@@ -4741,6 +4742,7 @@ model Employee {
   dependents             EmployeeDependent[]
   payrollSlips           PayrollSlip[]
   payrollInputs          PayrollFactorInput[]
+  loans                  Loan[]
 }
 
 /// عکس کارمند (حداکثر ۳۰۰ کیلوبایت)؛ جدا از Employee تا فهرست‌ها داده‌ی باینری نخوانند
@@ -5062,6 +5064,7 @@ model PayrollSlip {
   lines         PayrollSlipLine[]
   calcType      PayrollCalcType   @relation(fields: [calcTypeId], references: [id], onDelete: Restrict)
   calendarMonth WorkCalendarMonth @relation(fields: [year, month], references: [year, month], onDelete: Restrict)
+  loanBalances  LoanMonthlyBalance[]
 
   @@unique([employeeId, year, month, calcTypeId])
   @@index([calcTypeId])
@@ -5189,6 +5192,10 @@ model WorkCalendarMonth {
   paramValues      PayrollParameterValue[]
   slips            PayrollSlip[]
   inputs           PayrollFactorInput[]
+  loanStarts       Loan[]               @relation("LoanStartMonth")
+  loanAdjustments  LoanAdjustment[]     @relation("LoanAdjustmentMonth")
+  loanSuspensionsFrom LoanSuspension[]  @relation("LoanSuspensionFrom")
+  loanSuspensionsTo   LoanSuspension[]  @relation("LoanSuspensionTo")
 
   @@unique([calendarId, month])
   @@unique([year, month])
@@ -5205,4 +5212,118 @@ model PayrollFactorMethodBranch {
   method        PayrollFactorMethod  @relation(fields: [methodId], references: [id], onDelete: Cascade)
 
   @@unique([methodId, seq])
+}
+
+// ── حقوق و دستمزد › وام ──
+
+/// نوع وام: عنوان + سازمان مرتبط (شخص حقوقی از نوع بانک / موسسه مالی و اعتباری)
+model LoanType {
+  id                 Int      @id @default(autoincrement())
+  title              String   @unique
+  institutionPartyId Int
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  institution        Party    @relation(fields: [institutionPartyId], references: [id], onDelete: Restrict)
+  loans              Loan[]
+}
+
+/// تکلیف باقیمانده‌ی تقسیم مبلغ وام بر قسط: همراه با قسط اول / همراه با قسط آخر / یک قسط جدا بعد از قسط آخر
+enum LoanRemainderMode {
+  WITH_FIRST
+  WITH_LAST
+  EXTRA_LAST
+}
+
+/// پرداخت وام به کارمند (شماره‌ی خودکار)؛ اقساط از ماه شروع (ماه تقویم کاری) و بر اساس «مانده» کسر می‌شوند
+model Loan {
+  id                Int                  @id @default(autoincrement())
+  number            Int                  @unique
+  paymentDate       DateTime             @db.Date
+  employeeId        Int
+  loanTypeId        Int
+  amount            Decimal              @db.Decimal(20, 4)
+  installmentCount  Int
+  installmentAmount Decimal              @db.Decimal(20, 4)
+  startMonthId      Int
+  remainderMode     LoanRemainderMode
+  description       String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  employee          Employee             @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  loanType          LoanType             @relation(fields: [loanTypeId], references: [id], onDelete: Restrict)
+  startMonth        WorkCalendarMonth    @relation("LoanStartMonth", fields: [startMonthId], references: [id], onDelete: Restrict)
+  balances          LoanMonthlyBalance[]
+  adjustmentLines   LoanAdjustmentLine[]
+  suspensionLines   LoanSuspensionLine[]
+
+  @@index([employeeId])
+}
+
+/// مانده‌ی ماهانه‌ی وام که همزمان با محاسبه‌ی «حقوق ماهانه» ثبت می‌شود؛ با حذف فیش، خودکار پاک می‌شود (مانده‌ی ماه بعد از همین ردیف شروع می‌شود)
+model LoanMonthlyBalance {
+  id            Int         @id @default(autoincrement())
+  loanId        Int
+  slipId        Int
+  year          Int
+  month         Int
+  installment   Decimal     @db.Decimal(20, 4)
+  balanceBefore Decimal     @db.Decimal(20, 4)
+  balanceAfter  Decimal     @db.Decimal(20, 4)
+  loan          Loan        @relation(fields: [loanId], references: [id], onDelete: Restrict)
+  slip          PayrollSlip @relation(fields: [slipId], references: [id], onDelete: Cascade)
+
+  @@unique([loanId, year, month])
+  @@index([slipId])
+}
+
+/// اصلاح مانده / قسط وام از یک ماه به بعد
+model LoanAdjustment {
+  id          Int                  @id @default(autoincrement())
+  number      Int                  @unique
+  date        DateTime             @db.Date
+  fromMonthId Int
+  description String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  fromMonth   WorkCalendarMonth    @relation("LoanAdjustmentMonth", fields: [fromMonthId], references: [id], onDelete: Restrict)
+  lines       LoanAdjustmentLine[]
+}
+
+model LoanAdjustmentLine {
+  id             Int            @id @default(autoincrement())
+  adjustmentId   Int
+  loanId         Int
+  /// مبلغی که کارمند خارج از سیستم حقوق تسویه کرده (از مانده کم می‌شود)
+  settledAmount  Decimal?       @db.Decimal(20, 4)
+  /// مبلغ قسط جدید از ماه اصلاح به بعد
+  newInstallment Decimal?       @db.Decimal(20, 4)
+  adjustment     LoanAdjustment @relation(fields: [adjustmentId], references: [id], onDelete: Cascade)
+  loan           Loan           @relation(fields: [loanId], references: [id], onDelete: Restrict)
+
+  @@unique([adjustmentId, loanId])
+}
+
+/// تعلیق وام: در بازه‌ی «از ماه تا ماه» قسطی کسر نمی‌شود (برنامه به همان اندازه عقب می‌رود)
+model LoanSuspension {
+  id          Int                  @id @default(autoincrement())
+  number      Int                  @unique
+  date        DateTime             @db.Date
+  fromMonthId Int
+  toMonthId   Int
+  description String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  fromMonth   WorkCalendarMonth    @relation("LoanSuspensionFrom", fields: [fromMonthId], references: [id], onDelete: Restrict)
+  toMonth     WorkCalendarMonth    @relation("LoanSuspensionTo", fields: [toMonthId], references: [id], onDelete: Restrict)
+  lines       LoanSuspensionLine[]
+}
+
+model LoanSuspensionLine {
+  id           Int            @id @default(autoincrement())
+  suspensionId Int
+  loanId       Int
+  suspension   LoanSuspension @relation(fields: [suspensionId], references: [id], onDelete: Cascade)
+  loan         Loan           @relation(fields: [loanId], references: [id], onDelete: Restrict)
+
+  @@unique([suspensionId, loanId])
 }

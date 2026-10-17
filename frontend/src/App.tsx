@@ -101,6 +101,9 @@ import LegalParameters from "./pages/LegalParameters";
 import PayrollDataEntry from "./pages/PayrollDataEntry";
 import PayrollComponents from "./pages/PayrollComponents";
 import PayrollCalcTypes from "./pages/PayrollCalcTypes";
+import LoanTypes from "./pages/LoanTypes";
+import LoanPayments from "./pages/LoanPayments";
+import { LoanAdjustments, LoanSuspensions } from "./pages/LoanDocs";
 import WorkCalendars from "./pages/WorkCalendars";
 import FactorMethods from "./pages/FactorMethods";
 import { PayrollReportPage } from "./pages/PayrollCalculation";
@@ -455,6 +458,18 @@ export default function App() {
             <Route path="/payroll-calc-types" element={<PayrollCalcTypes />} />
             <Route path="/payroll-calc-types/new" element={<PayrollCalcTypes />} />
             <Route path="/payroll-calc-types/:id/edit" element={<PayrollCalcTypes />} />
+            <Route path="/loan-types" element={<LoanTypes />} />
+            <Route path="/loan-types/new" element={<LoanTypes />} />
+            <Route path="/loan-types/:id/edit" element={<LoanTypes />} />
+            <Route path="/loan-payments" element={<LoanPayments />} />
+            <Route path="/loan-payments/new" element={<LoanPayments />} />
+            <Route path="/loan-payments/:id/edit" element={<LoanPayments />} />
+            <Route path="/loan-adjustments" element={<LoanAdjustments />} />
+            <Route path="/loan-adjustments/new" element={<LoanAdjustments />} />
+            <Route path="/loan-adjustments/:id/edit" element={<LoanAdjustments />} />
+            <Route path="/loan-suspensions" element={<LoanSuspensions />} />
+            <Route path="/loan-suspensions/new" element={<LoanSuspensions />} />
+            <Route path="/loan-suspensions/:id/edit" element={<LoanSuspensions />} />
             <Route path="/payroll-components" element={<PayrollComponents />} />
             <Route path="/payroll-components/new" element={<PayrollComponents />} />
             <Route path="/payroll-components/:id/edit" element={<PayrollComponents />} />

@@ -3,7 +3,7 @@
 //   [C:<کلید عامل حقوق>[:نوع]]  VALUE مقدار (پیش‌فرض)، YTD سال تا ماه (با ماه جاری)، YTD_PREV، ALL_PREV، PREV
 //   [P:<کلید پارامتر مبنا>]   مقدار معتبر پارامتر (جدول پلکانی فقط داخل PROGRESSIVE)
 //   [B:<اطلاعات پایه>]          MONTH_DAYS, YEAR_DAYS, SERVICE_DAYS, SERVICE_YEARS, MONTH_NO
-//   [S:<طبقه>]                  جمع همه‌ی عوامل آن طبقه در همین ماه: EARNING (پرداختی)، DEDUCTION (کسر)، EMPLOYER_COST (هزینه کارفرما)، INFO (اطلاعاتی)
+//   [S:<طبقه>]                  جمع همه‌ی عوامل آن طبقه در همین ماه: EARNING (پرداختی)، DEDUCTION (کسر)، EMPLOYER_COST (هزینه کارفرما)، INFO (اطلاعاتی)؛ [S:LOANS] = جمع اقساط وام
 // توابع: MIN(...), MAX(...), ROUND(x[, ارقام]), PROGRESSIVE([P:جدول], مبلغ). عملگرها: + - * / و پرانتز.
 // شرط: مقایسه‌ها (> >= < <= = <>) با AND/OR (و/یا) و پرانتز؛ شرط خالی = همیشه برقرار.
 
@@ -34,6 +34,9 @@ export const BASE_INFO: Record<string, string> = {
   ALLOWED_HOURS: "ساعات مجاز ماه (تقویم کاری)",
 };
 export const KIND_FA: Record<string, string> = { WORK: "کارکرد", EARNING: "پرداختی", DEDUCTION: "کسر", EMPLOYER_COST: "هزینه کارفرما", INFO: "اطلاعاتی" };
+/** [S:LOANS] = جمع اقساط وام‌های کارمند در همین ماه (از «وام» می‌آید، نه از جمع یک طبقه‌ی عامل‌ها) */
+export const LOAN_SUM_KEY = "LOANS";
+export const LOAN_SUM_LABEL = "جمع اقساط وام";
 
 export const DECREE_VARIANTS: Record<string, string> = {
   LAST: "آخرین مقدار حکم",
@@ -241,7 +244,7 @@ function parseRef(raw: string): Node {
     return { t: "ref", ns, key, variant: v };
   }
   if (ns === "B" && !BASE_INFO[key]) throw new FormulaError(`اطلاعات پایه‌ی ناشناخته [${raw}]`);
-  if (ns === "S" && !KIND_FA[key]) throw new FormulaError(`طبقه‌ی ناشناخته [${raw}]`);
+  if (ns === "S" && !KIND_FA[key] && key !== LOAN_SUM_KEY) throw new FormulaError(`طبقه‌ی ناشناخته [${raw}]`);
   if (variant) throw new FormulaError(`[${raw}] نوع مقدار ندارد`);
   return { t: "ref", ns, key, variant: "" };
 }
