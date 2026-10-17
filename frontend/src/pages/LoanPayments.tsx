@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ErrorToast } from "../components/ErrorToast";
 import { DataTable } from "../components/DataTable";
@@ -147,6 +147,24 @@ function LoanForm({ editId }: { editId?: number }) {
   const { flash } = useSavedFlash();
   const locked = !!meta.lock;
   const set = (p: Partial<typeof EMPTY>) => setForm({ ...form, ...p });
+  // «الاکلنگی»: هر کدام از تعداد اقساط / مبلغ قسط را کاربر آخر وارد کرده، دیگری از روی مبلغ وام (با گرد کردن به پایین) محاسبه می‌شود؛ باقیمانده‌ی تقسیم همان «کسر قسط» است
+  const lastTyped = useRef<"count" | "installment" | null>(null);
+  function seesaw(next: typeof EMPTY): typeof EMPTY {
+    const amt = Number(next.amount);
+    if (!(amt > 0)) return next;
+    if (lastTyped.current === "count") {
+      const c = Number(next.installmentCount);
+      if (c >= 1) return { ...next, installmentAmount: Math.floor(amt / c) >= 1 ? String(Math.floor(amt / c)) : "" };
+    } else if (lastTyped.current === "installment") {
+      const i = Number(next.installmentAmount);
+      if (i >= 1) return { ...next, installmentCount: String(Math.max(1, Math.floor(amt / i))) };
+    }
+    return next;
+  }
+  const setCalc = (p: Partial<typeof EMPTY>, typed: "count" | "installment" | null) => {
+    if (typed) lastTyped.current = typed;
+    setForm(seesaw({ ...form, ...p }));
+  };
 
   useEffect(() => {
     api.get("/loan-types/lookup").then(setTypes).catch(() => {});
@@ -269,15 +287,15 @@ function LoanForm({ editId }: { editId?: number }) {
             </div>
             <div className="form-field">
               <label>مبلغ وام<RequiredMark /></label>
-              <AmountInput value={form.amount} onChange={(v) => set({ amount: v })} />
+              <AmountInput value={form.amount} onChange={(v) => setCalc({ amount: v }, null)} />
             </div>
             <div className="form-field">
-              <label>تعداد اقساط<RequiredMark /></label>
-              <input dir="ltr" inputMode="numeric" value={form.installmentCount} onChange={(e) => set({ installmentCount: e.target.value.replace(/\D/g, "") })} />
+              <label>تعداد اقساط<RequiredMark /> <FieldHint label="تعداد اقساط" text="تعداد را بزنید تا مبلغ قسط خودکار (مبلغ وام ÷ تعداد، گرد به پایین) حساب شود؛ یا مبلغ قسط را بزنید تا تعداد خودکار حساب شود. هر کدام را آخر وارد کنید، دیگری از روی آن محاسبه می‌شود" /></label>
+              <input dir="ltr" inputMode="numeric" value={form.installmentCount} onChange={(e) => setCalc({ installmentCount: e.target.value.replace(/\D/g, "") }, "count")} />
             </div>
             <div className="form-field">
               <label>مبلغ هر قسط<RequiredMark /></label>
-              <AmountInput value={form.installmentAmount} onChange={(v) => set({ installmentAmount: v })} />
+              <AmountInput value={form.installmentAmount} onChange={(v) => setCalc({ installmentAmount: v }, "installment")} />
             </div>
             <div className="form-field">
               <label>شروع قسط<RequiredMark /> <FieldHint label="شروع قسط" text="ماهی از تقویم کاری که اولین قسط در حقوق همان ماه کسر می‌شود" /></label>
