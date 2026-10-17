@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma";
 import { can, userHasAction } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { AuthedRequest } from "../middleware/auth";
-import { METHOD_FA, PayrollCalcError, calculatePayroll, validateFactorMethod, methodLockMessage, lockedMethodIds, getBaseCalcType, dependentSlipMessage } from "../services/payrollCalculationService";
+import { METHOD_FA, PayrollCalcError, calculatePayroll, validateFactorMethod, methodLockMessage, lockedMethodIds, getBaseCalcType, dependentSlipMessage, createPayrollComponent } from "../services/payrollCalculationService";
 import { getEffectiveDecrees } from "../services/employmentDecreeService";
 import { buildPayrollSlipsPrint } from "../services/payrollSlipPrint";
 import { jalaliMonthRange } from "../utils/jalaliDate";
@@ -116,18 +116,7 @@ router.get("/payroll-components", can(`${F_COMP}.view`), async (_req, res) => {
 router.post("/payroll-components", can(`${F_COMP}.create`), async (req, res) => {
   const b = req.body as any;
   try {
-    const title = str(b.title);
-    if (!title) throw new PayrollCalcError("عنوان الزامی است");
-    if (!KINDS.includes(b.kind)) throw new PayrollCalcError("طبقه را انتخاب کنید");
-    const calcType = b.calcTypeId ? await prisma.payrollCalcType.findUnique({ where: { id: Number(b.calcTypeId) } }) : null;
-    if (!calcType) throw new PayrollCalcError("نوع محاسبه را انتخاب کنید");
-    if (await prisma.payrollComponent.findFirst({ where: { title } })) throw new PayrollCalcError("عامل دیگری با همین عنوان وجود دارد");
-    // کلید داخلی را سیستم می‌سازد (به کاربر نمایش داده نمی‌شود)
-    const last = await prisma.payrollComponent.findFirst({ orderBy: { id: "desc" }, select: { id: true } });
-    let n = (last?.id ?? 0) + 1;
-    let key = `F${n}`;
-    while (await prisma.payrollComponent.findUnique({ where: { key } })) key = `F${++n}`;
-    const created = await prisma.payrollComponent.create({ data: { key, title, kind: b.kind, calcTypeId: calcType.id, description: str(b.description), isActive: b.isActive ?? true } });
+    const created = await createPayrollComponent({ title: str(b.title) ?? "", kind: b.kind, calcTypeId: Number(b.calcTypeId), description: str(b.description), isActive: b.isActive });
     res.status(201).json({ id: created.id });
   } catch (e) {
     fail(res, e, "خطا در ثبت عامل");

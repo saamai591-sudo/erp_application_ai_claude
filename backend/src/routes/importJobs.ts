@@ -35,6 +35,7 @@ const ENTITY_TYPE_TO_ACTION: Record<string, string> = {
   "inventory-counting-shortage": `${findFormPrefix("inventory-counting-shortages")}.create`,
   "sales-quote": `${findFormPrefix("sales-quotes")}.create`,
   "sales-price-list": `${findFormPrefix("sales-price-lists")}.edit`,
+  "payroll-component": `${findFormPrefix("payroll-components")}.create`,
 };
 
 const router = Router();

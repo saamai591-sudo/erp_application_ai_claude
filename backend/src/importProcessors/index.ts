@@ -17,6 +17,7 @@ import { createInventoryCountingShortage } from "../routes/inventoryCountingShor
 import { createSalesQuote } from "../routes/salesOperations";
 import { isPriceListUsed } from "../services/salesPriceService";
 import { createParty } from "../services/partyService";
+import { createPayrollComponent, PayrollCalcError } from "../services/payrollCalculationService";
 
 const DETAIL_TYPE_PARTY = 1;
 const DETAIL_TYPE_COST_CENTER = 2;
@@ -445,6 +446,28 @@ export function registerAllImportProcessors() {
       } catch (e: any) {
         if (e.code === "P2002") return { ok: false, error: "کد یا عنوان تکراری است" };
         return { ok: false, error: e.message || "خطا در ثبت واحد سنجش" };
+      }
+    },
+  });
+
+  // عامل حقوق: عنوان + طبقه + نوع محاسبه (خالی = حقوق ماهانه). ساخت از همان تابع فرم؛ روش محاسبه‌ی عامل را بعداً در «روش محاسبه عامل» تعریف کنید
+  registerImportEntity("payroll-component", {
+    row: async (row) => {
+      try {
+        const title = (row.title ?? "").trim();
+        if (!title) return { ok: false, error: "عنوان الزامی است" };
+        const KIND_BY_FA: Record<string, string> = { "کارکرد": "WORK", "پرداختی": "EARNING", "کسر": "DEDUCTION", "هزینه کارفرما": "EMPLOYER_COST", "اطلاعاتی": "INFO" };
+        const kind = KIND_BY_FA[(row.kind ?? "").trim()];
+        if (!kind) return { ok: false, error: `طبقه باید یکی از «${Object.keys(KIND_BY_FA).join("، ")}» باشد` };
+        const typeTitle = (row.calcTypeTitle ?? "").trim();
+        const calcType = typeTitle ? await prisma.payrollCalcType.findFirst({ where: { title: typeTitle } }) : await prisma.payrollCalcType.findFirst({ where: { isBase: true } });
+        if (!calcType) return { ok: false, error: typeTitle ? `نوع محاسبه‌ی «${typeTitle}» یافت نشد` : "نوع محاسبه‌ی پایه تعریف نشده است" };
+        if (!calcType.isActive) return { ok: false, error: `نوع محاسبه‌ی «${calcType.title}» غیرفعال است` };
+        await createPayrollComponent({ title, kind, calcTypeId: calcType.id, description: row.description });
+        return { ok: true };
+      } catch (e: any) {
+        if (e instanceof PayrollCalcError) return { ok: false, error: e.message };
+        return { ok: false, error: e.message || "خطا در ثبت عامل حقوق" };
       }
     },
   });

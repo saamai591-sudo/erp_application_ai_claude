@@ -214,6 +214,26 @@ function prevMonth(y: number, m: number) {
   return m === 1 ? { y: y - 1, m: 12 } : { y, m: m - 1 };
 }
 
+const COMPONENT_KINDS = ["WORK", "EARNING", "DEDUCTION", "EMPLOYER_COST", "INFO"];
+
+/** ساخت «عامل حقوق» (فرم و ورود از اکسل هر دو از همین تابع): عنوان یکتا، طبقه‌ی معتبر، نوع محاسبه‌ی موجود؛ کلید داخلی را سیستم می‌سازد */
+export async function createPayrollComponent(input: { title: string; kind: string; calcTypeId: number; description?: string | null; isActive?: boolean }): Promise<{ id: number }> {
+  const title = input.title.trim();
+  if (!title) throw new PayrollCalcError("عنوان الزامی است");
+  if (!COMPONENT_KINDS.includes(input.kind)) throw new PayrollCalcError("طبقه را انتخاب کنید");
+  const calcType = input.calcTypeId ? await prisma.payrollCalcType.findUnique({ where: { id: input.calcTypeId } }) : null;
+  if (!calcType) throw new PayrollCalcError("نوع محاسبه را انتخاب کنید");
+  if (await prisma.payrollComponent.findFirst({ where: { title } })) throw new PayrollCalcError("عامل دیگری با همین عنوان وجود دارد");
+  const last = await prisma.payrollComponent.findFirst({ orderBy: { id: "desc" }, select: { id: true } });
+  let n = (last?.id ?? 0) + 1;
+  let key = `F${n}`;
+  while (await prisma.payrollComponent.findUnique({ where: { key } })) key = `F${++n}`;
+  const created = await prisma.payrollComponent.create({
+    data: { key, title, kind: input.kind as any, calcTypeId: calcType.id, description: input.description?.trim() || null, isActive: input.isActive ?? true },
+  });
+  return { id: created.id };
+}
+
 export async function getBaseCalcType() {
   const t = await prisma.payrollCalcType.findFirst({ where: { isBase: true } });
   if (!t) throw new PayrollCalcError("نوع محاسبه‌ی پایه (حقوق ماهانه) تعریف نشده است");

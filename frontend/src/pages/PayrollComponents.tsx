@@ -8,6 +8,7 @@ import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
+import { ExcelImportButton } from "../components/ExcelImport";
 import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
@@ -67,6 +68,18 @@ function CompList() {
             title="عامل حقوق"
           />
           <NewRecordButton path="/payroll-components/new" />
+          <ExcelImportButton
+            entityLabel="عامل‌های حقوق"
+            templateFilename="قالب-عامل-حقوق"
+            backendEntityType="payroll-component"
+            columns={[
+              { key: "title", label: "عنوان", required: true },
+              { key: "kind", label: "طبقه", required: true, hint: Object.values(KIND_FA).join(" / ") },
+              { key: "calcTypeTitle", label: "نوع محاسبه", hint: "اختیاری — عنوان نوع محاسبه (مثلاً عیدی)؛ اگر خالی بماند «حقوق ماهانه»" },
+              { key: "description", label: "شرح", hint: "اختیاری" },
+            ]}
+            onDone={reload}
+          />
           <RefreshButton onClick={reload} />
         </div>
       </div>
