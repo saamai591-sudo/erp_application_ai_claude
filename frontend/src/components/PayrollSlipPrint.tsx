@@ -6,7 +6,7 @@ import { toFaDigits } from "../lib/formatAmount";
 
 // پیش‌نمایش و چاپ فیش حقوقی یک یا چند کارمند (سند HTML را سرور از فیش‌های ذخیره‌شده می‌سازد: POST /payroll-calculations/print).
 
-export function PayrollSlipPrintDialog({ year, month, employeeIds, onClose }: { year: number; month: number; employeeIds: number[]; onClose: () => void }) {
+export function PayrollSlipPrintDialog({ year, month, employeeIds, calcTypeId, onClose }: { year: number; month: number; employeeIds: number[]; calcTypeId?: number; onClose: () => void }) {
   const [html, setHtml] = useState("");
   const [fileName, setFileName] = useState("");
   const [count, setCount] = useState(0);
@@ -18,7 +18,7 @@ export function PayrollSlipPrintDialog({ year, month, employeeIds, onClose }: { 
   useEffect(() => {
     setLoading(true);
     api
-      .post("/payroll-calculations/print", { year, month, employeeIds }, { silent: true } as any)
+      .post("/payroll-calculations/print", { year, month, employeeIds, calcTypeId }, { silent: true } as any)
       .then((r: { html: string; fileName: string; count: number; missing: number[] }) => {
         setHtml(r.html);
         setFileName(r.fileName);

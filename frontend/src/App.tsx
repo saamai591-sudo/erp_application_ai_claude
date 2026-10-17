@@ -100,6 +100,7 @@ import EmploymentDecrees from "./pages/EmploymentDecrees";
 import LegalParameters from "./pages/LegalParameters";
 import PayrollDataEntry from "./pages/PayrollDataEntry";
 import PayrollComponents from "./pages/PayrollComponents";
+import PayrollCalcTypes from "./pages/PayrollCalcTypes";
 import FactorMethods from "./pages/FactorMethods";
 import { PayrollReportPage } from "./pages/PayrollCalculation";
 import PayrollCalculateMonth from "./pages/PayrollCalculateMonth";
@@ -447,6 +448,9 @@ export default function App() {
             <Route path="/legal-parameters" element={<LegalParameters />} />
             <Route path="/legal-parameters/new" element={<LegalParameters />} />
             <Route path="/legal-parameters/:id/edit" element={<LegalParameters />} />
+            <Route path="/payroll-calc-types" element={<PayrollCalcTypes />} />
+            <Route path="/payroll-calc-types/new" element={<PayrollCalcTypes />} />
+            <Route path="/payroll-calc-types/:id/edit" element={<PayrollCalcTypes />} />
             <Route path="/payroll-components" element={<PayrollComponents />} />
             <Route path="/payroll-components/new" element={<PayrollComponents />} />
             <Route path="/payroll-components/:id/edit" element={<PayrollComponents />} />

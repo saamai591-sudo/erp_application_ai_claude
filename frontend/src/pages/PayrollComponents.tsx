@@ -13,6 +13,7 @@ import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { KIND_FA } from "../lib/payrollLabels";
+import { useCalcTypes } from "../lib/useCalcTypes";
 
 // حقوق و دستمزد › تنظیمات › عامل حقوق: فقط هویت عامل (عنوان). کلید داخلی را سیستم خودکار می‌سازد و نمایش داده نمی‌شود؛
 // طبقه، روش و فرمول در «روش محاسبه عامل» (تاریخ‌دار) تعریف می‌شود.
@@ -25,6 +26,8 @@ interface Comp {
   isActive: boolean;
   method: string | null;
   kind: string;
+  calcTypeId: number;
+  calcTypeTitle: string;
 }
 
 export default function PayrollComponents() {
@@ -71,6 +74,7 @@ function CompList() {
       <DataTable
         columns={[
           { header: "عنوان", ...s((r) => r.title) },
+          { header: "نوع محاسبه", ...s((r) => r.calcTypeTitle), width: "150px" },
           { header: "طبقه", ...s((r) => (r.kind ? KIND_FA[r.kind] : "—")), width: "140px" },
           { header: "سیستمی", ...s((r) => (r.isSystem ? "بله" : "")), width: "80px" },
           { header: "فعال", ...s((r) => (r.isActive ? "بله" : "خیر")), width: "70px" },
@@ -83,7 +87,7 @@ function CompList() {
   );
 }
 
-const DEFAULT_FORM = { title: "", kind: "", description: "", isActive: true };
+const DEFAULT_FORM = { title: "", kind: "", calcTypeId: "", description: "", isActive: true };
 
 function CompForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
@@ -94,6 +98,13 @@ function CompForm({ editId }: { editId?: number }) {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const { flash } = useSavedFlash();
+  const { types, base } = useCalcTypes();
+
+  // عامل جدید پیش‌فرض به «حقوق ماهانه» وصل می‌شود (کاربر می‌تواند عوض کند)
+  useEffect(() => {
+    if (!editId && base && !form.calcTypeId) setForm({ ...form, calcTypeId: String(base.id) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [base]);
 
   useEffect(() => {
     if (!editId) return;
@@ -101,7 +112,7 @@ function CompForm({ editId }: { editId?: number }) {
       const c = rows.find((r) => r.id === editId);
       if (c) {
         setIsSystem(c.isSystem);
-        if (!hasPersistedState(cacheKey)) setForm({ title: c.title, kind: c.kind, description: c.description ?? "", isActive: c.isActive });
+        if (!hasPersistedState(cacheKey)) setForm({ title: c.title, kind: c.kind, calcTypeId: String(c.calcTypeId), description: c.description ?? "", isActive: c.isActive });
       }
       setLoaded(true);
     });
@@ -113,12 +124,13 @@ function CompForm({ editId }: { editId?: number }) {
     setError(null);
     if (!form.title.trim()) return setError("عنوان الزامی است");
     if (!form.kind) return setError("طبقه را انتخاب کنید");
+    if (!form.calcTypeId) return setError("نوع محاسبه را انتخاب کنید");
     try {
       if (editId) {
-        await api.put(`/payroll-components/${editId}`, form);
+        await api.put(`/payroll-components/${editId}`, { ...form, calcTypeId: Number(form.calcTypeId) });
         flash();
       } else {
-        const created = await api.post("/payroll-components", form);
+        const created = await api.post("/payroll-components", { ...form, calcTypeId: Number(form.calcTypeId) });
         flash();
         navigate(`/payroll-components/${created.id}/edit`);
       }
@@ -153,6 +165,13 @@ function CompForm({ editId }: { editId?: number }) {
           <div className="form-field">
             <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
+          </div>
+          <div className="form-field">
+            <label>نوع محاسبه<RequiredMark /> <FieldHint label="نوع محاسبه" text="این عامل در کدام محاسبه می‌آید (حقوق ماهانه، عیدی، ذخیره سنوات، …). هر عامل فقط به یک نوع تعلق دارد؛ اگر مثلاً مالیات در عیدی هم لازم است، یک عامل جدا (مثلاً «مالیات عیدی») تعریف کنید. فرمول عامل‌های انواع غیرِ حقوق ماهانه می‌تواند مقدار عامل‌های حقوق ماهانه‌ی همان ماه را بخواند." /></label>
+            <select value={form.calcTypeId} onChange={(e) => setForm({ ...form, calcTypeId: e.target.value })}>
+              <option value="">انتخاب کنید</option>
+              {types.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+            </select>
           </div>
           <div className="form-field">
             <label>طبقه<RequiredMark /> <FieldHint label="طبقه" text="پرداختی: به جمع پرداختی‌ها می‌رود. کسر: از خالص پرداختی کم می‌شود. هزینه کارفرما: هزینه‌ی کارفرما و بدون اثر بر خالص. اطلاعاتی: فقط نمایش (مثل روز کارکرد). طبقه‌ی عامل با زمان تغییر نمی‌کند." /></label>

@@ -8,6 +8,7 @@ import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState } from "../lib/usePersistedState";
 import { VALUE_TYPE_FA, MONTHS_FA, currentJalaliYearMonth, hoursToHm } from "../lib/payrollLabels";
+import { useCalcTypes } from "../lib/useCalcTypes";
 
 // حقوق و دستمزد › عملیات › ورود اطلاعات: ماه را انتخاب کنید، «لود اطلاعات» را بزنید؛ گرید کد پرسنل، عنوان و به‌ازای هر عاملِ «ورود دستی» یک ستون
 // دارد. فرمت مجاز هر ستون را نوع پارامتر عامل تعیین می‌کند: ساعت دقیقه hhh:mm — روز عدد صحیح — عدد اعشاری — مبلغ اعشار تا ارز پایه.
@@ -26,6 +27,7 @@ interface Row {
   values: Record<string, string | null>;
 }
 interface Data {
+  calcType?: { id: number; title: string; isBase: boolean };
   monthDays: number;
   decimals: number;
   columns: Column[];
@@ -69,10 +71,13 @@ function TimeCell({ value, onChange }: { value: string; onChange: (v: string) =>
 
 export default function PayrollDataEntry() {
   const cur = currentJalaliYearMonth();
-  const [sel, setSel] = usePersistedState("/payroll-data-entry:sel", { year: String(cur.year), month: String(cur.month) });
-  const [data, setData] = useState<Data | null>(null);
-  const [orig, setOrig] = useState<Record<string, string>>({});
-  const [cells, setCells] = useState<Record<string, string>>({});
+  const [sel, setSel] = usePersistedState("/payroll-data-entry:sel", { year: String(cur.year), month: String(cur.month), calcTypeId: "" });
+  // با رفتن به تب دیگر و برگشتن، گرید و ویرایش‌های ذخیره‌نشده می‌مانند (نیاز به «لود اطلاعات» دوباره نیست)
+  const [data, setData] = usePersistedState<Data | null>("form:/payroll-data-entry:data", null);
+  const [orig, setOrig] = usePersistedState<Record<string, string>>("form:/payroll-data-entry:orig", {});
+  const [cells, setCells] = usePersistedState<Record<string, string>>("form:/payroll-data-entry:cells", {});
+  const { types, base } = useCalcTypes();
+  const typeId = sel.calcTypeId || (base ? String(base.id) : "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { flash } = useSavedFlash();
@@ -83,7 +88,7 @@ export default function PayrollDataEntry() {
     setError(null);
     setBusy(true);
     try {
-      const d: Data = await api.get(`/payroll-data-entry?year=${sel.year}&month=${sel.month}`);
+      const d: Data = await api.get(`/payroll-data-entry?year=${sel.year}&month=${sel.month}&calcTypeId=${typeId}`);
       const init: Record<string, string> = {};
       for (const r of d.rows) for (const c of d.columns) init[key(r.employeeId, c.componentId)] = toCell(r.values[String(c.componentId)], c.valueType);
       setData(d);
@@ -108,7 +113,7 @@ export default function PayrollDataEntry() {
     if (entries.length === 0) return;
     setBusy(true);
     try {
-      await api.put("/payroll-data-entry", { year: Number(sel.year), month: Number(sel.month), entries });
+      await api.put("/payroll-data-entry", { year: Number(sel.year), month: Number(sel.month), calcTypeId: Number(typeId), entries });
       flash();
       // مقدار ذخیره‌شده مبنای تغییرات بعدی می‌شود
       setOrig({ ...cells });
@@ -168,6 +173,12 @@ export default function PayrollDataEntry() {
       <div className="card" style={{ padding: 12, marginBottom: 12 }}>
         <div className="form-grid">
           <div className="form-field">
+            <label>نوع محاسبه</label>
+            <select value={typeId} onChange={(e) => { setSel({ ...sel, calcTypeId: e.target.value }); setData(null); }}>
+              {types.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+            </select>
+          </div>
+          <div className="form-field">
             <label>سال</label>
             <input dir="ltr" inputMode="numeric" value={sel.year} onChange={(e) => { setSel({ ...sel, year: e.target.value.replace(/\D/g, "") }); setData(null); }} />
           </div>
@@ -186,7 +197,7 @@ export default function PayrollDataEntry() {
         </div>
       </div>
 
-      {data && data.columns.length === 0 && <p>برای این ماه عاملی با روش «ورود دستی» تعریف نشده است.</p>}
+      {data && data.columns.length === 0 && <p>برای این ماه و نوع محاسبه عاملی با روش «ورود دستی» تعریف نشده است.</p>}
       {data && data.columns.length > 0 && (
         <div style={{ overflowX: "auto" }}>
           <table className="hr-table">
@@ -207,7 +218,7 @@ export default function PayrollDataEntry() {
               {data.rows.map((r) => (
                 <tr key={r.employeeId}>
                   <td>{toFaDigits(r.personnelCode)}</td>
-                  <td>{r.fullName}{r.locked && <span title="حقوق این ماه محاسبه شده؛ برای ویرایش، ابتدا محاسبه را حذف کنید" style={{ marginInlineStart: 6, opacity: 0.7, fontSize: 12 }}>🔒 محاسبه‌شده</span>}</td>
+                  <td>{r.fullName}{r.locked && <span title="این نوع محاسبه برای این ماه انجام شده؛ برای ویرایش، ابتدا محاسبه را حذف کنید" style={{ marginInlineStart: 6, opacity: 0.7, fontSize: 12 }}>🔒 محاسبه‌شده</span>}</td>
                   {data.columns.map((c) => (
                     <td key={c.componentId}>{cell(r, c)}</td>
                   ))}

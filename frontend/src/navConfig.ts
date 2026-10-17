@@ -382,6 +382,7 @@ const RAW_MODULES: ModuleGroup[] = [
         title: "تنظیمات",
         items: [
           { key: "legal-parameters", label: "پارامترهای مبنا", list: "/legal-parameters", create: "/legal-parameters/new", icon: "sliders" },
+          { key: "calculation-types", label: "نوع محاسبه", list: "/payroll-calc-types", create: "/payroll-calc-types/new", icon: "sliders" },
           { key: "payroll-components", label: "عامل حقوق", list: "/payroll-components", create: "/payroll-components/new", icon: "tag" },
           { key: "factor-methods", label: "روش محاسبه عامل", list: "/factor-methods", create: "/factor-methods/new", icon: "sliders" },
         ],

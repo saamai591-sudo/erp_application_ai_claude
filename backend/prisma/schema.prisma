@@ -5013,8 +5013,27 @@ model PayrollComponent {
   isSystem    Boolean               @default(false)
   isActive    Boolean               @default(true)
   createdAt   DateTime              @default(now())
+  /// نوع محاسبه‌ای که عامل در آن می‌آید (حقوق ماهانه، عیدی، ذخیره سنوات، …)؛ هر عامل فقط به یک نوع تعلق دارد
+  calcTypeId  Int
+  calcType    PayrollCalcType       @relation(fields: [calcTypeId], references: [id], onDelete: Restrict)
   methods     PayrollFactorMethod[]
   inputs      PayrollFactorInput[]
+
+  @@index([calcTypeId])
+}
+
+/// «نوع محاسبه» حقوق: حقوق ماهانه (نوع پایه، دقیقاً یکی) و انواع دیگر مثل عیدی/ذخیره سنوات/بازخرید مرخصی/بازخرید سنوات.
+/// محاسبه‌ی هر نوعِ غیرپایه برای یک کارمند فقط وقتی مجاز است که فیش «حقوق ماهانه»ی همان ماه محاسبه شده باشد.
+model PayrollCalcType {
+  id          Int                 @id @default(autoincrement())
+  title       String              @unique
+  description String?
+  /// نوع پایه (حقوق ماهانه): دقیقاً یکی (ایندکس یکتای جزئی در migration)؛ غیرقابل حذف
+  isBase      Boolean             @default(false)
+  isActive    Boolean             @default(true)
+  createdAt   DateTime            @default(now())
+  components  PayrollComponent[]
+  slips       PayrollSlip[]
 }
 
 /// نتیجه‌ی محاسبه‌ی یک کارمند در یک ماه (با همه‌ی ورودی‌ها و ریز هر جزء برای گزارش)
@@ -5023,6 +5042,7 @@ model PayrollSlip {
   employeeId    Int
   year          Int
   month         Int
+  calcTypeId    Int
   decreeId      Int?
   monthDays     Int
   earnings      Decimal           @db.Decimal(20, 4)
@@ -5037,8 +5057,10 @@ model PayrollSlip {
   employee      Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   decree        EmploymentDecree? @relation(fields: [decreeId], references: [id], onDelete: Restrict)
   lines         PayrollSlipLine[]
+  calcType      PayrollCalcType   @relation(fields: [calcTypeId], references: [id], onDelete: Restrict)
 
-  @@unique([employeeId, year, month])
+  @@unique([employeeId, year, month, calcTypeId])
+  @@index([calcTypeId])
 }
 
 model PayrollSlipLine {

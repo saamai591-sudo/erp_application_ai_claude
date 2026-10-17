@@ -66,9 +66,12 @@ export interface SlipPrintResult {
   missing: number[];
 }
 
-export async function buildPayrollSlipsPrint(year: number, month: number, employeeIds: number[], digits: "LATIN" | "PERSIAN" = "PERSIAN"): Promise<SlipPrintResult> {
+export async function buildPayrollSlipsPrint(year: number, month: number, employeeIds: number[], digits: "LATIN" | "PERSIAN" = "PERSIAN", calcTypeId?: number): Promise<SlipPrintResult> {
+  const calcType = calcTypeId ? await prisma.payrollCalcType.findUnique({ where: { id: calcTypeId } }) : await prisma.payrollCalcType.findFirst({ where: { isBase: true } });
+  // عنوان فیش: حقوق ماهانه «فیش حقوق ماه …»، انواع دیگر «فیش <نوع> ماه …»
+  const docTitle = !calcType || calcType.isBase ? "فیش حقوق" : `فیش ${calcType.title}`;
   const slips = await prisma.payrollSlip.findMany({
-    where: { year, month, employeeId: { in: employeeIds } },
+    where: { year, month, employeeId: { in: employeeIds }, ...(calcType ? { calcTypeId: calcType.id } : {}) },
     include: {
       lines: { orderBy: { seq: "asc" } },
       decree: { select: { employmentType: { select: { title: true } } } },
@@ -129,7 +132,7 @@ export async function buildPayrollSlipsPrint(year: number, month: number, employ
     ].filter(Boolean);
     return `<div class="slip">
 <h1>${esc(company?.name ?? "")}</h1>
-<h2>فیش حقوق ماه ${MONTHS[month - 1]} سال ${year}</h2>
+<h2>${esc(docTitle)} ماه ${MONTHS[month - 1]} سال ${year}</h2>
 <div class="info">${info.join("")}</div>
 <div class="cols">${section("کارکرد", "مقدار", work)}${section("مزایا", "مبلغ – ریال", earn)}${section("کسورات", "مبلغ – ریال", ded)}</div>
 <div class="tot"><div><span>جمع مزایا</span><span>${money(s.earnings.toString())}</span></div><div><span>جمع کسور</span><span>${money(s.deductions.toString())}</span></div><div><span>خالص پرداختی</span><span>${money(s.netPay.toString())}</span></div></div>
@@ -138,7 +141,7 @@ ${s.hasErrors ? `<div class="warn">توجه: محاسبه‌ی این فیش د�
 </div>`;
   });
 
-  const title = slips.length === 1 ? `فیش حقوق ${MONTHS[month - 1]} ${year} - ${slips[0].employee.party.lastName ?? ""}`.trim() : `فیش حقوق ${MONTHS[month - 1]} ${year}`;
+  const title = slips.length === 1 ? `${docTitle} ${MONTHS[month - 1]} ${year} - ${slips[0].employee.party.lastName ?? ""}`.trim() : `${docTitle} ${MONTHS[month - 1]} ${year}`;
   const html = wrapPrintHtml(`<style>${CSS}</style>${blocks.join("") || "<p>فیشی برای چاپ وجود ندارد</p>"}`, { title, paper: "A4", orientation: "PORTRAIT", marginMm: 8, digits });
   return { html, fileName: title, count: slips.length, missing };
 }

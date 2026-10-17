@@ -26,6 +26,9 @@ import { jalaliMonthRange } from "../utils/jalaliDate";
 //  • ترتیب محاسبه از وابستگی عملوندها (و جمع طبقه [S:…]) به‌دست می‌آید؛ دور رد می‌شود؛
 //  • عامل با روش ورودی (دستی/تردد/خزانه) مقدارش را از PayrollFactorInput همین ماه می‌گیرد؛ مقدار ثابت از خود روش؛
 //  • شرط اگر برقرار نباشد مقدار عامل صفر است. هر مبلغ به ریال گرد می‌شود.
+// «نوع محاسبه»: حقوق ماهانه (پایه) یا انواع دیگر (عیدی، ذخیره سنوات، بازخرید …). هر عامل حقوق به یک نوع تعلق دارد و هر نوع فیش جدا (کارمند+ماه+نوع) دارد؛
+// محاسبه‌ی نوعِ غیرپایه فقط وقتی مجاز است که فیش «حقوق ماهانه»ی همان کارمند و ماه محاسبه شده باشد و فرمولش می‌تواند مقدار عامل‌های حقوق ماهانه را
+// بخواند ([C:کلید] و [D:کد:VALUE] از روی همان فیش؛ [C:کلید:YTD] = همان مقدار + سال‌به‌تاریخ قبلی).
 // حکم و پارامترهای مبنا در «آخرین روز ماه» خوانده می‌شوند. نتیجه با همه‌ی ورودی‌ها و ریز عملوندها ذخیره می‌شود تا گزارش نیازی به محاسبه‌ی دوباره نداشته باشد.
 
 export class PayrollCalcError extends Error {}
@@ -53,6 +56,8 @@ interface CandidateMethod {
   method: Method;
   conditionText: string | null;
   formulaText: string | null;
+  /** نوع محاسبه‌ی عاملِ حقوق (برای عامل حکم لازم نیست: همیشه حقوق ماهانه) */
+  calcTypeId?: number | null;
 }
 
 function parseTexts(m: { conditionText: string | null; formulaText: string | null }): { cond: Cond | null; formula: Node | null } {
@@ -96,11 +101,16 @@ export async function validateFactorMethod(cand: CandidateMethod): Promise<void>
     throw new PayrollCalcError(e.message);
   }
   const refs = allRefs(parsed);
-  const [decree, comps, params] = await Promise.all([
+  const [decree, comps, params, baseType] = await Promise.all([
     prisma.decreeComponent.findMany({ select: { code: true, title: true } }),
-    prisma.payrollComponent.findMany({ select: { key: true, title: true, kind: true } }),
+    prisma.payrollComponent.findMany({ select: { key: true, title: true, kind: true, calcTypeId: true } }),
     prisma.payrollParameter.findMany({ select: { key: true } }),
+    prisma.payrollCalcType.findFirst({ where: { isBase: true }, select: { id: true } }),
   ]);
+  const baseId = baseType?.id ?? 0;
+  // نوع عاملِ در دست تعریف: عامل حکم همیشه حقوق ماهانه است
+  const candType = cand.node.startsWith("D:") ? baseId : cand.calcTypeId ?? baseId;
+  const typeByKey = new Map(comps.map((c) => [c.key, c.calcTypeId]));
   const dCodes = new Set(decree.map((d) => String(d.code)));
   const cKeys = new Set(comps.map((c) => c.key));
   const pKeys = new Set(params.map((p) => p.key));
@@ -108,17 +118,27 @@ export async function validateFactorMethod(cand: CandidateMethod): Promise<void>
   for (const r of refs) {
     if (r.ns === "D" && !dCodes.has(r.key)) throw new PayrollCalcError("عامل حکم انتخاب‌شده در فرمول وجود ندارد");
     if (r.ns === "C" && !cKeys.has(r.key)) throw new PayrollCalcError("عامل حقوق انتخاب‌شده در فرمول وجود ندارد");
+    // هر نوع فقط عامل‌های خودش و (برای انواع غیرپایه) عامل‌های حقوق ماهانه را می‌بیند
+    if (r.ns === "C") {
+      const t = typeByKey.get(r.key);
+      if (t !== candType && !(candType !== baseId && t === baseId)) {
+        throw new PayrollCalcError(`عامل «${comps.find((c) => c.key === r.key)?.title ?? r.key}» متعلق به نوع محاسبه‌ی دیگری است و در این فرمول قابل استفاده نیست`);
+      }
+    }
     if (r.ns === "P" && !pKeys.has(r.key)) throw new PayrollCalcError("پارامتر مبنا انتخاب‌شده در فرمول تعریف نشده است");
   }
 
   // گراف وابستگی با آخرین روش هر عامل + نامزد
-  const latest = await prisma.payrollFactorMethod.findMany({ orderBy: { effectiveDate: "desc" }, include: { decreeComponent: { select: { code: true } }, payrollComponent: { select: { key: true } } } });
+  const latest = await prisma.payrollFactorMethod.findMany({ orderBy: { effectiveDate: "desc" }, include: { decreeComponent: { select: { code: true } }, payrollComponent: { select: { key: true, calcTypeId: true } } } });
   // طبقه از خود عامل می‌آید (عامل حکم همیشه «پرداختی» است)
   const kindByNode = new Map<string, Kind>([...decree.map((d) => [`D:${d.code}`, "EARNING" as Kind] as [string, Kind]), ...comps.map((x) => [`C:${x.key}`, x.kind as Kind] as [string, Kind])]);
   const seen = new Set<string>();
   const nodes: { node: string; kind: Kind; method: Method; cond: string | null; formula: string | null }[] = [];
   for (const m of latest) {
     const node = m.decreeComponent ? `D:${m.decreeComponent.code}` : `C:${m.payrollComponent!.key}`;
+    // دور فقط بین عامل‌های هم‌نوع معنا دارد (مقدار نوع پایه از فیش ماهانه‌ی آماده خوانده می‌شود)
+    const t = m.decreeComponent ? baseId : m.payrollComponent!.calcTypeId;
+    if (t !== candType) continue;
     if (seen.has(node) || node === cand.node) continue;
     seen.add(node);
     nodes.push({ node, kind: (kindByNode.get(node) ?? "INFO") as Kind, method: m.method as Method, cond: m.conditionText, formula: m.formulaText });
@@ -194,34 +214,75 @@ function prevMonth(y: number, m: number) {
   return m === 1 ? { y: y - 1, m: 12 } : { y, m: m - 1 };
 }
 
-export async function calculatePayroll(employeeId: number, year: number, month: number): Promise<{ slipId: number }> {
+export async function getBaseCalcType() {
+  const t = await prisma.payrollCalcType.findFirst({ where: { isBase: true } });
+  if (!t) throw new PayrollCalcError("نوع محاسبه‌ی پایه (حقوق ماهانه) تعریف نشده است");
+  return t;
+}
+
+/** حذف فیش «حقوق ماهانه» وقتی فیش نوع دیگری برای همان کارمند و ماه هست ممنوع است؛ پیام برای اولین مورد، null = آزاد */
+export async function dependentSlipMessage(baseSlips: { employeeId: number; year: number; month: number }[]): Promise<string | null> {
+  if (baseSlips.length === 0) return null;
+  const dep = await prisma.payrollSlip.findFirst({
+    where: { calcType: { isBase: false }, OR: baseSlips.map((b) => ({ employeeId: b.employeeId, year: b.year, month: b.month })) },
+    select: { calcType: { select: { title: true } }, employee: { select: { personnelCode: true } }, year: true, month: true },
+  });
+  if (!dep) return null;
+  return `برای کارمند ${dep.employee.personnelCode} در ${dep.year}/${dep.month} محاسبه‌ی «${dep.calcType.title}» هم انجام شده است؛ ابتدا آن را حذف کنید`;
+}
+
+export async function calculatePayroll(employeeId: number, year: number, month: number, calcTypeId?: number): Promise<{ slipId: number }> {
   if (!Number.isInteger(year) || year < 1300 || year > 1600 || !Number.isInteger(month) || month < 1 || month > 12) {
     throw new PayrollCalcError("سال یا ماه نامعتبر است");
   }
   const emp = await prisma.employee.findUnique({ where: { id: employeeId } });
   if (!emp) throw new PayrollCalcError("کارمند یافت نشد");
-  if (await prisma.payrollSlip.findUnique({ where: { employeeId_year_month: { employeeId, year, month } }, select: { id: true } })) {
-    throw new PayrollCalcError("برای این کارمند در این ماه محاسبه انجام شده است؛ ابتدا محاسبه را حذف کنید");
+  const baseType = await getBaseCalcType();
+  const calcType = calcTypeId ? await prisma.payrollCalcType.findUnique({ where: { id: calcTypeId } }) : baseType;
+  if (!calcType) throw new PayrollCalcError("نوع محاسبه یافت نشد");
+  if (!calcType.isActive) throw new PayrollCalcError(`نوع محاسبه‌ی «${calcType.title}» غیرفعال است`);
+  const typeId = calcType.id;
+  const isBase = calcType.isBase;
+  if (await prisma.payrollSlip.findUnique({ where: { employeeId_year_month_calcTypeId: { employeeId, year, month, calcTypeId: typeId } }, select: { id: true } })) {
+    throw new PayrollCalcError(`برای این کارمند در این ماه «${calcType.title}» محاسبه شده است؛ ابتدا محاسبه را حذف کنید`);
   }
+  // کنترل: نوع غیرپایه فقط پس از محاسبه‌ی «حقوق ماهانه»ی همان ماه
+  const baseSlip = isBase
+    ? null
+    : await prisma.payrollSlip.findUnique({
+        where: { employeeId_year_month_calcTypeId: { employeeId, year, month, calcTypeId: baseType.id } },
+        include: { lines: { select: { source: true, refId: true, amount: true, error: true } } },
+      });
+  if (!isBase && !baseSlip) throw new PayrollCalcError(`ابتدا «${baseType.title}» این کارمند برای همین ماه را محاسبه کنید`);
+  const baseLines = new Map((baseSlip?.lines ?? []).map((l) => [`${l.source}:${l.refId}`, l]));
   const range = jalaliMonthRange(year, month);
   const yearDays = jalaliMonthRange(year, 12).days === 30 ? 366 : 365;
   const warnings: string[] = [];
 
-  // ── حکم مؤثر ──
-  const eff = await getEffectiveDecree(employeeId, range.end);
-  if (!eff.decree || eff.validity !== "VALID") {
-    throw new PayrollCalcError(eff.validity === "EXPIRED" ? "حکم این کارمند در این ماه منقضی شده است" : "برای این کارمند در این ماه حکم تاییدشده‌ی معتبر وجود ندارد");
+  // ── حکم مؤثر (نوع غیرپایه: همان حکمِ فیش حقوق ماهانه) ──
+  let decreeId: number;
+  if (baseSlip?.decreeId) {
+    decreeId = baseSlip.decreeId;
+  } else {
+    const eff = await getEffectiveDecree(employeeId, range.end);
+    if (!eff.decree || eff.validity !== "VALID") {
+      throw new PayrollCalcError(eff.validity === "EXPIRED" ? "حکم این کارمند در این ماه منقضی شده است" : "برای این کارمند در این ماه حکم تاییدشده‌ی معتبر وجود ندارد");
+    }
+    decreeId = eff.decree.id;
   }
   const decree = await prisma.employmentDecree.findUnique({
-    where: { id: eff.decree.id },
+    where: { id: decreeId },
     include: { lines: { include: { component: true }, orderBy: { id: "asc" } } },
   });
   if (!decree) throw new PayrollCalcError("حکم یافت نشد");
-  const changed = await prisma.employmentDecree.findFirst({
-    where: { employeeId, status: "APPROVED", effectiveDate: { gt: range.start, lte: range.end }, NOT: { id: decree.id } },
-    select: { number: true },
-  });
-  if (changed || decree.effectiveDate > range.start) {
+  if (baseSlip?.hasErrors) warnings.push("فیش حقوق ماهانه‌ی این ماه خطا دارد؛ مقدار عامل‌های آن ممکن است ناقص باشد");
+  const changed = isBase
+    ? await prisma.employmentDecree.findFirst({
+        where: { employeeId, status: "APPROVED", effectiveDate: { gt: range.start, lte: range.end }, NOT: { id: decree.id } },
+        select: { number: true },
+      })
+    : null;
+  if (isBase && (changed || decree.effectiveDate > range.start)) {
     warnings.push("حکم کارمند در طول همین ماه تغییر کرده یا شروع شده است؛ در این نسخه کل ماه با آخرین حکم ماه محاسبه می‌شود (تفکیک روزانه انجام نمی‌شود)");
   }
 
@@ -245,10 +306,12 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
     return m ? toRow(m) : null;
   };
 
-  const payrollComps = await prisma.payrollComponent.findMany({ where: { isActive: true }, orderBy: { id: "asc" } });
+  const allComps = await prisma.payrollComponent.findMany({ where: { isActive: true }, orderBy: { id: "asc" } });
+  const payrollComps = allComps.filter((c) => c.calcTypeId === typeId);
   const allDecreeComps = await prisma.decreeComponent.findMany();
   const decreeByCode = new Map(allDecreeComps.map((d) => [String(d.code), d]));
-  const compByKey = new Map(payrollComps.map((c) => [c.key, c]));
+  const compByKey = new Map(allComps.map((c) => [c.key, c]));
+  const decreeLineValue = new Map(decree.lines.map((l) => [String(l.component.code), Number(l.value)]));
 
   // ── ورودی‌های ماه (ثبت‌شده در «ورود اطلاعات») ──
   const inputRows = await prisma.payrollFactorInput.findMany({ where: { employeeId, year, month } });
@@ -269,7 +332,8 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
     }
     return { ...n, parsed, parseError, refs: parsed ? allRefs(parsed) : [], deps: [] };
   };
-  for (const l of decree.lines) {
+  // روش عامل‌های حکم فقط در حقوق ماهانه محاسبه می‌شود؛ انواع دیگر مقدار آن‌ها را با [D:کد:…] می‌خوانند
+  for (const l of isBase ? decree.lines : []) {
     nodes.push(
       mk({
         node: `D:${l.component.code}`,
@@ -420,9 +484,23 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
       const comp = ns === "D" ? decreeByCode.get(key) : compByKey.get(key);
       if (!comp) throw new FormulaError(`${ns === "D" ? "عامل حکم" : "عامل حقوق"} ${key} وجود ندارد`);
       const source = ns === "D" ? "DECREE_COMPONENT" : "PAYROLL_COMPONENT";
-      if (ns === "D" && variant === "LAST") return n?.decreeValue ?? 0;
+      if (ns === "D" && variant === "LAST") return decreeLineValue.get(key) ?? 0;
       if (ns === "D" && variant === "AVG") return averageOf(key);
       if (variant === "PREV" || variant === "YTD_PREV" || variant === "ALL_PREV") return history(source, comp.id, variant);
+      const compType = (comp as { calcTypeId?: number }).calcTypeId;
+      // نوع غیرپایه: مقدار همین ماهِ عامل‌های حقوق ماهانه از روی فیش ماهانه (نه از محاسبه‌ی همین اجرا)
+      if (!isBase && (ns === "D" || (ns === "C" && compType !== typeId))) {
+        if (ns === "C" && compType !== baseType.id) throw new FormulaError(`عامل «${comp.title}» متعلق به نوع محاسبه‌ی دیگری است`);
+        const bl = baseLines.get(`${source}:${comp.id}`);
+        if (!bl) {
+          if (ns === "D") return 0; // عامل در حکم نیامده
+          throw new FormulaError(`عامل «${comp.title}» در فیش حقوق ماهانه‌ی این ماه نیست`);
+        }
+        if (bl.error) throw new FormulaError(`«${comp.title}» در حقوق ماهانه خطا دارد`);
+        const bv = Number(bl.amount);
+        return variant === "YTD" ? bv + history(source, comp.id, "YTD_PREV") : bv;
+      }
+      if (isBase && ns === "C" && compType !== typeId) throw new FormulaError(`عامل «${comp.title}» متعلق به نوع محاسبه‌ی دیگری است`);
       // مقدار همین ماه
       if (errored.has(node)) throw new FormulaError(`«${comp.title}» خطا دارد`);
       let v: number;
@@ -541,14 +619,19 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
 
   const slip = await prisma.$transaction(async (tx) => {
     // محاسبه‌ی مجدد روی ردیف محاسبه‌شده ممنوع است؛ کاربر باید ابتدا «حذف محاسبه» کند
-    if (await tx.payrollSlip.findUnique({ where: { employeeId_year_month: { employeeId, year, month } }, select: { id: true } })) {
-      throw new PayrollCalcError("برای این کارمند در این ماه محاسبه انجام شده است؛ ابتدا محاسبه را حذف کنید");
+    if (await tx.payrollSlip.findUnique({ where: { employeeId_year_month_calcTypeId: { employeeId, year, month, calcTypeId: typeId } }, select: { id: true } })) {
+      throw new PayrollCalcError(`برای این کارمند در این ماه «${calcType.title}» محاسبه شده است؛ ابتدا محاسبه را حذف کنید`);
+    }
+    // کنترل دوباره داخل تراکنش: فیش ماهانه در فاصله‌ی محاسبه حذف نشده باشد
+    if (!isBase && !(await tx.payrollSlip.findUnique({ where: { employeeId_year_month_calcTypeId: { employeeId, year, month, calcTypeId: baseType.id } }, select: { id: true } }))) {
+      throw new PayrollCalcError(`ابتدا «${baseType.title}» این کارمند برای همین ماه را محاسبه کنید`);
     }
     return tx.payrollSlip.create({
       data: {
         employeeId,
         year,
         month,
+        calcTypeId: typeId,
         decreeId: decree.id,
         monthDays: range.days,
         earnings,

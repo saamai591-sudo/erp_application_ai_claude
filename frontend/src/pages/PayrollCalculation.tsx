@@ -9,6 +9,7 @@ import { api, ApiError } from "../lib/api";
 import { usePersistedState } from "../lib/usePersistedState";
 import { KIND_FA, MONTHS_FA, currentJalaliYearMonth, hoursToHm } from "../lib/payrollLabels";
 import { PayrollSlipPrintDialog } from "../components/PayrollSlipPrint";
+import { useCalcTypes } from "../lib/useCalcTypes";
 
 // حقوق و دستمزد › محاسبه حقوق (عملیات) و گزارش محاسبات حقوق (گزارش): یک کارمند و یک ماه شمسی را انتخاب می‌کنید؛ محاسبه (فقط در حالت عملیات)
 // فیش را می‌سازد و گزارش، ریز ورودی‌ها و محاسبه‌ی تک‌تک عوامل (شرط، فرمول، مقدار عملوندها، نتیجه) را نشان می‌دهد.
@@ -38,6 +39,7 @@ interface SlipLine {
 }
 interface Slip {
   id: number;
+  calcType?: { id: number; title: string; isBase: boolean };
   year: number;
   month: number;
   employee: { id: number; personnelCode: string; fullName: string; nationalId: string | null };
@@ -57,10 +59,13 @@ const num = (v: number | null) => (v === null ? "—" : toFaDigits(Number(v).toL
 export function PayrollReportPage() {
   const [params] = useSearchParams();
   const cur = currentJalaliYearMonth();
-  const [sel, setSel] = usePersistedState("/payroll-report:sel", { employeeId: "", year: String(cur.year), month: String(cur.month) });
+  const [sel, setSel] = usePersistedState("/payroll-report:sel", { employeeId: "", year: String(cur.year), month: String(cur.month), calcTypeId: "" });
+  const { types, base } = useCalcTypes();
+  const typeId = sel.calcTypeId || (base ? String(base.id) : "");
   const [employees, setEmployees] = useState<EmpOpt[]>([]);
-  const [slip, setSlip] = useState<Slip | null>(null);
-  const [searched, setSearched] = useState(false);
+  // با رفتن به تب دیگر و برگشتن، فیش نمایش‌داده‌شده می‌ماند
+  const [slip, setSlip] = usePersistedState<Slip | null>("form:/payroll-calculation-report:slip", null);
+  const [searched, setSearched] = usePersistedState("form:/payroll-calculation-report:searched", false);
   const [error, setError] = useState<string | null>(null);
   const [printing, setPrinting] = useState(false);
 
@@ -73,20 +78,21 @@ export function PayrollReportPage() {
     const e = params.get("employeeId");
     const y = params.get("year");
     const m = params.get("month");
+    const t = params.get("calcTypeId") ?? "";
     if (e && y && m) {
-      setSel({ employeeId: e, year: y, month: m });
-      void load(e, y, m);
+      setSel({ employeeId: e, year: y, month: m, calcTypeId: t });
+      void load(e, y, m, t);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const emp = employees.find((e) => String(e.id) === sel.employeeId);
 
-  async function load(employeeId = sel.employeeId, year = sel.year, month = sel.month) {
+  async function load(employeeId = sel.employeeId, year = sel.year, month = sel.month, calcTypeId = typeId) {
     setError(null);
     if (!employeeId) return setError("کارمند را انتخاب کنید");
     try {
-      const f = await api.get(`/payroll-calculations/find?employeeId=${employeeId}&year=${year}&month=${month}`);
+      const f = await api.get(`/payroll-calculations/find?employeeId=${employeeId}&year=${year}&month=${month}${calcTypeId ? `&calcTypeId=${calcTypeId}` : ""}`);
       setSlip(f.id ? await api.get(`/payroll-calculations/${f.id}`) : null);
       setSearched(true);
     } catch (e) {
@@ -130,6 +136,12 @@ export function PayrollReportPage() {
             />
           </div>
           <div className="form-field">
+            <label>نوع محاسبه</label>
+            <select value={typeId} onChange={(e) => { setSel({ ...sel, calcTypeId: e.target.value }); reset(); }}>
+              {types.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+            </select>
+          </div>
+          <div className="form-field">
             <label>سال</label>
             <input dir="ltr" inputMode="numeric" value={sel.year} onChange={(e) => { setSel({ ...sel, year: e.target.value.replace(/\D/g, "") }); reset(); }} />
           </div>
@@ -146,9 +158,9 @@ export function PayrollReportPage() {
         </div>
       </div>
 
-      {searched && !slip && <p>برای این کارمند و ماه محاسبه‌ای ذخیره نشده است؛ از «محاسبه حقوق» محاسبه کنید.</p>}
+      {searched && !slip && <p>برای این کارمند، ماه و نوع محاسبه، محاسبه‌ای ذخیره نشده است؛ از «محاسبه حقوق» محاسبه کنید.</p>}
       {slip && <SlipView slip={slip} />}
-      {printing && slip && <PayrollSlipPrintDialog year={slip.year} month={slip.month} employeeIds={[slip.employee.id]} onClose={() => setPrinting(false)} />}
+      {printing && slip && <PayrollSlipPrintDialog year={slip.year} month={slip.month} employeeIds={[slip.employee.id]} calcTypeId={slip.calcType?.id} onClose={() => setPrinting(false)} />}
     </div>
   );
 }
@@ -159,7 +171,7 @@ function SlipView({ slip }: { slip: Slip }) {
   return (
     <div>
       <div className="hr-section">
-        {slip.employee.fullName} — کد پرسنلی {toFaDigits(slip.employee.personnelCode)} — {MONTHS_FA[slip.month - 1]} {toFaDigits(String(slip.year))}
+        {slip.calcType && !slip.calcType.isBase ? `${slip.calcType.title} — ` : ""}{slip.employee.fullName} — کد پرسنلی {toFaDigits(slip.employee.personnelCode)} — {MONTHS_FA[slip.month - 1]} {toFaDigits(String(slip.year))}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 8, margin: "8px 0" }}>
         {[

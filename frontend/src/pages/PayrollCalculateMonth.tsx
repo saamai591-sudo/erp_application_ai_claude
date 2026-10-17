@@ -8,6 +8,7 @@ import { useTabs } from "../lib/TabsContext";
 import { usePermissions } from "../lib/usePermissions";
 import { usePersistedState } from "../lib/usePersistedState";
 import { MONTHS_FA, currentJalaliYearMonth } from "../lib/payrollLabels";
+import { useCalcTypes } from "../lib/useCalcTypes";
 import { PayrollSlipPrintDialog } from "../components/PayrollSlipPrint";
 
 // حقوق و دستمزد › عملیات › محاسبه حقوق: ماه را انتخاب می‌کنید، «لود اطلاعات» فهرست پرسنل را می‌آورد، پرسنل مورد نظر را تیک می‌زنید و دکمهٔ
@@ -18,6 +19,8 @@ interface Row {
   personnelCode: string;
   fullName: string;
   decreeValidity: "VALID" | "EXPIRED" | "NONE";
+  /** نوع غیرپایه: «حقوق ماهانه»ی همین ماه محاسبه نشده؛ دلیل نمایش داده می‌شود و ردیف قابل انتخاب نیست */
+  blockedReason: string | null;
   slip: { id: number; netPay: string; hasErrors: boolean; calculatedAt: string } | null;
 }
 interface Outcome {
@@ -49,10 +52,17 @@ export default function PayrollCalculateMonth() {
   const { hasPermission } = usePermissions();
   const { openTab } = useTabs();
   const cur = currentJalaliYearMonth();
-  const [sel, setSel] = usePersistedState("/payroll-calculation:sel", { year: String(cur.year), month: String(cur.month) });
-  const [rows, setRows] = useState<Row[] | null>(null);
-  const [picked, setPicked] = useState<Set<number>>(new Set());
-  const [outcomes, setOutcomes] = useState<Record<number, Outcome>>({});
+  const [sel, setSel] = usePersistedState("/payroll-calculation:sel", { year: String(cur.year), month: String(cur.month), calcTypeId: "" });
+  // با رفتن به تب دیگر و برگشتن، فهرست لودشده، انتخاب‌ها و نتیجه‌ی محاسبه می‌مانند (نیاز به «لود اطلاعات» دوباره نیست)
+  const [rows, setRows] = usePersistedState<Row[] | null>("form:/payroll-calculation:rows", null);
+  const [pickedList, setPickedList] = usePersistedState<number[]>("/payroll-calculation:picked", []);
+  const picked = useMemo(() => new Set(pickedList), [pickedList]);
+  const setPicked = (n: Set<number>) => setPickedList([...n]);
+  const [outcomes, setOutcomes] = usePersistedState<Record<number, Outcome>>("form:/payroll-calculation:outcomes", {});
+  const { types, base } = useCalcTypes();
+  const typeId = sel.calcTypeId || (base ? String(base.id) : "");
+  const typeTitle = types.find((t) => String(t.id) === typeId)?.title ?? "";
+  void typeTitle;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [printing, setPrinting] = useState(false);
@@ -63,7 +73,7 @@ export default function PayrollCalculateMonth() {
     setError(null);
     setBusy(true);
     try {
-      const d = await api.get(`/payroll-calculations/month?year=${sel.year}&month=${sel.month}`);
+      const d = await api.get(`/payroll-calculations/month?year=${sel.year}&month=${sel.month}&calcTypeId=${typeId}`);
       setRows(d.rows);
       setPicked(new Set());
       setOutcomes({});
@@ -81,12 +91,12 @@ export default function PayrollCalculateMonth() {
   async function remove() {
     const targets = pickedRows.filter((r) => r.slip);
     if (targets.length === 0) return;
-    if (!window.confirm(`محاسبه‌ی حقوق ${toFaDigits(String(targets.length))} نفر حذف شود؟ پس از حذف می‌توانید اطلاعات ماهانه را ویرایش و دوباره محاسبه کنید.`)) return;
+    if (!window.confirm(`محاسبه‌ی «${typeTitle}» ${toFaDigits(String(targets.length))} نفر حذف شود؟ پس از حذف می‌توانید اطلاعات ماهانه را ویرایش و دوباره محاسبه کنید.`)) return;
     setError(null);
     setBusy(true);
     try {
-      await api.post("/payroll-calculations/delete", { year: Number(sel.year), month: Number(sel.month), employeeIds: targets.map((r) => r.employeeId) });
-      const d = await api.get(`/payroll-calculations/month?year=${sel.year}&month=${sel.month}`);
+      await api.post("/payroll-calculations/delete", { year: Number(sel.year), month: Number(sel.month), calcTypeId: Number(typeId), employeeIds: targets.map((r) => r.employeeId) });
+      const d = await api.get(`/payroll-calculations/month?year=${sel.year}&month=${sel.month}&calcTypeId=${typeId}`);
       setRows(d.rows);
       setOutcomes({});
     } catch (e) {
@@ -101,12 +111,12 @@ export default function PayrollCalculateMonth() {
     setError(null);
     setBusy(true);
     try {
-      const r = await api.post("/payroll-calculations/calculate", { year: Number(sel.year), month: Number(sel.month), employeeIds: [...picked] });
+      const r = await api.post("/payroll-calculations/calculate", { year: Number(sel.year), month: Number(sel.month), calcTypeId: Number(typeId), employeeIds: [...picked] });
       const map: Record<number, Outcome> = {};
       for (const x of r.results) map[x.employeeId] = x;
       setOutcomes(map);
       // خلاصه‌ی فیش‌های تازه
-      const d = await api.get(`/payroll-calculations/month?year=${sel.year}&month=${sel.month}`);
+      const d = await api.get(`/payroll-calculations/month?year=${sel.year}&month=${sel.month}&calcTypeId=${typeId}`);
       setRows(d.rows);
     } catch (e) {
       showError((e as ApiError).message);
@@ -115,20 +125,21 @@ export default function PayrollCalculateMonth() {
     }
   }
 
-  const allSelected = useMemo(() => !!rows && rows.length > 0 && rows.every((r) => picked.has(r.employeeId)), [rows, picked]);
+  const selectable = (rows ?? []).filter((r) => !r.blockedReason || r.slip);
+  const allSelected = useMemo(() => selectable.length > 0 && selectable.every((r) => picked.has(r.employeeId)), [selectable, picked]);
   const toggle = (id: number) => {
     const n = new Set(picked);
     n.has(id) ? n.delete(id) : n.add(id);
     setPicked(n);
   };
-  const report = (employeeId: number) => openTab(`/payroll-calculation-report?employeeId=${employeeId}&year=${sel.year}&month=${sel.month}`);
+  const report = (employeeId: number) => openTab(`/payroll-calculation-report?employeeId=${employeeId}&year=${sel.year}&month=${sel.month}&calcTypeId=${typeId}`);
 
   return (
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 6 }}>
           <InfoHint
-            text="ماه را انتخاب کنید و «لود اطلاعات» بزنید تا فهرست پرسنل بیاید؛ پرسنل مورد نظر را تیک بزنید و روی «محاسبه» (نوار ابزار) کلیک کنید؛ ردیفِ محاسبه‌شده دوباره محاسبه نمی‌شود، ابتدا «حذف محاسبه» بزنید. مقدار عوامل ورودی را قبلاً در «ورود اطلاعات» ثبت کنید و بعد از محاسبه، اطلاعات ماهانه‌ی آن کارمند قفل می‌شود. ریز محاسبه‌ی هر نفر در «گزارش محاسبات حقوق» دیده می‌شود."
+            text="نوع محاسبه و ماه را انتخاب کنید و «لود اطلاعات» بزنید تا فهرست پرسنل بیاید؛ پرسنل مورد نظر را تیک بزنید و روی «محاسبه» (نوار ابزار) کلیک کنید؛ ردیفِ محاسبه‌شده دوباره محاسبه نمی‌شود، ابتدا «حذف محاسبه» بزنید. مقدار عوامل ورودی را قبلاً در «ورود اطلاعات» ثبت کنید و بعد از محاسبه، اطلاعات ماهانه‌ی آن کارمند قفل می‌شود. ریز محاسبه‌ی هر نفر در «گزارش محاسبات حقوق» دیده می‌شود. محاسبه‌ی هر نوعِ غیر از «حقوق ماهانه» فقط برای کارمندی ممکن است که حقوق ماهانه‌ی همان ماهش محاسبه شده باشد؛ و حقوق ماهانه‌ای که محاسبه‌ی نوع دیگری به آن وابسته است حذف نمی‌شود."
             title="محاسبه حقوق"
           />
           {canCalc && (
@@ -170,6 +181,12 @@ export default function PayrollCalculateMonth() {
       <div className="card" style={{ padding: 12, marginBottom: 12 }}>
         <div className="form-grid">
           <div className="form-field">
+            <label>نوع محاسبه</label>
+            <select value={typeId} onChange={(e) => { setSel({ ...sel, calcTypeId: e.target.value }); setRows(null); }}>
+              {types.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+            </select>
+          </div>
+          <div className="form-field">
             <label>سال</label>
             <input dir="ltr" inputMode="numeric" value={sel.year} onChange={(e) => { setSel({ ...sel, year: e.target.value.replace(/\D/g, "") }); setRows(null); }} />
           </div>
@@ -190,6 +207,7 @@ export default function PayrollCalculateMonth() {
           year={Number(sel.year)}
           month={Number(sel.month)}
           employeeIds={pickedRows.filter((r) => r.slip).map((r) => r.employeeId)}
+          calcTypeId={Number(typeId)}
           onClose={() => setPrinting(false)}
         />
       )}
@@ -203,7 +221,7 @@ export default function PayrollCalculateMonth() {
                   <input
                     type="checkbox"
                     checked={allSelected}
-                    onChange={() => setPicked(allSelected ? new Set() : new Set(rows.map((r) => r.employeeId)))}
+                    onChange={() => setPicked(allSelected ? new Set() : new Set(selectable.map((r) => r.employeeId)))}
                   />
                 </th>
                 <th style={{ width: 110 }}>کد پرسنل</th>
@@ -220,7 +238,7 @@ export default function PayrollCalculateMonth() {
                 const o = outcomes[r.employeeId];
                 return (
                   <tr key={r.employeeId}>
-                    <td><input type="checkbox" checked={picked.has(r.employeeId)} onChange={() => toggle(r.employeeId)} /></td>
+                    <td><input type="checkbox" checked={picked.has(r.employeeId)} disabled={!!r.blockedReason && !r.slip} onChange={() => toggle(r.employeeId)} /></td>
                     <td>{toFaDigits(r.personnelCode)}</td>
                     <td>{r.fullName}</td>
                     <td style={r.decreeValidity !== "VALID" ? { color: "#c0392b" } : undefined}>{DECREE_FA[r.decreeValidity]}</td>
@@ -229,7 +247,8 @@ export default function PayrollCalculateMonth() {
                       {o && !o.ok && <span style={{ color: "#c0392b" }}>{o.error}</span>}
                       {o && o.ok && <span style={{ color: "#0a8f5a" }}>محاسبه شد{r.slip?.hasErrors ? " — با خطا در برخی عوامل" : ""}</span>}
                       {!o && r.slip && <span style={{ opacity: 0.75 }}>{r.slip.hasErrors ? "محاسبه‌شده — با خطا" : "محاسبه‌شده"}</span>}
-                      {!o && !r.slip && <span style={{ opacity: 0.5 }}>محاسبه نشده</span>}
+                      {!o && !r.slip && r.blockedReason && <span style={{ color: "#c0392b" }}>{r.blockedReason}</span>}
+                      {!o && !r.slip && !r.blockedReason && <span style={{ opacity: 0.5 }}>محاسبه نشده</span>}
                     </td>
                     <td>{r.slip && <button type="button" className="link-btn" onClick={() => report(r.employeeId)}>گزارش</button>}</td>
                   </tr>

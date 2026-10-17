@@ -24,13 +24,20 @@ async function baseDecimals(): Promise<number> {
   return c?.decimalPlaces ?? 0;
 }
 
+/** نوع محاسبه‌ی انتخاب‌شده (پیش‌فرض: نوع پایه) */
+async function resolveType(raw: unknown) {
+  const t = raw ? await prisma.payrollCalcType.findUnique({ where: { id: Number(raw) } }) : await prisma.payrollCalcType.findFirst({ where: { isBase: true } });
+  if (!t) throw new DErr("نوع محاسبه یافت نشد");
+  return t;
+}
+
 function checkYM(year: number, month: number) {
   if (!Number.isInteger(year) || year < 1300 || year > 1600 || !Number.isInteger(month) || month < 1 || month > 12) throw new DErr("سال یا ماه نامعتبر است");
 }
 
 /** ستون‌های ماه: عامل‌های فعالی که آخرین روششان (با ماه اجرا ≤ پایان ماه) «ورود دستی» است */
-async function columnsFor(end: Date) {
-  const comps = await prisma.payrollComponent.findMany({ where: { isActive: true }, orderBy: { id: "asc" } });
+async function columnsFor(end: Date, calcTypeId: number) {
+  const comps = await prisma.payrollComponent.findMany({ where: { isActive: true, calcTypeId }, orderBy: { id: "asc" } });
   const methods = await prisma.payrollFactorMethod.findMany({
     where: { payrollComponentId: { in: comps.map((c) => c.id) }, effectiveDate: { lte: end } },
     orderBy: { effectiveDate: "desc" },
@@ -49,7 +56,8 @@ router.get("/payroll-data-entry", can(`${F}.view`), async (req, res) => {
     const month = Number(req.query.month);
     checkYM(year, month);
     const range = jalaliMonthRange(year, month);
-    const [columns, decimals] = await Promise.all([columnsFor(range.end), baseDecimals()]);
+    const calcType = await resolveType(req.query.calcTypeId);
+    const [columns, decimals] = await Promise.all([columnsFor(range.end, calcType.id), baseDecimals()]);
     // کارمندانی که دوره‌ی همکاری‌شان با ماه هم‌پوشانی دارد
     const emps = await prisma.employee.findMany({
       where: { periods: { some: { startDate: { lte: range.end }, OR: [{ endDate: null }, { endDate: { gte: range.start } }] } } },
@@ -60,11 +68,12 @@ router.get("/payroll-data-entry", can(`${F}.view`), async (req, res) => {
       where: { year, month, employeeId: { in: emps.map((e) => e.id) }, componentId: { in: columns.map((c) => c.componentId) } },
     });
     const byKey = new Map(inputs.map((i) => [`${i.employeeId}:${i.componentId}`, i.value.toString()]));
-    // کارمندی که حقوق این ماهش محاسبه شده، اطلاعات ماهانه‌اش قفل است
-    const slips = await prisma.payrollSlip.findMany({ where: { year, month, employeeId: { in: emps.map((e) => e.id) } }, select: { employeeId: true } });
+    // کارمندی که همین نوع محاسبه‌اش برای این ماه انجام شده، اطلاعات ماهانه‌ی این نوع قفل است
+    const slips = await prisma.payrollSlip.findMany({ where: { year, month, calcTypeId: calcType.id, employeeId: { in: emps.map((e) => e.id) } }, select: { employeeId: true } });
     const calculated = new Set(slips.map((x) => x.employeeId));
     res.json({
       monthDays: range.days,
+      calcType: { id: calcType.id, title: calcType.title, isBase: calcType.isBase },
       decimals,
       columns,
       rows: emps.map((e) => ({
@@ -103,13 +112,14 @@ function parseByType(raw: string, valueType: string, title: string, monthDays: n
 }
 
 router.put("/payroll-data-entry", can(`${F}.edit`), async (req, res) => {
-  const b = req.body as { year: number; month: number; entries: { employeeId: number; componentId: number; value: string | null }[] };
+  const b = req.body as { year: number; month: number; calcTypeId?: number; entries: { employeeId: number; componentId: number; value: string | null }[] };
   try {
     const year = Number(b.year);
     const month = Number(b.month);
     checkYM(year, month);
     const range = jalaliMonthRange(year, month);
-    const [columns, decimals] = await Promise.all([columnsFor(range.end), baseDecimals()]);
+    const calcType = await resolveType(b.calcTypeId);
+    const [columns, decimals] = await Promise.all([columnsFor(range.end, calcType.id), baseDecimals()]);
     const colById = new Map(columns.map((c) => [c.componentId, c]));
     const entries = Array.isArray(b.entries) ? b.entries : [];
     const parsed: { employeeId: number; componentId: number; value: number | null }[] = [];
@@ -131,8 +141,8 @@ router.put("/payroll-data-entry", can(`${F}.edit`), async (req, res) => {
     const validSet = new Set(valid.map((v) => v.id));
     for (const p of parsed) if (!validSet.has(p.employeeId)) throw new DErr("کارمندی در این ماه همکاری ندارد یا یافت نشد");
     // محاسبه‌شده‌ها قابل ویرایش نیستند: ابتدا حذف محاسبه
-    const calc = await prisma.payrollSlip.findMany({ where: { year, month, employeeId: { in: empIds } }, include: { employee: { select: { personnelCode: true } } } });
-    if (calc.length) throw new DErr(`حقوق این ماه برای کارمند ${calc[0].employee.personnelCode} محاسبه شده است؛ برای ویرایش اطلاعات ماهانه ابتدا محاسبه را حذف کنید`);
+    const calc = await prisma.payrollSlip.findMany({ where: { year, month, calcTypeId: calcType.id, employeeId: { in: empIds } }, include: { employee: { select: { personnelCode: true } } } });
+    if (calc.length) throw new DErr(`«${calcType.title}» این ماه برای کارمند ${calc[0].employee.personnelCode} محاسبه شده است؛ برای ویرایش اطلاعات ماهانه ابتدا محاسبه را حذف کنید`);
 
     await prisma.$transaction(async (tx) => {
       for (const p of parsed) {

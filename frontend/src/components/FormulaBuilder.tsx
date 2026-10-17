@@ -81,7 +81,9 @@ export function FormulaBuilder({
   const clipRef = useRef<string[]>([]);
 
   useEffect(() => {
-    api.get("/payroll-methods/palette").then(setPal).catch((e) => setErr(e.message));
+    // عامل‌های قابل استفاده به نوع محاسبه‌ی عاملِ در دست تعریف بستگی دارد (سرور بر اساس عامل انتخاب‌شده فیلتر می‌کند)
+    api.get(`/payroll-methods/palette?basis=${basis}&factorId=${encodeURIComponent(factorId)}`).then(setPal).catch((e) => setErr(e.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // عنوان فارسی هر توکن
