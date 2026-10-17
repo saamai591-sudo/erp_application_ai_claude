@@ -40,8 +40,8 @@ function checkYM(year: number, month: number) {
 async function columnsFor(end: Date, calcTypeId: number) {
   const comps = await prisma.payrollComponent.findMany({ where: { isActive: true, calcTypeId }, orderBy: { id: "asc" } });
   const methods = await prisma.payrollFactorMethod.findMany({
-    where: { payrollComponentId: { in: comps.map((c) => c.id) }, effectiveDate: { lte: end } },
-    orderBy: { effectiveDate: "desc" },
+    where: { payrollComponentId: { in: comps.map((c) => c.id) }, execCalendarMonth: { startDate: { lte: end } } },
+    orderBy: { execCalendarMonth: { startDate: "desc" } },
   });
   const out: { componentId: number; title: string; valueType: string }[] = [];
   for (const c of comps) {

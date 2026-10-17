@@ -5115,11 +5115,10 @@ model PayrollFactorMethod {
   payrollComponentId Int?
   method             PayrollMethod        @default(CALCULATED)
   valueType          PayrollValueType     @default(AMOUNT)
-  /// ماه صدور و ماه اجرا فقط به‌صورت ارجاع به ردیف «تقویم کاری» (سال/ماه ذخیره نمی‌شود)؛ روش‌های قدیمیِ بدون تقویم NULL‌اند
-  issueCalendarMonthId Int?
-  execCalendarMonthId  Int?
-  /// اولین روز ماه اجرا (میلادی) برای کوئری مؤثر؛ مقدار مؤثر هر ماه = آخرین رکورد با این تاریخ ≤ پایان ماه
-  effectiveDate      DateTime             @db.Date
+  /// ماه صدور و ماه اجرا (هر دو اجباری) فقط به‌صورت ارجاع به ردیف «تقویم کاری»؛ سال/ماه/تاریخ جدا ذخیره نمی‌شود.
+  /// روش مؤثر یک ماه = آخرین رکورد عامل که تاریخ شروعِ ماه اجرای آن (WorkCalendarMonth.startDate) ≤ پایان آن ماه است
+  issueCalendarMonthId Int
+  execCalendarMonthId  Int
   fixedValue         Decimal?             @db.Decimal(20, 4)
   conditionText      String?
   formulaText        String?
@@ -5128,13 +5127,13 @@ model PayrollFactorMethod {
   updatedAt          DateTime             @updatedAt
   decreeComponent    DecreeComponent?     @relation(fields: [decreeComponentId], references: [id], onDelete: Cascade)
   payrollComponent   PayrollComponent?    @relation(fields: [payrollComponentId], references: [id], onDelete: Cascade)
-  issueCalendarMonth WorkCalendarMonth?   @relation("MethodIssueMonth", fields: [issueCalendarMonthId], references: [id], onDelete: Restrict)
-  execCalendarMonth  WorkCalendarMonth?   @relation("MethodExecMonth", fields: [execCalendarMonthId], references: [id], onDelete: Restrict)
+  issueCalendarMonth WorkCalendarMonth    @relation("MethodIssueMonth", fields: [issueCalendarMonthId], references: [id], onDelete: Restrict)
+  execCalendarMonth  WorkCalendarMonth    @relation("MethodExecMonth", fields: [execCalendarMonthId], references: [id], onDelete: Restrict)
 
   @@index([issueCalendarMonthId])
   @@index([execCalendarMonthId])
-  @@unique([decreeComponentId, effectiveDate])
-  @@unique([payrollComponentId, effectiveDate])
+  @@unique([decreeComponentId, execCalendarMonthId])
+  @@unique([payrollComponentId, execCalendarMonthId])
 }
 
 /// مقدار ورودی ماهانه‌ی عوامل با روش «ورود دستی / ورود از تردد / ورود از خزانه‌داری» برای هر کارمند

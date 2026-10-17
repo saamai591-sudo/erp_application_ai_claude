@@ -130,7 +130,7 @@ export async function validateFactorMethod(cand: CandidateMethod): Promise<void>
   }
 
   // گراف وابستگی با آخرین روش هر عامل + نامزد
-  const latest = await prisma.payrollFactorMethod.findMany({ orderBy: { effectiveDate: "desc" }, include: { decreeComponent: { select: { code: true } }, payrollComponent: { select: { key: true, calcTypeId: true } } } });
+  const latest = await prisma.payrollFactorMethod.findMany({ orderBy: { execCalendarMonth: { startDate: "desc" } }, include: { decreeComponent: { select: { code: true } }, payrollComponent: { select: { key: true, calcTypeId: true } } } });
   // طبقه از خود عامل می‌آید (عامل حکم همیشه «پرداختی» است)
   const kindByNode = new Map<string, Kind>([...decree.map((d) => [`D:${d.code}`, "EARNING" as Kind] as [string, Kind]), ...comps.map((x) => [`C:${x.key}`, x.kind as Kind] as [string, Kind])]);
   const seen = new Set<string>();
@@ -311,7 +311,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
   }
 
   // ── روش‌های مؤثر ──
-  const methods = await prisma.payrollFactorMethod.findMany({ where: { effectiveDate: { lte: range.end } }, orderBy: { effectiveDate: "desc" } });
+  const methods = await prisma.payrollFactorMethod.findMany({ where: { execCalendarMonth: { startDate: { lte: range.end } } }, orderBy: { execCalendarMonth: { startDate: "desc" } } });
   const toRow = (m: (typeof methods)[number]): MethodRow => ({
     id: m.id,
     method: m.method as Method,
