@@ -18,6 +18,9 @@ import { createSalesQuote } from "../routes/salesOperations";
 import { isPriceListUsed } from "../services/salesPriceService";
 import { createParty } from "../services/partyService";
 import { createPayrollComponent, PayrollCalcError } from "../services/payrollCalculationService";
+import { createEmployee } from "../routes/employees";
+import { createDecreeDraft, approveDecree } from "../routes/employmentDecrees";
+import { findPartyByNationalId } from "../services/partyService";
 
 const DETAIL_TYPE_PARTY = 1;
 const DETAIL_TYPE_COST_CENTER = 2;
@@ -468,6 +471,218 @@ export function registerAllImportProcessors() {
       } catch (e: any) {
         if (e instanceof PayrollCalcError) return { ok: false, error: e.message };
         return { ok: false, error: e.message || "خطا در ثبت عامل حقوق" };
+      }
+    },
+  });
+
+  // ── منابع انسانی: کارمند ──
+  // هر ردیف یک کارمند. شخص با «کد ملی» پیدا می‌شود (باید حقیقی و فعال و هنوز کارمند نباشد)؛ اگر شخصی با این کد ملی نیست، با نام و نام خانوادگی
+  // (و تاریخ تولد/جنسیت) از همان سرویس مشترک طرف‌حساب ساخته می‌شود. ساخت کارمند از همان تابع فرم است (createEmployee)؛ تنها تفاوت: عکس در اکسل
+  // نمی‌آید، پس بدون عکس ثبت می‌شود و از فرم ویرایش کارمند اضافه می‌شود. مقدار اولیه‌ی تحصیلات/تاهل/ایثارگری با تاریخ شروع همکاری ثبت می‌شود.
+  const MARITAL_BY_FA: Record<string, string> = { "مجرد": "SINGLE", "متاهل": "MARRIED", "مطلقه": "DIVORCED", "همسر فوت‌شده": "WIDOWED" };
+  const MILITARY_BY_FA: Record<string, string> = { "مشمول نیست": "NOT_APPLICABLE", "پایان خدمت": "COMPLETED", "معافیت": "EXEMPT", "مشمول": "SUBJECT", "در حال خدمت": "IN_SERVICE" };
+  const yesNo = (v: string | undefined) => ((v ?? "").trim() === "بله" ? true : (v ?? "").trim() === "خیر" || !(v ?? "").trim() ? false : null);
+  /** «عنوان» یا «کد» یک مرجع → رکورد؛ پیام روشن برای نبودن/ابهام */
+  async function pickByTitleOrCode<T extends { id: number }>(
+    raw: string | undefined,
+    label: string,
+    find: (where: { title?: string; code?: number; detailCode?: string }) => Promise<T[]>
+  ): Promise<{ row: T } | { error: string }> {
+    const v = (raw ?? "").trim();
+    if (!v) return { error: `${label} الزامی است` };
+    let hits = await find({ title: v });
+    if (hits.length === 0 && /^[0-9۰-۹]+$/.test(v)) {
+      const en = toEnglishDigits(v);
+      hits = await find({ code: Number(en), detailCode: en });
+    }
+    if (hits.length === 0) return { error: `${label} «${v}» یافت نشد` };
+    if (hits.length > 1) return { error: `${label} «${v}» مبهم است` };
+    return { row: hits[0] };
+  }
+  const posFind = (w: any) => prisma.position.findMany({ where: w.title ? { title: w.title } : { code: w.code } });
+  const unitFind = (w: any) => prisma.orgUnit.findMany({ where: w.title ? { title: w.title } : { code: w.code } });
+  const ccFind = (w: any) => prisma.costCenter.findMany({ where: w.title ? { title: w.title } : { detailCode: w.detailCode } });
+  const cityFind = async (title: string) => prisma.geoRegion.findMany({ where: { title, level: "CITY" } });
+
+  registerImportEntity("employee", {
+    row: async (row) => {
+      let newPartyId: number | null = null;
+      try {
+        const nationalId = toEnglishDigits(row.nationalId || "").trim();
+        if (!nationalId) return { ok: false, error: "کد ملی الزامی است" };
+        if (!row.startDate) return { ok: false, error: "تاریخ شروع همکاری الزامی است" };
+
+        const edu = await pickByTitleOrCode(row.educationLevel, "مدرک تحصیلی", (w) => prisma.educationLevel.findMany({ where: w.title ? { title: w.title } : { code: w.code } as any }));
+        if ("error" in edu) return { ok: false, error: edu.error };
+        const marital = MARITAL_BY_FA[(row.maritalStatus ?? "").trim()];
+        if (!marital) return { ok: false, error: `وضعیت تاهل باید یکی از «${Object.keys(MARITAL_BY_FA).join("، ")}» باشد` };
+        const isVeteran = yesNo(row.isVeteran);
+        if (isVeteran === null || !(row.isVeteran ?? "").trim()) return { ok: false, error: "وضعیت ایثارگری باید «بله» یا «خیر» باشد" };
+        const pos = await pickByTitleOrCode(row.positionTitle, "پست", posFind);
+        if ("error" in pos) return { ok: false, error: pos.error };
+        let orgUnitId: number | undefined;
+        if ((row.orgUnitTitle ?? "").trim()) {
+          const u = await pickByTitleOrCode(row.orgUnitTitle, "واحد سازمانی", unitFind);
+          if ("error" in u) return { ok: false, error: u.error };
+          orgUnitId = u.row.id;
+        }
+        let costCenterId: number | undefined;
+        if ((row.costCenterTitle ?? "").trim()) {
+          const c = await pickByTitleOrCode(row.costCenterTitle, "مرکز هزینه", ccFind);
+          if ("error" in c) return { ok: false, error: c.error };
+          costCenterId = c.row.id;
+        }
+        let birthPlaceId: number | undefined;
+        let issuePlaceId: number | undefined;
+        for (const [k, label] of [["birthPlace", "محل تولد"], ["issuePlace", "محل صدور"]] as const) {
+          const t = (row[k] ?? "").trim();
+          if (!t) continue;
+          const hits = await cityFind(t);
+          if (hits.length !== 1) return { ok: false, error: hits.length ? `${label} «${t}» مبهم است` : `شهر «${t}» (${label}) یافت نشد` };
+          if (k === "birthPlace") birthPlaceId = hits[0].id;
+          else issuePlaceId = hits[0].id;
+        }
+        const military = (row.militaryStatus ?? "").trim() ? MILITARY_BY_FA[row.militaryStatus.trim()] : undefined;
+        if ((row.militaryStatus ?? "").trim() && !military) return { ok: false, error: `وضعیت نظام وظیفه باید یکی از «${Object.keys(MILITARY_BY_FA).join("، ")}» باشد` };
+        const disability = yesNo(row.hasDisability);
+        if (disability === null) return { ok: false, error: "«دارای معلولیت» باید «بله» یا «خیر» باشد" };
+
+        // شخص: موجود یا ساخته‌شدنی
+        let partyId: number;
+        const found = await findPartyByNationalId(nationalId);
+        if (found) {
+          if (found.category !== "INDIVIDUAL") return { ok: false, error: "این کد ملی متعلق به شخص حقوقی است؛ فقط شخص حقیقی می‌تواند کارمند باشد" };
+          if (found.roles.employee) return { ok: false, error: "این شخص قبلاً به‌عنوان کارمند ثبت شده است" };
+          partyId = found.id;
+        } else {
+          if (!row.firstName || !row.lastName) return { ok: false, error: "شخصی با این کد ملی ثبت نشده است؛ برای ساخت شخص، نام و نام خانوادگی الزامی است" };
+          const gender = row.gender === "مرد" ? "MALE" : row.gender === "زن" ? "FEMALE" : undefined;
+          if (row.gender && !gender) return { ok: false, error: "جنسیت باید «مرد» یا «زن» باشد" };
+          const created = await createParty(
+            { category: "INDIVIDUAL", nationality: "LOCAL", firstName: row.firstName, lastName: row.lastName, nationalId, birthDate: row.birthDate ? resolveDateString(row.birthDate) : undefined, gender } as any,
+            { confirmDuplicate: false, autoDisambiguate: true }
+          );
+          partyId = created.id;
+          newPartyId = created.id;
+        }
+
+        await createEmployee(
+          {
+            partyId,
+            personnelCode: (row.personnelCode ?? "").trim() ? toEnglishDigits(row.personnelCode).trim() : undefined,
+            startDate: resolveDateString(row.startDate),
+            educationLevelId: edu.row.id,
+            educationField: row.educationField,
+            maritalStatus: marital,
+            isVeteran,
+            positionId: pos.row.id,
+            orgUnitId,
+            costCenterId,
+            fatherName: row.fatherName,
+            birthCertificateNumber: row.birthCertificateNumber,
+            birthPlaceId,
+            issuePlaceId,
+            militaryStatus: military,
+            insuranceNumber: row.insuranceNumber,
+            hasDisability: !!disability,
+            notes: row.notes,
+          },
+          { allowNoPhoto: true }
+        );
+        return { ok: true };
+      } catch (e: any) {
+        if (newPartyId) {
+          await prisma.detailCodeUsage.deleteMany({ where: { entityTable: "Party", entityId: newPartyId } }).catch(() => {});
+          await prisma.party.delete({ where: { id: newPartyId } }).catch(() => {});
+        }
+        return { ok: false, error: e.message || "خطا در ثبت کارمند" };
+      }
+    },
+  });
+
+  // ── منابع انسانی: حکم کارگزینی ──
+  // ردیف‌های هم‌گروه (ستون «شماره گروه حکم» + کد پرسنلی + تاریخ اعمال) یک حکم می‌شوند و هر ردیف یک «عامل حکم + مقدار» است. ساخت از همان تابع فرم است
+  // (createDecreeDraft)؛ «تایید شود؟ = بله» همان تایید فرم را اجرا می‌کند (اگر تایید رد شد، پیش‌نویس هم ساخته نمی‌شود). حکم‌های هر کارمند را
+  // به ترتیب تاریخ اعمال بیاورید (تایید حکمِ دارای تغییر انتصاب فقط برای آخرین حکم کارمند ممکن است).
+  const DECREE_TYPE_BY_FA: Record<string, string> = { "استخدام": "HIRE", "تمدید": "RENEWAL", "افزایش سالانه": "ANNUAL_RAISE", "ارتقا / تغییر پست": "PROMOTION", "اصلاحی": "AMENDMENT" };
+  registerImportEntity("employment-decree", {
+    groupByKey: (row) => `${row.groupNo || ""}__${toEnglishDigits(row.personnelCode || "").trim()}__${row.effectiveDate || ""}`,
+    group: async (groupRows, ctx) => {
+      let draftId: number | null = null;
+      try {
+        const first = groupRows[0];
+        const personnelCode = toEnglishDigits(first.personnelCode || "").trim();
+        if (!personnelCode) return { ok: false, error: "کد پرسنلی الزامی است" };
+        const emp = await prisma.employee.findUnique({ where: { personnelCode }, select: { id: true } });
+        if (!emp) return { ok: false, error: `کارمند با کد پرسنلی «${personnelCode}» یافت نشد` };
+        const type = DECREE_TYPE_BY_FA[(first.type ?? "").trim()];
+        if (!type) return { ok: false, error: `نوع حکم باید یکی از «${Object.keys(DECREE_TYPE_BY_FA).join("، ")}» باشد` };
+        if (!first.issueDate || !first.effectiveDate) return { ok: false, error: "تاریخ صدور و تاریخ اعمال الزامی است" };
+        const effectiveDate = resolveDateString(first.effectiveDate);
+        if (!ctx.allowDuplicates) {
+          const dup = await prisma.employmentDecree.findFirst({ where: { employeeId: emp.id, effectiveDate: new Date(`${effectiveDate}T00:00:00.000Z`) }, select: { number: true } });
+          if (dup) return { ok: false, error: `حکم شماره ${dup.number} با همین کارمند و تاریخ اعمال از قبل ثبت شده است` };
+        }
+        const et = await pickByTitleOrCode(first.employmentTypeTitle, "نوع همکاری", (w) => prisma.employmentType.findMany({ where: w.title ? { title: w.title } : { code: w.code } as any }));
+        if ("error" in et) return { ok: false, error: et.error };
+
+        let position: { row: { id: number } } | { error: string } | null = null;
+        let orgUnitId: number | undefined;
+        let costCenterId: number | undefined;
+        if ((first.positionTitle ?? "").trim()) {
+          position = await pickByTitleOrCode(first.positionTitle, "پست", posFind);
+          if ("error" in position) return { ok: false, error: position.error };
+          if ((first.orgUnitTitle ?? "").trim()) {
+            const u = await pickByTitleOrCode(first.orgUnitTitle, "واحد سازمانی", unitFind);
+            if ("error" in u) return { ok: false, error: u.error };
+            orgUnitId = u.row.id;
+          }
+          if ((first.costCenterTitle ?? "").trim()) {
+            const c = await pickByTitleOrCode(first.costCenterTitle, "مرکز هزینه", ccFind);
+            if ("error" in c) return { ok: false, error: c.error };
+            costCenterId = c.row.id;
+          }
+        }
+
+        const lines: { componentId: number; value: number }[] = [];
+        for (const [i, r] of groupRows.entries()) {
+          const comp = await pickByTitleOrCode(r.componentTitle, `عامل حکم (ردیف ${i + 1} حکم)`, (w) => prisma.decreeComponent.findMany({ where: w.title ? { title: w.title } : { code: w.code } as any }));
+          if ("error" in comp) return { ok: false, error: comp.error };
+          const value = Number(toEnglishDigits((r.value ?? "").replace(/[,٬\s]/g, "")));
+          if (!(r.value ?? "").toString().trim() || !isFinite(value)) return { ok: false, error: `مقدار عامل «${r.componentTitle}» نامعتبر است` };
+          lines.push({ componentId: comp.row.id, value });
+        }
+
+        const approve = (first.approve ?? "").trim() === "بله";
+        const created = await createDecreeDraft({
+          employeeId: emp.id,
+          type,
+          issueDate: resolveDateString(first.issueDate),
+          effectiveDate,
+          endDate: first.endDate ? resolveDateString(first.endDate) : undefined,
+          employmentTypeId: et.row.id,
+          weeklyHours: (first.weeklyHours ?? "").trim() ? toEnglishDigits(first.weeklyHours).trim() : undefined,
+          description: first.description,
+          positionId: position && "row" in position ? position.row.id : undefined,
+          orgUnitId,
+          costCenterId,
+          lines,
+        });
+        draftId = created.id;
+        if (approve) {
+          try {
+            await approveDecree(created.id);
+          } catch (e: any) {
+            // تایید رد شد: پیش‌نویسی که همین الان ساخته شد پاک می‌شود تا ورود مجدد تکراری نسازد
+            await prisma.employmentDecree.delete({ where: { id: created.id } }).catch(() => {});
+            draftId = null;
+            return { ok: false, error: `حکم تایید نشد: ${e.message}` };
+          }
+        }
+        return { ok: true };
+      } catch (e: any) {
+        if (draftId) await prisma.employmentDecree.delete({ where: { id: draftId } }).catch(() => {});
+        return { ok: false, error: e.message || "خطا در ثبت حکم" };
       }
     },
   });

@@ -200,26 +200,30 @@ router.get("/employment-decrees/:id", async (req, res) => {
 });
 
 // ── ایجاد (پیش‌نویس) ──
+/** ساخت پیش‌نویس حکم (تنها مسیر ساخت: فرم و ورود از اکسل). خطا = HrError */
+export async function createDecreeDraft(b: any): Promise<{ id: number; number: number }> {
+  const employeeId = Number(b.employeeId);
+  if (!employeeId || !(await prisma.employee.findUnique({ where: { id: employeeId }, select: { id: true } }))) {
+    throw new HrError("کارمند را انتخاب کنید");
+  }
+  const { header, lines } = await buildDraft(b, employeeId);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const last = await prisma.employmentDecree.findFirst({ orderBy: { number: "desc" }, select: { number: true } });
+      const created = await prisma.employmentDecree.create({
+        data: { ...header, number: (last?.number ?? 0) + 1, lines: { create: lines } },
+      });
+      return { id: created.id, number: created.number };
+    } catch (e: any) {
+      if (e?.code === "P2002" && attempt < 3) continue;
+      throw e;
+    }
+  }
+}
+
 router.post("/employment-decrees", can(`${FORM}.create`), async (req, res) => {
-  const b = req.body as any;
   try {
-    const employeeId = Number(b.employeeId);
-    if (!employeeId || !(await prisma.employee.findUnique({ where: { id: employeeId }, select: { id: true } }))) {
-      throw new HrError("کارمند را انتخاب کنید");
-    }
-    const { header, lines } = await buildDraft(b, employeeId);
-    for (let attempt = 0; ; attempt++) {
-      try {
-        const last = await prisma.employmentDecree.findFirst({ orderBy: { number: "desc" }, select: { number: true } });
-        const created = await prisma.employmentDecree.create({
-          data: { ...header, number: (last?.number ?? 0) + 1, lines: { create: lines } },
-        });
-        return res.status(201).json({ id: created.id, number: created.number });
-      } catch (e: any) {
-        if (e?.code === "P2002" && attempt < 3) continue;
-        throw e;
-      }
-    }
+    res.status(201).json(await createDecreeDraft(req.body));
   } catch (e: any) {
     fail(res, e, "خطا در ثبت حکم");
   }
@@ -248,45 +252,49 @@ router.put("/employment-decrees/:id", can(`${FORM}.edit`), async (req, res) => {
 });
 
 // ── تایید ──
-router.post("/employment-decrees/:id/approve", can(`${FORM}.approve`), async (req, res) => {
-  const id = Number(req.params.id);
-  try {
-    await prisma.$transaction(async (tx) => {
-      const d = await tx.employmentDecree.findUnique({ where: { id }, include: { lines: true } });
-      if (!d) throw new HrError("حکم یافت نشد");
-      if (d.status !== "DRAFT") throw new HrError("این حکم قبلاً تایید شده است");
-      // قفل ردیف کارمند: تایید هم‌زمان دو حکم یک کارمند پشت سر هم اجرا می‌شود
-      await tx.$queryRaw`SELECT "id" FROM "Employee" WHERE "id" = ${d.employeeId} FOR UPDATE`;
-      // تاریخ اعمال باید داخل یک دوره‌ی همکاری باشد
-      const periods = await tx.employmentPeriod.findMany({ where: { employeeId: d.employeeId } });
-      const inside = periods.some((p) => p.startDate <= d.effectiveDate && (!p.endDate || p.endDate >= d.effectiveDate));
-      if (!inside) throw new HrError("تاریخ اعمال حکم داخل هیچ دوره‌ی همکاری کارمند نیست");
-      // حکمی که از ماهِ دارای محاسبه (یا قبل از آن) اجرا می‌شود مبنای فیش ثبت‌شده را عوض می‌کند
-      const slips = await tx.payrollSlip.findMany({ where: { employeeId: d.employeeId }, select: { year: true, month: true } });
-      const hit = slips.find((x) => jalaliMonthRange(x.year, x.month).end >= d.effectiveDate);
-      if (hit) throw new HrError(`برای این کارمند حقوق ${hit.year}/${hit.month} محاسبه شده است؛ برای تایید حکمی با تاریخ اعمال قبل از پایان آن ماه، ابتدا محاسبه را حذف کنید`);
-      const same = await tx.employmentDecree.findFirst({
-        where: { employeeId: d.employeeId, status: "APPROVED", effectiveDate: d.effectiveDate, NOT: { id } },
+/** تایید پیش‌نویس (قفل کارمند، کنترل دوره‌ی همکاری/فیش/تکراری، اعمال انتصاب). تنها مسیر تایید: دکمه‌ی فرم و ورود از اکسل. خطا = HrError */
+export async function approveDecree(id: number): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const d = await tx.employmentDecree.findUnique({ where: { id }, include: { lines: true } });
+    if (!d) throw new HrError("حکم یافت نشد");
+    if (d.status !== "DRAFT") throw new HrError("این حکم قبلاً تایید شده است");
+    // قفل ردیف کارمند: تایید هم‌زمان دو حکم یک کارمند پشت سر هم اجرا می‌شود
+    await tx.$queryRaw`SELECT "id" FROM "Employee" WHERE "id" = ${d.employeeId} FOR UPDATE`;
+    // تاریخ اعمال باید داخل یک دوره‌ی همکاری باشد
+    const periods = await tx.employmentPeriod.findMany({ where: { employeeId: d.employeeId } });
+    const inside = periods.some((p) => p.startDate <= d.effectiveDate && (!p.endDate || p.endDate >= d.effectiveDate));
+    if (!inside) throw new HrError("تاریخ اعمال حکم داخل هیچ دوره‌ی همکاری کارمند نیست");
+    // حکمی که از ماهِ دارای محاسبه (یا قبل از آن) اجرا می‌شود مبنای فیش ثبت‌شده را عوض می‌کند
+    const slips = await tx.payrollSlip.findMany({ where: { employeeId: d.employeeId }, select: { year: true, month: true } });
+    const hit = slips.find((x) => jalaliMonthRange(x.year, x.month).end >= d.effectiveDate);
+    if (hit) throw new HrError(`برای این کارمند حقوق ${hit.year}/${hit.month} محاسبه شده است؛ برای تایید حکمی با تاریخ اعمال قبل از پایان آن ماه، ابتدا محاسبه را حذف کنید`);
+    const same = await tx.employmentDecree.findFirst({
+      where: { employeeId: d.employeeId, status: "APPROVED", effectiveDate: d.effectiveDate, NOT: { id } },
+      select: { number: true },
+    });
+    if (same) throw new HrError(`حکم تاییدشده‌ی شماره ${same.number} با همین تاریخ اعمال وجود دارد`);
+
+    let applied: { appliedId: number; previousId: number | null } | null = null;
+    if (d.positionId) {
+      const later = await tx.employmentDecree.findFirst({
+        where: { employeeId: d.employeeId, status: "APPROVED", effectiveDate: { gt: d.effectiveDate } },
         select: { number: true },
       });
-      if (same) throw new HrError(`حکم تاییدشده‌ی شماره ${same.number} با همین تاریخ اعمال وجود دارد`);
-
-      let applied: { appliedId: number; previousId: number | null } | null = null;
-      if (d.positionId) {
-        const later = await tx.employmentDecree.findFirst({
-          where: { employeeId: d.employeeId, status: "APPROVED", effectiveDate: { gt: d.effectiveDate } },
-          select: { number: true },
-        });
-        if (later) throw new HrError(`حکم دارای تغییر انتصاب باید آخرین حکم کارمند باشد (حکم بعدی: شماره ${later.number})`);
-        applied = await changeAssignment(tx, d.employeeId, { positionId: d.positionId, orgUnitId: d.orgUnitId, costCenterId: d.costCenterId }, d.effectiveDate);
-      }
-      await tx.employmentType.update({ where: { id: d.employmentTypeId }, data: { hasTransactions: true } });
-      await tx.decreeComponent.updateMany({ where: { id: { in: d.lines.map((l) => l.componentId) } }, data: { hasTransactions: true } });
-      await tx.employmentDecree.update({
-        where: { id },
-        data: { status: "APPROVED", approvedAt: new Date(), appliedAssignmentId: applied?.appliedId ?? null, previousAssignmentId: applied?.previousId ?? null },
-      });
+      if (later) throw new HrError(`حکم دارای تغییر انتصاب باید آخرین حکم کارمند باشد (حکم بعدی: شماره ${later.number})`);
+      applied = await changeAssignment(tx, d.employeeId, { positionId: d.positionId, orgUnitId: d.orgUnitId, costCenterId: d.costCenterId }, d.effectiveDate);
+    }
+    await tx.employmentType.update({ where: { id: d.employmentTypeId }, data: { hasTransactions: true } });
+    await tx.decreeComponent.updateMany({ where: { id: { in: d.lines.map((l) => l.componentId) } }, data: { hasTransactions: true } });
+    await tx.employmentDecree.update({
+      where: { id },
+      data: { status: "APPROVED", approvedAt: new Date(), appliedAssignmentId: applied?.appliedId ?? null, previousAssignmentId: applied?.previousId ?? null },
     });
+  });
+}
+
+router.post("/employment-decrees/:id/approve", can(`${FORM}.approve`), async (req, res) => {
+  try {
+    await approveDecree(Number(req.params.id));
     res.json({ ok: true });
   } catch (e: any) {
     fail(res, e, "خطا در تایید حکم");

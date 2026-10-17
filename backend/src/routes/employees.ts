@@ -222,81 +222,86 @@ router.get("/employees/:id", async (req, res) => {
 });
 
 // ── ایجاد ──
-router.post("/employees", can(`${FORM}.create`), async (req, res) => {
-  const b = req.body as any;
-  try {
-    const partyId = Number(b.partyId);
-    const party = partyId ? await prisma.party.findUnique({ where: { id: partyId }, include: { employee: true } }) : null;
-    if (!party) throw new HrError("شخص انتخاب‌شده یافت نشد");
-    if (party.category !== "INDIVIDUAL") throw new HrError("فقط شخص حقیقی می‌تواند کارمند باشد");
-    if (!party.isActive) throw new HrError("شخص انتخاب‌شده غیرفعال است");
-    if (party.employee) throw new HrError("این شخص قبلاً به‌عنوان کارمند ثبت شده است");
+/** ساخت کارمند روی یک شخص حقیقی موجود (تنها مسیر ساخت: فرم و ورود از اکسل). خطا = HrError */
+export async function createEmployee(b: any, opts: { allowNoPhoto?: boolean } = {}): Promise<{ id: number; personnelCode: string }> {
+  const partyId = Number(b.partyId);
+  const party = partyId ? await prisma.party.findUnique({ where: { id: partyId }, include: { employee: true } }) : null;
+  if (!party) throw new HrError("شخص انتخاب‌شده یافت نشد");
+  if (party.category !== "INDIVIDUAL") throw new HrError("فقط شخص حقیقی می‌تواند کارمند باشد");
+  if (!party.isActive) throw new HrError("شخص انتخاب‌شده غیرفعال است");
+  if (party.employee) throw new HrError("این شخص قبلاً به‌عنوان کارمند ثبت شده است");
 
-    const startDate = parseDay(b.startDate, "تاریخ شروع همکاری")!;
-    await checkRefs(b);
-    await checkAssignmentRefs(b);
-    const photo = decodePhoto(b.photo);
-    // مقدار اولیه‌ی تحصیلات، تاهل و ایثارگری اجباری است؛ سرور اولین سابقه‌ی هر کدام را با تاریخ شروع همکاری می‌سازد
-    if (!b.educationLevelId) throw new HrError("مدرک تحصیلی الزامی است");
-    if (!b.maritalStatus) throw new HrError("وضعیت تاهل الزامی است");
-    if (typeof b.isVeteran !== "boolean") throw new HrError("وضعیت ایثارگری الزامی است");
-    if (b.salaryBankAccountId) {
-      const acc = await prisma.partyBankAccount.findUnique({ where: { id: Number(b.salaryBankAccountId) } });
-      if (!acc || acc.partyId !== partyId) throw new HrError("حساب دریافت حقوق باید از حساب‌های بانکی همین شخص باشد");
-    }
+  const startDate = parseDay(b.startDate, "تاریخ شروع همکاری")!;
+  await checkRefs(b);
+  await checkAssignmentRefs(b);
+  // عکس در فرم الزامی است؛ ورود از اکسل (که عکس ندارد) با allowNoPhoto بدون عکس ثبت می‌شود و عکس بعداً از فرم ویرایش اضافه می‌شود
+  const photo = !b.photo && opts.allowNoPhoto ? null : decodePhoto(b.photo);
+  // مقدار اولیه‌ی تحصیلات، تاهل و ایثارگری اجباری است؛ سرور اولین سابقه‌ی هر کدام را با تاریخ شروع همکاری می‌سازد
+  if (!b.educationLevelId) throw new HrError("مدرک تحصیلی الزامی است");
+  if (!b.maritalStatus) throw new HrError("وضعیت تاهل الزامی است");
+  if (typeof b.isVeteran !== "boolean") throw new HrError("وضعیت ایثارگری الزامی است");
+  if (b.salaryBankAccountId) {
+    const acc = await prisma.partyBankAccount.findUnique({ where: { id: Number(b.salaryBankAccountId) } });
+    if (!acc || acc.partyId !== partyId) throw new HrError("حساب دریافت حقوق باید از حساب‌های بانکی همین شخص باشد");
+  }
 
-    let personnelCode = str(b.personnelCode);
-    if (personnelCode && (await prisma.employee.findUnique({ where: { personnelCode } }))) {
-      throw new HrError("کد پرسنلی تکراری است");
-    }
+  let personnelCode = str(b.personnelCode);
+  if (personnelCode && (await prisma.employee.findUnique({ where: { personnelCode } }))) {
+    throw new HrError("کد پرسنلی تکراری است");
+  }
 
-    // کد خودکار با رقابت هم‌زمان: تکرار محدود روی تداخل یکتایی
-    for (let attempt = 0; ; attempt++) {
-      const code = personnelCode ?? (await nextPersonnelCode());
-      try {
-        const created = await prisma.$transaction(async (tx) => {
-          const emp = await tx.employee.create({
-            data: {
-              personnelCode: code,
-              partyId,
-              status: "ACTIVE",
-              fatherName: str(b.fatherName),
-              birthCertificateNumber: str(b.birthCertificateNumber),
-              birthPlaceId: b.birthPlaceId ? Number(b.birthPlaceId) : null,
-              issuePlaceId: b.issuePlaceId ? Number(b.issuePlaceId) : null,
-              militaryStatus: b.militaryStatus || null,
-              insuranceNumber: str(b.insuranceNumber),
-              hasDisability: !!b.hasDisability,
-              notes: str(b.notes),
-              salaryBankAccountId: b.salaryBankAccountId ? Number(b.salaryBankAccountId) : null,
-            },
-          });
-          await tx.employeePhoto.create({ data: { employeeId: emp.id, ...photo } });
-          await tx.employmentPeriod.create({ data: { employeeId: emp.id, startDate } });
-          await tx.employeeEducationRecord.create({
-            data: { employeeId: emp.id, effectiveDate: startDate, educationLevelId: Number(b.educationLevelId), field: str(b.educationField) },
-          });
-          await tx.employeeMaritalRecord.create({ data: { employeeId: emp.id, effectiveDate: startDate, maritalStatus: b.maritalStatus } });
-          await tx.employeeVeteranRecord.create({ data: { employeeId: emp.id, effectiveDate: startDate, isVeteran: b.isVeteran } });
-          await tx.employeeAssignment.create({
-            data: {
-              employeeId: emp.id,
-              positionId: Number(b.positionId),
-              orgUnitId: Number(b.orgUnitId),
-              costCenterId: b.costCenterId || null,
-              fromDate: startDate,
-            },
-          });
-          await tx.position.update({ where: { id: Number(b.positionId) }, data: { hasTransactions: true } });
-          await tx.educationLevel.update({ where: { id: Number(b.educationLevelId) }, data: { hasTransactions: true } });
-          return emp;
+  // کد خودکار با رقابت هم‌زمان: تکرار محدود روی تداخل یکتایی
+  for (let attempt = 0; ; attempt++) {
+    const code = personnelCode ?? (await nextPersonnelCode());
+    try {
+      const created = await prisma.$transaction(async (tx) => {
+        const emp = await tx.employee.create({
+          data: {
+            personnelCode: code,
+            partyId,
+            status: "ACTIVE",
+            fatherName: str(b.fatherName),
+            birthCertificateNumber: str(b.birthCertificateNumber),
+            birthPlaceId: b.birthPlaceId ? Number(b.birthPlaceId) : null,
+            issuePlaceId: b.issuePlaceId ? Number(b.issuePlaceId) : null,
+            militaryStatus: b.militaryStatus || null,
+            insuranceNumber: str(b.insuranceNumber),
+            hasDisability: !!b.hasDisability,
+            notes: str(b.notes),
+            salaryBankAccountId: b.salaryBankAccountId ? Number(b.salaryBankAccountId) : null,
+          },
         });
-        return res.status(201).json({ id: created.id, personnelCode: created.personnelCode });
-      } catch (e: any) {
-        if (e?.code === "P2002" && !personnelCode && attempt < 3) continue;
-        throw e;
-      }
+        if (photo) await tx.employeePhoto.create({ data: { employeeId: emp.id, ...photo } });
+        await tx.employmentPeriod.create({ data: { employeeId: emp.id, startDate } });
+        await tx.employeeEducationRecord.create({
+          data: { employeeId: emp.id, effectiveDate: startDate, educationLevelId: Number(b.educationLevelId), field: str(b.educationField) },
+        });
+        await tx.employeeMaritalRecord.create({ data: { employeeId: emp.id, effectiveDate: startDate, maritalStatus: b.maritalStatus } });
+        await tx.employeeVeteranRecord.create({ data: { employeeId: emp.id, effectiveDate: startDate, isVeteran: b.isVeteran } });
+        await tx.employeeAssignment.create({
+          data: {
+            employeeId: emp.id,
+            positionId: Number(b.positionId),
+            orgUnitId: Number(b.orgUnitId),
+            costCenterId: b.costCenterId || null,
+            fromDate: startDate,
+          },
+        });
+        await tx.position.update({ where: { id: Number(b.positionId) }, data: { hasTransactions: true } });
+        await tx.educationLevel.update({ where: { id: Number(b.educationLevelId) }, data: { hasTransactions: true } });
+        return emp;
+      });
+      return { id: created.id, personnelCode: created.personnelCode };
+    } catch (e: any) {
+      if (e?.code === "P2002" && !personnelCode && attempt < 3) continue;
+      throw e;
     }
+  }
+}
+
+router.post("/employees", can(`${FORM}.create`), async (req, res) => {
+  try {
+    res.status(201).json(await createEmployee(req.body));
   } catch (e: any) {
     fail(res, e, "خطا در ثبت کارمند");
   }

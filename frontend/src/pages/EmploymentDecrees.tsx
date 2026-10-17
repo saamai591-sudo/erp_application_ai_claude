@@ -9,6 +9,7 @@ import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
+import { ExcelImportButton } from "../components/ExcelImport";
 import { RecordPickerField } from "../components/RecordPicker";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { toFaDigits } from "../lib/formatAmount";
@@ -117,6 +118,30 @@ function DecreeList() {
             title="حکم کارگزینی"
           />
           <NewRecordButton path={`/employment-decrees/new${employeeId ? `?employeeId=${employeeId}` : ""}`} />
+          <ExcelImportButton
+            entityLabel="احکام کارگزینی"
+            templateFilename="قالب-حکم-کارگزینی"
+            backendEntityType="employment-decree"
+            allowDuplicateOption
+            columns={[
+              { key: "groupNo", label: "شماره گروه حکم", required: true, hint: "ردیف‌هایی که یک حکم‌اند (هر ردیف یک عامل) شماره گروه یکسان دارند" },
+              { key: "personnelCode", label: "کد پرسنلی", required: true },
+              { key: "type", label: "نوع حکم", required: true, hint: Object.values(DECREE_TYPE_FA).join(" / ") },
+              { key: "issueDate", label: "تاریخ صدور", required: true, hint: "شمسی" },
+              { key: "effectiveDate", label: "تاریخ اعمال", required: true, hint: "شمسی؛ حکم‌های هر کارمند را به ترتیب تاریخ اعمال بیاورید" },
+              { key: "endDate", label: "تاریخ پایان", hint: "اختیاری" },
+              { key: "employmentTypeTitle", label: "نوع همکاری", required: true, hint: "عنوان یا کد نوع همکاری" },
+              { key: "weeklyHours", label: "ساعت کار هفتگی", hint: "اختیاری" },
+              { key: "description", label: "شرح", hint: "اختیاری" },
+              { key: "approve", label: "تایید شود؟", hint: "بله / خیر — پیش‌فرض خیر (پیش‌نویس)" },
+              { key: "positionTitle", label: "پست جدید", hint: "اختیاری — فقط اگر حکم پست را عوض می‌کند" },
+              { key: "orgUnitTitle", label: "واحد سازمانی جدید", hint: "فقط اگر پست واحد ندارد" },
+              { key: "costCenterTitle", label: "مرکز هزینه جدید", hint: "اختیاری" },
+              { key: "componentTitle", label: "عامل حکم", required: true, hint: "عنوان یا کد عامل حکم" },
+              { key: "value", label: "مقدار", required: true, hint: "مبلغ یا درصد (طبق نوع عامل)" },
+            ]}
+            onDone={reload}
+          />
           <RefreshButton onClick={reload} />
         </div>
         {employeeId && items[0] && (

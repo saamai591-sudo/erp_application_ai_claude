@@ -9,6 +9,7 @@ import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
+import { ExcelImportButton } from "../components/ExcelImport";
 import { RecordPickerField } from "../components/RecordPicker";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { toFaDigits } from "../lib/formatAmount";
@@ -159,6 +160,36 @@ function EmployeeList() {
             title="کارمندان"
           />
           <NewRecordButton path="/employees/new" />
+          <ExcelImportButton
+            entityLabel="کارمندان"
+            templateFilename="قالب-کارمند"
+            backendEntityType="employee"
+            columns={[
+              { key: "nationalId", label: "کد ملی", required: true, hint: "شخص حقیقی با این کد ملی پیدا می‌شود؛ اگر نبود با نام و نام خانوادگی ساخته می‌شود" },
+              { key: "firstName", label: "نام", hint: "فقط برای شخصِ جدید الزامی است" },
+              { key: "lastName", label: "نام خانوادگی", hint: "فقط برای شخصِ جدید الزامی است" },
+              { key: "birthDate", label: "تاریخ تولد", hint: "اختیاری، شمسی (۱۳۷۰/۰۵/۱۲) — فقط برای شخصِ جدید" },
+              { key: "gender", label: "جنسیت", hint: "مرد / زن — فقط برای شخصِ جدید" },
+              { key: "personnelCode", label: "کد پرسنلی", hint: "اختیاری — خالی = خودکار" },
+              { key: "startDate", label: "تاریخ شروع همکاری", required: true, hint: "شمسی، مثلاً ۱۴۰۳/۰۱/۰۱" },
+              { key: "educationLevel", label: "مدرک تحصیلی", required: true, hint: "عنوان یا کد مدرک" },
+              { key: "educationField", label: "رشته تحصیلی" },
+              { key: "maritalStatus", label: "وضعیت تاهل", required: true, hint: Object.values(MARITAL_FA).join(" / ") },
+              { key: "isVeteran", label: "ایثارگر", required: true, hint: "بله / خیر" },
+              { key: "positionTitle", label: "پست", required: true, hint: "عنوان یا کد پست (برای بدون پست، پست پیش‌فرض)" },
+              { key: "orgUnitTitle", label: "واحد سازمانی", hint: "فقط اگر پست واحد سازمانی ندارد" },
+              { key: "costCenterTitle", label: "مرکز هزینه", hint: "اختیاری — عنوان یا کد تفصیلی" },
+              { key: "fatherName", label: "نام پدر" },
+              { key: "birthCertificateNumber", label: "شماره شناسنامه" },
+              { key: "birthPlace", label: "محل تولد", hint: "عنوان شهر" },
+              { key: "issuePlace", label: "محل صدور", hint: "عنوان شهر" },
+              { key: "militaryStatus", label: "وضعیت نظام وظیفه", hint: Object.values(MILITARY_FA).join(" / ") },
+              { key: "insuranceNumber", label: "شماره بیمه" },
+              { key: "hasDisability", label: "دارای معلولیت", hint: "بله / خیر — پیش‌فرض خیر" },
+              { key: "notes", label: "توضیحات" },
+            ]}
+            onDone={reload}
+          />
           <RefreshButton onClick={reload} />
         </div>
       </div>
