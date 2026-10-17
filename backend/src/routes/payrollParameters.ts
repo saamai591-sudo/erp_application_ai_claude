@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { jalaliMonthRange, toJalaliYearMonth } from "../utils/jalaliDate";
-import { missingMonthMessage } from "../services/workCalendarService";
+import { getCalendarMonth, missingMonthMessage } from "../services/workCalendarService";
 import { assertParameterValueNotLocked, execMonthBeforeLastCalculation, lastCalculatedMonth, usedValueDates } from "../services/payrollParameterService";
 
 // حقوق و دستمزد › تنظیمات › پارامترهای مبنا: تعریف پارامتر + مقدارهای تاریخ‌دار (مقدار ساده یا جدول پلکانی).
@@ -199,8 +199,8 @@ router.post("/payroll-parameters/:id/values", can(`${FORM}.edit`), async (req, r
     const p = await prisma.payrollParameter.findUnique({ where: { id } });
     if (!p) return res.status(404).json({ error: "پارامتر یافت نشد" });
     const exec = parseExec(b);
-    const calMsg = await missingMonthMessage(exec.year, exec.month);
-    if (calMsg) throw new PErr(calMsg);
+    const calRow = await getCalendarMonth(exec.year, exec.month);
+    if (!calRow) throw new PErr((await missingMonthMessage(exec.year, exec.month))!);
     const effectiveDate = exec.date;
     const built = buildValue(p.type, b);
     const latest = await prisma.payrollParameterValue.findFirst({ where: { parameterId: id }, orderBy: { effectiveDate: "desc" } });
@@ -213,7 +213,7 @@ router.post("/payroll-parameters/:id/values", can(`${FORM}.edit`), async (req, r
     const lastCalc = await execMonthBeforeLastCalculation(exec.year, exec.month);
     if (lastCalc) throw new PErr(lastCalc);
     const created = await prisma.payrollParameterValue.create({
-      data: { parameterId: id, effectiveDate, value: built.value, note: str(b.note), brackets: { create: built.brackets } },
+      data: { parameterId: id, effectiveDate, execCalendarMonthId: calRow.id, value: built.value, note: str(b.note), brackets: { create: built.brackets } },
     });
     res.status(201).json({ id: created.id });
   } catch (e) {
@@ -251,11 +251,13 @@ router.put("/payroll-parameters/values/:valueId", can(`${FORM}.edit`), async (re
       const n0 = toJalaliYearMonth(next.effectiveDate);
       if (ymKey(exec.year, exec.month) >= ymKey(n0.year, n0.month)) throw new PErr(`ماه اجرا باید قبل از مقدار بعدی (${monthLabel(next.effectiveDate)}) بماند`);
     }
+    // مقدار قدیمیِ بدون تقویم که ماهش عوض نشده ارجاع NULL می‌ماند؛ وگرنه به ردیف تقویم وصل می‌شود
+    const calRowForEdit = await getCalendarMonth(exec.year, exec.month);
     await prisma.$transaction([
       prisma.payrollParameterBracket.deleteMany({ where: { valueId } }),
       prisma.payrollParameterValue.update({
         where: { id: valueId },
-        data: { effectiveDate, value: built.value, note: str(b.note), brackets: { create: built.brackets } },
+        data: { effectiveDate, execCalendarMonthId: calRowForEdit?.id ?? null, value: built.value, note: str(b.note), brackets: { create: built.brackets } },
       }),
     ]);
     res.json({ ok: true });

@@ -7,7 +7,8 @@ import { METHOD_FA, PayrollCalcError, calculatePayroll, validateFactorMethod, me
 import { getEffectiveDecrees } from "../services/employmentDecreeService";
 import { buildPayrollSlipsPrint } from "../services/payrollSlipPrint";
 import { jalaliMonthRange } from "../utils/jalaliDate";
-import { missingMonthMessage } from "../services/workCalendarService";
+import { getCalendarMonth, missingMonthMessage } from "../services/workCalendarService";
+import { toJalaliYearMonth } from "../utils/jalaliDate";
 import { BASE_INFO, DECREE_VARIANTS, FACTOR_VARIANTS, KIND_FA } from "../services/payrollFormula";
 
 // حقوق و دستمزد: عامل‌های حقوق (هویت)، «روش محاسبه عامل» (تاریخ‌دار با ماه اجرا؛ مبنا = عامل حکم یا عامل حقوق)، ورودی ماهانه‌ی عوامل،
@@ -174,6 +175,10 @@ router.delete("/payroll-components/:id", can(`${F_COMP}.delete`), async (req, re
 });
 
 // ════════════ روش محاسبه عامل ════════════
+// ماه صدور/اجرا فقط به‌صورت ارجاع به ردیف تقویم کاری ذخیره می‌شود؛ سال/ماه پاسخ از همان ردیف می‌آید.
+// روش قدیمیِ بدون ارجاع: ماه اجرا از effectiveDate (اول همان ماه) خوانده می‌شود و ماه صدور (که ذخیره نشده) برابر ماه اجرا نمایش داده می‌شود.
+const methodMonthInclude = { execCalendarMonth: { select: { year: true, month: true } }, issueCalendarMonth: { select: { year: true, month: true } } } as const;
+const execYm = (m: any): { year: number; month: number } => m.execCalendarMonth ?? toJalaliYearMonth(m.effectiveDate);
 const shapeMethod = (m: any, today: Date) => ({
   id: m.id,
   basis: m.decreeComponentId ? "decree" : "payroll",
@@ -181,10 +186,10 @@ const shapeMethod = (m: any, today: Date) => ({
   factorTitle: m.decreeComponent?.title ?? m.payrollComponent?.title ?? "",
   method: m.method,
   valueType: m.valueType,
-  issueYear: m.issueYear,
-  issueMonth: m.issueMonth,
-  execYear: m.execYear,
-  execMonth: m.execMonth,
+  issueYear: (m.issueCalendarMonth ?? execYm(m)).year,
+  issueMonth: (m.issueCalendarMonth ?? execYm(m)).month,
+  execYear: execYm(m).year,
+  execMonth: execYm(m).month,
   fixedValue: m.fixedValue === null ? null : m.fixedValue.toString(),
   conditionText: m.conditionText,
   formulaText: m.formulaText,
@@ -197,7 +202,7 @@ const shapeMethod = (m: any, today: Date) => ({
 router.get("/payroll-methods", can(`${F_METH}.view`), async (_req, res) => {
   const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
   const rows = await prisma.payrollFactorMethod.findMany({
-    include: { decreeComponent: { select: { title: true } }, payrollComponent: { select: { title: true } } },
+    include: { decreeComponent: { select: { title: true } }, payrollComponent: { select: { title: true } }, ...methodMonthInclude },
     orderBy: [{ effectiveDate: "desc" }, { id: "desc" }],
   });
   // «جاری» = آخرین رکورد هر عامل با تاریخ اجرای ≤ امروز
@@ -290,7 +295,7 @@ router.post("/payroll-methods/validate", can(`${F_METH}.view`), async (req, res)
 router.get("/payroll-methods/:id", can(`${F_METH}.view`), async (req, res) => {
   const m = await prisma.payrollFactorMethod.findUnique({
     where: { id: Number(req.params.id) },
-    include: { decreeComponent: { select: { title: true } }, payrollComponent: { select: { title: true } } },
+    include: { decreeComponent: { select: { title: true } }, payrollComponent: { select: { title: true } }, ...methodMonthInclude },
   });
   if (!m) return res.status(404).json({ error: "روش یافت نشد" });
   const { _eff, _today, ...rest } = shapeMethod(m, new Date());
@@ -326,14 +331,13 @@ async function methodData(b: any, existingId: number | null) {
     if (!Number.isInteger(y) || y < 1300 || y > 1600 || !Number.isInteger(m) || m < 1 || m > 12) throw new PayrollCalcError(`${label} نامعتبر است`);
   }
   if (ey * 12 + em < iy * 12 + im) throw new PayrollCalcError("ماه اجرا نمی‌تواند قبل از ماه صدور باشد");
-  // هر دو ماه باید در «تقویم کاری» تعریف شده باشند
-  for (const [y, m] of [[iy, im], [ey, em]] as const) {
-    const msg = await missingMonthMessage(y, m);
-    if (msg) throw new PayrollCalcError(msg);
-  }
-  // اولین روز ماه اجرا (میلادی)
-  const { jalaliMonthRange } = await import("../utils/jalaliDate");
-  const effectiveDate = jalaliMonthRange(ey, em).start;
+  // هر دو ماه باید ردیفی در «تقویم کاری» باشند؛ فقط ارجاع به همان ردیف ذخیره می‌شود
+  const issueRow = await getCalendarMonth(iy, im);
+  if (!issueRow) throw new PayrollCalcError((await missingMonthMessage(iy, im))!);
+  const execRow = await getCalendarMonth(ey, em);
+  if (!execRow) throw new PayrollCalcError((await missingMonthMessage(ey, em))!);
+  // اولین روز ماه اجرا (میلادی) = تاریخ شروع همان ردیف تقویم
+  const effectiveDate = execRow.startDate;
   let fixedValue: number | null = null;
   if (method === "FIXED") {
     fixedValue = Number(b.fixedValue);
@@ -349,10 +353,8 @@ async function methodData(b: any, existingId: number | null) {
     data: {
       method,
       valueType: b.valueType,
-      issueYear: iy,
-      issueMonth: im,
-      execYear: ey,
-      execMonth: em,
+      issueCalendarMonthId: issueRow.id,
+      execCalendarMonthId: execRow.id,
       effectiveDate,
       fixedValue,
       conditionText: isCalc ? conditionText : null,
@@ -368,7 +370,7 @@ router.post("/payroll-methods", can(`${F_METH}.create`), async (req, res) => {
     const where = basis === "decree" ? { decreeComponentId: factorId } : { payrollComponentId: factorId };
     const latest = await prisma.payrollFactorMethod.findFirst({ where, orderBy: { effectiveDate: "desc" } });
     if (latest && data.effectiveDate <= latest.effectiveDate) {
-      throw new PayrollCalcError(`ماه اجرا باید بعد از ماه اجرای آخرین روش این عامل (${latest.execYear}/${latest.execMonth}) باشد`);
+      throw new PayrollCalcError(`ماه اجرا باید بعد از ماه اجرای آخرین روش این عامل (${execYm(latest).year}/${execYm(latest).month}) باشد`);
     }
     const created = await prisma.payrollFactorMethod.create({ data: { ...where, ...data } });
     res.status(201).json({ id: created.id });
@@ -392,8 +394,8 @@ router.put("/payroll-methods/:id", can(`${F_METH}.edit`), async (req, res) => {
       prisma.payrollFactorMethod.findFirst({ where: { ...same, effectiveDate: { lt: m.effectiveDate } }, orderBy: { effectiveDate: "desc" } }),
       prisma.payrollFactorMethod.findFirst({ where: { ...same, effectiveDate: { gt: m.effectiveDate } }, orderBy: { effectiveDate: "asc" } }),
     ]);
-    if (prev && data.effectiveDate <= prev.effectiveDate) throw new PayrollCalcError(`ماه اجرا باید بعد از روش قبلی (${prev.execYear}/${prev.execMonth}) بماند`);
-    if (next && data.effectiveDate >= next.effectiveDate) throw new PayrollCalcError(`ماه اجرا باید قبل از روش بعدی (${next.execYear}/${next.execMonth}) بماند`);
+    if (prev && data.effectiveDate <= prev.effectiveDate) throw new PayrollCalcError(`ماه اجرا باید بعد از روش قبلی (${execYm(prev).year}/${execYm(prev).month}) بماند`);
+    if (next && data.effectiveDate >= next.effectiveDate) throw new PayrollCalcError(`ماه اجرا باید قبل از روش بعدی (${execYm(next).year}/${execYm(next).month}) بماند`);
     await prisma.payrollFactorMethod.update({ where: { id }, data });
     res.json({ ok: true });
   } catch (e) {

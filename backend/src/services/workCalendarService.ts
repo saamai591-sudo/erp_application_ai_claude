@@ -90,11 +90,18 @@ export async function missingMonthMessage(year: number, month: number): Promise<
 
 /** ماه‌های استفاده‌شده‌ی یک سال: فیش محاسبه‌شده، ورودی ماهانه یا روش محاسبه (ماه صدور یا اجرا) */
 export async function usedMonths(year: number): Promise<Set<number>> {
-  const [slips, inputs, execs, issues] = await Promise.all([
+  const [slips, inputs, execs, issues, values] = await Promise.all([
     prisma.payrollSlip.findMany({ where: { year }, distinct: ["month"], select: { month: true } }),
     prisma.payrollFactorInput.findMany({ where: { year }, distinct: ["month"], select: { month: true } }),
-    prisma.payrollFactorMethod.findMany({ where: { execYear: year }, distinct: ["execMonth"], select: { execMonth: true } }),
-    prisma.payrollFactorMethod.findMany({ where: { issueYear: year }, distinct: ["issueMonth"], select: { issueMonth: true } }),
+    prisma.payrollFactorMethod.findMany({ where: { execCalendarMonth: { year } }, select: { execCalendarMonth: { select: { month: true } } } }),
+    prisma.payrollFactorMethod.findMany({ where: { issueCalendarMonth: { year } }, select: { issueCalendarMonth: { select: { month: true } } } }),
+    prisma.payrollParameterValue.findMany({ where: { execCalendarMonth: { year } }, select: { execCalendarMonth: { select: { month: true } } } }),
   ]);
-  return new Set<number>([...slips.map((x) => x.month), ...inputs.map((x) => x.month), ...execs.map((x) => x.execMonth), ...issues.map((x) => x.issueMonth)]);
+  return new Set<number>([
+    ...slips.map((x) => x.month),
+    ...inputs.map((x) => x.month),
+    ...execs.map((x) => x.execCalendarMonth!.month),
+    ...issues.map((x) => x.issueCalendarMonth!.month),
+    ...values.map((x) => x.execCalendarMonth!.month),
+  ]);
 }

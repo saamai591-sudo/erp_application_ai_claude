@@ -79,7 +79,7 @@ router.post("/work-calendars", can(`${FORM}.create`), async (req, res) => {
       Object.assign(row, editableFields(g, `ماه ${row.month}`));
     }
     const created = await prisma.workCalendar.create({
-      data: { year, dailyMinutes, months: { create: rows } },
+      data: { year, dailyMinutes, months: { create: rows.map((r) => ({ ...r, year })) } },
     });
     res.status(201).json({ id: created.id });
   } catch (e) {
