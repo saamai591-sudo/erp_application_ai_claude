@@ -1,25 +1,61 @@
-// ورودی «ساعت:دقیقه» با ماسک: کاربر فقط رقم می‌زند و «:» خودکار می‌آید (hh:mm؛ برای ساعت‌های تجمعی hhh:mm).
-// ارقام از راست پر می‌شوند (مثل ماشین‌حساب): ۲ رقم آخر دقیقه و بقیه ساعت است؛ پس «۰۷۲۰» و «۷۲۰» هر دو «07:20» می‌شوند و Backspace آخرین رقم را برمی‌دارد.
-// مقدار متنیِ ماسک‌شده برمی‌گردد («» وقتی رقمی نیست)؛ معتبر بودن دقیقه (≤۵۹) و سقف ساعت را مصرف‌کننده بررسی می‌کند.
+// ورودی «ساعت:دقیقه» با ماسک: کاربر از چپ می‌نویسد و «:» خودکار می‌آید.
+//  • ساعت روزانه (۲ رقم ساعت): «۰۷» ← «07:» و ادامه‌ی «۲۰» ← «07:20».
+//  • ساعت‌های تجمعی (تا ۳ رقم ساعت: hhh:mm): بعد از رقم سوم ساعت «:» خودکار می‌آید («۲۲۷» ← «227:»)؛ برای ساعت کمتر از ۱۰۰ کاربر «:» را می‌زند («۸۰:» ← ادامه‌ی دقیقه).
+//  • رقم اول دقیقه بزرگ‌تر از ۵ صفر پیش می‌گیرد («07:7» ← «07:07»)؛ با خروج از فیلد مقدار کامل می‌شود («7» ← «07:00»).
+// مقدار متنیِ ماسک‌شده برمی‌گردد («» وقتی چیزی نیست)؛ کامل بودن/معتبر بودن را مصرف‌کننده با maskToMinutes می‌سنجد.
 
 const toLatin = (s: string) => s.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))).replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
 
-/** رقم‌ها → «HH:MM» (ساعت حداقل دو رقم)؛ بدون رقم = «» */
+/** دقیقه → متن «HH:MM» (ساعت حداقل دو رقم) */
+export function minutesToMask(min: number): string {
+  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+}
+
+/** رقم‌ها → «HH:MM» برای مقدار اولیه‌ی ساعت و دقیقه‌ی جداگانه (مثل ورود اطلاعات) */
 export function maskHm(digits: string): string {
   if (!digits) return "";
   const p = digits.padStart(3, "0");
   return `${p.slice(0, -2).padStart(2, "0")}:${p.slice(-2)}`;
 }
 
-/** دقیقه → متن ماسک‌شده («HH:MM») */
-export function minutesToMask(min: number): string {
-  return maskHm(String(Math.floor(min / 60) * 100 + (min % 60)));
-}
-
 /** متن ماسک‌شده → دقیقه (null = ناقص/نامعتبر) */
 export function maskToMinutes(text: string): number | null {
   const m = /^(\d{1,3}):([0-5]\d)$/.exec(toLatin(text).trim());
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+/** متنِ در حال تایپ → متن ماسک‌شده؛ deleting=true یعنی کاربر حذف می‌کند (دو رقمِ ساعت بدون «:» اجباری می‌ماند تا Backspace گیر نکند) */
+function applyMask(raw: string, maxHourDigits: number, deleting: boolean): string {
+  const t = toLatin(raw).replace(/[^0-9:]/g, "");
+  if (!t) return "";
+  const colon = t.indexOf(":");
+  let hours: string;
+  let minutes: string | null = null;
+  if (colon >= 0) {
+    hours = t.slice(0, colon).replace(/\D/g, "").slice(0, maxHourDigits);
+    minutes = t.slice(colon + 1).replace(/\D/g, "").slice(0, 2);
+  } else {
+    const d = t.replace(/\D/g, "");
+    // «:» خودکار: بعد از رقم آخرِ ساعت (فقط هنگام تایپ، نه حذف)
+    if (d.length < maxHourDigits || (d.length === maxHourDigits && deleting)) return d;
+    hours = d.slice(0, maxHourDigits);
+    minutes = d.slice(maxHourDigits, maxHourDigits + 2);
+  }
+  // رقم اول دقیقه بزرگ‌تر از ۵ ← صفر پیش می‌گیرد
+  if (minutes && minutes.length === 1 && Number(minutes) > 5) minutes = `0${minutes}`;
+  if (minutes && minutes.length === 2 && Number(minutes[0]) > 5) minutes = `0${minutes[0]}`;
+  return `${hours}:${minutes ?? ""}`;
+}
+
+/** با خروج از فیلد: ساعت دو رقمی و دقیقه‌ی دو رقمی («7» ← «07:00»، «07:2» ← «07:02»)؛ متنِ بی‌رقم خالی می‌شود */
+function normalize(text: string, maxHourDigits: number): string {
+  const t = toLatin(text);
+  const colon = t.indexOf(":");
+  const hoursRaw = (colon >= 0 ? t.slice(0, colon) : t).replace(/\D/g, "").slice(0, maxHourDigits);
+  const minutesRaw = colon >= 0 ? t.slice(colon + 1).replace(/\D/g, "").slice(0, 2) : "";
+  if (!hoursRaw && !minutesRaw) return "";
+  const minutes = minutesRaw.length === 1 ? `0${minutesRaw}` : minutesRaw.padEnd(2, "0");
+  return `${hoursRaw.padStart(2, "0")}:${minutes}`;
 }
 
 export function TimeInput({
@@ -34,7 +70,7 @@ export function TimeInput({
 }: {
   value: string;
   onChange: (text: string) => void;
-  /** حداکثر تعداد رقم ساعت (۲ = تا ۹۹:۵۹ برای ساعت روزانه، ۳ = تا ۹۹۹:۵۹ برای ساعت‌های تجمعی) */
+  /** حداکثر تعداد رقم ساعت (۲ = ساعت روزانه تا ۹۹:۵۹، ۳ = ساعت‌های تجمعی تا ۹۹۹:۵۹) */
   maxHourDigits?: number;
   disabled?: boolean;
   width?: number;
@@ -51,12 +87,11 @@ export function TimeInput({
       placeholder={placeholder}
       value={value}
       style={{ width, textAlign: "center" }}
-      onBlur={onBlur}
-      onChange={(e) => {
-        // رقم‌های متن جدید؛ صفرهای پیشِ ساعت (که فقط برای نمایش بودند) حذف می‌شوند تا سقف رقم‌ها اشتباه محاسبه نشود
-        const digits = toLatin(e.target.value).replace(/\D/g, "").replace(/^0+/, "");
-        if (digits.length > maxHourDigits + 2) return; // پر است؛ رقم اضافه نادیده گرفته می‌شود
-        onChange(maskHm(digits));
+      onChange={(e) => onChange(applyMask(e.target.value, maxHourDigits, e.target.value.length < value.length))}
+      onBlur={() => {
+        const n = normalize(value, maxHourDigits);
+        if (n !== value) onChange(n);
+        onBlur?.();
       }}
     />
   );
