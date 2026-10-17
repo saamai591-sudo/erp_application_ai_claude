@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { jalaliMonthRange } from "../utils/jalaliDate";
+import { missingMonthMessage } from "../services/workCalendarService";
 
 // حقوق و دستمزد › عملیات › ورود اطلاعات: ورود گروهیِ مقدار عوامل «ورود دستی» برای همه‌ی کارمندان یک ماه.
 // ستون‌ها = عامل‌هایی که روش مؤثر آن‌ها در پایان ماه انتخاب‌شده «ورود دستی» است؛ فرمت مجاز را نوع پارامتر عامل تعیین می‌کند:
@@ -55,6 +56,8 @@ router.get("/payroll-data-entry", can(`${F}.view`), async (req, res) => {
     const year = Number(req.query.year);
     const month = Number(req.query.month);
     checkYM(year, month);
+    const calMsg = await missingMonthMessage(year, month);
+    if (calMsg) throw new DErr(calMsg);
     const range = jalaliMonthRange(year, month);
     const calcType = await resolveType(req.query.calcTypeId);
     const [columns, decimals] = await Promise.all([columnsFor(range.end, calcType.id), baseDecimals()]);
@@ -117,6 +120,8 @@ router.put("/payroll-data-entry", can(`${F}.edit`), async (req, res) => {
     const year = Number(b.year);
     const month = Number(b.month);
     checkYM(year, month);
+    const calMsg = await missingMonthMessage(year, month);
+    if (calMsg) throw new DErr(calMsg);
     const range = jalaliMonthRange(year, month);
     const calcType = await resolveType(b.calcTypeId);
     const [columns, decimals] = await Promise.all([columnsFor(range.end, calcType.id), baseDecimals()]);

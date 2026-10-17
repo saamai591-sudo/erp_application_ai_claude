@@ -9,6 +9,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState } from "../lib/usePersistedState";
 import { VALUE_TYPE_FA, MONTHS_FA, currentJalaliYearMonth, hoursToHm } from "../lib/payrollLabels";
 import { useCalcTypes } from "../lib/useCalcTypes";
+import { WorkMonthPicker } from "../components/WorkMonthPicker";
 
 // حقوق و دستمزد › عملیات › ورود اطلاعات: ماه را انتخاب کنید، «لود اطلاعات» را بزنید؛ گرید کد پرسنل، عنوان و به‌ازای هر عاملِ «ورود دستی» یک ستون
 // دارد. فرمت مجاز هر ستون را نوع پارامتر عامل تعیین می‌کند: ساعت دقیقه hhh:mm — روز عدد صحیح — عدد اعشاری — مبلغ اعشار تا ارز پایه.
@@ -179,14 +180,8 @@ export default function PayrollDataEntry() {
             </select>
           </div>
           <div className="form-field">
-            <label>سال</label>
-            <input dir="ltr" inputMode="numeric" value={sel.year} onChange={(e) => { setSel({ ...sel, year: e.target.value.replace(/\D/g, "") }); setData(null); }} />
-          </div>
-          <div className="form-field">
-            <label>ماه</label>
-            <select value={sel.month} onChange={(e) => { setSel({ ...sel, month: e.target.value }); setData(null); }}>
-              {MONTHS_FA.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-            </select>
+            <label>ماه (از تقویم کاری)</label>
+            <WorkMonthPicker year={sel.year} month={sel.month} onChange={(y, m) => { setSel({ ...sel, year: String(y), month: String(m) }); setData(null); }} />
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>

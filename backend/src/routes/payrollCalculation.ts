@@ -7,6 +7,7 @@ import { METHOD_FA, PayrollCalcError, calculatePayroll, validateFactorMethod, me
 import { getEffectiveDecrees } from "../services/employmentDecreeService";
 import { buildPayrollSlipsPrint } from "../services/payrollSlipPrint";
 import { jalaliMonthRange } from "../utils/jalaliDate";
+import { missingMonthMessage } from "../services/workCalendarService";
 import { BASE_INFO, DECREE_VARIANTS, FACTOR_VARIANTS, KIND_FA } from "../services/payrollFormula";
 
 // حقوق و دستمزد: عامل‌های حقوق (هویت)، «روش محاسبه عامل» (تاریخ‌دار با ماه اجرا؛ مبنا = عامل حکم یا عامل حقوق)، ورودی ماهانه‌ی عوامل،
@@ -325,6 +326,11 @@ async function methodData(b: any, existingId: number | null) {
     if (!Number.isInteger(y) || y < 1300 || y > 1600 || !Number.isInteger(m) || m < 1 || m > 12) throw new PayrollCalcError(`${label} نامعتبر است`);
   }
   if (ey * 12 + em < iy * 12 + im) throw new PayrollCalcError("ماه اجرا نمی‌تواند قبل از ماه صدور باشد");
+  // هر دو ماه باید در «تقویم کاری» تعریف شده باشند
+  for (const [y, m] of [[iy, im], [ey, em]] as const) {
+    const msg = await missingMonthMessage(y, m);
+    if (msg) throw new PayrollCalcError(msg);
+  }
   // اولین روز ماه اجرا (میلادی)
   const { jalaliMonthRange } = await import("../utils/jalaliDate");
   const effectiveDate = jalaliMonthRange(ey, em).start;
@@ -421,6 +427,8 @@ router.get("/payroll-calculations/month", canAny(`${F_CALC}.view`, `${F_CALC}.ca
     const month = Number(req.query.month);
     if (!Number.isInteger(year) || year < 1300 || year > 1600 || !Number.isInteger(month) || month < 1 || month > 12) throw new PayrollCalcError("سال یا ماه نامعتبر است");
     const range = jalaliMonthRange(year, month);
+    const calMsg = await missingMonthMessage(year, month);
+    if (calMsg) throw new PayrollCalcError(calMsg);
     const baseType = await getBaseCalcType();
     const calcType = req.query.calcTypeId ? await prisma.payrollCalcType.findUnique({ where: { id: Number(req.query.calcTypeId) } }) : baseType;
     if (!calcType) throw new PayrollCalcError("نوع محاسبه یافت نشد");

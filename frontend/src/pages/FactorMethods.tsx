@@ -10,6 +10,7 @@ import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { RecordPickerField } from "../components/RecordPicker";
+import { WorkMonthPicker } from "../components/WorkMonthPicker";
 import { FormulaBuilder } from "../components/FormulaBuilder";
 import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
@@ -107,14 +108,8 @@ function MethodList() {
 }
 
 function MonthYear({ year, month, onChange, disabled }: { year: number; month: number; onChange: (y: number, m: number) => void; disabled?: boolean }) {
-  return (
-    <div style={{ display: "flex", gap: 6 }}>
-      <select disabled={disabled} value={month} onChange={(e) => onChange(year, Number(e.target.value))} style={{ flex: 1 }}>
-        {MONTHS_FA.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-      </select>
-      <input disabled={disabled} dir="ltr" inputMode="numeric" value={year || ""} onChange={(e) => onChange(Number(e.target.value.replace(/\D/g, "")) || 0, month)} style={{ width: 80 }} />
-    </div>
-  );
+  // فقط ماه‌های تعریف‌شده در «تقویم کاری»؛ مقدار قدیمیِ بیرون از تقویم برای خواندن نمایش داده می‌شود (autoFix خاموش: رکورد موجود دست نمی‌خورد)
+  return <WorkMonthPicker year={year} month={month} disabled={disabled} autoFix={false} onChange={onChange} />;
 }
 
 function MethodForm({ editId }: { editId?: number }) {

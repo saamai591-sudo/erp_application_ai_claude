@@ -17,6 +17,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePermissions } from "../lib/usePermissions";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { MONTHS_FA, currentJalaliYearMonth } from "../lib/payrollLabels";
+import { WorkMonthPicker } from "../components/WorkMonthPicker";
 
 // حقوق و دستمزد › تنظیمات › پارامترهای مبنا: هر پارامتر یک تعریف (کلید ثابت، نوع) + مقدارهای تاریخ‌دار است. مقدار معتبر هر تاریخ، آخرین مقدار با
 // ماه اجرا ≤ آن تاریخ است؛ تغییر سالانه‌ی قانون = یک مقدار جدید با ماه اجرای جدید (بدون تغییر کد). مقداری که در محاسبه استفاده شده قفل است
@@ -363,12 +364,7 @@ function ValueDialog({ param, value, onClose, onDone }: { param: ParamDetail; va
       <div className="form-grid">
         <div className="form-field">
           <label>ماه اجرا<RequiredMark /> <FieldHint label="ماه اجرا" text="از ابتدای این ماه به بعد این مقدار در محاسبه به کار می‌رود (تا مقدار بعدی)؛ باید بعد از ماه اجرای آخرین مقدار و بعد از آخرین ماهِ محاسبه‌شده‌ی حقوق باشد" /></label>
-          <div style={{ display: "flex", gap: 6 }}>
-            <select value={exec.month} onChange={(e) => setExec({ ...exec, month: Number(e.target.value) })} style={{ flex: 1 }}>
-              {MONTHS_FA.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-            </select>
-            <input dir="ltr" inputMode="numeric" value={exec.year || ""} onChange={(e) => setExec({ ...exec, year: Number(e.target.value.replace(/D/g, "")) || 0 })} style={{ width: 80 }} />
-          </div>
+          <WorkMonthPicker year={exec.year} month={exec.month} autoFix={false} onChange={(y, m) => setExec({ year: y, month: m })} />
           {param.lastCalculated && (
             <div style={{ opacity: 0.7, fontSize: 12, marginTop: 2 }}>آخرین ماهِ محاسبه‌شده: {monthText(param.lastCalculated.year, param.lastCalculated.month)}</div>
           )}

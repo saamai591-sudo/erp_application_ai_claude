@@ -9,6 +9,7 @@ import { usePermissions } from "../lib/usePermissions";
 import { usePersistedState } from "../lib/usePersistedState";
 import { MONTHS_FA, currentJalaliYearMonth } from "../lib/payrollLabels";
 import { useCalcTypes } from "../lib/useCalcTypes";
+import { WorkMonthPicker } from "../components/WorkMonthPicker";
 import { PayrollSlipPrintDialog } from "../components/PayrollSlipPrint";
 
 // حقوق و دستمزد › عملیات › محاسبه حقوق: ماه را انتخاب می‌کنید، «لود اطلاعات» فهرست پرسنل را می‌آورد، پرسنل مورد نظر را تیک می‌زنید و دکمهٔ
@@ -187,14 +188,8 @@ export default function PayrollCalculateMonth() {
             </select>
           </div>
           <div className="form-field">
-            <label>سال</label>
-            <input dir="ltr" inputMode="numeric" value={sel.year} onChange={(e) => { setSel({ ...sel, year: e.target.value.replace(/\D/g, "") }); setRows(null); }} />
-          </div>
-          <div className="form-field">
-            <label>ماه</label>
-            <select value={sel.month} onChange={(e) => { setSel({ ...sel, month: e.target.value }); setRows(null); }}>
-              {MONTHS_FA.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-            </select>
+            <label>ماه (از تقویم کاری)</label>
+            <WorkMonthPicker year={sel.year} month={sel.month} onChange={(y, m) => { setSel({ ...sel, year: String(y), month: String(m) }); setRows(null); }} />
           </div>
         </div>
         <div style={{ marginTop: 8 }}>

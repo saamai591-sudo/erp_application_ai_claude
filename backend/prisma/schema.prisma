@@ -5144,3 +5144,34 @@ model PayrollFactorInput {
 
   @@unique([employeeId, year, month, componentId])
 }
+
+/// تقویم کاری یک سال شمسی (حقوق و دستمزد): ساعات کاری روزانه + ۱۲ ماه با روزها/ساعات استاندارد و مجاز.
+/// ماه‌هایی که در فرم‌های حقوق (روش محاسبه، پارامتر مبنا، ورود اطلاعات، محاسبه) انتخاب می‌شوند فقط از همین تقویم می‌آیند.
+model WorkCalendar {
+  id           Int                 @id @default(autoincrement())
+  year         Int                 @unique
+  /// ساعات کاری روزانه (دقیقه؛ حداکثر ۲۳:۵۹ = ۱۴۳۹)
+  dailyMinutes Int
+  createdAt    DateTime            @default(now())
+  months       WorkCalendarMonth[]
+}
+
+model WorkCalendarMonth {
+  id               Int          @id @default(autoincrement())
+  calendarId       Int
+  month            Int
+  /// اول و آخر ماه شمسی (قابل تغییر نیست)
+  startDate        DateTime     @db.Date
+  endDate          DateTime     @db.Date
+  standardDays     Int
+  allowedDays      Int
+  /// ساعات (دقیقه): استاندارد = روز استاندارد × ساعات روزانه؛ مجاز پیش‌فرض = روز مجاز × ساعات روزانه (قابل ویرایش)
+  standardMinutes  Int
+  allowedMinutes   Int
+  /// بازه‌ی تردد (پیش‌فرض = ابتدا/انتهای ماه؛ در مدیریت تردد استفاده خواهد شد)
+  trafficStartDate DateTime     @db.Date
+  trafficEndDate   DateTime     @db.Date
+  calendar         WorkCalendar @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+
+  @@unique([calendarId, month])
+}

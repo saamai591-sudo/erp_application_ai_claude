@@ -550,6 +550,11 @@ export const REGISTRY: ModuleDef[] = [
     title: "منابع انسانی",
     subModules: [
       {
+        key: "settings",
+        title: "تنظیمات",
+        forms: [{ key: "work-calendars", title: "تقویم کاری", baseActions: CRUD }],
+      },
+      {
         key: "personnel",
         title: "پرسنلی",
         forms: [

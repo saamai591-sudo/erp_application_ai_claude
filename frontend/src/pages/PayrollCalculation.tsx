@@ -10,6 +10,7 @@ import { usePersistedState } from "../lib/usePersistedState";
 import { KIND_FA, MONTHS_FA, currentJalaliYearMonth, hoursToHm } from "../lib/payrollLabels";
 import { PayrollSlipPrintDialog } from "../components/PayrollSlipPrint";
 import { useCalcTypes } from "../lib/useCalcTypes";
+import { WorkMonthPicker } from "../components/WorkMonthPicker";
 
 // حقوق و دستمزد › محاسبه حقوق (عملیات) و گزارش محاسبات حقوق (گزارش): یک کارمند و یک ماه شمسی را انتخاب می‌کنید؛ محاسبه (فقط در حالت عملیات)
 // فیش را می‌سازد و گزارش، ریز ورودی‌ها و محاسبه‌ی تک‌تک عوامل (شرط، فرمول، مقدار عملوندها، نتیجه) را نشان می‌دهد.
@@ -142,14 +143,8 @@ export function PayrollReportPage() {
             </select>
           </div>
           <div className="form-field">
-            <label>سال</label>
-            <input dir="ltr" inputMode="numeric" value={sel.year} onChange={(e) => { setSel({ ...sel, year: e.target.value.replace(/\D/g, "") }); reset(); }} />
-          </div>
-          <div className="form-field">
-            <label>ماه</label>
-            <select value={sel.month} onChange={(e) => { setSel({ ...sel, month: e.target.value }); reset(); }}>
-              {MONTHS_FA.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-            </select>
+            <label>ماه (از تقویم کاری)</label>
+            <WorkMonthPicker year={sel.year} month={sel.month} autoFix={false} onChange={(y, m) => { setSel({ ...sel, year: String(y), month: String(m) }); reset(); }} />
           </div>
         </div>
         <div style={{ marginTop: 8 }}>

@@ -20,6 +20,7 @@ import {
   type Operand,
 } from "./payrollFormula";
 import { jalaliMonthRange } from "../utils/jalaliDate";
+import { getCalendarMonth, missingMonthMessage } from "./workCalendarService";
 
 // محاسبه‌ی حقوق یک کارمند در یک ماه شمسی بر اساس «روش محاسبه عامل»ها:
 //  • هر عامل حکم موجود در حکم مؤثر و هر عامل حقوق فعال، روش مؤثر خودش را (آخرین رکورد با ماه اجرا ≤ پایان ماه) دارد؛
@@ -257,6 +258,9 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
   }
   const emp = await prisma.employee.findUnique({ where: { id: employeeId } });
   if (!emp) throw new PayrollCalcError("کارمند یافت نشد");
+  // ماه باید در «تقویم کاری» تعریف شده باشد (روز/ساعت استاندارد و مجاز از همان می‌آید)
+  const calMonth = await getCalendarMonth(year, month);
+  if (!calMonth) throw new PayrollCalcError((await missingMonthMessage(year, month))!);
   const baseType = await getBaseCalcType();
   const calcType = calcTypeId ? await prisma.payrollCalcType.findUnique({ where: { id: calcTypeId } }) : baseType;
   if (!calcType) throw new PayrollCalcError("نوع محاسبه یافت نشد");
@@ -456,6 +460,10 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
     SERVICE_DAYS: serviceDays,
     SERVICE_YEARS: Math.round((serviceDays / 365) * 100) / 100,
     MONTH_NO: month,
+    STANDARD_DAYS: calMonth.standardDays,
+    ALLOWED_DAYS: calMonth.allowedDays,
+    STANDARD_HOURS: calMonth.standardMinutes / 60,
+    ALLOWED_HOURS: calMonth.allowedMinutes / 60,
   };
 
   // ── محیط ارزیابی ──

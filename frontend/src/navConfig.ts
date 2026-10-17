@@ -353,6 +353,10 @@ const RAW_MODULES: ModuleGroup[] = [
     title: "منابع انسانی",
     subModules: [
       {
+        title: "تنظیمات",
+        items: [{ key: "work-calendars", label: "تقویم کاری", list: "/work-calendars", create: "/work-calendars/new", icon: "calendar" }],
+      },
+      {
         title: "پرسنلی",
         items: [
           { key: "employees", label: "کارمندان", list: "/employees", create: "/employees/new", icon: "users" },

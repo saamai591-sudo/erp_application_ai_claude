@@ -28,6 +28,10 @@ export const BASE_INFO: Record<string, string> = {
   SERVICE_DAYS: "مدت همکاری (روز)",
   SERVICE_YEARS: "مدت همکاری (سال)",
   MONTH_NO: "شماره ماه محاسبه",
+  STANDARD_DAYS: "روزهای استاندارد ماه (تقویم کاری)",
+  ALLOWED_DAYS: "روزهای مجاز ماه (تقویم کاری)",
+  STANDARD_HOURS: "ساعات استاندارد ماه (تقویم کاری)",
+  ALLOWED_HOURS: "ساعات مجاز ماه (تقویم کاری)",
 };
 export const KIND_FA: Record<string, string> = { WORK: "کارکرد", EARNING: "پرداختی", DEDUCTION: "کسر", EMPLOYER_COST: "هزینه کارفرما", INFO: "اطلاعاتی" };
 

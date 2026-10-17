@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { jalaliMonthRange, toJalaliYearMonth } from "../utils/jalaliDate";
+import { missingMonthMessage } from "../services/workCalendarService";
 import { assertParameterValueNotLocked, execMonthBeforeLastCalculation, lastCalculatedMonth, usedValueDates } from "../services/payrollParameterService";
 
 // حقوق و دستمزد › تنظیمات › پارامترهای مبنا: تعریف پارامتر + مقدارهای تاریخ‌دار (مقدار ساده یا جدول پلکانی).
@@ -198,6 +199,8 @@ router.post("/payroll-parameters/:id/values", can(`${FORM}.edit`), async (req, r
     const p = await prisma.payrollParameter.findUnique({ where: { id } });
     if (!p) return res.status(404).json({ error: "پارامتر یافت نشد" });
     const exec = parseExec(b);
+    const calMsg = await missingMonthMessage(exec.year, exec.month);
+    if (calMsg) throw new PErr(calMsg);
     const effectiveDate = exec.date;
     const built = buildValue(p.type, b);
     const latest = await prisma.payrollParameterValue.findFirst({ where: { parameterId: id }, orderBy: { effectiveDate: "desc" } });
@@ -231,6 +234,8 @@ router.put("/payroll-parameters/values/:valueId", can(`${FORM}.edit`), async (re
     // تغییر ماه اجرا نباید مقدار را در تاریخچه جابه‌جا کند و نباید به ماه‌های محاسبه‌شده برسد
     const cur = toJalaliYearMonth(v.effectiveDate);
     if (ymKey(exec.year, exec.month) !== ymKey(cur.year, cur.month)) {
+      const calMsg = await missingMonthMessage(exec.year, exec.month);
+      if (calMsg) throw new PErr(calMsg);
       const lastCalc = await execMonthBeforeLastCalculation(exec.year, exec.month);
       if (lastCalc) throw new PErr(lastCalc);
     }
