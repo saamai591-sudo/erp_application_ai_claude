@@ -27,6 +27,8 @@ interface Operand {
   label: string;
   value: number | null;
   steps?: { from: number; to: number | null; rate: number; taxable: number; tax: number }[];
+  /** ریز اعضای یک مبنا */
+  parts?: { label: string; value: number }[];
 }
 interface SlipLine {
   seq: number;
@@ -49,7 +51,7 @@ interface Slip {
   totals: { earnings: string; deductions: string; employerCosts: string; netPay: string };
   hasErrors: boolean;
   warnings: string[];
-  parameters: Record<string, { title: string; type: string; effectiveDate: string; value: number | null; brackets: { from: number; to: number | null; rate: number }[] }>;
+  parameters: Record<string, { title: string; type: string; effectiveDate?: string; value: number | null; brackets?: { from: number; to: number | null; rate: number }[]; source?: string; members?: { label: string; value: number }[] }>;
   calculatedAt: string;
   lines: SlipLine[];
 }
@@ -235,6 +237,11 @@ function SlipView({ slip }: { slip: Slip }) {
                           {l.trace.operands.map((o, i) => (
                             <li key={i}>
                               {o.label}: <b>{o.value === null ? "جدول پلکانی" : num(o.value)}</b>
+                              {o.parts && o.parts.length > 0 && (
+                                <div style={{ opacity: 0.85, fontSize: 11 }}>
+                                  {o.parts.map((pt, j) => <span key={j} style={{ marginInlineEnd: 10 }}>{pt.label}: {money(pt.value)}</span>)}
+                                </div>
+                              )}
                               {o.steps && (
                                 <table className="hr-table" style={{ marginTop: 4, fontSize: 11 }}>
                                   <thead><tr><th>از</th><th>تا</th><th>نرخ ٪</th><th>مبلغ مشمول پله</th><th>مالیات پله</th></tr></thead>
@@ -270,18 +277,24 @@ function SlipView({ slip }: { slip: Slip }) {
 
       <h3 className="hr-section">پارامترهای مبنا استفاده‌شده</h3>
       <table className="hr-table">
-        <thead><tr><th>پارامتر</th><th>مقدار</th><th style={{ width: 130 }}>تاریخ شروع مقدار</th></tr></thead>
+        <thead><tr><th>پارامتر</th><th>مقدار</th><th style={{ width: 170 }}>تاریخ شروع مقدار / نوع</th></tr></thead>
         <tbody>
           {Object.entries(slip.parameters).length === 0 && <tr><td colSpan={3} style={{ textAlign: "center", opacity: 0.7 }}>—</td></tr>}
           {Object.entries(slip.parameters).map(([k, p]) => (
             <tr key={k}>
               <td>{p.title}</td>
               <td>
-                {p.type === "BRACKETS"
-                  ? p.brackets.map((b, i) => <div key={i}>از {money(b.from)} {b.to === null ? "به بالا" : `تا ${money(b.to)}`} — {num(b.rate)}٪</div>)
+                {p.type === "BASIS" ? (
+                  <>
+                    <b>{money(p.value)}</b>
+                    {(p.members ?? []).map((m, i) => <div key={i} style={{ fontSize: 12 }}>{m.label}: {money(m.value)}</div>)}
+                    {(p.members ?? []).length === 0 && <div style={{ fontSize: 12, opacity: 0.7 }}>بدون عضو</div>}
+                  </>
+                ) : p.type === "BRACKETS"
+                  ? (p.brackets ?? []).map((b, i) => <div key={i}>از {money(b.from)} {b.to === null ? "به بالا" : `تا ${money(b.to)}`} — {num(b.rate)}٪</div>)
                   : p.type === "PERCENT" ? `${num(p.value)}٪` : num(p.value)}
               </td>
-              <td>{formatJalaliDate(p.effectiveDate)}</td>
+              <td>{p.type === "BASIS" ? `مبنا — منبع ${p.source === "DECREE" ? "حکم" : "محاسبات"}` : formatJalaliDate(p.effectiveDate)}</td>
             </tr>
           ))}
         </tbody>

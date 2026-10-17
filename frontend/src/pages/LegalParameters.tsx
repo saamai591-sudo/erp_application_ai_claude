@@ -5,6 +5,7 @@ import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { AmountInput } from "../components/AmountInput";
 import { Modal } from "../components/Modal";
+import { RecordPickerDialog } from "../components/RecordPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
@@ -24,6 +25,9 @@ import { WorkMonthPicker } from "../components/WorkMonthPicker";
 // و مقدار جدید فقط برای ماهی بعد از آخرین ماهِ محاسبه‌شده ثبت می‌شود.
 
 const TYPE_FA: Record<string, string> = { NUMBER: "عدد", PERCENT: "درصد", AMOUNT: "مبلغ", BRACKETS: "جدول پلکانی" };
+// «نوع» = مقدار ثابت (مقدارهای تاریخ‌دار؛ «نوع داده» عدد/درصد/مبلغ/جدول پلکانی) یا مبنا (بدون مقدار؛ جمع مبلغ عامل‌های عضو، با «منبع داده» حکم یا محاسبات)
+const KIND_FA: Record<string, string> = { CONSTANT: "مقدار ثابت", BASIS: "مبنا" };
+const SOURCE_FA: Record<string, string> = { DECREE: "حکم", CALC: "محاسبات" };
 
 interface BracketRow {
   from: string;
@@ -47,6 +51,9 @@ interface ParamRow {
   key: string;
   title: string;
   type: string;
+  kind: string;
+  basisSource: string | null;
+  memberCount: number;
   description: string | null;
   isSystem: boolean;
   isActive: boolean;
@@ -58,6 +65,8 @@ interface ParamDetail {
   key: string;
   title: string;
   type: string;
+  kind: string;
+  basisSource: string | null;
   description: string | null;
   isSystem: boolean;
   isActive: boolean;
@@ -109,7 +118,7 @@ function ParamList() {
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
           <InfoHint
-            text="پارامترهای مبنا حقوق (نرخ بیمه، سقف بیمه، حداقل دستمزد، ضریب اضافه‌کار، جدول مالیات). هر پارامتر مقدارهای تاریخ‌دار دارد؛ برای تغییر سالانه، مقدار جدید با ماه اجرای جدید ثبت کنید (ماه اجرا باید بعد از آخرین ماهِ محاسبه‌شده باشد). مقداری که در محاسبه‌ی حقوق استفاده شده قابل ویرایش و حذف نیست. با ثبت هر ردیف، مقدار معتبر است و نیازی به تایید ندارد."
+            text="پارامترهای مبنا حقوق، دو نوع: «مقدار ثابت» (نرخ بیمه، سقف بیمه، حداقل دستمزد، جدول مالیات) و «مبنا» (درآمد مشمول بیمه/مالیات، مبنای اضافه‌کار، مبنای سنوات؛ بدون مقدار؛ مقدارش جمع مبلغ عامل‌های عضو است و اعضا در «روش محاسبه عامل» یا با عمل گروهی از همین فرم مشخص می‌شوند). هر مقدار ثابت مقدارهای تاریخ‌دار دارد؛ برای تغییر سالانه، مقدار جدید با ماه اجرای جدید ثبت کنید (ماه اجرا باید بعد از آخرین ماهِ محاسبه‌شده باشد). مقداری که در محاسبه‌ی حقوق استفاده شده قابل ویرایش و حذف نیست. با ثبت هر ردیف، مقدار معتبر است و نیازی به تایید ندارد."
             title="پارامترهای مبنا"
           />
           <NewRecordButton path="/legal-parameters/new" />
@@ -120,9 +129,11 @@ function ParamList() {
       <DataTable
         columns={[
           { header: "عنوان", ...s((r) => r.title) },
-          { header: "نوع", ...s((r) => TYPE_FA[r.type]), width: "110px" },
-          { header: "مقدار فعلی", ...s((r) => valueText(r.type, r.current)), width: "150px" },
-          { header: "ماه اجرا", ...s((r) => (r.current ? monthText(r.current.execYear, r.current.execMonth) : "—")), width: "130px" },
+          { header: "نوع", ...s((r) => KIND_FA[r.kind] ?? r.kind), width: "100px" },
+          { header: "نوع داده", ...s((r) => (r.kind === "BASIS" ? "—" : TYPE_FA[r.type])), width: "110px" },
+          { header: "منبع داده", ...s((r) => (r.kind === "BASIS" ? SOURCE_FA[r.basisSource ?? ""] ?? "" : "—")), width: "100px" },
+          { header: "مقدار فعلی", ...s((r) => (r.kind === "BASIS" ? "بدون مقدار (جمع اعضا)" : valueText(r.type, r.current))), width: "170px" },
+          { header: "ماه اجرا", ...s((r) => (r.kind !== "BASIS" && r.current ? monthText(r.current.execYear, r.current.execMonth) : "—")), width: "130px" },
           { header: "سیستمی", ...s((r) => (r.isSystem ? "بله" : "")), width: "80px" },
         ]}
         rows={items}
@@ -138,7 +149,7 @@ function ParamForm({ editId }: { editId?: number }) {
   const location = useLocation();
   const { hasPermission } = usePermissions();
   const cacheKey = `form:${location.pathname}:form`;
-  const [form, setForm] = usePersistedState(cacheKey, { title: "", type: "NUMBER", description: "", isActive: true });
+  const [form, setForm] = usePersistedState(cacheKey, { title: "", kind: "CONSTANT", type: "NUMBER", basisSource: "CALC", description: "", isActive: true });
   const [detail, setDetail] = useState<ParamDetail | null>(null);
   const [valueDlg, setValueDlg] = useState<{ value: ValueRow | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -149,7 +160,7 @@ function ParamForm({ editId }: { editId?: number }) {
     if (!editId) return;
     const d: ParamDetail = await api.get(`/payroll-parameters/${editId}`);
     setDetail(d);
-    if (fillForm) setForm({ title: d.title, type: d.type, description: d.description ?? "", isActive: d.isActive });
+    if (fillForm) setForm({ title: d.title, kind: d.kind, type: d.type, basisSource: d.basisSource ?? "CALC", description: d.description ?? "", isActive: d.isActive });
   }
 
   useEffect(() => {
@@ -167,7 +178,7 @@ function ParamForm({ editId }: { editId?: number }) {
         flash();
         await reload(false);
       } else {
-        const created = await api.post("/payroll-parameters", { title: form.title, type: form.type, description: form.description });
+        const created = await api.post("/payroll-parameters", { title: form.title, kind: form.kind, type: form.type, basisSource: form.basisSource, description: form.description });
         flash();
         navigate(`/legal-parameters/${created.id}/edit`);
       }
@@ -200,6 +211,8 @@ function ParamForm({ editId }: { editId?: number }) {
   const canEdit = hasPermission("payroll.settings.legal-parameters.edit");
   const isSystem = !!detail?.isSystem;
   const type = detail?.type ?? form.type;
+  const kind = detail?.kind ?? form.kind;
+  const basisSource = detail?.basisSource ?? form.basisSource;
 
   return (
     <FormPage
@@ -218,11 +231,26 @@ function ParamForm({ editId }: { editId?: number }) {
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
           </div>
           <div className="form-field">
-            <label>نوع<RequiredMark /></label>
-            <select disabled={!!editId} value={type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-              {Object.entries(TYPE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            <label>نوع<RequiredMark /> <FieldHint label="نوع" text="مقدار ثابت: مقدارهای تاریخ‌دار دارد (نرخ، سقف، جدول). مبنا: مقدار ندارد و در فرمول جمع مبلغ عامل‌های عضو را می‌دهد؛ اعضا را در «روش محاسبه عامل» هر عامل (یا با عمل گروهی همین فرم) مشخص کنید" /></label>
+            <select disabled={!!editId} value={kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
+              {Object.entries(KIND_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </div>
+          {kind === "BASIS" ? (
+            <div className="form-field">
+              <label>منبع داده<RequiredMark /> <FieldHint label="منبع داده" text="حکم: جمع مقدارِ خامِ عامل‌های حکمِ عضو (مثلاً پایه‌ی سنوات روزانه‌ی حکم). محاسبات: جمع مبلغ محاسبه‌شده‌ی عضوها در فیش همان ماه (عامل حکم یا عامل حقوق از طبقه‌ی پرداختی)؛ عامل حقوق فقط در مبنای منبع محاسبات عضو می‌شود" /></label>
+              <select disabled={!!editId} value={basisSource ?? "CALC"} onChange={(e) => setForm({ ...form, basisSource: e.target.value })}>
+                {Object.entries(SOURCE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
+          ) : (
+            <div className="form-field">
+              <label>نوع داده<RequiredMark /></label>
+              <select disabled={!!editId} value={type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+                {Object.entries(TYPE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
+          )}
           {editId && !isSystem && (
             <div className="form-field">
               <label className="checkbox-row">
@@ -238,7 +266,9 @@ function ParamForm({ editId }: { editId?: number }) {
         </div>
       </form>
 
-      {editId && detail && (
+      {editId && detail && detail.kind === "BASIS" && <MembersSection param={detail} canEdit={canEdit} />}
+
+      {editId && detail && detail.kind !== "BASIS" && (
         <>
           <h3 className="hr-section" style={{ display: "flex", alignItems: "center", gap: 8 }}>
             مقدارهای تاریخ‌دار
@@ -412,5 +442,165 @@ function ValueDialog({ param, value, onClose, onDone }: { param: ParamDetail; va
         <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
       </div>
     </Modal>
+  );
+}
+
+interface MemberRow {
+  basis: "decree" | "payroll";
+  factorId: number;
+  title: string;
+  methodId: number;
+  execYear: number;
+  execMonth: number;
+}
+interface CandidateRow {
+  basis: "decree" | "payroll";
+  id: number;
+  title: string;
+  key: string;
+}
+interface BulkResult {
+  basis: string;
+  factorId: number;
+  title: string;
+  status: "DONE" | "SKIPPED" | "ERROR";
+  message: string;
+}
+
+// اعضای مبنا در یک ماه + عمل گروهی «افزودن/حذف از مبنا از این ماه». هر عضو همان عاملی است که روش مؤثرِ آن ماهش عضو این مبناست؛ تغییر یعنی رکورد روش
+// جدید (کپی روش قبلی) با ماه اجرای همین ماه، یا اصلاح خودِ رکورد همین ماه. ماه جدید باید بعد از آخرین ماه محاسبه‌شده بماند تا قفل نشود.
+function MembersSection({ param, canEdit }: { param: ParamDetail; canEdit: boolean }) {
+  const cur = currentJalaliYearMonth();
+  const [ym, setYm] = usePersistedState(`form:basis-members:${param.id}`, { year: cur.year, month: cur.month });
+  const [members, setMembers] = useState<MemberRow[]>([]);
+  const [candidates, setCandidates] = useState<CandidateRow[]>([]);
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  const [pickOpen, setPickOpen] = useState(false);
+  const [results, setResults] = useState<BulkResult[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function load() {
+    setError(null);
+    try {
+      const q = `year=${ym.year}&month=${ym.month}`;
+      const [m, c] = await Promise.all([api.get(`/payroll-parameters/${param.id}/members?${q}`), api.get(`/payroll-parameters/${param.id}/candidates?${q}`)]);
+      setMembers(m);
+      setCandidates(c);
+      setTicked(new Set());
+    } catch (e) {
+      setMembers([]);
+      setCandidates([]);
+      setError((e as ApiError).message);
+    }
+  }
+  useEffect(() => {
+    if (ym.year && ym.month) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ym.year, ym.month, param.id]);
+
+  async function run(action: "add" | "remove", factors: { basis: string; id: number }[]) {
+    try {
+      const r = await api.post(`/payroll-parameters/${param.id}/members/bulk`, { action, year: ym.year, month: ym.month, factors });
+      setResults(r.results);
+      await load();
+    } catch (e) {
+      showError((e as ApiError).message);
+    }
+  }
+  const keyOf = (m: MemberRow) => `${m.basis}:${m.factorId}`;
+
+  return (
+    <>
+      <h3 className="hr-section">اعضای مبنا</h3>
+      <p style={{ opacity: 0.75, fontSize: 13, margin: "0 0 8px" }}>
+        {param.basisSource === "DECREE" ? "منبع «حکم»: جمع مقدار خامِ عامل‌های حکمِ عضو." : "منبع «محاسبات»: جمع مبلغ محاسبه‌شده‌ی عضوها (عامل حکم یا عامل حقوق از طبقه‌ی پرداختی) در فیش همان ماه."} عضویت یک عامل در «روش محاسبه عامل»ِ همان عامل هم قابل تنظیم است.
+      </p>
+      <ErrorToast message={error} />
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+        <span>اعضا در ماه:</span>
+        <div style={{ minWidth: 220 }}>
+          <WorkMonthPicker year={ym.year} month={ym.month} onChange={(y, m) => setYm({ year: y, month: m })} />
+        </div>
+        {canEdit && (
+          <>
+            <button type="button" className="btn secondary" disabled={candidates.length === 0} onClick={() => setPickOpen(true)} title="اضافه‌کردن عامل‌ها به این مبنا از ماهِ انتخاب‌شده">افزودن عامل‌ها از این ماه…</button>
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={ticked.size === 0}
+              onClick={() => {
+                if (!window.confirm(`${toFaDigits(String(ticked.size))} عامل از این مبنا (از ماه ${monthText(ym.year, ym.month)}) حذف شود؟`)) return;
+                run("remove", members.filter((m) => ticked.has(keyOf(m))).map((m) => ({ basis: m.basis, id: m.factorId })));
+              }}
+            >
+              حذف انتخاب‌شده‌ها از این ماه
+            </button>
+          </>
+        )}
+      </div>
+      <table className="hr-table">
+        <thead>
+          <tr>{canEdit && <th style={{ width: 36 }} />}<th>عامل</th><th style={{ width: 110 }}>نوع عامل</th><th style={{ width: 170 }}>رکورد روشِ مؤثر (ماه اجرا)</th></tr>
+        </thead>
+        <tbody>
+          {members.length === 0 && <tr><td colSpan={canEdit ? 4 : 3} style={{ textAlign: "center", opacity: 0.7 }}>در این ماه عضوی ندارد</td></tr>}
+          {members.map((m) => (
+            <tr key={keyOf(m)}>
+              {canEdit && (
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={ticked.has(keyOf(m))}
+                    onChange={() => setTicked((t) => { const n = new Set(t); n.has(keyOf(m)) ? n.delete(keyOf(m)) : n.add(keyOf(m)); return n; })}
+                  />
+                </td>
+              )}
+              <td>{m.title}</td>
+              <td>{m.basis === "decree" ? "عامل حکم" : "عامل حقوق"}</td>
+              <td>{monthText(m.execYear, m.execMonth)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {pickOpen && (
+        <RecordPickerDialog<{ id: string; basis: "decree" | "payroll"; factorId: number; title: string }>
+          title="انتخاب عامل‌ها برای افزودن به مبنا"
+          multiSelect
+          resultInDisplayOrder
+          rows={candidates.map((c) => ({ id: c.key, basis: c.basis, factorId: c.id, title: c.title }))}
+          columns={[
+            { header: "عامل", render: (r) => r.title, filterValue: (r) => r.title },
+            { header: "نوع عامل", render: (r) => (r.basis === "decree" ? "عامل حکم" : "عامل حقوق"), filterValue: (r) => (r.basis === "decree" ? "عامل حکم" : "عامل حقوق"), width: "120px" },
+          ]}
+          onSelect={() => setPickOpen(false)}
+          onSelectMultiple={(rows) => {
+            setPickOpen(false);
+            run("add", rows.map((r) => ({ basis: r.basis, id: r.factorId })));
+          }}
+          onClose={() => setPickOpen(false)}
+        />
+      )}
+
+      {results && (
+        <Modal title="نتیجه‌ی اعمال گروهی" onClose={() => setResults(null)}>
+          <table className="hr-table">
+            <thead><tr><th>عامل</th><th style={{ width: 90 }}>وضعیت</th><th>توضیح</th></tr></thead>
+            <tbody>
+              {results.map((r, i) => (
+                <tr key={i}>
+                  <td>{r.title}</td>
+                  <td style={{ color: r.status === "ERROR" ? "#c0392b" : r.status === "DONE" ? "#0a8f5a" : undefined }}>{r.status === "DONE" ? "انجام شد" : r.status === "SKIPPED" ? "نیازی نبود" : "خطا"}</td>
+                  <td>{r.message}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="actions" style={{ marginTop: 12 }}>
+            <button type="button" className="btn" onClick={() => setResults(null)}>بستن</button>
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }

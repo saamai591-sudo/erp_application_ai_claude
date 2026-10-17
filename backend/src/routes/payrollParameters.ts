@@ -5,6 +5,8 @@ import { findFormPrefix } from "../authz/registry";
 import { jalaliMonthRange, toJalaliYearMonth } from "../utils/jalaliDate";
 import { getCalendarMonth, missingMonthMessage } from "../services/workCalendarService";
 import { assertParameterValueNotLocked, execMonthBeforeLastCalculation, lastCalculatedMonth, usedValueDates } from "../services/payrollParameterService";
+import { bulkChangeMembers, candidatesAt, membersAt } from "../services/payrollBasisService";
+import { PayrollCalcError } from "../services/payrollCalculationService";
 
 // حقوق و دستمزد › تنظیمات › پارامترهای مبنا: تعریف پارامتر + مقدارهای تاریخ‌دار (مقدار ساده یا جدول پلکانی).
 // هر مقدار «ماه اجرا» دارد (سال+ماه شمسی؛ تاریخ شروعِ ذخیره‌شده = روز اول همان ماه). ماه اجرای مقدار جدید باید بعد از آخرین مقدار همان پارامتر
@@ -36,7 +38,7 @@ function parseExec(b: any): { year: number; month: number; date: Date } {
   return { year, month, date: jalaliMonthRange(year, month).start };
 }
 function fail(res: any, e: any, fallback: string) {
-  if (e instanceof PErr) return res.status(400).json({ error: e.message });
+  if (e instanceof PErr || e instanceof PayrollCalcError) return res.status(400).json({ error: e.message });
   if (e?.code === "P2002") return res.status(400).json({ error: "برای این پارامتر در همین ماه اجرا قبلاً مقداری ثبت شده است" });
   return res.status(400).json({ error: e?.message || fallback });
 }
@@ -92,7 +94,7 @@ router.get("/payroll-parameters", async (_req, res) => {
   const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
   const params = await prisma.payrollParameter.findMany({
     orderBy: [{ isSystem: "desc" }, { id: "asc" }],
-    include: { values: { orderBy: { effectiveDate: "desc" }, include: valueInclude } },
+    include: { values: { orderBy: { effectiveDate: "desc" }, include: valueInclude }, _count: { select: { members: true } } },
   });
   res.json(
     params.map((p) => {
@@ -102,6 +104,9 @@ router.get("/payroll-parameters", async (_req, res) => {
         key: p.key,
         title: p.title,
         type: p.type,
+        kind: p.kind,
+        basisSource: p.basisSource,
+        memberCount: p._count.members,
         description: p.description,
         isSystem: p.isSystem,
         isActive: p.isActive,
@@ -124,6 +129,8 @@ router.get("/payroll-parameters/:id", async (req, res) => {
     key: p.key,
     title: p.title,
     type: p.type,
+    kind: p.kind,
+    basisSource: p.basisSource,
     description: p.description,
     isSystem: p.isSystem,
     isActive: p.isActive,
@@ -144,14 +151,17 @@ router.post("/payroll-parameters", can(`${FORM}.create`), async (req, res) => {
   try {
     const title = str(b.title);
     if (!title) throw new PErr("عنوان الزامی است");
-    if (!TYPES.includes(b.type)) throw new PErr("نوع پارامتر نامعتبر است");
+    // «نوع»: مقدار ثابت (با «نوع داده») یا مبنا (با «منبع داده»: حکم / محاسبات؛ بدون مقدار)
+    const kind = b.kind === "BASIS" ? "BASIS" : "CONSTANT";
+    if (kind === "CONSTANT" && !TYPES.includes(b.type)) throw new PErr("نوع داده نامعتبر است");
+    if (kind === "BASIS" && !["DECREE", "CALC"].includes(b.basisSource)) throw new PErr("منبع داده‌ی مبنا را انتخاب کنید (حکم یا محاسبات)");
     if (await prisma.payrollParameter.findFirst({ where: { title } })) throw new PErr("پارامتر دیگری با همین عنوان وجود دارد");
     // کلید داخلی (برای ارجاع در فرمول‌ها) را سیستم می‌سازد و به کاربر نمایش داده نمی‌شود؛ هر کلیدی که از کلاینت بیاید نادیده گرفته می‌شود
     const last = await prisma.payrollParameter.findFirst({ orderBy: { id: "desc" }, select: { id: true } });
     let n = (last?.id ?? 0) + 1;
     let key = `PARAM_${n}`;
     while (await prisma.payrollParameter.findUnique({ where: { key } })) key = `PARAM_${++n}`;
-    const created = await prisma.payrollParameter.create({ data: { key, title, type: b.type, description: str(b.description), isSystem: false } });
+    const created = await prisma.payrollParameter.create({ data: { key, title, kind, type: kind === "BASIS" ? "AMOUNT" : b.type, basisSource: kind === "BASIS" ? b.basisSource : null, description: str(b.description), isSystem: false } });
     res.status(201).json({ id: created.id });
   } catch (e) {
     fail(res, e, "خطا در ثبت پارامتر");
@@ -183,6 +193,15 @@ router.delete("/payroll-parameters/:id", can(`${FORM}.delete`), async (req, res)
     const p = await prisma.payrollParameter.findUnique({ where: { id }, include: { values: { select: { id: true } } } });
     if (!p) return res.status(404).json({ error: "پارامتر یافت نشد" });
     if (p.isSystem) throw new PErr("پارامتر سیستمی قابل حذف نیست");
+    // فرمولی که به این پارامتر/مبنا ارجاع دارد، عضوهای مبنا و فیش‌های محاسبه‌شده مانع حذف‌اند
+    const ref = `[P:${p.key.toUpperCase()}]`;
+    const users = (await prisma.payrollFactorMethodBranch.findMany({ select: { formulaText: true, conditionText: true } })).some(
+      (b) => b.formulaText.toUpperCase().includes(ref) || (b.conditionText ?? "").toUpperCase().includes(ref)
+    );
+    if (users) throw new PErr("فرمول یک یا چند روش به این مورد ارجاع دارد؛ ابتدا فرمول‌ها را اصلاح کنید");
+    if ((await prisma.payrollFactorMethodBasis.count({ where: { parameterId: id } })) > 0) throw new PErr("این مبنا عضو دارد؛ ابتدا آن را از «روش محاسبه عامل»ِ عضوها بردارید");
+    const slipUse = await prisma.$queryRaw<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM "PayrollSlip" WHERE (parameters -> ${p.key}::text) IS NOT NULL`;
+    if ((slipUse[0]?.n ?? 0) > 0) throw new PErr("این مورد در محاسبه‌ی حقوق استفاده شده و قابل حذف نیست؛ ابتدا محاسبه‌های مربوط را حذف کنید");
     for (const v of p.values) await assertParameterValueNotLocked(v.id);
     await prisma.payrollParameter.delete({ where: { id } });
     res.status(204).send();
@@ -198,6 +217,7 @@ router.post("/payroll-parameters/:id/values", can(`${FORM}.edit`), async (req, r
   try {
     const p = await prisma.payrollParameter.findUnique({ where: { id } });
     if (!p) return res.status(404).json({ error: "پارامتر یافت نشد" });
+    if (p.kind === "BASIS") throw new PErr("مبنا مقدار ندارد؛ اعضای آن در «روش محاسبه عامل» مشخص می‌شوند");
     const exec = parseExec(b);
     const calRow = await getCalendarMonth(exec.year, exec.month);
     if (!calRow) throw new PErr((await missingMonthMessage(exec.year, exec.month))!);
@@ -276,6 +296,33 @@ router.delete("/payroll-parameters/values/:valueId", can(`${FORM}.delete`), asyn
     res.status(204).send();
   } catch (e) {
     fail(res, e, "خطا در حذف مقدار");
+  }
+});
+
+// ── اعضای مبنا ──
+// فهرست اعضا در یک ماه، عامل‌های قابل افزودن، و عمل گروهی «افزودن/حذف از مبنا از ماه X» (برای هر عامل در صورت نیاز رکورد روش جدید ساخته می‌شود)
+router.get("/payroll-parameters/:id/members", async (req, res) => {
+  try {
+    res.json(await membersAt(Number(req.params.id), req.query.year, req.query.month));
+  } catch (e) {
+    fail(res, e, "خطا در دریافت اعضا");
+  }
+});
+
+router.get("/payroll-parameters/:id/candidates", async (req, res) => {
+  try {
+    res.json(await candidatesAt(Number(req.params.id), req.query.year, req.query.month));
+  } catch (e) {
+    fail(res, e, "خطا در دریافت عامل‌ها");
+  }
+});
+
+router.post("/payroll-parameters/:id/members/bulk", can(`${FORM}.edit`), async (req, res) => {
+  const b = req.body as any;
+  try {
+    res.json({ results: await bulkChangeMembers(Number(req.params.id), b.action, b.year, b.month, Array.isArray(b.factors) ? b.factors : []) });
+  } catch (e) {
+    fail(res, e, "خطا در اعمال گروهی");
   }
 });
 

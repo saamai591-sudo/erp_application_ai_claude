@@ -304,12 +304,16 @@ export interface EvalEnv {
   scalar: (ns: Ns, key: string, variant: string) => number;
   brackets: (key: string) => Bracket[];
   label: (ns: Ns, key: string, variant: string) => string;
+  /** ریز اجزای یک عملوند (مثلاً اعضای یک مبنا) برای نمایش در گزارش */
+  parts?: (ns: Ns, key: string, variant: string) => { label: string; value: number }[] | undefined;
 }
 export interface Operand {
   ref: string;
   label: string;
   value: number | null;
   steps?: { from: number; to: number | null; rate: number; taxable: number; tax: number }[];
+  /** ریز اجزا (اعضای مبنا و مبلغ هر کدام) */
+  parts?: { label: string; value: number }[];
 }
 export interface EvalResult {
   value: number;
@@ -337,7 +341,8 @@ function makeEvaluator(env: EvalEnv) {
         return [n.v, fmt(n.v)];
       case "ref": {
         const v = env.scalar(n.ns, n.key, n.variant);
-        note({ ref: refText(n), label: env.label(n.ns, n.key, n.variant), value: v });
+        const parts = env.parts?.(n.ns, n.key, n.variant);
+        note({ ref: refText(n), label: env.label(n.ns, n.key, n.variant), value: v, ...(parts ? { parts } : {}) });
         return [v, fmt(v)];
       }
       case "neg": {

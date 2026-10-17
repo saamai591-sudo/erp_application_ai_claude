@@ -21,6 +21,8 @@ interface Palette {
     variants: { key: string; title: string }[];
   }[];
   baseInfo: { key: string; title: string }[];
+  /** مبناها (پارامتر نوع «مبنا»): در فرمول [P:کلید] جمع مبلغ عضوها را می‌دهد */
+  bases?: { key: string; title: string; source: string | null }[];
   classTotals: { key: string; title: string }[];
   params: { key: string; title: string; type: string }[];
 }
@@ -73,6 +75,7 @@ export function FormulaBuilder({
   factorTitle,
   method,
   branches,
+  basisIds,
   onClose,
   onSave,
 }: {
@@ -82,6 +85,8 @@ export function FormulaBuilder({
   factorTitle: string;
   method: string;
   branches: FormulaBranch[];
+  /** مبناهایی که این عامل عضو آن‌هاست (برای کنترل ارجاع دوری هنگام «بررسی») */
+  basisIds?: number[];
   onClose: () => void;
   onSave: (branches: FormulaBranch[]) => void;
 }) {
@@ -125,6 +130,7 @@ export function FormulaBuilder({
       for (const b of pal.baseInfo) m.set(`B:${b.key}`, b.title);
       for (const s of pal.classTotals) m.set(`S:${s.key}`, s.title);
       for (const p of pal.params) m.set(`P:${p.key}`, p.title);
+      for (const p of pal.bases ?? []) m.set(`P:${p.key}`, p.title);
     }
     return m;
   }, [pal]);
@@ -311,7 +317,7 @@ export function FormulaBuilder({
   async function check() {
     setErr(null);
     try {
-      const r = await api.post("/payroll-methods/validate", { basis, factorId: Number(factorId) || null, method, branches: toBranches() }, { silent: true } as any);
+      const r = await api.post("/payroll-methods/validate", { basis, factorId: Number(factorId) || null, method, branches: toBranches(), basisIds: basisIds ?? [] }, { silent: true } as any);
       if (r.ok) setOk(true);
       else setErr(r.error);
     } catch (e) {
@@ -330,6 +336,7 @@ export function FormulaBuilder({
     ...(pal?.payroll.map((p) => ({ key: p.method, title: p.title })) ?? []),
     { key: "BASE", title: "اطلاعات پایه" },
     { key: "TOTALS", title: "جمع طبقه‌ها" },
+    ...((pal?.bases?.length ?? 0) > 0 ? [{ key: "BASES", title: "مبناها" }] : []),
   ];
 
   function addVariant(vkey: string) {
@@ -522,18 +529,20 @@ export function FormulaBuilder({
           {col("دسته", cats.map((c) => item(c.title, cat === c.key, () => { setCat(c.key); setCls(""); setFac(""); })))}
           {col(
             "طبقه",
-            cat === "DECREE" || cat === "BASE" || cat === "TOTALS" || !cat
+            cat === "DECREE" || cat === "BASE" || cat === "TOTALS" || cat === "BASES" || !cat
               ? null
               : classes.map((c) => item(c.title, cls === c.kind, () => { setCls(c.kind); setFac(""); }))
           )}
           {col(
             "عامل",
-            cat === "BASE" || cat === "TOTALS" ? null : cat === "DECREE" || cls ? factors.map((f) => item(f.title, fac === f.key, () => setFac(f.key))) : null
+            cat === "BASE" || cat === "TOTALS" || cat === "BASES" ? null : cat === "DECREE" || cls ? factors.map((f) => item(f.title, fac === f.key, () => setFac(f.key))) : null
           )}
           {col(
-            cat === "BASE" ? "اطلاعات پایه" : cat === "TOTALS" ? "جمع طبقه" : "مقدار",
+            cat === "BASE" ? "اطلاعات پایه" : cat === "TOTALS" ? "جمع طبقه" : cat === "BASES" ? "مبنا (جمع اعضا)" : "مقدار",
             cat === "BASE"
               ? pal?.baseInfo.map((b) => item(b.title, false, () => push(`[B:${b.key}]`)))
+              : cat === "BASES"
+              ? pal?.bases?.map((b) => item(b.title, false, () => push(`[P:${b.key}]`)))
               : cat === "TOTALS"
               ? pal?.classTotals.map((b) => item(b.title, false, () => push(`[S:${b.key}]`)))
               : fac

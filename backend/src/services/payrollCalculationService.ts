@@ -62,6 +62,8 @@ interface CandidateMethod {
   branches: BranchInput[];
   /** نوع محاسبه‌ی عاملِ حقوق (برای عامل حکم لازم نیست: همیشه حقوق ماهانه) */
   calcTypeId?: number | null;
+  /** مبناهایی (پارامتر نوع «مبنا») که این روش عضو آن‌هاست؛ برای کنترل دور */
+  basisIds?: number[];
 }
 
 /** یک شاخه‌ی روش: شرطِ اختیاری + فرمول؛ شرط خالی فقط برای آخرین شاخه («در غیر این صورت») مجاز است */
@@ -110,13 +112,19 @@ function allRefs(ps: ParsedBranch[]): RefInfo[] {
 function edgesOf(
   self: string,
   refs: RefInfo[],
-  nodes: { node: string; kind: Kind }[]
+  nodes: { node: string; kind: Kind; bases?: Set<number> }[],
+  basisByKey?: Map<string, { id: number; source: string | null }>
 ): string[] {
   const out = new Set<string>();
   for (const r of refs) {
     if (r.ns === "D" && r.variant === "VALUE") out.add(`D:${r.key}`);
     else if (r.ns === "C" && (r.variant === "VALUE" || r.variant === "YTD")) out.add(`C:${r.key}`);
     else if (r.ns === "S") nodes.filter((n) => n.kind === r.key).forEach((n) => out.add(n.node));
+    else if (r.ns === "P") {
+      // مبنای «محاسبات»: مقدار از مبلغ همین ماهِ عضوها می‌آید ⇒ به همه‌ی اعضا وابسته است (اگر خودِ عامل عضو باشد، دور است)
+      const b = basisByKey?.get(r.key);
+      if (b && b.source === "CALC") nodes.filter((n) => n.bases?.has(b.id)).forEach((n) => out.add(n.node));
+    }
   }
   return [...out];
 }
@@ -129,9 +137,10 @@ export async function validateFactorMethod(cand: CandidateMethod): Promise<void>
   const [decree, comps, params, baseType] = await Promise.all([
     prisma.decreeComponent.findMany({ select: { code: true, title: true } }),
     prisma.payrollComponent.findMany({ select: { key: true, title: true, kind: true, calcTypeId: true } }),
-    prisma.payrollParameter.findMany({ select: { key: true } }),
+    prisma.payrollParameter.findMany({ select: { id: true, key: true, kind: true, basisSource: true } }),
     prisma.payrollCalcType.findFirst({ where: { isBase: true }, select: { id: true } }),
   ]);
+  const basisByKey = new Map(params.filter((p) => p.kind === "BASIS").map((p) => [p.key, { id: p.id, source: p.basisSource as string | null }]));
   const baseId = baseType?.id ?? 0;
   // نوع عاملِ در دست تعریف: عامل حکم همیشه حقوق ماهانه است
   const candType = cand.node.startsWith("D:") ? baseId : cand.calcTypeId ?? baseId;
@@ -154,11 +163,11 @@ export async function validateFactorMethod(cand: CandidateMethod): Promise<void>
   }
 
   // گراف وابستگی با آخرین روش هر عامل + نامزد
-  const latest = await prisma.payrollFactorMethod.findMany({ orderBy: { execCalendarMonth: { startDate: "desc" } }, include: { branches: { orderBy: { seq: "asc" } }, decreeComponent: { select: { code: true } }, payrollComponent: { select: { key: true, calcTypeId: true } } } });
+  const latest = await prisma.payrollFactorMethod.findMany({ orderBy: { execCalendarMonth: { startDate: "desc" } }, include: { branches: { orderBy: { seq: "asc" } }, bases: { select: { parameterId: true } }, decreeComponent: { select: { code: true } }, payrollComponent: { select: { key: true, calcTypeId: true } } } });
   // طبقه از خود عامل می‌آید (عامل حکم همیشه «پرداختی» است)
   const kindByNode = new Map<string, Kind>([...decree.map((d) => [`D:${d.code}`, "EARNING" as Kind] as [string, Kind]), ...comps.map((x) => [`C:${x.key}`, x.kind as Kind] as [string, Kind])]);
   const seen = new Set<string>();
-  const nodes: { node: string; kind: Kind; method: Method; branches: BranchInput[] }[] = [];
+  const nodes: { node: string; kind: Kind; method: Method; branches: BranchInput[]; bases: Set<number> }[] = [];
   for (const m of latest) {
     const node = m.decreeComponent ? `D:${m.decreeComponent.code}` : `C:${m.payrollComponent!.key}`;
     // دور فقط بین عامل‌های هم‌نوع معنا دارد (مقدار نوع پایه از فیش ماهانه‌ی آماده خوانده می‌شود)
@@ -166,16 +175,16 @@ export async function validateFactorMethod(cand: CandidateMethod): Promise<void>
     if (t !== candType) continue;
     if (seen.has(node) || node === cand.node) continue;
     seen.add(node);
-    nodes.push({ node, kind: (kindByNode.get(node) ?? "INFO") as Kind, method: m.method as Method, branches: m.branches.map((b) => ({ conditionText: b.conditionText, formulaText: b.formulaText })) });
+    nodes.push({ node, kind: (kindByNode.get(node) ?? "INFO") as Kind, method: m.method as Method, branches: m.branches.map((b) => ({ conditionText: b.conditionText, formulaText: b.formulaText })), bases: new Set(m.bases.map((x) => x.parameterId)) });
   }
-  nodes.push({ node: cand.node, kind: cand.kind, method: cand.method, branches: cand.branches });
-  const kindNodes = nodes.map((n) => ({ node: n.node, kind: n.kind }));
+  nodes.push({ node: cand.node, kind: cand.kind, method: cand.method, branches: cand.branches, bases: new Set(cand.basisIds ?? []) });
+  const kindNodes = nodes.map((n) => ({ node: n.node, kind: n.kind, bases: n.bases }));
   const graph = new Map<string, string[]>();
   for (const n of nodes) {
     let es: string[] = [];
     if (n.method === "CALCULATED" || n.node.startsWith("D:")) {
       try {
-        es = edgesOf(n.node, allRefs(parseBranches(n.branches)), kindNodes);
+        es = edgesOf(n.node, allRefs(parseBranches(n.branches)), kindNodes, basisByKey);
       } catch {
         es = [];
       }
@@ -224,6 +233,8 @@ interface MethodRow {
   fixedValue: number | null;
   branches: BranchInput[];
   isProvisional: boolean;
+  /** شناسه‌ی مبناهایی که این روش عضو آن‌هاست */
+  bases: number[];
 }
 
 interface FactorNode {
@@ -237,6 +248,8 @@ interface FactorNode {
   parseError: string | null;
   refs: RefInfo[];
   deps: string[];
+  /** شناسه‌ی مبناهایی که روش مؤثر این عامل عضو آن‌هاست */
+  bases: Set<number>;
   decreeValue?: number; // مقدار حکم (برای D)
   decreeValueType?: string;
 }
@@ -309,7 +322,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
     ? null
     : await prisma.payrollSlip.findUnique({
         where: { employeeId_year_month_calcTypeId: { employeeId, year, month, calcTypeId: baseType.id } },
-        include: { lines: { select: { source: true, refId: true, amount: true, error: true } } },
+        include: { lines: { select: { source: true, refId: true, amount: true, error: true, methodId: true, title: true } } },
       });
   if (!isBase && !baseSlip) throw new PayrollCalcError(`ابتدا «${baseType.title}» این کارمند برای همین ماه را محاسبه کنید`);
   const baseLines = new Map((baseSlip?.lines ?? []).map((l) => [`${l.source}:${l.refId}`, l]));
@@ -345,7 +358,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
   }
 
   // ── روش‌های مؤثر ──
-  const methods = await prisma.payrollFactorMethod.findMany({ where: { execCalendarMonth: { startDate: { lte: range.end } } }, orderBy: { execCalendarMonth: { startDate: "desc" } }, include: { branches: { orderBy: { seq: "asc" } } } });
+  const methods = await prisma.payrollFactorMethod.findMany({ where: { execCalendarMonth: { startDate: { lte: range.end } } }, orderBy: { execCalendarMonth: { startDate: "desc" } }, include: { branches: { orderBy: { seq: "asc" } }, bases: { select: { parameterId: true } } } });
   const toRow = (m: (typeof methods)[number]): MethodRow => ({
     id: m.id,
     method: m.method as Method,
@@ -353,6 +366,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
     fixedValue: m.fixedValue === null ? null : Number(m.fixedValue),
     branches: m.branches.map((b) => ({ conditionText: b.conditionText, formulaText: b.formulaText })),
     isProvisional: m.isProvisional,
+    bases: m.bases.map((x) => x.parameterId),
   });
   const decreeMethod = (id: number) => {
     const m = methods.find((x) => x.decreeComponentId === id);
@@ -376,7 +390,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
 
   // ── گره‌ها ──
   const nodes: FactorNode[] = [];
-  const mk = (n: Omit<FactorNode, "parsed" | "parseError" | "refs" | "deps">): FactorNode => {
+  const mk = (n: Omit<FactorNode, "parsed" | "parseError" | "refs" | "deps" | "bases">): FactorNode => {
     let parsed: FactorNode["parsed"] = null;
     let parseError: string | null = null;
     if (n.method && (n.method.method === "CALCULATED" || n.source === "DECREE_COMPONENT")) {
@@ -386,7 +400,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
         parseError = e.message;
       }
     }
-    return { ...n, parsed, parseError, refs: parsed ? allRefs(parsed) : [], deps: [] };
+    return { ...n, parsed, parseError, refs: parsed ? allRefs(parsed) : [], deps: [], bases: new Set(n.method?.bases ?? []) };
   };
   // روش عامل‌های حکم فقط در حقوق ماهانه محاسبه می‌شود؛ انواع دیگر مقدار آن‌ها را با [D:کد:…] می‌خوانند
   for (const l of isBase ? decree.lines : []) {
@@ -411,11 +425,13 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
     }
     nodes.push(mk({ node: `C:${c.key}`, source: "PAYROLL_COMPONENT", refId: c.id, title: c.title, kind: c.kind as Kind, method: m }));
   }
-  const kindNodes = nodes.map((n) => ({ node: n.node, kind: n.kind }));
+  const paramDefs = new Map((await prisma.payrollParameter.findMany()).map((p) => [p.key, p]));
+  const basisByKey = new Map([...paramDefs.values()].filter((p) => p.kind === "BASIS").map((p) => [p.key, { id: p.id, source: p.basisSource as string | null }]));
+  const kindNodes = nodes.map((n) => ({ node: n.node, kind: n.kind, bases: n.bases }));
   // اقساط وام: حقوق ماهانه از وضعیت وام‌ها محاسبه می‌کند و مانده را ثبت می‌کند؛ نوع‌های دیگر مقدار ثبت‌شده‌ی همان فیش ماهانه را می‌خوانند
   const loanItems: LoanMonthItem[] = isBase ? await computeLoanMonth(employeeId, year, month) : [];
   const loanSum = isBase ? loanItems.reduce((a, x) => a + x.installment, 0) : baseSlip ? await storedLoanSum(baseSlip.id) : 0;
-  for (const n of nodes) n.deps = edgesOf(n.node, n.refs, kindNodes);
+  for (const n of nodes) n.deps = edgesOf(n.node, n.refs, kindNodes, basisByKey);
 
   // ترتیب توپولوژیک
   const byNode = new Map(nodes.map((n) => [n.node, n]));
@@ -441,7 +457,6 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
 
   // ── پارامترها ──
   const params = await getParameterValues(range.end);
-  const paramDefs = new Map((await prisma.payrollParameter.findMany()).map((p) => [p.key, p]));
   const usedParams = new Map<string, ParameterValue>();
 
   // ── تاریخچه‌ی فیش‌های قبلی ──
@@ -506,6 +521,45 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
   const errored = new Map<string, string>();
   const lines: LineOut[] = [];
 
+  // مبناها (پارامتر نوع «مبنا»): جمع مبلغ عضوها. منبع «حکم» = مقدار خام عامل‌های حکمِ عضو؛ منبع «محاسبات» = مبلغ همین ماهِ عضوها (نوع غیرپایه: اعضای فیش ماهانه هم می‌آیند)
+  const baseLineBases = new Map<number, Set<number>>();
+  if (!isBase && baseSlip) {
+    const ids = [...new Set(baseSlip.lines.map((l) => l.methodId).filter((x): x is number => x !== null))];
+    const mem = ids.length ? await prisma.payrollFactorMethodBasis.findMany({ where: { methodId: { in: ids } }, select: { methodId: true, parameterId: true } }) : [];
+    for (const x of mem) baseLineBases.set(x.methodId, (baseLineBases.get(x.methodId) ?? new Set<number>()).add(x.parameterId));
+  }
+  const basisInfo = new Map<string, { title: string; source: string; value: number; members: { label: string; value: number }[] }>();
+  const basisValue = (def: (typeof paramDefs extends Map<string, infer V> ? V : never)): number => {
+    const got = basisInfo.get(def.key);
+    if (got) return got.value;
+    const members: { label: string; value: number }[] = [];
+    if (def.basisSource === "DECREE") {
+      for (const l of decree.lines) {
+        const m = decreeMethod(l.component.id);
+        if (m?.bases.includes(def.id)) members.push({ label: l.component.title, value: Number(l.value) });
+      }
+    } else {
+      for (const n of nodes) {
+        if (!n.bases.has(def.id)) continue;
+        if (errored.has(n.node)) throw new FormulaError(`«${n.title}» خطا دارد و در مبنای «${def.title}» نمی‌آید`);
+        const v = amounts.get(n.node);
+        if (v === undefined) throw new FormulaError(`«${n.title}» هنوز محاسبه نشده است (عضو مبنای «${def.title}»)`);
+        members.push({ label: n.title, value: v });
+      }
+      if (!isBase) {
+        for (const l of baseSlip?.lines ?? []) {
+          if (l.methodId === null || !baseLineBases.get(l.methodId)?.has(def.id)) continue;
+          if (l.error) throw new FormulaError(`«${l.title}» در حقوق ماهانه خطا دارد و در مبنای «${def.title}» نمی‌آید`);
+          members.push({ label: `${l.title} (${baseType.title})`, value: Number(l.amount) });
+        }
+      }
+    }
+    const value = members.reduce((a, x) => a + x.value, 0);
+    if (members.length === 0) warnings.push(`مبنای «${def.title}» در این ماه هیچ عضوی ندارد؛ مقدار آن صفر است`);
+    basisInfo.set(def.key, { title: def.title, source: def.basisSource ?? "CALC", value, members });
+    return value;
+  };
+
   const titleOf = (ns: string, key: string): string => {
     if (ns === "D") return decreeByCode.get(key)?.title ?? `عامل حکم ${key}`;
     if (ns === "C") return compByKey.get(key)?.title ?? key;
@@ -520,7 +574,11 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
       if (ns === "C" && variant && variant !== "VALUE") return `${t} — ${FACTOR_VARIANTS[variant] ?? variant}`;
       return t;
     },
+    parts(ns, key) {
+      return ns === "P" ? basisInfo.get(key)?.members : undefined;
+    },
     scalar(ns, key, variant) {
+      if (ns === "P" && paramDefs.get(key)?.kind === "BASIS") return basisValue(paramDefs.get(key)!);
       if (ns === "B") {
         if (!(key in base)) throw new FormulaError(`اطلاعات پایه‌ی ${key} موجود نیست`);
         return base[key];
@@ -698,6 +756,8 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
       brackets: pv.brackets,
     };
   }
+
+  for (const [k, b] of basisInfo) paramsOut[k] = { title: b.title, type: "BASIS", source: b.source, value: b.value, members: b.members };
 
   // ترتیب نمایش: طبقه‌ها (پرداختی، کسر، هزینه کارفرما، اطلاعاتی) و داخل هر طبقه به ترتیب محاسبه
   const kindOrder: Kind[] = ["WORK", "EARNING", "DEDUCTION", "EMPLOYER_COST", "INFO"];

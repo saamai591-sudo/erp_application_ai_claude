@@ -4957,7 +4957,34 @@ model PayrollParameter {
   isSystem    Boolean                 @default(false)
   isActive    Boolean                 @default(true)
   createdAt   DateTime                @default(now())
+  /// نوع: مقدار ثابت (مقدارهای تاریخ‌دار) یا مبنا (بدون مقدار؛ جمع مبلغ عامل‌های عضو که در «روش محاسبه عامل» مشخص می‌شوند)
+  kind        PayrollParamKind        @default(CONSTANT)
+  /// فقط مبنا: DECREE = جمع مقدارِ خام عامل‌های حکم، CALC = جمع مبلغ محاسبه‌شده‌ی عامل‌ها در فیش
+  basisSource PayrollBasisSource?
   values      PayrollParameterValue[]
+  members     PayrollFactorMethodBasis[]
+}
+
+enum PayrollParamKind {
+  CONSTANT
+  BASIS
+}
+
+enum PayrollBasisSource {
+  DECREE
+  CALC
+}
+
+/// عضویت یک رکورد «روش محاسبه عامل» در یک مبنا (تاریخچه از خودِ رکورد روش می‌آید: ماه اجرا)
+model PayrollFactorMethodBasis {
+  id          Int                 @id @default(autoincrement())
+  methodId    Int
+  parameterId Int
+  method      PayrollFactorMethod @relation(fields: [methodId], references: [id], onDelete: Cascade)
+  parameter   PayrollParameter    @relation(fields: [parameterId], references: [id], onDelete: Restrict)
+
+  @@unique([methodId, parameterId])
+  @@index([parameterId])
 }
 
 model PayrollParameterValue {
@@ -5130,6 +5157,8 @@ model PayrollFactorMethod {
   payrollComponent   PayrollComponent?    @relation(fields: [payrollComponentId], references: [id], onDelete: Cascade)
   /// شاخه‌های «شرط ← فرمول» (فقط روش محاسباتی و عامل حکم)؛ از بالا به پایین، اولین شاخه‌ی دارای شرطِ برقرار اجرا می‌شود
   branches           PayrollFactorMethodBranch[]
+  /// مبناهایی که این روش (عامل) در آن‌ها عضو است
+  bases              PayrollFactorMethodBasis[]
   issueCalendarMonth WorkCalendarMonth    @relation("MethodIssueMonth", fields: [issueCalendarMonthId], references: [id], onDelete: Restrict)
   execCalendarMonth  WorkCalendarMonth    @relation("MethodExecMonth", fields: [execCalendarMonthId], references: [id], onDelete: Restrict)
 

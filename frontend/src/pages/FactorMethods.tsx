@@ -35,6 +35,8 @@ interface Row {
   execMonth: number;
   fixedValue: string | null;
   branches: { conditionText: string; formulaText: string }[];
+  /** مبناهایی که این روش (عامل) عضو آن‌هاست */
+  basisIds?: number[];
   isProvisional: boolean;
   isCurrent: boolean;
   locked?: boolean;
@@ -43,6 +45,14 @@ interface Row {
 interface Factor {
   id: number;
   title: string;
+  /** طبقه‌ی عامل حقوق (برای عامل حکم همیشه پرداختی) */
+  kind?: string;
+}
+interface BasisOpt {
+  id: number;
+  title: string;
+  source: "DECREE" | "CALC";
+  isActive: boolean;
 }
 
 const ym = (y: number, m: number) => `${MONTHS_FA[m - 1]} ${toFaDigits(String(y))}`;
@@ -127,7 +137,10 @@ function MethodForm({ editId }: { editId?: number }) {
     execMonth: cur.month,
     fixedValue: "",
     branches: [] as { conditionText: string; formulaText: string }[],
+    basisIds: [] as number[],
   });
+  const [bases, setBases] = useState<BasisOpt[]>([]);
+  const [prefillNote, setPrefillNote] = useState<string | null>(null);
   const [factors, setFactors] = useState<{ decree: Factor[]; payroll: Factor[] }>({ decree: [], payroll: [] });
   const [builder, setBuilder] = useState(false);
   const [lockMessage, setLockMessage] = useState<string | null>(null);
@@ -137,7 +150,11 @@ function MethodForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     Promise.all([api.get("/decree-components"), api.get("/payroll-components")])
-      .then(([d, p]) => setFactors({ decree: d.map((x: any) => ({ id: x.id, title: x.title })), payroll: p.filter((x: any) => x.isActive).map((x: any) => ({ id: x.id, title: x.title })) }))
+      .then(([d, p]) => setFactors({ decree: d.map((x: any) => ({ id: x.id, title: x.title, kind: "EARNING" })), payroll: p.filter((x: any) => x.isActive).map((x: any) => ({ id: x.id, title: x.title, kind: x.kind })) }))
+      .catch(() => {});
+    api
+      .get("/payroll-parameters")
+      .then((rows: any[]) => setBases(rows.filter((r) => r.kind === "BASIS").map((r) => ({ id: r.id, title: r.title, source: r.basisSource, isActive: r.isActive }))))
       .catch(() => {});
     if (editId) api.get(`/payroll-methods/${editId}`).then((r: Row) => setLockMessage(r.locked ? r.lockMessage ?? "این روش در محاسبه‌ی حقوق استفاده شده و قفل است" : null)).catch(() => {});
     if (editId && !hasPersistedState(cacheKey)) {
@@ -153,6 +170,7 @@ function MethodForm({ editId }: { editId?: number }) {
           execMonth: r.execMonth,
           fixedValue: r.fixedValue ?? "",
           branches: r.branches ?? [],
+          basisIds: r.basisIds ?? [],
         });
         setLoaded(true);
       });
@@ -165,6 +183,28 @@ function MethodForm({ editId }: { editId?: number }) {
   const formulaActive = form.basis === "decree" || form.method === "CALCULATED";
   // state ذخیره‌شده‌ی قدیمی (قبل از شاخه‌ها) شاخه ندارد
   const branches = form.branches ?? [];
+  const basisIds = form.basisIds ?? [];
+  // مبنا: عامل حکم هر مبنا؛ عامل حقوق فقط طبقه‌ی «پرداختی» و فقط مبنای منبع «محاسبات»
+  const showBases = !!picked && (form.basis === "decree" || picked.kind === "EARNING");
+  const applicableBases = bases.filter((b) => (form.basis === "decree" || b.source === "CALC") && (b.isActive || basisIds.includes(b.id)));
+
+  // عامل انتخاب می‌شود: روش جدید از «آخرین رکورد روش همان عامل» پر می‌شود (فرمول، روش، نوع پارامتر، مبناها)؛ فقط ماه صدور/اجرا را کاربر تعیین می‌کند
+  async function pickFactor(f: Factor) {
+    const base = { ...form, factorId: String(f.id), basisIds: [] as number[] };
+    setPrefillNote(null);
+    if (editId) return setForm({ ...base, basisIds });
+    try {
+      const rows: Row[] = await api.get("/payroll-methods");
+      const prev = rows.filter((r) => r.basis === form.basis && r.factorId === f.id).sort((a, b) => b.execYear * 12 + b.execMonth - (a.execYear * 12 + a.execMonth))[0];
+      const pristine = (form.branches ?? []).length === 0 && !form.fixedValue;
+      if (prev && pristine) {
+        setForm({ ...base, method: form.basis === "decree" ? "CALCULATED" : prev.method, valueType: prev.valueType, fixedValue: prev.fixedValue ?? "", branches: prev.branches ?? [], basisIds: prev.basisIds ?? [] });
+        setPrefillNote(`روش و فرمول از آخرین رکورد این عامل (ماه اجرای ${ym(prev.execYear, prev.execMonth)}) پر شد؛ ماه صدور و ماه اجرای رکورد جدید را مشخص کنید و تغییرات را بدهید`);
+      } else setForm(base);
+    } catch {
+      setForm(base);
+    }
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -216,7 +256,10 @@ function MethodForm({ editId }: { editId?: number }) {
             <select
               disabled={!!editId}
               value={form.basis}
-              onChange={(e) => setForm({ ...form, basis: e.target.value as "decree" | "payroll", factorId: "", method: "CALCULATED", branches: [] })}
+              onChange={(e) => {
+                setPrefillNote(null);
+                setForm({ ...form, basis: e.target.value as "decree" | "payroll", factorId: "", method: "CALCULATED", branches: [], basisIds: [] });
+              }}
             >
               <option value="decree">عامل حکم</option>
               <option value="payroll">عامل حقوق</option>
@@ -230,7 +273,7 @@ function MethodForm({ editId }: { editId?: number }) {
               displayValue={picked?.title ?? ""}
               rows={list}
               columns={[{ header: "عنوان", render: (f) => f.title, filterValue: (f) => f.title }]}
-              onSelect={(f) => setForm({ ...form, factorId: String(f.id) })}
+              onSelect={(f) => void pickFactor(f)}
             />
           </div>
           {form.basis === "payroll" && (
@@ -278,6 +321,33 @@ function MethodForm({ editId }: { editId?: number }) {
             </div>
           </div>
         </div>
+        {prefillNote && <div className="alert" style={{ marginTop: 8 }}>{prefillNote}</div>}
+        {showBases && (
+          <>
+            <h3 className="hr-section">
+              مبناهای مؤثر <FieldHint label="مبناهای مؤثر" text="این عامل (از ماه اجرای این رکورد به بعد) در کدام مبناها جمع شود. تغییر عضویت در گذر زمان = رکورد روش جدید با ماه اجرای جدید. برای افزودن یک مبنا به چند عامل یک‌جا از «پارامترهای مبنا» ← همان مبنا استفاده کنید" />
+            </h3>
+            {applicableBases.length === 0 ? (
+              <p style={{ opacity: 0.7, fontSize: 13 }}>
+                {bases.length === 0 ? "مبنایی تعریف نشده است؛ در «پارامترهای مبنا» با نوع «مبنا» تعریف کنید." : "مبنای مناسب این عامل وجود ندارد (عامل حقوق فقط در مبناهای منبع «محاسبات» عضو می‌شود)."}
+              </p>
+            ) : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 24px" }}>
+                {applicableBases.map((b) => (
+                  <label key={b.id} className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={basisIds.includes(b.id)}
+                      onChange={(e) => setForm({ ...form, basisIds: e.target.checked ? [...basisIds, b.id] : basisIds.filter((x) => x !== b.id) })}
+                    />
+                    {b.title}
+                    <span style={{ opacity: 0.6, fontSize: 12 }}> (منبع: {b.source === "DECREE" ? "حکم" : "محاسبات"}){!b.isActive ? " — غیرفعال" : ""}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </>
+        )}
         </fieldset>
       </form>
       {builder && (
@@ -287,6 +357,7 @@ function MethodForm({ editId }: { editId?: number }) {
           factorTitle={picked?.title ?? ""}
           method={form.method}
           branches={branches}
+          basisIds={basisIds}
           onClose={() => setBuilder(false)}
           onSave={(bs) => {
             setForm({ ...form, branches: bs });
