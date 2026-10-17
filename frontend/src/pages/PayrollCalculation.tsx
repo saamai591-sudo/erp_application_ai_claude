@@ -36,7 +36,7 @@ interface SlipLine {
   formula: string | null;
   amount: string;
   error: string | null;
-  trace: { expression: string; operands: Operand[]; note?: string; method?: string; valueType?: string; condition?: { text: string; expression: string; result: boolean } };
+  trace: { expression: string; operands: Operand[]; note?: string; method?: string; valueType?: string; condition?: { text: string; expression: string; result: boolean }; branch?: { index: number; total: number; checked: { index: number; text: string; expression: string; result: boolean }[] } };
 }
 interface Slip {
   id: number;
@@ -214,10 +214,21 @@ function SlipView({ slip }: { slip: Slip }) {
                       <span style={{ color: "#c0392b" }}>{l.error}</span>
                     ) : (
                       <>
-                        {l.trace.condition && (
+                        {l.trace.branch && l.trace.branch.total > 1 ? (
                           <div style={{ fontSize: 12, marginBottom: 4 }}>
-                            شرط: <span dir="ltr" style={{ fontFamily: "monospace" }}>{l.trace.condition.expression}</span> ← <b>{l.trace.condition.result ? "برقرار" : "برقرار نیست"}</b>
+                            {l.trace.branch.checked.map((c) => (
+                              <div key={c.index}>
+                                شرط {c.index}: <span dir="ltr" style={{ fontFamily: "monospace" }}>{c.expression || "بدون شرط"}</span> ← <b>{c.result ? "برقرار" : "برقرار نیست"}</b>
+                              </div>
+                            ))}
+                            <div>{l.trace.branch.index > 0 ? <>شاخه‌ی اجراشده: <b>{l.trace.branch.index}</b> از {l.trace.branch.total}</> : <b>هیچ‌یک از شرط‌ها برقرار نبود؛ مقدار صفر</b>}</div>
                           </div>
+                        ) : (
+                          l.trace.condition && (
+                            <div style={{ fontSize: 12, marginBottom: 4 }}>
+                              شرط: <span dir="ltr" style={{ fontFamily: "monospace" }}>{l.trace.condition.expression}</span> ← <b>{l.trace.condition.result ? "برقرار" : "برقرار نیست"}</b>
+                            </div>
+                          )
                         )}
                         <div dir="ltr" style={{ fontFamily: "monospace", fontSize: 12 }}>{l.trace.expression}</div>
                         <ul style={{ margin: "4px 0 0", paddingInlineStart: 18, fontSize: 12 }}>

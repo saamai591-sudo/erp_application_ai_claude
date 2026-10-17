@@ -55,24 +55,51 @@ interface CandidateMethod {
   node: string;
   kind: Kind;
   method: Method;
-  conditionText: string | null;
-  formulaText: string | null;
+  /** شاخه‌های «شرط ← فرمول» (ترتیب = اولویت) */
+  branches: BranchInput[];
   /** نوع محاسبه‌ی عاملِ حقوق (برای عامل حکم لازم نیست: همیشه حقوق ماهانه) */
   calcTypeId?: number | null;
 }
 
-function parseTexts(m: { conditionText: string | null; formulaText: string | null }): { cond: Cond | null; formula: Node | null } {
-  let cond: Cond | null = null;
-  let formula: Node | null = null;
-  if (m.conditionText && m.conditionText.trim()) cond = parseCondition(m.conditionText);
-  if (m.formulaText && m.formulaText.trim()) formula = parseFormula(m.formulaText);
-  return { cond, formula };
+/** یک شاخه‌ی روش: شرطِ اختیاری + فرمول؛ شرط خالی فقط برای آخرین شاخه («در غیر این صورت») مجاز است */
+export interface BranchInput {
+  conditionText: string | null;
+  formulaText: string;
+}
+interface ParsedBranch {
+  cond: Cond | null;
+  formula: Node;
+  conditionText: string;
+  formulaText: string;
 }
 
-function allRefs(p: { cond: Cond | null; formula: Node | null }): RefInfo[] {
+/** تجزیه‌ی شاخه‌ها؛ خطاها با شماره‌ی شاخه می‌آیند (وقتی بیش از یکی است) */
+function parseBranches(bs: BranchInput[]): ParsedBranch[] {
+  if (bs.length === 0) throw new PayrollCalcError("فرمول الزامی است (آیکن فرمول را بزنید)");
+  return bs.map((b, i) => {
+    const tag = bs.length > 1 ? `شاخه‌ی ${i + 1}: ` : "";
+    try {
+      const hasCond = !!(b.conditionText && b.conditionText.trim());
+      if (!hasCond && i < bs.length - 1) throw new FormulaError("شرط خالی (در غیر این صورت) فقط برای آخرین شاخه مجاز است؛ شاخه‌های بعدی هرگز اجرا نمی‌شوند");
+      if (!(b.formulaText && b.formulaText.trim())) throw new FormulaError("فرمول تعریف نشده است");
+      return {
+        cond: hasCond ? parseCondition(b.conditionText!) : null,
+        formula: parseFormula(b.formulaText),
+        conditionText: hasCond ? b.conditionText!.trim() : "",
+        formulaText: b.formulaText.trim(),
+      };
+    } catch (e: any) {
+      throw new PayrollCalcError(tag + e.message);
+    }
+  });
+}
+
+function allRefs(ps: ParsedBranch[]): RefInfo[] {
   const out: RefInfo[] = [];
-  if (p.cond) collectCondRefs(p.cond, out);
-  if (p.formula) collectRefs(p.formula, out);
+  for (const p of ps) {
+    if (p.cond) collectCondRefs(p.cond, out);
+    collectRefs(p.formula, out);
+  }
   return out;
 }
 
@@ -94,13 +121,7 @@ function edgesOf(
 /** اعتبارسنجی یک روش در کنار روش‌های فعلی بقیه‌ی عامل‌ها: دستور، وجود عملوندها، دور */
 export async function validateFactorMethod(cand: CandidateMethod): Promise<void> {
   const needsFormula = cand.method === "CALCULATED" || cand.node.startsWith("D:");
-  if (needsFormula && !(cand.formulaText && cand.formulaText.trim())) throw new PayrollCalcError("فرمول الزامی است (آیکن فرمول را بزنید)");
-  let parsed: { cond: Cond | null; formula: Node | null };
-  try {
-    parsed = needsFormula ? parseTexts(cand) : { cond: null, formula: null };
-  } catch (e: any) {
-    throw new PayrollCalcError(e.message);
-  }
+  const parsed: ParsedBranch[] = needsFormula ? parseBranches(cand.branches) : [];
   const refs = allRefs(parsed);
   const [decree, comps, params, baseType] = await Promise.all([
     prisma.decreeComponent.findMany({ select: { code: true, title: true } }),
@@ -130,11 +151,11 @@ export async function validateFactorMethod(cand: CandidateMethod): Promise<void>
   }
 
   // گراف وابستگی با آخرین روش هر عامل + نامزد
-  const latest = await prisma.payrollFactorMethod.findMany({ orderBy: { execCalendarMonth: { startDate: "desc" } }, include: { decreeComponent: { select: { code: true } }, payrollComponent: { select: { key: true, calcTypeId: true } } } });
+  const latest = await prisma.payrollFactorMethod.findMany({ orderBy: { execCalendarMonth: { startDate: "desc" } }, include: { branches: { orderBy: { seq: "asc" } }, decreeComponent: { select: { code: true } }, payrollComponent: { select: { key: true, calcTypeId: true } } } });
   // طبقه از خود عامل می‌آید (عامل حکم همیشه «پرداختی» است)
   const kindByNode = new Map<string, Kind>([...decree.map((d) => [`D:${d.code}`, "EARNING" as Kind] as [string, Kind]), ...comps.map((x) => [`C:${x.key}`, x.kind as Kind] as [string, Kind])]);
   const seen = new Set<string>();
-  const nodes: { node: string; kind: Kind; method: Method; cond: string | null; formula: string | null }[] = [];
+  const nodes: { node: string; kind: Kind; method: Method; branches: BranchInput[] }[] = [];
   for (const m of latest) {
     const node = m.decreeComponent ? `D:${m.decreeComponent.code}` : `C:${m.payrollComponent!.key}`;
     // دور فقط بین عامل‌های هم‌نوع معنا دارد (مقدار نوع پایه از فیش ماهانه‌ی آماده خوانده می‌شود)
@@ -142,16 +163,16 @@ export async function validateFactorMethod(cand: CandidateMethod): Promise<void>
     if (t !== candType) continue;
     if (seen.has(node) || node === cand.node) continue;
     seen.add(node);
-    nodes.push({ node, kind: (kindByNode.get(node) ?? "INFO") as Kind, method: m.method as Method, cond: m.conditionText, formula: m.formulaText });
+    nodes.push({ node, kind: (kindByNode.get(node) ?? "INFO") as Kind, method: m.method as Method, branches: m.branches.map((b) => ({ conditionText: b.conditionText, formulaText: b.formulaText })) });
   }
-  nodes.push({ node: cand.node, kind: cand.kind, method: cand.method, cond: cand.conditionText, formula: cand.formulaText });
+  nodes.push({ node: cand.node, kind: cand.kind, method: cand.method, branches: cand.branches });
   const kindNodes = nodes.map((n) => ({ node: n.node, kind: n.kind }));
   const graph = new Map<string, string[]>();
   for (const n of nodes) {
     let es: string[] = [];
     if (n.method === "CALCULATED" || n.node.startsWith("D:")) {
       try {
-        es = edgesOf(n.node, allRefs(parseTexts({ conditionText: n.cond, formulaText: n.formula })), kindNodes);
+        es = edgesOf(n.node, allRefs(parseBranches(n.branches)), kindNodes);
       } catch {
         es = [];
       }
@@ -181,7 +202,16 @@ interface LineOut {
   formula: string | null;
   amount: number;
   error: string | null;
-  trace: { expression: string; operands: Operand[]; note?: string; method: string; valueType?: string; condition?: { text: string; expression: string; result: boolean } };
+  trace: {
+    expression: string;
+    operands: Operand[];
+    note?: string;
+    method: string;
+    valueType?: string;
+    condition?: { text: string; expression: string; result: boolean };
+    /** روش چند شاخه‌ای: شماره‌ی شاخه‌ی اجراشده (۰ = هیچ‌کدام)، تعداد شاخه‌ها و شرط‌های بررسی‌شده به ترتیب */
+    branch?: { index: number; total: number; checked: { index: number; text: string; expression: string; result: boolean }[] };
+  };
 }
 
 interface MethodRow {
@@ -189,8 +219,7 @@ interface MethodRow {
   method: Method;
   valueType: string;
   fixedValue: number | null;
-  conditionText: string | null;
-  formulaText: string | null;
+  branches: BranchInput[];
   isProvisional: boolean;
 }
 
@@ -201,7 +230,7 @@ interface FactorNode {
   title: string;
   kind: Kind;
   method: MethodRow | null;
-  parsed: { cond: Cond | null; formula: Node | null } | null;
+  parsed: ParsedBranch[] | null;
   parseError: string | null;
   refs: RefInfo[];
   deps: string[];
@@ -311,14 +340,13 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
   }
 
   // ── روش‌های مؤثر ──
-  const methods = await prisma.payrollFactorMethod.findMany({ where: { execCalendarMonth: { startDate: { lte: range.end } } }, orderBy: { execCalendarMonth: { startDate: "desc" } } });
+  const methods = await prisma.payrollFactorMethod.findMany({ where: { execCalendarMonth: { startDate: { lte: range.end } } }, orderBy: { execCalendarMonth: { startDate: "desc" } }, include: { branches: { orderBy: { seq: "asc" } } } });
   const toRow = (m: (typeof methods)[number]): MethodRow => ({
     id: m.id,
     method: m.method as Method,
     valueType: m.valueType,
     fixedValue: m.fixedValue === null ? null : Number(m.fixedValue),
-    conditionText: m.conditionText,
-    formulaText: m.formulaText,
+    branches: m.branches.map((b) => ({ conditionText: b.conditionText, formulaText: b.formulaText })),
     isProvisional: m.isProvisional,
   });
   const decreeMethod = (id: number) => {
@@ -348,8 +376,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
     let parseError: string | null = null;
     if (n.method && (n.method.method === "CALCULATED" || n.source === "DECREE_COMPONENT")) {
       try {
-        parsed = parseTexts(n.method);
-        if (!parsed.formula) throw new FormulaError("فرمول تعریف نشده است");
+        parsed = parseBranches(n.method.branches);
       } catch (e: any) {
         parseError = e.message;
       }
@@ -557,6 +584,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
     const m = n.method;
     let amount = 0;
     let error: string | null = null;
+    let matchedFormula: string | null = null;
     let trace: LineOut["trace"] = { expression: "", operands: [], method: "" };
     try {
       if (cycleErr.has(n.node)) throw new FormulaError("ارجاع دوری بین عوامل");
@@ -576,27 +604,45 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
         trace = { expression: String(v), operands: [], method: METHOD_FA[m.method], note: stored === undefined ? "مقداری در «ورود اطلاعات» ثبت نشده بود؛ صفر در نظر گرفته شد" : undefined };
       } else {
         if (n.parseError) throw new FormulaError(n.parseError);
-        const p = n.parsed!;
-        let skip = false;
+        const branches = n.parsed!;
+        // از بالا به پایین: اولین شاخه‌ای که شرطش برقرار است (یا بدون شرط است) اجرا می‌شود؛ هیچ‌کدام برقرار نباشد ⇒ صفر
+        const condOperands: Operand[] = [];
+        const checked: { index: number; text: string; expression: string; result: boolean }[] = [];
+        let matched = -1;
         let condInfo: LineOut["trace"]["condition"];
-        let condOperands: Operand[] = [];
-        if (p.cond) {
-          const c = evaluateCondition(p.cond, env);
-          condInfo = { text: m.conditionText ?? "", expression: c.expression, result: c.value };
-          condOperands = c.operands;
-          if (!c.value) skip = true;
+        for (let i = 0; i < branches.length; i++) {
+          const b = branches[i];
+          if (b.cond) {
+            const c = evaluateCondition(b.cond, env);
+            for (const o of c.operands) if (!condOperands.some((x) => x.ref === o.ref)) condOperands.push(o);
+            checked.push({ index: i + 1, text: b.conditionText, expression: c.expression, result: c.value });
+            if (!c.value) continue;
+            condInfo = { text: b.conditionText, expression: c.expression, result: true };
+          }
+          matched = i;
+          break;
         }
-        if (skip) {
+        const branchInfo = { index: matched + 1, total: branches.length, checked };
+        if (matched < 0) {
           amount = 0;
-          trace = { expression: "شرط برقرار نبود", operands: condOperands, method: METHOD_FA[n.source === "DECREE_COMPONENT" ? "CALCULATED" : m.method], condition: condInfo };
+          const last = checked[checked.length - 1];
+          trace = {
+            expression: branches.length > 1 ? "هیچ‌یک از شرط‌ها برقرار نبود" : "شرط برقرار نبود",
+            operands: condOperands,
+            method: METHOD_FA[n.source === "DECREE_COMPONENT" ? "CALCULATED" : m.method],
+            condition: last ? { text: last.text, expression: last.expression, result: false } : undefined,
+            branch: branchInfo,
+          };
         } else {
-          const r = evaluate(p.formula!, env);
+          matchedFormula = branches[matched].formulaText;
+          const r = evaluate(branches[matched].formula, env);
           amount = r.value;
           trace = {
             expression: r.expression,
             operands: [...condOperands, ...r.operands.filter((o) => !condOperands.some((c) => c.ref === o.ref))],
             method: METHOD_FA.CALCULATED,
             condition: condInfo,
+            branch: branchInfo,
           };
           if (n.source === "DECREE_COMPONENT" && n.decreeValueType && !["MONTHLY_AMOUNT", "DAILY_AMOUNT"].includes(n.decreeValueType)) {
             trace.note = `نوع مقدار «${DECREE_VALUE_FA[n.decreeValueType]}» عامل حکم؛ فرمول عامل مبنای تبدیل است`;
@@ -616,7 +662,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
       refId: n.refId,
       methodId: m?.id ?? null,
       title: n.title,
-      formula: m?.formulaText ?? null,
+      formula: matchedFormula,
       amount: error ? 0 : amount,
       error,
       trace,

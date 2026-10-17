@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { can, userHasAction } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { AuthedRequest } from "../middleware/auth";
+import type { BranchInput } from "../services/payrollCalculationService";
 import { METHOD_FA, PayrollCalcError, calculatePayroll, validateFactorMethod, methodLockMessage, lockedMethodIds, getBaseCalcType, dependentSlipMessage, createPayrollComponent } from "../services/payrollCalculationService";
 import { getEffectiveDecrees } from "../services/employmentDecreeService";
 import { buildPayrollSlipsPrint } from "../services/payrollSlipPrint";
@@ -20,6 +21,14 @@ const F_CALC = findFormPrefix("payroll-calculation");
 const F_REPORT = findFormPrefix("payroll-calculation-report");
 
 const router = Router();
+
+/** شاخه‌های بدنه → رشته‌های تمیز (شرط خالی = null)؛ شاخه‌ی کاملاً خالی نادیده گرفته می‌شود */
+function cleanBranches(raw: unknown): BranchInput[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((x: any) => ({ conditionText: str(x?.conditionText), formulaText: str(x?.formulaText) ?? "" }))
+    .filter((x) => x.conditionText || x.formulaText);
+}
 const day = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
 const str = (v: unknown) => {
   const t = typeof v === "string" ? v.trim() : "";
@@ -144,8 +153,8 @@ router.put("/payroll-components/:id", can(`${F_COMP}.edit`), async (req, res) =>
       if (!nt) throw new PayrollCalcError("نوع محاسبه یافت نشد");
       if (await prisma.payrollSlipLine.count({ where: { source: "PAYROLL_COMPONENT", refId: id } })) throw new PayrollCalcError("این عامل در فیش‌های محاسبه‌شده استفاده شده و نوع محاسبه‌اش قابل تغییر نیست");
       const refText = `[C:${c.key}`;
-      const users = (await prisma.payrollFactorMethod.findMany({ where: { NOT: { payrollComponentId: id } } })).filter(
-        (m) => (m.formulaText ?? "").toUpperCase().includes(refText) || (m.conditionText ?? "").toUpperCase().includes(refText)
+      const users = (await prisma.payrollFactorMethod.findMany({ where: { NOT: { payrollComponentId: id } }, include: { branches: true } })).filter((m) =>
+        m.branches.some((b) => b.formulaText.toUpperCase().includes(refText) || (b.conditionText ?? "").toUpperCase().includes(refText))
       );
       if (users.length) throw new PayrollCalcError("فرمول عامل‌های دیگر به این عامل ارجاع دارد؛ نوع محاسبه‌اش قابل تغییر نیست");
       calcTypeId = nt.id;
@@ -165,8 +174,8 @@ router.delete("/payroll-components/:id", can(`${F_COMP}.delete`), async (req, re
     return res.status(400).json({ error: "این عامل در فیش‌های محاسبه‌شده استفاده شده و قابل حذف نیست" });
   }
   const refText = `[C:${c.key}`;
-  const users = (await prisma.payrollFactorMethod.findMany({ where: { NOT: { payrollComponentId: id } } })).filter(
-    (m) => (m.formulaText ?? "").toUpperCase().includes(refText) || (m.conditionText ?? "").toUpperCase().includes(refText)
+  const users = (await prisma.payrollFactorMethod.findMany({ where: { NOT: { payrollComponentId: id } }, include: { branches: true } })).filter((m) =>
+    m.branches.some((b) => b.formulaText.toUpperCase().includes(refText) || (b.conditionText ?? "").toUpperCase().includes(refText))
   );
   if (users.length) return res.status(400).json({ error: "فرمول عامل‌های دیگر به این عامل ارجاع دارد" });
   await prisma.payrollComponent.delete({ where: { id } });
@@ -192,8 +201,8 @@ const shapeMethod = (m: any, today: Date) => ({
   execYear: execYm(m).year,
   execMonth: execYm(m).month,
   fixedValue: m.fixedValue === null ? null : m.fixedValue.toString(),
-  conditionText: m.conditionText,
-  formulaText: m.formulaText,
+  /** شاخه‌های «شرط ← فرمول» به ترتیب اولویت (روش غیرمحاسباتی: خالی) */
+  branches: (m.branches ?? []).map((b: any) => ({ conditionText: b.conditionText ?? "", formulaText: b.formulaText })),
   isProvisional: m.isProvisional,
   isCurrent: false as boolean,
   _eff: m.execCalendarMonth.startDate as Date,
@@ -203,7 +212,7 @@ const shapeMethod = (m: any, today: Date) => ({
 router.get("/payroll-methods", can(`${F_METH}.view`), async (_req, res) => {
   const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
   const rows = await prisma.payrollFactorMethod.findMany({
-    include: { decreeComponent: { select: { title: true } }, payrollComponent: { select: { title: true } }, ...methodMonthInclude },
+    include: { decreeComponent: { select: { title: true } }, payrollComponent: { select: { title: true } }, branches: { orderBy: { seq: "asc" } }, ...methodMonthInclude },
     orderBy: [{ execCalendarMonth: { startDate: "desc" } }, { id: "desc" }],
   });
   // «جاری» = آخرین رکورد هر عامل با تاریخ اجرای ≤ امروز
@@ -284,8 +293,7 @@ router.post("/payroll-methods/validate", can(`${F_METH}.view`), async (req, res)
       calcTypeId,
       kind: kindOfFactor as any,
       method: b.basis === "decree" ? "CALCULATED" : b.method ?? "CALCULATED",
-      conditionText: str(b.conditionText),
-      formulaText: str(b.formulaText),
+      branches: cleanBranches(b.branches),
     });
     res.json({ ok: true });
   } catch (e: any) {
@@ -296,7 +304,7 @@ router.post("/payroll-methods/validate", can(`${F_METH}.view`), async (req, res)
 router.get("/payroll-methods/:id", can(`${F_METH}.view`), async (req, res) => {
   const m = await prisma.payrollFactorMethod.findUnique({
     where: { id: Number(req.params.id) },
-    include: { decreeComponent: { select: { title: true } }, payrollComponent: { select: { title: true } }, ...methodMonthInclude },
+    include: { decreeComponent: { select: { title: true } }, payrollComponent: { select: { title: true } }, branches: { orderBy: { seq: "asc" } }, ...methodMonthInclude },
   });
   if (!m) return res.status(404).json({ error: "روش یافت نشد" });
   const { _eff, _today, ...rest } = shapeMethod(m, new Date());
@@ -342,10 +350,9 @@ async function methodData(b: any, existingId: number | null) {
     fixedValue = Number(b.fixedValue);
     if (b.fixedValue === undefined || b.fixedValue === null || b.fixedValue === "" || !isFinite(fixedValue)) throw new PayrollCalcError("مقدار ثابت الزامی است");
   }
-  const conditionText = str(b.conditionText);
-  const formulaText = str(b.formulaText);
-  await validateFactorMethod({ node, calcTypeId, kind: kind as any, method, conditionText, formulaText });
   const isCalc = method === "CALCULATED";
+  const branches = isCalc ? cleanBranches(b.branches) : [];
+  await validateFactorMethod({ node, calcTypeId, kind: kind as any, method, branches });
   return {
     basis,
     factorId,
@@ -357,22 +364,23 @@ async function methodData(b: any, existingId: number | null) {
       issueCalendarMonthId: issueRow.id,
       execCalendarMonthId: execRow.id,
       fixedValue,
-      conditionText: isCalc ? conditionText : null,
-      formulaText: isCalc ? formulaText : null,
       isProvisional: false,
     },
+    branches,
   };
 }
 
 router.post("/payroll-methods", can(`${F_METH}.create`), async (req, res) => {
   try {
-    const { basis, factorId, data, execStart } = await methodData(req.body, null);
+    const { basis, factorId, data, execStart, branches } = await methodData(req.body, null);
     const where = basis === "decree" ? { decreeComponentId: factorId } : { payrollComponentId: factorId };
     const latest = await prisma.payrollFactorMethod.findFirst({ where, orderBy: { execCalendarMonth: { startDate: "desc" } }, include: methodMonthInclude });
     if (latest && execStart <= latest.execCalendarMonth.startDate) {
       throw new PayrollCalcError(`ماه اجرا باید بعد از ماه اجرای آخرین روش این عامل (${execYm(latest).year}/${execYm(latest).month}) باشد`);
     }
-    const created = await prisma.payrollFactorMethod.create({ data: { ...where, ...data } });
+    const created = await prisma.payrollFactorMethod.create({
+      data: { ...where, ...data, branches: { create: branches.map((x, i) => ({ seq: i + 1, conditionText: x.conditionText, formulaText: x.formulaText })) } },
+    });
     res.status(201).json({ id: created.id });
   } catch (e) {
     fail(res, e, "خطا در ثبت روش محاسبه");
@@ -388,7 +396,7 @@ router.put("/payroll-methods/:id", can(`${F_METH}.edit`), async (req, res) => {
     if (lockMsg) throw new PayrollCalcError(lockMsg);
     // عامل و مبنای یک رکورد تغییر نمی‌کند
     const body = { ...req.body, basis: m.decreeComponentId ? "decree" : "payroll", factorId: m.decreeComponentId ?? m.payrollComponentId };
-    const { data, execStart } = await methodData(body, id);
+    const { data, execStart, branches } = await methodData(body, id);
     const same = m.decreeComponentId ? { decreeComponentId: m.decreeComponentId } : { payrollComponentId: m.payrollComponentId };
     const [prev, next] = await Promise.all([
       prisma.payrollFactorMethod.findFirst({ where: { ...same, execCalendarMonth: { startDate: { lt: m.execCalendarMonth.startDate } } }, orderBy: { execCalendarMonth: { startDate: "desc" } }, include: methodMonthInclude }),
@@ -396,7 +404,10 @@ router.put("/payroll-methods/:id", can(`${F_METH}.edit`), async (req, res) => {
     ]);
     if (prev && execStart <= prev.execCalendarMonth.startDate) throw new PayrollCalcError(`ماه اجرا باید بعد از روش قبلی (${execYm(prev).year}/${execYm(prev).month}) بماند`);
     if (next && execStart >= next.execCalendarMonth.startDate) throw new PayrollCalcError(`ماه اجرا باید قبل از روش بعدی (${execYm(next).year}/${execYm(next).month}) بماند`);
-    await prisma.payrollFactorMethod.update({ where: { id }, data });
+    await prisma.payrollFactorMethod.update({
+      where: { id },
+      data: { ...data, branches: { deleteMany: {}, create: branches.map((x, i) => ({ seq: i + 1, conditionText: x.conditionText, formulaText: x.formulaText })) } },
+    });
     res.json({ ok: true });
   } catch (e) {
     fail(res, e, "خطا در ویرایش روش محاسبه");

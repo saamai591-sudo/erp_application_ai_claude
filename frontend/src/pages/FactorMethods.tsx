@@ -34,8 +34,7 @@ interface Row {
   execYear: number;
   execMonth: number;
   fixedValue: string | null;
-  conditionText: string | null;
-  formulaText: string | null;
+  branches: { conditionText: string; formulaText: string }[];
   isProvisional: boolean;
   isCurrent: boolean;
   locked?: boolean;
@@ -127,8 +126,7 @@ function MethodForm({ editId }: { editId?: number }) {
     execYear: cur.year,
     execMonth: cur.month,
     fixedValue: "",
-    conditionText: "",
-    formulaText: "",
+    branches: [] as { conditionText: string; formulaText: string }[],
   });
   const [factors, setFactors] = useState<{ decree: Factor[]; payroll: Factor[] }>({ decree: [], payroll: [] });
   const [builder, setBuilder] = useState(false);
@@ -154,8 +152,7 @@ function MethodForm({ editId }: { editId?: number }) {
           execYear: r.execYear,
           execMonth: r.execMonth,
           fixedValue: r.fixedValue ?? "",
-          conditionText: r.conditionText ?? "",
-          formulaText: r.formulaText ?? "",
+          branches: r.branches ?? [],
         });
         setLoaded(true);
       });
@@ -166,12 +163,14 @@ function MethodForm({ editId }: { editId?: number }) {
   const list = form.basis === "decree" ? factors.decree : factors.payroll;
   const picked = list.find((f) => String(f.id) === form.factorId);
   const formulaActive = form.basis === "decree" || form.method === "CALCULATED";
+  // state ذخیره‌شده‌ی قدیمی (قبل از شاخه‌ها) شاخه ندارد
+  const branches = form.branches ?? [];
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     if (!form.factorId) return setError("عامل را انتخاب کنید");
-    if (formulaActive && !form.formulaText.trim()) return setError("فرمول تعریف نشده است؛ آیکن فرمول را بزنید");
+    if (formulaActive && !branches.some((b) => b.formulaText.trim())) return setError("فرمول تعریف نشده است؛ آیکن فرمول را بزنید");
     try {
       if (editId) {
         await api.put(`/payroll-methods/${editId}`, form);
@@ -217,7 +216,7 @@ function MethodForm({ editId }: { editId?: number }) {
             <select
               disabled={!!editId}
               value={form.basis}
-              onChange={(e) => setForm({ ...form, basis: e.target.value as "decree" | "payroll", factorId: "", method: "CALCULATED", formulaText: "", conditionText: "" })}
+              onChange={(e) => setForm({ ...form, basis: e.target.value as "decree" | "payroll", factorId: "", method: "CALCULATED", branches: [] })}
             >
               <option value="decree">عامل حکم</option>
               <option value="payroll">عامل حقوق</option>
@@ -237,7 +236,7 @@ function MethodForm({ editId }: { editId?: number }) {
           {form.basis === "payroll" && (
             <div className="form-field">
               <label>روش<RequiredMark /></label>
-              <select value={form.method} onChange={(e) => setForm({ ...form, method: e.target.value, ...(e.target.value !== "CALCULATED" ? { formulaText: "", conditionText: "" } : {}) })}>
+              <select value={form.method} onChange={(e) => setForm({ ...form, method: e.target.value, ...(e.target.value !== "CALCULATED" ? { branches: [] } : {}) })}>
                 {Object.entries(METHOD_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
@@ -275,7 +274,7 @@ function MethodForm({ editId }: { editId?: number }) {
               >
                 fx
               </button>
-              {formulaActive && (form.formulaText.trim() ? <span style={{ color: "#0a8f5a" }}>فرمول تعریف شده است{form.conditionText.trim() ? " (با شرط)" : ""}</span> : <span style={{ opacity: 0.6 }}>تعریف نشده</span>)}
+              {formulaActive && (branches.some((b) => b.formulaText.trim()) ? <span style={{ color: "#0a8f5a" }}>فرمول تعریف شده است{branches.length > 1 ? ` (${branches.length} شاخه)` : branches[0]?.conditionText.trim() ? " (با شرط)" : ""}</span> : <span style={{ opacity: 0.6 }}>تعریف نشده</span>)}
             </div>
           </div>
         </div>
@@ -287,11 +286,10 @@ function MethodForm({ editId }: { editId?: number }) {
           factorId={form.factorId}
           factorTitle={picked?.title ?? ""}
           method={form.method}
-          conditionText={form.conditionText}
-          formulaText={form.formulaText}
+          branches={branches}
           onClose={() => setBuilder(false)}
-          onSave={(c, f) => {
-            setForm({ ...form, conditionText: c, formulaText: f });
+          onSave={(bs) => {
+            setForm({ ...form, branches: bs });
             setBuilder(false);
           }}
         />

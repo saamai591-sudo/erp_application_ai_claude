@@ -5120,13 +5120,13 @@ model PayrollFactorMethod {
   issueCalendarMonthId Int
   execCalendarMonthId  Int
   fixedValue         Decimal?             @db.Decimal(20, 4)
-  conditionText      String?
-  formulaText        String?
   isProvisional      Boolean              @default(false)
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
   decreeComponent    DecreeComponent?     @relation(fields: [decreeComponentId], references: [id], onDelete: Cascade)
   payrollComponent   PayrollComponent?    @relation(fields: [payrollComponentId], references: [id], onDelete: Cascade)
+  /// شاخه‌های «شرط ← فرمول» (فقط روش محاسباتی و عامل حکم)؛ از بالا به پایین، اولین شاخه‌ی دارای شرطِ برقرار اجرا می‌شود
+  branches           PayrollFactorMethodBranch[]
   issueCalendarMonth WorkCalendarMonth    @relation("MethodIssueMonth", fields: [issueCalendarMonthId], references: [id], onDelete: Restrict)
   execCalendarMonth  WorkCalendarMonth    @relation("MethodExecMonth", fields: [execCalendarMonthId], references: [id], onDelete: Restrict)
 
@@ -5192,4 +5192,17 @@ model WorkCalendarMonth {
 
   @@unique([calendarId, month])
   @@unique([year, month])
+}
+
+/// یک شاخه‌ی «اگر شرط آنگاه فرمول» از روش محاسبه‌ی عامل. شرط خالی (فقط برای آخرین شاخه) = «در غیر این صورت».
+/// هیچ شاخه‌ای برقرار نباشد ⇒ مقدار عامل صفر.
+model PayrollFactorMethodBranch {
+  id            Int                  @id @default(autoincrement())
+  methodId      Int
+  seq           Int
+  conditionText String?
+  formulaText   String
+  method        PayrollFactorMethod  @relation(fields: [methodId], references: [id], onDelete: Cascade)
+
+  @@unique([methodId, seq])
 }

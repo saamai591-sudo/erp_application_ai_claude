@@ -2,13 +2,14 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "./Modal";
 import { ErrorToast } from "./ErrorToast";
 import { api, ApiError } from "../lib/api";
-import { KIND_FA } from "../lib/payrollLabels";
 
-// پنجره‌ی فرمول‌نویس حقوق: «عبارت شرطی» و «عبارت محاسباتی» به‌صورت چیپ؛ در پایین سه زبانه‌ی عوامل / توابع / مقادیر ثابت.
+// پنجره‌ی فرمول‌نویس حقوق: روش می‌تواند چند «شاخه» داشته باشد (شرط ← فرمول)؛ هر شاخه «عبارت شرطی» و «عبارت محاسباتی» به‌صورت چیپ دارد و در پایین
+// سه زبانه‌ی عوامل / توابع / مقادیر ثابت است. از بالا به پایین اولین شاخه‌ای که شرطش برقرار است اجرا می‌شود؛ شاخه‌ی بدون شرط («در غیر این صورت»)
+// فقط آخرین شاخه می‌تواند باشد و اگر هیچ شاخه‌ای برقرار نباشد مقدار عامل صفر است.
 // زبانه‌ی عوامل چهار گرید دارد: دسته ← طبقه ← عامل ← مقدار (نوع مقدار بر اساس دسته). ذخیره‌ی متن همان زبان فرمول سرور است
 // ([D:کد:نوع] [C:کلید:نوع] [P:کلید] [B:کلید] [S:طبقه])؛ کلیدها به کاربر نشان داده نمی‌شوند و چیپ‌ها عنوان فارسی دارند.
 // ویرایش مثل یک ویرایشگر متن: مکان‌نما (caret) بین چیپ‌ها با کلیک روی هر چیپ (نیمه‌ی چپ = قبل، نیمه‌ی راست = بعد) جابه‌جا می‌شود و درج از پالت یا تایپ
-// همیشه در همان نقطه انجام می‌شود (فوکوس بعد از درج در ناحیه می‌ماند و کلیک اضافه لازم نیست)؛ فلش‌ها/Home/End، Shift برای انتخاب بازه،
+// همیشه در همان نقطه‌ی «ناحیه‌ی فعال» انجام می‌شود (فوکوس بعد از درج در ناحیه می‌ماند و کلیک اضافه لازم نیست)؛ فلش‌ها/Home/End، Shift برای انتخاب بازه،
 // Ctrl+A/C/X/V، Backspace/Delete.
 
 interface Palette {
@@ -25,6 +26,17 @@ interface Palette {
 }
 
 type Area = "cond" | "calc";
+/** یک ناحیه‌ی قابل ویرایش: شرط یا فرمولِ شاخه‌ی b */
+interface Slot {
+  b: number;
+  a: Area;
+}
+const sk = (s: Slot) => `${s.b}:${s.a}`;
+
+export interface FormulaBranch {
+  conditionText: string;
+  formulaText: string;
+}
 
 /** ارقام فارسی/عربی → انگلیسی؛ «٫» (جداکننده‌ی اعشار فارسی) → «.» */
 function normalizeDigits(s: string): string {
@@ -50,13 +62,17 @@ function cleanNumber(raw: string): string {
 const OPS_CALC = ["+", "-", "*", "/", "(", ")", ","];
 const OPS_COND = [">", ">=", "<", "<=", "=", "<>"];
 
+interface Draft {
+  cond: string[];
+  calc: string[];
+}
+
 export function FormulaBuilder({
   basis,
   factorId,
   factorTitle,
   method,
-  conditionText,
-  formulaText,
+  branches,
   onClose,
   onSave,
 }: {
@@ -65,20 +81,21 @@ export function FormulaBuilder({
   /** عنوان عاملی که فرمولش تعریف می‌شود؛ در عنوان پنجره نمایش داده می‌شود */
   factorTitle: string;
   method: string;
-  conditionText: string;
-  formulaText: string;
+  branches: FormulaBranch[];
   onClose: () => void;
-  onSave: (condition: string, formula: string) => void;
+  onSave: (branches: FormulaBranch[]) => void;
 }) {
   const [pal, setPal] = useState<Palette | null>(null);
-  const [cond, setCond] = useState<string[]>(() => tokenize(conditionText));
-  const [calc, setCalc] = useState<string[]>(() => tokenize(formulaText));
-  const [active, setActive] = useState<Area>("calc");
-  // مکان‌نما = شماره‌ی نقطه‌ی درج بین توکن‌ها (۰..تعداد)؛ انتخاب = بازه‌ی [from, to) توکن‌ها
-  const [caret, setCaretState] = useState<Record<Area, number>>(() => ({ cond: tokenize(conditionText).length, calc: tokenize(formulaText).length }));
-  const [sel, setSel] = useState<{ a: Area; from: number; to: number } | null>(null);
-  const anchor = useRef<Record<Area, number>>({ cond: 0, calc: 0 });
-  const areaRefs = useRef<Record<Area, HTMLDivElement | null>>({ cond: null, calc: null });
+  const [br, setBr] = useState<Draft[]>(() =>
+    (branches.length ? branches : [{ conditionText: "", formulaText: "" }]).map((x) => ({ cond: tokenize(x.conditionText), calc: tokenize(x.formulaText) }))
+  );
+  const [active, setActive] = useState<Slot>({ b: 0, a: "calc" });
+  // مکان‌نما = شماره‌ی نقطه‌ی درج بین توکن‌ها (۰..تعداد) برای هر ناحیه؛ انتخاب = بازه‌ی [from, to) توکن‌های یک ناحیه
+  const endCarets = (ds: Draft[]) => Object.fromEntries(ds.flatMap((d, b) => [[`${b}:cond`, d.cond.length], [`${b}:calc`, d.calc.length]])) as Record<string, number>;
+  const [caret, setCaretState] = useState<Record<string, number>>(() => endCarets(br));
+  const [sel, setSel] = useState<{ k: string; from: number; to: number } | null>(null);
+  const anchor = useRef<Record<string, number>>({});
+  const areaRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const pasteHandled = useRef(false);
   const [tab, setTab] = useState<"factors" | "functions" | "constants">("factors");
   const [cat, setCat] = useState<string>("");
@@ -99,14 +116,12 @@ export function FormulaBuilder({
   const labelOf = useMemo(() => {
     const m = new Map<string, string>();
     if (pal) {
-      const dv = new Map(pal.decree.variants.map((v) => [v.key, v.title]));
       for (const f of pal.decree.factors) for (const v of pal.decree.variants) m.set(`D:${f.code}:${v.key}`.toUpperCase(), `${f.title} — ${v.title}`);
       for (const p of pal.payroll) {
         const vt = new Map(p.variants.map((v) => [v.key, v.title]));
         for (const c of p.classes)
           for (const f of c.factors) for (const v of p.variants) m.set(`C:${f.key}:${v.key}`.toUpperCase(), v.key === "VALUE" ? f.title : `${f.title} — ${vt.get(v.key)}`);
       }
-      void dv;
       for (const b of pal.baseInfo) m.set(`B:${b.key}`, b.title);
       for (const s of pal.classTotals) m.set(`S:${s.key}`, s.title);
       for (const p of pal.params) m.set(`P:${p.key}`, p.title);
@@ -135,59 +150,85 @@ export function FormulaBuilder({
     return { text: tok, kind: "op" };
   }
 
-  const get = (a: Area) => (a === "cond" ? cond : calc);
-  const commit = (a: Area, v: string[], c: number) => {
+  const get = (s: Slot): string[] => br[s.b]?.[s.a] ?? [];
+  const commit = (s: Slot, v: string[], c: number) => {
     setOk(false);
-    a === "cond" ? setCond(v) : setCalc(v);
+    setBr((prev) => prev.map((x, i) => (i === s.b ? { ...x, [s.a]: v } : x)));
     const at = Math.max(0, Math.min(c, v.length));
-    anchor.current[a] = at;
-    setCaretState((p) => ({ ...p, [a]: at }));
+    anchor.current[sk(s)] = at;
+    setCaretState((p) => ({ ...p, [sk(s)]: at }));
     setSel(null);
   };
-  const focusArea = (a: Area) => areaRefs.current[a]?.focus();
+  const focusSlot = (s: Slot) => areaRefs.current[sk(s)]?.focus();
   /** جابه‌جایی مکان‌نما؛ extend=true (Shift) بازه‌ی انتخاب را از لنگر تا نقطه‌ی جدید می‌گیرد */
-  const moveCaret = (a: Area, c: number, extend = false) => {
-    const at = Math.max(0, Math.min(c, get(a).length));
+  const moveCaret = (s: Slot, c: number, extend = false) => {
+    const k = sk(s);
+    const at = Math.max(0, Math.min(c, get(s).length));
     if (extend) {
-      const from = anchor.current[a];
-      setSel(from === at ? null : { a, from: Math.min(from, at), to: Math.max(from, at) });
+      const from = anchor.current[k] ?? 0;
+      setSel(from === at ? null : { k, from: Math.min(from, at), to: Math.max(from, at) });
     } else {
-      anchor.current[a] = at;
+      anchor.current[k] = at;
       setSel(null);
     }
-    setCaretState((p) => ({ ...p, [a]: at }));
+    setCaretState((p) => ({ ...p, [k]: at }));
   };
   /** درج در نقطه‌ی مکان‌نما (جایگزین انتخاب)؛ فوکوس در ناحیه می‌ماند تا کاربر بدون کلیک اضافه ادامه دهد */
-  const insert = (a: Area, ins: string[], refocus = true) => {
-    const t = get(a);
-    let from = caret[a];
+  const insert = (s: Slot, ins: string[], refocus = true) => {
+    const k = sk(s);
+    const t = get(s);
+    let from = caret[k] ?? t.length;
     let to = from;
-    if (sel && sel.a === a) {
+    if (sel && sel.k === k) {
       from = sel.from;
       to = sel.to;
     }
-    commit(a, [...t.slice(0, from), ...ins, ...t.slice(to)], from + ins.length);
-    if (refocus) focusArea(a);
+    commit(s, [...t.slice(0, from), ...ins, ...t.slice(to)], from + ins.length);
+    if (refocus) focusSlot(s);
   };
   const push = (...t: string[]) => insert(active, t);
-  const deleteRange = (a: Area, from: number, to: number) => {
-    const t = get(a);
-    commit(a, [...t.slice(0, from), ...t.slice(to)], from);
+  const deleteRange = (s: Slot, from: number, to: number) => {
+    const t = get(s);
+    commit(s, [...t.slice(0, from), ...t.slice(to)], from);
+  };
+
+  // ── شاخه‌ها: افزودن / حذف / جابه‌جایی ──
+  function restructure(next: Draft[], activeSlot: Slot) {
+    setOk(false);
+    setBr(next);
+    setCaretState(endCarets(next));
+    anchor.current = {};
+    setSel(null);
+    setActive(activeSlot);
+    setTimeout(() => focusSlot(activeSlot), 0);
+  }
+  const addBranch = () => restructure([...br, { cond: [], calc: [] }], { b: br.length, a: "cond" });
+  const removeBranch = (i: number) => {
+    if (br.length <= 1) return;
+    const next = br.filter((_, k) => k !== i);
+    restructure(next, { b: Math.min(active.b === i ? i : active.b > i ? active.b - 1 : active.b, next.length - 1), a: active.a });
+  };
+  const moveBranch = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= br.length) return;
+    const next = [...br];
+    [next[i], next[j]] = [next[j], next[i]];
+    restructure(next, { b: active.b === i ? j : active.b === j ? i : active.b, a: active.a });
   };
 
   /** کپی/برش: انتخاب، وگرنه کل عبارت */
-  function doCopy(a: Area, cutIt: boolean) {
-    const t = get(a);
-    const hasSel = sel && sel.a === a;
+  function doCopy(s: Slot, cutIt: boolean) {
+    const t = get(s);
+    const hasSel = sel && sel.k === sk(s);
     const part = hasSel ? t.slice(sel!.from, sel!.to) : t;
     clipRef.current = [...part];
     navigator.clipboard?.writeText(part.join(" ")).catch(() => {});
     if (cutIt) {
-      if (hasSel) deleteRange(a, sel!.from, sel!.to);
-      else commit(a, [], 0);
+      if (hasSel) deleteRange(s, sel!.from, sel!.to);
+      else commit(s, [], 0);
     }
   }
-  async function paste(a: Area) {
+  async function paste(s: Slot) {
     let toks = clipRef.current;
     try {
       const t = await navigator.clipboard?.readText();
@@ -195,36 +236,37 @@ export function FormulaBuilder({
     } catch {
       /* clipboard در دسترس نیست؛ از آخرین کپی داخلی استفاده می‌شود */
     }
-    if (toks.length) insert(a, toks);
+    if (toks.length) insert(s, toks);
   }
 
   /** تایپ مستقیم در ناحیه‌ی عبارت (در نقطه‌ی مکان‌نما): ارقام (فارسی یا انگلیسی)، نقطه/«/»/«٫» اعشار، عملگرها، فلش‌ها، Backspace/Delete و میانبرهای Ctrl */
-  function typeKey(a: Area, e: React.KeyboardEvent) {
+  function typeKey(s: Slot, e: React.KeyboardEvent) {
+    const key0 = sk(s);
     if (e.ctrlKey || e.metaKey) {
       const key = e.key.toLowerCase();
       if (key === "a") {
         e.preventDefault();
-        const n = get(a).length;
-        anchor.current[a] = 0;
-        setSel(n ? { a, from: 0, to: n } : null);
-        setCaretState((p) => ({ ...p, [a]: n }));
+        const n = get(s).length;
+        anchor.current[key0] = 0;
+        setSel(n ? { k: key0, from: 0, to: n } : null);
+        setCaretState((p) => ({ ...p, [key0]: n }));
       } else if (key === "c" || key === "x") {
         e.preventDefault();
-        doCopy(a, key === "x");
+        doCopy(s, key === "x");
       } else if (key === "v") {
         // رویداد paste مرورگر (بدون نیاز به مجوز) ترجیح دارد؛ اگر نیامد، خواندن مستقیم clipboard
         pasteHandled.current = false;
         setTimeout(() => {
-          if (!pasteHandled.current) void paste(a);
+          if (!pasteHandled.current) void paste(s);
         }, 80);
       }
       return;
     }
     if (e.altKey) return;
     const k = normalizeDigits(e.key);
-    const t = get(a);
-    const c = caret[a];
-    const hasSel = !!sel && sel.a === a;
+    const t = get(s);
+    const c = caret[key0] ?? t.length;
+    const hasSel = !!sel && sel.k === key0;
     const before = hasSel ? undefined : t[c - 1];
     const beforeIsNum = before !== undefined && before !== "" && /^\d*\.?\d*$/.test(before);
 
@@ -232,42 +274,44 @@ export function FormulaBuilder({
       e.preventDefault();
       let target = k === "Home" ? 0 : k === "End" ? t.length : k === "ArrowLeft" ? c - 1 : c + 1;
       if (!e.shiftKey && hasSel) target = k === "ArrowLeft" ? sel!.from : k === "ArrowRight" ? sel!.to : target;
-      moveCaret(a, target, e.shiftKey);
+      moveCaret(s, target, e.shiftKey);
     } else if (/^[0-9]$/.test(k)) {
       e.preventDefault();
-      if (beforeIsNum) commit(a, [...t.slice(0, c - 1), before + k, ...t.slice(c)], c);
-      else insert(a, [k], false);
+      if (beforeIsNum) commit(s, [...t.slice(0, c - 1), before + k, ...t.slice(c)], c);
+      else insert(s, [k], false);
     } else if (k === "." || (k === "/" && beforeIsNum && !before!.includes("."))) {
       // «/» بعد از عدد = اعشار فارسی؛ بدون عدد قبلی عملگر تقسیم است
       e.preventDefault();
       if (beforeIsNum) {
-        if (!before!.includes(".")) commit(a, [...t.slice(0, c - 1), before + ".", ...t.slice(c)], c);
-      } else insert(a, ["0."], false);
+        if (!before!.includes(".")) commit(s, [...t.slice(0, c - 1), before + ".", ...t.slice(c)], c);
+      } else insert(s, ["0."], false);
     } else if (["+", "-", "*", "/", "(", ")", ","].includes(k)) {
       e.preventDefault();
-      insert(a, [k], false);
-    } else if (a === "cond" && [">", "<", "="].includes(k)) {
+      insert(s, [k], false);
+    } else if (s.a === "cond" && [">", "<", "="].includes(k)) {
       e.preventDefault();
       // > یا < بعد از = (یا برعکس) به عملگر دو نویسه‌ای ترکیب می‌شود
-      if (k === "=" && (before === ">" || before === "<")) commit(a, [...t.slice(0, c - 1), before + "=", ...t.slice(c)], c);
-      else if (k === ">" && before === "<") commit(a, [...t.slice(0, c - 1), "<>", ...t.slice(c)], c);
-      else insert(a, [k], false);
+      if (k === "=" && (before === ">" || before === "<")) commit(s, [...t.slice(0, c - 1), before + "=", ...t.slice(c)], c);
+      else if (k === ">" && before === "<") commit(s, [...t.slice(0, c - 1), "<>", ...t.slice(c)], c);
+      else insert(s, [k], false);
     } else if (k === "Backspace") {
       e.preventDefault();
-      if (hasSel) deleteRange(a, sel!.from, sel!.to);
-      else if (beforeIsNum && before!.length > 1) commit(a, [...t.slice(0, c - 1), before!.slice(0, -1), ...t.slice(c)], c);
-      else if (c > 0) deleteRange(a, c - 1, c);
+      if (hasSel) deleteRange(s, sel!.from, sel!.to);
+      else if (beforeIsNum && before!.length > 1) commit(s, [...t.slice(0, c - 1), before!.slice(0, -1), ...t.slice(c)], c);
+      else if (c > 0) deleteRange(s, c - 1, c);
     } else if (k === "Delete") {
       e.preventDefault();
-      if (hasSel) deleteRange(a, sel!.from, sel!.to);
-      else if (c < t.length) deleteRange(a, c, c + 1);
+      if (hasSel) deleteRange(s, sel!.from, sel!.to);
+      else if (c < t.length) deleteRange(s, c, c + 1);
     }
   }
+
+  const toBranches = (): FormulaBranch[] => br.map((x) => ({ conditionText: x.cond.join(" "), formulaText: x.calc.join(" ") }));
 
   async function check() {
     setErr(null);
     try {
-      const r = await api.post("/payroll-methods/validate", { basis, factorId: Number(factorId) || null, method, conditionText: cond.join(" "), formulaText: calc.join(" ") }, { silent: true } as any);
+      const r = await api.post("/payroll-methods/validate", { basis, factorId: Number(factorId) || null, method, branches: toBranches() }, { silent: true } as any);
       if (r.ok) setOk(true);
       else setErr(r.error);
     } catch (e) {
@@ -315,46 +359,48 @@ export function FormulaBuilder({
   const caretEl = (
     <span key="caret" style={{ display: "inline-block", width: 2, height: 20, background: "var(--primary, #4f46e5)", animation: "fbblink 1s steps(1) infinite", alignSelf: "center" }} />
   );
-  const chipsArea = (a: Area, title: string, ops: string[], logic: boolean) => {
-    const toks = get(a);
-    const showCaret = active === a;
+  const chipsArea = (s: Slot, title: string, ops: string[], logic: boolean, placeholder: string) => {
+    const k = sk(s);
+    const toks = get(s);
+    const isActive = active.b === s.b && active.a === s.a;
+    const c0 = caret[k] ?? toks.length;
     const noFocusSteal = (e: React.MouseEvent) => e.preventDefault(); // دکمه‌ها فوکوس را از ناحیه نمی‌برند
     return (
-      <div style={{ marginBottom: 10 }}>
+      <div style={{ marginBottom: 8 }}>
         <div dir="ltr" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
           <b>{title}</b>
           {ops.map((o) => (
-            <button key={o} type="button" className="btn secondary" style={{ padding: "1px 8px" }} onMouseDown={noFocusSteal} onClick={() => { setActive(a); insert(a, [o]); }}>
+            <button key={o} type="button" className="btn secondary" style={{ padding: "1px 8px" }} onMouseDown={noFocusSteal} onClick={() => { setActive(s); insert(s, [o]); }}>
               {chipText(o).text}
             </button>
           ))}
           {logic && (
             <>
-              <button type="button" className="btn secondary" style={{ padding: "1px 8px" }} onMouseDown={noFocusSteal} onClick={() => { setActive(a); insert(a, ["AND"]); }}>و</button>
-              <button type="button" className="btn secondary" style={{ padding: "1px 8px" }} onMouseDown={noFocusSteal} onClick={() => { setActive(a); insert(a, ["OR"]); }}>یا</button>
+              <button type="button" className="btn secondary" style={{ padding: "1px 8px" }} onMouseDown={noFocusSteal} onClick={() => { setActive(s); insert(s, ["AND"]); }}>و</button>
+              <button type="button" className="btn secondary" style={{ padding: "1px 8px" }} onMouseDown={noFocusSteal} onClick={() => { setActive(s); insert(s, ["OR"]); }}>یا</button>
             </>
           )}
           <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-            <button type="button" className="link-btn" title="کپی (انتخاب یا کل عبارت)" onMouseDown={noFocusSteal} onClick={() => doCopy(a, false)}>کپی</button>
-            <button type="button" className="link-btn" title="چسباندن در مکان‌نما" onMouseDown={noFocusSteal} onClick={() => { setActive(a); void paste(a); }}>چسباندن</button>
-            <button type="button" className="link-btn" title="حذف قبل از مکان‌نما" onMouseDown={noFocusSteal} onClick={() => { setActive(a); if (sel && sel.a === a) deleteRange(a, sel.from, sel.to); else if (caret[a] > 0) deleteRange(a, caret[a] - 1, caret[a]); focusArea(a); }}>⌫</button>
-            <button type="button" className="link-btn" title="پاک کردن" onMouseDown={noFocusSteal} onClick={() => { commit(a, [], 0); focusArea(a); }}>پاک کردن</button>
+            <button type="button" className="link-btn" title="کپی (انتخاب یا کل عبارت)" onMouseDown={noFocusSteal} onClick={() => doCopy(s, false)}>کپی</button>
+            <button type="button" className="link-btn" title="چسباندن در مکان‌نما" onMouseDown={noFocusSteal} onClick={() => { setActive(s); void paste(s); }}>چسباندن</button>
+            <button type="button" className="link-btn" title="حذف قبل از مکان‌نما" onMouseDown={noFocusSteal} onClick={() => { setActive(s); if (sel && sel.k === k) deleteRange(s, sel.from, sel.to); else if (c0 > 0) deleteRange(s, c0 - 1, c0); focusSlot(s); }}>⌫</button>
+            <button type="button" className="link-btn" title="پاک کردن" onMouseDown={noFocusSteal} onClick={() => { commit(s, [], 0); focusSlot(s); }}>پاک کردن</button>
           </span>
         </div>
         <div
-          ref={(el) => { areaRefs.current[a] = el; }}
+          ref={(el) => { areaRefs.current[k] = el; }}
           onClick={() => {
             // کلیک روی فضای خالی: مکان‌نما انتهای عبارت
-            setActive(a);
-            moveCaret(a, toks.length);
-            focusArea(a);
+            setActive(s);
+            moveCaret(s, toks.length);
+            focusSlot(s);
           }}
-          onFocus={() => setActive(a)}
+          onFocus={() => setActive(s)}
           tabIndex={0}
-          onKeyDown={(e) => typeKey(a, e)}
+          onKeyDown={(e) => typeKey(s, e)}
           onCopy={(e) => {
             e.preventDefault();
-            const part = sel && sel.a === a ? toks.slice(sel.from, sel.to) : toks;
+            const part = sel && sel.k === k ? toks.slice(sel.from, sel.to) : toks;
             clipRef.current = [...part];
             e.clipboardData.setData("text/plain", part.join(" "));
           }}
@@ -363,13 +409,13 @@ export function FormulaBuilder({
             pasteHandled.current = true;
             const text = e.clipboardData.getData("text");
             const pasted = text && text.trim() ? tokenize(text) : clipRef.current;
-            if (pasted.length) insert(a, pasted, false);
+            if (pasted.length) insert(s, pasted, false);
           }}
           dir="ltr"
           style={{
-            minHeight: 62,
+            minHeight: 46,
             textAlign: "left",
-            border: `2px solid ${active === a ? "var(--primary, #4f46e5)" : "var(--line)"}`,
+            border: `2px solid ${isActive ? "var(--primary, #4f46e5)" : "var(--line)"}`,
             borderRadius: 8,
             padding: 6,
             display: "flex",
@@ -380,7 +426,7 @@ export function FormulaBuilder({
             cursor: "text",
           }}
         >
-          {toks.length === 0 && <span dir="rtl" style={{ opacity: 0.45 }}>{a === "cond" ? "بدون شرط (همیشه برقرار)" : "عبارت محاسباتی را از پایین بسازید"}</span>}
+          {toks.length === 0 && <span dir="rtl" style={{ opacity: 0.45 }}>{placeholder}</span>}
           {toks.map((t, i) => {
             const c = chipText(t);
             const base =
@@ -391,42 +437,63 @@ export function FormulaBuilder({
                 : c.kind === "num"
                 ? { background: "#0f766e", color: "#fff", borderRadius: 14, padding: "2px 10px" }
                 : { padding: "2px 4px", fontWeight: 700 };
-            const selected = !!sel && sel.a === a && i >= sel.from && i < sel.to;
+            const selected = !!sel && sel.k === k && i >= sel.from && i < sel.to;
             return (
               <Fragment key={i}>
-              {showCaret && caret[a] === i ? caretEl : null}
-              <span
-                title="کلیک: مکان‌نما قبل/بعد از این مورد — Shift+کلیک: انتخاب بازه — دوبار کلیک: حذف"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setActive(a);
-                  const r = e.currentTarget.getBoundingClientRect();
-                  moveCaret(a, e.clientX < r.left + r.width / 2 ? i : i + 1, e.shiftKey);
-                  focusArea(a);
-                }}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  deleteRange(a, i, i + 1);
-                }}
-                style={{ ...base, fontSize: 13, direction: c.kind === "ref" || c.kind === "fn" ? "rtl" : "ltr", unicodeBidi: "isolate", cursor: "text", outline: selected ? "2px solid #f59e0b" : undefined, background: selected && c.kind === "op" ? "rgba(245,158,11,.25)" : (base as any).background }}
-              >
-                {c.text}
-              </span>
+                {isActive && c0 === i ? caretEl : null}
+                <span
+                  title="کلیک: مکان‌نما قبل/بعد از این مورد — Shift+کلیک: انتخاب بازه — دوبار کلیک: حذف"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActive(s);
+                    const r = e.currentTarget.getBoundingClientRect();
+                    moveCaret(s, e.clientX < r.left + r.width / 2 ? i : i + 1, e.shiftKey);
+                    focusSlot(s);
+                  }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    deleteRange(s, i, i + 1);
+                  }}
+                  style={{ ...base, fontSize: 13, direction: c.kind === "ref" || c.kind === "fn" ? "rtl" : "ltr", unicodeBidi: "isolate", cursor: "text", outline: selected ? "2px solid #f59e0b" : undefined, background: selected && c.kind === "op" ? "rgba(245,158,11,.25)" : (base as any).background }}
+                >
+                  {c.text}
+                </span>
               </Fragment>
             );
           })}
-          {showCaret && caret[a] >= toks.length ? caretEl : null}
+          {isActive && c0 >= toks.length ? caretEl : null}
         </div>
       </div>
     );
   };
 
+  const multi = br.length > 1;
+
   return (
     <Modal title={factorTitle ? `فرمول عامل «${factorTitle}»` : "فرمول"} onClose={onClose} wide>
       <style>{"@keyframes fbblink{50%{opacity:0}}"}</style>
       <ErrorToast message={err} />
-      {chipsArea("cond", "عبارت شرطی", OPS_COND, true)}
-      {chipsArea("calc", "عبارت محاسباتی", OPS_CALC, false)}
+
+      {br.map((_, i) => (
+        <div key={i} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 10, marginBottom: 10 }}>
+          {multi && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <b>{i === 0 ? "اگر" : !br[i].cond.length ? "در غیر این صورت" : "وگرنه اگر"} — شاخه‌ی {i + 1}</b>
+              <span style={{ marginInlineStart: "auto", display: "flex", gap: 8 }}>
+                <button type="button" className="link-btn" disabled={i === 0} onClick={() => moveBranch(i, -1)} title="بالاتر">↑</button>
+                <button type="button" className="link-btn" disabled={i === br.length - 1} onClick={() => moveBranch(i, 1)} title="پایین‌تر">↓</button>
+                <button type="button" className="link-btn" onClick={() => removeBranch(i)} title="حذف این شاخه">حذف شاخه</button>
+              </span>
+            </div>
+          )}
+          {chipsArea({ b: i, a: "cond" }, "عبارت شرطی", OPS_COND, true, i === br.length - 1 ? "بدون شرط (در غیر این صورت / همیشه برقرار)" : "شرط این شاخه را بسازید")}
+          {chipsArea({ b: i, a: "calc" }, "عبارت محاسباتی", OPS_CALC, false, "عبارت محاسباتی را از پایین بسازید")}
+        </div>
+      ))}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+        <button type="button" className="btn secondary" onClick={addBranch}>+ افزودن شرط بعدی</button>
+        <span style={{ opacity: 0.65, fontSize: 12 }}>از بالا به پایین اولین شرطِ برقرار اجرا می‌شود؛ شاخه‌ی بدون شرط فقط آخرین شاخه می‌تواند باشد؛ اگر هیچ شرطی برقرار نباشد مقدار عامل صفر است.</span>
+      </div>
 
       <div style={{ display: "flex", gap: 14, borderBottom: "1px solid var(--line)", marginBottom: 8 }}>
         {(
@@ -445,7 +512,9 @@ export function FormulaBuilder({
             {t}
           </button>
         ))}
-        <span style={{ marginInlineStart: "auto", opacity: 0.7, fontSize: 12 }}>درج در: {active === "cond" ? "عبارت شرطی" : "عبارت محاسباتی"}</span>
+        <span style={{ marginInlineStart: "auto", opacity: 0.7, fontSize: 12 }}>
+          درج در: {multi ? `شاخه‌ی ${active.b + 1} — ` : ""}{active.a === "cond" ? "عبارت شرطی" : "عبارت محاسباتی"}
+        </span>
       </div>
 
       {tab === "factors" && (
@@ -506,7 +575,7 @@ export function FormulaBuilder({
       )}
 
       <div className="actions" style={{ marginTop: 12 }}>
-        <button type="button" className="btn" onClick={() => onSave(cond.join(" "), calc.join(" "))}>تایید</button>
+        <button type="button" className="btn" onClick={() => onSave(toBranches())}>تایید</button>
         <button type="button" className="btn secondary" onClick={check}>بررسی</button>
         <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
         {ok && <span style={{ color: "#0a8f5a" }}>فرمول معتبر است</span>}
