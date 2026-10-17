@@ -107,9 +107,9 @@ function MethodList() {
   );
 }
 
-function MonthYear({ year, month, onChange, disabled }: { year: number; month: number; onChange: (y: number, m: number) => void; disabled?: boolean }) {
-  // فقط ماه‌های تعریف‌شده در «تقویم کاری»؛ مقدار قدیمیِ بیرون از تقویم برای خواندن نمایش داده می‌شود (autoFix خاموش: رکورد موجود دست نمی‌خورد)
-  return <WorkMonthPicker year={year} month={month} disabled={disabled} autoFix={false} onChange={onChange} />;
+function MonthYear({ year, month, onChange, disabled, autoFix }: { year: number; month: number; onChange: (y: number, m: number) => void; disabled?: boolean; autoFix?: boolean }) {
+  // فقط ماه‌های تعریف‌شده در «تقویم کاری». روش جدید: اگر ماه پیش‌فرض در تقویم نبود خودکار به اولین ماه تقویم می‌رود؛ رکورد موجود دست نمی‌خورد
+  return <WorkMonthPicker year={year} month={month} disabled={disabled} autoFix={!!autoFix} onChange={onChange} />;
 }
 
 function MethodForm({ editId }: { editId?: number }) {
@@ -250,11 +250,11 @@ function MethodForm({ editId }: { editId?: number }) {
           </div>
           <div className="form-field">
             <label>ماه صدور<RequiredMark /></label>
-            <MonthYear year={form.issueYear} month={form.issueMonth} onChange={(y, m) => setForm({ ...form, issueYear: y, issueMonth: m })} />
+            <MonthYear autoFix={!editId} year={form.issueYear} month={form.issueMonth} onChange={(y, m) => setForm({ ...form, issueYear: y, issueMonth: m })} />
           </div>
           <div className="form-field">
             <label>ماه اجرا<RequiredMark /> <FieldHint label="ماه اجرا" text="از این ماه به بعد این روش در محاسبه به کار می‌رود (تا رکورد بعدی همین عامل)" /></label>
-            <MonthYear year={form.execYear} month={form.execMonth} onChange={(y, m) => setForm({ ...form, execYear: y, execMonth: m })} />
+            <MonthYear autoFix={!editId} year={form.execYear} month={form.execMonth} onChange={(y, m) => setForm({ ...form, execYear: y, execMonth: m })} />
           </div>
           {form.basis === "payroll" && form.method === "FIXED" && (
             <div className="form-field">

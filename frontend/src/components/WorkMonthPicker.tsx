@@ -75,11 +75,11 @@ export function WorkMonthPicker({
         title="سال (از تقویم کاری)"
       >
         {!y && <option value="">سال</option>}
-        {yearOptions.map((v) => <option key={v} value={v}>{toFaDigits(String(v))}</option>)}
+        {yearOptions.map((v) => <option key={v} value={v}>{toFaDigits(String(v))}{years.includes(v) ? "" : " (بدون تقویم)"}</option>)}
       </select>
       <select disabled={disabled} value={m || ""} onChange={(e) => onChange(y, Number(e.target.value))} style={{ flex: 1 }} title="ماه (از تقویم کاری)">
         {!m && <option value="">ماه</option>}
-        {monthOptions.map((v) => <option key={v} value={v}>{MONTHS_FA[v - 1]}</option>)}
+        {monthOptions.map((v) => <option key={v} value={v}>{MONTHS_FA[v - 1]}{monthsOfYear.includes(v) ? "" : " (بدون تقویم)"}</option>)}
       </select>
     </div>
   );
