@@ -5010,7 +5010,6 @@ model PayrollComponent {
   /// طبقه‌ی عامل (پرداختی/کسر/هزینه کارفرما/اطلاعاتی)؛ با زمان عوض نمی‌شود، پس روی خود عامل است نه روش محاسبه
   kind        PayrollComponentKind
   description String?
-  isSystem    Boolean               @default(false)
   isActive    Boolean               @default(true)
   createdAt   DateTime              @default(now())
   /// نوع محاسبه‌ای که عامل در آن می‌آید (حقوق ماهانه، عیدی، ذخیره سنوات، …)؛ هر عامل فقط به یک نوع تعلق دارد

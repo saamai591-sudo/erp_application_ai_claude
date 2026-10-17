@@ -23,7 +23,6 @@ interface Comp {
   id: number;
   title: string;
   description: string | null;
-  isSystem: boolean;
   isActive: boolean;
   method: string | null;
   kind: string;
@@ -89,7 +88,6 @@ function CompList() {
           { header: "عنوان", ...s((r) => r.title) },
           { header: "نوع محاسبه", ...s((r) => r.calcTypeTitle), width: "150px" },
           { header: "طبقه", ...s((r) => (r.kind ? KIND_FA[r.kind] : "—")), width: "140px" },
-          { header: "سیستمی", ...s((r) => (r.isSystem ? "بله" : "")), width: "80px" },
           { header: "فعال", ...s((r) => (r.isActive ? "بله" : "خیر")), width: "70px" },
         ]}
         rows={items}
@@ -107,7 +105,6 @@ function CompForm({ editId }: { editId?: number }) {
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_FORM);
-  const [isSystem, setIsSystem] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const { flash } = useSavedFlash();
@@ -124,7 +121,6 @@ function CompForm({ editId }: { editId?: number }) {
     api.get("/payroll-components").then((rows: Comp[]) => {
       const c = rows.find((r) => r.id === editId);
       if (c) {
-        setIsSystem(c.isSystem);
         if (!hasPersistedState(cacheKey)) setForm({ title: c.title, kind: c.kind, calcTypeId: String(c.calcTypeId), description: c.description ?? "", isActive: c.isActive });
       }
       setLoaded(true);
@@ -170,7 +166,7 @@ function CompForm({ editId }: { editId?: number }) {
       formId="payroll-comp-form"
       closePath="/payroll-components"
       newPath="/payroll-components/new"
-      onDelete={editId && !isSystem ? handleDelete : undefined}
+      onDelete={editId ? handleDelete : undefined}
     >
       <form id="payroll-comp-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
@@ -193,7 +189,7 @@ function CompForm({ editId }: { editId?: number }) {
               {Object.entries(KIND_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </div>
-          {editId && !isSystem && (
+          {editId && (
             <div className="form-field">
               <label className="checkbox-row">
                 <input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} />

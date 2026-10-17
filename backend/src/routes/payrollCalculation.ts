@@ -97,13 +97,12 @@ router.delete("/payroll-calc-types/:id", can(`${F_TYPE}.delete`), async (req, re
 
 // ════════════ عامل حقوق (هویت) ════════════
 router.get("/payroll-components", can(`${F_COMP}.view`), async (_req, res) => {
-  const rows = await prisma.payrollComponent.findMany({ orderBy: [{ isSystem: "desc" }, { id: "asc" }], include: { methods: { orderBy: { effectiveDate: "desc" }, take: 1 }, calcType: { select: { title: true } } } });
+  const rows = await prisma.payrollComponent.findMany({ orderBy: { id: "asc" }, include: { methods: { orderBy: { effectiveDate: "desc" }, take: 1 }, calcType: { select: { title: true } } } });
   res.json(
     rows.map((c) => ({
       id: c.id,
       title: c.title,
       description: c.description,
-      isSystem: c.isSystem,
       isActive: c.isActive,
       method: c.methods[0]?.method ?? null,
       kind: c.kind,
@@ -150,7 +149,7 @@ router.put("/payroll-components/:id", can(`${F_COMP}.edit`), async (req, res) =>
       if (users.length) throw new PayrollCalcError("فرمول عامل‌های دیگر به این عامل ارجاع دارد؛ نوع محاسبه‌اش قابل تغییر نیست");
       calcTypeId = nt.id;
     }
-    await prisma.payrollComponent.update({ where: { id }, data: { title, kind: b.kind ?? undefined, calcTypeId, description: str(b.description), isActive: c.isSystem ? undefined : b.isActive } });
+    await prisma.payrollComponent.update({ where: { id }, data: { title, kind: b.kind ?? undefined, calcTypeId, description: str(b.description), isActive: b.isActive } });
     res.json({ ok: true });
   } catch (e) {
     fail(res, e, "خطا در ویرایش عامل");
@@ -161,7 +160,6 @@ router.delete("/payroll-components/:id", can(`${F_COMP}.delete`), async (req, re
   const id = Number(req.params.id);
   const c = await prisma.payrollComponent.findUnique({ where: { id } });
   if (!c) return res.status(404).json({ error: "عامل یافت نشد" });
-  if (c.isSystem) return res.status(400).json({ error: "عامل سیستمی قابل حذف نیست (می‌توانید روش محاسبه‌ی آن را ویرایش کنید)" });
   if (await prisma.payrollSlipLine.count({ where: { source: "PAYROLL_COMPONENT", refId: id } })) {
     return res.status(400).json({ error: "این عامل در فیش‌های محاسبه‌شده استفاده شده و قابل حذف نیست" });
   }
