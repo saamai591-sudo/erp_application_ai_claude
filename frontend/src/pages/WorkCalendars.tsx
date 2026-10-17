@@ -7,7 +7,6 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
-import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { toFaDigits } from "../lib/formatAmount";
@@ -16,7 +15,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { MONTHS_FA } from "../lib/payrollLabels";
 
-// منابع انسانی › تنظیمات › تقویم کاری: برای هر سال شمسی ساعات کاری روزانه و ۱۲ ماه (روز/ساعت استاندارد و مجاز + بازه‌ی تردد) تعریف می‌شود.
+// منابع انسانی › تنظیمات › تقویم کاری: برای هر سال شمسی ساعات کاری روزانه و ۱۲ ماه (روز/ساعت استاندارد و مجاز) تعریف می‌شود؛ بازه‌ی تردد هر ماه فقط در بک‌اند نگهداری می‌شود و نمایش داده نمی‌شود.
 // ماه در فرم‌های حقوق (روش محاسبه، پارامتر مبنا، ورود اطلاعات، محاسبه) فقط از همین تقویم انتخاب می‌شود.
 
 interface ListRow {
@@ -236,7 +235,7 @@ function CalendarForm({ editId }: { editId?: number }) {
             </div>
           )}
         </div>
-        {editId && <p style={{ opacity: 0.75, fontSize: 12 }}>سال و ساعات روزانه بعد از ثبت قابل تغییر نیست. روز/ساعت مجاز و بازه‌ی تردد فقط برای ماه‌های استفاده‌نشده قابل ویرایش است.</p>}
+        {editId && <p style={{ opacity: 0.75, fontSize: 12 }}>سال و ساعات روزانه بعد از ثبت قابل تغییر نیست. روز/ساعت مجاز فقط برای ماه‌های استفاده‌نشده قابل ویرایش است.</p>}
 
         {rows && (
           <div style={{ overflowX: "auto", marginTop: 12 }}>
@@ -251,8 +250,6 @@ function CalendarForm({ editId }: { editId?: number }) {
                   <th>روزهای مجاز</th>
                   <th>ساعات استاندارد</th>
                   <th>ساعات مجاز</th>
-                  <th>شروع تردد</th>
-                  <th>پایان تردد</th>
                 </tr>
               </thead>
               <tbody>
@@ -284,8 +281,6 @@ function CalendarForm({ editId }: { editId?: number }) {
                       </td>
                       <td>{toFaDigits(minutesToHm(r.standardMinutes))}</td>
                       <td><HmInput minutes={r.allowedMinutes} disabled={dis} onChange={(m) => patch(r.month, { allowedMinutes: m })} /></td>
-                      <td><JalaliDatePicker value={r.trafficStartDate} disabled={dis} onChange={(v) => patch(r.month, { trafficStartDate: v })} /></td>
-                      <td><JalaliDatePicker value={r.trafficEndDate} disabled={dis} onChange={(v) => patch(r.month, { trafficEndDate: v })} /></td>
                     </tr>
                   );
                 })}
