@@ -7,6 +7,7 @@ import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
+import { TimeInput, minutesToMask, maskToMinutes } from "../components/TimeInput";
 import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { toFaDigits } from "../lib/formatAmount";
@@ -105,24 +106,21 @@ function CalendarList() {
   );
 }
 
-/** ورودی ساعت:دقیقه با متن محلی تا نوشتن نیمه‌کاره مختل نشود؛ فقط مقدار معتبر به بیرون می‌رود */
-function HmInput({ minutes, onChange, disabled, width = 90 }: { minutes: number; onChange: (m: number) => void; disabled?: boolean; width?: number }) {
-  const [text, setText] = useState(minutesToHm(minutes));
-  useEffect(() => setText(minutesToHm(minutes)), [minutes]);
+/** ساعت مجاز ماه: ماسک hhh:mm (کاربر فقط رقم می‌زند)؛ متن ناقص محلی می‌ماند و فقط مقدار معتبر به بیرون می‌رود */
+function HmInput({ minutes, onChange, disabled }: { minutes: number; onChange: (m: number) => void; disabled?: boolean }) {
+  const [text, setText] = useState(minutesToMask(minutes));
+  useEffect(() => setText(minutesToMask(minutes)), [minutes]);
   return (
-    <input
-      dir="ltr"
-      inputMode="numeric"
-      disabled={disabled}
+    <TimeInput
       value={text}
-      style={{ width, textAlign: "center" }}
-      onChange={(e) => {
-        const t = toLatin(e.target.value).replace(/[^0-9:]/g, "");
+      maxHourDigits={3}
+      disabled={disabled}
+      onChange={(t) => {
         setText(t);
-        const m = hmToMinutes(t);
+        const m = maskToMinutes(t);
         if (m !== null) onChange(m);
       }}
-      onBlur={() => setText(minutesToHm(minutes))}
+      onBlur={() => setText(minutesToMask(minutes))}
     />
   );
 }
@@ -142,7 +140,7 @@ function CalendarForm({ editId }: { editId?: number }) {
 
   async function load(id: number) {
     const c = await api.get(`/work-calendars/${id}`);
-    setForm({ year: String(c.year), dailyTime: minutesToHm(c.dailyMinutes) });
+    setForm({ year: String(c.year), dailyTime: minutesToMask(c.dailyMinutes) });
     setDailyMinutes(c.dailyMinutes);
     setRows(c.months);
   }
@@ -218,14 +216,7 @@ function CalendarForm({ editId }: { editId?: number }) {
           </div>
           <div className="form-field">
             <label>ساعات روزانه<RequiredMark /></label>
-            <input
-              dir="ltr"
-              inputMode="numeric"
-              disabled={!!editId}
-              placeholder="07:20"
-              value={form.dailyTime}
-              onChange={(e) => setForm({ ...form, dailyTime: toLatin(e.target.value).replace(/[^0-9:]/g, "") })}
-            />
+            <TimeInput value={form.dailyTime} disabled={!!editId} width={110} placeholder="07:20" onChange={(t) => setForm({ ...form, dailyTime: t })} />
           </div>
           {!editId && (
             <div className="form-field" style={{ alignSelf: "end" }}>

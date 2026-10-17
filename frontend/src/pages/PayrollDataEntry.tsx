@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
 import { InfoHint } from "../components/InfoHint";
 import { AmountInput } from "../components/AmountInput";
+import { TimeInput, maskHm } from "../components/TimeInput";
 import { toFaDigits } from "../lib/formatAmount";
 import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
@@ -39,35 +40,18 @@ interface Data {
 function toCell(v: string | null | undefined, valueType: string): string {
   if (v === null || v === undefined) return "";
   const n = Number(v);
-  if (valueType === "TIME") return hoursToHm(n).padStart(4, "0");
+  if (valueType === "TIME") {
+    const [h, m] = hoursToHm(n).split(":");
+    return maskHm(String(Number(h) * 100 + Number(m)));
+  }
   return String(n);
 }
 
 const toLatin = (s: string) => s.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))).replace(/٫/g, ".");
 
-/** سلول ساعت:دقیقه با ماسک hhh:mm */
+/** سلول ساعت:دقیقه با ماسک hhh:mm؛ کاربر فقط رقم می‌زند و «:» خودکار می‌آید */
 function TimeCell({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return (
-    <input
-      dir="ltr"
-      inputMode="numeric"
-      placeholder="۰۰:۰۰"
-      value={value}
-      style={{ width: 90, textAlign: "center" }}
-      onChange={(e) => {
-        // فقط رقم و یک «:»؛ دقیقه حداکثر دو رقم
-        let t = toLatin(e.target.value).replace(/[^0-9:]/g, "");
-        const i = t.indexOf(":");
-        if (i >= 0) t = t.slice(0, i + 1) + t.slice(i + 1).replace(/:/g, "").slice(0, 2);
-        onChange(t);
-      }}
-      onBlur={() => {
-        // «10» → «10:00»، «10:5» → «10:05»
-        const m = /^(\d+)(?::(\d{0,2}))?$/.exec(value);
-        if (m) onChange(`${m[1]}:${(m[2] ?? "").padEnd(2, "0")}`);
-      }}
-    />
-  );
+  return <TimeInput value={value} maxHourDigits={3} onChange={onChange} />;
 }
 
 export default function PayrollDataEntry() {
