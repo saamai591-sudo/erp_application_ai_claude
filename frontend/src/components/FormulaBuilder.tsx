@@ -129,10 +129,7 @@ export function FormulaBuilder({
       }
       for (const b of pal.baseInfo) m.set(`B:${b.key}`, b.title);
       for (const s of pal.classTotals) m.set(`S:${s.key}`, s.title);
-      for (const p of pal.params) {
-        m.set(`P:${p.key}`, p.title);
-        if (p.type === "PERCENT") m.set(`P:${p.key}:RATIO`, `${p.title} — ضریب`);
-      }
+      for (const p of pal.params) m.set(`P:${p.key}`, p.title);
       for (const p of pal.bases ?? []) m.set(`P:${p.key}`, p.title);
     }
     return m;
@@ -577,22 +574,11 @@ export function FormulaBuilder({
             <button type="button" className="btn secondary" disabled={!num || num === "." || num.endsWith(".")} onMouseDown={(e) => e.preventDefault()} onClick={() => { push(num); setNum(""); }}>افزودن عدد</button>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 6 }}>
-            {pal?.params.filter((p) => p.type !== "BRACKETS").map((p) =>
-              p.type === "PERCENT" ? (
-                <span key={p.key} style={{ display: "contents" }}>
-                  <button type="button" className="btn secondary" title="عدد خام؛ ۷٪ ← ۷" onMouseDown={(e) => e.preventDefault()} onClick={() => push(`[P:${p.key}]`)}>
-                    {p.title} <span style={{ opacity: 0.6 }}>(٪)</span>
-                  </button>
-                  <button type="button" className="btn secondary" title="ضریب؛ ۷٪ ← ۰٫۰۷ (بدون نیاز به تقسیم بر ۱۰۰)" onMouseDown={(e) => e.preventDefault()} onClick={() => push(`[P:${p.key}:RATIO]`)}>
-                    {p.title} — ضریب <span style={{ opacity: 0.6 }}>(÷۱۰۰)</span>
-                  </button>
-                </span>
-              ) : (
-                <button key={p.key} type="button" className="btn secondary" onMouseDown={(e) => e.preventDefault()} onClick={() => push(`[P:${p.key}]`)}>
-                  {p.title}
-                </button>
-              )
-            )}
+            {pal?.params.filter((p) => p.type !== "BRACKETS").map((p) => (
+              <button key={p.key} type="button" className="btn secondary" onMouseDown={(e) => e.preventDefault()} onClick={() => push(`[P:${p.key}]`)}>
+                {p.title}
+              </button>
+            ))}
           </div>
         </div>
       )}
