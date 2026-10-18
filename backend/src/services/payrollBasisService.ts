@@ -65,7 +65,6 @@ interface MethodBrief {
   payrollComponentId: number | null;
   method: string;
   valueType: string;
-  fixedValue: any;
   execStart: Date;
   execYear: number;
   execMonth: number;
@@ -83,7 +82,6 @@ async function loadMethods(): Promise<MethodBrief[]> {
       payrollComponentId: true,
       method: true,
       valueType: true,
-      fixedValue: true,
       execCalendarMonth: { select: { id: true, year: true, month: true, startDate: true } },
       bases: { select: { parameterId: true, effective: true } },
     },
@@ -95,7 +93,6 @@ async function loadMethods(): Promise<MethodBrief[]> {
     payrollComponentId: m.payrollComponentId,
     method: m.method,
     valueType: m.valueType,
-    fixedValue: m.fixedValue,
     execStart: m.execCalendarMonth.startDate,
     execYear: m.execCalendarMonth.year,
     execMonth: m.execCalendarMonth.month,
@@ -259,7 +256,6 @@ export async function bulkChangeMembers(parameterId: number, action: "add" | "re
             ...(dc ? { decreeComponentId: id } : { payrollComponentId: id }),
             method: src.method,
             valueType: src.valueType,
-            fixedValue: src.fixedValue,
             isProvisional: false,
             issueCalendarMonthId: m.id,
             execCalendarMonthId: m.id,

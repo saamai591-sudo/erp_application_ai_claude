@@ -36,7 +36,7 @@ const str = (v: unknown) => {
   return t || null;
 };
 const KINDS = ["WORK", "EARNING", "DEDUCTION", "EMPLOYER_COST", "INFO"];
-const METHODS = ["CALCULATED", "FIXED", "MANUAL", "ATTENDANCE", "TREASURY"];
+const METHODS = ["CALCULATED", "MANUAL", "ATTENDANCE", "TREASURY"];
 const VALUE_TYPES = ["NUMBER", "TIME", "DAYS", "AMOUNT"];
 
 function fail(res: Response, e: any, fallback: string) {
@@ -201,7 +201,6 @@ const shapeMethod = (m: any, today: Date) => ({
   issueMonth: m.issueCalendarMonth.month,
   execYear: execYm(m).year,
   execMonth: execYm(m).month,
-  fixedValue: m.fixedValue === null ? null : m.fixedValue.toString(),
   /** شاخه‌های «شرط ← فرمول» به ترتیب اولویت (روش غیرمحاسباتی: خالی) */
   branches: (m.branches ?? []).map((b: any) => ({ conditionText: b.conditionText ?? "", formulaText: b.formulaText })),
   isProvisional: m.isProvisional,
@@ -268,7 +267,6 @@ router.get("/payroll-methods/palette", can(`${F_METH}.view`), async (req, res) =
       { method: "MANUAL", title: "عامل ورود دستی", classes: byMethod("MANUAL"), variants: ["VALUE", "YTD_PREV", "ALL_PREV", "PREV"].map((k) => ({ key: k, title: FACTOR_VARIANTS[k] })) },
       { method: "ATTENDANCE", title: "عامل ورود سیستمی تردد", classes: byMethod("ATTENDANCE"), variants: ["VALUE", "YTD_PREV", "ALL_PREV", "PREV"].map((k) => ({ key: k, title: FACTOR_VARIANTS[k] })) },
       { method: "TREASURY", title: "عامل ورود سیستمی خزانه", classes: byMethod("TREASURY"), variants: ["VALUE", "YTD_PREV", "ALL_PREV", "PREV"].map((k) => ({ key: k, title: FACTOR_VARIANTS[k] })) },
-      { method: "FIXED", title: "عامل مقدار ثابت", classes: byMethod("FIXED"), variants: ["VALUE", "YTD_PREV", "ALL_PREV", "PREV"].map((k) => ({ key: k, title: FACTOR_VARIANTS[k] })) },
     ],
     baseInfo: Object.entries(BASE_INFO).map(([k, t]) => ({ key: k, title: t })),
     classTotals: [...KINDS.map((k) => ({ key: k, title: `جمع ${KIND_FA[k]}` })), { key: LOAN_SUM_KEY, title: LOAN_SUM_LABEL }],
@@ -355,11 +353,6 @@ async function methodData(b: any, existingId: number | null) {
   if (!issueRow) throw new PayrollCalcError((await missingMonthMessage(iy, im))!);
   const execRow = await getCalendarMonth(ey, em);
   if (!execRow) throw new PayrollCalcError((await missingMonthMessage(ey, em))!);
-  let fixedValue: number | null = null;
-  if (method === "FIXED") {
-    fixedValue = Number(b.fixedValue);
-    if (b.fixedValue === undefined || b.fixedValue === null || b.fixedValue === "" || !isFinite(fixedValue)) throw new PayrollCalcError("مقدار ثابت الزامی است");
-  }
   const isCalc = method === "CALCULATED";
   const branches = isCalc ? cleanBranches(b.branches) : [];
   // مبناهای مؤثر: عامل حکم هر مبنا؛ عامل حقوق فقط «پرداختی» و فقط مبنای منبع «محاسبات» (مبناهای فعلی همین رکورد حتی اگر غیرفعال شده باشند می‌مانند)
@@ -376,7 +369,6 @@ async function methodData(b: any, existingId: number | null) {
       valueType: b.valueType,
       issueCalendarMonthId: issueRow.id,
       execCalendarMonthId: execRow.id,
-      fixedValue,
       isProvisional: false,
     },
     branches,

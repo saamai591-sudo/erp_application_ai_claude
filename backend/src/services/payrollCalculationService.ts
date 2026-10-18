@@ -39,11 +39,10 @@ import { computeLoanMonth, loanChainMessage, storedLoanSum, type LoanMonthItem }
 export class PayrollCalcError extends Error {}
 
 type Kind = "WORK" | "EARNING" | "DEDUCTION" | "EMPLOYER_COST" | "INFO";
-type Method = "CALCULATED" | "FIXED" | "MANUAL" | "ATTENDANCE" | "TREASURY";
+type Method = "CALCULATED" | "MANUAL" | "ATTENDANCE" | "TREASURY";
 
 export const METHOD_FA: Record<string, string> = {
   CALCULATED: "محاسباتی",
-  FIXED: "مقدار ثابت",
   MANUAL: "ورود دستی",
   ATTENDANCE: "ورود از سیستم تردد",
   TREASURY: "ورود از سیستم خزانه‌داری",
@@ -231,7 +230,6 @@ interface MethodRow {
   id: number;
   method: Method;
   valueType: string;
-  fixedValue: number | null;
   branches: BranchInput[];
   isProvisional: boolean;
   /** شناسه‌ی مبناهایی که این روش عضو آن‌هاست */
@@ -364,7 +362,6 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
     id: m.id,
     method: m.method as Method,
     valueType: m.valueType,
-    fixedValue: m.fixedValue === null ? null : Number(m.fixedValue),
     branches: m.branches.map((b) => ({ conditionText: b.conditionText, formulaText: b.formulaText })),
     isProvisional: m.isProvisional,
     bases: m.bases.map((x) => x.parameterId),
@@ -675,11 +672,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
       if (!m) throw new FormulaError(n.source === "DECREE_COMPONENT" ? "روش محاسبه‌ی این عامل حکم تعریف نشده است" : "روش محاسبه تعریف نشده است");
       if (m.isProvisional) provisionalNotes.add(n.title);
       const compId = n.refId;
-      if (n.source === "PAYROLL_COMPONENT" && m.method === "FIXED") {
-        if (m.fixedValue === null) throw new FormulaError("مقدار ثابت تعریف نشده است");
-        amount = m.fixedValue;
-        trace = { expression: String(m.fixedValue), operands: [], method: METHOD_FA.FIXED };
-      } else if (n.source === "PAYROLL_COMPONENT" && INPUT_METHODS.includes(m.method)) {
+      if (n.source === "PAYROLL_COMPONENT" && INPUT_METHODS.includes(m.method)) {
         const stored = inputByComp.get(compId);
         // ورود دستی: مقدار ثبت‌نشده = صفر (ISNULL(x, 0)). ورود از تردد/خزانه: نبودن مقدار یعنی خوراک سیستم نرسیده؛ خطای روشن می‌دهد
         if (stored === undefined && m.method !== "MANUAL") throw new FormulaError(`مقدار ورودی (${METHOD_FA[m.method]}) برای این ماه ثبت نشده است`);

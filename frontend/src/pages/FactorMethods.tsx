@@ -3,7 +3,6 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ErrorToast } from "../components/ErrorToast";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
-import { AmountInput } from "../components/AmountInput";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
@@ -33,7 +32,6 @@ interface Row {
   issueMonth: number;
   execYear: number;
   execMonth: number;
-  fixedValue: string | null;
   branches: { conditionText: string; formulaText: string }[];
   /** مبناهایی که این روش (عامل) عضو آن‌هاست */
   basisIds?: number[];
@@ -137,7 +135,6 @@ function MethodForm({ editId }: { editId?: number }) {
     issueMonth: cur.month,
     execYear: cur.year,
     execMonth: cur.month,
-    fixedValue: "",
     branches: [] as { conditionText: string; formulaText: string }[],
     basisIds: [] as number[],
     noEffectBasisIds: [] as number[],
@@ -171,7 +168,6 @@ function MethodForm({ editId }: { editId?: number }) {
           issueMonth: r.issueMonth,
           execYear: r.execYear,
           execMonth: r.execMonth,
-          fixedValue: r.fixedValue ?? "",
           branches: r.branches ?? [],
           basisIds: r.basisIds ?? [],
           noEffectBasisIds: r.noEffectBasisIds ?? [],
@@ -204,9 +200,9 @@ function MethodForm({ editId }: { editId?: number }) {
     try {
       const rows: Row[] = await api.get("/payroll-methods");
       const prev = rows.filter((r) => r.basis === form.basis && r.factorId === f.id).sort((a, b) => b.execYear * 12 + b.execMonth - (a.execYear * 12 + a.execMonth))[0];
-      const pristine = (form.branches ?? []).length === 0 && !form.fixedValue;
+      const pristine = (form.branches ?? []).length === 0;
       if (prev && pristine) {
-        setForm({ ...base, method: form.basis === "decree" ? "CALCULATED" : prev.method, valueType: prev.valueType, fixedValue: prev.fixedValue ?? "", branches: prev.branches ?? [], basisIds: prev.basisIds ?? [], noEffectBasisIds: prev.noEffectBasisIds ?? [] });
+        setForm({ ...base, method: form.basis === "decree" ? "CALCULATED" : prev.method, valueType: prev.valueType, branches: prev.branches ?? [], basisIds: prev.basisIds ?? [], noEffectBasisIds: prev.noEffectBasisIds ?? [] });
         setPrefillNote(`روش و فرمول از آخرین رکورد این عامل (ماه اجرای ${ym(prev.execYear, prev.execMonth)}) پر شد؛ ماه صدور و ماه اجرای رکورد جدید را مشخص کنید و تغییرات را بدهید`);
       } else setForm(base);
     } catch {
@@ -308,12 +304,6 @@ function MethodForm({ editId }: { editId?: number }) {
             <label>ماه اجرا<RequiredMark /> <FieldHint label="ماه اجرا" text="از این ماه به بعد این روش در محاسبه به کار می‌رود (تا رکورد بعدی همین عامل)" /></label>
             <MonthYear autoFix={!editId} year={form.execYear} month={form.execMonth} onChange={(y, m) => setForm({ ...form, execYear: y, execMonth: m })} />
           </div>
-          {form.basis === "payroll" && form.method === "FIXED" && (
-            <div className="form-field">
-              <label>مقدار ثابت<RequiredMark /></label>
-              <AmountInput value={form.fixedValue} onChange={(v) => setForm({ ...form, fixedValue: v })} allowDecimal />
-            </div>
-          )}
           <div className="form-field">
             <label>فرمول</label>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

@@ -11,7 +11,6 @@ export const KIND_FA: Record<string, string> = {
 
 export const METHOD_FA: Record<string, string> = {
   CALCULATED: "محاسباتی",
-  FIXED: "مقدار ثابت",
   MANUAL: "ورود دستی",
   ATTENDANCE: "ورود از سیستم تردد",
   TREASURY: "ورود از سیستم خزانه‌داری",
