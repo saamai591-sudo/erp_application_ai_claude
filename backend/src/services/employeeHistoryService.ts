@@ -172,3 +172,59 @@ export async function updatePeriod(employeeId: number, periodId: number, b: any)
     await tx.employmentPeriod.update({ where: { id: periodId }, data: { startDate: start, endDate: end, terminationReasonId: reasonId, note: typeof b.note === "string" && b.note.trim() ? b.note.trim() : null } });
   });
 }
+
+/**
+ * حذف دوره‌ی همکاری: فقط آخرین دوره از بین چند دوره (تنها دوره با حذف کارمند هم‌سرنوشت است). انتصاب‌های شروع‌شده در این دوره همراهش پاک می‌شوند.
+ * رد می‌شود اگر از شروع این دوره به بعد حکم (هر وضعیت)، سابقه‌ی تحصیلی/تاهل/ایثارگری، وام، فیش محاسبه‌شده یا ورودی ماهانه‌ی حقوق باشد.
+ * دوره‌ی جاری پاک شود، کارمند به یک وضعیت پایان‌یافته برمی‌گردد که کاربر انتخاب می‌کند (خود سیستم وضعیت قبلی را نگه نمی‌دارد).
+ */
+export async function deletePeriod(employeeId: number, periodId: number, b: any): Promise<void> {
+  const emp = await prisma.employee.findUnique({ where: { id: employeeId } });
+  if (!emp) throw new HrError("کارمند یافت نشد");
+  const periods = await prisma.employmentPeriod.findMany({ where: { employeeId }, orderBy: { startDate: "asc" } });
+  const p = periods.find((x) => x.id === periodId);
+  if (!p) throw new HrError("دوره‌ی همکاری یافت نشد");
+  if (periods.length === 1) throw new HrError("تنها دوره‌ی همکاری قابل حذف نیست؛ برای برداشتن کارمند، خودِ کارمند را حذف کنید");
+  if (periods[periods.length - 1].id !== p.id) throw new HrError("فقط آخرین دوره‌ی همکاری قابل حذف است");
+  const prev = periods[periods.length - 2];
+  const start = p.startDate;
+  const range = { gte: start };
+
+  const [dec, edu, mar, vet, loan, slips, inputs] = await Promise.all([
+    prisma.employmentDecree.findFirst({ where: { employeeId, effectiveDate: range }, orderBy: { effectiveDate: "asc" }, select: { number: true, effectiveDate: true } }),
+    prisma.employeeEducationRecord.findFirst({ where: { employeeId, effectiveDate: range }, select: { effectiveDate: true } }),
+    prisma.employeeMaritalRecord.findFirst({ where: { employeeId, effectiveDate: range }, select: { effectiveDate: true } }),
+    prisma.employeeVeteranRecord.findFirst({ where: { employeeId, effectiveDate: range }, select: { effectiveDate: true } }),
+    prisma.loan.findFirst({ where: { employeeId, paymentDate: range }, select: { number: true } }),
+    prisma.payrollSlip.findMany({ where: { employeeId }, select: { year: true, month: true } }),
+    prisma.payrollFactorInput.findMany({ where: { employeeId }, select: { year: true, month: true }, distinct: ["year", "month"] }),
+  ]);
+  const overlaps = (y: number, m: number) => {
+    const r = jalaliMonthRange(y, m);
+    return r.end >= start && (!p.endDate || r.start <= p.endDate);
+  };
+  const slip = slips.find((s) => overlaps(s.year, s.month));
+  const inp = inputs.find((s) => overlaps(s.year, s.month));
+  const found: string[] = [];
+  if (dec) found.push(`حکم کارگزینی شماره ${dec.number} (${day(dec.effectiveDate)})`);
+  if (edu) found.push(`سابقه‌ی تحصیلی (${day(edu.effectiveDate)})`);
+  if (mar) found.push(`سابقه‌ی تاهل (${day(mar.effectiveDate)})`);
+  if (vet) found.push(`سابقه‌ی ایثارگری (${day(vet.effectiveDate)})`);
+  if (loan) found.push(`وام شماره ${loan.number}`);
+  if (slip) found.push(`فیش حقوق محاسبه‌شده‌ی ${slip.year}/${slip.month}`);
+  if (inp) found.push(`اطلاعات ماهانه‌ی حقوق ${inp.year}/${inp.month}`);
+  if (found.length) throw new HrError(`امکان حذف این دوره‌ی همکاری به دلیل ثبت اطلاعات در آن بازه وجود ندارد: ${found.join("، ")}`);
+
+  // دوره‌ی جاری: وضعیت بعد از حذف را کاربر مشخص می‌کند
+  let newStatus: "TERMINATED" | "RETIRED" | "ABANDONED" | null = null;
+  if (!p.endDate) {
+    if (!["TERMINATED", "RETIRED", "ABANDONED"].includes(b?.statusAfter)) throw new HrError("وضعیت کارمند بعد از حذف این دوره را انتخاب کنید (خاتمه همکاری، بازنشسته یا ترک کار)");
+    newStatus = b.statusAfter;
+    if (newStatus === "TERMINATED" && !prev.terminationReasonId) throw new HrError("دلیل خاتمه‌ی دوره‌ی قبلی ثبت نشده است؛ برای وضعیت «خاتمه همکاری» ابتدا دوره‌ی قبلی را ویرایش و دلیل را ثبت کنید یا وضعیت دیگری انتخاب کنید");
+  }
+  await prisma.$transaction(async (tx) => {
+    await tx.employeeAssignment.deleteMany({ where: { employeeId, fromDate: { gte: start } } });
+    await tx.employmentPeriod.delete({ where: { id: periodId } });
+    if (newStatus) await tx.employee.update({ where: { id: employeeId }, data: { status: newStatus } });
+  });
+}

@@ -347,6 +347,7 @@ function EmployeeForm({ editId }: { editId?: number }) {
   const [assignDlg, setAssignDlg] = useState(false);
   const [editAssign, setEditAssign] = useState<Assignment | null>(null);
   const [editPeriod, setEditPeriod] = useState<Detail["periods"][number] | null>(null);
+  const [delPeriod, setDelPeriod] = useState<Detail["periods"][number] | null>(null);
   const [depDlg, setDepDlg] = useState<Partial<Dependent> | null>(null);
   const { flash } = useSavedFlash();
 
@@ -789,16 +790,23 @@ function EmployeeForm({ editId }: { editId?: number }) {
           <h3 className="hr-section">دوره‌های همکاری</h3>
           <table className="hr-table">
             <thead>
-              <tr><th>شروع</th><th>پایان</th><th>دلیل خاتمه</th><th>توضیح</th>{canEditHistory && <th style={{ width: 80 }} />}</tr>
+              <tr><th>شروع</th><th>پایان</th><th>دلیل خاتمه</th><th>توضیح</th>{canEditHistory && <th style={{ width: 120 }} />}</tr>
             </thead>
             <tbody>
-              {[...detail.periods].reverse().map((p) => (
+              {[...detail.periods].reverse().map((p, idx) => (
                 <tr key={p.id}>
                   <td>{formatJalaliDate(p.startDate)}</td>
                   <td>{p.endDate ? formatJalaliDate(p.endDate) : "جاری"}</td>
                   <td>{p.terminationReason?.title ?? "—"}</td>
                   <td>{p.note ?? "—"}</td>
-                  {canEditHistory && <td><button type="button" className="link-btn" onClick={() => setEditPeriod(p)}>ویرایش</button></td>}
+                  {canEditHistory && (
+                    <td>
+                      <button type="button" className="link-btn" onClick={() => setEditPeriod(p)}>ویرایش</button>
+                      {idx === 0 && detail.periods.length > 1 && (
+                        <>{" "}<button type="button" className="link-btn" onClick={() => setDelPeriod(p)}>حذف</button></>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -866,6 +874,17 @@ function EmployeeForm({ editId }: { editId?: number }) {
           onClose={() => setEditAssign(null)}
           onDone={async () => {
             setEditAssign(null);
+            await reloadDetail();
+          }}
+        />
+      )}
+      {delPeriod && detail && (
+        <PeriodDeleteDialog
+          employeeId={detail.id}
+          value={delPeriod}
+          onClose={() => setDelPeriod(null)}
+          onDone={async () => {
+            setDelPeriod(null);
             await reloadDetail();
           }}
         />
@@ -1093,6 +1112,42 @@ function PeriodDialog({ employeeId, value, reasons, onClose, onDone }: { employe
       {!ended && <p style={{ opacity: 0.75, fontSize: 12 }}>این دوره جاری است؛ تاریخ پایان آن از «تغییر وضعیت همکاری» ثبت می‌شود.</p>}
       <div className="actions">
         <button type="button" className="btn" onClick={save}>ثبت</button>
+        <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
+      </div>
+    </Modal>
+  );
+}
+
+/** حذف آخرین دوره‌ی همکاری (فقط وقتی چند دوره هست و در آن بازه حکم/سابقه/وام/فیش/ورودی ماهانه‌ای نیست؛ سرور کنترل می‌کند). انتصاب‌های شروع‌شده در این دوره هم پاک می‌شوند. */
+function PeriodDeleteDialog({ employeeId, value, onClose, onDone }: { employeeId: number; value: Detail["periods"][number]; onClose: () => void; onDone: () => void }) {
+  const open = !value.endDate;
+  const [statusAfter, setStatusAfter] = useState("TERMINATED");
+  const [err, setErr] = useState<string | null>(null);
+  async function save() {
+    setErr(null);
+    try {
+      await api.del(`/employees/${employeeId}/periods/${value.id}${open ? `?statusAfter=${statusAfter}` : ""}`);
+      onDone();
+    } catch (e) {
+      setErr((e as ApiError).message);
+    }
+  }
+  return (
+    <Modal title="حذف دوره‌ی همکاری" onClose={onClose}>
+      <ErrorToast message={err} />
+      <p style={{ margin: "0 0 8px" }}>
+        دوره‌ی همکاری از <b>{formatJalaliDate(value.startDate)}</b> {value.endDate ? <>تا <b>{formatJalaliDate(value.endDate)}</b></> : "(جاری)"} حذف می‌شود و انتصاب‌هایی که در این دوره شروع شده‌اند هم همراهش پاک می‌شوند.
+      </p>
+      {open && (
+        <div className="form-field">
+          <label>وضعیت کارمند بعد از حذف<RequiredMark /> <FieldHint label="وضعیت بعد از حذف" text="با حذف دوره‌ی جاری، کارمند به دوره‌ی پایان‌یافته‌ی قبلی برمی‌گردد؛ وضعیت پایان‌یافته‌ی او را مشخص کنید" /></label>
+          <select value={statusAfter} onChange={(e) => setStatusAfter(e.target.value)}>
+            {ENDED.map((s) => <option key={s} value={s}>{EMPLOYEE_STATUS_FA[s]}</option>)}
+          </select>
+        </div>
+      )}
+      <div className="actions">
+        <button type="button" className="btn" onClick={save}>حذف دوره</button>
         <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
       </div>
     </Modal>

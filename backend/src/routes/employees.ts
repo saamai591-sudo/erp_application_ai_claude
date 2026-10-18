@@ -5,7 +5,7 @@ import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { loadCurrentRecords } from "../services/employeeRecordService";
 import { HrError, checkAssignmentRefs, changeAssignment } from "../services/employeeAssignmentService";
-import { assignmentLocks, deleteAssignment, updateAssignment, updatePeriod } from "../services/employeeHistoryService";
+import { assignmentLocks, deleteAssignment, deletePeriod, updateAssignment, updatePeriod } from "../services/employeeHistoryService";
 import { getEffectiveDecree, getEffectiveDecrees } from "../services/employmentDecreeService";
 
 // منابع انسانی › پرسنلی › کارمندان.
@@ -408,6 +408,15 @@ router.put("/employees/:id/periods/:pid", can(`${FORM}.editHistory`), async (req
     res.json({ ok: true });
   } catch (e: any) {
     fail(res, e, "خطا در ویرایش دوره‌ی همکاری");
+  }
+});
+
+router.delete("/employees/:id/periods/:pid", can(`${FORM}.editHistory`), async (req, res) => {
+  try {
+    await deletePeriod(Number(req.params.id), Number(req.params.pid), { statusAfter: req.query.statusAfter ?? req.body?.statusAfter });
+    res.status(204).send();
+  } catch (e: any) {
+    fail(res, e, "خطا در حذف دوره‌ی همکاری");
   }
 });
 
