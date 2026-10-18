@@ -2,6 +2,7 @@ import "express-async-errors";
 import express from "express";
 import cors from "cors";
 import { requireAuth } from "./middleware/auth";
+import { errorDisclosureGuard, GENERIC_ERROR } from "./middleware/errorDisclosure";
 import { fiscalScopeContext } from "./middleware/fiscalScope";
 import { syncRegistryToDb } from "./authz/sync";
 
@@ -153,8 +154,11 @@ process.on("unhandledRejection", (reason) => {
 process.on("uncaughtException", (err) => {
   console.error("Uncaught Exception:", err);
 });
+app.disable("x-powered-by");
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
+// هیچ متن خطای داخلی (Prisma/SQL، مسیر فایل، stack) در پاسخ‌ها به کلاینت نمی‌رسد؛ جزئیات فقط در لاگ سرور می‌ماند (middleware/errorDisclosure.ts)
+app.use(errorDisclosureGuard);
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 // نام و لوگوی شرکت برای عنوان/آیکن تب (عمومی، قبل از دروازه‌ی لایسنس)
@@ -303,21 +307,28 @@ app.use("/api", chequeDepositReturnsRoutes);
 app.use("/api", chequeClearingReceivableRoutes);
 app.use("/api", chequeClearingPayableRoutes);
 
+// مسیر ناشناخته‌ی API: پاسخ JSON ثابت (بدون صفحه‌ی HTML پیش‌فرض Express که مسیر درخواست را برمی‌گرداند)
+app.use("/api", (_req, res) => res.status(404).json({ error: "مسیر یافت نشد" }));
+
 // محافظ سراسری خطا: با import "express-async-errors" در بالای فایل، خطاهای async
 // درون route handlerها (حتی بدون try/catch صریح) به این middleware هدایت می‌شوند
 // به‌جای اینکه درخواست بدون پاسخ بماند (نمونه: تلاش برای حذف رکوردی که در جدول دیگری
 // به آن ارجاع داده شده و Prisma خطای P2003 صادر می‌کند).
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error("Unhandled route error:", err);
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  // جزئیات کامل (stack، پیام Prisma، مسیر فایل) فقط در لاگ سرور؛ هیچ‌کدام به کلاینت نمی‌رود
+  console.error(`Unhandled route error: ${req.method} ${req.originalUrl.split("?")[0]}`, err);
   if (res.headersSent) return;
+  // خطای خواندن بدنه‌ی درخواست (JSON خراب / حجم زیاد)
+  if (err?.type === "entity.parse.failed") return res.status(400).json({ error: "بدنه‌ی درخواست نامعتبر است" });
+  if (err?.type === "entity.too.large") return res.status(413).json({ error: "حجم درخواست بیش از حد مجاز است" });
   if (err?.code === "P2003") {
     return res.status(400).json({ error: "این رکورد در جای دیگری استفاده شده است و قابل حذف/ثبت نیست" });
   }
   if (err?.code === "P2002") {
     return res.status(400).json({ error: "این مقدار تکراری است" });
   }
-  res.status(500).json({ error: "خطای سرور، لطفاً دوباره تلاش کنید" });
+  res.status(500).json({ error: GENERIC_ERROR });
 });
 
 const port = process.env.PORT ? Number(process.env.PORT) : 4000;

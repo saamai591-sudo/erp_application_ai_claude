@@ -39,6 +39,8 @@ services:
       # کلید رمزنگاری کلید خصوصی «حافظه مالیاتی»؛ خالی ⇒ از JWT_SECRET مشتق می‌شود. برای عوض‌کردن JWT_SECRET بدون از دست دادن کلید، اینجا مقدار «قدیمیِ» JWT_SECRET را بگذارید
       TAX_KEY_ENCRYPTION_SECRET: ${TAX_KEY_ENCRYPTION_SECRET:-}
       PORT: 4000
+      # حالت production (جزئیات خطا هرگز به کلاینت نمی‌رود؛ فقط لاگ سرور)
+      NODE_ENV: production
       # ارسال صورتحساب به سامانه مودیان — پیش‌فرض خاموش (ارسال واقعی قانونی است). نگاه کنید به .env.example
       TAX_TRANSPORT_ENABLED: ${TAX_TRANSPORT_ENABLED:-false}
       TAX_API_BASE_URL: ${TAX_API_BASE_URL:-https://tp.tax.gov.ir/req/api/}

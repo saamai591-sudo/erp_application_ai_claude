@@ -27,6 +27,8 @@ COPY prisma/schema.prisma ./prisma/schema.prisma
 COPY prisma/migrations ./prisma/migrations
 RUN npx prisma generate
 COPY --from=build /app/dist ./dist
+# حالت production: هیچ خروجی/جزئیات توسعه‌ای (stack و …) نباید فعال باشد
+ENV NODE_ENV=production
 EXPOSE 4000
 # seed (upsert-محور و امن برای هر بار اجرا) و سپس سرور؛ -r bytenode = بارگذار فایل‌های .jsc
 CMD ["sh", "-c", "npx prisma migrate deploy && node -r bytenode dist/prisma/seed.jsc && node -r bytenode dist/src/index.jsc"]
