@@ -38,6 +38,9 @@ export const KIND_FA: Record<string, string> = { WORK: "کارکرد", EARNING: 
 export const LOAN_SUM_KEY = "LOANS";
 export const LOAN_SUM_LABEL = "جمع اقساط وام";
 
+/** [P:کلید:RATIO] = پارامتر نوع «درصد» به‌صورت ضریب (۷٪ ← ۰٫۰۷)؛ بدون نوع = همان عدد خام (۷) */
+export const PARAM_RATIO_VARIANT = "RATIO";
+
 export const DECREE_VARIANTS: Record<string, string> = {
   LAST: "آخرین مقدار حکم",
   AVG: "میانگین حکم",
@@ -245,6 +248,10 @@ function parseRef(raw: string): Node {
   }
   if (ns === "B" && !BASE_INFO[key]) throw new FormulaError(`اطلاعات پایه‌ی ناشناخته [${raw}]`);
   if (ns === "S" && !KIND_FA[key] && key !== LOAN_SUM_KEY) throw new FormulaError(`طبقه‌ی ناشناخته [${raw}]`);
+  if (ns === "P" && variant) {
+    if (variant !== PARAM_RATIO_VARIANT) throw new FormulaError(`نوع مقدار [${raw}] برای پارامتر نامعتبر است (فقط RATIO = ضریب)`);
+    return { t: "ref", ns, key, variant };
+  }
   if (variant) throw new FormulaError(`[${raw}] نوع مقدار ندارد`);
   return { t: "ref", ns, key, variant: "" };
 }

@@ -10,6 +10,7 @@ import {
   DECREE_VARIANTS,
   FACTOR_VARIANTS,
   KIND_FA,
+  PARAM_RATIO_VARIANT,
   LOAN_SUM_KEY,
   LOAN_SUM_LABEL,
   collectCondRefs,
@@ -137,7 +138,7 @@ export async function validateFactorMethod(cand: CandidateMethod): Promise<void>
   const [decree, comps, params, baseType] = await Promise.all([
     prisma.decreeComponent.findMany({ select: { code: true, title: true } }),
     prisma.payrollComponent.findMany({ select: { key: true, title: true, kind: true, calcTypeId: true } }),
-    prisma.payrollParameter.findMany({ select: { id: true, key: true, kind: true, basisSource: true } }),
+    prisma.payrollParameter.findMany({ select: { id: true, key: true, kind: true, basisSource: true, type: true } }),
     prisma.payrollCalcType.findFirst({ where: { isBase: true }, select: { id: true } }),
   ]);
   const basisByKey = new Map(params.filter((p) => p.kind === "BASIS").map((p) => [p.key, { id: p.id, source: p.basisSource as string | null }]));
@@ -160,6 +161,10 @@ export async function validateFactorMethod(cand: CandidateMethod): Promise<void>
       }
     }
     if (r.ns === "P" && !pKeys.has(r.key)) throw new PayrollCalcError("پارامتر مبنا انتخاب‌شده در فرمول تعریف نشده است");
+    if (r.ns === "P" && r.variant === PARAM_RATIO_VARIANT) {
+      const pd = params.find((x) => x.key === r.key);
+      if (!pd || pd.kind !== "CONSTANT" || pd.type !== "PERCENT") throw new PayrollCalcError(`«ضریب (÷۱۰۰)» فقط برای پارامتر مقدار ثابتِ نوع داده‌ی «درصد» است`);
+    }
   }
 
   // گراف وابستگی با آخرین روش هر عامل + نامزد
@@ -572,13 +577,17 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
       const t = titleOf(ns, key);
       if (ns === "D") return `${t} — ${DECREE_VARIANTS[variant] ?? variant}`;
       if (ns === "C" && variant && variant !== "VALUE") return `${t} — ${FACTOR_VARIANTS[variant] ?? variant}`;
+      if (ns === "P" && variant === PARAM_RATIO_VARIANT) return `${t} — ضریب`;
       return t;
     },
     parts(ns, key) {
       return ns === "P" ? basisInfo.get(key)?.members : undefined;
     },
     scalar(ns, key, variant) {
-      if (ns === "P" && paramDefs.get(key)?.kind === "BASIS") return basisValue(paramDefs.get(key)!);
+      if (ns === "P" && paramDefs.get(key)?.kind === "BASIS") {
+        if (variant === PARAM_RATIO_VARIANT) throw new FormulaError(`«ضریب» برای مبنا معنی ندارد`);
+        return basisValue(paramDefs.get(key)!);
+      }
       if (ns === "B") {
         if (!(key in base)) throw new FormulaError(`اطلاعات پایه‌ی ${key} موجود نیست`);
         return base[key];
@@ -589,6 +598,10 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
         if (!def) throw new FormulaError(`پارامتر ${key} تعریف نشده است`);
         if (!pv || pv.value === null) throw new FormulaError(`پارامتر مبنا «${def.title}» برای این ماه مقدار ندارد (در «پارامترهای مبنا» تعریف کنید)`);
         usedParams.set(key, pv);
+        if (variant === PARAM_RATIO_VARIANT) {
+          if (def.type !== "PERCENT") throw new FormulaError(`«ضریب (÷۱۰۰)» فقط برای پارامتر نوع «درصد» است؛ «${def.title}» درصد نیست`);
+          return pv.value / 100;
+        }
         return pv.value;
       }
       if (ns === "S" && key === LOAN_SUM_KEY) return loanSum;
