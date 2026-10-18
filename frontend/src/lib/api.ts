@@ -119,18 +119,33 @@ function notifySuccess(method: "POST" | "PUT" | "DELETE", path: string, options?
   scheduleAutoToast(successMessage(method, path));
 }
 
+/**
+ * جلوگیری از ثبت دوباره (دابل‌کلیک / Ctrl+S پشت‌سرهم): تا وقتی یک عملیات تغییردهنده (POST/PUT/DELETE) با همان مسیر و همان بدنه در جریان است،
+ * فراخوانی تکراری درخواست تازه نمی‌فرستد و به همان نتیجه‌ی در جریان وصل می‌شود. بدون این، ذخیره‌ی دوم با نسخه‌ی (updatedAt) کهنه
+ * می‌رفت و «این رکورد توسط کاربر دیگری تغییر کرده است» می‌خورد؛ و ساخت رکورد جدید دوبار انجام می‌شد.
+ */
+const inflight = new Map<string, Promise<any>>();
+function once<T>(method: string, path: string, body: unknown, run: () => Promise<T>): Promise<T> {
+  const key = `${method} ${path} ${JSON.stringify(body ?? null)}`;
+  const existing = inflight.get(key);
+  if (existing) return existing as Promise<T>;
+  const p = run().finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
+}
+
 export const api = {
   get: (path: string) => request(path).then((data) => {
     recordResourceFetch(path);
     rememberVersion(path, data);
     return data;
   }),
-  post: (path: string, body?: any, options?: MutationOptions) => request(path, { method: "POST", body: JSON.stringify(body) }).then((data) => {
+  post: (path: string, body?: any, options?: MutationOptions) => once("POST", path, body, () => request(path, { method: "POST", body: JSON.stringify(body) }).then((data) => {
     recordResourceMutation(path);
     notifySuccess("POST", path, options);
     return data;
-  }),
-  put: async (path: string, body?: any, options?: MutationOptions) => {
+  })),
+  put: (path: string, body?: any, options?: MutationOptions) => once("PUT", path, body, async () => {
     const hadVersion = hasRememberedVersion(path);
     const data = await request(path, { method: "PUT", body: JSON.stringify(attachVersion(path, body)) });
     recordResourceMutation(path);
@@ -149,12 +164,12 @@ export const api = {
       }
     }
     return data;
-  },
-  del: (path: string, options?: MutationOptions) => request(path, { method: "DELETE" }).then((data) => {
+  }),
+  del: (path: string, options?: MutationOptions) => once("DELETE", path, null, () => request(path, { method: "DELETE" }).then((data) => {
     recordResourceMutation(path);
     notifySuccess("DELETE", path, options);
     return data;
-  }),
+  })),
 };
 
 /** دانلود یک فایل متنی/باینری محافظت‌شده با توکن (مثلاً public-key.txt / csr.txt) و ذخیره با نام داده‌شده */

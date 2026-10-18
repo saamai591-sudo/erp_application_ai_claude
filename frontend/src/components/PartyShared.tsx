@@ -193,10 +193,14 @@ export function PartyForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
 
+  // ذخیره‌ی در جریان: دکمه‌ی ذخیره غیرفعال می‌شود و ذخیره‌ی دوم تا پایان اولی نادیده گرفته می‌شود
+  const [saving, setSaving] = useState(false);
   async function submit(confirmDuplicate = false) {
+    if (saving) return;
     setFormError(null);
     const childError = validateChildren(children);
     if (childError) return setFormError(childError);
+    setSaving(true);
     try {
       const body = { ...form, category, ...childrenPayload(children) };
       if (currentId) {
@@ -213,6 +217,8 @@ export function PartyForm({
       const err = e as ApiError;
       if (err.warning) setWarning(err.message);
       else setFormError(err.message);
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -240,6 +246,7 @@ export function PartyForm({
       closePath={backPath}
       newPath={`${backPath}/new`}
       onDelete={currentId ? handleDelete : undefined}
+      saveDisabled={saving}
     >
       <PartySectionNav counts={{ address: children.addresses.length, phone: children.phones.length, contact: (children.contacts ?? []).length, bank: children.bankAccounts.length }} />
 
