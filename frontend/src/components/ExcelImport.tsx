@@ -36,6 +36,20 @@ function ExcelIcon() {
   );
 }
 
+/**
+ * خانه‌ی «مدت/ساعت» اکسل (مثلاً 100:25 با قالب [h]:mm) را کتابخانه تاریخِ ۱۹۰۰ می‌کند و ساعتِ بیشتر از ۲۴ را گم می‌کرد؛ متن نمایشی خانه (w) همان 100:25 است.
+ * این خانه‌ها پیش از خواندن به متن hhh:mm تبدیل می‌شوند (ثانیه حذف می‌شود).
+ */
+function fixDurationCells(sheet: XLSX.WorkSheet) {
+  for (const addr of Object.keys(sheet)) {
+    if (addr.startsWith("!")) continue;
+    const c = sheet[addr] as XLSX.CellObject;
+    if (c.t !== "d" || !(c.v instanceof Date) || c.v.getFullYear() > 1900) continue;
+    const m = /^(\d+):(\d{2})/.exec(String(c.w ?? ""));
+    if (m) sheet[addr] = { t: "s", v: `${m[1]}:${m[2]}` };
+  }
+}
+
 export function ExcelImportButton({
   columns,
   onImportRow,
@@ -118,6 +132,7 @@ export function ExcelImportButton({
         const data = new Uint8Array(evt.target?.result as ArrayBuffer);
         const wb = XLSX.read(data, { type: "array", cellDates: true });
         const sheet = wb.Sheets[wb.SheetNames[0]];
+        fixDurationCells(sheet);
         const json: any[] = XLSX.utils.sheet_to_json(sheet, { defval: "" });
         if (json.length === 0) {
           setFileError("فایل خالی است یا هیچ ردیفی ندارد");

@@ -164,7 +164,7 @@ export default function PayrollDataEntry() {
                 ...data.columns.map((c) => ({
                   key: `c_${c.componentId}`,
                   label: c.title,
-                  hint: `${VALUE_TYPE_FA[c.valueType]}${c.valueType === "TIME" ? " — به‌صورت hh:mm (مثلاً 10:30)" : c.valueType === "DAYS" ? " — عدد صحیح" : ""}؛ خالی = بدون تغییر`,
+                  hint: `${VALUE_TYPE_FA[c.valueType]}${c.valueType === "TIME" ? " — به‌صورت hhh:mm، تا سه رقم ساعت و دو رقم دقیقه (مثلاً 100:25 یا 10:30)" : c.valueType === "DAYS" ? " — عدد صحیح" : ""}؛ خالی = بدون تغییر`,
                 })),
               ]}
               templateRows={data.rows.map((r) => ({ personnelCode: r.personnelCode, fullName: r.fullName }))}
