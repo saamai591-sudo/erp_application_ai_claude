@@ -342,24 +342,29 @@ function MethodForm({ editId }: { editId?: number }) {
                 {bases.length === 0 ? "مبنایی تعریف نشده است؛ در «پارامترهای مبنا» با نوع «مبنا» تعریف کنید." : "مبنای مناسب این عامل وجود ندارد (عامل حقوق فقط در مبناهای منبع «محاسبات» عضو می‌شود)."}
               </p>
             ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 28px" }}>
-                {applicableBases.map((b) => {
-                  const st = stateOf(b.id);
-                  return (
-                    <label key={b.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <select value={st} onChange={(e) => setState(b.id, e.target.value)} style={{ minWidth: 110, borderColor: st === "" ? "#d97706" : undefined }}>
-                        <option value="">—</option>
-                        <option value="YES">با تأثیر</option>
-                        <option value="NO">بدون تأثیر</option>
-                      </select>
-                      <span>
-                        {b.title}
-                        <span style={{ opacity: 0.6, fontSize: 12 }}> (منبع: {b.source === "DECREE" ? "حکم" : "محاسبات"}){!b.isActive ? " — غیرفعال" : ""}</span>
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
+              <table className="hr-table" style={{ maxWidth: 560 }}>
+                <thead>
+                  <tr><th>مبنا</th><th style={{ width: 150 }}>تأثیر</th><th style={{ width: 90 }}>منبع</th></tr>
+                </thead>
+                <tbody>
+                  {applicableBases.map((b) => {
+                    const st = stateOf(b.id);
+                    return (
+                      <tr key={b.id}>
+                        <td>{b.title}{!b.isActive ? <span style={{ opacity: 0.6, fontSize: 12 }}> — غیرفعال</span> : null}</td>
+                        <td>
+                          <select value={st} onChange={(e) => setState(b.id, e.target.value)} style={{ width: "100%", borderColor: st === "" ? "#d97706" : undefined }}>
+                            <option value="">—</option>
+                            <option value="YES">با تأثیر</option>
+                            <option value="NO">بدون تأثیر</option>
+                          </select>
+                        </td>
+                        <td>{b.source === "DECREE" ? "حکم" : "محاسبات"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             )}
           </>
         )}
