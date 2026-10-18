@@ -4706,6 +4706,8 @@ model Position {
   orgUnit         OrgUnit?             @relation(fields: [orgUnitId], references: [id])
   assignments     EmployeeAssignment[]
   employmentDecrees   EmploymentDecree[]
+  /// شغل‌های مورد نیاز این پست و تعداد نیاز هر کدام
+  jobs            PositionJob[]
 }
 
 model Employee {
@@ -4781,6 +4783,9 @@ model EmployeeAssignment {
   createdAt    DateTime    @default(now())
   employee     Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   position     Position    @relation(fields: [positionId], references: [id])
+  /// شغل کارمند در این پست (از شغل‌های تخصیص‌داده‌شده به پست؛ پستِ بدون شغل = خالی)
+  jobId        Int?
+  job          Job?        @relation(fields: [jobId], references: [id], onDelete: Restrict)
   orgUnit      OrgUnit     @relation(fields: [orgUnitId], references: [id])
   costCenter   CostCenter? @relation(fields: [costCenterId], references: [id])
   appliedByDecrees EmploymentDecree[] @relation("DecreeAppliedAssignment")
@@ -4908,6 +4913,8 @@ model EmploymentDecree {
   positionId           Int?
   orgUnitId            Int?
   costCenterId         Int?
+  /// شغل انتصاب (فقط وقتی پستِ حکم شغل دارد)
+  jobId                Int?
   appliedAssignmentId  Int?
   previousAssignmentId Int?
   approvedAt           DateTime?
@@ -4916,6 +4923,7 @@ model EmploymentDecree {
   employee             Employee             @relation(fields: [employeeId], references: [id])
   employmentType       EmploymentType       @relation(fields: [employmentTypeId], references: [id])
   position             Position?            @relation(fields: [positionId], references: [id])
+  job                  Job?                 @relation(fields: [jobId], references: [id], onDelete: Restrict)
   orgUnit              OrgUnit?             @relation(fields: [orgUnitId], references: [id])
   costCenter           CostCenter?          @relation(fields: [costCenterId], references: [id])
   appliedAssignment    EmployeeAssignment?  @relation("DecreeAppliedAssignment", fields: [appliedAssignmentId], references: [id], onDelete: SetNull)
@@ -5355,4 +5363,35 @@ model LoanSuspensionLine {
   loan         Loan           @relation(fields: [loanId], references: [id], onDelete: Restrict)
 
   @@unique([suspensionId, loanId])
+}
+
+// ── منابع انسانی › شغل ──
+
+/// شغل: کد خودکار، عنوان، کد تامین اجتماعی و سه متن (شرح شغل، مهارت‌های تخصصی، ویژگی‌های فردی)
+model Job {
+  id                Int                  @id @default(autoincrement())
+  code              Int                  @unique
+  title             String               @unique
+  socialSecurityCode String?
+  description       String?
+  specializedSkills String?
+  personalTraits    String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  positions         PositionJob[]
+  assignments       EmployeeAssignment[]
+  decrees           EmploymentDecree[]
+}
+
+/// شغلِ مورد نیاز یک پست با تعداد نفرات (مثلاً پست «کارشناس حسابداری» ← شغل «حسابدار» ۳ نفر)
+model PositionJob {
+  id            Int      @id @default(autoincrement())
+  positionId    Int
+  jobId         Int
+  requiredCount Int
+  position      Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  job           Job      @relation(fields: [jobId], references: [id], onDelete: Restrict)
+
+  @@unique([positionId, jobId])
+  @@index([jobId])
 }

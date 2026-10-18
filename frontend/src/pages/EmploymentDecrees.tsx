@@ -20,7 +20,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePermissions } from "../lib/usePermissions";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { DECREE_VALUE_TYPE_FA } from "./HrMasters";
-import { OptPicker, positionHasUnit, unitOfPosition, type Opt } from "./Employees";
+import { OptPicker, positionHasUnit, unitOfPosition, JobField, jobOfPosition, jobMissing, type Opt } from "./Employees";
 
 // منابع انسانی › پرسنلی › حکم کارگزینی (قرارداد و حکم یک سند است). پیش‌نویس ⇄ تایید؛ حکم تاییدشده فقط‌خواندنی است و تغییر حقوق = حکم جدید.
 // اعتبار هر حکم از تاریخ اعمال تا min(تاریخ پایان، روز قبل از حکم بعدی) است. حکم می‌تواند همزمان پست/انتصاب کارمند را هم عوض کند.
@@ -70,6 +70,7 @@ interface DecreeDetail {
   description: string | null;
   status: string;
   positionId: number | null;
+  jobId?: number | null;
   orgUnitId: number | null;
   costCenterId: number | null;
   updatedAt: string;
@@ -135,6 +136,7 @@ function DecreeList() {
               { key: "description", label: "شرح", hint: "اختیاری" },
               { key: "approve", label: "تایید شود؟", hint: "بله / خیر — پیش‌فرض خیر (پیش‌نویس)" },
               { key: "positionTitle", label: "پست جدید", hint: "اختیاری — فقط اگر حکم پست را عوض می‌کند" },
+              { key: "jobTitle", label: "شغل جدید", hint: "فقط اگر پست جدید شغل دارد (الزامی در آن صورت)" },
               { key: "orgUnitTitle", label: "واحد سازمانی جدید", hint: "فقط اگر پست واحد ندارد" },
               { key: "costCenterTitle", label: "مرکز هزینه جدید", hint: "اختیاری" },
               { key: "componentTitle", label: "عامل حکم", required: true, hint: "عنوان یا کد عامل حکم" },
@@ -183,6 +185,7 @@ const EMPTY = {
   description: "",
   changeAssignment: false,
   positionId: "",
+  jobId: "",
   orgUnitId: "",
   costCenterId: "",
   lines: [] as Line[],
@@ -225,6 +228,7 @@ function DecreeForm({ editId }: { editId?: number }) {
       description: d.description ?? "",
       changeAssignment: !!d.positionId,
       positionId: d.positionId ? String(d.positionId) : "",
+      jobId: d.jobId ? String(d.jobId) : "",
       orgUnitId: d.orgUnitId ? String(d.orgUnitId) : "",
       costCenterId: d.costCenterId ? String(d.costCenterId) : "",
       lines: d.lines.map((l) => ({ componentId: String(l.componentId), value: String(Number(l.value)) })),
@@ -313,6 +317,7 @@ function DecreeForm({ editId }: { editId?: number }) {
       weeklyHours: form.weeklyHours === "" ? null : Number(form.weeklyHours),
       description: form.description,
       positionId: form.changeAssignment && form.positionId ? Number(form.positionId) : null,
+      jobId: form.changeAssignment && form.jobId ? Number(form.jobId) : null,
       orgUnitId: form.changeAssignment && form.orgUnitId ? Number(form.orgUnitId) : null,
       costCenterId: form.changeAssignment && form.costCenterId ? Number(form.costCenterId) : null,
       lines: form.lines.filter((l) => l.componentId && Number(l.value || 0) > 0).map((l) => ({ componentId: Number(l.componentId), value: Number(l.value) })),
@@ -328,6 +333,7 @@ function DecreeForm({ editId }: { editId?: number }) {
     if (!form.employmentTypeId) return setError("نوع همکاری الزامی است");
     if (form.lines.filter((l) => Number(l.value || 0) > 0).length === 0) return setError("حداقل برای یک عامل مبلغ وارد کنید");
     if (form.changeAssignment && !form.positionId) return setError("پست را انتخاب کنید یا «تغییر انتصاب» را بردارید");
+    if (form.changeAssignment && jobMissing(positions, form.positionId, form.jobId)) return setError("شغل را انتخاب کنید");
     try {
       if (editId) {
         await api.put(`/employment-decrees/${editId}`, body());
@@ -477,8 +483,9 @@ function DecreeForm({ editId }: { editId?: number }) {
                 <div className="form-field">
                   <label>پست<RequiredMark /></label>
                   <OptPicker title="انتخاب پست" rows={positions} value={form.positionId} disabled={locked}
-                    onChange={(v) => setForm({ ...form, positionId: v, ...unitOfPosition(positions, v, form.orgUnitId) })} />
+                    onChange={(v) => setForm({ ...form, positionId: v, ...unitOfPosition(positions, v, form.orgUnitId), ...jobOfPosition(positions, v, form.jobId) })} />
                 </div>
+                <JobField positions={positions} positionId={form.positionId} value={form.jobId} onChange={(v) => set({ jobId: v })} disabled={locked} />
                 <div className="form-field">
                   <label>واحد سازمانی{positionHasUnit(positions, form.positionId) && <FieldHint label="واحد سازمانی" text="از روی پست انتخاب‌شده تعیین می‌شود" />}</label>
                   <OptPicker title="انتخاب واحد سازمانی" rows={orgUnits} value={form.orgUnitId}

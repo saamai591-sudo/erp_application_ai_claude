@@ -361,6 +361,7 @@ const RAW_MODULES: ModuleGroup[] = [
         items: [
           { key: "employees", label: "کارمندان", list: "/employees", create: "/employees/new", icon: "users" },
           { key: "positions", label: "پست‌های سازمانی", list: "/positions", create: "/positions/new", icon: "briefcase" },
+          { key: "jobs", label: "شغل", list: "/jobs", create: "/jobs/new", icon: "tag" },
           { key: "employee-education", label: "سوابق تحصیلی", list: "/employee-education", create: "/employee-education/new", icon: "file" },
           { key: "employee-veteran", label: "سوابق ایثارگری", list: "/employee-veteran", create: "/employee-veteran/new", icon: "file" },
           { key: "employee-marital", label: "سوابق تاهل", list: "/employee-marital", create: "/employee-marital/new", icon: "file" },

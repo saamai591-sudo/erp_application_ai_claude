@@ -42,6 +42,17 @@ interface OrgUnitRow {
   code: number;
   title: string;
 }
+interface JobOpt {
+  id: number;
+  code: number;
+  title: string;
+}
+/** شغل مورد نیاز پست در فرم: تعداد نیاز (متن برای ویرایش) و تعداد فعلی (فقط‌خواندنی، از انتصاب‌های جاری) */
+interface JobLine {
+  jobId: number;
+  title: string;
+  requiredCount: string;
+}
 
 export default function Positions() {
   const location = useLocation();
@@ -102,7 +113,7 @@ function PositionList() {
   );
 }
 
-const DEFAULT_FORM = { code: "", title: "", orgUnitId: "", isActive: true };
+const DEFAULT_FORM = { code: "", title: "", orgUnitId: "", isActive: true, jobs: [] as JobLine[] };
 
 function PositionForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
@@ -111,12 +122,21 @@ function PositionForm({ editId }: { editId?: number }) {
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_FORM);
   const [isDefault, setIsDefault] = useState(false);
   const [orgUnits, setOrgUnits] = useState<OrgUnitRow[]>([]);
+  const [allJobs, setAllJobs] = useState<JobOpt[]>([]);
+  const [headcount, setHeadcount] = useState<{ assigned: Record<number, number>; withoutJob: number }>({ assigned: {}, withoutJob: 0 });
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const { flash } = useSavedFlash();
 
   useEffect(() => {
     api.get("/org-units").then(setOrgUnits).catch(() => {});
+    api.get("/jobs").then(setAllJobs).catch(() => {});
+    if (editId) {
+      api
+        .get(`/positions/${editId}/jobs`)
+        .then((r: { jobs: { jobId: number; assignedCount: number }[]; withoutJob: number }) => setHeadcount({ assigned: Object.fromEntries(r.jobs.map((j) => [j.jobId, j.assignedCount])), withoutJob: r.withoutJob }))
+        .catch(() => {});
+    }
     if (!editId) {
       if (!hasPersistedState(cacheKey)) setForm(DEFAULT_FORM);
       return;
@@ -125,7 +145,15 @@ function PositionForm({ editId }: { editId?: number }) {
       const f = items.find((i) => i.id === editId);
       if (f) {
         setIsDefault(f.isDefault);
-        if (!hasPersistedState(cacheKey)) setForm({ code: String(f.code), title: f.title, orgUnitId: f.orgUnitId ? String(f.orgUnitId) : "", isActive: f.isActive });
+        if (!hasPersistedState(cacheKey)) {
+          setForm({
+            code: String(f.code),
+            title: f.title,
+            orgUnitId: f.orgUnitId ? String(f.orgUnitId) : "",
+            isActive: f.isActive,
+            jobs: ((f as any).jobs ?? []).map((j: { jobId: number; title: string; requiredCount: number }) => ({ jobId: j.jobId, title: j.title, requiredCount: String(j.requiredCount) })),
+          });
+        }
       }
       setLoaded(true);
     });
@@ -136,11 +164,16 @@ function PositionForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
     if (!form.title.trim()) return setError("عنوان پست الزامی است");
+    const jobsForm = form.jobs ?? [];
+    for (const j of jobsForm) {
+      if (!/^\d+$/.test(j.requiredCount) || Number(j.requiredCount) < 1) return setError(`تعداد مورد نیاز شغل «${j.title}» باید عدد صحیح و حداقل ۱ باشد`);
+    }
     const body = {
       code: form.code ? Number(form.code) : undefined,
       title: form.title,
       orgUnitId: form.orgUnitId ? Number(form.orgUnitId) : null,
       isActive: form.isActive,
+      jobs: jobsForm.map((j) => ({ jobId: j.jobId, requiredCount: Number(j.requiredCount) })),
     };
     try {
       if (editId) {
@@ -216,6 +249,55 @@ function PositionForm({ editId }: { editId?: number }) {
           </div>
         </div>
       </form>
+
+      <h3 className="hr-section">مشاغل مورد نیاز</h3>
+      <p style={{ opacity: 0.75, fontSize: 13, margin: "0 0 8px" }}>
+        شغل‌هایی که این پست نیاز دارد و تعداد نفرات هر کدام (مثلاً «معاونت مالی» ← مدیر مالی ۱ نفر). کارمند هنگام انتصاب به این پست، شغلش را الزاماً از همین شغل‌ها انتخاب می‌کند؛ پستِ بدون شغل، شغل نمی‌خواهد.
+      </p>
+      <div style={{ maxWidth: 360, marginBottom: 8 }}>
+        <RecordPickerField<JobOpt>
+          title="انتخاب شغل‌ها برای پست"
+          displayValue=""
+          placeholder="افزودن شغل…"
+          multiSelect
+          resultInDisplayOrder
+          rows={allJobs.filter((j) => !(form.jobs ?? []).some((x) => x.jobId === j.id))}
+          columns={[
+            { header: "کد", render: (j) => toFaDigits(String(j.code)), filterValue: (j) => String(j.code), width: "90px" },
+            { header: "عنوان", render: (j) => j.title, filterValue: (j) => j.title },
+          ]}
+          onSelectMultiple={(rows) => setForm({ ...form, jobs: [...(form.jobs ?? []), ...rows.map((j) => ({ jobId: j.id, title: j.title, requiredCount: "1" }))] })}
+        />
+      </div>
+      <table className="hr-table">
+        <thead>
+          <tr><th style={{ width: 40 }}>#</th><th>شغل</th><th style={{ width: 150 }}>تعداد مورد نیاز</th><th style={{ width: 130 }}>تعداد فعلی</th><th style={{ width: 60 }} /></tr>
+        </thead>
+        <tbody>
+          {(form.jobs ?? []).length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", opacity: 0.7 }}>شغلی برای این پست تعریف نشده است</td></tr>}
+          {(form.jobs ?? []).map((j, i) => (
+            <tr key={j.jobId}>
+              <td>{toFaDigits(String(i + 1))}</td>
+              <td>{j.title}</td>
+              <td>
+                <input
+                  dir="ltr"
+                  inputMode="numeric"
+                  style={{ width: 90 }}
+                  value={j.requiredCount}
+                  onChange={(e) => setForm({ ...form, jobs: (form.jobs ?? []).map((x) => (x.jobId === j.jobId ? { ...x, requiredCount: e.target.value.replace(/\D/g, "") } : x)) })}
+                />
+              </td>
+              <td>{editId ? toFaDigits(String(headcount.assigned[j.jobId] ?? 0)) : "—"}</td>
+              <td><button type="button" className="link-btn" onClick={() => setForm({ ...form, jobs: (form.jobs ?? []).filter((x) => x.jobId !== j.jobId) })}>حذف</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {editId && headcount.withoutJob > 0 && (form.jobs ?? []).length > 0 && (
+        <p style={{ opacity: 0.8, fontSize: 13 }}>{toFaDigits(String(headcount.withoutJob))} کارمند فعلیِ این پست شغل ندارند (قبل از تخصیص شغل به پست منتصب شده‌اند)؛ شغلشان با اولین انتصاب جدید تعیین می‌شود.</p>
+      )}
+
       {editId && <UsageSection positionId={editId} />}
     </FormPage>
   );

@@ -103,9 +103,11 @@ const assignmentSelect = {
   positionId: true,
   orgUnitId: true,
   costCenterId: true,
+  jobId: true,
   fromDate: true,
   toDate: true,
   position: { select: { id: true, code: true, title: true } },
+  job: { select: { id: true, code: true, title: true } },
   orgUnit: { select: { id: true, code: true, title: true } },
   costCenter: { select: { id: true, detailCode: true, title: true } },
 } as const;
@@ -284,6 +286,7 @@ export async function createEmployee(b: any, opts: { allowNoPhoto?: boolean } = 
             positionId: Number(b.positionId),
             orgUnitId: Number(b.orgUnitId),
             costCenterId: b.costCenterId || null,
+            jobId: b.jobId ?? null,
             fromDate: startDate,
           },
         });
@@ -432,6 +435,7 @@ router.post("/employees/:id/status", can(`${FORM}.changeStatus`), async (req, re
             positionId: Number(b.positionId),
             orgUnitId: Number(b.orgUnitId),
             costCenterId: b.costCenterId || null,
+            jobId: b.jobId ?? null,
             fromDate: date,
           },
         });

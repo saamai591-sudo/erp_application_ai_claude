@@ -542,6 +542,7 @@ export function registerAllImportProcessors() {
     return { row: hits[0] };
   }
   const posFind = (w: any) => prisma.position.findMany({ where: w.title ? { title: w.title } : { code: w.code } });
+  const jobFind = (w: any) => prisma.job.findMany({ where: w.title ? { title: w.title } : { code: w.code } });
   const unitFind = (w: any) => prisma.orgUnit.findMany({ where: w.title ? { title: w.title } : { code: w.code } });
   const ccFind = (w: any) => prisma.costCenter.findMany({ where: w.title ? { title: w.title } : { detailCode: w.detailCode } });
   const cityFind = async (title: string) => prisma.geoRegion.findMany({ where: { title, level: "CITY" } });
@@ -562,6 +563,13 @@ export function registerAllImportProcessors() {
         if (isVeteran === null || !(row.isVeteran ?? "").trim()) return { ok: false, error: "وضعیت ایثارگری باید «بله» یا «خیر» باشد" };
         const pos = await pickByTitleOrCode(row.positionTitle, "پست", posFind);
         if ("error" in pos) return { ok: false, error: pos.error };
+        // شغل (اختیاری در فایل؛ برای پستی که شغل دارد الزامی است و سرور همان را کنترل می‌کند)
+        let jobId: number | undefined;
+        if ((row.jobTitle ?? "").trim()) {
+          const j = await pickByTitleOrCode(row.jobTitle, "شغل", jobFind);
+          if ("error" in j) return { ok: false, error: j.error };
+          jobId = j.row.id;
+        }
         let orgUnitId: number | undefined;
         if ((row.orgUnitTitle ?? "").trim()) {
           const u = await pickByTitleOrCode(row.orgUnitTitle, "واحد سازمانی", unitFind);
@@ -618,6 +626,7 @@ export function registerAllImportProcessors() {
             maritalStatus: marital,
             isVeteran,
             positionId: pos.row.id,
+            jobId,
             orgUnitId,
             costCenterId,
             fatherName: row.fatherName,
@@ -669,11 +678,17 @@ export function registerAllImportProcessors() {
         if ("error" in et) return { ok: false, error: et.error };
 
         let position: { row: { id: number } } | { error: string } | null = null;
+        let jobId: number | undefined;
         let orgUnitId: number | undefined;
         let costCenterId: number | undefined;
         if ((first.positionTitle ?? "").trim()) {
           position = await pickByTitleOrCode(first.positionTitle, "پست", posFind);
           if ("error" in position) return { ok: false, error: position.error };
+          if ((first.jobTitle ?? "").trim()) {
+            const j = await pickByTitleOrCode(first.jobTitle, "شغل", jobFind);
+            if ("error" in j) return { ok: false, error: j.error };
+            jobId = j.row.id;
+          }
           if ((first.orgUnitTitle ?? "").trim()) {
             const u = await pickByTitleOrCode(first.orgUnitTitle, "واحد سازمانی", unitFind);
             if ("error" in u) return { ok: false, error: u.error };
@@ -706,6 +721,7 @@ export function registerAllImportProcessors() {
           weeklyHours: (first.weeklyHours ?? "").trim() ? toEnglishDigits(first.weeklyHours).trim() : undefined,
           description: first.description,
           positionId: position && "row" in position ? position.row.id : undefined,
+          jobId,
           orgUnitId,
           costCenterId,
           lines,

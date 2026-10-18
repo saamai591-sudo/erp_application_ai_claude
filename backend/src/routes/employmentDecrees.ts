@@ -48,6 +48,7 @@ const include = {
   employee: { select: { id: true, personnelCode: true, party: { select: { firstName: true, lastName: true, name: true } } } },
   employmentType: { select: { id: true, title: true } },
   position: { select: { id: true, title: true } },
+  job: { select: { id: true, title: true } },
   orgUnit: { select: { id: true, title: true } },
   costCenter: { select: { id: true, title: true } },
   lines: { include: { component: { select: { id: true, code: true, title: true, valueType: true } } }, orderBy: { id: "asc" as const } },
@@ -71,6 +72,8 @@ function shape(d: any) {
     status: d.status,
     positionId: d.positionId,
     positionTitle: d.position?.title ?? null,
+    jobId: d.jobId,
+    jobTitle: d.job?.title ?? null,
     orgUnitId: d.orgUnitId,
     orgUnitTitle: d.orgUnit?.title ?? null,
     costCenterId: d.costCenterId,
@@ -118,11 +121,11 @@ async function buildDraft(b: any, employeeId: number) {
     out.push({ componentId, value });
   }
   // تغییر انتصاب (اختیاری)
-  let assign: { positionId: number | null; orgUnitId: number | null; costCenterId: number | null } = { positionId: null, orgUnitId: null, costCenterId: null };
+  let assign: { positionId: number | null; orgUnitId: number | null; costCenterId: number | null; jobId: number | null } = { positionId: null, orgUnitId: null, costCenterId: null, jobId: null };
   if (b.positionId) {
-    const a = { positionId: Number(b.positionId), orgUnitId: b.orgUnitId ? Number(b.orgUnitId) : null, costCenterId: b.costCenterId ? Number(b.costCenterId) : null };
+    const a = { positionId: Number(b.positionId), orgUnitId: b.orgUnitId ? Number(b.orgUnitId) : null, costCenterId: b.costCenterId ? Number(b.costCenterId) : null, jobId: b.jobId ? Number(b.jobId) : null };
     await checkAssignmentRefs(a);
-    assign = { positionId: a.positionId, orgUnitId: a.orgUnitId!, costCenterId: a.costCenterId };
+    assign = { positionId: a.positionId, orgUnitId: a.orgUnitId!, costCenterId: a.costCenterId, jobId: a.jobId ?? null };
   }
   return {
     header: {
@@ -281,7 +284,7 @@ export async function approveDecree(id: number): Promise<void> {
         select: { number: true },
       });
       if (later) throw new HrError(`حکم دارای تغییر انتصاب باید آخرین حکم کارمند باشد (حکم بعدی: شماره ${later.number})`);
-      applied = await changeAssignment(tx, d.employeeId, { positionId: d.positionId, orgUnitId: d.orgUnitId, costCenterId: d.costCenterId }, d.effectiveDate);
+      applied = await changeAssignment(tx, d.employeeId, { positionId: d.positionId, orgUnitId: d.orgUnitId, costCenterId: d.costCenterId, jobId: d.jobId }, d.effectiveDate);
     }
     await tx.employmentType.update({ where: { id: d.employmentTypeId }, data: { hasTransactions: true } });
     await tx.decreeComponent.updateMany({ where: { id: { in: d.lines.map((l) => l.componentId) } }, data: { hasTransactions: true } });

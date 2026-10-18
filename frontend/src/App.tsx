@@ -95,6 +95,7 @@ import PettyCashes from "./pages/PettyCashes";
 import TaxMemories from "./pages/TaxMemories";
 import Employees from "./pages/Employees";
 import Positions from "./pages/Positions";
+import Jobs from "./pages/Jobs";
 import { EmploymentTypes, EducationLevels, TerminationReasons, DecreeComponents } from "./pages/HrMasters";
 import EmploymentDecrees from "./pages/EmploymentDecrees";
 import LegalParameters from "./pages/LegalParameters";
@@ -443,6 +444,9 @@ export default function App() {
             <Route path="/positions" element={<Positions />} />
             <Route path="/positions/new" element={<Positions />} />
             <Route path="/positions/:id/edit" element={<Positions />} />
+            <Route path="/jobs" element={<Jobs />} />
+            <Route path="/jobs/new" element={<Jobs />} />
+            <Route path="/jobs/:id/edit" element={<Jobs />} />
             <Route path="/decree-components" element={<DecreeComponents />} />
             <Route path="/decree-components/new" element={<DecreeComponents />} />
             <Route path="/decree-components/:id/edit" element={<DecreeComponents />} />
