@@ -117,6 +117,7 @@ router.get("/payroll-components", can(`${F_COMP}.view`), async (_req, res) => {
       isActive: c.isActive,
       method: c.methods[0]?.method ?? null,
       kind: c.kind,
+      excludeFromSums: c.excludeFromSums,
       calcTypeId: c.calcTypeId,
       calcTypeTitle: c.calcType.title,
     }))
@@ -126,7 +127,7 @@ router.get("/payroll-components", can(`${F_COMP}.view`), async (_req, res) => {
 router.post("/payroll-components", can(`${F_COMP}.create`), async (req, res) => {
   const b = req.body as any;
   try {
-    const created = await createPayrollComponent({ title: str(b.title) ?? "", kind: b.kind, calcTypeId: Number(b.calcTypeId), description: str(b.description), isActive: b.isActive });
+    const created = await createPayrollComponent({ title: str(b.title) ?? "", kind: b.kind, calcTypeId: Number(b.calcTypeId), description: str(b.description), isActive: b.isActive, excludeFromSums: b.excludeFromSums === true });
     res.status(201).json({ id: created.id });
   } catch (e) {
     fail(res, e, "خطا در ثبت عامل");
@@ -147,6 +148,10 @@ router.put("/payroll-components/:id", can(`${F_COMP}.edit`), async (req, res) =>
     if (b.kind && b.kind !== c.kind && (await prisma.payrollSlipLine.count({ where: { source: "PAYROLL_COMPONENT", refId: id } }))) {
       throw new PayrollCalcError("این عامل در فیش‌های محاسبه‌شده استفاده شده و طبقه‌اش قابل تغییر نیست");
     }
+    // «در جمع طبقه‌ها نیاید» نتیجه‌ی فرمول‌های جمع را عوض می‌کند؛ مثل طبقه، بعد از استفاده در فیش قابل تغییر نیست
+    if (b.excludeFromSums !== undefined && !!b.excludeFromSums !== c.excludeFromSums && (await prisma.payrollSlipLine.count({ where: { source: "PAYROLL_COMPONENT", refId: id } }))) {
+      throw new PayrollCalcError("این عامل در فیش‌های محاسبه‌شده استفاده شده و گزینه‌ی «در جمع طبقه‌ها نیاید» قابل تغییر نیست");
+    }
     // تغییر نوع محاسبه: فقط وقتی عامل در فیشی نیامده و فرمول عامل دیگری به آن ارجاع ندارد
     let calcTypeId: number | undefined;
     if (b.calcTypeId !== undefined && Number(b.calcTypeId) !== c.calcTypeId) {
@@ -160,7 +165,7 @@ router.put("/payroll-components/:id", can(`${F_COMP}.edit`), async (req, res) =>
       if (users.length) throw new PayrollCalcError("فرمول عامل‌های دیگر به این عامل ارجاع دارد؛ نوع محاسبه‌اش قابل تغییر نیست");
       calcTypeId = nt.id;
     }
-    await prisma.payrollComponent.update({ where: { id }, data: { title, kind: b.kind ?? undefined, calcTypeId, description: str(b.description), isActive: b.isActive } });
+    await prisma.payrollComponent.update({ where: { id }, data: { title, kind: b.kind ?? undefined, calcTypeId, description: str(b.description), isActive: b.isActive, excludeFromSums: b.excludeFromSums === undefined ? undefined : !!b.excludeFromSums } });
     res.json({ ok: true });
   } catch (e) {
     fail(res, e, "خطا در ویرایش عامل");

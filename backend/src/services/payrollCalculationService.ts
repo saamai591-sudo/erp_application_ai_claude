@@ -112,14 +112,14 @@ function allRefs(ps: ParsedBranch[]): RefInfo[] {
 function edgesOf(
   self: string,
   refs: RefInfo[],
-  nodes: { node: string; kind: Kind; bases?: Set<number> }[],
+  nodes: { node: string; kind: Kind; bases?: Set<number>; noSum?: boolean }[],
   basisByKey?: Map<string, { id: number; source: string | null }>
 ): string[] {
   const out = new Set<string>();
   for (const r of refs) {
     if (r.ns === "D" && r.variant === "VALUE") out.add(`D:${r.key}`);
     else if (r.ns === "C" && (r.variant === "VALUE" || r.variant === "YTD")) out.add(`C:${r.key}`);
-    else if (r.ns === "S") nodes.filter((n) => n.kind === r.key).forEach((n) => out.add(n.node));
+    else if (r.ns === "S") nodes.filter((n) => n.kind === r.key && !n.noSum).forEach((n) => out.add(n.node));
     else if (r.ns === "P") {
       // مبنای «محاسبات»: مقدار از مبلغ همین ماهِ عضوها می‌آید ⇒ به همه‌ی اعضا وابسته است (اگر خودِ عامل عضو باشد، دور است)
       const b = basisByKey?.get(r.key);
@@ -136,7 +136,7 @@ export async function validateFactorMethod(cand: CandidateMethod): Promise<void>
   const refs = allRefs(parsed);
   const [decree, comps, params, baseType] = await Promise.all([
     prisma.decreeComponent.findMany({ select: { code: true, title: true } }),
-    prisma.payrollComponent.findMany({ select: { key: true, title: true, kind: true, calcTypeId: true } }),
+    prisma.payrollComponent.findMany({ select: { key: true, title: true, kind: true, calcTypeId: true, excludeFromSums: true } }),
     prisma.payrollParameter.findMany({ select: { id: true, key: true, kind: true, basisSource: true } }),
     prisma.payrollCalcType.findFirst({ where: { isBase: true }, select: { id: true } }),
   ]);
@@ -166,8 +166,9 @@ export async function validateFactorMethod(cand: CandidateMethod): Promise<void>
   const latest = await prisma.payrollFactorMethod.findMany({ orderBy: { execCalendarMonth: { startDate: "desc" } }, include: { branches: { orderBy: { seq: "asc" } }, bases: { where: { effective: true }, select: { parameterId: true } }, decreeComponent: { select: { code: true } }, payrollComponent: { select: { key: true, calcTypeId: true } } } });
   // طبقه از خود عامل می‌آید (عامل حکم همیشه «پرداختی» است)
   const kindByNode = new Map<string, Kind>([...decree.map((d) => [`D:${d.code}`, "EARNING" as Kind] as [string, Kind]), ...comps.map((x) => [`C:${x.key}`, x.kind as Kind] as [string, Kind])]);
+  const noSumKeys = new Set(comps.filter((x) => x.excludeFromSums).map((x) => `C:${x.key}`));
   const seen = new Set<string>();
-  const nodes: { node: string; kind: Kind; method: Method; branches: BranchInput[]; bases: Set<number> }[] = [];
+  const nodes: { node: string; kind: Kind; method: Method; branches: BranchInput[]; bases: Set<number>; noSum: boolean }[] = [];
   for (const m of latest) {
     const node = m.decreeComponent ? `D:${m.decreeComponent.code}` : `C:${m.payrollComponent!.key}`;
     // دور فقط بین عامل‌های هم‌نوع معنا دارد (مقدار نوع پایه از فیش ماهانه‌ی آماده خوانده می‌شود)
@@ -175,10 +176,10 @@ export async function validateFactorMethod(cand: CandidateMethod): Promise<void>
     if (t !== candType) continue;
     if (seen.has(node) || node === cand.node) continue;
     seen.add(node);
-    nodes.push({ node, kind: (kindByNode.get(node) ?? "INFO") as Kind, method: m.method as Method, branches: m.branches.map((b) => ({ conditionText: b.conditionText, formulaText: b.formulaText })), bases: new Set(m.bases.map((x) => x.parameterId)) });
+    nodes.push({ node, kind: (kindByNode.get(node) ?? "INFO") as Kind, method: m.method as Method, branches: m.branches.map((b) => ({ conditionText: b.conditionText, formulaText: b.formulaText })), bases: new Set(m.bases.map((x) => x.parameterId)), noSum: noSumKeys.has(node) });
   }
-  nodes.push({ node: cand.node, kind: cand.kind, method: cand.method, branches: cand.branches, bases: new Set(cand.basisIds ?? []) });
-  const kindNodes = nodes.map((n) => ({ node: n.node, kind: n.kind, bases: n.bases }));
+  nodes.push({ node: cand.node, kind: cand.kind, method: cand.method, branches: cand.branches, bases: new Set(cand.basisIds ?? []), noSum: noSumKeys.has(cand.node) });
+  const kindNodes = nodes.map((n) => ({ node: n.node, kind: n.kind, bases: n.bases, noSum: n.noSum }));
   const graph = new Map<string, string[]>();
   for (const n of nodes) {
     let es: string[] = [];
@@ -249,6 +250,8 @@ interface FactorNode {
   deps: string[];
   /** شناسه‌ی مبناهایی که روش مؤثر این عامل عضو آن‌هاست */
   bases: Set<number>;
+  /** عامل با «در جمع طبقه‌ها نیاید» */
+  noSum?: boolean;
   decreeValue?: number; // مقدار حکم (برای D)
   decreeValueType?: string;
 }
@@ -262,7 +265,7 @@ function prevMonth(y: number, m: number) {
 const COMPONENT_KINDS = ["WORK", "EARNING", "DEDUCTION", "EMPLOYER_COST", "INFO"];
 
 /** ساخت «عامل حقوق» (فرم و ورود از اکسل هر دو از همین تابع): عنوان یکتا، طبقه‌ی معتبر، نوع محاسبه‌ی موجود؛ کلید داخلی را سیستم می‌سازد */
-export async function createPayrollComponent(input: { title: string; kind: string; calcTypeId: number; description?: string | null; isActive?: boolean }): Promise<{ id: number }> {
+export async function createPayrollComponent(input: { title: string; kind: string; calcTypeId: number; description?: string | null; isActive?: boolean; excludeFromSums?: boolean }): Promise<{ id: number }> {
   const title = input.title.trim();
   if (!title) throw new PayrollCalcError("عنوان الزامی است");
   if (!COMPONENT_KINDS.includes(input.kind)) throw new PayrollCalcError("طبقه را انتخاب کنید");
@@ -274,7 +277,7 @@ export async function createPayrollComponent(input: { title: string; kind: strin
   let key = `F${n}`;
   while (await prisma.payrollComponent.findUnique({ where: { key } })) key = `F${++n}`;
   const created = await prisma.payrollComponent.create({
-    data: { key, title, kind: input.kind as any, calcTypeId: calcType.id, description: input.description?.trim() || null, isActive: input.isActive ?? true },
+    data: { key, title, kind: input.kind as any, calcTypeId: calcType.id, description: input.description?.trim() || null, isActive: input.isActive ?? true, excludeFromSums: !!input.excludeFromSums },
   });
   return { id: created.id };
 }
@@ -421,11 +424,11 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
       warnings.push(`برای عامل حقوق «${c.title}» روش محاسبه‌ای تعریف نشده است؛ در محاسبه نیامد`);
       continue;
     }
-    nodes.push(mk({ node: `C:${c.key}`, source: "PAYROLL_COMPONENT", refId: c.id, title: c.title, kind: c.kind as Kind, method: m }));
+    nodes.push(mk({ node: `C:${c.key}`, source: "PAYROLL_COMPONENT", refId: c.id, title: c.title, kind: c.kind as Kind, method: m, noSum: c.excludeFromSums }));
   }
   const paramDefs = new Map((await prisma.payrollParameter.findMany()).map((p) => [p.key, p]));
   const basisByKey = new Map([...paramDefs.values()].filter((p) => p.kind === "BASIS").map((p) => [p.key, { id: p.id, source: p.basisSource as string | null }]));
-  const kindNodes = nodes.map((n) => ({ node: n.node, kind: n.kind, bases: n.bases }));
+  const kindNodes = nodes.map((n) => ({ node: n.node, kind: n.kind, bases: n.bases, noSum: n.noSum }));
   // اقساط وام: حقوق ماهانه از وضعیت وام‌ها محاسبه می‌کند و مانده را ثبت می‌کند؛ نوع‌های دیگر مقدار ثبت‌شده‌ی همان فیش ماهانه را می‌خوانند
   const loanItems: LoanMonthItem[] = isBase ? await computeLoanMonth(employeeId, year, month) : [];
   const loanSum = isBase ? loanItems.reduce((a, x) => a + x.installment, 0) : baseSlip ? await storedLoanSum(baseSlip.id) : 0;
@@ -609,7 +612,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
       if (ns === "S") {
         let sum = 0;
         for (const n of nodes) {
-          if (n.kind !== key) continue;
+          if (n.kind !== key || n.noSum) continue;
           if (errored.has(n.node)) throw new FormulaError(`«${n.title}» خطا دارد و در جمع ${KIND_FA[key]} نمی‌آید`);
           sum += amounts.get(n.node) ?? 0;
         }

@@ -5068,6 +5068,8 @@ model PayrollComponent {
   kind        PayrollComponentKind
   description String?
   isActive    Boolean               @default(true)
+  /// true = در جمع طبقه‌ها ([S:پرداختی] و …) فرمول‌ها نیاید و وابستگی هم ساخته نشود (مثل «بدهی ماه جاری»؛ در جمع‌های فیش همچنان می‌آید)
+  excludeFromSums Boolean           @default(false)
   createdAt   DateTime              @default(now())
   /// نوع محاسبه‌ای که عامل در آن می‌آید (حقوق ماهانه، عیدی، ذخیره سنوات، …)؛ هر عامل فقط به یک نوع تعلق دارد
   calcTypeId  Int

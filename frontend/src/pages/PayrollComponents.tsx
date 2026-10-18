@@ -26,6 +26,7 @@ interface Comp {
   isActive: boolean;
   method: string | null;
   kind: string;
+  excludeFromSums?: boolean;
   calcTypeId: number;
   calcTypeTitle: string;
 }
@@ -88,6 +89,7 @@ function CompList() {
           { header: "عنوان", ...s((r) => r.title) },
           { header: "نوع محاسبه", ...s((r) => r.calcTypeTitle), width: "150px" },
           { header: "طبقه", ...s((r) => (r.kind ? KIND_FA[r.kind] : "—")), width: "140px" },
+          { header: "در جمع طبقه‌ها", ...s((r) => (r.excludeFromSums ? "نمی‌آید" : "می‌آید")), width: "120px" },
           { header: "فعال", ...s((r) => (r.isActive ? "بله" : "خیر")), width: "70px" },
         ]}
         rows={items}
@@ -98,7 +100,7 @@ function CompList() {
   );
 }
 
-const DEFAULT_FORM = { title: "", kind: "", calcTypeId: "", description: "", isActive: true };
+const DEFAULT_FORM = { title: "", kind: "", calcTypeId: "", description: "", isActive: true, excludeFromSums: false };
 
 function CompForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
@@ -121,7 +123,7 @@ function CompForm({ editId }: { editId?: number }) {
     api.get("/payroll-components").then((rows: Comp[]) => {
       const c = rows.find((r) => r.id === editId);
       if (c) {
-        if (!hasPersistedState(cacheKey)) setForm({ title: c.title, kind: c.kind, calcTypeId: String(c.calcTypeId), description: c.description ?? "", isActive: c.isActive });
+        if (!hasPersistedState(cacheKey)) setForm({ title: c.title, kind: c.kind, calcTypeId: String(c.calcTypeId), description: c.description ?? "", isActive: c.isActive, excludeFromSums: !!c.excludeFromSums });
       }
       setLoaded(true);
     });
@@ -188,6 +190,13 @@ function CompForm({ editId }: { editId?: number }) {
               <option value="">انتخاب کنید</option>
               {Object.entries(KIND_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
+          </div>
+          <div className="form-field">
+            <label className="checkbox-row">
+              <input type="checkbox" checked={form.excludeFromSums} onChange={(e) => setForm({ ...form, excludeFromSums: e.target.checked })} />
+              در جمع طبقه‌ها نیاید
+              <FieldHint label="در جمع طبقه‌ها نیاید" text="عاملی که خودش از جمع‌ها محاسبه می‌شود (مثلاً «بدهی ماه جاری» = جمع کسورات − جمع پرداختی‌ها) را علامت بزنید تا در «جمع پرداختی» و مانند آن در فرمول‌ها حساب نشود و حلقه‌ی وابستگی نسازد. در جمع‌های فیش همچنان می‌آید. بعد از استفاده در فیش قابل تغییر نیست." />
+            </label>
           </div>
           {editId && (
             <div className="form-field">
