@@ -37,6 +37,7 @@ export interface Party {
 interface PartyFull extends Party {
   addresses: any[];
   phones: any[];
+  contacts?: any[];
   bankAccounts: any[];
 }
 
@@ -240,7 +241,7 @@ export function PartyForm({
       newPath={`${backPath}/new`}
       onDelete={currentId ? handleDelete : undefined}
     >
-      <PartySectionNav counts={{ address: children.addresses.length, phone: children.phones.length, bank: children.bankAccounts.length }} />
+      <PartySectionNav counts={{ address: children.addresses.length, phone: children.phones.length, contact: (children.contacts ?? []).length, bank: children.bankAccounts.length }} />
 
       <form id="party-main-form" onSubmit={onSubmit}>
         <PartySectionCard id={PARTY_SECTION_IDS.main} title="اطلاعات اصلی">

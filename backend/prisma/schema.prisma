@@ -315,6 +315,7 @@ model Party {
   addresses          PartyAddress[]
   bankAccounts       PartyBankAccount[]
   phones             PartyPhone[]
+  contacts           PartyContact[]
   payments           Payment[]
   paymentSettlementLines PaymentSettlementLine[]
   purchaseExpert     PurchaseExpert?
@@ -355,6 +356,22 @@ model PartyPhone {
   number    String
   isPrimary Boolean   @default(false)
   party     Party     @relation(fields: [partyId], references: [id], onDelete: Cascade)
+}
+
+/// افراد مرتبط با طرف‌حساب (مثلاً شخصی که از یک شرکت تماس می‌گیرد): نام، سمت، موبایل، تلفن، ایمیل و توضیحات پیگیری.
+/// شخص مستقل (Party با کد تفصیل) نیست؛ فقط اطلاعات تماسِ همین طرف‌حساب است.
+model PartyContact {
+  id          Int     @id @default(autoincrement())
+  partyId     Int
+  name        String
+  position    String?
+  mobile      String?
+  phone       String?
+  email       String?
+  description String?
+  party       Party   @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@index([partyId])
 }
 
 model PartyBankAccount {

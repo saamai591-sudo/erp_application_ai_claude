@@ -32,6 +32,15 @@ export interface PhoneInput {
   number: string;
   isPrimary?: boolean;
 }
+export interface ContactInput {
+  id?: number;
+  name: string;
+  position?: string | null;
+  mobile?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  description?: string | null;
+}
 export interface BankAccountInput {
   id?: number;
   bankPartyId?: number | null;
@@ -64,6 +73,7 @@ export interface PartyInput {
    */
   addresses?: AddressInput[];
   phones?: PhoneInput[];
+  contacts?: ContactInput[];
   bankAccounts?: BankAccountInput[];
 }
 
@@ -138,6 +148,7 @@ const PHONE_TYPES = ["MOBILE", "HEAD_OFFICE", "FACTORY", "WAREHOUSE", "HOME"];
 interface CleanChildren {
   addresses?: { id?: number; type: string; cityId: number; address: string | null; postalCode: string | null; isPrimary: boolean }[];
   phones?: { id?: number; type: string; number: string; isPrimary: boolean }[];
+  contacts?: { id?: number; name: string; position: string | null; mobile: string | null; phone: string | null; email: string | null; description: string | null }[];
   bankAccounts?: { id?: number; bankPartyId: number | null; accountNumber: string | null; iban: string | null; cardNumber: string | null }[];
 }
 
@@ -177,6 +188,24 @@ async function cleanChildren(input: PartyInput): Promise<CleanChildren> {
       return { id: p.id ? Number(p.id) : undefined, type: p.type, number, isPrimary: !!p.isPrimary };
     });
     out.phones = normalizePrimary(rows, "تلفن‌ها");
+  }
+  if (input.contacts !== undefined) {
+    const digits = (v: unknown) => toEnglishDigits(String(v ?? "")).replace(/[\s-]+/g, "") || null;
+    out.contacts = input.contacts.map((c, i) => {
+      const name = String(c.name ?? "").replace(/\s+/g, " ").trim();
+      if (!name) throw new PartyError(`نام فرد مرتبط ردیف ${i + 1} الزامی است`);
+      const email = String(c.email ?? "").trim() || null;
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new PartyError(`ایمیل فرد مرتبط ردیف ${i + 1} نامعتبر است`);
+      return {
+        id: c.id ? Number(c.id) : undefined,
+        name,
+        position: String(c.position ?? "").trim() || null,
+        mobile: digits(c.mobile),
+        phone: digits(c.phone),
+        email,
+        description: String(c.description ?? "").trim() || null,
+      };
+    });
   }
   if (input.bankAccounts !== undefined) {
     const rows = input.bankAccounts.map((b, i) => {
@@ -231,6 +260,15 @@ async function syncChildren(tx: Tx, partyId: number, c: CleanChildren) {
       (ids) => tx.partyPhone.deleteMany({ where: { id: { in: ids } } }),
       (id, r) => tx.partyPhone.update({ where: { id }, data: { type: r.type as any, number: r.number, isPrimary: r.isPrimary } }),
       (r) => tx.partyPhone.create({ data: { partyId, type: r.type as any, number: r.number, isPrimary: r.isPrimary } })
+    );
+  if (c.contacts)
+    await sync(
+      "افراد مرتبط",
+      await tx.partyContact.findMany({ where: { partyId }, select: { id: true } }),
+      c.contacts,
+      (ids) => tx.partyContact.deleteMany({ where: { id: { in: ids } } }),
+      (id, r) => tx.partyContact.update({ where: { id }, data: { name: r.name, position: r.position, mobile: r.mobile, phone: r.phone, email: r.email, description: r.description } }),
+      (r) => tx.partyContact.create({ data: { partyId, name: r.name, position: r.position, mobile: r.mobile, phone: r.phone, email: r.email, description: r.description } })
     );
   if (c.bankAccounts)
     await sync(

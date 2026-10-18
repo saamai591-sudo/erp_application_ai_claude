@@ -26,6 +26,16 @@ export interface PhoneRow {
   number: string;
   isPrimary: boolean;
 }
+export interface ContactRow {
+  k: string;
+  id?: number;
+  name: string;
+  position: string;
+  mobile: string;
+  phone: string;
+  email: string;
+  description: string;
+}
 export interface BankRow {
   k: string;
   id?: number;
@@ -37,10 +47,12 @@ export interface BankRow {
 export interface PartyChildren {
   addresses: AddressRow[];
   phones: PhoneRow[];
+  /** افراد مرتبط؛ در state ذخیره‌شده‌ی قدیمی نیست (undefined = بخش دست‌نخورده) */
+  contacts?: ContactRow[];
   bankAccounts: BankRow[];
 }
 
-export const EMPTY_CHILDREN: PartyChildren = { addresses: [], phones: [], bankAccounts: [] };
+export const EMPTY_CHILDREN: PartyChildren = { addresses: [], phones: [], contacts: [], bankAccounts: [] };
 
 let seq = 0;
 const nk = () => `n${Date.now()}_${seq++}`;
@@ -50,6 +62,7 @@ export function childrenFromDetail(p: any): PartyChildren {
   return {
     addresses: (p.addresses || []).map((a: any) => ({ k: `a${a.id}`, id: a.id, type: a.type, cityId: String(a.cityId), address: a.address || "", postalCode: a.postalCode || "", isPrimary: !!a.isPrimary })),
     phones: (p.phones || []).map((a: any) => ({ k: `p${a.id}`, id: a.id, type: a.type, number: a.number || "", isPrimary: !!a.isPrimary })),
+    contacts: (p.contacts || []).map((a: any) => ({ k: `c${a.id}`, id: a.id, name: a.name || "", position: a.position || "", mobile: a.mobile || "", phone: a.phone || "", email: a.email || "", description: a.description || "" })),
     bankAccounts: (p.bankAccounts || []).map((a: any) => ({ k: `b${a.id}`, id: a.id, bankPartyId: a.bankPartyId ? String(a.bankPartyId) : "", accountNumber: a.accountNumber || "", iban: a.iban || "", cardNumber: a.cardNumber || "" })),
   };
 }
@@ -59,6 +72,7 @@ export function childrenPayload(c: PartyChildren) {
   return {
     addresses: c.addresses.map(({ k, cityId, ...r }) => ({ ...r, cityId: cityId ? Number(cityId) : 0 })),
     phones: c.phones.map(({ k, ...r }) => r),
+    contacts: c.contacts?.map(({ k, ...r }) => r),
     bankAccounts: c.bankAccounts.map(({ k, bankPartyId, ...r }) => ({ ...r, bankPartyId: bankPartyId ? Number(bankPartyId) : null })),
   };
 }
@@ -67,18 +81,23 @@ export function childrenPayload(c: PartyChildren) {
 export function validateChildren(c: PartyChildren): string | null {
   for (const [i, a] of c.addresses.entries()) if (!a.cityId) return `نشانی ردیف ${toFaDigits(String(i + 1))}: انتخاب شهر الزامی است`;
   for (const [i, p] of c.phones.entries()) if (!p.number.trim()) return `تلفن ردیف ${toFaDigits(String(i + 1))}: شماره الزامی است`;
+  for (const [i, x] of (c.contacts ?? []).entries()) {
+    if (!x.name.trim()) return `فرد مرتبط ردیف ${toFaDigits(String(i + 1))}: نام الزامی است`;
+    if (x.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x.email.trim())) return `فرد مرتبط ردیف ${toFaDigits(String(i + 1))}: ایمیل نامعتبر است`;
+  }
   for (const [i, b] of c.bankAccounts.entries()) if (!b.accountNumber.trim() && !b.iban.trim() && !b.cardNumber.trim()) return `حساب بانکی ردیف ${toFaDigits(String(i + 1))}: حداقل یکی از شماره حساب، شبا یا شماره کارت لازم است`;
   return null;
 }
 
-export const PARTY_SECTION_IDS = { main: "party-sec-main", address: "party-sec-address", phone: "party-sec-phone", bank: "party-sec-bank" };
+export const PARTY_SECTION_IDS = { main: "party-sec-main", address: "party-sec-address", phone: "party-sec-phone", contact: "party-sec-contact", bank: "party-sec-bank" };
 
 /** چیپ‌های پرش به بخش‌ها (بالای فرم) */
-export function PartySectionNav({ counts }: { counts: { address: number; phone: number; bank: number } }) {
+export function PartySectionNav({ counts }: { counts: { address: number; phone: number; contact: number; bank: number } }) {
   const items: [string, string, number | null][] = [
     [PARTY_SECTION_IDS.main, "اطلاعات اصلی", null],
     [PARTY_SECTION_IDS.address, "نشانی‌ها", counts.address],
     [PARTY_SECTION_IDS.phone, "تلفن‌ها", counts.phone],
+    [PARTY_SECTION_IDS.contact, "افراد مرتبط", counts.contact],
     [PARTY_SECTION_IDS.bank, "حساب‌های بانکی", counts.bank],
   ];
   return (
@@ -140,6 +159,7 @@ export function PartySections({ value, onChange }: { value: PartyChildren; onCha
   }, []);
 
   const { addresses, phones, bankAccounts } = value;
+  const contacts = value.contacts ?? [];
   const upd = (patch: Partial<PartyChildren>) => onChange({ ...value, ...patch });
 
   return (
@@ -213,6 +233,46 @@ export function PartySections({ value, onChange }: { value: PartyChildren; onCha
                   <input type="checkbox" checked={p.isPrimary} onChange={(e) => upd({ phones: setPrimary(phones, p.k, e.target.checked) })} />
                   تلفن اصلی
                 </label>
+              </div>
+            </RowShell>
+          );
+        })}
+      </PartySectionCard>
+
+      <PartySectionCard
+        id={PARTY_SECTION_IDS.contact}
+        title="افراد مرتبط"
+        addLabel="فرد مرتبط جدید"
+        onAdd={() => upd({ contacts: [...contacts, { k: nk(), name: "", position: "", mobile: "", phone: "", email: "", description: "" }] })}
+      >
+        {contacts.length === 0 && <div className="party-empty">فرد مرتبطی ثبت نشده است.</div>}
+        {contacts.map((c, i) => {
+          const set = (patch: Partial<ContactRow>) => upd({ contacts: contacts.map((x) => (x.k === c.k ? { ...x, ...patch } : x)) });
+          return (
+            <RowShell key={c.k} index={i} onRemove={() => upd({ contacts: contacts.filter((x) => x.k !== c.k) })}>
+              <div className="form-field">
+                <label>نام</label>
+                <input value={c.name} onChange={(e) => set({ name: e.target.value })} />
+              </div>
+              <div className="form-field">
+                <label>سمت</label>
+                <input value={c.position} onChange={(e) => set({ position: e.target.value })} />
+              </div>
+              <div className="form-field">
+                <label>موبایل</label>
+                <input dir="ltr" value={c.mobile} onChange={(e) => set({ mobile: e.target.value })} />
+              </div>
+              <div className="form-field">
+                <label>تلفن</label>
+                <input dir="ltr" value={c.phone} onChange={(e) => set({ phone: e.target.value })} />
+              </div>
+              <div className="form-field">
+                <label>ایمیل</label>
+                <input dir="ltr" value={c.email} onChange={(e) => set({ email: e.target.value })} />
+              </div>
+              <div className="form-field full">
+                <label>توضیحات (برای پیگیری)</label>
+                <input value={c.description} onChange={(e) => set({ description: e.target.value })} />
               </div>
             </RowShell>
           );

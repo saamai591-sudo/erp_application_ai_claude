@@ -32,7 +32,7 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   const party = await prisma.party.findUnique({
     where: { id: Number(req.params.id) },
-    include: { addresses: { include: { city: true } }, phones: true, bankAccounts: true },
+    include: { addresses: { include: { city: true } }, phones: true, contacts: { orderBy: { id: "asc" } }, bankAccounts: true },
   });
   if (!party) return res.status(404).json({ error: "طرف‌حساب یافت نشد" });
   res.json(party);
