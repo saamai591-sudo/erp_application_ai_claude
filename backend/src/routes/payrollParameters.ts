@@ -108,6 +108,7 @@ router.get("/payroll-parameters", async (_req, res) => {
         type: p.type,
         kind: p.kind,
         basisSource: p.basisSource,
+        decreeValueMode: p.decreeValueMode,
         memberCount: p._count.members,
         employeeValueCount: p._count.employeeValues,
         description: p.description,
@@ -134,6 +135,7 @@ router.get("/payroll-parameters/:id", async (req, res) => {
     type: p.type,
     kind: p.kind,
     basisSource: p.basisSource,
+    decreeValueMode: p.decreeValueMode,
     description: p.description,
     isSystem: p.isSystem,
     isActive: p.isActive,
@@ -159,13 +161,14 @@ router.post("/payroll-parameters", can(`${FORM}.create`), async (req, res) => {
     if (kind === "CONSTANT" && !TYPES.includes(b.type)) throw new PErr("نوع داده نامعتبر است");
     if (isPersonnelKind(kind) && !PERSONNEL_TYPES.includes(b.type)) throw new PErr("نوع داده‌ی مقدار ثابت پرسنلی فقط عدد، درصد یا مبلغ است");
     if (kind === "BASIS" && !["DECREE", "CALC"].includes(b.basisSource)) throw new PErr("منبع داده‌ی مبنا را انتخاب کنید (حکم یا محاسبات)");
+    if (kind === "BASIS" && b.basisSource === "DECREE" && !["LAST", "AVG"].includes(b.decreeValueMode)) throw new PErr("برای مبنای منبع «حکم» مشخص کنید مقدار حکم «آخرین مقدار حکم» باشد یا «میانگین حکم»");
     if (await prisma.payrollParameter.findFirst({ where: { title } })) throw new PErr("پارامتر دیگری با همین عنوان وجود دارد");
     // کلید داخلی (برای ارجاع در فرمول‌ها) را سیستم می‌سازد و به کاربر نمایش داده نمی‌شود؛ هر کلیدی که از کلاینت بیاید نادیده گرفته می‌شود
     const last = await prisma.payrollParameter.findFirst({ orderBy: { id: "desc" }, select: { id: true } });
     let n = (last?.id ?? 0) + 1;
     let key = `PARAM_${n}`;
     while (await prisma.payrollParameter.findUnique({ where: { key } })) key = `PARAM_${++n}`;
-    const created = await prisma.payrollParameter.create({ data: { key, title, kind, type: kind === "BASIS" ? "AMOUNT" : b.type, basisSource: kind === "BASIS" ? b.basisSource : null, description: str(b.description), isSystem: false } });
+    const created = await prisma.payrollParameter.create({ data: { key, title, kind, type: kind === "BASIS" ? "AMOUNT" : b.type, basisSource: kind === "BASIS" ? b.basisSource : null, decreeValueMode: kind === "BASIS" && b.basisSource === "DECREE" ? b.decreeValueMode : null, description: str(b.description), isSystem: false } });
     res.status(201).json({ id: created.id });
   } catch (e) {
     fail(res, e, "خطا در ثبت پارامتر");

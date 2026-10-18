@@ -532,15 +532,22 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
     const mem = ids.length ? await prisma.payrollFactorMethodBasis.findMany({ where: { methodId: { in: ids }, effective: true }, select: { methodId: true, parameterId: true } }) : [];
     for (const x of mem) baseLineBases.set(x.methodId, (baseLineBases.get(x.methodId) ?? new Set<number>()).add(x.parameterId));
   }
-  const basisInfo = new Map<string, { title: string; source: string; value: number; members: { label: string; value: number }[] }>();
+  const basisInfo = new Map<string, { title: string; source: string; decreeMode: string | null; value: number; members: { label: string; value: number }[] }>();
   const basisValue = (def: (typeof paramDefs extends Map<string, infer V> ? V : never)): number => {
     const got = basisInfo.get(def.key);
     if (got) return got.value;
     const members: { label: string; value: number }[] = [];
     if (def.basisSource === "DECREE") {
-      for (const l of decree.lines) {
-        const m = decreeMethod(l.component.id);
-        if (m?.bases.includes(def.id)) members.push({ label: l.component.title, value: Number(l.value) });
+      if (def.decreeValueMode === "AVG") {
+        // میانگین حکم: برای هر عامل حکمِ عضو، میانگین وزنی بر روزِ مقدارهای حکم (همان «میانگین حکم» فرمول‌ها)، حتی اگر در آخرین حکم نباشد
+        for (const c of allDecreeComps) {
+          if (decreeMethod(c.id)?.bases.includes(def.id)) members.push({ label: `${c.title} (میانگین)`, value: averageOf(String(c.code)) });
+        }
+      } else {
+        for (const l of decree.lines) {
+          const m = decreeMethod(l.component.id);
+          if (m?.bases.includes(def.id)) members.push({ label: l.component.title, value: Number(l.value) });
+        }
       }
     } else {
       for (const n of nodes) {
@@ -560,7 +567,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
     }
     const value = members.reduce((a, x) => a + x.value, 0);
     if (members.length === 0) warnings.push(`مبنای «${def.title}» در این ماه هیچ عضوی ندارد؛ مقدار آن صفر است`);
-    basisInfo.set(def.key, { title: def.title, source: def.basisSource ?? "CALC", value, members });
+    basisInfo.set(def.key, { title: def.title, source: def.basisSource ?? "CALC", decreeMode: def.basisSource === "DECREE" ? def.decreeValueMode ?? "LAST" : null, value, members });
     return value;
   };
 
@@ -777,7 +784,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
       brackets: [],
     };
   }
-  for (const [k, b] of basisInfo) paramsOut[k] = { title: b.title, type: "BASIS", source: b.source, value: b.value, members: b.members };
+  for (const [k, b] of basisInfo) paramsOut[k] = { title: b.title, type: "BASIS", source: b.source, decreeMode: b.decreeMode, value: b.value, members: b.members };
 
   // ترتیب نمایش: طبقه‌ها (پرداختی، کسر، هزینه کارفرما، اطلاعاتی) و داخل هر طبقه به ترتیب محاسبه
   const kindOrder: Kind[] = ["WORK", "EARNING", "DEDUCTION", "EMPLOYER_COST", "INFO"];

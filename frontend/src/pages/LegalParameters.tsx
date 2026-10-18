@@ -24,6 +24,7 @@ import { WorkMonthPicker } from "../components/WorkMonthPicker";
 // ماه اجرا ≤ آن تاریخ است؛ تغییر سالانه‌ی قانون = یک مقدار جدید با ماه اجرای جدید (بدون تغییر کد). مقداری که در محاسبه استفاده شده قفل است
 // و مقدار جدید فقط برای ماهی بعد از آخرین ماهِ محاسبه‌شده ثبت می‌شود.
 
+const DECREE_MODE_FA: Record<string, string> = { LAST: "آخرین مقدار حکم", AVG: "میانگین حکم" };
 const TYPE_FA: Record<string, string> = { NUMBER: "عدد", AMOUNT: "مبلغ", BRACKETS: "جدول پلکانی" };
 // «نوع» = مقدار ثابت (مقدارهای تاریخ‌دار؛ «نوع داده» عدد/مبلغ/جدول پلکانی) یا مبنا (بدون مقدار؛ جمع مبلغ عامل‌های عضو، با «منبع داده» حکم یا محاسبات)
 const KIND_FA: Record<string, string> = {
@@ -60,6 +61,7 @@ interface ParamRow {
   type: string;
   kind: string;
   basisSource: string | null;
+  decreeValueMode?: string | null;
   memberCount: number;
   employeeValueCount?: number;
   description: string | null;
@@ -75,6 +77,7 @@ interface ParamDetail {
   type: string;
   kind: string;
   basisSource: string | null;
+  decreeValueMode?: string | null;
   description: string | null;
   isSystem: boolean;
   isActive: boolean;
@@ -139,7 +142,7 @@ function ParamList() {
           { header: "عنوان", ...s((r) => r.title) },
           { header: "نوع", ...s((r) => KIND_FA[r.kind] ?? r.kind), width: "190px" },
           { header: "نوع داده", ...s((r) => (r.kind === "BASIS" ? "—" : TYPE_FA[r.type])), width: "110px" },
-          { header: "منبع داده", ...s((r) => (r.kind === "BASIS" ? SOURCE_FA[r.basisSource ?? ""] ?? "" : "—")), width: "100px" },
+          { header: "منبع داده", ...s((r) => (r.kind === "BASIS" ? (SOURCE_FA[r.basisSource ?? ""] ?? "") + (r.basisSource === "DECREE" && r.decreeValueMode ? ` (${DECREE_MODE_FA[r.decreeValueMode] ?? ""})` : "") : "—")), width: "170px" },
           { header: "مقدار فعلی", ...s((r) => (r.kind === "BASIS" ? "بدون مقدار (جمع اعضا)" : isPersonnel(r.kind) ? "مقدار هر کارمند" : valueText(r.type, r.current))), width: "170px" },
           { header: "ماه اجرا", ...s((r) => (r.kind !== "BASIS" && !isPersonnel(r.kind) && r.current ? monthText(r.current.execYear, r.current.execMonth) : "—")), width: "130px" },
           { header: "سیستمی", ...s((r) => (r.isSystem ? "بله" : "")), width: "80px" },
@@ -157,7 +160,7 @@ function ParamForm({ editId }: { editId?: number }) {
   const location = useLocation();
   const { hasPermission } = usePermissions();
   const cacheKey = `form:${location.pathname}:form`;
-  const [form, setForm] = usePersistedState(cacheKey, { title: "", kind: "CONSTANT", type: "NUMBER", basisSource: "CALC", description: "", isActive: true });
+  const [form, setForm] = usePersistedState(cacheKey, { title: "", kind: "CONSTANT", type: "NUMBER", basisSource: "CALC", decreeValueMode: "", description: "", isActive: true });
   const [detail, setDetail] = useState<ParamDetail | null>(null);
   const [valueDlg, setValueDlg] = useState<{ value: ValueRow | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -168,7 +171,7 @@ function ParamForm({ editId }: { editId?: number }) {
     if (!editId) return;
     const d: ParamDetail = await api.get(`/payroll-parameters/${editId}`);
     setDetail(d);
-    if (fillForm) setForm({ title: d.title, kind: d.kind, type: d.type, basisSource: d.basisSource ?? "CALC", description: d.description ?? "", isActive: d.isActive });
+    if (fillForm) setForm({ title: d.title, kind: d.kind, type: d.type, basisSource: d.basisSource ?? "CALC", decreeValueMode: d.decreeValueMode ?? "", description: d.description ?? "", isActive: d.isActive });
   }
 
   useEffect(() => {
@@ -180,13 +183,14 @@ function ParamForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
     if (!form.title.trim()) return setError("عنوان الزامی است");
+    if (!editId && form.kind === "BASIS" && form.basisSource === "DECREE" && !form.decreeValueMode) return setError("مقدار حکم را مشخص کنید: آخرین مقدار حکم یا میانگین حکم");
     try {
       if (editId) {
         await api.put(`/payroll-parameters/${editId}`, { title: form.title, description: form.description, isActive: form.isActive });
         flash();
         await reload(false);
       } else {
-        const created = await api.post("/payroll-parameters", { title: form.title, kind: form.kind, type: form.type, basisSource: form.basisSource, description: form.description });
+        const created = await api.post("/payroll-parameters", { title: form.title, kind: form.kind, type: form.type, basisSource: form.basisSource, decreeValueMode: form.basisSource === "DECREE" ? form.decreeValueMode : undefined, description: form.description });
         flash();
         navigate(`/legal-parameters/${created.id}/edit`);
       }
@@ -249,6 +253,15 @@ function ParamForm({ editId }: { editId?: number }) {
               <label>منبع داده<RequiredMark /> <FieldHint label="منبع داده" text="حکم: جمع مقدارِ خامِ عامل‌های حکمِ عضو (مثلاً پایه‌ی سنوات روزانه‌ی حکم). محاسبات: جمع مبلغ محاسبه‌شده‌ی عضوها در فیش همان ماه (عامل حکم یا عامل حقوق از طبقه‌ی پرداختی)؛ عامل حقوق فقط در مبنای منبع محاسبات عضو می‌شود" /></label>
               <select disabled={!!editId} value={basisSource ?? "CALC"} onChange={(e) => setForm({ ...form, basisSource: e.target.value })}>
                 {Object.entries(SOURCE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
+          ) : null}
+          {kind === "BASIS" && basisSource === "DECREE" ? (
+            <div className="form-field">
+              <label>مقدار حکم<RequiredMark /> <FieldHint label="مقدار حکم" text="آخرین مقدار حکم: مقدار عامل در آخرین حکم تأییدشده تا پایان ماه. میانگین حکم: میانگین وزنی بر روزِ مقدارهای حکم از ابتدای سال (یا اولین حکم) تا پایان ماه. این انتخاب بعد از ثبت قابل تغییر نیست." /></label>
+              <select disabled={!!editId} value={editId ? detail?.decreeValueMode ?? "" : form.decreeValueMode} onChange={(e) => setForm({ ...form, decreeValueMode: e.target.value })} style={!editId && !form.decreeValueMode ? { borderColor: "#d97706" } : undefined}>
+                <option value="">—</option>
+                {Object.entries(DECREE_MODE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
           ) : (
@@ -528,7 +541,7 @@ function MembersSection({ param, canEdit }: { param: ParamDetail; canEdit: boole
     <>
       <h3 className="hr-section">اعضای مبنا</h3>
       <p style={{ opacity: 0.75, fontSize: 13, margin: "0 0 8px" }}>
-        {param.basisSource === "DECREE" ? "منبع «حکم»: جمع مقدار خامِ عامل‌های حکمِ عضو." : "منبع «محاسبات»: جمع مبلغ محاسبه‌شده‌ی عضوها (عامل حکم یا عامل حقوق از طبقه‌ی پرداختی) در فیش همان ماه."} عضویت یک عامل در «روش محاسبه عامل»ِ همان عامل هم قابل تنظیم است.
+        {param.basisSource === "DECREE" ? `منبع «حکم»: جمع ${param.decreeValueMode === "AVG" ? "میانگین حکمِ" : "آخرین مقدار حکمِ"} عامل‌های حکمِ عضو.` : "منبع «محاسبات»: جمع مبلغ محاسبه‌شده‌ی عضوها (عامل حکم یا عامل حقوق از طبقه‌ی پرداختی) در فیش همان ماه."} عضویت یک عامل در «روش محاسبه عامل»ِ همان عامل هم قابل تنظیم است.
       </p>
       <ErrorToast message={error} />
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>

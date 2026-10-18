@@ -4970,6 +4970,8 @@ model PayrollParameter {
   kind        PayrollParamKind        @default(CONSTANT)
   /// فقط مبنا: DECREE = جمع مقدارِ خام عامل‌های حکم، CALC = جمع مبلغ محاسبه‌شده‌ی عامل‌ها در فیش
   basisSource PayrollBasisSource?
+  /// فقط مبنای منبع حکم: مقدار هر عامل حکمِ عضو = آخرین مقدار حکم (LAST) یا میانگین وزنیِ حکم (AVG)
+  decreeValueMode PayrollDecreeValueMode?
   values      PayrollParameterValue[]
   members     PayrollFactorMethodBasis[]
   /// مقدارهای اختصاصی کارمندان (فقط انواع پرسنلی)
@@ -4983,6 +4985,11 @@ enum PayrollParamKind {
   PERSONNEL_HR
   /// مقدار ثابت پرسنلی — ثبت در فرم «مقادیر ثابت پرسنل» توسط واحد حقوق
   PERSONNEL_PAYROLL
+}
+
+enum PayrollDecreeValueMode {
+  LAST
+  AVG
 }
 
 enum PayrollBasisSource {
