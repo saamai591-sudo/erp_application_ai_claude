@@ -237,7 +237,8 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
   const { openTab } = useTabs();
   const { hasPermission } = usePermissions();
   const [followUpDialog, setFollowUpDialog] = useState(false);
-  const followUp = useQuoteFollowUp(editId, meta?.status === "APPROVED");
+  const followUp = useQuoteFollowUp(editId, !!editId);
+  const followUpClosed = followUp.info?.state === "CLOSED_PARTIAL" || followUp.info?.state === "CLOSED_NO_SALE";
 
   useEffect(() => {
     async function init() {
@@ -342,7 +343,8 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
   }
 
   const status: Status = meta?.status || "DRAFT";
-  const locked = status !== "DRAFT";
+  // پیش‌فاکتور بسته‌شده (حتی در حالت ثبت) قابل ویرایش/تایید نیست تا پیگیری بازگشایی شود
+  const locked = status !== "DRAFT" || followUpClosed;
 
   function updateRow(idx: number, patch: Partial<RowState>) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -588,7 +590,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
               <DuplicateIcon />
             </button>
           )}
-          {status === "APPROVED" && hasPermission("sales.operations.sales-quotes.closeFollowUp") && followUp.info && (
+          {hasPermission("sales.operations.sales-quotes.closeFollowUp") && followUp.info && (
             followUp.info.state === "CLOSED_PARTIAL" || followUp.info.state === "CLOSED_NO_SALE" ? (
               <button type="button" className="toolbar-icon-btn" title="بازگشایی پیگیری (مانده‌ی بسته‌شده دوباره قابل پیگیری می‌شود)" onClick={reopenFollowUp}>
                 <UndoIcon />

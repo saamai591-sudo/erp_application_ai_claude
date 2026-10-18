@@ -247,7 +247,7 @@ router.get("/sales-quotes", can(`${SALES_QUOTES_FORM}.view`), async (_req, res) 
     orderBy: { id: "desc" },
   });
   // وضعیت پیگیری (فقط پیش‌فاکتورهای تأییدشده): مانده‌ها یک‌جا با چند کوئری تجمیعی
-  const remainders = await quoteRemainders(items.filter((d: any) => d.status === "APPROVED").map((d: any) => d.id));
+  const remainders = await quoteRemainders(items.map((d: any) => d.id));
   res.json(
     items.map((d: any) => ({
       id: d.id,
@@ -377,6 +377,7 @@ router.put("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.edit`), async (req, re
   const existing = await prisma.salesQuote.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "یافت نشد" });
   if (existing.status !== "DRAFT") return res.status(400).json({ error: "ویرایش فقط در حالت ثبت ممکن است" });
+  if (existing.followUpClosedAt) return res.status(400).json({ error: "پیگیری این پیش‌فاکتور بسته شده است؛ ابتدا پیگیری را بازگشایی کنید" });
   if (!body.date || !body.customerId || !body.salesTypeId || !body.salesCenterId || !body.currencyId) {
     return res.status(400).json({ error: "تاریخ، مشتری، نوع فروش، مرکز فروش و ارز الزامی است" });
   }
@@ -476,6 +477,7 @@ router.post("/sales-quotes/:id/approve", can(`${SALES_QUOTES_FORM}.approve`), as
   const d = await prisma.salesQuote.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط در وضعیت ثبت قابل تایید است" });
+  if (d.followUpClosedAt) return res.status(400).json({ error: "پیگیری این پیش‌فاکتور بسته شده است؛ ابتدا پیگیری را بازگشایی کنید" });
   await prisma.salesQuote.update({ where: { id }, data: { status: "APPROVED" } });
   res.json({ id, status: "APPROVED" });
 });

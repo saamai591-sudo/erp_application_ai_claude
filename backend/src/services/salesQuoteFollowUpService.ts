@@ -78,9 +78,9 @@ export async function quoteRemainders(quoteIds: number[], db: any = prisma): Pro
   return out;
 }
 
-/** وضعیت پیگیری؛ null برای پیش‌نویس (هنوز تأیید نشده) */
+/** وضعیت پیگیری. پیش‌فاکتور در حالت «ثبت» هم پیگیری می‌شود (و می‌تواند منصرف شود)؛ چون هنوز تبدیلی ندارد، بسته‌شدنش «بسته بدون فروش» است */
 export function followUpStateOf(q: { status: string; followUpClosedAt: Date | null; validUntil: Date | null }, r: QuoteRemainder | undefined, today = new Date()): FollowUpState | null {
-  if (q.status !== "APPROVED") return null;
+  if (q.status === "VOIDED") return null;
   const remainingQty = r?.remainingQty ?? 0;
   if (q.followUpClosedAt) return r?.hasConversion ? "CLOSED_PARTIAL" : "CLOSED_NO_SALE";
   if (remainingQty <= EPS) return "WON";
@@ -134,7 +134,7 @@ export async function closeFollowUp(quoteId: number, input: { reasonId: number; 
       const lineIds = await lockQuote(tx, quoteId);
       const quote = await tx.salesQuote.findUnique({ where: { id: quoteId } });
       if (!quote) throw new QuoteFollowUpError("پیش‌فاکتور یافت نشد");
-      if (quote.status !== "APPROVED") throw new QuoteFollowUpError("پیگیری فقط برای پیش‌فاکتور تأییدشده بسته می‌شود");
+      if (quote.status !== "APPROVED" && quote.status !== "DRAFT") throw new QuoteFollowUpError("وضعیت این پیش‌فاکتور اجازه‌ی بستن پیگیری نمی‌دهد");
       if (quote.followUpClosedAt) throw new QuoteFollowUpError("پیگیری این پیش‌فاکتور قبلاً بسته شده است");
       const rem = (await quoteRemainders([quoteId], tx)).get(quoteId)!;
       if (rem.remainingQty <= EPS) throw new QuoteFollowUpError("از این پیش‌فاکتور چیزی باقی نمانده که بسته شود (همه‌ی ردیف‌ها تبدیل شده‌اند)");
