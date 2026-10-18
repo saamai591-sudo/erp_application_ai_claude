@@ -26,7 +26,14 @@ import { WorkMonthPicker } from "../components/WorkMonthPicker";
 
 const TYPE_FA: Record<string, string> = { NUMBER: "عدد", PERCENT: "درصد", AMOUNT: "مبلغ", BRACKETS: "جدول پلکانی" };
 // «نوع» = مقدار ثابت (مقدارهای تاریخ‌دار؛ «نوع داده» عدد/درصد/مبلغ/جدول پلکانی) یا مبنا (بدون مقدار؛ جمع مبلغ عامل‌های عضو، با «منبع داده» حکم یا محاسبات)
-const KIND_FA: Record<string, string> = { CONSTANT: "مقدار ثابت", BASIS: "مبنا" };
+const KIND_FA: Record<string, string> = {
+  CONSTANT: "مقدار ثابت",
+  BASIS: "مبنا",
+  PERSONNEL_HR: "مقدار ثابت پرسنلی - منابع انسانی",
+  PERSONNEL_PAYROLL: "مقدار ثابت پرسنلی - حقوقی",
+};
+/** مقدار ثابت پرسنلی: مقدار هر کارمند جداگانه ثبت می‌شود (نه در همین فرم)؛ ثبت‌نشده = صفر */
+const isPersonnel = (k: string) => k === "PERSONNEL_HR" || k === "PERSONNEL_PAYROLL";
 const SOURCE_FA: Record<string, string> = { DECREE: "حکم", CALC: "محاسبات" };
 
 interface BracketRow {
@@ -54,6 +61,7 @@ interface ParamRow {
   kind: string;
   basisSource: string | null;
   memberCount: number;
+  employeeValueCount?: number;
   description: string | null;
   isSystem: boolean;
   isActive: boolean;
@@ -129,11 +137,11 @@ function ParamList() {
       <DataTable
         columns={[
           { header: "عنوان", ...s((r) => r.title) },
-          { header: "نوع", ...s((r) => KIND_FA[r.kind] ?? r.kind), width: "100px" },
+          { header: "نوع", ...s((r) => KIND_FA[r.kind] ?? r.kind), width: "190px" },
           { header: "نوع داده", ...s((r) => (r.kind === "BASIS" ? "—" : TYPE_FA[r.type])), width: "110px" },
           { header: "منبع داده", ...s((r) => (r.kind === "BASIS" ? SOURCE_FA[r.basisSource ?? ""] ?? "" : "—")), width: "100px" },
-          { header: "مقدار فعلی", ...s((r) => (r.kind === "BASIS" ? "بدون مقدار (جمع اعضا)" : valueText(r.type, r.current))), width: "170px" },
-          { header: "ماه اجرا", ...s((r) => (r.kind !== "BASIS" && r.current ? monthText(r.current.execYear, r.current.execMonth) : "—")), width: "130px" },
+          { header: "مقدار فعلی", ...s((r) => (r.kind === "BASIS" ? "بدون مقدار (جمع اعضا)" : isPersonnel(r.kind) ? "مقدار هر کارمند" : valueText(r.type, r.current))), width: "170px" },
+          { header: "ماه اجرا", ...s((r) => (r.kind !== "BASIS" && !isPersonnel(r.kind) && r.current ? monthText(r.current.execYear, r.current.execMonth) : "—")), width: "130px" },
           { header: "سیستمی", ...s((r) => (r.isSystem ? "بله" : "")), width: "80px" },
         ]}
         rows={items}
@@ -231,8 +239,8 @@ function ParamForm({ editId }: { editId?: number }) {
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
           </div>
           <div className="form-field">
-            <label>نوع<RequiredMark /> <FieldHint label="نوع" text="مقدار ثابت: مقدارهای تاریخ‌دار دارد (نرخ، سقف، جدول). مبنا: مقدار ندارد و در فرمول جمع مبلغ عامل‌های عضو را می‌دهد؛ اعضا را در «روش محاسبه عامل» هر عامل (یا با عمل گروهی همین فرم) مشخص کنید" /></label>
-            <select disabled={!!editId} value={kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
+            <label>نوع<RequiredMark /> <FieldHint label="نوع" text="مقدار ثابت: مقدارهای تاریخ‌دار دارد (نرخ، سقف، جدول). مبنا: مقدار ندارد و در فرمول جمع مبلغ عامل‌های عضو را می‌دهد؛ اعضا را در «روش محاسبه عامل» هر عامل (یا با عمل گروهی همین فرم) مشخص کنید. مقدار ثابت پرسنلی: مقدار هر کارمند جداگانه و تاریخ‌دار ثبت می‌شود و ثبت‌نشده صفر است؛ «منابع انسانی» در تب مقادیر ثابت فرم کارمند و «حقوقی» در فرم «مقادیر ثابت پرسنل» وارد می‌شود" /></label>
+            <select disabled={!!editId} value={kind} onChange={(e) => setForm({ ...form, kind: e.target.value, type: isPersonnel(e.target.value) && form.type === "BRACKETS" ? "NUMBER" : form.type })}>
               {Object.entries(KIND_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </div>
@@ -247,7 +255,7 @@ function ParamForm({ editId }: { editId?: number }) {
             <div className="form-field">
               <label>نوع داده<RequiredMark /></label>
               <select disabled={!!editId} value={type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-                {Object.entries(TYPE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                {Object.entries(TYPE_FA).filter(([k]) => !(isPersonnel(kind) && k === "BRACKETS")).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
           )}
@@ -268,7 +276,14 @@ function ParamForm({ editId }: { editId?: number }) {
 
       {editId && detail && detail.kind === "BASIS" && <MembersSection param={detail} canEdit={canEdit} />}
 
-      {editId && detail && detail.kind !== "BASIS" && (
+      {editId && detail && isPersonnel(detail.kind) && (
+        <p className="hr-note" style={{ opacity: 0.85 }}>
+          مقدار این پارامتر برای هر کارمند جداگانه و از یک ماه اجرا به بعد ثبت می‌شود
+          {detail.kind === "PERSONNEL_HR" ? " (تب «مقادیر ثابت» فرم کارمند، توسط منابع انسانی)" : " (فرم «مقادیر ثابت پرسنل»، توسط واحد حقوق)"}؛ برای کارمندی که مقداری ندارد، مقدار صفر در نظر گرفته می‌شود. در فرمول می‌توانید با یک شرط (مثلاً «اگر مقدار صفر بود، نرخ ثابت») پیش‌فرض بگذارید.
+        </p>
+      )}
+
+      {editId && detail && detail.kind !== "BASIS" && !isPersonnel(detail.kind) && (
         <>
           <h3 className="hr-section" style={{ display: "flex", alignItems: "center", gap: 8 }}>
             مقدارهای تاریخ‌دار

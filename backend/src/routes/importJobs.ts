@@ -39,6 +39,7 @@ const ENTITY_TYPE_TO_ACTION: Record<string, string> = {
   employee: `${findFormPrefix("employees")}.create`,
   "employment-decree": `${findFormPrefix("employment-decrees")}.create`,
   "payroll-data-entry": `${findFormPrefix("payroll-data-entry")}.edit`,
+  "personnel-constant": `${findFormPrefix("personnel-constants")}.edit`,
 };
 
 const router = Router();
@@ -63,7 +64,7 @@ router.post("/", async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: "هیچ ردیفی برای ورود اطلاعات ارسال نشده است" });
   }
   try {
-    const jobId = await startImportJob(entityType, rows, !!allowDuplicates);
+    const jobId = await startImportJob(entityType, rows, !!allowDuplicates, (req as any).user?.id ?? null);
     res.status(201).json({ jobId });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در شروع پردازش" });

@@ -271,7 +271,9 @@ router.get("/payroll-methods/palette", can(`${F_METH}.view`), async (req, res) =
     baseInfo: Object.entries(BASE_INFO).map(([k, t]) => ({ key: k, title: t })),
     classTotals: [...KINDS.map((k) => ({ key: k, title: `جمع ${KIND_FA[k]}` })), { key: LOAN_SUM_KEY, title: LOAN_SUM_LABEL }],
     // مقدارهای ثابت (به‌جز مبناها) و مبناها جدا؛ مبنا در فرمول به‌صورت [P:کلید] جمع عضوهایش را می‌دهد
-    params: params.filter((p) => p.kind === "CONSTANT").map((p) => ({ key: p.key, title: p.title, type: p.type })),
+    params: params
+      .filter((p) => p.kind === "CONSTANT" || p.kind === "PERSONNEL_HR" || p.kind === "PERSONNEL_PAYROLL")
+      .map((p) => ({ key: p.key, title: p.title, type: p.type, personnel: p.kind === "PERSONNEL_HR" ? "HR" : p.kind === "PERSONNEL_PAYROLL" ? "PAYROLL" : null })),
     bases: params.filter((p) => p.kind === "BASIS").map((p) => ({ key: p.key, title: p.title, source: p.basisSource })),
   });
 });

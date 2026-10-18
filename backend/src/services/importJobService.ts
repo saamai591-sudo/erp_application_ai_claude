@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma";
 
-export type ImportRowContext = { allowDuplicates: boolean };
+export type ImportRowContext = { allowDuplicates: boolean; userId?: number | null };
 export type ImportRowResult = { ok: boolean; error?: string };
 export type ImportRowProcessor = (row: Record<string, string>, ctx: ImportRowContext) => Promise<ImportRowResult>;
 /** برای رکوردهای چندردیفی (مثل سند حسابداری): چند ردیف اکسل با هم یک رکورد می‌سازند */
@@ -27,7 +27,7 @@ export function isImportEntityRegistered(entityType: string): boolean {
 }
 
 /** فقط رکورد Job را می‌سازد و پردازش را در پس‌زمینه (بدون انتظار درخواست HTTP) آغاز می‌کند */
-export async function startImportJob(entityType: string, rows: Record<string, string>[], allowDuplicates: boolean): Promise<number> {
+export async function startImportJob(entityType: string, rows: Record<string, string>[], allowDuplicates: boolean, userId: number | null = null): Promise<number> {
   const config = registry[entityType];
   if (!config) throw new Error(`نوع ورودی «${entityType}» پشتیبانی نمی‌شود`);
 
@@ -36,7 +36,7 @@ export async function startImportJob(entityType: string, rows: Record<string, st
   });
 
   // fire-and-forget: عمداً await نمی‌شود تا پاسخ HTTP فوری برگردد
-  processJob(job.id, config, rows, allowDuplicates).catch((err) => {
+  processJob(job.id, config, rows, allowDuplicates, userId).catch((err) => {
     console.error(`Import job ${job.id} crashed:`, err);
     prisma.importJob.update({ where: { id: job.id }, data: { status: "DONE" } }).catch(() => {});
   });
@@ -44,10 +44,10 @@ export async function startImportJob(entityType: string, rows: Record<string, st
   return job.id;
 }
 
-async function processJob(jobId: number, config: EntityConfig, rows: Record<string, string>[], allowDuplicates: boolean) {
+async function processJob(jobId: number, config: EntityConfig, rows: Record<string, string>[], allowDuplicates: boolean, userId: number | null) {
   await prisma.importJob.update({ where: { id: jobId }, data: { status: "RUNNING" } });
 
-  const ctx: ImportRowContext = { allowDuplicates };
+  const ctx: ImportRowContext = { allowDuplicates, userId };
   const results: { rowIndex: number; data: Record<string, string>; status: "ok" | "error"; error?: string }[] = [];
   let success = 0;
   let failed = 0;

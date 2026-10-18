@@ -565,6 +565,7 @@ export const REGISTRY: ModuleDef[] = [
             actions: [
               { key: "changeStatus", title: "تغییر وضعیت همکاری" },
               { key: "editHistory", title: "اصلاح سوابق انتصاب و دوره‌های همکاری" },
+              { key: "editPayrollParams", title: "ثبت مقادیر ثابت پرسنلی (منابع انسانی)" },
             ],
           },
           { key: "positions", title: "پست‌های سازمانی", baseActions: CRUD },
@@ -614,6 +615,7 @@ export const REGISTRY: ModuleDef[] = [
         title: "عملیات",
         forms: [
           { key: "payroll-data-entry", title: "ورود اطلاعات", baseActions: ["view", "edit"] },
+          { key: "personnel-constants", title: "مقادیر ثابت پرسنل", baseActions: ["view", "edit"] },
           {
             key: "payroll-calculation",
             title: "محاسبه حقوق",

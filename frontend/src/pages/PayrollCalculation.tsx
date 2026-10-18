@@ -51,7 +51,7 @@ interface Slip {
   totals: { earnings: string; deductions: string; employerCosts: string; netPay: string };
   hasErrors: boolean;
   warnings: string[];
-  parameters: Record<string, { title: string; type: string; effectiveDate?: string; value: number | null; brackets?: { from: number; to: number | null; rate: number }[]; source?: string; members?: { label: string; value: number }[] }>;
+  parameters: Record<string, { title: string; type: string; effectiveDate?: string | null; personnel?: "HR" | "PAYROLL"; value: number | null; brackets?: { from: number; to: number | null; rate: number }[]; source?: string; members?: { label: string; value: number }[] }>;
   calculatedAt: string;
   lines: SlipLine[];
 }
@@ -294,7 +294,7 @@ function SlipView({ slip }: { slip: Slip }) {
                   ? (p.brackets ?? []).map((b, i) => <div key={i}>از {money(b.from)} {b.to === null ? "به بالا" : `تا ${money(b.to)}`} — {num(b.rate)}٪</div>)
                   : p.type === "PERCENT" ? `${num(p.value)}٪` : num(p.value)}
               </td>
-              <td>{p.type === "BASIS" ? `مبنا — منبع ${p.source === "DECREE" ? "حکم" : "محاسبات"}` : formatJalaliDate(p.effectiveDate)}</td>
+              <td>{p.type === "BASIS" ? `مبنا — منبع ${p.source === "DECREE" ? "حکم" : "محاسبات"}` : p.personnel ? `پرسنلی ${p.personnel === "HR" ? "منابع انسانی" : "حقوقی"} — ${p.effectiveDate ? "از " + formatJalaliDate(p.effectiveDate) : "ثبت‌نشده (صفر)"}` : formatJalaliDate(p.effectiveDate ?? undefined)}</td>
             </tr>
           ))}
         </tbody>

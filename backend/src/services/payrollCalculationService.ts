@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma";
 import { getEffectiveDecree } from "./employmentDecreeService";
 import { getParameterValues, type ParameterValue } from "./payrollParameterService";
+import { isPersonnelKind, loadEmployeeParamValues } from "./personnelValueService";
 import {
   Cond,
   FormulaError,
@@ -458,6 +459,9 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
   // ── پارامترها ──
   const params = await getParameterValues(range.end);
   const usedParams = new Map<string, ParameterValue>();
+  // مقدار ثابت پرسنلی: مقدار مؤثر همین کارمند در پایان ماه؛ ثبت‌نشده = صفر
+  const empParams = await loadEmployeeParamValues(employeeId, range.end);
+  const usedPersonnel = new Map<string, { value: number; effectiveDate: Date | null; source: string; type: string }>();
 
   // ── تاریخچه‌ی فیش‌های قبلی ──
   const prevSlips = await prisma.payrollSlip.findMany({
@@ -582,6 +586,12 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
       if (ns === "B") {
         if (!(key in base)) throw new FormulaError(`اطلاعات پایه‌ی ${key} موجود نیست`);
         return base[key];
+      }
+      if (ns === "P" && isPersonnelKind(paramDefs.get(key)?.kind)) {
+        const def = paramDefs.get(key)!;
+        const ev = empParams.get(def.id);
+        usedPersonnel.set(key, { value: ev?.value ?? 0, effectiveDate: ev?.effectiveDate ?? null, source: def.kind, type: def.type });
+        return ev?.value ?? 0;
       }
       if (ns === "P") {
         const pv = params.get(key);
@@ -757,6 +767,16 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
     };
   }
 
+  for (const [k, u] of usedPersonnel) {
+    paramsOut[k] = {
+      title: paramDefs.get(k)?.title ?? k,
+      type: u.type,
+      personnel: u.source === "PERSONNEL_HR" ? "HR" : "PAYROLL",
+      effectiveDate: u.effectiveDate ? u.effectiveDate.toISOString().slice(0, 10) : null,
+      value: u.value,
+      brackets: [],
+    };
+  }
   for (const [k, b] of basisInfo) paramsOut[k] = { title: b.title, type: "BASIS", source: b.source, value: b.value, members: b.members };
 
   // ترتیب نمایش: طبقه‌ها (پرداختی، کسر، هزینه کارفرما، اطلاعاتی) و داخل هر طبقه به ترتیب محاسبه

@@ -88,6 +88,7 @@ model User {
   party                    Party?                  @relation(fields: [partyId], references: [id])
   roles                    UserRole[]
   scheduledJobs            ScheduledJob[]
+  employeeParamValues      PayrollEmployeeParameterValue[] @relation("EmployeeParamValueCreator")
   actions                  UserAction[]
   documentItemAmounts      DocumentItemAmount[]
   goodsPricingStatuses     GoodsPricingStatus[]
@@ -4745,6 +4746,7 @@ model Employee {
   payrollSlips           PayrollSlip[]
   payrollInputs          PayrollFactorInput[]
   loans                  Loan[]
+  payrollParamValues     PayrollEmployeeParameterValue[]
 }
 
 /// عکس کارمند (حداکثر ۳۰۰ کیلوبایت)؛ جدا از Employee تا فهرست‌ها داده‌ی باینری نخوانند
@@ -4971,11 +4973,17 @@ model PayrollParameter {
   basisSource PayrollBasisSource?
   values      PayrollParameterValue[]
   members     PayrollFactorMethodBasis[]
+  /// مقدارهای اختصاصی کارمندان (فقط انواع پرسنلی)
+  employeeValues PayrollEmployeeParameterValue[]
 }
 
 enum PayrollParamKind {
   CONSTANT
   BASIS
+  /// مقدار ثابت پرسنلی — ثبت در فرم کارمند توسط منابع انسانی
+  PERSONNEL_HR
+  /// مقدار ثابت پرسنلی — ثبت در فرم «مقادیر ثابت پرسنل» توسط واحد حقوق
+  PERSONNEL_PAYROLL
 }
 
 enum PayrollBasisSource {
@@ -5233,6 +5241,7 @@ model WorkCalendarMonth {
   loanAdjustments  LoanAdjustment[]     @relation("LoanAdjustmentMonth")
   loanSuspensionsFrom LoanSuspension[]  @relation("LoanSuspensionFrom")
   loanSuspensionsTo   LoanSuspension[]  @relation("LoanSuspensionTo")
+  employeeParamValues PayrollEmployeeParameterValue[]
 
   @@unique([calendarId, month])
   @@unique([year, month])
@@ -5394,4 +5403,24 @@ model PositionJob {
 
   @@unique([positionId, jobId])
   @@index([jobId])
+}
+
+/// مقدار ثابت پرسنلی یک کارمند از یک ماه تقویم کاری به بعد (تا مقدار بعدی)؛ ثبت‌نشده = صفر.
+/// مقدار مؤثر یک ماه = آخرین رکورد با effectiveDate (روز اول ماه اجرا) ≤ پایان آن ماه
+model PayrollEmployeeParameterValue {
+  id               Int               @id @default(autoincrement())
+  parameterId      Int
+  employeeId       Int
+  execCalendarMonthId Int
+  effectiveDate    DateTime          @db.Date
+  value            Decimal           @db.Decimal(20, 4)
+  createdById      Int?
+  createdAt        DateTime          @default(now())
+  parameter        PayrollParameter  @relation(fields: [parameterId], references: [id], onDelete: Restrict)
+  employee         Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  execCalendarMonth WorkCalendarMonth @relation(fields: [execCalendarMonthId], references: [id], onDelete: Restrict)
+  createdBy        User?             @relation("EmployeeParamValueCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([parameterId, employeeId, execCalendarMonthId])
+  @@index([employeeId])
 }

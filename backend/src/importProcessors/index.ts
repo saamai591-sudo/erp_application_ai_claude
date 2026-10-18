@@ -21,6 +21,7 @@ import { createPayrollComponent, PayrollCalcError } from "../services/payrollCal
 import { createEmployee } from "../routes/employees";
 import { createDecreeDraft, approveDecree } from "../routes/employmentDecrees";
 import { findPartyByNationalId } from "../services/partyService";
+import { bulkSetValues, listParametersOfKind } from "../services/personnelValueService";
 import { DErr, prepareDataEntry, saveDataEntries, type DataEntryContext } from "../routes/payrollDataEntry";
 
 const DETAIL_TYPE_PARTY = 1;
@@ -513,6 +514,32 @@ export function registerAllImportProcessors() {
       } catch (e: any) {
         if (e instanceof DErr) return { ok: false, error: e.message };
         return { ok: false, error: e.message || "خطا در ثبت اطلاعات ماهانه" };
+      }
+    },
+  });
+
+  // ── حقوق و دستمزد: مقادیر ثابت پرسنل (نوع حقوقی) ──
+  // هر ردیف یک کارمند (کد پرسنلی) و یک ستون به‌ازای هر پارامتر «مقدار ثابت پرسنلی - حقوقی» (کلید p_<شناسه‌ی پارامتر>)؛ سال/ماه از extraFields.
+  // خانه‌ی خالی = بدون تغییر. ثبت از همان bulkSetValues ماتریس است (همه‌ی کنترل‌ها یکسان؛ خطای هر مقدار فقط همان ردیف را رد می‌کند).
+  registerImportEntity("personnel-constant", {
+    row: async (row, ctx) => {
+      try {
+        const code = toEnglishDigits((row.personnelCode ?? "").trim());
+        if (!code) return { ok: false, error: "کد پرسنلی الزامی است" };
+        const emps = await prisma.employee.findMany({ select: { id: true, personnelCode: true } });
+        const emp = emps.find((e) => e.personnelCode === code) ?? (/^d+$/.test(code) ? emps.find((e) => /^d+$/.test(e.personnelCode) && Number(e.personnelCode) === Number(code)) : undefined);
+        if (!emp) return { ok: false, error: `کارمندی با کد پرسنلی «${code}» یافت نشد` };
+        const params = await listParametersOfKind("PERSONNEL_PAYROLL");
+        const entries = params
+          .map((p) => ({ employeeId: emp.id, parameterId: p.id, year: Number(row.year), month: Number(row.month), value: (row[`p_${p.id}`] ?? "").trim() }))
+          .filter((e) => e.value !== "");
+        if (entries.length === 0) return { ok: true };
+        const results = await bulkSetValues(entries, ["PERSONNEL_PAYROLL"], ctx.userId ?? null);
+        const bad = results.filter((r) => !r.ok);
+        if (bad.length) return { ok: false, error: bad.map((b) => b.error).join("؛ ") };
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت مقدار ثابت پرسنلی" };
       }
     },
   });

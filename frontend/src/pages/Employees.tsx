@@ -11,6 +11,7 @@ import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { ExcelImportButton } from "../components/ExcelImport";
 import { RecordPickerField } from "../components/RecordPicker";
+import { EmployeeParamValues } from "../components/EmployeeParamValues";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate, localTodayIso } from "../lib/formatDate";
@@ -518,6 +519,7 @@ function EmployeeForm({ editId }: { editId?: number }) {
   const canChangeStatus = !!editId && hasPermission("hr.personnel.employees.changeStatus");
   const canEdit = !!editId && hasPermission("hr.personnel.employees.edit");
   const canEditHistory = !!editId && hasPermission("hr.personnel.employees.editHistory");
+  const canEditParams = !!editId && hasPermission("hr.personnel.employees.editPayrollParams");
   const partyOpt = parties.find((p) => String(p.id) === form.partyId);
   const photoSrc = photo?.preview ?? detail?.photo ?? null;
   const ended = ENDED.includes(status);
@@ -811,6 +813,8 @@ function EmployeeForm({ editId }: { editId?: number }) {
               ))}
             </tbody>
           </table>
+
+          <EmployeeParamValues employeeId={detail.id} canEdit={canEditParams} />
 
           <h3 className="hr-section" style={{ display: "flex", alignItems: "center", gap: 8 }}>
             وابستگان

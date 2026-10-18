@@ -24,7 +24,8 @@ interface Palette {
   /** مبناها (پارامتر نوع «مبنا»): در فرمول [P:کلید] جمع مبلغ عضوها را می‌دهد */
   bases?: { key: string; title: string; source: string | null }[];
   classTotals: { key: string; title: string }[];
-  params: { key: string; title: string; type: string }[];
+  /** personnel = مقدار ثابت پرسنلی (مقدار اختصاصی هر کارمند؛ ثبت‌نشده صفر) */
+  params: { key: string; title: string; type: string; personnel?: "HR" | "PAYROLL" | null }[];
 }
 
 type Area = "cond" | "calc";
@@ -575,8 +576,8 @@ export function FormulaBuilder({
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 6 }}>
             {pal?.params.filter((p) => p.type !== "BRACKETS").map((p) => (
-              <button key={p.key} type="button" className="btn secondary" onMouseDown={(e) => e.preventDefault()} onClick={() => push(`[P:${p.key}]`)}>
-                {p.title}
+              <button key={p.key} type="button" className="btn secondary" onMouseDown={(e) => e.preventDefault()} onClick={() => push(`[P:${p.key}]`)} title={p.personnel ? "مقدار اختصاصی هر کارمند؛ برای کارمندی که مقداری ندارد صفر است" : undefined}>
+                {p.title}{p.personnel ? " (پرسنلی)" : ""}
               </button>
             ))}
           </div>
