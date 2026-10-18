@@ -90,6 +90,13 @@ interface Assignment {
   id: number;
   fromDate: string;
   toDate: string | null;
+  positionId?: number;
+  orgUnitId?: number;
+  costCenterId?: number | null;
+  jobId?: number | null;
+  /** حکمی با تاریخ اعمال ≥ شروع این انتصاب هست؛ ویرایش و حذف ممنوع */
+  locked?: boolean;
+  lockedReason?: string | null;
   position: { title: string };
   job?: { title: string } | null;
   orgUnit: { title: string };
@@ -102,7 +109,7 @@ interface Detail {
   updatedAt: string;
   party: { id: number; detailCode: string; fullName: string; nationalId: string | null; birthDate: string | null; gender: string | null; bankAccounts: { id: number; accountNumber: string | null; iban: string | null; cardNumber: string | null }[] };
   photo: string | null;
-  periods: { id: number; startDate: string; endDate: string | null; terminationReason: { title: string } | null; note: string | null }[];
+  periods: { id: number; startDate: string; endDate: string | null; terminationReasonId?: number | null; terminationReason: { title: string } | null; note: string | null }[];
   assignments: Assignment[];
   currentAssignment: Assignment | null;
   decree: { validity: string; number: number | null; effectiveDate: string | null; endDate: string | null; employmentTypeTitle: string | null; weeklyHours: string | null } | null;
@@ -338,6 +345,8 @@ function EmployeeForm({ editId }: { editId?: number }) {
   const [nextCode, setNextCode] = useState("");
   const [statusDlg, setStatusDlg] = useState(false);
   const [assignDlg, setAssignDlg] = useState(false);
+  const [editAssign, setEditAssign] = useState<Assignment | null>(null);
+  const [editPeriod, setEditPeriod] = useState<Detail["periods"][number] | null>(null);
   const [depDlg, setDepDlg] = useState<Partial<Dependent> | null>(null);
   const { flash } = useSavedFlash();
 
@@ -482,6 +491,16 @@ function EmployeeForm({ editId }: { editId?: number }) {
     }
   }
 
+  async function deleteAssignment(a: Assignment) {
+    if (!window.confirm("این انتصاب حذف شود؟ انتصاب قبلی دوباره «جاری» می‌شود.")) return;
+    try {
+      await api.del(`/employees/${editId}/assignments/${a.id}`);
+      await reloadDetail();
+    } catch (e) {
+      showError((e as ApiError).message);
+    }
+  }
+
   async function deleteDependent(d: Dependent) {
     if (!window.confirm(`وابسته «${d.firstName} ${d.lastName}» حذف شود؟`)) return;
     try {
@@ -497,6 +516,7 @@ function EmployeeForm({ editId }: { editId?: number }) {
   const status = detail?.status ?? "ACTIVE";
   const canChangeStatus = !!editId && hasPermission("hr.personnel.employees.changeStatus");
   const canEdit = !!editId && hasPermission("hr.personnel.employees.edit");
+  const canEditHistory = !!editId && hasPermission("hr.personnel.employees.editHistory");
   const partyOpt = parties.find((p) => String(p.id) === form.partyId);
   const photoSrc = photo?.preview ?? detail?.photo ?? null;
   const ended = ENDED.includes(status);
@@ -736,10 +756,10 @@ function EmployeeForm({ editId }: { editId?: number }) {
           </h3>
           <table className="hr-table">
             <thead>
-              <tr><th>از تاریخ</th><th>تا تاریخ</th><th>پست</th><th>شغل</th><th>واحد سازمانی</th><th>مرکز هزینه</th></tr>
+              <tr><th>از تاریخ</th><th>تا تاریخ</th><th>پست</th><th>شغل</th><th>واحد سازمانی</th><th>مرکز هزینه</th>{canEditHistory && <th style={{ width: 130 }} />}</tr>
             </thead>
             <tbody>
-              {[...detail.assignments].reverse().map((a) => (
+              {[...detail.assignments].reverse().map((a, idx, arr) => (
                 <tr key={a.id}>
                   <td>{formatJalaliDate(a.fromDate)}</td>
                   <td>{a.toDate ? formatJalaliDate(a.toDate) : "فعلی"}</td>
@@ -747,6 +767,20 @@ function EmployeeForm({ editId }: { editId?: number }) {
                   <td>{a.job?.title ?? "—"}</td>
                   <td>{a.orgUnit.title}</td>
                   <td>{a.costCenter?.title ?? "—"}</td>
+                  {canEditHistory && (
+                    <td>
+                      {a.locked ? (
+                        <span title={a.lockedReason ?? ""} style={{ opacity: 0.75, fontSize: 12, cursor: "help" }}>🔒 قفل (حکم)</span>
+                      ) : (
+                        <>
+                          <button type="button" className="link-btn" onClick={() => setEditAssign(a)}>ویرایش</button>
+                          {!a.toDate && idx < arr.length - 1 && (
+                            <>{" "}<button type="button" className="link-btn" onClick={() => deleteAssignment(a)}>حذف</button></>
+                          )}
+                        </>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -755,7 +789,7 @@ function EmployeeForm({ editId }: { editId?: number }) {
           <h3 className="hr-section">دوره‌های همکاری</h3>
           <table className="hr-table">
             <thead>
-              <tr><th>شروع</th><th>پایان</th><th>دلیل خاتمه</th><th>توضیح</th></tr>
+              <tr><th>شروع</th><th>پایان</th><th>دلیل خاتمه</th><th>توضیح</th>{canEditHistory && <th style={{ width: 80 }} />}</tr>
             </thead>
             <tbody>
               {[...detail.periods].reverse().map((p) => (
@@ -764,6 +798,7 @@ function EmployeeForm({ editId }: { editId?: number }) {
                   <td>{p.endDate ? formatJalaliDate(p.endDate) : "جاری"}</td>
                   <td>{p.terminationReason?.title ?? "—"}</td>
                   <td>{p.note ?? "—"}</td>
+                  {canEditHistory && <td><button type="button" className="link-btn" onClick={() => setEditPeriod(p)}>ویرایش</button></td>}
                 </tr>
               ))}
             </tbody>
@@ -817,6 +852,32 @@ function EmployeeForm({ editId }: { editId?: number }) {
           onClose={() => setStatusDlg(false)}
           onDone={async () => {
             setStatusDlg(false);
+            await reloadDetail();
+          }}
+        />
+      )}
+      {editAssign && detail && (
+        <AssignmentDialog
+          employeeId={detail.id}
+          value={editAssign}
+          positions={positions}
+          orgUnits={orgUnits}
+          costCenters={costCenters}
+          onClose={() => setEditAssign(null)}
+          onDone={async () => {
+            setEditAssign(null);
+            await reloadDetail();
+          }}
+        />
+      )}
+      {editPeriod && detail && (
+        <PeriodDialog
+          employeeId={detail.id}
+          value={editPeriod}
+          reasons={reasons}
+          onClose={() => setEditPeriod(null)}
+          onDone={async () => {
+            setEditPeriod(null);
             await reloadDetail();
           }}
         />
@@ -882,26 +943,32 @@ const toAssignBody = (f: any) => ({
   costCenterId: f.costCenterId ? Number(f.costCenterId) : null,
 });
 
-function AssignmentDialog({ employeeId, onClose, onDone, ...lk }: LookupProps & { employeeId: number; onClose: () => void; onDone: () => void }) {
-  const [f, setF] = useState({ fromDate: localTodayIso(), positionId: "", jobId: "", orgUnitId: "", costCenterId: "" });
+function AssignmentDialog({ employeeId, value, onClose, onDone, ...lk }: LookupProps & { employeeId: number; value?: Assignment; onClose: () => void; onDone: () => void }) {
+  // value = اصلاح یک انتصاب موجود (PUT)؛ بدون value = انتصاب جدید (POST)
+  const [f, setF] = useState(
+    value
+      ? { fromDate: value.fromDate, positionId: String(value.positionId ?? ""), jobId: value.jobId ? String(value.jobId) : "", orgUnitId: String(value.orgUnitId ?? ""), costCenterId: value.costCenterId ? String(value.costCenterId) : "" }
+      : { fromDate: localTodayIso(), positionId: "", jobId: "", orgUnitId: "", costCenterId: "" }
+  );
   const [err, setErr] = useState<string | null>(null);
   async function save() {
     setErr(null);
     if (!f.positionId || !f.orgUnitId) return setErr("پست و واحد سازمانی الزامی است");
     if (jobMissing(lk.positions, f.positionId, f.jobId)) return setErr("شغل را انتخاب کنید");
     try {
-      await api.post(`/employees/${employeeId}/assignments`, { fromDate: f.fromDate, ...toAssignBody(f) });
+      if (value) await api.put(`/employees/${employeeId}/assignments/${value.id}`, { fromDate: f.fromDate, ...toAssignBody(f) });
+      else await api.post(`/employees/${employeeId}/assignments`, { fromDate: f.fromDate, ...toAssignBody(f) });
       onDone();
     } catch (e) {
       setErr((e as ApiError).message);
     }
   }
   return (
-    <Modal title="انتصاب جدید" onClose={onClose}>
+    <Modal title={value ? "ویرایش انتصاب" : "انتصاب جدید"} onClose={onClose}>
       <ErrorToast message={err} />
       <div className="form-grid">
         <div className="form-field">
-          <label>از تاریخ<RequiredMark /> <FieldHint label="از تاریخ" text="انتصاب فعلی یک روز قبل از این تاریخ بسته می‌شود" /></label>
+          <label>از تاریخ<RequiredMark /> <FieldHint label="از تاریخ" text={value ? "با تغییر این تاریخ، پایانِ انتصاب قبلی هم هماهنگ می‌شود؛ باید بین شروع انتصاب قبلی و بعدی بماند" : "انتصاب فعلی یک روز قبل از این تاریخ بسته می‌شود"} /></label>
           <JalaliDatePicker value={f.fromDate} onChange={(v) => setF({ ...f, fromDate: v })} />
         </div>
         <AssignmentFields f={f} setF={setF} lk={lk} />
@@ -968,6 +1035,62 @@ function StatusDialog({ detail, reasons, onClose, onDone, ...lk }: LookupProps &
         </div>
         {rehire && <AssignmentFields f={f} setF={setF} lk={lk} />}
       </div>
+      <div className="actions">
+        <button type="button" className="btn" onClick={save}>ثبت</button>
+        <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
+      </div>
+    </Modal>
+  );
+}
+
+/** ویرایش دوره‌ی همکاری: شروع، پایان (فقط دوره‌ی پایان‌یافته؛ پایان دوره‌ی جاری از «تغییر وضعیت» ثبت می‌شود)، دلیل خاتمه و توضیح. کنترل‌ها در سرور است. */
+function PeriodDialog({ employeeId, value, reasons, onClose, onDone }: { employeeId: number; value: Detail["periods"][number]; reasons: Opt[]; onClose: () => void; onDone: () => void }) {
+  const ended = !!value.endDate;
+  const [f, setF] = useState({ startDate: value.startDate, endDate: value.endDate ?? "", terminationReasonId: value.terminationReasonId ? String(value.terminationReasonId) : "", note: value.note ?? "" });
+  const [err, setErr] = useState<string | null>(null);
+  async function save() {
+    setErr(null);
+    try {
+      await api.put(`/employees/${employeeId}/periods/${value.id}`, {
+        startDate: f.startDate,
+        endDate: ended ? f.endDate : undefined,
+        terminationReasonId: ended && f.terminationReasonId ? Number(f.terminationReasonId) : null,
+        note: f.note,
+      });
+      onDone();
+    } catch (e) {
+      setErr((e as ApiError).message);
+    }
+  }
+  return (
+    <Modal title="ویرایش دوره‌ی همکاری" onClose={onClose}>
+      <ErrorToast message={err} />
+      <div className="form-grid">
+        <div className="form-field">
+          <label>تاریخ شروع<RequiredMark /> <FieldHint label="تاریخ شروع" text="سابقه‌ی تحصیلی، تاهل، ایثارگری، انتصاب یا حکمی قبل از تاریخ جدید نباید ثبت شده باشد" /></label>
+          <JalaliDatePicker value={f.startDate} onChange={(v) => setF({ ...f, startDate: v })} />
+        </div>
+        {ended && (
+          <>
+            <div className="form-field">
+              <label>تاریخ پایان<RequiredMark /></label>
+              <JalaliDatePicker value={f.endDate} onChange={(v) => setF({ ...f, endDate: v })} />
+            </div>
+            <div className="form-field">
+              <label>دلیل خاتمه</label>
+              <select value={f.terminationReasonId} onChange={(e) => setF({ ...f, terminationReasonId: e.target.value })}>
+                <option value="">—</option>
+                {reasons.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}
+              </select>
+            </div>
+          </>
+        )}
+        <div className="form-field">
+          <label>توضیح</label>
+          <input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
+        </div>
+      </div>
+      {!ended && <p style={{ opacity: 0.75, fontSize: 12 }}>این دوره جاری است؛ تاریخ پایان آن از «تغییر وضعیت همکاری» ثبت می‌شود.</p>}
       <div className="actions">
         <button type="button" className="btn" onClick={save}>ثبت</button>
         <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>

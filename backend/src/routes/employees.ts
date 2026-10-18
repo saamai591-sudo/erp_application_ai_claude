@@ -5,6 +5,7 @@ import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { loadCurrentRecords } from "../services/employeeRecordService";
 import { HrError, checkAssignmentRefs, changeAssignment } from "../services/employeeAssignmentService";
+import { assignmentLocks, deleteAssignment, updateAssignment, updatePeriod } from "../services/employeeHistoryService";
 import { getEffectiveDecree, getEffectiveDecrees } from "../services/employmentDecreeService";
 
 // منابع انسانی › پرسنلی › کارمندان.
@@ -210,6 +211,7 @@ router.get("/employees/:id", async (req, res) => {
   });
   if (!e) return res.status(404).json({ error: "کارمند یافت نشد" });
   const { photo, party, periods, assignments, dependents, ...rest } = e;
+  const locks = await assignmentLocks(id, assignments);
   res.json({
     ...rest,
     current: await loadCurrentRecords(id),
@@ -217,7 +219,8 @@ router.get("/employees/:id", async (req, res) => {
     party: { ...party, fullName: partyDisplayName(party), birthDate: day(party.birthDate) },
     photo: photo ? `data:${photo.mimeType};base64,${Buffer.from(photo.data).toString("base64")}` : null,
     periods: periods.map((p) => ({ ...p, startDate: day(p.startDate), endDate: day(p.endDate) })),
-    assignments: assignments.map(shapeAssignment),
+    // قفل هر انتصاب: حکمی (هر وضعیت) با تاریخ اعمال ≥ شروع آن انتصاب
+    assignments: assignments.map((a) => ({ ...shapeAssignment(a), locked: !!locks.get(a.id), lockedReason: locks.get(a.id) ?? null })),
     currentAssignment: assignments.find((a) => !a.toDate) ? shapeAssignment(assignments.find((a) => !a.toDate)) : null,
     dependents: dependents.map((d) => ({ ...d, birthDate: day(d.birthDate) })),
   });
@@ -377,6 +380,34 @@ router.post("/employees/:id/assignments", can(`${FORM}.edit`), async (req, res) 
     res.status(201).json({ ok: true });
   } catch (e: any) {
     fail(res, e, "خطا در ثبت انتصاب");
+  }
+});
+
+// ── اصلاح سوابق (انتصاب و دوره‌ی همکاری): قواعد در services/employeeHistoryService.ts ──
+router.put("/employees/:id/assignments/:aid", can(`${FORM}.editHistory`), async (req, res) => {
+  try {
+    await updateAssignment(Number(req.params.id), Number(req.params.aid), req.body);
+    res.json({ ok: true });
+  } catch (e: any) {
+    fail(res, e, "خطا در ویرایش انتصاب");
+  }
+});
+
+router.delete("/employees/:id/assignments/:aid", can(`${FORM}.editHistory`), async (req, res) => {
+  try {
+    await deleteAssignment(Number(req.params.id), Number(req.params.aid));
+    res.status(204).send();
+  } catch (e: any) {
+    fail(res, e, "خطا در حذف انتصاب");
+  }
+});
+
+router.put("/employees/:id/periods/:pid", can(`${FORM}.editHistory`), async (req, res) => {
+  try {
+    await updatePeriod(Number(req.params.id), Number(req.params.pid), req.body);
+    res.json({ ok: true });
+  } catch (e: any) {
+    fail(res, e, "خطا در ویرایش دوره‌ی همکاری");
   }
 });
 

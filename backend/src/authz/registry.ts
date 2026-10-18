@@ -562,7 +562,10 @@ export const REGISTRY: ModuleDef[] = [
             key: "employees",
             title: "کارمندان",
             baseActions: CRUD,
-            actions: [{ key: "changeStatus", title: "تغییر وضعیت همکاری" }],
+            actions: [
+              { key: "changeStatus", title: "تغییر وضعیت همکاری" },
+              { key: "editHistory", title: "اصلاح سوابق انتصاب و دوره‌های همکاری" },
+            ],
           },
           { key: "positions", title: "پست‌های سازمانی", baseActions: CRUD },
           { key: "jobs", title: "شغل", baseActions: CRUD },
