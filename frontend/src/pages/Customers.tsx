@@ -159,9 +159,11 @@ function CustomerForm({ editId }: { editId?: number }) {
   function loadParties() {
     return api.get("/parties").then((p: PartyOption[]) => setParties(p.filter((x) => x.isActive))).catch(() => {});
   }
+  // فهرست اشخاص با تغییر رکورد هم تازه می‌شود: بعد از «تعریف شخص جدید» همین کامپوننت (بدون mount دوباره) از /customers/new به /customers/<id>/edit می‌رود
+  // و فهرست قدیمی شخصِ تازه را نداشت؛ پس عنوان در انتخابگر طرف حساب خالی می‌ماند
   useEffect(() => {
     loadParties();
-  }, []);
+  }, [editId]);
 
   useEffect(() => {
     if (!editId) {
