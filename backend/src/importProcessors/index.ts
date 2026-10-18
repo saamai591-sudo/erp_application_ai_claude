@@ -21,6 +21,7 @@ import { createPayrollComponent, PayrollCalcError } from "../services/payrollCal
 import { createEmployee } from "../routes/employees";
 import { createDecreeDraft, approveDecree } from "../routes/employmentDecrees";
 import { findPartyByNationalId } from "../services/partyService";
+import { DErr, prepareDataEntry, saveDataEntries, type DataEntryContext } from "../routes/payrollDataEntry";
 
 const DETAIL_TYPE_PARTY = 1;
 const DETAIL_TYPE_COST_CENTER = 2;
@@ -471,6 +472,47 @@ export function registerAllImportProcessors() {
       } catch (e: any) {
         if (e instanceof PayrollCalcError) return { ok: false, error: e.message };
         return { ok: false, error: e.message || "خطا در ثبت عامل حقوق" };
+      }
+    },
+  });
+
+  // ── حقوق و دستمزد: ورود اطلاعات ماهانه ──
+  // هر ردیف یک کارمند (با «کد پرسنلی»؛ صفرهای ابتدای کد اگر اکسل حذف کرده باشد مهم نیست) و یک ستون به‌ازای هر عامل «ورود دستی» (کلید c_<شناسه‌ی عامل>).
+  // سال/ماه/نوع محاسبه از extraFields می‌آیند. خانه‌ی خالی = بدون تغییر (حذف مقدار فقط از خود گرید). ذخیره از همان saveDataEntries فرم است، پس همه‌ی
+  // کنترل‌ها (فرمت مقدار، همکاری در ماه، قفل محاسبه‌شده) یکسان است و خطای هر کارمند فقط همان ردیف را رد می‌کند.
+  const deCache = new Map<string, { at: number; ctx: DataEntryContext; byCode: Map<string, number> }>();
+  async function dataEntryContext(row: Record<string, string>) {
+    const key = `${row.year}-${row.month}-${row.calcTypeId ?? ""}`;
+    const hit = deCache.get(key);
+    if (hit && Date.now() - hit.at < 60000) return hit;
+    const ctx = await prepareDataEntry(row.year, row.month, row.calcTypeId || undefined);
+    const emps = await prisma.employee.findMany({ select: { id: true, personnelCode: true } });
+    const byCode = new Map<string, number>();
+    for (const e of emps) {
+      byCode.set(e.personnelCode, e.id);
+      if (/^\d+$/.test(e.personnelCode)) byCode.set(String(Number(e.personnelCode)), e.id);
+    }
+    const fresh = { at: Date.now(), ctx, byCode };
+    deCache.set(key, fresh);
+    return fresh;
+  }
+  registerImportEntity("payroll-data-entry", {
+    row: async (row) => {
+      try {
+        const code = toEnglishDigits((row.personnelCode ?? "").trim());
+        if (!code) return { ok: false, error: "کد پرسنلی الزامی است" };
+        const { ctx, byCode } = await dataEntryContext(row);
+        const employeeId = byCode.get(code) ?? (/^\d+$/.test(code) ? byCode.get(String(Number(code))) : undefined);
+        if (!employeeId) return { ok: false, error: `کارمندی با کد پرسنلی «${code}» یافت نشد` };
+        const entries = ctx.columns
+          .map((c) => ({ employeeId, componentId: c.componentId, value: (row[`c_${c.componentId}`] ?? "").trim() }))
+          .filter((e) => e.value !== "");
+        if (entries.length === 0) return { ok: true };
+        await saveDataEntries(ctx, entries);
+        return { ok: true };
+      } catch (e: any) {
+        if (e instanceof DErr) return { ok: false, error: e.message };
+        return { ok: false, error: e.message || "خطا در ثبت اطلاعات ماهانه" };
       }
     },
   });

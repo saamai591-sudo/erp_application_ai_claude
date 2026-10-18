@@ -13,7 +13,7 @@ import { missingMonthMessage } from "../services/workCalendarService";
 const F = findFormPrefix("payroll-data-entry");
 const router = Router();
 
-class DErr extends Error {}
+export class DErr extends Error {}
 
 function fail(res: Response, e: any) {
   if (e instanceof DErr) return res.status(400).json({ error: e.message });
@@ -114,49 +114,64 @@ function parseByType(raw: string, valueType: string, title: string, monthDays: n
   return v;
 }
 
+/** زمینه‌ی یک ماه/نوع محاسبه: بازه‌ی ماه، ستون‌های «ورود دستی» و اعشار ارز پایه */
+export async function prepareDataEntry(yearRaw: unknown, monthRaw: unknown, calcTypeRaw: unknown) {
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  checkYM(year, month);
+  const calMsg = await missingMonthMessage(year, month);
+  if (calMsg) throw new DErr(calMsg);
+  const range = jalaliMonthRange(year, month);
+  const calcType = await resolveType(calcTypeRaw);
+  const [columns, decimals] = await Promise.all([columnsFor(range.end, calcType.id), baseDecimals()]);
+  return { year, month, range, calcType, columns, decimals };
+}
+export type DataEntryContext = Awaited<ReturnType<typeof prepareDataEntry>>;
+
+/**
+ * اعتبارسنجی و ذخیره‌ی مقدارهای ورودی ماه (تنها محل نوشتن PayrollFactorInput؛ هم فرم و هم ورود از اکسل از همین استفاده می‌کنند).
+ * value تهی/خالی = حذف ورودی. هر خطا کل فراخوانی را رد می‌کند (چیزی ذخیره نمی‌شود).
+ */
+export async function saveDataEntries(ctx: DataEntryContext, entries: { employeeId: number; componentId: number; value: string | null }[]): Promise<number> {
+  const { year, month, range, calcType, columns, decimals } = ctx;
+  const colById = new Map(columns.map((c) => [c.componentId, c]));
+  const parsed: { employeeId: number; componentId: number; value: number | null }[] = [];
+  for (const e of entries) {
+    const col = colById.get(Number(e.componentId));
+    if (!col) throw new DErr("یکی از عامل‌ها در این ماه «ورود دستی» نیست");
+    if (e.value === null || e.value === undefined || String(e.value).trim() === "") {
+      parsed.push({ employeeId: Number(e.employeeId), componentId: col.componentId, value: null });
+    } else {
+      parsed.push({ employeeId: Number(e.employeeId), componentId: col.componentId, value: parseByType(String(e.value), col.valueType, col.title, range.days, decimals) });
+    }
+  }
+  // کارمند باید در این ماه همکاری داشته باشد
+  const empIds = [...new Set(parsed.map((p) => p.employeeId))];
+  const valid = await prisma.employee.findMany({
+    where: { id: { in: empIds }, periods: { some: { startDate: { lte: range.end }, OR: [{ endDate: null }, { endDate: { gte: range.start } }] } } },
+    select: { id: true },
+  });
+  const validSet = new Set(valid.map((v) => v.id));
+  for (const p of parsed) if (!validSet.has(p.employeeId)) throw new DErr("کارمندی در این ماه همکاری ندارد یا یافت نشد");
+  // محاسبه‌شده‌ها قابل ویرایش نیستند: ابتدا حذف محاسبه
+  const calc = await prisma.payrollSlip.findMany({ where: { year, month, calcTypeId: calcType.id, employeeId: { in: empIds } }, include: { employee: { select: { personnelCode: true } } } });
+  if (calc.length) throw new DErr(`«${calcType.title}» این ماه برای کارمند ${calc[0].employee.personnelCode} محاسبه شده است؛ برای ویرایش اطلاعات ماهانه ابتدا محاسبه را حذف کنید`);
+
+  await prisma.$transaction(async (tx) => {
+    for (const p of parsed) {
+      const where = { employeeId_year_month_componentId: { employeeId: p.employeeId, year, month, componentId: p.componentId } };
+      if (p.value === null) await tx.payrollFactorInput.deleteMany({ where: { employeeId: p.employeeId, year, month, componentId: p.componentId } });
+      else await tx.payrollFactorInput.upsert({ where, create: { employeeId: p.employeeId, year, month, componentId: p.componentId, value: p.value }, update: { value: p.value } });
+    }
+  });
+  return parsed.length;
+}
+
 router.put("/payroll-data-entry", can(`${F}.edit`), async (req, res) => {
   const b = req.body as { year: number; month: number; calcTypeId?: number; entries: { employeeId: number; componentId: number; value: string | null }[] };
   try {
-    const year = Number(b.year);
-    const month = Number(b.month);
-    checkYM(year, month);
-    const calMsg = await missingMonthMessage(year, month);
-    if (calMsg) throw new DErr(calMsg);
-    const range = jalaliMonthRange(year, month);
-    const calcType = await resolveType(b.calcTypeId);
-    const [columns, decimals] = await Promise.all([columnsFor(range.end, calcType.id), baseDecimals()]);
-    const colById = new Map(columns.map((c) => [c.componentId, c]));
-    const entries = Array.isArray(b.entries) ? b.entries : [];
-    const parsed: { employeeId: number; componentId: number; value: number | null }[] = [];
-    for (const e of entries) {
-      const col = colById.get(Number(e.componentId));
-      if (!col) throw new DErr("یکی از عامل‌ها در این ماه «ورود دستی» نیست");
-      if (e.value === null || e.value === undefined || String(e.value).trim() === "") {
-        parsed.push({ employeeId: Number(e.employeeId), componentId: col.componentId, value: null });
-      } else {
-        parsed.push({ employeeId: Number(e.employeeId), componentId: col.componentId, value: parseByType(String(e.value), col.valueType, col.title, range.days, decimals) });
-      }
-    }
-    // کارمند باید در این ماه همکاری داشته باشد
-    const empIds = [...new Set(parsed.map((p) => p.employeeId))];
-    const valid = await prisma.employee.findMany({
-      where: { id: { in: empIds }, periods: { some: { startDate: { lte: range.end }, OR: [{ endDate: null }, { endDate: { gte: range.start } }] } } },
-      select: { id: true },
-    });
-    const validSet = new Set(valid.map((v) => v.id));
-    for (const p of parsed) if (!validSet.has(p.employeeId)) throw new DErr("کارمندی در این ماه همکاری ندارد یا یافت نشد");
-    // محاسبه‌شده‌ها قابل ویرایش نیستند: ابتدا حذف محاسبه
-    const calc = await prisma.payrollSlip.findMany({ where: { year, month, calcTypeId: calcType.id, employeeId: { in: empIds } }, include: { employee: { select: { personnelCode: true } } } });
-    if (calc.length) throw new DErr(`«${calcType.title}» این ماه برای کارمند ${calc[0].employee.personnelCode} محاسبه شده است؛ برای ویرایش اطلاعات ماهانه ابتدا محاسبه را حذف کنید`);
-
-    await prisma.$transaction(async (tx) => {
-      for (const p of parsed) {
-        const where = { employeeId_year_month_componentId: { employeeId: p.employeeId, year, month, componentId: p.componentId } };
-        if (p.value === null) await tx.payrollFactorInput.deleteMany({ where: { employeeId: p.employeeId, year, month, componentId: p.componentId } });
-        else await tx.payrollFactorInput.upsert({ where, create: { employeeId: p.employeeId, year, month, componentId: p.componentId, value: p.value }, update: { value: p.value } });
-      }
-    });
-    res.json({ saved: parsed.length });
+    const ctx = await prepareDataEntry(b.year, b.month, b.calcTypeId);
+    res.json({ saved: await saveDataEntries(ctx, Array.isArray(b.entries) ? b.entries : []) });
   } catch (e) {
     fail(res, e);
   }

@@ -11,6 +11,7 @@ import { usePersistedState } from "../lib/usePersistedState";
 import { VALUE_TYPE_FA, MONTHS_FA, currentJalaliYearMonth, hoursToHm } from "../lib/payrollLabels";
 import { useCalcTypes } from "../lib/useCalcTypes";
 import { WorkMonthPicker } from "../components/WorkMonthPicker";
+import { ExcelImportButton } from "../components/ExcelImport";
 
 // حقوق و دستمزد › عملیات › ورود اطلاعات: ماه را انتخاب کنید، «لود اطلاعات» را بزنید؛ گرید کد پرسنل، عنوان و به‌ازای هر عاملِ «ورود دستی» یک ستون
 // دارد. فرمت مجاز هر ستون را نوع پارامتر عامل تعیین می‌کند: ساعت دقیقه hhh:mm — روز عدد صحیح — عدد اعشاری — مبلغ اعشار تا ارز پایه.
@@ -151,6 +152,25 @@ export default function PayrollDataEntry() {
             text="مقدار عوامل «ورود دستی» (مثل روز کارکرد و ساعت اضافه‌کار) را برای همه‌ی کارمندان یک ماه یک‌جا وارد کنید. ستون‌ها عامل‌هایی هستند که روش محاسبه‌ی مؤثرشان در آن ماه «ورود دستی» است. ساعت دقیقه: hhh:mm — روز: عدد صحیح — عدد: اعشار مجاز — مبلغ: اعشار به تعداد اعشار ارز پایه."
             title="ورود اطلاعات"
           />
+          {data && data.columns.length > 0 && (
+            <ExcelImportButton
+              entityLabel="اطلاعات ماهانه"
+              templateFilename={`قالب-ورود-اطلاعات-ماهانه-${sel.year}-${sel.month}`}
+              backendEntityType="payroll-data-entry"
+              extraFields={{ year: String(sel.year), month: String(sel.month), calcTypeId: String(typeId) }}
+              columns={[
+                { key: "personnelCode", label: "کد پرسنلی", required: true, hint: "کد پرسنلی کارمند (صفرهای ابتدای کد مهم نیست)" },
+                { key: "fullName", label: "عنوان", hint: "فقط برای راهنمایی در فایل قالب؛ خوانده نمی‌شود" },
+                ...data.columns.map((c) => ({
+                  key: `c_${c.componentId}`,
+                  label: c.title,
+                  hint: `${VALUE_TYPE_FA[c.valueType]}${c.valueType === "TIME" ? " — به‌صورت hh:mm (مثلاً 10:30)" : c.valueType === "DAYS" ? " — عدد صحیح" : ""}؛ خالی = بدون تغییر`,
+                })),
+              ]}
+              templateRows={data.rows.map((r) => ({ personnelCode: r.personnelCode, fullName: r.fullName }))}
+              onDone={load}
+            />
+          )}
         </div>
       </div>
       <ErrorToast message={error} />
@@ -170,6 +190,7 @@ export default function PayrollDataEntry() {
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           <button type="button" className="btn secondary" disabled={busy} onClick={load}>لود اطلاعات</button>
+          {dirty.length > 0 && <span style={{ alignSelf: "center", opacity: 0.7, fontSize: 12 }}>تغییرات ذخیره‌نشده دارید؛ ورود از اکسل گرید را از روی سرور تازه می‌کند — ابتدا ذخیره کنید</span>}
           <button type="button" className="btn" disabled={busy || !data || dirty.length === 0} onClick={save}>
             ذخیره{dirty.length ? ` (${toFaDigits(String(dirty.length))} تغییر)` : ""}
           </button>

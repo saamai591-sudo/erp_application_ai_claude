@@ -14,6 +14,7 @@ import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { useTabs } from "../lib/TabsContext";
 
 // پست‌های سازمانی. «پست پیش‌فرض» حذف‌نشدنی/غیرقابل‌غیرفعال‌شدن است؛ شرکتی که از پست استفاده نمی‌کند همه را به آن منتصب می‌کند.
 
@@ -26,6 +27,15 @@ interface PositionRow {
   isDefault: boolean;
   isActive: boolean;
   hasTransactions: boolean;
+}
+interface PositionUse {
+  kind: "ASSIGNMENT" | "DECREE";
+  id: number;
+  employeeId: number;
+  personnelCode: string;
+  employeeName: string;
+  description: string;
+  path: string;
 }
 interface OrgUnitRow {
   id: number;
@@ -206,6 +216,39 @@ function PositionForm({ editId }: { editId?: number }) {
           </div>
         </div>
       </form>
+      {editId && <UsageSection positionId={editId} />}
     </FormPage>
+  );
+}
+
+// «موارد استفاده»: کجاها از این پست استفاده شده (انتصاب‌های کارمندان و احکام کارگزینی) — برای دانستنِ علت «قابل حذف نیست» و رفتن به همان رکورد
+function UsageSection({ positionId }: { positionId: number }) {
+  const { openTab } = useTabs();
+  const [uses, setUses] = useState<PositionUse[] | null>(null);
+  useEffect(() => {
+    api.get(`/positions/${positionId}/usage`).then(setUses).catch(() => setUses([]));
+  }, [positionId]);
+  if (uses === null) return null;
+  return (
+    <>
+      <h3 className="hr-section">موارد استفاده</h3>
+      <table className="hr-table">
+        <thead>
+          <tr><th style={{ width: 40 }}>#</th><th style={{ width: 110 }}>کد پرسنلی</th><th>کارمند</th><th>مورد</th><th style={{ width: 90 }} /></tr>
+        </thead>
+        <tbody>
+          {uses.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", opacity: 0.7 }}>این پست در جایی استفاده نشده و قابل حذف است</td></tr>}
+          {uses.map((u, i) => (
+            <tr key={`${u.kind}:${u.id}`}>
+              <td>{toFaDigits(String(i + 1))}</td>
+              <td>{toFaDigits(u.personnelCode)}</td>
+              <td>{u.employeeName}</td>
+              <td>{u.description}</td>
+              <td><button type="button" className="link-btn" onClick={() => openTab(u.path)}>باز کردن</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
   );
 }

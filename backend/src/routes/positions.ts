@@ -20,6 +20,51 @@ router.get("/positions", async (req, res) => {
   res.json(rows);
 });
 
+// «موارد استفاده» ی یک پست (برای نمایش در فرم پست و پیام حذف): انتصاب‌های کارمندان و احکام کارگزینی. شمارش از داده‌ی زنده است نه پرچم hasTransactions
+// (پرچم یک‌بار که روشن شود هیچ‌وقت خاموش نمی‌شد و حتی بعد از حذف انتصاب‌ها پست حذف‌نشدنی می‌ماند).
+interface PositionUse {
+  kind: "ASSIGNMENT" | "DECREE";
+  id: number;
+  employeeId: number;
+  personnelCode: string;
+  employeeName: string;
+  description: string;
+  path: string;
+}
+const dayOf = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+async function positionUsage(id: number): Promise<PositionUse[]> {
+  const emp = { select: { id: true, personnelCode: true, party: { select: { firstName: true, lastName: true, name: true } } } } as const;
+  const name = (e: { party: { firstName: string | null; lastName: string | null; name: string | null } }) => [e.party.firstName, e.party.lastName].filter(Boolean).join(" ") || e.party.name || "";
+  const [assignments, decrees] = await Promise.all([
+    prisma.employeeAssignment.findMany({ where: { positionId: id }, orderBy: [{ fromDate: "desc" }, { id: "desc" }], include: { employee: emp } }),
+    prisma.employmentDecree.findMany({ where: { positionId: id }, orderBy: { number: "desc" }, include: { employee: emp } }),
+  ]);
+  return [
+    ...assignments.map((a) => ({
+      kind: "ASSIGNMENT" as const,
+      id: a.id,
+      employeeId: a.employeeId,
+      personnelCode: a.employee.personnelCode,
+      employeeName: name(a.employee),
+      description: `انتصاب کارمند${a.toDate ? "" : " (جاری)"} از ${dayOf(a.fromDate)}${a.toDate ? ` تا ${dayOf(a.toDate)}` : ""}`,
+      path: `/employees/${a.employeeId}/edit`,
+    })),
+    ...decrees.map((d) => ({
+      kind: "DECREE" as const,
+      id: d.id,
+      employeeId: d.employeeId,
+      personnelCode: d.employee.personnelCode,
+      employeeName: name(d.employee),
+      description: `حکم کارگزینی شماره ${d.number} (تاریخ اعمال ${dayOf(d.effectiveDate)})`,
+      path: `/employment-decrees/${d.id}/edit`,
+    })),
+  ];
+}
+
+router.get("/positions/:id/usage", can(`${FORM}.view`), async (req, res) => {
+  res.json(await positionUsage(Number(req.params.id)));
+});
+
 router.post("/positions", can(`${FORM}.create`), async (req, res) => {
   const body = req.body as { code?: number; title?: string; orgUnitId?: number | null; isActive?: boolean };
   const title = (body.title ?? "").trim();
@@ -74,7 +119,13 @@ router.delete("/positions/:id", can(`${FORM}.delete`), async (req, res) => {
   const existing = await prisma.position.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "پست یافت نشد" });
   if (existing.isDefault) return res.status(400).json({ error: "پست پیش‌فرض قابل حذف نیست" });
-  if (existing.hasTransactions) return res.status(400).json({ error: "این پست گردش دارد و قابل حذف نیست" });
+  const uses = await positionUsage(id);
+  if (uses.length > 0) {
+    const shown = uses.slice(0, 5).map((u) => `کارمند ${u.personnelCode} (${u.employeeName}) — ${u.description}`).join("؛ ");
+    return res.status(400).json({
+      error: `این پست در ${uses.length} مورد استفاده شده و قابل حذف نیست: ${shown}${uses.length > 5 ? ` و ${uses.length - 5} مورد دیگر` : ""}. فهرست کامل در فرم پست، بخش «موارد استفاده» است.`,
+    });
+  }
   try {
     await prisma.position.delete({ where: { id } });
     res.status(204).send();

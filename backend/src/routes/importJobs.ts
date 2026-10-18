@@ -38,6 +38,7 @@ const ENTITY_TYPE_TO_ACTION: Record<string, string> = {
   "payroll-component": `${findFormPrefix("payroll-components")}.create`,
   employee: `${findFormPrefix("employees")}.create`,
   "employment-decree": `${findFormPrefix("employment-decrees")}.create`,
+  "payroll-data-entry": `${findFormPrefix("payroll-data-entry")}.edit`,
 };
 
 const router = Router();

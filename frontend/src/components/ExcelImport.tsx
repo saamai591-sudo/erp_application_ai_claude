@@ -44,6 +44,7 @@ export function ExcelImportButton({
   backendEntityType,
   extraFields,
   allowDuplicateOption,
+  templateRows,
   onDone,
   templateFilename = "قالب-ورود-اطلاعات",
   entityLabel = "اطلاعات",
@@ -64,6 +65,8 @@ export function ExcelImportButton({
   extraFields?: Record<string, string>;
   /** اگر true باشد، چک‌باکس «حتی اگر مشابه رکورد موجود بود ثبت شود» در دیالوگ نمایش داده می‌شود */
   allowDuplicateOption?: boolean;
+  /** ردیف‌های آماده برای فایل قالب (کلید ستون ← مقدار)؛ مثلاً فهرست کارمندان ماه در قالب ورود اطلاعات ماهانه */
+  templateRows?: Record<string, string>[];
   onDone?: () => void;
   templateFilename?: string;
   entityLabel?: string;
@@ -80,7 +83,7 @@ export function ExcelImportButton({
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function downloadTemplate() {
-    const ws = XLSX.utils.aoa_to_sheet([columns.map((c) => c.label)]);
+    const ws = XLSX.utils.aoa_to_sheet([columns.map((c) => c.label), ...(templateRows ?? []).map((r) => columns.map((c) => r[c.key] ?? ""))]);
     ws["!cols"] = columns.map(() => ({ wch: 22 }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
@@ -88,6 +91,11 @@ export function ExcelImportButton({
   }
 
   function parseCell(raw: any): string {
+    if (raw instanceof Date && !isNaN(raw.getTime()) && raw.getFullYear() <= 1900) {
+      // خانه‌ی «ساعت» اکسل (مثلاً 10:30) به‌صورت تاریخِ سال ۱۸۹۹ خوانده می‌شود؛ به hh:mm برمی‌گردد (نیم‌ثانیه برای خطای گرد کردن کتابخانه)
+      const t = new Date(raw.getTime() + 30000);
+      return `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+    }
     if (raw instanceof Date && !isNaN(raw.getTime())) {
       const y = raw.getFullYear();
       const m = String(raw.getMonth() + 1).padStart(2, "0");
