@@ -113,7 +113,8 @@ async function salesQuoteLineRemaining(id: number, excludeDeliveryId?: number, d
   const delivered = line.inventoryLines
     .filter((d: any) => d.document.documentType === "SALES_DELIVERY" && (!excludeDeliveryId || d.documentId !== excludeDeliveryId))
     .reduce((s: number, d: any) => s + Number(d.quantity), 0);
-  return { line, remaining: Number(line.quantity) - ordered - delivered };
+  // مقدارِ «بسته‌شده»ی پیگیری پیش‌فاکتور (فروش نشد) هم از مانده کم می‌شود
+  return { line, remaining: Number(line.quantity) - ordered - delivered - Number(line.closedQuantity ?? 0) };
 }
 
 /**
@@ -337,7 +338,7 @@ async function pickableSalesQuoteLines(customerId: number, destDate: Date | null
         .filter((d: any) => d.document.documentType === "SALES_DELIVERY" && (!excludeDeliveryId || d.documentId !== excludeDeliveryId))
         .reduce((s: number, d: any) => s + Number(d.quantity), 0);
       const quantity = Number(l.quantity);
-      const remaining = quantity - ordered - done;
+      const remaining = quantity - ordered - done - Number(l.closedQuantity ?? 0);
       const party = l.salesQuote.customer.party;
       return {
         id: l.id,

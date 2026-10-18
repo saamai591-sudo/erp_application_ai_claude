@@ -382,7 +382,9 @@ async function candidatesForBasisType(basisType: BasisType, partyId: number, exc
         return s + Math.max(0, Number(l.amount) - allocated);
       }, 0);
       const invoiced = invoicedByQuote.get(q.id) || { net: 0, vat: 0 };
-      const applied = (group === "VAT" ? invoiced.vat : invoiced.net) + unallocatedAdvances;
+      // مانده‌ی بسته‌شده‌ی پیگیری (فروش نشد) از مانده‌ی قابل دریافت کم می‌شود
+      const closedPart = q.followUpClosedAt ? Number(group === "VAT" ? q.closedRemainingVat ?? 0 : q.closedRemainingAmount ?? 0) : 0;
+      const applied = (group === "VAT" ? invoiced.vat : invoiced.net) + unallocatedAdvances + closedPart;
       return {
         id: q.id, number: q.number, date: q.date, currencyId: q.currencyId, currencyTitle: q.currency.title,
         fxRate: 1, partyId, total, applied, remaining: total - applied,

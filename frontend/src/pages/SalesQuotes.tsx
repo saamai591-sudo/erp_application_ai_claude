@@ -31,6 +31,7 @@ import { DescriptionField } from "../components/DescriptionField";
 import { stageFormPrefill, takeFormPrefill } from "../lib/formPrefill";
 import { useTabs } from "../lib/TabsContext";
 import { usePermissions } from "../lib/usePermissions";
+import { CloseFollowUpDialog, FOLLOWUP_FA, FollowUpBanner, useQuoteFollowUp } from "../components/QuoteFollowUp";
 
 // «پیش‌فاکتور» — بالاترین سند زنجیره فروش (پیش‌فاکتور > سفارش فروش > حواله فروش > فاکتور فروش)؛ این
 // ماژول هیچ مستند تحلیل اختصاصی در پروژه ندارد (رجوع کنید به یادداشت بالای schema.prisma و
@@ -51,7 +52,7 @@ function customerTitle(c: CustomerOption): string {
   return c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim();
 }
 
-interface ListRow { id: number; number: number; date: string; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: Status; lineCount: number; totalAmount: number }
+interface ListRow { followUpState?: string | null; followUpReasonTitle?: string | null; closedRemainingAmount?: number | null; id: number; number: number; date: string; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: Status; lineCount: number; totalAmount: number }
 interface DetailLine { id: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null; listPrice?: number | null }
 interface Detail extends ListRow { currencyId: number; description: string | null; validUntil?: string | null; lines: DetailLine[] }
 
@@ -76,6 +77,14 @@ function UndoIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
       <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function CloseCircleIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M9 9l6 6M15 9l-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }
@@ -151,6 +160,9 @@ function SalesQuoteList() {
           { header: "مرکز فروش", render: (r) => r.salesCenterTitle || "—", filterType: "string", filterValue: (r) => r.salesCenterTitle || "" },
           { header: "مبلغ کل (پس از تخفیف)", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
           { header: "وضعیت", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, filterType: "string", filterValue: (r) => STATUS_FA[r.status] },
+          { header: "وضعیت پیگیری", render: (r) => (r.followUpState ? FOLLOWUP_FA[r.followUpState] : "—"), filterType: "string", filterValue: (r) => (r.followUpState ? FOLLOWUP_FA[r.followUpState] : ""), width: "150px" },
+          { header: "دلیل فروش‌نشدن", render: (r) => r.followUpReasonTitle || "—", filterType: "string", filterValue: (r) => r.followUpReasonTitle || "" },
+          { header: "مبلغ بسته‌شده", render: (r) => (r.closedRemainingAmount ? formatAmountFa(r.closedRemainingAmount) : "—"), filterType: "number", filterValue: (r) => r.closedRemainingAmount ?? 0, decimal: true },
         ]}
         rows={items}
         edit={{ path: (r) => `/sales-quotes/${r.id}/edit` }}
@@ -224,6 +236,8 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
   const { flash } = useSavedFlash();
   const { openTab } = useTabs();
   const { hasPermission } = usePermissions();
+  const [followUpDialog, setFollowUpDialog] = useState(false);
+  const followUp = useQuoteFollowUp(editId, meta?.status === "APPROVED");
 
   useEffect(() => {
     async function init() {
@@ -527,6 +541,16 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
       showError((e as ApiError).message);
     }
   }
+  async function reopenFollowUp() {
+    if (!editId || !window.confirm("پیگیری این پیش‌فاکتور دوباره باز شود؟ مانده‌ی بسته‌شده دوباره در انتخابگرها می‌آید.")) return;
+    try {
+      await api.post(`/sales-quotes/${editId}/reopen-follow-up`, {});
+      await followUp.reload();
+    } catch (e) {
+      showError((e as ApiError).message);
+    }
+  }
+
   async function runAction(path: string) {
     if (!editId) return;
     try {
@@ -564,6 +588,17 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
               <DuplicateIcon />
             </button>
           )}
+          {status === "APPROVED" && hasPermission("sales.operations.sales-quotes.closeFollowUp") && followUp.info && (
+            followUp.info.state === "CLOSED_PARTIAL" || followUp.info.state === "CLOSED_NO_SALE" ? (
+              <button type="button" className="toolbar-icon-btn" title="بازگشایی پیگیری (مانده‌ی بسته‌شده دوباره قابل پیگیری می‌شود)" onClick={reopenFollowUp}>
+                <UndoIcon />
+              </button>
+            ) : followUp.info.remainingQty > 1e-9 ? (
+              <button type="button" className="toolbar-icon-btn" title="بستن پیگیری (مانده‌ی پیش‌فاکتور فروش نشد/منصرف شد)" onClick={() => setFollowUpDialog(true)}>
+                <CloseCircleIcon />
+              </button>
+            ) : null
+          )}
           <DownstreamMenu actions={QUOTE_DOWNSTREAM_ACTIONS} sourceId={editId} disabledReason={status !== "APPROVED" ? "پیش‌فاکتور تایید نشده است؛ ابتدا آن را تایید کنید" : null} />
         </>
       ) : undefined}
@@ -571,6 +606,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
     >
       <form id="sales-quote-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
+        <FollowUpBanner info={followUp.info} />
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
             <div className="form-field">
@@ -723,6 +759,17 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
           </div>
         </div>
       </form>
+      {followUpDialog && editId && followUp.info && (
+        <CloseFollowUpDialog
+          quoteId={editId}
+          info={followUp.info}
+          onClose={() => setFollowUpDialog(false)}
+          onDone={() => {
+            setFollowUpDialog(false);
+            followUp.reload();
+          }}
+        />
+      )}
     </FormPage>
   );
 }

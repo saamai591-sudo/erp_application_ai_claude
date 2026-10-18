@@ -10,6 +10,7 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { computePrice, findEffectivePriceListId, loadItemPricing } from "../services/salesPriceService";
 import { createParty, updateParty, PartyError, PartyWarning, PartyInput } from "../services/partyService";
+import { followUpStateOf, quoteRemainders } from "../services/salesQuoteFollowUpService";
 
 const CUSTOMERS_FORM = findFormPrefix("customers");
 const SALES_QUOTES_FORM = findFormPrefix("sales-quotes");
@@ -242,9 +243,11 @@ function parseQuoteValidUntil(raw: string | null | undefined, docDate: Date): Da
 
 router.get("/sales-quotes", can(`${SALES_QUOTES_FORM}.view`), async (_req, res) => {
   const items = await prisma.salesQuote.findMany({
-    include: { customer: { include: { party: true } }, salesType: true, salesCenter: true, fiscalPeriod: true, currency: true, lines: true },
+    include: { customer: { include: { party: true } }, salesType: true, salesCenter: true, fiscalPeriod: true, currency: true, lines: true, followUpReason: true },
     orderBy: { id: "desc" },
   });
+  // وضعیت پیگیری (فقط پیش‌فاکتورهای تأییدشده): مانده‌ها یک‌جا با چند کوئری تجمیعی
+  const remainders = await quoteRemainders(items.filter((d: any) => d.status === "APPROVED").map((d: any) => d.id));
   res.json(
     items.map((d: any) => ({
       id: d.id,
@@ -258,6 +261,10 @@ router.get("/sales-quotes", can(`${SALES_QUOTES_FORM}.view`), async (_req, res) 
       salesCenterTitle: d.salesCenter.title,
       currencyTitle: d.currency.title,
       status: d.status,
+      followUpState: followUpStateOf(d, remainders.get(d.id)),
+      followUpReasonTitle: d.followUpReason?.title ?? null,
+      followUpClosedAt: d.followUpClosedAt,
+      closedRemainingAmount: d.closedRemainingAmount === null || d.closedRemainingAmount === undefined ? null : Number(d.closedRemainingAmount),
       lineCount: d.lines.length,
       totalAmount: d.lines.reduce((s: number, l: any) => s + Number(l.amount) - Number(l.discount), 0),
     }))
@@ -478,6 +485,7 @@ router.post("/sales-quotes/:id/unapprove", can(`${SALES_QUOTES_FORM}.unapprove`)
   const d = await prisma.salesQuote.findUnique({ where: { id } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "APPROVED") return res.status(400).json({ error: "فقط در وضعیت تایید قابل برگشت است" });
+  if (d.followUpClosedAt) return res.status(400).json({ error: "پیگیری این پیش‌فاکتور بسته شده است؛ ابتدا پیگیری را بازگشایی کنید" });
   {
     const used = await salesQuoteDownstreamUsages(id);
     if (used.length > 0) return res.status(400).json({ error: `این پیش‌فاکتور گردش دارد (${used.join("، ")}) و امکان برگشت تایید وجود ندارد` });
@@ -504,7 +512,7 @@ interface SalesOrderLineInput {
 
 // طبق تصمیم صریح کاربر (۱۴۰۵/۰۶/۲۰، هم‌الگوی SalesQuote): مالیات بر ارزش‌افزوده همیشه به همان ارز هدر
 // محاسبه/ذخیره می‌شود (نه ارز مبنا)، چون این فرم اصلاً fxRate ندارد.
-async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: string, docDate: Date, customerId?: number, decimalPlaces = 2) {
+async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: string, docDate: Date, customerId?: number, decimalPlaces = 2, excludeOrderId?: number) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("سفارش فروش باید حداقل یک ردیف کالا داشته باشد");
   const cleaned: {
     sourceSalesQuoteLineId: number | null;
@@ -534,6 +542,10 @@ async function validateSalesOrderLines(lines: SalesOrderLineInput[], basis: stri
       const source = await prisma.salesQuoteLine.findUnique({ where: { id: l.sourceSalesQuoteLineId }, include: { salesQuote: true } });
       if (!source) throw new Error(`ردیف پیش‌فاکتور برای ردیف ${idx + 1} یافت نشد`);
       if (source.salesQuote.status !== "APPROVED") throw new Error(`پیش‌فاکتور ردیف ${idx + 1} در وضعیت تایید نیست`);
+      // پیگیری بسته‌شده: سفارش تازه ممکن نیست؛ سفارشی که همین ردیف را از قبل داشته (ویرایش) مجاز می‌ماند
+      if (source.salesQuote.followUpClosedAt && !(excludeOrderId && (await prisma.salesOrderLine.count({ where: { salesOrderId: excludeOrderId, sourceSalesQuoteLineId: source.id } })) > 0)) {
+        throw new Error(`پیگیری پیش‌فاکتور ردیف ${idx + 1} بسته شده است؛ ابتدا پیگیری را بازگشایی کنید`);
+      }
       // مشتری پیش‌فاکتور مبنا باید با مشتری سرصفحه‌ی سفارش یکی باشد (علاوه بر فیلتر انتخابگر، در سرور هم اعمال می‌شود)
       if (!customerId || source.salesQuote.customerId !== customerId) throw new Error(`مشتری پیش‌فاکتور ردیف ${idx + 1} با مشتری انتخاب‌شده در هدر یکسان نیست`);
       sourceSalesQuoteLineId = source.id;
@@ -597,7 +609,9 @@ router.get("/sales-orders/pickable-quote-lines", can(`${SALES_ORDERS_FORM}.view`
           .filter((o: any) => !excludeOrderId || o.salesOrderId !== excludeOrderId)
           .reduce((s: number, o: any) => s + Number(o.quantity), 0) +
         // آنچه مستقیماً با حواله فروش (بر مبنای همین پیش‌فاکتور) تحویل شده هم از مانده کم می‌شود
-        l.inventoryLines.filter((d: any) => d.document.documentType === "SALES_DELIVERY").reduce((s: number, d: any) => s + Number(d.quantity), 0);
+        l.inventoryLines.filter((d: any) => d.document.documentType === "SALES_DELIVERY").reduce((s: number, d: any) => s + Number(d.quantity), 0) +
+        // مقدارِ «بسته‌شده»ی پیگیری (فروش نشد) هم از مانده کم می‌شود
+        Number(l.closedQuantity ?? 0);
       const quantity = Number(l.quantity);
       const remaining = quantity - done;
       return {
@@ -769,7 +783,7 @@ router.put("/sales-orders/:id", can(`${SALES_ORDERS_FORM}.edit`), async (req, re
     if (!salesCenter) throw new Error("مرکز فروش یافت نشد");
     const currency = await prisma.currency.findUnique({ where: { id: body.currencyId } });
     if (!currency) throw new Error("ارز یافت نشد");
-    const lines = await validateSalesOrderLines(body.lines, body.basis, date, body.customerId, currency.decimalPlaces);
+    const lines = await validateSalesOrderLines(body.lines, body.basis, date, body.customerId, currency.decimalPlaces, id);
 
     await prisma.$transaction([
       prisma.salesOrderLine.deleteMany({ where: { salesOrderId: id } }),

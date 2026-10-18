@@ -84,6 +84,7 @@ import DeliveryAuthorizations from "./pages/DeliveryAuthorizations";
 import Customers from "./pages/Customers";
 import SalesTypes from "./pages/SalesTypes";
 import SalesCenters from "./pages/SalesCenters";
+import SalesQuoteLostReasons from "./pages/SalesQuoteLostReasons";
 import SalesPriceLists from "./pages/SalesPriceLists";
 import FrequentDescriptions from "./pages/FrequentDescriptions";
 import ReceiptTypes from "./pages/ReceiptTypes";
@@ -407,6 +408,9 @@ export default function App() {
             <Route path="/sales-centers" element={<SalesCenters />} />
             <Route path="/sales-centers/new" element={<SalesCenters />} />
             <Route path="/sales-centers/:id/edit" element={<SalesCenters />} />
+            <Route path="/sales-quote-lost-reasons" element={<SalesQuoteLostReasons />} />
+            <Route path="/sales-quote-lost-reasons/new" element={<SalesQuoteLostReasons />} />
+            <Route path="/sales-quote-lost-reasons/:id/edit" element={<SalesQuoteLostReasons />} />
             <Route path="/sales-price-lists" element={<SalesPriceLists />} />
             <Route path="/sales-price-lists/new" element={<SalesPriceLists />} />
             <Route path="/sales-price-lists/:id/edit" element={<SalesPriceLists />} />

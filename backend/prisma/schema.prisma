@@ -89,6 +89,7 @@ model User {
   roles                    UserRole[]
   scheduledJobs            ScheduledJob[]
   employeeParamValues      PayrollEmployeeParameterValue[] @relation("EmployeeParamValueCreator")
+  salesQuotesFollowUpClosed SalesQuote[] @relation("SalesQuoteFollowUpClosedBy")
   actions                  UserAction[]
   documentItemAmounts      DocumentItemAmount[]
   goodsPricingStatuses     GoodsPricingStatus[]
@@ -2308,8 +2309,26 @@ model SalesQuote {
   fiscalPeriod   FiscalPeriod     @relation(fields: [fiscalPeriodId], references: [id])
   lines          SalesQuoteLine[]
   receiptSettlementLines ReceiptSettlementLine[]
+  /// «بستن پیگیری»: مانده‌ی پیش‌فاکتورِ تأییدشده که دیگر دنبال نمی‌شود (منصرف شد/فروش نشد). مقدار بسته‌شده‌ی هر ردیف در SalesQuoteLine.closedQuantity و جمع مبلغ/ارزش‌افزوده‌ی آن (به ارز پیش‌فاکتور) همین‌جا در لحظه‌ی بستن فریز می‌شود
+  followUpClosedAt       DateTime?
+  followUpClosedById     Int?
+  followUpReasonId       Int?
+  followUpNote           String?
+  closedRemainingAmount  Decimal?          @db.Decimal(36, 10)
+  closedRemainingVat     Decimal?          @db.Decimal(36, 10)
+  followUpClosedBy       User?             @relation("SalesQuoteFollowUpClosedBy", fields: [followUpClosedById], references: [id], onDelete: SetNull)
+  followUpReason         SalesQuoteLostReason? @relation(fields: [followUpReasonId], references: [id], onDelete: Restrict)
 
   @@unique([fiscalPeriodId, number])
+}
+
+/// دلایل «فروش نشد» برای بستن پیگیری پیش‌فاکتور (قیمت بالا، رقیب، بودجه نداشت، …)
+model SalesQuoteLostReason {
+  id        Int          @id @default(autoincrement())
+  title     String       @unique
+  isActive  Boolean      @default(true)
+  createdAt DateTime     @default(now())
+  quotes    SalesQuote[]
 }
 
 model SalesQuoteLine {
@@ -2338,6 +2357,8 @@ model SalesQuoteLine {
   priceRuleId     Int?
   priceList       SalesPriceList?  @relation(fields: [priceListId], references: [id], onDelete: Restrict)
   priceRule       SalesPriceRule?  @relation(fields: [priceRuleId], references: [id], onDelete: Restrict)
+  /// مقدارِ بسته‌شده (پیگیری‌نشونده) این ردیف؛ از «مانده»ی ردیف کم می‌شود. صفر = باز
+  closedQuantity  Decimal          @default(0) @db.Decimal(36, 10)
   salesOrderLines SalesOrderLine[] @relation("SalesOrderSourceSalesQuoteLine")
   salesInvoiceLines SalesInvoiceLine[] @relation("SalesInvoiceSourceSalesQuoteLine")
   inventoryLines  InventoryDocumentLine[] @relation("InventoryLineSourceSalesQuoteLine")

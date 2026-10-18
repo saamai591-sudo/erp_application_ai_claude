@@ -263,6 +263,7 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "sales-types", label: "نوع فروش", list: "/sales-types", create: "/sales-types/new", icon: "tag" },
           { key: "sales-centers", label: "مرکز فروش", list: "/sales-centers", create: "/sales-centers/new", icon: "briefcase" },
           { key: "sales-price-lists", label: "اعلامیه قیمت فروش", list: "/sales-price-lists", create: "/sales-price-lists/new", icon: "tag" },
+          { key: "sales-quote-lost-reasons", label: "دلایل فروش‌نشدن پیش‌فاکتور", list: "/sales-quote-lost-reasons", create: "/sales-quote-lost-reasons/new", icon: "tag" },
         ],
       },
       {

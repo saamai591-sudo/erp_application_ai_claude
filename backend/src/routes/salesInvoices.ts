@@ -336,7 +336,9 @@ function deliveryDocReason(doc: any, h: HeaderCtx): string | null {
 /** مقدار ردیف‌های پیش‌فاکتور که قبلاً در سفارش فروش آمده‌اند — از مانده‌ی صورتحساب مستقیم پیش‌فاکتور کم می‌شود (همان سند دوبار صورتحساب نشود) */
 async function quoteLineOrderedQty(quoteLineId: number): Promise<number> {
   const agg = await prisma.salesOrderLine.aggregate({ where: { sourceSalesQuoteLineId: quoteLineId }, _sum: { quantity: true } });
-  return Number(agg._sum.quantity ?? 0);
+  // + مقدارِ «بسته‌شده»ی پیگیری پیش‌فاکتور (فروش نشد): از مانده‌ی فاکتور مستقیم هم کم می‌شود
+  const line = await prisma.salesQuoteLine.findUnique({ where: { id: quoteLineId }, select: { closedQuantity: true } });
+  return Number(agg._sum.quantity ?? 0) + Number(line?.closedQuantity ?? 0);
 }
 
 async function validateLines(
