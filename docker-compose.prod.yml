@@ -41,6 +41,8 @@ services:
       PORT: 4000
       # حالت production (جزئیات خطا هرگز به کلاینت نمی‌رود؛ فقط لاگ سرور)
       NODE_ENV: production
+      # (اختیاری) مبدأهای مجاز CORS وقتی frontend روی hostname دیگری از API باز می‌شود (جداشده با کاما)؛ خالی = فقط هم‌hostname و هم‌مبدأ
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
       # ارسال صورتحساب به سامانه مودیان — پیش‌فرض خاموش (ارسال واقعی قانونی است). نگاه کنید به .env.example
       TAX_TRANSPORT_ENABLED: ${TAX_TRANSPORT_ENABLED:-false}
       TAX_API_BASE_URL: ${TAX_API_BASE_URL:-https://tp.tax.gov.ir/req/api/}

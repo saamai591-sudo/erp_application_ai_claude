@@ -10,6 +10,7 @@ RUN npm run build
 FROM nginx:1.27-alpine
 RUN rm -f /etc/nginx/conf.d/default.conf
 COPY release/nginx.conf /etc/nginx/conf.d/erp.conf
+COPY release/security-headers.tpl /etc/nginx/security-headers.tpl
 COPY release/40-erp-config.sh /docker-entrypoint.d/40-erp-config.sh
 RUN sed -i 's/\r$//' /docker-entrypoint.d/40-erp-config.sh && chmod +x /docker-entrypoint.d/40-erp-config.sh
 COPY --from=build /app/dist /usr/share/nginx/html

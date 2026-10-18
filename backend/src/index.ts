@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import { requireAuth } from "./middleware/auth";
 import { errorDisclosureGuard, GENERIC_ERROR } from "./middleware/errorDisclosure";
+import { corsPolicy, securityHeaders } from "./middleware/securityHeaders";
 import { fiscalScopeContext } from "./middleware/fiscalScope";
 import { syncRegistryToDb } from "./authz/sync";
 
@@ -155,7 +156,8 @@ process.on("uncaughtException", (err) => {
   console.error("Uncaught Exception:", err);
 });
 app.disable("x-powered-by");
-app.use(cors());
+app.use(securityHeaders);
+app.use(corsPolicy);
 app.use(express.json({ limit: "50mb" }));
 // هیچ متن خطای داخلی (Prisma/SQL، مسیر فایل، stack) در پاسخ‌ها به کلاینت نمی‌رسد؛ جزئیات فقط در لاگ سرور می‌ماند (middleware/errorDisclosure.ts)
 app.use(errorDisclosureGuard);
@@ -307,8 +309,8 @@ app.use("/api", chequeDepositReturnsRoutes);
 app.use("/api", chequeClearingReceivableRoutes);
 app.use("/api", chequeClearingPayableRoutes);
 
-// مسیر ناشناخته‌ی API: پاسخ JSON ثابت (بدون صفحه‌ی HTML پیش‌فرض Express که مسیر درخواست را برمی‌گرداند)
-app.use("/api", (_req, res) => res.status(404).json({ error: "مسیر یافت نشد" }));
+// هر مسیر ناشناخته (داخل یا بیرون از /api): پاسخ JSON ثابت، بدون صفحه‌ی HTML پیش‌فرض Express (که مسیر درخواست و CSP خودش را برمی‌گرداند)
+app.use((_req, res) => res.status(404).json({ error: "مسیر یافت نشد" }));
 
 // محافظ سراسری خطا: با import "express-async-errors" در بالای فایل، خطاهای async
 // درون route handlerها (حتی بدون try/catch صریح) به این middleware هدایت می‌شوند
