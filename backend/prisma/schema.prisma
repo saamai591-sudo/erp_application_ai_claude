@@ -4995,6 +4995,8 @@ model PayrollFactorMethodBasis {
   id          Int                 @id @default(autoincrement())
   methodId    Int
   parameterId Int
+  /// true = با تأثیر (عضو مبنا)، false = بدون تأثیر (کاربر آگاهانه عضو نکرده)؛ نبودنِ ردیف = تعیین‌نشده
+  effective   Boolean             @default(true)
   method      PayrollFactorMethod @relation(fields: [methodId], references: [id], onDelete: Cascade)
   parameter   PayrollParameter    @relation(fields: [parameterId], references: [id], onDelete: Restrict)
 

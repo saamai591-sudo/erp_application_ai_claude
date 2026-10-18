@@ -9,7 +9,7 @@ import { getEffectiveDecrees } from "../services/employmentDecreeService";
 import { buildPayrollSlipsPrint } from "../services/payrollSlipPrint";
 import { jalaliMonthRange } from "../utils/jalaliDate";
 import { getCalendarMonth, missingMonthMessage } from "../services/workCalendarService";
-import { checkBasisSelection } from "../services/payrollBasisService";
+import { basisRows, resolveBasisDecisions } from "../services/payrollBasisService";
 import { BASE_INFO, DECREE_VARIANTS, FACTOR_VARIANTS, KIND_FA, LOAN_SUM_KEY, LOAN_SUM_LABEL } from "../services/payrollFormula";
 
 // حقوق و دستمزد: عامل‌های حقوق (هویت)، «روش محاسبه عامل» (تاریخ‌دار با ماه اجرا؛ مبنا = عامل حکم یا عامل حقوق)، ورودی ماهانه‌ی عوامل،
@@ -206,7 +206,9 @@ const shapeMethod = (m: any, today: Date) => ({
   branches: (m.branches ?? []).map((b: any) => ({ conditionText: b.conditionText ?? "", formulaText: b.formulaText })),
   isProvisional: m.isProvisional,
   /** مبناهایی که این روش (عامل) عضو آن‌هاست */
-  basisIds: (m.bases ?? []).map((b: any) => b.parameterId) as number[],
+  basisIds: (m.bases ?? []).filter((b: any) => b.effective).map((b: any) => b.parameterId) as number[],
+  /** مبناهایی که کاربر آگاهانه «بدون تأثیر» تعیین کرده (مبنای بدون هیچ‌کدام از دو فهرست = تعیین‌نشده) */
+  noEffectBasisIds: (m.bases ?? []).filter((b: any) => !b.effective).map((b: any) => b.parameterId) as number[],
   isCurrent: false as boolean,
   _eff: m.execCalendarMonth.startDate as Date,
   _today: today,
@@ -215,7 +217,7 @@ const shapeMethod = (m: any, today: Date) => ({
 router.get("/payroll-methods", can(`${F_METH}.view`), async (_req, res) => {
   const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
   const rows = await prisma.payrollFactorMethod.findMany({
-    include: { decreeComponent: { select: { title: true } }, payrollComponent: { select: { title: true } }, branches: { orderBy: { seq: "asc" } }, bases: { select: { parameterId: true } }, ...methodMonthInclude },
+    include: { decreeComponent: { select: { title: true } }, payrollComponent: { select: { title: true } }, branches: { orderBy: { seq: "asc" } }, bases: { select: { parameterId: true, effective: true } }, ...methodMonthInclude },
     orderBy: [{ execCalendarMonth: { startDate: "desc" } }, { id: "desc" }],
   });
   // «جاری» = آخرین رکورد هر عامل با تاریخ اجرای ≤ امروز
@@ -312,7 +314,7 @@ router.post("/payroll-methods/validate", can(`${F_METH}.view`), async (req, res)
 router.get("/payroll-methods/:id", can(`${F_METH}.view`), async (req, res) => {
   const m = await prisma.payrollFactorMethod.findUnique({
     where: { id: Number(req.params.id) },
-    include: { decreeComponent: { select: { title: true } }, payrollComponent: { select: { title: true } }, branches: { orderBy: { seq: "asc" } }, bases: { select: { parameterId: true } }, ...methodMonthInclude },
+    include: { decreeComponent: { select: { title: true } }, payrollComponent: { select: { title: true } }, branches: { orderBy: { seq: "asc" } }, bases: { select: { parameterId: true, effective: true } }, ...methodMonthInclude },
   });
   if (!m) return res.status(404).json({ error: "روش یافت نشد" });
   const { _eff, _today, ...rest } = shapeMethod(m, new Date());
@@ -362,7 +364,7 @@ async function methodData(b: any, existingId: number | null) {
   const branches = isCalc ? cleanBranches(b.branches) : [];
   // مبناهای مؤثر: عامل حکم هر مبنا؛ عامل حقوق فقط «پرداختی» و فقط مبنای منبع «محاسبات» (مبناهای فعلی همین رکورد حتی اگر غیرفعال شده باشند می‌مانند)
   const keep = existingId ? (await prisma.payrollFactorMethodBasis.findMany({ where: { methodId: existingId }, select: { parameterId: true } })).map((x) => x.parameterId) : [];
-  const basisIds = await checkBasisSelection({ basis, kind }, b.basisIds, keep);
+  const { effectiveIds: basisIds, noEffectIds } = await resolveBasisDecisions({ basis, kind }, b.basisIds, b.noEffectBasisIds, keep);
   await validateFactorMethod({ node, calcTypeId, kind: kind as any, method, branches, basisIds });
   return {
     basis,
@@ -379,19 +381,20 @@ async function methodData(b: any, existingId: number | null) {
     },
     branches,
     basisIds,
+    noEffectIds,
   };
 }
 
 router.post("/payroll-methods", can(`${F_METH}.create`), async (req, res) => {
   try {
-    const { basis, factorId, data, execStart, branches, basisIds } = await methodData(req.body, null);
+    const { basis, factorId, data, execStart, branches, basisIds, noEffectIds } = await methodData(req.body, null);
     const where = basis === "decree" ? { decreeComponentId: factorId } : { payrollComponentId: factorId };
     const latest = await prisma.payrollFactorMethod.findFirst({ where, orderBy: { execCalendarMonth: { startDate: "desc" } }, include: methodMonthInclude });
     if (latest && execStart <= latest.execCalendarMonth.startDate) {
       throw new PayrollCalcError(`ماه اجرا باید بعد از ماه اجرای آخرین روش این عامل (${execYm(latest).year}/${execYm(latest).month}) باشد`);
     }
     const created = await prisma.payrollFactorMethod.create({
-      data: { ...where, ...data, branches: { create: branches.map((x, i) => ({ seq: i + 1, conditionText: x.conditionText, formulaText: x.formulaText })) }, bases: { create: basisIds.map((parameterId) => ({ parameterId })) } },
+      data: { ...where, ...data, branches: { create: branches.map((x, i) => ({ seq: i + 1, conditionText: x.conditionText, formulaText: x.formulaText })) }, bases: { create: basisRows(basisIds, noEffectIds) } },
     });
     res.status(201).json({ id: created.id });
   } catch (e) {
@@ -408,7 +411,7 @@ router.put("/payroll-methods/:id", can(`${F_METH}.edit`), async (req, res) => {
     if (lockMsg) throw new PayrollCalcError(lockMsg);
     // عامل و مبنای یک رکورد تغییر نمی‌کند
     const body = { ...req.body, basis: m.decreeComponentId ? "decree" : "payroll", factorId: m.decreeComponentId ?? m.payrollComponentId };
-    const { data, execStart, branches, basisIds } = await methodData(body, id);
+    const { data, execStart, branches, basisIds, noEffectIds } = await methodData(body, id);
     const same = m.decreeComponentId ? { decreeComponentId: m.decreeComponentId } : { payrollComponentId: m.payrollComponentId };
     const [prev, next] = await Promise.all([
       prisma.payrollFactorMethod.findFirst({ where: { ...same, execCalendarMonth: { startDate: { lt: m.execCalendarMonth.startDate } } }, orderBy: { execCalendarMonth: { startDate: "desc" } }, include: methodMonthInclude }),
@@ -418,7 +421,7 @@ router.put("/payroll-methods/:id", can(`${F_METH}.edit`), async (req, res) => {
     if (next && execStart >= next.execCalendarMonth.startDate) throw new PayrollCalcError(`ماه اجرا باید قبل از روش بعدی (${execYm(next).year}/${execYm(next).month}) بماند`);
     await prisma.payrollFactorMethod.update({
       where: { id },
-      data: { ...data, branches: { deleteMany: {}, create: branches.map((x, i) => ({ seq: i + 1, conditionText: x.conditionText, formulaText: x.formulaText })) }, bases: { deleteMany: {}, create: basisIds.map((parameterId) => ({ parameterId })) } },
+      data: { ...data, branches: { deleteMany: {}, create: branches.map((x, i) => ({ seq: i + 1, conditionText: x.conditionText, formulaText: x.formulaText })) }, bases: { deleteMany: {}, create: basisRows(basisIds, noEffectIds) } },
     });
     res.json({ ok: true });
   } catch (e) {

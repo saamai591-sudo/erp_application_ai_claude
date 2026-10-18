@@ -4,6 +4,8 @@ import { getCalendarMonth, missingMonthMessage } from "./workCalendarService";
 
 // مبناها (پارامتر مبنا از نوع «مبنا»): عضویت یک عامل در یک مبنا روی رکورد «روش محاسبه عامل» ذخیره می‌شود (PayrollFactorMethodBasis) و تاریخچه‌اش همان
 // «ماه اجرا»ی رکورد است. تنها محل قواعد عضویت (فرم روش، عمل گروهی و نمای اعضا همه از اینجا استفاده می‌کنند).
+//  • هر مبنای قابل‌اعمال برای عامل سه حالت دارد: تعیین‌نشده (ردیفی نیست) | با تأثیر (effective=true) | بدون تأثیر (effective=false)؛ ذخیره‌ی روش از
+//    فرم، تعیین‌نشده را نمی‌پذیرد تا کاربر آگاهانه تصمیم گرفته باشد (resolveBasisDecisions). فقط «با تأثیر» عضویت حساب می‌شود.
 //  • عامل حکم: هر مبنایی (منبع حکم یا محاسبات)؛ عامل حقوق: فقط طبقه‌ی «پرداختی» و فقط مبنای منبع «محاسبات».
 //  • منبع «حکم» = جمع مقدارِ خامِ عامل‌های حکمِ عضو؛ منبع «محاسبات» = جمع مبلغ محاسبه‌شده‌ی عضوها در فیش همان ماه.
 
@@ -26,6 +28,37 @@ export async function checkBasisSelection(factor: { basis: FactorBasis; kind: st
   return ids;
 }
 
+/** مبناهایی که برای عامل باید تعیین تکلیف شوند: مبناهای فعال قابل‌اعمال (عامل حکم همه؛ عامل حقوق «پرداختی» فقط منبع محاسبات) */
+export async function applicableBasisRows(factor: { basis: FactorBasis; kind: string }) {
+  if (factor.basis === "payroll" && factor.kind !== "EARNING") return [];
+  return prisma.payrollParameter.findMany({
+    where: { kind: "BASIS", isActive: true, ...(factor.basis === "payroll" ? { basisSource: "CALC" as const } : {}) },
+    select: { id: true, title: true },
+    orderBy: { id: "asc" },
+  });
+}
+
+/**
+ * تصمیم کاربر درباره‌ی مبناها در ذخیره‌ی روش: «با تأثیر» و «بدون تأثیر» هر دو اعتبارسنجی می‌شوند، هم‌پوشانی ندارند و هر مبنای فعالِ قابل‌اعمال باید
+ * در یکی از دو فهرست باشد (تعیین‌نشده = رد). keep = مبناهای از قبل ثبت‌شده‌ی همین رکورد (حتی اگر غیرفعال شده باشند).
+ */
+export async function resolveBasisDecisions(factor: { basis: FactorBasis; kind: string }, rawYes: unknown, rawNo: unknown, keep: number[] = []): Promise<{ effectiveIds: number[]; noEffectIds: number[] }> {
+  const effectiveIds = await checkBasisSelection(factor, rawYes, keep);
+  const noEffectIds = await checkBasisSelection(factor, rawNo, keep);
+  if (effectiveIds.some((x) => noEffectIds.includes(x))) throw new PayrollCalcError("یک مبنا نمی‌تواند هم «با تأثیر» و هم «بدون تأثیر» باشد");
+  const undecided = (await applicableBasisRows(factor)).filter((r) => !effectiveIds.includes(r.id) && !noEffectIds.includes(r.id));
+  if (undecided.length > 0) {
+    throw new PayrollCalcError(`برای مبناهای زیر باید «با تأثیر» یا «بدون تأثیر» را انتخاب کنید: ${undecided.map((r) => `«${r.title}»`).join("، ")}`);
+  }
+  return { effectiveIds, noEffectIds };
+}
+
+/** ردیف‌های ذخیره‌ی وضعیت مبناها برای یک رکورد روش */
+export const basisRows = (effectiveIds: number[], noEffectIds: number[]) => [
+  ...effectiveIds.map((parameterId) => ({ parameterId, effective: true })),
+  ...noEffectIds.map((parameterId) => ({ parameterId, effective: false })),
+];
+
 interface MethodBrief {
   id: number;
   decreeComponentId: number | null;
@@ -38,6 +71,8 @@ interface MethodBrief {
   execMonth: number;
   execId: number;
   baseIds: number[];
+  /** مبناهایی که کاربر آگاهانه «بدون تأثیر» تعیین کرده */
+  noEffectIds: number[];
 }
 
 async function loadMethods(): Promise<MethodBrief[]> {
@@ -50,7 +85,7 @@ async function loadMethods(): Promise<MethodBrief[]> {
       valueType: true,
       fixedValue: true,
       execCalendarMonth: { select: { id: true, year: true, month: true, startDate: true } },
-      bases: { select: { parameterId: true } },
+      bases: { select: { parameterId: true, effective: true } },
     },
     orderBy: { execCalendarMonth: { startDate: "desc" } },
   });
@@ -65,7 +100,8 @@ async function loadMethods(): Promise<MethodBrief[]> {
     execYear: m.execCalendarMonth.year,
     execMonth: m.execCalendarMonth.month,
     execId: m.execCalendarMonth.id,
-    baseIds: m.bases.map((b) => b.parameterId),
+    baseIds: m.bases.filter((b) => b.effective).map((b) => b.parameterId),
+    noEffectIds: m.bases.filter((b) => !b.effective).map((b) => b.parameterId),
   }));
 }
 
@@ -185,8 +221,8 @@ export async function bulkChangeMembers(parameterId: number, action: "add" | "re
         res("SKIPPED", "از قبل عضو این مبنا بود");
         continue;
       }
-      if (action === "remove" && !isMember) {
-        res("SKIPPED", "عضو این مبنا نبود");
+      if (action === "remove" && e.noEffectIds.includes(parameterId)) {
+        res("SKIPPED", "از قبل «بدون تأثیر» بود");
         continue;
       }
       if (later.length > 0) {
@@ -194,6 +230,8 @@ export async function bulkChangeMembers(parameterId: number, action: "add" | "re
         throw new PayrollCalcError(`برای این عامل بعد از این ماه روش دیگری (ماه اجرای ${l.execYear}/${l.execMonth}) تعریف شده و تغییر برای ماه‌های بعد از آن اثری ندارد؛ ابتدا همان روش را اصلاح کنید یا ماه دیگری انتخاب کنید`);
       }
       const nextIds = action === "add" ? [...e.baseIds, parameterId] : e.baseIds.filter((x) => x !== parameterId);
+      // حذف از مبنا = ثبت صریح «بدون تأثیر»؛ افزودن، تصمیم قبلی «بدون تأثیر» را برمی‌دارد (مبناهای دیگرِ رکورد همان‌طور که هستند می‌مانند)
+      const nextNo = action === "remove" ? [...e.noEffectIds.filter((x) => x !== parameterId), parameterId] : e.noEffectIds.filter((x) => x !== parameterId);
       if (action === "add") await checkBasisSelection({ basis, kind: pc?.kind ?? "EARNING" }, [parameterId], []);
       const src = await prisma.payrollFactorMethod.findUnique({ where: { id: e.id }, include: { branches: { orderBy: { seq: "asc" } } } });
       if (!src) throw new PayrollCalcError("روش یافت نشد");
@@ -212,9 +250,9 @@ export async function bulkChangeMembers(parameterId: number, action: "add" | "re
         if (lock) throw new PayrollCalcError(lock);
         await prisma.$transaction([
           prisma.payrollFactorMethodBasis.deleteMany({ where: { methodId: e.id } }),
-          prisma.payrollFactorMethodBasis.createMany({ data: nextIds.map((parameterId) => ({ methodId: e.id, parameterId })) }),
+          prisma.payrollFactorMethodBasis.createMany({ data: basisRows(nextIds, nextNo).map((r) => ({ methodId: e.id, ...r })) }),
         ]);
-        res("DONE", action === "add" ? "به روش همین ماه اضافه شد" : "از روش همین ماه حذف شد");
+        res("DONE", action === "add" ? "به روش همین ماه اضافه شد (با تأثیر)" : "در روش همین ماه «بدون تأثیر» شد");
       } else {
         await prisma.payrollFactorMethod.create({
           data: {
@@ -226,10 +264,10 @@ export async function bulkChangeMembers(parameterId: number, action: "add" | "re
             issueCalendarMonthId: m.id,
             execCalendarMonthId: m.id,
             branches: { create: branches.map((b, i) => ({ seq: i + 1, conditionText: b.conditionText, formulaText: b.formulaText })) },
-            bases: { create: nextIds.map((parameterId) => ({ parameterId })) },
+            bases: { create: basisRows(nextIds, nextNo) },
           },
         });
-        res("DONE", `${action === "add" ? "اضافه" : "حذف"} شد (روش جدید با ماه اجرای ${m.year}/${m.month} از روی روش قبلی ساخته شد)`);
+        res("DONE", `${action === "add" ? "اضافه (با تأثیر)" : "بدون تأثیر"} شد (روش جدید با ماه اجرای ${m.year}/${m.month} از روی روش قبلی ساخته شد)`);
       }
     } catch (err: any) {
       res("ERROR", err?.message || "خطا");

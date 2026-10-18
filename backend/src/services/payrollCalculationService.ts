@@ -164,7 +164,7 @@ export async function validateFactorMethod(cand: CandidateMethod): Promise<void>
   }
 
   // گراف وابستگی با آخرین روش هر عامل + نامزد
-  const latest = await prisma.payrollFactorMethod.findMany({ orderBy: { execCalendarMonth: { startDate: "desc" } }, include: { branches: { orderBy: { seq: "asc" } }, bases: { select: { parameterId: true } }, decreeComponent: { select: { code: true } }, payrollComponent: { select: { key: true, calcTypeId: true } } } });
+  const latest = await prisma.payrollFactorMethod.findMany({ orderBy: { execCalendarMonth: { startDate: "desc" } }, include: { branches: { orderBy: { seq: "asc" } }, bases: { where: { effective: true }, select: { parameterId: true } }, decreeComponent: { select: { code: true } }, payrollComponent: { select: { key: true, calcTypeId: true } } } });
   // طبقه از خود عامل می‌آید (عامل حکم همیشه «پرداختی» است)
   const kindByNode = new Map<string, Kind>([...decree.map((d) => [`D:${d.code}`, "EARNING" as Kind] as [string, Kind]), ...comps.map((x) => [`C:${x.key}`, x.kind as Kind] as [string, Kind])]);
   const seen = new Set<string>();
@@ -359,7 +359,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
   }
 
   // ── روش‌های مؤثر ──
-  const methods = await prisma.payrollFactorMethod.findMany({ where: { execCalendarMonth: { startDate: { lte: range.end } } }, orderBy: { execCalendarMonth: { startDate: "desc" } }, include: { branches: { orderBy: { seq: "asc" } }, bases: { select: { parameterId: true } } } });
+  const methods = await prisma.payrollFactorMethod.findMany({ where: { execCalendarMonth: { startDate: { lte: range.end } } }, orderBy: { execCalendarMonth: { startDate: "desc" } }, include: { branches: { orderBy: { seq: "asc" } }, bases: { where: { effective: true }, select: { parameterId: true } } } });
   const toRow = (m: (typeof methods)[number]): MethodRow => ({
     id: m.id,
     method: m.method as Method,
@@ -529,7 +529,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
   const baseLineBases = new Map<number, Set<number>>();
   if (!isBase && baseSlip) {
     const ids = [...new Set(baseSlip.lines.map((l) => l.methodId).filter((x): x is number => x !== null))];
-    const mem = ids.length ? await prisma.payrollFactorMethodBasis.findMany({ where: { methodId: { in: ids } }, select: { methodId: true, parameterId: true } }) : [];
+    const mem = ids.length ? await prisma.payrollFactorMethodBasis.findMany({ where: { methodId: { in: ids }, effective: true }, select: { methodId: true, parameterId: true } }) : [];
     for (const x of mem) baseLineBases.set(x.methodId, (baseLineBases.get(x.methodId) ?? new Set<number>()).add(x.parameterId));
   }
   const basisInfo = new Map<string, { title: string; source: string; value: number; members: { label: string; value: number }[] }>();

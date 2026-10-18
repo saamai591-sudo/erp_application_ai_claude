@@ -203,12 +203,13 @@ router.delete("/payroll-parameters/:id", can(`${FORM}.delete`), async (req, res)
       (b) => b.formulaText.toUpperCase().includes(ref) || (b.conditionText ?? "").toUpperCase().includes(ref)
     );
     if (users) throw new PErr("فرمول یک یا چند روش به این مورد ارجاع دارد؛ ابتدا فرمول‌ها را اصلاح کنید");
-    if ((await prisma.payrollFactorMethodBasis.count({ where: { parameterId: id } })) > 0) throw new PErr("این مبنا عضو دارد؛ ابتدا آن را از «روش محاسبه عامل»ِ عضوها بردارید");
+    if ((await prisma.payrollFactorMethodBasis.count({ where: { parameterId: id, effective: true } })) > 0) throw new PErr("این مبنا عضو دارد؛ ابتدا آن را از «روش محاسبه عامل»ِ عضوها بردارید");
     const slipUse = await prisma.$queryRaw<{ n: number }[]>`SELECT COUNT(*)::int AS n FROM "PayrollSlip" WHERE (parameters -> ${p.key}::text) IS NOT NULL`;
     if ((slipUse[0]?.n ?? 0) > 0) throw new PErr("این مورد در محاسبه‌ی حقوق استفاده شده و قابل حذف نیست؛ ابتدا محاسبه‌های مربوط را حذف کنید");
     if ((await employeeValueCount(id)) > 0) throw new PErr("برای این پارامتر مقدار کارمند ثبت شده است؛ ابتدا مقدارهای کارمندان را حذف کنید");
     for (const v of p.values) await assertParameterValueNotLocked(v.id);
-    await prisma.payrollParameter.delete({ where: { id } });
+    // ردیف‌های «بدون تأثیر» فقط ثبت یک تصمیم‌اند و مانع حذف نیستند
+    await prisma.$transaction([prisma.payrollFactorMethodBasis.deleteMany({ where: { parameterId: id, effective: false } }), prisma.payrollParameter.delete({ where: { id } })]);
     res.status(204).send();
   } catch (e) {
     fail(res, e, "خطا در حذف پارامتر");
