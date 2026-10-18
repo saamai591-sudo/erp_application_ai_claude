@@ -25,6 +25,7 @@ router.get("/logo", async (_req, res) => {
     if (!a) return res.status(404).end();
     res.setHeader("Content-Type", a.mimeType);
     res.setHeader("Cache-Control", "public, max-age=86400");
+    res.removeHeader("Pragma");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.send(Buffer.from(a.data));
   } catch {

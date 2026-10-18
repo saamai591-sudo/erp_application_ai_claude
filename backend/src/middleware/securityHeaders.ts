@@ -10,6 +10,9 @@ export function securityHeaders(_req: Request, res: Response, next: NextFunction
   // فیلتر XSS مرورگرهای قدیمی (مرورگرهای جدید نادیده می‌گیرند)؛ mode=block یعنی فقط مسدود کردن، نه پاک‌سازی
   res.setHeader("X-XSS-Protection", "1; mode=block");
   res.setHeader("Referrer-Policy", "no-referrer");
+  // پاسخ‌های API پیش‌فرض کش نمی‌شوند (داده‌ی حساس)؛ routeای که کش می‌خواهد (مثل لوگوی شرکت) Cache-Control خودش را می‌گذارد و Pragma را برمی‌دارد
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Pragma", "no-cache");
   next();
 }
 
