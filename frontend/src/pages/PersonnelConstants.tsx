@@ -39,7 +39,7 @@ interface Data {
   employees: Row[];
 }
 
-const TYPE_FA: Record<string, string> = { NUMBER: "عدد", PERCENT: "درصد", AMOUNT: "مبلغ" };
+const TYPE_FA: Record<string, string> = { NUMBER: "عدد", AMOUNT: "مبلغ" };
 const key = (e: number, p: number) => `${e}:${p}`;
 
 export default function PersonnelConstants() {

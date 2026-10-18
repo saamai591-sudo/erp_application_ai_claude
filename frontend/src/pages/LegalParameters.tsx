@@ -24,8 +24,8 @@ import { WorkMonthPicker } from "../components/WorkMonthPicker";
 // ماه اجرا ≤ آن تاریخ است؛ تغییر سالانه‌ی قانون = یک مقدار جدید با ماه اجرای جدید (بدون تغییر کد). مقداری که در محاسبه استفاده شده قفل است
 // و مقدار جدید فقط برای ماهی بعد از آخرین ماهِ محاسبه‌شده ثبت می‌شود.
 
-const TYPE_FA: Record<string, string> = { NUMBER: "عدد", PERCENT: "درصد", AMOUNT: "مبلغ", BRACKETS: "جدول پلکانی" };
-// «نوع» = مقدار ثابت (مقدارهای تاریخ‌دار؛ «نوع داده» عدد/درصد/مبلغ/جدول پلکانی) یا مبنا (بدون مقدار؛ جمع مبلغ عامل‌های عضو، با «منبع داده» حکم یا محاسبات)
+const TYPE_FA: Record<string, string> = { NUMBER: "عدد", AMOUNT: "مبلغ", BRACKETS: "جدول پلکانی" };
+// «نوع» = مقدار ثابت (مقدارهای تاریخ‌دار؛ «نوع داده» عدد/مبلغ/جدول پلکانی) یا مبنا (بدون مقدار؛ جمع مبلغ عامل‌های عضو، با «منبع داده» حکم یا محاسبات)
 const KIND_FA: Record<string, string> = {
   CONSTANT: "مقدار ثابت",
   BASIS: "مبنا",
@@ -87,7 +87,7 @@ const fmtNum = (v: string | null) => (v === null ? "" : toFaDigits(Number(v).toL
 function valueText(type: string, v: ValueRow | null): string {
   if (!v) return "تعریف نشده";
   if (type === "BRACKETS") return `${toFaDigits(String(v.brackets.length))} پله`;
-  return type === "PERCENT" ? `${fmtNum(v.value)}٪` : fmtNum(v.value);
+  return fmtNum(v.value);
 }
 
 export default function LegalParameters() {
@@ -416,7 +416,7 @@ function ValueDialog({ param, value, onClose, onDone }: { param: ParamDetail; va
         </div>
         {!isBr && (
           <div className="form-field">
-            <label>مقدار{param.type === "PERCENT" ? " (درصد)" : ""}<RequiredMark /></label>
+            <label>مقدار<RequiredMark /></label>
             <AmountInput value={val} onChange={setVal} allowDecimal />
           </div>
         )}

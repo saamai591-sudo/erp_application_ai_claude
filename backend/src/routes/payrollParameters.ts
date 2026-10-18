@@ -18,9 +18,9 @@ const router = Router();
 
 class PErr extends Error {}
 
-const TYPES = ["NUMBER", "PERCENT", "AMOUNT", "BRACKETS"];
+const TYPES = ["NUMBER", "AMOUNT", "BRACKETS"];
 /** نوع داده‌ی مجاز مقدار ثابت پرسنلی: جدول پلکانی برای هر نفر معنا ندارد */
-const PERSONNEL_TYPES = ["NUMBER", "PERCENT", "AMOUNT"];
+const PERSONNEL_TYPES = ["NUMBER", "AMOUNT"];
 const day = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
 const str = (v: unknown) => {
   const t = typeof v === "string" ? v.trim() : "";
@@ -88,7 +88,6 @@ function buildValue(type: string, b: any): { value: number | null; brackets: { p
   }
   const v = Number(b.value);
   if (b.value === undefined || b.value === null || b.value === "" || !isFinite(v) || v < 0) throw new PErr("مقدار نامعتبر است");
-  if (type === "PERCENT" && v > 100) throw new PErr("درصد نباید بیش از ۱۰۰ باشد");
   return { value: v, brackets: [] };
 }
 

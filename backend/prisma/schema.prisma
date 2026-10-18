@@ -4952,7 +4952,6 @@ model EmploymentDecreeLine {
 
 enum PayrollParamType {
   NUMBER
-  PERCENT
   AMOUNT
   BRACKETS
 }
@@ -5007,7 +5006,7 @@ model PayrollParameterValue {
   id            Int                       @id @default(autoincrement())
   parameterId   Int
   effectiveDate DateTime                  @db.Date
-  /// مقدار عددی (NUMBER/PERCENT/AMOUNT)؛ برای BRACKETS خالی است
+  /// مقدار عددی (NUMBER/AMOUNT)؛ برای BRACKETS خالی است
   value         Decimal?                  @db.Decimal(20, 4)
   note          String?
   createdAt     DateTime                  @default(now())

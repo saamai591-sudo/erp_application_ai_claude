@@ -30,7 +30,7 @@ interface Row {
 }
 
 export const fmtParamValue = (type: string, v: string) =>
-  `${toFaDigits(Number(v).toLocaleString("en-US", { maximumFractionDigits: 4 }))}${type === "PERCENT" ? "٪" : ""}`;
+  toFaDigits(Number(v).toLocaleString("en-US", { maximumFractionDigits: 4 }));
 
 export function EmployeeParamValues({ employeeId, canEdit }: { employeeId: number; canEdit: boolean }) {
   const [params, setParams] = useState<Param[]>([]);
@@ -135,7 +135,7 @@ export function EmployeeParamValues({ employeeId, canEdit }: { employeeId: numbe
               <WorkMonthField year={dlg.year} month={dlg.month} disabled={dlg.fixed} onChange={(y, m) => setDlg({ ...dlg, year: y, month: m })} />
             </div>
             <div className="form-field">
-              <label>مقدار{selected ? ` (${selected.type === "PERCENT" ? "درصد" : selected.type === "AMOUNT" ? "مبلغ" : "عدد"})` : ""}<RequiredMark /></label>
+              <label>مقدار{selected ? ` (${selected.type === "AMOUNT" ? "مبلغ" : "عدد"})` : ""}<RequiredMark /></label>
               <input dir="ltr" inputMode="decimal" value={dlg.value} onChange={(e) => setDlg({ ...dlg, value: e.target.value.replace(/[^0-9.]/g, "") })} />
             </div>
           </div>

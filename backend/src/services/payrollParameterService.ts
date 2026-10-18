@@ -12,7 +12,7 @@ export interface Bracket {
 export interface ParameterValue {
   parameterId: number;
   key: string;
-  type: "NUMBER" | "PERCENT" | "AMOUNT" | "BRACKETS";
+  type: "NUMBER" | "AMOUNT" | "BRACKETS";
   effectiveDate: Date;
   value: number | null;
   brackets: Bracket[];

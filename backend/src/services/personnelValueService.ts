@@ -44,7 +44,6 @@ export async function loadEmployeeParamValues(employeeId: number, onDate: Date):
 function checkValue(type: string, raw: unknown): number {
   const v = typeof raw === "string" ? Number(raw.replace(/,/g, "").trim()) : Number(raw);
   if (raw === null || raw === undefined || raw === "" || !isFinite(v) || v < 0) throw new PersonnelValueError("مقدار نامعتبر است (عدد غیرمنفی وارد کنید)");
-  if (type === "PERCENT" && v > 100) throw new PersonnelValueError("درصد نباید بیش از ۱۰۰ باشد");
   if (type === "AMOUNT" && !Number.isInteger(v * 10000)) throw new PersonnelValueError("تعداد اعشار مبلغ بیش از حد مجاز است");
   return v;
 }
