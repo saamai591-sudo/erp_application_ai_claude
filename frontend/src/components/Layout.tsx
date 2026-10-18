@@ -517,6 +517,10 @@ function ModuleFlyout({
     right: window.innerWidth - anchorRect.left + 6,
     maxHeight: `calc(100vh - ${anchorRect.top}px - 16px)`,
   };
+  // صفحه‌ی باریک (موبایل) یا جایی که پنل دوم از لبه‌ی چپ بیرون می‌زند: به‌جای دو پنل کنار هم، یک پنل تمام‌عرض؛ انتخاب زیرماژول آن را با
+  // فهرست فرم‌ها عوض می‌کند و دکمه‌ی «بازگشت» به فهرست زیرماژول‌ها برمی‌گردد
+  const stacked = window.innerWidth <= 768 || (panel1Rect !== null && panel1Rect.left < 250);
+  const stackedStyle: React.CSSProperties = { ...style1, left: 8, minWidth: 0, maxWidth: "none" };
   const style2: React.CSSProperties | null = panel1Rect
     ? {
         position: "fixed",
@@ -528,7 +532,8 @@ function ModuleFlyout({
 
   return createPortal(
     <>
-      <div className="nav-flyout" ref={panel1Ref} style={style1}>
+      {!(stacked && activeSub) && (
+      <div className="nav-flyout" ref={panel1Ref} style={stacked ? stackedStyle : style1}>
         <div className="nav-flyout-header">
           <span className={`module-icon mod-ic-${MODULE_ICON[mod.title] || "layers"}`}>
             <NavIcon name={MODULE_ICON[mod.title] || "layers"} />
@@ -549,8 +554,15 @@ function ModuleFlyout({
           </button>
         ))}
       </div>
+      )}
       {activeSub && style2 && (
-        <div className="nav-flyout" ref={panel2Ref} style={style2}>
+        <div className="nav-flyout" ref={panel2Ref} style={stacked ? stackedStyle : style2}>
+          {stacked && (
+            <button type="button" className="nav-flyout-submodule-row" onClick={() => setActiveSubTitle(null)}>
+              <span>→</span>
+              <span>بازگشت به {mod.title}</span>
+            </button>
+          )}
           <div className="nav-flyout-header">
             <span className={`submodule-icon sub-ic-${SUBMODULE_ICON[activeSub.title] || "file"}`}>
               <NavIcon name={SUBMODULE_ICON[activeSub.title] || "file"} />
