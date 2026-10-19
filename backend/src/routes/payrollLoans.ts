@@ -4,6 +4,7 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { WorkCalendarError, day, getCalendarMonth, missingMonthMessage, parseDay } from "../services/workCalendarService";
+import { employeeIdsInPeriod } from "../services/employmentStatusService";
 import {
   LoanError,
   assertNoCalculationFrom,
@@ -53,11 +54,9 @@ async function monthRef(year: unknown, month: unknown, label: string) {
 // ── کارمندان فعال در یک تاریخ (انتخابگر پرداخت وام) ──
 
 async function activeEmployeesAt(date: Date, ids?: number[]) {
+  const inPeriod = await employeeIdsInPeriod(date, date, ids);
   const emps = await prisma.employee.findMany({
-    where: {
-      ...(ids ? { id: { in: ids } } : {}),
-      periods: { some: { startDate: { lte: date }, OR: [{ endDate: null }, { endDate: { gte: date } }] } },
-    },
+    where: { id: { in: inPeriod } },
     orderBy: { personnelCode: "asc" },
     include: {
       party: { select: { firstName: true, lastName: true, name: true } },

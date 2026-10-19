@@ -5,21 +5,17 @@ import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { loadCurrentRecords } from "../services/employeeRecordService";
 import { HrError, checkAssignmentRefs, changeAssignment } from "../services/employeeAssignmentService";
-import { assignmentLocks, deleteAssignment, deletePeriod, updateAssignment, updatePeriod } from "../services/employeeHistoryService";
+import { assignmentLocks, deleteAssignment, updateAssignment } from "../services/employeeHistoryService";
+import { changeStatus, createInitialRecord, currentStatuses, deleteStatusRecord, isCooperationEnded, statusHistory, updateStatusRecord } from "../services/employmentStatusService";
 import { getEffectiveDecree, getEffectiveDecrees } from "../services/employmentDecreeService";
 
 // منابع انسانی › پرسنلی › کارمندان.
 // SSOT: کارمند یک «نقش» روی Party است (مثل مشتری/تامین‌کننده)؛ نام، کد ملی، نشانی، تلفن و حساب بانکی همان Party هستند و تفصیلی کارمند
 // = Party.detailCode (کد دوم نداریم). تاریخ تولد و جنسیت هم روی Party نوشته می‌شود؛ بقیه‌ی مشخصات شخصی و استخدامی روی Employee.
-// وضعیت‌های پایان (خاتمه/بازنشسته/ترک کار) دوره‌ی همکاری و انتصاب فعال را می‌بندند؛ بازگشت به «شاغل» = استخدام مجدد (دوره‌ی تازه).
+// وضعیت و دوره‌های همکاری رکوردهای تاریخ‌دارِ «سابقه‌ی وضعیت» هستند (services/employmentStatusService.ts)؛ وضعیت پایان انتصاب باز را می‌بندد و بازگشت به «شاغل» = استخدام مجدد.
 
 const FORM = findFormPrefix("employees");
 const router = Router();
-
-const ENDED = ["TERMINATED", "RETIRED", "ABANDONED"] as const;
-const STATUSES = ["ACTIVE", "UNPAID_LEAVE", "SICK_LEAVE", "TERMINATED", "RETIRED", "SUSPENDED", "ABANDONED"] as const;
-type Status = (typeof STATUSES)[number];
-const isEnded = (s: string) => (ENDED as readonly string[]).includes(s);
 
 const MARITAL = ["SINGLE", "MARRIED", "DIVORCED", "WIDOWED"];
 const MILITARY = ["NOT_APPLICABLE", "COMPLETED", "EXEMPT", "SUBJECT", "IN_SERVICE"];
@@ -128,6 +124,7 @@ router.get("/employees", async (_req, res) => {
     orderBy: { personnelCode: "asc" },
   });
   const decrees = await getEffectiveDecrees(rows.map((r) => r.id));
+  const statuses = await currentStatuses();
   res.json(
     rows.map((e) => {
       const cur = e.assignments[0];
@@ -135,7 +132,7 @@ router.get("/employees", async (_req, res) => {
       return {
         id: e.id,
         personnelCode: e.personnelCode,
-        status: e.status,
+        status: statuses.get(e.id) ?? "ACTIVE",
         partyId: e.partyId,
         detailCode: e.party.detailCode,
         fullName: partyDisplayName(e.party),
@@ -204,13 +201,13 @@ router.get("/employees/:id", async (req, res) => {
       photo: true,
       birthPlace: { select: { id: true, title: true } },
       issuePlace: { select: { id: true, title: true } },
-      periods: { orderBy: { startDate: "asc" }, include: { terminationReason: { select: { id: true, title: true } } } },
       assignments: { orderBy: [{ fromDate: "asc" }, { id: "asc" }], select: assignmentSelect },
       dependents: { orderBy: { id: "asc" } },
     },
   });
   if (!e) return res.status(404).json({ error: "کارمند یافت نشد" });
-  const { photo, party, periods, assignments, dependents, ...rest } = e;
+  const { photo, party, assignments, dependents, ...rest } = e;
+  const history = await statusHistory(id);
   const locks = await assignmentLocks(id, assignments);
   res.json({
     ...rest,
@@ -218,7 +215,11 @@ router.get("/employees/:id", async (req, res) => {
     decree: await decreeSummary(id),
     party: { ...party, fullName: partyDisplayName(party), birthDate: day(party.birthDate) },
     photo: photo ? `data:${photo.mimeType};base64,${Buffer.from(photo.data).toString("base64")}` : null,
-    periods: periods.map((p) => ({ ...p, startDate: day(p.startDate), endDate: day(p.endDate) })),
+    status: history.status,
+    lastStatus: history.lastStatus,
+    lastStatusDate: history.lastDate,
+    statusRecords: history.records,
+    periods: history.periods,
     // قفل هر انتصاب: حکمی (هر وضعیت) با تاریخ اعمال ≥ شروع آن انتصاب
     assignments: assignments.map((a) => ({ ...shapeAssignment(a), locked: !!locks.get(a.id), lockedReason: locks.get(a.id) ?? null })),
     currentAssignment: assignments.find((a) => !a.toDate) ? shapeAssignment(assignments.find((a) => !a.toDate)) : null,
@@ -264,7 +265,6 @@ export async function createEmployee(b: any, opts: { allowNoPhoto?: boolean } = 
           data: {
             personnelCode: code,
             partyId,
-            status: "ACTIVE",
             fatherName: str(b.fatherName),
             birthCertificateNumber: str(b.birthCertificateNumber),
             birthPlaceId: b.birthPlaceId ? Number(b.birthPlaceId) : null,
@@ -277,7 +277,7 @@ export async function createEmployee(b: any, opts: { allowNoPhoto?: boolean } = 
           },
         });
         if (photo) await tx.employeePhoto.create({ data: { employeeId: emp.id, ...photo } });
-        await tx.employmentPeriod.create({ data: { employeeId: emp.id, startDate } });
+        await createInitialRecord(tx, emp.id, startDate);
         await tx.employeeEducationRecord.create({
           data: { employeeId: emp.id, effectiveDate: startDate, educationLevelId: Number(b.educationLevelId), field: str(b.educationField) },
         });
@@ -373,7 +373,7 @@ router.post("/employees/:id/assignments", can(`${FORM}.edit`), async (req, res) 
   try {
     const emp = await prisma.employee.findUnique({ where: { id } });
     if (!emp) return res.status(404).json({ error: "کارمند یافت نشد" });
-    if (isEnded(emp.status)) throw new HrError("همکاری این کارمند پایان یافته است؛ ابتدا او را مجدداً شاغل کنید");
+    if (await isCooperationEnded(id)) throw new HrError("همکاری این کارمند پایان یافته است؛ ابتدا او را مجدداً شاغل کنید");
     const fromDate = parseDay(b.fromDate, "تاریخ شروع انتصاب")!;
     await checkAssignmentRefs(b);
     await prisma.$transaction((tx) => changeAssignment(tx, id, b, fromDate));
@@ -402,90 +402,32 @@ router.delete("/employees/:id/assignments/:aid", can(`${FORM}.editHistory`), asy
   }
 });
 
-router.put("/employees/:id/periods/:pid", can(`${FORM}.editHistory`), async (req, res) => {
-  try {
-    await updatePeriod(Number(req.params.id), Number(req.params.pid), req.body);
-    res.json({ ok: true });
-  } catch (e: any) {
-    fail(res, e, "خطا در ویرایش دوره‌ی همکاری");
-  }
-});
-
-router.delete("/employees/:id/periods/:pid", can(`${FORM}.editHistory`), async (req, res) => {
-  try {
-    await deletePeriod(Number(req.params.id), Number(req.params.pid), { statusAfter: req.query.statusAfter ?? req.body?.statusAfter });
-    res.status(204).send();
-  } catch (e: any) {
-    fail(res, e, "خطا در حذف دوره‌ی همکاری");
-  }
-});
-
-// ── تغییر وضعیت همکاری ──
-// ACTIVE/مرخصی/تعلیق ⇄ بین خودشان: فقط وضعیت. به پایان (خاتمه/بازنشسته/ترک کار): بستن دوره و انتصاب فعال.
-// از پایان به شاغل: دوره‌ی تازه + انتصاب تازه (استخدام مجدد؛ کد پرسنلی و سوابق همان می‌ماند).
+// ── سابقه‌ی وضعیت همکاری (قواعد در services/employmentStatusService.ts) ──
+// تغییر وضعیت: رکورد تازه بعد از آخرین رکورد. تاریخ وضعیت پایان = اولین روز بعد از همکاری؛ از پایان به شاغل = استخدام مجدد (پست/شغل/… در بدنه).
 router.post("/employees/:id/status", can(`${FORM}.changeStatus`), async (req, res) => {
-  const id = Number(req.params.id);
-  const b = req.body as any;
   try {
-    const emp = await prisma.employee.findUnique({ where: { id } });
-    if (!emp) return res.status(404).json({ error: "کارمند یافت نشد" });
-    const target = b.status as Status;
-    if (!STATUSES.includes(target)) throw new HrError("وضعیت نامعتبر است");
-    if (target === emp.status) throw new HrError("کارمند هم‌اکنون در همین وضعیت است");
-    const date = parseDay(b.date, "تاریخ")!;
-    const wasEnded = isEnded(emp.status);
-
-    if (wasEnded && target !== "ACTIVE") {
-      throw new HrError("همکاری این کارمند پایان یافته است؛ برای هر تغییر ابتدا باید مجدداً «شاغل» شود");
-    }
-
-    await prisma.$transaction(async (tx) => {
-      const openPeriod = await tx.employmentPeriod.findFirst({ where: { employeeId: id, endDate: null } });
-      if (isEnded(target)) {
-        if (!openPeriod) throw new HrError("دوره‌ی همکاری باز یافت نشد");
-        if (date < openPeriod.startDate) throw new HrError("تاریخ نباید قبل از شروع همکاری باشد");
-        let reasonId: number | null = null;
-        if (b.terminationReasonId) {
-          if (!(await tx.terminationReason.findUnique({ where: { id: Number(b.terminationReasonId) } }))) {
-            throw new HrError("دلیل خاتمه همکاری یافت نشد");
-          }
-          reasonId = Number(b.terminationReasonId);
-          await tx.terminationReason.update({ where: { id: reasonId }, data: { hasTransactions: true } });
-        } else if (target === "TERMINATED") {
-          throw new HrError("دلیل خاتمه همکاری الزامی است");
-        }
-        await tx.employmentPeriod.update({
-          where: { id: openPeriod.id },
-          data: { endDate: date, terminationReasonId: reasonId, note: str(b.note) },
-        });
-        const open = await tx.employeeAssignment.findFirst({ where: { employeeId: id, toDate: null } });
-        if (open) {
-          // انتصابی که در همان روز شروع شده بود، تاریخ پایان قبل از شروع پیدا نکند
-          await tx.employeeAssignment.update({ where: { id: open.id }, data: { toDate: date < open.fromDate ? open.fromDate : date } });
-        }
-      } else if (wasEnded) {
-        // استخدام مجدد: دوره‌ی تازه + انتصاب تازه
-        const last = await tx.employmentPeriod.findFirst({ where: { employeeId: id }, orderBy: { startDate: "desc" } });
-        if (last?.endDate && date <= last.endDate) throw new HrError("تاریخ استخدام مجدد باید بعد از پایان همکاری قبلی باشد");
-        await checkAssignmentRefs(b);
-        await tx.employmentPeriod.create({ data: { employeeId: id, startDate: date, note: str(b.note) } });
-        await tx.employeeAssignment.create({
-          data: {
-            employeeId: id,
-            positionId: Number(b.positionId),
-            orgUnitId: Number(b.orgUnitId),
-            costCenterId: b.costCenterId || null,
-            jobId: b.jobId ?? null,
-            fromDate: date,
-          },
-        });
-        await tx.position.update({ where: { id: Number(b.positionId) }, data: { hasTransactions: true } });
-      }
-      await tx.employee.update({ where: { id }, data: { status: target } });
-    });
+    await changeStatus(Number(req.params.id), req.body);
     res.json({ ok: true });
   } catch (e: any) {
     fail(res, e, "خطا در تغییر وضعیت");
+  }
+});
+
+router.put("/employees/:id/status-records/:rid", can(`${FORM}.editHistory`), async (req, res) => {
+  try {
+    await updateStatusRecord(Number(req.params.id), Number(req.params.rid), req.body);
+    res.json({ ok: true });
+  } catch (e: any) {
+    fail(res, e, "خطا در ویرایش رکورد وضعیت");
+  }
+});
+
+router.delete("/employees/:id/status-records/:rid", can(`${FORM}.editHistory`), async (req, res) => {
+  try {
+    await deleteStatusRecord(Number(req.params.id), Number(req.params.rid));
+    res.status(204).send();
+  } catch (e: any) {
+    fail(res, e, "خطا در حذف رکورد وضعیت");
   }
 });
 

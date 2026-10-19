@@ -6,6 +6,7 @@ import { assertRecordNotStale } from "../utils/concurrency";
 import { HrError, checkAssignmentRefs, changeAssignment } from "../services/employeeAssignmentService";
 import { getEffectiveDecree } from "../services/employmentDecreeService";
 import { jalaliMonthRange } from "../utils/jalaliDate";
+import { getPeriods, periodContains } from "../services/employmentStatusService";
 
 // منابع انسانی › پرسنلی › حکم کارگزینی (قرارداد و حکم یک سند است).
 // پیش‌نویس ⇄ تایید؛ حکم تاییدشده تغییر نمی‌کند (حکم جدید با تاریخ اعمال جدید صادر می‌شود). اعتبار از تاریخ اعمال تا min(پایان، روز قبل از حکم بعدی)
@@ -264,9 +265,7 @@ export async function approveDecree(id: number): Promise<void> {
     // قفل ردیف کارمند: تایید هم‌زمان دو حکم یک کارمند پشت سر هم اجرا می‌شود
     await tx.$queryRaw`SELECT "id" FROM "Employee" WHERE "id" = ${d.employeeId} FOR UPDATE`;
     // تاریخ اعمال باید داخل یک دوره‌ی همکاری باشد
-    const periods = await tx.employmentPeriod.findMany({ where: { employeeId: d.employeeId } });
-    const inside = periods.some((p) => p.startDate <= d.effectiveDate && (!p.endDate || p.endDate >= d.effectiveDate));
-    if (!inside) throw new HrError("تاریخ اعمال حکم داخل هیچ دوره‌ی همکاری کارمند نیست");
+    if (!periodContains(await getPeriods(d.employeeId, tx), d.effectiveDate)) throw new HrError("تاریخ اعمال حکم داخل هیچ دوره‌ی همکاری کارمند نیست");
     // حکمی که از ماهِ دارای محاسبه (یا قبل از آن) اجرا می‌شود مبنای فیش ثبت‌شده را عوض می‌کند
     const slips = await tx.payrollSlip.findMany({ where: { employeeId: d.employeeId }, select: { year: true, month: true } });
     const hit = slips.find((x) => jalaliMonthRange(x.year, x.month).end >= d.effectiveDate);

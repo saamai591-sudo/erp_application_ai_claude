@@ -4,6 +4,7 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { jalaliMonthRange } from "../utils/jalaliDate";
 import { missingMonthMessage } from "../services/workCalendarService";
+import { employeeIdsInPeriod } from "../services/employmentStatusService";
 
 // حقوق و دستمزد › عملیات › ورود اطلاعات: ورود گروهیِ مقدار عوامل «ورود دستی» برای همه‌ی کارمندان یک ماه.
 // ستون‌ها = عامل‌هایی که روش مؤثر آن‌ها در پایان ماه انتخاب‌شده «ورود دستی» است؛ فرمت مجاز را نوع پارامتر عامل تعیین می‌کند:
@@ -62,8 +63,9 @@ router.get("/payroll-data-entry", can(`${F}.view`), async (req, res) => {
     const calcType = await resolveType(req.query.calcTypeId);
     const [columns, decimals] = await Promise.all([columnsFor(range.end, calcType.id), baseDecimals()]);
     // کارمندانی که دوره‌ی همکاری‌شان با ماه هم‌پوشانی دارد
+    const inPeriod = await employeeIdsInPeriod(range.start, range.end);
     const emps = await prisma.employee.findMany({
-      where: { periods: { some: { startDate: { lte: range.end }, OR: [{ endDate: null }, { endDate: { gte: range.start } }] } } },
+      where: { id: { in: inPeriod } },
       include: { party: { select: { firstName: true, lastName: true, name: true } } },
       orderBy: { personnelCode: "asc" },
     });
@@ -147,11 +149,7 @@ export async function saveDataEntries(ctx: DataEntryContext, entries: { employee
   }
   // کارمند باید در این ماه همکاری داشته باشد
   const empIds = [...new Set(parsed.map((p) => p.employeeId))];
-  const valid = await prisma.employee.findMany({
-    where: { id: { in: empIds }, periods: { some: { startDate: { lte: range.end }, OR: [{ endDate: null }, { endDate: { gte: range.start } }] } } },
-    select: { id: true },
-  });
-  const validSet = new Set(valid.map((v) => v.id));
+  const validSet = new Set(await employeeIdsInPeriod(range.start, range.end, empIds));
   for (const p of parsed) if (!validSet.has(p.employeeId)) throw new DErr("کارمندی در این ماه همکاری ندارد یا یافت نشد");
   // محاسبه‌شده‌ها قابل ویرایش نیستند: ابتدا حذف محاسبه
   const calc = await prisma.payrollSlip.findMany({ where: { year, month, calcTypeId: calcType.id, employeeId: { in: empIds } }, include: { employee: { select: { personnelCode: true } } } });

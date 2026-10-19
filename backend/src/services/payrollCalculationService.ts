@@ -25,6 +25,7 @@ import {
 import { jalaliMonthRange } from "../utils/jalaliDate";
 import { getCalendarMonth, missingMonthMessage } from "./workCalendarService";
 import { computeLoanMonth, loanChainMessage, storedLoanSum, type LoanMonthItem } from "./payrollLoanService";
+import { getPeriods } from "./employmentStatusService";
 
 // محاسبه‌ی حقوق یک کارمند در یک ماه شمسی بر اساس «روش محاسبه عامل»ها:
 //  • هر عامل حکم موجود در حکم مؤثر و هر عامل حقوق فعال، روش مؤثر خودش را (آخرین رکورد با ماه اجرا ≤ پایان ماه) دارد؛
@@ -505,7 +506,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
   };
 
   // اطلاعات پایه
-  const periods = await prisma.employmentPeriod.findMany({ where: { employeeId }, orderBy: { startDate: "asc" } });
+  const periods = await getPeriods(employeeId);
   const cur = periods.find((p) => p.startDate <= range.end && (!p.endDate || p.endDate >= range.end)) ?? periods[periods.length - 1];
   const serviceDays = cur ? Math.max(0, Math.floor((range.end.getTime() - cur.startDate.getTime()) / 86400000) + 1) : 0;
   const base: Record<string, number> = {

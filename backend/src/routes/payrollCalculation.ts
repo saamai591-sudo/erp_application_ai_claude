@@ -11,6 +11,7 @@ import { jalaliMonthRange } from "../utils/jalaliDate";
 import { getCalendarMonth, missingMonthMessage } from "../services/workCalendarService";
 import { basisRows, resolveBasisDecisions } from "../services/payrollBasisService";
 import { BASE_INFO, DECREE_VARIANTS, FACTOR_VARIANTS, KIND_FA, LOAN_SUM_KEY, LOAN_SUM_LABEL } from "../services/payrollFormula";
+import { employeeIdsInPeriod } from "../services/employmentStatusService";
 
 // حقوق و دستمزد: عامل‌های حقوق (هویت)، «روش محاسبه عامل» (تاریخ‌دار با ماه اجرا؛ مبنا = عامل حکم یا عامل حقوق)، ورودی ماهانه‌ی عوامل،
 // محاسبه‌ی فیش یک کارمند و جزئیات آن برای گزارش.
@@ -457,8 +458,9 @@ router.get("/payroll-calculations/month", canAny(`${F_CALC}.view`, `${F_CALC}.ca
     const baseType = await getBaseCalcType();
     const calcType = req.query.calcTypeId ? await prisma.payrollCalcType.findUnique({ where: { id: Number(req.query.calcTypeId) } }) : baseType;
     if (!calcType) throw new PayrollCalcError("نوع محاسبه یافت نشد");
+    const inPeriod = await employeeIdsInPeriod(range.start, range.end);
     const emps = await prisma.employee.findMany({
-      where: { periods: { some: { startDate: { lte: range.end }, OR: [{ endDate: null }, { endDate: { gte: range.start } }] } } },
+      where: { id: { in: inPeriod } },
       include: { party: { select: { firstName: true, lastName: true, name: true } } },
       orderBy: { personnelCode: "asc" },
     });

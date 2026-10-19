@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma";
 import { jalaliMonthRange, toJalaliYearMonth } from "../utils/jalaliDate";
 import { getCalendarMonth, missingMonthMessage } from "./workCalendarService";
 import { lastCalculatedYm, ymOf } from "./payrollLoanService";
+import { employeeIdsInPeriod } from "./employmentStatusService";
 
 // مقدار ثابت پرسنلی («پارامترهای مبنا» با نوع PERSONNEL_HR / PERSONNEL_PAYROLL): مقدار اختصاصی هر کارمند از یک «ماه اجرا» به بعد (تا مقدار بعدی).
 // ثبت‌نشده = صفر. تنها نویسنده‌ی PayrollEmployeeParameterValue همین سرویس است (فرم کارمند، ماتریس واحد حقوق، اکسل و عمل گروهی همه از اینجا رد می‌شوند)؛
@@ -156,8 +157,9 @@ export async function personnelMatrix(year: number, month: number) {
   if (msg) throw new PersonnelValueError(msg);
   const range = jalaliMonthRange(year, month);
   const params = await listParametersOfKind("PERSONNEL_PAYROLL");
+  const inPeriod = await employeeIdsInPeriod(range.start, range.end);
   const emps = await prisma.employee.findMany({
-    where: { periods: { some: { startDate: { lte: range.end }, OR: [{ endDate: null }, { endDate: { gte: range.start } }] } } },
+    where: { id: { in: inPeriod } },
     include: { party: { select: { firstName: true, lastName: true, name: true } } },
     orderBy: { personnelCode: "asc" },
   });

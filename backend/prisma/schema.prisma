@@ -4728,7 +4728,7 @@ model TerminationReason {
   title           String             @unique
   isActive        Boolean            @default(true)
   hasTransactions Boolean            @default(false)
-  periods         EmploymentPeriod[]
+  statusRecords   EmployeeStatusRecord[]
 }
 
 /// پست سازمانی. انتصاب هر کارمند همیشه به یک پست است؛ شرکتی که پست ندارد از «پست پیش‌فرض» (isDefault، دقیقاً یکی، حذف‌نشدنی) استفاده می‌کند
@@ -4754,7 +4754,6 @@ model Employee {
   /// کد پرسنلی (دستی؛ خالی = آخرین کد عددی + ۱ با همان طول)
   personnelCode          String               @unique
   partyId                Int                  @unique
-  status                 EmployeeStatus       @default(ACTIVE)
   fatherName             String?
   birthCertificateNumber String?
   birthPlaceId           Int?
@@ -4778,7 +4777,7 @@ model Employee {
   decrees                EmploymentDecree[]
   veteranRecords         EmployeeVeteranRecord[]
   maritalRecords         EmployeeMaritalRecord[]
-  periods                EmploymentPeriod[]
+  statusRecords          EmployeeStatusRecord[]
   assignments            EmployeeAssignment[]
   dependents             EmployeeDependent[]
   payrollSlips           PayrollSlip[]
@@ -4797,18 +4796,21 @@ model EmployeePhoto {
 }
 
 /// دوره‌ی همکاری؛ استخدام مجدد = دوره‌ی تازه روی همان Employee (کد پرسنلی و سابقه می‌ماند). حداکثر یک دوره‌ی باز (endDate خالی) برای هر کارمند
-model EmploymentPeriod {
+/// سابقه‌ی وضعیت همکاری کارمند (تنها منبع وضعیت و دوره‌های همکاری): از «تاریخ اعمال» به بعد کارمند در این وضعیت است تا رکورد بعدی.
+/// اولین رکورد = شروع همکاری (ACTIVE)؛ وضعیت‌های پایان (خاتمه/بازنشسته/ترک کار) در «اولین روز بعد از همکاری» ثبت می‌شوند و بعد از آن فقط ACTIVE (استخدام مجدد) می‌آید.
+/// «دوره‌ی همکاری» ذخیره نمی‌شود و از همین رکوردها مشتق می‌شود (services/employmentStatusService.ts)؛ وضعیت جاری = آخرین رکورد تا امروز.
+model EmployeeStatusRecord {
   id                  Int                @id @default(autoincrement())
   employeeId          Int
-  startDate           DateTime           @db.Date
-  endDate             DateTime?          @db.Date
+  effectiveDate       DateTime           @db.Date
+  status              EmployeeStatus
   terminationReasonId Int?
   note                String?
   createdAt           DateTime           @default(now())
   employee            Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   terminationReason   TerminationReason? @relation(fields: [terminationReasonId], references: [id])
 
-  @@index([employeeId])
+  @@unique([employeeId, effectiveDate])
 }
 
 /// انتصاب تاریخ‌دار: کارمند × پست × واحد سازمانی × (مرکز هزینه / پروژه). یک انتصاب فعال (toDate خالی) در هر زمان؛ تغییر = بستن قبلی + ردیف تازه

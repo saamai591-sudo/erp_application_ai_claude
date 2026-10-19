@@ -23,7 +23,8 @@ import { useTabs } from "../lib/TabsContext";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 
 // منابع انسانی › پرسنلی › کارمندان. کارمند «نقش» روی یک شخص حقیقی است (نام/کد ملی/نشانی/تلفن/حساب بانکی همان شخص‌اند و اینجا تکرار نمی‌شوند)؛
-// تاریخ تولد و جنسیت روی خودِ شخص ذخیره می‌شود. وضعیت و انتصاب با عملیات جدا (دکمه‌های «تغییر وضعیت» و «انتصاب جدید») تغییر می‌کنند تا سابقه بماند.
+// تاریخ تولد و جنسیت روی خودِ شخص ذخیره می‌شود. وضعیت و انتصاب با عملیات جدا (دکمه‌های «تغییر وضعیت» و «انتصاب جدید») تغییر می‌کنند تا سابقه بماند:
+// وضعیت همکاری = «سوابق وضعیت» (رکوردهای تاریخ‌دار: شروع، مرخصی، تعلیق، خاتمه/بازنشستگی/ترک کار در اولین روز بعد از همکاری، شاغل مجدد)؛ وضعیت جاری و دوره‌ها از آن‌ها مشتق می‌شوند.
 
 export const EMPLOYEE_STATUS_FA: Record<string, string> = {
   ACTIVE: "شاغل",
@@ -103,6 +104,18 @@ interface Assignment {
   orgUnit: { title: string };
   costCenter: { title: string } | null;
 }
+interface StatusRecord {
+  id: number;
+  effectiveDate: string;
+  status: string;
+  terminationReasonId: number | null;
+  terminationReason: { title: string } | null;
+  note: string | null;
+  /** فقط رکورد پایان: آخرین روز همکاری (یک روز قبل از تاریخ اعمال) */
+  lastWorkDate: string | null;
+  isFirst: boolean;
+  canDelete: boolean;
+}
 interface Detail {
   id: number;
   personnelCode: string;
@@ -110,7 +123,10 @@ interface Detail {
   updatedAt: string;
   party: { id: number; detailCode: string; fullName: string; nationalId: string | null; birthDate: string | null; gender: string | null; bankAccounts: { id: number; accountNumber: string | null; iban: string | null; cardNumber: string | null }[] };
   photo: string | null;
-  periods: { id: number; startDate: string; endDate: string | null; terminationReasonId?: number | null; terminationReason: { title: string } | null; note: string | null }[];
+  /** وضعیت جاری (آخرین رکورد تا امروز) */
+  lastStatus: string;
+  lastStatusDate: string | null;
+  statusRecords: StatusRecord[];
   assignments: Assignment[];
   currentAssignment: Assignment | null;
   decree: { validity: string; number: number | null; effectiveDate: string | null; endDate: string | null; employmentTypeTitle: string | null; weeklyHours: string | null } | null;
@@ -347,8 +363,7 @@ function EmployeeForm({ editId }: { editId?: number }) {
   const [statusDlg, setStatusDlg] = useState(false);
   const [assignDlg, setAssignDlg] = useState(false);
   const [editAssign, setEditAssign] = useState<Assignment | null>(null);
-  const [editPeriod, setEditPeriod] = useState<Detail["periods"][number] | null>(null);
-  const [delPeriod, setDelPeriod] = useState<Detail["periods"][number] | null>(null);
+  const [editRecord, setEditRecord] = useState<StatusRecord | null>(null);
   const [depDlg, setDepDlg] = useState<Partial<Dependent> | null>(null);
   const { flash } = useSavedFlash();
 
@@ -503,6 +518,19 @@ function EmployeeForm({ editId }: { editId?: number }) {
     }
   }
 
+  async function deleteStatusRecord(r: StatusRecord) {
+    const msg = ENDED.includes(r.status)
+      ? `رکورد «${EMPLOYEE_STATUS_FA[r.status]}» (${formatJalaliDate(r.effectiveDate)}) حذف می‌شود و همکاری کارمند برمی‌گردد (انتصابی که با خاتمه بسته شده بود دوباره باز می‌شود). ادامه می‌دهید؟`
+      : `رکورد «${EMPLOYEE_STATUS_FA[r.status]}» (${formatJalaliDate(r.effectiveDate)}) حذف شود؟`;
+    if (!window.confirm(msg)) return;
+    try {
+      await api.del(`/employees/${editId}/status-records/${r.id}`);
+      await reloadDetail();
+    } catch (e) {
+      showError((e as ApiError).message);
+    }
+  }
+
   async function deleteDependent(d: Dependent) {
     if (!window.confirm(`وابسته «${d.firstName} ${d.lastName}» حذف شود؟`)) return;
     try {
@@ -522,7 +550,8 @@ function EmployeeForm({ editId }: { editId?: number }) {
   const canEditParams = !!editId && hasPermission("hr.personnel.employees.editPayrollParams");
   const partyOpt = parties.find((p) => String(p.id) === form.partyId);
   const photoSrc = photo?.preview ?? detail?.photo ?? null;
-  const ended = ENDED.includes(status);
+  // همکاری پایان‌یافته = آخرین رکوردِ وضعیت پایان باشد (حتی اگر تاریخش هنوز نرسیده)
+  const ended = ENDED.includes(detail?.lastStatus ?? status);
 
   return (
     <FormPage
@@ -789,23 +818,29 @@ function EmployeeForm({ editId }: { editId?: number }) {
             </tbody>
           </table>
 
-          <h3 className="hr-section">دوره‌های همکاری</h3>
+          <h3 className="hr-section">
+            سوابق وضعیت همکاری
+            <FieldHint label="سوابق وضعیت" text="هر رکورد از «تاریخ اعمال» به بعد معتبر است. وضعیت‌های پایان (خاتمه، بازنشستگی، ترک کار) در «اولین روز بعد از همکاری» ثبت می‌شوند و آخرین روز همکاری یک روز قبل از آن است. با حذف آخرین رکوردِ پایان، همکاری برمی‌گردد (برگشت از خاتمه)." />
+          </h3>
           <table className="hr-table">
             <thead>
-              <tr><th>شروع</th><th>پایان</th><th>دلیل خاتمه</th><th>توضیح</th>{canEditHistory && <th style={{ width: 120 }} />}</tr>
+              <tr><th>تاریخ اعمال</th><th>وضعیت</th><th>دلیل خاتمه</th><th>توضیح</th>{canEditHistory && <th style={{ width: 170 }} />}</tr>
             </thead>
             <tbody>
-              {[...detail.periods].reverse().map((p, idx) => (
-                <tr key={p.id}>
-                  <td>{formatJalaliDate(p.startDate)}</td>
-                  <td>{p.endDate ? formatJalaliDate(p.endDate) : "جاری"}</td>
-                  <td>{p.terminationReason?.title ?? "—"}</td>
-                  <td>{p.note ?? "—"}</td>
+              {[...detail.statusRecords].reverse().map((r) => (
+                <tr key={r.id}>
+                  <td>
+                    {formatJalaliDate(r.effectiveDate)}
+                    {r.lastWorkDate && <span style={{ opacity: 0.7, fontSize: 12 }}> (آخرین روز همکاری: {formatJalaliDate(r.lastWorkDate)})</span>}
+                  </td>
+                  <td>{r.isFirst ? "شروع همکاری" : EMPLOYEE_STATUS_FA[r.status] ?? r.status}</td>
+                  <td>{r.terminationReason?.title ?? "—"}</td>
+                  <td>{r.note ?? "—"}</td>
                   {canEditHistory && (
                     <td>
-                      <button type="button" className="link-btn" onClick={() => setEditPeriod(p)}>ویرایش</button>
-                      {idx === 0 && detail.periods.length > 1 && (
-                        <>{" "}<button type="button" className="link-btn" onClick={() => setDelPeriod(p)}>حذف</button></>
+                      <button type="button" className="link-btn" onClick={() => setEditRecord(r)}>ویرایش</button>
+                      {r.canDelete && (
+                        <>{" "}<button type="button" className="link-btn" onClick={() => deleteStatusRecord(r)}>{ENDED.includes(r.status) ? "برگشت از خاتمه" : "حذف"}</button></>
                       )}
                     </td>
                   )}
@@ -882,25 +917,14 @@ function EmployeeForm({ editId }: { editId?: number }) {
           }}
         />
       )}
-      {delPeriod && detail && (
-        <PeriodDeleteDialog
+      {editRecord && detail && (
+        <StatusRecordDialog
           employeeId={detail.id}
-          value={delPeriod}
-          onClose={() => setDelPeriod(null)}
-          onDone={async () => {
-            setDelPeriod(null);
-            await reloadDetail();
-          }}
-        />
-      )}
-      {editPeriod && detail && (
-        <PeriodDialog
-          employeeId={detail.id}
-          value={editPeriod}
+          value={editRecord}
           reasons={reasons}
-          onClose={() => setEditPeriod(null)}
+          onClose={() => setEditRecord(null)}
           onDone={async () => {
-            setEditPeriod(null);
+            setEditRecord(null);
             await reloadDetail();
           }}
         />
@@ -1005,8 +1029,8 @@ function AssignmentDialog({ employeeId, value, onClose, onDone, ...lk }: LookupP
 }
 
 function StatusDialog({ detail, reasons, onClose, onDone, ...lk }: LookupProps & { detail: Detail; reasons: Opt[]; onClose: () => void; onDone: () => void }) {
-  const wasEnded = ENDED.includes(detail.status);
-  const options = wasEnded ? ["ACTIVE"] : Object.keys(EMPLOYEE_STATUS_FA).filter((s) => s !== detail.status);
+  const wasEnded = ENDED.includes(detail.lastStatus);
+  const options = wasEnded ? ["ACTIVE"] : Object.keys(EMPLOYEE_STATUS_FA).filter((s) => s !== detail.lastStatus);
   const [f, setF] = useState({ status: options[0], date: localTodayIso(), terminationReasonId: "", note: "", positionId: "", jobId: "", orgUnitId: "", costCenterId: "" });
   const [err, setErr] = useState<string | null>(null);
   const toEnded = ENDED.includes(f.status);
@@ -1030,7 +1054,7 @@ function StatusDialog({ detail, reasons, onClose, onDone, ...lk }: LookupProps &
   return (
     <Modal title="تغییر وضعیت همکاری" onClose={onClose}>
       <ErrorToast message={err} />
-      <p style={{ margin: "0 0 8px" }}>وضعیت فعلی: <b>{EMPLOYEE_STATUS_FA[detail.status]}</b></p>
+      <p style={{ margin: "0 0 8px" }}>آخرین وضعیت ثبت‌شده: <b>{EMPLOYEE_STATUS_FA[detail.lastStatus]}</b>{detail.lastStatusDate ? <> (از {formatJalaliDate(detail.lastStatusDate)})</> : null}</p>
       {wasEnded && <p style={{ margin: "0 0 8px", opacity: 0.8 }}>همکاری پایان یافته است؛ فقط «شاغل شدن مجدد» (استخدام مجدد با دوره‌ی تازه) ممکن است.</p>}
       <div className="form-grid">
         <div className="form-field">
@@ -1040,7 +1064,10 @@ function StatusDialog({ detail, reasons, onClose, onDone, ...lk }: LookupProps &
           </select>
         </div>
         <div className="form-field">
-          <label>تاریخ<RequiredMark /></label>
+          <label>
+            {toEnded ? "اولین روز بعد از همکاری" : rehire ? "تاریخ شروع مجدد" : "تاریخ اعمال"}<RequiredMark />
+            <FieldHint label="تاریخ" text={toEnded ? "تاریخ، اولین روزی است که کارمند دیگر همکاری ندارد؛ آخرین روز همکاری یک روز قبل از آن است. باید بعد از آخرین رکورد وضعیت باشد." : "از این تاریخ به بعد کارمند در وضعیت جدید است؛ باید بعد از آخرین رکورد وضعیت باشد."} />
+          </label>
           <JalaliDatePicker value={f.date} onChange={(v) => setF({ ...f, date: v })} />
         </div>
         {toEnded && (
@@ -1066,17 +1093,16 @@ function StatusDialog({ detail, reasons, onClose, onDone, ...lk }: LookupProps &
   );
 }
 
-/** ویرایش دوره‌ی همکاری: شروع، پایان (فقط دوره‌ی پایان‌یافته؛ پایان دوره‌ی جاری از «تغییر وضعیت» ثبت می‌شود)، دلیل خاتمه و توضیح. کنترل‌ها در سرور است. */
-function PeriodDialog({ employeeId, value, reasons, onClose, onDone }: { employeeId: number; value: Detail["periods"][number]; reasons: Opt[]; onClose: () => void; onDone: () => void }) {
-  const ended = !!value.endDate;
-  const [f, setF] = useState({ startDate: value.startDate, endDate: value.endDate ?? "", terminationReasonId: value.terminationReasonId ? String(value.terminationReasonId) : "", note: value.note ?? "" });
+/** ویرایش یک رکورد وضعیت: تاریخ اعمال (بین رکوردهای همسایه)، دلیل خاتمه (فقط رکورد پایان) و توضیح. وضعیتِ رکورد عوض نمی‌شود؛ کنترل‌ها در سرور است. */
+function StatusRecordDialog({ employeeId, value, reasons, onClose, onDone }: { employeeId: number; value: StatusRecord; reasons: Opt[]; onClose: () => void; onDone: () => void }) {
+  const ended = ENDED.includes(value.status);
+  const [f, setF] = useState({ date: value.effectiveDate, terminationReasonId: value.terminationReasonId ? String(value.terminationReasonId) : "", note: value.note ?? "" });
   const [err, setErr] = useState<string | null>(null);
   async function save() {
     setErr(null);
     try {
-      await api.put(`/employees/${employeeId}/periods/${value.id}`, {
-        startDate: f.startDate,
-        endDate: ended ? f.endDate : undefined,
+      await api.put(`/employees/${employeeId}/status-records/${value.id}`, {
+        date: f.date,
         terminationReasonId: ended && f.terminationReasonId ? Number(f.terminationReasonId) : null,
         note: f.note,
       });
@@ -1086,72 +1112,32 @@ function PeriodDialog({ employeeId, value, reasons, onClose, onDone }: { employe
     }
   }
   return (
-    <Modal title="ویرایش دوره‌ی همکاری" onClose={onClose}>
+    <Modal title={`ویرایش رکورد وضعیت — ${value.isFirst ? "شروع همکاری" : EMPLOYEE_STATUS_FA[value.status]}`} onClose={onClose}>
       <ErrorToast message={err} />
       <div className="form-grid">
         <div className="form-field">
-          <label>تاریخ شروع<RequiredMark /> <FieldHint label="تاریخ شروع" text="سابقه‌ی تحصیلی، تاهل، ایثارگری، انتصاب یا حکمی قبل از تاریخ جدید نباید ثبت شده باشد" /></label>
-          <JalaliDatePicker value={f.startDate} onChange={(v) => setF({ ...f, startDate: v })} />
+          <label>
+            {ended ? "اولین روز بعد از همکاری" : value.isFirst ? "تاریخ شروع همکاری" : "تاریخ اعمال"}<RequiredMark />
+            {value.isFirst && <FieldHint label="تاریخ شروع" text="سابقه‌ی تحصیلی، تاهل، ایثارگری، انتصاب یا حکمی قبل از تاریخ جدید نباید ثبت شده باشد" />}
+          </label>
+          <JalaliDatePicker value={f.date} onChange={(v) => setF({ ...f, date: v })} />
         </div>
         {ended && (
-          <>
-            <div className="form-field">
-              <label>تاریخ پایان<RequiredMark /></label>
-              <JalaliDatePicker value={f.endDate} onChange={(v) => setF({ ...f, endDate: v })} />
-            </div>
-            <div className="form-field">
-              <label>دلیل خاتمه</label>
-              <select value={f.terminationReasonId} onChange={(e) => setF({ ...f, terminationReasonId: e.target.value })}>
-                <option value="">—</option>
-                {reasons.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}
-              </select>
-            </div>
-          </>
+          <div className="form-field">
+            <label>دلیل خاتمه{value.status === "TERMINATED" && <RequiredMark />}</label>
+            <select value={f.terminationReasonId} onChange={(e) => setF({ ...f, terminationReasonId: e.target.value })}>
+              <option value="">—</option>
+              {reasons.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}
+            </select>
+          </div>
         )}
         <div className="form-field">
           <label>توضیح</label>
           <input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
         </div>
       </div>
-      {!ended && <p style={{ opacity: 0.75, fontSize: 12 }}>این دوره جاری است؛ تاریخ پایان آن از «تغییر وضعیت همکاری» ثبت می‌شود.</p>}
       <div className="actions">
         <button type="button" className="btn" onClick={save}>ثبت</button>
-        <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
-      </div>
-    </Modal>
-  );
-}
-
-/** حذف آخرین دوره‌ی همکاری (فقط وقتی چند دوره هست و در آن بازه حکم/سابقه/وام/فیش/ورودی ماهانه‌ای نیست؛ سرور کنترل می‌کند). انتصاب‌های شروع‌شده در این دوره هم پاک می‌شوند. */
-function PeriodDeleteDialog({ employeeId, value, onClose, onDone }: { employeeId: number; value: Detail["periods"][number]; onClose: () => void; onDone: () => void }) {
-  const open = !value.endDate;
-  const [statusAfter, setStatusAfter] = useState("TERMINATED");
-  const [err, setErr] = useState<string | null>(null);
-  async function save() {
-    setErr(null);
-    try {
-      await api.del(`/employees/${employeeId}/periods/${value.id}${open ? `?statusAfter=${statusAfter}` : ""}`);
-      onDone();
-    } catch (e) {
-      setErr((e as ApiError).message);
-    }
-  }
-  return (
-    <Modal title="حذف دوره‌ی همکاری" onClose={onClose}>
-      <ErrorToast message={err} />
-      <p style={{ margin: "0 0 8px" }}>
-        دوره‌ی همکاری از <b>{formatJalaliDate(value.startDate)}</b> {value.endDate ? <>تا <b>{formatJalaliDate(value.endDate)}</b></> : "(جاری)"} حذف می‌شود و انتصاب‌هایی که در این دوره شروع شده‌اند هم همراهش پاک می‌شوند.
-      </p>
-      {open && (
-        <div className="form-field">
-          <label>وضعیت کارمند بعد از حذف<RequiredMark /> <FieldHint label="وضعیت بعد از حذف" text="با حذف دوره‌ی جاری، کارمند به دوره‌ی پایان‌یافته‌ی قبلی برمی‌گردد؛ وضعیت پایان‌یافته‌ی او را مشخص کنید" /></label>
-          <select value={statusAfter} onChange={(e) => setStatusAfter(e.target.value)}>
-            {ENDED.map((s) => <option key={s} value={s}>{EMPLOYEE_STATUS_FA[s]}</option>)}
-          </select>
-        </div>
-      )}
-      <div className="actions">
-        <button type="button" className="btn" onClick={save}>حذف دوره</button>
         <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
       </div>
     </Modal>
