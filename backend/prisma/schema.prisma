@@ -5308,14 +5308,14 @@ model PayrollFactorMethodBranch {
 
 // ── حقوق و دستمزد › وام ──
 
-/// نوع وام: عنوان + سازمان مرتبط (شخص حقوقی از نوع بانک / موسسه مالی و اعتباری)
+/// نوع وام: عنوان + سازمان مرتبط اختیاری (شخص حقوقی از نوع بانک / موسسه مالی و اعتباری)
 model LoanType {
   id                 Int      @id @default(autoincrement())
   title              String   @unique
-  institutionPartyId Int
+  institutionPartyId Int?
   isActive           Boolean  @default(true)
   createdAt          DateTime @default(now())
-  institution        Party    @relation(fields: [institutionPartyId], references: [id], onDelete: Restrict)
+  institution        Party?   @relation(fields: [institutionPartyId], references: [id], onDelete: Restrict)
   loans              Loan[]
 }
 

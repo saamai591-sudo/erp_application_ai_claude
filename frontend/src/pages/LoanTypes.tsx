@@ -14,12 +14,12 @@ import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 
-// حقوق و دستمزد › وام › نوع وام: عنوان + سازمان مرتبط (شخص حقوقی از نوع بانک / موسسه مالی و اعتباری).
+// حقوق و دستمزد › وام › نوع وام: عنوان + سازمان مرتبط اختیاری (شخص حقوقی از نوع بانک / موسسه مالی و اعتباری).
 
 interface TypeRow {
   id: number;
   title: string;
-  institutionPartyId: number;
+  institutionPartyId: number | null;
   institutionTitle: string;
   institutionCode: string;
   isActive: boolean;
@@ -100,7 +100,7 @@ function TypeForm({ editId }: { editId?: number }) {
     api.get("/loan-types/institutions").then(setInstitutions).catch(() => {});
     if (!editId) return;
     api.get(`/loan-types/${editId}`).then((t: TypeRow) => {
-      if (!hasPersistedState(cacheKey)) setForm({ title: t.title, institutionPartyId: String(t.institutionPartyId), isActive: t.isActive });
+      if (!hasPersistedState(cacheKey)) setForm({ title: t.title, institutionPartyId: t.institutionPartyId ? String(t.institutionPartyId) : "", isActive: t.isActive });
       setLoaded(true);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -112,7 +112,6 @@ function TypeForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
     if (!form.title.trim()) return setError("عنوان الزامی است");
-    if (!form.institutionPartyId) return setError("سازمان مرتبط را انتخاب کنید");
     try {
       if (editId) {
         await api.put(`/loan-types/${editId}`, form);
@@ -155,7 +154,7 @@ function TypeForm({ editId }: { editId?: number }) {
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus />
           </div>
           <div className="form-field">
-            <label>سازمان مرتبط<RequiredMark /></label>
+            <label>سازمان مرتبط</label>
             <RecordPickerField<Institution>
               title="انتخاب سازمان مرتبط (بانک / موسسه مالی و اعتباری)"
               displayValue={picked ? `${toFaDigits(picked.detailCode)} — ${picked.detailTitle}` : ""}
@@ -165,6 +164,7 @@ function TypeForm({ editId }: { editId?: number }) {
                 { header: "عنوان", render: (x) => x.detailTitle, filterValue: (x) => x.detailTitle },
               ]}
               onSelect={(x) => setForm({ ...form, institutionPartyId: String(x.id) })}
+              onClear={() => setForm({ ...form, institutionPartyId: "" })}
             />
           </div>
           {editId && (

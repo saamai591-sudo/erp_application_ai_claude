@@ -88,8 +88,8 @@ const shapeType = (t: any) => ({
   id: t.id,
   title: t.title,
   institutionPartyId: t.institutionPartyId,
-  institutionTitle: t.institution.detailTitle,
-  institutionCode: t.institution.detailCode,
+  institutionTitle: t.institution?.detailTitle ?? "",
+  institutionCode: t.institution?.detailCode ?? "",
   isActive: t.isActive,
   loanCount: t._count?.loans ?? 0,
 });
@@ -106,7 +106,7 @@ router.get("/loan-types/institutions", async (_req, res) => {
 // جستجوی بدون مجوز فرم (انتخابگر نوع وام در پرداخت وام)
 router.get("/loan-types/lookup", async (_req, res) => {
   const rows = await prisma.loanType.findMany({ where: { isActive: true }, orderBy: { title: "asc" }, include: { institution: { select: { detailTitle: true, detailCode: true } } } });
-  res.json(rows.map((t) => ({ id: t.id, title: t.title, institutionTitle: t.institution.detailTitle })));
+  res.json(rows.map((t) => ({ id: t.id, title: t.title, institutionTitle: t.institution?.detailTitle ?? "" })));
 });
 
 router.get("/loan-types", can(`${F_TYPE}.view`), async (_req, res) => {
@@ -124,10 +124,14 @@ async function typeData(b: any, id: number | null) {
   const title = String(b.title ?? "").trim().replace(/\s+/g, " ");
   if (!title) throw new LoanError("عنوان الزامی است");
   if (await prisma.loanType.findFirst({ where: { title, ...(id ? { NOT: { id } } : {}) } })) throw new LoanError("نوع وام دیگری با همین عنوان وجود دارد");
-  const institutionPartyId = Number(b.institutionPartyId);
-  const inst = institutionPartyId ? await prisma.party.findUnique({ where: { id: institutionPartyId } }) : null;
-  if (!inst) throw new LoanError("سازمان مرتبط را انتخاب کنید");
-  if (inst.category !== "LEGAL" || inst.legalType !== "BANK") throw new LoanError("سازمان مرتبط باید شخص حقوقی از نوع بانک / موسسه مالی و اعتباری باشد");
+  // سازمان مرتبط اختیاری است؛ خالی = بدون سازمان
+  const rawInst = b.institutionPartyId;
+  const institutionPartyId: number | null = rawInst === undefined || rawInst === null || rawInst === "" ? null : Number(rawInst);
+  if (institutionPartyId !== null) {
+    const inst = Number.isInteger(institutionPartyId) ? await prisma.party.findUnique({ where: { id: institutionPartyId } }) : null;
+    if (!inst) throw new LoanError("سازمان مرتبط یافت نشد");
+    if (inst.category !== "LEGAL" || inst.legalType !== "BANK") throw new LoanError("سازمان مرتبط باید شخص حقوقی از نوع بانک / موسسه مالی و اعتباری باشد");
+  }
   return { title, institutionPartyId, isActive: b.isActive === undefined ? true : !!b.isActive };
 }
 
