@@ -20,6 +20,8 @@ export type EmpStatus = "ACTIVE" | "UNPAID_LEAVE" | "SICK_LEAVE" | "TERMINATED" 
 export const EMP_STATUSES: readonly EmpStatus[] = ["ACTIVE", "UNPAID_LEAVE", "SICK_LEAVE", "TERMINATED", "RETIRED", "SUSPENDED", "ABANDONED"];
 export const ENDED_STATUSES: readonly EmpStatus[] = ["TERMINATED", "RETIRED", "ABANDONED"];
 export const isEnded = (s: string) => (ENDED_STATUSES as readonly string[]).includes(s);
+/** وضعیت‌هایی که برای رکورد تازه قابل ثبت‌اند: بازنشستگی و ترک کار «خاتمه همکاری» با علت مربوطه‌اند (مقدار enum فقط برای داده‌ی قدیمی مانده است) */
+const LEGACY_ENDED: readonly EmpStatus[] = ["RETIRED", "ABANDONED"];
 const STATUS_FA: Record<EmpStatus, string> = {
   ACTIVE: "شاغل",
   UNPAID_LEAVE: "مرخصی بدون حقوق",
@@ -273,6 +275,7 @@ async function resolveReason(tx: Tx, raw: unknown, status: EmpStatus): Promise<n
 export async function changeStatus(employeeId: number, b: any): Promise<void> {
   const target = b.status as EmpStatus;
   if (!EMP_STATUSES.includes(target)) throw new HrError("وضعیت نامعتبر است");
+  if (LEGACY_ENDED.includes(target)) throw new HrError("وضعیت «بازنشسته» و «ترک کار» ثبت نمی‌شود؛ «خاتمه همکاری» را با علت مربوطه (مثلاً بازنشستگی یا ترک کار) ثبت کنید");
   const date = parseDay(b.date, "تاریخ");
   await prisma.$transaction(async (tx) => {
     await lockEmployee(tx, employeeId);

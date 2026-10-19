@@ -1030,7 +1030,8 @@ function AssignmentDialog({ employeeId, value, onClose, onDone, ...lk }: LookupP
 
 function StatusDialog({ detail, reasons, onClose, onDone, ...lk }: LookupProps & { detail: Detail; reasons: Opt[]; onClose: () => void; onDone: () => void }) {
   const wasEnded = ENDED.includes(detail.lastStatus);
-  const options = wasEnded ? ["ACTIVE"] : Object.keys(EMPLOYEE_STATUS_FA).filter((s) => s !== detail.lastStatus);
+  // «بازنشسته» و «ترک کار» انتخاب نمی‌شوند؛ همان «خاتمه همکاری» با علت مربوطه است (دلیل خاتمه همکاری الزامی است)
+  const options = wasEnded ? ["ACTIVE"] : Object.keys(EMPLOYEE_STATUS_FA).filter((s) => s !== detail.lastStatus && s !== "RETIRED" && s !== "ABANDONED");
   const [f, setF] = useState({ status: options[0], date: localTodayIso(), terminationReasonId: "", note: "", positionId: "", jobId: "", orgUnitId: "", costCenterId: "" });
   const [err, setErr] = useState<string | null>(null);
   const toEnded = ENDED.includes(f.status);
