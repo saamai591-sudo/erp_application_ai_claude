@@ -326,6 +326,8 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
   // خطای خواندن بدنه‌ی درخواست (JSON خراب / حجم زیاد)
   if (err?.type === "entity.parse.failed") return res.status(400).json({ error: "بدنه‌ی درخواست نامعتبر است" });
   if (err?.type === "entity.too.large") return res.status(413).json({ error: "حجم درخواست بیش از حد مجاز است" });
+  // حذف ممنوع به‌خاطر ارجاع (lib/deleteUsage.ts): پیام دقیق + فهرست ساختاریافته‌ی موارد استفاده
+  if (err?.code === "DELETE_BLOCKED") return res.status(400).json({ error: err.message, usages: err.usages });
   if (err?.code === "P2003") {
     return res.status(400).json({ error: "این رکورد در جای دیگری استفاده شده است و قابل حذف/ثبت نیست" });
   }

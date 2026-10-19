@@ -1,6 +1,7 @@
 import { assertLineAmountDecimals } from "../utils/amountDecimals";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { getRequestContext } from "./requestContext";
+import { explainDeleteFailure } from "./deleteUsage";
 
 const rawPrisma = new PrismaClient();
 
@@ -97,6 +98,15 @@ const nestedLines = (data: any): any[] => {
   return [...(Array.isArray(c) ? c : c ? [c] : []), ...(Array.isArray(m) ? m : m ? [m] : [])];
 };
 
+// «موارد استفاده» هنگام شکست حذف (lib/deleteUsage.ts): خطای کلید خارجی (P2003) در delete/deleteMany به پیامی با رکوردهای دقیقِ ارجاع‌دهنده تبدیل می‌شود
+async function deleteWithUsage(model: string, args: any, query: (a: any) => Promise<any>) {
+  try {
+    return await query(args);
+  } catch (e) {
+    throw await explainDeleteFailure(rawPrisma, model, args?.where, e);
+  }
+}
+
 export const prisma = rawPrisma.$extends({
   query: {
     journalEntryLine: {
@@ -120,14 +130,20 @@ export const prisma = rawPrisma.$extends({
       },
       async delete({ args, query }) {
         await assertJournalEntryDeletable(args.where);
-        return query(args);
+        return deleteWithUsage("JournalEntry", args, query);
       },
       async deleteMany({ args, query }) {
         await assertJournalEntryDeletable(args.where);
-        return query(args);
+        return deleteWithUsage("JournalEntry", args, query);
       },
     },
     $allModels: {
+      delete({ model, args, query }) {
+        return deleteWithUsage(model, args, query);
+      },
+      deleteMany({ model, args, query }) {
+        return deleteWithUsage(model, args, query);
+      },
       findMany({ model, args, query }) {
         return withFiscalScope(model, args, query);
       },
