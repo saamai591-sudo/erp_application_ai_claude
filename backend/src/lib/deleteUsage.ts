@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import { USAGE_META } from "./usageLabels";
 import { displayDate } from "../utils/dateDisplay";
+import { getRequestContext } from "./requestContext";
 
 // «موارد استفاده» هنگام شکست حذف (base؛ برای همه‌ی مدل‌های فعلی و آینده، بدون تغییر در routeها):
 // وقتی prisma.<model>.delete/deleteMany به‌خاطر ارجاع جدول دیگری (کلید خارجی، P2003) شکست بخورد، هوک روی کلاینت مشترک (lib/prisma.ts)
@@ -20,14 +21,28 @@ export interface UsageRef {
   path: string | null;
 }
 
+/** یک نوع رکوردِ ارجاع‌دهنده: برچسب، تعداد کل و رکوردهای نمونه (تا UI_PER_GROUP تا) */
+export interface UsageGroup {
+  label: string;
+  total: number;
+  refs: UsageRef[];
+}
+
 export class DeleteBlockedError extends Error {
   code = "DELETE_BLOCKED";
-  constructor(message: string, public usages: UsageRef[]) {
+  constructor(message: string, /** بخش اول پیام (بدون فهرست) — برای نمایش کوتاه کنار دیالوگ */ public header: string, public groups: UsageGroup[]) {
     super(message);
+  }
+  /** فهرست مسطح همه‌ی ارجاع‌ها */
+  get usages(): UsageRef[] {
+    return this.groups.flatMap((g) => g.refs);
   }
 }
 
+/** تعداد رکورد هر نوع در پیام متنی */
 const PER_GROUP = 5;
+/** تعداد رکورد هر نوع در فهرست ساختاریافته (دیالوگ «موارد استفاده») */
+const UI_PER_GROUP = 20;
 const MAX_GROUPS = 8;
 const FETCH = 200;
 const MAX_DEPTH = 3;
@@ -96,7 +111,7 @@ async function addRows(raw: PrismaClient, model: string, where: object, groups: 
     const parentIds = [...new Set<number>(lines.map((l: any) => l[parent.col]))];
     if (parentIds.length === 0) return;
     const meta = USAGE_META[parent.model];
-    const rows = await delegate(raw, parent.model).findMany({ where: { id: { in: parentIds.slice(0, 50) } }, orderBy: { id: "asc" }, ...(meta?.include ? { include: meta.include } : {}) });
+    const rows = await delegate(raw, parent.model).findMany({ where: { id: { in: parentIds.slice(0, UI_PER_GROUP) } }, orderBy: { id: "asc" }, ...(meta?.include ? { include: meta.include } : {}) });
     const g = groups.get(parent.model) ?? { label: meta?.label ?? `رکورد ${parent.model}`, refs: new Map(), total: 0 };
     for (const r of rows) g.refs.set(r.id, refOf(parent.model, r));
     g.total = Math.max(g.total, parentIds.length);
@@ -106,7 +121,7 @@ async function addRows(raw: PrismaClient, model: string, where: object, groups: 
   const meta = USAGE_META[model];
   const [total, rows] = await Promise.all([
     d.count({ where }),
-    d.findMany({ where, orderBy: { id: "asc" }, take: PER_GROUP, ...(meta?.include ? { include: meta.include } : {}) }),
+    d.findMany({ where, orderBy: { id: "asc" }, take: UI_PER_GROUP, ...(meta?.include ? { include: meta.include } : {}) }),
   ]);
   if (!total) return;
   const g = groups.get(model) ?? { label: meta?.label ?? `رکورد ${model}`, refs: new Map(), total: 0 };
@@ -130,14 +145,18 @@ async function collect(raw: PrismaClient, model: string, ids: number[], depth: n
   }
 }
 
-function buildMessage(targetLabel: string, targetTitle: string | null, groups: Group[]): string {
+function buildHeader(targetLabel: string, targetTitle: string | null): string {
+  return `${targetLabel}${targetTitle ? ` «${targetTitle}»` : ""} قابل حذف نیست؛ در این موارد استفاده شده است`;
+}
+
+function buildMessage(header: string, groups: Group[]): string {
   const parts = groups.slice(0, MAX_GROUPS).map((g) => {
     const shown = [...g.refs.values()].slice(0, PER_GROUP);
     const more = g.total - shown.length;
     return `${g.label}: ${shown.map((r) => r.title).join("، ")}${more > 0 ? ` و ${more} مورد دیگر` : ""}`;
   });
   const extra = groups.length > MAX_GROUPS ? ` (و ${groups.length - MAX_GROUPS} نوع مورد دیگر)` : "";
-  return `${targetLabel}${targetTitle ? ` «${targetTitle}»` : ""} قابل حذف نیست؛ در این موارد استفاده شده است — ${parts.join(" — ")}${extra}`;
+  return `${header} — ${parts.join(" — ")}${extra}`;
 }
 
 /**
@@ -158,8 +177,13 @@ export async function explainDeleteFailure(raw: PrismaClient, model: string, whe
     const title = targets.length === 1 ? (() => { try { return meta?.title ? meta.title(targets[0]) : defaultTitle(targets[0]); } catch { return null; } })() : null;
     const label = targets.length === 1 ? (meta?.label ?? `رکورد ${model}`) : `${targets.length} ${meta?.label ?? "رکورد"}`;
     const list = [...groups.values()];
-    const usages = list.flatMap((g) => [...g.refs.values()]);
-    return new DeleteBlockedError(buildMessage(label, title, list), usages);
+    const header = buildHeader(label, title);
+    const out: UsageGroup[] = list.slice(0, MAX_GROUPS * 2).map((g) => ({ label: g.label, total: g.total, refs: [...g.refs.values()] }));
+    const message = buildMessage(header, list);
+    // برای پاسخ HTTP: route ممکن است خطا را خودش بگیرد و فقط e.message را بفرستد؛ middleware/usageResponse.ts فهرست ساختاریافته را از اینجا به پاسخ اضافه می‌کند
+    const shared = getRequestContext()?.shared;
+    if (shared) shared.deleteBlocked = { header, message, groups: out };
+    return new DeleteBlockedError(message, header, out);
   } catch (e) {
     if (process.env.DEBUG_USAGE) console.error("[deleteUsage]", e);
     return error;

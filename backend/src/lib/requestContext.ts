@@ -6,12 +6,14 @@ import { AsyncLocalStorage } from "async_hooks";
 interface RequestContext {
   fiscalPeriodId?: number;
   bypassFiscalScope?: boolean;
+  /** جعبه‌ی مشترکِ یک درخواست: نسخه‌های کپی‌شده‌ی زمینه (مثل withoutFiscalPeriodScope) همین شیء را نگه می‌دارند، پس چیزی که پایین‌دست می‌نویسد به پاسخ می‌رسد */
+  shared?: { deleteBlocked?: { header: string; message: string; groups: unknown[] } };
 }
 
 const als = new AsyncLocalStorage<RequestContext>();
 
 export function runWithRequestContext<T>(ctx: RequestContext, fn: () => T): T {
-  return als.run(ctx, fn);
+  return als.run({ ...ctx, shared: ctx.shared ?? {} }, fn);
 }
 
 export function getRequestContext(): RequestContext | undefined {

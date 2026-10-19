@@ -149,6 +149,7 @@ import ChequeClearingReceivable from "./pages/ChequeClearingReceivable";
 import ChequeClearingPayable from "./pages/ChequeClearingPayable";
 
 import { ToastHost } from "./components/ToastHost";
+import { UsageDialogHost } from "./components/UsageDialogHost";
 
 export default function App() {
   return (
@@ -156,6 +157,7 @@ export default function App() {
       <AuthProvider>
         <ToastHost />
         <TabsProvider>
+        <UsageDialogHost />
         <Routes>
           <Route path="/login" element={<Login />} />
           {/* «مدیریت» (لایسنس): جدا از ورود ERP، با کلمه‌ی عبور خودش */}

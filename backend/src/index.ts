@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import { requireAuth } from "./middleware/auth";
 import { errorDisclosureGuard, GENERIC_ERROR } from "./middleware/errorDisclosure";
+import { usageResponse } from "./middleware/usageResponse";
 import { corsPolicy, securityHeaders } from "./middleware/securityHeaders";
 import { fiscalScopeContext } from "./middleware/fiscalScope";
 import { syncRegistryToDb } from "./authz/sync";
@@ -162,6 +163,8 @@ app.use(corsPolicy);
 app.use(express.json({ limit: "50mb" }));
 // هیچ متن خطای داخلی (Prisma/SQL، مسیر فایل، stack) در پاسخ‌ها به کلاینت نمی‌رسد؛ جزئیات فقط در لاگ سرور می‌ماند (middleware/errorDisclosure.ts)
 app.use(errorDisclosureGuard);
+// فهرست ساختاریافته‌ی «موارد استفاده» در پاسخ خطای حذف (middleware/usageResponse.ts)
+app.use(usageResponse);
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 // نام و لوگوی شرکت برای عنوان/آیکن تب (عمومی، قبل از دروازه‌ی لایسنس)
@@ -327,7 +330,7 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
   if (err?.type === "entity.parse.failed") return res.status(400).json({ error: "بدنه‌ی درخواست نامعتبر است" });
   if (err?.type === "entity.too.large") return res.status(413).json({ error: "حجم درخواست بیش از حد مجاز است" });
   // حذف ممنوع به‌خاطر ارجاع (lib/deleteUsage.ts): پیام دقیق + فهرست ساختاریافته‌ی موارد استفاده
-  if (err?.code === "DELETE_BLOCKED") return res.status(400).json({ error: err.message, usages: err.usages });
+  if (err?.code === "DELETE_BLOCKED") return res.status(400).json({ error: err.message, header: err.header, usageGroups: err.groups });
   if (err?.code === "P2003") {
     return res.status(400).json({ error: "این رکورد در جای دیگری استفاده شده است و قابل حذف/ثبت نیست" });
   }

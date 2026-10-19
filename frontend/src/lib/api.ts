@@ -14,6 +14,8 @@ export function absoluteApiUrl(path: string): string {
   return new URL(`${API_URL}${path}`, window.location.origin).href;
 }
 
+import { showUsageDialog, UsageGroup } from "./usageDialog";
+
 export class ApiError extends Error {
   warning?: boolean;
   /** فرمت استاندارد خطای عملیات دسته‌ای (bulk) — وقتی بک‌اند به‌جای یک پیام تکی، فهرست ساختاریافته‌ای
@@ -60,6 +62,12 @@ async function request(path: string, options: RequestInit = {}) {
     // قفل لایسنس: نرم‌افزار فعال نیست ⇒ صفحه‌ی مدیریت (فعال‌سازی)
     if (res.status === 403 && data.code === "LICENSE_REQUIRED" && !window.location.pathname.startsWith("/management")) {
       window.location.assign("/management");
+    }
+    // حذف ممنوع به‌خاطر ارجاع: فهرست دقیقِ موارد استفاده در دیالوگ سراسری (با «باز کردن») نشان داده می‌شود و پیام خطا کوتاه می‌ماند
+    const usageGroups = data.usageGroups as UsageGroup[] | undefined;
+    if (usageGroups?.length) {
+      showUsageDialog({ header: data.header || data.error, groups: usageGroups });
+      throw new ApiError(`${data.header || data.error} (فهرست در پنجره‌ی «موارد استفاده» است)`);
     }
     throw new ApiError(data.error || "خطای ناشناخته رخ داد", data.warning, data.details);
   }
