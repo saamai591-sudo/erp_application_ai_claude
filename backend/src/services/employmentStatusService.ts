@@ -72,7 +72,7 @@ export async function loadRecords(employeeId: number, db: Db = prisma): Promise<
   return (await db.employeeStatusRecord.findMany({ where: { employeeId }, orderBy: { effectiveDate: "asc" }, select: SEL })) as StatusRec[];
 }
 
-async function loadRecordsMany(ids?: number[]): Promise<Map<number, StatusRec[]>> {
+export async function loadRecordsMany(ids?: number[]): Promise<Map<number, StatusRec[]>> {
   const rows = (await prisma.employeeStatusRecord.findMany({
     where: ids ? { employeeId: { in: ids } } : {},
     orderBy: [{ employeeId: "asc" }, { effectiveDate: "asc" }],
@@ -124,6 +124,13 @@ export async function employeeIdsInPeriod(start: Date, end: Date, ids?: number[]
   const out: number[] = [];
   for (const [id, recs] of all) if (periodsOverlap(derivePeriods(recs), start, end)) out.push(id);
   return out;
+}
+
+/** وضعیت در یک تاریخ = آخرین رکورد تا آن تاریخ؛ null = همکاری هنوز شروع نشده */
+export function statusAt(recs: StatusRec[], date: Date): EmpStatus | null {
+  let cur: StatusRec | undefined;
+  for (const r of recs) if (r.effectiveDate <= date) cur = r;
+  return cur?.status ?? null;
 }
 
 /** وضعیت جاری = آخرین رکورد تا امروز (امروز به وقت تهران)؛ اگر همه‌ی رکوردها آینده‌اند، اولین رکورد */
@@ -330,6 +337,11 @@ export async function updateStatusRecord(employeeId: number, recordId: number, b
     const dateChanged = !sameDay(newDate, r.effectiveDate);
     if (dateChanged) {
       if (idx === 0) await assertNothingBeforeStart(employeeId, newDate, tx);
+      // رکورد شروعِ مرجع حکم‌ها: تاریخ شروع نباید بعد از تاریخ اعمال حکمی شود که به آن عطف دارد
+      if (!isEnded(r.status) && newDate > r.effectiveDate) {
+        const bad = await tx.employmentDecree.findFirst({ where: { startRecordId: r.id, effectiveDate: { lt: newDate } }, orderBy: { effectiveDate: "asc" }, select: { number: true, effectiveDate: true } });
+        if (bad) throw new HrError(`حکم شماره ${bad.number} با تاریخ اعمال ${day(bad.effectiveDate)} عطف به این شروع همکاری صادر شده و قبل از تاریخ جدید است`);
+      }
       const after = derivePeriods(updated);
       if (periodsKey(derivePeriods(recs)) !== periodsKey(after)) await assertCovered(employeeId, after, tx);
       // پایان همکاری جابه‌جا شد: انتصابی که با آخرین روز قبلی بسته شده بود همراهش جابه‌جا می‌شود

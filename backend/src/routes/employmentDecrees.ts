@@ -7,6 +7,7 @@ import { HrError, checkAssignmentRefs, changeAssignment } from "../services/empl
 import { getEffectiveDecree } from "../services/employmentDecreeService";
 import { jalaliMonthRange } from "../utils/jalaliDate";
 import { getPeriods, periodContains } from "../services/employmentStatusService";
+import { decreeCandidateEmployees, previousDecree, validateDecreeCooperation } from "../services/decreeCooperationService";
 
 // منابع انسانی › پرسنلی › حکم کارگزینی (قرارداد و حکم یک سند است).
 // پیش‌نویس ⇄ تایید؛ حکم تاییدشده تغییر نمی‌کند (حکم جدید با تاریخ اعمال جدید صادر می‌شود). اعتبار از تاریخ اعمال تا min(پایان، روز قبل از حکم بعدی)
@@ -52,6 +53,7 @@ const include = {
   job: { select: { id: true, title: true } },
   orgUnit: { select: { id: true, title: true } },
   costCenter: { select: { id: true, title: true } },
+  startRecord: { select: { id: true, effectiveDate: true } },
   lines: { include: { component: { select: { id: true, code: true, title: true, valueType: true } } }, orderBy: { id: "asc" as const } },
 };
 
@@ -79,6 +81,8 @@ function shape(d: any) {
     orgUnitTitle: d.orgUnit?.title ?? null,
     costCenterId: d.costCenterId,
     costCenterTitle: d.costCenter?.title ?? null,
+    startRecordId: d.startRecordId,
+    cooperationStartDate: day(d.startRecord?.effectiveDate),
     approvedAt: d.approvedAt,
     updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
@@ -91,12 +95,14 @@ function shape(d: any) {
 }
 
 /** اعتبارسنجی بدنه‌ی پیش‌نویس (ایجاد/ویرایش) → داده‌ی ذخیره */
-async function buildDraft(b: any, employeeId: number) {
+async function buildDraft(b: any, employeeId: number, excludeDecreeId?: number) {
   if (!TYPES.includes(b.type)) throw new HrError("نوع حکم نامعتبر است");
   const issueDate = parseDay(b.issueDate, "تاریخ صدور")!;
   const effectiveDate = parseDay(b.effectiveDate, "تاریخ اعمال")!;
   const endDate = parseDay(b.endDate, "تاریخ پایان", false);
   if (endDate && endDate < effectiveDate) throw new HrError("تاریخ پایان نباید قبل از تاریخ اعمال باشد");
+  // ارتباط با شروع همکاری (وضعیت پایان در دو تاریخ، اعمال ≥ شروع، یک استخدام برای هر شروع، ماه تقویم کاری استخدام)
+  const coop = await validateDecreeCooperation({ employeeId, type: b.type, issueDate, effectiveDate, excludeDecreeId });
   const empType = await prisma.employmentType.findUnique({ where: { id: Number(b.employmentTypeId) } });
   if (!empType) throw new HrError("نوع همکاری الزامی است");
   if (!empType.isActive) throw new HrError("نوع همکاری انتخاب‌شده غیرفعال است");
@@ -134,6 +140,7 @@ async function buildDraft(b: any, employeeId: number) {
       type: b.type,
       issueDate,
       effectiveDate,
+      startRecordId: coop.startRecordId,
       endDate,
       employmentTypeId: empType.id,
       weeklyHours,
@@ -175,6 +182,44 @@ router.get("/employment-decrees", async (req, res) => {
       isCurrent: current.get(d.employeeId) === d.id,
     }))
   );
+});
+
+// کارمندان قابل‌انتخاب در حکم: در هیچ‌کدام از تاریخ‌های صدور و اعمال در وضعیت پایان همکاری نیستند
+router.get("/employment-decrees/candidates", async (req, res) => {
+  try {
+    const issueDate = parseDay(req.query.issueDate, "تاریخ صدور")!;
+    const effectiveDate = parseDay(req.query.effectiveDate, "تاریخ اعمال")!;
+    const rows = await decreeCandidateEmployees(issueDate, effectiveDate);
+    res.json(rows.map((e) => ({ id: e.id, personnelCode: e.personnelCode, fullName: fullName(e.party) })));
+  } catch (e: any) {
+    fail(res, e, "خطا در دریافت کارمندان");
+  }
+});
+
+// شروع همکاریِ مرجع (فقط‌خواندنی در فرم) + همه‌ی کنترل‌های ارتباط با شروع همکاری برای نمایش زودهنگام؛ خطا در فیلد error می‌آید (نه ۴۰۰)
+router.get("/employment-decrees/cooperation-start", async (req, res) => {
+  try {
+    const employeeId = Number(req.query.employeeId);
+    if (!employeeId) return res.json({ startDate: null, error: null });
+    const issueDate = parseDay(req.query.issueDate, "تاریخ صدور")!;
+    const effectiveDate = parseDay(req.query.effectiveDate, "تاریخ اعمال")!;
+    const r = await validateDecreeCooperation({ employeeId, type: String(req.query.type ?? ""), issueDate, effectiveDate, excludeDecreeId: req.query.excludeId ? Number(req.query.excludeId) : undefined });
+    res.json({ startDate: day(r.startDate), error: null });
+  } catch (e: any) {
+    if (e instanceof HrError) return res.json({ startDate: null, error: e.message });
+    fail(res, e, "خطا");
+  }
+});
+
+// حکم قبلیِ کارمند (ستون نمایشی مقادیر قبلی در فرم حکم)
+router.get("/employment-decrees/previous", async (req, res) => {
+  const employeeId = Number(req.query.employeeId);
+  if (!employeeId) return res.json({ decree: null });
+  const eff = req.query.effectiveDate ? parseDay(req.query.effectiveDate, "تاریخ اعمال") : null;
+  const d = await previousDecree(employeeId, eff, req.query.excludeId ? Number(req.query.excludeId) : undefined);
+  res.json({
+    decree: d ? { id: d.id, number: d.number, effectiveDate: day(d.effectiveDate), lines: d.lines.map((l) => ({ componentId: l.componentId, value: l.value.toString() })) } : null,
+  });
 });
 
 // حکم مؤثر یک کارمند (برای پیش‌پر کردن حکم جدید)
@@ -244,7 +289,7 @@ router.put("/employment-decrees/:id", can(`${FORM}.edit`), async (req, res) => {
     if (lockMsg) throw new HrError(lockMsg);
     if (existing.status !== "DRAFT") throw new HrError("حکم تاییدشده قابل ویرایش نیست؛ ابتدا برگشت از تایید یا حکم جدید صادر کنید");
     assertRecordNotStale(existing.updatedAt, b.updatedAt, "این حکم");
-    const { header, lines } = await buildDraft(b, existing.employeeId); // کارمند حکم تغییر نمی‌کند
+    const { header, lines } = await buildDraft(b, existing.employeeId, id); // کارمند حکم تغییر نمی‌کند
     await prisma.$transaction([
       prisma.employmentDecreeLine.deleteMany({ where: { decreeId: id } }),
       prisma.employmentDecree.update({ where: { id }, data: { ...header, lines: { create: lines } } }),
@@ -266,6 +311,8 @@ export async function approveDecree(id: number): Promise<void> {
     await tx.$queryRaw`SELECT "id" FROM "Employee" WHERE "id" = ${d.employeeId} FOR UPDATE`;
     // تاریخ اعمال باید داخل یک دوره‌ی همکاری باشد
     if (!periodContains(await getPeriods(d.employeeId, tx), d.effectiveDate)) throw new HrError("تاریخ اعمال حکم داخل هیچ دوره‌ی همکاری کارمند نیست");
+    // قواعد ارتباط با شروع همکاری دوباره سنجیده می‌شود (وضعیت کارمند از زمان ثبت پیش‌نویس ممکن است عوض شده باشد) و مرجع به‌روز می‌شود
+    const coop = await validateDecreeCooperation({ employeeId: d.employeeId, type: d.type, issueDate: d.issueDate, effectiveDate: d.effectiveDate, excludeDecreeId: id });
     // حکمی که از ماهِ دارای محاسبه (یا قبل از آن) اجرا می‌شود مبنای فیش ثبت‌شده را عوض می‌کند
     const slips = await tx.payrollSlip.findMany({ where: { employeeId: d.employeeId }, select: { year: true, month: true } });
     const hit = slips.find((x) => jalaliMonthRange(x.year, x.month).end >= d.effectiveDate);
@@ -289,7 +336,7 @@ export async function approveDecree(id: number): Promise<void> {
     await tx.decreeComponent.updateMany({ where: { id: { in: d.lines.map((l) => l.componentId) } }, data: { hasTransactions: true } });
     await tx.employmentDecree.update({
       where: { id },
-      data: { status: "APPROVED", approvedAt: new Date(), appliedAssignmentId: applied?.appliedId ?? null, previousAssignmentId: applied?.previousId ?? null },
+      data: { status: "APPROVED", approvedAt: new Date(), startRecordId: coop.startRecordId, appliedAssignmentId: applied?.appliedId ?? null, previousAssignmentId: applied?.previousId ?? null },
     });
   });
 }

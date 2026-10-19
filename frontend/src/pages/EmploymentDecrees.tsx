@@ -215,6 +215,39 @@ function DecreeForm({ editId }: { editId?: number }) {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const { flash } = useSavedFlash();
+  // حکم جدید: فقط کارمندانی که در هر دو تاریخ صدور و اعمال در وضعیت پایان همکاری نیستند (با تغییر تاریخ‌ها دوباره گرفته می‌شود)
+  const [candidates, setCandidates] = useState<EmpOpt[] | null>(null);
+  // شروع همکاریِ مرجع (فقط‌خواندنی) + خطای کنترل‌های ارتباط حکم با شروع همکاری، مستقیم از سرور
+  const [coop, setCoop] = useState<{ startDate: string | null; error: string | null }>({ startDate: null, error: null });
+  // حکم قبلیِ همان کارمند (ستون نمایشی)
+  const [prev, setPrev] = useState<{ id: number; number: number; effectiveDate: string; lines: { componentId: number; value: string }[] } | null>(null);
+
+  useEffect(() => {
+    if (editId || !form.issueDate || !form.effectiveDate) return;
+    let alive = true;
+    api.get(`/employment-decrees/candidates?issueDate=${form.issueDate}&effectiveDate=${form.effectiveDate}`).then((r) => alive && setCandidates(r)).catch(() => {});
+    return () => { alive = false; };
+  }, [editId, form.issueDate, form.effectiveDate]);
+
+  useEffect(() => {
+    if (!form.employeeId || !form.issueDate || !form.effectiveDate) { setCoop({ startDate: null, error: null }); return; }
+    let alive = true;
+    api
+      .get(`/employment-decrees/cooperation-start?employeeId=${form.employeeId}&issueDate=${form.issueDate}&effectiveDate=${form.effectiveDate}&type=${form.type}${editId ? `&excludeId=${editId}` : ""}`)
+      .then((r) => alive && setCoop(r))
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [form.employeeId, form.issueDate, form.effectiveDate, form.type, editId]);
+
+  useEffect(() => {
+    if (!form.employeeId) { setPrev(null); return; }
+    let alive = true;
+    api
+      .get(`/employment-decrees/previous?employeeId=${form.employeeId}&effectiveDate=${form.effectiveDate || ""}${editId ? `&excludeId=${editId}` : ""}`)
+      .then((r) => alive && setPrev(r.decree))
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [form.employeeId, form.effectiveDate, editId]);
 
   function fromDetail(d: DecreeDetail) {
     setMeta({ number: d.number, status: d.status, updatedAt: d.updatedAt, lock: (d as any).payrollLocked ? (d as any).payrollLockMessage : null });
@@ -297,6 +330,8 @@ function DecreeForm({ editId }: { editId?: number }) {
 
   /** مقدار یک عامل در ردیف‌های حکم (رشته‌ی خالی = وارد نشده) */
   const valueOf = (componentId: number) => form.lines.find((l) => l.componentId === String(componentId))?.value ?? "";
+  /** مقدار عامل در حکم قبلی (فقط نمایش؛ خالی = در حکم قبلی نبوده) */
+  const prevValueOf = (componentId: number) => prev?.lines.find((l) => l.componentId === componentId)?.value ?? "";
   function setValueOf(componentId: number, v: string) {
     const id = String(componentId);
     const rest = form.lines.filter((l) => l.componentId !== id);
@@ -308,18 +343,24 @@ function DecreeForm({ editId }: { editId?: number }) {
   const set = (p: Partial<typeof EMPTY>) => setForm({ ...form, ...p });
 
   /** فوتر جمعِ گرید عوامل حکم: جمع همه‌ی مقدارها (طبق درخواست) و، اگر چند نوع مقدار (ماهانه/روزانه/ساعتی/درصد) در حکم آمده، جمع هر نوع جدا */
-  function decreeTotals(): { label: string; value: string }[] {
+  function decreeTotals(): { label: string; value: string; prev: string }[] {
     const fmt = (n: number) => toFaDigits(Number(n.toFixed(4)).toLocaleString("en-US", { maximumFractionDigits: 4 }));
-    const byType = new Map<string, number>();
-    let all = 0;
-    for (const c of shownComponents) {
-      const n = Number(valueOf(c.id));
-      if (!Number.isFinite(n) || n === 0) continue;
-      all += n;
-      byType.set(c.valueType, (byType.get(c.valueType) ?? 0) + n);
-    }
-    const rows = [{ label: "جمع مقدارها", value: fmt(all) }];
-    if (byType.size > 1) for (const [t, v] of byType) rows.push({ label: `جمع ${DECREE_VALUE_TYPE_FA[t] ?? t}`, value: fmt(v) });
+    const sums = (valueFn: (id: number) => number) => {
+      const byType = new Map<string, number>();
+      let all = 0;
+      for (const c of shownComponents) {
+        const n = valueFn(c.id);
+        if (!Number.isFinite(n) || n === 0) continue;
+        all += n;
+        byType.set(c.valueType, (byType.get(c.valueType) ?? 0) + n);
+      }
+      return { all, byType };
+    };
+    const cur = sums((id) => Number(valueOf(id)));
+    const old = sums((id) => Number(prevValueOf(id)));
+    const rows = [{ label: "جمع مقدارها", value: fmt(cur.all), prev: prev ? fmt(old.all) : "" }];
+    const types = new Set([...cur.byType.keys(), ...old.byType.keys()]);
+    if (types.size > 1) for (const t of types) rows.push({ label: `جمع ${DECREE_VALUE_TYPE_FA[t] ?? t}`, value: fmt(cur.byType.get(t) ?? 0), prev: prev ? fmt(old.byType.get(t) ?? 0) : "" });
     return rows;
   }
 
@@ -413,20 +454,6 @@ function DecreeForm({ editId }: { editId?: number }) {
         <fieldset disabled={locked} style={{ border: "none", padding: 0, margin: 0 }}>
           <div className="form-grid">
             <div className="form-field">
-              <label>کارمند<RequiredMark /></label>
-              <RecordPickerField<EmpOpt>
-                title="انتخاب کارمند"
-                disabled={!!editId || locked}
-                displayValue={emp ? `${toFaDigits(emp.personnelCode)} — ${emp.fullName}` : ""}
-                rows={employees}
-                columns={[
-                  { header: "کد پرسنلی", render: (x) => toFaDigits(x.personnelCode), filterValue: (x) => x.personnelCode, width: "110px" },
-                  { header: "نام و نام خانوادگی", render: (x) => x.fullName, filterValue: (x) => x.fullName },
-                ]}
-                onSelect={(x) => onPickEmployee(String(x.id))}
-              />
-            </div>
-            <div className="form-field">
               <label>نوع حکم<RequiredMark /></label>
               <select value={form.type} onChange={(e) => set({ type: e.target.value })}>
                 {Object.entries(DECREE_TYPE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -437,8 +464,30 @@ function DecreeForm({ editId }: { editId?: number }) {
               <JalaliDatePicker value={form.issueDate} onChange={(v) => set({ issueDate: v })} />
             </div>
             <div className="form-field">
-              <label>تاریخ اعمال<RequiredMark /> <FieldHint label="تاریخ اعمال" text="حکم از این تاریخ معتبر است و حکم قبلی کارمند تا روز قبل از آن اعتبار دارد" /></label>
+              <label>تاریخ اعمال<RequiredMark /> <FieldHint label="تاریخ اعمال" text="حکم از این تاریخ معتبر است و حکم قبلی کارمند تا روز قبل از آن اعتبار دارد. نباید قبل از شروع همکاری باشد؛ در حکم استخدام ماه تقویم کاریِ آن نباید قبل از ماه تقویم کاریِ تاریخ صدور باشد" /></label>
               <JalaliDatePicker value={form.effectiveDate} onChange={(v) => set({ effectiveDate: v })} />
+            </div>
+            <div className="form-field">
+              <label>کارمند<RequiredMark /> {!editId && <FieldHint label="کارمند" text="فقط کارمندانی که در هر دو تاریخ صدور و اعمال در وضعیت پایان همکاری (خاتمه، بازنشسته، ترک کار) نیستند" />}</label>
+              <RecordPickerField<EmpOpt>
+                title="انتخاب کارمند"
+                disabled={!!editId || locked}
+                displayValue={emp ? `${toFaDigits(emp.personnelCode)} — ${emp.fullName}` : ""}
+                rows={editId ? employees : (candidates ?? employees)}
+                columns={[
+                  { header: "کد پرسنلی", render: (x) => toFaDigits(x.personnelCode), filterValue: (x) => x.personnelCode, width: "110px" },
+                  { header: "نام و نام خانوادگی", render: (x) => x.fullName, filterValue: (x) => x.fullName },
+                ]}
+                onSelect={(x) => onPickEmployee(String(x.id))}
+              />
+              {!editId && form.employeeId && candidates && !candidates.some((c) => String(c.id) === form.employeeId) && (
+                <div style={{ color: "var(--danger)", fontSize: 12 }}>این کارمند در یکی از تاریخ‌های صدور یا اعمال در وضعیت پایان همکاری است</div>
+              )}
+            </div>
+            <div className="form-field">
+              <label>شروع همکاری (مرجع حکم) <FieldHint label="شروع همکاری" text="حکم عطف به این شروع همکاری صادر می‌شود (از تاریخ صدور تعیین می‌شود). تا وقتی همکاری کارمند خاتمه نخورده همه‌ی احکامش به همان شروع عطف دارند؛ برای هر شروع همکاری فقط یک حکم استخدام ممکن است" /></label>
+              <input disabled value={coop.startDate ? formatJalaliDate(coop.startDate) : ""} />
+              {coop.error && !locked && <div style={{ color: "var(--danger)", fontSize: 12 }}>{coop.error}</div>}
             </div>
             <div className="form-field">
               <label>تاریخ پایان <FieldHint label="تاریخ پایان" text="اختیاری؛ خالی یعنی دائم/بدون پایان. بعد از این تاریخ، بدون حکم بعدی، کارمند «بدون حکم معتبر» می‌شود" /></label>
@@ -463,11 +512,11 @@ function DecreeForm({ editId }: { editId?: number }) {
 
           <h3 className="hr-section">عوامل حکم</h3>
           <ScrollGridWithTotals
-            totals={decreeTotals().map((t) => ({ cells: [null, t.label, null, t.value] }))}
-            head={<tr><th style={{ width: 40 }}>#</th><th>عامل</th><th style={{ width: 130 }}>نوع مقدار</th><th style={{ width: 220 }}>مقدار</th></tr>}
+            totals={decreeTotals().map((t) => ({ cells: [null, t.label, null, t.value, t.prev] }))}
+            head={<tr><th style={{ width: 40 }}>#</th><th>عامل</th><th style={{ width: 130 }}>نوع مقدار</th><th style={{ width: 220 }}>مقدار</th><th style={{ width: 170 }} title="فقط نمایش">{prev ? `حکم قبلی (شماره ${toFaDigits(String(prev.number))} — ${formatJalaliDate(prev.effectiveDate)})` : "حکم قبلی"}</th></tr>}
           >
               {shownComponents.length === 0 && (
-                <tr><td colSpan={4} style={{ textAlign: "center", opacity: 0.7 }}>عاملی تعریف نشده است؛ ابتدا «عامل حکم» تعریف کنید</td></tr>
+                <tr><td colSpan={5} style={{ textAlign: "center", opacity: 0.7 }}>عاملی تعریف نشده است؛ ابتدا «عامل حکم» تعریف کنید</td></tr>
               )}
               {shownComponents.map((c, i) => (
                 <tr key={c.id}>
@@ -477,6 +526,7 @@ function DecreeForm({ editId }: { editId?: number }) {
                   <td>
                     <AmountInput value={valueOf(c.id)} onChange={(v) => setValueOf(c.id, v)} allowDecimal disabled={locked} />
                   </td>
+                  <td style={{ opacity: 0.8 }}>{prevValueOf(c.id) === "" ? "—" : toFaDigits(Number(prevValueOf(c.id)).toLocaleString("en-US", { maximumFractionDigits: 4 }))}</td>
                 </tr>
               ))}
           </ScrollGridWithTotals>
