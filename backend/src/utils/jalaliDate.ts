@@ -4,6 +4,7 @@ import persian_fa from "react-date-object/locales/persian_fa";
 import gregorian from "react-date-object/calendars/gregorian";
 import gregorian_en from "react-date-object/locales/gregorian_en";
 import { toEnglishDigits } from "./digits";
+import { displayDate } from "./dateDisplay";
 
 /**
  * تشخیص خودکار و تبدیل یک رشته تاریخ (شمسی با هر جداکننده و ارقام فارسی/انگلیسی، یا میلادی ایزو)
@@ -50,8 +51,8 @@ export function toJalaliYearMonth(date: Date): { year: number; month: number } {
  * نمی‌فهمد؛ همیشه با تاریخ شمسی کار می‌کند).
  */
 export function formatJalaliDateForMessage(date: Date): string {
-  const j = new DateObject({ date, calendar: gregorian, locale: gregorian_en }).convert(persian, persian_fa);
-  return `${String(j.year).padStart(4, "0")}/${String(j.month.number).padStart(2, "0")}/${String(j.day).padStart(2, "0")}`;
+  // نام قدیمی؛ پیاده‌سازی در «utils/dateDisplay.ts#displayDate» (تنها نقطه‌ی نمایش تاریخ؛ تقویم نمایش آنجا تعیین می‌شود)
+  return displayDate(date);
 }
 
 /** بازه‌ی یک ماه شمسی: اولین و آخرین روز (میلادی، UTC نیمه‌شب) و تعداد روزهای ماه */

@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { nextSerialNumber } from "../utils/coding";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
+import { displayDate } from "../utils/dateDisplay";
 
 // پست‌های سازمانی. «پست پیش‌فرض» (isDefault) را seed می‌سازد: دقیقاً یکی، حذف‌نشدنی و بدون امکان غیرفعال‌شدن؛ شرکتی که از پست
 // استفاده نمی‌کند همه را به آن منتصب می‌کند تا با شروع استفاده از پست‌ها داده یک‌دست باشد (تصمیم کاربر).
@@ -32,7 +33,8 @@ interface PositionUse {
   description: string;
   path: string;
 }
-const dayOf = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+// فقط برای متن «مورد»: تاریخ در تقویم نمایش
+const dayOf = (d: Date | null) => displayDate(d);
 async function positionUsage(id: number): Promise<PositionUse[]> {
   const emp = { select: { id: true, personnelCode: true, party: { select: { firstName: true, lastName: true, name: true } } } } as const;
   const name = (e: { party: { firstName: string | null; lastName: string | null; name: string | null } }) => [e.party.firstName, e.party.lastName].filter(Boolean).join(" ") || e.party.name || "";

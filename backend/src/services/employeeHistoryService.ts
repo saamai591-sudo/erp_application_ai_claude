@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma";
 import { jalaliMonthRange } from "../utils/jalaliDate";
 import { HrError, checkAssignmentRefs } from "./employeeAssignmentService";
+import { displayDate } from "../utils/dateDisplay";
 
 // اصلاح سوابق کارمند: ویرایش/حذف انتصاب و ویرایش دوره‌ی همکاری (تنها محل این قواعد؛ مسیرهای employees فقط صدا می‌زنند).
 //  • انتصابی که برای کارمند «حکمی با تاریخ اعمال ≥ تاریخ شروع آن انتصاب» دارد قابل ویرایش و حذف نیست (حکم هر وضعیتی).
@@ -9,7 +10,8 @@ import { HrError, checkAssignmentRefs } from "./employeeAssignmentService";
 //    وابستگان تاریخِ شروع ندارند (فقط تاریخ تولد)، پس در این کنترل نیستند.
 
 const DAY = 86400000;
-const day = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : "");
+/** فقط برای متن پیام‌ها: تاریخ در تقویم نمایش (utils/dateDisplay) */
+const day = (d: Date | null | undefined) => displayDate(d);
 const sameDay = (a: Date, b: Date) => a.getTime() === b.getTime();
 
 function parseDay(v: unknown, label: string): Date {

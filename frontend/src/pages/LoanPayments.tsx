@@ -110,7 +110,7 @@ function LoanList() {
           { header: "تعداد اقساط", ...n((r) => r.installmentCount), width: "100px" },
           { header: "مبلغ قسط", ...n((r) => r.installmentAmount) },
           { header: "شروع قسط", ...s((r) => workMonthLabel(r.startYear, r.startMonth)), width: "120px" },
-          { header: "کسر باقیمانده", ...s((r) => REMAINDER_MODE_FA[r.remainderMode] ?? r.remainderMode), width: "140px" },
+          { header: "کسر باقیمانده", ...s((r) => (r.amount - r.installmentCount * r.installmentAmount > 0 ? REMAINDER_MODE_FA[r.remainderMode] ?? r.remainderMode : "—")), width: "140px" },
           { header: "شرح", ...s((r) => r.description) },
         ]}
         rows={items}
@@ -205,10 +205,13 @@ function LoanForm({ editId }: { editId?: number }) {
   const count = Number(form.installmentCount);
   const inst = Number(form.installmentAmount);
   const remainder = amount > 0 && count > 0 && inst > 0 ? amount - count * inst : null;
+  // فیلد «کسر قسط» فقط وقتی باقیمانده‌ی مثبت هست نمایش داده می‌شود (و آن‌وقت اجباری است)
+  const needsRemainderMode = remainder !== null && remainder > 0;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    if (needsRemainderMode && !form.remainderMode) return setError("نحوه‌ی کسر باقیمانده‌ی قسط را انتخاب کنید");
     try {
       if (editId) {
         await api.put(`/loan-payments/${editId}`, form);
@@ -301,6 +304,7 @@ function LoanForm({ editId }: { editId?: number }) {
               <label>شروع قسط<RequiredMark /> <FieldHint label="شروع قسط" text="ماهی از تقویم کاری که اولین قسط در حقوق همان ماه کسر می‌شود" /></label>
               <WorkMonthField year={form.startYear} month={form.startMonth} title="انتخاب ماه شروع قسط" onChange={(y, m) => set({ startYear: y, startMonth: m })} />
             </div>
+            {needsRemainderMode && (
             <div className="form-field">
               <label>کسر قسط<RequiredMark /> <FieldHint label="کسر قسط" text="تکلیف باقیمانده‌ی تقسیم (مبلغ وام منهای تعداد × قسط): همراه با قسط اول، همراه با قسط آخر، یا یک قسط جدا و کوچک‌تر بعد از آخرین قسط کامل" /></label>
               <select value={form.remainderMode} onChange={(e) => set({ remainderMode: e.target.value })}>
@@ -308,6 +312,7 @@ function LoanForm({ editId }: { editId?: number }) {
                 {Object.entries(REMAINDER_MODE_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
+            )}
             <div className="form-field" style={{ gridColumn: "1 / -1" }}>
               <label>شرح</label>
               <input value={form.description} onChange={(e) => set({ description: e.target.value })} />

@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { nextSerialNumber } from "../utils/coding";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
+import { displayDate } from "../utils/dateDisplay";
 
 // منابع انسانی › شغل: کد (خودکار: آخرین + ۱)، عنوان، کد تامین اجتماعی و سه متن (شرح شغل، مهارت‌های تخصصی، ویژگی‌های فردی).
 // هر پست شغل‌های مورد نیازش را با تعداد نفرات دارد (PositionJob) و کارمند در انتصاب شغلش را از همان‌ها انتخاب می‌کند.
@@ -55,7 +56,7 @@ async function jobUsage(id: number) {
     prisma.employmentDecree.findMany({ where: { jobId: id }, orderBy: { number: "desc" }, select: { id: true, number: true, employeeId: true, employee: { select: { personnelCode: true } } } }),
   ]);
   const name = (p: { firstName: string | null; lastName: string | null; name: string | null }) => [p.firstName, p.lastName].filter(Boolean).join(" ") || p.name || "";
-  const day = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+  const day = (d: Date | null) => displayDate(d); // فقط برای متن «مورد»
   return [
     ...positions.map((p) => ({ kind: "POSITION" as const, id: p.positionId, description: `مورد نیاز پست «${p.position.title}» — ${p.requiredCount} نفر`, path: `/positions/${p.positionId}/edit` })),
     ...assignments.map((a) => ({

@@ -49,17 +49,24 @@ export function jalaliToGregorianIso(input: string): string | null {
     return null;
   }
 }
-export function formatJalaliDate(isoDate: string | null | undefined): string {
+/**
+ * تقویمِ نمایشِ تاریخ در متن/جدول/برچسب‌ها — تنها نقطه‌ی تصمیم در فرانت‌اند (معادلِ `DISPLAY_CALENDAR` در بک‌اند `utils/dateDisplay.ts`).
+ * داده و API همیشه ISO میلادی‌اند؛ برای عرضه با تقویم میلادی کافی است این مقدار (یا env ساخت `VITE_DISPLAY_CALENDAR=GREGORIAN`) عوض شود.
+ */
+export const DISPLAY_CALENDAR: "JALALI" | "GREGORIAN" = String(import.meta.env.VITE_DISPLAY_CALENDAR ?? "").toUpperCase() === "GREGORIAN" ? "GREGORIAN" : "JALALI";
+
+/** هر تاریخِ ISO که قرار است به‌صورت متن به کاربر نشان داده شود باید از این تابع بگذرد (نام قدیمی `formatJalaliDate` همین را صدا می‌زند) */
+export function formatDisplayDate(isoDate: string | null | undefined): string {
   if (!isoDate) return "—";
   const iso = isoDate.slice(0, 10);
   try {
-    const j = new DateObject({ date: iso, format: "YYYY-MM-DD", calendar: gregorian, locale: gregorian_en }).convert(
-      persian,
-      persian_fa
-    );
+    const g = new DateObject({ date: iso, format: "YYYY-MM-DD", calendar: gregorian, locale: gregorian_en });
+    const j = DISPLAY_CALENDAR === "GREGORIAN" ? g : g.convert(persian, persian_fa);
     const formatted = `${String(j.year).padStart(4, "0")}/${String(j.month.number).padStart(2, "0")}/${String(j.day).padStart(2, "0")}`;
     return toFaDigits(formatted);
   } catch {
     return "—";
   }
 }
+
+export const formatJalaliDate = formatDisplayDate;

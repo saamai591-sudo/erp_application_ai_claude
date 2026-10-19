@@ -254,7 +254,11 @@ async function loanData(b: any, existing: { id: number; loanTypeId: number } | n
   if (installmentAmount > amount) throw new LoanError("مبلغ هر قسط نمی‌تواند از مبلغ وام بیشتر باشد");
   if ((installmentCount - 1) * installmentAmount >= amount) throw new LoanError("تعداد اقساط با مبلغ قسط سازگار نیست؛ قسط آخر مبلغی نخواهد داشت (تعداد را کمتر یا قسط را کمتر کنید)");
   const start = await monthRef(b.startYear, b.startMonth, "شروع قسط");
-  if (!MODE_VALUES.includes(b.remainderMode)) throw new LoanError("نحوه‌ی کسر باقیمانده‌ی قسط را انتخاب کنید");
+  // «کسر قسط» فقط وقتی لازم است که باقیمانده‌ی تقسیم مثبت باشد؛ وگرنه مقدار خنثی ذخیره می‌شود
+  // (EXTRA_LAST بدون باقیمانده اثری ندارد؛ WITH_LAST برخلاف آن بعد از اصلاح مانده، باقی را یک‌جا کسر می‌کند)
+  const hasRemainder = amount - installmentCount * installmentAmount > 0;
+  if (hasRemainder && !MODE_VALUES.includes(b.remainderMode)) throw new LoanError("نحوه‌ی کسر باقیمانده‌ی قسط را انتخاب کنید");
+  const remainderMode = hasRemainder ? b.remainderMode : "EXTRA_LAST";
   // کنترل: اگر از ماه شروع قسط (یا بعد از آن) برای کارمند محاسبه‌ی حقوق انجام شده، ذخیره‌ی وام ممکن نیست
   await assertNoCalculationFrom([employeeId], ymOf(start.year, start.month), (who, y, m) =>
     `برای کارمند ${who} در ${y}/${m} محاسبه‌ی حقوق انجام شده و ماه شروع قسط (${start.year}/${start.month}) همان ماه یا قبل از آن است؛ ذخیره‌ی وام ممکن نیست — ابتدا محاسبه‌های حقوق را حذف کنید یا ماه شروع قسط را بعد از آخرین ماه محاسبه‌شده بگذارید`
@@ -267,7 +271,7 @@ async function loanData(b: any, existing: { id: number; loanTypeId: number } | n
     installmentCount,
     installmentAmount,
     startMonthId: start.id,
-    remainderMode: b.remainderMode,
+    remainderMode,
     description: String(b.description ?? "").trim() || null,
   };
 }
