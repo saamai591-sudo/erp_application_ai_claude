@@ -3,7 +3,7 @@ import { ErrorToast } from "../components/ErrorToast";
 import { InfoHint } from "../components/InfoHint";
 import { AmountInput } from "../components/AmountInput";
 import { TimeInput, maskHm } from "../components/TimeInput";
-import { toFaDigits } from "../lib/formatAmount";
+import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
@@ -133,7 +133,7 @@ export default function PayrollDataEntry() {
     const k = key(r.employeeId, c.componentId);
     const v = cells[k] ?? "";
     const set = (nv: string) => setCells({ ...cells, [k]: nv });
-    if (r.locked) return <span style={{ opacity: 0.8 }}>{v === "" ? "—" : c.valueType === "TIME" ? v : toFaDigits(v)}</span>;
+    if (r.locked) return <span style={{ opacity: 0.8 }}>{v === "" ? "—" : c.valueType === "TIME" ? v : c.valueType === "DAYS" ? toFaDigits(v) : formatAmountFa(v)}</span>;
     if (c.valueType === "TIME") return <TimeCell value={v} onChange={set} />;
     if (c.valueType === "DAYS") {
       return (
