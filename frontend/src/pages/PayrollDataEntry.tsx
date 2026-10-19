@@ -8,10 +8,11 @@ import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState } from "../lib/usePersistedState";
-import { VALUE_TYPE_FA, MONTHS_FA, currentJalaliYearMonth, hoursToHm } from "../lib/payrollLabels";
+import { VALUE_TYPE_FA, MONTHS_FA, currentJalaliYearMonth, hoursToHm, parseHours } from "../lib/payrollLabels";
 import { useCalcTypes } from "../lib/useCalcTypes";
 import { WorkMonthPicker } from "../components/WorkMonthPicker";
 import { ExcelImportButton } from "../components/ExcelImport";
+import { ScrollGridWithTotals } from "../components/ScrollGridWithTotals";
 
 // حقوق و دستمزد › عملیات › ورود اطلاعات: ماه را انتخاب کنید، «لود اطلاعات» را بزنید؛ گرید کد پرسنل، عنوان و به‌ازای هر عاملِ «ورود دستی» یک ستون
 // دارد. فرمت مجاز هر ستون را نوع پارامتر عامل تعیین می‌کند: ساعت دقیقه hhh:mm — روز عدد صحیح — عدد اعشاری — مبلغ اعشار تا ارز پایه.
@@ -110,6 +111,24 @@ export default function PayrollDataEntry() {
     }
   }
 
+  /** جمع هر ستون از مقدارهای فعلیِ گرید (شامل ویرایش‌های ذخیره‌نشده)؛ ساعت:دقیقه با دقیقه‌ی صحیح جمع می‌شود */
+  function columnTotal(c: Column): string {
+    let sum = 0;
+    for (const r of data?.rows ?? []) {
+      const raw = (cells[key(r.employeeId, c.componentId)] ?? "").trim();
+      if (!raw) continue;
+      if (c.valueType === "TIME") {
+        const h = parseHours(raw);
+        if (h !== null) sum += Math.round(h * 60);
+      } else {
+        const n = Number(toLatin(raw).replace(/,/g, ""));
+        if (Number.isFinite(n)) sum += n;
+      }
+    }
+    if (c.valueType === "TIME") return toFaDigits(`${Math.floor(sum / 60)}:${String(sum % 60).padStart(2, "0")}`);
+    return toFaDigits(Number((sum).toFixed(4)).toLocaleString("en-US", { maximumFractionDigits: 4 }));
+  }
+
   function cell(r: Row, c: Column) {
     const k = key(r.employeeId, c.componentId);
     const v = cells[k] ?? "";
@@ -199,9 +218,10 @@ export default function PayrollDataEntry() {
 
       {data && data.columns.length === 0 && <p>برای این ماه و نوع محاسبه عاملی با روش «ورود دستی» تعریف نشده است.</p>}
       {data && data.columns.length > 0 && (
-        <div style={{ overflowX: "auto" }}>
-          <table className="hr-table">
-            <thead>
+        <ScrollGridWithTotals
+          fill
+          totals={[{ cells: [null, `جمع (${toFaDigits(String(data.rows.length))} نفر)`, ...data.columns.map((c) => columnTotal(c))] }]}
+          head={
               <tr>
                 <th style={{ width: 110 }}>کد پرسنل</th>
                 <th>عنوان</th>
@@ -212,8 +232,8 @@ export default function PayrollDataEntry() {
                   </th>
                 ))}
               </tr>
-            </thead>
-            <tbody>
+          }
+        >
               {data.rows.length === 0 && <tr><td colSpan={2 + data.columns.length} style={{ textAlign: "center", opacity: 0.7 }}>کارمندی با همکاری در این ماه یافت نشد</td></tr>}
               {data.rows.map((r) => (
                 <tr key={r.employeeId}>
@@ -224,9 +244,7 @@ export default function PayrollDataEntry() {
                   ))}
                 </tr>
               ))}
-            </tbody>
-          </table>
-        </div>
+        </ScrollGridWithTotals>
       )}
     </div>
   );

@@ -20,6 +20,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePermissions } from "../lib/usePermissions";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { DECREE_VALUE_TYPE_FA } from "./HrMasters";
+import { ScrollGridWithTotals } from "../components/ScrollGridWithTotals";
 import { OptPicker, positionHasUnit, unitOfPosition, JobField, jobOfPosition, jobMissing, type Opt } from "./Employees";
 
 // منابع انسانی › پرسنلی › حکم کارگزینی (قرارداد و حکم یک سند است). پیش‌نویس ⇄ تایید؛ حکم تاییدشده فقط‌خواندنی است و تغییر حقوق = حکم جدید.
@@ -306,6 +307,22 @@ function DecreeForm({ editId }: { editId?: number }) {
   const shownComponents = components.filter((c) => c.isActive || form.lines.some((l) => l.componentId === String(c.id)));
   const set = (p: Partial<typeof EMPTY>) => setForm({ ...form, ...p });
 
+  /** فوتر جمعِ گرید عوامل حکم: جمع همه‌ی مقدارها (طبق درخواست) و، اگر چند نوع مقدار (ماهانه/روزانه/ساعتی/درصد) در حکم آمده، جمع هر نوع جدا */
+  function decreeTotals(): { label: string; value: string }[] {
+    const fmt = (n: number) => toFaDigits(Number(n.toFixed(4)).toLocaleString("en-US", { maximumFractionDigits: 4 }));
+    const byType = new Map<string, number>();
+    let all = 0;
+    for (const c of shownComponents) {
+      const n = Number(valueOf(c.id));
+      if (!Number.isFinite(n) || n === 0) continue;
+      all += n;
+      byType.set(c.valueType, (byType.get(c.valueType) ?? 0) + n);
+    }
+    const rows = [{ label: "جمع مقدارها", value: fmt(all) }];
+    if (byType.size > 1) for (const [t, v] of byType) rows.push({ label: `جمع ${DECREE_VALUE_TYPE_FA[t] ?? t}`, value: fmt(v) });
+    return rows;
+  }
+
   function body() {
     return {
       employeeId: Number(form.employeeId),
@@ -445,11 +462,10 @@ function DecreeForm({ editId }: { editId?: number }) {
           </div>
 
           <h3 className="hr-section">عوامل حکم</h3>
-          <table className="hr-table">
-            <thead>
-              <tr><th style={{ width: 40 }}>#</th><th>عامل</th><th style={{ width: 130 }}>نوع مقدار</th><th style={{ width: 220 }}>مقدار</th></tr>
-            </thead>
-            <tbody>
+          <ScrollGridWithTotals
+            totals={decreeTotals().map((t) => ({ cells: [null, t.label, null, t.value] }))}
+            head={<tr><th style={{ width: 40 }}>#</th><th>عامل</th><th style={{ width: 130 }}>نوع مقدار</th><th style={{ width: 220 }}>مقدار</th></tr>}
+          >
               {shownComponents.length === 0 && (
                 <tr><td colSpan={4} style={{ textAlign: "center", opacity: 0.7 }}>عاملی تعریف نشده است؛ ابتدا «عامل حکم» تعریف کنید</td></tr>
               )}
@@ -463,8 +479,7 @@ function DecreeForm({ editId }: { editId?: number }) {
                   </td>
                 </tr>
               ))}
-            </tbody>
-          </table>
+          </ScrollGridWithTotals>
           <p style={{ opacity: 0.7, fontSize: 12, margin: "4px 0 0" }}>
             مبلغ عامل‌هایی که نمی‌خواهید در این حکم بیاید را خالی بگذارید.
           </p>

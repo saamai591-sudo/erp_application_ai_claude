@@ -10,6 +10,7 @@ import { usePersistedState } from "../lib/usePersistedState";
 import { MONTHS_FA, currentJalaliYearMonth } from "../lib/payrollLabels";
 import { useCalcTypes } from "../lib/useCalcTypes";
 import { WorkMonthPicker } from "../components/WorkMonthPicker";
+import { ScrollGridWithTotals } from "../components/ScrollGridWithTotals";
 import { PayrollSlipPrintDialog } from "../components/PayrollSlipPrint";
 
 // حقوق و دستمزد › عملیات › محاسبه حقوق: ماه را انتخاب می‌کنید، «لود اطلاعات» فهرست پرسنل را می‌آورد، پرسنل مورد نظر را تیک می‌زنید و دکمهٔ
@@ -208,9 +209,22 @@ export default function PayrollCalculateMonth() {
       )}
 
       {rows && (
-        <div style={{ overflowX: "auto" }}>
-          <table className="hr-table">
-            <thead>
+        <ScrollGridWithTotals
+          fill
+          totals={[
+            {
+              cells: [
+                null,
+                "جمع",
+                `${toFaDigits(String(rows.length))} نفر`,
+                null,
+                money(String(rows.reduce((a, r) => a + (r.slip ? Number(r.slip.netPay) : 0), 0))),
+                `${toFaDigits(String(rows.filter((r) => r.slip).length))} محاسبه‌شده`,
+                null,
+              ],
+            },
+          ]}
+          head={
               <tr>
                 <th style={{ width: 40 }}>
                   <input
@@ -226,8 +240,8 @@ export default function PayrollCalculateMonth() {
                 <th>وضعیت</th>
                 <th style={{ width: 90 }} />
               </tr>
-            </thead>
-            <tbody>
+          }
+        >
               {rows.length === 0 && <tr><td colSpan={7} style={{ textAlign: "center", opacity: 0.7 }}>کارمندی با همکاری در این ماه یافت نشد</td></tr>}
               {rows.map((r) => {
                 const o = outcomes[r.employeeId];
@@ -249,9 +263,7 @@ export default function PayrollCalculateMonth() {
                   </tr>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
+        </ScrollGridWithTotals>
       )}
     </div>
   );
