@@ -3,6 +3,8 @@ import { wrapPrintHtml } from "./printService";
 
 // چاپ «فیش حقوقی» یک یا چند کارمند از فیش‌های محاسبه‌شده‌ی یک ماه (چیدمان بر اساس نمونه‌ی `Documents/فیش.pdf`):
 // عنوان شرکت و «فیش حقوق ماه … سال …»، مشخصات کارمند، سه ستون کارکرد | مزایا | کسورات، جمع‌ها و جمله‌ی واریز به حساب.
+// فقط عامل‌هایی که مبلغ/مقدار دارند چاپ می‌شوند (ردیف صفر چاپ نمی‌شود؛ ردیفِ دارای خطا برای دیده‌شدن می‌ماند)، ستون «کارکرد» فقط عامل‌های طبقه‌ی «کارکرد» را دارد و
+// ستون «وام» (عنوان وام، مبلغ هر قسط، مانده) فقط وقتی کارمند در آن ماه وامِ جاری دارد اضافه می‌شود (از مانده‌ی ماهانه‌ی ذخیره‌شده‌ی همان فیش).
 // اعداد از خودِ فیش ذخیره‌شده خوانده می‌شود (نه محاسبه‌ی دوباره)؛ هر فیش یک بلوک است و چند فیش پشت سر هم در صفحه‌ها می‌آید.
 
 const MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
@@ -53,9 +55,23 @@ interface LineLite {
 
 function section(title: string, valueHead: string, lines: LineLite[]): string {
   const rows = lines
+    .filter((l) => l.error || Math.abs(l.amount) > 1e-9)
     .map((l) => `<tr><td>${esc(l.title)}</td><td class="n">${l.error ? "—" : valueText(l.amount, l.valueType)}</td></tr>`)
     .join("");
   return `<div class="col"><div class="head">${esc(title)}</div><table><thead><tr><th>عنوان</th><th>${esc(valueHead)}</th></tr></thead><tbody>${rows || `<tr><td colspan="2">&nbsp;</td></tr>`}</tbody></table></div>`;
+}
+
+interface LoanRowLite {
+  title: string;
+  installment: number;
+  balance: number;
+}
+
+/** ستون «وام»: عنوان وام | مبلغ هر قسط (این ماه) | مانده (بعد از این ماه) */
+function loanSection(loans: LoanRowLite[]): string {
+  if (loans.length === 0) return "";
+  const rows = loans.map((l) => `<tr><td>${esc(l.title)}</td><td class="n">${money(l.installment)}</td><td class="n">${money(l.balance)}</td></tr>`).join("");
+  return `<div class="col"><div class="head">وام</div><table><thead><tr><th>عنوان وام</th><th>مبلغ هر قسط</th><th>مانده</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 export interface SlipPrintResult {
@@ -74,6 +90,7 @@ export async function buildPayrollSlipsPrint(year: number, month: number, employ
     where: { year, month, employeeId: { in: employeeIds }, ...(calcType ? { calcTypeId: calcType.id } : {}) },
     include: {
       lines: { orderBy: { seq: "asc" } },
+      loanBalances: { include: { loan: { select: { number: true, loanType: { select: { title: true } } } } }, orderBy: { loanId: "asc" } },
       decree: { select: { employmentType: { select: { title: true } } } },
       employee: {
         select: {
@@ -114,9 +131,19 @@ export async function buildPayrollSlipsPrint(year: number, month: number, employ
       error: l.error,
       valueType: (l.trace as any)?.valueType,
     }));
-    const work = lines.filter((l) => l.kind === "WORK" || l.kind === "INFO");
+    const work = lines.filter((l) => l.kind === "WORK");
     const earn = lines.filter((l) => l.kind === "EARNING");
     const ded = lines.filter((l) => l.kind === "DEDUCTION");
+    // وام‌های جاری این ماه (مانده‌ی ماهانه‌ی ذخیره‌شده‌ی همین فیش)؛ اگر چند وام هم‌عنوان باشد شماره‌ی وام کنارش می‌آید
+    const loanTitleCount = new Map<string, number>();
+    for (const b of s.loanBalances) loanTitleCount.set(b.loan.loanType.title, (loanTitleCount.get(b.loan.loanType.title) ?? 0) + 1);
+    const loans: LoanRowLite[] = s.loanBalances
+      .filter((b) => Number(b.balanceBefore) > 0 || Number(b.installment) > 0)
+      .map((b) => ({
+        title: (loanTitleCount.get(b.loan.loanType.title) ?? 0) > 1 ? `${b.loan.loanType.title} (شماره ${b.loan.number})` : b.loan.loanType.title,
+        installment: Number(b.installment),
+        balance: Number(b.balanceAfter),
+      }));
     const acc = accounts.find((a) => a.id === s.employee.salaryBankAccountId);
     const bank = acc?.bankPartyId ? bankParties.find((b) => b.id === acc.bankPartyId) : undefined;
     const bankName = bank ? bank.name ?? [bank.firstName, bank.lastName].filter(Boolean).join(" ") : "";
@@ -134,7 +161,7 @@ export async function buildPayrollSlipsPrint(year: number, month: number, employ
 <h1>${esc(company?.name ?? "")}</h1>
 <h2>${esc(docTitle)} ماه ${MONTHS[month - 1]} سال ${year}</h2>
 <div class="info">${info.join("")}</div>
-<div class="cols">${section("کارکرد", "مقدار", work)}${section("مزایا", "مبلغ – ریال", earn)}${section("کسورات", "مبلغ – ریال", ded)}</div>
+<div class="cols">${section("کارکرد", "مقدار", work)}${section("مزایا", "مبلغ – ریال", earn)}${section("کسورات", "مبلغ – ریال", ded)}${loanSection(loans)}</div>
 <div class="tot"><div><span>جمع مزایا</span><span>${money(s.earnings.toString())}</span></div><div><span>جمع کسور</span><span>${money(s.deductions.toString())}</span></div><div><span>خالص پرداختی</span><span>${money(s.netPay.toString())}</span></div></div>
 ${accNo ? `<div class="note">مبلغ خالص پرداختنی به حساب شماره ${esc(accNo)}${bankName ? ` نزد بانک ${esc(bankName)}` : ""} واریز گردید.</div>` : ""}
 ${s.hasErrors ? `<div class="warn">توجه: محاسبه‌ی این فیش در برخی عوامل خطا داشته و جمع‌ها ناقص است؛ فیش را پیش از استفاده بررسی کنید.</div>` : ""}
