@@ -39,6 +39,14 @@ export async function syncRegistryToDb(): Promise<void> {
     });
   }
 
+  // «مدیر سیستم» (Role.code = 1) هر Action موجود در Registry را خودکار دارد: فرم/اکشن تازه که فقط در registry.ts تعریف شود، همان اولین بالا آمدنِ سرور
+  // برای مدیر سیستم هم فعال است (قبلاً فقط seed این را وصل می‌کرد). نقش‌های دیگر عمداً خودکار چیزی نمی‌گیرند؛ تیک آن‌ها از فرم «نقش کاربری» است.
+  const admin = await prisma.role.findUnique({ where: { code: 1 } });
+  if (admin) {
+    const all = await prisma.action.findMany({ select: { id: true } });
+    await prisma.roleAction.createMany({ data: all.map((x) => ({ roleId: admin.id, actionId: x.id })), skipDuplicates: true });
+  }
+
   const validKeys = new Set(flat.map((a) => a.key));
   const existing = await prisma.action.findMany({ select: { id: true, key: true } });
   const staleIds = existing.filter((e) => !validKeys.has(e.key)).map((e) => e.id);
