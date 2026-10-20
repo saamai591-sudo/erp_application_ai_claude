@@ -6,6 +6,7 @@ import { assertRecordNotStale } from "../utils/concurrency";
 import { loadCurrentRecords } from "../services/employeeRecordService";
 import { HrError, checkAssignmentRefs, changeAssignment } from "../services/employeeAssignmentService";
 import { assignmentLocks, deleteAssignment, updateAssignment } from "../services/employeeHistoryService";
+import { loadEmployeeBeneficiaries, saveEmployeeBeneficiaries } from "../services/beneficiaryService";
 import { changeStatus, createInitialRecord, currentStatuses, deleteStatusRecord, isCooperationEnded, statusHistory, updateStatusRecord } from "../services/employmentStatusService";
 import { getEffectiveDecree, getEffectiveDecrees } from "../services/employmentDecreeService";
 
@@ -216,6 +217,7 @@ router.get("/employees/:id", async (req, res) => {
     party: { ...party, fullName: partyDisplayName(party), birthDate: day(party.birthDate) },
     photo: photo ? `data:${photo.mimeType};base64,${Buffer.from(photo.data).toString("base64")}` : null,
     status: history.status,
+    beneficiaries: await loadEmployeeBeneficiaries(id),
     lastStatus: history.lastStatus,
     lastStatusDate: history.lastDate,
     statusRecords: history.records,
@@ -278,6 +280,7 @@ export async function createEmployee(b: any, opts: { allowNoPhoto?: boolean } = 
         });
         if (photo) await tx.employeePhoto.create({ data: { employeeId: emp.id, ...photo } });
         await createInitialRecord(tx, emp.id, startDate);
+        await saveEmployeeBeneficiaries(tx, emp.id, b.beneficiaries); // undefined (ورود از اکسل) = بدون تغییر
         await tx.employeeEducationRecord.create({
           data: { employeeId: emp.id, effectiveDate: startDate, educationLevelId: Number(b.educationLevelId), field: str(b.educationField) },
         });
@@ -352,6 +355,7 @@ router.put("/employees/:id", can(`${FORM}.edit`), async (req, res) => {
           salaryBankAccountId: has("salaryBankAccountId") ? (b.salaryBankAccountId ? Number(b.salaryBankAccountId) : null) : undefined,
         },
       });
+      await saveEmployeeBeneficiaries(tx, id, b.beneficiaries);
       if (photo) {
         await tx.employeePhoto.upsert({
           where: { employeeId: id },

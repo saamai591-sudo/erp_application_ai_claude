@@ -355,7 +355,11 @@ const RAW_MODULES: ModuleGroup[] = [
     subModules: [
       {
         title: "تنظیمات",
-        items: [{ key: "work-calendars", label: "تقویم کاری", list: "/work-calendars", create: "/work-calendars/new", icon: "calendar" }],
+        items: [
+          { key: "work-calendars", label: "تقویم کاری", list: "/work-calendars", create: "/work-calendars/new", icon: "calendar" },
+          { key: "beneficiary-orgs", label: "سازمان ذینفع", list: "/beneficiary-orgs", create: "/beneficiary-orgs/new", icon: "tag" },
+          { key: "beneficiary-branches", label: "شعب سازمان ذینفع", list: "/beneficiary-branches", create: "/beneficiary-branches/new", icon: "tag" },
+        ],
       },
       {
         title: "پرسنلی",

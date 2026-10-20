@@ -148,6 +148,8 @@ import ChequeDepositReturns from "./pages/ChequeDepositReturns";
 import ChequeClearingReceivable from "./pages/ChequeClearingReceivable";
 import ChequeClearingPayable from "./pages/ChequeClearingPayable";
 
+import BeneficiaryOrgs from "./pages/BeneficiaryOrgs";
+import BeneficiaryBranches from "./pages/BeneficiaryBranches";
 import { ToastHost } from "./components/ToastHost";
 import { UsageDialogHost } from "./components/UsageDialogHost";
 
@@ -466,6 +468,12 @@ export default function App() {
             <Route path="/work-calendars" element={<WorkCalendars />} />
             <Route path="/work-calendars/new" element={<WorkCalendars />} />
             <Route path="/work-calendars/:id/edit" element={<WorkCalendars />} />
+            <Route path="/beneficiary-orgs" element={<BeneficiaryOrgs />} />
+            <Route path="/beneficiary-orgs/new" element={<BeneficiaryOrgs />} />
+            <Route path="/beneficiary-orgs/:id/edit" element={<BeneficiaryOrgs />} />
+            <Route path="/beneficiary-branches" element={<BeneficiaryBranches />} />
+            <Route path="/beneficiary-branches/new" element={<BeneficiaryBranches />} />
+            <Route path="/beneficiary-branches/:id/edit" element={<BeneficiaryBranches />} />
             <Route path="/payroll-calc-types" element={<PayrollCalcTypes />} />
             <Route path="/payroll-calc-types/new" element={<PayrollCalcTypes />} />
             <Route path="/payroll-calc-types/:id/edit" element={<PayrollCalcTypes />} />

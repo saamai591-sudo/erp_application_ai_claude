@@ -52,6 +52,9 @@ export const USAGE_META: Record<string, UsageMeta> = {
   PayrollFactorMethod: { label: "روش محاسبه عامل", title: (r) => `#${r.id}` },
   WorkCalendar: { label: "تقویم کاری", title: (r) => `${r.year}` },
   WorkCalendarMonth: { label: "ماه تقویم کاری", title: (r) => `${r.year}/${r.month}` },
+  BeneficiaryOrg: { label: "سازمان ذینفع", base: "/beneficiary-orgs" },
+  BeneficiaryBranch: { label: "شعبه‌ی سازمان ذینفع", base: "/beneficiary-branches", include: { party: { select: { detailTitle: true } } }, title: (r) => `${r.party?.detailTitle ?? ""}${r.contractRow ? ` (ردیف پیمان ${r.contractRow})` : ""}` },
+  EmployeeBeneficiary: { label: "مشمولیت کارمند در سازمان ذینفع", include: EMP, title: (r) => `${r.isIncluded ? "مشمول" : "غیرمشمول"}${ofEmp(r)}` },
   // اطلاعات پایه
   Party: { label: "شخص / طرف‌حساب", title: (r) => r.detailTitle || partyName(r) || r.detailCode },
   Customer: { label: "مشتری", base: "/customers", include: { party: { select: { firstName: true, lastName: true, name: true, detailTitle: true } } }, title: (r) => r.party?.detailTitle || partyName(r.party) || `#${r.id}` },

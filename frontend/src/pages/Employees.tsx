@@ -104,6 +104,14 @@ interface Assignment {
   orgUnit: { title: string };
   costCenter: { title: string } | null;
 }
+interface BenefOrg {
+  id: number;
+  code: number;
+  title: string;
+  type: string;
+  fileNumberLabel: string;
+  branches: { id: number; isActive: boolean; label: string; fileNumber: string }[];
+}
 interface StatusRecord {
   id: number;
   effectiveDate: string;
@@ -339,6 +347,8 @@ const EMPTY = {
   isVeteran: "",
   notes: "",
   salaryBankAccountId: "",
+  /** مشمولیت در سازمان‌های ذینفع: organizationId → «مشمول/غیرمشمول» (خالی = تعیین‌نشده) + شعبه */
+  benef: {} as Record<string, { included: "" | "YES" | "NO"; branchId: string }>,
 };
 
 function EmployeeForm({ editId }: { editId?: number }) {
@@ -359,6 +369,7 @@ function EmployeeForm({ editId }: { editId?: number }) {
   const [cities, setCities] = useState<Opt[]>([]);
   const [levels, setLevels] = useState<Opt[]>([]);
   const [reasons, setReasons] = useState<Opt[]>([]);
+  const [benefOrgs, setBenefOrgs] = useState<BenefOrg[]>([]);
   const [nextCode, setNextCode] = useState("");
   const [statusDlg, setStatusDlg] = useState(false);
   const [assignDlg, setAssignDlg] = useState(false);
@@ -383,6 +394,7 @@ function EmployeeForm({ editId }: { editId?: number }) {
     setCities(geo.filter((g: any) => g.level === "CITY").map((g: any) => ({ id: g.id, title: g.title, code: Number(g.code) || undefined })));
     setLevels(lv);
     setReasons(rs);
+    api.get("/beneficiary-orgs/employee-options").then(setBenefOrgs).catch(() => {});
     if (!editId) {
       api.get("/employees/available-parties").then(setParties).catch(() => {});
       api.get("/employees/next-code").then((r: { code: string }) => setNextCode(r.code)).catch(() => {});
@@ -403,6 +415,9 @@ function EmployeeForm({ editId }: { editId?: number }) {
       hasDisability: !!d.hasDisability,
       notes: d.notes ?? "",
       salaryBankAccountId: d.salaryBankAccountId ? String(d.salaryBankAccountId) : "",
+      benef: Object.fromEntries(
+        ((d.beneficiaries ?? []) as { organizationId: number; isIncluded: boolean; branchId: number | null }[]).map((b) => [String(b.organizationId), { included: b.isIncluded ? "YES" : "NO", branchId: b.branchId ? String(b.branchId) : "" }])
+      ),
     });
   }
 
@@ -455,10 +470,21 @@ function EmployeeForm({ editId }: { editId?: number }) {
       notes: form.notes,
       salaryBankAccountId: form.salaryBankAccountId ? Number(form.salaryBankAccountId) : null,
     };
+    // مشمولیت سازمان‌های ذینفع: برای هر سازمان باید صریحاً مشمول یا غیرمشمول انتخاب شود (با «—» ذخیره نمی‌شود)؛ مشمول ⇒ شعبه الزامی
+    for (const o of benefOrgs) {
+      const v = (form.benef ?? {})[String(o.id)];
+      if (!v || !v.included) return setError(`برای سازمان «${o.title}» مشمول یا غیرمشمول را انتخاب کنید`);
+      if (v.included === "YES" && !v.branchId) return setError(`برای سازمان «${o.title}» شعبه را انتخاب کنید`);
+    }
+    const beneficiaries = benefOrgs.map((o) => {
+      const v = (form.benef ?? {})[String(o.id)];
+      return { organizationId: o.id, isIncluded: v.included === "YES", branchId: v.included === "YES" ? Number(v.branchId) : null };
+    });
     try {
       if (editId) {
         await api.put(`/employees/${editId}`, {
           ...common,
+          beneficiaries,
           personnelCode: form.personnelCode.trim(),
           photo: photo ? { mimeType: photo.mimeType, dataBase64: photo.dataBase64 } : undefined,
           updatedAt: detail?.updatedAt,
@@ -477,6 +503,7 @@ function EmployeeForm({ editId }: { editId?: number }) {
         if (!form.isVeteran) return setError("وضعیت ایثارگری الزامی است");
         const created = await api.post("/employees", {
           ...common,
+          beneficiaries,
           // مقدار اولیه‌ی سوابق تاریخ‌دار: سرور اولین سابقه‌ی هر کدام را با تاریخ شروع همکاری می‌سازد؛ بعداً فقط از فرم‌های «سوابق» تغییر می‌کنند
           educationLevelId: Number(form.educationLevelId),
           educationField: form.educationField,
@@ -751,6 +778,52 @@ function EmployeeForm({ editId }: { editId?: number }) {
             <input value={form.notes} onChange={(e) => set("notes", e.target.value)} />
           </div>
         </div>
+
+        {benefOrgs.length > 0 && (
+          <>
+            <h3 className="hr-section">
+              سازمان‌های ذینفع{" "}
+              <FieldHint label="سازمان‌های ذینفع" text="برای هر سازمان باید صریحاً «مشمول» یا «غیرمشمول» انتخاب شود (با «—» ذخیره نمی‌شود). برای کارمند مشمول، شعبه از شعبه‌های همان سازمان انتخاب می‌شود (عنوان شعبه + ردیف پیمان)." />
+            </h3>
+            <table className="hr-table">
+              <thead>
+                <tr><th>نام سازمان</th><th style={{ width: 160 }}>مشمول</th><th>شعبه</th></tr>
+              </thead>
+              <tbody>
+                {benefOrgs.map((o) => {
+                  const v = (form.benef ?? {})[String(o.id)] ?? { included: "", branchId: "" };
+                  const setV = (p: Partial<typeof v>) => setForm({ ...form, benef: { ...(form.benef ?? {}), [String(o.id)]: { ...v, ...p } } });
+                  const branch = o.branches.find((b) => String(b.id) === v.branchId);
+                  return (
+                    <tr key={o.id}>
+                      <td>{o.title}</td>
+                      <td>
+                        <select value={v.included} onChange={(e) => setV({ included: e.target.value as "" | "YES" | "NO", branchId: e.target.value === "YES" ? v.branchId : "" })}>
+                          <option value="">—</option>
+                          <option value="YES">مشمول</option>
+                          <option value="NO">غیرمشمول</option>
+                        </select>
+                      </td>
+                      <td>
+                        <RecordPickerField<BenefOrg["branches"][number]>
+                          title={`انتخاب شعبه — ${o.title}`}
+                          disabled={v.included !== "YES"}
+                          displayValue={branch ? branch.label : ""}
+                          rows={o.branches.filter((b) => b.isActive || String(b.id) === v.branchId)}
+                          columns={[
+                            { header: "شعبه (ردیف پیمان)", render: (x) => x.label, filterValue: (x) => x.label },
+                            { header: o.fileNumberLabel, render: (x) => toFaDigits(x.fileNumber), filterValue: (x) => x.fileNumber, width: "150px" },
+                          ]}
+                          onSelect={(x) => setV({ branchId: String(x.id) })}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </>
+        )}
 
         {!editId && (
           <>

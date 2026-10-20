@@ -553,7 +553,11 @@ export const REGISTRY: ModuleDef[] = [
       {
         key: "settings",
         title: "تنظیمات",
-        forms: [{ key: "work-calendars", title: "تقویم کاری", baseActions: CRUD }],
+        forms: [
+          { key: "work-calendars", title: "تقویم کاری", baseActions: CRUD },
+          { key: "beneficiary-orgs", title: "سازمان ذینفع", baseActions: CRUD },
+          { key: "beneficiary-branches", title: "شعب سازمان ذینفع", baseActions: CRUD },
+        ],
       },
       {
         key: "personnel",
