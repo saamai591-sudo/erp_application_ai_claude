@@ -34,6 +34,7 @@ interface SetRow {
   secondingPartyTitle: string | null;
   projectId: number | null;
   projectTitle: string | null;
+  lockedReason?: string | null;
 }
 interface EmpOpt {
   id: number;
@@ -127,6 +128,7 @@ function SettingForm({ editId }: { editId?: number }) {
   const [projects, setProjects] = useState<ProjectOpt[]>([]);
   const [meta, setMeta] = useState<{ employee?: string }>({});
   const [error, setError] = useState<string | null>(null);
+  const [lock, setLock] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const { flash } = useSavedFlash();
 
@@ -136,6 +138,7 @@ function SettingForm({ editId }: { editId?: number }) {
     api.get("/projects").then(setProjects).catch(() => {});
     if (!editId) return;
     api.get(`/payroll-issue-settings/${editId}`).then((s: SetRow) => {
+      setLock(s.lockedReason ?? null);
       setMeta({ employee: `${s.personnelCode} — ${s.employeeName}` });
       if (!hasPersistedState(cacheKey)) {
         setForm({ fromYear: s.fromYear, fromMonth: s.fromMonth, employeeId: String(s.employeeId), groupId: String(s.groupId), secondingPartyId: s.secondingPartyId ? String(s.secondingPartyId) : "", projectId: s.projectId ? String(s.projectId) : "" });
@@ -204,10 +207,13 @@ function SettingForm({ editId }: { editId?: number }) {
       formId="payroll-setting-form"
       closePath="/payroll-issue-settings"
       newPath="/payroll-issue-settings/new"
-      onDelete={editId ? handleDelete : undefined}
+      onDelete={editId && !lock ? handleDelete : undefined}
+      saveDisabled={!!lock}
     >
       <form id="payroll-setting-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
+        {lock && <div className="alert error" style={{ marginBottom: 8 }}>{lock}</div>}
+        <fieldset disabled={!!lock} style={{ border: "none", padding: 0, margin: 0 }}>
         <div className="form-grid">
           <div className="form-field">
             <label>ماه<RequiredMark /> <FieldHint label="ماه" text="از این ماه به بعد (تا رکورد بعدیِ همین کارمند) این تنظیمات اعمال می‌شود" /></label>
@@ -276,6 +282,7 @@ function SettingForm({ editId }: { editId?: number }) {
             </div>
           </>
         )}
+        </fieldset>
       </form>
     </FormPage>
   );

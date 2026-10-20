@@ -41,6 +41,7 @@ interface TplRow {
   description: string | null;
   partyKind: string | null;
   isActive: boolean;
+  lockedReason?: string | null;
 }
 interface Options {
   groups: { id: number; code: number; title: string; hasSecondment: boolean; usesProject: boolean }[];
@@ -118,6 +119,7 @@ function TplForm({ editId }: { editId?: number }) {
   const [form, setForm] = usePersistedState(cacheKey, EMPTY);
   const [opts, setOpts] = useState<Options>({ groups: [], refs: [], accounts: [] });
   const [error, setError] = useState<string | null>(null);
+  const [lock, setLock] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const { flash } = useSavedFlash();
 
@@ -125,6 +127,7 @@ function TplForm({ editId }: { editId?: number }) {
     api.get("/payroll-journal-templates/options").then(setOpts).catch(() => {});
     if (!editId) return;
     api.get(`/payroll-journal-templates/${editId}`).then((t: TplRow) => {
+      setLock(t.lockedReason ?? null);
       const refKey = t.payrollComponentId ? `P:${t.payrollComponentId}` : t.decreeComponentId ? `D:${t.decreeComponentId}` : t.netCalcTypeId ? `N:${t.netCalcTypeId}` : `L:${t.loanTypeId}`;
       if (!hasPersistedState(cacheKey)) {
         setForm({ fromYear: t.fromYear, fromMonth: t.fromMonth, groupId: String(t.groupId), refKey, accountId: String(t.accountId), nature: t.nature, description: t.description ?? "", partyKind: t.partyKind ?? "", isActive: t.isActive });
@@ -195,10 +198,13 @@ function TplForm({ editId }: { editId?: number }) {
       formId="payroll-tpl-form"
       closePath="/payroll-journal-templates"
       newPath="/payroll-journal-templates/new"
-      onDelete={editId ? handleDelete : undefined}
+      onDelete={editId && !lock ? handleDelete : undefined}
+      saveDisabled={!!lock}
     >
       <form id="payroll-tpl-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
+        {lock && <div className="alert error" style={{ marginBottom: 8 }}>{lock}</div>}
+        <fieldset disabled={!!lock} style={{ border: "none", padding: 0, margin: 0 }}>
         <div className="form-grid">
           <div className="form-field">
             <label>از ماه<RequiredMark /></label>
@@ -271,6 +277,7 @@ function TplForm({ editId }: { editId?: number }) {
             </label>
           </div>
         </div>
+        </fieldset>
       </form>
     </FormPage>
   );

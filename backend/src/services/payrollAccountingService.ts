@@ -40,6 +40,46 @@ export function refKeyOf(t: { payrollComponentId: number | null; decreeComponent
   return `L:${t.loanTypeId}`;
 }
 
+// ── قفل الگو و تنظیمات بعد از صدور سند ──
+// رکورد الگو/تنظیماتی که «از ماه»اش ≤ آخرین ماهِ دارای سند حقوق است قفل است (ویرایش/حذف نمی‌شود) و رکورد تازه هم فقط با «از ماه» بعد از آخرین ماهِ دارای سند ممکن است
+// (وگرنه سند صادرشده را با الگو/گروه دیگری توجیه می‌کرد). الگو: آخرین ماهِ دارای سندِ کارمندانِ همان گروه؛ تنظیمات: آخرین ماهِ دارای سندِ همان کارمند.
+
+export interface IssuedIndex {
+  byGroup: Map<number, number>;
+  byEmployee: Map<number, number>;
+}
+
+export async function issuedIndex(): Promise<IssuedIndex> {
+  const out: IssuedIndex = { byGroup: new Map(), byEmployee: new Map() };
+  const slips = await prisma.payrollSlip.findMany({ where: { journalEntryId: { not: null } }, select: { employeeId: true, year: true, month: true } });
+  if (slips.length === 0) return out;
+  const settings = await prisma.payrollIssueSetting.findMany({ where: { employeeId: { in: [...new Set(slips.map((x) => x.employeeId))] } }, include: { fromMonth: { select: { year: true, month: true } } } });
+  for (const sl of slips) {
+    const ym = ymKey(sl.year, sl.month);
+    if (ym > (out.byEmployee.get(sl.employeeId) ?? 0)) out.byEmployee.set(sl.employeeId, ym);
+    const eff = settings.filter((x) => x.employeeId === sl.employeeId && ymKey(x.fromMonth.year, x.fromMonth.month) <= ym).sort((a, b) => ymKey(b.fromMonth.year, b.fromMonth.month) - ymKey(a.fromMonth.year, a.fromMonth.month))[0];
+    if (eff && ym > (out.byGroup.get(eff.groupId) ?? 0)) out.byGroup.set(eff.groupId, ym);
+  }
+  return out;
+}
+
+const ymText = (ym: number) => `${Math.floor(ym / 100)}/${ym % 100}`;
+
+/** پیام قفلِ یک رکورد الگو (null = آزاد) */
+export function templateLockMessage(idx: IssuedIndex, groupId: number, fromYear: number, fromMonth: number): string | null {
+  const max = idx.byGroup.get(groupId);
+  return max !== undefined && ymKey(fromYear, fromMonth) <= max ? `برای کارمندان این گروه تا ماه ${ymText(max)} سند حقوق صادر شده است؛ رکورد الگو با «از ماه» ${ymText(ymKey(fromYear, fromMonth))} قفل است` : null;
+}
+/** پیام قفلِ یک رکورد تنظیمات صدور (null = آزاد) */
+export function settingLockMessage(idx: IssuedIndex, employeeId: number, fromYear: number, fromMonth: number): string | null {
+  const max = idx.byEmployee.get(employeeId);
+  return max !== undefined && ymKey(fromYear, fromMonth) <= max ? `برای این کارمند تا ماه ${ymText(max)} سند حقوق صادر شده است؛ تنظیمات با «از ماه» ${ymText(ymKey(fromYear, fromMonth))} قفل است` : null;
+}
+/** رکورد تازه (یا ویرایش‌شده) باید بعد از آخرین ماهِ دارای سند باشد */
+function assertAfterIssued(max: number | undefined, year: number, month: number, who: string) {
+  if (max !== undefined && ymKey(year, month) <= max) throw new PayrollAcctError(`برای ${who} تا ماه ${ymText(max)} سند حقوق صادر شده است؛ «از ماه» باید بعد از آن باشد`);
+}
+
 // ── گروه حساب حقوق ──
 
 export async function groupHasSettings(groupId: number): Promise<boolean> {
@@ -91,6 +131,7 @@ export async function validateTemplate(b: any, excludeId?: number) {
   } else if (!(await prisma.loanType.findUnique({ where: { id: refId } }))) throw new PayrollAcctError("نوع وام یافت نشد");
   ref[refField] = refId;
 
+  assertAfterIssued((await issuedIndex()).byGroup.get(group.id), cal.year, cal.month, "کارمندان این گروه");
   const nature = b.nature;
   if (nature !== "DEBIT" && nature !== "CREDIT") throw new PayrollAcctError("ماهیت را انتخاب کنید (بدهکار یا بستانکار)");
 
@@ -133,6 +174,7 @@ export async function validateIssueSetting(b: any, excludeId?: number) {
   if (!employeeId || !(await prisma.employee.findUnique({ where: { id: employeeId }, select: { id: true } }))) throw new PayrollAcctError("کارمند را انتخاب کنید");
   const { employeeIdsInPeriod } = await import("./employmentStatusService");
   if ((await employeeIdsInPeriod(cal.startDate, cal.endDate, [employeeId])).length === 0) throw new PayrollAcctError("کارمند در ماه انتخاب‌شده در وضعیت همکاری نیست");
+  assertAfterIssued((await issuedIndex()).byEmployee.get(employeeId), cal.year, cal.month, "این کارمند");
   const group = await prisma.payrollAccountGroup.findUnique({ where: { id: Number(b.groupId) } });
   if (!group) throw new PayrollAcctError("گروه حساب را انتخاب کنید");
   let secondingPartyId: number | null = null;

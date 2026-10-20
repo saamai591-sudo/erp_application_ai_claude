@@ -15,6 +15,9 @@ import {
   validateIssueSetting,
   validateTemplate,
   accountSlots,
+  issuedIndex,
+  settingLockMessage,
+  templateLockMessage,
 } from "../services/payrollAccountingService";
 import { DETAIL_TYPE_CODE_PARTY } from "../utils/detailValues";
 
@@ -155,8 +158,8 @@ function shapeTemplate(t: any) {
 }
 
 router.get("/payroll-journal-templates", can(`${F_TPL}.view`), async (_req, res) => {
-  const rows = await prisma.payrollJournalTemplate.findMany({ include: tplInclude, orderBy: [{ groupId: "asc" }, { id: "asc" }] });
-  res.json(rows.map(shapeTemplate));
+  const [rows, idx] = await Promise.all([prisma.payrollJournalTemplate.findMany({ include: tplInclude, orderBy: [{ groupId: "asc" }, { id: "asc" }] }), issuedIndex()]);
+  res.json(rows.map((t) => ({ ...shapeTemplate(t), lockedReason: templateLockMessage(idx, t.groupId, t.fromMonth.year, t.fromMonth.month) })));
 });
 
 /** گزینه‌های فرم: گروه‌ها، مرجع‌ها (عامل حقوق/حکم، خالص پرداختی هر نوع محاسبه، وام هر نوع)، حساب‌های معین با «دارای سطح طرف حساب» */
@@ -188,7 +191,7 @@ router.get("/payroll-journal-templates/options", async (_req, res) => {
 router.get("/payroll-journal-templates/:id", can(`${F_TPL}.view`), async (req, res) => {
   const t = await prisma.payrollJournalTemplate.findUnique({ where: { id: Number(req.params.id) }, include: tplInclude });
   if (!t) return res.status(404).json({ error: "رکورد الگو یافت نشد" });
-  res.json(shapeTemplate(t));
+  res.json({ ...shapeTemplate(t), lockedReason: templateLockMessage(await issuedIndex(), t.groupId, t.fromMonth.year, t.fromMonth.month) });
 });
 
 router.post("/payroll-journal-templates", can(`${F_TPL}.create`), async (req, res) => {
@@ -203,7 +206,10 @@ router.post("/payroll-journal-templates", can(`${F_TPL}.create`), async (req, re
 router.put("/payroll-journal-templates/:id", can(`${F_TPL}.edit`), async (req, res) => {
   try {
     const id = Number(req.params.id);
-    if (!(await prisma.payrollJournalTemplate.findUnique({ where: { id } }))) return res.status(404).json({ error: "رکورد الگو یافت نشد" });
+    const ex = await prisma.payrollJournalTemplate.findUnique({ where: { id }, include: { fromMonth: { select: { year: true, month: true } } } });
+    if (!ex) return res.status(404).json({ error: "رکورد الگو یافت نشد" });
+    const lock = templateLockMessage(await issuedIndex(), ex.groupId, ex.fromMonth.year, ex.fromMonth.month);
+    if (lock) throw new PayrollAcctError(lock);
     await prisma.payrollJournalTemplate.update({ where: { id }, data: await validateTemplate(req.body, id) });
     res.json({ ok: true });
   } catch (e) {
@@ -213,6 +219,11 @@ router.put("/payroll-journal-templates/:id", can(`${F_TPL}.edit`), async (req, r
 
 router.delete("/payroll-journal-templates/:id", can(`${F_TPL}.delete`), async (req, res) => {
   try {
+    const ex = await prisma.payrollJournalTemplate.findUnique({ where: { id: Number(req.params.id) }, include: { fromMonth: { select: { year: true, month: true } } } });
+    if (ex) {
+      const lock = templateLockMessage(await issuedIndex(), ex.groupId, ex.fromMonth.year, ex.fromMonth.month);
+      if (lock) throw new PayrollAcctError(lock);
+    }
     await prisma.payrollJournalTemplate.delete({ where: { id: Number(req.params.id) } });
     res.status(204).end();
   } catch (e) {
@@ -250,8 +261,8 @@ function shapeSetting(s: any) {
 }
 
 router.get("/payroll-issue-settings", can(`${F_SET}.view`), async (_req, res) => {
-  const rows = await prisma.payrollIssueSetting.findMany({ include: setInclude, orderBy: [{ employeeId: "asc" }, { id: "asc" }] });
-  res.json(rows.map(shapeSetting));
+  const [rows, idx] = await Promise.all([prisma.payrollIssueSetting.findMany({ include: setInclude, orderBy: [{ employeeId: "asc" }, { id: "asc" }] }), issuedIndex()]);
+  res.json(rows.map((s) => ({ ...shapeSetting(s), lockedReason: settingLockMessage(idx, s.employeeId, s.fromMonth.year, s.fromMonth.month) })));
 });
 
 // کارمندانی که در ماه انتخاب‌شده در وضعیت همکاری‌اند (انتخابگر کارمند فرم)
@@ -270,7 +281,7 @@ router.get("/payroll-issue-settings/employees", async (req, res) => {
 router.get("/payroll-issue-settings/:id", can(`${F_SET}.view`), async (req, res) => {
   const s = await prisma.payrollIssueSetting.findUnique({ where: { id: Number(req.params.id) }, include: setInclude });
   if (!s) return res.status(404).json({ error: "تنظیمات یافت نشد" });
-  res.json(shapeSetting(s));
+  res.json({ ...shapeSetting(s), lockedReason: settingLockMessage(await issuedIndex(), s.employeeId, s.fromMonth.year, s.fromMonth.month) });
 });
 
 router.post("/payroll-issue-settings", can(`${F_SET}.create`), async (req, res) => {
@@ -285,7 +296,10 @@ router.post("/payroll-issue-settings", can(`${F_SET}.create`), async (req, res) 
 router.put("/payroll-issue-settings/:id", can(`${F_SET}.edit`), async (req, res) => {
   try {
     const id = Number(req.params.id);
-    if (!(await prisma.payrollIssueSetting.findUnique({ where: { id } }))) return res.status(404).json({ error: "تنظیمات یافت نشد" });
+    const ex = await prisma.payrollIssueSetting.findUnique({ where: { id }, include: { fromMonth: { select: { year: true, month: true } } } });
+    if (!ex) return res.status(404).json({ error: "تنظیمات یافت نشد" });
+    const lock = settingLockMessage(await issuedIndex(), ex.employeeId, ex.fromMonth.year, ex.fromMonth.month);
+    if (lock) throw new PayrollAcctError(lock);
     await prisma.payrollIssueSetting.update({ where: { id }, data: await validateIssueSetting(req.body, id) });
     res.json({ ok: true });
   } catch (e) {
@@ -295,6 +309,11 @@ router.put("/payroll-issue-settings/:id", can(`${F_SET}.edit`), async (req, res)
 
 router.delete("/payroll-issue-settings/:id", can(`${F_SET}.delete`), async (req, res) => {
   try {
+    const ex = await prisma.payrollIssueSetting.findUnique({ where: { id: Number(req.params.id) }, include: { fromMonth: { select: { year: true, month: true } } } });
+    if (ex) {
+      const lock = settingLockMessage(await issuedIndex(), ex.employeeId, ex.fromMonth.year, ex.fromMonth.month);
+      if (lock) throw new PayrollAcctError(lock);
+    }
     await prisma.payrollIssueSetting.delete({ where: { id: Number(req.params.id) } });
     res.status(204).end();
   } catch (e) {
