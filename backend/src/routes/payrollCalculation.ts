@@ -12,6 +12,7 @@ import { getCalendarMonth, missingMonthMessage } from "../services/workCalendarS
 import { basisRows, resolveBasisDecisions } from "../services/payrollBasisService";
 import { BASE_INFO, DECREE_VARIANTS, FACTOR_VARIANTS, KIND_FA, LOAN_SUM_KEY, LOAN_SUM_LABEL } from "../services/payrollFormula";
 import { employeeIdsInPeriod } from "../services/employmentStatusService";
+import { slipJournalLockMessage } from "../services/payrollAccountingService";
 
 // حقوق و دستمزد: عامل‌های حقوق (هویت)، «روش محاسبه عامل» (تاریخ‌دار با ماه اجرا؛ مبنا = عامل حکم یا عامل حقوق)، ورودی ماهانه‌ی عوامل،
 // محاسبه‌ی فیش یک کارمند و جزئیات آن برای گزارش.
@@ -109,7 +110,7 @@ router.delete("/payroll-calc-types/:id", can(`${F_TYPE}.delete`), async (req, re
 
 // ════════════ عامل حقوق (هویت) ════════════
 router.get("/payroll-components", can(`${F_COMP}.view`), async (_req, res) => {
-  const rows = await prisma.payrollComponent.findMany({ orderBy: { id: "asc" }, include: { methods: { orderBy: { execCalendarMonth: { startDate: "desc" } }, take: 1 }, calcType: { select: { title: true } } } });
+  const rows = await prisma.payrollComponent.findMany({ orderBy: { id: "asc" }, include: { methods: { orderBy: { execCalendarMonth: { startDate: "desc" } }, take: 1 }, calcType: { select: { title: true } }, beneficiaryOrg: { select: { title: true } } } });
   res.json(
     rows.map((c) => ({
       id: c.id,
@@ -121,6 +122,8 @@ router.get("/payroll-components", can(`${F_COMP}.view`), async (_req, res) => {
       excludeFromSums: c.excludeFromSums,
       calcTypeId: c.calcTypeId,
       calcTypeTitle: c.calcType.title,
+      beneficiaryOrgId: c.beneficiaryOrgId,
+      beneficiaryOrgTitle: c.beneficiaryOrg?.title ?? null,
     }))
   );
 });
@@ -128,7 +131,7 @@ router.get("/payroll-components", can(`${F_COMP}.view`), async (_req, res) => {
 router.post("/payroll-components", can(`${F_COMP}.create`), async (req, res) => {
   const b = req.body as any;
   try {
-    const created = await createPayrollComponent({ title: str(b.title) ?? "", kind: b.kind, calcTypeId: Number(b.calcTypeId), description: str(b.description), isActive: b.isActive, excludeFromSums: b.excludeFromSums === true });
+    const created = await createPayrollComponent({ title: str(b.title) ?? "", kind: b.kind, calcTypeId: Number(b.calcTypeId), description: str(b.description), isActive: b.isActive, excludeFromSums: b.excludeFromSums === true, beneficiaryOrgId: b.beneficiaryOrgId ? Number(b.beneficiaryOrgId) : null });
     res.status(201).json({ id: created.id });
   } catch (e) {
     fail(res, e, "خطا در ثبت عامل");
@@ -153,6 +156,15 @@ router.put("/payroll-components/:id", can(`${F_COMP}.edit`), async (req, res) =>
     if (b.excludeFromSums !== undefined && !!b.excludeFromSums !== c.excludeFromSums && (await prisma.payrollSlipLine.count({ where: { source: "PAYROLL_COMPONENT", refId: id } }))) {
       throw new PayrollCalcError("این عامل در فیش‌های محاسبه‌شده استفاده شده و گزینه‌ی «در جمع طبقه‌ها نیاید» قابل تغییر نیست");
     }
+    // سازمان ذینفع عامل بر مبلغ فیش اثر دارد (غیرمشمول = صفر)؛ بعد از استفاده در فیش قابل تغییر نیست
+    let beneficiaryOrgId: number | null | undefined;
+    if (b.beneficiaryOrgId !== undefined) {
+      beneficiaryOrgId = b.beneficiaryOrgId ? Number(b.beneficiaryOrgId) : null;
+      if (beneficiaryOrgId !== c.beneficiaryOrgId) {
+        if (beneficiaryOrgId && !(await prisma.beneficiaryOrg.findUnique({ where: { id: beneficiaryOrgId } }))) throw new PayrollCalcError("سازمان ذینفع یافت نشد");
+        if (await prisma.payrollSlipLine.count({ where: { source: "PAYROLL_COMPONENT", refId: id } })) throw new PayrollCalcError("این عامل در فیش‌های محاسبه‌شده استفاده شده و سازمان ذینفعش قابل تغییر نیست");
+      }
+    }
     // تغییر نوع محاسبه: فقط وقتی عامل در فیشی نیامده و فرمول عامل دیگری به آن ارجاع ندارد
     let calcTypeId: number | undefined;
     if (b.calcTypeId !== undefined && Number(b.calcTypeId) !== c.calcTypeId) {
@@ -166,7 +178,7 @@ router.put("/payroll-components/:id", can(`${F_COMP}.edit`), async (req, res) =>
       if (users.length) throw new PayrollCalcError("فرمول عامل‌های دیگر به این عامل ارجاع دارد؛ نوع محاسبه‌اش قابل تغییر نیست");
       calcTypeId = nt.id;
     }
-    await prisma.payrollComponent.update({ where: { id }, data: { title, kind: b.kind ?? undefined, calcTypeId, description: str(b.description), isActive: b.isActive, excludeFromSums: b.excludeFromSums === undefined ? undefined : !!b.excludeFromSums } });
+    await prisma.payrollComponent.update({ where: { id }, data: { title, kind: b.kind ?? undefined, calcTypeId, description: str(b.description), isActive: b.isActive, excludeFromSums: b.excludeFromSums === undefined ? undefined : !!b.excludeFromSums, beneficiaryOrgId } });
     res.json({ ok: true });
   } catch (e) {
     fail(res, e, "خطا در ویرایش عامل");
@@ -464,7 +476,7 @@ router.get("/payroll-calculations/month", canAny(`${F_CALC}.view`, `${F_CALC}.ca
       include: { party: { select: { firstName: true, lastName: true, name: true } } },
       orderBy: { personnelCode: "asc" },
     });
-    const slips = await prisma.payrollSlip.findMany({ where: { year, month, calcTypeId: calcType.id, employeeId: { in: emps.map((e) => e.id) } } });
+    const slips = await prisma.payrollSlip.findMany({ where: { year, month, calcTypeId: calcType.id, employeeId: { in: emps.map((e) => e.id) } }, include: { journalEntry: { select: { id: true, referenceNumber: true, status: true } } } });
     // نوع غیرپایه: کارمندانی که «حقوق ماهانه»ی همین ماهشان محاسبه نشده قابل محاسبه نیستند
     const baseSet = calcType.isBase
       ? null
@@ -481,7 +493,7 @@ router.get("/payroll-calculations/month", canAny(`${F_CALC}.view`, `${F_CALC}.ca
           fullName: [e.party.firstName, e.party.lastName].filter(Boolean).join(" ") || e.party.name || "",
           decreeValidity: decrees.get(e.id)?.validity ?? "NONE",
           blockedReason: baseSet && !baseSet.has(e.id) ? `ابتدا «${baseType.title}» محاسبه شود` : null,
-          slip: s ? { id: s.id, netPay: s.netPay.toString(), hasErrors: s.hasErrors, calculatedAt: s.calculatedAt } : null,
+          slip: s ? { id: s.id, netPay: s.netPay.toString(), hasErrors: s.hasErrors, calculatedAt: s.calculatedAt, journalEntryId: s.journalEntry?.id ?? null, journalReferenceNumber: s.journalEntry?.referenceNumber ?? null } : null,
         };
       }),
     });
@@ -621,6 +633,8 @@ router.post("/payroll-calculations/delete", can(`${F_CALC}.delete`), async (req,
       const msg = await dependentSlipMessage(ids.map((employeeId) => ({ employeeId, year: Number(b.year), month: Number(b.month) })));
       if (msg) throw new PayrollCalcError(msg);
     }
+    const lock = await slipJournalLockMessage({ year: Number(b.year), month: Number(b.month), calcTypeId, employeeId: { in: ids } });
+    if (lock) throw new PayrollCalcError(lock);
     const r = await prisma.payrollSlip.deleteMany({ where: { year: Number(b.year), month: Number(b.month), calcTypeId, employeeId: { in: ids } } });
     res.json({ deleted: r.count });
   } catch (e) {
@@ -629,6 +643,8 @@ router.post("/payroll-calculations/delete", can(`${F_CALC}.delete`), async (req,
 });
 
 router.delete("/payroll-calculations/:id", can(`${F_CALC}.delete`), async (req, res) => {
+  const lock = await slipJournalLockMessage({ id: Number(req.params.id) });
+  if (lock) return res.status(400).json({ error: lock });
   const slip = await prisma.payrollSlip.findUnique({ where: { id: Number(req.params.id) }, select: { employeeId: true, year: true, month: true, calcType: { select: { isBase: true } } } });
   if (slip?.calcType.isBase) {
     const msg = await dependentSlipMessage([slip]);

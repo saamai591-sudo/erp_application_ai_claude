@@ -253,6 +253,9 @@ interface FactorNode {
   bases: Set<number>;
   /** عامل با «در جمع طبقه‌ها نیاید» */
   noSum?: boolean;
+  /** سازمان ذینفع مرتبط با عامل حقوق: کارمندِ غیرمشمول در آن سازمان ⇒ مبلغ صفر؛ مشمولیتِ تعیین‌نشده ⇒ خطا */
+  orgId?: number | null;
+  orgTitle?: string | null;
   decreeValue?: number; // مقدار حکم (برای D)
   decreeValueType?: string;
 }
@@ -266,19 +269,20 @@ function prevMonth(y: number, m: number) {
 const COMPONENT_KINDS = ["WORK", "EARNING", "DEDUCTION", "EMPLOYER_COST", "INFO"];
 
 /** ساخت «عامل حقوق» (فرم و ورود از اکسل هر دو از همین تابع): عنوان یکتا، طبقه‌ی معتبر، نوع محاسبه‌ی موجود؛ کلید داخلی را سیستم می‌سازد */
-export async function createPayrollComponent(input: { title: string; kind: string; calcTypeId: number; description?: string | null; isActive?: boolean; excludeFromSums?: boolean }): Promise<{ id: number }> {
+export async function createPayrollComponent(input: { title: string; kind: string; calcTypeId: number; description?: string | null; isActive?: boolean; excludeFromSums?: boolean; beneficiaryOrgId?: number | null }): Promise<{ id: number }> {
   const title = input.title.trim();
   if (!title) throw new PayrollCalcError("عنوان الزامی است");
   if (!COMPONENT_KINDS.includes(input.kind)) throw new PayrollCalcError("طبقه را انتخاب کنید");
   const calcType = input.calcTypeId ? await prisma.payrollCalcType.findUnique({ where: { id: input.calcTypeId } }) : null;
   if (!calcType) throw new PayrollCalcError("نوع محاسبه را انتخاب کنید");
   if (await prisma.payrollComponent.findFirst({ where: { title } })) throw new PayrollCalcError("عامل دیگری با همین عنوان وجود دارد");
+  if (input.beneficiaryOrgId && !(await prisma.beneficiaryOrg.findUnique({ where: { id: input.beneficiaryOrgId } }))) throw new PayrollCalcError("سازمان ذینفع یافت نشد");
   const last = await prisma.payrollComponent.findFirst({ orderBy: { id: "desc" }, select: { id: true } });
   let n = (last?.id ?? 0) + 1;
   let key = `F${n}`;
   while (await prisma.payrollComponent.findUnique({ where: { key } })) key = `F${++n}`;
   const created = await prisma.payrollComponent.create({
-    data: { key, title, kind: input.kind as any, calcTypeId: calcType.id, description: input.description?.trim() || null, isActive: input.isActive ?? true, excludeFromSums: !!input.excludeFromSums },
+    data: { key, title, kind: input.kind as any, calcTypeId: calcType.id, description: input.description?.trim() || null, isActive: input.isActive ?? true, excludeFromSums: !!input.excludeFromSums, beneficiaryOrgId: input.beneficiaryOrgId || null },
   });
   return { id: created.id };
 }
@@ -379,7 +383,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
     return m ? toRow(m) : null;
   };
 
-  const allComps = await prisma.payrollComponent.findMany({ where: { isActive: true }, orderBy: { id: "asc" } });
+  const allComps = await prisma.payrollComponent.findMany({ where: { isActive: true }, orderBy: { id: "asc" }, include: { beneficiaryOrg: { select: { title: true } } } });
   const payrollComps = allComps.filter((c) => c.calcTypeId === typeId);
   const allDecreeComps = await prisma.decreeComponent.findMany();
   const decreeByCode = new Map(allDecreeComps.map((d) => [String(d.code), d]));
@@ -425,7 +429,7 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
       warnings.push(`برای عامل حقوق «${c.title}» روش محاسبه‌ای تعریف نشده است؛ در محاسبه نیامد`);
       continue;
     }
-    nodes.push(mk({ node: `C:${c.key}`, source: "PAYROLL_COMPONENT", refId: c.id, title: c.title, kind: c.kind as Kind, method: m, noSum: c.excludeFromSums }));
+    nodes.push(mk({ node: `C:${c.key}`, source: "PAYROLL_COMPONENT", refId: c.id, title: c.title, kind: c.kind as Kind, method: m, noSum: c.excludeFromSums, orgId: c.beneficiaryOrgId, orgTitle: c.beneficiaryOrg?.title ?? null }));
   }
   const paramDefs = new Map((await prisma.payrollParameter.findMany()).map((p) => [p.key, p]));
   const basisByKey = new Map([...paramDefs.values()].filter((p) => p.kind === "BASIS").map((p) => [p.key, { id: p.id, source: p.basisSource as string | null }]));
@@ -665,6 +669,8 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
   };
 
   const provisionalNotes = new Set<string>();
+  // مشمولیت کارمند در سازمان‌های ذینفع (برای عامل‌های دارای سازمان)
+  const benefByOrg = new Map((await prisma.employeeBeneficiary.findMany({ where: { employeeId }, select: { organizationId: true, isIncluded: true } })).map((b) => [b.organizationId, b.isIncluded]));
   for (const n of order) {
     const m = n.method;
     let amount = 0;
@@ -676,7 +682,12 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
       if (!m) throw new FormulaError(n.source === "DECREE_COMPONENT" ? "روش محاسبه‌ی این عامل حکم تعریف نشده است" : "روش محاسبه تعریف نشده است");
       if (m.isProvisional) provisionalNotes.add(n.title);
       const compId = n.refId;
-      if (n.source === "PAYROLL_COMPONENT" && INPUT_METHODS.includes(m.method)) {
+      const orgIncluded = n.source === "PAYROLL_COMPONENT" && n.orgId ? benefByOrg.get(n.orgId) : true;
+      if (n.source === "PAYROLL_COMPONENT" && n.orgId && orgIncluded === undefined) throw new FormulaError(`مشمولیت کارمند در سازمان «${n.orgTitle ?? ""}» تعیین نشده است؛ در فرم کارمند مشمول یا غیرمشمول را انتخاب کنید`);
+      if (orgIncluded === false) {
+        amount = 0;
+        trace = { expression: "0", operands: [], method: METHOD_FA[m.method], note: `کارمند در سازمان «${n.orgTitle ?? ""}» غیرمشمول است؛ مبلغ صفر در نظر گرفته شد` };
+      } else if (n.source === "PAYROLL_COMPONENT" && INPUT_METHODS.includes(m.method)) {
         const stored = inputByComp.get(compId);
         // ورود دستی: مقدار ثبت‌نشده = صفر (ISNULL(x, 0)). ورود از تردد/خزانه: نبودن مقدار یعنی خوراک سیستم نرسیده؛ خطای روشن می‌دهد
         if (stored === undefined && m.method !== "MANUAL") throw new FormulaError(`مقدار ورودی (${METHOD_FA[m.method]}) برای این ماه ثبت نشده است`);

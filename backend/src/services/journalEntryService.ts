@@ -3,7 +3,7 @@ import { assertLineHasAmount, assertDateNotConfirmed } from "../utils/journalEnt
 import { toBaseCurrencyAmount } from "../utils/currencyConversion";
 import { assertLineAmountDecimals } from "../utils/amountDecimals";
 
-export type IssuingSystemType = "ACCOUNTING" | "ACCOUNTING_EXCEL_IMPORT" | "ACCOUNT_CLOSING" | "OPENING_CLOSING" | "WAREHOUSE" | "PURCHASE" | "SALES" | "TREASURY";
+export type IssuingSystemType = "PAYROLL" | "ACCOUNTING" | "ACCOUNTING_EXCEL_IMPORT" | "ACCOUNT_CLOSING" | "OPENING_CLOSING" | "WAREHOUSE" | "PURCHASE" | "SALES" | "TREASURY";
 
 export interface IssueLineInput {
   accountId: number;

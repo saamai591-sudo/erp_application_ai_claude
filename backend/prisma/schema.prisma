@@ -288,6 +288,7 @@ model DetailCodeUsage {
 }
 
 model Party {
+  payrollIssueSettingsSecond PayrollIssueSetting[] @relation("PayrollIssueSecondingParty")
   id                 Int                @id @default(autoincrement())
   detailCode         String             @unique
   /// عنوان تفصیل: یکتا و قابل ویرایش (پیش‌فرض: نام)؛ دو شخص هم‌نام باید عنوان تفصیل متفاوت داشته باشند
@@ -679,6 +680,7 @@ model OlapReport {
 }
 
 model Account {
+  payrollJournalTemplates PayrollJournalTemplate[]
   id                             Int                             @id @default(autoincrement())
   parentId                       Int?
   levelId                        Int
@@ -721,6 +723,7 @@ model DocumentType {
 }
 
 model JournalEntry {
+  payrollSlips PayrollSlip[]
   id                  Int                  @id @default(autoincrement())
   consolidationSource ConsolidatedDocumentSource?
   settingUsages       AccountingSettingUsage[]
@@ -1305,6 +1308,7 @@ model InitialInventoryLine {
 }
 
 model Project {
+  payrollIssueSettings PayrollIssueSetting[]
   id                Int                @id @default(autoincrement())
   detailCode        String             @unique
   title             String             @unique
@@ -3379,6 +3383,7 @@ enum JournalEntryStatus {
 }
 
 enum IssuingSystem {
+  PAYROLL
   ACCOUNTING
   ACCOUNTING_EXCEL_IMPORT
   ACCOUNT_CLOSING
@@ -4751,6 +4756,7 @@ model Position {
 }
 
 model Employee {
+  payrollIssueSettings PayrollIssueSetting[]
   id                     Int                  @id @default(autoincrement())
   /// کد پرسنلی (دستی؛ خالی = آخرین کد عددی + ۱ با همان طول)
   personnelCode          String               @unique
@@ -4932,6 +4938,7 @@ enum DecreeStatus {
 }
 
 model DecreeComponent {
+  journalTemplates PayrollJournalTemplate[]
   id              Int                  @id @default(autoincrement())
   code            Int                  @unique
   title           String               @unique
@@ -5109,6 +5116,10 @@ enum PayrollSectionKind {
 /// عامل حقوق (هویت): عنوان + کلید داخلی که سیستم خودکار می‌سازد و به کاربر نمایش داده نمی‌شود. طبقه، روش و فرمول در رکوردهای تاریخ‌دار
 /// «روش محاسبه عامل» (PayrollFactorMethod) می‌آید.
 model PayrollComponent {
+  /// سازمان ذینفع مرتبط با عامل: کارمندِ «غیرمشمول» در این سازمان مبلغ این عامل را صفر می‌گیرد؛ در سند حقوق، طرف حساب «سازمان مرتبط با عامل» = شعبه‌ی کارمند در همین سازمان
+  beneficiaryOrgId Int?
+  beneficiaryOrg   BeneficiaryOrg? @relation(fields: [beneficiaryOrgId], references: [id], onDelete: Restrict)
+  journalTemplates PayrollJournalTemplate[]
   id          Int                   @id @default(autoincrement())
   key         String                @unique
   title       String
@@ -5131,6 +5142,7 @@ model PayrollComponent {
 /// «نوع محاسبه» حقوق: حقوق ماهانه (نوع پایه، دقیقاً یکی) و انواع دیگر مثل عیدی/ذخیره سنوات/بازخرید مرخصی/بازخرید سنوات.
 /// محاسبه‌ی هر نوعِ غیرپایه برای یک کارمند فقط وقتی مجاز است که فیش «حقوق ماهانه»ی همان ماه محاسبه شده باشد.
 model PayrollCalcType {
+  journalTemplates PayrollJournalTemplate[]
   id          Int                 @id @default(autoincrement())
   title       String              @unique
   description String?
@@ -5144,6 +5156,9 @@ model PayrollCalcType {
 
 /// نتیجه‌ی محاسبه‌ی یک کارمند در یک ماه (با همه‌ی ورودی‌ها و ریز هر جزء برای گزارش)
 model PayrollSlip {
+  /// سند حسابداری صادرشده برای این فیش (یک سند می‌تواند فیش چند کارمند را داشته باشد)؛ با حذف سند خالی می‌شود
+  journalEntryId Int?
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   id            Int               @id @default(autoincrement())
   employeeId    Int
   year          Int
@@ -5270,6 +5285,8 @@ model WorkCalendar {
 }
 
 model WorkCalendarMonth {
+  payrollTemplates PayrollJournalTemplate[] @relation("PayrollTemplateMonth")
+  payrollIssueSettings PayrollIssueSetting[] @relation("PayrollIssueSettingMonth")
   id               Int          @id @default(autoincrement())
   calendarId       Int
   /// سال تقویم (نسخه‌ی هم‌گام‌شده از WorkCalendar.year برای ارجاع سال+ماه از فیش و ورودی ماهانه)
@@ -5320,6 +5337,7 @@ model PayrollFactorMethodBranch {
 
 /// نوع وام: عنوان + سازمان مرتبط اختیاری (شخص حقوقی از نوع بانک / موسسه مالی و اعتباری)
 model LoanType {
+  journalTemplates PayrollJournalTemplate[]
   id                 Int      @id @default(autoincrement())
   title              String   @unique
   institutionPartyId Int?
@@ -5491,6 +5509,7 @@ enum BeneficiaryOrgType {
 
 /// سازمان ذینفع: کد (خودکار = آخرین + ۱)، عنوان یکتا، نوع، فعال
 model BeneficiaryOrg {
+  payrollComponents PayrollComponent[]
   id        Int                 @id @default(autoincrement())
   code      Int                 @unique
   title     String              @unique
@@ -5533,4 +5552,76 @@ model EmployeeBeneficiary {
   branch         BeneficiaryBranch? @relation(fields: [branchId], references: [id], onDelete: Restrict)
 
   @@unique([employeeId, organizationId])
+}
+
+// ── حقوق و دستمزد › حسابداری حقوق ──
+
+enum PayrollEntryNature {
+  DEBIT
+  CREDIT
+}
+
+/// نوع طرف حسابِ ردیف الگو: پرسنل (طرف حساب خود کارمند) / سازمان مرتبط با عامل (شعبه‌ی کارمند در سازمان ذینفعِ عامل) / سازمان مامورکننده (از تنظیمات صدور)
+enum PayrollPartyKind {
+  EMPLOYEE
+  FACTOR_ORG
+  SECONDING_ORG
+}
+
+/// گروه حساب حقوق: کد (خودکار)، عنوان، «مامور به خدمت دارد» و انواع تفصیل (فعلاً فقط پروژه؛ بعد از اولین «تنظیمات صدور سند» قفل می‌شود)
+model PayrollAccountGroup {
+  id            Int                    @id @default(autoincrement())
+  code          Int                    @unique
+  title         String                 @unique
+  hasSecondment Boolean                @default(false)
+  usesProject   Boolean                @default(false)
+  createdAt     DateTime               @default(now())
+  templates     PayrollJournalTemplate[]
+  settings      PayrollIssueSetting[]
+}
+
+/// الگوی سند حقوق — یک ردیف = یک «رکورد داده‌ای» مستقل (از ماه + گروه + عامل + حساب + ماهیت …). برای ماه M: بزرگ‌ترین «از ماه» ≤ M
+/// از میان رکوردهای هر (گروه، مرجع) و همه‌ی رکوردهای فعالِ همان «از ماه» اجرا می‌شوند؛ اگر همه غیرفعال باشند «فاقد الگو» است.
+/// مرجع دقیقاً یکی از: عامل حقوق / عامل حکم / خالص پرداختی (نوع محاسبه) / وام (نوع وام) — CHECK در مهاجرت.
+model PayrollJournalTemplate {
+  id                Int                 @id @default(autoincrement())
+  fromMonthId       Int
+  groupId           Int
+  payrollComponentId Int?
+  decreeComponentId Int?
+  netCalcTypeId     Int?
+  loanTypeId        Int?
+  accountId         Int
+  nature            PayrollEntryNature
+  description       String?
+  isActive          Boolean             @default(true)
+  partyKind         PayrollPartyKind?
+  createdAt         DateTime            @default(now())
+  fromMonth         WorkCalendarMonth   @relation("PayrollTemplateMonth", fields: [fromMonthId], references: [id], onDelete: Restrict)
+  group             PayrollAccountGroup @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  payrollComponent  PayrollComponent?   @relation(fields: [payrollComponentId], references: [id], onDelete: Restrict)
+  decreeComponent   DecreeComponent?    @relation(fields: [decreeComponentId], references: [id], onDelete: Restrict)
+  netCalcType       PayrollCalcType?    @relation(fields: [netCalcTypeId], references: [id], onDelete: Restrict)
+  loanType          LoanType?           @relation(fields: [loanTypeId], references: [id], onDelete: Restrict)
+  account           Account             @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([groupId, fromMonthId])
+}
+
+/// تنظیمات صدور سند حقوق: از یک ماه به بعد (آخرین رکورد ≤ ماه معتبر است) کارمند در چه گروه حسابی است و سازمان مامورکننده/پروژه‌ی او چیست
+model PayrollIssueSetting {
+  id               Int                 @id @default(autoincrement())
+  fromMonthId      Int
+  employeeId       Int
+  groupId          Int
+  secondingPartyId Int?
+  projectId        Int?
+  createdAt        DateTime            @default(now())
+  fromMonth        WorkCalendarMonth   @relation("PayrollIssueSettingMonth", fields: [fromMonthId], references: [id], onDelete: Restrict)
+  employee         Employee            @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  group            PayrollAccountGroup @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  secondingParty   Party?              @relation("PayrollIssueSecondingParty", fields: [secondingPartyId], references: [id], onDelete: Restrict)
+  project          Project?            @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@unique([employeeId, fromMonthId])
 }

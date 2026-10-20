@@ -158,6 +158,8 @@ export async function resolveAccountDetailFieldsForCodes(
 // — مثلاً چون قبل از افزودن نوع تفصیل «تنخواه»/«تنخواه‌دار» تفصیل‌های دیگری هم تعریف شده بودند — تطبیق
 // همیشه بی‌صدا شکست می‌خورد). resolveSystemDetailTypeId زیر، تبدیل صحیح کد به id را انجام می‌دهد.
 export const DETAIL_TYPE_CODE_PARTY = 1;
+export const DETAIL_TYPE_CODE_COST_CENTER = 2;
+export const DETAIL_TYPE_CODE_PROJECT = 8;
 export const DETAIL_TYPE_CODE_PETTY_CASH = 5;
 export const DETAIL_TYPE_CODE_PETTY_CASH_CUSTODIAN = 6;
 

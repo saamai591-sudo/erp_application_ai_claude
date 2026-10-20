@@ -29,6 +29,8 @@ interface Comp {
   excludeFromSums?: boolean;
   calcTypeId: number;
   calcTypeTitle: string;
+  beneficiaryOrgId?: number | null;
+  beneficiaryOrgTitle?: string | null;
 }
 
 export default function PayrollComponents() {
@@ -100,7 +102,7 @@ function CompList() {
   );
 }
 
-const DEFAULT_FORM = { title: "", kind: "", calcTypeId: "", description: "", isActive: true, excludeFromSums: false };
+const DEFAULT_FORM = { title: "", kind: "", calcTypeId: "", description: "", isActive: true, excludeFromSums: false, beneficiaryOrgId: "" };
 
 function CompForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
@@ -111,6 +113,10 @@ function CompForm({ editId }: { editId?: number }) {
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const { flash } = useSavedFlash();
   const { types, base } = useCalcTypes();
+  const [orgs, setOrgs] = useState<{ id: number; title: string; isActive: boolean }[]>([]);
+  useEffect(() => {
+    api.get("/beneficiary-orgs").then(setOrgs).catch(() => {});
+  }, []);
 
   // عامل جدید پیش‌فرض به «حقوق ماهانه» وصل می‌شود (کاربر می‌تواند عوض کند)
   useEffect(() => {
@@ -123,7 +129,7 @@ function CompForm({ editId }: { editId?: number }) {
     api.get("/payroll-components").then((rows: Comp[]) => {
       const c = rows.find((r) => r.id === editId);
       if (c) {
-        if (!hasPersistedState(cacheKey)) setForm({ title: c.title, kind: c.kind, calcTypeId: String(c.calcTypeId), description: c.description ?? "", isActive: c.isActive, excludeFromSums: !!c.excludeFromSums });
+        if (!hasPersistedState(cacheKey)) setForm({ title: c.title, kind: c.kind, calcTypeId: String(c.calcTypeId), description: c.description ?? "", isActive: c.isActive, excludeFromSums: !!c.excludeFromSums, beneficiaryOrgId: c.beneficiaryOrgId ? String(c.beneficiaryOrgId) : "" });
       }
       setLoaded(true);
     });
@@ -189,6 +195,13 @@ function CompForm({ editId }: { editId?: number }) {
             <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
               <option value="">انتخاب کنید</option>
               {Object.entries(KIND_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          <div className="form-field">
+            <label>سازمان ذینفع <FieldHint label="سازمان ذینفع" text="اختیاری. کارمندی که در این سازمان «غیرمشمول» است مبلغ این عامل را صفر می‌گیرد (و اگر مشمولیتش تعیین نشده باشد محاسبه خطا می‌دهد). در الگوی سند حقوق، طرف حساب «سازمان مرتبط با عامل» = شعبه‌ی کارمند در همین سازمان. بعد از استفاده در فیش قابل تغییر نیست." /></label>
+            <select value={form.beneficiaryOrgId} onChange={(e) => setForm({ ...form, beneficiaryOrgId: e.target.value })}>
+              <option value="">—</option>
+              {orgs.filter((o) => o.isActive || String(o.id) === form.beneficiaryOrgId).map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}
             </select>
           </div>
           <div className="form-field">

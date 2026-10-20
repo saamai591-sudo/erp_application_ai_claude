@@ -149,6 +149,9 @@ import ChequeClearingReceivable from "./pages/ChequeClearingReceivable";
 import ChequeClearingPayable from "./pages/ChequeClearingPayable";
 
 import BeneficiaryOrgs from "./pages/BeneficiaryOrgs";
+import PayrollAccountGroups from "./pages/PayrollAccountGroups";
+import PayrollJournalTemplates from "./pages/PayrollJournalTemplates";
+import PayrollIssueSettings from "./pages/PayrollIssueSettings";
 import BeneficiaryBranches from "./pages/BeneficiaryBranches";
 import { ToastHost } from "./components/ToastHost";
 import { UsageDialogHost } from "./components/UsageDialogHost";
@@ -477,6 +480,15 @@ export default function App() {
             <Route path="/payroll-calc-types" element={<PayrollCalcTypes />} />
             <Route path="/payroll-calc-types/new" element={<PayrollCalcTypes />} />
             <Route path="/payroll-calc-types/:id/edit" element={<PayrollCalcTypes />} />
+            <Route path="/payroll-account-groups" element={<PayrollAccountGroups />} />
+            <Route path="/payroll-account-groups/new" element={<PayrollAccountGroups />} />
+            <Route path="/payroll-account-groups/:id/edit" element={<PayrollAccountGroups />} />
+            <Route path="/payroll-journal-templates" element={<PayrollJournalTemplates />} />
+            <Route path="/payroll-journal-templates/new" element={<PayrollJournalTemplates />} />
+            <Route path="/payroll-journal-templates/:id/edit" element={<PayrollJournalTemplates />} />
+            <Route path="/payroll-issue-settings" element={<PayrollIssueSettings />} />
+            <Route path="/payroll-issue-settings/new" element={<PayrollIssueSettings />} />
+            <Route path="/payroll-issue-settings/:id/edit" element={<PayrollIssueSettings />} />
             <Route path="/loan-types" element={<LoanTypes />} />
             <Route path="/loan-types/new" element={<LoanTypes />} />
             <Route path="/loan-types/:id/edit" element={<LoanTypes />} />

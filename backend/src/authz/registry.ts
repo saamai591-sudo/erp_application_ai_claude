@@ -625,8 +625,21 @@ export const REGISTRY: ModuleDef[] = [
             key: "payroll-calculation",
             title: "محاسبه حقوق",
             baseActions: ["view", "delete"],
-            actions: [{ key: "calculate", title: "محاسبه" }],
+            actions: [
+              { key: "calculate", title: "محاسبه" },
+              { key: "issueJournalEntry", title: "صدور سند حسابداری" },
+              { key: "deleteJournalEntry", title: "حذف سند حسابداری" },
+            ],
           },
+        ],
+      },
+      {
+        key: "payroll-accounting",
+        title: "حسابداری حقوق",
+        forms: [
+          { key: "payroll-account-groups", title: "گروه حساب حقوق", baseActions: CRUD },
+          { key: "payroll-journal-templates", title: "الگوی سند حقوق", baseActions: CRUD },
+          { key: "payroll-issue-settings", title: "تنظیمات صدور سند حقوق", baseActions: CRUD },
         ],
       },
       {

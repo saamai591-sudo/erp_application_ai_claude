@@ -55,6 +55,9 @@ export const USAGE_META: Record<string, UsageMeta> = {
   BeneficiaryOrg: { label: "سازمان ذینفع", base: "/beneficiary-orgs" },
   BeneficiaryBranch: { label: "شعبه‌ی سازمان ذینفع", base: "/beneficiary-branches", include: { party: { select: { detailTitle: true } } }, title: (r) => `${r.party?.detailTitle ?? ""}${r.contractRow ? ` (ردیف پیمان ${r.contractRow})` : ""}` },
   EmployeeBeneficiary: { label: "مشمولیت کارمند در سازمان ذینفع", include: EMP, title: (r) => `${r.isIncluded ? "مشمول" : "غیرمشمول"}${ofEmp(r)}` },
+  PayrollAccountGroup: { label: "گروه حساب حقوق", base: "/payroll-account-groups" },
+  PayrollJournalTemplate: { label: "رکورد الگوی سند حقوق", base: "/payroll-journal-templates", title: (r) => `#${r.id}` },
+  PayrollIssueSetting: { label: "تنظیمات صدور سند حقوق", base: "/payroll-issue-settings", include: EMP, title: (r) => `#${r.id}${ofEmp(r)}` },
   // اطلاعات پایه
   Party: { label: "شخص / طرف‌حساب", title: (r) => r.detailTitle || partyName(r) || r.detailCode },
   Customer: { label: "مشتری", base: "/customers", include: { party: { select: { firstName: true, lastName: true, name: true, detailTitle: true } } }, title: (r) => r.party?.detailTitle || partyName(r.party) || `#${r.id}` },
