@@ -9,8 +9,10 @@ import { getCalendarMonth } from "../services/workCalendarService";
 import {
   PayrollAcctError,
   PayrollIssueError,
-  BulkTemplateError,
+  BulkRowsError,
+  bulkCreateSettings,
   bulkCreateTemplates,
+  bulkSettingCandidates,
   bulkTemplateCandidates,
   deletePayrollJournals,
   groupHasSettings,
@@ -35,7 +37,7 @@ const router = Router();
 
 function fail(res: any, e: any, fallback: string) {
   if (e instanceof PayrollIssueError) return sendBulkError(res, 400, e.message, e.problems as any);
-  if (e instanceof BulkTemplateError) return sendBulkError(res, 400, e.message, e.rowErrors as any);
+  if (e instanceof BulkRowsError) return sendBulkError(res, 400, e.message, e.rowErrors as any);
   if (e instanceof PayrollAcctError) return res.status(400).json({ error: e.message });
   if (e?.code === "P2002") return res.status(400).json({ error: "رکورد تکراری است" });
   return res.status(400).json({ error: e?.message || fallback });
@@ -274,7 +276,7 @@ router.delete("/payroll-journal-templates/:id", can(`${F_TPL}.delete`), async (r
   }
 });
 
-// ── تنظیمات صدور سند حقوق ──
+// ── تنظیمات صدور سند ──
 
 const setInclude = {
   fromMonth: { select: { year: true, month: true } },
@@ -318,6 +320,30 @@ router.get("/payroll-issue-settings/employees", async (req, res) => {
     res.json(emps.map((e) => ({ id: e.id, personnelCode: e.personnelCode, fullName: personName(e.party) })));
   } catch (e) {
     fail(res, e, "خطا در دریافت کارمندان");
+  }
+});
+
+// تعریف گروهی تنظیمات: کاندیداها (GET) و ذخیره‌ی همه‌یا‌هیچ (POST)؛ مجوز = ایجاد تنظیمات
+router.get("/payroll-issue-settings/bulk/candidates", can(`${F_SET}.create`), async (req, res) => {
+  try {
+    res.json(await bulkSettingCandidates({ year: Number(req.query.year), month: Number(req.query.month), groupId: Number(req.query.groupId) }));
+  } catch (e) {
+    fail(res, e, "خطا در بارگذاری کارمندان");
+  }
+});
+
+router.post("/payroll-issue-settings/bulk", can(`${F_SET}.create`), async (req, res) => {
+  try {
+    const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
+    const result = await bulkCreateSettings({
+      year: Number(req.body.year),
+      month: Number(req.body.month),
+      groupId: Number(req.body.groupId),
+      rows: rows.map((r: any) => ({ employeeId: Number(r.employeeId), secondingPartyId: r.secondingPartyId ? Number(r.secondingPartyId) : null, projectId: r.projectId ? Number(r.projectId) : null })),
+    });
+    res.status(201).json(result);
+  } catch (e) {
+    fail(res, e, "خطا در ثبت گروهی تنظیمات صدور سند");
   }
 });
 

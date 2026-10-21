@@ -255,7 +255,7 @@ export interface BulkRowInput {
   partyKind: string | null;
   description: string | null;
 }
-export class BulkTemplateError extends Error {
+export class BulkRowsError extends Error {
   constructor(message: string, public rowErrors: { rowKey: string; message: string }[]) {
     super(message);
   }
@@ -286,21 +286,21 @@ export async function bulkCreateTemplates(p: { year: number; month: number; grou
       else throw e;
     }
   }
-  if (errors.length > 0) throw new BulkTemplateError("برخی ردیف‌ها خطا دارند؛ اصلاح یا حذفشان کنید (چیزی ذخیره نشد)", errors);
+  if (errors.length > 0) throw new BulkRowsError("برخی ردیف‌ها خطا دارند؛ اصلاح یا حذفشان کنید (چیزی ذخیره نشد)", errors);
   await prisma.$transaction(data.map((d) => prisma.payrollJournalTemplate.create({ data: d })));
   return { created: data.length, skipped };
 }
 
 // ── تنظیمات صدور: اعتبارسنجی ──
 
-export async function validateIssueSetting(b: any, excludeId?: number) {
+export async function validateIssueSetting(b: any, excludeId?: number, issued?: IssuedIndex) {
   const cal = await getCalendarMonth(Number(b.fromYear), Number(b.fromMonth));
   if (!cal) throw new PayrollAcctError("ماه در تقویم کاری تعریف نشده است");
   const employeeId = Number(b.employeeId);
   if (!employeeId || !(await prisma.employee.findUnique({ where: { id: employeeId }, select: { id: true } }))) throw new PayrollAcctError("کارمند را انتخاب کنید");
   const { employeeIdsInPeriod } = await import("./employmentStatusService");
   if ((await employeeIdsInPeriod(cal.startDate, cal.endDate, [employeeId])).length === 0) throw new PayrollAcctError("کارمند در ماه انتخاب‌شده در وضعیت همکاری نیست");
-  assertAfterIssued((await issuedIndex()).byEmployee.get(employeeId), cal.year, cal.month, "این کارمند");
+  assertAfterIssued((issued ?? (await issuedIndex())).byEmployee.get(employeeId), cal.year, cal.month, "این کارمند");
   const group = await prisma.payrollAccountGroup.findUnique({ where: { id: Number(b.groupId) } });
   if (!group) throw new PayrollAcctError("گروه حساب را انتخاب کنید");
   let secondingPartyId: number | null = null;
@@ -319,6 +319,55 @@ export async function validateIssueSetting(b: any, excludeId?: number) {
   const dup = await prisma.payrollIssueSetting.findFirst({ where: { employeeId, fromMonthId: cal.id, ...(excludeId ? { NOT: { id: excludeId } } : {}) } });
   if (dup) throw new PayrollAcctError("برای این کارمند در همین ماه قبلاً تنظیمات ثبت شده است");
   return { fromMonthId: cal.id, employeeId, groupId: group.id, secondingPartyId, projectId };
+}
+
+// ── تعریف گروهی تنظیمات صدور (گروه حساب × ماه) ──
+// کاندیداها: کارمندانِ در وضعیت همکاری در آن ماه که تنظیماتِ مؤثر (رکورد با «از ماه» ≤ ماه) ندارند و بعد از آخرین ماهِ دارای سندشان هستند.
+// ذخیره: همه‌یا‌هیچ؛ هر ردیف با همان validateIssueSetting؛ ردیف‌های ارسالی همگی درج می‌شوند (ردیف ناخواسته را کاربر در گرید حذف می‌کند).
+
+export async function bulkSettingCandidates(p: { year: number; month: number; groupId: number }) {
+  const cal = await getCalendarMonth(p.year, p.month);
+  if (!cal) throw new PayrollAcctError("ماه در تقویم کاری تعریف نشده است");
+  const group = await prisma.payrollAccountGroup.findUnique({ where: { id: p.groupId } });
+  if (!group) throw new PayrollAcctError("گروه حساب حقوق را انتخاب کنید");
+  const ym = ymKey(p.year, p.month);
+  const { employeeIdsInPeriod } = await import("./employmentStatusService");
+  const ids = await employeeIdsInPeriod(cal.startDate, cal.endDate);
+  const settings = await prisma.payrollIssueSetting.findMany({ where: { employeeId: { in: ids } }, select: { employeeId: true, fromMonth: { select: { year: true, month: true } } } });
+  const hasEffective = new Set(settings.filter((x) => ymKey(x.fromMonth.year, x.fromMonth.month) <= ym).map((x) => x.employeeId));
+  const issued = await issuedIndex();
+  let blocked = 0;
+  const free = ids.filter((id) => {
+    if (hasEffective.has(id)) return false;
+    const max = issued.byEmployee.get(id);
+    if (max !== undefined && ym <= max) { blocked++; return false; }
+    return true;
+  });
+  const emps = await prisma.employee.findMany({ where: { id: { in: free } }, orderBy: { personnelCode: "asc" }, select: { id: true, personnelCode: true, party: { select: { firstName: true, lastName: true, name: true } } } });
+  return {
+    hasSecondment: group.hasSecondment,
+    usesProject: group.usesProject,
+    blocked,
+    employees: emps.map((e) => ({ id: e.id, personnelCode: e.personnelCode, fullName: [e.party.firstName, e.party.lastName].filter(Boolean).join(" ") || e.party.name || "" })),
+  };
+}
+
+export async function bulkCreateSettings(p: { year: number; month: number; groupId: number; rows: { employeeId: number; secondingPartyId: number | null; projectId: number | null }[] }) {
+  if (p.rows.length === 0) throw new PayrollAcctError("ردیفی برای ثبت وجود ندارد");
+  const issued = await issuedIndex();
+  const errors: { rowKey: string; message: string }[] = [];
+  const data: Awaited<ReturnType<typeof validateIssueSetting>>[] = [];
+  for (const r of p.rows) {
+    try {
+      data.push(await validateIssueSetting({ fromYear: p.year, fromMonth: p.month, employeeId: r.employeeId, groupId: p.groupId, secondingPartyId: r.secondingPartyId, projectId: r.projectId }, undefined, issued));
+    } catch (e: any) {
+      if (e instanceof PayrollAcctError) errors.push({ rowKey: String(r.employeeId), message: e.message });
+      else throw e;
+    }
+  }
+  if (errors.length > 0) throw new BulkRowsError("برخی ردیف‌ها خطا دارند؛ اصلاح یا حذفشان کنید (چیزی ذخیره نشد)", errors);
+  await prisma.$transaction(data.map((d) => prisma.payrollIssueSetting.create({ data: d })));
+  return { created: data.length };
 }
 
 // ── صدور سند ──
@@ -417,7 +466,7 @@ export async function issuePayrollJournal(inp: IssueInput) {
     if (slip.hasErrors) { problem("فیش حقوق", null, "فیش این کارمند خطا دارد؛ ابتدا محاسبه را اصلاح کنید"); continue; }
 
     const effSetting = settingsAll.filter((s) => s.employeeId === emp.id && ymKey(s.fromMonth.year, s.fromMonth.month) <= ym).sort((a, b) => ymKey(b.fromMonth.year, b.fromMonth.month) - ymKey(a.fromMonth.year, a.fromMonth.month))[0];
-    if (!effSetting) { problem("تنظیمات صدور سند", null, "برای این کارمند «تنظیمات صدور سند حقوق» (گروه حساب) تا این ماه تعریف نشده است"); continue; }
+    if (!effSetting) { problem("تنظیمات صدور سند", null, "برای این کارمند «تنظیمات صدور سند» (گروه حساب) تا این ماه تعریف نشده است"); continue; }
     if (effSetting.group.hasSecondment && !effSetting.secondingParty) { problem("تنظیمات صدور سند", null, "سازمان مامورکننده در تنظیمات این کارمند مشخص نیست"); continue; }
     if (effSetting.group.usesProject && !effSetting.project) { problem("تنظیمات صدور سند", null, "پروژه در تنظیمات این کارمند مشخص نیست"); continue; }
     const groupId = effSetting.groupId;

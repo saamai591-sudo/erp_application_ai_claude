@@ -410,7 +410,7 @@ const RAW_MODULES: ModuleGroup[] = [
         items: [
           { key: "payroll-account-groups", label: "گروه حساب حقوق", list: "/payroll-account-groups", create: "/payroll-account-groups/new", icon: "tag" },
           { key: "payroll-journal-templates", label: "الگوی سند حقوق", list: "/payroll-journal-templates", create: "/payroll-journal-templates/new", icon: "file" },
-          { key: "payroll-issue-settings", label: "تنظیمات صدور سند حقوق", list: "/payroll-issue-settings", create: "/payroll-issue-settings/new", icon: "sliders" },
+          { key: "payroll-issue-settings", label: "تنظیمات صدور سند", list: "/payroll-issue-settings", create: "/payroll-issue-settings/new", icon: "sliders" },
         ],
       },
       {

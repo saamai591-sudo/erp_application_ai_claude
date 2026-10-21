@@ -6,6 +6,8 @@ import { FormPage } from "../components/FormPage";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import PayrollIssueSettingsBulk from "./PayrollIssueSettingsBulk";
+import { useTabs } from "../lib/TabsContext";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { RecordPickerField } from "../components/RecordPicker";
@@ -16,7 +18,7 @@ import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 
-// حقوق و دستمزد › حسابداری حقوق › تنظیمات صدور سند حقوق: از یک ماه به بعد (آخرین رکورد ≤ ماه سند معتبر است) هر کارمند در چه گروه حسابی است،
+// حقوق و دستمزد › حسابداری حقوق › تنظیمات صدور سند: از یک ماه به بعد (آخرین رکورد ≤ ماه سند معتبر است) هر کارمند در چه گروه حسابی است،
 // سازمان مامورکننده‌اش (فقط گروه‌های «مامور به خدمت دارد») و تفصیل‌های گروه (فعلاً پروژه).
 
 interface SetRow {
@@ -63,12 +65,14 @@ interface ProjectOpt {
 export default function PayrollIssueSettings() {
   const location = useLocation();
   const { id } = useParams();
+  if (location.pathname.endsWith("/bulk")) return <PayrollIssueSettingsBulk />;
   if (location.pathname.endsWith("/new")) return <SettingForm />;
   if (location.pathname.endsWith("/edit")) return <SettingForm editId={Number(id)} />;
   return <SettingList />;
 }
 
 function SettingList() {
+  const { openTab } = useTabs();
   const cacheKey = "/payroll-issue-settings";
   const [items, setItems] = usePersistedState<SetRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
@@ -92,7 +96,7 @@ function SettingList() {
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint text="برای هر کارمند مشخص کنید از کدام ماه در کدام گروه حساب حقوق است (و در صورت نیاز سازمان مامورکننده و پروژه). هنگام صدور سند، آخرین تنظیمات تا ماه فیش اعمال می‌شود." title="تنظیمات صدور سند حقوق" />
+          <InfoHint text="برای هر کارمند مشخص کنید از کدام ماه در کدام گروه حساب حقوق است (و در صورت نیاز سازمان مامورکننده و پروژه). هنگام صدور سند، آخرین تنظیمات تا ماه فیش اعمال می‌شود." title="تنظیمات صدور سند" />
           <NewRecordButton path="/payroll-issue-settings/new" />
           <RefreshButton onClick={reload} />
         </div>
@@ -110,6 +114,7 @@ function SettingList() {
         rows={items}
         edit={{ path: (r: SetRow) => `/payroll-issue-settings/${r.id}/edit` }}
         onDelete={onDelete}
+        bulkActions={[{ label: () => "تعریف گروهی تنظیمات", onClick: () => openTab("/payroll-issue-settings/bulk"), noSelection: true }]}
       />
     </div>
   );
@@ -203,7 +208,7 @@ function SettingForm({ editId }: { editId?: number }) {
 
   return (
     <FormPage
-      title={editId ? "ویرایش تنظیمات صدور سند حقوق" : "تنظیمات صدور سند حقوق جدید"}
+      title={editId ? "ویرایش تنظیمات صدور سند" : "تنظیمات صدور سند جدید"}
       formId="payroll-setting-form"
       closePath="/payroll-issue-settings"
       newPath="/payroll-issue-settings/new"

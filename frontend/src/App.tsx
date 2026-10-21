@@ -489,6 +489,7 @@ export default function App() {
             <Route path="/payroll-journal-templates/:id/edit" element={<PayrollJournalTemplates />} />
             <Route path="/payroll-issue-settings" element={<PayrollIssueSettings />} />
             <Route path="/payroll-issue-settings/new" element={<PayrollIssueSettings />} />
+            <Route path="/payroll-issue-settings/bulk" element={<PayrollIssueSettings />} />
             <Route path="/payroll-issue-settings/:id/edit" element={<PayrollIssueSettings />} />
             <Route path="/loan-types" element={<LoanTypes />} />
             <Route path="/loan-types/new" element={<LoanTypes />} />

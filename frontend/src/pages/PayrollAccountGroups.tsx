@@ -15,7 +15,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 
 // حقوق و دستمزد › حسابداری حقوق › گروه حساب حقوق: کد (خالی = آخرین + ۱)، عنوان، «مامور به خدمت دارد» و بخش «انواع تفصیل» (فعلاً فقط پروژه).
-// بعد از ثبت اولین «تنظیمات صدور سند حقوق» برای گروه، انواع تفصیل (و مامور به خدمت) قفل می‌شود.
+// بعد از ثبت اولین «تنظیمات صدور سند» برای گروه، انواع تفصیل (و مامور به خدمت) قفل می‌شود.
 
 interface GroupRow {
   id: number;
@@ -58,7 +58,7 @@ function GroupList() {
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint text="گروه حساب حقوق (مثلاً «رسمی»، «قراردادی») تعیین می‌کند هر کارمند با کدام الگوی سند حقوق سند می‌خورد؛ گروه هر کارمند در «تنظیمات صدور سند حقوق» مشخص می‌شود." title="گروه حساب حقوق" />
+          <InfoHint text="گروه حساب حقوق (مثلاً «رسمی»، «قراردادی») تعیین می‌کند هر کارمند با کدام الگوی سند حقوق سند می‌خورد؛ گروه هر کارمند در «تنظیمات صدور سند» مشخص می‌شود." title="گروه حساب حقوق" />
           <NewRecordButton path="/payroll-account-groups/new" />
           <RefreshButton onClick={reload} />
         </div>
@@ -154,13 +154,13 @@ function GroupForm({ editId }: { editId?: number }) {
             <label className="checkbox-row">
               <input type="checkbox" checked={form.hasSecondment} disabled={locked} onChange={(e) => setForm({ ...form, hasSecondment: e.target.checked })} />
               مامور به خدمت دارد
-              <FieldHint label="مامور به خدمت دارد" text="برای کارمندانِ این گروه در «تنظیمات صدور سند حقوق» سازمان مامورکننده الزامی می‌شود و در الگو می‌توان «سازمان مامورکننده» را طرف حساب کرد." />
+              <FieldHint label="مامور به خدمت دارد" text="برای کارمندانِ این گروه در «تنظیمات صدور سند» سازمان مامورکننده الزامی می‌شود و در الگو می‌توان «سازمان مامورکننده» را طرف حساب کرد." />
             </label>
           </div>
         </div>
         <h3 className="hr-section">
           انواع تفصیل{" "}
-          <FieldHint label="انواع تفصیل" text="تفصیل‌هایی که علاوه بر طرف حساب و مرکز هزینه، سیستم هنگام صدور سند از «تنظیمات صدور سند حقوق» پر می‌کند. بعد از ثبت اولین تنظیمات صدور برای این گروه قابل تغییر نیست." />
+          <FieldHint label="انواع تفصیل" text="تفصیل‌هایی که علاوه بر طرف حساب و مرکز هزینه، سیستم هنگام صدور سند از «تنظیمات صدور سند» پر می‌کند. بعد از ثبت اولین تنظیمات صدور برای این گروه قابل تغییر نیست." />
         </h3>
         <div className="form-grid">
           <div className="form-field">
@@ -170,7 +170,7 @@ function GroupForm({ editId }: { editId?: number }) {
             </label>
           </div>
         </div>
-        {locked && <p style={{ opacity: 0.75, fontSize: 12 }}>برای این گروه «تنظیمات صدور سند حقوق» ثبت شده است؛ «مامور به خدمت دارد» و انواع تفصیل قابل تغییر نیست.</p>}
+        {locked && <p style={{ opacity: 0.75, fontSize: 12 }}>برای این گروه «تنظیمات صدور سند» ثبت شده است؛ «مامور به خدمت دارد» و انواع تفصیل قابل تغییر نیست.</p>}
       </form>
     </FormPage>
   );

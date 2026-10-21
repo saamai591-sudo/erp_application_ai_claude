@@ -639,7 +639,7 @@ export const REGISTRY: ModuleDef[] = [
         forms: [
           { key: "payroll-account-groups", title: "گروه حساب حقوق", baseActions: CRUD },
           { key: "payroll-journal-templates", title: "الگوی سند حقوق", baseActions: CRUD },
-          { key: "payroll-issue-settings", title: "تنظیمات صدور سند حقوق", baseActions: CRUD },
+          { key: "payroll-issue-settings", title: "تنظیمات صدور سند", baseActions: CRUD },
         ],
       },
       {
