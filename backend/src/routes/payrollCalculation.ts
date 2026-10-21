@@ -7,6 +7,7 @@ import type { BranchInput } from "../services/payrollCalculationService";
 import { METHOD_FA, PayrollCalcError, calculatePayroll, validateFactorMethod, methodLockMessage, lockedMethodIds, getBaseCalcType, dependentSlipMessage, createPayrollComponent } from "../services/payrollCalculationService";
 import { getEffectiveDecrees } from "../services/employmentDecreeService";
 import { buildPayrollSlipsPrint } from "../services/payrollSlipPrint";
+import { buildPayrollListPrint } from "../services/payrollListPrint";
 import { jalaliMonthRange } from "../utils/jalaliDate";
 import { getCalendarMonth, missingMonthMessage } from "../services/workCalendarService";
 import { basisRows, resolveBasisDecisions } from "../services/payrollBasisService";
@@ -617,6 +618,19 @@ router.post("/payroll-calculations/print", canAny(`${F_CALC}.view`, `${F_REPORT}
     res.json(r);
   } catch (e) {
     fail(res, e, "خطا در آماده‌سازی چاپ فیش");
+  }
+});
+
+// چاپ «لیست حقوق» یک ماه (A4 افقی، چیدمان خودکار ستون‌ها)؛ employeeIds خالی = همه‌ی فیش‌های محاسبه‌شده‌ی آن ماه و نوع محاسبه
+router.post("/payroll-calculations/print-list", canAny(`${F_CALC}.view`, `${F_REPORT}.view`), async (req, res) => {
+  const b = req.body as { year: number; month: number; employeeIds?: number[]; digits?: string; calcTypeId?: number };
+  try {
+    const ids = Array.isArray(b.employeeIds) ? [...new Set(b.employeeIds.map(Number).filter(Boolean))] : [];
+    const r = await buildPayrollListPrint(Number(b.year), Number(b.month), ids.length ? ids : null, b.digits === "LATIN" ? "LATIN" : "PERSIAN", b.calcTypeId ? Number(b.calcTypeId) : undefined);
+    if (r.count === 0) throw new PayrollCalcError("در این ماه محاسبه‌ای ثبت نشده است؛ ابتدا محاسبه کنید");
+    res.json(r);
+  } catch (e) {
+    fail(res, e, "خطا در آماده‌سازی چاپ لیست حقوق");
   }
 });
 

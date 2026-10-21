@@ -4,9 +4,10 @@ import { PrintFrame, printFrame } from "./PrintButton";
 import { api, ApiError } from "../lib/api";
 import { toFaDigits } from "../lib/formatAmount";
 
-// پیش‌نمایش و چاپ فیش حقوقی یک یا چند کارمند (سند HTML را سرور از فیش‌های ذخیره‌شده می‌سازد: POST /payroll-calculations/print).
+// پیش‌نمایش و چاپ فیش حقوقی یک یا چند کارمند (سند HTML را سرور از فیش‌های ذخیره‌شده می‌سازد: POST /payroll-calculations/print)؛
+// با list=true «لیست حقوق» A4 افقی (POST /payroll-calculations/print-list؛ employeeIds خالی = همه‌ی فیش‌های محاسبه‌شده‌ی ماه).
 
-export function PayrollSlipPrintDialog({ year, month, employeeIds, calcTypeId, onClose }: { year: number; month: number; employeeIds: number[]; calcTypeId?: number; onClose: () => void }) {
+export function PayrollSlipPrintDialog({ year, month, employeeIds, calcTypeId, list, onClose }: { year: number; month: number; employeeIds: number[]; calcTypeId?: number; list?: boolean; onClose: () => void }) {
   const [html, setHtml] = useState("");
   const [fileName, setFileName] = useState("");
   const [count, setCount] = useState(0);
@@ -18,7 +19,7 @@ export function PayrollSlipPrintDialog({ year, month, employeeIds, calcTypeId, o
   useEffect(() => {
     setLoading(true);
     api
-      .post("/payroll-calculations/print", { year, month, employeeIds, calcTypeId }, { silent: true } as any)
+      .post(list ? "/payroll-calculations/print-list" : "/payroll-calculations/print", { year, month, employeeIds, calcTypeId }, { silent: true } as any)
       .then((r: { html: string; fileName: string; count: number; missing: number[] }) => {
         setHtml(r.html);
         setFileName(r.fileName);
@@ -31,13 +32,13 @@ export function PayrollSlipPrintDialog({ year, month, employeeIds, calcTypeId, o
   }, []);
 
   return (
-    <Modal title="چاپ فیش حقوقی" onClose={onClose} wide>
+    <Modal title={list ? "چاپ لیست حقوق" : "چاپ فیش حقوقی"} onClose={onClose} wide>
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
         <button type="button" className="btn" disabled={!html || loading} onClick={() => printFrame(frameRef.current, fileName)}>چاپ</button>
         <button type="button" className="btn secondary" onClick={onClose}>بستن</button>
         {!loading && !error && (
           <span style={{ opacity: 0.8 }}>
-            {toFaDigits(String(count))} فیش{missing > 0 ? ` — ${toFaDigits(String(missing))} نفر فیش محاسبه‌شده نداشتند و چاپ نشدند` : ""}
+            {toFaDigits(String(count))} {list ? "نفر" : "فیش"}{missing > 0 ? ` — ${toFaDigits(String(missing))} نفر فیش محاسبه‌شده نداشتند و چاپ نشدند` : ""}
           </span>
         )}
       </div>

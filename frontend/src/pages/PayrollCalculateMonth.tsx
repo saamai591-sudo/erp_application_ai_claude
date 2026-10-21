@@ -80,6 +80,7 @@ export default function PayrollCalculateMonth() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [printingList, setPrintingList] = useState(false);
   const [issueOpen, setIssueOpen] = useState(false);
   const [issueDate, setIssueDate] = useState("");
   const [issueError, setIssueError] = useState<string | null>(null);
@@ -227,6 +228,15 @@ export default function PayrollCalculateMonth() {
           >
             چاپ فیش
           </button>
+          <button
+            type="button"
+            className="btn secondary"
+            disabled={busy || !(rows ?? []).some((r) => r.slip)}
+            onClick={() => setPrintingList(true)}
+            title={hasCalculatedPicked ? "چاپ لیست حقوق (A4 افقی) کارمندان محاسبه‌شده‌ی انتخاب‌شده" : "چاپ لیست حقوق (A4 افقی) همه‌ی کارمندان محاسبه‌شده‌ی این ماه"}
+          >
+            چاپ لیست
+          </button>
           {hasPermission("payroll.operations.payroll-calculation.delete") && (
             <button
               type="button"
@@ -345,6 +355,17 @@ export default function PayrollCalculateMonth() {
             <button type="button" className="btn" onClick={() => setProblems(null)}>بستن</button>
           </div>
         </Modal>
+      )}
+
+      {printingList && (
+        <PayrollSlipPrintDialog
+          list
+          year={Number(sel.year)}
+          month={Number(sel.month)}
+          employeeIds={hasCalculatedPicked ? pickedRows.filter((r) => r.slip).map((r) => r.employeeId) : []}
+          calcTypeId={Number(typeId)}
+          onClose={() => setPrintingList(false)}
+        />
       )}
 
       {printing && (
