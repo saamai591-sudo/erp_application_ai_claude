@@ -625,6 +625,16 @@ export const REGISTRY: ModuleDef[] = [
           { key: "payroll-data-entry", title: "ورود اطلاعات", baseActions: ["view", "edit"] },
           { key: "personnel-constants", title: "مقادیر ثابت پرسنل", baseActions: ["view", "edit"] },
           {
+            key: "payroll-payment-preps",
+            title: "آماده‌سازی پرداخت",
+            baseActions: CRUD,
+            actions: [
+              { key: "approve", title: "تایید" },
+              { key: "unapprove", title: "برگشت از تایید" },
+              { key: "generateFile", title: "ایجاد فایل" },
+            ],
+          },
+          {
             key: "payroll-calculation",
             title: "محاسبه حقوق",
             baseActions: ["view", "delete"],

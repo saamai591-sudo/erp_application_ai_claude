@@ -113,6 +113,7 @@ import { PayrollReportPage } from "./pages/PayrollCalculation";
 import PayrollCalculateMonth from "./pages/PayrollCalculateMonth";
 import { EmployeeEducation, EmployeeVeteran, EmployeeMarital } from "./pages/HrRecords";
 import EmployeeSalaryAccounts from "./pages/EmployeeSalaryAccounts";
+import PayrollPaymentPreps from "./pages/PayrollPaymentPreps";
 import TradeLedgers from "./pages/TradeLedgers";
 import TaxInvoiceSubmission from "./pages/TaxInvoiceSubmission";
 import WarehouseDocDetails from "./pages/WarehouseDocDetails";
@@ -520,6 +521,9 @@ export default function App() {
             <Route path="/factor-methods/:id/edit" element={<FactorMethods />} />
             <Route path="/payroll-data-entry" element={<PayrollDataEntry />} />
             <Route path="/personnel-constants" element={<PersonnelConstants />} />
+            <Route path="/payroll-payment-preps" element={<PayrollPaymentPreps />} />
+            <Route path="/payroll-payment-preps/new" element={<PayrollPaymentPreps />} />
+            <Route path="/payroll-payment-preps/:id/edit" element={<PayrollPaymentPreps />} />
             <Route path="/payroll-calculation" element={<PayrollCalculateMonth />} />
             <Route path="/payroll-calculation-report" element={<PayrollReportPage />} />
             <Route path="/employee-salary-accounts" element={<EmployeeSalaryAccounts />} />

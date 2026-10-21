@@ -14,6 +14,7 @@ import { basisRows, resolveBasisDecisions } from "../services/payrollBasisServic
 import { BASE_INFO, DECREE_VARIANTS, FACTOR_VARIANTS, KIND_FA, LOAN_SUM_KEY, LOAN_SUM_LABEL } from "../services/payrollFormula";
 import { employeeIdsInPeriod } from "../services/employmentStatusService";
 import { slipJournalLockMessage } from "../services/payrollAccountingService";
+import { slipPrepLockMessage } from "../services/payrollPaymentPrepService";
 
 // حقوق و دستمزد: عامل‌های حقوق (هویت)، «روش محاسبه عامل» (تاریخ‌دار با ماه اجرا؛ مبنا = عامل حکم یا عامل حقوق)، ورودی ماهانه‌ی عوامل،
 // محاسبه‌ی فیش یک کارمند و جزئیات آن برای گزارش.
@@ -649,6 +650,8 @@ router.post("/payroll-calculations/delete", can(`${F_CALC}.delete`), async (req,
     }
     const lock = await slipJournalLockMessage({ year: Number(b.year), month: Number(b.month), calcTypeId, employeeId: { in: ids } });
     if (lock) throw new PayrollCalcError(lock);
+    const prepLock = await slipPrepLockMessage({ year: Number(b.year), month: Number(b.month), calcTypeId, employeeId: { in: ids } });
+    if (prepLock) throw new PayrollCalcError(prepLock);
     const r = await prisma.payrollSlip.deleteMany({ where: { year: Number(b.year), month: Number(b.month), calcTypeId, employeeId: { in: ids } } });
     res.json({ deleted: r.count });
   } catch (e) {
@@ -659,6 +662,8 @@ router.post("/payroll-calculations/delete", can(`${F_CALC}.delete`), async (req,
 router.delete("/payroll-calculations/:id", can(`${F_CALC}.delete`), async (req, res) => {
   const lock = await slipJournalLockMessage({ id: Number(req.params.id) });
   if (lock) return res.status(400).json({ error: lock });
+  const prepLock = await slipPrepLockMessage({ id: Number(req.params.id) });
+  if (prepLock) return res.status(400).json({ error: prepLock });
   const slip = await prisma.payrollSlip.findUnique({ where: { id: Number(req.params.id) }, select: { employeeId: true, year: true, month: true, calcType: { select: { isBase: true } } } });
   if (slip?.calcType.isBase) {
     const msg = await dependentSlipMessage([slip]);

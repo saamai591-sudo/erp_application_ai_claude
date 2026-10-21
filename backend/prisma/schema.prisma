@@ -64,6 +64,7 @@ model UserAction {
 }
 
 model User {
+  payrollPaymentPreps PayrollPaymentPrep[]
   id                       Int                     @id @default(autoincrement())
   code                     Int                     @unique
   mobile                   String                  @unique @db.VarChar(11)
@@ -4758,6 +4759,7 @@ model Position {
 }
 
 model Employee {
+  paymentPrepLines PayrollPaymentPrepLine[]
   payrollIssueSettings PayrollIssueSetting[]
   id                     Int                  @id @default(autoincrement())
   /// کد پرسنلی (دستی؛ خالی = آخرین کد عددی + ۱ با همان طول)
@@ -5118,6 +5120,7 @@ enum PayrollSectionKind {
 /// عامل حقوق (هویت): عنوان + کلید داخلی که سیستم خودکار می‌سازد و به کاربر نمایش داده نمی‌شود. طبقه، روش و فرمول در رکوردهای تاریخ‌دار
 /// «روش محاسبه عامل» (PayrollFactorMethod) می‌آید.
 model PayrollComponent {
+  paymentPrepLines PayrollPaymentPrepLine[]
   fileFieldRefs FileStructureFieldRef[]
   paymentTypeItems PayrollPaymentTypeItem[]
   /// سازمان ذینفع مرتبط با عامل: کارمندِ «غیرمشمول» در این سازمان مبلغ این عامل را صفر می‌گیرد؛ در سند حقوق، طرف حساب «سازمان مرتبط با عامل» = شعبه‌ی کارمند در همین سازمان
@@ -5162,6 +5165,7 @@ model PayrollCalcType {
 
 /// نتیجه‌ی محاسبه‌ی یک کارمند در یک ماه (با همه‌ی ورودی‌ها و ریز هر جزء برای گزارش)
 model PayrollSlip {
+  paymentPrepLines PayrollPaymentPrepLine[]
   /// سند حسابداری صادرشده برای این فیش (یک سند می‌تواند فیش چند کارمند را داشته باشد)؛ با حذف سند خالی می‌شود
   journalEntryId Int?
   journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
@@ -5291,6 +5295,7 @@ model WorkCalendar {
 }
 
 model WorkCalendarMonth {
+  paymentPreps PayrollPaymentPrep[]
   payrollTemplates PayrollJournalTemplate[] @relation("PayrollTemplateMonth")
   payrollIssueSettings PayrollIssueSetting[] @relation("PayrollIssueSettingMonth")
   id               Int          @id @default(autoincrement())
@@ -5344,6 +5349,7 @@ model PayrollFactorMethodBranch {
 
 /// نوع وام: عنوان + سازمان مرتبط اختیاری (شخص حقوقی از نوع بانک / موسسه مالی و اعتباری)
 model LoanType {
+  paymentPrepLines PayrollPaymentPrepLine[]
   paymentTypeItems PayrollPaymentTypeItem[]
   journalTemplates PayrollJournalTemplate[]
   id                 Int      @id @default(autoincrement())
@@ -5532,6 +5538,7 @@ model BeneficiaryOrg {
 
 /// شعبه‌ی سازمان ذینفع: شعبه = یک شخص حقوقی؛ شماره پرونده/کد کارگاه (دستی)؛ ردیف پیمان، کارفرما و آدرس فقط برای تامین اجتماعی
 model BeneficiaryBranch {
+  paymentPreps PayrollPaymentPrep[]
   id             Int                   @id @default(autoincrement())
   organizationId Int
   partyId        Int
@@ -5644,6 +5651,7 @@ enum PayrollPayTo {
 
 /// نوع پرداخت حقوق (تنظیمات حقوق): سربرگ + آیتم‌های عامل (کسور / هزینه کارفرما / وام / خالص پرداختی)
 model PayrollPaymentType {
+  preps            PayrollPaymentPrep[]
   id               Int                      @id @default(autoincrement())
   code             Int                      @unique
   title            String                   @unique
@@ -5750,6 +5758,7 @@ enum FileAggFunc {
 
 /// ساختار فایل تعریف‌شده‌ی کاربر (ساختارهای پیش‌فرض نصب در کد هستند و با «کپی» اینجا می‌آیند)
 model FileStructure {
+  paymentPreps PayrollPaymentPrep[]
   id          Int                 @id @default(autoincrement())
   code        Int                 @unique
   title       String              @unique
@@ -5847,4 +5856,68 @@ model FileStructureFieldMap {
   field       FileStructureField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
 
   @@unique([fieldId, sourceValue])
+}
+
+// ── حقوق و دستمزد › عملیات › آماده‌سازی پرداخت ──
+
+enum PayrollPrepStatus {
+  DRAFT
+  APPROVED
+}
+
+enum PayrollPrepItemKind {
+  PAYROLL_FACTOR
+  LOAN_TYPE
+  NET_PAY
+}
+
+/// سند «آماده‌سازی پرداخت»: برای یک ماه تقویم کاری و یک نوع پرداخت حقوق، بخشی از مبلغ عامل‌ها/وام‌ها/خالص پرداختیِ فیش‌ها را «برای پرداخت آماده» می‌کند
+/// (تدریجی: مجموع مبالغ آماده‌شده‌ی یک ردیفِ فیش در همه‌ی سندها از مبلغ آن بیشتر نمی‌شود). سند حسابداری ندارد؛ بعد از تایید، «ایجاد فایل» از روی آن فایل بانکی/سازمانی می‌سازد
+/// (بدون ذخیره‌ی نتیجه). قواعد: services/payrollPaymentPrepService.ts
+model PayrollPaymentPrep {
+  id              Int                    @id @default(autoincrement())
+  number          Int                    @unique
+  date            DateTime               @db.Date
+  description     String?
+  year            Int
+  month           Int
+  paymentTypeId   Int
+  /// فقط وقتی نوع پرداخت «سازمان ذینفع» است: شعبه‌ی همان سازمان (اجباری)
+  branchId        Int?
+  /// فقط وقتی نوع پرداخت «فایل دارد»: ساختار فایل (بانکی برای نوع پرسنل، هم‌سازمان برای نوع سازمانی)
+  fileStructureId Int?
+  status          PayrollPrepStatus      @default(DRAFT)
+  approvedAt      DateTime?
+  createdById     Int?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  paymentType     PayrollPaymentType     @relation(fields: [paymentTypeId], references: [id], onDelete: Restrict)
+  branch          BeneficiaryBranch?     @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  fileStructure   FileStructure?         @relation(fields: [fileStructureId], references: [id], onDelete: Restrict)
+  calendarMonth   WorkCalendarMonth      @relation(fields: [year, month], references: [year, month], onDelete: Restrict)
+  createdBy       User?                  @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  lines           PayrollPaymentPrepLine[]
+
+  @@index([year, month])
+}
+
+/// ردیف آماده‌سازی: یک آیتم (عامل حقوق / نوع وام / خالص پرداختی) از فیشِ یک کارمند. «مبلغ» نسخه‌ی لحظه‌ی بارگذاری است؛ کنترل همیشه با مبلغِ زنده‌ی فیش انجام می‌شود
+model PayrollPaymentPrepLine {
+  id                 Int                 @id @default(autoincrement())
+  prepId             Int
+  slipId             Int
+  employeeId         Int
+  kind               PayrollPrepItemKind
+  payrollComponentId Int?
+  loanTypeId         Int?
+  amount             Decimal             @db.Decimal(20, 4)
+  payableAmount      Decimal             @db.Decimal(20, 4)
+  prep               PayrollPaymentPrep  @relation(fields: [prepId], references: [id], onDelete: Cascade)
+  slip               PayrollSlip         @relation(fields: [slipId], references: [id], onDelete: Restrict)
+  employee           Employee            @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  payrollComponent   PayrollComponent?   @relation(fields: [payrollComponentId], references: [id], onDelete: Restrict)
+  loanType           LoanType?           @relation(fields: [loanTypeId], references: [id], onDelete: Restrict)
+
+  @@index([prepId])
+  @@index([slipId])
 }

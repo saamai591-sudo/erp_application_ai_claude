@@ -90,6 +90,14 @@ export async function validatePaymentType(b: any, excludeId?: number): Promise<P
     } else if (!(await prisma.payrollCalcType.findUnique({ where: { id: refId } }))) throw new PayTypeError("نوع محاسبه یافت نشد");
     items.push({ field, refId });
   }
+  if (excludeId && (await prisma.payrollPaymentPrep.count({ where: { paymentTypeId: excludeId } })) > 0) {
+    const cur = await prisma.payrollPaymentType.findUnique({ where: { id: excludeId }, include: { items: true } });
+    const keyOf = (i: { field: string; refId: number }) => `${i.field}:${i.refId}`;
+    const curKeys = new Set((cur?.items ?? []).map((i) => (i.payrollComponentId ? keyOf({ field: "payrollComponentId", refId: i.payrollComponentId }) : i.loanTypeId ? keyOf({ field: "loanTypeId", refId: i.loanTypeId }) : keyOf({ field: "netCalcTypeId", refId: i.netCalcTypeId! }))));
+    const newKeys = new Set(items.map(keyOf));
+    if (!cur || cur.payTo !== payTo || cur.beneficiaryOrgId !== beneficiaryOrgId || cur.hasFile !== !!b.hasFile || curKeys.size !== newKeys.size || [...curKeys].some((k) => !newKeys.has(k)))
+      throw new PayTypeError("این نوع پرداخت در «آماده‌سازی پرداخت» استفاده شده است؛ فقط عنوان و فعال/غیرفعال‌بودن قابل تغییر است");
+  }
   return { code, title, isActive: b.isActive === undefined ? true : !!b.isActive, payTo, beneficiaryOrgId, hasFile: !!b.hasFile, items };
 }
 

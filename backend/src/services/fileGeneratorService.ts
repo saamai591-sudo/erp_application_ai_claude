@@ -25,6 +25,10 @@ export interface GenParams {
   orgId?: number | null;
   branchId?: number | null;
   params?: Record<string, string>;
+  /** نوع پرداخت: حسابِ مؤثرِ همین نوع (فرم «حساب دریافت حقوق») خوانده می‌شود */
+  paymentTypeId?: number | null;
+  /** از «آماده‌سازی پرداخت»: برای هر کارمند مجموعِ «مبلغ قابل پرداخت» به تفکیک مرجع («P:<عامل>» / «N:<نوع محاسبه>») که جای مجموع فیش می‌نشیند */
+  prepAmounts?: Map<number, Map<string, number>> | null;
 }
 export interface GenProblem {
   level: "ERROR" | "WARNING";
@@ -126,7 +130,7 @@ export async function generateFiles(def: StructureDef, gp: GenParams): Promise<G
     return { files: [], zip: null, problems, employeeCount: 0 };
   }
   const empIds = [...byEmp.keys()];
-  const salaryAcc = await loadSalaryAccounts(empIds, gp.year, gp.month);
+  const salaryAcc = await loadSalaryAccounts(empIds, gp.year, gp.month, gp.paymentTypeId ?? undefined);
   const bankIds = [...new Set([...salaryAcc.values()].map((a) => a.bankPartyId).filter((x): x is number => !!x))];
   const [eduRows, statusMap, bankParties] = await Promise.all([
     prisma.employeeEducationRecord.findMany({ where: { employeeId: { in: empIds }, effectiveDate: { lte: monthEnd } }, orderBy: { effectiveDate: "desc" }, select: { employeeId: true, educationLevel: { select: { title: true } } } }),
@@ -192,6 +196,8 @@ export async function generateFiles(def: StructureDef, gp: GenParams): Promise<G
         add(`${l.source === "DECREE_COMPONENT" ? "D" : "P"}:${l.refId}`, Number(l.amount));
       }
     }
+    const ov = gp.prepAmounts?.get(employeeId);
+    if (ov) for (const [k, v] of ov) sums.set(k, v);
     emps.push({ employeeId, personnelCode: e.personnelCode, hasErrors: list.some((s) => s.hasErrors), dict, sums });
   }
   for (const e of emps) if (e.hasErrors) problems.push({ level: "WARNING", message: `فیش کارمند ${e.personnelCode} خطا دارد؛ مبلغ‌ها ممکن است ناقص باشند` });

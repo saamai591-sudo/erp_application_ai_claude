@@ -13,6 +13,7 @@ import { WorkMonthField } from "../components/WorkMonthField";
 import { toFaDigits } from "../lib/formatAmount";
 import { api, ApiError } from "../lib/api";
 import { showError, showToast } from "../lib/toast";
+import { downloadBase64, mimeOfFile } from "../lib/downloadBase64";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { usePermissions } from "../lib/usePermissions";
@@ -643,20 +644,6 @@ function MapDialog({ value, readOnly, onClose, onSave }: { value: { sourceValue:
   );
 }
 
-function download(name: string, base64: string, mime = "application/octet-stream") {
-  const bin = atob(base64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
-}
-
 interface Problem { level: "ERROR" | "WARNING"; message: string }
 
 function GenerateDialog({ structureRef, def, opts, onClose }: { structureRef: string; def: DefUI; opts: Options; onClose: () => void }) {
@@ -695,8 +682,8 @@ function GenerateDialog({ structureRef, def, opts, onClose }: { structureRef: st
     setBusy(true);
     try {
       const r = await api.post(`/file-structures/${structureRef}/generate`, body(), { silent: true } as any);
-      if (r.zip) download(r.zip.name, r.zip.dataBase64, "application/zip");
-      else for (const f of r.files) download(f.name, f.dataBase64, /\.xlsx$/i.test(f.name) ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : /\.xls$/i.test(f.name) ? "application/vnd.ms-excel" : "text/plain");
+      if (r.zip) downloadBase64(r.zip.name, r.zip.dataBase64, "application/zip");
+      else for (const f of r.files) downloadBase64(f.name, f.dataBase64, mimeOfFile(f.name));
       showToast("فایل تولید شد");
     } catch (e) {
       setErr((e as ApiError).message);

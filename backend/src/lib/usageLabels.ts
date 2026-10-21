@@ -54,6 +54,8 @@ export const USAGE_META: Record<string, UsageMeta> = {
   WorkCalendarMonth: { label: "ماه تقویم کاری", title: (r) => `${r.year}/${r.month}` },
   BeneficiaryOrg: { label: "سازمان ذینفع", base: "/beneficiary-orgs" },
   BeneficiaryBranch: { label: "شعبه‌ی سازمان ذینفع", base: "/beneficiary-branches", include: { party: { select: { detailTitle: true } } }, title: (r) => `${r.party?.detailTitle ?? ""}${r.contractRow ? ` (ردیف پیمان ${r.contractRow})` : ""}` },
+  PayrollPaymentPrep: { label: "آماده‌سازی پرداخت", base: "/payroll-payment-preps", title: (r) => `شماره ${r.number}` },
+  PayrollPaymentPrepLine: { label: "ردیف آماده‌سازی پرداخت", base: "/payroll-payment-preps", include: EMP, title: (r) => `سند ${r.prepId}${ofEmp(r)}` },
   EmployeeSalaryAccount: { label: "حساب دریافت حقوق کارمند", base: "/employee-salary-accounts", include: EMP, title: (r) => `حساب دریافت حقوق${ofEmp(r)}` },
   EmployeeBeneficiary: { label: "مشمولیت کارمند در سازمان ذینفع", include: EMP, title: (r) => `${r.isIncluded ? "مشمول" : "غیرمشمول"}${ofEmp(r)}` },
   PayrollAccountGroup: { label: "گروه حساب حقوق", base: "/payroll-account-groups" },
