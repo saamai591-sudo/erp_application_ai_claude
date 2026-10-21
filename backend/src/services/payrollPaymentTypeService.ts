@@ -13,7 +13,8 @@ const KIND_FA: Record<string, string> = { DEDUCTION: "کسر", EMPLOYER_COST: "�
 export interface PayRef {
   key: string; // P:<id> | L:<id> | N:<id>
   field: PayItemField;
-  id: number;
+  /** شناسه‌ی عامل/نوع وام/نوع محاسبه (فرم آن را به‌صورت { [field]: refId } می‌فرستد) */
+  refId: number;
   type: string; // طبقه / نوع مرجع برای نمایش
   title: string;
   calcTypeTitle: string;
@@ -28,10 +29,10 @@ export async function loadPayRefOptions(): Promise<PayRef[]> {
   ]);
   const base = calcTypes.find((c) => c.isBase);
   return [
-    ...comps.map((c) => ({ key: `P:${c.id}`, field: "payrollComponentId" as const, id: c.id, type: KIND_FA[c.kind] ?? c.kind, title: c.title, calcTypeTitle: c.calcType.title })),
+    ...comps.map((c) => ({ key: `P:${c.id}`, field: "payrollComponentId" as const, refId: c.id, type: KIND_FA[c.kind] ?? c.kind, title: c.title, calcTypeTitle: c.calcType.title })),
     // اقساط وام فقط در حقوق ماهانه می‌آید
-    ...loanTypes.map((l) => ({ key: `L:${l.id}`, field: "loanTypeId" as const, id: l.id, type: "وام", title: l.title, calcTypeTitle: base?.title ?? "" })),
-    ...calcTypes.map((c) => ({ key: `N:${c.id}`, field: "netCalcTypeId" as const, id: c.id, type: "خالص پرداختی", title: "خالص پرداختی", calcTypeTitle: c.title })),
+    ...loanTypes.map((l) => ({ key: `L:${l.id}`, field: "loanTypeId" as const, refId: l.id, type: "وام", title: l.title, calcTypeTitle: base?.title ?? "" })),
+    ...calcTypes.map((c) => ({ key: `N:${c.id}`, field: "netCalcTypeId" as const, refId: c.id, type: "خالص پرداختی", title: "خالص پرداختی", calcTypeTitle: c.title })),
   ];
 }
 
