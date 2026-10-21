@@ -65,7 +65,10 @@ function cleanField(raw: any, file: FileDef, fileIdx: number, seqInFile: number)
   if (file.format === "DBF" && !length) throw new FileStructureError(`طول فیلد DBF «${name}» الزامی است`);
   const decimals = raw.decimals ? Number(raw.decimals) : 0;
   if (!Number.isInteger(decimals) || decimals < 0 || decimals > 8) throw new FileStructureError(`تعداد اعشار «${name}» نامعتبر است`);
-  const f: FieldDef = { name, title, dataType, length, decimals, zeroPad: !!raw.zeroPad, source: raw.source };
+  const section = raw.section === "HEADER" || raw.section === "FOOTER" ? raw.section : "ITEM";
+  const lineNo = raw.lineNo === undefined || raw.lineNo === null || raw.lineNo === "" ? 1 : Number(raw.lineNo);
+  if (!Number.isInteger(lineNo) || lineNo < 1 || lineNo > 20) throw new FileStructureError(`شماره‌ی خط «${name}» باید عدد صحیح ۱ تا ۲۰ باشد`);
+  const f: FieldDef = { name, title, dataType, length, decimals, zeroPad: !!raw.zeroPad, section, lineNo, required: !!raw.required, skipRowIfZero: section === "ITEM" && !!raw.skipRowIfZero, source: raw.source };
   switch (raw.source) {
     case "CONSTANT":
       f.constantValue = typeof raw.constantValue === "string" ? raw.constantValue : String(raw.constantValue ?? "");
@@ -75,7 +78,7 @@ function cleanField(raw: any, file: FileDef, fileIdx: number, seqInFile: number)
     case "EMPLOYEE_FIELD": {
       const d = DICT_BY_KEY.get(String(raw.systemField));
       if (!d) throw new FileStructureError(`فیلد سیستمی «${raw.systemField}» برای «${name}» وجود ندارد`);
-      if (file.rowKind === "SINGLE" && d.scope !== "GLOBAL") throw new FileStructureError(`«${name}»: در فایل تک‌ردیفی فقط فیلدهای «شرکت و دوره / شعبه» مجازند`);
+      if (section !== "ITEM" && d.scope !== "GLOBAL") throw new FileStructureError(`«${name}»: در هدر و فوتر فقط فیلدهای «شرکت و دوره / شعبه» مجازند`);
       f.systemField = d.key;
       f.maps = (Array.isArray(raw.maps) ? raw.maps : [])
         .map((m: any) => ({ sourceValue: String(m.sourceValue ?? "").trim(), targetValue: String(m.targetValue ?? "").trim() }))
@@ -96,12 +99,12 @@ function cleanField(raw: any, file: FileDef, fileIdx: number, seqInFile: number)
       break;
     }
     case "AGGREGATE": {
-      if (file.rowKind !== "SINGLE") throw new FileStructureError(`«${name}»: مجموع/تعداد فقط در فایل تک‌ردیفی ممکن است`);
+      if (section === "ITEM") throw new FileStructureError(`«${name}»: مجموع/تعداد فقط در بخش هدر یا فوتر ممکن است`);
       if (raw.aggFunc !== "SUM" && raw.aggFunc !== "COUNT") throw new FileStructureError(`«${name}»: تابع مجموع‌گیری را انتخاب کنید`);
       f.aggFunc = raw.aggFunc;
-      f.aggFileSeq = Number(raw.aggFileSeq) || null;
+      f.aggFileSeq = Number(raw.aggFileSeq) || null; // خالی = همین فایل
       f.aggFieldName = str(raw.aggFieldName);
-      if (!f.aggFileSeq || !f.aggFieldName) throw new FileStructureError(`«${name}»: فایل و فیلد مبنای مجموع‌گیری را انتخاب کنید`);
+      if (!f.aggFieldName) throw new FileStructureError(`«${name}»: فیلد مبنای مجموع‌گیری را انتخاب کنید`);
       break;
     }
     case "EXPR": {
@@ -130,11 +133,11 @@ export function validateDef(b: any): StructureDef {
     const nameTemplate = str(rf.nameTemplate);
     if (!nameTemplate) throw new FileStructureError(`فایل ${i + 1}: الگوی نام فایل الزامی است`);
     if (!/^[^\\/:*?"<>|]+$/.test(nameTemplate)) throw new FileStructureError(`فایل ${i + 1}: نام فایل نویسه‌ی غیرمجاز دارد`);
-    const format = rf.format === "DBF" ? "DBF" : "DELIMITED";
-    const rowKind = rf.rowKind === "SINGLE" ? "SINGLE" : "PER_EMPLOYEE";
+    const format = rf.format === "DBF" ? "DBF" : rf.format === "EXCEL" ? "EXCEL" : "DELIMITED";
     const delimiter = typeof rf.delimiter === "string" && rf.delimiter.length >= 1 && rf.delimiter.length <= 3 ? rf.delimiter : ",";
-    const encoding = format === "DBF" ? "IRAN_SYSTEM" : rf.encoding === "UTF8" ? "UTF8" : "UTF8_BOM";
-    const file: FileDef = { seq: i + 1, nameTemplate, format, rowKind, delimiter, encoding, lineEnding: rf.lineEnding === "CRLF" ? "CRLF" : "LF", trailingNewline: rf.trailingNewline !== false, fields: [] };
+    const encoding = format === "DBF" ? "IRAN_SYSTEM" : format === "EXCEL" || rf.encoding === "UTF8" ? "UTF8" : "UTF8_BOM";
+    if (format === "EXCEL" && !/\.xlsx?$/i.test(nameTemplate)) throw new FileStructureError(`فایل ${i + 1}: پسوند فایل اکسل باید .xls یا .xlsx باشد`);
+    const file: FileDef = { seq: i + 1, nameTemplate, format, sheetName: format === "EXCEL" ? str(rf.sheetName) ?? "Sheet1" : null, delimiter, encoding, lineEnding: rf.lineEnding === "CRLF" ? "CRLF" : "LF", trailingNewline: rf.trailingNewline !== false, fields: [] };
     const rawFields = Array.isArray(rf.fields) ? rf.fields : [];
     if (rawFields.length === 0) throw new FileStructureError(`فایل ${i + 1}: دست‌کم یک فیلد لازم است`);
     file.fields = rawFields.map((fl: any, j: number) => cleanField(fl, file, i + 1, j + 1));
@@ -142,6 +145,10 @@ export function validateDef(b: any): StructureDef {
     for (const fl of file.fields) {
       if (names.has(fl.name)) throw new FileStructureError(`فایل ${i + 1}: نام فیلد «${fl.name}» تکراری است`);
       names.add(fl.name);
+    }
+    if (format === "DBF") {
+      const kinds = new Set(file.fields.map((fl) => `${fl.section}:${fl.lineNo}`));
+      if (kinds.size > 1 || file.fields[0].section === "FOOTER" || file.fields[0].lineNo !== 1) throw new FileStructureError(`فایل ${i + 1}: فایل DBF یک جدول است؛ همه‌ی فیلدها باید در یک بخش (آیتم یا هدر) و خط ۱ باشند`);
     }
     for (const fl of file.fields) {
       if (fl.source === "EXPR") {
@@ -153,9 +160,9 @@ export function validateDef(b: any): StructureDef {
   for (const f of files) {
     for (const fl of f.fields) {
       if (fl.source !== "AGGREGATE") continue;
-      const target = files.find((x) => x.seq === fl.aggFileSeq);
-      if (!target || target.rowKind !== "PER_EMPLOYEE") throw new FileStructureError(`«${fl.name}»: فایل مبنای مجموع‌گیری باید فایل «یک ردیف به ازای هر کارمند» باشد`);
-      if (!target.fields.some((x) => x.name === fl.aggFieldName)) throw new FileStructureError(`«${fl.name}»: فیلد «${fl.aggFieldName}» در فایل ${target.seq} نیست`);
+      const target = files.find((x) => x.seq === (fl.aggFileSeq ?? f.seq));
+      if (!target) throw new FileStructureError(`«${fl.name}»: فایل مبنای مجموع‌گیری یافت نشد`);
+      if (!target.fields.some((x) => x.name === fl.aggFieldName && x.section === "ITEM")) throw new FileStructureError(`«${fl.name}»: فیلد «${fl.aggFieldName}» در بخش آیتم فایل ${target.seq} نیست`);
     }
   }
   return { systemKey: null, title, sourceKind: "PAYROLL_LIST", isActive: b.isActive === undefined ? true : !!b.isActive, files };
@@ -188,7 +195,7 @@ const filesCreate = (def: StructureDef) =>
     seq: f.seq,
     nameTemplate: f.nameTemplate,
     format: f.format,
-    rowKind: f.rowKind,
+    sheetName: f.sheetName ?? null,
     delimiter: f.delimiter,
     encoding: f.encoding,
     lineEnding: f.lineEnding,
@@ -202,6 +209,10 @@ const filesCreate = (def: StructureDef) =>
         length: fl.length ?? null,
         decimals: fl.decimals ?? 0,
         zeroPad: !!fl.zeroPad,
+        section: fl.section ?? "ITEM",
+        lineNo: fl.lineNo ?? 1,
+        required: !!fl.required,
+        skipRowIfZero: !!fl.skipRowIfZero,
         source: fl.source,
         constantValue: fl.constantValue ?? null,
         systemField: fl.systemField ?? null,
@@ -269,7 +280,7 @@ function toDef(row: any): StructureDef {
       seq: f.seq,
       nameTemplate: f.nameTemplate,
       format: f.format,
-      rowKind: f.rowKind,
+      sheetName: f.sheetName,
       delimiter: f.delimiter,
       encoding: f.encoding,
       lineEnding: f.lineEnding,
@@ -281,6 +292,10 @@ function toDef(row: any): StructureDef {
         length: fl.length,
         decimals: fl.decimals,
         zeroPad: fl.zeroPad,
+        section: fl.section,
+        lineNo: fl.lineNo,
+        required: fl.required,
+        skipRowIfZero: fl.skipRowIfZero,
         source: fl.source,
         constantValue: fl.constantValue,
         systemField: fl.systemField,

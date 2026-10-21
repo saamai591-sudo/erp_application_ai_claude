@@ -39,6 +39,10 @@ interface FieldUI {
   length: string;
   decimals: string;
   zeroPad: boolean;
+  section: "HEADER" | "ITEM" | "FOOTER";
+  lineNo: string;
+  required: boolean;
+  skipRowIfZero: boolean;
   source: string;
   constantValue: string;
   systemField: string;
@@ -52,8 +56,8 @@ interface FieldUI {
 }
 interface FileUI {
   nameTemplate: string;
-  format: "DELIMITED" | "DBF";
-  rowKind: "PER_EMPLOYEE" | "SINGLE";
+  format: "DELIMITED" | "DBF" | "EXCEL";
+  sheetName: string;
   delimiter: string;
   encoding: string;
   lineEnding: string;
@@ -77,8 +81,17 @@ interface Options {
 
 const KIND_FA: Record<string, string> = { EARNING: "پرداختی", DEDUCTION: "کسر", EMPLOYER_COST: "هزینه کارفرما", WORK: "کارکرد", INFO: "اطلاعاتی" };
 
-const emptyField = (): FieldUI => ({ name: "", title: "", dataType: "TEXT", length: "", decimals: "0", zeroPad: false, source: "CONSTANT", constantValue: "", systemField: "", paramKey: "", aggFunc: "SUM", aggFileSeq: "", aggFieldName: "", exprText: "", refs: { payroll: [], decree: [], net: [] }, maps: [] });
-const emptyFile = (): FileUI => ({ nameTemplate: "", format: "DELIMITED", rowKind: "PER_EMPLOYEE", delimiter: ",", encoding: "UTF8_BOM", lineEnding: "LF", trailingNewline: true, fields: [emptyField()] });
+const SECTION_FA: Record<string, string> = { HEADER: "هدر", ITEM: "آیتم", FOOTER: "فوتر" };
+const DELIMITERS: { value: string; label: string }[] = [
+  { value: ",", label: "ویرگول ( , )" },
+  { value: ";", label: "نقطه‌ویرگول ( ; )" },
+  { value: " ", label: "فاصله" },
+  { value: "\t", label: "تب (Tab)" },
+  { value: "|", label: "خط عمودی ( | )" },
+];
+
+const emptyField = (): FieldUI => ({ name: "", title: "", dataType: "TEXT", length: "", decimals: "0", zeroPad: false, section: "ITEM", lineNo: "1", required: false, skipRowIfZero: false, source: "CONSTANT", constantValue: "", systemField: "", paramKey: "", aggFunc: "SUM", aggFileSeq: "", aggFieldName: "", exprText: "", refs: { payroll: [], decree: [], net: [] }, maps: [] });
+const emptyFile = (): FileUI => ({ nameTemplate: "", format: "DELIMITED", sheetName: "Sheet1", delimiter: ",", encoding: "UTF8_BOM", lineEnding: "LF", trailingNewline: true, fields: [emptyField()] });
 const EMPTY: DefUI = { title: "", isActive: true, files: [emptyFile()] };
 
 function fromServer(d: any): DefUI {
@@ -88,7 +101,7 @@ function fromServer(d: any): DefUI {
     files: (d.files ?? []).map((f: any) => ({
       nameTemplate: f.nameTemplate,
       format: f.format,
-      rowKind: f.rowKind,
+      sheetName: f.sheetName ?? "Sheet1",
       delimiter: f.delimiter,
       encoding: f.encoding,
       lineEnding: f.lineEnding,
@@ -100,6 +113,10 @@ function fromServer(d: any): DefUI {
         length: x.length ? String(x.length) : "",
         decimals: String(x.decimals ?? 0),
         zeroPad: !!x.zeroPad,
+        section: x.section ?? "ITEM",
+        lineNo: String(x.lineNo ?? 1),
+        required: !!x.required,
+        skipRowIfZero: !!x.skipRowIfZero,
         source: x.source,
         constantValue: x.constantValue ?? "",
         systemField: x.systemField ?? "",
@@ -124,6 +141,7 @@ const toBody = (d: DefUI) => ({
       ...x,
       length: x.length ? Number(x.length) : null,
       decimals: Number(x.decimals || 0),
+      lineNo: Number(x.lineNo || 1),
       aggFileSeq: x.aggFileSeq ? Number(x.aggFileSeq) : null,
     })),
   })),
@@ -216,8 +234,9 @@ function StructureForm({ editRef }: { editRef?: string }) {
   const file = form.files[Math.min(fileIdx, form.files.length - 1)];
   const setFile = (patch: Partial<FileUI>) => setForm({ ...form, files: form.files.map((f, i) => (i === fileIdx ? { ...f, ...patch } : f)) });
   const setField = (i: number, patch: Partial<FieldUI>) => setFile({ fields: file.fields.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
-  const dictFor = useMemo(() => (opts ? opts.dictionary.filter((d) => file?.rowKind !== "SINGLE" || d.scope === "GLOBAL") : []), [opts, file?.rowKind]);
-  const groups = useMemo(() => [...new Set(dictFor.map((d) => d.group))], [dictFor]);
+  // در هدر و فوتر فقط فیلدهای کل فایل (شرکت/دوره/شعبه) مجازند؛ در آیتم همه
+  const dictFor = (section: string) => (opts ? opts.dictionary.filter((d) => section === "ITEM" || d.scope === "GLOBAL") : []);
+  const groupsFor = (section: string) => [...new Set(dictFor(section).map((d) => d.group))];
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -320,23 +339,25 @@ function StructureForm({ editRef }: { editRef?: string }) {
                 </div>
                 <div className="form-field">
                   <label>قالب فایل</label>
-                  <select value={file.format} onChange={(e) => setFile({ format: e.target.value as FileUI["format"], encoding: e.target.value === "DBF" ? "IRAN_SYSTEM" : "UTF8_BOM" })}>
+                  <select value={file.format} onChange={(e) => setFile({ format: e.target.value as FileUI["format"], encoding: e.target.value === "DBF" ? "IRAN_SYSTEM" : e.target.value === "EXCEL" ? "UTF8" : "UTF8_BOM" })}>
                     <option value="DELIMITED">متنی با جداکننده (CSV/TXT)</option>
                     <option value="DBF">DBF (dBase III)</option>
+                    <option value="EXCEL">اکسل (.xls / .xlsx)</option>
                   </select>
                 </div>
-                <div className="form-field">
-                  <label>هر ردیف</label>
-                  <select value={file.rowKind} onChange={(e) => setFile({ rowKind: e.target.value as FileUI["rowKind"] })}>
-                    <option value="PER_EMPLOYEE">یک ردیف به ازای هر کارمند</option>
-                    <option value="SINGLE">یک ردیف برای کل فایل (سرلیست)</option>
-                  </select>
-                </div>
+                {file.format === "EXCEL" && (
+                  <div className="form-field">
+                    <label>نام برگه</label>
+                    <input dir="ltr" value={file.sheetName} onChange={(e) => setFile({ sheetName: e.target.value })} />
+                  </div>
+                )}
                 {file.format === "DELIMITED" && (
                   <>
                     <div className="form-field">
                       <label>جداکننده</label>
-                      <input dir="ltr" value={file.delimiter} maxLength={3} onChange={(e) => setFile({ delimiter: e.target.value })} />
+                      <select value={file.delimiter} onChange={(e) => setFile({ delimiter: e.target.value })}>
+                        {DELIMITERS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+                      </select>
                     </div>
                     <div className="form-field">
                       <label>کدگذاری</label>
@@ -360,18 +381,24 @@ function StructureForm({ editRef }: { editRef?: string }) {
                 {file.format === "DBF" && <div className="form-field"><label>کدگذاری متن</label><input disabled value="ایران‌سیستم" /></div>}
               </div>
 
-              <h3 className="hr-section" style={{ marginTop: 14 }}>فیلدها</h3>
+              <h3 className="hr-section" style={{ marginTop: 14 }}>
+                فیلدها <FieldHint label="بخش و خط" text="هر فیلد در یکی از بخش‌های هدر (ابتدای فایل)، آیتم (به ازای هر کارمند) یا فوتر (انتهای فایل) و در یک خط از آن بخش می‌آید. بخش هدر می‌تواند چند خط داشته باشد (مثل بانک شهر)؛ در بخش آیتم اگر فیلدها چند خط داشته باشند، هر کارمند همان‌قدر خط می‌گیرد. ترتیب فیلدها داخل یک خط همان ترتیب جدول است. فایل DBF یک جدول است و فقط یک بخش و خط ۱ دارد." />
+              </h3>
               <div className="grid-scroll-area" style={{ maxHeight: "55vh" }}>
                 <table className="je-lines-table">
                   <thead>
                     <tr>
                       <th style={{ width: 36 }}>#</th>
+                      <th style={{ width: 80 }}>بخش</th>
+                      <th style={{ width: 50 }}>خط</th>
                       <th style={{ width: 110 }}>نام</th>
                       <th style={{ width: 200 }}>عنوان</th>
                       <th style={{ width: 80 }}>نوع</th>
                       <th style={{ width: 60 }}>طول</th>
                       <th style={{ width: 60 }}>اعشار</th>
                       <th style={{ width: 50 }}>صفر پر</th>
+                      <th style={{ width: 55 }}>الزامی</th>
+                      <th style={{ width: 70 }}>حذف ردیف صفر</th>
                       <th style={{ width: 150 }}>منبع مقدار</th>
                       <th style={{ minWidth: 260 }}>تنظیم منبع</th>
                       <th style={{ width: 90 }}></th>
@@ -381,6 +408,20 @@ function StructureForm({ editRef }: { editRef?: string }) {
                     {file.fields.map((x, i) => (
                       <tr key={i}>
                         <td>{toFaDigits(String(i + 1))}</td>
+                        <td>
+                          <select value={x.section} onChange={(e) => {
+                            const section = e.target.value as FieldUI["section"];
+                            // منبع‌هایی که فقط در آیتم/هدر معنا دارند را با تغییر بخش سازگار کن
+                            const patch: Partial<FieldUI> = { section };
+                            if (section !== "ITEM" && (x.source === "FACTOR_SUM")) patch.source = "CONSTANT";
+                            if (section === "ITEM" && x.source === "AGGREGATE") patch.source = "CONSTANT";
+                            if (section !== "ITEM") patch.skipRowIfZero = false;
+                            setField(i, patch);
+                          }}>
+                            {Object.entries(SECTION_FA).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                          </select>
+                        </td>
+                        <td><input dir="ltr" value={x.lineNo} onChange={(e) => setField(i, { lineNo: e.target.value.replace(/\D/g, "") })} /></td>
                         <td><input dir="ltr" value={x.name} onChange={(e) => setField(i, { name: e.target.value })} /></td>
                         <td><input value={x.title} onChange={(e) => setField(i, { title: e.target.value })} /></td>
                         <td>
@@ -392,9 +433,13 @@ function StructureForm({ editRef }: { editRef?: string }) {
                         <td><input dir="ltr" value={x.length} onChange={(e) => setField(i, { length: e.target.value.replace(/\D/g, "") })} /></td>
                         <td>{x.dataType === "NUMBER" ? <input dir="ltr" value={x.decimals} onChange={(e) => setField(i, { decimals: e.target.value.replace(/\D/g, "") })} /> : ""}</td>
                         <td style={{ textAlign: "center" }}><input type="checkbox" checked={x.zeroPad} onChange={(e) => setField(i, { zeroPad: e.target.checked })} /></td>
+                        <td style={{ textAlign: "center" }}><input type="checkbox" checked={x.required} title="خالی‌بودن مقدار برای کارمند، تولید فایل را متوقف می‌کند" onChange={(e) => setField(i, { required: e.target.checked })} /></td>
+                        <td style={{ textAlign: "center" }}>
+                          {x.section === "ITEM" ? <input type="checkbox" checked={x.skipRowIfZero} title="اگر مقدار صفر یا خالی بود، ردیف آن کارمند در فایل نمی‌آید" onChange={(e) => setField(i, { skipRowIfZero: e.target.checked })} /> : ""}
+                        </td>
                         <td>
                           <select value={x.source} onChange={(e) => setField(i, { source: e.target.value })}>
-                            {Object.entries(SOURCE_FA).filter(([k]) => k !== "AGGREGATE" || file.rowKind === "SINGLE").map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                            {Object.entries(SOURCE_FA).filter(([k]) => (k !== "AGGREGATE" || x.section !== "ITEM") && (k !== "FACTOR_SUM" || x.section === "ITEM")).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                           </select>
                         </td>
                         <td>
@@ -403,9 +448,9 @@ function StructureForm({ editRef }: { editRef?: string }) {
                             <div style={{ display: "flex", gap: 4 }}>
                               <select value={x.systemField} onChange={(e) => setField(i, { systemField: e.target.value })} style={{ flex: 1 }}>
                                 <option value="">انتخاب کنید</option>
-                                {groups.map((g) => (
+                                {groupsFor(x.section).map((g) => (
                                   <optgroup key={g} label={g}>
-                                    {dictFor.filter((d) => d.group === g).map((d) => <option key={d.key} value={d.key}>{d.title}{d.pending ? " (فعلاً خالی)" : ""}</option>)}
+                                    {dictFor(x.section).filter((d) => d.group === g).map((d) => <option key={d.key} value={d.key}>{d.title}{d.pending ? " (فعلاً خالی)" : ""}</option>)}
                                   </optgroup>
                                 ))}
                               </select>
@@ -430,12 +475,12 @@ function StructureForm({ editRef }: { editRef?: string }) {
                                 <option value="COUNT">تعداد ردیف</option>
                               </select>
                               <select value={x.aggFileSeq} onChange={(e) => setField(i, { aggFileSeq: e.target.value, aggFieldName: "" })}>
-                                <option value="">فایل…</option>
-                                {form.files.map((f, j) => (f.rowKind === "PER_EMPLOYEE" ? <option key={j} value={j + 1}>{f.nameTemplate || `فایل ${j + 1}`}</option> : null))}
+                                <option value="">همین فایل</option>
+                                {form.files.map((f, j) => (j !== fileIdx ? <option key={j} value={j + 1}>{f.nameTemplate || `فایل ${j + 1}`}</option> : null))}
                               </select>
                               <select value={x.aggFieldName} onChange={(e) => setField(i, { aggFieldName: e.target.value })}>
                                 <option value="">فیلد…</option>
-                                {(form.files[Number(x.aggFileSeq) - 1]?.fields ?? []).map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}
+                                {(form.files[x.aggFileSeq ? Number(x.aggFileSeq) - 1 : fileIdx]?.fields ?? []).filter((f) => f.section === "ITEM").map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}
                               </select>
                             </div>
                           )}
@@ -600,7 +645,7 @@ function GenerateDialog({ structureRef, def, opts, onClose }: { structureRef: st
     try {
       const r = await api.post(`/file-structures/${structureRef}/generate`, body(), { silent: true } as any);
       if (r.zip) download(r.zip.name, r.zip.dataBase64, "application/zip");
-      else for (const f of r.files) download(f.name, f.dataBase64, "text/plain");
+      else for (const f of r.files) download(f.name, f.dataBase64, /\.xlsx$/i.test(f.name) ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : /\.xls$/i.test(f.name) ? "application/vnd.ms-excel" : "text/plain");
       showToast("فایل تولید شد");
     } catch (e) {
       setErr((e as ApiError).message);
@@ -657,7 +702,7 @@ function GenerateDialog({ structureRef, def, opts, onClose }: { structureRef: st
               <b dir="ltr">{f.name}</b> — {toFaDigits(String(f.rows))} ردیف، {toFaDigits(String(f.bytes))} بایت
               <div className="grid-scroll-area" style={{ maxHeight: 220 }}>
                 <table className="je-lines-table">
-                  <thead><tr>{f.header.map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                  {f.header.length > 0 && <thead><tr>{f.header.map((h) => <th key={h}>{h}</th>)}</tr></thead>}
                   <tbody>{f.sample.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j} style={{ whiteSpace: "nowrap" }}>{c}</td>)}</tr>)}</tbody>
                 </table>
               </div>

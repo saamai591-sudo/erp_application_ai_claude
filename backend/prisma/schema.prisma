@@ -5683,6 +5683,7 @@ enum FileSourceKind {
 enum FileFormat {
   DELIMITED
   DBF
+  EXCEL
 }
 
 enum FileEncoding {
@@ -5696,10 +5697,11 @@ enum FileLineEnding {
   CRLF
 }
 
-/// PER_EMPLOYEE = یک ردیف به ازای هر کارمند؛ SINGLE = یک ردیف برای کل فایل (مثل سرلیست بیمه)
-enum FileRowKind {
-  PER_EMPLOYEE
-  SINGLE
+/// بخش فایل: هدر (یک یا چند خط در ابتدا)، آیتم‌ها (به ازای هر کارمند یک یا چند خط)، فوتر (در انتها)
+enum FileSection {
+  HEADER
+  ITEM
+  FOOTER
 }
 
 enum FileFieldType {
@@ -5740,7 +5742,8 @@ model FileStructureFile {
   /// الگوی نام فایل: {YYYY} سال شمسی ۴ رقمی، {YY} ۲ رقمی، {MM} ماه ۲ رقمی
   nameTemplate    String
   format          FileFormat
-  rowKind         FileRowKind          @default(PER_EMPLOYEE)
+  /// نام برگه (فقط اکسل)
+  sheetName       String?
   delimiter       String               @default(",")
   encoding        FileEncoding         @default(UTF8)
   lineEnding      FileLineEnding       @default(LF)
@@ -5762,6 +5765,13 @@ model FileStructureField {
   length        Int?
   decimals      Int                      @default(0)
   zeroPad       Boolean                  @default(false)
+  /// بخش و شماره‌ی خطی که این فیلد در آن می‌آید (ترتیب فیلدها داخل یک خط = seq)
+  section       FileSection              @default(ITEM)
+  lineNo        Int                      @default(1)
+  /// مقدار خالی برای کارمند = خطای بازدارنده
+  required      Boolean                  @default(false)
+  /// اگر مقدار صفر/خالی بود کل ردیفِ آن کارمند در فایل نمی‌آید
+  skipRowIfZero Boolean                  @default(false)
   source        FileFieldSource
   constantValue String?
   systemField   String?

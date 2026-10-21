@@ -5,6 +5,8 @@
 
 export type FieldSource = "CONSTANT" | "EMPLOYEE_FIELD" | "FACTOR_SUM" | "AGGREGATE" | "PARAM" | "EXPR" | "EMPTY";
 
+export type FieldSection = "HEADER" | "ITEM" | "FOOTER";
+
 export interface FieldDef {
   name: string;
   title: string;
@@ -12,6 +14,13 @@ export interface FieldDef {
   length?: number | null;
   decimals?: number;
   zeroPad?: boolean;
+  /** بخش و شماره‌ی خط (پیش‌فرض: آیتم، خط ۱) */
+  section?: FieldSection;
+  lineNo?: number;
+  /** مقدار خالی برای کارمند = خطای بازدارنده */
+  required?: boolean;
+  /** مقدار صفر/خالی = ردیفِ آن کارمند در فایل نمی‌آید */
+  skipRowIfZero?: boolean;
   source: FieldSource;
   constantValue?: string | null;
   systemField?: string | null;
@@ -30,8 +39,9 @@ export interface FieldDef {
 export interface FileDef {
   seq: number;
   nameTemplate: string;
-  format: "DELIMITED" | "DBF";
-  rowKind: "PER_EMPLOYEE" | "SINGLE";
+  format: "DELIMITED" | "DBF" | "EXCEL";
+  /** نام برگه (فقط اکسل) */
+  sheetName?: string | null;
   delimiter: string;
   encoding: "UTF8" | "UTF8_BOM" | "IRAN_SYSTEM";
   lineEnding: "LF" | "CRLF";
@@ -139,7 +149,7 @@ const MAZ_TITLES = ["اضافه کاری", "حق مسکن", "حق بن کارگ�
 const agg = (name: string, title: string, length: number, fieldName: string, aggFunc: "SUM" | "COUNT" = "SUM"): FieldDef => ({
   name, title, dataType: "NUMBER", length, source: "AGGREGATE", aggFunc, aggFileSeq: 2, aggFieldName: fieldName,
 });
-const DSKKAR_FIELDS: FieldDef[] = [
+const DSKKAR_RAW: FieldDef[] = [
   { name: "DSK_ID", title: "کد کارگاه", dataType: "TEXT", length: 10, source: "EMPLOYEE_FIELD", systemField: "BRANCH_CODE" },
   { name: "DSK_NAME", title: "نام کارگاه", dataType: "TEXT", length: 100, source: "EMPLOYEE_FIELD", systemField: "COMPANY_NAME" },
   { name: "DSK_FARM", title: "نام کارفرما", dataType: "TEXT", length: 100, source: "EMPLOYEE_FIELD", systemField: "BRANCH_EMPLOYER" },
@@ -166,6 +176,7 @@ const DSKKAR_FIELDS: FieldDef[] = [
   agg("DSK_INC", "مجموع پایه سنوات", 12, "DSW_INC"),
   agg("DSK_SPOUSE", "مجموع حق تاهل", 12, "DSW_SPOUSE"),
 ];
+const DSKKAR_FIELDS: FieldDef[] = DSKKAR_RAW.map((f) => ({ ...f, section: "HEADER" as const })); // سرلیست = یک ردیفِ بخش هدر
 const DSKWOR_FIELDS: FieldDef[] = [
   { name: "DSW_ID", title: "کد کارگاه", dataType: "TEXT", length: 10, source: "EMPLOYEE_FIELD", systemField: "BRANCH_CODE" },
   { name: "DSW_YY", title: "سال عملکرد", dataType: "NUMBER", length: 2, zeroPad: true, source: "EMPLOYEE_FIELD", systemField: "PERIOD_YEAR2" },
@@ -199,8 +210,34 @@ const DSKWOR_FIELDS: FieldDef[] = [
 ];
 
 const delimited = (seq: number, nameTemplate: string, fields: FieldDef[]): FileDef => ({
-  seq, nameTemplate, format: "DELIMITED", rowKind: "PER_EMPLOYEE", delimiter: ",", encoding: "UTF8_BOM", lineEnding: "LF", trailingNewline: true, fields,
+  seq, nameTemplate, format: "DELIMITED", delimiter: ",", encoding: "UTF8_BOM", lineEnding: "LF", trailingNewline: true, fields,
 });
+
+// ── فایل واریز گروهی حقوق: بانک شهر (متنی، جداکننده‌ی فاصله) ──
+// هدر دو خط: «تعداد برداشت، تعداد واریز، تراز» و «حساب مبدأ، مبلغ، D»؛ سپس به ازای هر کارمند «شماره سپرده، مبلغ، C»
+const hd = (name: string, title: string, lineNo: number, extra: Partial<FieldDef>): FieldDef => ({ name, title, dataType: "NUMBER", section: "HEADER", lineNo, source: "CONSTANT", ...extra });
+const SHAHR_FIELDS: FieldDef[] = [
+  hd("H_DEBIT_COUNT", "تعداد برداشت (Debit)", 1, { constantValue: "1" }),
+  hd("H_CREDIT_COUNT", "تعداد واریز (Credit)", 1, { source: "AGGREGATE", aggFunc: "COUNT", aggFileSeq: null, aggFieldName: "ACCOUNT" }),
+  hd("H_TOTAL", "تراز فایل (جمع مبلغ)", 1, { source: "AGGREGATE", aggFunc: "SUM", aggFileSeq: null, aggFieldName: "AMOUNT" }),
+  hd("H_SRC_ACCOUNT", "شماره سپرده‌ی مبدأ", 2, { dataType: "TEXT", source: "PARAM", paramKey: "SOURCE_ACCOUNT", constantValue: "", required: true }),
+  hd("H_SRC_AMOUNT", "مبلغ برداشت", 2, { source: "AGGREGATE", aggFunc: "SUM", aggFileSeq: null, aggFieldName: "AMOUNT" }),
+  hd("H_SRC_TYPE", "نوع تراکنش", 2, { dataType: "TEXT", constantValue: "D" }),
+  { name: "ACCOUNT", title: "شماره سپرده‌ی مقصد", dataType: "TEXT", section: "ITEM", source: "EMPLOYEE_FIELD", systemField: "SALARY_ACCOUNT_NUMBER", required: true },
+  { name: "AMOUNT", title: "مبلغ", dataType: "NUMBER", section: "ITEM", source: "FACTOR_SUM", skipRowIfZero: true, suggest: { netCalcTypeTitles: ["حقوق ماهانه"] } },
+  { name: "TYPE", title: "نوع تراکنش", dataType: "TEXT", section: "ITEM", source: "CONSTANT", constantValue: "C" },
+];
+
+// ── فایل واریز گروهی: بانک پارسیان (اکسل .xls؛ سطر اول ثابت و نباید حذف شود) ──
+const PARSIAN_FIELDS: FieldDef[] = [
+  { name: "H1", title: "عنوان ستون ۱", dataType: "TEXT", section: "HEADER", lineNo: 1, source: "CONSTANT", constantValue: "Destination Deposit Number (Variz Be)" },
+  { name: "H2", title: "عنوان ستون ۲", dataType: "TEXT", section: "HEADER", lineNo: 1, source: "CONSTANT", constantValue: "Transfer Amount (Mablagh)" },
+  { name: "H3", title: "عنوان ستون ۳", dataType: "TEXT", section: "HEADER", lineNo: 1, source: "CONSTANT", constantValue: "Destination Note (Sharh)" },
+  { name: "H4", title: "عنوان ستون ۴", dataType: "TEXT", section: "HEADER", lineNo: 1, source: "CONSTANT", constantValue: "Please do not remove this first row. (Lotfan radife nokhost ra paak nafarmayid.)" },
+  { name: "DEPOSIT", title: "شماره سپرده‌ی مقصد", dataType: "TEXT", section: "ITEM", source: "EMPLOYEE_FIELD", systemField: "SALARY_ACCOUNT_NUMBER", required: true },
+  { name: "AMOUNT", title: "مبلغ", dataType: "NUMBER", section: "ITEM", source: "FACTOR_SUM", skipRowIfZero: true, suggest: { netCalcTypeTitles: ["حقوق ماهانه"] } },
+  { name: "NOTE", title: "شرح", dataType: "TEXT", section: "ITEM", source: "PARAM", paramKey: "NOTE", constantValue: "حقوق {MONTH_NAME} {YYYY}" },
+];
 
 export const SYSTEM_STRUCTURES: StructureDef[] = [
   {
@@ -223,8 +260,26 @@ export const SYSTEM_STRUCTURES: StructureDef[] = [
     sourceKind: "PAYROLL_LIST",
     isActive: true,
     files: [
-      { seq: 1, nameTemplate: "DSKKAR00.DBF", format: "DBF", rowKind: "SINGLE", delimiter: ",", encoding: "IRAN_SYSTEM", lineEnding: "LF", trailingNewline: false, fields: DSKKAR_FIELDS },
-      { seq: 2, nameTemplate: "DSKWOR00.DBF", format: "DBF", rowKind: "PER_EMPLOYEE", delimiter: ",", encoding: "IRAN_SYSTEM", lineEnding: "LF", trailingNewline: false, fields: DSKWOR_FIELDS },
+      { seq: 1, nameTemplate: "DSKKAR00.DBF", format: "DBF", delimiter: ",", encoding: "IRAN_SYSTEM", lineEnding: "LF", trailingNewline: false, fields: DSKKAR_FIELDS },
+      { seq: 2, nameTemplate: "DSKWOR00.DBF", format: "DBF", delimiter: ",", encoding: "IRAN_SYSTEM", lineEnding: "LF", trailingNewline: false, fields: DSKWOR_FIELDS },
+    ],
+  },
+  {
+    systemKey: "BANK_SHAHR",
+    title: "واریز گروهی حقوق — بانک شهر",
+    sourceKind: "PAYROLL_LIST",
+    isActive: true,
+    files: [
+      { seq: 1, nameTemplate: "Salary.txt", format: "DELIMITED", delimiter: " ", encoding: "UTF8", lineEnding: "CRLF", trailingNewline: true, fields: SHAHR_FIELDS },
+    ],
+  },
+  {
+    systemKey: "BANK_PARSIAN",
+    title: "واریز گروهی حقوق — بانک پارسیان (اکسل)",
+    sourceKind: "PAYROLL_LIST",
+    isActive: true,
+    files: [
+      { seq: 1, nameTemplate: "transfer.xls", format: "EXCEL", sheetName: "transfer", delimiter: ",", encoding: "UTF8", lineEnding: "LF", trailingNewline: false, fields: PARSIAN_FIELDS },
     ],
   },
 ];

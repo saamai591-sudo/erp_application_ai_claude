@@ -30,6 +30,10 @@ export const DICTIONARY: DictField[] = [
   { key: "INSURANCE_NUMBER", title: "شماره بیمه", scope: "EMP", group: "کارمند" },
   { key: "ADDRESS", title: "آدرس (نشانی اصلی)", scope: "EMP", group: "کارمند" },
   { key: "POSTAL_CODE", title: "کد پستی (نشانی اصلی)", scope: "EMP", group: "کارمند" },
+  { key: "SALARY_ACCOUNT_NUMBER", title: "شماره حساب/سپرده‌ی دریافت حقوق", scope: "EMP", group: "حساب دریافت حقوق", hint: "از «حساب دریافت حقوق» فرم کارمند" },
+  { key: "SALARY_IBAN", title: "شماره شبا‌ی حساب دریافت حقوق", scope: "EMP", group: "حساب دریافت حقوق" },
+  { key: "SALARY_CARD_NUMBER", title: "شماره کارت حساب دریافت حقوق", scope: "EMP", group: "حساب دریافت حقوق" },
+  { key: "SALARY_BANK_TITLE", title: "نام بانکِ حساب دریافت حقوق", scope: "EMP", group: "حساب دریافت حقوق" },
   // قرارداد و انتصاب
   { key: "JOB_TITLE", title: "عنوان شغل (در نبود آن، عنوان پست)", scope: "EMP", group: "قرارداد" },
   { key: "JOB_SS_CODE", title: "کد شغل تامین اجتماعی", scope: "EMP", group: "قرارداد" },
