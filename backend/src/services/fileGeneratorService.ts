@@ -308,6 +308,8 @@ export async function generateFiles(def: StructureDef, gp: GenParams): Promise<G
 
   // به ترتیب تعریف ساختار برگردانده شود
   results.sort((a, b) => def.files.findIndex((f) => expandName(f.nameTemplate) === a.name) - def.files.findIndex((f) => expandName(f.nameTemplate) === b.name));
-  const zip = def.zipNameTemplate ? { name: expandName(def.zipNameTemplate), data: buildZip(results.map((r) => ({ name: r.name, data: r.data }))) } : null;
+  // چند فایل → یک zip با نام «<عنوان ساختار> <سالماه>»؛ یک فایل → خودِ فایل (نامش از الگوی نام فایل)
+  const zipBase = `${def.title} ${yyyy}${mm}`.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
+  const zip = results.length > 1 ? { name: `${zipBase}.zip`, data: buildZip(results.map((r) => ({ name: r.name, data: r.data }))) } : null;
   return { files: results, zip, problems, employeeCount: emps.length };
 }

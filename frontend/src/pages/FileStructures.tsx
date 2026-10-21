@@ -62,12 +62,10 @@ interface FileUI {
 }
 interface DefUI {
   title: string;
-  description: string;
   isActive: boolean;
-  zipNameTemplate: string;
   files: FileUI[];
 }
-interface ListRow { id: string; code: number | null; title: string; description: string | null; isActive: boolean; isSystem: boolean; fileCount: number }
+interface ListRow { id: string; code: number | null; title: string; isActive: boolean; isSystem: boolean; fileCount: number }
 interface Options {
   dictionary: { key: string; title: string; scope: "EMP" | "GLOBAL"; group: string; pending?: boolean; hint?: string }[];
   payrollFactors: { id: number; title: string; kind: string; calcTypeTitle: string }[];
@@ -81,14 +79,12 @@ const KIND_FA: Record<string, string> = { EARNING: "پرداختی", DEDUCTION: 
 
 const emptyField = (): FieldUI => ({ name: "", title: "", dataType: "TEXT", length: "", decimals: "0", zeroPad: false, source: "CONSTANT", constantValue: "", systemField: "", paramKey: "", aggFunc: "SUM", aggFileSeq: "", aggFieldName: "", exprText: "", refs: { payroll: [], decree: [], net: [] }, maps: [] });
 const emptyFile = (): FileUI => ({ nameTemplate: "", format: "DELIMITED", rowKind: "PER_EMPLOYEE", delimiter: ",", encoding: "UTF8_BOM", lineEnding: "LF", trailingNewline: true, fields: [emptyField()] });
-const EMPTY: DefUI = { title: "", description: "", isActive: true, zipNameTemplate: "", files: [emptyFile()] };
+const EMPTY: DefUI = { title: "", isActive: true, files: [emptyFile()] };
 
 function fromServer(d: any): DefUI {
   return {
     title: d.title ?? "",
-    description: d.description ?? "",
     isActive: d.isActive !== false,
-    zipNameTemplate: d.zipNameTemplate ?? "",
     files: (d.files ?? []).map((f: any) => ({
       nameTemplate: f.nameTemplate,
       format: f.format,
@@ -121,9 +117,7 @@ function fromServer(d: any): DefUI {
 
 const toBody = (d: DefUI) => ({
   title: d.title,
-  description: d.description,
   isActive: d.isActive,
-  zipNameTemplate: d.zipNameTemplate,
   files: d.files.map((f) => ({
     ...f,
     fields: f.fields.map((x) => ({
@@ -180,7 +174,6 @@ function StructureList() {
           { header: "عنوان", ...s((r) => r.title) },
           { header: "نوع", ...s((r) => (r.isSystem ? "پیش‌فرض نصب" : "تعریف‌شده")), width: "120px" },
           { header: "تعداد فایل", render: (r: ListRow) => toFaDigits(String(r.fileCount)), filterType: "number" as const, filterValue: (r: ListRow) => r.fileCount, width: "100px" },
-          { header: "توضیح", ...s((r) => r.description ?? "") },
           { header: "فعال", ...s((r) => (r.isActive ? "بله" : "خیر")), width: "70px" },
         ]}
         rows={items}
@@ -301,14 +294,6 @@ function StructureForm({ editRef }: { editRef?: string }) {
             <div className="form-field">
               <label>عنوان<RequiredMark /></label>
               <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-            </div>
-            <div className="form-field">
-              <label>نام فایل zip <FieldHint label="نام فایل zip" text="اگر پر باشد همه‌ی فایل‌های خروجی در یک zip با این نام بسته می‌شوند. {YYYY} سال، {YY} سال دو رقمی، {MM} ماه" /></label>
-              <input value={form.zipNameTemplate} onChange={(e) => setForm({ ...form, zipNameTemplate: e.target.value })} dir="ltr" />
-            </div>
-            <div className="form-field" style={{ gridColumn: "1 / -1" }}>
-              <label>توضیح</label>
-              <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
             </div>
             <div className="form-field">
               <label className="checkbox-row"><input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} /> فعال</label>

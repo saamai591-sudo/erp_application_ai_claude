@@ -44,10 +44,8 @@ export interface StructureDef {
   systemKey?: string | null;
   code?: number | null;
   title: string;
-  description?: string | null;
   sourceKind: "PAYROLL_LIST";
   isActive: boolean;
-  zipNameTemplate?: string | null;
   files: FileDef[];
 }
 
@@ -208,7 +206,6 @@ export const SYSTEM_STRUCTURES: StructureDef[] = [
   {
     systemKey: "TAX_WH",
     title: "فهرست حقوق مالیاتی (WH)",
-    description: "فایل فهرست حقوق سامانه مالیات بر درآمد حقوق (WHYYYYMM.TXT) — جدول اقلام حقوق و دستمزد (ریالی)، ۳۹ فیلد. اقلام بدون داده‌ی سیستمی (وضعیت محل خدمت، مسکن، اتومبیل) فعلاً خالی می‌ماند.",
     sourceKind: "PAYROLL_LIST",
     isActive: true,
     files: [delimited(1, "WH{YYYY}{MM}.TXT", WH_FIELDS)],
@@ -216,7 +213,6 @@ export const SYSTEM_STRUCTURES: StructureDef[] = [
   {
     systemKey: "TAX_WP",
     title: "فهرست کارکنان مالیاتی (WP)",
-    description: "فایل فهرست کارکنان سامانه مالیات بر درآمد حقوق (WPYYYYMM.TXT)، ۲۳ فیلد؛ فقط برای کارمند تازه یا تغییر اطلاعات ارسال می‌شود. نوع بیمه، نوع معافیت و رسته فعلاً خالی می‌ماند.",
     sourceKind: "PAYROLL_LIST",
     isActive: true,
     files: [delimited(1, "WP{YYYY}{MM}.TXT", WP_FIELDS)],
@@ -224,10 +220,8 @@ export const SYSTEM_STRUCTURES: StructureDef[] = [
   {
     systemKey: "SSO_DSK",
     title: "لیست بیمه تامین اجتماعی (DSKKAR / DSKWOR)",
-    description: "فایل‌های DBF لیست ماهانه بیمه (نسخه ۶ list disk): DSKKAR00.DBF (سرلیست) و DSKWOR00.DBF (کارکنان) در یک zip؛ متن‌ها با ایران‌سیستم. تولید نیاز به انتخاب شعبه‌ی سازمان تامین اجتماعی دارد.",
     sourceKind: "PAYROLL_LIST",
     isActive: true,
-    zipNameTemplate: "DSKKAR00.zip",
     files: [
       { seq: 1, nameTemplate: "DSKKAR00.DBF", format: "DBF", rowKind: "SINGLE", delimiter: ",", encoding: "IRAN_SYSTEM", lineEnding: "LF", trailingNewline: false, fields: DSKKAR_FIELDS },
       { seq: 2, nameTemplate: "DSKWOR00.DBF", format: "DBF", rowKind: "PER_EMPLOYEE", delimiter: ",", encoding: "IRAN_SYSTEM", lineEnding: "LF", trailingNewline: false, fields: DSKWOR_FIELDS },

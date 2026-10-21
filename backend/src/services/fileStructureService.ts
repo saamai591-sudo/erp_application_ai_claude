@@ -158,8 +158,7 @@ export function validateDef(b: any): StructureDef {
       if (!target.fields.some((x) => x.name === fl.aggFieldName)) throw new FileStructureError(`«${fl.name}»: فیلد «${fl.aggFieldName}» در فایل ${target.seq} نیست`);
     }
   }
-  const zip = str(b.zipNameTemplate);
-  return { systemKey: null, title, description: str(b.description), sourceKind: "PAYROLL_LIST", isActive: b.isActive === undefined ? true : !!b.isActive, zipNameTemplate: zip, files };
+  return { systemKey: null, title, sourceKind: "PAYROLL_LIST", isActive: b.isActive === undefined ? true : !!b.isActive, files };
 }
 
 /** وجود عامل‌های مرجع (کنترل FK قبل از ذخیره، پیام فارسی به‌جای خطای دیتابیس) */
@@ -226,10 +225,8 @@ export async function createStructure(def: StructureDef) {
         data: {
           code: await nextSerialNumber(prisma.fileStructure, "code"),
           title: def.title,
-          description: def.description ?? null,
           sourceKind: def.sourceKind,
           isActive: def.isActive,
-          zipNameTemplate: def.zipNameTemplate ?? null,
           files: { create: filesCreate(def) },
         },
       });
@@ -247,7 +244,7 @@ export async function updateStructure(id: number, def: StructureDef) {
     prisma.fileStructureFile.deleteMany({ where: { structureId: id } }),
     prisma.fileStructure.update({
       where: { id },
-      data: { title: def.title, description: def.description ?? null, isActive: def.isActive, zipNameTemplate: def.zipNameTemplate ?? null, files: { create: filesCreate(def) } },
+      data: { title: def.title, isActive: def.isActive, files: { create: filesCreate(def) } },
     }),
   ]);
 }
@@ -266,10 +263,8 @@ function toDef(row: any): StructureDef {
     systemKey: null,
     code: row.code,
     title: row.title,
-    description: row.description,
     sourceKind: row.sourceKind,
     isActive: row.isActive,
-    zipNameTemplate: row.zipNameTemplate,
     files: row.files.map((f: any) => ({
       seq: f.seq,
       nameTemplate: f.nameTemplate,
@@ -326,12 +321,11 @@ export async function listStructures() {
     id: null as number | null,
     code: null as number | null,
     title: s.title,
-    description: s.description ?? null,
     isActive: true,
     isSystem: true,
     fileCount: s.files.length,
   }));
-  const own = rows.map((r) => ({ ref: String(r.id), id: r.id, code: r.code, title: r.title, description: r.description, isActive: r.isActive, isSystem: false, fileCount: r.files.length }));
+  const own = rows.map((r) => ({ ref: String(r.id), id: r.id, code: r.code, title: r.title, isActive: r.isActive, isSystem: false, fileCount: r.files.length }));
   return [...sys, ...own];
 }
 
