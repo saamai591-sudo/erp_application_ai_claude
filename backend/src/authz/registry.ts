@@ -232,7 +232,7 @@ export const REGISTRY: ModuleDef[] = [
             key: "document-confirmation",
             title: "تایید اسناد",
             baseActions: ["view"],
-            actions: [{ key: "confirm", title: "تایید" }],
+            actions: [{ key: "confirm", title: "تایید" }, { key: "unconfirm", title: "برگشت از تایید" }],
           },
           {
             key: "journal-consolidation",

@@ -7,6 +7,7 @@ import { api } from "../lib/api";
 import { showToast } from "../lib/toast";
 import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
+import { usePermissions } from "../lib/usePermissions";
 
 interface StatusResponse {
   fiscalPeriodId: number;
@@ -24,6 +25,9 @@ export default function DocumentConfirmation() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const { hasPermission } = usePermissions();
+  const canUnconfirm = hasPermission("accounting.operations.document-confirmation.unconfirm");
+  const [revertDate, setRevertDate] = useState("");
 
   async function loadStatus(d: string) {
     setError(null);
@@ -76,6 +80,26 @@ export default function DocumentConfirmation() {
     }
   }
 
+  async function onRevert() {
+    if (!revertDate) return;
+    setError(null);
+    setLoading(true);
+    try {
+      const check = await api.post("/document-confirmation/uncheck", { date: revertDate });
+      if (!window.confirm(`${toFaDigits(String(check.count))} سند تاییدشده با تاریخ ${formatJalaliDate(revertDate)} و بعد از آن به وضعیت «بررسی» برمی‌گردند و دوباره قابل ثبت/ویرایش خواهند شد. ادامه می‌دهید؟`)) {
+        setLoading(false);
+        return;
+      }
+      const result = await api.post("/document-confirmation/unconfirm", { date: revertDate });
+      showToast(`${toFaDigits(String(result.updatedCount))} سند به وضعیت «بررسی» برگشت`);
+      await loadStatus(date);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -110,6 +134,24 @@ export default function DocumentConfirmation() {
           {loading ? "در حال پردازش..." : "تایید"}
         </button>
       </div>
+
+      {canUnconfirm && (
+        <div className="card" style={{ padding: 20, marginTop: 16 }}>
+          <h3 style={{ margin: "0 0 10px", fontSize: 14 }}>برگشت از تایید</h3>
+          <div className="form-grid" style={{ marginBottom: 16, maxWidth: 700 }}>
+            <div className="form-field">
+              <label>
+                برگشت از تایید از تاریخ<RequiredMark />
+                <InfoHint title="برگشت از تایید" text="همه‌ی اسناد تاییدشده‌ی دوره مالی با تاریخ مساوی یا بعد از این تاریخ به وضعیت «بررسی» برمی‌گردند و مرز تایید به قبل از این تاریخ می‌رسد. اسنادی که تجمیع شده‌اند مانع‌اند؛ ابتدا تجمیع آن‌ها را حذف کنید." />
+              </label>
+              <JalaliDatePicker fiscalYear value={revertDate} onChange={setRevertDate} />
+            </div>
+          </div>
+          <button type="button" className="btn secondary" onClick={onRevert} disabled={loading || !revertDate}>
+            {loading ? "در حال پردازش..." : "برگشت از تایید"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
