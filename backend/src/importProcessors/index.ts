@@ -22,6 +22,7 @@ import { createEmployee } from "../routes/employees";
 import { createDecreeDraft, approveDecree } from "../routes/employmentDecrees";
 import { findPartyByNationalId } from "../services/partyService";
 import { bulkSetValues, listParametersOfKind } from "../services/personnelValueService";
+import { upsertSalaryAccount } from "../services/employeeSalaryAccountService";
 import { DErr, prepareDataEntry, saveDataEntries, type DataEntryContext } from "../routes/payrollDataEntry";
 
 const DETAIL_TYPE_PARTY = 1;
@@ -527,7 +528,7 @@ export function registerAllImportProcessors() {
         const code = toEnglishDigits((row.personnelCode ?? "").trim());
         if (!code) return { ok: false, error: "کد پرسنلی الزامی است" };
         const emps = await prisma.employee.findMany({ select: { id: true, personnelCode: true } });
-        const emp = emps.find((e) => e.personnelCode === code) ?? (/^d+$/.test(code) ? emps.find((e) => /^d+$/.test(e.personnelCode) && Number(e.personnelCode) === Number(code)) : undefined);
+        const emp = emps.find((e) => e.personnelCode === code) ?? (/^\d+$/.test(code) ? emps.find((e) => /^\d+$/.test(e.personnelCode) && Number(e.personnelCode) === Number(code)) : undefined);
         if (!emp) return { ok: false, error: `کارمندی با کد پرسنلی «${code}» یافت نشد` };
         const params = await listParametersOfKind("PERSONNEL_PAYROLL");
         const entries = params
@@ -540,6 +541,35 @@ export function registerAllImportProcessors() {
         return { ok: true };
       } catch (e: any) {
         return { ok: false, error: e.message || "خطا در ثبت مقدار ثابت پرسنلی" };
+      }
+    },
+  });
+
+  // ── منابع انسانی: حساب دریافت حقوق ──
+  // هر ردیف = (کد پرسنلی، نوع پرداخت [عنوان یا کد]، از سال/ماه، شماره حساب یا شبا یا کارت). حساب باید از حساب‌های بانکیِ شخصِ همان کارمند باشد.
+  // همان (کارمند، نوع، ماه) قبلاً ثبت شده باشد حسابش عوض می‌شود (تغییر بانکِ همه‌ی کارکنان از یک ماه با یک فایل). ثبت از upsertSalaryAccount (همان قواعد فرم).
+  registerImportEntity("employee-salary-account", {
+    row: async (row) => {
+      try {
+        const code = toEnglishDigits((row.personnelCode ?? "").trim());
+        if (!code) return { ok: false, error: "کد پرسنلی الزامی است" };
+        const emps = await prisma.employee.findMany({ select: { id: true, personnelCode: true, partyId: true } });
+        const emp = emps.find((e) => e.personnelCode === code) ?? (/^\d+$/.test(code) ? emps.find((e) => /^\d+$/.test(e.personnelCode) && Number(e.personnelCode) === Number(code)) : undefined);
+        if (!emp) return { ok: false, error: `کارمندی با کد پرسنلی «${code}» یافت نشد` };
+        const typeRaw = (row.paymentType ?? "").trim();
+        if (!typeRaw) return { ok: false, error: "نوع پرداخت الزامی است" };
+        const types = await prisma.payrollPaymentType.findMany({ where: { OR: [{ title: typeRaw }, ...(/^\d+$/.test(toEnglishDigits(typeRaw)) ? [{ code: Number(toEnglishDigits(typeRaw)) }] : [])] } });
+        if (types.length === 0) return { ok: false, error: `نوع پرداخت «${typeRaw}» یافت نشد` };
+        if (types.length > 1) return { ok: false, error: `نوع پرداخت «${typeRaw}» مبهم است` };
+        const acc = toEnglishDigits((row.account ?? "").trim());
+        if (!acc) return { ok: false, error: "شماره حساب (یا شبا یا کارت) الزامی است" };
+        const accounts = await prisma.partyBankAccount.findMany({ where: { partyId: emp.partyId, OR: [{ accountNumber: acc }, { iban: acc }, { cardNumber: acc }] } });
+        if (accounts.length === 0) return { ok: false, error: `حسابی با شماره «${acc}» در حساب‌های بانکی این کارمند (فرم شخص) نیست` };
+        if (accounts.length > 1) return { ok: false, error: `شماره «${acc}» بین چند حساب این شخص مشترک است` };
+        await upsertSalaryAccount({ employeeId: emp.id, paymentTypeId: types[0].id, year: Number(toEnglishDigits(row.year ?? "")), month: Number(toEnglishDigits(row.month ?? "")), bankAccountId: accounts[0].id, note: row.note });
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت حساب دریافت حقوق" };
       }
     },
   });

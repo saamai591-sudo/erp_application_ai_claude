@@ -348,7 +348,6 @@ const EMPTY = {
   hasDisability: false,
   isVeteran: "",
   notes: "",
-  salaryBankAccountId: "",
   /** مشمولیت در سازمان‌های ذینفع: organizationId → «مشمول/غیرمشمول» (خالی = تعیین‌نشده) + شعبه */
   benef: {} as Record<string, { included: "" | "YES" | "NO"; branchId: string }>,
 };
@@ -416,7 +415,6 @@ function EmployeeForm({ editId }: { editId?: number }) {
       insuranceNumber: d.insuranceNumber ?? "",
       hasDisability: !!d.hasDisability,
       notes: d.notes ?? "",
-      salaryBankAccountId: d.salaryBankAccountId ? String(d.salaryBankAccountId) : "",
       benef: Object.fromEntries(
         ((d.beneficiaries ?? []) as { organizationId: number; isIncluded: boolean; branchId: number | null }[]).map((b) => [String(b.organizationId), { included: b.isIncluded ? "YES" : "NO", branchId: b.branchId ? String(b.branchId) : "" }])
       ),
@@ -470,7 +468,6 @@ function EmployeeForm({ editId }: { editId?: number }) {
       insuranceNumber: form.insuranceNumber,
       hasDisability: form.hasDisability,
       notes: form.notes,
-      salaryBankAccountId: form.salaryBankAccountId ? Number(form.salaryBankAccountId) : null,
     };
     // مشمولیت سازمان‌های ذینفع: برای هر سازمان باید صریحاً مشمول یا غیرمشمول انتخاب شود (با «—» ذخیره نمی‌شود)؛ مشمول ⇒ شعبه الزامی
     for (const o of benefOrgs) {
@@ -655,15 +652,14 @@ function EmployeeForm({ editId }: { editId?: number }) {
             );
           })()}
           {editId && detail && (
-            <div className="form-field">
-              <label>حساب دریافت حقوق</label>
-              <select value={form.salaryBankAccountId} onChange={(e) => set("salaryBankAccountId", e.target.value)}>
-                <option value="">—</option>
-                {detail.party.bankAccounts.map((b) => (
-                  <option key={b.id} value={b.id}>{toFaDigits(b.accountNumber || b.iban || b.cardNumber || String(b.id))}</option>
-                ))}
-              </select>
-            </div>
+            <RecordLinkField label="حساب دریافت حقوق" path="/employee-salary-accounts" employeeId={editId} openTab={openTab} newLabel="ثبت حساب جدید"
+              text={
+                (detail.salaryAccounts as { paymentTypeTitle: string; accountLabel: string; bankTitle: string | null; fromMonthTitle: string }[] | undefined)?.length
+                  ? (detail.salaryAccounts as { paymentTypeTitle: string; accountLabel: string; bankTitle: string | null; fromMonthTitle: string }[])
+                      .map((a) => `${a.paymentTypeTitle}: ${toFaDigits(a.accountLabel)}${a.bankTitle ? " — " + a.bankTitle : ""} (از ${a.fromMonthTitle})`)
+                      .join("؛ ")
+                  : "—"
+              } />
           )}
         </div>
 

@@ -9,6 +9,7 @@ import { jalaliMonthRange } from "../utils/jalaliDate";
 import { derivePeriods, loadRecordsMany, periodsOverlap, type Period } from "./employmentStatusService";
 import { unicodeToIranSystem, sanitizeForIranSystem } from "./iranSystem";
 import { DICT_BY_KEY, usesBranch } from "./fileStructureDictionary";
+import { loadSalaryAccounts } from "./employeeSalaryAccountService";
 import { buildDbf, buildZip, evalExpr, parseExpr, type DbfFieldDef } from "../utils/fileFormats";
 import type { FieldDef, FieldSection, FileDef, StructureDef } from "../data/fileStructureDefaults";
 
@@ -107,7 +108,6 @@ export async function generateFiles(def: StructureDef, gp: GenParams): Promise<G
           party: { include: { addresses: true } },
           birthPlace: { select: { title: true } },
           issuePlace: { select: { title: true } },
-          salaryBankAccount: true,
           assignments: { include: { job: { select: { title: true, socialSecurityCode: true } }, position: { select: { title: true } } }, orderBy: { fromDate: "asc" } },
         },
       },
@@ -126,7 +126,8 @@ export async function generateFiles(def: StructureDef, gp: GenParams): Promise<G
     return { files: [], zip: null, problems, employeeCount: 0 };
   }
   const empIds = [...byEmp.keys()];
-  const bankIds = [...new Set([...byEmp.values()].map((l) => l[0].employee.salaryBankAccount?.bankPartyId).filter((x): x is number => !!x))];
+  const salaryAcc = await loadSalaryAccounts(empIds, gp.year, gp.month);
+  const bankIds = [...new Set([...salaryAcc.values()].map((a) => a.bankPartyId).filter((x): x is number => !!x))];
   const [eduRows, statusMap, bankParties] = await Promise.all([
     prisma.employeeEducationRecord.findMany({ where: { employeeId: { in: empIds }, effectiveDate: { lte: monthEnd } }, orderBy: { effectiveDate: "desc" }, select: { employeeId: true, educationLevel: { select: { title: true } } } }),
     loadRecordsMany(empIds),
@@ -168,10 +169,11 @@ export async function generateFiles(def: StructureDef, gp: GenParams): Promise<G
     set("INSURANCE_NUMBER", e.insuranceNumber);
     set("ADDRESS", addr?.address);
     set("POSTAL_CODE", addr?.postalCode);
-    set("SALARY_ACCOUNT_NUMBER", e.salaryBankAccount?.accountNumber);
-    set("SALARY_IBAN", e.salaryBankAccount?.iban);
-    set("SALARY_CARD_NUMBER", e.salaryBankAccount?.cardNumber);
-    set("SALARY_BANK_TITLE", e.salaryBankAccount?.bankPartyId ? bankTitle.get(e.salaryBankAccount.bankPartyId) : "");
+    const sal = salaryAcc.get(employeeId);
+    set("SALARY_ACCOUNT_NUMBER", sal?.accountNumber);
+    set("SALARY_IBAN", sal?.iban);
+    set("SALARY_CARD_NUMBER", sal?.cardNumber);
+    set("SALARY_BANK_TITLE", sal?.bankPartyId ? bankTitle.get(sal.bankPartyId) : "");
     set("JOB_TITLE", asg?.job?.title ?? asg?.position?.title);
     set("JOB_SS_CODE", asg?.job?.socialSecurityCode);
     set("POSITION_TITLE", asg?.position?.title);

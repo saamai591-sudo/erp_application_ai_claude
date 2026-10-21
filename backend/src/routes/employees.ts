@@ -9,6 +9,7 @@ import { assignmentLocks, deleteAssignment, updateAssignment } from "../services
 import { loadEmployeeBeneficiaries, saveEmployeeBeneficiaries } from "../services/beneficiaryService";
 import { changeStatus, createInitialRecord, currentStatuses, deleteStatusRecord, isCooperationEnded, statusHistory, updateStatusRecord } from "../services/employmentStatusService";
 import { getEffectiveDecree, getEffectiveDecrees } from "../services/employmentDecreeService";
+import { currentSalaryAccounts } from "../services/employeeSalaryAccountService";
 
 // منابع انسانی › پرسنلی › کارمندان.
 // SSOT: کارمند یک «نقش» روی Party است (مثل مشتری/تامین‌کننده)؛ نام، کد ملی، نشانی، تلفن و حساب بانکی همان Party هستند و تفصیلی کارمند
@@ -218,6 +219,8 @@ router.get("/employees/:id", async (req, res) => {
     photo: photo ? `data:${photo.mimeType};base64,${Buffer.from(photo.data).toString("base64")}` : null,
     status: history.status,
     beneficiaries: await loadEmployeeBeneficiaries(id),
+    // حساب دریافت حقوق مؤثرِ ماهِ امروز به تفکیک نوع پرداخت (فقط نمایش؛ ثبت در فرم «حساب دریافت حقوق»)
+    salaryAccounts: await currentSalaryAccounts(id),
     lastStatus: history.lastStatus,
     lastStatusDate: history.lastDate,
     statusRecords: history.records,
@@ -248,10 +251,6 @@ export async function createEmployee(b: any, opts: { allowNoPhoto?: boolean } = 
   if (!b.educationLevelId) throw new HrError("مدرک تحصیلی الزامی است");
   if (!b.maritalStatus) throw new HrError("وضعیت تاهل الزامی است");
   if (typeof b.isVeteran !== "boolean") throw new HrError("وضعیت ایثارگری الزامی است");
-  if (b.salaryBankAccountId) {
-    const acc = await prisma.partyBankAccount.findUnique({ where: { id: Number(b.salaryBankAccountId) } });
-    if (!acc || acc.partyId !== partyId) throw new HrError("حساب دریافت حقوق باید از حساب‌های بانکی همین شخص باشد");
-  }
 
   let personnelCode = str(b.personnelCode);
   if (personnelCode && (await prisma.employee.findUnique({ where: { personnelCode } }))) {
@@ -275,7 +274,6 @@ export async function createEmployee(b: any, opts: { allowNoPhoto?: boolean } = 
             insuranceNumber: str(b.insuranceNumber),
             hasDisability: !!b.hasDisability,
             notes: str(b.notes),
-            salaryBankAccountId: b.salaryBankAccountId ? Number(b.salaryBankAccountId) : null,
           },
         });
         if (photo) await tx.employeePhoto.create({ data: { employeeId: emp.id, ...photo } });
@@ -333,10 +331,6 @@ router.put("/employees/:id", can(`${FORM}.edit`), async (req, res) => {
     }
     let photo: { mimeType: string; data: Buffer } | undefined;
     if (b.photo !== undefined && b.photo !== null) photo = decodePhoto(b.photo);
-    if (b.salaryBankAccountId) {
-      const acc = await prisma.partyBankAccount.findUnique({ where: { id: Number(b.salaryBankAccountId) } });
-      if (!acc || acc.partyId !== emp.partyId) throw new HrError("حساب دریافت حقوق باید از حساب‌های بانکی همین شخص باشد");
-    }
 
     const has = (k: string) => b[k] !== undefined;
     await prisma.$transaction(async (tx) => {
@@ -352,7 +346,6 @@ router.put("/employees/:id", can(`${FORM}.edit`), async (req, res) => {
           insuranceNumber: has("insuranceNumber") ? str(b.insuranceNumber) : undefined,
           hasDisability: has("hasDisability") ? !!b.hasDisability : undefined,
           notes: has("notes") ? str(b.notes) : undefined,
-          salaryBankAccountId: has("salaryBankAccountId") ? (b.salaryBankAccountId ? Number(b.salaryBankAccountId) : null) : undefined,
         },
       });
       await saveEmployeeBeneficiaries(tx, id, b.beneficiaries);

@@ -578,6 +578,7 @@ export const REGISTRY: ModuleDef[] = [
           { key: "employee-education", title: "سوابق تحصیلی", baseActions: CRUD },
           { key: "employee-veteran", title: "سوابق ایثارگری", baseActions: CRUD },
           { key: "employee-marital", title: "سوابق تاهل", baseActions: CRUD },
+          { key: "employee-salary-accounts", title: "حساب دریافت حقوق", baseActions: CRUD },
           { key: "employment-types", title: "نوع همکاری", baseActions: CRUD },
           { key: "education-levels", title: "مدرک تحصیلی", baseActions: CRUD },
           { key: "termination-reasons", title: "دلایل خاتمه همکاری", baseActions: CRUD },

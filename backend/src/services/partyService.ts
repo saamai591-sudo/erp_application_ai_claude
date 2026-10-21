@@ -280,8 +280,8 @@ async function syncChildren(tx: Tx, partyId: number, c: CleanChildren) {
       (r) => tx.partyBankAccount.create({ data: { partyId, bankPartyId: r.bankPartyId, accountNumber: r.accountNumber, iban: r.iban, cardNumber: r.cardNumber } }),
       async (ids) => {
         // حساب بانکی‌ای که کارمندی برای دریافت حقوق انتخاب کرده حذف نمی‌شود (پشتوانه‌ی دیتابیسی: FK با Restrict)
-        const used = await tx.employee.findFirst({ where: { salaryBankAccountId: { in: ids } }, select: { party: { select: { detailTitle: true } } } });
-        if (used) throw new PartyError(`یکی از حساب‌های بانکی حذف‌شده توسط کارمند «${used.party.detailTitle}» برای دریافت حقوق استفاده شده است و قابل حذف نیست`);
+        const used = await tx.employeeSalaryAccount.findFirst({ where: { bankAccountId: { in: ids } }, select: { employee: { select: { party: { select: { detailTitle: true } } } } } });
+        if (used) throw new PartyError(`یکی از حساب‌های بانکی حذف‌شده توسط کارمند «${used.employee.party.detailTitle}» برای دریافت حقوق استفاده شده است و قابل حذف نیست`);
       }
     );
 }

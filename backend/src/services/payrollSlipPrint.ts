@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { wrapPrintHtml } from "./printService";
+import { loadSalaryAccounts } from "./employeeSalaryAccountService";
 
 // چاپ «فیش حقوقی» یک یا چند کارمند از فیش‌های محاسبه‌شده‌ی یک ماه (چیدمان بر اساس نمونه‌ی `Documents/فیش.pdf`):
 // عنوان شرکت و «فیش حقوق ماه … سال …»، مشخصات کارمند، سه ستون کارکرد | مزایا | کسورات، جمع‌ها و جمله‌ی واریز به حساب.
@@ -96,7 +97,6 @@ export async function buildPayrollSlipsPrint(year: number, month: number, employ
         select: {
           id: true,
           personnelCode: true,
-          salaryBankAccountId: true,
           partyId: true,
           party: { select: { firstName: true, lastName: true, name: true, nationalId: true } },
           assignments: {
@@ -114,8 +114,9 @@ export async function buildPayrollSlipsPrint(year: number, month: number, employ
   const company = await prisma.companyProfile.findUnique({ where: { id: 1 }, select: { name: true } });
 
   // حساب بانکی حقوق: ارجاع به یکی از حساب‌های بانکیِ همان شخص
-  const accIds = slips.map((s) => s.employee.salaryBankAccountId).filter((x): x is number => !!x);
-  const accounts = accIds.length ? await prisma.partyBankAccount.findMany({ where: { id: { in: accIds } } }) : [];
+  // (تاریخ‌دار: حسابِ مؤثرِ همین ماه؛ services/employeeSalaryAccountService.ts)
+  const salaryAcc = await loadSalaryAccounts(slips.map((s) => s.employeeId), year, month);
+  const accounts = [...salaryAcc.values()];
   const bankPartyIds = accounts.map((a) => a.bankPartyId).filter((x): x is number => !!x);
   const bankParties = bankPartyIds.length ? await prisma.party.findMany({ where: { id: { in: bankPartyIds } }, select: { id: true, name: true, firstName: true, lastName: true } }) : [];
 
@@ -144,7 +145,7 @@ export async function buildPayrollSlipsPrint(year: number, month: number, employ
         installment: Number(b.installment),
         balance: Number(b.balanceAfter),
       }));
-    const acc = accounts.find((a) => a.id === s.employee.salaryBankAccountId);
+    const acc = salaryAcc.get(s.employeeId);
     const bank = acc?.bankPartyId ? bankParties.find((b) => b.id === acc.bankPartyId) : undefined;
     const bankName = bank ? bank.name ?? [bank.firstName, bank.lastName].filter(Boolean).join(" ") : "";
     const accNo = acc ? acc.accountNumber || acc.iban || acc.cardNumber || "" : "";

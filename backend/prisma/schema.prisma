@@ -385,7 +385,8 @@ model PartyBankAccount {
   iban          String?
   cardNumber    String?
   party         Party   @relation(fields: [partyId], references: [id], onDelete: Cascade)
-  salaryEmployees Employee[]
+  /// رکوردهای «حساب دریافت حقوق» کارمندان که به این حساب اشاره می‌کنند (Restrict: حسابِ استفاده‌شده حذف نمی‌شود)
+  salaryRecords EmployeeSalaryAccount[]
 }
 
 model BankAccountType {
@@ -4770,13 +4771,10 @@ model Employee {
   insuranceNumber        String?
   hasDisability          Boolean              @default(false)
   notes                  String?
-  /// حساب دریافت حقوق: ارجاع به یکی از حساب‌های بانکی همان طرف‌حساب
-  salaryBankAccountId    Int?
   hasTransactions        Boolean              @default(false)
   createdAt              DateTime             @default(now())
   updatedAt              DateTime             @updatedAt
   party                  Party                @relation(fields: [partyId], references: [id])
-  salaryBankAccount      PartyBankAccount?    @relation(fields: [salaryBankAccountId], references: [id], onDelete: Restrict)
   birthPlace             GeoRegion?           @relation("EmployeeBirthPlace", fields: [birthPlaceId], references: [id])
   issuePlace             GeoRegion?           @relation("EmployeeIssuePlace", fields: [issuePlaceId], references: [id])
   photo                  EmployeePhoto?
@@ -4792,6 +4790,8 @@ model Employee {
   payrollInputs          PayrollFactorInput[]
   loans                  Loan[]
   payrollParamValues     PayrollEmployeeParameterValue[]
+  /// حساب دریافت حقوق (تاریخ‌دار، به تفکیک نوع پرداخت حقوق)
+  salaryAccounts         EmployeeSalaryAccount[]
 }
 
 /// عکس کارمند (حداکثر ۳۰۰ کیلوبایت)؛ جدا از Employee تا فهرست‌ها داده‌ی باینری نخوانند
@@ -5320,6 +5320,7 @@ model WorkCalendarMonth {
   loanSuspensionsFrom LoanSuspension[]  @relation("LoanSuspensionFrom")
   loanSuspensionsTo   LoanSuspension[]  @relation("LoanSuspensionTo")
   employeeParamValues PayrollEmployeeParameterValue[]
+  salaryAccountMonths EmployeeSalaryAccount[]
 
   @@unique([calendarId, month])
   @@unique([year, month])
@@ -5653,6 +5654,27 @@ model PayrollPaymentType {
   hasFile          Boolean                  @default(false)
   createdAt        DateTime                 @default(now())
   items            PayrollPaymentTypeItem[]
+  salaryAccounts   EmployeeSalaryAccount[]
+}
+
+/// حساب دریافت حقوق کارمند: «از ماه» (تقویم کاری) × نوع پرداخت حقوق (فقط نوع «پرسنل») × یکی از حساب‌های بانکیِ همان شخص.
+/// مؤثر برای ماه M و نوع T = آخرین رکورد همان نوع با «از ماه» ≤ M (services/employeeSalaryAccountService.ts، تنها نویسنده/خواننده).
+model EmployeeSalaryAccount {
+  id            Int                 @id @default(autoincrement())
+  employeeId    Int
+  paymentTypeId Int
+  fromMonthId   Int
+  bankAccountId Int
+  note          String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  employee      Employee            @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  paymentType   PayrollPaymentType  @relation(fields: [paymentTypeId], references: [id], onDelete: Restrict)
+  fromMonth     WorkCalendarMonth   @relation(fields: [fromMonthId], references: [id], onDelete: Restrict)
+  bankAccount   PartyBankAccount    @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+
+  @@unique([employeeId, paymentTypeId, fromMonthId])
+  @@index([employeeId])
 }
 
 /// آیتم نوع پرداخت: دقیقاً یکی از عامل حقوق / نوع وام / خالص پرداختیِ یک نوع محاسبه
