@@ -396,6 +396,7 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "payroll-components", label: "عامل حقوق", list: "/payroll-components", create: "/payroll-components/new", icon: "tag" },
           { key: "factor-methods", label: "روش محاسبه عامل", list: "/factor-methods", create: "/factor-methods/new", icon: "sliders" },
           { key: "payroll-payment-types", label: "نوع پرداخت حقوق", list: "/payroll-payment-types", create: "/payroll-payment-types/new", icon: "banknote" },
+          { key: "file-structures", label: "ساختار فایل", list: "/file-structures", create: "/file-structures/new", icon: "file" },
         ],
       },
       {

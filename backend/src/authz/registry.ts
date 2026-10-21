@@ -614,6 +614,7 @@ export const REGISTRY: ModuleDef[] = [
           { key: "payroll-components", title: "عامل حقوق", baseActions: CRUD },
           { key: "factor-methods", title: "روش محاسبه عامل", baseActions: CRUD },
           { key: "payroll-payment-types", title: "نوع پرداخت حقوق", baseActions: CRUD },
+          { key: "file-structures", title: "ساختار فایل", baseActions: CRUD, actions: [{ key: "generate", title: "تولید فایل" }] },
         ],
       },
       {

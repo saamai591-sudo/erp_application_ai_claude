@@ -57,6 +57,8 @@ export const USAGE_META: Record<string, UsageMeta> = {
   EmployeeBeneficiary: { label: "مشمولیت کارمند در سازمان ذینفع", include: EMP, title: (r) => `${r.isIncluded ? "مشمول" : "غیرمشمول"}${ofEmp(r)}` },
   PayrollAccountGroup: { label: "گروه حساب حقوق", base: "/payroll-account-groups" },
   PayrollPaymentType: { label: "نوع پرداخت حقوق", base: "/payroll-payment-types" },
+  FileStructure: { label: "ساختار فایل", base: "/file-structures" },
+  FileStructureFieldRef: { label: "فیلد ساختار فایل", base: "/file-structures", title: (r) => `#${r.fieldId}` },
   PayrollPaymentTypeItem: { label: "آیتم نوع پرداخت حقوق", base: "/payroll-payment-types", title: (r) => `#${r.paymentTypeId}` },
   PayrollJournalTemplate: { label: "رکورد الگوی سند حقوق", base: "/payroll-journal-templates", title: (r) => `#${r.id}` },
   PayrollIssueSetting: { label: "تنظیمات صدور سند", base: "/payroll-issue-settings", include: EMP, title: (r) => `#${r.id}${ofEmp(r)}` },

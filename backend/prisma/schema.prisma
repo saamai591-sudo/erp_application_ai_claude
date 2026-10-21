@@ -4938,6 +4938,7 @@ enum DecreeStatus {
 }
 
 model DecreeComponent {
+  fileFieldRefs FileStructureFieldRef[]
   journalTemplates PayrollJournalTemplate[]
   id              Int                  @id @default(autoincrement())
   code            Int                  @unique
@@ -5116,6 +5117,7 @@ enum PayrollSectionKind {
 /// عامل حقوق (هویت): عنوان + کلید داخلی که سیستم خودکار می‌سازد و به کاربر نمایش داده نمی‌شود. طبقه، روش و فرمول در رکوردهای تاریخ‌دار
 /// «روش محاسبه عامل» (PayrollFactorMethod) می‌آید.
 model PayrollComponent {
+  fileFieldRefs FileStructureFieldRef[]
   paymentTypeItems PayrollPaymentTypeItem[]
   /// سازمان ذینفع مرتبط با عامل: کارمندِ «غیرمشمول» در این سازمان مبلغ این عامل را صفر می‌گیرد؛ در سند حقوق، طرف حساب «سازمان مرتبط با عامل» = شعبه‌ی کارمند در همین سازمان
   beneficiaryOrgId Int?
@@ -5143,6 +5145,7 @@ model PayrollComponent {
 /// «نوع محاسبه» حقوق: حقوق ماهانه (نوع پایه، دقیقاً یکی) و انواع دیگر مثل عیدی/ذخیره سنوات/بازخرید مرخصی/بازخرید سنوات.
 /// محاسبه‌ی هر نوعِ غیرپایه برای یک کارمند فقط وقتی مجاز است که فیش «حقوق ماهانه»ی همان ماه محاسبه شده باشد.
 model PayrollCalcType {
+  fileFieldRefs FileStructureFieldRef[]
   paymentTypeItems PayrollPaymentTypeItem[]
   journalTemplates PayrollJournalTemplate[]
   id          Int                 @id @default(autoincrement())
@@ -5668,4 +5671,140 @@ model PayrollPaymentTypeItem {
   @@unique([paymentTypeId, loanTypeId])
   @@unique([paymentTypeId, netCalcTypeId])
   @@index([paymentTypeId])
+}
+
+// ── ساختار فایل (فایل‌های بانک‌ها و سازمان‌ها: مالیات، تامین اجتماعی، …) ──
+
+/// منبع داده‌ی ساختار: فعلاً فیش‌های حقوق یک ماه (بعداً فهرست پرداخت‌ها)
+enum FileSourceKind {
+  PAYROLL_LIST
+}
+
+enum FileFormat {
+  DELIMITED
+  DBF
+}
+
+enum FileEncoding {
+  UTF8
+  UTF8_BOM
+  IRAN_SYSTEM
+}
+
+enum FileLineEnding {
+  LF
+  CRLF
+}
+
+/// PER_EMPLOYEE = یک ردیف به ازای هر کارمند؛ SINGLE = یک ردیف برای کل فایل (مثل سرلیست بیمه)
+enum FileRowKind {
+  PER_EMPLOYEE
+  SINGLE
+}
+
+enum FileFieldType {
+  TEXT
+  NUMBER
+}
+
+enum FileFieldSource {
+  CONSTANT
+  EMPLOYEE_FIELD
+  FACTOR_SUM
+  AGGREGATE
+  PARAM
+  EXPR
+  EMPTY
+}
+
+enum FileAggFunc {
+  SUM
+  COUNT
+}
+
+/// ساختار فایل تعریف‌شده‌ی کاربر (ساختارهای پیش‌فرض نصب در کد هستند و با «کپی» اینجا می‌آیند)
+model FileStructure {
+  id          Int                 @id @default(autoincrement())
+  code        Int                 @unique
+  title       String              @unique
+  description String?
+  sourceKind  FileSourceKind      @default(PAYROLL_LIST)
+  isActive    Boolean             @default(true)
+  /// اگر پر باشد همه‌ی فایل‌های خروجی در یک zip با این الگوی نام بسته می‌شوند
+  zipNameTemplate String?
+  createdAt   DateTime            @default(now())
+  files       FileStructureFile[]
+}
+
+model FileStructureFile {
+  id              Int                  @id @default(autoincrement())
+  structureId     Int
+  seq             Int
+  /// الگوی نام فایل: {YYYY} سال شمسی ۴ رقمی، {YY} ۲ رقمی، {MM} ماه ۲ رقمی
+  nameTemplate    String
+  format          FileFormat
+  rowKind         FileRowKind          @default(PER_EMPLOYEE)
+  delimiter       String               @default(",")
+  encoding        FileEncoding         @default(UTF8)
+  lineEnding      FileLineEnding       @default(LF)
+  trailingNewline Boolean              @default(true)
+  structure       FileStructure        @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  fields          FileStructureField[]
+
+  @@unique([structureId, seq])
+}
+
+model FileStructureField {
+  id            Int                      @id @default(autoincrement())
+  fileId        Int
+  seq           Int
+  /// نام فیلد (DBF: حداکثر ۱۰ نویسه‌ی انگلیسی؛ در فرمول EXPR هم با همین نام صدا زده می‌شود)
+  name          String
+  title         String
+  dataType      FileFieldType            @default(TEXT)
+  length        Int?
+  decimals      Int                      @default(0)
+  zeroPad       Boolean                  @default(false)
+  source        FileFieldSource
+  constantValue String?
+  systemField   String?
+  paramKey      String?
+  aggFunc       FileAggFunc?
+  aggFileSeq    Int?
+  aggFieldName  String?
+  exprText      String?
+  file          FileStructureFile        @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  refs          FileStructureFieldRef[]
+  maps          FileStructureFieldMap[]
+
+  @@unique([fileId, seq])
+}
+
+/// عامل‌های مجموع‌گیری‌شده‌ی یک فیلد (دقیقاً یکی از عامل حقوق / عامل حکم / خالص پرداختیِ یک نوع محاسبه)
+model FileStructureFieldRef {
+  id                 Int                @id @default(autoincrement())
+  fieldId            Int
+  payrollComponentId Int?
+  decreeComponentId  Int?
+  netCalcTypeId      Int?
+  field              FileStructureField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  payrollComponent   PayrollComponent?  @relation(fields: [payrollComponentId], references: [id], onDelete: Restrict)
+  decreeComponent    DecreeComponent?   @relation(fields: [decreeComponentId], references: [id], onDelete: Restrict)
+  netCalcType        PayrollCalcType?   @relation(fields: [netCalcTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([fieldId, payrollComponentId])
+  @@unique([fieldId, decreeComponentId])
+  @@unique([fieldId, netCalcTypeId])
+  @@index([fieldId])
+}
+
+/// نگاشت مقدار (مثلاً «کارشناسی» ← ۴) برای فیلدهای متنیِ سیستمی
+model FileStructureFieldMap {
+  id          Int                @id @default(autoincrement())
+  fieldId     Int
+  sourceValue String
+  targetValue String
+  field       FileStructureField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+
+  @@unique([fieldId, sourceValue])
 }
