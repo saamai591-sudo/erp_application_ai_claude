@@ -65,17 +65,21 @@ interface FileUI {
   fields: FieldUI[];
 }
 interface DefUI {
+  /** مربوط به: بانک یا سازمان ذینفع (حداکثر یکی) */
+  bankPartyId: string;
+  beneficiaryOrgId: string;
   title: string;
   isActive: boolean;
   files: FileUI[];
 }
-interface ListRow { id: string; code: number | null; title: string; isActive: boolean; isSystem: boolean; fileCount: number }
+interface ListRow { id: string; code: number | null; title: string; isActive: boolean; isSystem: boolean; fileCount: number; ownerTitle: string }
 interface Options {
   dictionary: { key: string; title: string; scope: "EMP" | "GLOBAL"; group: string; pending?: boolean; hint?: string }[];
   payrollFactors: { id: number; title: string; kind: string; calcTypeTitle: string }[];
   decreeFactors: { id: number; title: string }[];
   calcTypes: { id: number; title: string }[];
   orgs: { id: number; title: string; type: string }[];
+  banks: { id: number; title: string }[];
   branches: { id: number; organizationId: number; fileNumber: string; contractRow: string; title: string }[];
 }
 
@@ -92,12 +96,14 @@ const DELIMITERS: { value: string; label: string }[] = [
 
 const emptyField = (): FieldUI => ({ name: "", title: "", dataType: "TEXT", length: "", decimals: "0", zeroPad: false, section: "ITEM", lineNo: "1", required: false, skipRowIfZero: false, source: "CONSTANT", constantValue: "", systemField: "", paramKey: "", aggFunc: "SUM", aggFileSeq: "", aggFieldName: "", exprText: "", refs: { payroll: [], decree: [], net: [] }, maps: [] });
 const emptyFile = (): FileUI => ({ nameTemplate: "", format: "DELIMITED", sheetName: "Sheet1", delimiter: ",", encoding: "UTF8_BOM", lineEnding: "LF", trailingNewline: true, fields: [emptyField()] });
-const EMPTY: DefUI = { title: "", isActive: true, files: [emptyFile()] };
+const EMPTY: DefUI = { title: "", isActive: true, bankPartyId: "", beneficiaryOrgId: "", files: [emptyFile()] };
 
 function fromServer(d: any): DefUI {
   return {
     title: d.title ?? "",
     isActive: d.isActive !== false,
+    bankPartyId: d.bankPartyId ? String(d.bankPartyId) : "",
+    beneficiaryOrgId: d.beneficiaryOrgId ? String(d.beneficiaryOrgId) : "",
     files: (d.files ?? []).map((f: any) => ({
       nameTemplate: f.nameTemplate,
       format: f.format,
@@ -135,6 +141,8 @@ function fromServer(d: any): DefUI {
 const toBody = (d: DefUI) => ({
   title: d.title,
   isActive: d.isActive,
+  bankPartyId: d.bankPartyId ? Number(d.bankPartyId) : null,
+  beneficiaryOrgId: d.beneficiaryOrgId ? Number(d.beneficiaryOrgId) : null,
   files: d.files.map((f) => ({
     ...f,
     fields: f.fields.map((x) => ({
@@ -167,7 +175,7 @@ function StructureList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   async function onDelete(row: ListRow) {
-    if (row.isSystem) return showError("ساختار پیش‌فرض نصب حذف نمی‌شود؛ می‌توانید از آن کپی بگیرید");
+    if (row.isSystem) return showError("ساختار پیش‌فرض نصب حذف نمی‌شود؛ می‌توانید غیرفعالش کنید");
     try {
       await api.del(`/file-structures/${row.id}`);
       await reload();
@@ -190,6 +198,7 @@ function StructureList() {
         columns={[
           { header: "کد", render: (r: ListRow) => (r.code ? toFaDigits(String(r.code)) : "—"), filterType: "number" as const, filterValue: (r: ListRow) => r.code ?? 0, width: "70px" },
           { header: "عنوان", ...s((r) => r.title) },
+          { header: "مربوط به", ...s((r) => r.ownerTitle), width: "200px" },
           { header: "نوع", ...s((r) => (r.isSystem ? "پیش‌فرض نصب" : "تعریف‌شده")), width: "120px" },
           { header: "تعداد فایل", render: (r: ListRow) => toFaDigits(String(r.fileCount)), filterType: "number" as const, filterValue: (r: ListRow) => r.fileCount, width: "100px" },
           { header: "فعال", ...s((r) => (r.isActive ? "بله" : "خیر")), width: "70px" },
@@ -217,14 +226,16 @@ function StructureForm({ editRef }: { editRef?: string }) {
   const [genDlg, setGenDlg] = useState(false);
   const { flash } = useSavedFlash();
   const { hasPermission } = usePermissions();
-  const isSystem = !!editRef && editRef.startsWith("sys-");
-  const readOnly = isSystem;
+  // ساختار پیش‌فرض نصب (systemKey) هم قابل ویرایش است؛ فقط حذف‌نشدنی است و «بازگردانی به پیش‌فرض نصب» دارد
+  const [isSystem, setIsSystem] = useState(false);
+  const readOnly = false;
 
   useEffect(() => {
     api.get("/file-structures/options").then(setOpts).catch(() => {});
     if (!editRef) return;
     api.get(`/file-structures/${editRef}`).then((d: any) => {
       setUnresolved(d.unresolved ?? []);
+      setIsSystem(!!d.isSystem);
       if (!hasPersistedState(cacheKey)) setForm(fromServer(d));
       setLoaded(true);
     });
@@ -268,6 +279,18 @@ function StructureForm({ editRef }: { editRef?: string }) {
     }
   }
 
+  async function onReset() {
+    if (!editRef || !window.confirm("محتوای این ساختار با پیش‌فرض نصب جایگزین شود؟ تغییرات شما در فیلدها از بین می‌رود.")) return;
+    try {
+      const r = await api.post(`/file-structures/${editRef}/reset-to-default`, {});
+      const d = await api.get(`/file-structures/${editRef}`);
+      setUnresolved(d.unresolved ?? r.unresolved ?? []);
+      setForm(fromServer(d));
+    } catch (err) {
+      showError((err as ApiError).message);
+    }
+  }
+
   async function handleDelete() {
     if (!editRef || isSystem) return;
     try {
@@ -283,17 +306,19 @@ function StructureForm({ editRef }: { editRef?: string }) {
 
   return (
     <FormPage
-      title={editRef ? (isSystem ? "ساختار فایل (پیش‌فرض نصب)" : "ویرایش ساختار فایل") : "ساختار فایل جدید"}
+      title={editRef ? "ویرایش ساختار فایل" : "ساختار فایل جدید"}
       formId="file-structure-form"
       closePath="/file-structures"
       newPath="/file-structures/new"
       onDelete={editRef && !isSystem ? handleDelete : undefined}
-      saveDisabled={readOnly}
       toolbarExtra={
         editRef ? (
           <>
             {hasPermission("payroll.settings.file-structures.create") && (
               <button type="button" className="toolbar-icon-btn" onClick={onCopy} title="کپی این ساختار (نسخه‌ی قابل‌ویرایش)">کپی</button>
+            )}
+            {isSystem && hasPermission("payroll.settings.file-structures.edit") && (
+              <button type="button" className="toolbar-icon-btn" onClick={onReset} title="محتوای ساختار را دوباره از پیش‌فرض نصب می‌خواند (عنوان، فعال و «مربوط به» می‌ماند)">بازگردانی به پیش‌فرض نصب</button>
             )}
             <button type="button" className="toolbar-icon-btn" onClick={() => setGenDlg(true)} title="پیش‌نمایش و تولید فایل برای یک ماه">تولید فایل</button>
           </>
@@ -302,7 +327,7 @@ function StructureForm({ editRef }: { editRef?: string }) {
     >
       <form id="file-structure-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
-        {isSystem && <div className="alert" style={{ marginBottom: 8 }}>این ساختار پیش‌فرض نصب است و فقط‌خواندنی است؛ برای تغییر، «کپی» بگیرید. عامل‌های پیشنهادی با عنوان با عامل‌های این نصب تطبیق داده می‌شوند.</div>}
+        {isSystem && <div className="alert" style={{ marginBottom: 8 }}>این ساختار پیش‌فرض نصب است؛ می‌توانید ویرایشش کنید (حذف نمی‌شود، غیرفعالش کنید). عامل‌های پیشنهادی هنگام ساخت با عنوان با عامل‌های این نصب تطبیق داده شده‌اند؛ هر چه پیدا نشد را خودتان انتخاب کنید. «بازگردانی به پیش‌فرض نصب» محتوا را دوباره از پیش‌فرض می‌خواند.</div>}
         {unresolved.length > 0 && (
           <div className="alert error" style={{ marginBottom: 8 }}>
             عامل‌های پیدا‌نشده در این نصب (مبلغشان صفر لحاظ می‌شود): {unresolved.map((u) => `«${u.title}» (${u.field})`).join("، ")}
@@ -313,6 +338,32 @@ function StructureForm({ editRef }: { editRef?: string }) {
             <div className="form-field">
               <label>عنوان<RequiredMark /></label>
               <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+            </div>
+            <div className="form-field">
+              <label>مربوط به <FieldHint label="مربوط به" text="این فایل مال کدام بانک یا کدام سازمان ذینفع است؛ در «آماده‌سازی پرداخت» با انتخاب سازمان (یا بانک) فقط ساختارهای همان نمایش داده می‌شود" /></label>
+              <div style={{ display: "flex", gap: 6 }}>
+                <select
+                  value={form.bankPartyId ? "BANK" : form.beneficiaryOrgId ? "ORG" : ""}
+                  onChange={(e) => setForm({ ...form, bankPartyId: e.target.value === "BANK" ? form.bankPartyId || "" : "", beneficiaryOrgId: e.target.value === "ORG" ? form.beneficiaryOrgId || "" : "", ...(e.target.value === "BANK" && !form.bankPartyId ? { bankPartyId: "0" } : {}), ...(e.target.value === "ORG" && !form.beneficiaryOrgId ? { beneficiaryOrgId: "0" } : {}) })}
+                  style={{ width: 130 }}
+                >
+                  <option value="">—</option>
+                  <option value="BANK">بانک</option>
+                  <option value="ORG">سازمان ذینفع</option>
+                </select>
+                {form.bankPartyId !== "" && form.beneficiaryOrgId === "" && (
+                  <select value={form.bankPartyId === "0" ? "" : form.bankPartyId} onChange={(e) => setForm({ ...form, bankPartyId: e.target.value || "0" })} style={{ flex: 1 }}>
+                    <option value="">انتخاب بانک…</option>
+                    {(opts?.banks ?? []).map((b) => <option key={b.id} value={b.id}>{b.title}</option>)}
+                  </select>
+                )}
+                {form.beneficiaryOrgId !== "" && form.bankPartyId === "" && (
+                  <select value={form.beneficiaryOrgId === "0" ? "" : form.beneficiaryOrgId} onChange={(e) => setForm({ ...form, beneficiaryOrgId: e.target.value || "0" })} style={{ flex: 1 }}>
+                    <option value="">انتخاب سازمان…</option>
+                    {(opts?.orgs ?? []).map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}
+                  </select>
+                )}
+              </div>
             </div>
             <div className="form-field">
               <label className="checkbox-row"><input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} /> فعال</label>

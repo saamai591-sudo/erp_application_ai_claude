@@ -103,6 +103,7 @@ import { licenseGate } from "./license/licenseGate";
 import managementBackupRoutes from "./routes/managementBackup";
 import { startBackupScheduler } from "./services/backupService";
 import { stampUnmarkedTaxMemories } from "./services/taxMemoryLicense";
+import { ensureDefaultFileStructures } from "./services/fileStructureService";
 import { fxOffBodyNormalizer } from "./license/fxOff";
 import { startScheduler } from "./jobs/scheduler";
 import warehouseDocDetailSettingRoutes from "./routes/warehouseDocDetailSettings";
@@ -362,6 +363,7 @@ syncRegistryToDb()
       // زمان‌سنج پشتیبان‌گیری (مستقل از SCHEDULER_ENABLED؛ فقط وقتی سیاست از «مدیریت» روشن شود کار می‌کند)
       startBackupScheduler().catch((e) => console.error("[backup] خطا در راه‌اندازی", e));
       // حافظه‌های مالیاتیِ بدون سریال (قدیمی) با سریال لایسنس جاری علامت می‌خورند
+      ensureDefaultFileStructures().catch((e) => console.error("[file-structures] ساخت ساختارهای پیش‌فرض نصب", e));
       stampUnmarkedTaxMemories().catch((e) => console.error("[tax-memory] علامت‌گذاری با سریال لایسنس", e));
     });
   })

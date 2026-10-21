@@ -3,11 +3,11 @@ import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { DICTIONARY } from "../services/fileStructureDictionary";
-import { FileStructureError, copyStructure, createStructure, isSystemRef, listStructures, loadStructure, updateStructure, validateDef } from "../services/fileStructureService";
+import { FileStructureError, copyStructure, createStructure, listStructures, loadStructure, resetToInstallDefault, updateStructure, validateDef } from "../services/fileStructureService";
 import { generateFiles, type GenProblem } from "../services/fileGeneratorService";
 
 // حقوق و دستمزد › تنظیمات › ساختار فایل: تعریف ساختار فایل‌های بانک‌ها و سازمان‌ها + پیش‌نمایش/تولید برای یک ماه.
-// قواعد: services/fileStructureService.ts و services/fileGeneratorService.ts. ساختارهای پیش‌فرض نصب با شناسه‌ی «sys-<KEY>» فقط‌خواندنی‌اند.
+// قواعد: services/fileStructureService.ts و services/fileGeneratorService.ts. ساختارهای پیش‌فرض نصب هم ردیف دیتابیسی‌اند (systemKey): قابل ویرایش، ولی حذف‌نشدنی.
 
 const F = findFormPrefix("file-structures");
 const router = Router();
@@ -24,12 +24,13 @@ router.get("/file-structures", can(`${F}.view`), async (_req, res) => {
 
 /** گزینه‌های فرم: فهرست فیلدهای سیستمی، عامل‌ها، انواع محاسبه و شعبه‌های سازمان‌های ذینفع */
 router.get("/file-structures/options", can(`${F}.view`), async (_req, res) => {
-  const [payroll, decree, calc, orgs, branches] = await Promise.all([
+  const [payroll, decree, calc, orgs, branches, banks] = await Promise.all([
     prisma.payrollComponent.findMany({ orderBy: { id: "asc" }, select: { id: true, title: true, kind: true, calcType: { select: { title: true } } } }),
     prisma.decreeComponent.findMany({ orderBy: { code: "asc" }, select: { id: true, title: true } }),
     prisma.payrollCalcType.findMany({ orderBy: [{ isBase: "desc" }, { id: "asc" }], select: { id: true, title: true } }),
     prisma.beneficiaryOrg.findMany({ orderBy: { code: "asc" }, select: { id: true, title: true, type: true } }),
     prisma.beneficiaryBranch.findMany({ where: { isActive: true }, orderBy: { id: "asc" }, select: { id: true, organizationId: true, fileNumber: true, contractRow: true, party: { select: { detailTitle: true } } } }),
+    prisma.party.findMany({ where: { legalType: "BANK", isActive: true }, orderBy: { detailTitle: "asc" }, select: { id: true, detailTitle: true } }),
   ]);
   res.json({
     dictionary: DICTIONARY,
@@ -37,6 +38,7 @@ router.get("/file-structures/options", can(`${F}.view`), async (_req, res) => {
     decreeFactors: decree,
     calcTypes: calc,
     orgs,
+    banks: banks.map((b) => ({ id: b.id, title: b.detailTitle })),
     branches: branches.map((b) => ({ id: b.id, organizationId: b.organizationId, fileNumber: b.fileNumber, contractRow: b.contractRow, title: b.party.detailTitle })),
   });
 });
@@ -44,7 +46,7 @@ router.get("/file-structures/options", can(`${F}.view`), async (_req, res) => {
 router.get("/file-structures/:ref", can(`${F}.view`), async (req, res) => {
   const r = await loadStructure(req.params.ref);
   if (!r) return res.status(404).json({ error: "ساختار فایل یافت نشد" });
-  res.json({ ...r.def, ref: req.params.ref, isSystem: isSystemRef(req.params.ref), unresolved: r.unresolved });
+  res.json({ ...r.def, ref: req.params.ref, isSystem: !!r.def.systemKey, unresolved: r.unresolved });
 });
 
 router.post("/file-structures", can(`${F}.create`), async (req, res) => {
@@ -58,7 +60,6 @@ router.post("/file-structures", can(`${F}.create`), async (req, res) => {
 
 router.put("/file-structures/:ref", can(`${F}.edit`), async (req, res) => {
   try {
-    if (isSystemRef(req.params.ref)) throw new FileStructureError("ساختار پیش‌فرض نصب قابل ویرایش نیست؛ از آن «کپی» بگیرید");
     const id = Number(req.params.ref);
     if (!(await prisma.fileStructure.findUnique({ where: { id }, select: { id: true } }))) return res.status(404).json({ error: "ساختار فایل یافت نشد" });
     await updateStructure(id, validateDef(req.body));
@@ -70,11 +71,20 @@ router.put("/file-structures/:ref", can(`${F}.edit`), async (req, res) => {
 
 router.delete("/file-structures/:ref", can(`${F}.delete`), async (req, res) => {
   try {
-    if (isSystemRef(req.params.ref)) throw new FileStructureError("ساختار پیش‌فرض نصب حذف نمی‌شود");
+    const row = await prisma.fileStructure.findUnique({ where: { id: Number(req.params.ref) }, select: { systemKey: true } });
+    if (row?.systemKey) throw new FileStructureError("ساختار پیش‌فرض نصب حذف نمی‌شود؛ می‌توانید غیرفعالش کنید");
     await prisma.fileStructure.delete({ where: { id: Number(req.params.ref) } });
     res.status(204).end();
   } catch (e) {
     fail(res, e, "خطا در حذف ساختار فایل");
+  }
+});
+
+router.post("/file-structures/:ref/reset-to-default", can(`${F}.edit`), async (req, res) => {
+  try {
+    res.json(await resetToInstallDefault(Number(req.params.ref)));
+  } catch (e) {
+    fail(res, e, "خطا در بازگردانی ساختار");
   }
 });
 

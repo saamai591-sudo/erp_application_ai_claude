@@ -289,6 +289,7 @@ model DetailCodeUsage {
 
 model Party {
   payrollIssueSettingsSecond PayrollIssueSetting[] @relation("PayrollIssueSecondingParty")
+  fileStructures FileStructure[] @relation("FileStructureBank")
   id                 Int                @id @default(autoincrement())
   detailCode         String             @unique
   /// عنوان تفصیل: یکتا و قابل ویرایش (پیش‌فرض: نام)؛ دو شخص هم‌نام باید عنوان تفصیل متفاوت داشته باشند
@@ -5517,6 +5518,7 @@ enum BeneficiaryOrgType {
 /// سازمان ذینفع: کد (خودکار = آخرین + ۱)، عنوان یکتا، نوع، فعال
 model BeneficiaryOrg {
   paymentTypes PayrollPaymentType[]
+  fileStructures FileStructure[]
   payrollComponents PayrollComponent[]
   id        Int                 @id @default(autoincrement())
   code      Int                 @unique
@@ -5754,6 +5756,15 @@ model FileStructure {
   sourceKind  FileSourceKind      @default(PAYROLL_LIST)
   isActive    Boolean             @default(true)
   createdAt   DateTime            @default(now())
+  /// کلید ساختار پیش‌فرض نصب (WH/WP/DSK/بانک‌ها)؛ این ساختارها قابل ویرایش‌اند ولی حذف نمی‌شوند (غیرفعال کنید)
+  systemKey   String?             @unique
+  /// کاربر ساختارِ پیش‌فرض نصب را ذخیره کرده است (اتصال خودکار به سازمان دیگر عوض نمی‌شود)
+  userEdited  Boolean             @default(false)
+  /// این فایل مربوط به کدام بانک (شخص حقوقیِ بانک) یا کدام سازمان ذینفع است؛ حداکثر یکی (CHECK در مایگریشن)
+  bankPartyId      Int?
+  beneficiaryOrgId Int?
+  bankParty        Party?            @relation("FileStructureBank", fields: [bankPartyId], references: [id], onDelete: Restrict)
+  beneficiaryOrg   BeneficiaryOrg?   @relation(fields: [beneficiaryOrgId], references: [id], onDelete: Restrict)
   files       FileStructureFile[]
 }
 

@@ -165,7 +165,20 @@ export function validateDef(b: any): StructureDef {
       if (!target.fields.some((x) => x.name === fl.aggFieldName && x.section === "ITEM")) throw new FileStructureError(`«${fl.name}»: فیلد «${fl.aggFieldName}» در بخش آیتم فایل ${target.seq} نیست`);
     }
   }
-  return { systemKey: null, title, sourceKind: "PAYROLL_LIST", isActive: b.isActive === undefined ? true : !!b.isActive, files };
+  const bankPartyId = b.bankPartyId ? Number(b.bankPartyId) : null;
+  const beneficiaryOrgId = b.beneficiaryOrgId ? Number(b.beneficiaryOrgId) : null;
+  if (bankPartyId && beneficiaryOrgId) throw new FileStructureError("فایل فقط می‌تواند به یک بانک یا یک سازمان ذینفع مربوط باشد، نه هر دو");
+  return { systemKey: null, title, sourceKind: "PAYROLL_LIST", isActive: b.isActive === undefined ? true : !!b.isActive, files, bankPartyId, beneficiaryOrgId };
+}
+
+/** وجود و نوعِ بانک/سازمان انتخاب‌شده (پیام فارسی به‌جای خطای FK) */
+async function assertOwner(def: StructureDef) {
+  if (def.bankPartyId) {
+    const p = await prisma.party.findUnique({ where: { id: def.bankPartyId }, select: { legalType: true } });
+    if (!p) throw new FileStructureError("بانک انتخاب‌شده یافت نشد");
+    if (p.legalType !== "BANK") throw new FileStructureError("بانک انتخاب‌شده باید شخص حقوقی از نوع «بانک» باشد");
+  }
+  if (def.beneficiaryOrgId && !(await prisma.beneficiaryOrg.findUnique({ where: { id: def.beneficiaryOrgId }, select: { id: true } }))) throw new FileStructureError("سازمان ذینفع انتخاب‌شده یافت نشد");
 }
 
 /** وجود عامل‌های مرجع (کنترل FK قبل از ذخیره، پیام فارسی به‌جای خطای دیتابیس) */
@@ -229,6 +242,7 @@ const filesCreate = (def: StructureDef) =>
 
 export async function createStructure(def: StructureDef) {
   await assertRefsExist(def);
+  await assertOwner(def);
   if (await prisma.fileStructure.findUnique({ where: { title: def.title } })) throw new FileStructureError("ساختار دیگری با همین عنوان وجود دارد");
   for (let attempt = 0; ; attempt++) {
     try {
@@ -238,6 +252,9 @@ export async function createStructure(def: StructureDef) {
           title: def.title,
           sourceKind: def.sourceKind,
           isActive: def.isActive,
+          systemKey: def.systemKey ?? null,
+          bankPartyId: def.bankPartyId ?? null,
+          beneficiaryOrgId: def.beneficiaryOrgId ?? null,
           files: { create: filesCreate(def) },
         },
       });
@@ -248,19 +265,22 @@ export async function createStructure(def: StructureDef) {
   }
 }
 
-export async function updateStructure(id: number, def: StructureDef) {
+export async function updateStructure(id: number, def: StructureDef, opts: { keepUserEdited?: boolean } = {}) {
   await assertRefsExist(def);
+  await assertOwner(def);
   if (await prisma.fileStructure.findFirst({ where: { title: def.title, NOT: { id } } })) throw new FileStructureError("ساختار دیگری با همین عنوان وجود دارد");
   await prisma.$transaction([
     prisma.fileStructureFile.deleteMany({ where: { structureId: id } }),
     prisma.fileStructure.update({
       where: { id },
-      data: { title: def.title, isActive: def.isActive, files: { create: filesCreate(def) } },
+      data: { title: def.title, isActive: def.isActive, bankPartyId: def.bankPartyId ?? null, beneficiaryOrgId: def.beneficiaryOrgId ?? null, ...(opts.keepUserEdited ? {} : { userEdited: true }), files: { create: filesCreate(def) } },
     }),
   ]);
 }
 
 const FULL = {
+  bankParty: { select: { id: true, detailTitle: true } },
+  beneficiaryOrg: { select: { id: true, title: true } },
   files: {
     orderBy: { seq: "asc" as const },
     include: { fields: { orderBy: { seq: "asc" as const }, include: { refs: true, maps: true } } },
@@ -271,7 +291,11 @@ const FULL = {
 function toDef(row: any): StructureDef {
   return {
     id: row.id,
-    systemKey: null,
+    systemKey: row.systemKey ?? null,
+    bankPartyId: row.bankPartyId ?? null,
+    beneficiaryOrgId: row.beneficiaryOrgId ?? null,
+    bankTitle: row.bankParty?.detailTitle ?? null,
+    orgTitle: row.beneficiaryOrg?.title ?? null,
     code: row.code,
     title: row.title,
     sourceKind: row.sourceKind,
@@ -315,41 +339,72 @@ function toDef(row: any): StructureDef {
   };
 }
 
-export const isSystemRef = (idOrKey: string) => idOrKey.startsWith("sys-");
-
-/** ساختار با شناسه‌ی عددی (دیتابیس) یا «sys-<KEY>» (پیش‌فرض نصب). برای پیش‌فرض نصب عامل‌ها با عنوان تطبیق داده می‌شوند. */
-export async function loadStructure(idOrKey: string): Promise<{ def: StructureDef; unresolved: { field: string; title: string }[] } | null> {
-  if (isSystemRef(idOrKey)) {
-    const sys = SYSTEM_STRUCTURES.find((s) => s.systemKey === idOrKey.slice(4));
-    if (!sys) return null;
-    const r = await resolveSuggestions(sys);
-    return { def: { ...r.def, id: null }, unresolved: r.unresolved };
-  }
-  const row = await prisma.fileStructure.findUnique({ where: { id: Number(idOrKey) }, include: FULL });
+/** ساختار با شناسه‌ی عددی (همه‌ی ساختارها، از جمله پیش‌فرض‌های نصب، ردیف دیتابیسی‌اند) */
+export async function loadStructure(id: string | number): Promise<{ def: StructureDef; unresolved: { field: string; title: string }[] } | null> {
+  const n = Number(id);
+  if (!Number.isInteger(n)) return null;
+  const row = await prisma.fileStructure.findUnique({ where: { id: n }, include: FULL });
   return row ? { def: toDef(row), unresolved: [] } : null;
 }
 
 export async function listStructures() {
-  const rows = await prisma.fileStructure.findMany({ orderBy: { code: "asc" }, include: { files: { select: { id: true } } } });
-  const sys = SYSTEM_STRUCTURES.map((s) => ({
-    ref: `sys-${s.systemKey}`,
-    id: null as number | null,
-    code: null as number | null,
-    title: s.title,
-    isActive: true,
-    isSystem: true,
-    fileCount: s.files.length,
+  const rows = await prisma.fileStructure.findMany({
+    orderBy: { code: "asc" },
+    include: { files: { select: { id: true } }, bankParty: { select: { detailTitle: true } }, beneficiaryOrg: { select: { title: true } } },
+  });
+  return rows.map((r) => ({
+    ref: String(r.id),
+    id: r.id,
+    code: r.code,
+    title: r.title,
+    isActive: r.isActive,
+    isSystem: !!r.systemKey,
+    fileCount: r.files.length,
+    ownerTitle: r.bankParty?.detailTitle ?? r.beneficiaryOrg?.title ?? "",
   }));
-  const own = rows.map((r) => ({ ref: String(r.id), id: r.id, code: r.code, title: r.title, isActive: r.isActive, isSystem: false, fileCount: r.files.length }));
-  return [...sys, ...own];
 }
 
-export async function copyStructure(idOrKey: string, title?: string) {
+export async function copyStructure(idOrKey: string | number, title?: string) {
   const src = await loadStructure(idOrKey);
   if (!src) throw new FileStructureError("ساختار یافت نشد");
   const baseTitle = str(title) ?? `کپی ${src.def.title}`;
   let t = baseTitle;
   for (let n = 2; await prisma.fileStructure.findUnique({ where: { title: t } }); n++) t = `${baseTitle} (${n})`;
-  const created = await createStructure({ ...src.def, title: t, systemKey: null });
+  const created = await createStructure({ ...src.def, title: t, systemKey: null, bankPartyId: null, beneficiaryOrgId: null });
   return { id: created.id, unresolved: src.unresolved };
+}
+
+/** ساختارهای پیش‌فرض نصب را (در صورت نبودن) به‌صورت ردیف دیتابیسی می‌سازد: عامل‌ها با عنوان تطبیق داده می‌شوند (عنوانِ پیدانشده خالی می‌ماند و کاربر انتخاب می‌کند)،
+ * ساختارهای مالیاتی/تامین اجتماعی به سازمانِ هم‌نوع وصل می‌شوند (اگر در این نصب دقیقاً یکی باشد)، ساختارهای بانکی بدون بانک می‌مانند تا کاربر انتخاب کند.
+ * تا وقتی کاربر ساختار را ذخیره نکرده، اتصال خالیِ سازمان در راه‌اندازی‌های بعدی هم تکمیل می‌شود. هر دو بار اجرا بی‌اثر است. */
+export async function ensureDefaultFileStructures(): Promise<void> {
+  const orgByType = async (type: string) => {
+    const orgs = await prisma.beneficiaryOrg.findMany({ where: { type: type as any, isActive: true }, select: { id: true } });
+    return orgs.length === 1 ? orgs[0].id : null;
+  };
+  for (const sys of SYSTEM_STRUCTURES) {
+    const existing = await prisma.fileStructure.findUnique({ where: { systemKey: sys.systemKey! }, select: { id: true, userEdited: true, bankPartyId: true, beneficiaryOrgId: true } });
+    if (existing) {
+      if (!existing.userEdited && sys.orgType && !existing.beneficiaryOrgId && !existing.bankPartyId) {
+        const orgId = await orgByType(sys.orgType);
+        if (orgId) await prisma.fileStructure.update({ where: { id: existing.id }, data: { beneficiaryOrgId: orgId } });
+      }
+      continue;
+    }
+    const r = await resolveSuggestions(sys);
+    let title = sys.title;
+    for (let n = 2; await prisma.fileStructure.findUnique({ where: { title } }); n++) title = `${sys.title} (${n})`;
+    await createStructure({ ...r.def, title, systemKey: sys.systemKey, bankPartyId: null, beneficiaryOrgId: sys.orgType ? await orgByType(sys.orgType) : null });
+  }
+}
+
+/** بازگردانی محتوای ساختارِ پیش‌فرض نصب از کد (عنوان، فعال‌بودن و «مربوط به» می‌ماند) */
+export async function resetToInstallDefault(id: number) {
+  const row = await prisma.fileStructure.findUnique({ where: { id }, select: { systemKey: true, title: true, isActive: true, bankPartyId: true, beneficiaryOrgId: true } });
+  if (!row) throw new FileStructureError("ساختار یافت نشد");
+  const sys = SYSTEM_STRUCTURES.find((x) => x.systemKey === row.systemKey);
+  if (!sys) throw new FileStructureError("این ساختار پیش‌فرض نصب نیست");
+  const r = await resolveSuggestions(sys);
+  await updateStructure(id, { ...r.def, title: row.title, isActive: row.isActive, bankPartyId: row.bankPartyId, beneficiaryOrgId: row.beneficiaryOrgId }, { keepUserEdited: true });
+  return { unresolved: r.unresolved };
 }

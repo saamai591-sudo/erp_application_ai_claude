@@ -1,5 +1,5 @@
 // ساختارهای پیش‌فرض نصب برای «ساختار فایل»: فهرست حقوق مالیاتی (WH)، فهرست کارکنان مالیاتی (WP) و لیست بیمه تامین اجتماعی (DSKKAR/DSKWOR).
-// فقط‌خواندنی‌اند و در کد می‌مانند؛ کاربر با «کپی» یک نسخه‌ی قابل‌ویرایش در دیتابیس می‌سازد. عامل‌های مجموع‌گیری‌شده با «عنوان» پیشنهاد می‌شوند
+// در کد می‌مانند و هنگام راه‌اندازی به‌صورت ردیف دیتابیسی (با systemKey) ساخته می‌شوند تا کاربر ویرایششان کند (ensureDefaultFileStructures)؛ «بازگردانی به پیش‌فرض نصب» محتوا را دوباره از همین‌جا می‌خواند. عامل‌های مجموع‌گیری‌شده با «عنوان» پیشنهاد می‌شوند
 // (suggest) و هنگام تولید فایل/کپی با عنوان عامل‌ها و نوع‌های محاسبه‌ی همین نصب تطبیق داده می‌شوند؛ عنوانی که پیدا نشود صفر می‌شود (و هشدار می‌دهد).
 // منبع: مشخصات رسمی راهنمای فایل مالیات حقوق (نسخه ۱.۷.۰.۵)، ساختار DSKKAR/DSKWOR نسخه ۶ و تعریف‌های نرم‌افزار قبلی (سام) که کاربر داده است.
 
@@ -57,6 +57,13 @@ export interface StructureDef {
   sourceKind: "PAYROLL_LIST";
   isActive: boolean;
   files: FileDef[];
+  /** مربوط به: بانک (شخص حقوقیِ بانک) یا سازمان ذینفع؛ حداکثر یکی */
+  bankPartyId?: number | null;
+  beneficiaryOrgId?: number | null;
+  bankTitle?: string | null;
+  orgTitle?: string | null;
+  /** فقط برای ساختار پیش‌فرض نصب: نوع سازمانی که هنگام ساخت به آن وصل می‌شود (اگر در این نصب دقیقاً یک سازمان از این نوع باشد) */
+  orgType?: "SOCIAL_SECURITY" | "TAX" | "OTHER";
 }
 
 const num = (name: string, title: string, extra: Partial<FieldDef> = {}): FieldDef => ({ name, title, dataType: "NUMBER", source: "CONSTANT", constantValue: "0", ...extra });
@@ -242,6 +249,7 @@ const PARSIAN_FIELDS: FieldDef[] = [
 export const SYSTEM_STRUCTURES: StructureDef[] = [
   {
     systemKey: "TAX_WH",
+    orgType: "TAX",
     title: "فهرست حقوق مالیاتی (WH)",
     sourceKind: "PAYROLL_LIST",
     isActive: true,
@@ -249,6 +257,7 @@ export const SYSTEM_STRUCTURES: StructureDef[] = [
   },
   {
     systemKey: "TAX_WP",
+    orgType: "TAX",
     title: "فهرست کارکنان مالیاتی (WP)",
     sourceKind: "PAYROLL_LIST",
     isActive: true,
@@ -256,6 +265,7 @@ export const SYSTEM_STRUCTURES: StructureDef[] = [
   },
   {
     systemKey: "SSO_DSK",
+    orgType: "SOCIAL_SECURITY",
     title: "لیست بیمه تامین اجتماعی (DSKKAR / DSKWOR)",
     sourceKind: "PAYROLL_LIST",
     isActive: true,
