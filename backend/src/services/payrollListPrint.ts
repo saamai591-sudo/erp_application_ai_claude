@@ -90,25 +90,37 @@ function makePlan(cols: Col[], texts: Map<string, string[]>, fontPt: number, emp
     const longestWord = Math.max(...c.title.split(" ").map((w) => widthEm(w) * tEm * 1.08)) + PAD_X;
     return Math.max(valW, longestWord, 4);
   });
-  // نوارها: حریصانه به ترتیب ستون‌ها
-  const bands: Col[][] = [];
-  const bandW: number[][] = [];
-  let cur: Col[] = [];
-  let curW: number[] = [];
-  let sum = 0;
-  cols.forEach((c, i) => {
-    if (cur.length > 0 && sum + minW[i] > usableW) {
-      bands.push(cur);
-      bandW.push(curW);
-      cur = [];
-      curW = [];
-      sum = 0;
-    }
-    cur.push(c);
-    curW.push(minW[i]);
-    sum += minW[i];
-  });
-  if (cur.length) { bands.push(cur); bandW.push(curW); }
+  // نوارها: حریصانه به ترتیب ستون‌ها. گروه «سایر» هیچ‌وقت بین دو نوار نمی‌شکند؛ سایر گروه‌ها هم تا جایی که تعداد نوارها بیشتر نشود سالم می‌مانند
+  // (اگر گروهی کامل در نوار جاری جا نشد و در یک نوار جا می‌شود، از نوار تازه شروع می‌شود).
+  const secW = new Map<Sec, number>();
+  cols.forEach((c, i) => secW.set(c.sec, (secW.get(c.sec) ?? 0) + minW[i]));
+  const pack = (keepAll: boolean) => {
+    const bands: Col[][] = [];
+    const bandW: number[][] = [];
+    let cur: Col[] = [];
+    let curW: number[] = [];
+    let sum = 0;
+    cols.forEach((c, i) => {
+      const startsSec = i === 0 || cols[i - 1].sec !== c.sec;
+      const keep = c.sec === "OTHER" || (keepAll && c.sec !== "INFO");
+      const wholeW = secW.get(c.sec) ?? 0;
+      if (cur.length > 0 && (sum + minW[i] > usableW || (startsSec && keep && wholeW <= usableW && sum + wholeW > usableW))) {
+        bands.push(cur);
+        bandW.push(curW);
+        cur = [];
+        curW = [];
+        sum = 0;
+      }
+      cur.push(c);
+      curW.push(minW[i]);
+      sum += minW[i];
+    });
+    if (cur.length) { bands.push(cur); bandW.push(curW); }
+    return { bands, bandW };
+  };
+  const loose = pack(false);
+  const tidy = pack(true);
+  const { bands, bandW } = tidy.bands.length <= loose.bands.length ? tidy : loose;
   // هر نوار تا پر شدن عرض صفحه کشیده می‌شود
   const widths = bandW.map((w) => {
     const total = w.reduce((a, b) => a + b, 0);
