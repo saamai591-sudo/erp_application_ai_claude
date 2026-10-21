@@ -15,18 +15,16 @@ export interface AssignmentInput {
   jobId?: number | null;
 }
 
-/** واحد سازمانیِ انتصاب = واحد خودِ پست؛ فقط اگر پست واحد نداشت (مثل پست پیش‌فرض) از کاربر گرفته می‌شود. نتیجه را در a.orgUnitId می‌نویسد */
+/** مرکز هزینه‌ی انتصاب الزامی است و واحد سازمانیِ انتصاب = واحد سازمانیِ همان مرکز هزینه (مقدار ارسالی کلاینت نادیده گرفته می‌شود). نتیجه را در a.orgUnitId می‌نویسد */
 export async function checkAssignmentRefs(a: AssignmentInput): Promise<void> {
   if (!a.positionId) throw new HrError("پست الزامی است");
   const pos = await prisma.position.findUnique({ where: { id: Number(a.positionId) } });
   if (!pos) throw new HrError("پست یافت نشد");
   if (!pos.isActive) throw new HrError("پست انتخاب‌شده غیرفعال است");
-  if (pos.orgUnitId) a.orgUnitId = pos.orgUnitId;
-  if (!a.orgUnitId) throw new HrError("این پست واحد سازمانی ندارد؛ واحد سازمانی را انتخاب کنید");
-  if (!(await prisma.orgUnit.findUnique({ where: { id: Number(a.orgUnitId) } }))) throw new HrError("واحد سازمانی یافت نشد");
-  if (a.costCenterId && !(await prisma.costCenter.findUnique({ where: { id: Number(a.costCenterId) } }))) {
-    throw new HrError("مرکز هزینه یافت نشد");
-  }
+  if (!a.costCenterId) throw new HrError("مرکز هزینه الزامی است");
+  const cc = await prisma.costCenter.findUnique({ where: { id: Number(a.costCenterId) }, select: { id: true, orgUnitId: true } });
+  if (!cc) throw new HrError("مرکز هزینه یافت نشد");
+  a.orgUnitId = cc.orgUnitId;
   // شغل: کاربر هنگام انتخاب پست باید از شغل‌هایی که به همان پست تخصیص داده شده یکی را انتخاب کند
   const jobs = await prisma.positionJob.findMany({ where: { positionId: pos.id }, select: { jobId: true } });
   const jobId = a.jobId ? Number(a.jobId) : null;

@@ -78,6 +78,8 @@ export interface Opt {
   detailCode?: string;
   isActive?: boolean;
   orgUnitId?: number | null;
+  /** فقط مرکز هزینه: واحد سازمانیِ آن (واحد انتصاب از همین می‌آید) */
+  orgUnit?: { title: string } | null;
   level?: string;
   /** فقط پست: شغل‌های تخصیص‌داده‌شده به پست (انتخاب شغل در انتصاب از همین می‌آید) */
   jobs?: PositionJobOpt[];
@@ -219,8 +221,7 @@ function EmployeeList() {
               { key: "isVeteran", label: "ایثارگر", required: true, hint: "بله / خیر" },
               { key: "positionTitle", label: "پست", required: true, hint: "عنوان یا کد پست (برای بدون پست، پست پیش‌فرض)" },
               { key: "jobTitle", label: "شغل", hint: "عنوان یا کد شغل؛ برای پستی که شغل دارد الزامی و باید از شغل‌های همان پست باشد" },
-              { key: "orgUnitTitle", label: "واحد سازمانی", hint: "فقط اگر پست واحد سازمانی ندارد" },
-              { key: "costCenterTitle", label: "مرکز هزینه", hint: "اختیاری — عنوان یا کد تفصیلی" },
+              { key: "costCenterTitle", label: "مرکز هزینه", required: true, hint: "عنوان یا کد تفصیلی؛ واحد سازمانی از روی مرکز هزینه تعیین می‌شود" },
               { key: "fatherName", label: "نام پدر" },
               { key: "birthCertificateNumber", label: "شماره شناسنامه" },
               { key: "birthPlace", label: "محل تولد", hint: "عنوان شهر" },
@@ -290,14 +291,15 @@ export function OptPicker({ title, rows, value, onChange, onClear, disabled }: {
   );
 }
 
-/** پستِ دارای واحد سازمانی؟ (آن‌گاه واحد از پست می‌آید و قابل‌ویرایش نیست) */
-export function positionHasUnit(positions: Opt[], positionId: string): boolean {
-  return !!positions.find((p) => String(p.id) === positionId)?.orgUnitId;
-}
-/** با انتخاب پست، واحد سازمانی آن پست ست می‌شود؛ پستِ بدون واحد مقدار فعلی را نگه می‌دارد */
-export function unitOfPosition(positions: Opt[], positionId: string, current: string): { orgUnitId: string } {
-  const u = positions.find((p) => String(p.id) === positionId)?.orgUnitId;
-  return { orgUnitId: u ? String(u) : current };
+/** واحد سازمانیِ انتصاب = واحد مرکز هزینه‌ی انتخاب‌شده؛ فیلدی فقط‌نمایشی بعد از مرکز هزینه (سرور هم همین را از مرکز هزینه می‌گیرد) */
+export function OrgUnitOfCostCenter({ costCenters, costCenterId }: { costCenters: Opt[]; costCenterId: string }) {
+  const title = costCenters.find((c) => String(c.id) === costCenterId)?.orgUnit?.title ?? "";
+  return (
+    <div className="form-field">
+      <label>واحد سازمانی <FieldHint label="واحد سازمانی" text="از روی مرکز هزینه‌ی انتخاب‌شده تعیین می‌شود" /></label>
+      <input value={title} disabled readOnly />
+    </div>
+  );
 }
 
 /** شغل‌های تخصیص‌داده‌شده به یک پست */
@@ -496,7 +498,7 @@ function EmployeeForm({ editId }: { editId?: number }) {
         if (!form.startDate) return setError("تاریخ شروع همکاری الزامی است");
         if (!form.positionId) return setError("پست الزامی است");
         if (jobMissing(positions, form.positionId, form.jobId)) return setError("شغل را انتخاب کنید");
-        if (!form.orgUnitId) return setError("واحد سازمانی الزامی است");
+        if (!form.costCenterId) return setError("مرکز هزینه الزامی است");
         if (!photo) return setError("عکس کارمند الزامی است");
         if (!form.educationLevelId) return setError("مدرک تحصیلی الزامی است");
         if (!form.maritalStatus) return setError("وضعیت تاهل الزامی است");
@@ -513,8 +515,7 @@ function EmployeeForm({ editId }: { editId?: number }) {
           startDate: form.startDate,
           positionId: Number(form.positionId),
           jobId: form.jobId ? Number(form.jobId) : null,
-          orgUnitId: Number(form.orgUnitId),
-          costCenterId: form.costCenterId ? Number(form.costCenterId) : null,
+          costCenterId: Number(form.costCenterId),
           photo: { mimeType: photo.mimeType, dataBase64: photo.dataBase64 },
         });
         flash();
@@ -835,17 +836,14 @@ function EmployeeForm({ editId }: { editId?: number }) {
               </div>
               <div className="form-field">
                 <label>پست<RequiredMark /> <FieldHint label="پست" text="برای شرکتی که از پست استفاده نمی‌کند «پست پیش‌فرض» را انتخاب کنید" /></label>
-                <OptPicker title="انتخاب پست" rows={positions} value={form.positionId} onChange={(v) => setForm({ ...form, positionId: v, ...unitOfPosition(positions, v, form.orgUnitId), ...jobOfPosition(positions, v, form.jobId) })} />
+                <OptPicker title="انتخاب پست" rows={positions} value={form.positionId} onChange={(v) => setForm({ ...form, positionId: v, ...jobOfPosition(positions, v, form.jobId) })} />
               </div>
               <JobField positions={positions} positionId={form.positionId} value={form.jobId} onChange={(v) => set("jobId", v)} />
               <div className="form-field">
-                <label>واحد سازمانی<RequiredMark /> {positionHasUnit(positions, form.positionId) && <FieldHint label="واحد سازمانی" text="از روی پست انتخاب‌شده تعیین می‌شود" />}</label>
-                <OptPicker title="انتخاب واحد سازمانی" rows={orgUnits} value={form.orgUnitId} disabled={positionHasUnit(positions, form.positionId)} onChange={(v) => set("orgUnitId", v)} />
+                <label>مرکز هزینه<RequiredMark /></label>
+                <OptPicker title="انتخاب مرکز هزینه" rows={costCenters} value={form.costCenterId} onChange={(v) => set("costCenterId", v)} />
               </div>
-              <div className="form-field">
-                <label>مرکز هزینه</label>
-                <OptPicker title="انتخاب مرکز هزینه" rows={costCenters} value={form.costCenterId} onChange={(v) => set("costCenterId", v)} onClear={() => set("costCenterId", "")} />
-              </div>
+              <OrgUnitOfCostCenter costCenters={costCenters} costCenterId={form.costCenterId} />
             </div>
           </>
         )}
@@ -1041,17 +1039,14 @@ function AssignmentFields({ f, setF, lk }: { f: any; setF: (v: any) => void; lk:
     <>
       <div className="form-field">
         <label>پست<RequiredMark /></label>
-        <OptPicker title="انتخاب پست" rows={lk.positions} value={f.positionId} onChange={(v) => setF({ ...f, positionId: v, ...unitOfPosition(lk.positions, v, f.orgUnitId), ...jobOfPosition(lk.positions, v, f.jobId ?? "") })} />
+        <OptPicker title="انتخاب پست" rows={lk.positions} value={f.positionId} onChange={(v) => setF({ ...f, positionId: v, ...jobOfPosition(lk.positions, v, f.jobId ?? "") })} />
       </div>
       <JobField positions={lk.positions} positionId={f.positionId} value={f.jobId ?? ""} onChange={(v) => setF({ ...f, jobId: v })} />
       <div className="form-field">
-        <label>واحد سازمانی<RequiredMark /></label>
-        <OptPicker title="انتخاب واحد سازمانی" rows={lk.orgUnits} value={f.orgUnitId} disabled={positionHasUnit(lk.positions, f.positionId)} onChange={(v) => setF({ ...f, orgUnitId: v })} />
+        <label>مرکز هزینه<RequiredMark /></label>
+        <OptPicker title="انتخاب مرکز هزینه" rows={lk.costCenters} value={f.costCenterId} onChange={(v) => setF({ ...f, costCenterId: v })} />
       </div>
-      <div className="form-field">
-        <label>مرکز هزینه</label>
-        <OptPicker title="انتخاب مرکز هزینه" rows={lk.costCenters} value={f.costCenterId} onChange={(v) => setF({ ...f, costCenterId: v })} onClear={() => setF({ ...f, costCenterId: "" })} />
-      </div>
+      <OrgUnitOfCostCenter costCenters={lk.costCenters} costCenterId={f.costCenterId} />
     </>
   );
 }
@@ -1059,8 +1054,7 @@ function AssignmentFields({ f, setF, lk }: { f: any; setF: (v: any) => void; lk:
 const toAssignBody = (f: any) => ({
   positionId: Number(f.positionId),
   jobId: f.jobId ? Number(f.jobId) : null,
-  orgUnitId: Number(f.orgUnitId),
-  costCenterId: f.costCenterId ? Number(f.costCenterId) : null,
+  costCenterId: Number(f.costCenterId),
 });
 
 function AssignmentDialog({ employeeId, value, onClose, onDone, ...lk }: LookupProps & { employeeId: number; value?: Assignment; onClose: () => void; onDone: () => void }) {
@@ -1073,7 +1067,7 @@ function AssignmentDialog({ employeeId, value, onClose, onDone, ...lk }: LookupP
   const [err, setErr] = useState<string | null>(null);
   async function save() {
     setErr(null);
-    if (!f.positionId || !f.orgUnitId) return setErr("پست و واحد سازمانی الزامی است");
+    if (!f.positionId || !f.costCenterId) return setErr("پست و مرکز هزینه الزامی است");
     if (jobMissing(lk.positions, f.positionId, f.jobId)) return setErr("شغل را انتخاب کنید");
     try {
       if (value) await api.put(`/employees/${employeeId}/assignments/${value.id}`, { fromDate: f.fromDate, ...toAssignBody(f) });
@@ -1111,6 +1105,7 @@ function StatusDialog({ detail, reasons, onClose, onDone, ...lk }: LookupProps &
   const rehire = wasEnded && f.status === "ACTIVE";
   async function save() {
     setErr(null);
+    if (rehire && !f.costCenterId) return setErr("مرکز هزینه الزامی است");
     if (rehire && jobMissing(lk.positions, f.positionId, f.jobId)) return setErr("شغل را انتخاب کنید");
     try {
       await api.post(`/employees/${detail.id}/status`, {

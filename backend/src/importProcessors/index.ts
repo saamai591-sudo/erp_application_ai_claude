@@ -570,7 +570,6 @@ export function registerAllImportProcessors() {
   }
   const posFind = (w: any) => prisma.position.findMany({ where: w.title ? { title: w.title } : { code: w.code } });
   const jobFind = (w: any) => prisma.job.findMany({ where: w.title ? { title: w.title } : { code: w.code } });
-  const unitFind = (w: any) => prisma.orgUnit.findMany({ where: w.title ? { title: w.title } : { code: w.code } });
   const ccFind = (w: any) => prisma.costCenter.findMany({ where: w.title ? { title: w.title } : { detailCode: w.detailCode } });
   const cityFind = async (title: string) => prisma.geoRegion.findMany({ where: { title, level: "CITY" } });
 
@@ -597,18 +596,10 @@ export function registerAllImportProcessors() {
           if ("error" in j) return { ok: false, error: j.error };
           jobId = j.row.id;
         }
-        let orgUnitId: number | undefined;
-        if ((row.orgUnitTitle ?? "").trim()) {
-          const u = await pickByTitleOrCode(row.orgUnitTitle, "واحد سازمانی", unitFind);
-          if ("error" in u) return { ok: false, error: u.error };
-          orgUnitId = u.row.id;
-        }
-        let costCenterId: number | undefined;
-        if ((row.costCenterTitle ?? "").trim()) {
-          const c = await pickByTitleOrCode(row.costCenterTitle, "مرکز هزینه", ccFind);
-          if ("error" in c) return { ok: false, error: c.error };
-          costCenterId = c.row.id;
-        }
+        if (!(row.costCenterTitle ?? "").trim()) return { ok: false, error: "مرکز هزینه الزامی است" };
+        const cc = await pickByTitleOrCode(row.costCenterTitle, "مرکز هزینه", ccFind);
+        if ("error" in cc) return { ok: false, error: cc.error };
+        const costCenterId = cc.row.id;
         let birthPlaceId: number | undefined;
         let issuePlaceId: number | undefined;
         for (const [k, label] of [["birthPlace", "محل تولد"], ["issuePlace", "محل صدور"]] as const) {
@@ -654,7 +645,6 @@ export function registerAllImportProcessors() {
             isVeteran,
             positionId: pos.row.id,
             jobId,
-            orgUnitId,
             costCenterId,
             fatherName: row.fatherName,
             birthCertificateNumber: row.birthCertificateNumber,
@@ -706,7 +696,6 @@ export function registerAllImportProcessors() {
 
         let position: { row: { id: number } } | { error: string } | null = null;
         let jobId: number | undefined;
-        let orgUnitId: number | undefined;
         let costCenterId: number | undefined;
         if ((first.positionTitle ?? "").trim()) {
           position = await pickByTitleOrCode(first.positionTitle, "پست", posFind);
@@ -716,16 +705,10 @@ export function registerAllImportProcessors() {
             if ("error" in j) return { ok: false, error: j.error };
             jobId = j.row.id;
           }
-          if ((first.orgUnitTitle ?? "").trim()) {
-            const u = await pickByTitleOrCode(first.orgUnitTitle, "واحد سازمانی", unitFind);
-            if ("error" in u) return { ok: false, error: u.error };
-            orgUnitId = u.row.id;
-          }
-          if ((first.costCenterTitle ?? "").trim()) {
-            const c = await pickByTitleOrCode(first.costCenterTitle, "مرکز هزینه", ccFind);
-            if ("error" in c) return { ok: false, error: c.error };
-            costCenterId = c.row.id;
-          }
+          if (!(first.costCenterTitle ?? "").trim()) return { ok: false, error: "با پست جدید، مرکز هزینه‌ی جدید الزامی است" };
+          const c = await pickByTitleOrCode(first.costCenterTitle, "مرکز هزینه", ccFind);
+          if ("error" in c) return { ok: false, error: c.error };
+          costCenterId = c.row.id;
         }
 
         const lines: { componentId: number; value: number }[] = [];
@@ -749,7 +732,6 @@ export function registerAllImportProcessors() {
           description: first.description,
           positionId: position && "row" in position ? position.row.id : undefined,
           jobId,
-          orgUnitId,
           costCenterId,
           lines,
         });
