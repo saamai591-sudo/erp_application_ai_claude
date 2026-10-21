@@ -150,6 +150,7 @@ import ChequeClearingPayable from "./pages/ChequeClearingPayable";
 
 import BeneficiaryOrgs from "./pages/BeneficiaryOrgs";
 import PayrollAccountGroups from "./pages/PayrollAccountGroups";
+import PayrollPaymentTypes from "./pages/PayrollPaymentTypes";
 import PayrollJournalTemplates from "./pages/PayrollJournalTemplates";
 import PayrollIssueSettings from "./pages/PayrollIssueSettings";
 import BeneficiaryBranches from "./pages/BeneficiaryBranches";
@@ -480,6 +481,9 @@ export default function App() {
             <Route path="/payroll-calc-types" element={<PayrollCalcTypes />} />
             <Route path="/payroll-calc-types/new" element={<PayrollCalcTypes />} />
             <Route path="/payroll-calc-types/:id/edit" element={<PayrollCalcTypes />} />
+            <Route path="/payroll-payment-types" element={<PayrollPaymentTypes />} />
+            <Route path="/payroll-payment-types/new" element={<PayrollPaymentTypes />} />
+            <Route path="/payroll-payment-types/:id/edit" element={<PayrollPaymentTypes />} />
             <Route path="/payroll-account-groups" element={<PayrollAccountGroups />} />
             <Route path="/payroll-account-groups/new" element={<PayrollAccountGroups />} />
             <Route path="/payroll-account-groups/:id/edit" element={<PayrollAccountGroups />} />

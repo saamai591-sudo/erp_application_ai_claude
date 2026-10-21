@@ -613,6 +613,7 @@ export const REGISTRY: ModuleDef[] = [
           { key: "calculation-types", title: "نوع محاسبه", baseActions: CRUD },
           { key: "payroll-components", title: "عامل حقوق", baseActions: CRUD },
           { key: "factor-methods", title: "روش محاسبه عامل", baseActions: CRUD },
+          { key: "payroll-payment-types", title: "نوع پرداخت حقوق", baseActions: CRUD },
         ],
       },
       {

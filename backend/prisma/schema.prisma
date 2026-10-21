@@ -5116,6 +5116,7 @@ enum PayrollSectionKind {
 /// عامل حقوق (هویت): عنوان + کلید داخلی که سیستم خودکار می‌سازد و به کاربر نمایش داده نمی‌شود. طبقه، روش و فرمول در رکوردهای تاریخ‌دار
 /// «روش محاسبه عامل» (PayrollFactorMethod) می‌آید.
 model PayrollComponent {
+  paymentTypeItems PayrollPaymentTypeItem[]
   /// سازمان ذینفع مرتبط با عامل: کارمندِ «غیرمشمول» در این سازمان مبلغ این عامل را صفر می‌گیرد؛ در سند حقوق، طرف حساب «سازمان مرتبط با عامل» = شعبه‌ی کارمند در همین سازمان
   beneficiaryOrgId Int?
   beneficiaryOrg   BeneficiaryOrg? @relation(fields: [beneficiaryOrgId], references: [id], onDelete: Restrict)
@@ -5142,6 +5143,7 @@ model PayrollComponent {
 /// «نوع محاسبه» حقوق: حقوق ماهانه (نوع پایه، دقیقاً یکی) و انواع دیگر مثل عیدی/ذخیره سنوات/بازخرید مرخصی/بازخرید سنوات.
 /// محاسبه‌ی هر نوعِ غیرپایه برای یک کارمند فقط وقتی مجاز است که فیش «حقوق ماهانه»ی همان ماه محاسبه شده باشد.
 model PayrollCalcType {
+  paymentTypeItems PayrollPaymentTypeItem[]
   journalTemplates PayrollJournalTemplate[]
   id          Int                 @id @default(autoincrement())
   title       String              @unique
@@ -5337,6 +5339,7 @@ model PayrollFactorMethodBranch {
 
 /// نوع وام: عنوان + سازمان مرتبط اختیاری (شخص حقوقی از نوع بانک / موسسه مالی و اعتباری)
 model LoanType {
+  paymentTypeItems PayrollPaymentTypeItem[]
   journalTemplates PayrollJournalTemplate[]
   id                 Int      @id @default(autoincrement())
   title              String   @unique
@@ -5509,6 +5512,7 @@ enum BeneficiaryOrgType {
 
 /// سازمان ذینفع: کد (خودکار = آخرین + ۱)، عنوان یکتا، نوع، فعال
 model BeneficiaryOrg {
+  paymentTypes PayrollPaymentType[]
   payrollComponents PayrollComponent[]
   id        Int                 @id @default(autoincrement())
   code      Int                 @unique
@@ -5624,4 +5628,44 @@ model PayrollIssueSetting {
   project          Project?            @relation(fields: [projectId], references: [id], onDelete: Restrict)
 
   @@unique([employeeId, fromMonthId])
+}
+
+/// پرداخت به چه کسی: پرسنل یا سازمان مرتبط با عامل
+enum PayrollPayTo {
+  EMPLOYEE
+  FACTOR_ORG
+}
+
+/// نوع پرداخت حقوق (تنظیمات حقوق): سربرگ + آیتم‌های عامل (کسور / هزینه کارفرما / وام / خالص پرداختی)
+model PayrollPaymentType {
+  id               Int                      @id @default(autoincrement())
+  code             Int                      @unique
+  title            String                   @unique
+  isActive         Boolean                  @default(true)
+  payTo            PayrollPayTo
+  /// فقط وقتی payTo = FACTOR_ORG
+  beneficiaryOrgId Int?
+  beneficiaryOrg   BeneficiaryOrg?          @relation(fields: [beneficiaryOrgId], references: [id], onDelete: Restrict)
+  /// «فایل دارد»: برای این نوع پرداخت فایل (مثلاً فایل بانکی) تولید می‌شود
+  hasFile          Boolean                  @default(false)
+  createdAt        DateTime                 @default(now())
+  items            PayrollPaymentTypeItem[]
+}
+
+/// آیتم نوع پرداخت: دقیقاً یکی از عامل حقوق / نوع وام / خالص پرداختیِ یک نوع محاسبه
+model PayrollPaymentTypeItem {
+  id                 Int                @id @default(autoincrement())
+  paymentTypeId      Int
+  payrollComponentId Int?
+  loanTypeId         Int?
+  netCalcTypeId      Int?
+  paymentType        PayrollPaymentType @relation(fields: [paymentTypeId], references: [id], onDelete: Cascade)
+  payrollComponent   PayrollComponent?  @relation(fields: [payrollComponentId], references: [id], onDelete: Restrict)
+  loanType           LoanType?          @relation(fields: [loanTypeId], references: [id], onDelete: Restrict)
+  netCalcType        PayrollCalcType?   @relation(fields: [netCalcTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([paymentTypeId, payrollComponentId])
+  @@unique([paymentTypeId, loanTypeId])
+  @@unique([paymentTypeId, netCalcTypeId])
+  @@index([paymentTypeId])
 }

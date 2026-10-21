@@ -56,6 +56,8 @@ export const USAGE_META: Record<string, UsageMeta> = {
   BeneficiaryBranch: { label: "شعبه‌ی سازمان ذینفع", base: "/beneficiary-branches", include: { party: { select: { detailTitle: true } } }, title: (r) => `${r.party?.detailTitle ?? ""}${r.contractRow ? ` (ردیف پیمان ${r.contractRow})` : ""}` },
   EmployeeBeneficiary: { label: "مشمولیت کارمند در سازمان ذینفع", include: EMP, title: (r) => `${r.isIncluded ? "مشمول" : "غیرمشمول"}${ofEmp(r)}` },
   PayrollAccountGroup: { label: "گروه حساب حقوق", base: "/payroll-account-groups" },
+  PayrollPaymentType: { label: "نوع پرداخت حقوق", base: "/payroll-payment-types" },
+  PayrollPaymentTypeItem: { label: "آیتم نوع پرداخت حقوق", base: "/payroll-payment-types", title: (r) => `#${r.paymentTypeId}` },
   PayrollJournalTemplate: { label: "رکورد الگوی سند حقوق", base: "/payroll-journal-templates", title: (r) => `#${r.id}` },
   PayrollIssueSetting: { label: "تنظیمات صدور سند", base: "/payroll-issue-settings", include: EMP, title: (r) => `#${r.id}${ofEmp(r)}` },
   // اطلاعات پایه
