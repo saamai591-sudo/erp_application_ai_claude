@@ -104,7 +104,7 @@ export function accountSlots(a: { detailType1: any; detailType2: any; detailType
 }
 
 /** بدنه‌ی یک رکورد الگو → داده‌ی ذخیره (همه‌ی کنترل‌ها؛ ویرایش با excludeId) */
-export async function validateTemplate(b: any, excludeId?: number) {
+export async function validateTemplate(b: any, excludeId?: number, issued?: IssuedIndex) {
   const fromYear = Number(b.fromYear);
   const fromMonth = Number(b.fromMonth);
   const cal = await getCalendarMonth(fromYear, fromMonth);
@@ -131,7 +131,7 @@ export async function validateTemplate(b: any, excludeId?: number) {
   } else if (!(await prisma.loanType.findUnique({ where: { id: refId } }))) throw new PayrollAcctError("نوع وام یافت نشد");
   ref[refField] = refId;
 
-  assertAfterIssued((await issuedIndex()).byGroup.get(group.id), cal.year, cal.month, "کارمندان این گروه");
+  assertAfterIssued((issued ?? (await issuedIndex())).byGroup.get(group.id), cal.year, cal.month, "کارمندان این گروه");
   const nature = b.nature;
   if (nature !== "DEBIT" && nature !== "CREDIT") throw new PayrollAcctError("ماهیت را انتخاب کنید (بدهکار یا بستانکار)");
 
@@ -163,6 +163,132 @@ export async function validateTemplate(b: any, excludeId?: number) {
   });
   if (dup) throw new PayrollAcctError("رکوردی با همین ماه، گروه، عامل، حساب، ماهیت و نوع طرف حساب قبلاً ثبت شده است");
   return data;
+}
+
+// ── تعریف گروهی الگو (گروه حساب × ماه × نوع محاسبه) ──
+// گرید کاندیداها: مزایا / کسور / هزینه کارفرما (دو ردیف: بدهکار و بستانکار) / وام‌ها / خالص پرداختی. فقط آیتم‌هایی که برای آن ماه «الگوی مؤثر» ندارند
+// (هیچ رکورد فعالی در آخرین «از ماه» ≤ ماه)؛ با includeOlder آیتم‌های دارای الگوی ماه‌های قبل هم می‌آیند و حساب/ماهیت قبلی پیش‌پر می‌شود.
+// ذخیره: همه‌یا‌هیچ؛ هر ردیف با همان validateTemplate بررسی می‌شود و ردیف بدون حساب بی‌صدا رد می‌شود؛ هزینه کارفرما فقط جفت (بدهکار + بستانکار) درج می‌شود.
+
+export type BulkSection = "EARNING" | "DEDUCTION" | "EMPLOYER_COST" | "LOAN" | "NET";
+export interface BulkCandidate {
+  rowKey: string; // <refKey>|<nature>
+  refKey: RefKey;
+  field: "payrollComponentId" | "decreeComponentId" | "netCalcTypeId" | "loanTypeId";
+  refId: number;
+  section: BulkSection;
+  title: string;
+  nature: "DEBIT" | "CREDIT";
+  description: string;
+  hasOrg: boolean;
+  prefill: { accountId: number; partyKind: string | null; description: string | null; fromYear: number; fromMonth: number } | null;
+}
+
+export async function bulkTemplateCandidates(p: { year: number; month: number; groupId: number; calcTypeId: number; includeOlder: boolean }): Promise<BulkCandidate[]> {
+  const cal = await getCalendarMonth(p.year, p.month);
+  if (!cal) throw new PayrollAcctError("ماه در تقویم کاری تعریف نشده است");
+  const group = await prisma.payrollAccountGroup.findUnique({ where: { id: p.groupId } });
+  if (!group) throw new PayrollAcctError("گروه حساب حقوق را انتخاب کنید");
+  const calcType = await prisma.payrollCalcType.findUnique({ where: { id: p.calcTypeId } });
+  if (!calcType) throw new PayrollAcctError("نوع محاسبه را انتخاب کنید");
+  assertAfterIssued((await issuedIndex()).byGroup.get(group.id), cal.year, cal.month, "کارمندان این گروه");
+  const ym = ymKey(p.year, p.month);
+
+  const tplRaw = await prisma.payrollJournalTemplate.findMany({ where: { groupId: group.id }, include: { fromMonth: { select: { year: true, month: true } } } });
+  const all = tplRaw
+    .map((t) => ({ t, fromKey: ymKey(t.fromMonth.year, t.fromMonth.month), refKey: refKeyOf(t) }))
+    .filter((x) => x.fromKey <= ym);
+  // رکوردهای مؤثر هر مرجع (آخرین «از ماه» و فقط فعال‌ها)
+  const effective = (refKey: RefKey) => {
+    const mine = all.filter((x) => x.refKey === refKey);
+    if (mine.length === 0) return [] as typeof all;
+    const top = Math.max(...mine.map((x) => x.fromKey));
+    return mine.filter((x) => x.fromKey === top && x.t.isActive);
+  };
+
+  const out: BulkCandidate[] = [];
+  const add = (c: Omit<BulkCandidate, "rowKey" | "prefill" | "nature">, natures: ("DEBIT" | "CREDIT")[]) => {
+    const eff = effective(c.refKey);
+    if (eff.length > 0 && (!p.includeOlder || eff.some((x) => x.fromKey === ym))) return; // الگوی مؤثر دارد (یا همین ماه ثبت شده است)
+    for (const nature of natures) {
+      const old = eff.find((x) => x.t.nature === nature) ?? null;
+      out.push({
+        ...c,
+        nature,
+        rowKey: c.refKey + "|" + nature,
+        prefill: old ? { accountId: old.t.accountId, partyKind: old.t.partyKind, description: old.t.description, fromYear: old.t.fromMonth.year, fromMonth: old.t.fromMonth.month } : null,
+      });
+    }
+  };
+
+  // عوامل حقوق این نوع محاسبه (کارکرد و اطلاعاتی سند ندارند؛ عاملِ «جمع اقساط وام» با وام‌ها جدا ثبت می‌شود)
+  const loanFactorIds = new Set(
+    (await prisma.payrollFactorMethodBranch.findMany({ where: { formulaText: { contains: "[S:" + LOAN_SUM_KEY + "]" }, method: { payrollComponentId: { not: null } } }, select: { method: { select: { payrollComponentId: true } } } }))
+      .map((b) => b.method.payrollComponentId!)
+  );
+  const comps = await prisma.payrollComponent.findMany({ where: { calcTypeId: calcType.id, isActive: true, kind: { in: ["EARNING", "DEDUCTION", "EMPLOYER_COST"] } }, orderBy: { id: "asc" }, select: { id: true, title: true, kind: true, beneficiaryOrgId: true } });
+  const decrees = calcType.isBase ? await prisma.decreeComponent.findMany({ orderBy: { code: "asc" }, select: { id: true, title: true } }) : [];
+  for (const d of decrees) add({ refKey: "D:" + d.id, field: "decreeComponentId", refId: d.id, section: "EARNING", title: d.title, description: "بابت " + d.title, hasOrg: false }, ["DEBIT"]);
+  for (const c of comps) {
+    if (loanFactorIds.has(c.id)) continue;
+    const natures: ("DEBIT" | "CREDIT")[] = c.kind === "EARNING" ? ["DEBIT"] : c.kind === "DEDUCTION" ? ["CREDIT"] : ["DEBIT", "CREDIT"];
+    add({ refKey: "P:" + c.id, field: "payrollComponentId", refId: c.id, section: c.kind as BulkSection, title: c.title, description: "بابت " + c.title, hasOrg: !!c.beneficiaryOrgId }, natures);
+  }
+  // وام‌ها: اقساط فقط در سند حقوق ماهانه می‌آیند
+  if (calcType.isBase) {
+    for (const l of await prisma.loanType.findMany({ orderBy: { title: "asc" }, select: { id: true, title: true } })) {
+      add({ refKey: "L:" + l.id, field: "loanTypeId", refId: l.id, section: "LOAN", title: l.title, description: "بابت وام " + l.title, hasOrg: false }, ["CREDIT"]);
+    }
+  }
+  add({ refKey: "N:" + calcType.id, field: "netCalcTypeId", refId: calcType.id, section: "NET", title: "خالص پرداختی (" + calcType.title + ")", description: "بابت خالص پرداختی " + calcType.title, hasOrg: false }, ["CREDIT"]);
+
+  const order: Record<BulkSection, number> = { EARNING: 1, DEDUCTION: 2, EMPLOYER_COST: 3, LOAN: 4, NET: 5 };
+  return out.sort((a, b) => order[a.section] - order[b.section]);
+}
+
+export interface BulkRowInput {
+  rowKey: string;
+  field: BulkCandidate["field"];
+  refId: number;
+  nature: "DEBIT" | "CREDIT";
+  accountId: number | null;
+  partyKind: string | null;
+  description: string | null;
+}
+export class BulkTemplateError extends Error {
+  constructor(message: string, public rowErrors: { rowKey: string; message: string }[]) {
+    super(message);
+  }
+}
+
+export async function bulkCreateTemplates(p: { year: number; month: number; groupId: number; rows: BulkRowInput[] }) {
+  const rows = p.rows.filter((r) => r.accountId);
+  const skipped = p.rows.length - rows.length;
+  if (rows.length === 0) throw new PayrollAcctError("برای هیچ ردیفی حساب معین انتخاب نشده است");
+  const errors: { rowKey: string; message: string }[] = [];
+  const issued = await issuedIndex();
+
+  // هزینه کارفرما: ردیف بدهکار و بستانکار هر عامل با هم
+  const empCostIds = new Set((await prisma.payrollComponent.findMany({ where: { id: { in: rows.filter((r) => r.field === "payrollComponentId").map((r) => r.refId) }, kind: "EMPLOYER_COST" }, select: { id: true } })).map((c) => c.id));
+  for (const id of empCostIds) {
+    const mine = rows.filter((r) => r.field === "payrollComponentId" && r.refId === id);
+    if (!mine.some((r) => r.nature === "DEBIT") || !mine.some((r) => r.nature === "CREDIT")) {
+      for (const r of mine) errors.push({ rowKey: r.rowKey, message: "برای هزینه کارفرما هم ردیف بدهکار و هم بستانکار لازم است" });
+    }
+  }
+  const data: Awaited<ReturnType<typeof validateTemplate>>[] = [];
+  for (const r of rows) {
+    if (errors.some((e) => e.rowKey === r.rowKey)) continue;
+    try {
+      data.push(await validateTemplate({ fromYear: p.year, fromMonth: p.month, groupId: p.groupId, [r.field]: r.refId, accountId: r.accountId, nature: r.nature, description: r.description, partyKind: r.partyKind, isActive: true }, undefined, issued));
+    } catch (e: any) {
+      if (e instanceof PayrollAcctError) errors.push({ rowKey: r.rowKey, message: e.message });
+      else throw e;
+    }
+  }
+  if (errors.length > 0) throw new BulkTemplateError("برخی ردیف‌ها خطا دارند؛ اصلاح یا حذفشان کنید (چیزی ذخیره نشد)", errors);
+  await prisma.$transaction(data.map((d) => prisma.payrollJournalTemplate.create({ data: d })));
+  return { created: data.length, skipped };
 }
 
 // ── تنظیمات صدور: اعتبارسنجی ──

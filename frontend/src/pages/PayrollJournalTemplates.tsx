@@ -6,6 +6,8 @@ import { FormPage } from "../components/FormPage";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import PayrollTemplatesBulk from "./PayrollTemplatesBulk";
+import { useTabs } from "../lib/TabsContext";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { RecordPickerField } from "../components/RecordPicker";
@@ -52,12 +54,14 @@ interface Options {
 export default function PayrollJournalTemplates() {
   const location = useLocation();
   const { id } = useParams();
+  if (location.pathname.endsWith("/bulk")) return <PayrollTemplatesBulk />;
   if (location.pathname.endsWith("/new")) return <TplForm />;
   if (location.pathname.endsWith("/edit")) return <TplForm editId={Number(id)} />;
   return <TplList />;
 }
 
 function TplList() {
+  const { openTab } = useTabs();
   const cacheKey = "/payroll-journal-templates";
   const [items, setItems] = usePersistedState<TplRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
@@ -105,6 +109,7 @@ function TplList() {
         rows={items}
         edit={{ path: (r: TplRow) => `/payroll-journal-templates/${r.id}/edit` }}
         onDelete={onDelete}
+        bulkActions={[{ label: () => "تعریف گروهی الگو", onClick: () => openTab("/payroll-journal-templates/bulk"), noSelection: true }]}
       />
     </div>
   );

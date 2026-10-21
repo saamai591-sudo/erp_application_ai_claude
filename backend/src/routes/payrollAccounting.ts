@@ -9,6 +9,9 @@ import { getCalendarMonth } from "../services/workCalendarService";
 import {
   PayrollAcctError,
   PayrollIssueError,
+  BulkTemplateError,
+  bulkCreateTemplates,
+  bulkTemplateCandidates,
   deletePayrollJournals,
   groupHasSettings,
   issuePayrollJournal,
@@ -32,6 +35,7 @@ const router = Router();
 
 function fail(res: any, e: any, fallback: string) {
   if (e instanceof PayrollIssueError) return sendBulkError(res, 400, e.message, e.problems as any);
+  if (e instanceof BulkTemplateError) return sendBulkError(res, 400, e.message, e.rowErrors as any);
   if (e instanceof PayrollAcctError) return res.status(400).json({ error: e.message });
   if (e?.code === "P2002") return res.status(400).json({ error: "رکورد تکراری است" });
   return res.status(400).json({ error: e?.message || fallback });
@@ -186,6 +190,45 @@ router.get("/payroll-journal-templates/options", async (_req, res) => {
     ],
     accounts: accounts.map((a) => ({ id: a.id, code: a.code, title: a.title, hasPartySlot: accountSlots(a).some((s) => s.type.code === DETAIL_TYPE_CODE_PARTY) })),
   });
+});
+
+// تعریف گروهی الگو: کاندیداها (GET) و ذخیره‌ی همه‌یا‌هیچ (POST)؛ مجوز = ایجاد الگو
+router.get("/payroll-journal-templates/bulk/candidates", can(`${F_TPL}.create`), async (req, res) => {
+  try {
+    const rows = await bulkTemplateCandidates({
+      year: Number(req.query.year),
+      month: Number(req.query.month),
+      groupId: Number(req.query.groupId),
+      calcTypeId: Number(req.query.calcTypeId),
+      includeOlder: req.query.includeOlder === "true",
+    });
+    res.json(rows);
+  } catch (e) {
+    fail(res, e, "خطا در بارگذاری آیتم‌ها");
+  }
+});
+
+router.post("/payroll-journal-templates/bulk", can(`${F_TPL}.create`), async (req, res) => {
+  try {
+    const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
+    const result = await bulkCreateTemplates({
+      year: Number(req.body.year),
+      month: Number(req.body.month),
+      groupId: Number(req.body.groupId),
+      rows: rows.map((r: any) => ({
+        rowKey: String(r.rowKey),
+        field: r.field,
+        refId: Number(r.refId),
+        nature: r.nature,
+        accountId: r.accountId ? Number(r.accountId) : null,
+        partyKind: r.partyKind || null,
+        description: typeof r.description === "string" ? r.description : null,
+      })),
+    });
+    res.status(201).json(result);
+  } catch (e) {
+    fail(res, e, "خطا در ثبت گروهی الگوی سند حقوق");
+  }
 });
 
 router.get("/payroll-journal-templates/:id", can(`${F_TPL}.view`), async (req, res) => {
