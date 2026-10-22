@@ -34,6 +34,8 @@ interface StepUI {
   description: string;
   completion: "MANUAL" | "EVENT";
   completionEvent: string;
+  requireNote: boolean;
+  requireAttachment: boolean;
   deadlineHours: string;
   reminderHours: string;
   escalateUserId: string;
@@ -44,7 +46,7 @@ interface StepUI {
 interface FormUI { title: string; description: string; isActive: boolean; startEvent: string; startCondition: Cond[]; steps: StepUI[] }
 interface ListRow { id: number; code: number; title: string; rootTypeTitle: string; startEventTitle: string; isActive: boolean; version: number; stepCount: number; instanceCount: number }
 
-const emptyStep = (): StepUI => ({ title: "", description: "", completion: "MANUAL", completionEvent: "", deadlineHours: "", reminderHours: "", escalateUserId: "", escalateRoleId: "", entryCondition: [], assignees: [] });
+const emptyStep = (): StepUI => ({ title: "", description: "", completion: "MANUAL", completionEvent: "", requireNote: true, requireAttachment: true, deadlineHours: "", reminderHours: "", escalateUserId: "", escalateRoleId: "", entryCondition: [], assignees: [] });
 const EMPTY: FormUI = { title: "", description: "", isActive: true, startEvent: "SALES_QUOTE_APPROVED", startCondition: [], steps: [emptyStep()] };
 const KIND_FA = { USER: "کاربر", ROLE: "نقش", CREATOR: "ثبت‌کننده‌ی سند" } as const;
 
@@ -59,6 +61,8 @@ const fromServer = (d: any): FormUI => ({
     description: s.description ?? "",
     completion: s.completion,
     completionEvent: s.completionEvent ?? "",
+    requireNote: s.requireNote !== false,
+    requireAttachment: s.requireAttachment !== false,
     deadlineHours: s.deadlineHours ? String(s.deadlineHours) : "",
     reminderHours: s.reminderHours ? String(s.reminderHours) : "",
     escalateUserId: s.escalateUserId ? String(s.escalateUserId) : "",
@@ -80,6 +84,8 @@ const toBody = (f: FormUI) => ({
     description: s.description,
     completion: s.completion,
     completionEvent: s.completion === "EVENT" ? s.completionEvent : null,
+    requireNote: s.requireNote,
+    requireAttachment: s.requireAttachment,
     deadlineHours: s.deadlineHours ? Number(s.deadlineHours) : null,
     reminderHours: s.reminderHours ? Number(s.reminderHours) : null,
     escalateUserId: s.escalateUserId ? Number(s.escalateUserId) : null,
@@ -317,6 +323,13 @@ function ProcessForm({ editId }: { editId?: number }) {
                     <option value="">—</option>
                     {meta.completionEvents.map((e) => <option key={e.key} value={e.key}>{e.title}</option>)}
                   </select>
+                </div>
+              )}
+              {s.completion === "MANUAL" && (
+                <div className="form-field">
+                  <label>هنگام «انجام شد» <FieldHint label="الزام توضیح و مدرک" text="تعیین کنید کاربر برای بستن این مرحله حتماً توضیح بنویسد و/یا مدرک پیوست کند؛ اگر اختیاری باشد، همچنان می‌تواند ثبت کند" /></label>
+                  <label className="checkbox-row"><input type="checkbox" checked={s.requireNote} onChange={(e) => setStep(i, { requireNote: e.target.checked })} /> توضیح اجباری</label>
+                  <label className="checkbox-row"><input type="checkbox" checked={s.requireAttachment} onChange={(e) => setStep(i, { requireAttachment: e.target.checked })} /> مدرک (پیوست) اجباری</label>
                 </div>
               )}
               <div className="form-field" style={{ gridColumn: "1 / -1" }}>

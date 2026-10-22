@@ -19,6 +19,8 @@ export interface TaskRow {
   rootTitle: string;
   stepTitle: string;
   completion: "MANUAL" | "EVENT";
+  requireNote: boolean;
+  requireAttachment: boolean;
   status: string;
   claimedByName: string;
   createdAt: string;
@@ -228,7 +230,7 @@ function TaskDetail({ taskId }: { taskId: number }) {
         {d.stepDescription && <div style={{ opacity: 0.85, marginTop: 4 }}>{d.stepDescription}</div>}
         <div style={{ opacity: 0.8, marginTop: 4 }}>
           مهلت: {dt(d.dueAt)} {d.overdue && <span style={{ color: "var(--danger, #c0392b)" }}>(عقب‌افتاده)</span>}
-          {" — "}{d.completion === "EVENT" ? "بسته‌شدن خودکار با ثبت سند" : "نیازمند توضیح و مدرک"}
+          {" — "}{d.completion === "EVENT" ? "بسته‌شدن خودکار با ثبت سند" : `توضیح ${d.requireNote ? "اجباری" : "اختیاری"}، مدرک ${d.requireAttachment ? "اجباری" : "اختیاری"}`}
         </div>
       </div>
 
@@ -258,7 +260,7 @@ function TaskDetail({ taskId }: { taskId: number }) {
       )}
 
       <div className="card" style={{ padding: 12, marginBottom: 8 }}>
-        <h4 style={{ margin: "0 0 6px" }}>مدارک</h4>
+        <h4 style={{ margin: "0 0 6px" }}>مدارک{d.completion === "MANUAL" && d.requireAttachment && <RequiredMark />}</h4>
         {d.attachments.length === 0 ? <div style={{ opacity: 0.7 }}>مدرکی پیوست نشده است.</div> : d.attachments.map((a) => (
           <div key={a.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button type="button" className="link-btn" onClick={() => openAttachment(a.id).catch((e) => showError((e as ApiError).message))}>{a.fileName}</button>
@@ -280,7 +282,7 @@ function TaskDetail({ taskId }: { taskId: number }) {
           {d.status === "CLAIMED" && d.isMine && <button type="button" className="btn secondary" disabled={busy} style={{ marginInlineStart: 6 }} onClick={() => run(() => api.post(`/workflow/tasks/${taskId}/release`, {}), "کار رها شد")}>رها کردن</button>}
           {d.completion === "MANUAL" && d.canComplete && (
             <div style={{ marginTop: 8 }}>
-              <label>توضیح انجام کار<RequiredMark /></label>
+              <label>توضیح انجام کار{d.requireNote && <RequiredMark />}</label>
               <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} style={{ width: "100%" }} />
               <button type="button" className="btn" style={{ marginTop: 6 }} disabled={busy} onClick={() => run(async () => { await api.post(`/workflow/tasks/${taskId}/complete`, { note }); navigate("/my-tasks"); }, "کار انجام شد")}>انجام شد</button>
             </div>

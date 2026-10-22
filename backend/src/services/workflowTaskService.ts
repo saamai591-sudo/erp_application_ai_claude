@@ -29,7 +29,7 @@ function visibleWhere(userId: number, roleIds: number[]) {
 }
 
 const TASK_INCLUDE = {
-  step: { select: { id: true, title: true, description: true, completion: true, completionEvent: true } },
+  step: { select: { id: true, title: true, description: true, completion: true, completionEvent: true, requireNote: true, requireAttachment: true } },
   instance: { select: { id: true, rootType: true, rootId: true, rootNumber: true, rootTitle: true, creatorUserId: true, status: true } },
   claimedBy: { select: { id: true, firstName: true, lastName: true } },
   completedBy: { select: { id: true, firstName: true, lastName: true } },
@@ -46,6 +46,8 @@ function shape(t: any, userId: number) {
     rootTitle: t.instance.rootTitle,
     stepTitle: t.step.title,
     completion: t.step.completion,
+    requireNote: t.step.requireNote,
+    requireAttachment: t.step.requireAttachment,
     status: t.status,
     claimedById: t.claimedById,
     claimedByName: fullName(t.claimedBy),
@@ -168,14 +170,14 @@ export async function completeManual(userId: number, taskId: number, note: unkno
   if (t.status !== "OPEN" && t.status !== "CLAIMED") throw new WorkflowError("کار قبلاً بسته شده است");
   if (t.status === "CLAIMED" && t.claimedById !== userId) throw new WorkflowError("این کار را کاربر دیگری برداشته است");
   const text = typeof note === "string" ? note.trim() : "";
-  if (!text) throw new WorkflowError("توضیح الزامی است");
-  if ((await prisma.workflowAttachment.count({ where: { taskId } })) === 0) throw new WorkflowError("حداقل یک مدرک (پیوست) الزامی است");
+  if (t.step.requireNote && !text) throw new WorkflowError("توضیح الزامی است");
+  if (t.step.requireAttachment && (await prisma.workflowAttachment.count({ where: { taskId } })) === 0) throw new WorkflowError("حداقل یک مدرک (پیوست) الزامی است");
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100010, ${Number(t.instance.rootId)})`);
     const fresh = await tx.workflowTask.findUnique({ where: { id: taskId }, select: { status: true } });
     if (!fresh || (fresh.status !== "OPEN" && fresh.status !== "CLAIMED")) throw new WorkflowError("کار قبلاً بسته شده است");
     await tx.workflowTask.update({ where: { id: taskId }, data: { claimedById: t.claimedById ?? userId, claimedAt: t.claimedBy ? undefined : new Date() } });
-    await completeTask(tx, taskId, { userId, kind: "MANUAL", note: text });
+    await completeTask(tx, taskId, { userId, kind: "MANUAL", note: text || null });
   });
 }
 

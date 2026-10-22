@@ -22,6 +22,8 @@ interface StepData {
   description: string | null;
   completion: "MANUAL" | "EVENT";
   completionEvent: string | null;
+  requireNote: boolean;
+  requireAttachment: boolean;
   deadlineHours: number | null;
   reminderHours: number | null;
   escalateUserId: number | null;
@@ -99,7 +101,7 @@ export async function validateProcess(b: any, excludeId?: number): Promise<Proce
       } else throw new ProcessError(`مرحله ${n}: مسئول ناقص است`);
     }
     if (isActive && completion === "MANUAL" && assignees.length === 0) throw new ProcessError(`مرحله ${n} («${stepTitle}»): برای فرایند فعال، مرحله‌ی دستی باید دست‌کم یک مسئول داشته باشد`);
-    steps.push({ seq: n, title: stepTitle, description: str(r.description), completion, completionEvent, deadlineHours, reminderHours, escalateUserId, escalateRoleId, entryCondition, assignees });
+    steps.push({ seq: n, title: stepTitle, description: str(r.description), completion, completionEvent, requireNote: r.requireNote === undefined ? true : !!r.requireNote, requireAttachment: r.requireAttachment === undefined ? true : !!r.requireAttachment, deadlineHours, reminderHours, escalateUserId, escalateRoleId, entryCondition, assignees });
   }
   if (userIds.size && (await prisma.user.count({ where: { id: { in: [...userIds] } } })) !== userIds.size) throw new ProcessError("یکی از کاربران انتخاب‌شده یافت نشد");
   if (roleIds.size && (await prisma.role.count({ where: { id: { in: [...roleIds] } } })) !== roleIds.size) throw new ProcessError("یکی از نقش‌های انتخاب‌شده یافت نشد");
@@ -113,6 +115,8 @@ const stepCreate = (steps: StepData[]) =>
     description: s.description,
     completion: s.completion,
     completionEvent: s.completionEvent,
+    requireNote: s.requireNote,
+    requireAttachment: s.requireAttachment,
     deadlineHours: s.deadlineHours,
     reminderHours: s.reminderHours,
     escalateUserId: s.escalateUserId,
@@ -213,6 +217,8 @@ export async function getProcess(id: number) {
       description: s.description,
       completion: s.completion,
       completionEvent: s.completionEvent,
+      requireNote: s.requireNote,
+      requireAttachment: s.requireAttachment,
       deadlineHours: s.deadlineHours,
       reminderHours: s.reminderHours,
       escalateUserId: s.escalateUserId,
@@ -254,12 +260,12 @@ export async function createSalesChainTemplate(): Promise<{ id: number }> {
   let title = "زنجیره‌ی فروش (الگو)";
   for (let n = 2; await prisma.workflowProcess.findUnique({ where: { title } }); n++) title = `زنجیره‌ی فروش (الگو) ${n}`;
   const steps: Omit<StepData, "seq">[] = [
-    { title: "پیگیری پیش‌فاکتور و دریافت وجه از مشتری", description: "با مشتری هماهنگ و پیگیری کنید؛ نتیجه و مدرک (مثلاً رسید یا پیام) را ثبت کنید", completion: "MANUAL", completionEvent: null, deadlineHours: 48, reminderHours: null, escalateUserId: null, escalateRoleId: null, entryCondition: [], assignees: [{ kind: "CREATOR", userId: null, roleId: null }] },
-    { title: "ثبت دریافت", description: null, completion: "EVENT", completionEvent: "RECEIPT_APPROVED", deadlineHours: null, reminderHours: null, escalateUserId: null, escalateRoleId: null, entryCondition: [], assignees: [] },
-    { title: "هماهنگی لجستیک", description: "زمان و نحوه‌ی ارسال کالا را با مشتری و انبار هماهنگ کنید", completion: "MANUAL", completionEvent: null, deadlineHours: 24, reminderHours: null, escalateUserId: null, escalateRoleId: null, entryCondition: [], assignees: [] },
-    { title: "صدور حواله فروش", description: "انباردار حواله را ثبت می‌کند", completion: "EVENT", completionEvent: "SALES_DELIVERY_REGISTERED", deadlineHours: 48, reminderHours: null, escalateUserId: null, escalateRoleId: null, entryCondition: [], assignees: [] },
-    { title: "صدور فاکتور فروش", description: "حسابداری فاکتور را ثبت می‌کند", completion: "EVENT", completionEvent: "SALES_INVOICE_CREATED", deadlineHours: 48, reminderHours: null, escalateUserId: null, escalateRoleId: null, entryCondition: [], assignees: [] },
-    { title: "ارسال فاکتور به مودیان", description: null, completion: "EVENT", completionEvent: "TAX_INVOICE_SENT", deadlineHours: 72, reminderHours: null, escalateUserId: null, escalateRoleId: null, entryCondition: [], assignees: [] },
+    { title: "پیگیری پیش‌فاکتور و دریافت وجه از مشتری", description: "با مشتری هماهنگ و پیگیری کنید؛ نتیجه و مدرک (مثلاً رسید یا پیام) را ثبت کنید", completion: "MANUAL", completionEvent: null, requireNote: true, requireAttachment: true, deadlineHours: 48, reminderHours: null, escalateUserId: null, escalateRoleId: null, entryCondition: [], assignees: [{ kind: "CREATOR", userId: null, roleId: null }] },
+    { title: "ثبت دریافت", description: null, completion: "EVENT", completionEvent: "RECEIPT_APPROVED", requireNote: true, requireAttachment: true, deadlineHours: null, reminderHours: null, escalateUserId: null, escalateRoleId: null, entryCondition: [], assignees: [] },
+    { title: "هماهنگی لجستیک", description: "زمان و نحوه‌ی ارسال کالا را با مشتری و انبار هماهنگ کنید", completion: "MANUAL", completionEvent: null, requireNote: true, requireAttachment: true, deadlineHours: 24, reminderHours: null, escalateUserId: null, escalateRoleId: null, entryCondition: [], assignees: [] },
+    { title: "صدور حواله فروش", description: "انباردار حواله را ثبت می‌کند", completion: "EVENT", completionEvent: "SALES_DELIVERY_REGISTERED", requireNote: true, requireAttachment: true, deadlineHours: 48, reminderHours: null, escalateUserId: null, escalateRoleId: null, entryCondition: [], assignees: [] },
+    { title: "صدور فاکتور فروش", description: "حسابداری فاکتور را ثبت می‌کند", completion: "EVENT", completionEvent: "SALES_INVOICE_CREATED", requireNote: true, requireAttachment: true, deadlineHours: 48, reminderHours: null, escalateUserId: null, escalateRoleId: null, entryCondition: [], assignees: [] },
+    { title: "ارسال فاکتور به مودیان", description: null, completion: "EVENT", completionEvent: "TAX_INVOICE_SENT", requireNote: true, requireAttachment: true, deadlineHours: 72, reminderHours: null, escalateUserId: null, escalateRoleId: null, entryCondition: [], assignees: [] },
   ];
   return createProcess({ title, description: "الگوی پیشنهادی؛ مسئول و مهلت مرحله‌ها را تنظیم و فرایند را فعال کنید", isActive: false, rootType: "SALES_QUOTE", startEvent: "SALES_QUOTE_APPROVED", startCondition: [], steps: steps.map((s, i) => ({ ...s, seq: i + 1 })) });
 }

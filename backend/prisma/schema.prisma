@@ -6017,6 +6017,9 @@ model WorkflowStep {
   title           String
   description     String?
   completion      WorkflowCompletion     @default(MANUAL)
+  /// مرحله‌ی دستی: توضیح و مدرکِ «انجام شد» اجباری است یا اختیاری (طراح فرایند تعیین می‌کند؛ پیش‌فرض هر دو اجباری)
+  requireNote       Boolean              @default(true)
+  requireAttachment Boolean              @default(true)
   /// فقط وقتی completion = EVENT
   completionEvent String?
   /// مهلت (ساعت تقویمی از لحظه‌ی ساخت کار)، یادآوری (ساعت بعد از ساخت) و تشدید (کاربر/نقش)
