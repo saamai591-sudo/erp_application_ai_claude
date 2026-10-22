@@ -164,9 +164,19 @@ async function escalationUserIds(step: { escalateUserId: number | null; escalate
 let lastDeadlineRun = 0;
 
 /** یادآوری و تشدیدِ کارهای باز (idempotent؛ هر اطلاعیه فقط یک‌بار). throttled=true ⇒ حداکثر هر ۶۰ ثانیه */
-export async function processDeadlines(throttled = false): Promise<{ reminders: number; escalations: number }> {
-  if (throttled && Date.now() - lastDeadlineRun < 60_000) return { reminders: 0, escalations: 0 };
-  lastDeadlineRun = Date.now();
+export interface DeadlineItem {
+  taskId: number;
+  kind: "REMINDER" | "OVERDUE";
+  title: string;
+  rootTitle: string;
+  users: number;
+}
+
+/** dryRun=true: فقط می‌شمارد و چیزی نمی‌نویسد (حالت آزمایشی کار زمان‌بندی‌شده) */
+export async function processDeadlines(throttled = false, dryRun = false): Promise<{ reminders: number; escalations: number; items: DeadlineItem[] }> {
+  const items: DeadlineItem[] = [];
+  if (throttled && Date.now() - lastDeadlineRun < 60_000) return { reminders: 0, escalations: 0, items };
+  if (!dryRun) lastDeadlineRun = Date.now();
   const now = new Date();
   let reminders = 0, escalations = 0;
   const open = { status: { in: ["OPEN", "CLAIMED"] as ("OPEN" | "CLAIMED")[] } };
@@ -176,6 +186,8 @@ export async function processDeadlines(throttled = false): Promise<{ reminders: 
   });
   for (const t of due) {
     const users = await stepUserIds(t.stepId, t.instance.creatorUserId);
+    items.push({ taskId: t.id, kind: "REMINDER", title: t.step.title, rootTitle: t.instance.rootTitle, users: users.length });
+    if (dryRun) { reminders++; continue; }
     await prisma.$transaction([
       prisma.workflowTask.update({ where: { id: t.id }, data: { reminderSentAt: now } }),
       prisma.workflowNotification.createMany({ data: users.map((userId) => ({ userId, taskId: t.id, kind: "REMINDER" as const, message: `یادآوری: «${t.step.title}» — ${t.instance.rootTitle}` })) }),
@@ -189,6 +201,8 @@ export async function processDeadlines(throttled = false): Promise<{ reminders: 
   for (const t of late) {
     const users = new Set(await stepUserIds(t.stepId, t.instance.creatorUserId));
     const esc = (await escalationUserIds(t.step)).filter((u) => !users.has(u));
+    items.push({ taskId: t.id, kind: "OVERDUE", title: t.step.title, rootTitle: t.instance.rootTitle, users: users.size + esc.length });
+    if (dryRun) { escalations++; continue; }
     await prisma.$transaction([
       prisma.workflowTask.update({ where: { id: t.id }, data: { overdueNotifiedAt: now } }),
       prisma.workflowTaskLog.create({ data: { taskId: t.id, action: "OVERDUE", message: "مهلت کار گذشت" } }),
@@ -201,5 +215,5 @@ export async function processDeadlines(throttled = false): Promise<{ reminders: 
     ]);
     escalations++;
   }
-  return { reminders, escalations };
+  return { reminders, escalations, items };
 }

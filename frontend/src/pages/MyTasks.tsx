@@ -68,6 +68,11 @@ function TaskList() {
   const [rows, setRows] = useState<TaskRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notes, setNotes] = useState<{ id: number; taskId: number; kind: string; message: string; createdAt: string; read: boolean }[]>([]);
+  const loadNotes = useCallback(() => api.get("/workflow/notifications").then(setNotes).catch(() => {}), []);
+  useEffect(() => {
+    loadNotes();
+  }, [loadNotes]);
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -91,6 +96,17 @@ function TaskList() {
         </div>
       </div>
       <ErrorToast message={error} />
+      {notes.some((n) => !n.read) && (
+        <div className="card" style={{ padding: 10, marginBottom: 8, border: "1px solid var(--warn, #f59e0b)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+            <b>اطلاعیه‌ها</b>
+            <button type="button" className="btn-link" onClick={() => api.post("/workflow/notifications/read", {}, { silent: true } as any).then(loadNotes)}>خوانده شد</button>
+          </div>
+          {notes.filter((n) => !n.read).slice(0, 8).map((n) => (
+            <div key={n.id}><button type="button" className="link-btn" onClick={() => navigate(`/my-tasks/${n.taskId}`)}>{n.message}</button> <span style={{ opacity: 0.6 }}>({dt(n.createdAt)})</span></div>
+          ))}
+        </div>
+      )}
       <div className="mytasks-tabs" style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "8px 0" }}>
         {SCOPES.map((s) => (
           <button key={s.key} type="button" className={scope === s.key ? "btn" : "btn secondary"} onClick={() => setScope(s.key)}>{s.label}</button>
