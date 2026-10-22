@@ -10,6 +10,7 @@ import { API_URL } from "../lib/apiUrl";
 import { api, ApiError, getToken } from "../lib/api";
 import { showError, showToast } from "../lib/toast";
 import { usePermissions } from "../lib/usePermissions";
+import { WorkflowTaskAction } from "../components/WorkflowTaskAction";
 
 // کارتابل › «کارهای من» (دسکتاپ و موبایل): فهرست کارها و جزئیات هر کار — خلاصه‌ی فقط‌خواندنی سند، تاریخچه، پیوست‌ها و «برداشتن / انجام شد».
 // مرحله‌ی دستی: توضیح + حداقل یک مدرک (تصویر/PDF تا ۵ مگابایت) الزامی است؛ مرحله‌ی خودکار با ثبت سند بسته می‌شود. قواعد در سرور (workflowTaskService).
@@ -23,6 +24,9 @@ export interface TaskRow {
   requireAttachment: boolean;
   branchPerEvent?: boolean;
   parentTitle?: string | null;
+  completionEvent?: string | null;
+  quoteId?: number | null;
+  deliveryId?: number | null;
   progress?: { total: number; done: number; branches: { docNumber: number | null; status: string }[] } | null;
   status: string;
   claimedByName: string;
@@ -159,6 +163,7 @@ function TaskList() {
 
 interface Detail extends TaskRow {
   stepDescription: string | null;
+  actionContext: { quoteNumber: number; partyId: number; partyTitle: string } | null;
   note: string | null;
   eventRef: string | null;
   summary: { kind?: string; title: string; fields: { label: string; value: string; isDate?: boolean }[]; lines: { title: string; quantity: number; unitPrice: number; amount: number; discount: number }[]; total: number; totalVat: number } | null;
@@ -302,7 +307,8 @@ function TaskDetail({ taskId }: { taskId: number }) {
 
       {active && canAct && (
         <div className="card" style={{ padding: 12, marginBottom: 8 }}>
-          {d.canClaim && <button type="button" className="btn" disabled={busy} onClick={() => run(() => api.post(`/workflow/tasks/${taskId}/claim`, {}), "کار برداشته شد")}>برداشتن کار</button>}
+          {d.completion === "EVENT" && <span style={{ marginInlineEnd: 6 }}><WorkflowTaskAction task={{ id: d.id, status: d.status, isMine: d.isMine, canClaim: d.canClaim, completionEvent: d.completionEvent ?? null, quoteId: d.quoteId ?? null, deliveryId: d.deliveryId ?? null, actionContext: d.actionContext }} onClaimed={load} /></span>}
+          {d.canClaim && <button type="button" className="btn secondary" disabled={busy} onClick={() => run(() => api.post(`/workflow/tasks/${taskId}/claim`, {}), "کار برداشته شد")}>برداشتن کار</button>}
           {d.status === "CLAIMED" && d.isMine && <button type="button" className="btn secondary" disabled={busy} style={{ marginInlineStart: 6 }} onClick={() => run(() => api.post(`/workflow/tasks/${taskId}/release`, {}), "کار رها شد")}>رها کردن</button>}
           {d.completion === "MANUAL" && d.canComplete && (
             <div style={{ marginTop: 8 }}>

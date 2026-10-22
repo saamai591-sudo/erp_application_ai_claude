@@ -2,6 +2,8 @@ import { FormEvent, Fragment, useEffect, useState } from "react";
 import { TypePickerField } from "../components/TypePickerFields";
 import { ErrorToast } from "../components/ErrorToast";
 import { showError } from "../lib/toast";
+import { takeFormPrefill } from "../lib/formPrefill";
+import type { ReceiptFromTaskPrefill } from "../components/WorkflowTaskAction";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
@@ -463,7 +465,9 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
           return;
         }
       } else {
-        setHeader({ date: defaultDocumentDate(fp), partyId: "", partyDisplay: "", description: "" });
+        // «ثبت دریافت» از کارِ کارتابل: طرف حساب و شرح از پیش‌فاکتور پیش‌پر می‌شود؛ ابزار و موضوعات را خود کاربر وارد می‌کند
+        const fromTask = takeFormPrefill<ReceiptFromTaskPrefill>(location.pathname);
+        setHeader({ date: defaultDocumentDate(fp), partyId: fromTask ? String(fromTask.partyId) : "", partyDisplay: fromTask?.partyDisplay ?? "", description: fromTask?.description ?? "" });
         setInstrumentRows([emptyInstrumentRow()]);
         setSettlementRows([]);
         setMeta(null);

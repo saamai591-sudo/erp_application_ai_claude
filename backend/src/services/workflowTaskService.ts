@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { completeTask, processDeadlines } from "./workflowEngineService";
 import { quoteDeliveryProgress, rootSummary, type InstanceRootType } from "./workflowEvents";
 
@@ -30,7 +31,7 @@ function visibleWhere(userId: number, roleIds: number[]) {
 
 const TASK_INCLUDE = {
   step: { select: { id: true, title: true, description: true, completion: true, completionEvent: true, requireNote: true, requireAttachment: true, branchPerEvent: true } },
-  instance: { select: { id: true, rootType: true, rootId: true, rootNumber: true, rootTitle: true, creatorUserId: true, status: true, parentInstanceId: true, parent: { select: { rootTitle: true } } } },
+  instance: { select: { id: true, rootType: true, rootId: true, rootNumber: true, rootTitle: true, creatorUserId: true, status: true, parentInstanceId: true, parent: { select: { rootTitle: true, rootId: true } } } },
   claimedBy: { select: { id: true, firstName: true, lastName: true } },
   completedBy: { select: { id: true, firstName: true, lastName: true } },
 } as const;
@@ -49,6 +50,10 @@ function shape(t: any, userId: number) {
     requireNote: t.step.requireNote,
     requireAttachment: t.step.requireAttachment,
     branchPerEvent: t.step.branchPerEvent,
+    completionEvent: t.step.completionEvent,
+    // پیش‌فاکتورِ مبنا (برای شاخه‌ی حواله = پیش‌فاکتورِ نمونه‌ی والد) و حواله‌ی شاخه؛ دکمه‌ی «اقدام» فرم بعدی را با این‌ها باز می‌کند
+    quoteId: t.instance.rootType === "SALES_QUOTE" ? t.instance.rootId : t.instance.parent?.rootId ?? null,
+    deliveryId: t.instance.rootType === "SALES_DELIVERY" ? t.instance.rootId : null,
     parentTitle: t.instance.parent?.rootTitle ?? null,
     status: t.status,
     claimedById: t.claimedById,
@@ -92,6 +97,16 @@ async function repeatProgress(t: any) {
   return { total: p.total, done: p.done, branches: branches.map((b) => ({ docNumber: b.rootNumber, status: b.status })) };
 }
 
+/** اطلاعات پیش‌پر کردن فرم بعدی از روی کار (طرف حساب پیش‌فاکتور)؛ فقط در جزئیات کار */
+async function actionContextOf(t: any) {
+  const quoteId = t.instance.rootType === "SALES_QUOTE" ? t.instance.rootId : t.instance.parent?.rootId;
+  if (!quoteId) return null;
+  const q = await withoutFiscalPeriodScope(() => prisma.salesQuote.findUnique({ where: { id: quoteId }, select: { number: true, customer: { select: { party: { select: { id: true, detailTitle: true, firstName: true, lastName: true, name: true } } } } } }));
+  if (!q) return null;
+  const p = q.customer.party;
+  return { quoteNumber: q.number, partyId: p.id, partyTitle: p.detailTitle || [p.firstName, p.lastName].filter(Boolean).join(" ") || p.name || "" };
+}
+
 async function loadVisible(userId: number, taskId: number, canSeeAll: boolean) {
   const roleIds = await roleIdsOf(userId);
   const t = await prisma.workflowTask.findFirst({ where: { id: taskId, ...(canSeeAll ? {} : { OR: [visibleWhere(userId, roleIds), { claimedById: userId }, { completedById: userId }] }) }, include: TASK_INCLUDE });
@@ -111,6 +126,7 @@ export async function getTask(userId: number, taskId: number, canSeeAll: boolean
   return {
     ...shape(t, userId),
     progress: await repeatProgress(t),
+    actionContext: await actionContextOf(t),
     stepDescription: t.step.description,
     note: t.note,
     eventRef: t.eventRef,
