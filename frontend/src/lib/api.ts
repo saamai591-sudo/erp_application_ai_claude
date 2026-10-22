@@ -121,6 +121,17 @@ function successMessage(method: "POST" | "PUT" | "DELETE", path: string): string
   return "عملیات با موفقیت انجام شد";
 }
 
+/** هر عملیات تغییردهنده‌ی موفق ممکن است کاری در کارتابل بسازد/ببندد (تایید پیش‌فاکتور، ثبت حواله…)؛ زنگ کارتابل فوراً شمارنده را تازه می‌خواند (WorkflowBell) */
+export const WORKFLOW_REFRESH_EVENT = "workflow-refresh";
+function pingWorkflow(path: string) {
+  if (path.startsWith("/auth/")) return;
+  try {
+    window.dispatchEvent(new Event(WORKFLOW_REFRESH_EVENT));
+  } catch {
+    /* خارج از مرورگر */
+  }
+}
+
 /** پیام موفقیت خودکار پایه برای هر عملیات تغییردهنده (نگاه کنید به scheduleAutoToast در toast.ts) */
 function notifySuccess(method: "POST" | "PUT" | "DELETE", path: string, options?: MutationOptions) {
   if (options?.silent || NON_OPERATION_PATHS.some((re) => re.test(path))) return;
@@ -151,6 +162,7 @@ export const api = {
   post: (path: string, body?: any, options?: MutationOptions) => once("POST", path, body, () => request(path, { method: "POST", body: JSON.stringify(body) }).then((data) => {
     recordResourceMutation(path);
     notifySuccess("POST", path, options);
+    pingWorkflow(path);
     return data;
   })),
   put: (path: string, body?: any, options?: MutationOptions) => once("PUT", path, body, async () => {
@@ -158,6 +170,7 @@ export const api = {
     const data = await request(path, { method: "PUT", body: JSON.stringify(attachVersion(path, body)) });
     recordResourceMutation(path);
     notifySuccess("PUT", path, options);
+    pingWorkflow(path);
     if (data && typeof data === "object" && typeof data.updatedAt === "string") {
       rememberVersion(path, data);
     } else if (hadVersion) {
@@ -176,6 +189,7 @@ export const api = {
   del: (path: string, options?: MutationOptions) => once("DELETE", path, null, () => request(path, { method: "DELETE" }).then((data) => {
     recordResourceMutation(path);
     notifySuccess("DELETE", path, options);
+    pingWorkflow(path);
     return data;
   })),
 };

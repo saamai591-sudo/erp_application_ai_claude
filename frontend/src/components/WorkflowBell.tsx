@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { api } from "../lib/api";
+import { api, WORKFLOW_REFRESH_EVENT } from "../lib/api";
 import { toFaDigits } from "../lib/formatAmount";
 import { useTabs } from "../lib/TabsContext";
 
-// زنگ کارتابل در نوار بالا: تعداد کارهای بازِ من (و نشان زرد برای عقب‌افتاده/اطلاعیه‌ی خوانده‌نشده)؛ هر ۶۰ ثانیه از سرور خوانده می‌شود (فقط داخل برنامه، بدون پیامک).
+// زنگ کارتابل در نوار بالا: تعداد کارهای بازِ من (و نشان زرد برای عقب‌افتاده/اطلاعیه‌ی خوانده‌نشده)؛ شمارنده بلافاصله بعد از هر عملیات موفق خودِ کاربر (مثلاً تایید پیش‌فاکتور)، با برگشتن به پنجره و هر ۲۰ ثانیه از سرور خوانده می‌شود؛ کارِ ساخته‌شده توسط دیگران حداکثر ۲۰ ثانیه دیر می‌رسد (فقط داخل برنامه، بدون پیامک؛ نه SignalR).
 export function WorkflowBell() {
   const { openTab } = useTabs();
   const [c, setC] = useState<{ open: number; overdue: number; unread: number } | null>(null);
@@ -11,10 +11,26 @@ export function WorkflowBell() {
     let alive = true;
     const load = () => api.get("/workflow/summary").then((r) => alive && setC(r)).catch(() => {});
     load();
-    const t = setInterval(load, 60_000);
+    const t = setInterval(load, 20_000);
+    // بعد از عملیات خودِ کاربر چند عملیات پشت‌سرهم یک بار خوانده می‌شود
+    let debounce: ReturnType<typeof setTimeout> | undefined;
+    const soon = () => {
+      clearTimeout(debounce);
+      debounce = setTimeout(load, 400);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") soon();
+    };
+    window.addEventListener(WORKFLOW_REFRESH_EVENT, soon);
+    window.addEventListener("focus", soon);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       alive = false;
       clearInterval(t);
+      clearTimeout(debounce);
+      window.removeEventListener(WORKFLOW_REFRESH_EVENT, soon);
+      window.removeEventListener("focus", soon);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
   const n = c ? c.open : 0;
