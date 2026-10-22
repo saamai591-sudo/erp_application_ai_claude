@@ -33,6 +33,8 @@ enum ActionKind {
 }
 
 model Role {
+  workflowAssignments WorkflowStepAssignee[]
+  workflowEscalations WorkflowStep[] @relation("WfStepEscalateRole")
   id        Int          @id @default(autoincrement())
   code      Int          @unique
   title     String       @unique
@@ -64,6 +66,18 @@ model UserAction {
 }
 
 model User {
+  /// نام کاربری (برای ورود؛ اختیاری و یکتا) و «کاربر سبک» (فقط کارتابل، موبایل‌محور)
+  username                 String?                 @unique
+  isLight                  Boolean                 @default(false)
+  workflowClaimed          WorkflowTask[]          @relation("WfTaskClaimedBy")
+  workflowCompleted        WorkflowTask[]          @relation("WfTaskCompletedBy")
+  workflowInstances        WorkflowInstance[]      @relation("WfInstanceCreator")
+  workflowAssignments      WorkflowStepAssignee[]
+  workflowEscalations      WorkflowStep[]          @relation("WfStepEscalateUser")
+  workflowNotifications    WorkflowNotification[]
+  workflowAttachments      WorkflowAttachment[]
+  workflowLogs             WorkflowTaskLog[]
+  salesQuotesCreated       SalesQuote[]            @relation("SalesQuoteCreator")
   payrollPaymentPreps PayrollPaymentPrep[]
   id                       Int                     @id @default(autoincrement())
   code                     Int                     @unique
@@ -2296,6 +2310,9 @@ model Customer {
 }
 
 model SalesQuote {
+  /// ثبت‌کننده‌ی پیش‌فاکتور (مسئولِ پویای «ثبت‌کننده‌ی سند» در کارتابل)؛ پیش‌فاکتورهای قدیمی خالی‌اند
+  createdById Int?
+  createdBy   User? @relation("SalesQuoteCreator", fields: [createdById], references: [id], onDelete: SetNull)
   id             Int              @id @default(autoincrement())
   fiscalPeriodId Int
   number         Int
@@ -5920,4 +5937,229 @@ model PayrollPaymentPrepLine {
 
   @@index([prepId])
   @@index([slipId])
+}
+
+// ── کارتابل و گردش کار (موتور سبک «رویداد ← کار»؛ طراحی: Documents/WorkflowInbox.md) ──
+
+enum WorkflowRootType {
+  SALES_QUOTE
+}
+
+enum WorkflowCompletion {
+  /// کاربر با توضیح و مدرک «انجام شد» می‌زند
+  MANUAL
+  /// با رویدادِ سند خودکار بسته می‌شود
+  EVENT
+}
+
+enum WorkflowAssigneeKind {
+  USER
+  ROLE
+  /// ثبت‌کننده‌ی سندِ ریشه
+  CREATOR
+}
+
+enum WorkflowInstanceStatus {
+  RUNNING
+  DONE
+  CANCELLED
+}
+
+enum WorkflowTaskStatus {
+  OPEN
+  CLAIMED
+  DONE
+  SKIPPED
+  CANCELLED
+}
+
+enum WorkflowNotificationKind {
+  REMINDER
+  OVERDUE
+  ESCALATED
+}
+
+/// تعریف فرایند (هویت)؛ مراحل در نسخه‌ها می‌آیند (ویرایش = نسخه‌ی تازه؛ نمونه‌های در جریان با نسخه‌ی خودشان ادامه می‌دهند)
+model WorkflowProcess {
+  id             Int                      @id @default(autoincrement())
+  code           Int                      @unique
+  title          String                   @unique
+  description    String?
+  rootType       WorkflowRootType
+  /// کلید رویداد شروع (services/workflowEvents.ts)
+  startEvent     String
+  /// شرط شروع: [{field, op: "EQ"|"NEQ", value}] با AND روی فیلدهای سندِ ریشه
+  startCondition Json                     @default("[]")
+  isActive       Boolean                  @default(true)
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  versions       WorkflowProcessVersion[]
+  instances      WorkflowInstance[]
+}
+
+model WorkflowProcessVersion {
+  id        Int              @id @default(autoincrement())
+  processId Int
+  version   Int
+  isCurrent Boolean          @default(true)
+  createdAt DateTime         @default(now())
+  process   WorkflowProcess  @relation(fields: [processId], references: [id], onDelete: Cascade)
+  steps     WorkflowStep[]
+  instances WorkflowInstance[]
+
+  @@unique([processId, version])
+}
+
+model WorkflowStep {
+  id              Int                    @id @default(autoincrement())
+  versionId       Int
+  seq             Int
+  title           String
+  description     String?
+  completion      WorkflowCompletion     @default(MANUAL)
+  /// فقط وقتی completion = EVENT
+  completionEvent String?
+  /// مهلت (ساعت تقویمی از لحظه‌ی ساخت کار)، یادآوری (ساعت بعد از ساخت) و تشدید (کاربر/نقش)
+  deadlineHours   Int?
+  reminderHours   Int?
+  escalateUserId  Int?
+  escalateRoleId  Int?
+  /// شرط ورود به مرحله (مثل شرط شروع)؛ برقرار نبودن = مرحله رد می‌شود
+  entryCondition  Json                   @default("[]")
+  version         WorkflowProcessVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  escalateUser    User?                  @relation("WfStepEscalateUser", fields: [escalateUserId], references: [id], onDelete: Restrict)
+  escalateRole    Role?                  @relation("WfStepEscalateRole", fields: [escalateRoleId], references: [id], onDelete: Restrict)
+  assignees       WorkflowStepAssignee[]
+  tasks           WorkflowTask[]
+
+  @@unique([versionId, seq])
+}
+
+model WorkflowStepAssignee {
+  id     Int                  @id @default(autoincrement())
+  stepId Int
+  kind   WorkflowAssigneeKind
+  userId Int?
+  roleId Int?
+  step   WorkflowStep         @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  user   User?                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  role   Role?                @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@index([stepId])
+}
+
+/// اجرای یک فرایند برای یک سندِ ریشه (مثلاً یک پیش‌فاکتور)
+model WorkflowInstance {
+  id            Int                    @id @default(autoincrement())
+  processId     Int
+  versionId     Int
+  rootType      WorkflowRootType
+  rootId        Int
+  rootNumber    Int?
+  /// عنوان نمایشی سندِ ریشه (مثلاً «پیش‌فاکتور ۱۵ — مشتری X»)
+  rootTitle     String
+  creatorUserId Int?
+  status        WorkflowInstanceStatus @default(RUNNING)
+  /// فیلدهای سندِ ریشه در لحظه‌ی شروع (برای شرط‌ها)
+  context       Json                   @default("{}")
+  startedAt     DateTime               @default(now())
+  finishedAt    DateTime?
+  process       WorkflowProcess        @relation(fields: [processId], references: [id], onDelete: Restrict)
+  version       WorkflowProcessVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  creatorUser   User?                  @relation("WfInstanceCreator", fields: [creatorUserId], references: [id], onDelete: SetNull)
+  tasks         WorkflowTask[]
+  events        WorkflowInstanceEvent[]
+
+  @@unique([processId, rootType, rootId])
+  @@index([rootType, rootId])
+}
+
+/// رویدادهای سندهای مرتبط که برای یک نمونه رخ داده‌اند (مرحله‌ای که بعداً فعال شود با رویدادِ قبلاً‌رخ‌داده فوراً بسته می‌شود)
+model WorkflowInstanceEvent {
+  id         Int              @id @default(autoincrement())
+  instanceId Int
+  eventType  String
+  docType    String
+  docId      Int
+  docNumber  Int?
+  at         DateTime         @default(now())
+  instance   WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@unique([instanceId, eventType, docType, docId])
+}
+
+model WorkflowTask {
+  id                Int                @id @default(autoincrement())
+  instanceId        Int
+  stepId            Int
+  seq               Int
+  status            WorkflowTaskStatus @default(OPEN)
+  claimedById       Int?
+  claimedAt         DateTime?
+  createdAt         DateTime           @default(now())
+  dueAt             DateTime?
+  reminderAt        DateTime?
+  reminderSentAt    DateTime?
+  /// اولین بار که عقب‌افتادگی (و تشدید) اطلاع داده شد
+  overdueNotifiedAt DateTime?
+  completedAt       DateTime?
+  completedById     Int?
+  /// MANUAL | EVENT | SKIPPED | CANCELLED
+  completionKind    String?
+  note              String?
+  eventRef          String?
+  instance          WorkflowInstance   @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  step              WorkflowStep       @relation(fields: [stepId], references: [id], onDelete: Restrict)
+  claimedBy         User?              @relation("WfTaskClaimedBy", fields: [claimedById], references: [id], onDelete: SetNull)
+  completedBy       User?              @relation("WfTaskCompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
+  logs              WorkflowTaskLog[]
+  attachments       WorkflowAttachment[]
+  notifications     WorkflowNotification[]
+
+  @@unique([instanceId, stepId])
+  @@index([status])
+}
+
+model WorkflowTaskLog {
+  id      Int          @id @default(autoincrement())
+  taskId  Int
+  userId  Int?
+  action  String
+  message String?
+  at      DateTime     @default(now())
+  task    WorkflowTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user    User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([taskId])
+}
+
+/// مدرک پیوست‌شده به یک کار (داخل دیتابیس؛ سقف حجم و نوع در سرویس)
+model WorkflowAttachment {
+  id           Int          @id @default(autoincrement())
+  taskId       Int
+  fileName     String
+  mimeType     String
+  size         Int
+  data         Bytes
+  uploadedById Int?
+  createdAt    DateTime     @default(now())
+  task         WorkflowTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploadedBy   User?        @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([taskId])
+}
+
+/// اطلاعیه‌ی داخل برنامه (یادآوری مهلت، عقب‌افتادگی، تشدید)
+model WorkflowNotification {
+  id        Int                      @id @default(autoincrement())
+  userId    Int
+  taskId    Int
+  kind      WorkflowNotificationKind
+  message   String
+  createdAt DateTime                 @default(now())
+  readAt    DateTime?
+  user      User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task      WorkflowTask             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
 }

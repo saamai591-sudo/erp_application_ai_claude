@@ -432,6 +432,23 @@ const RAW_MODULES: ModuleGroup[] = [
       },
     ],
   },
+  {
+    title: "کارتابل",
+    subModules: [
+      {
+        title: "کارتابل",
+        items: [{ key: "my-tasks", label: "کارهای من", list: "/my-tasks", icon: "file", type: "operational" }],
+      },
+      {
+        title: "تنظیمات",
+        items: [{ key: "workflow-processes", label: "تعریف فرایند", list: "/workflow-processes", create: "/workflow-processes/new", icon: "sliders" }],
+      },
+      {
+        title: "گزارش",
+        items: [{ key: "workflow-all-tasks", label: "همه‌ی کارها", list: "/workflow-all-tasks", icon: "tree", type: "report" }],
+      },
+    ],
+  },
   { title: "مدیریت تردد", subModules: [] },
 ];
 

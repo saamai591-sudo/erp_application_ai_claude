@@ -90,6 +90,7 @@
   --nc-mod-hr: #8bd450;
   --nc-mod-payroll: #ff8fb8;
   --nc-mod-attendance: #8ea2ff;
+  --nc-mod-workflow: #5eead4;
   --nc-sub-ops: #ffd23f;
   --nc-sub-structure: #5ab8ff;
   --nc-sub-report: #ff7fb8;
@@ -169,6 +170,7 @@
   --nc-mod-hr: #8bd450;
   --nc-mod-payroll: #ff8fb8;
   --nc-mod-attendance: #8ea2ff;
+  --nc-mod-workflow: #5eead4;
   --nc-sub-ops: #ffd23f;
   --nc-sub-structure: #5ab8ff;
   --nc-sub-report: #ff7fb8;
@@ -322,6 +324,7 @@
   --nc-mod-hr: #8bd450;
   --nc-mod-payroll: #ff8fb8;
   --nc-mod-attendance: #8ea2ff;
+  --nc-mod-workflow: #5eead4;
   --nc-sub-ops: #ffd23f;
   --nc-sub-structure: #5ab8ff;
   --nc-sub-report: #ff7fb8;
@@ -546,6 +549,7 @@ body {
 .module-icon.mod-ic-users { color: var(--nc-mod-hr); }
 .module-icon.mod-ic-banknote { color: var(--nc-mod-payroll); }
 .module-icon.mod-ic-clock { color: var(--nc-mod-attendance); }
+.module-icon.mod-ic-inbox { color: var(--nc-mod-workflow); }
 
 .nav-submodule { margin: 4px 0 8px 0; padding-right: 8px; margin-right: 10px; }
 .submodule-title {
@@ -1919,6 +1923,7 @@ html[data-fx="off"] .fx-only { display: none !important; }
   --ico-hr: #8bd450;
   --ico-payroll: #ff8fb8;
   --ico-attendance: #8ea2ff;
+  --ico-workflow: #2dd4bf;
 }
 [data-theme="light"], [data-theme="blue"] {
   --ico-settings: #6d3fd1;
@@ -1933,6 +1938,7 @@ html[data-fx="off"] .fx-only { display: none !important; }
   --ico-hr: #4d8f12;
   --ico-payroll: #c2306a;
   --ico-attendance: #4a52d6;
+  --ico-workflow: #0f8f86;
 }
 .module-icon.mod-ic-gear { --ico: var(--ico-settings); }
 .module-icon.mod-ic-database { --ico: var(--ico-info); }
@@ -1946,6 +1952,7 @@ html[data-fx="off"] .fx-only { display: none !important; }
 .module-icon.mod-ic-users { --ico: var(--ico-hr); }
 .module-icon.mod-ic-banknote { --ico: var(--ico-payroll); }
 .module-icon.mod-ic-clock { --ico: var(--ico-attendance); }
+.module-icon.mod-ic-inbox { --ico: var(--ico-workflow); }
 .module-title .module-icon, .module-icon-btn .module-icon, .nav-flyout-header .module-icon {
   width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0; display: inline-grid; place-items: center;
   color: var(--ico, var(--primary));
@@ -2140,3 +2147,8 @@ html[data-fx="off"] .fx-only { display: none !important; }
 .party-row { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
 .party-row-head { display: flex; align-items: center; margin-bottom: 6px; }
 .party-empty { color: var(--ink-soft); font-size: 12.5px; padding: 4px 0; }
+
+/* زنگ کارتابل در نوار بالا */
+.wf-bell { position: relative; }
+.wf-bell-badge { position: absolute; top: -4px; inset-inline-end: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #e5484d; color: #fff; font-size: 10px; line-height: 16px; text-align: center; }
+.wf-bell-badge.warn { background: #f59e0b; }

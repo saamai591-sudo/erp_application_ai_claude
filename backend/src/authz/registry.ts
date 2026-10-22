@@ -603,6 +603,27 @@ export const REGISTRY: ModuleDef[] = [
     ],
   },
   {
+    key: "workflow",
+    title: "کارتابل",
+    subModules: [
+      {
+        key: "inbox",
+        title: "کارتابل",
+        forms: [{ key: "my-tasks", title: "کارهای من", baseActions: ["view"], actions: [{ key: "act", title: "برداشتن، پیوست و انجام کار" }] }],
+      },
+      {
+        key: "settings",
+        title: "تنظیمات",
+        forms: [{ key: "workflow-processes", title: "تعریف فرایند", baseActions: CRUD }],
+      },
+      {
+        key: "reports",
+        title: "گزارش",
+        forms: [{ key: "workflow-all-tasks", title: "همه‌ی کارها", baseActions: ["view"], actions: [{ key: "reassign", title: "واگذاری کار به کاربر دیگر" }] }],
+      },
+    ],
+  },
+  {
     key: "payroll",
     title: "حقوق و دستمزد",
     subModules: [

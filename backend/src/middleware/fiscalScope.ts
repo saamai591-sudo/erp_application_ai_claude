@@ -6,8 +6,9 @@ import { runWithRequestContext } from "../lib/requestContext";
 // fallback به «آخرین دوره مالی» در خودِ lib/prisma.ts انجام می‌شود (فقط وقتی واقعاً لازم شود، برای
 // پرهیز از یک Query اضافه روی درخواست‌هایی که اصلاً به مدل دارای fiscalPeriodId کاری ندارند).
 export function fiscalScopeContext(req: Request, _res: Response, next: NextFunction) {
+  const userId = (req as any).user?.id as number | undefined;
   const header = req.header("x-fiscal-period-id");
   const parsed = header ? Number(header) : NaN;
   const fiscalPeriodId = Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-  runWithRequestContext({ fiscalPeriodId }, () => next());
+  runWithRequestContext({ fiscalPeriodId, userId }, () => next());
 }

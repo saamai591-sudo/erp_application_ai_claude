@@ -13,6 +13,7 @@ import { userHasAction, can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmounts, computeUnitCost } from "../services/documentItemAmountService";
 import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
+import { emitWorkflowEvent } from "../services/workflowEngineService";
 
 const FORM = findFormPrefix("sales-deliveries");
 
@@ -563,6 +564,7 @@ export async function createSalesDelivery(body: HeaderBody) {
 router.post("/sales-deliveries", can(`${FORM}.create`), async (req, res) => {
   try {
     const created = await createSalesDelivery(req.body as HeaderBody);
+    await emitWorkflowEvent("SALES_DELIVERY_REGISTERED", created.id);
     res.status(201).json(created);
   } catch (e: any) {
     if (e.code === "P2002") return res.status(400).json({ error: "شماره سند تکراری است" });

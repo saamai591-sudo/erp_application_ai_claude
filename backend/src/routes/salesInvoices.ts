@@ -16,6 +16,7 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { EffectiveTreasurySettings } from "../services/treasurySettingService";
 import { assertNotSentToTax } from "../services/taxInvoiceSendService";
+import { emitWorkflowEvent } from "../services/workflowEngineService";
 
 const FORM = findFormPrefix("sales-invoices");
 
@@ -937,6 +938,7 @@ router.post("/sales-invoices", can(`${FORM}.create`), async (req, res) => {
       },
       });
     });
+    await emitWorkflowEvent("SALES_INVOICE_CREATED", created.id);
     res.status(201).json(created);
   } catch (e: any) {
     if (e.code === "P2002") return res.status(400).json({ error: "شماره سند تکراری است" });

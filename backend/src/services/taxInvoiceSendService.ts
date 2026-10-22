@@ -16,6 +16,7 @@ import { ensureMemoryMatchesLicense } from "./taxMemoryLicense";
 import { assertTaxSendingLicensed } from "../license/licenseService";
 import { createTaxTransport, InquiryResult, TaxApiError, TaxTransport } from "./taxTransport";
 import { toWireInvoice } from "./taxWire";
+import { emitWorkflowEvent } from "./workflowEngineService";
 
 export interface SendItemInput extends Partial<TaxInvoiceOptions> {
   salesInvoiceId: number;
@@ -62,7 +63,8 @@ async function applyInquiry(taxInvoiceId: number, r: InquiryResult) {
     patch.warnings = toJson(asList(data.warning));
   }
   if (r.referenceNumber) patch.referenceNumber = r.referenceNumber;
-  await prisma.taxInvoice.update({ where: { id: taxInvoiceId }, data: patch });
+  const upd = await prisma.taxInvoice.update({ where: { id: taxInvoiceId }, data: patch, select: { salesInvoiceId: true } });
+  if (status === "SUCCESS") await emitWorkflowEvent("TAX_INVOICE_SENT", upd.salesInvoiceId);
 }
 
 export async function sendTaxInvoices(items: SendItemInput[]): Promise<SendItemResult[]> {

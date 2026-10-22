@@ -12,6 +12,7 @@ import { can } from "../authz/guard";
 import { assertReceiptAdvanceNotAllocated } from "../services/salesInvoiceAdvanceService";
 import { assertUsedInstrumentsUnchanged } from "../utils/instrumentLock";
 import { findFormPrefix } from "../authz/registry";
+import { emitWorkflowEvent } from "../services/workflowEngineService";
 
 const FORM = findFormPrefix("receipts");
 
@@ -969,6 +970,7 @@ async function receiptApproveHandler(req: any, res: any) {
       await tx.receipt.update({ where: { id }, data: { status: "APPROVED" } });
     });
 
+    await emitWorkflowEvent("RECEIPT_APPROVED", id);
     res.json({ id, status: "APPROVED" });
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در تایید سند" });

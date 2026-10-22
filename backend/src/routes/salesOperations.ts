@@ -11,6 +11,8 @@ import { findFormPrefix } from "../authz/registry";
 import { computePrice, findEffectivePriceListId, loadItemPricing } from "../services/salesPriceService";
 import { createParty, updateParty, PartyError, PartyWarning, PartyInput } from "../services/partyService";
 import { followUpStateOf, quoteRemainders } from "../services/salesQuoteFollowUpService";
+import { emitWorkflowEvent } from "../services/workflowEngineService";
+import { getRequestContext } from "../lib/requestContext";
 
 const CUSTOMERS_FORM = findFormPrefix("customers");
 const SALES_QUOTES_FORM = findFormPrefix("sales-quotes");
@@ -354,6 +356,7 @@ export async function createSalesQuote(body: SalesQuoteHeaderBody, forcedNumber?
         description: body.description || null,
         validUntil,
         status: "DRAFT",
+        createdById: getRequestContext()?.userId ?? null,
         lines: { create: lines.map((l, idx) => ({ ...l, rowOrder: idx })) },
       },
     });
@@ -479,6 +482,7 @@ router.post("/sales-quotes/:id/approve", can(`${SALES_QUOTES_FORM}.approve`), as
   if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط در وضعیت ثبت قابل تایید است" });
   if (d.followUpClosedAt) return res.status(400).json({ error: "پیگیری این پیش‌فاکتور بسته شده است؛ ابتدا پیگیری را بازگشایی کنید" });
   await prisma.salesQuote.update({ where: { id }, data: { status: "APPROVED" } });
+  await emitWorkflowEvent("SALES_QUOTE_APPROVED", id);
   res.json({ id, status: "APPROVED" });
 });
 
@@ -493,6 +497,7 @@ router.post("/sales-quotes/:id/unapprove", can(`${SALES_QUOTES_FORM}.unapprove`)
     if (used.length > 0) return res.status(400).json({ error: `این پیش‌فاکتور گردش دارد (${used.join("، ")}) و امکان برگشت تایید وجود ندارد` });
   }
   await prisma.salesQuote.update({ where: { id }, data: { status: "DRAFT" } });
+  await emitWorkflowEvent("SALES_QUOTE_UNAPPROVED", id);
   res.json({ id, status: "DRAFT" });
 });
 

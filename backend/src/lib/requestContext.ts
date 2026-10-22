@@ -6,6 +6,8 @@ import { AsyncLocalStorage } from "async_hooks";
 interface RequestContext {
   fiscalPeriodId?: number;
   bypassFiscalScope?: boolean;
+  /** کاربر جاری (از توکن)؛ برای ثبت‌کننده‌ی سند و رویدادهای کارتابل */
+  userId?: number;
   /** جعبه‌ی مشترکِ یک درخواست: نسخه‌های کپی‌شده‌ی زمینه (مثل withoutFiscalPeriodScope) همین شیء را نگه می‌دارند، پس چیزی که پایین‌دست می‌نویسد به پاسخ می‌رسد */
   shared?: { deleteBlocked?: { header: string; message: string; groups: unknown[] } };
 }

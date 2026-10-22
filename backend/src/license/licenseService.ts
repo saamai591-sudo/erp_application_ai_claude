@@ -239,7 +239,7 @@ export async function checkLicenseGate(): Promise<GateResult> {
 // ── ماژول‌ها و قابلیت‌های فعال ───────────────────────────────────────────────────────────────────────────────────────────────────────
 // ماژول‌های پایه همیشه روشن‌اند؛ بقیه فقط اگر در لایسنس باشند. modules/features = null یعنی «همه» (قفل خاموش، ساخت بدون کلید، لایسنس نبودن
 // [در آن حالت دروازه‌ی قفل جلوی همه‌چیز را می‌گیرد] یا لایسنسِ بدون محدودیت). داده‌ی ماژول خاموش‌شده در جدول‌ها می‌ماند؛ فقط دسترسی/منو بسته می‌شود.
-export const CORE_MODULES = ["settings", "master-data", "accounting"];
+export const CORE_MODULES = ["settings", "master-data", "accounting", "workflow"];
 
 export interface Entitlements {
   enforced: boolean;
