@@ -21,7 +21,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 
 interface Meta {
   startEvents: { key: string; title: string }[];
-  completionEvents: { key: string; title: string }[];
+  completionEvents: { key: string; title: string; canBranch: boolean }[];
   conditionFields: { key: string; title: string }[];
   users: { id: number; title: string; isLight: boolean }[];
   roles: { id: number; title: string }[];
@@ -36,6 +36,7 @@ interface StepUI {
   completionEvent: string;
   requireNote: boolean;
   requireAttachment: boolean;
+  branchPerEvent: boolean;
   deadlineHours: string;
   reminderHours: string;
   escalateUserId: string;
@@ -46,7 +47,7 @@ interface StepUI {
 interface FormUI { title: string; description: string; isActive: boolean; startEvent: string; startCondition: Cond[]; steps: StepUI[] }
 interface ListRow { id: number; code: number; title: string; rootTypeTitle: string; startEventTitle: string; isActive: boolean; version: number; stepCount: number; instanceCount: number }
 
-const emptyStep = (): StepUI => ({ title: "", description: "", completion: "MANUAL", completionEvent: "", requireNote: true, requireAttachment: true, deadlineHours: "", reminderHours: "", escalateUserId: "", escalateRoleId: "", entryCondition: [], assignees: [] });
+const emptyStep = (): StepUI => ({ title: "", description: "", completion: "MANUAL", completionEvent: "", requireNote: true, requireAttachment: true, branchPerEvent: false, deadlineHours: "", reminderHours: "", escalateUserId: "", escalateRoleId: "", entryCondition: [], assignees: [] });
 const EMPTY: FormUI = { title: "", description: "", isActive: true, startEvent: "SALES_QUOTE_APPROVED", startCondition: [], steps: [emptyStep()] };
 const KIND_FA = { USER: "کاربر", ROLE: "نقش", CREATOR: "ثبت‌کننده‌ی سند" } as const;
 
@@ -63,6 +64,7 @@ const fromServer = (d: any): FormUI => ({
     completionEvent: s.completionEvent ?? "",
     requireNote: s.requireNote !== false,
     requireAttachment: s.requireAttachment !== false,
+    branchPerEvent: !!s.branchPerEvent,
     deadlineHours: s.deadlineHours ? String(s.deadlineHours) : "",
     reminderHours: s.reminderHours ? String(s.reminderHours) : "",
     escalateUserId: s.escalateUserId ? String(s.escalateUserId) : "",
@@ -86,6 +88,7 @@ const toBody = (f: FormUI) => ({
     completionEvent: s.completion === "EVENT" ? s.completionEvent : null,
     requireNote: s.requireNote,
     requireAttachment: s.requireAttachment,
+    branchPerEvent: s.completion === "EVENT" && s.branchPerEvent,
     deadlineHours: s.deadlineHours ? Number(s.deadlineHours) : null,
     reminderHours: s.reminderHours ? Number(s.reminderHours) : null,
     escalateUserId: s.escalateUserId ? Number(s.escalateUserId) : null,
@@ -319,10 +322,16 @@ function ProcessForm({ editId }: { editId?: number }) {
               {s.completion === "EVENT" && (
                 <div className="form-field">
                   <label>رویداد بسته‌شدن<RequiredMark /></label>
-                  <select value={s.completionEvent} onChange={(e) => setStep(i, { completionEvent: e.target.value })}>
+                  <select value={s.completionEvent} onChange={(e) => setStep(i, { completionEvent: e.target.value, branchPerEvent: false })}>
                     <option value="">—</option>
                     {meta.completionEvents.map((e) => <option key={e.key} value={e.key}>{e.title}</option>)}
                   </select>
+                </div>
+              )}
+              {s.completion === "EVENT" && meta.completionEvents.find((e) => e.key === s.completionEvent)?.canBranch && (
+                <div className="form-field">
+                  <label>مسیر هر سند <FieldHint label="هر حواله یک مسیر جدا" text="اگر روشن باشد، این مرحله با اولین حواله بسته نمی‌شود و تا حواله‌شدن کامل پیش‌فاکتور (یا بستن پیگیری آن) برای مسئولش باز می‌ماند. با ثبت هر حواله، مرحله‌های بعدی (مثلاً صدور فاکتور) برای همان حواله جداگانه برای نفر بعدی ساخته می‌شود. برگشت از فروش در این مسیر اثری ندارد." /></label>
+                  <label className="checkbox-row"><input type="checkbox" checked={s.branchPerEvent} onChange={(e) => setStep(i, { branchPerEvent: e.target.checked })} /> هر حواله یک مسیر جدا برای مرحله‌های بعدی</label>
                 </div>
               )}
               {s.completion === "MANUAL" && (

@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
+import { emitWorkflowEvent } from "../services/workflowEngineService";
 import { QuoteFollowUpError, closeFollowUp, followUpPreview, reopenFollowUp } from "../services/salesQuoteFollowUpService";
 
 // پیگیری پیش‌فاکتور (بستن/بازگشایی) + دلایل «فروش نشد». منطق فقط در services/salesQuoteFollowUpService.ts
@@ -24,6 +25,7 @@ router.get("/sales-quotes/:id/follow-up", can(`${QUOTES}.view`), async (req, res
 router.post("/sales-quotes/:id/close-follow-up", can(`${QUOTES}.closeFollowUp`), async (req, res) => {
   try {
     const r = await closeFollowUp(Number(req.params.id), { reasonId: Number(req.body?.reasonId), note: req.body?.note }, uid(req));
+    await emitWorkflowEvent("SALES_QUOTE_FOLLOWUP_CLOSED", Number(req.params.id));
     res.json({ ok: true, ...r });
   } catch (e) {
     fail(res, e, "خطا در بستن پیگیری");

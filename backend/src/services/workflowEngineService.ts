@@ -1,11 +1,14 @@
 import { prisma } from "../lib/prisma";
 import { getRequestContext } from "../lib/requestContext";
-import { EVENT_BY_KEY, conditionOk, docNumberOf, loadRoot, resolveRoots, type RootType } from "./workflowEvents";
+import { EVENT_BY_KEY, conditionOk, deliveryDocsOf, docNumberOf, loadRoot, quoteDeliveryProgress, resolveRoots, type RootType } from "./workflowEvents";
 
 // موتور کارتابل/گردش کار (تنها نویسنده‌ی WorkflowInstance/Task/InstanceEvent/Log/Notification). طراحی: Documents/WorkflowInbox.md
 //  • emitWorkflowEvent(eventKey, docId): بعد از انجام موفق کارِ سند اعلام می‌شود؛ خطا هرگز کارِ اصلی را خراب نمی‌کند (فقط لاگ می‌شود).
 //  • رویداد شروع ⇒ نمونه (Instance) برای سندِ ریشه + کارِ اولین مرحله؛ مرحله‌ها به‌ترتیب فعال می‌شوند (شرط ورود برقرار نباشد ⇒ رد می‌شود).
 //  • مرحله‌ی «خودکار» با رویدادِ مرتبط بسته می‌شود؛ رویدادی که قبل از فعال‌شدن مرحله رخ داده فوراً آن را می‌بندد (WorkflowInstanceEvent).
+//  • مرحله‌ی «هر رویداد یک شاخه» (branchPerEvent، مثلاً ثبت حواله): با اولین رویداد بسته نمی‌شود؛ برای هر سندِ رویداد (هر حواله) یک نمونه‌ی شاخه
+//    (parentInstanceId، ریشه = خودِ حواله) برای مرحله‌های بعدی ساخته می‌شود. خودِ مرحله تا کامل‌شدن حواله‌ی پیش‌فاکتور یا بستن پیگیری آن باز می‌ماند
+//    و نمونه‌ی والد فقط تا همین مرحله می‌رود. برگشت از فروش مسیر جداست و روی این فرایند اثری ندارد.
 //  • مرحله‌ی «دستی» فقط با completeManual (توضیح + مدرک) بسته می‌شود (workflowTaskService).
 //  • مهلت/یادآوری/تشدید: processDeadlines (کار زمان‌بندی‌شده + اجرای دوره‌ایِ سبک هنگام خواندن شمارنده).
 
@@ -27,6 +30,7 @@ async function handleEvent(eventKey: string, docId: number) {
   const roots = await resolveRoots(eventKey, docId);
   if (roots.length === 0) return;
   const { docType, docNumber } = await docNumberOf(eventKey, docId);
+  const deliveries = await deliveryDocsOf(eventKey, docId);
   const actorId = getRequestContext()?.userId ?? null;
   for (const rootId of roots) {
     await prisma.$transaction(
@@ -39,12 +43,33 @@ async function handleEvent(eventKey: string, docId: number) {
             await cancelInstance(tx, inst.id, actorId, "تایید پیش‌فاکتور برگشت خورد");
             continue;
           }
+          if (def.closesRepeat) {
+            // پیگیری پیش‌فاکتور بسته شد: مرحله‌ی «هر رویداد یک شاخه»ی باز هم بسته می‌شود
+            const repeat = await tx.workflowTask.findMany({ where: { instanceId: inst.id, status: { in: ["OPEN", "CLAIMED"] }, step: { branchPerEvent: true } }, select: { id: true } });
+            for (const t of repeat) await completeTask(tx, t.id, { userId: actorId, kind: "EVENT", eventRef: `بستن پیگیری پیش‌فاکتور ${docNumber ?? docId}` });
+            continue;
+          }
           await tx.workflowInstanceEvent.createMany({ data: [{ instanceId: inst.id, eventType: eventKey, docType, docId, docNumber }], skipDuplicates: true });
           const tasks = await tx.workflowTask.findMany({
             where: { instanceId: inst.id, status: { in: ["OPEN", "CLAIMED"] }, step: { completion: "EVENT", completionEvent: eventKey } },
-            select: { id: true },
+            select: { id: true, seq: true, step: { select: { branchPerEvent: true } } },
           });
-          for (const t of tasks) await completeTask(tx, t.id, { userId: actorId, kind: "EVENT", eventRef: `${docType}:${docNumber ?? docId}` });
+          for (const t of tasks) {
+            if (t.step.branchPerEvent) {
+              // اولین رویداد مرحله را نمی‌بندد: برای این سند شاخه می‌سازد؛ مرحله فقط با کامل‌شدن حواله‌ی پیش‌فاکتور بسته می‌شود
+              if (def.canBranch) await ensureBranch(tx, inst.id, t.seq, docId, docNumber, actorId);
+              if ((await quoteDeliveryProgress(rootId)).complete) await completeTask(tx, t.id, { userId: actorId, kind: "EVENT", eventRef: "حواله‌ی کامل پیش‌فاکتور" });
+            } else await completeTask(tx, t.id, { userId: actorId, kind: "EVENT", eventRef: `${docType}:${docNumber ?? docId}` });
+          }
+        }
+        // رویدادِ فاکتور/ارسال مودیان ← شاخه‌های همان حواله‌ها (حتی وقتی نمونه‌ی والد تمام شده است)
+        if (deliveries.length && !def.canBranch && !def.cancels && !def.closesRepeat) {
+          const branches = await tx.workflowInstance.findMany({ where: { rootType: "SALES_DELIVERY", rootId: { in: deliveries }, status: "RUNNING", parent: { is: { rootType: def.rootType, rootId } } }, select: { id: true } });
+          for (const b of branches) {
+            await tx.workflowInstanceEvent.createMany({ data: [{ instanceId: b.id, eventType: eventKey, docType, docId, docNumber }], skipDuplicates: true });
+            const bt = await tx.workflowTask.findMany({ where: { instanceId: b.id, status: { in: ["OPEN", "CLAIMED"] }, step: { completion: "EVENT", completionEvent: eventKey } }, select: { id: true } });
+            for (const t of bt) await completeTask(tx, t.id, { userId: actorId, kind: "EVENT", eventRef: `${docType}:${docNumber ?? docId}` });
+          }
         }
       },
       { timeout: 30000 }
@@ -81,8 +106,11 @@ async function activateFrom(tx: Tx, instanceId: number, afterSeq: number, actorI
   const inst = await tx.workflowInstance.findUnique({ where: { id: instanceId }, include: { events: true } });
   if (!inst || inst.status !== "RUNNING") return;
   const steps = await tx.workflowStep.findMany({ where: { versionId: inst.versionId, seq: { gt: afterSeq } }, orderBy: { seq: "asc" } });
+  // نمونه‌ی والد (غیرشاخه) فقط تا مرحله‌ی «هر رویداد یک شاخه» می‌رود؛ مرحله‌های بعد را شاخه‌ها اجرا می‌کنند
+  const branchStep = inst.parentInstanceId ? null : await tx.workflowStep.findFirst({ where: { versionId: inst.versionId, branchPerEvent: true }, select: { seq: true } });
   const now = new Date();
   for (const step of steps) {
+    if (branchStep && step.seq > branchStep.seq) break;
     if (await tx.workflowTask.findUnique({ where: { instanceId_stepId: { instanceId, stepId: step.id } }, select: { id: true } })) continue;
     if (!conditionOk(step.entryCondition, inst.context as Record<string, unknown>)) {
       const t = await tx.workflowTask.create({ data: { instanceId, stepId: step.id, seq: step.seq, status: "SKIPPED", completedAt: now, completionKind: "SKIPPED" } });
@@ -99,6 +127,15 @@ async function activateFrom(tx: Tx, instanceId: number, afterSeq: number, actorI
       },
     });
     await tx.workflowTaskLog.create({ data: { taskId: task.id, userId: actorId, action: "CREATED", message: step.title } });
+    if (step.branchPerEvent && step.completion === "EVENT" && step.completionEvent) {
+      // رویدادهای قبل‌رخ‌داده (مثلاً حواله‌هایی که پیش از رسیدن به این مرحله ثبت شده‌اند) هر کدام شاخه‌ی خود را می‌سازند
+      for (const e of inst.events.filter((x) => x.eventType === step.completionEvent)) await ensureBranch(tx, inst.id, step.seq, e.docId, e.docNumber, actorId);
+      if ((await quoteDeliveryProgress(inst.rootId)).complete) {
+        await finishTask(tx, task.id, { userId: actorId, kind: "EVENT", eventRef: "حواله‌ی کامل پیش‌فاکتور" });
+        continue;
+      }
+      return; // مرحله باز می‌ماند
+    }
     if (step.completion === "EVENT" && step.completionEvent) {
       const ev = inst.events.find((e) => e.eventType === step.completionEvent);
       if (ev) {
@@ -109,6 +146,35 @@ async function activateFrom(tx: Tx, instanceId: number, afterSeq: number, actorI
     return; // منتظر این کار
   }
   await tx.workflowInstance.update({ where: { id: instanceId }, data: { status: "DONE", finishedAt: now } });
+}
+
+/** شاخه‌ی یک حواله: نمونه‌ی فرزند با ریشه‌ی خودِ حواله که مرحله‌های بعد از مرحله‌ی «هر رویداد یک شاخه» را اجرا می‌کند (تکراری ساخته نمی‌شود) */
+async function ensureBranch(tx: Tx, parentId: number, branchSeq: number, docId: number, docNumber: number | null, actorId: number | null) {
+  const parent = await tx.workflowInstance.findUnique({ where: { id: parentId }, include: { events: true } });
+  if (!parent) return;
+  const exists = await tx.workflowInstance.findUnique({ where: { processId_rootType_rootId: { processId: parent.processId, rootType: "SALES_DELIVERY", rootId: docId } }, select: { id: true } });
+  if (exists) return;
+  const branch = await tx.workflowInstance.create({
+    data: {
+      processId: parent.processId,
+      versionId: parent.versionId,
+      rootType: "SALES_DELIVERY",
+      rootId: docId,
+      rootNumber: docNumber,
+      rootTitle: `حواله فروش ${docNumber ?? docId} — ${parent.rootTitle}`,
+      creatorUserId: parent.creatorUserId,
+      context: parent.context as any,
+      parentInstanceId: parent.id,
+    },
+  });
+  await tx.workflowInstanceEvent.create({ data: { instanceId: branch.id, eventType: "SALES_DELIVERY_REGISTERED", docType: "SALES_DELIVERY", docId, docNumber } });
+  // فاکتور/ارسال مودیانی که پیش از ساخت شاخه برای والد ثبت شده و به همین حواله مربوط است، برای شاخه هم به‌یاد می‌ماند
+  for (const e of parent.events.filter((x) => x.docType === "SALES_INVOICE")) {
+    if ((await deliveryDocsOf(e.eventType, e.docId)).includes(docId)) {
+      await tx.workflowInstanceEvent.createMany({ data: [{ instanceId: branch.id, eventType: e.eventType, docType: e.docType, docId: e.docId, docNumber: e.docNumber }], skipDuplicates: true });
+    }
+  }
+  await activateFrom(tx, branch.id, branchSeq, actorId);
 }
 
 async function finishTask(tx: Tx, taskId: number, p: { userId: number | null; kind: "MANUAL" | "EVENT"; note?: string | null; eventRef?: string | null }) {

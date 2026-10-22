@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { completeTask, processDeadlines } from "./workflowEngineService";
-import { rootSummary, type RootType } from "./workflowEvents";
+import { quoteDeliveryProgress, rootSummary, type InstanceRootType } from "./workflowEvents";
 
 // کارتابل: فهرست/جزئیات کارها، برداشتن، انجام‌شدنِ دستی (توضیح + مدرک)، پیوست‌ها، شمارنده و اطلاعیه‌ها. موتور: workflowEngineService.ts
 // دیدن یک کار: کاربرِ ثابت / عضو نقش / ثبت‌کننده‌ی سندِ ریشه (بر اساس مسئول‌های مرحله) یا — برای تشدید — کاربر/نقشِ تشدید؛ «همه‌ی کارها» دسترسی جدا دارد.
@@ -29,8 +29,8 @@ function visibleWhere(userId: number, roleIds: number[]) {
 }
 
 const TASK_INCLUDE = {
-  step: { select: { id: true, title: true, description: true, completion: true, completionEvent: true, requireNote: true, requireAttachment: true } },
-  instance: { select: { id: true, rootType: true, rootId: true, rootNumber: true, rootTitle: true, creatorUserId: true, status: true } },
+  step: { select: { id: true, title: true, description: true, completion: true, completionEvent: true, requireNote: true, requireAttachment: true, branchPerEvent: true } },
+  instance: { select: { id: true, rootType: true, rootId: true, rootNumber: true, rootTitle: true, creatorUserId: true, status: true, parentInstanceId: true, parent: { select: { rootTitle: true } } } },
   claimedBy: { select: { id: true, firstName: true, lastName: true } },
   completedBy: { select: { id: true, firstName: true, lastName: true } },
 } as const;
@@ -48,6 +48,8 @@ function shape(t: any, userId: number) {
     completion: t.step.completion,
     requireNote: t.step.requireNote,
     requireAttachment: t.step.requireAttachment,
+    branchPerEvent: t.step.branchPerEvent,
+    parentTitle: t.instance.parent?.rootTitle ?? null,
     status: t.status,
     claimedById: t.claimedById,
     claimedByName: fullName(t.claimedBy),
@@ -77,7 +79,17 @@ export async function listTasks(userId: number, scope: Scope, canSeeAll: boolean
   else if (scope === "done") where = { status: "DONE", OR: [{ completedById: userId }, { claimedById: userId }, visibleWhere(userId, roleIds)] };
   else where = { ...active, AND: [visibleWhere(userId, roleIds)], OR: [{ claimedById: null }, { claimedById: userId }] };
   const rows = await prisma.workflowTask.findMany({ where, include: TASK_INCLUDE, orderBy: scope === "done" ? { completedAt: "desc" } : [{ dueAt: "asc" }, { createdAt: "asc" }], take: scope === "done" || scope === "all" ? 300 : 500 });
-  return rows.map((t) => shape(t, userId));
+  return Promise.all(rows.map(async (t) => ({ ...shape(t, userId), progress: await repeatProgress(t) })));
+}
+
+/** پیشرفت مرحله‌ی «هر رویداد یک شاخه» (مثلاً حواله‌شدن پیش‌فاکتور): مقدار کل/حواله‌شده و حواله‌های ثبت‌شده با وضعیت مسیرشان؛ برای بقیه‌ی کارها null */
+async function repeatProgress(t: any) {
+  if (!t.step.branchPerEvent || t.instance.rootType !== "SALES_QUOTE") return null;
+  const [p, branches] = await Promise.all([
+    quoteDeliveryProgress(t.instance.rootId),
+    prisma.workflowInstance.findMany({ where: { parentInstanceId: t.instance.id }, orderBy: { id: "asc" }, select: { rootNumber: true, status: true } }),
+  ]);
+  return { total: p.total, done: p.done, branches: branches.map((b) => ({ docNumber: b.rootNumber, status: b.status })) };
 }
 
 async function loadVisible(userId: number, taskId: number, canSeeAll: boolean) {
@@ -93,11 +105,12 @@ export async function getTask(userId: number, taskId: number, canSeeAll: boolean
     prisma.workflowTaskLog.findMany({ where: { taskId }, orderBy: { at: "asc" }, include: { user: { select: { firstName: true, lastName: true } } } }),
     prisma.workflowAttachment.findMany({ where: { taskId }, orderBy: { id: "asc" }, select: { id: true, fileName: true, mimeType: true, size: true, createdAt: true, uploadedById: true } }),
     prisma.workflowInstanceEvent.findMany({ where: { instanceId: t.instanceId }, orderBy: { at: "asc" } }),
-    rootSummary(t.instance.rootType as RootType, t.instance.rootId),
+    rootSummary(t.instance.rootType as InstanceRootType, t.instance.rootId),
   ]);
   await prisma.workflowNotification.updateMany({ where: { userId, taskId, readAt: null }, data: { readAt: new Date() } });
   return {
     ...shape(t, userId),
+    progress: await repeatProgress(t),
     stepDescription: t.step.description,
     note: t.note,
     eventRef: t.eventRef,
@@ -173,7 +186,9 @@ export async function completeManual(userId: number, taskId: number, note: unkno
   if (t.step.requireNote && !text) throw new WorkflowError("توضیح الزامی است");
   if (t.step.requireAttachment && (await prisma.workflowAttachment.count({ where: { taskId } })) === 0) throw new WorkflowError("حداقل یک مدرک (پیوست) الزامی است");
   await prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100010, ${Number(t.instance.rootId)})`);
+    // قفل هر ریشه‌ی پیش‌فاکتور؛ شاخه‌ی حواله زیر قفل پیش‌فاکتور والدش کار می‌کند (همان کلیدی که رویدادها می‌گیرند)
+    const lockRoot = t.instance.parentInstanceId ? (await tx.workflowInstance.findUnique({ where: { id: t.instance.parentInstanceId }, select: { rootId: true } }))?.rootId ?? t.instance.rootId : t.instance.rootId;
+    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100010, ${Number(lockRoot)})`);
     const fresh = await tx.workflowTask.findUnique({ where: { id: taskId }, select: { status: true } });
     if (!fresh || (fresh.status !== "OPEN" && fresh.status !== "CLAIMED")) throw new WorkflowError("کار قبلاً بسته شده است");
     await tx.workflowTask.update({ where: { id: taskId }, data: { claimedById: t.claimedById ?? userId, claimedAt: t.claimedBy ? undefined : new Date() } });

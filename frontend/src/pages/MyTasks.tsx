@@ -21,6 +21,9 @@ export interface TaskRow {
   completion: "MANUAL" | "EVENT";
   requireNote: boolean;
   requireAttachment: boolean;
+  branchPerEvent?: boolean;
+  parentTitle?: string | null;
+  progress?: { total: number; done: number; branches: { docNumber: number | null; status: string }[] } | null;
   status: string;
   claimedByName: string;
   createdAt: string;
@@ -45,8 +48,21 @@ const ACTION_FA: Record<string, string> = {
   DONE_BY_EVENT: "با ثبت سند بسته شد", SKIPPED: "رد شد", CANCELLED: "لغو شد", OVERDUE: "مهلت گذشت",
 };
 const EVENT_FA: Record<string, string> = {
-  SALES_QUOTE_APPROVED: "تایید پیش‌فاکتور", RECEIPT_APPROVED: "ثبت دریافت", SALES_DELIVERY_REGISTERED: "ثبت حواله فروش", SALES_INVOICE_CREATED: "ثبت فاکتور فروش", TAX_INVOICE_SENT: "ارسال فاکتور به مودیان",
+  SALES_QUOTE_FOLLOWUP_CLOSED: "بستن پیگیری پیش‌فاکتور", SALES_QUOTE_APPROVED: "تایید پیش‌فاکتور", RECEIPT_APPROVED: "ثبت دریافت", SALES_DELIVERY_REGISTERED: "ثبت حواله فروش", SALES_INVOICE_CREATED: "ثبت فاکتور فروش", TAX_INVOICE_SENT: "ارسال فاکتور به مودیان",
 };
+
+const BRANCH_STATUS_FA: Record<string, string> = { RUNNING: "در جریان", DONE: "تمام‌شده", CANCELLED: "لغو" };
+
+/** نوار پیشرفت حواله‌ی پیش‌فاکتور (مرحله‌ی «هر حواله یک مسیر») */
+function ProgressBar({ p }: { p: NonNullable<TaskRow["progress"]> }) {
+  const pct = p.total > 0 ? Math.min(100, Math.round((p.done / p.total) * 100)) : 0;
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ height: 8, borderRadius: 4, background: "var(--border, #ddd)", overflow: "hidden" }}><div style={{ width: `${pct}%`, height: "100%", background: "var(--primary, #2563eb)" }} /></div>
+      <div style={{ marginTop: 2, fontSize: "0.9em", opacity: 0.85 }}>{toFaDigits(String(pct))}٪ حواله شده ({formatAmountFa(p.done)} از {formatAmountFa(p.total)}) — {toFaDigits(String(p.branches.length))} حواله ثبت شده</div>
+    </div>
+  );
+}
 
 const dt = (iso: string | null) => (iso ? `${formatJalaliDate(iso)} ${toFaDigits(new Date(iso).toTimeString().slice(0, 5))}` : "—");
 
@@ -127,6 +143,7 @@ function TaskList() {
                 <span style={{ opacity: 0.8 }}>{STATUS_FA[t.status] ?? t.status}{t.claimedByName && t.status === "CLAIMED" ? ` — ${t.claimedByName}` : ""}</span>
               </div>
               <div style={{ marginTop: 4 }}>{t.rootTitle}</div>
+              {t.progress && <ProgressBar p={t.progress} />}
               <div style={{ marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap", opacity: 0.8, fontSize: "0.9em" }}>
                 <span>{t.completion === "EVENT" ? "خودکار (با ثبت سند)" : "دستی"}</span>
                 {t.dueAt && t.status !== "DONE" && <span style={t.overdue ? { color: "var(--danger, #c0392b)" } : undefined}>{dueText(t)}</span>}
@@ -144,7 +161,7 @@ interface Detail extends TaskRow {
   stepDescription: string | null;
   note: string | null;
   eventRef: string | null;
-  summary: { title: string; fields: { label: string; value: string; isDate?: boolean }[]; lines: { title: string; quantity: number; unitPrice: number; amount: number; discount: number }[]; total: number; totalVat: number } | null;
+  summary: { kind?: string; title: string; fields: { label: string; value: string; isDate?: boolean }[]; lines: { title: string; quantity: number; unitPrice: number; amount: number; discount: number }[]; total: number; totalVat: number } | null;
   events: { eventType: string; docType: string; docNumber: number | null; at: string }[];
   logs: { action: string; message: string | null; at: string; userName: string }[];
   attachments: { id: number; fileName: string; mimeType: string; size: number; mine: boolean }[];
@@ -227,6 +244,13 @@ function TaskDetail({ taskId }: { taskId: number }) {
       </div>
       <div className="card" style={{ padding: 12, marginBottom: 8 }}>
         <div><b>{d.rootTitle}</b></div>
+        {d.progress && (
+          <>
+            <ProgressBar p={d.progress} />
+            {d.progress.branches.length > 0 && <div style={{ marginTop: 4, opacity: 0.85 }}>{d.progress.branches.map((b, i) => <span key={i} style={{ marginInlineEnd: 10 }}>حواله {b.docNumber != null ? toFaDigits(String(b.docNumber)) : "—"}: {BRANCH_STATUS_FA[b.status] ?? b.status}</span>)}</div>}
+            <div style={{ marginTop: 4, opacity: 0.7, fontSize: "0.9em" }}>این کار تا حواله‌شدن کامل پیش‌فاکتور (یا بستن پیگیری آن) باز می‌ماند؛ هر حواله مسیر جدای خودش را برای مرحله‌های بعد دارد.</div>
+          </>
+        )}
         {d.stepDescription && <div style={{ opacity: 0.85, marginTop: 4 }}>{d.stepDescription}</div>}
         <div style={{ opacity: 0.8, marginTop: 4 }}>
           مهلت: {dt(d.dueAt)} {d.overdue && <span style={{ color: "var(--danger, #c0392b)" }}>(عقب‌افتاده)</span>}
@@ -243,12 +267,12 @@ function TaskDetail({ taskId }: { taskId: number }) {
           {d.summary.lines.length > 0 && (
             <div className="grid-scroll-area" style={{ marginTop: 8, maxHeight: 220 }}>
               <table className="je-lines-table">
-                <thead><tr><th>کالا/خدمت</th><th>مقدار</th><th>فی</th><th>مبلغ</th></tr></thead>
-                <tbody>{d.summary.lines.map((l, i) => <tr key={i}><td>{l.title}</td><td>{formatAmountFa(l.quantity)}</td><td>{formatAmountFa(l.unitPrice)}</td><td>{formatAmountFa(l.amount - l.discount)}</td></tr>)}</tbody>
+                <thead><tr><th>کالا/خدمت</th><th>مقدار</th>{d.summary.kind !== "SALES_DELIVERY" && <><th>فی</th><th>مبلغ</th></>}</tr></thead>
+                <tbody>{d.summary.lines.map((l, i) => <tr key={i}><td>{l.title}</td><td>{formatAmountFa(l.quantity)}</td>{d.summary!.kind !== "SALES_DELIVERY" && <><td>{formatAmountFa(l.unitPrice)}</td><td>{formatAmountFa(l.amount - l.discount)}</td></>}</tr>)}</tbody>
               </table>
             </div>
           )}
-          <div style={{ marginTop: 6 }}>جمع (پس از تخفیف): <b>{formatAmountFa(d.summary.total)}</b></div>
+          {d.summary.kind !== "SALES_DELIVERY" && <div style={{ marginTop: 6 }}>جمع (پس از تخفیف): <b>{formatAmountFa(d.summary.total)}</b></div>}
         </div>
       )}
 

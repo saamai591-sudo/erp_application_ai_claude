@@ -5943,6 +5943,8 @@ model PayrollPaymentPrepLine {
 
 enum WorkflowRootType {
   SALES_QUOTE
+  /// فقط برای شاخه‌های «هر حواله یک مسیر» (WorkflowInstance.parentInstanceId)
+  SALES_DELIVERY
 }
 
 enum WorkflowCompletion {
@@ -6020,6 +6022,8 @@ model WorkflowStep {
   /// مرحله‌ی دستی: توضیح و مدرکِ «انجام شد» اجباری است یا اختیاری (طراح فرایند تعیین می‌کند؛ پیش‌فرض هر دو اجباری)
   requireNote       Boolean              @default(true)
   requireAttachment Boolean              @default(true)
+  /// فقط مرحله‌ی EVENT: این مرحله با هر رویداد بسته نمی‌شود؛ برای سندِ آن رویداد (مثلاً هر حواله) یک شاخه برای مرحله‌های بعدی ساخته می‌شود و خودِ مرحله تا کامل‌شدن (یا بستن پیگیری پیش‌فاکتور) باز می‌ماند
+  branchPerEvent    Boolean              @default(false)
   /// فقط وقتی completion = EVENT
   completionEvent String?
   /// مهلت (ساعت تقویمی از لحظه‌ی ساخت کار)، یادآوری (ساعت بعد از ساخت) و تشدید (کاربر/نقش)
@@ -6070,11 +6074,16 @@ model WorkflowInstance {
   process       WorkflowProcess        @relation(fields: [processId], references: [id], onDelete: Restrict)
   version       WorkflowProcessVersion @relation(fields: [versionId], references: [id], onDelete: Restrict)
   creatorUser   User?                  @relation("WfInstanceCreator", fields: [creatorUserId], references: [id], onDelete: SetNull)
+  /// شاخه‌ی یک مرحله‌ی branchPerEvent: نمونه‌ی والد (پیش‌فاکتور)؛ rootType/rootId همین نمونه = سند شاخه (حواله)
+  parentInstanceId Int?
+  parent        WorkflowInstance?      @relation("WfInstanceBranch", fields: [parentInstanceId], references: [id], onDelete: SetNull)
+  branches      WorkflowInstance[]     @relation("WfInstanceBranch")
   tasks         WorkflowTask[]
   events        WorkflowInstanceEvent[]
 
   @@unique([processId, rootType, rootId])
   @@index([rootType, rootId])
+  @@index([parentInstanceId])
 }
 
 /// رویدادهای سندهای مرتبط که برای یک نمونه رخ داده‌اند (مرحله‌ای که بعداً فعال شود با رویدادِ قبلاً‌رخ‌داده فوراً بسته می‌شود)
