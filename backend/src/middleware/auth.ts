@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
 
 export interface AuthedRequest extends Request {
-  user?: { id: number; mobile: string };
+  user?: { id: number; mobile: string; light?: boolean };
 }
 
 // نشست با «عدم فعالیت» تمام می‌شود: توکن فقط SESSION_IDLE_MINUTES (پیش‌فرض ۲۰ دقیقه) اعتبار دارد و کلاینت تا وقتی کاربر
@@ -19,14 +19,16 @@ export const SESSION_MAX_HOURS = envNumber("SESSION_MAX_HOURS", 12, 1);
 export interface TokenPayload {
   id: number;
   mobile: string;
+  /** کاربر سبک (فقط کارتابل)؛ lightUserGuard از همین می‌خواند */
+  light?: boolean;
   /** لحظه‌ی ورود اولیه (ثانیه‌ی یونیکس)؛ تمدیدها آن را حفظ می‌کنند تا سقف مطلق نشست رعایت شود */
   authAt?: number;
   iat?: number;
 }
 
 /** authAt خالی = ورود تازه. */
-export function signToken(payload: { id: number; mobile: string }, authAt?: number) {
-  return jwt.sign({ id: payload.id, mobile: payload.mobile, authAt: authAt ?? Math.floor(Date.now() / 1000) }, JWT_SECRET, {
+export function signToken(payload: { id: number; mobile: string; light?: boolean }, authAt?: number) {
+  return jwt.sign({ id: payload.id, mobile: payload.mobile, ...(payload.light ? { light: true } : {}), authAt: authAt ?? Math.floor(Date.now() / 1000) }, JWT_SECRET, {
     expiresIn: `${SESSION_IDLE_MINUTES}m`,
   });
 }
@@ -42,7 +44,7 @@ export function requireAuth(req: AuthedRequest, res: Response, next: NextFunctio
   }
   const token = header.slice("Bearer ".length);
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: number; mobile: string };
+    const decoded = jwt.verify(token, JWT_SECRET) as { id: number; mobile: string; light?: boolean };
     req.user = decoded;
     next();
   } catch {

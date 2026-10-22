@@ -267,6 +267,19 @@ export async function getEntitlements(): Promise<Entitlements> {
   }
 }
 
+/** سقف کاربران فعال لایسنس؛ null = نامحدود (قفل خاموش، ساخت بدون کلید، لایسنسِ بدون سقف یا لایسنس نامعتبر که دروازه خودش می‌بندد) */
+export async function getMaxUsers(): Promise<number | null> {
+  if (!isEnforcementEnabled()) return null;
+  try {
+    const s = await getCachedStatus();
+    if (s.state === "UNCONFIGURED" || !s.license || !isStateAllowed(s.state)) return null;
+    return s.license.maxUsers ?? null;
+  } catch (e) {
+    console.error("[license] خواندن سقف کاربران ناموفق بود", e);
+    return null;
+  }
+}
+
 /** آیا قابلیت (مثلاً FX) در لایسنس فعال است؟ features=null (قفل خاموش/لایسنس قدیمی) یعنی همه‌ی قابلیت‌ها */
 export function isFeatureEnabled(ent: Entitlements, feature: string): boolean {
   return !ent.features || ent.features.includes(feature);

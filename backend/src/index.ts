@@ -2,6 +2,8 @@ import "express-async-errors";
 import express from "express";
 import cors from "cors";
 import { requireAuth } from "./middleware/auth";
+import { lightUserGuard } from "./middleware/lightGuard";
+import { ensureLightRole } from "./services/userAccountService";
 import { errorDisclosureGuard, GENERIC_ERROR } from "./middleware/errorDisclosure";
 import { usageResponse } from "./middleware/usageResponse";
 import { corsPolicy, securityHeaders } from "./middleware/securityHeaders";
@@ -193,6 +195,7 @@ app.use("/api/share", printShareRoutes);
 
 // همه مسیرهای زیر نیازمند احراز هویت هستند
 app.use("/api", requireAuth);
+app.use("/api", lightUserGuard);
 // دوره مالی جاری (هدر x-fiscal-period-id) را در RequestContext می‌گذارد تا lib/prisma.ts بتواند
 // خودکار لیست موجودیت‌های دارای fiscalPeriodId را به همان دوره محدود کند — نگاه کنید به
 // middleware/fiscalScope.ts و lib/requestContext.ts.
@@ -361,6 +364,7 @@ const port = process.env.PORT ? Number(process.env.PORT) : 4000;
 // همگام‌سازی Registry با جدول Action در هر بار بالا آمدن سرور (نه فقط seed) — یعنی افزودن/حذف یک
 // Action در registry.ts، بدون نیاز به اجرای دستیِ seed، در همان اولین ری‌استارت بعدی اعمال می‌شود.
 syncRegistryToDb()
+  .then(() => ensureLightRole().catch((e) => console.error("[users] ساخت نقش کاربر سبک", e)))
   .then(() => {
     app.listen(port, () => {
       console.log(`Backend listening on port ${port}`);

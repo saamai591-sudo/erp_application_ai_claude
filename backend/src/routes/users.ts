@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma";
 import { nextSerialNumber } from "../utils/coding";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
+import { UserAccountError, assertUserCapacity, checkUsername, ensureLightRole, normalizeUsername } from "../services/userAccountService";
 
 const FORM = findFormPrefix("users");
 
@@ -34,7 +35,9 @@ router.get("/", can(`${FORM}.view`), async (_req, res) => {
 
 router.post("/", can(`${FORM}.create`), async (req, res) => {
   // eslint-disable-next-line prefer-const
-  let { code, mobile, firstName, lastName, isActive, password, roleIds, actionIds, partyId } = req.body as {
+  let { code, mobile, firstName, lastName, isActive, password, roleIds, actionIds, partyId, username: rawUsername, isLight } = req.body as {
+    username?: string;
+    isLight?: boolean;
     code?: number;
     mobile: string;
     firstName: string;
@@ -59,6 +62,20 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
   const dupMobile = await prisma.user.findUnique({ where: { mobile } });
   if (dupMobile) return res.status(400).json({ error: "شماره همراه تکراری است" });
 
+  // نام کاربری، کاربر سبک و سقف کاربران لایسنس
+  const username = normalizeUsername(rawUsername);
+  try {
+    if (isLight && !username) throw new UserAccountError("برای کاربر سبک نام کاربری الزامی است");
+    if (username) await checkUsername(username);
+    if (isActive ?? true) await assertUserCapacity();
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
+  if (isLight) {
+    roleIds = [await ensureLightRole()];
+    actionIds = [];
+  }
+
   const finalCode = code ?? (await nextSerialNumber(prisma.user, "code"));
   const passwordHash = await bcrypt.hash(password, 10);
 
@@ -66,6 +83,8 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
     data: {
       code: finalCode,
       mobile,
+      username,
+      isLight: !!isLight,
       firstName,
       lastName: lastName ?? "",
       isActive: isActive ?? true,
@@ -83,7 +102,9 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
 
 router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
-  const { firstName, lastName, isActive, password, roleIds, actionIds, partyId } = req.body as {
+  let { firstName, lastName, isActive, password, roleIds, actionIds, partyId, username: rawUsername, isLight } = req.body as {
+    username?: string;
+    isLight?: boolean;
     firstName?: string;
     lastName?: string;
     isActive?: boolean;
@@ -93,7 +114,22 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
     actionIds?: number[];
   };
 
-  const data: any = { firstName, lastName, isActive, partyId: partyId === undefined ? undefined : partyId || null };
+  const existing = await prisma.user.findUnique({ where: { id }, select: { isActive: true, isLight: true, username: true } });
+  if (!existing) return res.status(404).json({ error: "کاربر یافت نشد" });
+  const username = rawUsername === undefined ? undefined : normalizeUsername(rawUsername);
+  const light = isLight === undefined ? existing.isLight : !!isLight;
+  try {
+    if (username) await checkUsername(username, id);
+    if (light && !(username ?? existing.username)) throw new UserAccountError("برای کاربر سبک نام کاربری الزامی است");
+    if (isActive === true && !existing.isActive) await assertUserCapacity();
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
+  if (light) {
+    roleIds = [await ensureLightRole()];
+    actionIds = [];
+  }
+  const data: any = { firstName, lastName, isActive, partyId: partyId === undefined ? undefined : partyId || null, username, isLight: isLight === undefined ? undefined : light };
   if (password) {
     if (password.length < 6) return res.status(400).json({ error: "رمز عبور باید حداقل ۶ کاراکتر باشد" });
     data.passwordHash = await bcrypt.hash(password, 10);

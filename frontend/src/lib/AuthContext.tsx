@@ -9,6 +9,8 @@ interface AuthUser {
   mobile: string;
   firstName: string;
   lastName: string;
+  /** کاربر سبک: فقط کارتابل (موبایل) */
+  isLight?: boolean;
 }
 
 interface AuthCtx {

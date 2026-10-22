@@ -104,15 +104,14 @@ export default function Login() {
           )}
 
           <label className="lg-field">
-            <span>شماره همراه</span>
+            <span>شماره همراه یا نام کاربری</span>
             <div className="lg-input">
               <UserIcon />
               <input
                 value={mobile}
-                onChange={(e) => setMobile(digitsOnly(e.target.value))}
+                onChange={(e) => setMobile(/^[0-9۰-۹٠-٩]*$/.test(e.target.value) ? digitsOnly(e.target.value) : e.target.value.trim())}
                 placeholder="09999999999"
                 dir="ltr"
-                inputMode="numeric"
                 autoComplete="username"
                 autoFocus
               />

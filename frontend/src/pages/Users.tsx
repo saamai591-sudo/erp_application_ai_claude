@@ -42,6 +42,8 @@ interface UserRow {
   id: number;
   code: number;
   mobile: string;
+  username?: string | null;
+  isLight?: boolean;
   firstName: string;
   lastName: string;
   isActive: boolean;
@@ -100,7 +102,7 @@ function UserForm({ editId }: { editId?: number }) {
   const [roles, setRoles] = useState<Role[]>([]);
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [tree, setTree] = useState<TreeModule[]>([]);
-  const [form, setForm] = usePersistedState(`${cacheKey}:form`, { mobile: "", firstName: "", lastName: "", password: "", isActive: true, partyId: "" });
+  const [form, setForm] = usePersistedState(`${cacheKey}:form`, { mobile: "", username: "", isLight: false, firstName: "", lastName: "", password: "", isActive: true, partyId: "" });
   const [roleIds, setRoleIds] = usePersistedState<Set<number>>(`${cacheKey}:roleIds`, new Set());
   const [actionIds, setActionIds] = usePersistedState<Set<number>>(`${cacheKey}:actionIds`, new Set());
   const [formError, setFormError] = useState<string | null>(null);
@@ -121,6 +123,8 @@ function UserForm({ editId }: { editId?: number }) {
       if (found) {
         setForm({
           mobile: found.mobile,
+          username: found.username ?? "",
+          isLight: !!found.isLight,
           firstName: found.firstName,
           lastName: found.lastName,
           password: "",
@@ -156,6 +160,8 @@ function UserForm({ editId }: { editId?: number }) {
           firstName: form.firstName,
           lastName: form.lastName,
           isActive: form.isActive,
+          username: form.username,
+          isLight: form.isLight,
           partyId: form.partyId ? Number(form.partyId) : null,
           roleIds: Array.from(roleIds),
           actionIds: Array.from(actionIds),
@@ -215,6 +221,17 @@ function UserForm({ editId }: { editId?: number }) {
             />
           </div>
           <div className="form-field">
+            <label>نام کاربری {form.isLight && <RequiredMark />} <FieldHint label="نام کاربری" text="اختیاری برای کاربر کامل؛ برای کاربر سبک الزامی است. ۳ تا ۳۰ نویسه از حروف انگلیسی، رقم و . _ - ؛ ورود با شماره همراه یا همین نام کاربری ممکن است" /></label>
+            <input dir="ltr" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, "") })} autoComplete="off" name="user-username" />
+          </div>
+          <div className="form-field">
+            <label className="checkbox-row">
+              <input type="checkbox" checked={form.isLight} onChange={(e) => setForm({ ...form, isLight: e.target.checked })} />
+              کاربر سبک (فقط کارتابل){" "}
+              <FieldHint label="کاربر سبک" text="حساب موبایل‌محور که فقط «کارهای من» و خلاصه‌ی فقط‌خواندنی سند را می‌بیند؛ به نقش‌ها و دسترسی‌های دیگر نیازی ندارد و در سقف کاربران لایسنس می‌شمارد" />
+            </label>
+          </div>
+          <div className="form-field">
             <label>رمز عبور {editId ? "(خالی = بدون تغییر)" : <RequiredMark />}</label>
             <input
               dir="ltr"
@@ -257,6 +274,8 @@ function UserForm({ editId }: { editId?: number }) {
               </label>
             </div>
           )}
+          {form.isLight && <div className="form-field full"><div className="alert">کاربر سبک خودکار فقط نقش «کارتابل (کاربر سبک)» را می‌گیرد؛ نقش و دسترسی مستقیم دیگری لازم نیست.</div></div>}
+          {!form.isLight && (<>
           <div className="form-field full">
             <label>نقش‌های کاربری</label>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
@@ -288,6 +307,7 @@ function UserForm({ editId }: { editId?: number }) {
             </label>
             <PermissionTree tree={tree} checked={actionIds} onToggle={toggleActionIds} persistKey={`${cacheKey}:permTree`} />
           </div>
+          </>)}
         </div>
       </form>
     </FormPage>

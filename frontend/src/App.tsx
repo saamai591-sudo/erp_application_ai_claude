@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./lib/AuthContext";
 import { TabsProvider } from "./lib/TabsContext";
-import Layout from "./components/Layout";
+import LayoutSwitch from "./components/MobileShell";
 import Login from "./pages/Login";
 import Welcome from "./pages/Welcome";
 import Roles from "./pages/Roles";
@@ -174,7 +174,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           {/* «مدیریت» (لایسنس): جدا از ورود ERP، با کلمه‌ی عبور خودش */}
           <Route path="/management" element={<Management />} />
-          <Route element={<Layout />}>
+          <Route element={<LayoutSwitch />}>
             <Route index element={<Welcome />} />
 
             <Route path="/roles" element={<Roles />} />

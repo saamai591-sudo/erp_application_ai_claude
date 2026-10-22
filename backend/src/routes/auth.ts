@@ -6,26 +6,28 @@ import { SESSION_IDLE_MINUTES, SESSION_MAX_HOURS, signToken, verifyToken } from 
 const router = Router();
 
 router.post("/login", async (req, res) => {
+  // «mobile» شماره همراه یا نام کاربری است (کاربر سبک با نام کاربری وارد می‌شود)
   const { mobile, password } = req.body as { mobile?: string; password?: string };
   if (!mobile || !password) {
-    return res.status(400).json({ error: "شماره همراه و رمز عبور الزامی است" });
+    return res.status(400).json({ error: "شماره همراه یا نام کاربری و رمز عبور الزامی است" });
   }
 
-  const user = await prisma.user.findUnique({ where: { mobile } });
+  const ident = String(mobile).trim();
+  const user = await prisma.user.findFirst({ where: { OR: [{ mobile: ident }, { username: ident.toLowerCase() }] } });
   if (!user || !user.isActive) {
     return res.status(401).json({ error: "کاربری با این مشخصات یافت نشد یا غیرفعال است" });
   }
 
   const ok = await bcrypt.compare(password, user.passwordHash);
   if (!ok) {
-    return res.status(401).json({ error: "شماره همراه یا رمز عبور اشتباه است" });
+    return res.status(401).json({ error: "شماره همراه/نام کاربری یا رمز عبور اشتباه است" });
   }
 
-  const token = signToken({ id: user.id, mobile: user.mobile });
+  const token = signToken({ id: user.id, mobile: user.mobile, light: user.isLight });
   res.json({
     token,
     idleMinutes: SESSION_IDLE_MINUTES,
-    user: { id: user.id, mobile: user.mobile, firstName: user.firstName, lastName: user.lastName },
+    user: { id: user.id, mobile: user.mobile, firstName: user.firstName, lastName: user.lastName, isLight: user.isLight },
   });
 });
 
@@ -40,9 +42,9 @@ router.post("/refresh", async (req, res) => {
     if (Date.now() / 1000 - authAt > SESSION_MAX_HOURS * 3600) {
       return res.status(401).json({ error: "مدت مجاز نشست به پایان رسید؛ دوباره وارد شوید" });
     }
-    const user = await prisma.user.findUnique({ where: { id: p.id }, select: { id: true, mobile: true, isActive: true } });
+    const user = await prisma.user.findUnique({ where: { id: p.id }, select: { id: true, mobile: true, isActive: true, isLight: true } });
     if (!user || !user.isActive) return res.status(401).json({ error: "کاربر غیرفعال است" });
-    res.json({ token: signToken({ id: user.id, mobile: user.mobile }, authAt), idleMinutes: SESSION_IDLE_MINUTES });
+    res.json({ token: signToken({ id: user.id, mobile: user.mobile, light: user.isLight }, authAt), idleMinutes: SESSION_IDLE_MINUTES });
   } catch {
     res.status(401).json({ error: "توکن نامعتبر یا منقضی شده است" });
   }
