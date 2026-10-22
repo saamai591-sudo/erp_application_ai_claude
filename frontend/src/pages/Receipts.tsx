@@ -537,11 +537,42 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
 
   // «بارگذاری از اقلام دریافت»: انتخاب چندگانه‌ی ردیف‌های اقلام دریافت جاری، و افزودن یک ردیف
   // موضوعات دریافت خالی به‌ازای هر ردیف انتخاب‌شده (طبق تصمیم کاربر برای این بخش سند)
+  // همان کنترل‌های cleanOneInstrumentLine بک‌اند؛ تا کاربر موقع ذخیره‌ی سند به خطای ناقص‌بودن ابزار نخورد و مجبور
+  // نشود موضوعات را پاک و دوباره وارد کند، ناقص‌بودن ابزار همان لحظه‌ی افزودن به موضوعات اعلام می‌شود
+  function instrumentRowProblem(r: InstrumentRowState): string | null {
+    if (!(Number(r.amount) > 0)) return "مبلغ باید عددی مثبت باشد";
+    if (r.type === "CASH") {
+      if (!r.cashBoxId) return "انتخاب صندوق الزامی است";
+      if (!r.currencyId) return "انتخاب ارز الزامی است";
+    } else if (r.type === "BANK_TRANSFER" || r.type === "POS") {
+      if (!r.bankAccountId) return "انتخاب حساب بانکی الزامی است";
+    } else if (r.type === "CHEQUE") {
+      if (!r.chequeNumber) return "شماره چک الزامی است";
+      if (!r.chequeDueDate) return "تاریخ سررسید چک الزامی است";
+      if (!r.cashBoxId) return "انتخاب صندوق برای ابزار چک الزامی است";
+      if (!r.chequeTypeId) return "نوع چک الزامی است";
+    }
+    if (r.currencyId && baseCurrency && String(baseCurrency.id) !== r.currencyId && !(Number(r.fxRate) > 0)) return "نرخ ارز الزامی است";
+    return null;
+  }
+
   function loadFromInstruments(rows: (InstrumentRowState & { idx: number })[]) {
+    const problems = rows.map((r) => ({ r, problem: instrumentRowProblem(r) }));
+    const ok = problems.filter((p) => !p.problem).map((p) => p.r);
+    const bad = problems.filter((p) => p.problem);
+    if (bad.length) {
+      setError(
+        `ابزارهای زیر ناقص‌اند و به موضوعات دریافت اضافه نشدند؛ ابتدا ردیف ابزار را کامل کنید: ` +
+          bad.map((p) => `ردیف ${toFaDigits(String(p.r.idx + 1))} (${p.problem})`).join("، ")
+      );
+    } else {
+      setError(null);
+    }
+    if (ok.length === 0) return;
     setSettlementRows((prev) => [
       ...prev,
       // شرح ردیف ابزارِ انتخاب‌شده، شرح پیش‌فرض ردیف موضوعات است
-      ...rows.map((r) => ({ ...emptySettlementRow(r.clientKey, instrumentLabel(r, r.idx), r.currencyId), description: r.description })),
+      ...ok.map((r) => ({ ...emptySettlementRow(r.clientKey, instrumentLabel(r, r.idx), r.currencyId), description: r.description })),
     ]);
   }
 
