@@ -146,6 +146,9 @@ function TaskDetail({ taskId }: { taskId: number }) {
   const navigate = useNavigate();
   const { hasPermission } = usePermissions();
   const canAct = hasPermission("workflow.inbox.my-tasks.act");
+  const canReassign = hasPermission("workflow.reports.workflow-all-tasks.reassign");
+  const [users, setUsers] = useState<{ id: number; title: string }[]>([]);
+  const [toUser, setToUser] = useState("");
   const [d, setD] = useState<Detail | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -163,6 +166,9 @@ function TaskDetail({ taskId }: { taskId: number }) {
   useEffect(() => {
     load();
   }, [load]);
+  useEffect(() => {
+    if (canReassign) api.get("/workflow/users").then(setUsers).catch(() => {});
+  }, [canReassign]);
 
   async function run(fn: () => Promise<unknown>, okMsg?: string) {
     setBusy(true);
@@ -263,6 +269,12 @@ function TaskDetail({ taskId }: { taskId: number }) {
               <button type="button" className="btn" style={{ marginTop: 6 }} disabled={busy} onClick={() => run(async () => { await api.post(`/workflow/tasks/${taskId}/complete`, { note }); navigate("/my-tasks"); }, "کار انجام شد")}>انجام شد</button>
             </div>
           )}
+        </div>
+      )}
+      {active && canReassign && (
+        <div className="card" style={{ padding: 12, marginBottom: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <select value={toUser} onChange={(e) => setToUser(e.target.value)}><option value="">واگذاری به…</option>{users.map((u) => <option key={u.id} value={u.id}>{u.title}</option>)}</select>
+          <button type="button" className="btn secondary" disabled={busy || !toUser} onClick={() => run(() => api.post(`/workflow/tasks/${taskId}/reassign`, { userId: Number(toUser) }), "کار واگذار شد")}>واگذاری</button>
         </div>
       )}
       {d.status === "DONE" && d.note && <div className="card" style={{ padding: 12, marginBottom: 8 }}><b>توضیح:</b> {d.note}</div>}

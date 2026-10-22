@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { can, userHasAction } from "../authz/guard";
+import { prisma } from "../lib/prisma";
 import { findFormPrefix } from "../authz/registry";
 import type { AuthedRequest } from "../middleware/auth";
 import {
@@ -83,6 +84,12 @@ router.post("/workflow/tasks/:id/release", can(`${INBOX}.act`), async (req, res)
   } catch (e) {
     fail(res, e, "خطا در رها کردن کار");
   }
+});
+
+// فهرست کاربران برای واگذاری
+router.get("/workflow/users", can(`${ALL}.reassign`), async (_req, res) => {
+  const us = await prisma.user.findMany({ where: { isActive: true }, orderBy: { code: "asc" }, select: { id: true, firstName: true, lastName: true } });
+  res.json(us.map((u) => ({ id: u.id, title: `${u.firstName} ${u.lastName}`.trim() })));
 });
 
 router.post("/workflow/tasks/:id/reassign", can(`${ALL}.reassign`), async (req, res) => {

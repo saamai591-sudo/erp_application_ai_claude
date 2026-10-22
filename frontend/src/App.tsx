@@ -116,6 +116,7 @@ import EmployeeSalaryAccounts from "./pages/EmployeeSalaryAccounts";
 import PayrollPaymentPreps from "./pages/PayrollPaymentPreps";
 import MyTasks from "./pages/MyTasks";
 import WorkflowAllTasks from "./pages/WorkflowAllTasks";
+import WorkflowProcesses from "./pages/WorkflowProcesses";
 import TradeLedgers from "./pages/TradeLedgers";
 import TaxInvoiceSubmission from "./pages/TaxInvoiceSubmission";
 import WarehouseDocDetails from "./pages/WarehouseDocDetails";
@@ -526,6 +527,9 @@ export default function App() {
             <Route path="/my-tasks" element={<MyTasks />} />
             <Route path="/my-tasks/:id" element={<MyTasks />} />
             <Route path="/workflow-all-tasks" element={<WorkflowAllTasks />} />
+            <Route path="/workflow-processes" element={<WorkflowProcesses />} />
+            <Route path="/workflow-processes/new" element={<WorkflowProcesses />} />
+            <Route path="/workflow-processes/:id/edit" element={<WorkflowProcesses />} />
             <Route path="/payroll-payment-preps" element={<PayrollPaymentPreps />} />
             <Route path="/payroll-payment-preps/new" element={<PayrollPaymentPreps />} />
             <Route path="/payroll-payment-preps/:id/edit" element={<PayrollPaymentPreps />} />
