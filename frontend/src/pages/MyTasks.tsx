@@ -11,6 +11,7 @@ import { api, ApiError, getToken } from "../lib/api";
 import { showError, showToast } from "../lib/toast";
 import { usePermissions } from "../lib/usePermissions";
 import { WorkflowTaskAction } from "../components/WorkflowTaskAction";
+import { CloseFollowUpDialog, type FollowUpInfo } from "../components/QuoteFollowUp";
 
 // کارتابل › «کارهای من» (دسکتاپ و موبایل): فهرست کارها و جزئیات هر کار — خلاصه‌ی فقط‌خواندنی سند، تاریخچه، پیوست‌ها و «برداشتن / انجام شد».
 // مرحله‌ی دستی: توضیح + حداقل یک مدرک (تصویر/PDF تا ۵ مگابایت) الزامی است؛ مرحله‌ی خودکار با ثبت سند بسته می‌شود. قواعد در سرور (workflowTaskService).
@@ -189,11 +190,14 @@ function TaskDetail({ taskId }: { taskId: number }) {
   const { hasPermission } = usePermissions();
   const canAct = hasPermission("workflow.inbox.my-tasks.act");
   const canReassign = hasPermission("workflow.reports.workflow-all-tasks.reassign");
+  // «مشتری منصرف شد» = همان «بستن پیگیری» پیش‌فاکتور (رویدادِ وقفه‌انداز فرایند)؛ فقط روی کارهای خودِ پیش‌فاکتور، نه شاخه‌ی حواله
+  const canCloseQuote = hasPermission("sales.operations.sales-quotes.closeFollowUp");
   const [users, setUsers] = useState<{ id: number; title: string }[]>([]);
   const [toUser, setToUser] = useState("");
   const [d, setD] = useState<Detail | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [fu, setFu] = useState<FollowUpInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -321,6 +325,13 @@ function TaskDetail({ taskId }: { taskId: number }) {
           )}
         </div>
       )}
+      {active && canAct && canCloseQuote && d.quoteId && !d.deliveryId && (
+        <div className="card" style={{ padding: 12, marginBottom: 8 }}>
+          <button type="button" className="btn secondary" disabled={busy} onClick={() => run(async () => setFu(await api.get(`/sales-quotes/${d.quoteId}/follow-up`)))}>مشتری منصرف شد</button>
+          <span style={{ marginInlineStart: 8, opacity: 0.75, fontSize: "0.9em" }}>پیگیری پیش‌فاکتور بسته می‌شود؛ اگر چیزی حواله نشده، همه‌ی کارهای باز این فرایند لغو می‌شود.</span>
+        </div>
+      )}
+      {fu && d.quoteId && <CloseFollowUpDialog quoteId={d.quoteId} info={fu} onClose={() => setFu(null)} onDone={() => { setFu(null); load(); }} />}
       {active && canReassign && (
         <div className="card" style={{ padding: 12, marginBottom: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
           <select value={toUser} onChange={(e) => setToUser(e.target.value)}><option value="">واگذاری به…</option>{users.map((u) => <option key={u.id} value={u.id}>{u.title}</option>)}</select>
