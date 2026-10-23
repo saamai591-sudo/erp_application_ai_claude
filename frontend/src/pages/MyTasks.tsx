@@ -46,12 +46,14 @@ const SCOPES: { key: string; label: string }[] = [
   { key: "claimed", label: "برداشته‌شده توسط من" },
   { key: "overdue", label: "عقب‌افتاده" },
   { key: "done", label: "انجام‌شده" },
+  { key: "cancelled", label: "لغو‌شده" },
 ];
 const ACTION_FA: Record<string, string> = {
   CREATED: "ایجاد شد", CLAIMED: "برداشته شد", RELEASED: "رها شد", REASSIGNED: "واگذار شد", ATTACHED: "پیوست شد", DONE: "انجام شد",
   DONE_BY_EVENT: "با ثبت سند بسته شد", SKIPPED: "رد شد", CANCELLED: "لغو شد", OVERDUE: "مهلت گذشت",
 };
 const EVENT_FA: Record<string, string> = {
+  SALES_QUOTE_FOLLOWUP_REOPENED: "بازگشایی پیگیری پیش‌فاکتور",
   SALES_QUOTE_FOLLOWUP_CLOSED: "بستن پیگیری پیش‌فاکتور", SALES_QUOTE_APPROVED: "تایید پیش‌فاکتور", RECEIPT_APPROVED: "ثبت دریافت", SALES_DELIVERY_REGISTERED: "ثبت حواله فروش", SALES_INVOICE_CREATED: "ثبت فاکتور فروش", TAX_INVOICE_SENT: "ارسال فاکتور به مودیان",
 };
 

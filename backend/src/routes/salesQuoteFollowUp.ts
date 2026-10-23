@@ -35,6 +35,7 @@ router.post("/sales-quotes/:id/close-follow-up", can(`${QUOTES}.closeFollowUp`),
 router.post("/sales-quotes/:id/reopen-follow-up", can(`${QUOTES}.closeFollowUp`), async (req, res) => {
   try {
     await reopenFollowUp(Number(req.params.id));
+    await emitWorkflowEvent("SALES_QUOTE_FOLLOWUP_REOPENED", Number(req.params.id));
     res.json({ ok: true });
   } catch (e) {
     fail(res, e, "خطا در بازگشایی پیگیری");

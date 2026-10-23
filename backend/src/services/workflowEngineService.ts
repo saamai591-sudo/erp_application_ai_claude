@@ -37,6 +37,11 @@ async function handleEvent(eventKey: string, docId: number) {
       async (tx) => {
         await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${LOCK_KEY}, ${Number(rootId)})`);
         if (def.canStart) await startInstances(tx, def.rootType, rootId, eventKey, docType, docId, docNumber, actorId);
+        // بازگشایی پیگیری: فرایندِ لغوشده‌ی پیش‌فاکتورِ تاییدشده از اول شروع می‌شود (نمونه‌ی تمام‌شده/در جریان دست نمی‌خورد)
+        if (def.restarts) {
+          await startInstances(tx, def.rootType, rootId, "SALES_QUOTE_APPROVED", docType, docId, docNumber, actorId, true);
+          return;
+        }
         const instances = await tx.workflowInstance.findMany({ where: { rootType: def.rootType, rootId, status: "RUNNING" }, select: { id: true } });
         for (const inst of instances) {
           if (def.cancels) {
@@ -44,9 +49,18 @@ async function handleEvent(eventKey: string, docId: number) {
             continue;
           }
           if (def.closesRepeat) {
-            // پیگیری پیش‌فاکتور بسته شد: مرحله‌ی «هر رویداد یک شاخه»ی باز هم بسته می‌شود
-            const repeat = await tx.workflowTask.findMany({ where: { instanceId: inst.id, status: { in: ["OPEN", "CLAIMED"] }, step: { branchPerEvent: true } }, select: { id: true } });
-            for (const t of repeat) await completeTask(tx, t.id, { userId: actorId, kind: "EVENT", eventRef: `بستن پیگیری پیش‌فاکتور ${docNumber ?? docId}` });
+            // پیگیری پیش‌فاکتور بسته شد (مشتری منصرف شد). چیزی حواله نشده ⇒ کل فرایند و همه‌ی کارهای بازش لغو می‌شود و به مسئولان اطلاعیه می‌رود؛
+            // اگر بخشی حواله شده ⇒ فقط پیگیریِ حواله‌ی باقی‌مانده (مرحله‌ی «هر رویداد یک شاخه») بسته می‌شود و مسیر حواله‌های ثبت‌شده ادامه دارد
+            const delivered = (await tx.workflowInstanceEvent.count({ where: { instanceId: inst.id, eventType: "SALES_DELIVERY_REGISTERED" } })) > 0 || (await tx.workflowInstance.count({ where: { parentInstanceId: inst.id } })) > 0;
+            if (!delivered) {
+              const q = await tx.salesQuote.findUnique({ where: { id: rootId }, select: { followUpNote: true, followUpReason: { select: { title: true } } } });
+              const why = [q?.followUpReason?.title, q?.followUpNote].filter(Boolean).join(" — ") || "بدون دلیل ثبت‌شده";
+              const hasReceipt = (await tx.workflowInstanceEvent.count({ where: { instanceId: inst.id, eventType: "RECEIPT_APPROVED" } })) > 0;
+              await cancelInstance(tx, inst.id, actorId, `مشتری منصرف شد: ${why}`, `پیش‌فاکتور ${docNumber ?? docId} بسته شد؛ مشتری منصرف شد (${why})${hasReceipt ? "؛ توجه: برای این پیش‌فاکتور دریافت ثبت شده است، برگشت وجه را بررسی کنید" : ""}`);
+            } else {
+              const repeat = await tx.workflowTask.findMany({ where: { instanceId: inst.id, status: { in: ["OPEN", "CLAIMED"] }, step: { branchPerEvent: true } }, select: { id: true } });
+              for (const t of repeat) await completeTask(tx, t.id, { userId: actorId, kind: "EVENT", eventRef: `بستن پیگیری پیش‌فاکتور ${docNumber ?? docId}` });
+            }
             continue;
           }
           await tx.workflowInstanceEvent.createMany({ data: [{ instanceId: inst.id, eventType: eventKey, docType, docId, docNumber }], skipDuplicates: true });
@@ -77,7 +91,7 @@ async function handleEvent(eventKey: string, docId: number) {
   }
 }
 
-async function startInstances(tx: Tx, rootType: RootType, rootId: number, eventKey: string, docType: string, docId: number, docNumber: number | null, actorId: number | null) {
+async function startInstances(tx: Tx, rootType: RootType, rootId: number, eventKey: string, docType: string, docId: number, docNumber: number | null, actorId: number | null, requireApproved = false) {
   const processes = await tx.workflowProcess.findMany({
     where: { isActive: true, rootType, startEvent: eventKey },
     include: { versions: { where: { isCurrent: true }, include: { steps: { orderBy: { seq: "asc" } } } } },
@@ -85,6 +99,7 @@ async function startInstances(tx: Tx, rootType: RootType, rootId: number, eventK
   if (processes.length === 0) return;
   const root = await loadRoot(rootType, rootId);
   if (!root) return;
+  if (requireApproved && root.status !== "APPROVED") return;
   for (const p of processes) {
     const v = p.versions[0];
     if (!v || v.steps.length === 0) continue;
@@ -193,12 +208,19 @@ export async function completeTask(tx: Tx, taskId: number, p: { userId: number |
   await activateFrom(tx, t.instanceId, t.seq, p.userId);
 }
 
-export async function cancelInstance(tx: Tx, instanceId: number, actorId: number | null, reason: string) {
-  const open = await tx.workflowTask.findMany({ where: { instanceId, status: { in: ["OPEN", "CLAIMED"] } }, select: { id: true } });
+/** notifyText: اگر داده شود به مسئولان (و برداشتنده‌ی) هر کار بازِ لغوشده اطلاعیه‌ی «کار لغو شد» می‌رود */
+export async function cancelInstance(tx: Tx, instanceId: number, actorId: number | null, reason: string, notifyText?: string) {
+  const open = await tx.workflowTask.findMany({ where: { instanceId, status: { in: ["OPEN", "CLAIMED"] } }, select: { id: true, stepId: true, claimedById: true, step: { select: { title: true } } } });
+  const creator = notifyText ? (await tx.workflowInstance.findUnique({ where: { id: instanceId }, select: { creatorUserId: true } }))?.creatorUserId ?? null : null;
   const now = new Date();
   for (const t of open) {
     await tx.workflowTask.update({ where: { id: t.id }, data: { status: "CANCELLED", completedAt: now, completionKind: "CANCELLED" } });
     await tx.workflowTaskLog.create({ data: { taskId: t.id, userId: actorId, action: "CANCELLED", message: reason } });
+    if (notifyText) {
+      const users = new Set(await stepUserIds(t.stepId, creator));
+      if (t.claimedById) users.add(t.claimedById);
+      if (users.size) await tx.workflowNotification.createMany({ data: [...users].map((userId) => ({ userId, taskId: t.id, kind: "CANCELLED" as const, message: `کار «${t.step.title}» لغو شد — ${notifyText}` })) });
+    }
   }
   await tx.workflowInstance.update({ where: { id: instanceId }, data: { status: "CANCELLED", finishedAt: now } });
 }

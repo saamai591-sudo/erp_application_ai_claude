@@ -70,7 +70,7 @@ function shape(t: any, userId: number) {
   };
 }
 
-export type Scope = "mine" | "claimed" | "overdue" | "done" | "all";
+export type Scope = "mine" | "claimed" | "overdue" | "done" | "cancelled" | "all";
 
 export async function listTasks(userId: number, scope: Scope, canSeeAll: boolean) {
   const roleIds = await roleIdsOf(userId);
@@ -82,8 +82,9 @@ export async function listTasks(userId: number, scope: Scope, canSeeAll: boolean
   } else if (scope === "claimed") where = { ...active, claimedById: userId };
   else if (scope === "overdue") where = { ...active, dueAt: { lt: new Date() }, AND: [visibleWhere(userId, roleIds)] };
   else if (scope === "done") where = { status: "DONE", OR: [{ completedById: userId }, { claimedById: userId }, visibleWhere(userId, roleIds)] };
+  else if (scope === "cancelled") where = { status: "CANCELLED", AND: [visibleWhere(userId, roleIds)] };
   else where = { ...active, AND: [visibleWhere(userId, roleIds)], OR: [{ claimedById: null }, { claimedById: userId }] };
-  const rows = await prisma.workflowTask.findMany({ where, include: TASK_INCLUDE, orderBy: scope === "done" ? { completedAt: "desc" } : [{ dueAt: "asc" }, { createdAt: "asc" }], take: scope === "done" || scope === "all" ? 300 : 500 });
+  const rows = await prisma.workflowTask.findMany({ where, include: TASK_INCLUDE, orderBy: scope === "done" || scope === "cancelled" ? { completedAt: "desc" } : [{ dueAt: "asc" }, { createdAt: "asc" }], take: scope === "done" || scope === "cancelled" || scope === "all" ? 300 : 500 });
   return Promise.all(rows.map(async (t) => ({ ...shape(t, userId), progress: await repeatProgress(t) })));
 }
 

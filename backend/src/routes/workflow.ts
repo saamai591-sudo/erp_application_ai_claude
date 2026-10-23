@@ -44,7 +44,7 @@ router.get("/workflow/summary", async (req, res) => {
 
 router.get("/workflow/tasks", can(`${INBOX}.view`), async (req, res) => {
   try {
-    const scope = (["mine", "claimed", "overdue", "done", "all"].includes(String(req.query.scope)) ? String(req.query.scope) : "mine") as Scope;
+    const scope = (["mine", "claimed", "overdue", "done", "cancelled", "all"].includes(String(req.query.scope)) ? String(req.query.scope) : "mine") as Scope;
     res.json(await listTasks(uid(req), scope, await canAll(req)));
   } catch (e) {
     fail(res, e, "خطا در خواندن کارها");

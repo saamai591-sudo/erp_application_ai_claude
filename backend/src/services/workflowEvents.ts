@@ -22,6 +22,8 @@ export interface EventDef {
   canBranch?: boolean;
   /// مرحله‌ی «هر رویداد یک شاخه»ی باز را می‌بندد (بستن پیگیری پیش‌فاکتور)
   closesRepeat?: boolean;
+  /// فرایندِ لغوشده‌ی این پیش‌فاکتور را دوباره از اول شروع می‌کند (مثل تایید دوباره)؛ فقط برای پیش‌فاکتور تاییدشده
+  restarts?: boolean;
 }
 
 export const WORKFLOW_EVENTS: EventDef[] = [
@@ -32,6 +34,7 @@ export const WORKFLOW_EVENTS: EventDef[] = [
   { key: "SALES_INVOICE_CREATED", title: "فاکتور فروشِ مربوط به پیش‌فاکتور ثبت شد", rootType: "SALES_QUOTE", canComplete: true },
   { key: "TAX_INVOICE_SENT", title: "فاکتورِ مربوط به پیش‌فاکتور به سامانه مودیان ارسال شد", rootType: "SALES_QUOTE", canComplete: true },
   { key: "SALES_QUOTE_FOLLOWUP_CLOSED", title: "پیگیری پیش‌فاکتور بسته شد", rootType: "SALES_QUOTE", closesRepeat: true },
+  { key: "SALES_QUOTE_FOLLOWUP_REOPENED", title: "پیگیری پیش‌فاکتور بازگشایی شد", rootType: "SALES_QUOTE", restarts: true },
 ];
 /// رویدادهایی که مرحله‌ی بعد از یک مرحله‌ی «هر رویداد یک شاخه» (شاخه‌ی هر حواله) می‌تواند با آن‌ها بسته شود: فقط اسنادی که به حواله برمی‌گردند (deliveryDocsOf)
 export const BRANCH_STEP_EVENTS = new Set(["SALES_INVOICE_CREATED", "TAX_INVOICE_SENT"]);
@@ -133,6 +136,7 @@ export async function resolveRoots(eventKey: string, docId: number): Promise<num
     case "SALES_QUOTE_APPROVED":
     case "SALES_QUOTE_UNAPPROVED":
     case "SALES_QUOTE_FOLLOWUP_CLOSED":
+    case "SALES_QUOTE_FOLLOWUP_REOPENED":
       return [docId];
     case "RECEIPT_APPROVED": {
       const lines = await prisma.receiptSettlementLine.findMany({ where: { receiptId: docId }, select: { salesQuoteId: true, salesOrderId: true } });
@@ -205,6 +209,7 @@ export async function docNumberOf(eventKey: string, docId: number): Promise<{ do
     case "SALES_QUOTE_APPROVED":
     case "SALES_QUOTE_UNAPPROVED":
     case "SALES_QUOTE_FOLLOWUP_CLOSED":
+    case "SALES_QUOTE_FOLLOWUP_REOPENED":
       return { docType: "SALES_QUOTE", docNumber: (await prisma.salesQuote.findUnique({ where: { id: docId }, select: { number: true } }))?.number ?? null };
     case "RECEIPT_APPROVED":
       return { docType: "RECEIPT", docNumber: (await prisma.receipt.findUnique({ where: { id: docId }, select: { number: true } }))?.number ?? null };
