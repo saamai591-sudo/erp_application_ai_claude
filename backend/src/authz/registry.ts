@@ -609,7 +609,10 @@ export const REGISTRY: ModuleDef[] = [
       {
         key: "settings",
         title: "تنظیمات",
-        forms: [{ key: "attendance-shifts", title: "شیفت", baseActions: CRUD }],
+        forms: [
+          { key: "attendance-shifts", title: "شیفت", baseActions: CRUD },
+          { key: "attendance-factors", title: "عوامل تردد", baseActions: CRUD },
+        ],
       },
       {
         key: "operations",
@@ -632,7 +635,10 @@ export const REGISTRY: ModuleDef[] = [
       {
         key: "reports",
         title: "گزارش",
-        forms: [{ key: "attendance-worksheet", title: "کارکرد روزانه", baseActions: ["view"] }],
+        forms: [
+          { key: "attendance-worksheet", title: "کارکرد روزانه", baseActions: ["view"] },
+          { key: "attendance-factor-results", title: "نتایج عوامل تردد", baseActions: ["view"] },
+        ],
       },
     ],
   },

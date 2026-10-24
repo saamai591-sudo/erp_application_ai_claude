@@ -453,7 +453,10 @@ const RAW_MODULES: ModuleGroup[] = [
     subModules: [
       {
         title: "تنظیمات",
-        items: [{ key: "attendance-shifts", label: "شیفت", list: "/attendance-shifts", create: "/attendance-shifts/new", icon: "calendar" }],
+        items: [
+          { key: "attendance-shifts", label: "شیفت", list: "/attendance-shifts", create: "/attendance-shifts/new", icon: "calendar" },
+          { key: "attendance-factors", label: "عوامل تردد", list: "/attendance-factors", create: "/attendance-factors/new", icon: "sliders" },
+        ],
       },
       {
         title: "عملیات",
@@ -465,7 +468,10 @@ const RAW_MODULES: ModuleGroup[] = [
       },
       {
         title: "گزارش",
-        items: [{ key: "attendance-worksheet", label: "کارکرد روزانه", list: "/attendance-worksheet", icon: "ledger", type: "report" }],
+        items: [
+          { key: "attendance-worksheet", label: "کارکرد روزانه", list: "/attendance-worksheet", icon: "ledger", type: "report" },
+          { key: "attendance-factor-results", label: "نتایج عوامل تردد", list: "/attendance-factor-results", icon: "ledger", type: "report" },
+        ],
       },
     ],
   },

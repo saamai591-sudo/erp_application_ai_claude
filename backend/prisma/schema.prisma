@@ -5347,6 +5347,7 @@ model WorkCalendarMonth {
   loanSuspensionsTo   LoanSuspension[]  @relation("LoanSuspensionTo")
   employeeParamValues PayrollEmployeeParameterValue[]
   salaryAccountMonths EmployeeSalaryAccount[]
+  attendanceMethods AttendanceFactorMethod[] @relation("AttendanceMethodExecMonth")
 
   @@unique([calendarId, month])
   @@unique([year, month])
@@ -6327,4 +6328,60 @@ model AttendanceShiftAssignment {
 
   @@unique([employeeId, fromDate])
   @@index([shiftId])
+}
+
+// ── مدیریت تردد: عوامل و فرمول (روزانه / ماهانه) ──
+
+enum AttendanceFactorLevel {
+  /// برای هر روزِ هر کارمند از متغیرهای کارکرد همان روز محاسبه می‌شود
+  DAY
+  /// برای هر ماهِ هر کارمند از تجمیع عوامل/متغیرهای روزانه و عوامل ماهانه‌ی دیگر محاسبه می‌شود
+  MONTH
+}
+
+enum AttendanceValueType {
+  NUMBER
+  /// زمان؛ مقدار به دقیقه نگه‌داری و به‌صورت ساعت:دقیقه نمایش داده می‌شود
+  TIME
+  DAYS
+}
+
+/// عامل تردد (مثلاً «اضافه‌کار روزانه»، «سقف اضافه‌کار ماهانه»)؛ کلید داخلی (AF<id>) را سیستم می‌سازد و به کاربر نشان داده نمی‌شود
+model AttendanceFactor {
+  id          Int                     @id @default(autoincrement())
+  key         String                  @unique
+  title       String                  @unique
+  level       AttendanceFactorLevel
+  valueType   AttendanceValueType     @default(TIME)
+  isActive    Boolean                 @default(true)
+  description String?
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  methods     AttendanceFactorMethod[]
+}
+
+/// روش محاسبه‌ی عامل از «ماه اجرا» (ماه تقویم کاری) به بعد؛ روشِ مؤثر هر ماه = آخرین روشی که ماه اجرایش ≤ آن ماه است
+model AttendanceFactorMethod {
+  id                  Int                          @id @default(autoincrement())
+  factorId            Int
+  execCalendarMonthId Int
+  createdAt           DateTime                     @default(now())
+  updatedAt           DateTime                     @updatedAt
+  factor              AttendanceFactor             @relation(fields: [factorId], references: [id], onDelete: Cascade)
+  execCalendarMonth   WorkCalendarMonth            @relation("AttendanceMethodExecMonth", fields: [execCalendarMonthId], references: [id], onDelete: Restrict)
+  branches            AttendanceFactorMethodBranch[]
+
+  @@unique([factorId, execCalendarMonthId])
+}
+
+/// شاخه‌های روش: از بالا اولین شاخه‌ای که شرطش برقرار است اجرا می‌شود (شرط خالی فقط برای آخرین شاخه)
+model AttendanceFactorMethodBranch {
+  id            Int                    @id @default(autoincrement())
+  methodId      Int
+  seq           Int
+  conditionText String?
+  formulaText   String
+  method        AttendanceFactorMethod @relation(fields: [methodId], references: [id], onDelete: Cascade)
+
+  @@unique([methodId, seq])
 }

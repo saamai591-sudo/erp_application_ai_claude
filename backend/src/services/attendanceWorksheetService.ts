@@ -33,6 +33,10 @@ interface Win {
   segEndAbs: number | null;
   wsAbs: number;
   weAbs: number;
+  /** برنامه‌ی همان روز شیفت: استراحت، ساعت مرخصی و ساعت کاری خالص (مجموع بازه‌ها − استراحت) */
+  dayBreak: number;
+  dayLeave: number;
+  dayNet: number;
   /** تاریخ شروع انتسابِ مؤثر (برای تقدمِ انتساب تازه‌تر در مرز) */
   asgFrom: number;
   punches: { id: number; abs: number; manual: boolean }[];
@@ -57,6 +61,11 @@ function windowsOf(asgs: Asg[], timelines: Map<number, TimelineRow[]>, employeeI
     timelines.set(a.shift.id, tl);
   }
   const base = day * DAY;
+  const dayDef = (a.shift.days ?? []).find((x: any) => x.dayNo === tl!.find((t) => t.dayIdx === idx)?.dayNo);
+  const segTotal = dayDef && dayDef.isWorkDay ? (dayDef.segments ?? []).reduce((n: number, x: any) => n + (x.endMinute - x.startMinute), 0) : 0;
+  const dayBreak = dayDef && dayDef.isWorkDay ? dayDef.breakMinutes : 0;
+  const dayNet = Math.max(0, segTotal - dayBreak);
+  const dayLeave = dayDef && dayDef.isWorkDay ? (dayDef.leaveMinutes ?? dayNet) : 0;
   return tl
     .filter((t) => t.dayIdx === idx)
     .map((t) => ({
@@ -70,6 +79,9 @@ function windowsOf(asgs: Asg[], timelines: Map<number, TimelineRow[]>, employeeI
       segEndAbs: t.segEnd === null ? null : base + t.segEnd,
       wsAbs: base + t.wsRel,
       weAbs: base + t.weRel,
+      dayBreak,
+      dayLeave,
+      dayNet,
       asgFrom: dayNum(a!.fromDate),
       punches: [],
     }));
@@ -169,6 +181,9 @@ export async function buildWorksheet(opts: { from: Date; to: Date; employeeId?: 
         rest: w.rest,
         shiftTitle: w.shiftTitle,
         dayNo: w.dayNo,
+        dayBreakMinutes: w.dayBreak,
+        dayLeaveMinutes: w.dayLeave,
+        dayNetMinutes: w.dayNet,
         segStartClock: w.segStartAbs === null ? null : clockOf(w.segStartAbs),
         segEndClock: w.segEndAbs === null ? null : clockOf(w.segEndAbs),
         segEndsNextDay: w.segEndAbs !== null && w.segEndAbs - w.workDay * DAY >= DAY,

@@ -7,7 +7,11 @@
 // توابع: MIN(...), MAX(...), ROUND(x[, ارقام]), PROGRESSIVE([P:جدول], مبلغ). عملگرها: + - * / و پرانتز.
 // شرط: مقایسه‌ها (> >= < <= = <>) با AND/OR (و/یا) و پرانتز؛ شرط خالی = همیشه برقرار.
 
-export type Ns = "D" | "C" | "P" | "B" | "S";
+import { AGG_VARIANTS, ATT_BASE_INFO, DAY_VARS } from "./attendanceFormulaDefs";
+
+// V F A T M = نام‌فضاهای فرمول‌ساز تردد (attendanceFormulaDefs.ts)؛ در گویش حقوق پذیرفته نمی‌شوند و برعکس
+export type Ns = "D" | "C" | "P" | "B" | "S" | "V" | "F" | "A" | "T" | "M";
+export type Dialect = "PAYROLL" | "ATTENDANCE";
 
 export type Node =
   | { t: "num"; v: number }
@@ -127,7 +131,7 @@ function tokenize(src: string): Tok[] {
 
 class Parser {
   p = 0;
-  constructor(public toks: Tok[]) {}
+  constructor(public toks: Tok[], public dialect: Dialect = "PAYROLL") {}
   peek() {
     return this.toks[this.p];
   }
@@ -160,7 +164,7 @@ class Parser {
       if (!isFinite(v)) throw new FormulaError(`عدد نامعتبر «${t.s}»`);
       return { t: "num", v };
     }
-    if (t.k === "ref") return parseRef(t.s);
+    if (t.k === "ref") return parseRef(t.s, this.dialect);
     if (t.k === "lp") {
       const n = this.expr();
       const c = this.next();
@@ -227,12 +231,28 @@ class Parser {
   }
 }
 
-function parseRef(raw: string): Node {
-  const m = /^([DCPBS]):([A-Za-z0-9_]+)(?::([A-Za-z_]+))?$/.exec(raw.trim());
-  if (!m) throw new FormulaError(`عملوند نامعتبر [${raw}]`);
+const DIALECT_NS: Record<Dialect, string> = { PAYROLL: "DCPBS", ATTENDANCE: "VFATMPB" };
+
+function parseRef(raw: string, dialect: Dialect = "PAYROLL"): Node {
+  const m = /^([A-Z]):([A-Za-z0-9_]+)(?::([A-Za-z_]+))?$/.exec(raw.trim());
+  if (!m || !DIALECT_NS[dialect].includes(m[1])) throw new FormulaError(`عملوند نامعتبر [${raw}]`);
   const ns = m[1] as Ns;
   const key = ns === "D" ? m[2] : m[2].toUpperCase();
   const variant = (m[3] ?? "").toUpperCase();
+  if (dialect === "ATTENDANCE") {
+    if (ns === "V") {
+      if (!DAY_VARS[key]) throw new FormulaError(`متغیر روز ناشناخته [${raw}]`);
+    } else if (ns === "B") {
+      if (!ATT_BASE_INFO[key]) throw new FormulaError(`اطلاعات پایه‌ی ناشناخته [${raw}]`);
+    } else if (ns === "T" && !DAY_VARS[key]) throw new FormulaError(`متغیر روز ناشناخته [${raw}]`);
+    if (ns === "A" || ns === "T") {
+      const v = variant || "SUM";
+      if (!AGG_VARIANTS[v]) throw new FormulaError(`نوع تجمیع [${raw}] نامعتبر است`);
+      return { t: "ref", ns, key, variant: v };
+    }
+    if (variant) throw new FormulaError(`[${raw}] نوع مقدار ندارد`);
+    return { t: "ref", ns, key, variant: "" };
+  }
   if (ns === "D") {
     const v = variant || "VALUE";
     if (!DECREE_VARIANTS[v]) throw new FormulaError(`نوع مقدار [${raw}] برای عامل حکم نامعتبر است`);
@@ -249,18 +269,18 @@ function parseRef(raw: string): Node {
   return { t: "ref", ns, key, variant: "" };
 }
 
-export function parseFormula(src: string): Node {
+export function parseFormula(src: string, dialect: Dialect = "PAYROLL"): Node {
   const toks = tokenize(src);
   if (toks.length === 0) throw new FormulaError("فرمول خالی است");
-  const ps = new Parser(toks);
+  const ps = new Parser(toks, dialect);
   const n = ps.expr();
   if (ps.p < toks.length) throw new FormulaError(`بخش اضافه در انتهای فرمول: «${toks[ps.p].s}»`);
   return n;
 }
 
-export function parseCondition(src: string): Cond {
+export function parseCondition(src: string, dialect: Dialect = "PAYROLL"): Cond {
   const toks = tokenize(src);
-  const ps = new Parser(toks);
+  const ps = new Parser(toks, dialect);
   const c = ps.cond();
   if (ps.p < toks.length) throw new FormulaError(`بخش اضافه در انتهای شرط: «${toks[ps.p].s}»`);
   return c;

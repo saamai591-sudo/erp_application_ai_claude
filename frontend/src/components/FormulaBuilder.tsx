@@ -28,6 +28,14 @@ interface Palette {
   params: { key: string; title: string; type: string; personnel?: "HR" | "PAYROLL" | null }[];
 }
 
+/** پالت فرمول‌ساز تردد (سرور: GET /attendance-factors/palette): دسته‌ها (متغیر روز، عامل روزانه، تجمیع …) ← مورد ← نوع تجمیع */
+interface AttPalette {
+  level: "DAY" | "MONTH";
+  groups: { ns: string; title: string; items: { key: string; title: string }[]; variants: { key: string; title: string }[] | null }[];
+  baseInfo: { key: string; title: string }[];
+  params: { key: string; title: string; type: string }[];
+}
+
 type Area = "cond" | "calc";
 /** یک ناحیه‌ی قابل ویرایش: شرط یا فرمولِ شاخه‌ی b */
 interface Slot {
@@ -71,20 +79,23 @@ interface Draft {
 }
 
 export function FormulaBuilder({
-  basis,
+  basis = "payroll",
   factorId,
   factorTitle,
-  method,
+  method = "CALCULATED",
+  attendanceLevel,
   branches,
   basisIds,
   onClose,
   onSave,
 }: {
-  basis: "decree" | "payroll";
+  basis?: "decree" | "payroll";
   factorId: string;
   /** عنوان عاملی که فرمولش تعریف می‌شود؛ در عنوان پنجره نمایش داده می‌شود */
   factorTitle: string;
-  method: string;
+  method?: string;
+  /** حالت «عوامل تردد»: سطح عامل (روزانه/ماهانه)؛ پالت و بررسی از مسیرهای /attendance-factors می‌آید */
+  attendanceLevel?: "DAY" | "MONTH";
   branches: FormulaBranch[];
   /** مبناهایی که این عامل عضو آن‌هاست (برای کنترل ارجاع دوری هنگام «بررسی») */
   basisIds?: number[];
@@ -92,6 +103,8 @@ export function FormulaBuilder({
   onSave: (branches: FormulaBranch[]) => void;
 }) {
   const [pal, setPal] = useState<Palette | null>(null);
+  const [attPal, setAttPal] = useState<AttPalette | null>(null);
+  const att = !!attendanceLevel;
   const [br, setBr] = useState<Draft[]>(() =>
     (branches.length ? branches : [{ conditionText: "", formulaText: "" }]).map((x) => ({ cond: tokenize(x.conditionText), calc: tokenize(x.formulaText) }))
   );
@@ -114,6 +127,10 @@ export function FormulaBuilder({
 
   useEffect(() => {
     // عامل‌های قابل استفاده به نوع محاسبه‌ی عاملِ در دست تعریف بستگی دارد (سرور بر اساس عامل انتخاب‌شده فیلتر می‌کند)
+    if (attendanceLevel) {
+      api.get(`/attendance-factors/palette?level=${attendanceLevel}&factorId=${encodeURIComponent(factorId)}`).then(setAttPal).catch((e) => setErr(e.message));
+      return;
+    }
     api.get(`/payroll-methods/palette?basis=${basis}&factorId=${encodeURIComponent(factorId)}`).then(setPal).catch((e) => setErr(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -133,15 +150,24 @@ export function FormulaBuilder({
       for (const p of pal.params) m.set(`P:${p.key}`, p.title);
       for (const p of pal.bases ?? []) m.set(`P:${p.key}`, p.title);
     }
+    if (attPal) {
+      for (const g of attPal.groups)
+        for (const i of g.items) {
+          if (g.variants) for (const v of g.variants) m.set(`${g.ns}:${i.key}:${v.key}`.toUpperCase(), `${i.title} — ${v.title}`);
+          else m.set(`${g.ns}:${i.key}`.toUpperCase(), i.title);
+        }
+      for (const b of attPal.baseInfo) m.set(`B:${b.key}`, b.title);
+      for (const p of attPal.params) m.set(`P:${p.key}`, p.title);
+    }
     return m;
-  }, [pal]);
+  }, [pal, attPal]);
 
   function chipText(tok: string): { text: string; kind: "ref" | "op" | "num" | "fn" } {
     if (tok.startsWith("[")) {
       const raw = tok.slice(1, -1).toUpperCase();
       const parts = raw.split(":");
       // نوع پیش‌فرض VALUE
-      const norm = (parts[0] === "D" || parts[0] === "C") && parts.length === 2 ? `${raw}:VALUE` : raw;
+      const norm = (parts[0] === "D" || parts[0] === "C") && parts.length === 2 ? `${raw}:VALUE` : (parts[0] === "A" || parts[0] === "T") && parts.length === 2 ? `${raw}:SUM` : raw;
       return { text: labelOf.get(norm) ?? labelOf.get(raw) ?? tok, kind: "ref" };
     }
     const u = tok.toUpperCase();
@@ -318,7 +344,9 @@ export function FormulaBuilder({
   async function check() {
     setErr(null);
     try {
-      const r = await api.post("/payroll-methods/validate", { basis, factorId: Number(factorId) || null, method, branches: toBranches(), basisIds: basisIds ?? [] }, { silent: true } as any);
+      const r = attendanceLevel
+        ? await api.post("/attendance-factors/validate", { level: attendanceLevel, factorId: Number(factorId) || null, branches: toBranches() }, { silent: true } as any)
+        : await api.post("/payroll-methods/validate", { basis, factorId: Number(factorId) || null, method, branches: toBranches(), basisIds: basisIds ?? [] }, { silent: true } as any);
       if (r.ok) setOk(true);
       else setErr(r.error);
     } catch (e) {
@@ -331,6 +359,16 @@ export function FormulaBuilder({
   const classes = payrollCat?.classes ?? [];
   const factors = cat === "DECREE" ? (pal?.decree.factors.map((f) => ({ key: f.code, title: f.title })) ?? []) : (classes.find((c) => c.kind === cls)?.factors ?? []);
   const variants = cat === "DECREE" ? (pal?.decree.variants ?? []) : (payrollCat?.variants ?? []);
+
+  // حالت تردد: دسته ← مورد ← (نوع تجمیع)
+  const attCats = [...(attPal?.groups.map((g) => ({ key: g.ns, title: g.title })) ?? []), { key: "BASE", title: "اطلاعات پایه" }];
+  const attGroup = attPal?.groups.find((g) => g.ns === cat);
+  const attItems = cat === "BASE" ? [] : attGroup?.items ?? [];
+  const attPick = (i: { key: string; title: string }) => {
+    if (!attGroup) return;
+    if (attGroup.variants) setFac(i.key);
+    else push(`[${attGroup.ns}:${i.key}]`);
+  };
 
   const cats: { key: string; title: string }[] = [
     { key: "DECREE", title: "عامل حکم" },
@@ -525,7 +563,15 @@ export function FormulaBuilder({
         </span>
       </div>
 
-      {tab === "factors" && (
+      {tab === "factors" && att && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+          {col("دسته", attCats.map((c) => item(c.title, cat === c.key, () => { setCat(c.key); setFac(""); })))}
+          {col(cat === "BASE" ? "اطلاعات پایه" : "مورد", cat === "BASE" ? attPal?.baseInfo.map((b) => item(b.title, false, () => push(`[B:${b.key}]`))) : attItems.map((i) => item(i.title, fac === i.key, () => attPick(i))))}
+          {col("مقدار", attGroup?.variants && fac ? attGroup.variants.map((v) => item(v.title, false, () => push(`[${attGroup.ns}:${fac}:${v.key}]`))) : null)}
+        </div>
+      )}
+
+      {tab === "factors" && !att && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
           {col("دسته", cats.map((c) => item(c.title, cat === c.key, () => { setCat(c.key); setCls(""); setFac(""); })))}
           {col(
@@ -575,6 +621,11 @@ export function FormulaBuilder({
             <button type="button" className="btn secondary" disabled={!num || num === "." || num.endsWith(".")} onMouseDown={(e) => e.preventDefault()} onClick={() => { push(num); setNum(""); }}>افزودن عدد</button>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 6 }}>
+            {att && attPal?.params.map((p) => (
+              <button key={p.key} type="button" className="btn secondary" onMouseDown={(e) => e.preventDefault()} onClick={() => push(`[P:${p.key}]`)}>
+                {p.title}
+              </button>
+            ))}
             {pal?.params.filter((p) => p.type !== "BRACKETS").map((p) => (
               <button key={p.key} type="button" className="btn secondary" onMouseDown={(e) => e.preventDefault()} onClick={() => push(`[P:${p.key}]`)} title={p.personnel ? "مقدار اختصاصی هر کارمند؛ برای کارمندی که مقداری ندارد صفر است" : undefined}>
                 {p.title}{p.personnel ? " (پرسنلی)" : ""}
