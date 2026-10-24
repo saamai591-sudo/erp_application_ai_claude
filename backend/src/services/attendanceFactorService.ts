@@ -383,6 +383,7 @@ function dayVariables(rows: any[]): { vars: Record<string, number>; incomplete: 
   const first = rows[0];
   const vars: Record<string, number> = {
     PLANNED: isWork ? first.dayNetMinutes : 0,
+    PLANNED_GROSS: isWork ? first.dayGrossMinutes : 0,
     PRESENCE: sum(ok, "presenceMinutes"),
     REST_PRESENCE: sum(rest.filter((r) => r.status === "WORK_ON_REST"), "presenceMinutes"),
     LATE: sum(ok, "lateMinutes"),

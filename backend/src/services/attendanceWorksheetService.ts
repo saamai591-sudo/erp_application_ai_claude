@@ -37,6 +37,7 @@ interface Win {
   dayBreak: number;
   dayLeave: number;
   dayNet: number;
+  dayGross: number;
   /** تاریخ شروع انتسابِ مؤثر (برای تقدمِ انتساب تازه‌تر در مرز) */
   asgFrom: number;
   punches: { id: number; abs: number; manual: boolean }[];
@@ -82,6 +83,7 @@ function windowsOf(asgs: Asg[], timelines: Map<number, TimelineRow[]>, employeeI
       dayBreak,
       dayLeave,
       dayNet,
+      dayGross: segTotal,
       asgFrom: dayNum(a!.fromDate),
       punches: [],
     }));
@@ -185,6 +187,7 @@ export async function buildWorksheet(opts: { from: Date; to: Date; employeeId?: 
         dayBreakMinutes: w.dayBreak,
         dayLeaveMinutes: w.dayLeave,
         dayNetMinutes: w.dayNet,
+        dayGrossMinutes: w.dayGross,
         segStartClock: w.segStartAbs === null ? null : clockOf(w.segStartAbs),
         segEndClock: w.segEndAbs === null ? null : clockOf(w.segEndAbs),
         segEndsNextDay: w.segEndAbs !== null && w.segEndAbs - w.workDay * DAY >= DAY,
