@@ -5,6 +5,7 @@ import { getCalendarMonth } from "./workCalendarService";
 import { getParameterValue } from "./payrollParameterService";
 import { evaluate, evaluateCondition, parseCondition, parseFormula, collectRefs, collectCondRefs, FormulaError, type Cond, type EvalEnv, type Node, type Ns, type RefInfo } from "./payrollFormula";
 import { bandOverlap, effectiveBands, type EffectiveBand } from "./attendanceTimeBandService";
+import { leaveForDay, loadApprovedLeave, type DayLeave } from "./attendanceLeaveService";
 import { BAND_KEY_RE } from "./attendanceFormulaDefs";
 import { AGG_HINTS, ATT_BASE_HINTS, ATT_GROUP_HINTS, DAY_VAR_HINTS } from "./attendanceFormulaHints";
 import { AGG_VARIANTS, ALLOWED_NS, ATT_BASE_INFO, ATT_LEVEL_FA, ATT_VALUE_TYPE_FA, DAY_VARS, type AttLevel, type AttValueType } from "./attendanceFormulaDefs";
@@ -160,7 +161,10 @@ export async function validateBranches(factor: { id: number | null; key: string;
   const parsed = branches.map((b, i) => parseBranch(b, i, multi));
   const all = await prisma.attendanceFactor.findMany({ include: { methods: { include: { branches: true } } } });
   const byKey = new Map(all.map((f) => [f.key, f]));
-  const bandRows = await prisma.attendanceTimeBand.findMany({ select: { key: true, title: true, isActive: true } });
+  const bandRows = [
+    ...(await prisma.attendanceTimeBand.findMany({ select: { key: true, title: true, isActive: true } })),
+    ...(await prisma.attendanceLeaveType.findMany({ select: { key: true, title: true, isActive: true } })),
+  ];
   const myRefs: RefInfo[] = [];
   parsed.forEach((p, i) => {
     const tag = multi ? `شاخه‌ی ${i + 1}: ` : "";
@@ -178,8 +182,9 @@ export async function validateBranches(factor: { id: number | null; key: string;
       }
       if ((r.ns === "V" || r.ns === "T") && BAND_KEY_RE.test(r.key)) {
         const bd = bandRows.find((x) => x.key === r.key);
-        if (!bd) throw new AttendanceError(`${tag}بازه‌ی زمانیِ ارجاع‌شده یافت نشد`);
-        if (!bd.isActive) throw new AttendanceError(`${tag}بازه‌ی زمانی «${bd.title}» غیرفعال است`);
+        const what = r.key.startsWith("LV") ? "نوع مرخصی" : "بازه‌ی زمانی";
+        if (!bd) throw new AttendanceError(`${tag}${what}ِ ارجاع‌شده یافت نشد`);
+        if (!bd.isActive) throw new AttendanceError(`${tag}${what} «${bd.title}» غیرفعال است`);
       }
       if (r.ns === "P") {
         // پارامتر مبنا: مقدار ثابتِ عددی/مبلغی (نه جدول پلکانی/مبنا/پرسنلی)
@@ -261,11 +266,13 @@ export async function deleteMethod(factorId: number, methodId: number) {
 // ───────────────────────── پالت فرمول‌ساز ─────────────────────────
 
 export async function palette(level: AttLevel, factorId?: number) {
-  const [factors, params, bandRows] = await Promise.all([
+  const [factors, params, bandRows, leaveRows] = await Promise.all([
     prisma.attendanceFactor.findMany({ where: { isActive: true }, orderBy: { id: "asc" } }),
     prisma.payrollParameter.findMany({ where: { isActive: true, kind: "CONSTANT", type: { in: ["NUMBER", "AMOUNT"] } }, orderBy: { id: "asc" } }),
     prisma.attendanceTimeBand.findMany({ where: { isActive: true }, orderBy: { id: "asc" } }),
+    prisma.attendanceLeaveType.findMany({ where: { isActive: true }, orderBy: { id: "asc" } }),
   ]);
+  const leaveItems = leaveRows.map((t) => ({ key: t.key, title: `مرخصی ${t.title}`, hint: [t.description, "مدت مرخصی تاییدشده‌ی این نوع در همان روز (دقیقه): مرخصی تمام‌روز = «ساعت مرخصی» روز شیفت؛ مرخصی ساعتی = بخشی از ساعت درخواستی که با بازه‌های کاری هم‌پوشانی دارد. برای روز غیرکاری صفر است."].filter(Boolean).join(" — ") }));
   const bandItems = bandRows.map((b) => ({ key: b.key, title: `حضور در ${b.title}`, hint: [b.description, "کل حضور (جفت‌ترددها) در این بازه‌ی ساعتی، اعم از داخل شیفت و اضافه‌کار؛ ساعت بازه در «بازه‌های زمانی» تعریف می‌شود و به شیفت وابسته نیست. حداقل مدت یا ضریب را در فرمول بگذارید."].filter(Boolean).join(" — ") }));
   const self = factorId ? factors.find((f) => f.id === factorId) : undefined;
   const pick = (lv: AttLevel) =>
@@ -280,10 +287,11 @@ export async function palette(level: AttLevel, factorId?: number) {
           { ns: "V", title: "متغیرهای روز", hint: ATT_GROUP_HINTS.V, items: dayVars, variants: null },
           { ns: "F", title: "عوامل روزانه", hint: ATT_GROUP_HINTS.F, items: pick("DAY"), variants: null },
           ...(bandItems.length ? [{ ns: "V", key: "BANDS", title: "حضور در بازه‌های زمانی", hint: ATT_GROUP_HINTS.BANDS, items: bandItems, variants: null }] : []),
+          ...(leaveItems.length ? [{ ns: "V", key: "LEAVES", title: "مرخصی", hint: ATT_GROUP_HINTS.LEAVES, items: leaveItems, variants: null }] : []),
         ]
       : [
           { ns: "A", title: "تجمیع عوامل روزانه در ماه", hint: ATT_GROUP_HINTS.A, items: pick("DAY"), variants: aggVariants },
-          { ns: "T", title: "تجمیع متغیرهای روز در ماه", hint: ATT_GROUP_HINTS.T, items: [...dayVars, ...bandItems], variants: aggVariants },
+          { ns: "T", title: "تجمیع متغیرهای روز در ماه", hint: ATT_GROUP_HINTS.T, items: [...dayVars, ...bandItems, ...leaveItems], variants: aggVariants },
           { ns: "M", title: "عوامل ماهانه", hint: ATT_GROUP_HINTS.M, items: pick("MONTH"), variants: null },
         ];
   return {
@@ -385,7 +393,7 @@ function runBranches(f: Compiled, env: EvalEnv): Val {
 }
 
 /** متغیرهای یک روز از ردیف‌های «کارکرد روزانه» همان روز */
-function dayVariables(rows: any[], bands: EffectiveBand[] = []): { vars: Record<string, number>; incomplete: boolean; shiftTitle: string } {
+function dayVariables(rows: any[], bands: EffectiveBand[] = [], leave?: DayLeave, leaveKeys: string[] = []): { vars: Record<string, number>; incomplete: boolean; shiftTitle: string } {
   const work = rows.filter((r) => !r.rest);
   const rest = rows.filter((r) => r.rest);
   const ok = work.filter((r) => r.status === "OK");
@@ -408,13 +416,16 @@ function dayVariables(rows: any[], bands: EffectiveBand[] = []): { vars: Record<
     IS_REST_DAY: isWork ? 0 : 1,
     IS_SHIFT_OFF_DAY: !isWork && first.dayType === "SHIFT_OFF" ? 1 : 0,
     IS_OFFICIAL_HOLIDAY: !isWork && first.dayType === "OFFICIAL_HOLIDAY" ? 1 : 0,
-    ABSENT: isWork && work.every((r) => r.status === "NO_PUNCH") ? 1 : 0,
+    // مرخصی روزانه‌ی تاییدشده غیبت را برمی‌دارد؛ مرخصی ساعتی فقط وقتی که کل ساعت کاری را بپوشاند
+    ABSENT: isWork && work.every((r) => r.status === "NO_PUNCH") && !leave?.hasDaily && (leave?.total ?? 0) < first.dayNetMinutes ? 1 : 0,
+    LEAVE_TAKEN: leave?.total ?? 0,
     ROWS: work.length,
     INCOMPLETE_ROWS: rows.filter((r) => r.status === "INCOMPLETE").length,
   };
   // حضور در هر بازه‌ی زمانی: اشتراک همه‌ی جفت‌ترددهای آن روز (ردیف‌های کامل، شامل روز استراحت) با بازه‌ی ساعتی؛ بازه‌ای که برای این ماه نسخه ندارد متغیرش نیست
   const pairs: [number, number][] = rows.filter((r) => r.status === "OK" || r.status === "WORK_ON_REST").flatMap((r) => r.pairsAbs ?? []);
   for (const b of bands) if (b.startMinute !== null && b.endMinute !== null) vars[b.key] = bandOverlap(pairs, b.startMinute, b.endMinute);
+  for (const k of leaveKeys) vars[k] = leave?.byKey[k] ?? 0;
   return { vars, incomplete: vars.INCOMPLETE_ROWS > 0, shiftTitle: first.shiftTitle };
 }
 
@@ -431,7 +442,9 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
   const from = cal.trafficStartDate, to = cal.trafficEndDate;
   const compiled = orderFactors(await compileFactors(cal.endDate));
   const bands = await effectiveBands(cal.endDate);
-  const bandTitle = new Map(bands.map((b) => [b.key, b.title]));
+  const leaveTypes = await prisma.attendanceLeaveType.findMany({ where: { isActive: true }, select: { key: true, title: true }, orderBy: { id: "asc" } });
+  const leaveKeys = leaveTypes.map((t) => t.key);
+  const bandTitle = new Map<string, string>([...bands.map((b) => [b.key, `حضور در ${b.title}`] as [string, string]), ...leaveTypes.map((t) => [t.key, `مرخصی ${t.title}`] as [string, string])]);
   const dayFactors = compiled.filter((f) => f.level === "DAY");
   const monthFactors = compiled.filter((f) => f.level === "MONTH");
   const showSet = new Set((await prisma.attendanceFactor.findMany({ where: { showInWorksheet: true }, select: { id: true } })).map((x) => x.id));
@@ -480,7 +493,7 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
     return undefined;
   };
   const labelOf = (ns: Ns, key: string, variant: string) => {
-    if ((ns === "V" || ns === "T") && bandTitle.has(key)) return `حضور در ${bandTitle.get(key)}${ns === "T" ? ` (${AGG_VARIANTS[variant] ?? variant})` : ""}`;
+    if ((ns === "V" || ns === "T") && bandTitle.has(key)) return `${bandTitle.get(key)}${ns === "T" ? ` (${AGG_VARIANTS[variant] ?? variant})` : ""}`;
     if (ns === "V" || ns === "T") return DAY_VARS[key] ? `${ns === "T" ? "تجمیع " : ""}${DAY_VARS[key]}${ns === "T" ? ` (${AGG_VARIANTS[variant] ?? variant})` : ""}` : key;
     if (ns === "F" || ns === "M") return factorTitle.get(key) ?? key;
     if (ns === "A") return `${factorTitle.get(key) ?? key} (${AGG_VARIANTS[variant] ?? variant})`;
@@ -493,6 +506,7 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
   };
 
   const ws = await buildWorksheet({ from, to, employeeId: opts.employeeId, employeeIds: opts.employeeIds, includeRest: true });
+  const approvedLeave = await loadApprovedLeave([...new Set(ws.rows.map((r: any) => r.employeeId as number))], dayNum(from), dayNum(to));
   const rowsByEmp = new Map<number, any[]>();
   for (const r of ws.rows) (rowsByEmp.get(r.employeeId) ?? rowsByEmp.set(r.employeeId, []).get(r.employeeId)!).push(r);
 
@@ -505,7 +519,7 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
     const dayRows: { date: string; vars: Record<string, number>; incomplete: boolean; shiftTitle: string; values: Record<string, Val> }[] = [];
 
     for (const date of dates) {
-      const dv = dayVariables(byDate.get(date)!, bands);
+      const dv = dayVariables(byDate.get(date)!, bands, leaveForDay(approvedLeave, empId, dayNum(new Date(date)), byDate.get(date)!), leaveKeys);
       const values: Record<string, Val> = {};
       const env: EvalEnv = {
         scalar: (ns, key) => {
@@ -586,7 +600,7 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
     from: dayStr(from),
     to: dayStr(to),
     factors: factorsOut,
-    bands: bands.map((b) => ({ key: b.key, title: `حضور در ${b.title}` })),
+    bands: [...bands.map((b) => ({ key: b.key, title: `حضور در ${b.title}` })), ...leaveTypes.map((t) => ({ key: t.key, title: `مرخصی ${t.title}` }))],
     employees,
     days,
     summary: { employees: employees.length, days: days.length, incompleteDays: days.filter((d) => d.incomplete).length, factorErrors: factorsOut.filter((f) => f.error).length },

@@ -4779,6 +4779,7 @@ model Employee {
   paymentPrepLines PayrollPaymentPrepLine[]
   attendancePunches AttendancePunch[]
   attendanceCorrections AttendanceCorrectionRequest[]
+  attendanceLeaveRequests AttendanceLeaveRequest[]
   attendanceShiftAssignments AttendanceShiftAssignment[]
   payrollIssueSettings PayrollIssueSetting[]
   id                     Int                  @id @default(autoincrement())
@@ -6469,4 +6470,72 @@ model AttendanceDayExceptionShift {
   shift       AttendanceShift        @relation(fields: [shiftId], references: [id], onDelete: Restrict)
 
   @@unique([exceptionId, shiftId])
+}
+
+// ── مدیریت تردد: نوع مرخصی و درخواست مرخصی ──
+
+enum AttendanceLeaveUnit {
+  DAY
+  HOUR
+  BOTH
+}
+
+/// نوع مرخصی (استحقاقی، استعلاجی، بدون حقوق …). کلید داخلی LV<id> را سیستم می‌سازد و متغیر روزِ «مرخصی <عنوان>» از آن می‌آید
+model AttendanceLeaveType {
+  id                 Int                       @id @default(autoincrement())
+  key                String                    @unique
+  title              String                    @unique
+  isActive           Boolean                   @default(true)
+  /// واحد درخواست: روزانه، ساعتی یا هر دو
+  unit               AttendanceLeaveUnit       @default(BOTH)
+  /// از مانده‌ی مرخصی کم شود؟ (مرحله‌ی «مانده‌ی مرخصی»؛ فعلاً فقط نگه‌داری می‌شود)
+  deductsBalance     Boolean                   @default(false)
+  /// تایید درخواست بدون پیوست (مدرک) ممکن نیست
+  requiresAttachment Boolean                   @default(false)
+  /// روز تعطیل وسط مرخصی جزو مرخصی حساب شود؟ (مرحله‌ی «مانده‌ی مرخصی»؛ فعلاً فقط نگه‌داری می‌شود)
+  countHolidays      Boolean                   @default(false)
+  description        String?
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  requests           AttendanceLeaveRequest[]
+}
+
+/// درخواست مرخصی: روزانه (از تاریخ تا تاریخ، startMinute/endMinute خالی) یا ساعتی (یک تاریخ + ساعت شروع/پایان)
+model AttendanceLeaveRequest {
+  id           Int                          @id @default(autoincrement())
+  number       Int                          @unique
+  employeeId   Int
+  leaveTypeId  Int
+  fromDate     DateTime                     @db.Date
+  toDate       DateTime                     @db.Date
+  /// فقط ساعتی (دقیقه از ۰۰:۰۰ همان روز)
+  startMinute  Int?
+  endMinute    Int?
+  reason       String
+  status       AttendanceCorrectionStatus   @default(PENDING)
+  decidedById  Int?
+  decidedAt    DateTime?
+  decisionNote String?
+  createdById  Int?
+  createdAt    DateTime                     @default(now())
+  updatedAt    DateTime                     @updatedAt
+  employee     Employee                     @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  leaveType    AttendanceLeaveType          @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+  attachments  AttendanceLeaveAttachment[]
+
+  @@index([employeeId, fromDate, toDate])
+}
+
+model AttendanceLeaveAttachment {
+  id           Int                    @id @default(autoincrement())
+  requestId    Int
+  fileName     String
+  mimeType     String
+  size         Int
+  data         Bytes
+  uploadedById Int?
+  createdAt    DateTime               @default(now())
+  request      AttendanceLeaveRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
 }

@@ -27,6 +27,7 @@ export const DAY_VARS: Record<string, string> = {
   OT_AFTER: "اضافه‌کار بعد از پایان بازه",
   BREAK: "مدت استراحت روز",
   LEAVE_MINUTES: "ساعت مرخصی روز (برای کسر از مانده)",
+  LEAVE_TAKEN: "مرخصی تاییدشده‌ی روز (همه‌ی انواع)",
   IS_WORK_DAY: "روز کاری است (۱ یا ۰)",
   IS_REST_DAY: "روز غیرکاری است: تعطیلی شیفت یا رسمی (۱ یا ۰)",
   IS_SHIFT_OFF_DAY: "روز تعطیلیِ شیفت است (۱ یا ۰)",
@@ -37,7 +38,7 @@ export const DAY_VARS: Record<string, string> = {
 };
 
 /** متغیر روزِ خودکارِ هر «بازه‌ی زمانی» (حضور در بازه): کلید TB<id>؛ عنوان و وجودش از جدول AttendanceTimeBand می‌آید */
-export const BAND_KEY_RE = /^TB\d+$/;
+export const BAND_KEY_RE = /^(TB|LV)\d+$/;
 
 export const AGG_VARIANTS: Record<string, string> = { SUM: "جمع ماه", MAX: "بیشترین روز", DAYS: "تعداد روزهای دارای مقدار" };
 

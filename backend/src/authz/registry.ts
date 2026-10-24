@@ -613,6 +613,7 @@ export const REGISTRY: ModuleDef[] = [
           { key: "attendance-shifts", title: "شیفت", baseActions: CRUD },
           { key: "attendance-factors", title: "عوامل تردد", baseActions: CRUD },
           { key: "attendance-time-bands", title: "بازه‌های زمانی", baseActions: CRUD },
+          { key: "attendance-leave-types", title: "نوع مرخصی", baseActions: CRUD },
         ],
       },
       {
@@ -621,6 +622,16 @@ export const REGISTRY: ModuleDef[] = [
         forms: [
           { key: "attendance-shift-assignments", title: "انتساب شیفت", baseActions: CRUD },
           { key: "attendance-day-exceptions", title: "استثنای روز", baseActions: CRUD },
+          {
+            key: "attendance-leave-requests",
+            title: "درخواست مرخصی",
+            baseActions: CRUD,
+            actions: [
+              { key: "approve", title: "تایید" },
+              { key: "reject", title: "رد" },
+              { key: "unapprove", title: "برگشت از تایید / رد" },
+            ],
+          },
           { key: "attendance-punches", title: "ورود و خروج", baseActions: CRUD },
           {
             key: "attendance-correction-requests",

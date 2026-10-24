@@ -40,6 +40,8 @@ export const USAGE_META: Record<string, UsageMeta> = {
   Job: { label: "شغل", base: "/jobs" },
   AttendanceShift: { label: "شیفت", base: "/attendance-shifts" },
   AttendanceShiftAssignment: { label: "انتساب شیفت", base: "/attendance-shift-assignments", title: (r) => `#${r.id}` },
+  AttendanceLeaveType: { label: "نوع مرخصی", base: "/attendance-leave-types" },
+  AttendanceLeaveRequest: { label: "درخواست مرخصی", base: "/attendance-leave-requests", title: (r) => `شماره ${r.number}` },
   AttendanceDayExceptionShift: { label: "استثنای روز تردد" },
   AttendanceDayException: { label: "استثنای روز تردد", base: "/attendance-day-exceptions" },
   AttendanceTimeBand: { label: "بازه‌ی زمانی تردد", base: "/attendance-time-bands" },
