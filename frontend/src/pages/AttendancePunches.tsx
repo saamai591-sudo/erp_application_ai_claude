@@ -30,6 +30,7 @@ export interface PunchRow {
   employeeName: string;
   date: string;
   workDate: string | null;
+  workRowNo: number | null;
   minute: number;
   time: string;
   source: string;
@@ -153,7 +154,7 @@ function PunchList() {
           { header: "کارمند", ...s((r) => r.employeeName) },
           { header: "تاریخ", ...s((r) => formatJalaliDate(r.date)), width: "110px" },
           { header: "ساعت", ...s((r) => toFaDigits(r.time)), width: "80px" },
-          { header: "روز کاری (دستی)", ...s((r) => (r.workDate ? formatJalaliDate(r.workDate) : "")), width: "140px" },
+          { header: "اختصاص دستی (روز کاری / ردیف)", ...s((r) => (r.workDate ? `${formatJalaliDate(r.workDate)} / ${toFaDigits(String(r.workRowNo ?? 1))}` : "")), width: "200px" },
           { header: "منبع", ...s((r) => r.sourceTitle), width: "130px" },
           {
             header: "درخواست اصلاح",
@@ -172,24 +173,58 @@ function PunchList() {
   );
 }
 
+interface WindowOpt {
+  workDate: string;
+  rowNo: number;
+  rest: boolean;
+  segStartClock: number | null;
+  segEndClock: number | null;
+  segEndsNextDay: boolean;
+  windowStart: { date: string; clock: number };
+  windowEnd: { date: string; clock: number };
+}
+const hm = (m: number) => toFaDigits(minutesToMask(m));
+/** برچسب یک پنجره در انتخابگر: «تاریخ روز کاری از ساعت … تا ساعت …» (بازه‌ی شیفت) + محدوده‌ی پنجره‌ی حضور */
+function windowLabel(o: WindowOpt): string {
+  const head = formatJalaliDate(o.workDate);
+  const seg = o.rest ? "روز استراحت" : `از ساعت ${hm(o.segStartClock as number)} تا ساعت ${hm(o.segEndClock as number)}${o.segEndsNextDay ? " (روز بعد)" : ""}`;
+  const ws = `${hm(o.windowStart.clock)}${o.windowStart.date < o.workDate ? " روز قبل" : o.windowStart.date > o.workDate ? " روز بعد" : ""}`;
+  const we = `${hm(o.windowEnd.clock)}${o.windowEnd.date > o.workDate ? " روز بعد" : ""}`;
+  return `${toFaDigits(head)} ${seg} — پنجره: ${ws} تا ${we}`;
+}
+
 function PunchForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { openTab } = useTabs();
   const cacheKey = `form:${location.pathname}:form`;
   // فرم داده‌ی ساده: تاریخ + کارمند + ساعت. بعد از ثبتِ تردد جدید، تاریخ و کارمند می‌مانند و فقط ساعت پاک می‌شود تا ترددهای بعدی سریع وارد شوند
-  const [form, setForm] = usePersistedState(cacheKey, { employeeId: "", date: localTodayIso(), time: "", workDate: "" });
+  const [form, setForm] = usePersistedState(cacheKey, { employeeId: "", date: localTodayIso(), time: "", workDate: "", workRowNo: "1" });
   const [meta, setMeta] = useState<{ canEdit: boolean; sourceTitle: string; correctionRequestId: number | null; correctionNumber: number | null; updatedAt?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const employees = useEmployeeOptions();
   const { flash } = useSavedFlash();
+  const [windowOpts, setWindowOpts] = useState<WindowOpt[]>([]);
+  const [windowNote, setWindowNote] = useState<string | null>(null);
+
+  // گزینه‌های «اختصاص دستی به پنجره»: پنجره‌های روز قبل/همان روز/روز بعد از تاریخ تردد از روی شیفتِ منتسب به کارمند
+  useEffect(() => {
+    setWindowOpts([]);
+    setWindowNote(null);
+    if (!form.employeeId || !form.date) return;
+    let alive = true;
+    api.get(`/attendance-punches/window-options?employeeId=${form.employeeId}&date=${form.date}`)
+      .then((r: WindowOpt[]) => { if (alive) { setWindowOpts(r); if (r.length === 0) setWindowNote("برای این کارمند در این روزها شیفتی منتسب نیست (فرم «انتساب شیفت»)"); } })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [form.employeeId, form.date]);
 
   useEffect(() => {
     if (!editId) return;
     api.get(`/attendance-punches/${editId}`).then((r: PunchRow) => {
       setMeta({ canEdit: r.canEdit, sourceTitle: r.sourceTitle, correctionRequestId: r.correctionRequestId, correctionNumber: r.correctionNumber, updatedAt: r.updatedAt });
-      if (!hasPersistedState(cacheKey)) setForm({ employeeId: String(r.employeeId), date: r.date, time: minutesToMask(r.minute), workDate: r.workDate ?? "" });
+      if (!hasPersistedState(cacheKey)) setForm({ employeeId: String(r.employeeId), date: r.date, time: minutesToMask(r.minute), workDate: r.workDate ?? "", workRowNo: String(r.workRowNo ?? 1) });
       setLoaded(true);
     }).catch((e) => setError(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -204,14 +239,14 @@ function PunchForm({ editId }: { editId?: number }) {
     if (minute === null || minute >= 1440) return setError("ساعت را کامل وارد کنید (۰۰:۰۰ تا ۲۳:۵۹)");
     try {
       if (editId) {
-        await api.put(`/attendance-punches/${editId}`, { date: form.date, minute, workDate: form.workDate || null, updatedAt: meta?.updatedAt });
+        await api.put(`/attendance-punches/${editId}`, { date: form.date, minute, workDate: form.workDate || null, workRowNo: form.workDate ? Number(form.workRowNo) : null, updatedAt: meta?.updatedAt });
         flash();
         const r: PunchRow = await api.get(`/attendance-punches/${editId}`);
         setMeta((m) => (m ? { ...m, updatedAt: r.updatedAt } : m));
       } else {
-        await api.post("/attendance-punches", { employeeId: Number(form.employeeId), date: form.date, minute, workDate: form.workDate || null });
+        await api.post("/attendance-punches", { employeeId: Number(form.employeeId), date: form.date, minute, workDate: form.workDate || null, workRowNo: form.workDate ? Number(form.workRowNo) : null });
         flash();
-        setForm({ ...form, time: "", workDate: "" });
+        setForm({ ...form, time: "", workDate: "", workRowNo: "1" });
       }
     } catch (err) {
       setError((err as ApiError).message);
@@ -256,11 +291,19 @@ function PunchForm({ editId }: { editId?: number }) {
               <TimeInput value={form.time} width={100} autoFocus={!editId} onChange={(t) => setForm({ ...form, time: t })} />
             </div>
             <div className="form-field">
-              <label>روز کاری (اختصاص دستی) <FieldHint label="روز کاری" text="فقط برای استثنا: هر تردد به‌طور خودکار با پنجره‌ی حضور شیفت به یک روز کاری می‌خورد. اگر تردد مبهم یا خارج از پنجره است (مثلاً ۲۴:۰۰ که خروج روز قبل است)، همین‌جا روز کاری‌اش را دستی مشخص کنید؛ حداکثر یک روز با تاریخ تردد فاصله." /></label>
-              <div style={{ display: "flex", gap: 4 }}>
-                <JalaliDatePicker value={form.workDate} onChange={(v) => setForm({ ...form, workDate: v })} />
-                {form.workDate && <button type="button" className="btn-link" onClick={() => setForm({ ...form, workDate: "" })}>حذف</button>}
-              </div>
+              <label>اختصاص دستی به پنجره <FieldHint label="اختصاص دستی" text="فقط برای استثنا: هر تردد به‌طور خودکار با ساعتش در پنجره‌ی حضورِ یک ردیف شیفت می‌افتد. اگر باید به پنجره‌ی دیگری تعلق داشته باشد، آن را از فهرست انتخاب کنید؛ فهرست از روی شیفتِ منتسب به کارمند، تاریخ روز کاری و ساعت شروع و پایان بازه (و محدوده‌ی پنجره) را نشان می‌دهد. فقط پنجره‌های روز قبل، همان روز و روز بعد از تاریخ تردد نمایش داده می‌شود." /></label>
+              {(() => {
+                const cur = form.workDate ? `${form.workDate}|${form.workRowNo}` : "";
+                const known = windowOpts.some((o) => `${o.workDate}|${o.rowNo}` === cur);
+                return (
+                  <select value={cur} onChange={(e) => { const [d, r] = e.target.value ? e.target.value.split("|") : ["", "1"]; setForm({ ...form, workDate: d, workRowNo: r }); }} style={{ maxWidth: 560 }}>
+                    <option value="">خودکار (بر اساس ساعت تردد)</option>
+                    {cur && !known && <option value={cur}>{formatJalaliDate(form.workDate)} — ردیف {toFaDigits(form.workRowNo)} (فعلی)</option>}
+                    {windowOpts.map((o) => <option key={`${o.workDate}|${o.rowNo}`} value={`${o.workDate}|${o.rowNo}`}>{windowLabel(o)}</option>)}
+                  </select>
+                );
+              })()}
+              {windowNote && <small style={{ opacity: 0.7 }}>{windowNote}</small>}
             </div>
           </div>
         </fieldset>

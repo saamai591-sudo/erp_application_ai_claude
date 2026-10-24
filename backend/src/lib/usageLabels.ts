@@ -39,6 +39,7 @@ export const USAGE_META: Record<string, UsageMeta> = {
   Position: { label: "پست سازمانی", base: "/positions" },
   Job: { label: "شغل", base: "/jobs" },
   AttendanceShift: { label: "شیفت", base: "/attendance-shifts" },
+  AttendanceShiftAssignment: { label: "انتساب شیفت", base: "/attendance-shift-assignments", title: (r) => `#${r.id}` },
   AttendancePunch: { label: "تردد", base: "/attendance-punches", title: (r) => `#${r.id}` },
   AttendanceCorrectionRequest: { label: "درخواست اصلاح تردد", base: "/attendance-correction-requests", title: (r) => `شماره ${r.number}` },
   PositionJob: { label: "شغل مورد نیاز پست", title: (r) => `#${r.id}` },

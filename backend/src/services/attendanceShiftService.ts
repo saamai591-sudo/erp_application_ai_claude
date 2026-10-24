@@ -5,34 +5,43 @@ import { AttendanceError, minuteText } from "./attendancePunchService";
 // هر روز: کاری/غیرکاری؛ دست‌کم یک بازه‌ی کاری (شروع/پایان، پایان می‌تواند روز بعد باشد)؛ «استراحت» (مثلاً ناهار) که جزو ساعت کاری نیست؛ و
 // «ساعت مرخصی» = مقداری که اگر فرد آن روز را مرخصی بگیرد از مانده‌ی مرخصی‌اش کم می‌شود (خالی = ساعت کاری خالص = مجموع بازه‌ها − استراحت؛
 // مثلاً شیفت ۹ ساعته با ۳۰ دقیقه ناهار ⇒ ۸:۳۰). انتساب شیفت به افراد (با نقطه‌ی شروع چرخه‌ی چرخشی) در فرم جداگانه‌ی بعدی است.
-// «پنجره‌ی حضور» هر روز: ترددِ هر روزِ تقویمی با پنجره‌ی ردیف شیفت همان روز به «روز کاری» نسبت داده می‌شود (کارکرد روزانه، فاز بعد). برای هر روز فقط «شروع پنجره» ذخیره می‌شود و پایانش
-// خودکار «شروع پنجره‌ی روز بعد در چرخه + ۲۴ ساعت» است (روز آخر چرخه به روز اول وصل می‌شود)؛ پس پنجره‌ها هم‌پوشانی و فاصله ندارند و ترددی بی‌صاحب نمی‌ماند.
-// پنجره‌ی هر روز باید همه‌ی بازه‌های کاری همان روز را بپوشاند. شروع خالی = پیش‌فرض (روز کاری: ۴ ساعت قبل از شروع اولین بازه، حداقل ۰۰:۰۰؛ روز استراحت: ۰۴:۰۰).
-// استثنا: ترددِ مبهم/خارج از پنجره را کاربر با فیلد «روز کاری» روی تردد دستی به یک روز اختصاص می‌دهد (AttendancePunch.workDate).
+//
+// «پنجره‌ی حضور» (کارکرد روزانه، فاز بعد): هر ردیف شیفت = هر بازه‌ی کاری (و برای روز استراحت یک ردیف خالی) پنجره‌ی خودش را دارد و ترددهای هر پنجره
+// داخل همان پنجره جفت می‌شوند؛ پس یک روز می‌تواند چند پنجره داشته باشد (مثلاً ۰۰:۰۰–۰۶:۰۰ و ۱۸:۰۰–۲۴:۰۰). برای هر ردیف فقط «شروع پنجره» ذخیره می‌شود و پایانش
+// خودکار «شروع پنجره‌ی ردیف بعدی در خط زمانی چرخه» است (ردیف آخر به اولِ چرخه‌ی بعد وصل می‌شود) ⇒ پنجره‌ها هم‌پوشانی و فاصله ندارند. پنجره‌ی هر بازه باید
+// خودِ آن بازه را بپوشاند. ورودی «شروع پنجره» ساعت روی ساعت است و تنها نقطه‌ی تبدیلش resolveWindowStart است: «آخرین ساعتِ هم‌نامِ نه دیرتر از شروع بازه» (پس شروع
+// پنجره‌ی یک بازه‌ی ۰۰:۰۰ می‌تواند ۲۰:۰۰ روز قبل باشد)؛ برای روز استراحت ساعتِ همان روز. خالی = پیش‌فرض: ۴ ساعت قبل از شروع بازه (روز استراحت ۰۴:۰۰) ولی نه زودتر از
+// پایان ردیف قبل. استثنا: ترددِ مبهم را کاربر با «روز کاری + ردیف» روی خود تردد (AttendancePunch.workDate/workRowNo) دستی به یک پنجره اختصاص می‌دهد.
 // زمان‌ها در پایگاه داده «دقیقه از ابتدای روز شیفت» است و پایان می‌تواند بیش از ۱۴۴۰ باشد؛ ورودی/خروجی فرم «ساعت روی ساعت» (۰ تا ۱۴۳۹) است
 // و بازه‌ی عبور از نیمه‌شب را همین سرویس محاسبه می‌کند (تنها نقطه‌ی این قاعده).
 
 const DAY = 1440;
 const WEEKLY_LEN = 7;
 const MAX_ROTATION = 62;
+export const DEFAULT_WINDOW_LEAD = 240;
+export const MAX_SEGMENTS = 6;
 
 export interface SegmentInput {
   startClock: number;
   endClock: number;
+  /** شروع پنجره‌ی حضور (ساعت روی ساعت)؛ خالی = پیش‌فرض */
+  windowStartClock?: number | null;
+}
+export interface SegmentData {
+  startMinute: number;
+  endMinute: number;
+  /** شروع پنجره نسبت به ابتدای روز شیفت (می‌تواند منفی = روز قبل) */
+  windowStartMinute: number;
 }
 export interface DayInput {
   dayNo: number;
   isWorkDay: boolean;
   breakMinutes: number;
   leaveMinutes: number | null;
-  /** شروع پنجره‌ی حضور (دقیقه‌ی روز، ۰..۱۴۳۹) */
+  /** فقط روز استراحت: شروع پنجره‌ی آن روز نسبت به ابتدای روز */
   windowStartMinute: number;
-  segments: { startMinute: number; endMinute: number }[];
+  segments: SegmentData[];
 }
-
-export const DEFAULT_WINDOW_LEAD = 240;
-/** نشانه‌ی «شروع پنجره خالی» تا دور دوم (پیش‌فرض‌ها) */
-const AUTO_WINDOW = -1;
 export interface ShiftData {
   code: number | null;
   title: string;
@@ -48,9 +57,10 @@ const int = (v: unknown, label: string, min: number, max: number): number => {
   if (v === null || v === undefined || v === "" || !Number.isInteger(n) || n < min || n > max) throw new AttendanceError(`${label} نامعتبر است`);
   return n;
 };
+const mod = (a: number, n: number) => ((a % n) + n) % n;
 
 /** بازه‌های «ساعت روی ساعت» یک روز → دقیقه‌های مطلق (پایان کوچک‌تر/مساوی شروع ⇒ روز بعد؛ هر بازه‌ی بعدی بعد از پایان قبلی) */
-export function resolveSegments(raw: SegmentInput[], label: string): { startMinute: number; endMinute: number }[] {
+export function resolveSegments(raw: { startClock: number; endClock: number }[], label: string): { startMinute: number; endMinute: number }[] {
   const out: { startMinute: number; endMinute: number }[] = [];
   let prevEnd = -1;
   for (const [i, s] of raw.entries()) {
@@ -69,6 +79,81 @@ export function resolveSegments(raw: SegmentInput[], label: string): { startMinu
 
 export const totalMinutesOf = (segs: { startMinute: number; endMinute: number }[]) => segs.reduce((s, x) => s + (x.endMinute - x.startMinute), 0);
 
+/** ساعتِ ورودیِ شروع پنجره → دقیقه نسبت به ابتدای روز: بازه‌ی کاری: آخرین ساعتِ هم‌نام که دیرتر از شروع بازه نباشد؛ روز استراحت: ساعتِ همان روز */
+export function resolveWindowStart(clock: number, segStart: number | null): number {
+  return segStart === null ? clock : segStart - mod(segStart - clock, DAY);
+}
+
+// ── خط زمانی ردیف‌ها (برای پنجره‌ها) ──
+
+interface Row {
+  day: DayInput;
+  seg: SegmentData | null;
+  /** ابتدای روز شیفت در خط زمانی چرخه */
+  base: number;
+  startAbs: number | null;
+  endAbs: number | null;
+  /** شروع پنجره (مطلق در خط زمانی)؛ NaN = هنوز تعیین نشده */
+  ws: number;
+  label: string;
+}
+
+function buildRows(days: DayInput[]): Row[] {
+  const rows: Row[] = [];
+  days.forEach((d, i) => {
+    const base = i * DAY;
+    if (!d.isWorkDay || d.segments.length === 0) rows.push({ day: d, seg: null, base, startAbs: null, endAbs: null, ws: base + d.windowStartMinute, label: `روز ${d.dayNo}` });
+    else d.segments.forEach((s, k) => rows.push({ day: d, seg: s, base, startAbs: base + s.startMinute, endAbs: base + s.endMinute, ws: base + s.windowStartMinute, label: d.segments.length > 1 ? `روز ${d.dayNo} بازه ${k + 1}` : `روز ${d.dayNo}` }));
+  });
+  return rows;
+}
+
+function autoStart(row: Row, prev: { ws: number; endAbs: number | null } | null): number {
+  const cand = row.seg ? row.startAbs! - DEFAULT_WINDOW_LEAD : row.base + DEFAULT_WINDOW_LEAD;
+  const lower = prev ? Math.max(prev.ws + 1, prev.endAbs ?? prev.ws + 1) : -Infinity;
+  return Math.max(cand, lower);
+}
+
+/** شروع خالیِ پنجره (NaN) ⇒ پیش‌فرض؛ سپس خط زمانی: پنجره‌ها پشت‌سرهم، و هر پنجره خودِ بازه‌اش را بپوشاند */
+function resolveAndValidateWindows(days: DayInput[]) {
+  const rows = buildRows(days);
+  const N = days.length * DAY;
+  // ردیف‌های «خودکار»: ابتدا پیش‌فرضِ ساده، سپس تا ثبات (هر ردیف نه زودتر از پایان ردیف قبل؛ ردیف اول به ردیف آخرِ چرخه‌ی قبل وصل است)
+  const auto = rows.map((r) => Number.isNaN(r.ws));
+  rows.forEach((r, k) => {
+    if (auto[k]) r.ws = r.seg ? r.startAbs! - DEFAULT_WINDOW_LEAD : r.base + DEFAULT_WINDOW_LEAD;
+  });
+  for (let pass = 0; pass < rows.length + 2; pass++) {
+    let changed = false;
+    rows.forEach((r, k) => {
+      if (!auto[k]) return;
+      const wrap = k === 0;
+      const prev = rows[(k - 1 + rows.length) % rows.length];
+      const w = autoStart(r, { ws: prev.ws - (wrap ? N : 0), endAbs: prev.endAbs === null ? null : prev.endAbs - (wrap ? N : 0) });
+      if (w !== r.ws) {
+        r.ws = w;
+        changed = true;
+      }
+    });
+    if (!changed) break;
+  }
+  rows.forEach((r, k) => {
+    const wrap = k + 1 === rows.length;
+    const next = rows[(k + 1) % rows.length];
+    const nextWs = next.ws + (wrap ? N : 0);
+    if (!(r.ws < nextWs)) throw new AttendanceError(`${r.label}: پنجره‌های حضور باید پشت‌سرهم و بدون هم‌پوشانی باشند؛ شروع پنجره‌ی ${r.label} باید قبل از شروع پنجره‌ی ${next.label} باشد`);
+    if (r.seg) {
+      if (r.ws > r.startAbs!) throw new AttendanceError(`${r.label}: شروع پنجره‌ی حضور باید قبل از شروع بازه‌ی کاری (${minuteText(r.seg.startMinute % DAY)}) باشد`);
+      if (nextWs < r.endAbs!) throw new AttendanceError(`${r.label}: پنجره‌ی حضور باید تا پایان بازه‌ی کاری (${minuteText(r.seg.endMinute % DAY)}${r.seg.endMinute >= DAY ? " روز بعد" : ""}) ادامه داشته باشد؛ شروع پنجره‌ی ${next.label} را دیرتر بگذارید`);
+    }
+  });
+  // نتیجه به ساختار روزها برمی‌گردد (نسبت به ابتدای روز)
+  rows.forEach((r) => {
+    if (r.seg) r.seg.windowStartMinute = r.ws - r.base;
+    else r.day.windowStartMinute = r.ws - r.base;
+  });
+}
+
 export async function normalizeShift(b: any, excludeId?: number): Promise<ShiftData> {
   const title = typeof b?.title === "string" ? b.title.trim().replace(/\s+/g, " ") : "";
   if (!title) throw new AttendanceError("عنوان شیفت الزامی است");
@@ -83,60 +168,36 @@ export async function normalizeShift(b: any, excludeId?: number): Promise<ShiftD
   const rawDays: any[] = Array.isArray(b?.days) ? b.days : [];
   if (rawDays.length !== cycleLength) throw new AttendanceError(`تعریف همه‌ی ${cycleLength} روز چرخه لازم است`);
   const seen = new Set<number>();
-  const days: DayInput[] = rawDays.map((d, i) => {
+  const days: DayInput[] = rawDays.map((d) => {
     const dayNo = int(d?.dayNo, "شماره‌ی روز", 1, cycleLength);
     if (seen.has(dayNo)) throw new AttendanceError(`روز ${dayNo} تکراری است`);
     seen.add(dayNo);
     const label = `روز ${dayNo}`;
     const isWorkDay = !!d?.isWorkDay;
-    const wRaw = d?.windowStartClock;
-    const explicitWindow = wRaw === undefined || wRaw === null || wRaw === "" ? null : int(wRaw, `${label}: شروع پنجره‌ی حضور`, 0, DAY - 1);
-    if (!isWorkDay) return { dayNo, isWorkDay: false, breakMinutes: 0, leaveMinutes: null, windowStartMinute: explicitWindow ?? AUTO_WINDOW, segments: [] };
+    const clockOrNull = (v: unknown, what: string): number | null => (v === undefined || v === null || v === "" ? null : int(v, `${label}: ${what}`, 0, DAY - 1));
+    if (!isWorkDay) {
+      const c = clockOrNull(d?.windowStartClock, "شروع پنجره‌ی حضور");
+      return { dayNo, isWorkDay: false, breakMinutes: 0, leaveMinutes: null, windowStartMinute: c === null ? NaN : resolveWindowStart(c, null), segments: [] };
+    }
     const segInput: SegmentInput[] = Array.isArray(d?.segments) ? d.segments : [];
     if (segInput.length === 0) throw new AttendanceError(`${label}: روز کاری دست‌کم یک بازه‌ی کاری لازم دارد`);
-    if (segInput.length > 6) throw new AttendanceError(`${label}: حداکثر ۶ بازه`);
-    const segments = resolveSegments(segInput, label);
+    if (segInput.length > MAX_SEGMENTS) throw new AttendanceError(`${label}: حداکثر ${MAX_SEGMENTS} بازه`);
+    const resolved = resolveSegments(segInput, label);
+    const segments: SegmentData[] = resolved.map((r, i) => {
+      const c = clockOrNull(segInput[i].windowStartClock, `شروع پنجره‌ی بازه ${i + 1}`);
+      return { ...r, windowStartMinute: c === null ? NaN : resolveWindowStart(c, r.startMinute) };
+    });
     const total = totalMinutesOf(segments);
     const breakMinutes = d?.breakMinutes === undefined || d?.breakMinutes === null || d?.breakMinutes === "" ? 0 : int(d.breakMinutes, `${label}: استراحت`, 0, DAY);
     if (breakMinutes >= total) throw new AttendanceError(`${label}: استراحت (${minuteText(breakMinutes)}) باید کمتر از مجموع بازه‌ها (${minuteText(total)}) باشد`);
     const leaveMinutes = d?.leaveMinutes === undefined || d?.leaveMinutes === null || d?.leaveMinutes === "" ? null : int(d.leaveMinutes, `${label}: ساعت مرخصی`, 0, DAY);
-    void i;
-    return { dayNo, isWorkDay: true, breakMinutes, leaveMinutes, windowStartMinute: explicitWindow ?? AUTO_WINDOW, segments };
+    return { dayNo, isWorkDay: true, breakMinutes, leaveMinutes, windowStartMinute: 0, segments };
   });
   for (let n = 1; n <= cycleLength; n++) if (!seen.has(n)) throw new AttendanceError(`روز ${n} تعریف نشده است`);
   if (!days.some((d) => d.isWorkDay)) throw new AttendanceError("دست‌کم یک روز کاری لازم است");
   days.sort((a, c) => a.dayNo - c.dayNo);
-  resolveDefaultWindows(days);
-  assertWindowsCover(days);
-  return { code, title, isActive: b?.isActive === undefined ? true : !!b.isActive, cycleType, cycleLength, description: typeof b?.description === "string" && b.description.trim() ? b.description.trim() : null, days: days.sort((a, c) => a.dayNo - c.dayNo) };
-}
-
-/**
- * شروع خالیِ پنجره ⇒ پیش‌فرض: روز کاری ۴ ساعت قبل از شروع اولین بازه (حداقل ۰۰:۰۰)، روز استراحت ۰۴:۰۰؛ و اگر بازه‌ی روز قبل در چرخه از نیمه‌شب گذشته (شیفت شب)،
- * دیرتر از پایان آن بازه شروع نشود (پنجره‌ی ردیف بعد نباید پایان شیفت شب را ببُرد).
- */
-function resolveDefaultWindows(days: DayInput[]) {
-  days.forEach((d, i) => {
-    if (d.windowStartMinute !== AUTO_WINDOW) return;
-    const base = d.isWorkDay && d.segments.length ? Math.max(0, d.segments[0].startMinute - DEFAULT_WINDOW_LEAD) : DEFAULT_WINDOW_LEAD;
-    const prev = days[(i - 1 + days.length) % days.length];
-    const prevEnd = prev.isWorkDay && prev.segments.length ? prev.segments[prev.segments.length - 1].endMinute : 0;
-    const spill = prevEnd > DAY ? prevEnd - DAY : 0;
-    d.windowStartMinute = Math.min(DAY - 1, Math.max(base, spill));
-  });
-}
-
-/** پنجره‌ی هر روز = [شروع همان روز، ۲۴ساعت + شروع روز بعد در چرخه)؛ باید همه‌ی بازه‌های کاری آن روز را بپوشاند */
-export function assertWindowsCover(days: DayInput[]) {
-  days.forEach((d, i) => {
-    if (!d.isWorkDay || d.segments.length === 0) return;
-    const next = days[(i + 1) % days.length];
-    const end = DAY + next.windowStartMinute;
-    const firstStart = d.segments[0].startMinute;
-    const lastEnd = d.segments[d.segments.length - 1].endMinute;
-    if (d.windowStartMinute > firstStart) throw new AttendanceError(`روز ${d.dayNo}: شروع پنجره‌ی حضور (${minuteText(d.windowStartMinute)}) باید قبل از شروع بازه‌ی کاری (${minuteText(firstStart % DAY)}) باشد`);
-    if (end < lastEnd) throw new AttendanceError(`روز ${d.dayNo}: پنجره‌ی حضور باید تا پایان بازه‌ی کاری (${minuteText(lastEnd % DAY)}${lastEnd >= DAY ? " روز بعد" : ""}) ادامه داشته باشد؛ شروع پنجره‌ی روز ${next.dayNo} (${minuteText(next.windowStartMinute)}) را دیرتر بگذارید`);
-  });
+  resolveAndValidateWindows(days);
+  return { code, title, isActive: b?.isActive === undefined ? true : !!b.isActive, cycleType, cycleLength, description: typeof b?.description === "string" && b.description.trim() ? b.description.trim() : null, days };
 }
 
 const dayCreate = (days: DayInput[]) =>
@@ -146,7 +207,7 @@ const dayCreate = (days: DayInput[]) =>
     breakMinutes: d.breakMinutes,
     leaveMinutes: d.leaveMinutes,
     windowStartMinute: d.windowStartMinute,
-    segments: { create: d.segments.map((s, i) => ({ seq: i + 1, startMinute: s.startMinute, endMinute: s.endMinute })) },
+    segments: { create: d.segments.map((s, i) => ({ seq: i + 1, startMinute: s.startMinute, endMinute: s.endMinute, windowStartMinute: s.windowStartMinute })) },
   }));
 
 export async function createShift(d: ShiftData): Promise<{ id: number }> {
@@ -169,18 +230,55 @@ export async function updateShift(id: number, d: ShiftData): Promise<void> {
   });
 }
 
-/** «موارد استفاده» ی شیفت؛ انتساب‌ها در فرم بعدی اضافه می‌شود */
-export async function shiftUsageMessage(_id: number): Promise<string | null> {
-  return null;
+/** شیفتِ منتسب‌شده به کارمند ویرایش/حذف نمی‌شود (پنجره‌ها و روزهای کاریِ گذشته‌ی او را عوض می‌کند)؛ برای تغییر، شیفت تازه بسازید و انتساب جدید ثبت کنید */
+export async function shiftUsageMessage(id: number): Promise<string | null> {
+  const rows = await prisma.attendanceShiftAssignment.findMany({ where: { shiftId: id }, take: 5, orderBy: { id: "asc" }, select: { employee: { select: { personnelCode: true } } } });
+  if (rows.length === 0) return null;
+  const total = await prisma.attendanceShiftAssignment.count({ where: { shiftId: id } });
+  return `این شیفت به ${total} انتساب (کارمند ${rows.map((r) => r.employee.personnelCode).join("، ")}${total > rows.length ? " و …" : ""}) وصل است و تغییر نمی‌کند؛ برای تغییر، شیفت تازه بسازید و انتساب جدید ثبت کنید`;
 }
+
+export interface TimelineRow {
+  dayIdx: number;
+  dayNo: number;
+  /** شماره‌ی ردیف همان روز (۱ = اولین بازه؛ روز استراحت = null) */
+  seq: number | null;
+  segStart: number | null;
+  segEnd: number | null;
+  /** شروع/پایان پنجره نسبت به ابتدای همین روز شیفت (می‌تواند منفی یا بیش از ۱۴۴۰ باشد) */
+  wsRel: number;
+  weRel: number;
+}
+
+/** خط زمانی ردیف‌های یک شیفتِ ذخیره‌شده با پنجره‌ی هر ردیف (پایان = شروع ردیف بعدی؛ ردیف آخر به اول چرخه‌ی بعد) */
+export function shiftTimeline(s: any): TimelineRow[] {
+  const sorted = [...(s.days ?? [])].sort((a: any, b: any) => a.dayNo - b.dayNo);
+  const flat: { dayIdx: number; dayNo: number; seq: number | null; segStart: number | null; segEnd: number | null; base: number; ws: number }[] = [];
+  sorted.forEach((d: any, i: number) => {
+    const segs = [...(d.segments ?? [])].sort((a: any, b: any) => a.seq - b.seq);
+    if (!d.isWorkDay || segs.length === 0) flat.push({ dayIdx: i, dayNo: d.dayNo, seq: null, segStart: null, segEnd: null, base: i * DAY, ws: i * DAY + d.windowStartMinute });
+    else segs.forEach((x: any) => flat.push({ dayIdx: i, dayNo: d.dayNo, seq: x.seq, segStart: x.startMinute, segEnd: x.endMinute, base: i * DAY, ws: i * DAY + x.windowStartMinute }));
+  });
+  const N = sorted.length * DAY;
+  return flat.map((f, k) => {
+    const wrap = k + 1 === flat.length;
+    return { dayIdx: f.dayIdx, dayNo: f.dayNo, seq: f.seq, segStart: f.segStart, segEnd: f.segEnd, wsRel: f.ws - f.base, weRel: flat[(k + 1) % flat.length].ws + (wrap ? N : 0) - f.base };
+  });
+}
+
+/** دقیقه‌ی نسبی (نسبت به ابتدای یک روز) → ساعت روی ساعت + جابه‌جایی روز (−۱ = روز قبل، ۰ = همان روز، ۱ = روز بعد) */
+const rel = (m: number) => ({ clock: mod(m, DAY), dayOffset: Math.floor(m / DAY) });
 
 export function shiftShape(s: any) {
   const sorted = [...(s.days ?? [])].sort((a: any, b: any) => a.dayNo - b.dayNo);
+  const timeline = shiftTimeline(s);
+  const endOf = (dayIdx: number, seq: number | null) => timeline.find((t) => t.dayIdx === dayIdx && t.seq === seq)!.weRel;
   const days = sorted.map((d: any, idx: number) => {
-    const next = sorted[(idx + 1) % sorted.length];
     const segs = [...(d.segments ?? [])].sort((a: any, b: any) => a.seq - b.seq);
     const total = totalMinutesOf(segs);
     const work = Math.max(0, total - d.breakMinutes);
+    const restRow = !d.isWorkDay || segs.length === 0;
+    const restWin = restRow ? { start: rel(d.windowStartMinute), end: rel(endOf(idx, null)) } : null;
     return {
       dayNo: d.dayNo,
       isWorkDay: d.isWorkDay,
@@ -189,10 +287,26 @@ export function shiftShape(s: any) {
       totalMinutes: total,
       workMinutes: work,
       leaveMinutesEffective: d.isWorkDay ? d.leaveMinutes ?? work : 0,
-      windowStartClock: d.windowStartMinute,
-      /** پایان پنجره: دقیقه‌ی مطلق از ابتدای این روز (بیش از ۱۴۴۰ = روز بعد) */
-      windowEndMinute: DAY + next.windowStartMinute,
-      segments: segs.map((x: any) => ({ startClock: x.startMinute % DAY, endClock: x.endMinute % DAY, endsNextDay: x.endMinute >= DAY, startMinute: x.startMinute, endMinute: x.endMinute })),
+      /** فقط روز استراحت: پنجره‌ی همان روز */
+      windowStartClock: restWin ? restWin.start.clock : null,
+      windowStartDayOffset: restWin ? restWin.start.dayOffset : null,
+      windowEndClock: restWin ? restWin.end.clock : null,
+      windowEndDayOffset: restWin ? restWin.end.dayOffset : null,
+      segments: segs.map((x: any) => {
+        const ws = rel(x.windowStartMinute);
+        const we = rel(endOf(idx, x.seq));
+        return {
+          startClock: x.startMinute % DAY,
+          endClock: x.endMinute % DAY,
+          endsNextDay: x.endMinute >= DAY,
+          startMinute: x.startMinute,
+          endMinute: x.endMinute,
+          windowStartClock: ws.clock,
+          windowStartDayOffset: ws.dayOffset,
+          windowEndClock: we.clock,
+          windowEndDayOffset: we.dayOffset,
+        };
+      }),
     };
   });
   return {

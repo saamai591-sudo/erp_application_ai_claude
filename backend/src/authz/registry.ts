@@ -615,6 +615,7 @@ export const REGISTRY: ModuleDef[] = [
         key: "operations",
         title: "عملیات",
         forms: [
+          { key: "attendance-shift-assignments", title: "انتساب شیفت", baseActions: CRUD },
           { key: "attendance-punches", title: "ورود و خروج", baseActions: CRUD },
           {
             key: "attendance-correction-requests",

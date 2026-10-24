@@ -4779,6 +4779,7 @@ model Employee {
   paymentPrepLines PayrollPaymentPrepLine[]
   attendancePunches AttendancePunch[]
   attendanceCorrections AttendanceCorrectionRequest[]
+  attendanceShiftAssignments AttendanceShiftAssignment[]
   payrollIssueSettings PayrollIssueSetting[]
   id                     Int                  @id @default(autoincrement())
   /// کد پرسنلی (دستی؛ خالی = آخرین کد عددی + ۱ با همان طول)
@@ -6208,8 +6209,9 @@ model AttendancePunch {
   minute              Int
   source              AttendancePunchSource         @default(MANUAL)
   correctionRequestId Int?
-  /// اختصاص دستیِ تردد به یک روز کاری (استثنا؛ بر پنجره‌ی حضور شیفت غلبه می‌کند). خالی = روز کاری از روی پنجره‌ی حضور شیفت تعیین می‌شود
+  /// اختصاص دستیِ تردد به یک پنجره‌ی حضور (استثنا؛ بر پنجره‌ی خودکار غلبه می‌کند): روز کاری + شماره‌ی ردیف شیفت (بازه) همان روز؛ خالی = پنجره از روی ساعت تردد تعیین می‌شود
   workDate            DateTime?                     @db.Date
+  workRowNo           Int?
   description         String?
   createdById         Int?
   createdAt           DateTime                      @default(now())
@@ -6273,6 +6275,7 @@ model AttendanceShift {
   createdAt   DateTime             @default(now())
   updatedAt   DateTime             @updatedAt
   days        AttendanceShiftDay[]
+  assignments AttendanceShiftAssignment[]
 }
 
 model AttendanceShiftDay {
@@ -6285,7 +6288,7 @@ model AttendanceShiftDay {
   breakMinutes Int                      @default(0)
   /// ساعتی که اگر فرد این روز را مرخصی بگیرد از مانده‌ی مرخصی کم می‌شود؛ خالی = ساعت کاری خالص (مجموع بازه‌ها − استراحت)
   leaveMinutes Int?
-  /// شروع «پنجره‌ی حضور» این روز (دقیقه از ابتدای روز، ۰ تا ۱۴۳۹)؛ پایان پنجره = شروع پنجره‌ی روز بعد در چرخه (+۲۴ ساعت) ⇒ پنجره‌ها هم‌پوشانی و فاصله ندارند
+  /// فقط روز استراحت: شروع «پنجره‌ی حضور» آن روز (دقیقه از ابتدای روز)؛ پنجره‌ی بازه‌های کاری روی AttendanceShiftSegment است
   windowStartMinute Int            @default(240)
   shift        AttendanceShift          @relation(fields: [shiftId], references: [id], onDelete: Cascade)
   segments     AttendanceShiftSegment[]
@@ -6300,7 +6303,28 @@ model AttendanceShiftSegment {
   /// دقیقه از ابتدای روزِ شیفت؛ پایان می‌تواند بیش از ۱۴۴۰ باشد (روز بعد)
   startMinute Int
   endMinute   Int
+  /// شروع «پنجره‌ی حضور» این بازه نسبت به ابتدای روز شیفت (می‌تواند منفی = روز قبل)؛ پایان پنجره = شروع پنجره‌ی ردیف بعدی در خط زمانی چرخه ⇒ پنجره‌ها هم‌پوشانی و فاصله ندارند
+  windowStartMinute Int            @default(0)
   day         AttendanceShiftDay @relation(fields: [dayId], references: [id], onDelete: Cascade)
 
   @@unique([dayId, seq])
+}
+
+/// انتساب شیفت به کارمند: از «تاریخ شروع» به بعد (تا اولین انتساب بعدی) این شیفت برای او معتبر است. شیفت چرخشی نقطه‌ی شروع چرخه را دارد
+model AttendanceShiftAssignment {
+  id             Int             @id @default(autoincrement())
+  employeeId     Int
+  shiftId        Int
+  fromDate       DateTime        @db.Date
+  /// فقط شیفت چرخشی: تاریخی که «روز ۱ چرخه» روی آن می‌افتد (روزهای بعد و قبل از آن بر پایه‌ی طول چرخه تکرار می‌شوند)
+  cycleStartDate DateTime?       @db.Date
+  note           String?
+  createdById    Int?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  employee       Employee        @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  shift          AttendanceShift @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+
+  @@unique([employeeId, fromDate])
+  @@index([shiftId])
 }

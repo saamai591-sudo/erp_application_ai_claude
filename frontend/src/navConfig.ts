@@ -458,6 +458,7 @@ const RAW_MODULES: ModuleGroup[] = [
       {
         title: "عملیات",
         items: [
+          { key: "attendance-shift-assignments", label: "انتساب شیفت", list: "/attendance-shift-assignments", create: "/attendance-shift-assignments/new", icon: "users" },
           { key: "attendance-punches", label: "ورود و خروج", list: "/attendance-punches", create: "/attendance-punches/new", icon: "calendar" },
           { key: "attendance-correction-requests", label: "درخواست اصلاح تردد", list: "/attendance-correction-requests", create: "/attendance-correction-requests/new", icon: "file" },
         ],

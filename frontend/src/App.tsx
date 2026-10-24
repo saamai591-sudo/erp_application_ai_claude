@@ -100,6 +100,7 @@ import Jobs from "./pages/Jobs";
 import AttendancePunches from "./pages/AttendancePunches";
 import AttendanceCorrectionRequests from "./pages/AttendanceCorrectionRequests";
 import AttendanceShifts from "./pages/AttendanceShifts";
+import AttendanceShiftAssignments from "./pages/AttendanceShiftAssignments";
 import { EmploymentTypes, EducationLevels, TerminationReasons, DecreeComponents } from "./pages/HrMasters";
 import EmploymentDecrees from "./pages/EmploymentDecrees";
 import LegalParameters from "./pages/LegalParameters";
@@ -478,6 +479,9 @@ export default function App() {
             <Route path="/attendance-shifts" element={<AttendanceShifts />} />
             <Route path="/attendance-shifts/new" element={<AttendanceShifts />} />
             <Route path="/attendance-shifts/:id/edit" element={<AttendanceShifts />} />
+            <Route path="/attendance-shift-assignments" element={<AttendanceShiftAssignments />} />
+            <Route path="/attendance-shift-assignments/new" element={<AttendanceShiftAssignments />} />
+            <Route path="/attendance-shift-assignments/:id/edit" element={<AttendanceShiftAssignments />} />
             <Route path="/decree-components" element={<DecreeComponents />} />
             <Route path="/decree-components/new" element={<DecreeComponents />} />
             <Route path="/decree-components/:id/edit" element={<DecreeComponents />} />
