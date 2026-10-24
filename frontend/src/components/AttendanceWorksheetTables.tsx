@@ -63,9 +63,9 @@ const s = <T,>(f: (r: T) => string, extra: object = {}) => ({ render: (r: T) => 
 export function WorksheetGrid({ data, showEmployee }: { data: WorksheetData | null; showEmployee?: boolean }) {
   const cols: any[] = [
     { header: "کد پرسنلی", ...s<DayRow>((r) => toFaDigits(r.personnelCode)), width: "100px" },
-    ...(showEmployee ? [{ header: "کارمند", ...s<DayRow>((r) => r.employeeName) }] : []),
+    ...(showEmployee ? [{ header: "کارمند", ...s<DayRow>((r) => r.employeeName), width: "170px" }] : []),
     { header: "تاریخ", ...s<DayRow>((r) => formatJalaliDate(r.date)), width: "100px" },
-    { header: "ردیف شیفت", ...s<DayRow>((r) => toFaDigits(r.shiftText)), width: "230px" },
+    { header: "ردیف شیفت", ...s<DayRow>((r) => toFaDigits(r.shiftText)), width: "200px" },
     { header: "اولین ورود", ...s<DayRow>((r) => (r.firstIn ? toFaDigits(r.firstIn) : "")), width: "100px" },
     { header: "آخرین خروج", ...s<DayRow>((r) => (r.lastOut ? toFaDigits(r.lastOut) : "")), width: "100px" },
     ...(data?.factors ?? []).map((f) => ({ header: f.title, ...s<DayRow>((r) => fmtVal(r.values[f.key], f.valueType)), width: "130px" })),
@@ -76,7 +76,7 @@ export function WorksheetGrid({ data, showEmployee }: { data: WorksheetData | nu
 export function PunchGrid({ data, showEmployee }: { data: WorksheetData | null; showEmployee?: boolean }) {
   const cols: any[] = [
     { header: "کد پرسنلی", ...s<PunchRow>((r) => toFaDigits(r.personnelCode)), width: "100px" },
-    ...(showEmployee ? [{ header: "کارمند", ...s<PunchRow>((r) => r.employeeName) }] : []),
+    ...(showEmployee ? [{ header: "کارمند", ...s<PunchRow>((r) => r.employeeName), width: "170px" }] : []),
     { header: "تاریخ", ...s<PunchRow>((r) => formatJalaliDate(r.date)), width: "100px" },
     { header: "ردیف شیفت", ...s<PunchRow>((r) => toFaDigits(r.shiftRow)), width: "230px" },
     { header: "ساعت", ...s<PunchRow>((r) => toFaDigits(r.time) + (r.manual ? " *" : "")), width: "110px" },
