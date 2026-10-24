@@ -4,7 +4,7 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
 import {
-  AttendanceError, EMPLOYEE_SELECT, SOURCE_FA, assertDayOpen, assertEmployeeWorking, assertNoDuplicatePunches, cleanPunchRows, dayStr, minuteText, parseDay, parseMinute, personName,
+  AttendanceError, EMPLOYEE_SELECT, SOURCE_FA, assertDayOpen, assertEmployeeWorking, assertNoDuplicatePunches, cleanPunchRows, cleanWorkDate, dayStr, minuteText, parseDay, parseMinute, personName,
   approveCorrection, nextRequestNumber, rejectCorrection, unapproveCorrection,
 } from "../services/attendancePunchService";
 
@@ -23,6 +23,7 @@ const punchShape = (p: any) => ({
   personnelCode: p.employee.personnelCode,
   employeeName: personName(p.employee.party),
   date: dayStr(p.date),
+  workDate: dayStr(p.workDate),
   minute: p.minute,
   time: minuteText(p.minute),
   source: p.source,
@@ -67,7 +68,8 @@ router.post("/attendance-punches", can(`${PUNCH_FORM}.create`), async (req, res)
     await assertEmployeeWorking(employeeId, date);
     await assertDayOpen(employeeId, date);
     await assertNoDuplicatePunches(employeeId, date, [minute]);
-    const created = await prisma.attendancePunch.create({ data: { employeeId, date, minute, source: "MANUAL", description: typeof req.body?.description === "string" && req.body.description.trim() ? req.body.description.trim() : null, createdById: uid(req) } });
+    const workDate = await cleanWorkDate(employeeId, date, req.body?.workDate);
+    const created = await prisma.attendancePunch.create({ data: { employeeId, date, minute, workDate, source: "MANUAL", description: typeof req.body?.description === "string" && req.body.description.trim() ? req.body.description.trim() : null, createdById: uid(req) } });
     res.status(201).json({ id: created.id });
   } catch (e: any) {
     if (e?.code === "P2002") return res.status(400).json({ error: "ترددی با همین ساعت برای این کارمند و روز قبلاً ثبت شده است" });
@@ -88,7 +90,8 @@ router.put("/attendance-punches/:id", can(`${PUNCH_FORM}.edit`), async (req, res
     await assertDayOpen(ex.employeeId, ex.date);
     await assertDayOpen(ex.employeeId, date);
     await assertNoDuplicatePunches(ex.employeeId, date, [minute], id);
-    await prisma.attendancePunch.update({ where: { id }, data: { date, minute, description: typeof req.body?.description === "string" && req.body.description.trim() ? req.body.description.trim() : null } });
+    const workDate = await cleanWorkDate(ex.employeeId, date, req.body?.workDate);
+    await prisma.attendancePunch.update({ where: { id }, data: { date, minute, workDate, description: typeof req.body?.description === "string" && req.body.description.trim() ? req.body.description.trim() : null } });
     res.json({ id });
   } catch (e: any) {
     if (e?.code === "P2002") return res.status(400).json({ error: "ترددی با همین ساعت برای این کارمند و روز قبلاً ثبت شده است" });

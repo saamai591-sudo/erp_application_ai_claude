@@ -5,6 +5,10 @@ import { AttendanceError, minuteText } from "./attendancePunchService";
 // هر روز: کاری/غیرکاری؛ دست‌کم یک بازه‌ی کاری (شروع/پایان، پایان می‌تواند روز بعد باشد)؛ «استراحت» (مثلاً ناهار) که جزو ساعت کاری نیست؛ و
 // «ساعت مرخصی» = مقداری که اگر فرد آن روز را مرخصی بگیرد از مانده‌ی مرخصی‌اش کم می‌شود (خالی = ساعت کاری خالص = مجموع بازه‌ها − استراحت؛
 // مثلاً شیفت ۹ ساعته با ۳۰ دقیقه ناهار ⇒ ۸:۳۰). انتساب شیفت به افراد (با نقطه‌ی شروع چرخه‌ی چرخشی) در فرم جداگانه‌ی بعدی است.
+// «پنجره‌ی حضور» هر روز: ترددِ هر روزِ تقویمی با پنجره‌ی ردیف شیفت همان روز به «روز کاری» نسبت داده می‌شود (کارکرد روزانه، فاز بعد). برای هر روز فقط «شروع پنجره» ذخیره می‌شود و پایانش
+// خودکار «شروع پنجره‌ی روز بعد در چرخه + ۲۴ ساعت» است (روز آخر چرخه به روز اول وصل می‌شود)؛ پس پنجره‌ها هم‌پوشانی و فاصله ندارند و ترددی بی‌صاحب نمی‌ماند.
+// پنجره‌ی هر روز باید همه‌ی بازه‌های کاری همان روز را بپوشاند. شروع خالی = پیش‌فرض (روز کاری: ۴ ساعت قبل از شروع اولین بازه، حداقل ۰۰:۰۰؛ روز استراحت: ۰۴:۰۰).
+// استثنا: ترددِ مبهم/خارج از پنجره را کاربر با فیلد «روز کاری» روی تردد دستی به یک روز اختصاص می‌دهد (AttendancePunch.workDate).
 // زمان‌ها در پایگاه داده «دقیقه از ابتدای روز شیفت» است و پایان می‌تواند بیش از ۱۴۴۰ باشد؛ ورودی/خروجی فرم «ساعت روی ساعت» (۰ تا ۱۴۳۹) است
 // و بازه‌ی عبور از نیمه‌شب را همین سرویس محاسبه می‌کند (تنها نقطه‌ی این قاعده).
 
@@ -21,8 +25,14 @@ export interface DayInput {
   isWorkDay: boolean;
   breakMinutes: number;
   leaveMinutes: number | null;
+  /** شروع پنجره‌ی حضور (دقیقه‌ی روز، ۰..۱۴۳۹) */
+  windowStartMinute: number;
   segments: { startMinute: number; endMinute: number }[];
 }
+
+export const DEFAULT_WINDOW_LEAD = 240;
+/** نشانه‌ی «شروع پنجره خالی» تا دور دوم (پیش‌فرض‌ها) */
+const AUTO_WINDOW = -1;
 export interface ShiftData {
   code: number | null;
   title: string;
@@ -79,7 +89,9 @@ export async function normalizeShift(b: any, excludeId?: number): Promise<ShiftD
     seen.add(dayNo);
     const label = `روز ${dayNo}`;
     const isWorkDay = !!d?.isWorkDay;
-    if (!isWorkDay) return { dayNo, isWorkDay: false, breakMinutes: 0, leaveMinutes: null, segments: [] };
+    const wRaw = d?.windowStartClock;
+    const explicitWindow = wRaw === undefined || wRaw === null || wRaw === "" ? null : int(wRaw, `${label}: شروع پنجره‌ی حضور`, 0, DAY - 1);
+    if (!isWorkDay) return { dayNo, isWorkDay: false, breakMinutes: 0, leaveMinutes: null, windowStartMinute: explicitWindow ?? AUTO_WINDOW, segments: [] };
     const segInput: SegmentInput[] = Array.isArray(d?.segments) ? d.segments : [];
     if (segInput.length === 0) throw new AttendanceError(`${label}: روز کاری دست‌کم یک بازه‌ی کاری لازم دارد`);
     if (segInput.length > 6) throw new AttendanceError(`${label}: حداکثر ۶ بازه`);
@@ -89,11 +101,42 @@ export async function normalizeShift(b: any, excludeId?: number): Promise<ShiftD
     if (breakMinutes >= total) throw new AttendanceError(`${label}: استراحت (${minuteText(breakMinutes)}) باید کمتر از مجموع بازه‌ها (${minuteText(total)}) باشد`);
     const leaveMinutes = d?.leaveMinutes === undefined || d?.leaveMinutes === null || d?.leaveMinutes === "" ? null : int(d.leaveMinutes, `${label}: ساعت مرخصی`, 0, DAY);
     void i;
-    return { dayNo, isWorkDay: true, breakMinutes, leaveMinutes, segments };
+    return { dayNo, isWorkDay: true, breakMinutes, leaveMinutes, windowStartMinute: explicitWindow ?? AUTO_WINDOW, segments };
   });
   for (let n = 1; n <= cycleLength; n++) if (!seen.has(n)) throw new AttendanceError(`روز ${n} تعریف نشده است`);
   if (!days.some((d) => d.isWorkDay)) throw new AttendanceError("دست‌کم یک روز کاری لازم است");
+  days.sort((a, c) => a.dayNo - c.dayNo);
+  resolveDefaultWindows(days);
+  assertWindowsCover(days);
   return { code, title, isActive: b?.isActive === undefined ? true : !!b.isActive, cycleType, cycleLength, description: typeof b?.description === "string" && b.description.trim() ? b.description.trim() : null, days: days.sort((a, c) => a.dayNo - c.dayNo) };
+}
+
+/**
+ * شروع خالیِ پنجره ⇒ پیش‌فرض: روز کاری ۴ ساعت قبل از شروع اولین بازه (حداقل ۰۰:۰۰)، روز استراحت ۰۴:۰۰؛ و اگر بازه‌ی روز قبل در چرخه از نیمه‌شب گذشته (شیفت شب)،
+ * دیرتر از پایان آن بازه شروع نشود (پنجره‌ی ردیف بعد نباید پایان شیفت شب را ببُرد).
+ */
+function resolveDefaultWindows(days: DayInput[]) {
+  days.forEach((d, i) => {
+    if (d.windowStartMinute !== AUTO_WINDOW) return;
+    const base = d.isWorkDay && d.segments.length ? Math.max(0, d.segments[0].startMinute - DEFAULT_WINDOW_LEAD) : DEFAULT_WINDOW_LEAD;
+    const prev = days[(i - 1 + days.length) % days.length];
+    const prevEnd = prev.isWorkDay && prev.segments.length ? prev.segments[prev.segments.length - 1].endMinute : 0;
+    const spill = prevEnd > DAY ? prevEnd - DAY : 0;
+    d.windowStartMinute = Math.min(DAY - 1, Math.max(base, spill));
+  });
+}
+
+/** پنجره‌ی هر روز = [شروع همان روز، ۲۴ساعت + شروع روز بعد در چرخه)؛ باید همه‌ی بازه‌های کاری آن روز را بپوشاند */
+export function assertWindowsCover(days: DayInput[]) {
+  days.forEach((d, i) => {
+    if (!d.isWorkDay || d.segments.length === 0) return;
+    const next = days[(i + 1) % days.length];
+    const end = DAY + next.windowStartMinute;
+    const firstStart = d.segments[0].startMinute;
+    const lastEnd = d.segments[d.segments.length - 1].endMinute;
+    if (d.windowStartMinute > firstStart) throw new AttendanceError(`روز ${d.dayNo}: شروع پنجره‌ی حضور (${minuteText(d.windowStartMinute)}) باید قبل از شروع بازه‌ی کاری (${minuteText(firstStart % DAY)}) باشد`);
+    if (end < lastEnd) throw new AttendanceError(`روز ${d.dayNo}: پنجره‌ی حضور باید تا پایان بازه‌ی کاری (${minuteText(lastEnd % DAY)}${lastEnd >= DAY ? " روز بعد" : ""}) ادامه داشته باشد؛ شروع پنجره‌ی روز ${next.dayNo} (${minuteText(next.windowStartMinute)}) را دیرتر بگذارید`);
+  });
 }
 
 const dayCreate = (days: DayInput[]) =>
@@ -102,6 +145,7 @@ const dayCreate = (days: DayInput[]) =>
     isWorkDay: d.isWorkDay,
     breakMinutes: d.breakMinutes,
     leaveMinutes: d.leaveMinutes,
+    windowStartMinute: d.windowStartMinute,
     segments: { create: d.segments.map((s, i) => ({ seq: i + 1, startMinute: s.startMinute, endMinute: s.endMinute })) },
   }));
 
@@ -131,7 +175,9 @@ export async function shiftUsageMessage(_id: number): Promise<string | null> {
 }
 
 export function shiftShape(s: any) {
-  const days = [...(s.days ?? [])].sort((a: any, b: any) => a.dayNo - b.dayNo).map((d: any) => {
+  const sorted = [...(s.days ?? [])].sort((a: any, b: any) => a.dayNo - b.dayNo);
+  const days = sorted.map((d: any, idx: number) => {
+    const next = sorted[(idx + 1) % sorted.length];
     const segs = [...(d.segments ?? [])].sort((a: any, b: any) => a.seq - b.seq);
     const total = totalMinutesOf(segs);
     const work = Math.max(0, total - d.breakMinutes);
@@ -143,6 +189,9 @@ export function shiftShape(s: any) {
       totalMinutes: total,
       workMinutes: work,
       leaveMinutesEffective: d.isWorkDay ? d.leaveMinutes ?? work : 0,
+      windowStartClock: d.windowStartMinute,
+      /** پایان پنجره: دقیقه‌ی مطلق از ابتدای این روز (بیش از ۱۴۴۰ = روز بعد) */
+      windowEndMinute: DAY + next.windowStartMinute,
       segments: segs.map((x: any) => ({ startClock: x.startMinute % DAY, endClock: x.endMinute % DAY, endsNextDay: x.endMinute >= DAY, startMinute: x.startMinute, endMinute: x.endMinute })),
     };
   });

@@ -23,7 +23,7 @@ const WEEKDAYS = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه",
 const DAY = 1440;
 
 interface SegUI { start: string; end: string }
-interface DayUI { isWorkDay: boolean; segments: SegUI[]; breakText: string; leaveText: string }
+interface DayUI { isWorkDay: boolean; segments: SegUI[]; breakText: string; leaveText: string; windowText: string }
 interface ShiftRow {
   id: number;
   code: number;
@@ -34,7 +34,7 @@ interface ShiftRow {
   description: string;
   workDayCount: number;
   totalWorkMinutes: number;
-  days: { dayNo: number; isWorkDay: boolean; breakMinutes: number; leaveMinutes: number | null; segments: { startClock: number; endClock: number }[] }[];
+  days: { dayNo: number; isWorkDay: boolean; breakMinutes: number; leaveMinutes: number | null; windowStartClock: number; segments: { startClock: number; endClock: number }[] }[];
   updatedAt?: string;
 }
 
@@ -95,7 +95,31 @@ function ShiftList() {
   );
 }
 
-const emptyDay = (work: boolean): DayUI => ({ isWorkDay: work, segments: work ? [{ start: "", end: "" }] : [], breakText: "", leaveText: "" });
+const emptyDay = (work: boolean): DayUI => ({ isWorkDay: work, segments: work ? [{ start: "", end: "" }] : [], breakText: "", leaveText: "", windowText: "" });
+
+const WINDOW_LEAD = 240;
+/** پایان مطلق آخرین بازه‌ی یک روز (هم‌قاعده با سرور؛ بیش از ۱۴۴۰ = روز بعد) */
+function lastEndAbs(d: DayUI): number {
+  if (!d.isWorkDay) return 0;
+  let prevEnd = -1;
+  for (const s of d.segments) {
+    const sc = maskToMinutes(s.start), ec = maskToMinutes(s.end);
+    if (sc === null || ec === null || sc >= DAY || ec >= DAY) return 0;
+    const start = prevEnd < 0 ? sc : sc + Math.max(0, Math.ceil((prevEnd - sc) / DAY)) * DAY;
+    prevEnd = ec + (Math.floor((start - ec) / DAY) + 1) * DAY;
+  }
+  return Math.max(prevEnd, 0);
+}
+/** شروع مؤثر پنجره‌ی حضور (هم‌قاعده با سرور): خالی ⇒ روز کاری ۴ ساعت قبل از شروع اولین بازه (حداقل ۰۰:۰۰)، روز استراحت ۰۴:۰۰؛ و دیرتر از پایانِ شیفتِ شبِ روز قبل نباشد */
+function effectiveWindowStart(days: DayUI[], i: number): number | null {
+  const d = days[i];
+  if (d.windowText) return maskToMinutes(d.windowText);
+  const first = d.isWorkDay && d.segments.length ? maskToMinutes(d.segments[0].start) : null;
+  if (d.isWorkDay && first === null) return null;
+  const base = d.isWorkDay ? Math.max(0, (first as number) - WINDOW_LEAD) : WINDOW_LEAD;
+  const prevEnd = lastEndAbs(days[(i - 1 + days.length) % days.length]);
+  return Math.min(DAY - 1, Math.max(base, prevEnd > DAY ? prevEnd - DAY : 0));
+}
 const weeklyDays = (): DayUI[] => Array.from({ length: 7 }, (_, i) => emptyDay(i < 5));
 const resizeDays = (days: DayUI[], n: number): DayUI[] => Array.from({ length: n }, (_, i) => days[i] ?? emptyDay(true));
 
@@ -141,6 +165,7 @@ function ShiftForm({ editId }: { editId?: number }) {
         segments: d.segments.map((s) => ({ start: minutesToMask(s.startClock), end: minutesToMask(s.endClock) })),
         breakText: d.breakMinutes ? minutesToMask(d.breakMinutes) : "",
         leaveText: d.leaveMinutes !== null ? minutesToMask(d.leaveMinutes) : "",
+        windowText: minutesToMask(d.windowStartClock),
       })),
     };
   }
@@ -175,8 +200,10 @@ function ShiftForm({ editId }: { editId?: number }) {
     const days = [];
     for (const [i, d] of form.days.entries()) {
       const label = form.cycleType === "WEEKLY" ? WEEKDAYS[i] : `روز ${toFaDigits(String(i + 1))}`;
+      const windowStartClock = d.windowText ? maskToMinutes(d.windowText) : null;
+      if (d.windowText && (windowStartClock === null || windowStartClock >= DAY)) return setError(`${label}: شروع پنجره‌ی حضور نامعتبر است`);
       if (!d.isWorkDay) {
-        days.push({ dayNo: i + 1, isWorkDay: false, segments: [] });
+        days.push({ dayNo: i + 1, isWorkDay: false, segments: [], windowStartClock });
         continue;
       }
       const segments = [];
@@ -190,7 +217,7 @@ function ShiftForm({ editId }: { editId?: number }) {
       if (brk === null) return setError(`${label}: استراحت نامعتبر است`);
       const leave = d.leaveText ? maskToMinutes(d.leaveText) : null;
       if (d.leaveText && leave === null) return setError(`${label}: ساعت مرخصی نامعتبر است`);
-      days.push({ dayNo: i + 1, isWorkDay: true, segments, breakMinutes: brk, leaveMinutes: leave });
+      days.push({ dayNo: i + 1, isWorkDay: true, segments, breakMinutes: brk, leaveMinutes: leave, windowStartClock });
     }
     const body = { title: form.title, isActive: form.isActive, cycleType: form.cycleType, cycleLength: form.cycleType === "WEEKLY" ? 7 : Number(form.cycleLength), description: form.description, days, updatedAt };
     try {
@@ -257,7 +284,7 @@ function ShiftForm({ editId }: { editId?: number }) {
         </div>
 
         <h4 style={{ margin: "14px 0 6px" }}>
-          روزهای چرخه <FieldHint label="روزهای چرخه" text="بازه‌ی کاری: ساعت شروع و پایان؛ اگر پایان کوچک‌تر از شروع باشد، پایان در روز بعد است (شیفت شب). استراحت (مثلاً ناهار) جزو ساعت کاری نیست. ساعت مرخصی: مقداری که اگر فرد این روز را مرخصی بگیرد از مانده‌ی مرخصی‌اش کم می‌شود؛ خالی = ساعت کاری خالص." />
+          روزهای چرخه <FieldHint label="روزهای چرخه" text="بازه‌ی کاری: ساعت شروع و پایان؛ اگر پایان کوچک‌تر از شروع باشد، پایان در روز بعد است (شیفت شب). استراحت (مثلاً ناهار) جزو ساعت کاری نیست. ساعت مرخصی: مقداری که اگر فرد این روز را مرخصی بگیرد از مانده‌ی مرخصی‌اش کم می‌شود؛ خالی = ساعت کاری خالص. پنجره‌ی حضور: ترددهای هر روز تقویمی که در پنجره‌ی این ردیف بیفتد به همین روز کاری تعلق دارد؛ فقط «شروع» را تعیین می‌کنید و پایان خودکار شروع پنجره‌ی روز بعد است (پنجره‌ها هم‌پوشانی و فاصله ندارند). خالی = پیش‌فرض (۴ ساعت قبل از شروع شیفت). پنجره باید همه‌ی بازه‌های کاری را بپوشاند." />
         </h4>
         <div className="grid-scroll-area" style={{ maxHeight: "none", overflowX: "auto" }}>
           <table className="je-lines-table">
@@ -268,6 +295,7 @@ function ShiftForm({ editId }: { editId?: number }) {
                 <th>بازه‌های کاری</th>
                 <th style={{ width: 110 }}>استراحت</th>
                 <th style={{ width: 110 }}>ساعت مرخصی</th>
+                <th style={{ width: 190 }}>پنجره‌ی حضور</th>
                 <th style={{ width: 230 }}>محاسبه</th>
                 <th style={{ width: 110 }}></th>
               </tr>
@@ -300,6 +328,21 @@ function ShiftForm({ editId }: { editId?: number }) {
                     </td>
                     <td>{d.isWorkDay && <TimeInput value={d.breakText} width={80} placeholder="00:30" onChange={(t) => setDay(i, { breakText: t })} />}</td>
                     <td>{d.isWorkDay && <TimeInput value={d.leaveText} width={80} placeholder={c ? minutesToMask(c.work) : "—"} onChange={(t) => setDay(i, { leaveText: t })} />}</td>
+                    <td style={{ fontSize: 12 }}>
+                      {(() => {
+                        const own = effectiveWindowStart(form.days, i);
+                        const nextStart = effectiveWindowStart(form.days, (i + 1) % form.days.length);
+                        return (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                              <span>از</span>
+                              <TimeInput value={d.windowText} width={72} placeholder={own !== null ? minutesToMask(own) : "خودکار"} onChange={(t) => setDay(i, { windowText: t })} />
+                            </div>
+                            {nextStart !== null && <span style={{ opacity: 0.75 }}>تا {hm(nextStart)} روز بعد</span>}
+                          </div>
+                        );
+                      })()}
+                    </td>
                     <td style={{ fontSize: 13 }}>{c ? <>طول: {hm(c.total)} — کار خالص: {hm(c.work)} — کسر مرخصی: <b>{hm(c.leave)}</b></> : ""}</td>
                     <td>{d.isWorkDay && <button type="button" className="btn-link" title="تعریف این روز را برای همه‌ی روزهای کاری دیگر کپی می‌کند" onClick={() => copyToWorkDays(i)}>اعمال به روزهای کاری</button>}</td>
                   </tr>

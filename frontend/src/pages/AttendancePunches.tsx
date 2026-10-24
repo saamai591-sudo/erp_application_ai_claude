@@ -29,6 +29,7 @@ export interface PunchRow {
   personnelCode: string;
   employeeName: string;
   date: string;
+  workDate: string | null;
   minute: number;
   time: string;
   source: string;
@@ -152,6 +153,7 @@ function PunchList() {
           { header: "کارمند", ...s((r) => r.employeeName) },
           { header: "تاریخ", ...s((r) => formatJalaliDate(r.date)), width: "110px" },
           { header: "ساعت", ...s((r) => toFaDigits(r.time)), width: "80px" },
+          { header: "روز کاری (دستی)", ...s((r) => (r.workDate ? formatJalaliDate(r.workDate) : "")), width: "140px" },
           { header: "منبع", ...s((r) => r.sourceTitle), width: "130px" },
           {
             header: "درخواست اصلاح",
@@ -176,7 +178,7 @@ function PunchForm({ editId }: { editId?: number }) {
   const { openTab } = useTabs();
   const cacheKey = `form:${location.pathname}:form`;
   // فرم داده‌ی ساده: تاریخ + کارمند + ساعت. بعد از ثبتِ تردد جدید، تاریخ و کارمند می‌مانند و فقط ساعت پاک می‌شود تا ترددهای بعدی سریع وارد شوند
-  const [form, setForm] = usePersistedState(cacheKey, { employeeId: "", date: localTodayIso(), time: "" });
+  const [form, setForm] = usePersistedState(cacheKey, { employeeId: "", date: localTodayIso(), time: "", workDate: "" });
   const [meta, setMeta] = useState<{ canEdit: boolean; sourceTitle: string; correctionRequestId: number | null; correctionNumber: number | null; updatedAt?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
@@ -187,7 +189,7 @@ function PunchForm({ editId }: { editId?: number }) {
     if (!editId) return;
     api.get(`/attendance-punches/${editId}`).then((r: PunchRow) => {
       setMeta({ canEdit: r.canEdit, sourceTitle: r.sourceTitle, correctionRequestId: r.correctionRequestId, correctionNumber: r.correctionNumber, updatedAt: r.updatedAt });
-      if (!hasPersistedState(cacheKey)) setForm({ employeeId: String(r.employeeId), date: r.date, time: minutesToMask(r.minute) });
+      if (!hasPersistedState(cacheKey)) setForm({ employeeId: String(r.employeeId), date: r.date, time: minutesToMask(r.minute), workDate: r.workDate ?? "" });
       setLoaded(true);
     }).catch((e) => setError(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -202,14 +204,14 @@ function PunchForm({ editId }: { editId?: number }) {
     if (minute === null || minute >= 1440) return setError("ساعت را کامل وارد کنید (۰۰:۰۰ تا ۲۳:۵۹)");
     try {
       if (editId) {
-        await api.put(`/attendance-punches/${editId}`, { date: form.date, minute, updatedAt: meta?.updatedAt });
+        await api.put(`/attendance-punches/${editId}`, { date: form.date, minute, workDate: form.workDate || null, updatedAt: meta?.updatedAt });
         flash();
         const r: PunchRow = await api.get(`/attendance-punches/${editId}`);
         setMeta((m) => (m ? { ...m, updatedAt: r.updatedAt } : m));
       } else {
-        await api.post("/attendance-punches", { employeeId: Number(form.employeeId), date: form.date, minute });
+        await api.post("/attendance-punches", { employeeId: Number(form.employeeId), date: form.date, minute, workDate: form.workDate || null });
         flash();
-        setForm({ ...form, time: "" });
+        setForm({ ...form, time: "", workDate: "" });
       }
     } catch (err) {
       setError((err as ApiError).message);
@@ -252,6 +254,13 @@ function PunchForm({ editId }: { editId?: number }) {
             <div className="form-field">
               <label>ساعت<RequiredMark /> <FieldHint label="ساعت" text="ساعت تردد (۰۰:۰۰ تا ۲۳:۵۹). جهت ورود یا خروج وارد نمی‌شود؛ سیستم بعداً با جفت‌کردن ترددهای هر روز آن را تشخیص می‌دهد. تردد بعد از نیمه‌شب با تاریخ همان روز تقویمی ثبت می‌شود." /></label>
               <TimeInput value={form.time} width={100} autoFocus={!editId} onChange={(t) => setForm({ ...form, time: t })} />
+            </div>
+            <div className="form-field">
+              <label>روز کاری (اختصاص دستی) <FieldHint label="روز کاری" text="فقط برای استثنا: هر تردد به‌طور خودکار با پنجره‌ی حضور شیفت به یک روز کاری می‌خورد. اگر تردد مبهم یا خارج از پنجره است (مثلاً ۲۴:۰۰ که خروج روز قبل است)، همین‌جا روز کاری‌اش را دستی مشخص کنید؛ حداکثر یک روز با تاریخ تردد فاصله." /></label>
+              <div style={{ display: "flex", gap: 4 }}>
+                <JalaliDatePicker value={form.workDate} onChange={(v) => setForm({ ...form, workDate: v })} />
+                {form.workDate && <button type="button" className="btn-link" onClick={() => setForm({ ...form, workDate: "" })}>حذف</button>}
+              </div>
             </div>
           </div>
         </fieldset>

@@ -6208,6 +6208,8 @@ model AttendancePunch {
   minute              Int
   source              AttendancePunchSource         @default(MANUAL)
   correctionRequestId Int?
+  /// اختصاص دستیِ تردد به یک روز کاری (استثنا؛ بر پنجره‌ی حضور شیفت غلبه می‌کند). خالی = روز کاری از روی پنجره‌ی حضور شیفت تعیین می‌شود
+  workDate            DateTime?                     @db.Date
   description         String?
   createdById         Int?
   createdAt           DateTime                      @default(now())
@@ -6283,6 +6285,8 @@ model AttendanceShiftDay {
   breakMinutes Int                      @default(0)
   /// ساعتی که اگر فرد این روز را مرخصی بگیرد از مانده‌ی مرخصی کم می‌شود؛ خالی = ساعت کاری خالص (مجموع بازه‌ها − استراحت)
   leaveMinutes Int?
+  /// شروع «پنجره‌ی حضور» این روز (دقیقه از ابتدای روز، ۰ تا ۱۴۳۹)؛ پایان پنجره = شروع پنجره‌ی روز بعد در چرخه (+۲۴ ساعت) ⇒ پنجره‌ها هم‌پوشانی و فاصله ندارند
+  windowStartMinute Int            @default(240)
   shift        AttendanceShift          @relation(fields: [shiftId], references: [id], onDelete: Cascade)
   segments     AttendanceShiftSegment[]
 

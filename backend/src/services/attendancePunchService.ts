@@ -46,6 +46,15 @@ export async function assertDayOpen(_employeeId: number, _date: Date) {
   /* جای قفل «بستن ماه تردد» */
 }
 
+/** اختصاص دستی به روز کاری (اختیاری): باید حداکثر یک روز با تاریخ تردد فاصله داشته باشد و داخل دوره‌ی همکاری باشد */
+export async function cleanWorkDate(employeeId: number, date: Date, raw: unknown): Promise<Date | null> {
+  if (raw === undefined || raw === null || raw === "") return null;
+  const wd = parseDay(raw, "روز کاری");
+  if (Math.abs(wd.getTime() - date.getTime()) > 86400000) throw new AttendanceError("روز کاری حداکثر یک روز با تاریخ تردد فاصله دارد");
+  await assertEmployeeWorking(employeeId, wd);
+  return wd;
+}
+
 export interface PunchInput {
   minute: number;
   description?: string | null;
