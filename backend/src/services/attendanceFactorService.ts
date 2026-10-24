@@ -4,6 +4,7 @@ import { buildWorksheet } from "./attendanceWorksheetService";
 import { getCalendarMonth } from "./workCalendarService";
 import { getParameterValue } from "./payrollParameterService";
 import { evaluate, evaluateCondition, parseCondition, parseFormula, collectRefs, collectCondRefs, FormulaError, type Cond, type EvalEnv, type Node, type Ns, type RefInfo } from "./payrollFormula";
+import { AGG_HINTS, ATT_BASE_HINTS, ATT_GROUP_HINTS, DAY_VAR_HINTS } from "./attendanceFormulaHints";
 import { AGG_VARIANTS, ALLOWED_NS, ATT_BASE_INFO, ATT_LEVEL_FA, ATT_VALUE_TYPE_FA, DAY_VARS, type AttLevel, type AttValueType } from "./attendanceFormulaDefs";
 
 // مدیریت تردد › عوامل و فرمول. تنها محل قواعد: تعریف عامل (روزانه/ماهانه)، روش‌های تاریخ‌دار (ماه اجرا از «تقویم کاری») با شاخه‌های شرط ← فرمول، اعتبارسنجی (نام‌فضاهای مجاز هر سطح،
@@ -256,24 +257,28 @@ export async function palette(level: AttLevel, factorId?: number) {
     prisma.payrollParameter.findMany({ where: { isActive: true, kind: "CONSTANT", type: { in: ["NUMBER", "AMOUNT"] } }, orderBy: { id: "asc" } }),
   ]);
   const self = factorId ? factors.find((f) => f.id === factorId) : undefined;
-  const pick = (lv: AttLevel) => factors.filter((f) => f.level === lv && f.id !== self?.id).map((f) => ({ key: f.key, title: f.title }));
-  const aggVariants = Object.entries(AGG_VARIANTS).map(([key, title]) => ({ key, title }));
-  const dayVars = Object.entries(DAY_VARS).map(([key, title]) => ({ key, title }));
+  const pick = (lv: AttLevel) =>
+    factors
+      .filter((f) => f.level === lv && f.id !== self?.id)
+      .map((f) => ({ key: f.key, title: f.title, hint: [f.description, lv === "DAY" ? "عامل روزانه؛ مقدارش برای هر روز جداگانه محاسبه می‌شود." : "عامل ماهانه؛ یک مقدار برای کل ماه."].filter(Boolean).join(" — ") }));
+  const aggVariants = Object.entries(AGG_VARIANTS).map(([key, title]) => ({ key, title, hint: AGG_HINTS[key] }));
+  const dayVars = Object.entries(DAY_VARS).map(([key, title]) => ({ key, title, hint: DAY_VAR_HINTS[key] }));
   const groups =
     level === "DAY"
       ? [
-          { ns: "V", title: "متغیرهای روز", items: dayVars, variants: null },
-          { ns: "F", title: "عوامل روزانه", items: pick("DAY"), variants: null },
+          { ns: "V", title: "متغیرهای روز", hint: ATT_GROUP_HINTS.V, items: dayVars, variants: null },
+          { ns: "F", title: "عوامل روزانه", hint: ATT_GROUP_HINTS.F, items: pick("DAY"), variants: null },
         ]
       : [
-          { ns: "A", title: "تجمیع عوامل روزانه در ماه", items: pick("DAY"), variants: aggVariants },
-          { ns: "T", title: "تجمیع متغیرهای روز در ماه", items: dayVars, variants: aggVariants },
-          { ns: "M", title: "عوامل ماهانه", items: pick("MONTH"), variants: null },
+          { ns: "A", title: "تجمیع عوامل روزانه در ماه", hint: ATT_GROUP_HINTS.A, items: pick("DAY"), variants: aggVariants },
+          { ns: "T", title: "تجمیع متغیرهای روز در ماه", hint: ATT_GROUP_HINTS.T, items: dayVars, variants: aggVariants },
+          { ns: "M", title: "عوامل ماهانه", hint: ATT_GROUP_HINTS.M, items: pick("MONTH"), variants: null },
         ];
   return {
     level,
     groups,
-    baseInfo: Object.entries(ATT_BASE_INFO).map(([key, title]) => ({ key, title })),
+    baseHint: ATT_GROUP_HINTS.BASE,
+    baseInfo: Object.entries(ATT_BASE_INFO).map(([key, title]) => ({ key, title, hint: ATT_BASE_HINTS[key] })),
     params: params.map((p) => ({ key: p.key, title: p.title, type: p.type })),
   };
 }

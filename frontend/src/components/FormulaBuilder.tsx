@@ -31,8 +31,9 @@ interface Palette {
 /** پالت فرمول‌ساز تردد (سرور: GET /attendance-factors/palette): دسته‌ها (متغیر روز، عامل روزانه، تجمیع …) ← مورد ← نوع تجمیع */
 interface AttPalette {
   level: "DAY" | "MONTH";
-  groups: { ns: string; title: string; items: { key: string; title: string }[]; variants: { key: string; title: string }[] | null }[];
-  baseInfo: { key: string; title: string }[];
+  groups: { ns: string; title: string; hint?: string; items: { key: string; title: string; hint?: string }[]; variants: { key: string; title: string; hint?: string }[] | null }[];
+  baseHint?: string;
+  baseInfo: { key: string; title: string; hint?: string }[];
   params: { key: string; title: string; type: string }[];
 }
 
@@ -361,7 +362,7 @@ export function FormulaBuilder({
   const variants = cat === "DECREE" ? (pal?.decree.variants ?? []) : (payrollCat?.variants ?? []);
 
   // حالت تردد: دسته ← مورد ← (نوع تجمیع)
-  const attCats = [...(attPal?.groups.map((g) => ({ key: g.ns, title: g.title })) ?? []), { key: "BASE", title: "اطلاعات پایه" }];
+  const attCats = [...(attPal?.groups.map((g) => ({ key: g.ns, title: g.title, hint: g.hint })) ?? []), { key: "BASE", title: "اطلاعات پایه", hint: attPal?.baseHint }];
   const attGroup = attPal?.groups.find((g) => g.ns === cat);
   const attItems = cat === "BASE" ? [] : attGroup?.items ?? [];
   const attPick = (i: { key: string; title: string }) => {
@@ -391,11 +392,12 @@ export function FormulaBuilder({
       {children}
     </div>
   );
-  const item = (label: string, selected: boolean, onClick: () => void) => (
+  const item = (label: string, selected: boolean, onClick: () => void, hint?: string) => (
     <div
       key={label}
       onClick={onClick}
       onMouseDown={(e) => e.preventDefault()}
+      title={hint}
       style={{ padding: "5px 10px", cursor: "pointer", background: selected ? "var(--primary-soft, rgba(80,80,200,.15))" : undefined, fontSize: 13 }}
     >
       {label}
@@ -565,9 +567,9 @@ export function FormulaBuilder({
 
       {tab === "factors" && att && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-          {col("دسته", attCats.map((c) => item(c.title, cat === c.key, () => { setCat(c.key); setFac(""); })))}
-          {col(cat === "BASE" ? "اطلاعات پایه" : "مورد", cat === "BASE" ? attPal?.baseInfo.map((b) => item(b.title, false, () => push(`[B:${b.key}]`))) : attItems.map((i) => item(i.title, fac === i.key, () => attPick(i))))}
-          {col("مقدار", attGroup?.variants && fac ? attGroup.variants.map((v) => item(v.title, false, () => push(`[${attGroup.ns}:${fac}:${v.key}]`))) : null)}
+          {col("دسته", attCats.map((c) => item(c.title, cat === c.key, () => { setCat(c.key); setFac(""); }, c.hint)))}
+          {col(cat === "BASE" ? "اطلاعات پایه" : "مورد", cat === "BASE" ? attPal?.baseInfo.map((b) => item(b.title, false, () => push(`[B:${b.key}]`), b.hint)) : attItems.map((i) => item(i.title, fac === i.key, () => attPick(i), i.hint)))}
+          {col("مقدار", attGroup?.variants && fac ? attGroup.variants.map((v) => item(v.title, false, () => push(`[${attGroup.ns}:${fac}:${v.key}]`), v.hint)) : null)}
         </div>
       )}
 
