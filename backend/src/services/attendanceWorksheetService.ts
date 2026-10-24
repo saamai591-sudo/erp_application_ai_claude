@@ -170,9 +170,15 @@ export async function buildWorksheet(opts: { from: Date; to: Date; employeeId?: 
       const status: RowStatus = n === 0 ? "NO_PUNCH" : !even ? "INCOMPLETE" : w.rest ? "WORK_ON_REST" : "OK";
       const m = (v: number | null) => (v === null || w.rest ? null : Math.max(0, v));
       const late = first !== null && w.segStartAbs !== null ? m(first - w.segStartAbs) : null;
-      const overBefore = first !== null && w.segStartAbs !== null ? m(w.segStartAbs - first) : null;
+      // اضافه‌کار قبل/بعد = مدتِ حضورِ واقعی (جفت‌های تردد) بیرون از بازه، نه فاصله‌ی اولین/آخرین تردد با بازه؛ پس خروجِ بینِ دو جفت (مثلاً ۱۷ تا ۲۰) اضافه‌کار حساب نمی‌شود.
+      // ردیفِ ناقص (تعداد فرد) جفتِ کامل ندارد: برای قبل همان فاصله‌ی اولین تردد، برای بعد null.
+      const pairs: [number, number][] = [];
+      if (even) for (let i = 0; i + 1 < n; i += 2) pairs.push([w.punches[i].abs, w.punches[i + 1].abs]);
+      const segS = w.segStartAbs, segE = w.segEndAbs;
+      const overBefore =
+        first === null || segS === null || w.rest ? null : even ? pairs.reduce((a, [i, o]) => a + Math.max(0, Math.min(o, segS) - i), 0) : m(segS - first);
       const early = lastOut !== null && w.segEndAbs !== null ? m(w.segEndAbs - lastOut) : null;
-      const overAfter = lastOut !== null && w.segEndAbs !== null ? m(lastOut - w.segEndAbs) : null;
+      const overAfter = lastOut === null || segE === null || w.rest ? null : pairs.reduce((a, [i, o]) => a + Math.max(0, o - Math.max(i, segE)), 0);
       const rel = (abs: number) => ({ date: dayStr(fromNum(Math.floor(abs / DAY)))!, clock: clockOf(abs) });
       const row = {
         id: `${emp.id}|${dayStr(fromNum(w.workDay))}|${w.rowNo}`,
