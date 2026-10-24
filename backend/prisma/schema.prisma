@@ -6332,8 +6332,6 @@ model AttendanceShiftAssignment {
   employeeId     Int
   shiftId        Int
   fromDate       DateTime        @db.Date
-  /// فقط شیفت چرخشی: تاریخی که «روز ۱ چرخه» روی آن می‌افتد (روزهای بعد و قبل از آن بر پایه‌ی طول چرخه تکرار می‌شوند)
-  cycleStartDate DateTime?       @db.Date
   note           String?
   createdById    Int?
   createdAt      DateTime        @default(now())

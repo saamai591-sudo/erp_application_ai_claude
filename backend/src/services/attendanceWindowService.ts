@@ -47,7 +47,7 @@ export async function effectiveAssignmentOn(employeeId: number, date: Date) {
 export async function windowRowsOn(employeeId: number, date: Date): Promise<WindowOption[] | null> {
   const a = await effectiveAssignmentOn(employeeId, date);
   if (!a) return null;
-  const idx = cycleDayIndex(a.shift.cycleType, a.shift.cycleLength, a.cycleStartDate ?? a.shift.cycleStartDate, date);
+  const idx = cycleDayIndex(a.shift.cycleType, a.shift.cycleLength, a.shift.cycleStartDate, date);
   let rows = shiftTimeline(a.shift).filter((t) => t.dayIdx === idx);
   // استثنای روز (ساعت شروع/پایان اصلاح‌شده یا تعطیلی) همان‌طور که کارکرد روزانه می‌بیند
   const dn = Math.floor(date.getTime() / DAY_MS);

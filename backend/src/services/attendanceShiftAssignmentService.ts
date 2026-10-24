@@ -21,10 +21,8 @@ export function assignmentShape(a: any) {
     cycleType: a.shift.cycleType,
     cycleLength: a.shift.cycleLength,
     fromDate: dayStr(a.fromDate),
-    /** جایگزین اختیاریِ همین انتساب (خالی = از تعریف شیفت) */
-    cycleStartDate: dayStr(a.cycleStartDate),
-    shiftCycleStartDate: a.shift.cycleType === "ROTATING" ? dayStr(a.shift.cycleStartDate) : null,
-    effectiveCycleStartDate: a.shift.cycleType === "ROTATING" ? dayStr(a.cycleStartDate ?? a.shift.cycleStartDate) : null,
+    /** تاریخ روز ۱ چرخه‌ی شیفت (فقط چرخشی؛ فقط نمایش) */
+    cycleStartDate: a.shift.cycleType === "ROTATING" ? dayStr(a.shift.cycleStartDate) : null,
     note: a.note ?? "",
     updatedAt: a.updatedAt,
   };
@@ -40,13 +38,9 @@ async function clean(b: any) {
   if (!shift) throw new AttendanceError("شیفت یافت نشد");
   if (!shift.isActive) throw new AttendanceError("این شیفت غیرفعال است");
   await assertEmployeeWorking(employeeId, fromDate);
-  let cycleStartDate: Date | null = null;
-  if (shift.cycleType === "ROTATING") {
-    // تاریخ روز ۱ چرخه از تعریف شیفت می‌آید؛ مقدارِ اختیاریِ این انتساب (در صورت وجود) بر آن مقدم است
-    if (b?.cycleStartDate) cycleStartDate = parseDay(b.cycleStartDate, "تاریخ روز ۱ چرخه");
-    else if (!shift.cycleStartDate) throw new AttendanceError(`برای شیفت چرخشی «${shift.title}» تاریخ روز ۱ چرخه تعیین نشده است؛ آن را در تعریف شیفت (یا در همین انتساب) وارد کنید`);
-  }
-  return { employeeId, shiftId, fromDate, cycleStartDate, note: typeof b?.note === "string" && b.note.trim() ? b.note.trim() : null };
+  // تاریخ روز ۱ چرخه فقط در تعریف شیفت است؛ انتساب فقط «کارمند + شیفت + از تاریخ» است و کارمند از روزِ مربوطِ همان تاریخ وارد چرخه می‌شود
+  if (shift.cycleType === "ROTATING" && !shift.cycleStartDate) throw new AttendanceError(`برای شیفت چرخشی «${shift.title}» تاریخ روز ۱ چرخه تعیین نشده است؛ آن را در تعریف شیفت وارد کنید`);
+  return { employeeId, shiftId, fromDate, note: typeof b?.note === "string" && b.note.trim() ? b.note.trim() : null };
 }
 
 /** ترددی که با اختصاص دستی (روز کاری ≥ تاریخ شروع) به این انتساب متکی است */
