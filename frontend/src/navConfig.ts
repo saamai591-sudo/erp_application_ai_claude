@@ -385,7 +385,6 @@ const RAW_MODULES: ModuleGroup[] = [
       },
     ],
   },
-  // «مدیریت تردد» هنوز فرمی ندارد؛ تا اولین فرم، منو آن را نمایش نمی‌دهد (filterModulesByAccess ماژول بی‌آیتم را پنهان می‌کند)
   {
     title: "حقوق و دستمزد",
     subModules: [
@@ -449,7 +448,22 @@ const RAW_MODULES: ModuleGroup[] = [
       },
     ],
   },
-  { title: "مدیریت تردد", subModules: [] },
+  {
+    title: "مدیریت تردد",
+    subModules: [
+      {
+        title: "تنظیمات",
+        items: [{ key: "attendance-shifts", label: "شیفت", list: "/attendance-shifts", create: "/attendance-shifts/new", icon: "calendar" }],
+      },
+      {
+        title: "عملیات",
+        items: [
+          { key: "attendance-punches", label: "ورود و خروج", list: "/attendance-punches", create: "/attendance-punches/new", icon: "calendar" },
+          { key: "attendance-correction-requests", label: "درخواست اصلاح تردد", list: "/attendance-correction-requests", create: "/attendance-correction-requests/new", icon: "file" },
+        ],
+      },
+    ],
+  },
 ];
 
 // قاعده‌ی عمومی ترتیب زیرماژول‌ها در همه‌ی ماژول‌ها: «تنظیمات» اول، بقیه (عملیات و گروه‌های عملیاتی) به همان ترتیب تعریف در وسط،

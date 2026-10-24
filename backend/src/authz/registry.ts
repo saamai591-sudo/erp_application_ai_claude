@@ -603,6 +603,34 @@ export const REGISTRY: ModuleDef[] = [
     ],
   },
   {
+    key: "attendance",
+    title: "مدیریت تردد",
+    subModules: [
+      {
+        key: "settings",
+        title: "تنظیمات",
+        forms: [{ key: "attendance-shifts", title: "شیفت", baseActions: CRUD }],
+      },
+      {
+        key: "operations",
+        title: "عملیات",
+        forms: [
+          { key: "attendance-punches", title: "ورود و خروج", baseActions: CRUD },
+          {
+            key: "attendance-correction-requests",
+            title: "درخواست اصلاح تردد",
+            baseActions: CRUD,
+            actions: [
+              { key: "approve", title: "تایید (ثبت ترددها)" },
+              { key: "reject", title: "رد" },
+              { key: "unapprove", title: "برگشت از تایید / رد" },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
     key: "workflow",
     title: "کارتابل",
     subModules: [

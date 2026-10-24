@@ -97,6 +97,9 @@ import TaxMemories from "./pages/TaxMemories";
 import Employees from "./pages/Employees";
 import Positions from "./pages/Positions";
 import Jobs from "./pages/Jobs";
+import AttendancePunches from "./pages/AttendancePunches";
+import AttendanceCorrectionRequests from "./pages/AttendanceCorrectionRequests";
+import AttendanceShifts from "./pages/AttendanceShifts";
 import { EmploymentTypes, EducationLevels, TerminationReasons, DecreeComponents } from "./pages/HrMasters";
 import EmploymentDecrees from "./pages/EmploymentDecrees";
 import LegalParameters from "./pages/LegalParameters";
@@ -466,6 +469,15 @@ export default function App() {
             <Route path="/jobs" element={<Jobs />} />
             <Route path="/jobs/new" element={<Jobs />} />
             <Route path="/jobs/:id/edit" element={<Jobs />} />
+            <Route path="/attendance-punches" element={<AttendancePunches />} />
+            <Route path="/attendance-punches/new" element={<AttendancePunches />} />
+            <Route path="/attendance-punches/:id/edit" element={<AttendancePunches />} />
+            <Route path="/attendance-correction-requests" element={<AttendanceCorrectionRequests />} />
+            <Route path="/attendance-correction-requests/new" element={<AttendanceCorrectionRequests />} />
+            <Route path="/attendance-correction-requests/:id/edit" element={<AttendanceCorrectionRequests />} />
+            <Route path="/attendance-shifts" element={<AttendanceShifts />} />
+            <Route path="/attendance-shifts/new" element={<AttendanceShifts />} />
+            <Route path="/attendance-shifts/:id/edit" element={<AttendanceShifts />} />
             <Route path="/decree-components" element={<DecreeComponents />} />
             <Route path="/decree-components/new" element={<DecreeComponents />} />
             <Route path="/decree-components/:id/edit" element={<DecreeComponents />} />

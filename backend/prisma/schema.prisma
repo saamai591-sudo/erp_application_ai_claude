@@ -4777,6 +4777,8 @@ model Position {
 
 model Employee {
   paymentPrepLines PayrollPaymentPrepLine[]
+  attendancePunches AttendancePunch[]
+  attendanceCorrections AttendanceCorrectionRequest[]
   payrollIssueSettings PayrollIssueSetting[]
   id                     Int                  @id @default(autoincrement())
   /// کد پرسنلی (دستی؛ خالی = آخرین کد عددی + ۱ با همان طول)
@@ -6176,4 +6178,132 @@ model WorkflowNotification {
   task      WorkflowTask             @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@index([userId, readAt])
+}
+
+// ── مدیریت تردد: تردد خام و درخواست اصلاح تردد (فاز ۱) ──
+
+enum AttendancePunchDirection {
+  IN
+  OUT
+}
+
+enum AttendancePunchSource {
+  /// ثبت مستقیم در فرم ورود و خروج
+  MANUAL
+  /// ورود از فایل
+  IMPORT
+  /// دستگاه حضور و غیاب
+  DEVICE
+  /// ساخته‌شده با تایید «درخواست اصلاح تردد» (قابل ویرایش/حذف مستقیم نیست)
+  CORRECTION
+}
+
+enum AttendanceCorrectionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// یک تردد (ورود یا خروج): روز تقویمی + دقیقه از ۰۰:۰۰ (وقت تهران). جهت اختیاری است (نامشخص ⇒ جفت‌سازی بعداً بر اساس ترتیب زمانی)
+model AttendancePunch {
+  id                  Int                           @id @default(autoincrement())
+  employeeId          Int
+  date                DateTime                      @db.Date
+  /// دقیقه از ابتدای روز (۰ تا ۱۴۳۹)
+  minute              Int
+  direction           AttendancePunchDirection?
+  source              AttendancePunchSource         @default(MANUAL)
+  correctionRequestId Int?
+  description         String?
+  createdById         Int?
+  createdAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
+  employee            Employee                      @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  correctionRequest   AttendanceCorrectionRequest?  @relation(fields: [correctionRequestId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, date, minute])
+  @@index([date])
+  @@index([correctionRequestId])
+}
+
+/// درخواست اصلاح تردد (مثلاً فراموشی ثبت): یک کارمند + یک روز + چند تردد درخواستی؛ با تایید، ترددها با منبع CORRECTION ثبت می‌شوند
+model AttendanceCorrectionRequest {
+  id           Int                        @id @default(autoincrement())
+  number       Int                        @unique
+  employeeId   Int
+  date         DateTime                   @db.Date
+  reason       String
+  status       AttendanceCorrectionStatus @default(PENDING)
+  decidedById  Int?
+  decidedAt    DateTime?
+  decisionNote String?
+  createdById  Int?
+  createdAt    DateTime                   @default(now())
+  updatedAt    DateTime                   @updatedAt
+  employee     Employee                   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  lines        AttendanceCorrectionLine[]
+  punches      AttendancePunch[]
+
+  @@index([employeeId, date])
+}
+
+model AttendanceCorrectionLine {
+  id        Int                           @id @default(autoincrement())
+  requestId Int
+  minute    Int
+  direction AttendancePunchDirection?
+  request   AttendanceCorrectionRequest   @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, minute])
+}
+
+// ── مدیریت تردد: شیفت (فاز ۱) ──
+
+enum AttendanceShiftCycle {
+  /// هفتگی: ۷ روز، روز ۱ = شنبه … روز ۷ = جمعه (هم‌تراز با هفته‌ی تقویم)
+  WEEKLY
+  /// چرخشی: چرخه‌ی N روزه که نقطه‌ی شروعش هنگام انتساب به فرد تعیین می‌شود
+  ROTATING
+}
+
+/// شیفت = الگوی تناوبی روزها؛ هر روز چرخه کاری/غیرکاری است و بازه‌های کاری، مدت استراحت (جزو کار نیست) و ساعت مرخصی همان روز را دارد
+model AttendanceShift {
+  id          Int                  @id @default(autoincrement())
+  code        Int                  @unique
+  title       String               @unique
+  isActive    Boolean              @default(true)
+  cycleType   AttendanceShiftCycle @default(WEEKLY)
+  cycleLength Int                  @default(7)
+  description String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  days        AttendanceShiftDay[]
+}
+
+model AttendanceShiftDay {
+  id           Int                      @id @default(autoincrement())
+  shiftId      Int
+  /// شماره‌ی روز در چرخه (۱ تا cycleLength)
+  dayNo        Int
+  isWorkDay    Boolean                  @default(true)
+  /// استراحت (مثلاً ناهار) به دقیقه؛ از طول بازه‌ها جزو ساعت کاری نیست
+  breakMinutes Int                      @default(0)
+  /// ساعتی که اگر فرد این روز را مرخصی بگیرد از مانده‌ی مرخصی کم می‌شود؛ خالی = ساعت کاری خالص (مجموع بازه‌ها − استراحت)
+  leaveMinutes Int?
+  shift        AttendanceShift          @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  segments     AttendanceShiftSegment[]
+
+  @@unique([shiftId, dayNo])
+}
+
+model AttendanceShiftSegment {
+  id          Int                @id @default(autoincrement())
+  dayId       Int
+  seq         Int
+  /// دقیقه از ابتدای روزِ شیفت؛ پایان می‌تواند بیش از ۱۴۴۰ باشد (روز بعد)
+  startMinute Int
+  endMinute   Int
+  day         AttendanceShiftDay @relation(fields: [dayId], references: [id], onDelete: Cascade)
+
+  @@unique([dayId, seq])
 }
