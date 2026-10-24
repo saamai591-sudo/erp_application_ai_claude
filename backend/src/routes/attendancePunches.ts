@@ -4,7 +4,7 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
 import {
-  AttendanceError, EMPLOYEE_SELECT, SOURCE_FA, assertDayOpen, assertEmployeeWorking, assertNoDuplicatePunches, cleanPunchRows, dayStr, minuteText, parseDay, parseDirection, parseMinute, personName,
+  AttendanceError, EMPLOYEE_SELECT, SOURCE_FA, assertDayOpen, assertEmployeeWorking, assertNoDuplicatePunches, cleanPunchRows, dayStr, minuteText, parseDay, parseMinute, personName,
   approveCorrection, nextRequestNumber, rejectCorrection, unapproveCorrection,
 } from "../services/attendancePunchService";
 
@@ -25,7 +25,6 @@ const punchShape = (p: any) => ({
   date: dayStr(p.date),
   minute: p.minute,
   time: minuteText(p.minute),
-  direction: p.direction,
   source: p.source,
   sourceTitle: SOURCE_FA[p.source] ?? p.source,
   correctionRequestId: p.correctionRequestId,
@@ -58,18 +57,18 @@ router.get("/attendance-punches/:id", can(`${PUNCH_FORM}.view`), async (req, res
   res.json(punchShape(p));
 });
 
-/** ثبت چند تردد برای یک کارمند و یک روز (همه یا هیچ) */
+/** ثبت یک تردد: کارمند + تاریخ + ساعت (فرم داده‌ی ساده، بدون هدر/ردیف) */
 router.post("/attendance-punches", can(`${PUNCH_FORM}.create`), async (req, res) => {
   try {
     const employeeId = Number(req.body?.employeeId);
     if (!employeeId) throw new AttendanceError("کارمند الزامی است");
     const date = parseDay(req.body?.date);
-    const rows = cleanPunchRows(req.body?.punches);
+    const minute = parseMinute(req.body?.minute);
     await assertEmployeeWorking(employeeId, date);
     await assertDayOpen(employeeId, date);
-    await assertNoDuplicatePunches(employeeId, date, rows.map((r) => r.minute));
-    await prisma.attendancePunch.createMany({ data: rows.map((r) => ({ employeeId, date, minute: r.minute, direction: r.direction, source: "MANUAL" as const, description: r.description, createdById: uid(req) })) });
-    res.status(201).json({ ok: true, count: rows.length });
+    await assertNoDuplicatePunches(employeeId, date, [minute]);
+    const created = await prisma.attendancePunch.create({ data: { employeeId, date, minute, source: "MANUAL", description: typeof req.body?.description === "string" && req.body.description.trim() ? req.body.description.trim() : null, createdById: uid(req) } });
+    res.status(201).json({ id: created.id });
   } catch (e: any) {
     if (e?.code === "P2002") return res.status(400).json({ error: "ترددی با همین ساعت برای این کارمند و روز قبلاً ثبت شده است" });
     fail(res, e, "خطا در ثبت تردد");
@@ -89,7 +88,7 @@ router.put("/attendance-punches/:id", can(`${PUNCH_FORM}.edit`), async (req, res
     await assertDayOpen(ex.employeeId, ex.date);
     await assertDayOpen(ex.employeeId, date);
     await assertNoDuplicatePunches(ex.employeeId, date, [minute], id);
-    await prisma.attendancePunch.update({ where: { id }, data: { date, minute, direction: parseDirection(req.body?.direction), description: typeof req.body?.description === "string" && req.body.description.trim() ? req.body.description.trim() : null } });
+    await prisma.attendancePunch.update({ where: { id }, data: { date, minute, description: typeof req.body?.description === "string" && req.body.description.trim() ? req.body.description.trim() : null } });
     res.json({ id });
   } catch (e: any) {
     if (e?.code === "P2002") return res.status(400).json({ error: "ترددی با همین ساعت برای این کارمند و روز قبلاً ثبت شده است" });
@@ -127,8 +126,8 @@ const reqShape = (r: any) => ({
   statusTitle: STATUS_FA[r.status] ?? r.status,
   decidedAt: r.decidedAt ? r.decidedAt.toISOString() : null,
   decisionNote: r.decisionNote ?? "",
-  lines: (r.lines ?? []).sort((a: any, b: any) => a.minute - b.minute).map((l: any) => ({ minute: l.minute, time: minuteText(l.minute), direction: l.direction })),
-  lineSummary: (r.lines ?? []).slice().sort((a: any, b: any) => a.minute - b.minute).map((l: any) => minuteText(l.minute) + (l.direction === "IN" ? " (ورود)" : l.direction === "OUT" ? " (خروج)" : "")).join("، "),
+  lines: (r.lines ?? []).sort((a: any, b: any) => a.minute - b.minute).map((l: any) => ({ minute: l.minute, time: minuteText(l.minute) })),
+  lineSummary: (r.lines ?? []).slice().sort((a: any, b: any) => a.minute - b.minute).map((l: any) => minuteText(l.minute)).join("، "),
   updatedAt: r.updatedAt,
 });
 
@@ -166,7 +165,7 @@ router.post("/attendance-correction-requests", can(`${REQ_FORM}.create`), async 
       try {
         const created = await prisma.$transaction(async (tx) =>
           tx.attendanceCorrectionRequest.create({
-            data: { number: await nextRequestNumber(tx), employeeId: d.employeeId, date: d.date, reason: d.reason, createdById: uid(req), lines: { create: d.rows.map((r) => ({ minute: r.minute, direction: r.direction })) } },
+            data: { number: await nextRequestNumber(tx), employeeId: d.employeeId, date: d.date, reason: d.reason, createdById: uid(req), lines: { create: d.rows.map((r) => ({ minute: r.minute })) } },
           })
         );
         return res.status(201).json({ id: created.id, number: created.number });
@@ -190,7 +189,7 @@ router.put("/attendance-correction-requests/:id", can(`${REQ_FORM}.edit`), async
     const d = await cleanRequest(req.body);
     await prisma.$transaction([
       prisma.attendanceCorrectionLine.deleteMany({ where: { requestId: id } }),
-      prisma.attendanceCorrectionRequest.update({ where: { id }, data: { employeeId: d.employeeId, date: d.date, reason: d.reason, lines: { create: d.rows.map((r) => ({ minute: r.minute, direction: r.direction })) } } }),
+      prisma.attendanceCorrectionRequest.update({ where: { id }, data: { employeeId: d.employeeId, date: d.date, reason: d.reason, lines: { create: d.rows.map((r) => ({ minute: r.minute })) } } }),
     ]);
     res.json({ id });
   } catch (e) {

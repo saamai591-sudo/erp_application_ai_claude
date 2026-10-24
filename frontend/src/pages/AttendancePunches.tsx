@@ -19,8 +19,9 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { useTabs } from "../lib/TabsContext";
 
-// مدیریت تردد › عملیات › «ورود و خروج»: ترددهای خام (کارمند + روز + ساعت + جهت). دو منبع در یک فهرست و قابل تفکیک‌اند: ثبت مستقیم (ورود دستی/فایل/دستگاه)
-// و ترددی که با تایید «درخواست اصلاح تردد» ساخته شده (ستون «منبع» و شماره‌ی درخواست؛ ویرایش/حذف مستقیم ندارد). قواعد در سرور (services/attendancePunchService.ts).
+// مدیریت تردد › عملیات › «ورود و خروج»: ترددهای خام = کارمند + تاریخ + ساعت (جهت ورود/خروج ذخیره نمی‌شود؛ بعداً با جفت‌سازی ترددهای هر روز تشخیص داده می‌شود).
+// فرم، یک «فرم داده‌ی ساده» است (بدون هدر/ردیف). دو منبع در یک فهرست و قابل تفکیک‌اند: ثبت مستقیم (ورود دستی/فایل/دستگاه) و ترددی که با تایید
+// «درخواست اصلاح تردد» ساخته شده (ستون «منبع» و شماره‌ی درخواست؛ ویرایش/حذف مستقیم ندارد). قواعد در سرور (services/attendancePunchService.ts).
 
 export interface PunchRow {
   id: number;
@@ -30,7 +31,6 @@ export interface PunchRow {
   date: string;
   minute: number;
   time: string;
-  direction: "IN" | "OUT" | null;
   source: string;
   sourceTitle: string;
   correctionRequestId: number | null;
@@ -45,7 +45,6 @@ export interface EmpOpt {
   fullName: string;
 }
 
-export const DIRECTION_FA: Record<string, string> = { IN: "ورود", OUT: "خروج" };
 const SOURCE_FILTER: { key: string; label: string }[] = [
   { key: "", label: "همه" },
   { key: "MANUAL", label: "ورود دستی" },
@@ -123,7 +122,7 @@ function PunchList() {
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint title="ورود و خروج" text="ترددهای خام کارمندان. ترددی که با تایید «درخواست اصلاح تردد» ثبت می‌شود در همین فهرست با منبع «درخواست اصلاح» و شماره‌ی درخواست دیده می‌شود و فقط با برگشت از تایید همان درخواست تغییر می‌کند." />
+          <InfoHint title="ورود و خروج" text="ترددهای خام کارمندان (کارمند، تاریخ، ساعت؛ جهت ورود/خروج را سیستم بعداً با جفت‌سازی تشخیص می‌دهد). ترددی که با تایید «درخواست اصلاح تردد» ثبت می‌شود در همین فهرست با منبع «درخواست اصلاح» و شماره‌ی درخواست دیده می‌شود و فقط با برگشت از تایید همان درخواست تغییر می‌کند." />
           <NewRecordButton path="/attendance-punches/new" />
           <RefreshButton onClick={reload} />
         </div>
@@ -153,7 +152,6 @@ function PunchList() {
           { header: "کارمند", ...s((r) => r.employeeName) },
           { header: "تاریخ", ...s((r) => formatJalaliDate(r.date)), width: "110px" },
           { header: "ساعت", ...s((r) => toFaDigits(r.time)), width: "80px" },
-          { header: "جهت", ...s((r) => (r.direction ? DIRECTION_FA[r.direction] : "—")), width: "80px" },
           { header: "منبع", ...s((r) => r.sourceTitle), width: "130px" },
           {
             header: "درخواست اصلاح",
@@ -172,20 +170,13 @@ function PunchList() {
   );
 }
 
-interface PunchLine {
-  time: string;
-  direction: string;
-  description: string;
-}
-
-const emptyLine = (direction = ""): PunchLine => ({ time: "", direction, description: "" });
-
 function PunchForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { openTab } = useTabs();
   const cacheKey = `form:${location.pathname}:form`;
-  const [form, setForm] = usePersistedState(cacheKey, { employeeId: "", date: localTodayIso(), lines: [emptyLine("IN"), emptyLine("OUT")] as PunchLine[] });
+  // فرم داده‌ی ساده: تاریخ + کارمند + ساعت. بعد از ثبتِ تردد جدید، تاریخ و کارمند می‌مانند و فقط ساعت پاک می‌شود تا ترددهای بعدی سریع وارد شوند
+  const [form, setForm] = usePersistedState(cacheKey, { employeeId: "", date: localTodayIso(), time: "" });
   const [meta, setMeta] = useState<{ canEdit: boolean; sourceTitle: string; correctionRequestId: number | null; correctionNumber: number | null; updatedAt?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
@@ -196,42 +187,29 @@ function PunchForm({ editId }: { editId?: number }) {
     if (!editId) return;
     api.get(`/attendance-punches/${editId}`).then((r: PunchRow) => {
       setMeta({ canEdit: r.canEdit, sourceTitle: r.sourceTitle, correctionRequestId: r.correctionRequestId, correctionNumber: r.correctionNumber, updatedAt: r.updatedAt });
-      if (!hasPersistedState(cacheKey)) setForm({ employeeId: String(r.employeeId), date: r.date, lines: [{ time: minutesToMask(r.minute), direction: r.direction ?? "", description: r.description }] });
+      if (!hasPersistedState(cacheKey)) setForm({ employeeId: String(r.employeeId), date: r.date, time: minutesToMask(r.minute) });
       setLoaded(true);
     }).catch((e) => setError(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
-
-  const setLine = (i: number, patch: Partial<PunchLine>) => setForm({ ...form, lines: form.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) });
-
-  function minuteOf(text: string): number | null {
-    const m = maskToMinutes(text);
-    return m !== null && m < 1440 ? m : null;
-  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     if (!form.employeeId) return setError("کارمند را انتخاب کنید");
     if (!form.date) return setError("تاریخ الزامی است");
-    const filled = form.lines.filter((l) => l.time.trim());
-    if (filled.length === 0) return setError("دست‌کم یک ساعت وارد کنید");
-    const punches = [];
-    for (const [i, l] of filled.entries()) {
-      const m = minuteOf(l.time);
-      if (m === null) return setError(`ساعت ردیف ${toFaDigits(String(i + 1))} نامعتبر است (۰۰:۰۰ تا ۲۳:۵۹)`);
-      punches.push({ minute: m, direction: l.direction || null, description: l.description });
-    }
+    const minute = maskToMinutes(form.time);
+    if (minute === null || minute >= 1440) return setError("ساعت را کامل وارد کنید (۰۰:۰۰ تا ۲۳:۵۹)");
     try {
       if (editId) {
-        await api.put(`/attendance-punches/${editId}`, { date: form.date, ...punches[0], updatedAt: meta?.updatedAt });
+        await api.put(`/attendance-punches/${editId}`, { date: form.date, minute, updatedAt: meta?.updatedAt });
         flash();
         const r: PunchRow = await api.get(`/attendance-punches/${editId}`);
         setMeta((m) => (m ? { ...m, updatedAt: r.updatedAt } : m));
       } else {
-        await api.post("/attendance-punches", { employeeId: Number(form.employeeId), date: form.date, punches });
+        await api.post("/attendance-punches", { employeeId: Number(form.employeeId), date: form.date, minute });
         flash();
-        navigate("/attendance-punches");
+        setForm({ ...form, time: "" });
       }
     } catch (err) {
       setError((err as ApiError).message);
@@ -264,40 +242,18 @@ function PunchForm({ editId }: { editId?: number }) {
         <fieldset disabled={readOnly} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="form-grid">
             <div className="form-field">
+              <label>تاریخ<RequiredMark /></label>
+              <JalaliDatePicker value={form.date} onChange={(v) => setForm({ ...form, date: v })} />
+            </div>
+            <div className="form-field">
               <label>کارمند<RequiredMark /></label>
               <EmployeePickerField employees={employees} value={form.employeeId} disabled={!!editId} onSelect={(x) => setForm({ ...form, employeeId: String(x.id) })} />
             </div>
             <div className="form-field">
-              <label>تاریخ<RequiredMark /></label>
-              <JalaliDatePicker value={form.date} onChange={(v) => setForm({ ...form, date: v })} />
+              <label>ساعت<RequiredMark /> <FieldHint label="ساعت" text="ساعت تردد (۰۰:۰۰ تا ۲۳:۵۹). جهت ورود یا خروج وارد نمی‌شود؛ سیستم بعداً با جفت‌کردن ترددهای هر روز آن را تشخیص می‌دهد. تردد بعد از نیمه‌شب با تاریخ همان روز تقویمی ثبت می‌شود." /></label>
+              <TimeInput value={form.time} width={100} autoFocus={!editId} onChange={(t) => setForm({ ...form, time: t })} />
             </div>
           </div>
-          <h4 style={{ margin: "14px 0 6px" }}>
-            ترددها <FieldHint label="ترددها" text="ساعت هر ورود یا خروج (۰۰:۰۰ تا ۲۳:۵۹). جهت اختیاری است؛ اگر خالی بماند، ترددها بعداً به ترتیب زمان جفت‌سازی می‌شوند. برای شیفت شب، تردد بعد از نیمه‌شب با تاریخ همان روز تقویمی ثبت می‌شود." />
-          </h4>
-          <table className="je-lines-table" style={{ maxWidth: 760 }}>
-            <thead>
-              <tr><th style={{ width: 50 }}>ردیف</th><th style={{ width: 120 }}>ساعت</th><th style={{ width: 130 }}>جهت</th><th>توضیحات</th><th style={{ width: 40 }}></th></tr>
-            </thead>
-            <tbody>
-              {form.lines.map((l, i) => (
-                <tr key={i}>
-                  <td>{toFaDigits(String(i + 1))}</td>
-                  <td><TimeInput value={l.time} width={90} onChange={(t) => setLine(i, { time: t })} /></td>
-                  <td>
-                    <select value={l.direction} onChange={(e) => setLine(i, { direction: e.target.value })}>
-                      <option value="">نامشخص</option>
-                      <option value="IN">ورود</option>
-                      <option value="OUT">خروج</option>
-                    </select>
-                  </td>
-                  <td><input value={l.description} onChange={(e) => setLine(i, { description: e.target.value })} /></td>
-                  <td>{!editId && form.lines.length > 1 && <button type="button" className="btn-link" onClick={() => setForm({ ...form, lines: form.lines.filter((_, j) => j !== i) })}>×</button>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!editId && <button type="button" className="btn secondary" style={{ marginTop: 6 }} onClick={() => setForm({ ...form, lines: [...form.lines, emptyLine()] })}>+ ردیف</button>}
         </fieldset>
       </form>
     </FormPage>

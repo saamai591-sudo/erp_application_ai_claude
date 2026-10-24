@@ -3,15 +3,13 @@ import { displayDate } from "../utils/dateDisplay";
 import { getPeriods, periodContains } from "./employmentStatusService";
 
 // مدیریت تردد › تردد خام: تنها نویسنده‌ی AttendancePunch و AttendanceCorrectionRequest/Line (فرم‌های «ورود و خروج» و «درخواست اصلاح تردد»).
-//  • تردد = کارمند + روز + دقیقه از ۰۰:۰۰ (وقت تهران) + جهت اختیاری + منبع (MANUAL/IMPORT/DEVICE/CORRECTION). برای هر کارمند در هر روز و دقیقه فقط یک تردد.
+//  • تردد = کارمند + روز + دقیقه از ۰۰:۰۰ (وقت تهران) + منبع (MANUAL/IMPORT/DEVICE/CORRECTION). جهت ورود/خروج ذخیره نمی‌شود (جفت‌سازی بعداً در کارکرد روزانه). برای هر کارمند در هر روز و دقیقه فقط یک تردد.
 //  • ترددِ ساخته‌شده با تایید درخواست اصلاح (منبع CORRECTION) مستقیماً ویرایش/حذف نمی‌شود؛ فقط با «برگشت از تایید» همان درخواست حذف می‌شود.
 //  • روزِ تردد باید داخل یکی از دوره‌های همکاری کارمند باشد (ورود قبل از شروع یا بعد از خاتمه همکاری رد می‌شود).
 //  • قفل «بستن ماه تردد» (فاز بعد) از همین نقطه‌ها اعمال می‌شود (assertDayOpen).
 
 export class AttendanceError extends Error {}
 
-export const DIRECTIONS = ["IN", "OUT"] as const;
-export type Direction = (typeof DIRECTIONS)[number];
 export const SOURCE_FA: Record<string, string> = { MANUAL: "ورود دستی", IMPORT: "ورود از فایل", DEVICE: "دستگاه", CORRECTION: "درخواست اصلاح" };
 
 export const dayStr = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : null);
@@ -28,12 +26,6 @@ export function parseMinute(v: unknown, label = "ساعت"): number {
   const n = Number(v);
   if (v === null || v === undefined || v === "" || !Number.isInteger(n) || n < 0 || n > 1439) throw new AttendanceError(`${label} نامعتبر است`);
   return n;
-}
-
-export function parseDirection(v: unknown): Direction | null {
-  if (v === null || v === undefined || v === "") return null;
-  if (!(DIRECTIONS as readonly string[]).includes(String(v))) throw new AttendanceError("جهت تردد نامعتبر است");
-  return v as Direction;
 }
 
 export const minuteText = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
@@ -56,7 +48,6 @@ export async function assertDayOpen(_employeeId: number, _date: Date) {
 
 export interface PunchInput {
   minute: number;
-  direction: Direction | null;
   description?: string | null;
 }
 
@@ -69,7 +60,7 @@ export function cleanPunchRows(raw: unknown): PunchInput[] {
     const minute = parseMinute(r?.minute, `ساعت ردیف ${i + 1}`);
     if (seen.has(minute)) throw new AttendanceError(`ساعت ${minuteText(minute)} در چند ردیف تکرار شده است`);
     seen.add(minute);
-    return { minute, direction: parseDirection(r?.direction), description: typeof r?.description === "string" && r.description.trim() ? r.description.trim() : null };
+    return { minute, description: typeof r?.description === "string" && r.description.trim() ? r.description.trim() : null };
   });
 }
 
@@ -98,7 +89,7 @@ export async function approveCorrection(id: number, userId: number | null) {
     const dup = await tx.attendancePunch.findMany({ where: { employeeId: r.employeeId, date: r.date, minute: { in: r.lines.map((l) => l.minute) } }, select: { minute: true } });
     if (dup.length) throw new AttendanceError(`ترددی در ساعت ${dup.map((d) => minuteText(d.minute)).join("، ")} برای این روز قبلاً ثبت شده است`);
     await tx.attendancePunch.createMany({
-      data: r.lines.map((l) => ({ employeeId: r.employeeId, date: r.date, minute: l.minute, direction: l.direction, source: "CORRECTION" as const, correctionRequestId: r.id, description: `درخواست اصلاح شماره ${r.number}`, createdById: userId })),
+      data: r.lines.map((l) => ({ employeeId: r.employeeId, date: r.date, minute: l.minute, source: "CORRECTION" as const, correctionRequestId: r.id, description: `درخواست اصلاح شماره ${r.number}`, createdById: userId })),
     });
     await tx.attendanceCorrectionRequest.update({ where: { id }, data: { status: "APPROVED", decidedById: userId, decidedAt: new Date() } });
   });

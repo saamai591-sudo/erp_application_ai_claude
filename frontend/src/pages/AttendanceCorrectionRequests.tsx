@@ -35,7 +35,7 @@ interface ReqRow {
   statusTitle: string;
   decisionNote: string;
   lineSummary: string;
-  lines: { minute: number; time: string; direction: string | null }[];
+  lines: { minute: number; time: string }[];
   updatedAt?: string;
 }
 
@@ -106,16 +106,15 @@ function ReqList() {
 
 interface Line {
   time: string;
-  direction: string;
 }
-const emptyLine = (direction = ""): Line => ({ time: "", direction });
+const emptyLine = (): Line => ({ time: "" });
 
 function ReqForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { hasPermission } = usePermissions();
   const cacheKey = `form:${location.pathname}:form`;
-  const [form, setForm] = usePersistedState(cacheKey, { employeeId: "", date: localTodayIso(), reason: "", lines: [emptyLine("IN")] as Line[] });
+  const [form, setForm] = usePersistedState(cacheKey, { employeeId: "", date: localTodayIso(), reason: "", lines: [emptyLine()] as Line[] });
   const [meta, setMeta] = useState<{ number: number; status: string; statusTitle: string; decisionNote: string; updatedAt?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
@@ -133,7 +132,7 @@ function ReqForm({ editId }: { editId?: number }) {
   useEffect(() => {
     if (!editId) return;
     load().then((r) => {
-      if (!hasPersistedState(cacheKey)) setForm({ employeeId: String(r.employeeId), date: r.date, reason: r.reason, lines: r.lines.map((l) => ({ time: minutesToMask(l.minute), direction: l.direction ?? "" })) });
+      if (!hasPersistedState(cacheKey)) setForm({ employeeId: String(r.employeeId), date: r.date, reason: r.reason, lines: r.lines.map((l) => ({ time: minutesToMask(l.minute) })) });
       setLoaded(true);
     }).catch((e) => setError(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -153,7 +152,7 @@ function ReqForm({ editId }: { editId?: number }) {
     for (const [i, l] of filled.entries()) {
       const m = maskToMinutes(l.time);
       if (m === null || m >= 1440) return setError(`ساعت ردیف ${toFaDigits(String(i + 1))} نامعتبر است (۰۰:۰۰ تا ۲۳:۵۹)`);
-      lines.push({ minute: m, direction: l.direction || null });
+      lines.push({ minute: m });
     }
     try {
       const body = { employeeId: Number(form.employeeId), date: form.date, reason: form.reason, lines };
@@ -180,7 +179,7 @@ function ReqForm({ editId }: { editId?: number }) {
       await load();
       // فرم از سرور تازه شود (حافظه‌ی فرم ممکن است کهنه باشد)
       const r: ReqRow = await api.get(`/attendance-correction-requests/${editId}`);
-      setForm({ employeeId: String(r.employeeId), date: r.date, reason: r.reason, lines: r.lines.map((l) => ({ time: minutesToMask(l.minute), direction: l.direction ?? "" })) });
+      setForm({ employeeId: String(r.employeeId), date: r.date, reason: r.reason, lines: r.lines.map((l) => ({ time: minutesToMask(l.minute) })) });
     } catch (e) {
       showError((e as ApiError).message);
     } finally {
@@ -237,22 +236,15 @@ function ReqForm({ editId }: { editId?: number }) {
           <h4 style={{ margin: "14px 0 6px" }}>
             ترددهای درخواستی <FieldHint label="ترددهای درخواستی" text="ترددهایی که باید برای این روز ثبت شوند. اگر در همان ساعت قبلاً تردد ثبت شده باشد، تایید رد می‌شود." />
           </h4>
-          <table className="je-lines-table" style={{ maxWidth: 520 }}>
+          <table className="je-lines-table" style={{ maxWidth: 360 }}>
             <thead>
-              <tr><th style={{ width: 50 }}>ردیف</th><th style={{ width: 120 }}>ساعت</th><th>جهت</th><th style={{ width: 40 }}></th></tr>
+              <tr><th style={{ width: 50 }}>ردیف</th><th style={{ width: 120 }}>ساعت</th><th style={{ width: 40 }}></th></tr>
             </thead>
             <tbody>
               {form.lines.map((l, i) => (
                 <tr key={i}>
                   <td>{toFaDigits(String(i + 1))}</td>
                   <td><TimeInput value={l.time} width={90} onChange={(t) => setLine(i, { time: t })} /></td>
-                  <td>
-                    <select value={l.direction} onChange={(e) => setLine(i, { direction: e.target.value })}>
-                      <option value="">نامشخص</option>
-                      <option value="IN">ورود</option>
-                      <option value="OUT">خروج</option>
-                    </select>
-                  </td>
                   <td>{form.lines.length > 1 && <button type="button" className="btn-link" onClick={() => setForm({ ...form, lines: form.lines.filter((_, j) => j !== i) })}>×</button>}</td>
                 </tr>
               ))}

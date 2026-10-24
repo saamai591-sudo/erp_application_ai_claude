@@ -6182,11 +6182,6 @@ model WorkflowNotification {
 
 // ── مدیریت تردد: تردد خام و درخواست اصلاح تردد (فاز ۱) ──
 
-enum AttendancePunchDirection {
-  IN
-  OUT
-}
-
 enum AttendancePunchSource {
   /// ثبت مستقیم در فرم ورود و خروج
   MANUAL
@@ -6204,14 +6199,13 @@ enum AttendanceCorrectionStatus {
   REJECTED
 }
 
-/// یک تردد (ورود یا خروج): روز تقویمی + دقیقه از ۰۰:۰۰ (وقت تهران). جهت اختیاری است (نامشخص ⇒ جفت‌سازی بعداً بر اساس ترتیب زمانی)
+/// یک تردد: روز تقویمی + دقیقه از ۰۰:۰۰ (وقت تهران). جهت (ورود/خروج) ذخیره نمی‌شود؛ سیستم بعداً با جفت‌سازیِ ترددهای هر روز بر اساس ترتیب زمانی آن را تشخیص می‌دهد
 model AttendancePunch {
   id                  Int                           @id @default(autoincrement())
   employeeId          Int
   date                DateTime                      @db.Date
   /// دقیقه از ابتدای روز (۰ تا ۱۴۳۹)
   minute              Int
-  direction           AttendancePunchDirection?
   source              AttendancePunchSource         @default(MANUAL)
   correctionRequestId Int?
   description         String?
@@ -6251,7 +6245,6 @@ model AttendanceCorrectionLine {
   id        Int                           @id @default(autoincrement())
   requestId Int
   minute    Int
-  direction AttendancePunchDirection?
   request   AttendanceCorrectionRequest   @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
   @@unique([requestId, minute])
