@@ -3,8 +3,8 @@ import { AttendanceError, dayStr, minuteText, parseDay } from "./attendancePunch
 import type { TimelineRow } from "./attendanceShiftService";
 import { DAY_TYPE_FA, type AttDayType } from "./attendanceFormulaDefs";
 
-// مدیریت تردد › عملیات › «استثنای روز» (مثلاً چهارشنبه‌سوری: پایان شیفت ساعت ۱۵ / بارندگی: شروع ساعت ۱۰ / اعلام تعطیلی): برای یک تاریخ یا بازه‌ی تاریخ و دامنه‌ی «همه‌ی شیفت‌ها»
-// یا «شیفت‌های انتخابی»، ساعت شروعِ اولین بازه‌ی کاری و/یا ساعت پایانِ آخرین بازه‌ی کاری را عوض می‌کند، یا نوع روز را «تعطیلی شیفت/رسمی» می‌کند. شیفت دست نمی‌خورد؛
+// مدیریت تردد › عملیات › «استثنای روز» (مثلاً چهارشنبه‌سوری: پایان شیفت ساعت ۱۵ / بارندگی: شروع ساعت ۱۰ / اعلام تعطیلی): برای فقط «یک تاریخ» و دامنه‌ی «همه‌ی شیفت‌ها»
+// یا «شیفت‌های انتخابی»، یکی از پنج اثر: تغییر شروع / تغییر پایان / تغییر شروع و پایان (ساعتِ شروعِ اولین و پایانِ آخرین بازه‌ی کاری) یا اعلام تعطیلی شیفت / تعطیلی رسمی. شیفت دست نمی‌خورد؛
 // اثر فقط هنگام ساختن برنامه‌ی هر روز (کارکرد روزانه و انتخابگر پنجره) روی ردیف‌های همان روز اعمال می‌شود (applyToDay = تنها نقطه‌ی اعمال). پنجره‌ی حضور عوض نمی‌شود:
 // ساعت جدید باید داخل همان پنجره بماند، وگرنه استثنا برای آن کارمند/روز اعمال نمی‌شود و علتش کنار «ردیف شیفت» می‌آید. استراحت می‌ماند و «ساعت مرخصی» اگر دستی تعیین
 // نشده باشد از طول جدید حساب می‌شود. اگر یک روز هم استثنای «همه‌ی شیفت‌ها» و هم استثنای «همان شیفت» داشته باشد، خاص‌تر (شیفت) مقدم است.
@@ -17,8 +17,7 @@ const dayNum = (d: Date) => Math.floor(d.getTime() / DAY_MS);
 export interface DayExc {
   id: number;
   title: string;
-  fromDay: number;
-  toDay: number;
+  day: number;
   allShifts: boolean;
   shiftIds: Set<number>;
   newStartMinute: number | null;
@@ -28,25 +27,24 @@ export interface DayExc {
 
 export async function loadExceptions(fromDay: number, toDay: number): Promise<DayExc[]> {
   const rows = await prisma.attendanceDayException.findMany({
-    where: { fromDate: { lte: new Date(toDay * DAY_MS) }, toDate: { gte: new Date(fromDay * DAY_MS) } },
+    where: { date: { gte: new Date(fromDay * DAY_MS), lte: new Date(toDay * DAY_MS) } },
     include: { shifts: { select: { shiftId: true } } },
   });
   return rows.map((r) => ({
     id: r.id,
     title: r.title,
-    fromDay: dayNum(r.fromDate),
-    toDay: dayNum(r.toDate),
+    day: dayNum(r.date),
     allShifts: r.allShifts,
     shiftIds: new Set(r.shifts.map((s) => s.shiftId)),
     newStartMinute: r.newStartMinute,
     newEndMinute: r.newEndMinute,
-    dayType: r.dayType as AttDayType | null,
+    dayType: r.effect === "SHIFT_OFF" ? "SHIFT_OFF" : r.effect === "OFFICIAL_HOLIDAY" ? "OFFICIAL_HOLIDAY" : null,
   }));
 }
 
 /** استثنای مؤثر برای یک روز و یک شیفت: استثنای مخصوص همان شیفت بر «همه‌ی شیفت‌ها» مقدم است */
 export function pickException(excs: DayExc[], day: number, shiftId: number): DayExc | undefined {
-  const hit = excs.filter((e) => e.fromDay <= day && day <= e.toDay);
+  const hit = excs.filter((e) => e.day === day);
   return hit.find((e) => !e.allShifts && e.shiftIds.has(shiftId)) ?? hit.find((e) => e.allShifts);
 }
 
@@ -93,8 +91,10 @@ export function applyToDay(dayRows: TimelineRow[], ex: DayExc): Applied {
 
 // ───────────────────────── CRUD ─────────────────────────
 
-export function effectText(e: { newStartMinute: number | null; newEndMinute: number | null; dayType: string | null }): string {
-  if (e.dayType) return `نوع روز: ${DAY_TYPE_FA[e.dayType as AttDayType]}`;
+export const EFFECT_FA: Record<string, string> = { START: "تغییر ساعت شروع", END: "تغییر ساعت پایان", START_END: "تغییر ساعت شروع/پایان", SHIFT_OFF: "اعلام تعطیلی شیفت", OFFICIAL_HOLIDAY: "اعلام تعطیلی رسمی" };
+
+export function effectText(e: { effect: string; newStartMinute: number | null; newEndMinute: number | null }): string {
+  if (e.effect === "SHIFT_OFF" || e.effect === "OFFICIAL_HOLIDAY") return EFFECT_FA[e.effect];
   const parts: string[] = [];
   if (e.newStartMinute !== null) parts.push(`شروع ${minuteText(e.newStartMinute)}`);
   if (e.newEndMinute !== null) parts.push(`پایان ${minuteText(e.newEndMinute)}`);
@@ -105,14 +105,13 @@ export function exceptionShape(r: any) {
   return {
     id: r.id,
     title: r.title,
-    fromDate: dayStr(r.fromDate),
-    toDate: dayStr(r.toDate),
+    date: dayStr(r.date),
     allShifts: r.allShifts,
     shiftIds: (r.shifts ?? []).map((s: any) => s.shiftId),
     shiftTitles: (r.shifts ?? []).map((s: any) => s.shift?.title).filter(Boolean),
     newStartMinute: r.newStartMinute,
     newEndMinute: r.newEndMinute,
-    dayType: r.dayType,
+    effect: r.effect,
     effectText: effectText(r),
     description: r.description ?? "",
     updatedAt: r.updatedAt,
@@ -129,10 +128,7 @@ function cleanMinute(v: unknown, label: string): number | null {
 export async function saveException(body: any, userId: number | null, id?: number) {
   const title = String(body?.title ?? "").trim().replace(/\s+/g, " ");
   if (!title) throw new AttendanceError("عنوان استثنا الزامی است");
-  const fromDate = parseDay(body?.fromDate, "از تاریخ");
-  const toDate = body?.toDate ? parseDay(body.toDate, "تا تاریخ") : fromDate;
-  if (toDate < fromDate) throw new AttendanceError("تاریخ پایان قبل از تاریخ شروع است");
-  if (dayNum(toDate) - dayNum(fromDate) + 1 > MAX_RANGE_DAYS) throw new AttendanceError(`بازه‌ی استثنا حداکثر ${MAX_RANGE_DAYS} روز است`);
+  const date = parseDay(body?.date, "تاریخ");
   const allShifts = body?.allShifts === true;
   const shiftIds: number[] = allShifts ? [] : [...new Set<number>((Array.isArray(body?.shiftIds) ? body.shiftIds : []).map(Number).filter((n: number) => Number.isInteger(n) && n > 0))];
   if (!allShifts && shiftIds.length === 0) throw new AttendanceError("«همه‌ی شیفت‌ها» را بزنید یا دست‌کم یک شیفت انتخاب کنید");
@@ -140,21 +136,28 @@ export async function saveException(body: any, userId: number | null, id?: numbe
     const found = await prisma.attendanceShift.count({ where: { id: { in: shiftIds } } });
     if (found !== shiftIds.length) throw new AttendanceError("شیفت انتخاب‌شده یافت نشد");
   }
-  const dayType = body?.dayType ? String(body.dayType) : null;
-  if (dayType !== null && dayType !== "SHIFT_OFF" && dayType !== "OFFICIAL_HOLIDAY") throw new AttendanceError("نوع روز فقط «تعطیلی شیفت» یا «تعطیلی رسمی» می‌تواند باشد");
-  const newStartMinute = cleanMinute(body?.newStartMinute, "ساعت شروع جدید");
-  const newEndMinute = cleanMinute(body?.newEndMinute, "ساعت پایان جدید");
-  if (dayType && (newStartMinute !== null || newEndMinute !== null)) throw new AttendanceError("اعلام تعطیلی با تغییر ساعت شروع/پایان هم‌زمان نمی‌شود");
-  if (!dayType && newStartMinute === null && newEndMinute === null) throw new AttendanceError("ساعت شروع جدید و/یا ساعت پایان جدید را وارد کنید، یا نوع روز را انتخاب کنید");
+  const effect = String(body?.effect ?? "");
+  if (!EFFECT_FA[effect]) throw new AttendanceError("اثر استثنا را انتخاب کنید");
+  const isHoliday = effect === "SHIFT_OFF" || effect === "OFFICIAL_HOLIDAY";
+  const needStart = effect === "START" || effect === "START_END";
+  const needEnd = effect === "END" || effect === "START_END";
+  let newStartMinute = cleanMinute(body?.newStartMinute, "ساعت شروع جدید");
+  let newEndMinute = cleanMinute(body?.newEndMinute, "ساعت پایان جدید");
+  if (needStart && newStartMinute === null) throw new AttendanceError("ساعت شروع جدید را وارد کنید");
+  if (needEnd && newEndMinute === null) throw new AttendanceError("ساعت پایان جدید را وارد کنید");
+  // ساعتِ اضافه‌ی نامربوط به اثر انتخابی نادیده گرفته می‌شود
+  if (!needStart) newStartMinute = null;
+  if (!needEnd) newEndMinute = null;
+  void isHoliday;
   // هم‌پوشانیِ هم‌سطح: دو استثنای «همه‌ی شیفت‌ها» یا دو استثنا با شیفتِ مشترک روی یک روز
   const others = await prisma.attendanceDayException.findMany({
-    where: { fromDate: { lte: toDate }, toDate: { gte: fromDate }, ...(id ? { id: { not: id } } : {}) },
+    where: { date, ...(id ? { id: { not: id } } : {}) },
     include: { shifts: { select: { shiftId: true } } },
   });
   for (const o of others) {
-    if ((allShifts && o.allShifts) || o.shifts.some((s) => shiftIds.includes(s.shiftId))) throw new AttendanceError(`با استثنای «${o.title}» روی همان روزها و همان شیفت هم‌پوشانی دارد`);
+    if ((allShifts && o.allShifts) || o.shifts.some((s) => shiftIds.includes(s.shiftId))) throw new AttendanceError(`با استثنای «${o.title}» روی همان تاریخ و همان شیفت هم‌پوشانی دارد`);
   }
-  const data = { title, fromDate, toDate, allShifts, newStartMinute, newEndMinute, dayType: dayType as any, description: String(body?.description ?? "").trim() || null };
+  const data = { title, date, allShifts, effect: effect as any, newStartMinute, newEndMinute, description: String(body?.description ?? "").trim() || null };
   if (!id) return prisma.attendanceDayException.create({ data: { ...data, createdById: userId, shifts: { create: shiftIds.map((shiftId) => ({ shiftId })) } }, include: { shifts: { include: { shift: { select: { title: true } } } } } });
   if (!(await prisma.attendanceDayException.findUnique({ where: { id } }))) throw new AttendanceError("استثنا یافت نشد");
   return prisma.$transaction(async (tx) => {

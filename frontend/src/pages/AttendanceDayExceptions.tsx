@@ -17,20 +17,22 @@ import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 
-// مدیریت تردد › عملیات › «استثنای روز»: برای یک تاریخ یا بازه‌ی تاریخ (مثلاً چهارشنبه‌سوری)، ساعت شروع اولین بازه و/یا ساعت پایان آخرین بازه‌ی کاریِ «همه‌ی شیفت‌ها» یا شیفت‌های
-// انتخابی را عوض می‌کند، یا روز را «تعطیلی شیفت/رسمی» اعلام می‌کند. خودِ شیفت دست نمی‌خورد. قواعد در سرور (services/attendanceDayExceptionService.ts).
+// مدیریت تردد › عملیات › «استثنای روز»: برای فقط «یک تاریخ» (مثلاً چهارشنبه‌سوری) و دامنه‌ی «همه‌ی شیفت‌ها» یا شیفت‌های انتخابی، یکی از پنج اثر: تغییر ساعت شروع / تغییر ساعت پایان /
+// تغییر شروع و پایان (شروع اولین بازه‌ی کاری و پایان آخرین بازه‌ی کاری) یا اعلام تعطیلی شیفت / تعطیلی رسمی. خودِ شیفت دست نمی‌خورد. قواعد در سرور (services/attendanceDayExceptionService.ts).
+
+type Effect = "START" | "END" | "START_END" | "SHIFT_OFF" | "OFFICIAL_HOLIDAY";
+const EFFECT_FA: Record<Effect, string> = { START: "تغییر ساعت شروع", END: "تغییر ساعت پایان", START_END: "تغییر ساعت شروع/پایان", SHIFT_OFF: "اعلام تعطیلی شیفت", OFFICIAL_HOLIDAY: "اعلام تعطیلی رسمی" };
 
 interface ExcRow {
   id: number;
   title: string;
-  fromDate: string;
-  toDate: string;
+  date: string;
   allShifts: boolean;
   shiftIds: number[];
   shiftTitles: string[];
   newStartMinute: number | null;
   newEndMinute: number | null;
-  dayType: "SHIFT_OFF" | "OFFICIAL_HOLIDAY" | null;
+  effect: Effect;
   effectText: string;
   description: string;
   updatedAt?: string;
@@ -41,10 +43,8 @@ interface ShiftOpt {
   title: string;
   isActive: boolean;
 }
-type Effect = "HOURS" | "SHIFT_OFF" | "OFFICIAL_HOLIDAY";
 
 const scopeText = (r: ExcRow) => (r.allShifts ? "همه‌ی شیفت‌ها" : r.shiftTitles.join("، "));
-const dateText = (r: ExcRow) => (r.fromDate === r.toDate ? formatJalaliDate(r.fromDate) : `${formatJalaliDate(r.fromDate)} تا ${formatJalaliDate(r.toDate)}`);
 
 export default function AttendanceDayExceptions() {
   const location = useLocation();
@@ -78,7 +78,7 @@ function ExcList() {
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint title="استثنای روز" text="برای یک تاریخ یا بازه‌ی تاریخ، ساعت شروع اولین بازه و/یا ساعت پایان آخرین بازه‌ی کاری را (برای همه‌ی شیفت‌ها یا شیفت‌های انتخابی) عوض کنید، یا روز را تعطیلی شیفت/رسمی اعلام کنید. خودِ شیفت تغییر نمی‌کند؛ کارکرد روزانه و فرمول‌ها برای آن روز بر اساس ساعت‌های اصلاح‌شده حساب می‌شوند." />
+          <InfoHint title="استثنای روز" text="برای یک تاریخ، ساعت شروع اولین بازه و/یا ساعت پایان آخرین بازه‌ی کاری را (برای همه‌ی شیفت‌ها یا شیفت‌های انتخابی) عوض کنید، یا روز را تعطیلی شیفت/رسمی اعلام کنید. خودِ شیفت تغییر نمی‌کند؛ کارکرد روزانه و فرمول‌ها برای آن روز بر اساس ساعت‌های اصلاح‌شده حساب می‌شوند." />
           <NewRecordButton path="/attendance-day-exceptions/new" />
           <RefreshButton onClick={reload} />
         </div>
@@ -87,9 +87,9 @@ function ExcList() {
       <DataTable
         columns={[
           { header: "عنوان", ...s((r) => r.title) },
-          { header: "تاریخ", ...s((r) => dateText(r)), width: "190px" },
+          { header: "تاریخ", ...s((r) => formatJalaliDate(r.date)), width: "120px" },
           { header: "دامنه", ...s((r) => scopeText(r)) },
-          { header: "اثر", ...s((r) => toFaDigits(r.effectText)), width: "200px" },
+          { header: "اثر", ...s((r) => toFaDigits(r.effectText)), width: "230px" },
         ]}
         rows={items}
         edit={{ path: (r: ExcRow) => `/attendance-day-exceptions/${r.id}/edit` }}
@@ -103,7 +103,7 @@ function ExcForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
-  const [form, setForm] = usePersistedState(cacheKey, { title: "", fromDate: localTodayIso(), toDate: "", allShifts: true, shiftIds: [] as number[], effect: "HOURS" as Effect, start: "", end: "", description: "" });
+  const [form, setForm] = usePersistedState(cacheKey, { title: "", date: localTodayIso(), allShifts: true, shiftIds: [] as number[], effect: "START_END" as Effect, start: "", end: "", description: "" });
   const [updatedAt, setUpdatedAt] = useState<string | undefined>();
   const [shifts, setShifts] = useState<ShiftOpt[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -118,11 +118,10 @@ function ExcForm({ editId }: { editId?: number }) {
       if (!hasPersistedState(cacheKey)) {
         setForm({
           title: r.title,
-          fromDate: r.fromDate,
-          toDate: r.toDate === r.fromDate ? "" : r.toDate,
+          date: r.date,
           allShifts: r.allShifts,
           shiftIds: r.shiftIds,
-          effect: r.dayType ?? "HOURS",
+          effect: r.effect,
           start: r.newStartMinute !== null ? minutesToMask(r.newStartMinute) : "",
           end: r.newEndMinute !== null ? minutesToMask(r.newEndMinute) : "",
           description: r.description,
@@ -134,32 +133,20 @@ function ExcForm({ editId }: { editId?: number }) {
   }, [editId]);
 
   const toggleShift = (id: number) => setForm({ ...form, shiftIds: form.shiftIds.includes(id) ? form.shiftIds.filter((x) => x !== id) : [...form.shiftIds, id] });
+  const needStart = form.effect === "START" || form.effect === "START_END";
+  const needEnd = form.effect === "END" || form.effect === "START_END";
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     if (!form.title.trim()) return setError("عنوان استثنا الزامی است");
-    if (!form.fromDate) return setError("تاریخ الزامی است");
+    if (!form.date) return setError("تاریخ الزامی است");
     if (!form.allShifts && form.shiftIds.length === 0) return setError("«همه‌ی شیفت‌ها» را بزنید یا دست‌کم یک شیفت انتخاب کنید");
-    let newStartMinute: number | null = null, newEndMinute: number | null = null;
-    if (form.effect === "HOURS") {
-      newStartMinute = form.start ? maskToMinutes(form.start) : null;
-      newEndMinute = form.end ? maskToMinutes(form.end) : null;
-      if ((form.start && newStartMinute === null) || (form.end && newEndMinute === null)) return setError("ساعت شروع/پایان را کامل و معتبر وارد کنید (مثلاً 15:00)");
-      if (newStartMinute === null && newEndMinute === null) return setError("ساعت شروع جدید و/یا ساعت پایان جدید را وارد کنید");
-    }
-    const body = {
-      title: form.title,
-      fromDate: form.fromDate,
-      toDate: form.toDate || form.fromDate,
-      allShifts: form.allShifts,
-      shiftIds: form.allShifts ? [] : form.shiftIds,
-      newStartMinute,
-      newEndMinute,
-      dayType: form.effect === "HOURS" ? null : form.effect,
-      description: form.description,
-      updatedAt,
-    };
+    const newStartMinute = needStart ? maskToMinutes(form.start) : null;
+    const newEndMinute = needEnd ? maskToMinutes(form.end) : null;
+    if (needStart && newStartMinute === null) return setError("ساعت شروع جدید را کامل و معتبر وارد کنید (مثلاً 10:00)");
+    if (needEnd && newEndMinute === null) return setError("ساعت پایان جدید را کامل و معتبر وارد کنید (مثلاً 15:00)");
+    const body = { title: form.title, date: form.date, allShifts: form.allShifts, shiftIds: form.allShifts ? [] : form.shiftIds, effect: form.effect, newStartMinute, newEndMinute, description: form.description, updatedAt };
     try {
       if (editId) {
         await api.put(`/attendance-day-exceptions/${editId}`, body);
@@ -197,12 +184,8 @@ function ExcForm({ editId }: { editId?: number }) {
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
           </div>
           <div className="form-field">
-            <label>از تاریخ<RequiredMark /></label>
-            <JalaliDatePicker value={form.fromDate} onChange={(v) => setForm({ ...form, fromDate: v })} />
-          </div>
-          <div className="form-field">
-            <label>تا تاریخ <FieldHint label="تا تاریخ" text="خالی = فقط همان یک روز." /></label>
-            <JalaliDatePicker value={form.toDate} onChange={(v) => setForm({ ...form, toDate: v })} />
+            <label>تاریخ<RequiredMark /></label>
+            <JalaliDatePicker value={form.date} onChange={(v) => setForm({ ...form, date: v })} />
           </div>
           <div className="form-field" style={{ gridColumn: "1 / -1" }}>
             <label>دامنه <FieldHint label="دامنه" text="همه‌ی شیفت‌ها یا شیفت‌های انتخابی. اگر برای یک روز هم استثنای «همه‌ی شیفت‌ها» و هم استثنای «همان شیفت» باشد، استثنای مخصوص شیفت مقدم است؛ دو استثنای هم‌سطح روی یک روز مجاز نیست." /></label>
@@ -218,22 +201,20 @@ function ExcForm({ editId }: { editId?: number }) {
           <div className="form-field">
             <label>اثر<RequiredMark /></label>
             <select value={form.effect} onChange={(e) => setForm({ ...form, effect: e.target.value as Effect })}>
-              <option value="HOURS">تغییر ساعت شروع/پایان</option>
-              <option value="SHIFT_OFF">اعلام تعطیلی شیفت</option>
-              <option value="OFFICIAL_HOLIDAY">اعلام تعطیلی رسمی</option>
+              {(Object.keys(EFFECT_FA) as Effect[]).map((k) => <option key={k} value={k}>{EFFECT_FA[k]}</option>)}
             </select>
           </div>
-          {form.effect === "HOURS" && (
-            <>
-              <div className="form-field">
-                <label>ساعت شروع جدید <FieldHint label="شروع جدید" text="شروع اولین بازه‌ی کاریِ آن روز. خالی = بدون تغییر. باید داخل پنجره‌ی حضور همان بازه و قبل از پایانِ آن باشد؛ وگرنه برای آن کارمند/روز اعمال نمی‌شود و علتش کنار «ردیف شیفت» می‌آید." /></label>
-                <TimeInput value={form.start} width={90} placeholder="10:00" onChange={(t) => setForm({ ...form, start: t })} />
-              </div>
-              <div className="form-field">
-                <label>ساعت پایان جدید <FieldHint label="پایان جدید" text="پایان آخرین بازه‌ی کاریِ آن روز. خالی = بدون تغییر. اگر از شروع بازه کوچک‌تر یا مساوی باشد روز بعد حساب می‌شود (شیفت شب). استراحت سر جایش می‌ماند و «ساعت مرخصی» اگر دستی تعیین نشده باشد از طول جدید حساب می‌شود." /></label>
-                <TimeInput value={form.end} width={90} placeholder="15:00" onChange={(t) => setForm({ ...form, end: t })} />
-              </div>
-            </>
+          {needStart && (
+            <div className="form-field">
+              <label>ساعت شروع جدید<RequiredMark /> <FieldHint label="شروع جدید" text="شروع اولین بازه‌ی کاریِ آن روز. باید داخل پنجره‌ی حضور همان بازه و قبل از پایانِ آن باشد؛ وگرنه برای آن کارمند/روز اعمال نمی‌شود و علتش کنار «ردیف شیفت» می‌آید." /></label>
+              <TimeInput value={form.start} width={90} placeholder="10:00" onChange={(t) => setForm({ ...form, start: t })} />
+            </div>
+          )}
+          {needEnd && (
+            <div className="form-field">
+              <label>ساعت پایان جدید<RequiredMark /> <FieldHint label="پایان جدید" text="پایان آخرین بازه‌ی کاریِ آن روز. اگر از شروع بازه کوچک‌تر یا مساوی باشد روز بعد حساب می‌شود (شیفت شب). استراحت سر جایش می‌ماند و «ساعت مرخصی» اگر دستی تعیین نشده باشد از طول جدید حساب می‌شود." /></label>
+              <TimeInput value={form.end} width={90} placeholder="15:00" onChange={(t) => setForm({ ...form, end: t })} />
+            </div>
           )}
           <div className="form-field" style={{ gridColumn: "1 / -1" }}>
             <label>توضیحات</label>

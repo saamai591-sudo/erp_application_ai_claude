@@ -15,7 +15,7 @@ const fail = (res: any, e: any, fallback: string) => res.status(400).json({ erro
 const INCLUDE = { shifts: { include: { shift: { select: { title: true } } } } };
 
 router.get("/attendance-day-exceptions", async (_req, res) => {
-  const rows = await prisma.attendanceDayException.findMany({ orderBy: [{ fromDate: "desc" }, { id: "desc" }], include: INCLUDE });
+  const rows = await prisma.attendanceDayException.findMany({ orderBy: [{ date: "desc" }, { id: "desc" }], include: INCLUDE });
   res.json(rows.map(exceptionShape));
 });
 

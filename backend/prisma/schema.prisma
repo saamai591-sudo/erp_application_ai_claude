@@ -6428,25 +6428,37 @@ model AttendanceTimeBandVersion {
   @@unique([bandId, execCalendarMonthId])
 }
 
-/// استثنای روز: برای یک تاریخ/بازه‌ی تاریخ و دامنه‌ی «همه‌ی شیفت‌ها» یا «شیفت‌های انتخابی»، شروعِ اولین بازه و/یا پایانِ آخرین بازه‌ی کاری را عوض می‌کند یا نوع روز را تعطیلی می‌کند (شیفت دست نمی‌خورد)
+enum AttendanceDayExceptionEffect {
+  /// تغییر ساعت شروع اولین بازه‌ی کاری
+  START
+  /// تغییر ساعت پایان آخرین بازه‌ی کاری
+  END
+  /// تغییر هر دو
+  START_END
+  /// اعلام تعطیلی شیفت
+  SHIFT_OFF
+  /// اعلام تعطیلی رسمی
+  OFFICIAL_HOLIDAY
+}
+
+/// استثنای روز: برای یک تاریخ و دامنه‌ی «همه‌ی شیفت‌ها» یا «شیفت‌های انتخابی»، شروعِ اولین بازه و/یا پایانِ آخرین بازه‌ی کاری را عوض می‌کند یا نوع روز را تعطیلی می‌کند (شیفت دست نمی‌خورد)
 model AttendanceDayException {
   id             Int                          @id @default(autoincrement())
   title          String
-  fromDate       DateTime                     @db.Date
-  toDate         DateTime                     @db.Date
+  /// فقط یک تاریخ (استثنا بازه ندارد)
+  date           DateTime                     @db.Date
   allShifts      Boolean                      @default(false)
-  /// ساعت جدید (دقیقه از ابتدای روز، ۰..۱۴۳۹)؛ خالی = بدون تغییر
+  effect         AttendanceDayExceptionEffect
+  /// ساعت جدید (دقیقه از ابتدای روز، ۰..۱۴۳۹)؛ فقط برای اثرهای START / END / START_END
   newStartMinute Int?
   newEndMinute   Int?
-  /// اعلام تعطیلی (فقط تعطیلی شیفت/رسمی؛ با ساعت جدید هم‌زمان نمی‌شود)
-  dayType        AttendanceDayType?
   description    String?
   createdById    Int?
   createdAt      DateTime                     @default(now())
   updatedAt      DateTime                     @updatedAt
   shifts         AttendanceDayExceptionShift[]
 
-  @@index([fromDate, toDate])
+  @@index([date])
 }
 
 model AttendanceDayExceptionShift {
