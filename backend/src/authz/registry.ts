@@ -612,6 +612,7 @@ export const REGISTRY: ModuleDef[] = [
         forms: [
           { key: "attendance-shifts", title: "شیفت", baseActions: CRUD },
           { key: "attendance-factors", title: "عوامل تردد", baseActions: CRUD },
+          { key: "attendance-time-bands", title: "بازه‌های زمانی", baseActions: CRUD },
         ],
       },
       {

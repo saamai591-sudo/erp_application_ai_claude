@@ -31,6 +31,9 @@ export const DAY_VARS: Record<string, string> = {
   INCOMPLETE_ROWS: "تعداد بازه‌های ناقص (تعداد فردِ تردد)",
 };
 
+/** متغیر روزِ خودکارِ هر «بازه‌ی زمانی» (حضور در بازه): کلید TB<id>؛ عنوان و وجودش از جدول AttendanceTimeBand می‌آید */
+export const BAND_KEY_RE = /^TB\d+$/;
+
 export const AGG_VARIANTS: Record<string, string> = { SUM: "جمع ماه", MAX: "بیشترین روز", DAYS: "تعداد روزهای دارای مقدار" };
 
 export const ATT_BASE_INFO: Record<string, string> = {

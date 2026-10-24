@@ -456,6 +456,7 @@ const RAW_MODULES: ModuleGroup[] = [
         items: [
           { key: "attendance-shifts", label: "شیفت", list: "/attendance-shifts", create: "/attendance-shifts/new", icon: "calendar" },
           { key: "attendance-factors", label: "عوامل تردد", list: "/attendance-factors", create: "/attendance-factors/new", icon: "sliders" },
+          { key: "attendance-time-bands", label: "بازه‌های زمانی", list: "/attendance-time-bands", create: "/attendance-time-bands/new", icon: "calendar" },
         ],
       },
       {

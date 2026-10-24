@@ -206,6 +206,7 @@ export async function buildWorksheet(opts: { from: Date; to: Date; employeeId?: 
         lastOut: lastOut === null ? null : timeText(lastOut, w.workDay),
         presenceMinutes: n >= 2 ? presence : null,
         presenceInShiftMinutes: inShift,
+        pairsAbs: pairs,
         lateMinutes: late,
         earlyLeaveMinutes: early,
         overtimeBeforeMinutes: overBefore,

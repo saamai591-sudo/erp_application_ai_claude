@@ -31,7 +31,7 @@ interface Palette {
 /** پالت فرمول‌ساز تردد (سرور: GET /attendance-factors/palette): دسته‌ها (متغیر روز، عامل روزانه، تجمیع …) ← مورد ← نوع تجمیع */
 interface AttPalette {
   level: "DAY" | "MONTH";
-  groups: { ns: string; title: string; hint?: string; items: { key: string; title: string; hint?: string }[]; variants: { key: string; title: string; hint?: string }[] | null }[];
+  groups: { ns: string; key?: string; title: string; hint?: string; items: { key: string; title: string; hint?: string }[]; variants: { key: string; title: string; hint?: string }[] | null }[];
   baseHint?: string;
   baseInfo: { key: string; title: string; hint?: string }[];
   params: { key: string; title: string; type: string }[];
@@ -362,8 +362,8 @@ export function FormulaBuilder({
   const variants = cat === "DECREE" ? (pal?.decree.variants ?? []) : (payrollCat?.variants ?? []);
 
   // حالت تردد: دسته ← مورد ← (نوع تجمیع)
-  const attCats = [...(attPal?.groups.map((g) => ({ key: g.ns, title: g.title, hint: g.hint })) ?? []), { key: "BASE", title: "اطلاعات پایه", hint: attPal?.baseHint }];
-  const attGroup = attPal?.groups.find((g) => g.ns === cat);
+  const attCats = [...(attPal?.groups.map((g) => ({ key: g.key ?? g.ns, title: g.title, hint: g.hint })) ?? []), { key: "BASE", title: "اطلاعات پایه", hint: attPal?.baseHint }];
+  const attGroup = attPal?.groups.find((g) => (g.key ?? g.ns) === cat);
   const attItems = cat === "BASE" ? [] : attGroup?.items ?? [];
   const attPick = (i: { key: string; title: string }) => {
     if (!attGroup) return;

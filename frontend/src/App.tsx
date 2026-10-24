@@ -105,6 +105,7 @@ import AttendanceWorksheet from "./pages/AttendanceWorksheet";
 import AttendanceFactors from "./pages/AttendanceFactors";
 import AttendanceFactorResults from "./pages/AttendanceFactorResults";
 import AttendanceReview from "./pages/AttendanceReview";
+import AttendanceTimeBands from "./pages/AttendanceTimeBands";
 import { EmploymentTypes, EducationLevels, TerminationReasons, DecreeComponents } from "./pages/HrMasters";
 import EmploymentDecrees from "./pages/EmploymentDecrees";
 import LegalParameters from "./pages/LegalParameters";
@@ -489,6 +490,9 @@ export default function App() {
             <Route path="/attendance-factors/:id/edit" element={<AttendanceFactors />} />
             <Route path="/attendance-factor-results" element={<AttendanceFactorResults />} />
             <Route path="/attendance-review" element={<AttendanceReview />} />
+            <Route path="/attendance-time-bands" element={<AttendanceTimeBands />} />
+            <Route path="/attendance-time-bands/new" element={<AttendanceTimeBands />} />
+            <Route path="/attendance-time-bands/:id/edit" element={<AttendanceTimeBands />} />
             <Route path="/attendance-shift-assignments" element={<AttendanceShiftAssignments />} />
             <Route path="/attendance-shift-assignments/new" element={<AttendanceShiftAssignments />} />
             <Route path="/attendance-shift-assignments/:id/edit" element={<AttendanceShiftAssignments />} />

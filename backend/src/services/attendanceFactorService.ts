@@ -4,6 +4,8 @@ import { buildWorksheet } from "./attendanceWorksheetService";
 import { getCalendarMonth } from "./workCalendarService";
 import { getParameterValue } from "./payrollParameterService";
 import { evaluate, evaluateCondition, parseCondition, parseFormula, collectRefs, collectCondRefs, FormulaError, type Cond, type EvalEnv, type Node, type Ns, type RefInfo } from "./payrollFormula";
+import { bandOverlap, effectiveBands, type EffectiveBand } from "./attendanceTimeBandService";
+import { BAND_KEY_RE } from "./attendanceFormulaDefs";
 import { AGG_HINTS, ATT_BASE_HINTS, ATT_GROUP_HINTS, DAY_VAR_HINTS } from "./attendanceFormulaHints";
 import { AGG_VARIANTS, ALLOWED_NS, ATT_BASE_INFO, ATT_LEVEL_FA, ATT_VALUE_TYPE_FA, DAY_VARS, type AttLevel, type AttValueType } from "./attendanceFormulaDefs";
 
@@ -158,6 +160,7 @@ export async function validateBranches(factor: { id: number | null; key: string;
   const parsed = branches.map((b, i) => parseBranch(b, i, multi));
   const all = await prisma.attendanceFactor.findMany({ include: { methods: { include: { branches: true } } } });
   const byKey = new Map(all.map((f) => [f.key, f]));
+  const bandRows = await prisma.attendanceTimeBand.findMany({ select: { key: true, title: true, isActive: true } });
   const myRefs: RefInfo[] = [];
   parsed.forEach((p, i) => {
     const tag = multi ? `شاخه‌ی ${i + 1}: ` : "";
@@ -172,6 +175,11 @@ export async function validateBranches(factor: { id: number | null; key: string;
         const want: AttLevel = r.ns === "M" ? "MONTH" : "DAY";
         if (t.level !== want) throw new AttendanceError(`${tag}عامل «${t.title}» ${ATT_LEVEL_FA[t.level as AttLevel]} است و در این جای فرمول مجاز نیست`);
         if (!t.isActive) throw new AttendanceError(`${tag}عامل «${t.title}» غیرفعال است`);
+      }
+      if ((r.ns === "V" || r.ns === "T") && BAND_KEY_RE.test(r.key)) {
+        const bd = bandRows.find((x) => x.key === r.key);
+        if (!bd) throw new AttendanceError(`${tag}بازه‌ی زمانیِ ارجاع‌شده یافت نشد`);
+        if (!bd.isActive) throw new AttendanceError(`${tag}بازه‌ی زمانی «${bd.title}» غیرفعال است`);
       }
       if (r.ns === "P") {
         // پارامتر مبنا: مقدار ثابتِ عددی/مبلغی (نه جدول پلکانی/مبنا/پرسنلی)
@@ -253,10 +261,12 @@ export async function deleteMethod(factorId: number, methodId: number) {
 // ───────────────────────── پالت فرمول‌ساز ─────────────────────────
 
 export async function palette(level: AttLevel, factorId?: number) {
-  const [factors, params] = await Promise.all([
+  const [factors, params, bandRows] = await Promise.all([
     prisma.attendanceFactor.findMany({ where: { isActive: true }, orderBy: { id: "asc" } }),
     prisma.payrollParameter.findMany({ where: { isActive: true, kind: "CONSTANT", type: { in: ["NUMBER", "AMOUNT"] } }, orderBy: { id: "asc" } }),
+    prisma.attendanceTimeBand.findMany({ where: { isActive: true }, orderBy: { id: "asc" } }),
   ]);
+  const bandItems = bandRows.map((b) => ({ key: b.key, title: `حضور در ${b.title}`, hint: [b.description, "کل حضور (جفت‌ترددها) در این بازه‌ی ساعتی، اعم از داخل شیفت و اضافه‌کار؛ ساعت بازه در «بازه‌های زمانی» تعریف می‌شود و به شیفت وابسته نیست. حداقل مدت یا ضریب را در فرمول بگذارید."].filter(Boolean).join(" — ") }));
   const self = factorId ? factors.find((f) => f.id === factorId) : undefined;
   const pick = (lv: AttLevel) =>
     factors
@@ -269,10 +279,11 @@ export async function palette(level: AttLevel, factorId?: number) {
       ? [
           { ns: "V", title: "متغیرهای روز", hint: ATT_GROUP_HINTS.V, items: dayVars, variants: null },
           { ns: "F", title: "عوامل روزانه", hint: ATT_GROUP_HINTS.F, items: pick("DAY"), variants: null },
+          ...(bandItems.length ? [{ ns: "V", key: "BANDS", title: "حضور در بازه‌های زمانی", hint: ATT_GROUP_HINTS.BANDS, items: bandItems, variants: null }] : []),
         ]
       : [
           { ns: "A", title: "تجمیع عوامل روزانه در ماه", hint: ATT_GROUP_HINTS.A, items: pick("DAY"), variants: aggVariants },
-          { ns: "T", title: "تجمیع متغیرهای روز در ماه", hint: ATT_GROUP_HINTS.T, items: dayVars, variants: aggVariants },
+          { ns: "T", title: "تجمیع متغیرهای روز در ماه", hint: ATT_GROUP_HINTS.T, items: [...dayVars, ...bandItems], variants: aggVariants },
           { ns: "M", title: "عوامل ماهانه", hint: ATT_GROUP_HINTS.M, items: pick("MONTH"), variants: null },
         ];
   return {
@@ -374,7 +385,7 @@ function runBranches(f: Compiled, env: EvalEnv): Val {
 }
 
 /** متغیرهای یک روز از ردیف‌های «کارکرد روزانه» همان روز */
-function dayVariables(rows: any[]): { vars: Record<string, number>; incomplete: boolean; shiftTitle: string } {
+function dayVariables(rows: any[], bands: EffectiveBand[] = []): { vars: Record<string, number>; incomplete: boolean; shiftTitle: string } {
   const work = rows.filter((r) => !r.rest);
   const rest = rows.filter((r) => r.rest);
   const ok = work.filter((r) => r.status === "OK");
@@ -399,6 +410,9 @@ function dayVariables(rows: any[]): { vars: Record<string, number>; incomplete: 
     ROWS: work.length,
     INCOMPLETE_ROWS: rows.filter((r) => r.status === "INCOMPLETE").length,
   };
+  // حضور در هر بازه‌ی زمانی: اشتراک همه‌ی جفت‌ترددهای آن روز (ردیف‌های کامل، شامل روز استراحت) با بازه‌ی ساعتی؛ بازه‌ای که برای این ماه نسخه ندارد متغیرش نیست
+  const pairs: [number, number][] = rows.filter((r) => r.status === "OK" || r.status === "WORK_ON_REST").flatMap((r) => r.pairsAbs ?? []);
+  for (const b of bands) if (b.startMinute !== null && b.endMinute !== null) vars[b.key] = bandOverlap(pairs, b.startMinute, b.endMinute);
   return { vars, incomplete: vars.INCOMPLETE_ROWS > 0, shiftTitle: first.shiftTitle };
 }
 
@@ -414,6 +428,8 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
   if (!cal) throw new AttendanceError(`ماه ${opts.month} سال ${opts.year} در «تقویم کاری» تعریف نشده است`);
   const from = cal.trafficStartDate, to = cal.trafficEndDate;
   const compiled = orderFactors(await compileFactors(cal.endDate));
+  const bands = await effectiveBands(cal.endDate);
+  const bandTitle = new Map(bands.map((b) => [b.key, b.title]));
   const dayFactors = compiled.filter((f) => f.level === "DAY");
   const monthFactors = compiled.filter((f) => f.level === "MONTH");
   const showSet = new Set((await prisma.attendanceFactor.findMany({ where: { showInWorksheet: true }, select: { id: true } })).map((x) => x.id));
@@ -462,6 +478,7 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
     return undefined;
   };
   const labelOf = (ns: Ns, key: string, variant: string) => {
+    if ((ns === "V" || ns === "T") && bandTitle.has(key)) return `حضور در ${bandTitle.get(key)}${ns === "T" ? ` (${AGG_VARIANTS[variant] ?? variant})` : ""}`;
     if (ns === "V" || ns === "T") return DAY_VARS[key] ? `${ns === "T" ? "تجمیع " : ""}${DAY_VARS[key]}${ns === "T" ? ` (${AGG_VARIANTS[variant] ?? variant})` : ""}` : key;
     if (ns === "F" || ns === "M") return factorTitle.get(key) ?? key;
     if (ns === "A") return `${factorTitle.get(key) ?? key} (${AGG_VARIANTS[variant] ?? variant})`;
@@ -486,11 +503,14 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
     const dayRows: { date: string; vars: Record<string, number>; incomplete: boolean; shiftTitle: string; values: Record<string, Val> }[] = [];
 
     for (const date of dates) {
-      const dv = dayVariables(byDate.get(date)!);
+      const dv = dayVariables(byDate.get(date)!, bands);
       const values: Record<string, Val> = {};
       const env: EvalEnv = {
         scalar: (ns, key) => {
-          if (ns === "V") return dv.vars[key];
+          if (ns === "V") {
+            if (dv.vars[key] === undefined) throw new FormulaError(`${labelOf(ns, key, "")} برای این ماه تعریف نشده است (بازه‌ی زمانی نسخه‌ای ندارد)`);
+            return dv.vars[key];
+          }
           if (ns === "F") {
             const v = values[key];
             if (!v || v.value === null) throw new FormulaError(`عامل «${factorTitle.get(key) ?? key}» مقدار ندارد${v?.error ? ` (${v.error})` : ""}`);
@@ -522,7 +542,10 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
     const mvals: Record<string, Val> = {};
     const menv: EvalEnv = {
       scalar: (ns, key, variant) => {
-        if (ns === "T") return agg((d) => d.vars[key], variant) as number;
+        if (ns === "T") {
+          if (dayRows.length && dayRows[0].vars[key] === undefined) throw new FormulaError(`${labelOf(ns, key, "")} برای این ماه تعریف نشده است (بازه‌ی زمانی نسخه‌ای ندارد)`);
+          return agg((d) => d.vars[key], variant) as number;
+        }
         if (ns === "A") {
           const bad = dayRows.filter((d) => d.values[key] === undefined || d.values[key].value === null).length;
           if (bad > 0) throw new FormulaError(`عامل روزانه‌ی «${factorTitle.get(key) ?? key}» در ${bad} روز مقدار نداشت (خطا یا روش تعریف‌نشده)`);
@@ -561,6 +584,7 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
     from: dayStr(from),
     to: dayStr(to),
     factors: factorsOut,
+    bands: bands.map((b) => ({ key: b.key, title: `حضور در ${b.title}` })),
     employees,
     days,
     summary: { employees: employees.length, days: days.length, incompleteDays: days.filter((d) => d.incomplete).length, factorErrors: factorsOut.filter((f) => f.error).length },

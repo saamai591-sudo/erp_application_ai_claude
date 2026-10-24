@@ -53,6 +53,7 @@ interface Result {
   from: string;
   to: string;
   factors: FactorInfo[];
+  bands?: { key: string; title: string }[];
   employees: EmpRow[];
   days: DayRow[];
   summary: { employees: number; days: number; incompleteDays: number; factorErrors: number };
@@ -196,7 +197,7 @@ export default function AttendanceFactorResults() {
               <table className="hr-table" style={{ marginBottom: 12 }}>
                 <tbody>
                   {Object.entries(detail.vars).map(([k, v]) => (
-                    <tr key={k}><td>{VAR_FA[k] ?? k}</td><td dir="ltr" style={{ textAlign: "left" }}>{TIME_VARS.has(k) ? toFaDigits(minutesToMask(v)) : toFaDigits(String(v))}</td></tr>
+                    <tr key={k}><td>{VAR_FA[k] ?? data?.bands?.find((b) => b.key === k)?.title ?? k}</td><td dir="ltr" style={{ textAlign: "left" }}>{TIME_VARS.has(k) || /^TB\d+$/.test(k) ? toFaDigits(minutesToMask(v)) : toFaDigits(String(v))}</td></tr>
                   ))}
                 </tbody>
               </table>

@@ -40,6 +40,8 @@ export const USAGE_META: Record<string, UsageMeta> = {
   Job: { label: "شغل", base: "/jobs" },
   AttendanceShift: { label: "شیفت", base: "/attendance-shifts" },
   AttendanceShiftAssignment: { label: "انتساب شیفت", base: "/attendance-shift-assignments", title: (r) => `#${r.id}` },
+  AttendanceTimeBand: { label: "بازه‌ی زمانی تردد", base: "/attendance-time-bands" },
+  AttendanceTimeBandVersion: { label: "نسخه‌ی بازه‌ی زمانی تردد", base: "/attendance-time-bands", title: (r) => `#${r.id}` },
   AttendanceFactor: { label: "عامل تردد", base: "/attendance-factors" },
   AttendanceFactorMethod: { label: "روش محاسبه‌ی عامل تردد", base: "/attendance-factors", title: (r) => `#${r.id}` },
   AttendancePunch: { label: "تردد", base: "/attendance-punches", title: (r) => `#${r.id}` },

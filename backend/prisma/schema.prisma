@@ -5348,6 +5348,7 @@ model WorkCalendarMonth {
   employeeParamValues PayrollEmployeeParameterValue[]
   salaryAccountMonths EmployeeSalaryAccount[]
   attendanceMethods AttendanceFactorMethod[] @relation("AttendanceMethodExecMonth")
+  attendanceBandVersions AttendanceTimeBandVersion[] @relation("AttendanceBandExecMonth")
 
   @@unique([calendarId, month])
   @@unique([year, month])
@@ -6386,4 +6387,32 @@ model AttendanceFactorMethodBranch {
   method        AttendanceFactorMethod @relation(fields: [methodId], references: [id], onDelete: Cascade)
 
   @@unique([methodId, seq])
+}
+
+/// بازه‌ی زمانی ساعتی (مثلاً «شبکاری ۲۱ تا ۴»): برای هر بازه یک متغیر روز خودکار «حضور در بازه» ساخته می‌شود؛ کلید داخلی TB<id> را سیستم می‌سازد
+model AttendanceTimeBand {
+  id          Int                          @id @default(autoincrement())
+  key         String                       @unique
+  title       String                       @unique
+  isActive    Boolean                      @default(true)
+  description String?
+  createdAt   DateTime                     @default(now())
+  updatedAt   DateTime                     @updatedAt
+  versions    AttendanceTimeBandVersion[]
+}
+
+/// ساعت شروع/پایان بازه از «ماه اجرا» (ماه تقویم کاری) به بعد؛ پایان ≤ شروع یعنی از نیمه‌شب می‌گذرد (۲۱ تا ۰۴)
+model AttendanceTimeBandVersion {
+  id                  Int                @id @default(autoincrement())
+  bandId              Int
+  execCalendarMonthId Int
+  /// دقیقه از ۰۰:۰۰ (۰ تا ۱۴۳۹)
+  startMinute         Int
+  endMinute           Int
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  band                AttendanceTimeBand @relation(fields: [bandId], references: [id], onDelete: Cascade)
+  execCalendarMonth   WorkCalendarMonth  @relation("AttendanceBandExecMonth", fields: [execCalendarMonthId], references: [id], onDelete: Restrict)
+
+  @@unique([bandId, execCalendarMonthId])
 }

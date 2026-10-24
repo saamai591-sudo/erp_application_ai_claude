@@ -7,7 +7,7 @@
 // توابع: MIN(...), MAX(...), ROUND(x[, ارقام]), PROGRESSIVE([P:جدول], مبلغ). عملگرها: + - * / و پرانتز.
 // شرط: مقایسه‌ها (> >= < <= = <>) با AND/OR (و/یا) و پرانتز؛ شرط خالی = همیشه برقرار.
 
-import { AGG_VARIANTS, ATT_BASE_INFO, DAY_VARS } from "./attendanceFormulaDefs";
+import { AGG_VARIANTS, ATT_BASE_INFO, BAND_KEY_RE, DAY_VARS } from "./attendanceFormulaDefs";
 
 // V F A T M = نام‌فضاهای فرمول‌ساز تردد (attendanceFormulaDefs.ts)؛ در گویش حقوق پذیرفته نمی‌شوند و برعکس
 export type Ns = "D" | "C" | "P" | "B" | "S" | "V" | "F" | "A" | "T" | "M";
@@ -241,10 +241,10 @@ function parseRef(raw: string, dialect: Dialect = "PAYROLL"): Node {
   const variant = (m[3] ?? "").toUpperCase();
   if (dialect === "ATTENDANCE") {
     if (ns === "V") {
-      if (!DAY_VARS[key]) throw new FormulaError(`متغیر روز ناشناخته [${raw}]`);
+      if (!DAY_VARS[key] && !BAND_KEY_RE.test(key)) throw new FormulaError(`متغیر روز ناشناخته [${raw}]`);
     } else if (ns === "B") {
       if (!ATT_BASE_INFO[key]) throw new FormulaError(`اطلاعات پایه‌ی ناشناخته [${raw}]`);
-    } else if (ns === "T" && !DAY_VARS[key]) throw new FormulaError(`متغیر روز ناشناخته [${raw}]`);
+    } else if (ns === "T" && !DAY_VARS[key] && !BAND_KEY_RE.test(key)) throw new FormulaError(`متغیر روز ناشناخته [${raw}]`);
     if (ns === "A" || ns === "T") {
       const v = variant || "SUM";
       if (!AGG_VARIANTS[v]) throw new FormulaError(`نوع تجمیع [${raw}] نامعتبر است`);
