@@ -463,6 +463,10 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "attendance-correction-requests", label: "درخواست اصلاح تردد", list: "/attendance-correction-requests", create: "/attendance-correction-requests/new", icon: "file" },
         ],
       },
+      {
+        title: "گزارش",
+        items: [{ key: "attendance-worksheet", label: "کارکرد روزانه", list: "/attendance-worksheet", icon: "ledger", type: "report" }],
+      },
     ],
   },
 ];

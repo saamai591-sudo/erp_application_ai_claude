@@ -629,6 +629,11 @@ export const REGISTRY: ModuleDef[] = [
           },
         ],
       },
+      {
+        key: "reports",
+        title: "گزارش",
+        forms: [{ key: "attendance-worksheet", title: "کارکرد روزانه", baseActions: ["view"] }],
+      },
     ],
   },
   {
