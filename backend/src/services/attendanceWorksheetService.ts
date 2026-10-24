@@ -60,7 +60,7 @@ function windowsOf(asgs: Asg[], timelines: Map<number, TimelineRow[]>, excs: Day
   for (const x of asgs) if (dayNum(x.fromDate) <= day) a = x;
   if (!a) return [];
   const d = fromNum(day);
-  const idx = cycleDayIndex(a.shift.cycleType, a.shift.cycleLength, a.cycleStartDate, d);
+  const idx = cycleDayIndex(a.shift.cycleType, a.shift.cycleLength, a.cycleStartDate ?? a.shift.cycleStartDate, d);
   let tl = timelines.get(a.shift.id);
   if (!tl) {
     tl = shiftTimeline(a.shift);

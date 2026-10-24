@@ -33,6 +33,8 @@ interface AsgRow {
   cycleLength: number;
   fromDate: string;
   cycleStartDate: string | null;
+  shiftCycleStartDate: string | null;
+  effectiveCycleStartDate: string | null;
   note: string;
   updatedAt?: string;
 }
@@ -42,6 +44,7 @@ interface ShiftOpt {
   title: string;
   cycleType: "WEEKLY" | "ROTATING";
   cycleLength: number;
+  cycleStartDate: string | null;
   isActive: boolean;
 }
 
@@ -92,7 +95,7 @@ function AsgList() {
           { header: "شیفت", ...s((r) => `${toFaDigits(String(r.shiftCode))} — ${r.shiftTitle}`) },
           { header: "چرخه", ...s((r) => cycleText(r.cycleType, r.cycleLength)), width: "150px" },
           { header: "تاریخ شروع", ...s((r) => formatJalaliDate(r.fromDate)), width: "120px" },
-          { header: "روز ۱ چرخه", ...s((r) => (r.cycleStartDate ? formatJalaliDate(r.cycleStartDate) : "—")), width: "120px" },
+          { header: "روز ۱ چرخه", ...s((r) => (r.effectiveCycleStartDate ? formatJalaliDate(r.effectiveCycleStartDate) + (r.cycleStartDate ? " (انتساب)" : "") : "—")), width: "170px" },
           { header: "توضیحات", ...s((r) => r.note) },
         ]}
         rows={items}
@@ -135,7 +138,7 @@ function AsgForm({ editId }: { editId?: number }) {
     if (!form.employeeId) return setError("کارمند را انتخاب کنید");
     if (!form.shiftId) return setError("شیفت را انتخاب کنید");
     if (!form.fromDate) return setError("تاریخ شروع الزامی است");
-    if (rotating && !form.cycleStartDate) return setError("برای شیفت چرخشی، تاریخ روز ۱ چرخه الزامی است");
+    if (rotating && !form.cycleStartDate && !shift?.cycleStartDate) return setError("برای این شیفت چرخشی تاریخ روز ۱ چرخه تعیین نشده است؛ آن را در تعریف شیفت (یا همین‌جا) وارد کنید");
     const body = { employeeId: Number(form.employeeId), shiftId: Number(form.shiftId), fromDate: form.fromDate, cycleStartDate: rotating ? form.cycleStartDate : null, note: form.note, updatedAt };
     try {
       if (editId) {
@@ -184,7 +187,7 @@ function AsgForm({ editId }: { editId?: number }) {
                 { header: "عنوان", render: (x) => x.title, filterValue: (x) => x.title },
                 { header: "چرخه", render: (x) => cycleText(x.cycleType, x.cycleLength), filterValue: (x) => cycleText(x.cycleType, x.cycleLength), width: "140px" },
               ]}
-              onSelect={(x) => setForm({ ...form, shiftId: String(x.id), cycleStartDate: x.cycleType === "ROTATING" ? form.cycleStartDate || form.fromDate : "" })}
+              onSelect={(x) => setForm({ ...form, shiftId: String(x.id), cycleStartDate: "" })}
             />
           </div>
           <div className="form-field">
@@ -193,7 +196,11 @@ function AsgForm({ editId }: { editId?: number }) {
           </div>
           {rotating && (
             <div className="form-field">
-              <label>تاریخ روز ۱ چرخه<RequiredMark /> <FieldHint label="روز ۱ چرخه" text="تاریخی که «روز ۱» چرخه‌ی این شیفت روی آن می‌افتد (می‌تواند قبل یا بعد از تاریخ شروع باشد)؛ روزهای دیگر با تکرار چرخه از روی همین تاریخ تعیین می‌شود." /></label>
+              <label>
+                روز ۱ چرخه{shift?.cycleStartDate ? ` (از شیفت: ${formatJalaliDate(shift.cycleStartDate)})` : ""}
+                {!shift?.cycleStartDate && <RequiredMark />}{" "}
+                <FieldHint label="روز ۱ چرخه" text="تاریخِ روز ۱ چرخه در تعریف شیفت تعیین می‌شود و همه‌ی کارمندانِ شیفت از همان می‌روند. این فیلد فقط برای استثنا است (جایگزین اختیاریِ همین انتساب)؛ خالی = از تعریف شیفت. برای تیم با فاز متفاوت بهتر است شیفتِ جدا (تکثیر) بسازید." />
+              </label>
               <JalaliDatePicker value={form.cycleStartDate} onChange={(v) => setForm({ ...form, cycleStartDate: v })} />
             </div>
           )}

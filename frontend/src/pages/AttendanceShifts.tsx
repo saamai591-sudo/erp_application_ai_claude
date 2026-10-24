@@ -9,6 +9,9 @@ import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { TimeInput, maskToMinutes, minutesToMask } from "../components/TimeInput";
+import { JalaliDatePicker } from "../components/JalaliDatePicker";
+import { stageFormPrefill, takeFormPrefill } from "../lib/formPrefill";
+import { useTabs } from "../lib/TabsContext";
 import { toFaDigits } from "../lib/formatAmount";
 import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
@@ -35,6 +38,7 @@ interface ShiftRow {
   isActive: boolean;
   cycleType: "WEEKLY" | "ROTATING";
   cycleLength: number;
+  cycleStartDate: string | null;
   description: string;
   workDayCount: number;
   totalWorkMinutes: number;
@@ -136,12 +140,25 @@ function ShiftForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
-  const [form, setForm] = usePersistedState(cacheKey, { title: "", isActive: true, cycleType: "WEEKLY" as "WEEKLY" | "ROTATING", cycleLength: "7", description: "", days: weeklyDays() });
+  const [form, setForm] = usePersistedState(cacheKey, { title: "", isActive: true, cycleType: "WEEKLY" as "WEEKLY" | "ROTATING", cycleLength: "7", cycleStart: "", description: "", days: weeklyDays() });
   const [code, setCode] = useState<number | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const { flash } = useSavedFlash();
+  const { openTab } = useTabs();
+
+  // «تکثیر شیفت»: فرمِ جدید با همان الگو (روزها و بازه‌ها) پر می‌شود؛ عنوان و (برای چرخشی) تاریخ روز ۱ چرخه را کاربر عوض می‌کند. چیزی تا «ذخیره» ساخته نمی‌شود.
+  useEffect(() => {
+    if (editId) return;
+    const p = takeFormPrefill<typeof form>("/attendance-shifts/new");
+    if (p) setForm(p);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  function duplicate() {
+    stageFormPrefill("/attendance-shifts/new", { ...form, title: `کپی ${form.title}`, cycleStart: "", days: form.days.map((d) => ({ ...d, segments: d.segments.map((x) => ({ ...x })) })) });
+    openTab("/attendance-shifts/new");
+  }
 
   function fromRow(r: ShiftRow) {
     return {
@@ -149,6 +166,7 @@ function ShiftForm({ editId }: { editId?: number }) {
       isActive: r.isActive,
       cycleType: r.cycleType,
       cycleLength: String(r.cycleLength),
+      cycleStart: r.cycleStartDate ?? "",
       description: r.description,
       days: r.days.map((d): DayUI => ({
         dayType: d.dayType,
@@ -211,7 +229,8 @@ function ShiftForm({ editId }: { editId?: number }) {
       if (d.leaveText && leave === null) return setError(`${label}: ساعت مرخصی نامعتبر است`);
       days.push({ dayNo: i + 1, dayType: "WORK", segments, breakMinutes: brk, leaveMinutes: leave });
     }
-    const body = { title: form.title, isActive: form.isActive, cycleType: form.cycleType, cycleLength: form.cycleType === "WEEKLY" ? 7 : Number(form.cycleLength), description: form.description, days, updatedAt };
+    if (form.cycleType === "ROTATING" && !form.cycleStart) return setError("تاریخ روز ۱ چرخه را وارد کنید");
+    const body = { title: form.title, isActive: form.isActive, cycleType: form.cycleType, cycleLength: form.cycleType === "WEEKLY" ? 7 : Number(form.cycleLength), cycleStartDate: form.cycleType === "ROTATING" ? form.cycleStart : null, description: form.description, days, updatedAt };
     try {
       if (editId) {
         await api.put(`/attendance-shifts/${editId}`, body);
@@ -241,7 +260,7 @@ function ShiftForm({ editId }: { editId?: number }) {
   if (!loaded) return null;
   const rotating = form.cycleType === "ROTATING";
   return (
-    <FormPage title={editId ? "ویرایش شیفت" : "شیفت جدید"} formId="attendance-shift-form" closePath="/attendance-shifts" newPath="/attendance-shifts/new" onDelete={editId ? handleDelete : undefined}>
+    <FormPage title={editId ? "ویرایش شیفت" : "شیفت جدید"} formId="attendance-shift-form" closePath="/attendance-shifts" newPath="/attendance-shifts/new" onDelete={editId ? handleDelete : undefined} toolbarExtra={editId ? <button type="button" className="btn secondary" onClick={duplicate} title="ساخت شیفت جدید با همین الگو">تکثیر</button> : undefined}>
       <form id="attendance-shift-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
         <div className="form-grid">
@@ -254,7 +273,7 @@ function ShiftForm({ editId }: { editId?: number }) {
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
           </div>
           <div className="form-field">
-            <label>نوع چرخه <FieldHint label="نوع چرخه" text="هفتگی: ۷ روز هم‌تراز هفته (شنبه تا جمعه). چرخشی: چرخه‌ی N روزه (مثلاً ۲ روز صبح، ۲ روز شب، ۲ روز استراحت)؛ روز شروع چرخه برای هر فرد هنگام انتساب مشخص می‌شود." /></label>
+            <label>نوع چرخه <FieldHint label="نوع چرخه" text="هفتگی: ۷ روز هم‌تراز هفته (شنبه تا جمعه). چرخشی: چرخه‌ی N روزه (مثلاً ۲ روز صبح، ۲ روز شب، ۲ روز استراحت) که تاریخِ «روز ۱ چرخه»اش را همین‌جا تعیین می‌کنید؛ برای تیم‌هایی با فاز متفاوت، برای هر تیم یک شیفت (با «تکثیر») و تاریخ خودش بسازید." /></label>
             <select value={form.cycleType} onChange={(e) => changeCycle(e.target.value as "WEEKLY" | "ROTATING")}>
               <option value="WEEKLY">هفتگی</option>
               <option value="ROTATING">چرخشی</option>
@@ -264,6 +283,12 @@ function ShiftForm({ editId }: { editId?: number }) {
             <div className="form-field">
               <label>طول چرخه (روز)<RequiredMark /></label>
               <input dir="ltr" inputMode="numeric" value={form.cycleLength} onChange={(e) => changeLength(e.target.value.replace(/\D/g, ""))} style={{ width: 90 }} />
+            </div>
+          )}
+          {rotating && (
+            <div className="form-field">
+              <label>تاریخ روز ۱ چرخه<RequiredMark /> <FieldHint label="روز ۱ چرخه" text="تاریخی که «روز ۱» چرخه‌ی این شیفت روی آن می‌افتد (می‌تواند قبل یا بعد از تاریخ انتساب باشد؛ چرخه به هر دو طرف تکرار می‌شود). همه‌ی کارمندانِ این شیفت از همین تاریخ می‌روند؛ برای تیمی با فاز متفاوت، شیفت را «تکثیر» کنید و تاریخ دیگری بگذارید." /></label>
+              <JalaliDatePicker value={form.cycleStart} onChange={(v) => setForm({ ...form, cycleStart: v })} />
             </div>
           )}
           <div className="form-field">

@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma";
-import { DAY_TYPE_FA, type AttDayType } from "./attendanceFormulaDefs";
-import { AttendanceError, minuteText } from "./attendancePunchService";
+import { DAY_TYPE_FA, WEEKLY_ANCHOR, type AttDayType } from "./attendanceFormulaDefs";
+import { AttendanceError, dayStr, minuteText, parseDay } from "./attendancePunchService";
 
 // مدیریت تردد › شیفت: تنها نویسنده‌ی AttendanceShift/Day/Segment. شیفت = الگوی تناوبی روزها (هفتگی ۷روزه هم‌تراز هفته، یا چرخشی N روزه).
 // هر روز: کاری/غیرکاری؛ دست‌کم یک بازه‌ی کاری (شروع/پایان، پایان می‌تواند روز بعد باشد)؛ «استراحت» (مثلاً ناهار) که جزو ساعت کاری نیست؛ و
@@ -49,6 +49,8 @@ export interface ShiftData {
   isActive: boolean;
   cycleType: "WEEKLY" | "ROTATING";
   cycleLength: number;
+  /** تاریخِ روز ۱ چرخه: چرخشی = ورودی کاربر (الزامی)، هفتگی = شنبه‌ی ثابت */
+  cycleStartDate: Date;
   description: string | null;
   days: DayInput[];
 }
@@ -161,6 +163,15 @@ export async function normalizeShift(b: any, excludeId?: number): Promise<ShiftD
   if (await prisma.attendanceShift.findFirst({ where: { title, ...(excludeId ? { NOT: { id: excludeId } } : {}) } })) throw new AttendanceError("شیفت دیگری با همین عنوان وجود دارد");
   const cycleType = b?.cycleType === "ROTATING" ? "ROTATING" : "WEEKLY";
   const cycleLength = cycleType === "WEEKLY" ? WEEKLY_LEN : int(b?.cycleLength, "طول چرخه", 2, MAX_ROTATION);
+  // تاریخ روز ۱ چرخه: شیفت هفتگی همیشه شنبه‌ی ثابت (شنبه‌بودن کنترل می‌شود)، شیفت چرخشی هر تاریخی که کاربر بدهد (الزامی)
+  let cycleStartDate: Date;
+  if (cycleType === "WEEKLY") {
+    cycleStartDate = WEEKLY_ANCHOR;
+    if (cycleStartDate.getUTCDay() !== 6) throw new AttendanceError("تاریخ مرجع شیفت هفتگی باید شنبه باشد");
+  } else {
+    if (!b?.cycleStartDate) throw new AttendanceError(`برای شیفت چرخشی، تاریخی که «روز ۱ چرخه» روی آن می‌افتد الزامی است (چرخه‌ی ${cycleLength} روزه)`);
+    cycleStartDate = parseDay(b.cycleStartDate, "تاریخ روز ۱ چرخه");
+  }
   let code: number | null = null;
   if (b?.code !== undefined && b?.code !== null && b?.code !== "") {
     code = int(b.code, "کد", 1, 999999);
@@ -200,7 +211,7 @@ export async function normalizeShift(b: any, excludeId?: number): Promise<ShiftD
   if (!days.some((d) => d.dayType === "WORK")) throw new AttendanceError("دست‌کم یک روز کاری لازم است");
   days.sort((a, c) => a.dayNo - c.dayNo);
   resolveAndValidateWindows(days);
-  return { code, title, isActive: b?.isActive === undefined ? true : !!b.isActive, cycleType, cycleLength, description: typeof b?.description === "string" && b.description.trim() ? b.description.trim() : null, days };
+  return { code, title, isActive: b?.isActive === undefined ? true : !!b.isActive, cycleType, cycleLength, cycleStartDate, description: typeof b?.description === "string" && b.description.trim() ? b.description.trim() : null, days };
 }
 
 const dayCreate = (days: DayInput[]) =>
@@ -217,7 +228,7 @@ export async function createShift(d: ShiftData): Promise<{ id: number }> {
   for (let attempt = 0; ; attempt++) {
     try {
       const code = d.code ?? ((await prisma.attendanceShift.findFirst({ orderBy: { code: "desc" }, select: { code: true } }))?.code ?? 0) + 1;
-      const s = await prisma.attendanceShift.create({ data: { code, title: d.title, isActive: d.isActive, cycleType: d.cycleType, cycleLength: d.cycleLength, description: d.description, days: { create: dayCreate(d.days) } } });
+      const s = await prisma.attendanceShift.create({ data: { code, title: d.title, isActive: d.isActive, cycleType: d.cycleType, cycleLength: d.cycleLength, cycleStartDate: d.cycleStartDate, description: d.description, days: { create: dayCreate(d.days) } } });
       return { id: s.id };
     } catch (e: any) {
       if (e?.code === "P2002" && attempt < 3 && d.code === null) continue;
@@ -229,7 +240,7 @@ export async function createShift(d: ShiftData): Promise<{ id: number }> {
 export async function updateShift(id: number, d: ShiftData): Promise<void> {
   await prisma.$transaction(async (tx) => {
     await tx.attendanceShiftDay.deleteMany({ where: { shiftId: id } });
-    await tx.attendanceShift.update({ where: { id }, data: { ...(d.code !== null ? { code: d.code } : {}), title: d.title, isActive: d.isActive, cycleType: d.cycleType, cycleLength: d.cycleLength, description: d.description, days: { create: dayCreate(d.days) } } });
+    await tx.attendanceShift.update({ where: { id }, data: { ...(d.code !== null ? { code: d.code } : {}), title: d.title, isActive: d.isActive, cycleType: d.cycleType, cycleLength: d.cycleLength, cycleStartDate: d.cycleStartDate, description: d.description, days: { create: dayCreate(d.days) } } });
   });
 }
 
@@ -321,6 +332,7 @@ export function shiftShape(s: any) {
     isActive: s.isActive,
     cycleType: s.cycleType,
     cycleLength: s.cycleLength,
+    cycleStartDate: s.cycleType === "ROTATING" ? dayStr(s.cycleStartDate) : null,
     description: s.description ?? "",
     workDayCount: days.filter((d: any) => d.isWorkDay).length,
     totalWorkMinutes: days.reduce((a: number, d: any) => a + d.workMinutes, 0),

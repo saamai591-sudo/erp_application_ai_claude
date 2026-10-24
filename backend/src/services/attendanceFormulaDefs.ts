@@ -10,6 +10,9 @@
 export type AttDayType = "WORK" | "SHIFT_OFF" | "OFFICIAL_HOLIDAY";
 export const DAY_TYPE_FA: Record<AttDayType, string> = { WORK: "روز کاری", SHIFT_OFF: "تعطیلی شیفت", OFFICIAL_HOLIDAY: "تعطیلی رسمی" };
 
+/** شنبه‌ی ثابتِ مرجعِ شیفت‌های هفتگی (۲۰۰۰/۰۱/۰۱ میلادی شنبه بود)؛ سیستم برای شیفت هفتگی همین را ذخیره می‌کند و کاربر نمی‌بیند */
+export const WEEKLY_ANCHOR = new Date(Date.UTC(2000, 0, 1));
+
 export type AttLevel = "DAY" | "MONTH";
 
 export const ATT_LEVEL_FA: Record<AttLevel, string> = { DAY: "روزانه", MONTH: "ماهانه" };

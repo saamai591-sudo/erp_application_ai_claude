@@ -6274,6 +6274,8 @@ model AttendanceShift {
   isActive    Boolean              @default(true)
   cycleType   AttendanceShiftCycle @default(WEEKLY)
   cycleLength Int                  @default(7)
+  /// تاریخِ «روز ۱ چرخه» (مرجع تشخیص روز چرخه برای همه‌ی افراد این شیفت): شیفت چرخشی را کاربر تعیین می‌کند (الزامی)؛ شیفت هفتگی همیشه یک شنبه‌ی ثابت است (سیستم می‌گذارد)
+  cycleStartDate DateTime?         @db.Date
   description String?
   createdAt   DateTime             @default(now())
   updatedAt   DateTime             @updatedAt

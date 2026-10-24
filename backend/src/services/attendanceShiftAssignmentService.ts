@@ -7,7 +7,7 @@ import { AttendanceError, EMPLOYEE_SELECT, assertEmployeeWorking, dayStr, parseD
 // شیفت هفتگی هم‌تراز هفته است و تاریخ چرخه ندارد. کارمند باید در تاریخ شروع در دوره‌ی همکاری باشد و شیفت فعال باشد.
 // قفل: انتسابی که ترددِ دستی‌اختصاص‌یافته‌ای (روز کاری ≥ تاریخ شروع) به آن متکی است ویرایش/حذف نمی‌شود.
 
-export const ASSIGNMENT_INCLUDE = { employee: { select: EMPLOYEE_SELECT }, shift: { select: { id: true, code: true, title: true, cycleType: true, cycleLength: true } } } as const;
+export const ASSIGNMENT_INCLUDE = { employee: { select: EMPLOYEE_SELECT }, shift: { select: { id: true, code: true, title: true, cycleType: true, cycleLength: true, cycleStartDate: true } } } as const;
 
 export function assignmentShape(a: any) {
   return {
@@ -21,7 +21,10 @@ export function assignmentShape(a: any) {
     cycleType: a.shift.cycleType,
     cycleLength: a.shift.cycleLength,
     fromDate: dayStr(a.fromDate),
+    /** جایگزین اختیاریِ همین انتساب (خالی = از تعریف شیفت) */
     cycleStartDate: dayStr(a.cycleStartDate),
+    shiftCycleStartDate: a.shift.cycleType === "ROTATING" ? dayStr(a.shift.cycleStartDate) : null,
+    effectiveCycleStartDate: a.shift.cycleType === "ROTATING" ? dayStr(a.cycleStartDate ?? a.shift.cycleStartDate) : null,
     note: a.note ?? "",
     updatedAt: a.updatedAt,
   };
@@ -39,8 +42,9 @@ async function clean(b: any) {
   await assertEmployeeWorking(employeeId, fromDate);
   let cycleStartDate: Date | null = null;
   if (shift.cycleType === "ROTATING") {
-    if (!b?.cycleStartDate) throw new AttendanceError(`برای شیفت چرخشی، تاریخی که «روز ۱ چرخه» روی آن می‌افتد الزامی است (چرخه‌ی ${shift.cycleLength} روزه)`);
-    cycleStartDate = parseDay(b.cycleStartDate, "تاریخ روز ۱ چرخه");
+    // تاریخ روز ۱ چرخه از تعریف شیفت می‌آید؛ مقدارِ اختیاریِ این انتساب (در صورت وجود) بر آن مقدم است
+    if (b?.cycleStartDate) cycleStartDate = parseDay(b.cycleStartDate, "تاریخ روز ۱ چرخه");
+    else if (!shift.cycleStartDate) throw new AttendanceError(`برای شیفت چرخشی «${shift.title}» تاریخ روز ۱ چرخه تعیین نشده است؛ آن را در تعریف شیفت (یا در همین انتساب) وارد کنید`);
   }
   return { employeeId, shiftId, fromDate, cycleStartDate, note: typeof b?.note === "string" && b.note.trim() ? b.note.trim() : null };
 }

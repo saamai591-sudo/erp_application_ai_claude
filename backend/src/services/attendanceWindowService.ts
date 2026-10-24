@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma";
 import { displayDate } from "../utils/dateDisplay";
 import { AttendanceError, assertEmployeeWorking, dayStr, parseDay } from "./attendancePunchService";
 import { shiftTimeline } from "./attendanceShiftService";
+import { WEEKLY_ANCHOR } from "./attendanceFormulaDefs";
 import { applyToDay, loadExceptions, pickException } from "./attendanceDayExceptionService";
 
 // مدیریت تردد › پنجره‌های حضورِ یک کارمند در یک تاریخ: شیفتِ مؤثر (آخرین انتساب با تاریخ شروع ≤ آن روز) + روزِ چرخه + ردیف‌های آن روز با پنجره‌شان.
@@ -27,10 +28,10 @@ export interface WindowOption {
   windowEnd: { date: string; clock: number };
 }
 
-/** شماره‌ی روز در چرخه (۱..N) برای یک تاریخ */
+/** شماره‌ی روز در چرخه (۰..N−۱) برای یک تاریخ: فرمول واحد برای هفتگی و چرخشی = (تاریخ − تاریخ مرجع) mod طول چرخه */
 export function cycleDayIndex(cycleType: string, cycleLength: number, cycleStartDate: Date | null, date: Date): number {
-  if (cycleType === "WEEKLY") return mod(date.getUTCDay() + 1, 7); // شنبه = ۰
-  const anchor = cycleStartDate ?? date;
+  // مرجع: تاریخ مؤثر (انتساب یا شیفت)؛ شیفت هفتگیِ بی‌تاریخ از شنبه‌ی ثابت، چرخشیِ بی‌تاریخ (داده‌ی قدیمی) از خودِ آن تاریخ
+  const anchor = cycleStartDate ?? (cycleType === "WEEKLY" ? WEEKLY_ANCHOR : date);
   return mod(Math.round((date.getTime() - anchor.getTime()) / DAY_MS), cycleLength);
 }
 
@@ -46,7 +47,7 @@ export async function effectiveAssignmentOn(employeeId: number, date: Date) {
 export async function windowRowsOn(employeeId: number, date: Date): Promise<WindowOption[] | null> {
   const a = await effectiveAssignmentOn(employeeId, date);
   if (!a) return null;
-  const idx = cycleDayIndex(a.shift.cycleType, a.shift.cycleLength, a.cycleStartDate, date);
+  const idx = cycleDayIndex(a.shift.cycleType, a.shift.cycleLength, a.cycleStartDate ?? a.shift.cycleStartDate, date);
   let rows = shiftTimeline(a.shift).filter((t) => t.dayIdx === idx);
   // استثنای روز (ساعت شروع/پایان اصلاح‌شده یا تعطیلی) همان‌طور که کارکرد روزانه می‌بیند
   const dn = Math.floor(date.getTime() / DAY_MS);
