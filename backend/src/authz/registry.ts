@@ -638,6 +638,7 @@ export const REGISTRY: ModuleDef[] = [
         forms: [
           { key: "attendance-worksheet", title: "کارکرد روزانه", baseActions: ["view"] },
           { key: "attendance-factor-results", title: "نتایج عوامل تردد", baseActions: ["view"] },
+          { key: "attendance-review", title: "مرور کارکرد", baseActions: ["view"] },
         ],
       },
     ],

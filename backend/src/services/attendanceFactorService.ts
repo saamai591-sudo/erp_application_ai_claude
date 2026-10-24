@@ -41,6 +41,7 @@ export function factorShape(f: any) {
     valueType: f.valueType as AttValueType,
     valueTypeTitle: ATT_VALUE_TYPE_FA[f.valueType as AttValueType],
     isActive: f.isActive,
+    showInWorksheet: !!f.showInWorksheet,
     description: f.description ?? "",
     methodCount: f._count?.methods,
     updatedAt: f.updatedAt,
@@ -58,11 +59,11 @@ export async function saveFactor(body: any, id?: number) {
   const title = String(body?.title ?? "").trim().replace(/\s+/g, " ");
   if (!title) throw new AttendanceError("عنوان عامل الزامی است");
   const valueType = valueTypeOf(body?.valueType);
-  const data = { title, valueType, isActive: body?.isActive !== false, description: String(body?.description ?? "").trim() || null };
+  const data = { title, valueType, isActive: body?.isActive !== false, showInWorksheet: body?.showInWorksheet === true, description: String(body?.description ?? "").trim() || null };
   if (!id) {
     const level = levelOf(body?.level);
     return prisma.$transaction(async (tx) => {
-      const f = await tx.attendanceFactor.create({ data: { ...data, level, key: `TMP${Date.now()}${Math.floor(Math.random() * 1000)}` } });
+      const f = await tx.attendanceFactor.create({ data: { ...data, showInWorksheet: data.showInWorksheet && level === "DAY", level, key: `TMP${Date.now()}${Math.floor(Math.random() * 1000)}` } });
       return tx.attendanceFactor.update({ where: { id: f.id }, data: { key: `AF${f.id}` } });
     });
   }
@@ -78,7 +79,7 @@ export async function saveFactor(body: any, id?: number) {
     const by = await factorsReferencing(ex.key);
     if (by.length) throw new AttendanceError(`نوع مقدارِ عاملی که در فرمول عامل دیگر استفاده شده قابل تغییر نیست (${by.slice(0, 5).join("، ")})`);
   }
-  return prisma.attendanceFactor.update({ where: { id }, data: { ...data, level } });
+  return prisma.attendanceFactor.update({ where: { id }, data: { ...data, showInWorksheet: data.showInWorksheet && level === "DAY", level } });
 }
 
 export async function deleteFactor(id: number) {
@@ -403,6 +404,7 @@ export interface ComputeOpts {
   year: number;
   month: number;
   employeeId?: number;
+  employeeIds?: number[];
 }
 
 export async function computeAttendanceResults(opts: ComputeOpts) {
@@ -412,7 +414,8 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
   const compiled = orderFactors(await compileFactors(cal.endDate));
   const dayFactors = compiled.filter((f) => f.level === "DAY");
   const monthFactors = compiled.filter((f) => f.level === "MONTH");
-  const factorsOut = compiled.map((f) => ({ key: f.key, id: f.id, title: f.title, level: f.level, valueType: f.valueType, error: f.error }));
+  const showSet = new Set((await prisma.attendanceFactor.findMany({ where: { showInWorksheet: true }, select: { id: true } })).map((x) => x.id));
+  const factorsOut = compiled.map((f) => ({ key: f.key, id: f.id, title: f.title, level: f.level, valueType: f.valueType, error: f.error, showInWorksheet: showSet.has(f.id) }));
 
   // پارامترهای مبنا: مقدار معتبر در پایان ماه (یک بار)
   const paramCache = new Map<string, number>();
@@ -468,7 +471,7 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
     throw new FormulaError("جدول پلکانی در فرمول تردد پشتیبانی نمی‌شود");
   };
 
-  const ws = await buildWorksheet({ from, to, employeeId: opts.employeeId, includeRest: true });
+  const ws = await buildWorksheet({ from, to, employeeId: opts.employeeId, employeeIds: opts.employeeIds, includeRest: true });
   const rowsByEmp = new Map<number, any[]>();
   for (const r of ws.rows) (rowsByEmp.get(r.employeeId) ?? rowsByEmp.set(r.employeeId, []).get(r.employeeId)!).push(r);
 

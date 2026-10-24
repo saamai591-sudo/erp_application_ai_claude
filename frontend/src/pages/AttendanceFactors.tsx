@@ -30,6 +30,7 @@ interface FactorRow {
   valueType: "NUMBER" | "TIME" | "DAYS";
   valueTypeTitle: string;
   isActive: boolean;
+  showInWorksheet?: boolean;
   description: string;
   methodCount?: number;
   updatedAt?: string;
@@ -89,6 +90,7 @@ function FactorList() {
           { header: "نوع مقدار", ...s((r) => r.valueTypeTitle), width: "170px" },
           { header: "روش‌ها", ...s((r) => toFaDigits(String(r.methodCount ?? 0))), width: "90px" },
           { header: "فعال", ...s((r) => (r.isActive ? "بله" : "خیر")), width: "80px" },
+          { header: "نمایش در گزارش کارکرد", ...s((r) => (r.showInWorksheet ? "بله" : "")), width: "150px" },
           { header: "توضیحات", ...s((r) => r.description) },
         ]}
         rows={items}
@@ -110,7 +112,7 @@ function FactorForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
-  const [form, setForm] = usePersistedState(cacheKey, { title: "", level: "DAY" as Level, valueType: "TIME", isActive: true, description: "" });
+  const [form, setForm] = usePersistedState(cacheKey, { title: "", level: "DAY" as Level, valueType: "TIME", isActive: true, showInWorksheet: false, description: "" });
   const [updatedAt, setUpdatedAt] = useState<string | undefined>();
   const [methods, setMethods] = useState<MethodRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -124,7 +126,7 @@ function FactorForm({ editId }: { editId?: number }) {
     const r: FactorRow = await api.get(`/attendance-factors/${editId}`);
     setUpdatedAt(r.updatedAt);
     setMethods(r.methods ?? []);
-    if (!hasPersistedState(cacheKey)) setForm({ title: r.title, level: r.level, valueType: r.valueType, isActive: r.isActive, description: r.description });
+    if (!hasPersistedState(cacheKey)) setForm({ title: r.title, level: r.level, valueType: r.valueType, isActive: r.isActive, showInWorksheet: !!r.showInWorksheet, description: r.description });
   }
   useEffect(() => {
     load().then(() => setLoaded(true)).catch((e) => setError(e.message));
@@ -212,6 +214,11 @@ function FactorForm({ editId }: { editId?: number }) {
           <div className="form-field">
             <label className="checkbox-row"><input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} /> فعال</label>
           </div>
+          {form.level === "DAY" && (
+            <div className="form-field">
+              <label className="checkbox-row"><input type="checkbox" checked={form.showInWorksheet} onChange={(e) => setForm({ ...form, showInWorksheet: e.target.checked })} /> نمایش در گزارش کارکرد <FieldHint label="نمایش در گزارش کارکرد" text="اگر تیک بخورد، مقدار این عامل برای هر روز به‌صورت یک ستون در گزارش‌های «کارکرد روزانه» و «مرور کارکرد» نمایش داده می‌شود. فقط عامل روزانه." /></label>
+            </div>
+          )}
           <div className="form-field" style={{ gridColumn: "1 / -1" }}>
             <label>توضیحات</label>
             <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />

@@ -6354,6 +6354,8 @@ model AttendanceFactor {
   level       AttendanceFactorLevel
   valueType   AttendanceValueType     @default(TIME)
   isActive    Boolean                 @default(true)
+  /// نمایش مقدار این عامل (فقط روزانه) در ستون‌های «کارکرد روزانه» و «مرور کارکرد»
+  showInWorksheet Boolean             @default(false)
   description String?
   createdAt   DateTime                @default(now())
   updatedAt   DateTime                @updatedAt

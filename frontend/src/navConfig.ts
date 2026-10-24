@@ -471,6 +471,7 @@ const RAW_MODULES: ModuleGroup[] = [
         items: [
           { key: "attendance-worksheet", label: "کارکرد روزانه", list: "/attendance-worksheet", icon: "ledger", type: "report" },
           { key: "attendance-factor-results", label: "نتایج عوامل تردد", list: "/attendance-factor-results", icon: "ledger", type: "report" },
+          { key: "attendance-review", label: "مرور کارکرد", list: "/attendance-review", icon: "ledger", type: "report" },
         ],
       },
     ],

@@ -92,7 +92,7 @@ const timeText = (abs: number, relDay: number) => {
   return `${minuteText(clockOf(abs))}${off === 0 ? "" : off > 0 ? ` (+${off})` : ` (${off})`}`;
 };
 
-export async function buildWorksheet(opts: { from: Date; to: Date; employeeId?: number; includeRest?: boolean }) {
+export async function buildWorksheet(opts: { from: Date; to: Date; employeeId?: number; employeeIds?: number[]; includeRest?: boolean }) {
   const { from, to } = opts;
   const f = dayNum(from), t = dayNum(to);
   if (t < f) throw new AttendanceError("تاریخ پایان قبل از تاریخ شروع است");
@@ -100,7 +100,8 @@ export async function buildWorksheet(opts: { from: Date; to: Date; employeeId?: 
 
   // کارمندان: مشخص‌شده، یا همه‌ی کارمندانِ دارای انتساب/تردد در بازه
   let ids: number[];
-  if (opts.employeeId) ids = [opts.employeeId];
+  if (opts.employeeIds) ids = opts.employeeIds;
+  else if (opts.employeeId) ids = [opts.employeeId];
   else {
     const [a, p] = await Promise.all([
       prisma.attendanceShiftAssignment.findMany({ where: { fromDate: { lte: to } }, select: { employeeId: true }, distinct: ["employeeId"] }),
