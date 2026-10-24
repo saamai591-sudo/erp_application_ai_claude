@@ -106,6 +106,7 @@ import AttendanceFactors from "./pages/AttendanceFactors";
 import AttendanceFactorResults from "./pages/AttendanceFactorResults";
 import AttendanceReview from "./pages/AttendanceReview";
 import AttendanceTimeBands from "./pages/AttendanceTimeBands";
+import AttendanceDayExceptions from "./pages/AttendanceDayExceptions";
 import { EmploymentTypes, EducationLevels, TerminationReasons, DecreeComponents } from "./pages/HrMasters";
 import EmploymentDecrees from "./pages/EmploymentDecrees";
 import LegalParameters from "./pages/LegalParameters";
@@ -490,6 +491,9 @@ export default function App() {
             <Route path="/attendance-factors/:id/edit" element={<AttendanceFactors />} />
             <Route path="/attendance-factor-results" element={<AttendanceFactorResults />} />
             <Route path="/attendance-review" element={<AttendanceReview />} />
+            <Route path="/attendance-day-exceptions" element={<AttendanceDayExceptions />} />
+            <Route path="/attendance-day-exceptions/new" element={<AttendanceDayExceptions />} />
+            <Route path="/attendance-day-exceptions/:id/edit" element={<AttendanceDayExceptions />} />
             <Route path="/attendance-time-bands" element={<AttendanceTimeBands />} />
             <Route path="/attendance-time-bands/new" element={<AttendanceTimeBands />} />
             <Route path="/attendance-time-bands/:id/edit" element={<AttendanceTimeBands />} />

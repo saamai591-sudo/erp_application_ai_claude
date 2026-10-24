@@ -3,6 +3,7 @@ import { AttendanceError, EMPLOYEE_SELECT, dayStr, minuteText, personName } from
 import { getPeriods, periodContains } from "./employmentStatusService";
 import { shiftTimeline, type TimelineRow } from "./attendanceShiftService";
 import { cycleDayIndex } from "./attendanceWindowService";
+import { applyToDay, loadExceptions, pickException, type DayExc } from "./attendanceDayExceptionService";
 
 // مدیریت تردد › «کارکرد روزانه»: مشتق است و ذخیره نمی‌شود (با تغییر تردد/انتساب/شیفت دوباره محاسبه می‌شود؛ ذخیره‌ی نتیجه با «بستن ماه تردد» می‌آید).
 // برای هر کارمند و هر روز، ردیف‌های شیفتِ منتسب (هر بازه‌ی کاری؛ روز استراحت = یک ردیف) هر کدام پنجره‌ی حضور دارند؛ هر تردد با زمان مطلقش به پنجره‌ای می‌خورد که در آن می‌افتد
@@ -29,6 +30,8 @@ interface Win {
   rest: boolean;
   /** نوع روز شیفت: کاری / تعطیلی شیفت / تعطیلی رسمی */
   dayType: string;
+  /** توضیح استثنای روز (اصلاح‌شده / اعمال‌نشد) */
+  exceptionNote: string;
   shiftTitle: string;
   dayNo: number;
   segStartAbs: number | null;
@@ -52,7 +55,7 @@ interface Asg {
   shift: any;
 }
 
-function windowsOf(asgs: Asg[], timelines: Map<number, TimelineRow[]>, employeeId: number, day: number): Win[] {
+function windowsOf(asgs: Asg[], timelines: Map<number, TimelineRow[]>, excs: DayExc[], employeeId: number, day: number): Win[] {
   let a: Asg | undefined;
   for (const x of asgs) if (dayNum(x.fromDate) <= day) a = x;
   if (!a) return [];
@@ -65,18 +68,31 @@ function windowsOf(asgs: Asg[], timelines: Map<number, TimelineRow[]>, employeeI
   }
   const base = day * DAY;
   const dayDef = (a.shift.days ?? []).find((x: any) => x.dayNo === tl!.find((t) => t.dayIdx === idx)?.dayNo);
-  const segTotal = dayDef && dayDef.dayType === "WORK" ? (dayDef.segments ?? []).reduce((n: number, x: any) => n + (x.endMinute - x.startMinute), 0) : 0;
-  const dayBreak = dayDef && dayDef.dayType === "WORK" ? dayDef.breakMinutes : 0;
+  let dayRows = tl.filter((t) => t.dayIdx === idx);
+  let dayType: string = dayDef?.dayType ?? "WORK";
+  let exceptionNote = "";
+  const ex = pickException(excs, day, a.shift.id);
+  if (ex) {
+    const r = applyToDay(dayRows, ex);
+    if (r.skipped) exceptionNote = `استثنای «${ex.title}» اعمال نشد: ${r.skipped}`;
+    else {
+      dayRows = r.rows;
+      if (r.dayType) dayType = r.dayType;
+      exceptionNote = r.note;
+    }
+  }
+  const segTotal = dayType === "WORK" ? dayRows.filter((t) => t.seq !== null).reduce((n, t) => n + ((t.segEnd as number) - (t.segStart as number)), 0) : 0;
+  const dayBreak = dayType === "WORK" ? dayDef?.breakMinutes ?? 0 : 0;
   const dayNet = Math.max(0, segTotal - dayBreak);
-  const dayLeave = dayDef && dayDef.dayType === "WORK" ? (dayDef.leaveMinutes ?? dayNet) : 0;
-  return tl
-    .filter((t) => t.dayIdx === idx)
+  const dayLeave = dayType === "WORK" ? (dayDef?.leaveMinutes ?? dayNet) : 0;
+  return dayRows
     .map((t) => ({
       employeeId,
       workDay: day,
       rowNo: t.seq ?? 1,
       rest: t.seq === null,
-      dayType: dayDef?.dayType ?? "WORK",
+      dayType,
+      exceptionNote,
       shiftTitle: a!.shift.title,
       dayNo: t.dayNo,
       segStartAbs: t.segStart === null ? null : base + t.segStart,
@@ -126,6 +142,7 @@ export async function buildWorksheet(opts: { from: Date; to: Date; employeeId?: 
   const punchBy = new Map<number, typeof punches>();
   for (const p of punches) (punchBy.get(p.employeeId) ?? punchBy.set(p.employeeId, []).get(p.employeeId)!).push(p);
   const timelines = new Map<number, TimelineRow[]>();
+  const excs = await loadExceptions(f - 1, t + 1);
 
   const rows: any[] = [];
   const review: any[] = [];
@@ -139,7 +156,7 @@ export async function buildWorksheet(opts: { from: Date; to: Date; employeeId?: 
     // پنجره‌های روزهای [f−1, t+1] (روزهای کنارِ بازه ممکن است ترددهای ابتدا/انتهای بازه را بگیرند)
     for (let d = f - 1; d <= t + 1; d++) {
       if (!periodContains(periods, fromNum(d))) continue;
-      for (const w of windowsOf(asgs, timelines, emp.id, d)) {
+      for (const w of windowsOf(asgs, timelines, excs, emp.id, d)) {
         wins.set(`${w.workDay}|${w.rowNo}`, w);
         winList.push(w);
       }
@@ -194,6 +211,7 @@ export async function buildWorksheet(opts: { from: Date; to: Date; employeeId?: 
         rowNo: w.rowNo,
         rest: w.rest,
         dayType: w.dayType,
+        exceptionNote: w.exceptionNote,
         shiftTitle: w.shiftTitle,
         dayNo: w.dayNo,
         dayBreakMinutes: w.dayBreak,

@@ -97,6 +97,7 @@ import attendanceShiftAssignmentRoutes from "./routes/attendanceShiftAssignments
 import attendanceWorksheetRoutes from "./routes/attendanceWorksheet";
 import attendanceFactorRoutes from "./routes/attendanceFactors";
 import attendanceTimeBandRoutes from "./routes/attendanceTimeBands";
+import attendanceDayExceptionRoutes from "./routes/attendanceDayExceptions";
 import beneficiaryOrgRoutes from "./routes/beneficiaryOrgs";
 import payrollAccountingRoutes from "./routes/payrollAccounting";
 import payrollPaymentTypeRoutes from "./routes/payrollPaymentTypes";
@@ -246,6 +247,7 @@ app.use("/api", attendanceShiftAssignmentRoutes);
 app.use("/api", attendanceWorksheetRoutes);
 app.use("/api", attendanceFactorRoutes);
 app.use("/api", attendanceTimeBandRoutes);
+app.use("/api", attendanceDayExceptionRoutes);
 app.use("/api", beneficiaryOrgRoutes);
 app.use("/api", payrollAccountingRoutes);
 app.use("/api", payrollPaymentTypeRoutes);

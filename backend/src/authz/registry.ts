@@ -620,6 +620,7 @@ export const REGISTRY: ModuleDef[] = [
         title: "عملیات",
         forms: [
           { key: "attendance-shift-assignments", title: "انتساب شیفت", baseActions: CRUD },
+          { key: "attendance-day-exceptions", title: "استثنای روز", baseActions: CRUD },
           { key: "attendance-punches", title: "ورود و خروج", baseActions: CRUD },
           {
             key: "attendance-correction-requests",

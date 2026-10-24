@@ -86,7 +86,9 @@ export async function worksheetReport(opts: { from: Date; to: Date; employeeIds:
       const date = dayStr(new Date(d * DAY_MS))!;
       const dr = (rowsBy.get(`${emp.id}|${date}`) ?? []).sort((a, b) => a.rowNo - b.rowNo);
       const work = dr.filter((r) => !r.rest);
-      const shiftText = dr.length === 0 ? "شیفت منتسب نیست" : work.length === 0 ? (dr[0].dayType === "OFFICIAL_HOLIDAY" ? "تعطیلی رسمی" : "تعطیلی شیفت") : work.map(clock).join("، ");
+      const baseText = dr.length === 0 ? "شیفت منتسب نیست" : work.length === 0 ? (dr[0].dayType === "OFFICIAL_HOLIDAY" ? "تعطیلی رسمی" : "تعطیلی شیفت") : work.map(clock).join("، ");
+      const exNote = dr.find((r) => r.exceptionNote)?.exceptionNote;
+      const shiftText = exNote ? `${baseText} — ${exNote}` : baseText;
       rows.push({
         id: `${emp.id}|${date}`,
         employeeId: emp.id,

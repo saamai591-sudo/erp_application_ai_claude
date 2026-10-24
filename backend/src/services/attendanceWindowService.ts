@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma";
 import { displayDate } from "../utils/dateDisplay";
 import { AttendanceError, assertEmployeeWorking, dayStr, parseDay } from "./attendancePunchService";
 import { shiftTimeline } from "./attendanceShiftService";
+import { applyToDay, loadExceptions, pickException } from "./attendanceDayExceptionService";
 
 // مدیریت تردد › پنجره‌های حضورِ یک کارمند در یک تاریخ: شیفتِ مؤثر (آخرین انتساب با تاریخ شروع ≤ آن روز) + روزِ چرخه + ردیف‌های آن روز با پنجره‌شان.
 // انتخابگر «اختصاص دستی به پنجره» در فرم ورود و خروج و کنترل ترددِ اختصاص‌داده‌شده از همین‌جا می‌آید (تنها نقطه‌ی محاسبه‌ی روزِ چرخه).
@@ -46,8 +47,15 @@ export async function windowRowsOn(employeeId: number, date: Date): Promise<Wind
   const a = await effectiveAssignmentOn(employeeId, date);
   if (!a) return null;
   const idx = cycleDayIndex(a.shift.cycleType, a.shift.cycleLength, a.cycleStartDate, date);
-  return shiftTimeline(a.shift)
-    .filter((t) => t.dayIdx === idx)
+  let rows = shiftTimeline(a.shift).filter((t) => t.dayIdx === idx);
+  // استثنای روز (ساعت شروع/پایان اصلاح‌شده یا تعطیلی) همان‌طور که کارکرد روزانه می‌بیند
+  const dn = Math.floor(date.getTime() / DAY_MS);
+  const ex = pickException(await loadExceptions(dn, dn), dn, a.shift.id);
+  if (ex) {
+    const r = applyToDay(rows, ex);
+    if (!r.skipped) rows = r.rows;
+  }
+  return rows
     .map((t) => ({
       workDate: dayStr(date)!,
       rowNo: t.seq ?? 1,
