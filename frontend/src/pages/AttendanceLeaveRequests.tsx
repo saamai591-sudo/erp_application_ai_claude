@@ -63,7 +63,7 @@ interface ReqRow {
 }
 
 const MAX_BYTES = 5 * 1024 * 1024;
-const dateText = (r: ReqRow) => (r.hourly || r.fromDate === r.toDate ? formatJalaliDate(r.fromDate) : `${formatJalaliDate(r.fromDate)} تا ${formatJalaliDate(r.toDate)}`);
+const dateText = (r: ReqRow) => (r.fromDate === r.toDate ? formatJalaliDate(r.fromDate) : `${formatJalaliDate(r.fromDate)} تا ${formatJalaliDate(r.toDate)}`);
 
 async function openAttachment(id: number) {
   const res = await fetch(`${API_URL}/attendance-leave-attachments/${id}`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
@@ -126,7 +126,7 @@ function ReqList() {
           { header: "کارمند", ...s((r) => r.employeeName) },
           { header: "نوع مرخصی", ...s((r) => r.leaveTypeTitle), width: "130px" },
           { header: "تاریخ", ...s((r) => dateText(r)), width: "190px" },
-          { header: "ساعت", ...s((r) => (r.hourly ? toFaDigits(r.periodText) : "تمام‌روز")), width: "150px" },
+          { header: "ساعت", ...s((r) => (r.hourly ? toFaDigits(r.periodText) : "تمام‌روز")), width: "190px" },
           { header: "دلیل", ...s((r) => r.reason) },
           { header: "پیوست", ...s((r) => (r.attachmentCount ? toFaDigits(String(r.attachmentCount)) : "")), width: "70px" },
           { header: "وضعیت", ...s((r) => r.statusTitle), width: "100px" },
@@ -188,7 +188,7 @@ function ReqForm({ editId }: { editId?: number }) {
       endMinute = maskToMinutes(form.end);
       if (startMinute === null || endMinute === null) return setError("ساعت شروع و پایان مرخصی را کامل وارد کنید");
     }
-    const body = { employeeId: Number(form.employeeId), leaveTypeId: Number(form.leaveTypeId), hourly, fromDate: form.fromDate, toDate: hourly ? form.fromDate : form.toDate || form.fromDate, startMinute, endMinute, reason: form.reason };
+    const body = { employeeId: Number(form.employeeId), leaveTypeId: Number(form.leaveTypeId), hourly, fromDate: form.fromDate, toDate: form.toDate || form.fromDate, startMinute, endMinute, reason: form.reason };
     try {
       if (editId) {
         await api.put(`/attendance-leave-requests/${editId}`, { ...body, updatedAt: meta?.updatedAt });
@@ -296,24 +296,23 @@ function ReqForm({ editId }: { editId?: number }) {
               </div>
             )}
             <div className="form-field">
-              <label>{hourly ? "تاریخ" : "از تاریخ"}<RequiredMark /></label>
+              <label>از تاریخ<RequiredMark /></label>
               <JalaliDatePicker value={form.fromDate} onChange={(v) => setForm({ ...form, fromDate: v })} />
             </div>
-            {hourly ? (
-              <>
-                <div className="form-field">
-                  <label>از ساعت<RequiredMark /></label>
-                  <TimeInput value={form.start} width={90} placeholder="10:00" onChange={(t) => setForm({ ...form, start: t })} />
-                </div>
-                <div className="form-field">
-                  <label>تا ساعت<RequiredMark /> <FieldHint label="مرخصی ساعتی" text="فقط بخشی از ساعت که با بازه‌های کاریِ شیفت آن روز هم‌پوشانی دارد، مرخصی حساب می‌شود. مرخصی ساعتی از نیمه‌شب نمی‌گذرد." /></label>
-                  <TimeInput value={form.end} width={90} placeholder="12:00" onChange={(t) => setForm({ ...form, end: t })} />
-                </div>
-              </>
-            ) : (
+            {hourly && (
               <div className="form-field">
-                <label>تا تاریخ <FieldHint label="تا تاریخ" text="خالی = فقط همان یک روز. روز غیرکاری (تعطیلی شیفت/رسمی) دقیقه‌ی مرخصی ندارد." /></label>
-                <JalaliDatePicker value={form.toDate} onChange={(v) => setForm({ ...form, toDate: v })} />
+                <label>از ساعت<RequiredMark /> <FieldHint label="مرخصی ساعتی" text="یک بازه‌ی پیوسته از تاریخ و ساعت شروع تا تاریخ و ساعت پایان (حداکثر ۲۴ ساعت؛ برای شیفت شب می‌تواند به روز بعد برسد). شروع و پایان باید داخل بازه‌های کاری شیفتِ کارمند باشند، با ترددهای ثبت‌شده تداخل نداشته باشند و فقط بخشی که با بازه‌های کاری هم‌پوشانی دارد مرخصی حساب می‌شود." /></label>
+                <TimeInput value={form.start} width={90} placeholder="22:00" onChange={(t) => setForm({ ...form, start: t })} />
+              </div>
+            )}
+            <div className="form-field">
+              <label>تا تاریخ <FieldHint label="تا تاریخ" text={hourly ? "خالی = همان تاریخ شروع. برای مرخصی شبانه (مثلاً ۲۲:۰۰ تا ۰۲:۰۰) تاریخ روز بعد را بگذارید." : "خالی = فقط همان یک روز. روز غیرکاری (تعطیلی شیفت/رسمی) دقیقه‌ی مرخصی ندارد. با هر تردد ثبت‌شده در این تاریخ‌ها تداخل دارد."} /></label>
+              <JalaliDatePicker value={form.toDate} onChange={(v) => setForm({ ...form, toDate: v })} />
+            </div>
+            {hourly && (
+              <div className="form-field">
+                <label>تا ساعت<RequiredMark /></label>
+                <TimeInput value={form.end} width={90} placeholder="02:00" onChange={(t) => setForm({ ...form, end: t })} />
               </div>
             )}
             <div className="form-field" style={{ gridColumn: "1 / -1" }}>

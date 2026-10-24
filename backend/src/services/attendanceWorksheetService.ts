@@ -220,6 +220,8 @@ export async function buildWorksheet(opts: { from: Date; to: Date; employeeId?: 
         dayGrossMinutes: w.dayGross,
         segStartClock: w.segStartAbs === null ? null : clockOf(w.segStartAbs),
         segEndClock: w.segEndAbs === null ? null : clockOf(w.segEndAbs),
+        segStartRel: w.segStartAbs === null ? null : w.segStartAbs - w.workDay * DAY,
+        segEndRel: w.segEndAbs === null ? null : w.segEndAbs - w.workDay * DAY,
         segEndsNextDay: w.segEndAbs !== null && w.segEndAbs - w.workDay * DAY >= DAY,
         windowStart: rel(w.wsAbs),
         windowEnd: rel(w.weAbs),

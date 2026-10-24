@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma";
 import { displayDate } from "../utils/dateDisplay";
 import { AttendanceError, EMPLOYEE_SELECT, assertDayOpen, dayStr, minuteText, parseDay, personName } from "./attendancePunchService";
 import { getPeriods, periodContains } from "./employmentStatusService";
+import { buildWorksheet } from "./attendanceWorksheetService";
 
 // مدیریت تردد › نوع مرخصی و درخواست مرخصی (مرحله‌ی ۱ و ۲). تنها محل قواعد.
 // نوع مرخصی: واحد (روزانه/ساعتی/هر دو)، «از مانده کم شود» و «روز تعطیل وسط مرخصی» (برای مرحله‌ی «مانده‌ی مرخصی»؛ فعلاً فقط نگه‌داری می‌شوند)، «مدرک الزامی» (تایید بدون پیوست ممکن نیست).
@@ -94,7 +95,7 @@ export function requestShape(r: any) {
     hourly,
     startMinute: r.startMinute,
     endMinute: r.endMinute,
-    periodText: hourly ? `${minuteText(r.startMinute)} تا ${minuteText(r.endMinute)}` : "",
+    periodText: hourly ? `${minuteText(r.startMinute)} تا ${minuteText(r.endMinute)}${dayNum(r.toDate) > dayNum(r.fromDate) ? " (روز بعد)" : ""}` : "",
     reason: r.reason,
     status: r.status as keyof typeof STATUS_FA,
     statusTitle: STATUS_FA[r.status as keyof typeof STATUS_FA],
@@ -122,6 +123,66 @@ export interface CleanRequest {
   reason: string;
 }
 
+const DAY = 1440;
+const atText = (abs: number) => `${displayDate(new Date(Math.floor(abs / DAY) * DAY_MS))} ساعت ${minuteText(((abs % DAY) + DAY) % DAY)}`;
+
+/** بازه‌ی مطلق (دقیقه از مبدأ روز) یک درخواست ساعتی؛ null برای روزانه */
+const absInterval = (q: { fromDate: Date; toDate: Date; startMinute: number | null; endMinute: number | null }) =>
+  q.startMinute === null ? null : { s: dayNum(q.fromDate) * DAY + q.startMinute, e: dayNum(q.toDate) * DAY + (q.endMinute as number) };
+
+/**
+ * تداخل با درخواست‌های دیگر (ثبت‌شده یا تاییدشده): ساعتی با ساعتی فقط اگر بازه‌ی مطلقشان هم‌پوشان باشد؛ هر ترکیب دیگر (روزانه با روزانه یا ساعتی) اگر تاریخ‌هایشان مشترک باشد.
+ * این‌جا تنها نقطه‌ی «تداخل بین درخواست‌هاست»؛ درخواست ماموریت که ساخته شود همین تابع را برای آن هم می‌خواند.
+ */
+export async function assertNoRequestConflict(q: { employeeId: number; fromDate: Date; toDate: Date; startMinute: number | null; endMinute: number | null }, excludeId: number | undefined, statuses: ("PENDING" | "APPROVED")[]) {
+  const others = await prisma.attendanceLeaveRequest.findMany({
+    where: { employeeId: q.employeeId, status: { in: statuses }, fromDate: { lte: q.toDate }, toDate: { gte: q.fromDate }, ...(excludeId ? { id: { not: excludeId } } : {}) },
+    select: { number: true, fromDate: true, toDate: true, startMinute: true, endMinute: true },
+  });
+  const mine = absInterval(q);
+  for (const o of others) {
+    const theirs = absInterval(o);
+    if (mine && theirs && !(mine.s < theirs.e && theirs.s < mine.e)) continue;
+    throw new AttendanceError(`با درخواست مرخصی شماره ${o.number} هم‌پوشانی دارد`);
+  }
+}
+
+/**
+ * کنترل‌های «شیفت و حضور»: (۱) مرخصی ساعتی باید با شروع و پایانش داخل بازه‌های کاریِ شیفتِ همان روز (با اعمال استثنای روز) بیفتد (وسط بازه‌ی استراحت/بین دو بازه مجاز است
+ * ولی شروع و پایان باید داخل بازه‌ی کاری باشند)؛ (۲) مرخصی با ترددِ ثبت‌شده تداخل نداشته باشد: ساعتی با حضورِ جفت‌ترددها و ترددِ منفردِ داخل بازه، روزانه با هر تردد در تاریخ‌هایش.
+ */
+export async function assertShiftAndPresence(q: { employeeId: number; fromDate: Date; toDate: Date; startMinute: number | null; endMinute: number | null }) {
+  const f = dayNum(q.fromDate), t = dayNum(q.toDate);
+  const mine = absInterval(q);
+  if (mine) {
+    const ws = await buildWorksheet({ from: new Date((f - 1) * DAY_MS), to: new Date((t + 1) * DAY_MS), employeeIds: [q.employeeId], includeRest: true });
+    const rows = ws.rows.filter((r: any) => r.employeeId === q.employeeId);
+    const segs = rows
+      .filter((r: any) => !r.rest)
+      .map((r: any) => {
+        const wd = dayNum(new Date(r.workDate));
+        return { s: wd * DAY + (r.segStartRel as number), e: wd * DAY + (r.segEndRel as number) };
+      });
+    if (segs.length === 0) throw new AttendanceError("برای این کارمند در این تاریخ شیفتِ کاری منتسب نیست؛ مرخصی ساعتی فقط روی ساعت کاری شیفت ثبت می‌شود");
+    const list = segs.map((x) => `${atText(x.s)} تا ${atText(x.e)}`).join("، ");
+    if (!segs.some((x) => mine.s >= x.s && mine.s < x.e)) throw new AttendanceError(`شروع مرخصی (${atText(mine.s)}) داخل بازه‌ی کاری شیفت نیست؛ بازه‌های کاری: ${list}`);
+    if (!segs.some((x) => mine.e > x.s && mine.e <= x.e)) throw new AttendanceError(`پایان مرخصی (${atText(mine.e)}) داخل بازه‌ی کاری شیفت نیست؛ بازه‌های کاری: ${list}`);
+    for (const r of rows) {
+      for (const [i, o] of (r.pairsAbs ?? []) as [number, number][]) {
+        if (Math.min(o, mine.e) > Math.max(i, mine.s)) throw new AttendanceError(`این مرخصی با حضورِ ثبت‌شده‌ی کارمند (از ${atText(i)} تا ${atText(o)}) تداخل دارد؛ ابتدا ترددها را اصلاح کنید یا بازه‌ی مرخصی را عوض کنید`);
+      }
+    }
+    const punches = await prisma.attendancePunch.findMany({ where: { employeeId: q.employeeId, date: { gte: new Date((f - 1) * DAY_MS), lte: new Date((t + 1) * DAY_MS) } }, select: { date: true, minute: true } });
+    for (const p of punches) {
+      const abs = dayNum(p.date) * DAY + p.minute;
+      if (mine.s < abs && abs < mine.e) throw new AttendanceError(`در بازه‌ی این مرخصی ترددی در ${atText(abs)} ثبت شده است`);
+    }
+    return;
+  }
+  const punches = await prisma.attendancePunch.findMany({ where: { employeeId: q.employeeId, date: { gte: q.fromDate, lte: q.toDate } }, orderBy: [{ date: "asc" }, { minute: "asc" }], select: { date: true, minute: true }, take: 1 });
+  if (punches.length) throw new AttendanceError(`در تاریخ ${displayDate(punches[0].date)} ساعت ${minuteText(punches[0].minute)} تردد ثبت شده و با مرخصی روزانه تداخل دارد؛ مرخصی ساعتی ثبت کنید یا ترددها را اصلاح کنید`);
+}
+
 export async function cleanRequest(b: any, excludeId?: number): Promise<CleanRequest> {
   const employeeId = Number(b?.employeeId);
   if (!employeeId) throw new AttendanceError("کارمند الزامی است");
@@ -135,33 +196,27 @@ export async function cleanRequest(b: any, excludeId?: number): Promise<CleanReq
   if (hourly && type.unit === "DAY") throw new AttendanceError(`نوع مرخصی «${type.title}» فقط روزانه است`);
   if (!hourly && type.unit === "HOUR") throw new AttendanceError(`نوع مرخصی «${type.title}» فقط ساعتی است`);
   const fromDate = parseDay(b?.fromDate, "از تاریخ");
-  let toDate = hourly || !b?.toDate ? fromDate : parseDay(b.toDate, "تا تاریخ");
+  const toDate = !b?.toDate ? fromDate : parseDay(b.toDate, "تا تاریخ");
   let startMinute: number | null = null, endMinute: number | null = null;
+  if (toDate < fromDate) throw new AttendanceError("تاریخ پایان قبل از تاریخ شروع است");
   if (hourly) {
     startMinute = Number(b?.startMinute);
     endMinute = Number(b?.endMinute);
-    if (!Number.isInteger(startMinute) || !Number.isInteger(endMinute) || startMinute < 0 || endMinute > 1439 || startMinute < 0) throw new AttendanceError("ساعت شروع و پایان مرخصی ساعتی را کامل وارد کنید");
-    if (endMinute <= startMinute) throw new AttendanceError("ساعت پایان مرخصی باید بعد از ساعت شروع باشد (مرخصی ساعتی از نیمه‌شب نمی‌گذرد)");
-    toDate = fromDate;
-  }
-  if (toDate < fromDate) throw new AttendanceError("تاریخ پایان قبل از تاریخ شروع است");
-  if (dayNum(toDate) - dayNum(fromDate) + 1 > MAX_REQUEST_DAYS) throw new AttendanceError(`مرخصی حداکثر ${MAX_REQUEST_DAYS} روز در هر درخواست است`);
+    if (!Number.isInteger(startMinute) || !Number.isInteger(endMinute) || startMinute < 0 || startMinute > 1439 || endMinute < 0 || endMinute > 1439) throw new AttendanceError("ساعت شروع و پایان مرخصی ساعتی را کامل وارد کنید");
+    const len = dayNum(toDate) * DAY + endMinute - (dayNum(fromDate) * DAY + startMinute);
+    if (len <= 0) throw new AttendanceError("پایان مرخصی باید بعد از شروع آن باشد");
+    if (len > DAY) throw new AttendanceError("مرخصی ساعتی حداکثر ۲۴ ساعتِ پیوسته است؛ برای مدت بیشتر «مرخصی روزانه» ثبت کنید");
+  } else if (dayNum(toDate) - dayNum(fromDate) + 1 > MAX_REQUEST_DAYS) throw new AttendanceError(`مرخصی حداکثر ${MAX_REQUEST_DAYS} روز در هر درخواست است`);
   // کارمند باید در همه‌ی روزهای مرخصی در دوره‌ی همکاری باشد
   const periods = await getPeriods(employeeId);
   for (let d = dayNum(fromDate); d <= dayNum(toDate); d++) {
     if (!periodContains(periods, new Date(d * DAY_MS))) throw new AttendanceError(`کارمند در تاریخ ${displayDate(new Date(d * DAY_MS))} در دوره‌ی همکاری نیست`);
   }
-  // هم‌پوشانی با درخواست‌های دیگر (ثبت‌شده یا تاییدشده)
-  const others = await prisma.attendanceLeaveRequest.findMany({
-    where: { employeeId, status: { not: "REJECTED" }, fromDate: { lte: toDate }, toDate: { gte: fromDate }, ...(excludeId ? { id: { not: excludeId } } : {}) },
-    select: { number: true, startMinute: true, endMinute: true },
-  });
-  for (const o of others) {
-    const oHourly = o.startMinute !== null;
-    // ساعتی با ساعتی فقط وقتی تداخل دارد که بازه‌ی ساعتی‌شان هم‌پوشان باشد؛ هر ترکیبِ دیگر روی همان روز تداخل است
-    if (hourly && oHourly && !((startMinute as number) < (o.endMinute as number) && (o.startMinute as number) < (endMinute as number))) continue;
-    throw new AttendanceError(`با درخواست مرخصی شماره ${o.number} هم‌پوشانی دارد`);
-  }
+  const q = { employeeId, fromDate, toDate, startMinute, endMinute };
+  await assertDayOpen(employeeId, fromDate);
+  // اول کنترل شیفت و حضور (پیام روشن‌تر)، بعد تداخل با درخواست‌های دیگر
+  await assertShiftAndPresence(q);
+  await assertNoRequestConflict(q, excludeId, ["PENDING", "APPROVED"]);
   return { employeeId, leaveTypeId, fromDate, toDate, startMinute, endMinute, reason };
 }
 
@@ -184,13 +239,9 @@ export async function approveRequest(id: number, userId: number | null) {
     if (r.status !== "PENDING") throw new AttendanceError("فقط درخواست در وضعیت «ثبت‌شده» قابل تایید است");
     if (r.leaveType.requiresAttachment && r._count.attachments === 0) throw new AttendanceError(`برای نوع مرخصی «${r.leaveType.title}» پیوست (مدرک) الزامی است؛ ابتدا مدرک را پیوست کنید`);
     await assertDayOpen(r.employeeId, r.fromDate);
-    // در فاصله‌ی ثبت تا تایید ممکن است درخواست هم‌پوشان تاییدشده باشد
-    const clash = await tx.attendanceLeaveRequest.findMany({ where: { employeeId: r.employeeId, status: "APPROVED", id: { not: id }, fromDate: { lte: r.toDate }, toDate: { gte: r.fromDate } }, select: { number: true, startMinute: true, endMinute: true } });
-    for (const o of clash) {
-      const bothHourly = r.startMinute !== null && o.startMinute !== null;
-      if (bothHourly && !((r.startMinute as number) < (o.endMinute as number) && (o.startMinute as number) < (r.endMinute as number))) continue;
-      throw new AttendanceError(`با درخواست تاییدشده‌ی شماره ${o.number} هم‌پوشانی دارد`);
-    }
+    // در فاصله‌ی ثبت تا تایید ممکن است درخواست هم‌پوشان تاییدشده یا ترددِ تداخل‌دار ثبت شده باشد
+    await assertNoRequestConflict(r, id, ["APPROVED"]);
+    await assertShiftAndPresence(r);
     await tx.attendanceLeaveRequest.update({ where: { id }, data: { status: "APPROVED", decidedById: userId, decidedAt: new Date(), decisionNote: null } });
   });
 }
@@ -249,11 +300,11 @@ export interface ApprovedLeave {
   endMinute: number | null;
 }
 
-/** درخواست‌های «تاییدشده»ی کارمندان که با بازه‌ی روزها هم‌پوشان‌اند */
+/** درخواست‌های «تاییدشده»ی کارمندان که با بازه‌ی روزها هم‌پوشان‌اند (یک روز حاشیه برای مرخصی ساعتیِ شبانه) */
 export async function loadApprovedLeave(employeeIds: number[], fromDay: number, toDay: number): Promise<ApprovedLeave[]> {
   if (employeeIds.length === 0) return [];
   const rows = await prisma.attendanceLeaveRequest.findMany({
-    where: { employeeId: { in: employeeIds }, status: "APPROVED", fromDate: { lte: new Date(toDay * DAY_MS) }, toDate: { gte: new Date(fromDay * DAY_MS) } },
+    where: { employeeId: { in: employeeIds }, status: "APPROVED", fromDate: { lte: new Date((toDay + 1) * DAY_MS) }, toDate: { gte: new Date((fromDay - 1) * DAY_MS) } },
     include: { leaveType: { select: { key: true } } },
   });
   return rows.map((r) => ({ employeeId: r.employeeId, typeKey: r.leaveType.key, fromDay: dayNum(r.fromDate), toDay: dayNum(r.toDate), startMinute: r.startMinute, endMinute: r.endMinute }));
@@ -267,23 +318,24 @@ export interface DayLeave {
 }
 
 /**
- * مرخصیِ یک کارمند در یک روز از روی ردیف‌های «کارکرد روزانه»ی همان روز (dayRows): مرخصی تمام‌روز = «ساعت مرخصی» روز شیفت؛ مرخصی ساعتی = اشتراک بازه‌ی درخواستی با
- * بازه‌های کاریِ همان روز. روزِ غیرکاری (تعطیلی شیفت/رسمی) یا بدون شیفت دقیقه‌ی مرخصی ندارد (ولی مرخصی روزانه آن را «پوشش‌داده‌شده» می‌کند).
+ * مرخصیِ یک کارمند در یک روزِ کاری از روی ردیف‌های «کارکرد روزانه»ی همان روز (dayRows): مرخصی تمام‌روز = «ساعت مرخصی» روز شیفت؛ مرخصی ساعتی = اشتراکِ بازه‌ی مطلقِ درخواست
+ * با بازه‌های کاریِ همان روز (محور زمان پیوسته: مرخصی ۲۲ تا ۰۲ بامداد روز بعد به روزِ کاریِ شروعِ شیفت تعلق می‌گیرد). روزِ غیرکاری یا بدون شیفت دقیقه‌ی مرخصی ندارد.
  */
 export function leaveForDay(reqs: ApprovedLeave[], employeeId: number, day: number, dayRows: any[]): DayLeave {
   const out: DayLeave = { byKey: {}, total: 0, hasDaily: false };
   const work = dayRows.filter((r) => !r.rest);
   for (const q of reqs) {
-    if (q.employeeId !== employeeId || day < q.fromDay || day > q.toDay) continue;
+    if (q.employeeId !== employeeId) continue;
     let minutes = 0;
     if (q.startMinute === null) {
+      if (day < q.fromDay || day > q.toDay) continue;
       out.hasDaily = true;
       minutes = work.length ? work[0].dayLeaveMinutes ?? 0 : 0;
     } else {
+      const qs = q.fromDay * 1440 + q.startMinute, qe = q.toDay * 1440 + (q.endMinute as number);
       for (const r of work) {
-        const s = r.segStartClock as number;
-        const e = (r.segEndClock as number) + (r.segEndsNextDay ? 1440 : 0);
-        minutes += Math.max(0, Math.min(q.endMinute as number, e) - Math.max(q.startMinute, s));
+        const s = day * 1440 + (r.segStartRel as number), e = day * 1440 + (r.segEndRel as number);
+        minutes += Math.max(0, Math.min(qe, e) - Math.max(qs, s));
       }
     }
     if (minutes > 0) {
