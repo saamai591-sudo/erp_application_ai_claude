@@ -27,6 +27,8 @@ interface Win {
   workDay: number;
   rowNo: number;
   rest: boolean;
+  /** نوع روز شیفت: کاری / تعطیلی شیفت / تعطیلی رسمی */
+  dayType: string;
   shiftTitle: string;
   dayNo: number;
   segStartAbs: number | null;
@@ -63,10 +65,10 @@ function windowsOf(asgs: Asg[], timelines: Map<number, TimelineRow[]>, employeeI
   }
   const base = day * DAY;
   const dayDef = (a.shift.days ?? []).find((x: any) => x.dayNo === tl!.find((t) => t.dayIdx === idx)?.dayNo);
-  const segTotal = dayDef && dayDef.isWorkDay ? (dayDef.segments ?? []).reduce((n: number, x: any) => n + (x.endMinute - x.startMinute), 0) : 0;
-  const dayBreak = dayDef && dayDef.isWorkDay ? dayDef.breakMinutes : 0;
+  const segTotal = dayDef && dayDef.dayType === "WORK" ? (dayDef.segments ?? []).reduce((n: number, x: any) => n + (x.endMinute - x.startMinute), 0) : 0;
+  const dayBreak = dayDef && dayDef.dayType === "WORK" ? dayDef.breakMinutes : 0;
   const dayNet = Math.max(0, segTotal - dayBreak);
-  const dayLeave = dayDef && dayDef.isWorkDay ? (dayDef.leaveMinutes ?? dayNet) : 0;
+  const dayLeave = dayDef && dayDef.dayType === "WORK" ? (dayDef.leaveMinutes ?? dayNet) : 0;
   return tl
     .filter((t) => t.dayIdx === idx)
     .map((t) => ({
@@ -74,6 +76,7 @@ function windowsOf(asgs: Asg[], timelines: Map<number, TimelineRow[]>, employeeI
       workDay: day,
       rowNo: t.seq ?? 1,
       rest: t.seq === null,
+      dayType: dayDef?.dayType ?? "WORK",
       shiftTitle: a!.shift.title,
       dayNo: t.dayNo,
       segStartAbs: t.segStart === null ? null : base + t.segStart,
@@ -190,6 +193,7 @@ export async function buildWorksheet(opts: { from: Date; to: Date; employeeId?: 
         workDate: dayStr(fromNum(w.workDay)),
         rowNo: w.rowNo,
         rest: w.rest,
+        dayType: w.dayType,
         shiftTitle: w.shiftTitle,
         dayNo: w.dayNo,
         dayBreakMinutes: w.dayBreak,

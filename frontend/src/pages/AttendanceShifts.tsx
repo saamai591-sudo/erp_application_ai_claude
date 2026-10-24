@@ -23,7 +23,11 @@ const WEEKDAYS = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه",
 const DAY = 1440;
 
 interface SegUI { start: string; end: string; windowText: string }
-interface DayUI { isWorkDay: boolean; segments: SegUI[]; breakText: string; leaveText: string; windowText: string }
+type DayType = "WORK" | "SHIFT_OFF" | "OFFICIAL_HOLIDAY";
+const DAY_TYPE_FA: Record<DayType, string> = { WORK: "روز کاری", SHIFT_OFF: "تعطیلی شیفت", OFFICIAL_HOLIDAY: "تعطیلی رسمی" };
+/** نوعِ روز؛ وضعیت ذخیره‌شده‌ی قدیمیِ تب‌ها فقط isWorkDay (بولی) داشت */
+const typeOf = (d: any): DayType => d.dayType ?? (d.isWorkDay === false ? "SHIFT_OFF" : "WORK");
+interface DayUI { dayType: DayType; segments: SegUI[]; breakText: string; leaveText: string; windowText: string }
 interface ShiftRow {
   id: number;
   code: number;
@@ -34,7 +38,7 @@ interface ShiftRow {
   description: string;
   workDayCount: number;
   totalWorkMinutes: number;
-  days: { dayNo: number; isWorkDay: boolean; breakMinutes: number; leaveMinutes: number | null; windowStartClock: number | null; segments: { startClock: number; endClock: number; windowStartClock: number }[] }[];
+  days: { dayNo: number; dayType: DayType; breakMinutes: number; leaveMinutes: number | null; windowStartClock: number | null; segments: { startClock: number; endClock: number; windowStartClock: number }[] }[];
   updatedAt?: string;
 }
 
@@ -95,14 +99,14 @@ function ShiftList() {
   );
 }
 
-const emptyDay = (work: boolean): DayUI => ({ isWorkDay: work, segments: work ? [{ start: "", end: "", windowText: "" }] : [], breakText: "", leaveText: "", windowText: "" });
+const emptyDay = (work: boolean): DayUI => ({ dayType: work ? "WORK" : "SHIFT_OFF", segments: work ? [{ start: "", end: "", windowText: "" }] : [], breakText: "", leaveText: "", windowText: "" });
 
 const weeklyDays = (): DayUI[] => Array.from({ length: 7 }, (_, i) => emptyDay(i < 5));
 const resizeDays = (days: DayUI[], n: number): DayUI[] => Array.from({ length: n }, (_, i) => days[i] ?? emptyDay(true));
 
 /** نمایش محاسبه‌شده‌ی یک روز (هم‌قاعده با سرور: پایان ≤ شروع ⇒ روز بعد؛ بازه‌ی بعدی بعد از پایان قبلی) */
 function calc(d: DayUI): { total: number; work: number; leave: number } | null {
-  if (!d.isWorkDay) return null;
+  if (typeOf(d) !== "WORK") return null;
   let prevEnd = -1, total = 0;
   for (const s of d.segments) {
     const sc = maskToMinutes(s.start), ec = maskToMinutes(s.end);
@@ -124,7 +128,7 @@ function nextRowText(days: DayUI[], i: number, k: number): string {
   const d = days[i];
   if (k >= 0 && k + 1 < d.segments.length) return d.segments[k + 1].windowText || "خودکار";
   const nd = days[(i + 1) % days.length];
-  const t = nd.isWorkDay && nd.segments.length ? nd.segments[0].windowText : nd.windowText;
+  const t = typeOf(nd) === "WORK" && nd.segments.length ? nd.segments[0].windowText : nd.windowText;
   return `روز بعد، ${t || "خودکار"}`;
 }
 
@@ -147,7 +151,7 @@ function ShiftForm({ editId }: { editId?: number }) {
       cycleLength: String(r.cycleLength),
       description: r.description,
       days: r.days.map((d): DayUI => ({
-        isWorkDay: d.isWorkDay,
+        dayType: d.dayType,
         segments: d.segments.map((s) => ({ start: minutesToMask(s.startClock), end: minutesToMask(s.endClock), windowText: minutesToMask(s.windowStartClock) })),
         breakText: d.breakMinutes ? minutesToMask(d.breakMinutes) : "",
         leaveText: d.leaveMinutes !== null ? minutesToMask(d.leaveMinutes) : "",
@@ -168,7 +172,7 @@ function ShiftForm({ editId }: { editId?: number }) {
 
   const setDay = (i: number, patch: Partial<DayUI>) => setForm({ ...form, days: form.days.map((d, j) => (j === i ? { ...d, ...patch } : d)) });
   const setSeg = (i: number, k: number, patch: Partial<SegUI>) => setDay(i, { segments: form.days[i].segments.map((s, j) => (j === k ? { ...s, ...patch } : s)) });
-  const copyToWorkDays = (i: number) => setForm({ ...form, days: form.days.map((d, j) => (j !== i && d.isWorkDay ? { ...form.days[i], isWorkDay: true, segments: form.days[i].segments.map((s) => ({ ...s })) } : d)) });
+  const copyToWorkDays = (i: number) => setForm({ ...form, days: form.days.map((d, j) => (j !== i && typeOf(d) === "WORK" ? { ...form.days[i], dayType: "WORK" as DayType, segments: form.days[i].segments.map((s) => ({ ...s })) } : d)) });
 
   function changeCycle(cycleType: "WEEKLY" | "ROTATING") {
     if (cycleType === "WEEKLY") setForm({ ...form, cycleType, cycleLength: "7", days: resizeDays(form.days, 7) });
@@ -186,10 +190,10 @@ function ShiftForm({ editId }: { editId?: number }) {
     const days = [];
     for (const [i, d] of form.days.entries()) {
       const label = form.cycleType === "WEEKLY" ? WEEKDAYS[i] : `روز ${toFaDigits(String(i + 1))}`;
-      if (!d.isWorkDay) {
+      if (typeOf(d) !== "WORK") {
         const w = d.windowText ? maskToMinutes(d.windowText) : null;
         if (d.windowText && (w === null || w >= DAY)) return setError(`${label}: شروع پنجره‌ی حضور نامعتبر است`);
-        days.push({ dayNo: i + 1, isWorkDay: false, segments: [], windowStartClock: w });
+        days.push({ dayNo: i + 1, dayType: typeOf(d), segments: [], windowStartClock: w });
         continue;
       }
       const segments = [];
@@ -205,7 +209,7 @@ function ShiftForm({ editId }: { editId?: number }) {
       if (brk === null) return setError(`${label}: استراحت نامعتبر است`);
       const leave = d.leaveText ? maskToMinutes(d.leaveText) : null;
       if (d.leaveText && leave === null) return setError(`${label}: ساعت مرخصی نامعتبر است`);
-      days.push({ dayNo: i + 1, isWorkDay: true, segments, breakMinutes: brk, leaveMinutes: leave });
+      days.push({ dayNo: i + 1, dayType: "WORK", segments, breakMinutes: brk, leaveMinutes: leave });
     }
     const body = { title: form.title, isActive: form.isActive, cycleType: form.cycleType, cycleLength: form.cycleType === "WEEKLY" ? 7 : Number(form.cycleLength), description: form.description, days, updatedAt };
     try {
@@ -279,7 +283,7 @@ function ShiftForm({ editId }: { editId?: number }) {
             <thead>
               <tr>
                 <th style={{ width: 110 }}>روز</th>
-                <th style={{ width: 70 }}>کاری</th>
+                <th style={{ width: 130 }}>نوع روز</th>
                 <th>بازه‌های کاری</th>
                 <th style={{ width: 110 }}>استراحت</th>
                 <th style={{ width: 110 }}>ساعت مرخصی</th>
@@ -291,11 +295,15 @@ function ShiftForm({ editId }: { editId?: number }) {
               {form.days.map((d, i) => {
                 const c = calc(d);
                 return (
-                  <tr key={i} style={d.isWorkDay ? undefined : { opacity: 0.6 }}>
+                  <tr key={i} style={typeOf(d) === "WORK" ? undefined : { opacity: 0.6 }}>
                     <td><b>{rotating ? `روز ${toFaDigits(String(i + 1))}` : WEEKDAYS[i]}</b></td>
-                    <td><input type="checkbox" checked={d.isWorkDay} onChange={(e) => setDay(i, e.target.checked ? { isWorkDay: true, segments: d.segments.length ? d.segments : [{ start: "", end: "", windowText: "" }] } : { isWorkDay: false })} /></td>
                     <td>
-                      {d.isWorkDay ? (
+                      <select value={typeOf(d)} onChange={(e) => { const t = e.target.value as DayType; setDay(i, t === "WORK" ? { dayType: t, segments: d.segments.length ? d.segments : [{ start: "", end: "", windowText: "" }] } : { dayType: t }); }}>
+                        {(Object.keys(DAY_TYPE_FA) as DayType[]).map((t) => <option key={t} value={t}>{DAY_TYPE_FA[t]}</option>)}
+                      </select>
+                    </td>
+                    <td>
+                      {typeOf(d) === "WORK" ? (
                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                           {d.segments.map((s, k) => (
                             <div key={k} style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -316,17 +324,17 @@ function ShiftForm({ editId }: { editId?: number }) {
                         </div>
                       ) : (
                         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <span style={{ opacity: 0.7 }}>روز استراحت</span>
+                          <span style={{ opacity: 0.7 }}>{DAY_TYPE_FA[typeOf(d)]}</span>
                           <span style={{ marginInlineStart: 10, fontSize: 12, opacity: 0.8 }}>پنجره از</span>
                           <TimeInput value={d.windowText} width={72} placeholder="خودکار" onChange={(t) => setDay(i, { windowText: t })} />
                           <small style={{ opacity: 0.7 }}>تا شروع پنجره‌ی {nextRowText(form.days, i, -1)}</small>
                         </div>
                       )}
                     </td>
-                    <td>{d.isWorkDay && <TimeInput value={d.breakText} width={80} placeholder="00:30" onChange={(t) => setDay(i, { breakText: t })} />}</td>
-                    <td>{d.isWorkDay && <TimeInput value={d.leaveText} width={80} placeholder={c ? minutesToMask(c.work) : "—"} onChange={(t) => setDay(i, { leaveText: t })} />}</td>
+                    <td>{typeOf(d) === "WORK" && <TimeInput value={d.breakText} width={80} placeholder="00:30" onChange={(t) => setDay(i, { breakText: t })} />}</td>
+                    <td>{typeOf(d) === "WORK" && <TimeInput value={d.leaveText} width={80} placeholder={c ? minutesToMask(c.work) : "—"} onChange={(t) => setDay(i, { leaveText: t })} />}</td>
                     <td style={{ fontSize: 13 }}>{c ? <>طول: {hm(c.total)} — کار خالص: {hm(c.work)} — کسر مرخصی: <b>{hm(c.leave)}</b></> : ""}</td>
-                    <td>{d.isWorkDay && <button type="button" className="btn-link" title="تعریف این روز را برای همه‌ی روزهای کاری دیگر کپی می‌کند" onClick={() => copyToWorkDays(i)}>اعمال به روزهای کاری</button>}</td>
+                    <td>{typeOf(d) === "WORK" && <button type="button" className="btn-link" title="تعریف این روز را برای همه‌ی روزهای کاری دیگر کپی می‌کند" onClick={() => copyToWorkDays(i)}>اعمال به روزهای کاری</button>}</td>
                   </tr>
                 );
               })}

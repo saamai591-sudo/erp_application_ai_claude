@@ -406,6 +406,8 @@ function dayVariables(rows: any[], bands: EffectiveBand[] = []): { vars: Record<
     LEAVE_MINUTES: isWork ? first.dayLeaveMinutes : 0,
     IS_WORK_DAY: isWork ? 1 : 0,
     IS_REST_DAY: isWork ? 0 : 1,
+    IS_SHIFT_OFF_DAY: !isWork && first.dayType === "SHIFT_OFF" ? 1 : 0,
+    IS_OFFICIAL_HOLIDAY: !isWork && first.dayType === "OFFICIAL_HOLIDAY" ? 1 : 0,
     ABSENT: isWork && work.every((r) => r.status === "NO_PUNCH") ? 1 : 0,
     ROWS: work.length,
     INCOMPLETE_ROWS: rows.filter((r) => r.status === "INCOMPLETE").length,

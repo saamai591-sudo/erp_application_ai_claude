@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import { DAY_TYPE_FA, type AttDayType } from "./attendanceFormulaDefs";
 import { AttendanceError, minuteText } from "./attendancePunchService";
 
 // مدیریت تردد › شیفت: تنها نویسنده‌ی AttendanceShift/Day/Segment. شیفت = الگوی تناوبی روزها (هفتگی ۷روزه هم‌تراز هفته، یا چرخشی N روزه).
@@ -35,10 +36,10 @@ export interface SegmentData {
 }
 export interface DayInput {
   dayNo: number;
-  isWorkDay: boolean;
+  dayType: AttDayType;
   breakMinutes: number;
   leaveMinutes: number | null;
-  /** فقط روز استراحت: شروع پنجره‌ی آن روز نسبت به ابتدای روز */
+  /** فقط روز غیرکاری: شروع پنجره‌ی آن روز نسبت به ابتدای روز */
   windowStartMinute: number;
   segments: SegmentData[];
 }
@@ -102,7 +103,7 @@ function buildRows(days: DayInput[]): Row[] {
   const rows: Row[] = [];
   days.forEach((d, i) => {
     const base = i * DAY;
-    if (!d.isWorkDay || d.segments.length === 0) rows.push({ day: d, seg: null, base, startAbs: null, endAbs: null, ws: base + d.windowStartMinute, label: `روز ${d.dayNo}` });
+    if (d.dayType !== "WORK" || d.segments.length === 0) rows.push({ day: d, seg: null, base, startAbs: null, endAbs: null, ws: base + d.windowStartMinute, label: `روز ${d.dayNo}` });
     else d.segments.forEach((s, k) => rows.push({ day: d, seg: s, base, startAbs: base + s.startMinute, endAbs: base + s.endMinute, ws: base + s.windowStartMinute, label: d.segments.length > 1 ? `روز ${d.dayNo} بازه ${k + 1}` : `روز ${d.dayNo}` }));
   });
   return rows;
@@ -173,11 +174,13 @@ export async function normalizeShift(b: any, excludeId?: number): Promise<ShiftD
     if (seen.has(dayNo)) throw new AttendanceError(`روز ${dayNo} تکراری است`);
     seen.add(dayNo);
     const label = `روز ${dayNo}`;
-    const isWorkDay = !!d?.isWorkDay;
+    // نوع روز: dayType؛ کلاینت‌های قدیمی فقط isWorkDay (بولی) می‌فرستادند
+    const dayType: AttDayType = d?.dayType === "WORK" || d?.dayType === "SHIFT_OFF" || d?.dayType === "OFFICIAL_HOLIDAY" ? d.dayType : d?.dayType === undefined && d?.isWorkDay !== undefined ? (d.isWorkDay ? "WORK" : "SHIFT_OFF") : (() => { throw new AttendanceError(`روز ${dayNo}: نوع روز نامعتبر است`); })();
+    const isWorkDay = dayType === "WORK";
     const clockOrNull = (v: unknown, what: string): number | null => (v === undefined || v === null || v === "" ? null : int(v, `${label}: ${what}`, 0, DAY - 1));
     if (!isWorkDay) {
       const c = clockOrNull(d?.windowStartClock, "شروع پنجره‌ی حضور");
-      return { dayNo, isWorkDay: false, breakMinutes: 0, leaveMinutes: null, windowStartMinute: c === null ? NaN : resolveWindowStart(c, null), segments: [] };
+      return { dayNo, dayType, breakMinutes: 0, leaveMinutes: null, windowStartMinute: c === null ? NaN : resolveWindowStart(c, null), segments: [] };
     }
     const segInput: SegmentInput[] = Array.isArray(d?.segments) ? d.segments : [];
     if (segInput.length === 0) throw new AttendanceError(`${label}: روز کاری دست‌کم یک بازه‌ی کاری لازم دارد`);
@@ -191,10 +194,10 @@ export async function normalizeShift(b: any, excludeId?: number): Promise<ShiftD
     const breakMinutes = d?.breakMinutes === undefined || d?.breakMinutes === null || d?.breakMinutes === "" ? 0 : int(d.breakMinutes, `${label}: استراحت`, 0, DAY);
     if (breakMinutes >= total) throw new AttendanceError(`${label}: استراحت (${minuteText(breakMinutes)}) باید کمتر از مجموع بازه‌ها (${minuteText(total)}) باشد`);
     const leaveMinutes = d?.leaveMinutes === undefined || d?.leaveMinutes === null || d?.leaveMinutes === "" ? null : int(d.leaveMinutes, `${label}: ساعت مرخصی`, 0, DAY);
-    return { dayNo, isWorkDay: true, breakMinutes, leaveMinutes, windowStartMinute: 0, segments };
+    return { dayNo, dayType, breakMinutes, leaveMinutes, windowStartMinute: 0, segments };
   });
   for (let n = 1; n <= cycleLength; n++) if (!seen.has(n)) throw new AttendanceError(`روز ${n} تعریف نشده است`);
-  if (!days.some((d) => d.isWorkDay)) throw new AttendanceError("دست‌کم یک روز کاری لازم است");
+  if (!days.some((d) => d.dayType === "WORK")) throw new AttendanceError("دست‌کم یک روز کاری لازم است");
   days.sort((a, c) => a.dayNo - c.dayNo);
   resolveAndValidateWindows(days);
   return { code, title, isActive: b?.isActive === undefined ? true : !!b.isActive, cycleType, cycleLength, description: typeof b?.description === "string" && b.description.trim() ? b.description.trim() : null, days };
@@ -203,7 +206,7 @@ export async function normalizeShift(b: any, excludeId?: number): Promise<ShiftD
 const dayCreate = (days: DayInput[]) =>
   days.map((d) => ({
     dayNo: d.dayNo,
-    isWorkDay: d.isWorkDay,
+    dayType: d.dayType,
     breakMinutes: d.breakMinutes,
     leaveMinutes: d.leaveMinutes,
     windowStartMinute: d.windowStartMinute,
@@ -256,7 +259,7 @@ export function shiftTimeline(s: any): TimelineRow[] {
   const flat: { dayIdx: number; dayNo: number; seq: number | null; segStart: number | null; segEnd: number | null; base: number; ws: number }[] = [];
   sorted.forEach((d: any, i: number) => {
     const segs = [...(d.segments ?? [])].sort((a: any, b: any) => a.seq - b.seq);
-    if (!d.isWorkDay || segs.length === 0) flat.push({ dayIdx: i, dayNo: d.dayNo, seq: null, segStart: null, segEnd: null, base: i * DAY, ws: i * DAY + d.windowStartMinute });
+    if (d.dayType !== "WORK" || segs.length === 0) flat.push({ dayIdx: i, dayNo: d.dayNo, seq: null, segStart: null, segEnd: null, base: i * DAY, ws: i * DAY + d.windowStartMinute });
     else segs.forEach((x: any) => flat.push({ dayIdx: i, dayNo: d.dayNo, seq: x.seq, segStart: x.startMinute, segEnd: x.endMinute, base: i * DAY, ws: i * DAY + x.windowStartMinute }));
   });
   const N = sorted.length * DAY;
@@ -277,16 +280,18 @@ export function shiftShape(s: any) {
     const segs = [...(d.segments ?? [])].sort((a: any, b: any) => a.seq - b.seq);
     const total = totalMinutesOf(segs);
     const work = Math.max(0, total - d.breakMinutes);
-    const restRow = !d.isWorkDay || segs.length === 0;
+    const restRow = d.dayType !== "WORK" || segs.length === 0;
     const restWin = restRow ? { start: rel(d.windowStartMinute), end: rel(endOf(idx, null)) } : null;
     return {
       dayNo: d.dayNo,
-      isWorkDay: d.isWorkDay,
+      dayType: d.dayType as AttDayType,
+      dayTypeTitle: DAY_TYPE_FA[d.dayType as AttDayType],
+      isWorkDay: d.dayType === "WORK",
       breakMinutes: d.breakMinutes,
       leaveMinutes: d.leaveMinutes,
       totalMinutes: total,
       workMinutes: work,
-      leaveMinutesEffective: d.isWorkDay ? d.leaveMinutes ?? work : 0,
+      leaveMinutesEffective: d.dayType === "WORK" ? d.leaveMinutes ?? work : 0,
       /** فقط روز استراحت: پنجره‌ی همان روز */
       windowStartClock: restWin ? restWin.start.clock : null,
       windowStartDayOffset: restWin ? restWin.start.dayOffset : null,

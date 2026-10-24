@@ -86,7 +86,7 @@ export async function worksheetReport(opts: { from: Date; to: Date; employeeIds:
       const date = dayStr(new Date(d * DAY_MS))!;
       const dr = (rowsBy.get(`${emp.id}|${date}`) ?? []).sort((a, b) => a.rowNo - b.rowNo);
       const work = dr.filter((r) => !r.rest);
-      const shiftText = dr.length === 0 ? "شیفت منتسب نیست" : work.length === 0 ? "روز استراحت" : work.map(clock).join("، ");
+      const shiftText = dr.length === 0 ? "شیفت منتسب نیست" : work.length === 0 ? (dr[0].dayType === "OFFICIAL_HOLIDAY" ? "تعطیلی رسمی" : "تعطیلی شیفت") : work.map(clock).join("، ");
       rows.push({
         id: `${emp.id}|${date}`,
         employeeId: emp.id,
@@ -109,7 +109,7 @@ export async function worksheetReport(opts: { from: Date; to: Date; employeeIds:
             employeeName: name,
             date,
             rowNo: r.rowNo,
-            shiftRow: r.rest ? "روز استراحت" : clock(r),
+            shiftRow: r.rest ? (r.dayType === "OFFICIAL_HOLIDAY" ? "تعطیلی رسمی" : "تعطیلی شیفت") : clock(r),
             time: p.time,
             direction: n % 2 === 1 && i === n - 1 ? "بدون جفت" : i % 2 === 0 ? "ورود" : "خروج",
             manual: p.manual,

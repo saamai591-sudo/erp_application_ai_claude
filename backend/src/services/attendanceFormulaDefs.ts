@@ -7,6 +7,9 @@
 //   [M:<عامل ماهانه>]          مقدار یک عامل ماهانه‌ی دیگر
 //   [P:<پارامتر>] و [B:<اطلاعات پایه>] مثل حقوق. همه‌ی مقدارهای زمانی «دقیقه» هستند.
 
+export type AttDayType = "WORK" | "SHIFT_OFF" | "OFFICIAL_HOLIDAY";
+export const DAY_TYPE_FA: Record<AttDayType, string> = { WORK: "روز کاری", SHIFT_OFF: "تعطیلی شیفت", OFFICIAL_HOLIDAY: "تعطیلی رسمی" };
+
 export type AttLevel = "DAY" | "MONTH";
 
 export const ATT_LEVEL_FA: Record<AttLevel, string> = { DAY: "روزانه", MONTH: "ماهانه" };
@@ -17,7 +20,7 @@ export const DAY_VARS: Record<string, string> = {
   PLANNED_GROSS: "ساعت کاری برنامه‌ریزی‌شده‌ی روز (قبل از کسر استراحت)",
   PRESENCE: "مدت حضور کل (شامل خارج از بازه‌ی شیفت)",
   PRESENCE_IN_SHIFT: "مدت حضور داخل بازه‌ی شیفت",
-  REST_PRESENCE: "مدت حضور در روز استراحت",
+  REST_PRESENCE: "مدت حضور در روز غیرکاری (تعطیلی شیفت یا رسمی)",
   LATE: "تاخیر ورود (کل بازه‌های روز)",
   EARLY_LEAVE: "تعجیل خروج (کل بازه‌های روز)",
   OT_BEFORE: "اضافه‌کار قبل از شروع بازه",
@@ -25,7 +28,9 @@ export const DAY_VARS: Record<string, string> = {
   BREAK: "مدت استراحت روز",
   LEAVE_MINUTES: "ساعت مرخصی روز (برای کسر از مانده)",
   IS_WORK_DAY: "روز کاری است (۱ یا ۰)",
-  IS_REST_DAY: "روز استراحت است (۱ یا ۰)",
+  IS_REST_DAY: "روز غیرکاری است: تعطیلی شیفت یا رسمی (۱ یا ۰)",
+  IS_SHIFT_OFF_DAY: "روز تعطیلیِ شیفت است (۱ یا ۰)",
+  IS_OFFICIAL_HOLIDAY: "روز تعطیلِ رسمی است (۱ یا ۰)",
   ABSENT: "غیبت: روز کاری بدون هیچ تردد (۱ یا ۰)",
   ROWS: "تعداد بازه‌های کاری روز",
   INCOMPLETE_ROWS: "تعداد بازه‌های ناقص (تعداد فردِ تردد)",

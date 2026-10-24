@@ -6280,12 +6280,22 @@ model AttendanceShift {
   assignments AttendanceShiftAssignment[]
 }
 
+enum AttendanceDayType {
+  /// روز کاری (بازه‌های کاری دارد)
+  WORK
+  /// تعطیلی شیفت (روز استراحتِ این الگوی شیفت)
+  SHIFT_OFF
+  /// تعطیلی رسمی
+  OFFICIAL_HOLIDAY
+}
+
 model AttendanceShiftDay {
   id           Int                      @id @default(autoincrement())
   shiftId      Int
   /// شماره‌ی روز در چرخه (۱ تا cycleLength)
   dayNo        Int
-  isWorkDay    Boolean                  @default(true)
+  /// نوع روز در چرخه: کاری / تعطیلی شیفت / تعطیلی رسمی (فرمول‌ها می‌توانند به تفکیک آن‌ها رفتار کنند)
+  dayType      AttendanceDayType        @default(WORK)
   /// استراحت (مثلاً ناهار) به دقیقه؛ از طول بازه‌ها جزو ساعت کاری نیست
   breakMinutes Int                      @default(0)
   /// ساعتی که اگر فرد این روز را مرخصی بگیرد از مانده‌ی مرخصی کم می‌شود؛ خالی = ساعت کاری خالص (مجموع بازه‌ها − استراحت)
