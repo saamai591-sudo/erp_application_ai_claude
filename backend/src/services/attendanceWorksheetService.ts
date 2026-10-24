@@ -178,6 +178,8 @@ export async function buildWorksheet(opts: { from: Date; to: Date; employeeId?: 
       const overBefore =
         first === null || segS === null || w.rest ? null : even ? pairs.reduce((a, [i, o]) => a + Math.max(0, Math.min(o, segS) - i), 0) : m(segS - first);
       const early = lastOut !== null && w.segEndAbs !== null ? m(w.segEndAbs - lastOut) : null;
+      // حضور داخل بازه‌ی شیفت: اشتراکِ هر جفت‌تردد با [شروع بازه، پایان بازه] (بیرون از بازه حساب نمی‌شود)
+      const inShift = even && n >= 2 && segS !== null && segE !== null && !w.rest ? pairs.reduce((a, [i, o]) => a + Math.max(0, Math.min(o, segE) - Math.max(i, segS)), 0) : null;
       const overAfter = lastOut === null || segE === null || w.rest ? null : pairs.reduce((a, [i, o]) => a + Math.max(0, o - Math.max(i, segE)), 0);
       const rel = (abs: number) => ({ date: dayStr(fromNum(Math.floor(abs / DAY)))!, clock: clockOf(abs) });
       const row = {
@@ -203,6 +205,7 @@ export async function buildWorksheet(opts: { from: Date; to: Date; employeeId?: 
         firstIn: first === null ? null : timeText(first, w.workDay),
         lastOut: lastOut === null ? null : timeText(lastOut, w.workDay),
         presenceMinutes: n >= 2 ? presence : null,
+        presenceInShiftMinutes: inShift,
         lateMinutes: late,
         earlyLeaveMinutes: early,
         overtimeBeforeMinutes: overBefore,

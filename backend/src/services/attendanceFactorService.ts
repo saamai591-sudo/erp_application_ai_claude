@@ -385,6 +385,7 @@ function dayVariables(rows: any[]): { vars: Record<string, number>; incomplete: 
     PLANNED: isWork ? first.dayNetMinutes : 0,
     PLANNED_GROSS: isWork ? first.dayGrossMinutes : 0,
     PRESENCE: sum(ok, "presenceMinutes"),
+    PRESENCE_IN_SHIFT: sum(ok, "presenceInShiftMinutes"),
     REST_PRESENCE: sum(rest.filter((r) => r.status === "WORK_ON_REST"), "presenceMinutes"),
     LATE: sum(ok, "lateMinutes"),
     EARLY_LEAVE: sum(ok, "earlyLeaveMinutes"),

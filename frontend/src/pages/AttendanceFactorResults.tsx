@@ -68,7 +68,8 @@ const fmt = (v: Val | undefined, t: FactorInfo["valueType"]) => {
 const VAR_FA: Record<string, string> = {
   PLANNED: "ساعت کاری برنامه‌ریزی‌شده (خالص)",
   PLANNED_GROSS: "ساعت کاری برنامه‌ریزی‌شده (قبل از استراحت)",
-  PRESENCE: "حضور در بازه‌های کاری",
+  PRESENCE: "حضور کل (شامل خارج از بازه)",
+  PRESENCE_IN_SHIFT: "حضور داخل بازه‌ی شیفت",
   REST_PRESENCE: "حضور در روز استراحت",
   LATE: "تاخیر ورود",
   EARLY_LEAVE: "تعجیل خروج",
@@ -82,7 +83,7 @@ const VAR_FA: Record<string, string> = {
   ROWS: "تعداد بازه‌های کاری",
   INCOMPLETE_ROWS: "بازه‌های ناقص",
 };
-const TIME_VARS = new Set(["PLANNED", "PLANNED_GROSS", "PRESENCE", "REST_PRESENCE", "LATE", "EARLY_LEAVE", "OT_BEFORE", "OT_AFTER", "BREAK", "LEAVE_MINUTES"]);
+const TIME_VARS = new Set(["PLANNED", "PLANNED_GROSS", "PRESENCE", "PRESENCE_IN_SHIFT", "REST_PRESENCE", "LATE", "EARLY_LEAVE", "OT_BEFORE", "OT_AFTER", "BREAK", "LEAVE_MINUTES"]);
 
 export default function AttendanceFactorResults() {
   const key = "/attendance-factor-results";

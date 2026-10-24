@@ -15,7 +15,8 @@ export const ATT_LEVEL_FA: Record<AttLevel, string> = { DAY: "روزانه", MON
 export const DAY_VARS: Record<string, string> = {
   PLANNED: "ساعت کاری برنامه‌ریزی‌شده‌ی روز (خالص پس از استراحت)",
   PLANNED_GROSS: "ساعت کاری برنامه‌ریزی‌شده‌ی روز (قبل از کسر استراحت)",
-  PRESENCE: "مدت حضور در بازه‌های کاری",
+  PRESENCE: "مدت حضور کل (شامل خارج از بازه‌ی شیفت)",
+  PRESENCE_IN_SHIFT: "مدت حضور داخل بازه‌ی شیفت",
   REST_PRESENCE: "مدت حضور در روز استراحت",
   LATE: "تاخیر ورود (کل بازه‌های روز)",
   EARLY_LEAVE: "تعجیل خروج (کل بازه‌های روز)",
