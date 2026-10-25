@@ -87,6 +87,7 @@ import SalesCenters from "./pages/SalesCenters";
 import SalesQuoteLostReasons from "./pages/SalesQuoteLostReasons";
 import SalesPriceLists from "./pages/SalesPriceLists";
 import SalesStations from "./pages/SalesStations";
+import StoreSales from "./pages/StoreSales";
 import FrequentDescriptions from "./pages/FrequentDescriptions";
 import ReceiptTypes from "./pages/ReceiptTypes";
 import PaymentTypes from "./pages/PaymentTypes";
@@ -441,6 +442,9 @@ export default function App() {
             <Route path="/sales-quote-lost-reasons" element={<SalesQuoteLostReasons />} />
             <Route path="/sales-quote-lost-reasons/new" element={<SalesQuoteLostReasons />} />
             <Route path="/sales-quote-lost-reasons/:id/edit" element={<SalesQuoteLostReasons />} />
+            <Route path="/store-sales" element={<StoreSales />} />
+            <Route path="/store-sales/new" element={<StoreSales />} />
+            <Route path="/store-sales/:id/edit" element={<StoreSales />} />
             <Route path="/sales-stations" element={<SalesStations />} />
             <Route path="/sales-stations/new" element={<SalesStations />} />
             <Route path="/sales-stations/:id/edit" element={<SalesStations />} />

@@ -260,6 +260,10 @@ const RAW_MODULES: ModuleGroup[] = [
         title: "تنظیمات",
         items: [{ key: "sales-stations", label: "ایستگاه فروش", list: "/sales-stations", create: "/sales-stations/new", icon: "store" }],
       },
+      {
+        title: "عملیات",
+        items: [{ key: "store-sales", label: "فروش فروشگاهی", list: "/store-sales", create: "/store-sales/new", icon: "cart" }],
+      },
     ],
   },
   {

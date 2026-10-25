@@ -40,6 +40,8 @@ export interface StockExcludeOptions {
   excludeProductionConsumptionReturnId?: number;
   excludeFixedAssetIssueId?: number;
   excludeInventoryCountingShortageId?: number;
+  /** فروش فروشگاهیِ در حال ویرایش (تعداد فروش‌های «تحویل‌نشده» از موجودی کم می‌شود) */
+  excludeStoreSaleId?: number;
 }
 
 /**
@@ -127,7 +129,18 @@ export async function computeStockAsOf(
     // WAREHOUSE_ADJUSTMENT.quantity در جدول یکپارچه از قبل امضادار ذخیره می‌شود (adjustmentQuantity قدیم)
     .then((rows) => sum(rows));
 
-  const parts = await Promise.all([...signedQueries, adjustmentQuery]);
+  // فروش فروشگاهیِ تحویل‌نشده: فقط تعداد از موجودی کم می‌شود (حوالهٔ واقعی با «تحویل فروش» جایگزین می‌شود و فروش «تحویل‌شده» دیگر شمرده نمی‌شود)
+  const storeSaleQuery = db.storeSaleLine
+    .findMany({
+      where: {
+        goodsItemId,
+        sale: { warehouseId, deliveryStatus: "NOT_DELIVERED", date: { lte: asOfDate }, ...(opts.excludeStoreSaleId ? { NOT: { id: opts.excludeStoreSaleId } } : {}) },
+      },
+      select: { quantity: true },
+    })
+    .then((rows) => -sum(rows));
+
+  const parts = await Promise.all([...signedQueries, adjustmentQuery, storeSaleQuery]);
   return parts.reduce((s, p) => s + p, 0);
 }
 

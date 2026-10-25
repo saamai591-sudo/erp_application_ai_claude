@@ -344,7 +344,7 @@ router.put("/sales-price-lists/:id", can(`${FORM}.edit`), async (req, res) => {
     if (!currencyId || !(await prisma.currency.findUnique({ where: { id: currencyId } }))) throw new PLError("ارز الزامی است");
     const effectiveDate = parseDate(b.effectiveDate);
     if (used && (Number(b.currencyId) !== existing.currencyId || day(effectiveDate) !== day(existing.effectiveDate))) {
-      throw new PLError("این اعلامیه در پیش‌فاکتور استفاده شده است؛ ارز و تاریخ اجرا قابل تغییر نیست — اعلامیه‌ی جدید ثبت کنید");
+      throw new PLError("این اعلامیه در پیش‌فاکتور یا فروش فروشگاهی استفاده شده است؛ ارز و تاریخ اجرا قابل تغییر نیست — اعلامیه‌ی جدید ثبت کنید");
     }
     const { centerIds, typeIds, stationIds } = scopeInputs(b);
     await assertCentersAndTypesExist(centerIds, typeIds);
@@ -361,6 +361,9 @@ router.put("/sales-price-lists/:id", can(`${FORM}.edit`), async (req, res) => {
     if (centerIds.length) await assertNoScopeConflict({ centerIds, typeIds, currencyId, date: effectiveDate, excludeId: id });
     await assertNoStationConflict({ stationIds, currencyId, date: effectiveDate, excludeId: id });
     const removedStations = existingStations.filter((x) => !stationIds.includes(x.stationId));
+    for (const r of removedStations) {
+      if (await prisma.storeSaleLine.findFirst({ where: { priceListId: id, sale: { stationId: r.stationId } }, select: { id: true } })) throw new PLError("ایستگاهی که در فروش فروشگاهی از این اعلامیه فی گرفته است قابل حذف از اعلامیه نیست");
+    }
     const addedStations = stationIds.filter((st) => !existingStations.some((x) => x.stationId === st));
 
     const cleaned = used ? null : await cleanLinesAndRules(b);
@@ -403,7 +406,7 @@ router.delete("/sales-price-lists/:id", can(`${FORM}.delete`), async (req, res) 
   try {
     const existing = await prisma.salesPriceList.findUnique({ where: { id }, select: { id: true } });
     if (!existing) return res.status(404).json({ error: "اعلامیه یافت نشد" });
-    if (await isPriceListUsed(id)) throw new PLError("این اعلامیه در پیش‌فاکتور استفاده شده و قابل حذف نیست");
+    if (await isPriceListUsed(id)) throw new PLError("این اعلامیه در پیش‌فاکتور یا فروش فروشگاهی استفاده شده و قابل حذف نیست");
     await prisma.salesPriceList.delete({ where: { id } });
     res.status(204).send();
   } catch (e: any) {

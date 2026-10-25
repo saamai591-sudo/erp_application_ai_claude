@@ -41,6 +41,7 @@ export const USAGE_META: Record<string, UsageMeta> = {
   AttendanceShift: { label: "شیفت", base: "/attendance-shifts" },
   AttendanceShiftAssignment: { label: "انتساب شیفت", base: "/attendance-shift-assignments", title: (r) => `#${r.id}` },
   AttendanceLeaveType: { label: "نوع مرخصی", base: "/attendance-leave-types" },
+  StoreSale: { label: "فروش فروشگاهی", base: "/store-sales", title: (r) => `شماره ${r.number}` },
   SalesStation: { label: "ایستگاه فروش", base: "/sales-stations" },
   SalesPriceListStation: { label: "حوزه‌ی ایستگاه در اعلامیه قیمت" },
   AttendanceLeaveBalanceEntry: { label: "مانده‌ی مرخصی", base: "/attendance-leave-balance-entries", title: (r) => String(r.reason ?? "") },

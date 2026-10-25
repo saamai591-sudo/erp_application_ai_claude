@@ -182,6 +182,7 @@ model FiscalPeriod {
   hasTransactions           Boolean                    @default(false)
   createdAt                 DateTime                   @default(now())
   accountClosings           AccountClosing[]
+  storeSales                StoreSale[]
   pettyCashPayments         PettyCashPayment[]
   pettyCashSummaries        PettyCashSummary[]
   chequeDeposits            ChequeDeposit[]
@@ -909,6 +910,7 @@ model ImportJob {
 }
 
 model UnitOfMeasure {
+  storeSaleLines StoreSaleLine[]
   id                         Int                         @id @default(autoincrement())
   code                       Int                         @unique
   title                      String                      @unique
@@ -1090,6 +1092,7 @@ model GoodsAttributeItem {
 }
 
 model GoodsItem {
+  storeSaleLines StoreSaleLine[]
   id                            Int                            @id @default(autoincrement())
   kind                          GoodsItemKind
   goodsGroupId                  Int
@@ -2312,6 +2315,7 @@ model Customer {
   salesOrders     SalesOrder[]
   salesQuotes     SalesQuote[]
   salesStations   SalesStation[]
+  storeSales      StoreSale[]
 }
 
 model SalesQuote {
@@ -2425,6 +2429,7 @@ model SalesPriceList {
   rules         SalesPriceRule[]
   quoteLines    SalesQuoteLine[]
   stations      SalesPriceListStation[]
+  storeSaleLines StoreSaleLine[]
 }
 
 model SalesPriceListScope {
@@ -6665,4 +6670,60 @@ model SalesStation {
   customer     Customer      @relation(fields: [customerId], references: [id])
   costCenter   CostCenter    @relation(fields: [costCenterId], references: [id])
   priceListScopes SalesPriceListStation[]
+  storeSales      StoreSale[]
+}
+
+enum StoreSaleDeliveryStatus {
+  NOT_DELIVERED
+  DELIVERED
+}
+
+/// فروش فروشگاهی: سند مستقل (بدون سند حسابداری و بدون حواله انبار). تا وقتی «تحویل‌نشده» است تعدادش از موجودیِ گزارش‌ها کم می‌شود؛ فرم «تحویل فروش» (بعداً) یک حواله‌ی واقعی برای همه‌ی فروش‌های تحویل‌نشده تا یک تاریخ می‌سازد و آن‌ها را «تحویل‌شده» می‌کند.
+model StoreSale {
+  id             Int                     @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime                @db.Date
+  stationId      Int
+  /// کپی انبار/نوع فروش/مرکز هزینه‌ی ایستگاه در لحظه‌ی ثبت (تغییر بعدی ایستگاه روی فروش‌های ثبت‌شده اثر نمی‌گذارد)
+  warehouseId    Int?
+  salesTypeId    Int
+  costCenterId   Int
+  customerId     Int
+  description    String?
+  deliveryStatus StoreSaleDeliveryStatus @default(NOT_DELIVERED)
+  createdById    Int?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  fiscalPeriod   FiscalPeriod            @relation(fields: [fiscalPeriodId], references: [id])
+  station        SalesStation            @relation(fields: [stationId], references: [id])
+  customer       Customer                @relation(fields: [customerId], references: [id])
+  lines          StoreSaleLine[]
+
+  @@unique([fiscalPeriodId, number])
+  @@index([stationId, date])
+  @@index([warehouseId, deliveryStatus, date])
+}
+
+model StoreSaleLine {
+  id          Int       @id @default(autoincrement())
+  saleId      Int
+  rowOrder    Int       @default(0)
+  goodsItemId Int
+  unitId      Int
+  quantity    Decimal   @db.Decimal(36, 10)
+  unitPrice   Decimal   @db.Decimal(36, 10)
+  amount      Decimal   @db.Decimal(36, 10)
+  vatAmount   Decimal   @db.Decimal(36, 10)
+  /// اعلامیه‌ی قیمتِ منبعِ فی و «قیمت اعلامیه» (برای ممیزی وقتی فی با مجوز تغییر کرده)
+  priceListId Int?
+  listPrice   Decimal?  @db.Decimal(36, 10)
+  description String?
+  sale        StoreSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  goodsItem   GoodsItem @relation(fields: [goodsItemId], references: [id])
+  unit        UnitOfMeasure @relation(fields: [unitId], references: [id])
+  priceList   SalesPriceList? @relation(fields: [priceListId], references: [id])
+
+  @@index([saleId])
+  @@index([goodsItemId])
 }

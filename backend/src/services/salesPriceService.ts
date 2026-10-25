@@ -93,7 +93,8 @@ export function computePrice(pricing: ItemPricing, quantity: number): ComputedPr
   };
 }
 
-/** اعلامیه‌ای که حداقل یک ردیف پیش‌فاکتور به آن ارجاع دارد = «استفاده‌شده» و قفل است (مشتق، نه پرچم ذخیره‌شده) */
+/** اعلامیه‌ای که حداقل یک ردیف پیش‌فاکتور یا فروش فروشگاهی به آن ارجاع دارد = «استفاده‌شده» و قفل است (مشتق، نه پرچم ذخیره‌شده) */
 export async function isPriceListUsed(priceListId: number): Promise<boolean> {
-  return !!(await prisma.salesQuoteLine.findFirst({ where: { priceListId }, select: { id: true } }));
+  const [q, s] = await Promise.all([prisma.salesQuoteLine.findFirst({ where: { priceListId }, select: { id: true } }), prisma.storeSaleLine.findFirst({ where: { priceListId }, select: { id: true } })]);
+  return !!(q || s);
 }
