@@ -52,6 +52,16 @@ export async function findEffectivePriceListId(p: { salesCenterId: number; sales
   return scope?.priceListId ?? null;
 }
 
+/** اعلامیه‌ی مؤثر یک «ایستگاه فروش» (فروش فروشگاهی) در تاریخ؛ فقط از اعلامیه‌هایی که ایستگاه در حوزه‌شان است، بدون بازگشت به حوزه‌ی مرکز×نوع */
+export async function findEffectiveStationPriceListId(p: { stationId: number; currencyId: number; date: Date }): Promise<number | null> {
+  const scope = await prisma.salesPriceListStation.findFirst({
+    where: { stationId: p.stationId, currencyId: p.currencyId, effectiveDate: { lte: p.date }, priceList: { isActive: true } },
+    orderBy: { effectiveDate: "desc" },
+    select: { priceListId: true },
+  });
+  return scope?.priceListId ?? null;
+}
+
 /** فی پایه و پله‌های چند کالا از یک اعلامیه (دو کوئری ایندکس‌دار برای همه‌ی کالاها) */
 export async function loadItemPricing(priceListId: number, goodsItemIds: number[], decimalPlaces: number): Promise<Map<number, ItemPricing>> {
   const out = new Map<number, ItemPricing>();

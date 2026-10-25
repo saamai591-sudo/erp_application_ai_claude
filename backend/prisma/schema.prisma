@@ -494,6 +494,7 @@ model CostCenter {
   warehouseIssues   WarehouseIssue[]
   employeeAssignments EmployeeAssignment[]
   employmentDecrees   EmploymentDecree[]
+  salesStations       SalesStation[]
 }
 
 model OrgUnit {
@@ -548,6 +549,7 @@ model CashBox {
   receiptInstrumentLines ReceiptInstrumentLine[]
   treasuryAccountSettings TreasuryAccountSetting[]
   treasuryOpeningLines TreasuryOpeningCashBox[]
+  salesStations SalesStation[]
 }
 
 /// تعریف تنخواه (مدیریت خزانه › تنظیمات): کد تفصیلی توسط سرویس عمومی «ایجاد کد تفصیلی» (utils/coding.ts، نوع تفصیل ۵ «تنخواه») صادر می‌شود، نه ورودی کاربر.
@@ -971,6 +973,7 @@ model Warehouse {
   // effectiveLastConfirmedDate در services/warehouseConfirmationService.ts).
   implementationDate         DateTime?               @db.Date
   initialInventories         InitialInventory[]
+  salesStations              SalesStation[]
   salesDeliveries            SalesDelivery[]
   manager                    Party?                  @relation("WarehouseManager", fields: [managerId], references: [id])
   warehouseGroup             WarehouseGroup          @relation(fields: [warehouseGroupId], references: [id])
@@ -1478,6 +1481,7 @@ model SalesType {
   salesOrders                    SalesOrder[]
   goodsServiceAccountingSettings GoodsServiceAccountingSetting[]
   priceListScopes SalesPriceListScope[]
+  salesStations SalesStation[]
 }
 
 // طبق Documents/ReceiptType.md: مستر «نوع دریافت» — نوع دریافت (nature) تعیین می‌کند این دریافت اساساً
@@ -2307,6 +2311,7 @@ model Customer {
   salesReturnInvoices SalesReturnInvoice[]
   salesOrders     SalesOrder[]
   salesQuotes     SalesQuote[]
+  salesStations   SalesStation[]
 }
 
 model SalesQuote {
@@ -2419,6 +2424,7 @@ model SalesPriceList {
   lines         SalesPriceListLine[]
   rules         SalesPriceRule[]
   quoteLines    SalesQuoteLine[]
+  stations      SalesPriceListStation[]
 }
 
 model SalesPriceListScope {
@@ -2436,6 +2442,21 @@ model SalesPriceListScope {
   @@unique([priceListId, salesCenterId, salesTypeId])
   @@unique([salesCenterId, salesTypeId, currencyId, effectiveDate])
   @@index([salesCenterId, salesTypeId, effectiveDate])
+}
+
+/// حوزه‌ی «ایستگاه فروش» اعلامیه‌ی قیمت (فروش فروشگاهی): فی فروش یک ایستگاه فقط از اعلامیه‌هایی خوانده می‌شود که آن ایستگاه در حوزه‌شان است
+model SalesPriceListStation {
+  id            Int            @id @default(autoincrement())
+  priceListId   Int
+  stationId     Int
+  /// کپی ارز و تاریخ اجرای اعلامیه، فقط برای یکتایی در دیتابیس (هر ایستگاه×ارز×تاریخ فقط یک اعلامیه)
+  currencyId    Int
+  effectiveDate DateTime       @db.Date
+  priceList     SalesPriceList @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  station       SalesStation   @relation(fields: [stationId], references: [id])
+
+  @@unique([priceListId, stationId])
+  @@unique([stationId, currencyId, effectiveDate])
 }
 
 model SalesPriceListLine {
@@ -6612,4 +6633,36 @@ model AttendanceLeaveAttachment {
   request      AttendanceLeaveRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
 
   @@index([requestId])
+}
+
+// ── فروش فروشگاهی ──
+
+enum StoreOffering {
+  GOODS
+  SERVICES
+  BOTH
+}
+
+/// ایستگاه فروش (فروش فروشگاهی › تنظیمات): صندوقِ دریافت نقد، انبارِ کسر موجودی، نوع ارائه (کالا/خدمت/هر دو)، نوع فروش، مشتری پیش‌فرض و مرکز هزینه
+model SalesStation {
+  id           Int           @id @default(autoincrement())
+  code         Int           @unique
+  title        String        @unique
+  isActive     Boolean       @default(true)
+  offering     StoreOffering @default(GOODS)
+  cashBoxId    Int
+  /// فقط وقتی ارائه شامل کالا باشد الزامی است (انبارِ کسر موجودی)
+  warehouseId  Int?
+  salesTypeId  Int
+  customerId   Int
+  costCenterId Int
+  description  String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  cashBox      CashBox       @relation(fields: [cashBoxId], references: [id])
+  warehouse    Warehouse?    @relation(fields: [warehouseId], references: [id])
+  salesType    SalesType     @relation(fields: [salesTypeId], references: [id])
+  customer     Customer      @relation(fields: [customerId], references: [id])
+  costCenter   CostCenter    @relation(fields: [costCenterId], references: [id])
+  priceListScopes SalesPriceListStation[]
 }

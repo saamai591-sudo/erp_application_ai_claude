@@ -254,6 +254,15 @@ const RAW_MODULES: ModuleGroup[] = [
     ],
   },
   {
+    title: "فروش فروشگاهی",
+    subModules: [
+      {
+        title: "تنظیمات",
+        items: [{ key: "sales-stations", label: "ایستگاه فروش", list: "/sales-stations", create: "/sales-stations/new", icon: "store" }],
+      },
+    ],
+  },
+  {
     title: "فروش",
     subModules: [
       {

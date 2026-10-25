@@ -7,7 +7,9 @@ import { AuthedRequest } from "../middleware/auth";
 import { findEffectivePriceListId, isPriceListUsed, loadItemPricing } from "../services/salesPriceService";
 
 // فروش › تنظیمات › «اعلامیه قیمت فروش»: قیمت پایه‌ی کالا + پله‌های مقدار، برای مجموعه‌ای از (مرکز فروش × نوع فروش) و یک ارز.
-// - مرکز و نوع فروش اجباری‌اند؛ برای هر ترکیب مرکز×نوع×ارز×تاریخ اجرا فقط یک اعلامیه می‌تواند باشد (یکتایی دیتابیسی روی scope).
+// - حوزه‌ی «ایستگاه فروش» (فروش فروشگاهی) هم می‌تواند اضافه شود: حداقل یکی از دو حوزه (مرکز×نوع یا ایستگاه) الزامی است؛ فی فروش فروشگاهی فقط از حوزه‌ی ایستگاه
+//   خوانده می‌شود (بدون بازگشت به مرکز×نوع) و پیش‌فاکتور فقط حوزه‌ی مرکز×نوع را می‌بیند؛ هر ایستگاه×ارز×تاریخ اجرا فقط یک اعلامیه دارد.
+// - مرکز و نوع فروش (اگر حوزه‌ی مرکز×نوع انتخاب شود) باید با هم بیایند؛ برای هر ترکیب مرکز×نوع×ارز×تاریخ اجرا فقط یک اعلامیه می‌تواند باشد (یکتایی دیتابیسی روی scope).
 // - اعلامیه با «اعلامیه‌ی جدید» تغییر می‌کند؛ بعد از اولین استفاده در پیش‌فاکتور، قیمت‌ها/پله‌ها/ارز/تاریخ قفل می‌شود، فقط افزودن مرکز و نوع
 //   تازه (و عنوان/توضیح/فعال) مجاز است و حذف ترکیبی که در پیش‌فاکتوری استفاده شده ممنوع است.
 // - فی نهایی پیش‌فاکتور را سرور هنگام ذخیره می‌سازد (routes/salesOperations.ts)؛ اینجا فقط داده‌ی اعلامیه و endpoint «فراخوانی» برای فرم است.
@@ -39,6 +41,7 @@ interface Body {
   isActive?: boolean;
   salesCenterIds?: number[];
   salesTypeIds?: number[];
+  salesStationIds?: number[];
   lines?: LineInput[];
   rules?: RuleInput[];
 }
@@ -57,6 +60,23 @@ function uniqueInts(raw: unknown, label: string): number[] {
   const out = [...new Set(raw.map((x) => Number(x)))];
   if (out.some((x) => !Number.isInteger(x) || x <= 0)) throw new PLError(`${label} نامعتبر است`);
   return out;
+}
+
+/** حوزه‌ها: (مرکز × نوع) اختیاری ولی با هم، و ایستگاه‌ها اختیاری؛ حداقل یکی از دو حوزه */
+function scopeInputs(b: Body) {
+  const ids = (raw: unknown, label: string): number[] => {
+    if (raw === undefined || raw === null) return [];
+    if (!Array.isArray(raw)) throw new PLError(`${label} نامعتبر است`);
+    const out = [...new Set(raw.map((x) => Number(x)))];
+    if (out.some((x) => !Number.isInteger(x) || x <= 0)) throw new PLError(`${label} نامعتبر است`);
+    return out;
+  };
+  const centerIds = ids(b.salesCenterIds, "مرکز فروش");
+  const typeIds = ids(b.salesTypeIds, "نوع فروش");
+  const stationIds = ids(b.salesStationIds, "ایستگاه فروش");
+  if ((centerIds.length > 0) !== (typeIds.length > 0)) throw new PLError("مرکز فروش و نوع فروش باید با هم انتخاب شوند");
+  if (centerIds.length === 0 && stationIds.length === 0) throw new PLError("حداقل یک حوزه (مرکز و نوع فروش، یا ایستگاه فروش) انتخاب کنید");
+  return { centerIds, typeIds, stationIds };
 }
 
 function fail(res: any, e: any, fallback: string) {
@@ -125,7 +145,23 @@ async function assertNoScopeConflict(p: { centerIds: number[]; typeIds: number[]
   }
 }
 
+/** هر ایستگاه×ارز×تاریخ فقط یک اعلامیه */
+async function assertNoStationConflict(p: { stationIds: number[]; currencyId: number; date: Date; excludeId?: number }) {
+  if (p.stationIds.length === 0) return;
+  const clash = await prisma.salesPriceListStation.findFirst({
+    where: { currencyId: p.currencyId, effectiveDate: p.date, stationId: { in: p.stationIds }, ...(p.excludeId ? { priceListId: { not: p.excludeId } } : {}) },
+    include: { priceList: { select: { number: true } }, station: { select: { title: true } } },
+  });
+  if (clash) throw new PLError(`برای ایستگاه فروش «${clash.station.title}» در همین تاریخ اجرا و ارز، اعلامیه‌ی شماره ${clash.priceList.number} قبلاً ثبت شده است`);
+}
+
+async function assertStationsExist(stationIds: number[]) {
+  if (stationIds.length === 0) return;
+  if ((await prisma.salesStation.count({ where: { id: { in: stationIds } } })) !== stationIds.length) throw new PLError("یکی از ایستگاه‌های فروش انتخاب‌شده یافت نشد");
+}
+
 async function assertCentersAndTypesExist(centerIds: number[], typeIds: number[]) {
+  if (centerIds.length === 0) return;
   const [c, t] = await Promise.all([
     prisma.salesCenter.count({ where: { id: { in: centerIds } } }),
     prisma.salesType.count({ where: { id: { in: typeIds } } }),
@@ -179,6 +215,7 @@ router.get("/sales-price-lists", can(`${FORM}.view`), async (_req, res) => {
     include: {
       currency: { select: { title: true } },
       scopes: { select: { salesCenter: { select: { id: true, title: true } }, salesType: { select: { id: true, title: true } } } },
+      stations: { select: { station: { select: { id: true, title: true } } } },
       _count: { select: { lines: true, rules: true } },
       quoteLines: { take: 1, select: { id: true } },
     },
@@ -196,6 +233,7 @@ router.get("/sales-price-lists", can(`${FORM}.view`), async (_req, res) => {
         isActive: l.isActive,
         centers: centers.join("، "),
         salesTypes: types.join("، "),
+        stations: l.stations.map((x) => x.station.title).join("، "),
         lineCount: l._count.lines,
         ruleCount: l._count.rules,
         used: l.quoteLines.length > 0,
@@ -210,6 +248,7 @@ router.get("/sales-price-lists/:id", can(`${FORM}.view`), async (req, res) => {
     where: { id },
     include: {
       scopes: { select: { salesCenterId: true, salesTypeId: true } },
+      stations: { select: { stationId: true } },
       lines: { include: { goodsItem: { select: { fullCode: true, title: true } } }, orderBy: { id: "asc" } },
       rules: { include: { goodsItem: { select: { fullCode: true, title: true } } }, orderBy: [{ goodsItemId: "asc" }, { minQuantity: "asc" }] },
     },
@@ -227,6 +266,7 @@ router.get("/sales-price-lists/:id", can(`${FORM}.view`), async (req, res) => {
     used: await isPriceListUsed(id),
     salesCenterIds: [...new Set(l.scopes.map((s) => s.salesCenterId))],
     salesTypeIds: [...new Set(l.scopes.map((s) => s.salesTypeId))],
+    salesStationIds: l.stations.map((x) => x.stationId),
     lines: l.lines.map((x) => ({ goodsItemId: x.goodsItemId, goodsItemCode: x.goodsItem.fullCode, goodsItemTitle: x.goodsItem.title, price: Number(x.price) })),
     rules: l.rules.map((x) => ({
       goodsItemId: x.goodsItemId,
@@ -247,11 +287,12 @@ router.post("/sales-price-lists", can(`${FORM}.create`), async (req, res) => {
     const currencyId = Number(b.currencyId);
     if (!currencyId || !(await prisma.currency.findUnique({ where: { id: currencyId } }))) throw new PLError("ارز الزامی است");
     const effectiveDate = parseDate(b.effectiveDate);
-    const centerIds = uniqueInts(b.salesCenterIds, "مرکز فروش");
-    const typeIds = uniqueInts(b.salesTypeIds, "نوع فروش");
+    const { centerIds, typeIds, stationIds } = scopeInputs(b);
     await assertCentersAndTypesExist(centerIds, typeIds);
+    await assertStationsExist(stationIds);
     const { lines, rules } = await cleanLinesAndRules(b);
-    await assertNoScopeConflict({ centerIds, typeIds, currencyId, date: effectiveDate });
+    if (centerIds.length) await assertNoScopeConflict({ centerIds, typeIds, currencyId, date: effectiveDate });
+    await assertNoStationConflict({ stationIds, currencyId, date: effectiveDate });
 
     let created: { id: number } | null = null;
     for (let attempt = 0; attempt < 3 && !created; attempt++) {
@@ -267,6 +308,7 @@ router.post("/sales-price-lists", can(`${FORM}.create`), async (req, res) => {
               isActive: b.isActive ?? true,
               description: b.description ? String(b.description).trim() || null : null,
               scopes: { create: centerIds.flatMap((c) => typeIds.map((t) => ({ salesCenterId: c, salesTypeId: t, currencyId, effectiveDate }))) },
+              stations: { create: stationIds.map((st) => ({ stationId: st, currencyId, effectiveDate })) },
             },
           });
           if (lines.length) await tx.salesPriceListLine.createMany({ data: lines.map((l) => ({ priceListId: list.id, goodsItemId: l.goodsItemId, price: l.price })) });
@@ -282,7 +324,7 @@ router.post("/sales-price-lists", can(`${FORM}.create`), async (req, res) => {
     if (!created) throw new PLError("شماره‌ی اعلامیه تخصیص نیافت؛ دوباره تلاش کنید");
     res.status(201).json({ id: created.id });
   } catch (e: any) {
-    if (e?.code === "P2002") return res.status(400).json({ error: "برای یکی از ترکیب‌های مرکز و نوع فروش در همین تاریخ و ارز اعلامیه‌ی دیگری وجود دارد" });
+    if (e?.code === "P2002") return res.status(400).json({ error: "برای یکی از حوزه‌ها (ترکیب مرکز و نوع فروش یا ایستگاه) در همین تاریخ و ارز اعلامیه‌ی دیگری وجود دارد" });
     fail(res, e, "خطا در ثبت اعلامیه");
   }
 });
@@ -304,9 +346,10 @@ router.put("/sales-price-lists/:id", can(`${FORM}.edit`), async (req, res) => {
     if (used && (Number(b.currencyId) !== existing.currencyId || day(effectiveDate) !== day(existing.effectiveDate))) {
       throw new PLError("این اعلامیه در پیش‌فاکتور استفاده شده است؛ ارز و تاریخ اجرا قابل تغییر نیست — اعلامیه‌ی جدید ثبت کنید");
     }
-    const centerIds = uniqueInts(b.salesCenterIds, "مرکز فروش");
-    const typeIds = uniqueInts(b.salesTypeIds, "نوع فروش");
+    const { centerIds, typeIds, stationIds } = scopeInputs(b);
     await assertCentersAndTypesExist(centerIds, typeIds);
+    await assertStationsExist(stationIds);
+    const existingStations = await prisma.salesPriceListStation.findMany({ where: { priceListId: id } });
 
     const wanted = new Set(centerIds.flatMap((c) => typeIds.map((t) => `${c}:${t}`)));
     const current = new Map(existing.scopes.map((s) => [`${s.salesCenterId}:${s.salesTypeId}`, s]));
@@ -315,7 +358,10 @@ router.put("/sales-price-lists/:id", can(`${FORM}.edit`), async (req, res) => {
       const inUse = await prisma.salesQuoteLine.findFirst({ where: { priceListId: id, salesQuote: { salesCenterId: s.salesCenterId, salesTypeId: s.salesTypeId } }, select: { id: true } });
       if (inUse) throw new PLError("ترکیبی از مرکز و نوع فروش که در پیش‌فاکتور استفاده شده است قابل حذف از اعلامیه نیست");
     }
-    await assertNoScopeConflict({ centerIds, typeIds, currencyId, date: effectiveDate, excludeId: id });
+    if (centerIds.length) await assertNoScopeConflict({ centerIds, typeIds, currencyId, date: effectiveDate, excludeId: id });
+    await assertNoStationConflict({ stationIds, currencyId, date: effectiveDate, excludeId: id });
+    const removedStations = existingStations.filter((x) => !stationIds.includes(x.stationId));
+    const addedStations = stationIds.filter((st) => !existingStations.some((x) => x.stationId === st));
 
     const cleaned = used ? null : await cleanLinesAndRules(b);
 
@@ -333,6 +379,9 @@ router.put("/sales-price-lists/:id", can(`${FORM}.edit`), async (req, res) => {
       // دامنه: حذف ترکیب‌های برداشته‌شده، افزودن تازه‌ها، و هم‌گام‌کردن ارز/تاریخ کپی‌شده‌ی بقیه
       if (removed.length) await tx.salesPriceListScope.deleteMany({ where: { id: { in: removed.map((s) => s.id) } } });
       await tx.salesPriceListScope.updateMany({ where: { priceListId: id }, data: { currencyId, effectiveDate } });
+      if (removedStations.length) await tx.salesPriceListStation.deleteMany({ where: { id: { in: removedStations.map((x) => x.id) } } });
+      await tx.salesPriceListStation.updateMany({ where: { priceListId: id }, data: { currencyId, effectiveDate } });
+      if (addedStations.length) await tx.salesPriceListStation.createMany({ data: addedStations.map((st) => ({ priceListId: id, stationId: st, currencyId, effectiveDate })) });
       const toAdd = [...wanted].filter((k) => !current.has(k)).map((k) => k.split(":").map(Number));
       if (toAdd.length) await tx.salesPriceListScope.createMany({ data: toAdd.map(([c, t]) => ({ priceListId: id, salesCenterId: c, salesTypeId: t, currencyId, effectiveDate })) });
       if (cleaned) {
@@ -344,7 +393,7 @@ router.put("/sales-price-lists/:id", can(`${FORM}.edit`), async (req, res) => {
     });
     res.json({ id });
   } catch (e: any) {
-    if (e?.code === "P2002") return res.status(400).json({ error: "برای یکی از ترکیب‌های مرکز و نوع فروش در همین تاریخ و ارز اعلامیه‌ی دیگری وجود دارد" });
+    if (e?.code === "P2002") return res.status(400).json({ error: "برای یکی از حوزه‌ها (ترکیب مرکز و نوع فروش یا ایستگاه) در همین تاریخ و ارز اعلامیه‌ی دیگری وجود دارد" });
     fail(res, e, "خطا در ذخیره‌ی اعلامیه");
   }
 });

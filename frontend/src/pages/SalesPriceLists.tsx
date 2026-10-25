@@ -39,6 +39,7 @@ interface ListRow {
   isActive: boolean;
   centers: string;
   salesTypes: string;
+  stations: string;
   lineCount: number;
   ruleCount: number;
   used: boolean;
@@ -56,10 +57,11 @@ interface FormState {
   isActive: boolean;
   salesCenterIds: number[];
   salesTypeIds: number[];
+  salesStationIds: number[];
   lines: LineRow[];
   rules: RuleRow[];
 }
-const EMPTY_FORM: FormState = { title: "", currencyId: "", effectiveDate: "", description: "", isActive: true, salesCenterIds: [], salesTypeIds: [], lines: [], rules: [] };
+const EMPTY_FORM: FormState = { title: "", currencyId: "", effectiveDate: "", description: "", isActive: true, salesCenterIds: [], salesTypeIds: [], salesStationIds: [], lines: [], rules: [] };
 
 export default function SalesPriceLists() {
   const location = useLocation();
@@ -124,6 +126,7 @@ function PriceListList() {
           { header: "ارز", fxOnly: true, render: (r) => r.currencyTitle, width: "100px", filterType: "string", filterValue: (r) => r.currencyTitle },
           { header: "مراکز فروش", render: (r) => r.centers, filterType: "string", filterValue: (r) => r.centers },
           { header: "انواع فروش", render: (r) => r.salesTypes, filterType: "string", filterValue: (r) => r.salesTypes },
+          { header: "ایستگاه‌های فروش", render: (r) => r.stations, filterType: "string", filterValue: (r) => r.stations },
           { header: "تعداد کالا", render: (r) => toFaDigits(String(r.lineCount)), width: "90px", filterType: "number", filterValue: (r) => r.lineCount },
           { header: "تعداد پله", render: (r) => toFaDigits(String(r.ruleCount)), width: "90px", filterType: "number", filterValue: (r) => r.ruleCount },
           { header: "استفاده‌شده", render: (r) => (r.used ? "بله" : "خیر"), width: "90px", filterType: "string", filterValue: (r) => (r.used ? "بله" : "خیر") },
@@ -148,6 +151,7 @@ function PriceListForm({ editId }: { editId?: number }) {
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
   const [centers, setCenters] = useState<Option[]>([]);
   const [types, setTypes] = useState<Option[]>([]);
+  const [stations, setStations] = useState<Option[]>([]);
   const [goods, setGoods] = useState<GoodsOption[]>([]);
   const [tab, setTab] = useState<Tab>("main");
   const [lineSearch, setLineSearch] = useState("");
@@ -162,10 +166,11 @@ function PriceListForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [c, sc, st, g] = await Promise.all([api.get("/currencies"), api.get("/sales-centers"), api.get("/sales-types"), fetchSalesLineItems<GoodsOption>()]);
+      const [c, sc, st, g, ss] = await Promise.all([api.get("/currencies"), api.get("/sales-centers"), api.get("/sales-types"), fetchSalesLineItems<GoodsOption>(), api.get("/sales-stations").catch(() => [])]);
       setCurrencies(c);
       setCenters((sc as Option[]).filter((x) => x.isActive !== false));
       setTypes(st);
+      setStations((ss as Option[]).filter((x) => x.isActive !== false));
       setGoods(g);
       if (!hasPersistedState(`${cacheKey}:form`) && editId) {
         const d = await api.get(`/sales-price-lists/${editId}`);
@@ -178,6 +183,7 @@ function PriceListForm({ editId }: { editId?: number }) {
           isActive: d.isActive,
           salesCenterIds: d.salesCenterIds,
           salesTypeIds: d.salesTypeIds,
+          salesStationIds: d.salesStationIds ?? [],
           lines: d.lines.map((l: any) => ({ goodsItemId: String(l.goodsItemId), price: String(l.price) })),
           rules: d.rules.map((r: any) => ({ goodsItemId: String(r.goodsItemId), minQuantity: String(r.minQuantity), effect: r.effect, value: String(r.value) })),
         });
@@ -220,7 +226,7 @@ function PriceListForm({ editId }: { editId?: number }) {
   function setRule(i: number, patch: Partial<RuleRow>) {
     setForm((f) => ({ ...f, rules: f.rules.map((r, k) => (k === i ? { ...r, ...patch } : r)) }));
   }
-  function toggleId(key: "salesCenterIds" | "salesTypeIds", id: number) {
+  function toggleId(key: "salesCenterIds" | "salesTypeIds" | "salesStationIds", id: number) {
     setForm((f) => ({ ...f, [key]: f[key].includes(id) ? f[key].filter((x) => x !== id) : [...f[key], id] }));
   }
 
@@ -230,8 +236,8 @@ function PriceListForm({ editId }: { editId?: number }) {
     if (!form.title.trim()) return setError("عنوان الزامی است");
     if (!form.currencyId) return setError("ارز الزامی است");
     if (!form.effectiveDate) return setError("تاریخ اجرا الزامی است");
-    if (form.salesCenterIds.length === 0) return setError("حداقل یک مرکز فروش انتخاب کنید");
-    if (form.salesTypeIds.length === 0) return setError("حداقل یک نوع فروش انتخاب کنید");
+    if ((form.salesCenterIds.length > 0) !== (form.salesTypeIds.length > 0)) return setError("مرکز فروش و نوع فروش باید با هم انتخاب شوند");
+    if (form.salesCenterIds.length === 0 && form.salesStationIds.length === 0) return setError("حداقل یک حوزه (مرکز و نوع فروش، یا ایستگاه فروش) انتخاب کنید");
     for (const [i, l] of form.lines.entries()) if (!l.goodsItemId) return setError(`کالای ردیف قیمت ${toFaDigits(String(i + 1))} انتخاب نشده است`);
     for (const [i, r] of form.rules.entries()) {
       if (!r.goodsItemId) return setError(`کالای پلهٔ ${toFaDigits(String(i + 1))} انتخاب نشده است`);
@@ -246,6 +252,7 @@ function PriceListForm({ editId }: { editId?: number }) {
       isActive: form.isActive,
       salesCenterIds: form.salesCenterIds,
       salesTypeIds: form.salesTypeIds,
+      salesStationIds: form.salesStationIds,
       lines: form.lines.map((l) => ({ goodsItemId: Number(l.goodsItemId), price: Number(l.price) || 0 })),
       rules: form.rules.map((r) => ({ goodsItemId: Number(r.goodsItemId), minQuantity: Number(r.minQuantity), effect: r.effect, value: Number(r.value) })),
     };
@@ -306,7 +313,7 @@ function PriceListForm({ editId }: { editId?: number }) {
         <div className="party-tabs">
           {([
             ["main", "مشخصات"],
-            ["scope", `مراکز و انواع فروش (${toFaDigits(String(form.salesCenterIds.length))}×${toFaDigits(String(form.salesTypeIds.length))})`],
+            ["scope", `حوزه‌ها (${toFaDigits(String(form.salesCenterIds.length))}×${toFaDigits(String(form.salesTypeIds.length))}${form.salesStationIds.length ? ` + ${toFaDigits(String(form.salesStationIds.length))} ایستگاه` : ""})`],
             ["lines", `قیمت پایه (${toFaDigits(String(form.lines.length))})`],
             ["rules", `پله‌های مقدار (${toFaDigits(String(form.rules.length))})`],
           ] as [Tab, string][]).map(([k, label]) => (
@@ -355,10 +362,11 @@ function PriceListForm({ editId }: { editId?: number }) {
             {([
               ["salesCenterIds", "مراکز فروش", centers],
               ["salesTypeIds", "انواع فروش", types],
-            ] as ["salesCenterIds" | "salesTypeIds", string, Option[]][]).map(([key, title, options]) => (
+              ["salesStationIds", "ایستگاه‌های فروش (فروش فروشگاهی)", stations],
+            ] as ["salesCenterIds" | "salesTypeIds" | "salesStationIds", string, Option[]][]).map(([key, title, options]) => (
               <div key={key}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <strong>{title}<RequiredMark /></strong>
+                  <strong>{title}{key !== "salesStationIds" && <RequiredMark />}</strong>
                   <button type="button" className="link-btn" onClick={() => setForm((f) => ({ ...f, [key]: options.map((o) => o.id) }))}>انتخاب همه</button>
                   <button type="button" className="link-btn" disabled={used} onClick={() => setForm((f) => ({ ...f, [key]: [] }))}>هیچ‌کدام</button>
                 </div>
@@ -377,7 +385,7 @@ function PriceListForm({ editId }: { editId?: number }) {
               </div>
             ))}
             <p className="full" style={{ fontSize: 12, opacity: 0.75, gridColumn: "1 / -1" }}>
-              اعلامیه برای همه‌ی ترکیب‌های «مرکز فروش انتخاب‌شده × نوع فروش انتخاب‌شده» معتبر است. هر ترکیب در یک تاریخ اجرا و ارز فقط یک اعلامیه می‌تواند داشته باشد.
+              اعلامیه برای همه‌ی ترکیب‌های «مرکز فروش انتخاب‌شده × نوع فروش انتخاب‌شده» (پیش‌فاکتور) و برای ایستگاه‌های فروشِ انتخاب‌شده (فروش فروشگاهی) معتبر است؛ حداقل یکی از دو حوزه لازم است. فی فروش فروشگاهی فقط از اعلامیه‌ای خوانده می‌شود که ایستگاه در حوزه‌ی آن باشد. هر ترکیب (یا ایستگاه) در یک تاریخ اجرا و ارز فقط یک اعلامیه می‌تواند داشته باشد.
             </p>
           </div>
         )}

@@ -496,6 +496,17 @@ export const REGISTRY: ModuleDef[] = [
     ],
   },
   {
+    key: "store-sales",
+    title: "فروش فروشگاهی",
+    subModules: [
+      {
+        key: "config",
+        title: "تنظیمات",
+        forms: [{ key: "sales-stations", title: "ایستگاه فروش", baseActions: CRUD }],
+      },
+    ],
+  },
+  {
     key: "sales",
     title: "فروش",
     subModules: [

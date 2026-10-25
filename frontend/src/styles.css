@@ -91,6 +91,7 @@
   --nc-mod-payroll: #ff8fb8;
   --nc-mod-attendance: #8ea2ff;
   --nc-mod-workflow: #5eead4;
+  --nc-mod-store: #ff9f6b;
   --nc-sub-ops: #ffd23f;
   --nc-sub-structure: #5ab8ff;
   --nc-sub-report: #ff7fb8;
@@ -171,6 +172,7 @@
   --nc-mod-payroll: #ff8fb8;
   --nc-mod-attendance: #8ea2ff;
   --nc-mod-workflow: #5eead4;
+  --nc-mod-store: #ff9f6b;
   --nc-sub-ops: #ffd23f;
   --nc-sub-structure: #5ab8ff;
   --nc-sub-report: #ff7fb8;
@@ -325,6 +327,7 @@
   --nc-mod-payroll: #ff8fb8;
   --nc-mod-attendance: #8ea2ff;
   --nc-mod-workflow: #5eead4;
+  --nc-mod-store: #ff9f6b;
   --nc-sub-ops: #ffd23f;
   --nc-sub-structure: #5ab8ff;
   --nc-sub-report: #ff7fb8;
@@ -550,6 +553,7 @@ body {
 .module-icon.mod-ic-banknote { color: var(--nc-mod-payroll); }
 .module-icon.mod-ic-clock { color: var(--nc-mod-attendance); }
 .module-icon.mod-ic-inbox { color: var(--nc-mod-workflow); }
+.module-icon.mod-ic-store { color: var(--nc-mod-store); }
 
 .nav-submodule { margin: 4px 0 8px 0; padding-right: 8px; margin-right: 10px; }
 .submodule-title {
@@ -1929,6 +1933,7 @@ html[data-fx="off"] .fx-only { display: none !important; }
   --ico-payroll: #ff8fb8;
   --ico-attendance: #8ea2ff;
   --ico-workflow: #2dd4bf;
+  --ico-store: #ff9f6b;
 }
 [data-theme="light"], [data-theme="blue"] {
   --ico-settings: #6d3fd1;
@@ -1944,6 +1949,7 @@ html[data-fx="off"] .fx-only { display: none !important; }
   --ico-payroll: #c2306a;
   --ico-attendance: #4a52d6;
   --ico-workflow: #0f8f86;
+  --ico-store: #c2410c;
 }
 .module-icon.mod-ic-gear { --ico: var(--ico-settings); }
 .module-icon.mod-ic-database { --ico: var(--ico-info); }
@@ -1958,6 +1964,7 @@ html[data-fx="off"] .fx-only { display: none !important; }
 .module-icon.mod-ic-banknote { --ico: var(--ico-payroll); }
 .module-icon.mod-ic-clock { --ico: var(--ico-attendance); }
 .module-icon.mod-ic-inbox { --ico: var(--ico-workflow); }
+.module-icon.mod-ic-store { --ico: var(--ico-store); }
 .module-title .module-icon, .module-icon-btn .module-icon, .nav-flyout-header .module-icon {
   width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0; display: inline-grid; place-items: center;
   color: var(--ico, var(--primary));
@@ -2038,6 +2045,7 @@ html[data-fx="off"] .fx-only { display: none !important; }
   --nc-mod-hr: var(--icon-mono);
   --nc-mod-payroll: var(--icon-mono);
   --nc-mod-attendance: var(--icon-mono);
+  --nc-mod-store: var(--icon-mono);
   --nc-sub-ops: var(--icon-mono);
   --nc-sub-structure: var(--icon-mono);
   --nc-sub-report: var(--icon-mono);
