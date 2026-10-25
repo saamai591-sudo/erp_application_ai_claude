@@ -32,15 +32,30 @@ function applyMask(raw: string, maxHourDigits: number, deleting: boolean): strin
   let hours: string;
   let minutes: string | null = null;
   if (colon >= 0) {
-    hours = t.slice(0, colon).replace(/\D/g, "").slice(0, maxHourDigits);
+    hours = stripLeadingZeros(t.slice(0, colon).replace(/\D/g, "").slice(0, maxHourDigits));
     minutes = t.slice(colon + 1).replace(/\D/g, "").slice(0, 2);
   } else {
     const d = t.replace(/\D/g, "");
+    // ساعتِ سه‌رقمی صفرِ پیشین ندارد: رقم اولِ صفر یعنی ساعت دو‌رقمی («0830» ← «08:30»، «0000» ← «00:00»)
+    if (maxHourDigits > 2 && d.startsWith("0")) {
+      if (d.length < 2 || (d.length === 2 && deleting)) return d;
+      return finishMinutes(d.slice(0, 2), d.slice(2, 4));
+    }
     // «:» خودکار: بعد از رقم آخرِ ساعت (فقط هنگام تایپ، نه حذف)
     if (d.length < maxHourDigits || (d.length === maxHourDigits && deleting)) return d;
     hours = d.slice(0, maxHourDigits);
     minutes = d.slice(maxHourDigits, maxHourDigits + 2);
   }
+  return finishMinutes(hours, minutes);
+}
+
+/** صفرهای پیشینِ بیش از دو رقم حذف می‌شود («000» ← «00»، «007» ← «07») */
+function stripLeadingZeros(h: string): string {
+  return h.replace(/^0+(?=\d{2})/, "");
+}
+
+function finishMinutes(hours: string, minutesIn: string | null): string {
+  let minutes = minutesIn;
   // رقم اول دقیقه بزرگ‌تر از ۵ ← صفر پیش می‌گیرد
   if (minutes && minutes.length === 1 && Number(minutes) > 5) minutes = `0${minutes}`;
   if (minutes && minutes.length === 2 && Number(minutes[0]) > 5) minutes = `0${minutes[0]}`;
@@ -51,7 +66,7 @@ function applyMask(raw: string, maxHourDigits: number, deleting: boolean): strin
 function normalize(text: string, maxHourDigits: number): string {
   const t = toLatin(text);
   const colon = t.indexOf(":");
-  const hoursRaw = (colon >= 0 ? t.slice(0, colon) : t).replace(/\D/g, "").slice(0, maxHourDigits);
+  const hoursRaw = stripLeadingZeros((colon >= 0 ? t.slice(0, colon) : t).replace(/\D/g, "").slice(0, maxHourDigits));
   const minutesRaw = colon >= 0 ? t.slice(colon + 1).replace(/\D/g, "").slice(0, 2) : "";
   if (!hoursRaw && !minutesRaw) return "";
   const minutes = minutesRaw.length === 1 ? `0${minutesRaw}` : minutesRaw.padEnd(2, "0");
