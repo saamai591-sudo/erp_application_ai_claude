@@ -64,11 +64,13 @@ async function main() {
     { title: "وصول و برگشت چک پرداختنی", systemKey: "CHEQUE_CLEARING_PAYABLE" },
     { title: "خلاصه تنخواه", systemKey: "PETTY_CASH_SUMMARY" },
   ];
+  // فقط چهار نوع پایه در فهرست «انواع سند» دیده می‌شوند؛ بقیه‌ی سیستمی‌ها مخفی‌اند (فقط صدور سند از آن‌ها استفاده می‌کند)
+  const VISIBLE_KEYS = new Set(["OPERATIONAL", "OPENING", "CLOSING_ACCOUNTS", "CLOSING"]);
   for (const dt of documentTypes) {
     const existing = await prisma.documentType.findUnique({ where: { systemKey: dt.systemKey } });
     if (existing) continue;
     const last = await prisma.documentType.findFirst({ orderBy: { code: "desc" } });
-    await prisma.documentType.create({ data: { ...dt, code: (last?.code ?? 0) + 1, isSystem: true } });
+    await prisma.documentType.create({ data: { ...dt, code: (last?.code ?? 0) + 1, isSystem: true, isHidden: !VISIBLE_KEYS.has(dt.systemKey) } });
   }
 
   // درخت کامل دسترسی‌های سیستم (Module > SubModule > Form > Action) اکنون فقط در یک‌جا تعریف می‌شود:

@@ -32,7 +32,7 @@ function TypeList() {
   const navigate = useNavigate();
 
   async function reload() {
-    api.get("/document-types").then(setItems).catch((e) => setError(e.message));
+    api.get("/document-types?visibleOnly=true").then(setItems).catch((e) => setError(e.message));
   }
   useEffect(() => {
     if (!hasPersistedState(cacheKey)) reload();
