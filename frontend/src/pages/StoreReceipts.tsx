@@ -117,7 +117,14 @@ function ReceiptForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     const sid = form.saleId || "";
-    api.get(`/store-receipts/payable-sales${editId && sid ? `?saleId=${sid}` : ""}`).then(setSales).catch(() => {});
+    api.get(`/store-receipts/payable-sales${editId && sid ? `?saleId=${sid}` : ""}`)
+      .then((rows: SaleOpt[]) => {
+        setSales(rows);
+        // بازشدن از لینکِ کارتِ دریافتِ فرم فروش (?saleId=): فروش انتخاب و مبلغ/تاریخ از همان پیش‌فرض می‌شود
+        const pre = !editId && qs.get("saleId") ? rows.find((x) => String(x.id) === qs.get("saleId")) : undefined;
+        if (pre && !hasPersistedState(cacheKey)) setForm((f) => ({ ...f, saleId: String(pre.id), amount: String(pre.remaining), date: f.date < pre.date ? pre.date : f.date }));
+      })
+      .catch(() => {});
     if (!editId) return;
     api.get(`/store-receipts/${editId}`).then((r: RecRow) => {
       setMeta({ number: r.number, updatedAt: r.updatedAt, cashBoxTitle: r.cashBoxTitle });

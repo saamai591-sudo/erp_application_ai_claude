@@ -19,6 +19,7 @@ import { showError, showToast } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { usePermissions } from "../lib/usePermissions";
+import { useTabs } from "../lib/TabsContext";
 import { AmountInput } from "../components/AmountInput";
 import { localTodayIso } from "../lib/formatDate";
 
@@ -198,6 +199,7 @@ function SaleForm({ editId }: { editId?: number }) {
   const [payInfo, setPayInfo] = useState<{ payable: number; paid: number; remaining: number; status: "UNPAID" | "PARTIAL" | "PAID" }>({ payable: 0, paid: 0, remaining: 0, status: "UNPAID" });
   const [newRec, setNewRec] = useState({ date: localTodayIso(), amount: "", description: "" });
   const { hasPermission } = usePermissions();
+  const { openTab } = useTabs();
   const [stations, setStations] = useState<StationOpt[]>([]);
   const [customers, setCustomers] = useState<CustomerOpt[]>([]);
   const [sell, setSell] = useState<SellableResponse | null>(null);
@@ -532,7 +534,12 @@ function SaleForm({ editId }: { editId?: number }) {
         )}
         {editId && (
           <div className="card" style={{ marginTop: 16, padding: 14 }}>
-            <h4 style={{ margin: "0 0 8px" }}>دریافت (نقد)</h4>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+              <h4 style={{ margin: 0 }}>دریافت (نقد)</h4>
+              {hasPermission("store-sales.operations.store-receipts.create") && payInfo.remaining > 0 && (
+                <button type="button" className="link-btn" onClick={() => openTab(`/store-receipts/new?saleId=${editId}`)}>دریافت جدید در فرم کامل ←</button>
+              )}
+            </div>
             <p style={{ margin: "0 0 8px", fontSize: 13 }}>
               قابل پرداخت: <b>{formatAmountFa(payInfo.payable)}</b> — دریافت‌شده: <b>{formatAmountFa(payInfo.paid)}</b> — باقی‌مانده: <b>{formatAmountFa(payInfo.remaining)}</b> — وضعیت: <span className="badge">{PAYMENT_FA[payInfo.status]}</span>
             </p>
@@ -544,7 +551,7 @@ function SaleForm({ editId }: { editId?: number }) {
                 {receipts.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", opacity: 0.7 }}>دریافتی ثبت نشده است</td></tr>}
                 {receipts.map((r) => (
                   <tr key={r.id}>
-                    <td>{toFaDigits(String(r.number))}</td>
+                    <td>{hasPermission("store-sales.operations.store-receipts.view") ? <button type="button" className="link-btn" onClick={() => openTab(`/store-receipts/${r.id}/edit`)}>{toFaDigits(String(r.number))}</button> : toFaDigits(String(r.number))}</td>
                     <td>{formatJalaliDate(r.date)}</td>
                     <td>{formatAmountFa(r.amount)}</td>
                     <td>{r.description}</td>
