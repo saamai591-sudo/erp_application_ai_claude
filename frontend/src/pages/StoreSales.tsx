@@ -20,6 +20,7 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { usePermissions } from "../lib/usePermissions";
 import { useTabs } from "../lib/TabsContext";
+import { Modal } from "../components/Modal";
 import { AmountInput } from "../components/AmountInput";
 import { localTodayIso } from "../lib/formatDate";
 
@@ -200,6 +201,8 @@ function SaleForm({ editId }: { editId?: number }) {
   const [newRec, setNewRec] = useState({ date: localTodayIso(), amount: "", description: "" });
   const { hasPermission } = usePermissions();
   const { openTab } = useTabs();
+  const [confirmPay, setConfirmPay] = useState(false);
+  const [paying, setPaying] = useState(false);
   const [stations, setStations] = useState<StationOpt[]>([]);
   const [customers, setCustomers] = useState<CustomerOpt[]>([]);
   const [sell, setSell] = useState<SellableResponse | null>(null);
@@ -361,6 +364,23 @@ function SaleForm({ editId }: { editId?: number }) {
       setError((err as ApiError).message);
     }
   }
+  /** دریافت نقدِ تمام باقی‌مانده با یک ضربه (کارت بزرگِ لمسی): دریافتِ امروز (یا تاریخ فروش اگر امروز قبل از آن باشد) به مبلغ باقی‌مانده */
+  async function payRemaining() {
+    if (!editId || paying) return;
+    setPaying(true);
+    setError(null);
+    try {
+      const today = localTodayIso();
+      await api.post("/store-receipts", { saleId: editId, date: today < header.date ? header.date : today, amount: payInfo.remaining, description: "" });
+      setConfirmPay(false);
+      await reloadSale();
+    } catch (err) {
+      setConfirmPay(false);
+      setError((err as ApiError).message);
+    } finally {
+      setPaying(false);
+    }
+  }
   async function removeReceipt(r: ReceiptRow) {
     try {
       await api.del(`/store-receipts/${r.id}`);
@@ -426,6 +446,37 @@ function SaleForm({ editId }: { editId?: number }) {
           </div>
         </fieldset>
 
+        {canReceive && payInfo.remaining > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14, margin: "14px 0" }}>
+            <button
+              type="button"
+              onClick={() => setConfirmPay(true)}
+              style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--success, #1f9d55)", background: "var(--success-soft, #e6f6ec)", color: "var(--success, #17803f)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}
+            >
+              <span style={{ fontSize: 24, fontWeight: 800 }}>دریافت نقد — تسویه</span>
+              <span style={{ fontSize: 20, fontWeight: 700 }}>{formatAmountFa(payInfo.remaining)}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => openTab(`/store-receipts/new?saleId=${editId}`)}
+              style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--accent, #3b6ea8)", background: "var(--surface, #fff)", color: "var(--accent, #3b6ea8)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}
+            >
+              <span style={{ fontSize: 24, fontWeight: 800 }}>رسید دریافت با مبلغ دلخواه</span>
+              <span style={{ fontSize: 15, opacity: 0.8 }}>باز کردن فرم دریافت این فروش</span>
+            </button>
+          </div>
+        )}
+        {confirmPay && (
+          <Modal title="تایید دریافت نقد" onClose={() => setConfirmPay(false)}>
+            <p style={{ fontSize: 20, textAlign: "center", margin: "12px 0 20px" }}>
+              مبلغ <b>{formatAmountFa(payInfo.remaining)}</b> نقد دریافت شد؟
+            </p>
+            <div className="actions" style={{ gap: 14 }}>
+              <button type="button" className="btn" style={{ flex: 1, minHeight: 64, fontSize: 20 }} disabled={paying} onClick={payRemaining}>بله، ثبت دریافت</button>
+              <button type="button" className="btn secondary" style={{ flex: 1, minHeight: 64, fontSize: 20 }} onClick={() => setConfirmPay(false)}>انصراف</button>
+            </div>
+          </Modal>
+        )}
         {!ready && <p style={{ opacity: 0.75, margin: "14px 0" }}>ابتدا تاریخ و ایستگاه فروش را انتخاب کنید.</p>}
         {ready && sellError && <div className="alert warn" style={{ marginTop: 10 }}>{sellError}</div>}
 
