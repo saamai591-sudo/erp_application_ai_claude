@@ -654,6 +654,7 @@ export const REGISTRY: ModuleDef[] = [
           { key: "attendance-worksheet", title: "کارکرد روزانه", baseActions: ["view"] },
           { key: "attendance-factor-results", title: "نتایج عوامل تردد", baseActions: ["view"] },
           { key: "attendance-review", title: "مرور کارکرد", baseActions: ["view"] },
+          { key: "attendance-leave-balance-report", title: "مانده‌ی مرخصی کارمندان", baseActions: ["view"] },
         ],
       },
     ],

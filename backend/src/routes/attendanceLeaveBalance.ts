@@ -15,7 +15,9 @@ import {
   createEntry,
   entitlementShape,
   entryShape,
+  balanceReport,
   ledgerOf,
+  todayNum,
   policyShape,
 } from "../services/attendanceLeaveBalanceService";
 
@@ -23,12 +25,23 @@ import {
 
 const F_ENTRY = findFormPrefix("attendance-leave-balance-entries");
 const F_RULE = findFormPrefix("attendance-leave-entitlements");
+const F_REPORT = findFormPrefix("attendance-leave-balance-report");
 const router = Router();
 const uid = (req: any) => (req as AuthedRequest).user?.id ?? null;
 const fail = (res: any, e: any, fallback: string) => {
   if (e?.code === "P2002") return res.status(400).json({ error: "رکوردی با همین مشخصات از قبل ثبت شده است" });
   return res.status(400).json({ error: e instanceof AttendanceError ? e.message : e?.message || fallback });
 };
+
+// ── گزارش مانده‌ی همه‌ی کارمندان (تا پایان روز date، پیش‌فرض امروز) ──
+router.get("/attendance-leave-balance-report", can(`${F_REPORT}.view`), async (req, res) => {
+  try {
+    const date = typeof req.query.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date) ? Math.floor(new Date(`${req.query.date}T00:00:00Z`).getTime() / 86400000) : todayNum();
+    res.json(await balanceReport(date, req.query.leaveTypeId ? Number(req.query.leaveTypeId) : undefined));
+  } catch (e) {
+    fail(res, e, "خطا در تهیه‌ی گزارش مانده‌ی مرخصی");
+  }
+});
 
 // ── مانده‌ی دستی ──
 router.get("/attendance-leave-balance-entries", can(`${F_ENTRY}.view`), async (req, res) => {

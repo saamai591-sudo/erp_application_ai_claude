@@ -2,7 +2,7 @@ import { prisma } from "../lib/prisma";
 import { displayDate } from "../utils/dateDisplay";
 import { tehranDate } from "../jobs/time";
 import { AttendanceError, EMPLOYEE_SELECT, dayStr, parseDay, personName } from "./attendancePunchService";
-import { getPeriods, periodContains } from "./employmentStatusService";
+import { employeeIdsInPeriod, getPeriods, periodContains } from "./employmentStatusService";
 import { buildWorksheet } from "./attendanceWorksheetService";
 import { getCalendarMonth } from "./workCalendarService";
 import { leaveForDay, type ApprovedLeave } from "./attendanceLeaveService";
@@ -409,4 +409,72 @@ export async function typeHasBalanceData(leaveTypeId: number): Promise<boolean> 
     prisma.attendanceLeaveNegativePolicy.count({ where: { leaveTypeId } }),
   ]);
   return a + b + c > 0;
+}
+
+// ───────────────────────── گزارش مانده‌ی مرخصی همه‌ی کارمندان ─────────────────────────
+
+/**
+ * ردیف به‌ازای (کارمند × نوع مرخصیِ دارای مانده) برای کارمندانی که در تاریخ گزارش در دوره‌ی همکاری‌اند و برای آن نوع «داده‌ای» دارند
+ * (مانده‌ی دستی، درخواست غیررد، یا شیفتی که قاعده‌ی استحقاق دارد). مقادیر تا پایان روزِ گزارش و همان محاسبه‌ی computeLedger است.
+ */
+export async function balanceReport(asOfDay: number, leaveTypeId?: number) {
+  const types = await prisma.attendanceLeaveType.findMany({ where: { deductsBalance: true, ...(leaveTypeId ? { id: leaveTypeId } : {}) }, orderBy: { id: "asc" } });
+  if (types.length === 0) return { rows: [], asOf: isoOf(asOfDay) };
+  const asOf = fromNum(asOfDay);
+  const inCoop = new Set(await employeeIdsInPeriod(asOf, asOf));
+  if (inCoop.size === 0) return { rows: [], asOf: isoOf(asOfDay) };
+  const emps = await prisma.employee.findMany({ where: { id: { in: [...inCoop] } }, select: EMPLOYEE_SELECT, orderBy: { personnelCode: "asc" } });
+  const asgs = await prisma.attendanceShiftAssignment.findMany({ where: { employeeId: { in: [...inCoop] } }, select: { employeeId: true, shiftId: true } });
+  const shiftsOf = new Map<number, Set<number>>();
+  for (const a of asgs) (shiftsOf.get(a.employeeId) ?? shiftsOf.set(a.employeeId, new Set()).get(a.employeeId)!).add(a.shiftId);
+
+  const pairs: { emp: (typeof emps)[number]; type: (typeof types)[number] }[] = [];
+  for (const t of types) {
+    const [entries, reqs, rules] = await Promise.all([
+      prisma.attendanceLeaveBalanceEntry.findMany({ where: { leaveTypeId: t.id }, select: { employeeId: true }, distinct: ["employeeId"] }),
+      prisma.attendanceLeaveRequest.findMany({ where: { leaveTypeId: t.id, status: { in: ["PENDING", "APPROVED"] } }, select: { employeeId: true }, distinct: ["employeeId"] }),
+      prisma.attendanceLeaveEntitlement.findMany({ where: { leaveTypeId: t.id }, select: { shiftId: true }, distinct: ["shiftId"] }),
+    ]);
+    const hasData = new Set<number>([...entries.map((x) => x.employeeId), ...reqs.map((x) => x.employeeId)]);
+    const ruleShifts = new Set(rules.map((x) => x.shiftId));
+    for (const e of emps) {
+      if (hasData.has(e.id) || [...(shiftsOf.get(e.id) ?? [])].some((s) => ruleShifts.has(s))) pairs.push({ emp: e, type: t });
+    }
+  }
+  const rows: any[] = [];
+  const BATCH = 4;
+  for (let i = 0; i < pairs.length; i += BATCH) {
+    await Promise.all(
+      pairs.slice(i, i + BATCH).map(async ({ emp, type }) => {
+        const L = await computeLedger(emp.id, type.id, { untilDay: asOfDay });
+        let manual = 0, accrual = 0, consumed = 0;
+        for (const ev of L.events) {
+          if (ev.day > asOfDay) continue;
+          if (ev.kind === "MANUAL") manual += ev.delta;
+          else if (ev.kind === "ACCRUAL") accrual += ev.delta;
+          else consumed += -ev.delta;
+        }
+        const balance = manual + accrual - consumed;
+        rows.push({
+          id: `${emp.id}|${type.id}`,
+          employeeId: emp.id,
+          personnelCode: emp.personnelCode,
+          employeeName: personName(emp.party),
+          leaveTypeId: type.id,
+          leaveTypeTitle: type.title,
+          unit: L.unit,
+          manual,
+          accrual,
+          consumed,
+          balance,
+          manualText: fmtAmount(L.unit, manual),
+          accrualText: fmtAmount(L.unit, accrual),
+          consumedText: fmtAmount(L.unit, consumed),
+          balanceText: fmtAmount(L.unit, balance),
+        });
+      })
+    );
+  }
+  rows.sort((a, b) => (a.personnelCode < b.personnelCode ? -1 : a.personnelCode > b.personnelCode ? 1 : a.leaveTypeId - b.leaveTypeId));
+  return { rows, asOf: isoOf(asOfDay) };
 }

@@ -478,6 +478,7 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "attendance-worksheet", label: "کارکرد روزانه", list: "/attendance-worksheet", icon: "ledger", type: "report" },
           { key: "attendance-factor-results", label: "نتایج عوامل تردد", list: "/attendance-factor-results", icon: "ledger", type: "report" },
           { key: "attendance-review", label: "مرور کارکرد", list: "/attendance-review", icon: "ledger", type: "report" },
+          { key: "attendance-leave-balance-report", label: "مانده‌ی مرخصی کارمندان", list: "/attendance-leave-balance-report", icon: "ledger", type: "report" },
         ],
       },
     ],
