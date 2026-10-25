@@ -183,6 +183,7 @@ model FiscalPeriod {
   createdAt                 DateTime                   @default(now())
   accountClosings           AccountClosing[]
   storeSales                StoreSale[]
+  storeReceipts             StoreReceipt[]
   pettyCashPayments         PettyCashPayment[]
   pettyCashSummaries        PettyCashSummary[]
   chequeDeposits            ChequeDeposit[]
@@ -551,6 +552,7 @@ model CashBox {
   treasuryAccountSettings TreasuryAccountSetting[]
   treasuryOpeningLines TreasuryOpeningCashBox[]
   salesStations SalesStation[]
+  storeReceipts StoreReceipt[]
 }
 
 /// تعریف تنخواه (مدیریت خزانه › تنظیمات): کد تفصیلی توسط سرویس عمومی «ایجاد کد تفصیلی» (utils/coding.ts، نوع تفصیل ۵ «تنخواه») صادر می‌شود، نه ورودی کاربر.
@@ -6671,6 +6673,7 @@ model SalesStation {
   costCenter   CostCenter    @relation(fields: [costCenterId], references: [id])
   priceListScopes SalesPriceListStation[]
   storeSales      StoreSale[]
+  storeReceipts StoreReceipt[]
 }
 
 enum StoreSaleDeliveryStatus {
@@ -6699,6 +6702,7 @@ model StoreSale {
   station        SalesStation            @relation(fields: [stationId], references: [id])
   customer       Customer                @relation(fields: [customerId], references: [id])
   lines          StoreSaleLine[]
+  receipts       StoreReceipt[]
 
   @@unique([fiscalPeriodId, number])
   @@index([stationId, date])
@@ -6726,4 +6730,28 @@ model StoreSaleLine {
 
   @@index([saleId])
   @@index([goodsItemId])
+}
+
+/// دریافت فروشگاهی (فقط نقد): سند مستقلِ وابسته به یک فروش؛ بدون سند حسابداری. هر فروش چند دریافت می‌تواند داشته باشد و جمعشان از مبلغ قابل پرداخت فروش بیشتر نمی‌شود.
+model StoreReceipt {
+  id             Int          @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime     @db.Date
+  saleId         Int
+  /// کپی ایستگاه و صندوقِ آن در لحظه‌ی ثبت
+  stationId      Int
+  cashBoxId      Int
+  amount         Decimal      @db.Decimal(36, 10)
+  description    String?
+  createdById    Int?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  fiscalPeriod   FiscalPeriod @relation(fields: [fiscalPeriodId], references: [id])
+  sale           StoreSale    @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  station        SalesStation @relation(fields: [stationId], references: [id])
+  cashBox        CashBox      @relation(fields: [cashBoxId], references: [id])
+
+  @@unique([fiscalPeriodId, number])
+  @@index([saleId])
 }

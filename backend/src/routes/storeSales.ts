@@ -4,6 +4,7 @@ import { can, userHasAction } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import type { AuthedRequest } from "../middleware/auth";
 import { assertRecordNotStale } from "../utils/concurrency";
+import { paidBySale, receiptShape } from "../services/storeReceiptService";
 import { StoreSaleError, createStoreSale, deleteStoreSale, saleShape, sellableItems, updateStoreSale } from "../services/storeSaleService";
 
 // فروش فروشگاهی › عملیات › «فروش فروشگاهی»؛ منطق فقط در services/storeSaleService.ts.
@@ -36,13 +37,16 @@ router.get("/store-sales", can(`${FORM}.view`), async (req, res) => {
   const where: any = {};
   if (req.query.stationId) where.stationId = Number(req.query.stationId);
   const rows = await prisma.storeSale.findMany({ where, include: INCLUDE, orderBy: { id: "desc" }, take: 5000 });
-  res.json(rows.map((s) => saleShape(s)));
+  const paid = await paidBySale(rows.map((s) => s.id));
+  res.json(rows.map((s) => saleShape(s, false, paid.get(s.id) ?? 0)));
 });
 
 router.get("/store-sales/:id", can(`${FORM}.view`), async (req, res) => {
   const s = await prisma.storeSale.findUnique({ where: { id: Number(req.params.id) }, include: DETAIL_INCLUDE });
   if (!s) return res.status(404).json({ error: "فروش یافت نشد" });
-  res.json(saleShape(s, true));
+  const receipts = await prisma.storeReceipt.findMany({ where: { saleId: s.id }, include: { station: { select: { title: true } }, cashBox: { select: { title: true } } }, orderBy: { id: "asc" } });
+  const paid = receipts.reduce((n, r) => n + Number(r.amount), 0);
+  res.json({ ...saleShape(s, true, paid), receipts: receipts.map((r) => receiptShape(r)) });
 });
 
 router.post("/store-sales", can(`${FORM}.create`), async (req, res) => {

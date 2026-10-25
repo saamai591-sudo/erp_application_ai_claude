@@ -18,6 +18,9 @@ import { api, ApiError } from "../lib/api";
 import { showError, showToast } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { usePermissions } from "../lib/usePermissions";
+import { AmountInput } from "../components/AmountInput";
+import { localTodayIso } from "../lib/formatDate";
 
 // فروش فروشگاهی › عملیات › «فروش فروشگاهی»: اول تاریخ و ایستگاه انتخاب می‌شود؛ ردیف‌ها با بارکدخوان (فیلد بارکد کالا) یا جست‌وجو اضافه می‌شوند، مقدار پیش‌فرض ۱ و قابل‌تغییر است.
 // فی از «اعلامیه قیمت فروش» با حوزه‌ی همان ایستگاه خوانده می‌شود (پله‌ی مقدار هم)؛ کالای بدون فی در آن اعلامیه اصلاً قابل انتخاب نیست. فی فقط با مجوز «تغییر فی» قابل تغییر است.
@@ -72,6 +75,16 @@ interface ListRow {
   totalVat: number;
   payable: number;
   deliveryStatus: "NOT_DELIVERED" | "DELIVERED";
+  paid: number;
+  remaining: number;
+  paymentStatus: "UNPAID" | "PARTIAL" | "PAID";
+}
+interface ReceiptRow {
+  id: number;
+  number: number;
+  date: string;
+  amount: number;
+  description: string;
 }
 interface DetailLine {
   goodsItemId: number;
@@ -86,6 +99,7 @@ interface DetailLine {
   description: string;
 }
 interface Detail extends ListRow {
+  receipts: ReceiptRow[];
   stationId: number;
   customerId: number;
   description: string;
@@ -106,6 +120,7 @@ interface Row {
 }
 
 const DELIVERY_FA = { NOT_DELIVERED: "تحویل‌نشده", DELIVERED: "تحویل‌شده" } as const;
+const PAYMENT_FA = { UNPAID: "پرداخت‌نشده", PARTIAL: "جزئی", PAID: "تسویه" } as const;
 const customerTitleOf = (c: CustomerOpt) => c.party.detailTitle || (c.party.category === "LEGAL" ? c.party.name || "" : `${c.party.firstName || ""} ${c.party.lastName || ""}`.trim());
 const roundTo = (v: number, dp: number) => Math.round(v * 10 ** dp) / 10 ** dp;
 const qtyOf = (r: Row) => Number(r.quantity) || 0;
@@ -159,6 +174,9 @@ function SaleList() {
           { header: "مبلغ", ...n((r) => r.totalAmount), width: "120px" },
           { header: "ارزش افزوده", ...n((r) => r.totalVat), width: "120px" },
           { header: "مبلغ قابل پرداخت", ...n((r) => r.payable), width: "140px" },
+          { header: "دریافت‌شده", ...n((r) => r.paid), width: "120px" },
+          { header: "باقی‌مانده", ...n((r) => r.remaining), width: "120px" },
+          { header: "وضعیت پرداخت", ...s((r) => PAYMENT_FA[r.paymentStatus]), width: "110px" },
           { header: "وضعیت تحویل", ...s((r) => DELIVERY_FA[r.deliveryStatus]), width: "110px" },
         ]}
         rows={items}
@@ -176,6 +194,10 @@ function SaleForm({ editId }: { editId?: number }) {
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", stationId: "", customerId: "", description: "" });
   const [rows, setRows] = usePersistedState<Row[]>(`${cacheKey}:rows`, []);
   const [meta, setMeta] = useState<{ number: number; deliveryStatus: "NOT_DELIVERED" | "DELIVERED"; updatedAt?: string } | null>(null);
+  const [receipts, setReceipts] = useState<ReceiptRow[]>([]);
+  const [payInfo, setPayInfo] = useState<{ payable: number; paid: number; remaining: number; status: "UNPAID" | "PARTIAL" | "PAID" }>({ payable: 0, paid: 0, remaining: 0, status: "UNPAID" });
+  const [newRec, setNewRec] = useState({ date: localTodayIso(), amount: "", description: "" });
+  const { hasPermission } = usePermissions();
   const [stations, setStations] = useState<StationOpt[]>([]);
   const [customers, setCustomers] = useState<CustomerOpt[]>([]);
   const [sell, setSell] = useState<SellableResponse | null>(null);
@@ -195,6 +217,9 @@ function SaleForm({ editId }: { editId?: number }) {
       if (editId) {
         const d: Detail = await api.get(`/store-sales/${editId}`);
         setMeta({ number: d.number, deliveryStatus: d.deliveryStatus, updatedAt: d.updatedAt });
+        setReceipts(d.receipts ?? []);
+        setPayInfo({ payable: d.payable, paid: d.paid, remaining: d.remaining, status: d.paymentStatus });
+        setNewRec((x) => ({ ...x, date: localTodayIso() < d.date ? d.date : x.date, amount: d.remaining > 0 ? String(d.remaining) : "" }));
         if (!hasPersistedState(`${cacheKey}:header`)) {
           setHeader({ date: d.date, stationId: String(d.stationId), customerId: String(d.customerId), description: d.description });
           setRows(d.lines.map((l) => ({ goodsItemId: l.goodsItemId, code: l.goodsItemCode, title: l.goodsItemTitle, unitTitle: l.unitTitle, quantity: String(l.quantity), priceOverride: "", stored: { unitPrice: l.unitPrice, vatAmount: l.vatAmount }, description: l.description })));
@@ -235,7 +260,11 @@ function SaleForm({ editId }: { editId?: number }) {
   const dp = sell?.decimalPlaces ?? 0;
   const station = stations.find((s) => String(s.id) === header.stationId);
   const customer = customers.find((c) => String(c.id) === header.customerId);
-  const locked = !!editId && meta?.deliveryStatus === "DELIVERED";
+  const delivered = !!editId && meta?.deliveryStatus === "DELIVERED";
+  const hasReceipts = !!editId && receipts.length > 0;
+  const locked = delivered || hasReceipts;
+  const canReceive = !!editId && hasPermission("store-sales.operations.store-receipts.create");
+  const canDeleteReceipt = hasPermission("store-sales.operations.store-receipts.delete");
   const canChangePrice = !!sell?.canChangePrice;
 
   /** فی ردیف: دستی (اگر مجاز و وارد شده) وگرنه فی اعلامیه با پله‌ی مقدار (آینه‌ی سرور؛ مرجع نهایی سرور است) */
@@ -299,6 +328,9 @@ function SaleForm({ editId }: { editId?: number }) {
         flash();
         const d: Detail = await api.get(`/store-sales/${editId}`);
         setMeta({ number: d.number, deliveryStatus: d.deliveryStatus, updatedAt: d.updatedAt });
+        setReceipts(d.receipts ?? []);
+        setPayInfo({ payable: d.payable, paid: d.paid, remaining: d.remaining, status: d.paymentStatus });
+        setNewRec((x) => ({ ...x, date: localTodayIso() < d.date ? d.date : x.date, amount: d.remaining > 0 ? String(d.remaining) : "" }));
       } else {
         const created = await api.post("/store-sales", body);
         flash();
@@ -306,6 +338,33 @@ function SaleForm({ editId }: { editId?: number }) {
       }
     } catch (err) {
       setError((err as ApiError).message);
+    }
+  }
+
+  async function reloadSale() {
+    const d: Detail = await api.get(`/store-sales/${editId}`);
+    setMeta({ number: d.number, deliveryStatus: d.deliveryStatus, updatedAt: d.updatedAt });
+    setReceipts(d.receipts ?? []);
+    setPayInfo({ payable: d.payable, paid: d.paid, remaining: d.remaining, status: d.paymentStatus });
+    setNewRec((x) => ({ ...x, amount: d.remaining > 0 ? String(d.remaining) : "" }));
+  }
+  async function addReceipt() {
+    setError(null);
+    if (!(Number(newRec.amount) > 0)) return setError("مبلغ دریافت باید عددی بزرگ‌تر از صفر باشد");
+    try {
+      await api.post("/store-receipts", { saleId: editId, date: newRec.date, amount: Number(newRec.amount), description: newRec.description });
+      setNewRec((x) => ({ ...x, description: "" }));
+      await reloadSale();
+    } catch (err) {
+      setError((err as ApiError).message);
+    }
+  }
+  async function removeReceipt(r: ReceiptRow) {
+    try {
+      await api.del(`/store-receipts/${r.id}`);
+      await reloadSale();
+    } catch (err) {
+      showError((err as ApiError).message);
     }
   }
 
@@ -325,7 +384,8 @@ function SaleForm({ editId }: { editId?: number }) {
     <FormPage title={editId ? `فروش فروشگاهی شماره ${toFaDigits(String(meta?.number ?? ""))}` : "فروش فروشگاهی جدید"} formId="store-sale-form" closePath="/store-sales" newPath="/store-sales/new" onDelete={editId && !locked ? handleDelete : undefined} saveDisabled={locked}>
       <form id="store-sale-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
-        {locked && <div className="alert warn">این فروش تحویل شده است و قابل ویرایش یا حذف نیست.</div>}
+        {delivered && <div className="alert warn">این فروش تحویل شده است و قابل ویرایش یا حذف نیست.</div>}
+        {!delivered && hasReceipts && <div className="alert warn">برای این فروش دریافت ثبت شده است؛ برای ویرایش یا حذف فروش ابتدا دریافت‌ها را حذف کنید.</div>}
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="form-grid">
             <div className="form-field">
@@ -469,6 +529,39 @@ function SaleForm({ editId }: { editId?: number }) {
               </div>
             </div>
           </>
+        )}
+        {editId && (
+          <div className="card" style={{ marginTop: 16, padding: 14 }}>
+            <h4 style={{ margin: "0 0 8px" }}>دریافت (نقد)</h4>
+            <p style={{ margin: "0 0 8px", fontSize: 13 }}>
+              قابل پرداخت: <b>{formatAmountFa(payInfo.payable)}</b> — دریافت‌شده: <b>{formatAmountFa(payInfo.paid)}</b> — باقی‌مانده: <b>{formatAmountFa(payInfo.remaining)}</b> — وضعیت: <span className="badge">{PAYMENT_FA[payInfo.status]}</span>
+            </p>
+            <table className="je-lines-table">
+              <thead>
+                <tr><th>شماره</th><th>تاریخ</th><th>مبلغ</th><th>شرح</th><th></th></tr>
+              </thead>
+              <tbody>
+                {receipts.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", opacity: 0.7 }}>دریافتی ثبت نشده است</td></tr>}
+                {receipts.map((r) => (
+                  <tr key={r.id}>
+                    <td>{toFaDigits(String(r.number))}</td>
+                    <td>{formatJalaliDate(r.date)}</td>
+                    <td>{formatAmountFa(r.amount)}</td>
+                    <td>{r.description}</td>
+                    <td>{canDeleteReceipt && <button type="button" className="btn danger" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => removeReceipt(r)}>حذف</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {canReceive && payInfo.remaining > 0 && (
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 10 }}>
+                <div className="form-field-inline"><label>تاریخ</label><JalaliDatePicker fiscalYear value={newRec.date} onChange={(v) => setNewRec({ ...newRec, date: v })} /></div>
+                <div className="form-field-inline"><label>مبلغ</label><div style={{ width: 150 }}><AmountInput value={newRec.amount} onChange={(v) => setNewRec({ ...newRec, amount: v })} allowDecimal /></div></div>
+                <div className="form-field-inline"><label>شرح</label><input value={newRec.description} onChange={(e) => setNewRec({ ...newRec, description: e.target.value })} /></div>
+                <button type="button" className="btn" onClick={addReceipt}>ثبت دریافت</button>
+              </div>
+            )}
+          </div>
         )}
       </form>
     </FormPage>

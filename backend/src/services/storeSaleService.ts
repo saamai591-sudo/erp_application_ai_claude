@@ -171,6 +171,7 @@ export async function assertSaleEditable(id: number) {
   const s = await prisma.storeSale.findUnique({ where: { id }, select: { id: true, deliveryStatus: true } });
   if (!s) throw new StoreSaleError("فروش یافت نشد");
   if (s.deliveryStatus === "DELIVERED") throw new StoreSaleError("این فروش تحویل شده است و قابل ویرایش یا حذف نیست");
+  if (await prisma.storeReceipt.findFirst({ where: { saleId: id }, select: { id: true } })) throw new StoreSaleError("برای این فروش دریافت ثبت شده است؛ ابتدا دریافت‌ها را حذف کنید");
   return s;
 }
 
@@ -254,7 +255,7 @@ export function saleTotals(lines: { amount: any; vatAmount: any }[]) {
   return { amount, vat, payable: amount + vat };
 }
 
-export function saleShape(s: any, withLines = false) {
+export function saleShape(s: any, withLines = false, paid = 0) {
   const totals = saleTotals(s.lines ?? []);
   const base = {
     id: s.id,
@@ -270,6 +271,9 @@ export function saleShape(s: any, withLines = false) {
     totalAmount: totals.amount,
     totalVat: totals.vat,
     payable: totals.payable,
+    paid,
+    remaining: Math.max(0, totals.payable - paid),
+    paymentStatus: (paid <= 1e-6 ? "UNPAID" : paid + 1e-6 >= totals.payable ? "PAID" : "PARTIAL") as "UNPAID" | "PARTIAL" | "PAID",
     updatedAt: s.updatedAt,
   };
   if (!withLines) return base;
