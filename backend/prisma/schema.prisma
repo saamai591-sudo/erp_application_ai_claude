@@ -736,8 +736,6 @@ model DocumentType {
   title          String         @unique
   isSystem       Boolean        @default(false)
   systemKey      String?        @unique
-  /// مخفی از فهرست «انواع سند» (نوع‌های سیستمیِ سندهای خودکار؛ فقط صدور سند از آن‌ها استفاده می‌کند)
-  isHidden       Boolean        @default(false)
   journalEntries JournalEntry[]
 }
 

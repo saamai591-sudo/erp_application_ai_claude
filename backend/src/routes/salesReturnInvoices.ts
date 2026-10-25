@@ -13,6 +13,7 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { can } from "../authz/guard";
 import { allocateDocumentNumber, assertEditAllowed, releaseDocumentNumber } from "../services/numberingPatternService";
 import { findFormPrefix } from "../authz/registry";
+import { findIssuingDocType } from "../services/documentTypeService";
 
 const FORM = findFormPrefix("sales-return-invoices");
 
@@ -595,7 +596,7 @@ router.post("/sales-return-invoices/:id/issue-journal-entry", can(`${FORM}.issue
       });
     }
 
-    const docType = await prisma.documentType.findFirst({ where: { systemKey: "SALES_RETURN_INVOICE" } });
+    const docType = await findIssuingDocType("SALES_RETURN_INVOICE");
     if (!docType) return res.status(400).json({ error: "نوع سند «فاکتور برگشت از فروش» در سیستم تعریف نشده است" });
 
     const entry = await issueJournalEntry({

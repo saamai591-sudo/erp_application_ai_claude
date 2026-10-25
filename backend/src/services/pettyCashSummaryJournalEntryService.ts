@@ -6,6 +6,7 @@ import { resolvePaymentSubjectAccount } from "./paymentSubjectAccount";
 import { markSettingsUsed } from "./goodsAccountingSettingService";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { EffectiveTreasurySettings, findEffectiveTreasurySetting, markTreasurySettingsUsed } from "./treasurySettingService";
+import { findIssuingDocType } from "./documentTypeService";
 
 // =========================================================================
 // صدور سند حسابداری «خلاصه تنخواه» — اکشن دستی روی سند تاییدشده، هم‌الگوی services/paymentJournalEntryService.ts:
@@ -125,7 +126,7 @@ export async function issuePettyCashSummaryJournalEntry(summaryId: number) {
     creditLines.push({ accountId: creditAccount.id, ...creditDetails, currencyId: baseCurrency.id, debit: 0, credit: creditTotalBase, fxRate: 1, description });
   }
 
-  const docType = await prisma.documentType.findFirst({ where: { systemKey: "PETTY_CASH_SUMMARY" } });
+  const docType = await findIssuingDocType("PETTY_CASH_SUMMARY");
   if (!docType) throw new Error("نوع سند «خلاصه تنخواه» در سیستم تعریف نشده است");
 
   const entry = await issueJournalEntry({

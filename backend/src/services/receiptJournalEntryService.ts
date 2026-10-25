@@ -6,6 +6,7 @@ import { toBaseCurrencyAmount } from "../utils/currencyConversion";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { EffectiveTreasurySettings } from "./treasurySettingService";
 import { autoSlotRefreshPatch } from "./accountingLineDims";
+import { findIssuingDocType } from "./documentTypeService";
 
 // =========================================================================
 // سند حسابداری «دریافت» (Receipt) — دو مرحله:
@@ -383,7 +384,7 @@ export async function issueReceiptJournalEntry(receiptId: number) {
   // ترتیب سند همان قبلی: بدهکارها (ابزار)، بعد بستانکارها (موضوع) و تسعیرها
   const ordered = [...lines.filter((_, i) => plan[i].role === "INSTRUMENT"), ...lines.filter((_, i) => plan[i].role !== "INSTRUMENT")];
 
-  const docType = await prisma.documentType.findFirst({ where: { systemKey: "RECEIPT" } });
+  const docType = await findIssuingDocType("RECEIPT");
   if (!docType) throw new Error("نوع سند «رسید دریافت» در سیستم تعریف نشده است");
 
   const entry = await issueJournalEntry({

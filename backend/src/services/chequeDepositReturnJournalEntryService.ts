@@ -5,6 +5,7 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { buildChequeLedgerLines } from "./chequeCounterpartyLines";
 import { findDepositBankByCheque } from "./chequeDepositBankLookup";
 import { EffectiveTreasurySettings, findEffectiveTreasurySetting, markTreasurySettingsUsed } from "./treasurySettingService";
+import { findIssuingDocType } from "./documentTypeService";
 
 // =========================================================================
 // صدور سند حسابداری «برگشت از واگذاری چک» (ChequeDepositReturn) — اکشن دستی روی سند تاییدشده (هم‌الگوی واگذاری به بانک)،
@@ -108,7 +109,7 @@ export async function issueChequeDepositReturnJournalEntry(returnId: number) {
 
   if (errors.length > 0) throw new Error(errors.join("\n"));
 
-  const docType = await prisma.documentType.findFirst({ where: { systemKey: "CHEQUE_DEPOSIT_RETURN" } });
+  const docType = await findIssuingDocType("CHEQUE_DEPOSIT_RETURN");
   if (!docType) throw new Error("نوع سند «برگشت از واگذاری چک» در سیستم تعریف نشده است");
 
   const entry = await issueJournalEntry({

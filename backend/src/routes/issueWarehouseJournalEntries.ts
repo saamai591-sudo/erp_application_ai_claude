@@ -12,6 +12,7 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { OUTBOUND_DOC_TYPES } from "../services/warehouseMovementService";
 import { resolveAccountDetailFields } from "../utils/detailValues";
 import { sendBulkError } from "../lib/bulkError";
+import { findIssuingDocType } from "../services/documentTypeService";
 
 const FORM = findFormPrefix("accounting-issue-journal-entries");
 
@@ -413,7 +414,7 @@ router.post("/issue-warehouse-journal-entries/:id(\\d+)/issue", can(`${FORM}.iss
   }
 
   try {
-    const docType = await prisma.documentType.findFirst({ where: { systemKey: "WAREHOUSE_DOCUMENTS" } });
+    const docType = await findIssuingDocType("WAREHOUSE_DOCUMENTS");
     if (!docType) return res.status(400).json({ error: "نوع سند «اسناد انبار» در سیستم تعریف نشده است" });
 
     const entry = await issueJournalEntry({

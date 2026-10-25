@@ -30,6 +30,7 @@ import { netAllocationAmounts } from "../utils/purchaseDiscount";
 import { DetailRuleIndex, applyRule } from "../services/detailRuleService";
 import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
 import { findEffectiveTreasurySetting } from "../services/treasurySettingService";
+import { findIssuingDocType } from "../services/documentTypeService";
 
 const FORM = findFormPrefix("purchase-invoices");
 
@@ -1511,7 +1512,7 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
       });
     }
 
-    const docType = await prisma.documentType.findFirst({ where: { systemKey: "PURCHASE_INVOICE" } });
+    const docType = await findIssuingDocType("PURCHASE_INVOICE");
     if (!docType) return res.status(400).json({ error: "نوع سند «فاکتور خرید» در سیستم تعریف نشده است" });
 
     const entry = await issueJournalEntry({

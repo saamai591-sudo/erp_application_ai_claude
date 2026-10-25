@@ -4,6 +4,7 @@ import { getCalendarMonth } from "./workCalendarService";
 import { LOAN_SUM_KEY } from "./payrollFormula";
 import { displayDate } from "../utils/dateDisplay";
 import { DETAIL_TYPE_CODE_PARTY, DETAIL_TYPE_CODE_COST_CENTER, DETAIL_TYPE_CODE_PROJECT } from "../utils/detailValues";
+import { findIssuingDocType } from "./documentTypeService";
 
 // حقوق و دستمزد › حسابداری حقوق: قواعد الگوی سند حقوق، تنظیمات صدور و «صدور/حذف سند حقوق» — تنها محل این قواعد (routeها فقط صدا می‌زنند).
 //  • الگو = رکوردهای مستقل (از ماه، گروه حساب، مرجع، حساب، ماهیت …). برای ماه M و (گروه، مرجع): بزرگ‌ترین «از ماه» ≤ M و همه‌ی رکوردهای فعالِ همان «از ماه»؛
@@ -419,7 +420,7 @@ export async function issuePayrollJournal(inp: IssueInput) {
   if (ids.length === 0) throw new PayrollAcctError("هیچ کارمندی انتخاب نشده است");
   const calcType = inp.calcTypeId ? await prisma.payrollCalcType.findUnique({ where: { id: inp.calcTypeId } }) : await prisma.payrollCalcType.findFirst({ where: { isBase: true } });
   if (!calcType) throw new PayrollAcctError("نوع محاسبه یافت نشد");
-  const docType = await prisma.documentType.findFirst({ where: { systemKey: "PAYROLL" } });
+  const docType = await findIssuingDocType("PAYROLL");
   if (!docType) throw new PayrollAcctError("نوع سند «سند حقوق» تعریف نشده است");
   const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
   if (!baseCurrency) throw new PayrollAcctError("ارز پایه تعریف نشده است");

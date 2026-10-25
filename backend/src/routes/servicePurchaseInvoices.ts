@@ -27,6 +27,7 @@ import { netAllocationAmounts } from "../utils/purchaseDiscount";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, roundToCurrencyDecimals, ConversionCurrency } from "../utils/currencyConversion";
 import { saveDocumentDetails, loadDocumentDetails, DetailValueInput } from "../services/docDetailService";
 import { findEffectiveTreasurySetting } from "../services/treasurySettingService";
+import { findIssuingDocType } from "../services/documentTypeService";
 
 const FORM = findFormPrefix("service-purchase-invoices");
 
@@ -1052,7 +1053,7 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
       });
     }
 
-    const docType = await prisma.documentType.findFirst({ where: { systemKey: "SERVICE_PURCHASE_INVOICE" } });
+    const docType = await findIssuingDocType("SERVICE_PURCHASE_INVOICE");
     if (!docType) return res.status(400).json({ error: "نوع سند «فاکتور خرید خدمات» در سیستم تعریف نشده است" });
 
     const entry = await issueJournalEntry({

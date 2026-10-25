@@ -3,6 +3,7 @@ import { issueJournalEntry, IssueLineInput } from "./journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { EffectiveTreasurySettings, findEffectiveTreasurySetting, markTreasurySettingsUsed } from "./treasurySettingService";
+import { findIssuingDocType } from "./documentTypeService";
 
 // =========================================================================
 // صدور سند حسابداری «وصول و برگشت چک پرداختنی» (ChequeClearingPayable) — اکشن دستی روی سند تاییدشده (هم‌الگوی وصول و برگشت
@@ -104,7 +105,7 @@ export async function issueChequeClearingPayableJournalEntry(clearingId: number)
 
   if (errors.length > 0) throw new Error(errors.join("\n"));
 
-  const docType = await prisma.documentType.findFirst({ where: { systemKey: "CHEQUE_CLEARING_PAYABLE" } });
+  const docType = await findIssuingDocType("CHEQUE_CLEARING_PAYABLE");
   if (!docType) throw new Error("نوع سند «وصول و برگشت چک پرداختنی» در سیستم تعریف نشده است");
 
   const entry = await issueJournalEntry({

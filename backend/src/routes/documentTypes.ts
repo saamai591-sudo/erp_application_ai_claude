@@ -8,9 +8,8 @@ const FORM = findFormPrefix("document-types");
 
 const router = Router();
 
-// visibleOnly=true: فهرست فرم «انواع سند» (بدون نوع‌های سیستمیِ سندهای خودکار)؛ بقیه‌ی مصرف‌کننده‌ها (فیلتر گزارش‌ها، نمایش نوع سند اسناد) همه را می‌گیرند
-router.get("/", async (req, res) => {
-  res.json(await prisma.documentType.findMany({ where: req.query.visibleOnly === "true" ? { isHidden: false } : {}, orderBy: { code: "asc" } }));
+router.get("/", async (_req, res) => {
+  res.json(await prisma.documentType.findMany({ orderBy: { code: "asc" } }));
 });
 
 router.post("/", can(`${FORM}.create`), async (req, res) => {

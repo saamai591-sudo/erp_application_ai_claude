@@ -7,6 +7,7 @@ import { resolvePaymentSubjectAccount } from "./paymentSubjectAccount";
 import { markSettingsUsed } from "./goodsAccountingSettingService";
 import { EffectiveTreasurySettings, markTreasurySettingsUsed } from "./treasurySettingService";
 import { autoSlotRefreshPatch } from "./accountingLineDims";
+import { findIssuingDocType } from "./documentTypeService";
 
 // =========================================================================
 // سند حسابداری «پرداخت / اعلامیه پرداخت» (Payment) — هم‌الگوی receiptJournalEntryService.ts با جهت‌های معکوس، در دو مرحله:
@@ -394,7 +395,7 @@ export async function issuePaymentJournalEntry(paymentId: number) {
   const isCreditRole = (i: number) => plan[i].role === "INSTRUMENT";
   const ordered = [...lines.filter((_, i) => !isCreditRole(i)), ...lines.filter((_, i) => isCreditRole(i))];
 
-  const docType = await prisma.documentType.findFirst({ where: { systemKey: "PAYMENT" } });
+  const docType = await findIssuingDocType("PAYMENT");
   if (!docType) throw new Error("نوع سند «اعلامیه پرداخت» در سیستم تعریف نشده است");
 
   const entry = await issueJournalEntry({

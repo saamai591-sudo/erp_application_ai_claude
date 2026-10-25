@@ -4,6 +4,7 @@ import { resolveDetailTypeId, resolveAccountDetailFields } from "../utils/detail
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { buildChequeLedgerLines } from "./chequeCounterpartyLines";
 import { EffectiveTreasurySettings, findEffectiveTreasurySetting, markTreasurySettingsUsed } from "./treasurySettingService";
+import { findIssuingDocType } from "./documentTypeService";
 
 // =========================================================================
 // صدور سند حسابداری «واگذاری چک به بانک» (ChequeDeposit) — اکشن دستی روی سند تاییدشده (هم‌الگوی سند دریافت/پرداخت)،
@@ -97,7 +98,7 @@ export async function issueChequeDepositJournalEntry(depositId: number) {
 
   if (errors.length > 0) throw new Error(errors.join("\n"));
 
-  const docType = await prisma.documentType.findFirst({ where: { systemKey: "CHEQUE_DEPOSIT" } });
+  const docType = await findIssuingDocType("CHEQUE_DEPOSIT");
   if (!docType) throw new Error("نوع سند «واگذاری چک به بانک» در سیستم تعریف نشده است");
 
   const entry = await issueJournalEntry({

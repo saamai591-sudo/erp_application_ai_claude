@@ -51,26 +51,12 @@ async function main() {
     { title: "افتتاحیه", systemKey: "OPENING" },
     { title: "بستن حسابها", systemKey: "CLOSING_ACCOUNTS" },
     { title: "اختتامیه", systemKey: "CLOSING" },
-    { title: "اسناد انبار", systemKey: "WAREHOUSE_DOCUMENTS" },
-    { title: "فاکتور خرید", systemKey: "PURCHASE_INVOICE" },
-    { title: "فاکتور خرید خدمات", systemKey: "SERVICE_PURCHASE_INVOICE" },
-    { title: "فاکتور فروش", systemKey: "SALES_INVOICE" },
-    { title: "فاکتور برگشت از فروش", systemKey: "SALES_RETURN_INVOICE" },
-    { title: "رسید دریافت", systemKey: "RECEIPT" },
-    { title: "اعلامیه پرداخت", systemKey: "PAYMENT" },
-    { title: "واگذاری چک به بانک", systemKey: "CHEQUE_DEPOSIT" },
-    { title: "برگشت از واگذاری چک", systemKey: "CHEQUE_DEPOSIT_RETURN" },
-    { title: "وصول و برگشت چک دریافتنی", systemKey: "CHEQUE_CLEARING_RECEIVABLE" },
-    { title: "وصول و برگشت چک پرداختنی", systemKey: "CHEQUE_CLEARING_PAYABLE" },
-    { title: "خلاصه تنخواه", systemKey: "PETTY_CASH_SUMMARY" },
   ];
-  // فقط چهار نوع پایه در فهرست «انواع سند» دیده می‌شوند؛ بقیه‌ی سیستمی‌ها مخفی‌اند (فقط صدور سند از آن‌ها استفاده می‌کند)
-  const VISIBLE_KEYS = new Set(["OPERATIONAL", "OPENING", "CLOSING_ACCOUNTS", "CLOSING"]);
   for (const dt of documentTypes) {
     const existing = await prisma.documentType.findUnique({ where: { systemKey: dt.systemKey } });
     if (existing) continue;
     const last = await prisma.documentType.findFirst({ orderBy: { code: "desc" } });
-    await prisma.documentType.create({ data: { ...dt, code: (last?.code ?? 0) + 1, isSystem: true, isHidden: !VISIBLE_KEYS.has(dt.systemKey) } });
+    await prisma.documentType.create({ data: { ...dt, code: (last?.code ?? 0) + 1, isSystem: true } });
   }
 
   // درخت کامل دسترسی‌های سیستم (Module > SubModule > Form > Action) اکنون فقط در یک‌جا تعریف می‌شود:

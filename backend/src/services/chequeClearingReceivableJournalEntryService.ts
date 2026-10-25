@@ -5,6 +5,7 @@ import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { findDepositBankByCheque } from "./chequeDepositBankLookup";
 import { buildChequeLedgerLines } from "./chequeCounterpartyLines";
 import { EffectiveTreasurySettings, findEffectiveTreasurySetting, markTreasurySettingsUsed } from "./treasurySettingService";
+import { findIssuingDocType } from "./documentTypeService";
 
 // =========================================================================
 // صدور سند حسابداری «وصول و برگشت چک دریافتنی» (ChequeClearingReceivable) — اکشن دستی روی سند تاییدشده (هم‌الگوی واگذاری به
@@ -120,7 +121,7 @@ export async function issueChequeClearingReceivableJournalEntry(clearingId: numb
 
   if (errors.length > 0) throw new Error(errors.join("\n"));
 
-  const docType = await prisma.documentType.findFirst({ where: { systemKey: "CHEQUE_CLEARING_RECEIVABLE" } });
+  const docType = await findIssuingDocType("CHEQUE_CLEARING_RECEIVABLE");
   if (!docType) throw new Error("نوع سند «وصول و برگشت چک دریافتنی» در سیستم تعریف نشده است");
 
   const entry = await issueJournalEntry({

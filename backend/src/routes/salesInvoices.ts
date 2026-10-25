@@ -17,6 +17,7 @@ import { findFormPrefix } from "../authz/registry";
 import { EffectiveTreasurySettings } from "../services/treasurySettingService";
 import { assertNotSentToTax } from "../services/taxInvoiceSendService";
 import { emitWorkflowEvent } from "../services/workflowEngineService";
+import { findIssuingDocType } from "../services/documentTypeService";
 
 const FORM = findFormPrefix("sales-invoices");
 
@@ -1392,7 +1393,7 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
       });
     }
 
-    const docType = await prisma.documentType.findFirst({ where: { systemKey: "SALES_INVOICE" } });
+    const docType = await findIssuingDocType("SALES_INVOICE");
     if (!docType) return res.status(400).json({ error: "نوع سند «فاکتور فروش» در سیستم تعریف نشده است" });
 
     const entry = await issueJournalEntry({
