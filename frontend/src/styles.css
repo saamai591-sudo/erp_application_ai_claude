@@ -1668,6 +1668,11 @@ tbody tr:hover { background: var(--bg); }
 .modal.modal-wide { max-width: min(1200px, 96vw); }
 .modal h3 { margin: 0 0 16px; font-size: 16px; font-weight: 700; }
 .modal .actions { display: flex; justify-content: flex-start; gap: 10px; margin-top: 18px; }
+/* فرم دو‌ستونه داخل مودال: ستون‌ها و فیلدها اجازه‌ی کوچک‌شدن دارند تا select/ورودیِ دارای متن بلند از کادر مودال بیرون نزند */
+.modal .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.modal .form-field { min-width: 0; }
+.modal .form-field > div { min-width: 0; }
+.modal .form-field > select, .modal .form-field > input:not([type="checkbox"]):not([type="radio"]) { min-width: 0; max-width: 100%; }
 
 .required-mark { color: var(--danger); font-weight: 700; margin-inline-start: 2px; }
 
