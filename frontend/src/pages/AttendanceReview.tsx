@@ -110,7 +110,7 @@ export default function AttendanceReview() {
     <div>
       <ErrorToast message={error} />
       <div className="card ar-filters">
-        <AttendanceMonthField value={filters} onChange={(v) => (v.year !== filters.year || v.month !== filters.month) && setFilters(v)} />
+        <AttendanceMonthField value={filters} onChange={(v) => (v.year !== filters.year || v.month !== filters.month || v.start !== filters.start) && setFilters(v)} />
       </div>
 
       <ChainedTabsBar

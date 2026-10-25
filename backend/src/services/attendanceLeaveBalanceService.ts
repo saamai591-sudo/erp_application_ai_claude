@@ -414,15 +414,16 @@ export async function typeHasBalanceData(leaveTypeId: number): Promise<boolean> 
 // ───────────────────────── گزارش مانده‌ی مرخصی همه‌ی کارمندان ─────────────────────────
 
 /**
- * ردیف به‌ازای (کارمند × نوع مرخصیِ دارای مانده) برای کارمندانی که در تاریخ گزارش در دوره‌ی همکاری‌اند و برای آن نوع «داده‌ای» دارند
- * (مانده‌ی دستی، درخواست غیررد، یا شیفتی که قاعده‌ی استحقاق دارد). مقادیر تا پایان روزِ گزارش و همان محاسبه‌ی computeLedger است.
+ * ردیف به‌ازای (کارمند × نوع مرخصیِ دارای مانده) برای کارمندانی که در بازه‌ی [fromDay, toDay] در دوره‌ی همکاری‌اند و برای آن نوع «داده‌ای» دارند
+ * (مانده‌ی دستی، درخواست غیررد، یا شیفتی که قاعده‌ی استحقاق دارد). ستون‌ها: «مانده‌ی اول دوره» = مجموعِ همه‌ی رویدادها از ازل تا قبل از fromDay (انباشته)؛
+ * مانده‌ی دستی / استحقاق / مصرف فقط رویدادهای داخل بازه‌اند (مصرف منفی)؛ مانده = جمع همه‌ی این ستون‌ها. همان محاسبه‌ی computeLedger است.
  */
-export async function balanceReport(asOfDay: number, leaveTypeId?: number) {
+export async function balanceReport(fromDay: number, toDay: number, leaveTypeId?: number) {
+  const asOfDay = toDay;
   const types = await prisma.attendanceLeaveType.findMany({ where: { deductsBalance: true, ...(leaveTypeId ? { id: leaveTypeId } : {}) }, orderBy: { id: "asc" } });
-  if (types.length === 0) return { rows: [], asOf: isoOf(asOfDay) };
-  const asOf = fromNum(asOfDay);
-  const inCoop = new Set(await employeeIdsInPeriod(asOf, asOf));
-  if (inCoop.size === 0) return { rows: [], asOf: isoOf(asOfDay) };
+  if (types.length === 0) return { rows: [], from: isoOf(fromDay), asOf: isoOf(asOfDay) };
+  const inCoop = new Set(await employeeIdsInPeriod(fromNum(fromDay), fromNum(toDay)));
+  if (inCoop.size === 0) return { rows: [], from: isoOf(fromDay), asOf: isoOf(asOfDay) };
   const emps = await prisma.employee.findMany({ where: { id: { in: [...inCoop] } }, select: EMPLOYEE_SELECT, orderBy: { personnelCode: "asc" } });
   const asgs = await prisma.attendanceShiftAssignment.findMany({ where: { employeeId: { in: [...inCoop] } }, select: { employeeId: true, shiftId: true } });
   const shiftsOf = new Map<number, Set<number>>();
@@ -447,14 +448,15 @@ export async function balanceReport(asOfDay: number, leaveTypeId?: number) {
     await Promise.all(
       pairs.slice(i, i + BATCH).map(async ({ emp, type }) => {
         const L = await computeLedger(emp.id, type.id, { untilDay: asOfDay });
-        let manual = 0, accrual = 0, consumed = 0;
+        let opening = 0, manual = 0, accrual = 0, consumed = 0;
         for (const ev of L.events) {
-          if (ev.day > asOfDay) continue;
-          if (ev.kind === "MANUAL") manual += ev.delta;
+          if (ev.day > toDay) continue;
+          if (ev.day < fromDay) opening += ev.delta;
+          else if (ev.kind === "MANUAL") manual += ev.delta;
           else if (ev.kind === "ACCRUAL") accrual += ev.delta;
-          else consumed += -ev.delta;
+          else consumed += ev.delta; // مصرف منفی است
         }
-        const balance = manual + accrual - consumed;
+        const balance = opening + manual + accrual + consumed;
         rows.push({
           id: `${emp.id}|${type.id}`,
           employeeId: emp.id,
@@ -463,10 +465,12 @@ export async function balanceReport(asOfDay: number, leaveTypeId?: number) {
           leaveTypeId: type.id,
           leaveTypeTitle: type.title,
           unit: L.unit,
+          opening,
           manual,
           accrual,
           consumed,
           balance,
+          openingText: fmtAmount(L.unit, opening),
           manualText: fmtAmount(L.unit, manual),
           accrualText: fmtAmount(L.unit, accrual),
           consumedText: fmtAmount(L.unit, consumed),
@@ -476,5 +480,5 @@ export async function balanceReport(asOfDay: number, leaveTypeId?: number) {
     );
   }
   rows.sort((a, b) => (a.personnelCode < b.personnelCode ? -1 : a.personnelCode > b.personnelCode ? 1 : a.leaveTypeId - b.leaveTypeId));
-  return { rows, asOf: isoOf(asOfDay) };
+  return { rows, from: isoOf(fromDay), asOf: isoOf(asOfDay) };
 }

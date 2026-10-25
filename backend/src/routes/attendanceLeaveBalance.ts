@@ -33,11 +33,14 @@ const fail = (res: any, e: any, fallback: string) => {
   return res.status(400).json({ error: e instanceof AttendanceError ? e.message : e?.message || fallback });
 };
 
-// ── گزارش مانده‌ی همه‌ی کارمندان (تا پایان روز date، پیش‌فرض امروز) ──
+// ── گزارش مانده‌ی همه‌ی کارمندان در بازه‌ی [from, to] (مانده‌ی اول دوره انباشته، بقیه‌ی ستون‌ها فقط همان بازه) ──
 router.get("/attendance-leave-balance-report", can(`${F_REPORT}.view`), async (req, res) => {
   try {
-    const date = typeof req.query.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date) ? Math.floor(new Date(`${req.query.date}T00:00:00Z`).getTime() / 86400000) : todayNum();
-    res.json(await balanceReport(date, req.query.leaveTypeId ? Number(req.query.leaveTypeId) : undefined));
+    const dayOf = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? Math.floor(new Date(`${v}T00:00:00Z`).getTime() / 86400000) : null);
+    const to = dayOf(req.query.to) ?? todayNum();
+    const from = dayOf(req.query.from) ?? to;
+    if (from > to) throw new AttendanceError("تاریخ پایان قبل از تاریخ شروع است");
+    res.json(await balanceReport(from, to, req.query.leaveTypeId ? Number(req.query.leaveTypeId) : undefined));
   } catch (e) {
     fail(res, e, "خطا در تهیه‌ی گزارش مانده‌ی مرخصی");
   }

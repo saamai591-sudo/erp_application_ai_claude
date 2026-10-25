@@ -12,13 +12,14 @@ export interface AttendanceMonth {
   /** بازه‌ی تردد ماه */
   from: string;
   to: string;
-  /** پایان ماه (برای گزارش‌های «مانده تا پایان ماه») */
+  /** شروع و پایان خودِ ماه (برای گزارش‌های «مانده‌ی اول دوره / تا پایان ماه») */
+  start: string;
   endDate: string;
 }
 
-export const EMPTY_MONTH: AttendanceMonth = { year: 0, month: 0, from: "", to: "", endDate: "" };
+export const EMPTY_MONTH: AttendanceMonth = { year: 0, month: 0, from: "", to: "", start: "", endDate: "" };
 
-const toValue = (m: WorkCalendarMonthFull): AttendanceMonth => ({ year: m.year, month: m.month, from: m.trafficStartDate, to: m.trafficEndDate, endDate: m.endDate });
+const toValue = (m: WorkCalendarMonthFull): AttendanceMonth => ({ year: m.year, month: m.month, from: m.trafficStartDate, to: m.trafficEndDate, start: m.startDate, endDate: m.endDate });
 
 export function currentCalendarMonth(months: WorkCalendarMonthFull[], today = localTodayIso()): WorkCalendarMonthFull | undefined {
   const cur = months.find((m) => m.startDate <= today && today <= m.endDate);
@@ -31,7 +32,7 @@ export function currentCalendarMonth(months: WorkCalendarMonthFull[], today = lo
 export function AttendanceMonthField({ value, onChange, label = "ماه" }: { value: AttendanceMonth; onChange: (v: AttendanceMonth) => void; label?: string }) {
   const months = useWorkCalendarMonthsFull();
   useEffect(() => {
-    if (value.year || months.length === 0) return;
+    if ((value.year && value.start) || months.length === 0) return;
     const cur = currentCalendarMonth(months);
     if (cur) onChange(toValue(cur));
     // eslint-disable-next-line react-hooks/exhaustive-deps

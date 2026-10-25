@@ -20,10 +20,12 @@ interface Row {
   leaveTypeId: number;
   leaveTypeTitle: string;
   unit: "DAY" | "BOTH";
+  opening: number;
   manual: number;
   accrual: number;
   consumed: number;
   balance: number;
+  openingText: string;
   manualText: string;
   accrualText: string;
   consumedText: string;
@@ -36,7 +38,7 @@ interface TypeOpt {
 }
 
 const INFO_TEXT =
-  "برای هر کارمندِ در دوره‌ی همکاری در پایان ماه انتخابی و هر نوع مرخصیِ دارای مانده، مانده‌ی دستی + استحقاق − مصرف (درخواست‌های ثبت‌شده و تاییدشده) تا پایان همان ماه نشان داده می‌شود. " +
+  "برای هر کارمندِ در دوره‌ی همکاری در ماه انتخابی و هر نوع مرخصیِ دارای مانده: «مانده‌ی اول دوره» = مانده‌ی انباشته از ازل تا قبل از شروع ماه؛ مانده‌ی دستی، استحقاق و مصرف فقط رویدادهای همان ماه‌اند (مصرف منفی نشان داده می‌شود، شامل درخواست‌های ثبت‌شده و تاییدشده)؛ «مانده‌ی مرخصی» = جمع همه‌ی ستون‌ها = مانده تا پایان ماه. " +
   "فقط کارمندانی می‌آیند که برای آن نوع مانده‌ی دستی، درخواست یا شیفتِ دارای قاعده‌ی استحقاق دارند. نوع «روزانه» به روز و نوع «روزانه و ساعتی» به ساعت:دقیقه است. " +
   "استحقاقِ وابسته به کارکردِ واقعی تا پایان ماه کامل می‌شود؛ برای ماه جاری بر پایه‌ی داده‌ی تا امروز است.";
 
@@ -56,10 +58,10 @@ export default function AttendanceLeaveBalanceReport() {
   }, []);
 
   async function load() {
-    if (!month.year) return;
+    if (!month.year || !month.start) return;
     setLoading(true);
     try {
-      const r = await api.get(`/attendance-leave-balance-report?date=${month.endDate}${leaveTypeId ? `&leaveTypeId=${leaveTypeId}` : ""}`);
+      const r = await api.get(`/attendance-leave-balance-report?from=${month.start}&to=${month.endDate}${leaveTypeId ? `&leaveTypeId=${leaveTypeId}` : ""}`);
       setRows(r.rows);
       setAsOf(r.asOf);
       setError(null);
@@ -73,7 +75,7 @@ export default function AttendanceLeaveBalanceReport() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [month.year, month.month, leaveTypeId]);
+  }, [month.year, month.month, month.start, leaveTypeId]);
 
   const shown = useMemo(() => (onlyNegative ? rows.filter((r) => r.balance < 0) : rows), [rows, onlyNegative]);
   const num = (f: (r: Row) => string, v: (r: Row) => number, header: string, width: string): BalanceTableColumn<Row> => ({
@@ -90,10 +92,11 @@ export default function AttendanceLeaveBalanceReport() {
       { header: "کد پرسنلی", width: "110px", render: (r) => toFaDigits(r.personnelCode), sortValue: (r) => r.personnelCode, filterType: "string", filterValue: (r) => r.personnelCode },
       { header: "کارمند", render: (r) => r.employeeName, sortValue: (r) => r.employeeName, filterType: "string", filterValue: (r) => r.employeeName },
       { header: "نوع مرخصی", width: "150px", render: (r) => r.leaveTypeTitle, sortValue: (r) => r.leaveTypeTitle, filterType: "string", filterValue: (r) => r.leaveTypeTitle },
-      num((r) => r.manualText, (r) => r.manual, "مانده‌ی دستی", "120px"),
-      num((r) => r.accrualText, (r) => r.accrual, "استحقاق", "120px"),
-      num((r) => r.consumedText, (r) => r.consumed, "مصرف", "120px"),
-      num((r) => r.balanceText, (r) => r.balance, "مانده", "130px"),
+      num((r) => r.openingText, (r) => r.opening, "مانده‌ی اول دوره", "130px"),
+      num((r) => r.manualText, (r) => r.manual, "مانده‌ی دستی (طی ماه)", "140px"),
+      num((r) => r.accrualText, (r) => r.accrual, "استحقاق (طی ماه)", "130px"),
+      num((r) => r.consumedText, (r) => r.consumed, "مصرف (طی ماه)", "130px"),
+      num((r) => r.balanceText, (r) => r.balance, "مانده‌ی مرخصی", "140px"),
     ],
     []
   );
@@ -103,7 +106,7 @@ export default function AttendanceLeaveBalanceReport() {
       <ErrorToast message={error} />
       <div className="card ar-filters">
         <div style={{ display: "flex", alignItems: "flex-end", gap: 14, flexWrap: "wrap" }}>
-          <AttendanceMonthField value={month} onChange={(v) => (v.year !== month.year || v.month !== month.month) && setMonth(v)} />
+          <AttendanceMonthField value={month} onChange={(v) => (v.year !== month.year || v.month !== month.month || v.start !== month.start) && setMonth(v)} />
           <div className="form-field-inline">
             <label>نوع مرخصی</label>
             <select value={leaveTypeId} onChange={(e) => setLeaveTypeId(e.target.value)}>
@@ -117,7 +120,7 @@ export default function AttendanceLeaveBalanceReport() {
           <div className="form-field-inline">
             <InfoHint text={INFO_TEXT} title="مانده‌ی مرخصی کارمندان" />
             <RefreshButton onClick={load} title="رفرش" />
-            {asOf && <span style={{ opacity: 0.7, fontSize: 12 }}>مانده تا پایان {formatJalaliDate(asOf)}</span>}
+            {asOf && <span style={{ opacity: 0.7, fontSize: 12 }}>از {formatJalaliDate(month.start)} تا {formatJalaliDate(asOf)}</span>}
           </div>
         </div>
       </div>
