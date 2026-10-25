@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
-import { JalaliDatePicker } from "../components/JalaliDatePicker";
+import { AttendanceMonthField, AttendanceMonth, EMPTY_MONTH } from "../components/AttendanceMonthField";
 import { ChainedTabsBar } from "../components/ChainedTabsBar";
 import { SelectableBalanceTable, BalanceTableColumn } from "../components/SelectableBalanceTable";
 import { RefreshButton } from "../components/RefreshButton";
@@ -10,9 +10,7 @@ import { useChainedMultiSelect, SelectId } from "../lib/useChainedMultiSelect";
 import { useReviewTabViewState } from "../lib/useReviewTabLoader";
 import { getAttendanceReviewSnapshot, setAttendanceReviewSnapshot } from "../lib/attendanceReviewCache";
 import { toFaDigits } from "../lib/formatAmount";
-import { localTodayIso } from "../lib/formatDate";
 import { api } from "../lib/api";
-import { addDaysIso } from "./AttendancePunches";
 
 // گزارش «مرور کارکرد» (مدیریت تردد › گزارش) — هم‌الگوی بقیه‌ی مرورها: تب «کارمندان» (انتخاب یک یا چند ردیف) ← تب «کارکرد» و تب «ریز ورود و خروج» برای
 // کارمندانِ انتخاب‌شده (بدون انتخاب = همه‌ی کارمندان). دو تب آخر دقیقاً همان تب‌های گزارش «کارکرد روزانه»‌اند (components/AttendanceWorksheetTables.tsx) با ستون
@@ -29,11 +27,11 @@ const EMP_TAB = 0;
 const TAB_LABELS = ["کارمندان", "کارکرد", "ریز ورود و خروج"];
 const INFO_TEXT =
   "در تب «کارمندان» یک یا چند کارمند را انتخاب کنید و سپس تب «کارکرد» یا «ریز ورود و خروج» را بزنید تا فقط برای همان‌ها نمایش داده شود؛ بدون انتخاب، همه‌ی کارمندان نمایش داده می‌شوند. " +
-  "بازه‌ی گزارش حداکثر ۶۲ روز است. ستون‌های عوامل، عامل‌های تردد روزانه‌ای هستند که «نمایش در گزارش کارکرد» دارند.";
+  "بازه‌ی گزارش = بازه‌ی تردد ماه انتخابی (پیش‌فرض ماه جاری). ستون‌های عوامل، عامل‌های تردد روزانه‌ای هستند که «نمایش در گزارش کارکرد» دارند.";
 
 export default function AttendanceReview() {
   const snapshot = getAttendanceReviewSnapshot();
-  const [filters, setFilters] = useState(snapshot?.filters ?? { fromDate: addDaysIso(localTodayIso(), -6), toDate: localTodayIso() });
+  const [filters, setFilters] = useState<AttendanceMonth>(snapshot?.filters ?? EMPTY_MONTH);
   const [activeTab, setActiveTab] = useState(snapshot?.activeTab ?? 0);
   const [employees, setEmployees] = useState<EmpRow[] | null>(snapshot?.employees ?? null);
   const [data, setData] = useState<WorksheetData | null>(snapshot?.data ?? null);
@@ -65,12 +63,12 @@ export default function AttendanceReview() {
   }, []);
 
   const selectedIds = useMemo(() => Array.from(chain.get(EMP_TAB)).map(Number).sort((a, b) => a - b), [chain.selections]);
-  const key = `${filters.fromDate}|${filters.toDate}|${selectedIds.join(",")}`;
+  const key = `${filters.from}|${filters.to}|${selectedIds.join(",")}`;
 
   async function loadWorksheet() {
     setLoading(true);
     try {
-      const q = new URLSearchParams({ from: filters.fromDate, to: filters.toDate });
+      const q = new URLSearchParams({ from: filters.from, to: filters.to });
       // بدون انتخاب = همه‌ی کارمندانِ فهرست
       const ids = selectedIds.length ? selectedIds : (employees ?? []).map((e) => Number(e.id));
       q.set("employeeIds", ids.join(","));
@@ -84,9 +82,9 @@ export default function AttendanceReview() {
     }
   }
   useEffect(() => {
-    if (activeTab !== EMP_TAB && employees && key !== loadedKey) loadWorksheet();
+    if (activeTab !== EMP_TAB && employees && filters.year && key !== loadedKey) loadWorksheet();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, key, employees]);
+  }, [activeTab, key, employees, filters.year]);
 
   const empColumns = useMemo(
     (): BalanceTableColumn<EmpRow>[] => [
@@ -112,16 +110,7 @@ export default function AttendanceReview() {
     <div>
       <ErrorToast message={error} />
       <div className="card ar-filters">
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 14 }}>
-          <div className="form-field-inline">
-            <label>از تاریخ</label>
-            <JalaliDatePicker value={filters.fromDate} onChange={(v) => v !== filters.fromDate && setFilters((p) => ({ ...p, fromDate: v }))} />
-          </div>
-          <div className="form-field-inline">
-            <label>تا تاریخ</label>
-            <JalaliDatePicker value={filters.toDate} onChange={(v) => v !== filters.toDate && setFilters((p) => ({ ...p, toDate: v }))} />
-          </div>
-        </div>
+        <AttendanceMonthField value={filters} onChange={(v) => (v.year !== filters.year || v.month !== filters.month) && setFilters(v)} />
       </div>
 
       <ChainedTabsBar

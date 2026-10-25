@@ -3,13 +3,12 @@ import { ErrorToast } from "../components/ErrorToast";
 import { DataTable } from "../components/DataTable";
 import { RefreshButton } from "../components/RefreshButton";
 import { InfoHint } from "../components/InfoHint";
-import { JalaliDatePicker } from "../components/JalaliDatePicker";
+import { AttendanceMonthField, AttendanceMonth, EMPTY_MONTH } from "../components/AttendanceMonthField";
 import { PunchGrid, WorksheetGrid, WorksheetData } from "../components/AttendanceWorksheetTables";
 import { toFaDigits } from "../lib/formatAmount";
-import { formatJalaliDate, localTodayIso } from "../lib/formatDate";
+import { formatJalaliDate } from "../lib/formatDate";
 import { api } from "../lib/api";
 import { usePersistedState } from "../lib/usePersistedState";
-import { addDaysIso } from "./AttendancePunches";
 
 // مدیریت تردد › گزارش › «کارکرد روزانه»: اطلاعات خودِ کاربرِ واردشده (کارمندِ هم‌شخص با کاربر). سه تب: «کارکرد» (هر روز یک ردیف، همه‌ی روزها)، «ریز ورود و خروج»
 // (تک‌تک ترددها با جهتِ مشتق) و «نیازمند رسیدگی» (ترددِ بی‌پنجره و پنجره‌های ناقص). مشتق است و ذخیره نمی‌شود؛ قواعد در سرور
@@ -27,16 +26,17 @@ interface RRow {
 
 export default function AttendanceWorksheet() {
   const key = "/attendance-worksheet";
-  const [filter, setFilter] = usePersistedState(`${key}:filter`, { from: addDaysIso(localTodayIso(), -6), to: localTodayIso() });
+  const [month, setMonth] = usePersistedState<AttendanceMonth>(`${key}:month`, EMPTY_MONTH);
   const [tab, setTab] = usePersistedState(`${key}:tab`, "rows");
   const [data, setData] = usePersistedState<WorksheetData | null>(key, null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function load() {
+    if (!month.year) return;
     setLoading(true);
     try {
-      setData(await api.get(`/attendance-worksheet?from=${filter.from}&to=${filter.to}`));
+      setData(await api.get(`/attendance-worksheet?from=${month.from}&to=${month.to}`));
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -44,10 +44,11 @@ export default function AttendanceWorksheet() {
       setLoading(false);
     }
   }
+  // با عوض‌شدن (یا پیش‌فرض‌شدنِ) ماه، گزارش همان ماه بارگذاری می‌شود
   useEffect(() => {
-    if (!data) load();
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [month.year, month.month]);
 
   const sum = data?.summary;
   const rr = (f: (r: RRow) => string, extra: object = {}) => ({ render: (r: RRow) => f(r), filterType: "string" as const, filterValue: (r: RRow) => f(r), ...extra });
@@ -55,15 +56,13 @@ export default function AttendanceWorksheet() {
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint title="کارکرد روزانه" text="کارکرد خودِ شما در بازه‌ی انتخابی. ترددها بر اساس شیفتِ منتسب و پنجره‌های حضور به ردیف‌های شیفت می‌خورند و داخل هر پنجره به ترتیب جفت می‌شوند (۱ با ۲، ۳ با ۴ …). تعداد فرد = «ناقص» و نیازمند رسیدگی. ستون‌های عوامل، همان عامل‌های تردد هستند که «نمایش در گزارش کارکرد» دارند. این گزارش مشتق است و ذخیره نمی‌شود." />
+          <InfoHint title="کارکرد روزانه" text="کارکرد خودِ شما در ماه انتخابی (بازه‌ی تردد همان ماه در تقویم کاری؛ پیش‌فرض ماه جاری). ترددها بر اساس شیفتِ منتسب و پنجره‌های حضور به ردیف‌های شیفت می‌خورند و داخل هر پنجره به ترتیب جفت می‌شوند (۱ با ۲، ۳ با ۴ …). تعداد فرد = «ناقص» و نیازمند رسیدگی. ستون‌های عوامل، همان عامل‌های تردد هستند که «نمایش در گزارش کارکرد» دارند. این گزارش مشتق است و ذخیره نمی‌شود." />
           <RefreshButton onClick={load} />
         </div>
       </div>
       <ErrorToast message={error} />
-      <div className="form-grid" style={{ marginBottom: 8, alignItems: "end" }}>
-        <div className="form-field"><label>از تاریخ</label><JalaliDatePicker value={filter.from} onChange={(v) => setFilter({ ...filter, from: v })} /></div>
-        <div className="form-field"><label>تا تاریخ</label><JalaliDatePicker value={filter.to} onChange={(v) => setFilter({ ...filter, to: v })} /></div>
-        <div className="form-field"><button type="button" className="btn" disabled={loading} onClick={load}>نمایش</button></div>
+      <div className="card ar-filters">
+        <AttendanceMonthField value={month} onChange={setMonth} />
       </div>
       {data && data.linked === false && <div className="alert" style={{ marginBottom: 8 }}>کاربر شما به هیچ کارمندی متصل نیست؛ برای دیدن کارکرد، در «کاربر» شخصِ کارمند را انتخاب کنید.</div>}
       {sum && data?.linked !== false && (

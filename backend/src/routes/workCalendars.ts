@@ -33,7 +33,7 @@ const shapeMonth = (m: any, used: boolean) => ({
 // فهرست مرجع ماه‌ها برای انتخابگرهای فرم‌های حقوق (فقط ورود به سیستم)
 router.get("/work-calendars/months", async (_req, res) => {
   const rows = await prisma.workCalendarMonth.findMany({ orderBy: [{ calendar: { year: "desc" } }, { month: "asc" }], include: { calendar: { select: { year: true } } } });
-  res.json(rows.map((m) => ({ year: m.calendar.year, month: m.month, startDate: day(m.startDate), endDate: day(m.endDate), standardDays: m.standardDays, allowedDays: m.allowedDays })));
+  res.json(rows.map((m) => ({ year: m.calendar.year, month: m.month, startDate: day(m.startDate), endDate: day(m.endDate), trafficStartDate: day(m.trafficStartDate), trafficEndDate: day(m.trafficEndDate), standardDays: m.standardDays, allowedDays: m.allowedDays })));
 });
 
 router.get("/work-calendars", can(`${FORM}.view`), async (_req, res) => {

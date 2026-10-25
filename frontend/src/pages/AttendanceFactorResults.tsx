@@ -4,7 +4,7 @@ import { DataTable } from "../components/DataTable";
 import { Modal } from "../components/Modal";
 import { RefreshButton } from "../components/RefreshButton";
 import { InfoHint } from "../components/InfoHint";
-import { WorkMonthPicker } from "../components/WorkMonthPicker";
+import { AttendanceMonthField, EMPTY_MONTH } from "../components/AttendanceMonthField";
 import { minutesToMask } from "../components/TimeInput";
 import { toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
@@ -89,6 +89,7 @@ const TIME_VARS = new Set(["PLANNED", "PLANNED_GROSS", "PRESENCE", "PRESENCE_IN_
 export default function AttendanceFactorResults() {
   const key = "/attendance-factor-results";
   const [filter, setFilter] = usePersistedState(`${key}:filter`, { year: 0, month: 0, employeeId: "" });
+  const monthOf = { ...EMPTY_MONTH, year: filter.year, month: filter.month };
   const [tab, setTab] = usePersistedState(`${key}:tab`, "month");
   const [data, setData] = usePersistedState<Result | null>(key, null);
   const [error, setError] = useState<string | null>(null);
@@ -110,10 +111,11 @@ export default function AttendanceFactorResults() {
       setLoading(false);
     }
   }
+  // با عوض‌شدن (یا پیش‌فرض‌شدنِ) ماه، نتایج همان ماه محاسبه می‌شود
   useEffect(() => {
-    if (!data && filter.year) load();
+    if (filter.year) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [filter.year, filter.month, filter.employeeId]);
 
   const monthFactors = data?.factors.filter((f) => f.level === "MONTH") ?? [];
   const dayFactors = data?.factors.filter((f) => f.level === "DAY") ?? [];
@@ -136,16 +138,17 @@ export default function AttendanceFactorResults() {
         </div>
       </div>
       <ErrorToast message={error} />
-      <div className="form-grid" style={{ marginBottom: 8, alignItems: "end" }}>
-        <div className="form-field"><label>ماه</label><WorkMonthPicker year={filter.year} month={filter.month} onChange={(y, m) => setFilter({ ...filter, year: y, month: m })} /></div>
-        <div className="form-field">
+      <div className="card ar-filters">
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 14, flexWrap: "wrap" }}>
+        <AttendanceMonthField value={monthOf} onChange={(v) => (v.year !== filter.year || v.month !== filter.month) && setFilter({ ...filter, year: v.year, month: v.month })} />
+        <div className="form-field-inline">
           <label>کارمند</label>
           <div style={{ display: "flex", gap: 4 }}>
             <EmployeePickerField employees={employees} value={filter.employeeId} onSelect={(e) => setFilter({ ...filter, employeeId: String(e.id) })} />
             {filter.employeeId && <button type="button" className="btn-link" onClick={() => setFilter({ ...filter, employeeId: "" })}>همه</button>}
           </div>
         </div>
-        <div className="form-field"><button type="button" className="btn" disabled={loading || !filter.year} onClick={load}>نمایش</button></div>
+        </div>
       </div>
       {sum && data && (
         <p style={{ margin: "0 0 8px", fontSize: 13, opacity: 0.85 }}>

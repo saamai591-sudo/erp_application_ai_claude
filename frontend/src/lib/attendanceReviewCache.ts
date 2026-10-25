@@ -5,7 +5,7 @@ import { TabViewState } from "./useReviewTabLoader";
 export interface AttendanceReviewSnapshot {
   chainState: { selections: Record<number, Set<SelectId>>; order: number[] };
   activeTab: number;
-  filters: { fromDate: string; toDate: string };
+  filters: import("../components/AttendanceMonthField").AttendanceMonth;
   employees: any[] | null;
   data: any | null;
   loadedKey: string;

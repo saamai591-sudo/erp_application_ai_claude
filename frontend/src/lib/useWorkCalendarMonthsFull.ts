@@ -6,6 +6,9 @@ export interface WorkCalendarMonthFull {
   month: number;
   startDate: string;
   endDate: string;
+  /** بازه‌ی تردد (پیش‌فرض = ابتدا/انتهای ماه) */
+  trafficStartDate: string;
+  trafficEndDate: string;
 }
 
 /** ماه‌های تقویم کاری با تاریخ شروع/پایان (مثلاً پیش‌فرض و کمینه‌ی تاریخ سند حقوق) */
