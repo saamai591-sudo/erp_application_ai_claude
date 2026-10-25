@@ -109,6 +109,8 @@ import AttendanceTimeBands from "./pages/AttendanceTimeBands";
 import AttendanceDayExceptions from "./pages/AttendanceDayExceptions";
 import AttendanceLeaveTypes from "./pages/AttendanceLeaveTypes";
 import AttendanceLeaveRequests from "./pages/AttendanceLeaveRequests";
+import AttendanceLeaveBalance from "./pages/AttendanceLeaveBalance";
+import AttendanceLeaveEntitlements from "./pages/AttendanceLeaveEntitlements";
 import { EmploymentTypes, EducationLevels, TerminationReasons, DecreeComponents } from "./pages/HrMasters";
 import EmploymentDecrees from "./pages/EmploymentDecrees";
 import LegalParameters from "./pages/LegalParameters";
@@ -496,6 +498,10 @@ export default function App() {
             <Route path="/attendance-leave-types" element={<AttendanceLeaveTypes />} />
             <Route path="/attendance-leave-types/new" element={<AttendanceLeaveTypes />} />
             <Route path="/attendance-leave-types/:id/edit" element={<AttendanceLeaveTypes />} />
+            <Route path="/attendance-leave-entitlements" element={<AttendanceLeaveEntitlements />} />
+            <Route path="/attendance-leave-balance-entries" element={<AttendanceLeaveBalance />} />
+            <Route path="/attendance-leave-balance-entries/new" element={<AttendanceLeaveBalance />} />
+            <Route path="/attendance-leave-balance-entries/:id/edit" element={<AttendanceLeaveBalance />} />
             <Route path="/attendance-leave-requests" element={<AttendanceLeaveRequests />} />
             <Route path="/attendance-leave-requests/new" element={<AttendanceLeaveRequests />} />
             <Route path="/attendance-leave-requests/:id/edit" element={<AttendanceLeaveRequests />} />

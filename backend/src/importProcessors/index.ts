@@ -23,6 +23,7 @@ import { createDecreeDraft, approveDecree } from "../routes/employmentDecrees";
 import { findPartyByNationalId } from "../services/partyService";
 import { bulkSetValues, listParametersOfKind } from "../services/personnelValueService";
 import { upsertSalaryAccount } from "../services/employeeSalaryAccountService";
+import { cleanEntry, createEntry } from "../services/attendanceLeaveBalanceService";
 import { DErr, prepareDataEntry, saveDataEntries, type DataEntryContext } from "../routes/payrollDataEntry";
 
 const DETAIL_TYPE_PARTY = 1;
@@ -570,6 +571,42 @@ export function registerAllImportProcessors() {
         return { ok: true };
       } catch (e: any) {
         return { ok: false, error: e.message || "خطا در ثبت حساب دریافت حقوق" };
+      }
+    },
+  });
+
+  // ── مدیریت تردد: مانده‌ی اولیه / اصلاح مانده‌ی مرخصی ──
+  // هر ردیف = (کد پرسنلی، نوع مرخصی [عنوان]، تاریخ، افزایش/کاهش [خالی = افزایش]، مقدار، دلیل). مقدار برای نوع «روزانه» به روز (اعشار مجاز) و برای «روزانه و ساعتی» به ساعت:دقیقه (مثل 100:30).
+  // ثبت از همان cleanEntry/createEntry فرم «مانده‌ی مرخصی» است (همه‌ی قواعد یکسان).
+  registerImportEntity("attendance-leave-balance", {
+    row: async (row, ctx) => {
+      try {
+        const code = toEnglishDigits((row.personnelCode ?? "").trim());
+        if (!code) return { ok: false, error: "کد پرسنلی الزامی است" };
+        const emps = await prisma.employee.findMany({ select: { id: true, personnelCode: true } });
+        const emp = emps.find((e) => e.personnelCode === code) ?? (/^\d+$/.test(code) ? emps.find((e) => /^\d+$/.test(e.personnelCode) && Number(e.personnelCode) === Number(code)) : undefined);
+        if (!emp) return { ok: false, error: `کارمندی با کد پرسنلی «${code}» یافت نشد` };
+        const typeTitle = (row.leaveType ?? "").trim();
+        if (!typeTitle) return { ok: false, error: "نوع مرخصی الزامی است" };
+        const type = await prisma.attendanceLeaveType.findUnique({ where: { title: typeTitle } });
+        if (!type) return { ok: false, error: `نوع مرخصی «${typeTitle}» یافت نشد` };
+        const rawAmount = toEnglishDigits((row.amount ?? "").trim()).replace(/٫/g, ".");
+        let amount: number;
+        if (type.unit === "DAY") amount = Number(rawAmount);
+        else {
+          const m = rawAmount.match(/^(\d+):(\d{1,2})$/);
+          if (!m || Number(m[2]) > 59) return { ok: false, error: "مقدار برای این نوع مرخصی باید به شکل ساعت:دقیقه باشد (مثلاً 100:30)" };
+          amount = Number(m[1]) * 60 + Number(m[2]);
+        }
+        const dirRaw = (row.direction ?? "").trim();
+        const direction = dirRaw === "" || dirRaw === "افزایش" ? "INCREASE" : dirRaw === "کاهش" ? "DECREASE" : null;
+        if (!direction) return { ok: false, error: "افزایش/کاهش باید «افزایش» یا «کاهش» (یا خالی) باشد" };
+        if (!row.date) return { ok: false, error: "تاریخ الزامی است" };
+        const d = await cleanEntry({ employeeId: emp.id, leaveTypeId: type.id, date: resolveDateString(row.date), direction, amount, reason: row.reason });
+        await createEntry(d, ctx.userId ?? null);
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: e.message || "خطا در ثبت مانده‌ی مرخصی" };
       }
     },
   });

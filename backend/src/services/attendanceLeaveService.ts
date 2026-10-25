@@ -3,9 +3,11 @@ import { displayDate } from "../utils/dateDisplay";
 import { AttendanceError, EMPLOYEE_SELECT, assertDayOpen, dayStr, minuteText, parseDay, personName } from "./attendancePunchService";
 import { getPeriods, periodContains } from "./employmentStatusService";
 import { buildWorksheet } from "./attendanceWorksheetService";
+import { assertBalanceAllowed, lockEmployeeBalance, typeHasBalanceData } from "./attendanceLeaveBalanceService";
 
 // مدیریت تردد › نوع مرخصی و درخواست مرخصی (مرحله‌ی ۱ و ۲). تنها محل قواعد.
-// نوع مرخصی: واحد (روزانه/ساعتی/هر دو)، «از مانده کم شود» و «روز تعطیل وسط مرخصی» (برای مرحله‌ی «مانده‌ی مرخصی»؛ فعلاً فقط نگه‌داری می‌شوند)، «مدرک الزامی» (تایید بدون پیوست ممکن نیست).
+// نوع مرخصی: واحد (روزانه / روزانه و ساعتی)، «از مانده کم شود» و «روز تعطیل وسط مرخصی» (محاسبه‌ی مانده در attendanceLeaveBalanceService)، «مدرک الزامی» (تایید بدون پیوست ممکن نیست).
+// کنترل مانده‌ی منفی هنگام ثبت/ویرایش و تایید درخواست (assertBalanceAllowed) زیر قفل کارمند انجام می‌شود تا دو درخواست هم‌زمان هر دو از کنترل رد نشوند.
 // درخواست: روزانه (از تاریخ تا تاریخ) یا ساعتی (یک تاریخ + ساعت شروع/پایان همان روز)؛ ثبت‌شده ← تایید / رد (با دلیل) ← برگشت؛ فقط «ثبت‌شده» قابل ویرایش است.
 // اثر روی کارکرد (مشتق، ذخیره نمی‌شود): فقط درخواست «تاییدشده» — به ازای هر نوع مرخصی یک متغیر روز LV<id> و جمع همه‌ی انواع LEAVE_TAKEN (leaveForDay).
 
@@ -22,7 +24,7 @@ export function leaveTypeShape(t: any) {
     id: t.id,
     title: t.title,
     isActive: t.isActive,
-    unit: t.unit as "DAY" | "HOUR" | "BOTH",
+    unit: (t.unit === "DAY" ? "DAY" : "BOTH") as "DAY" | "BOTH",
     deductsBalance: t.deductsBalance,
     requiresAttachment: t.requiresAttachment,
     countHolidays: t.countHolidays,
@@ -36,7 +38,7 @@ export async function saveLeaveType(body: any, id?: number) {
   const title = String(body?.title ?? "").trim().replace(/\s+/g, " ");
   if (!title) throw new AttendanceError("عنوان نوع مرخصی الزامی است");
   const unit = String(body?.unit ?? "BOTH");
-  if (unit !== "DAY" && unit !== "HOUR" && unit !== "BOTH") throw new AttendanceError("واحد مرخصی نامعتبر است");
+  if (unit !== "DAY" && unit !== "BOTH") throw new AttendanceError("واحد مرخصی نامعتبر است");
   const data = {
     title,
     unit: unit as any,
@@ -54,10 +56,14 @@ export async function saveLeaveType(body: any, id?: number) {
   }
   const ex = await prisma.attendanceLeaveType.findUnique({ where: { id } });
   if (!ex) throw new AttendanceError("نوع مرخصی یافت نشد");
-  if (unit !== ex.unit && unit !== "BOTH") {
-    // محدودکردن واحد با درخواست‌های موجودِ ناسازگار نمی‌شود
-    const bad = await prisma.attendanceLeaveRequest.count({ where: { leaveTypeId: id, startMinute: unit === "DAY" ? { not: null } : null } });
-    if (bad > 0) throw new AttendanceError(`درخواست ${unit === "DAY" ? "ساعتی" : "روزانه"}ِ ثبت‌شده‌ای با این نوع وجود دارد؛ واحد را نمی‌توان محدود کرد`);
+  const exUnit = ex.unit === "DAY" ? "DAY" : "BOTH";
+  if (unit !== exUnit) {
+    // مانده‌ی روزانه «روز» و مانده‌ی روزانه و ساعتی «دقیقه» است؛ با داده‌ی مانده تغییر واحد معنا را عوض می‌کند
+    if (await typeHasBalanceData(id)) throw new AttendanceError("برای این نوع مرخصی مانده‌ی دستی، قاعده‌ی استحقاق یا مرخصی منفی ثبت شده است؛ واحد را نمی‌توان تغییر داد");
+    if (unit === "DAY") {
+      const bad = await prisma.attendanceLeaveRequest.count({ where: { leaveTypeId: id, startMinute: { not: null } } });
+      if (bad > 0) throw new AttendanceError("درخواست ساعتیِ ثبت‌شده‌ای با این نوع وجود دارد؛ واحد را نمی‌توان به «روزانه» محدود کرد");
+    }
   }
   return prisma.attendanceLeaveType.update({ where: { id }, data });
 }
@@ -194,7 +200,6 @@ export async function cleanRequest(b: any, excludeId?: number): Promise<CleanReq
   if (!reason) throw new AttendanceError("دلیل درخواست الزامی است");
   const hourly = b?.hourly === true;
   if (hourly && type.unit === "DAY") throw new AttendanceError(`نوع مرخصی «${type.title}» فقط روزانه است`);
-  if (!hourly && type.unit === "HOUR") throw new AttendanceError(`نوع مرخصی «${type.title}» فقط ساعتی است`);
   const fromDate = parseDay(b?.fromDate, "از تاریخ");
   const toDate = !b?.toDate ? fromDate : parseDay(b.toDate, "تا تاریخ");
   let startMinute: number | null = null, endMinute: number | null = null;
@@ -223,12 +228,24 @@ export async function cleanRequest(b: any, excludeId?: number): Promise<CleanReq
 export async function createRequest(d: CleanRequest, userId: number | null) {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await prisma.$transaction(async (tx) => tx.attendanceLeaveRequest.create({ data: { number: await nextNumber(tx), ...d, createdById: userId } }));
+      return await prisma.$transaction(async (tx) => {
+        await lockEmployeeBalance(tx, d.employeeId);
+        await assertBalanceAllowed({ employeeId: d.employeeId, leaveTypeId: d.leaveTypeId, fromDate: d.fromDate, extra: d });
+        return tx.attendanceLeaveRequest.create({ data: { number: await nextNumber(tx), ...d, createdById: userId } });
+      });
     } catch (e: any) {
       if (e?.code === "P2002" && attempt < 3) continue;
       throw e;
     }
   }
+}
+
+export async function updateRequest(id: number, d: CleanRequest) {
+  await prisma.$transaction(async (tx) => {
+    await lockEmployeeBalance(tx, d.employeeId);
+    await assertBalanceAllowed({ employeeId: d.employeeId, leaveTypeId: d.leaveTypeId, fromDate: d.fromDate, extra: { ...d, id }, excludeRequestId: id });
+    await tx.attendanceLeaveRequest.update({ where: { id }, data: d });
+  });
 }
 
 export async function approveRequest(id: number, userId: number | null) {
@@ -242,6 +259,8 @@ export async function approveRequest(id: number, userId: number | null) {
     // در فاصله‌ی ثبت تا تایید ممکن است درخواست هم‌پوشان تاییدشده یا ترددِ تداخل‌دار ثبت شده باشد
     await assertNoRequestConflict(r, id, ["APPROVED"]);
     await assertShiftAndPresence(r);
+    await lockEmployeeBalance(tx, r.employeeId);
+    await assertBalanceAllowed({ employeeId: r.employeeId, leaveTypeId: r.leaveTypeId, fromDate: r.fromDate });
     await tx.attendanceLeaveRequest.update({ where: { id }, data: { status: "APPROVED", decidedById: userId, decidedAt: new Date(), decisionNote: null } });
   });
 }
@@ -256,10 +275,16 @@ export async function rejectRequest(id: number, userId: number | null, note: unk
 export async function unapproveRequest(id: number) {
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100012, ${Number(id)})`);
-    const r = await tx.attendanceLeaveRequest.findUnique({ where: { id }, select: { status: true, employeeId: true, fromDate: true } });
+    const r = await tx.attendanceLeaveRequest.findUnique({ where: { id }, select: { status: true, employeeId: true, fromDate: true, leaveTypeId: true } });
     if (!r) throw new AttendanceError("درخواست یافت نشد");
     if (r.status === "PENDING") throw new AttendanceError("درخواست در وضعیت «ثبت‌شده» است");
     if (r.status === "APPROVED") await assertDayOpen(r.employeeId, r.fromDate);
+    else {
+      // درخواست ردشده دوباره «ثبت‌شده» و مصرف‌کننده‌ی مانده می‌شود
+      await lockEmployeeBalance(tx, r.employeeId);
+      const q = await tx.attendanceLeaveRequest.findUnique({ where: { id }, select: { id: true, number: true, leaveTypeId: true, fromDate: true, toDate: true, startMinute: true, endMinute: true } });
+      await assertBalanceAllowed({ employeeId: r.employeeId, leaveTypeId: r.leaveTypeId, fromDate: r.fromDate, extra: q!, excludeRequestId: id });
+    }
     await tx.attendanceLeaveRequest.update({ where: { id }, data: { status: "PENDING", decidedById: null, decidedAt: null, decisionNote: null } });
   });
 }

@@ -614,6 +614,7 @@ export const REGISTRY: ModuleDef[] = [
           { key: "attendance-factors", title: "عوامل تردد", baseActions: CRUD },
           { key: "attendance-time-bands", title: "بازه‌های زمانی", baseActions: CRUD },
           { key: "attendance-leave-types", title: "نوع مرخصی", baseActions: CRUD },
+          { key: "attendance-leave-entitlements", title: "قاعده‌ی استحقاق مرخصی", baseActions: CRUD },
         ],
       },
       {
@@ -632,6 +633,7 @@ export const REGISTRY: ModuleDef[] = [
               { key: "unapprove", title: "برگشت از تایید / رد" },
             ],
           },
+          { key: "attendance-leave-balance-entries", title: "مانده‌ی مرخصی", baseActions: CRUD },
           { key: "attendance-punches", title: "ورود و خروج", baseActions: CRUD },
           {
             key: "attendance-correction-requests",

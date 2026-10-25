@@ -13,12 +13,13 @@ import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { useTabs } from "../lib/TabsContext";
 
-// مدیریت تردد › تنظیمات › «نوع مرخصی» (استحقاقی، استعلاجی، بدون حقوق …): واحد (روزانه/ساعتی/هر دو)، «مدرک الزامی» و دو گزینه‌ی مربوط به «مانده‌ی مرخصی» (مرحله‌ی بعد).
+// مدیریت تردد › تنظیمات › «نوع مرخصی» (استحقاقی، استعلاجی، بدون حقوق …): واحد (روزانه / روزانه و ساعتی)، «مدرک الزامی» و گزینه‌های مربوط به «مانده‌ی مرخصی» (استحقاق در فرم «قاعده‌ی استحقاق مرخصی»، مانده‌ی دستی در «مانده‌ی مرخصی»).
 // برای هر نوع، در فرمول‌ساز عوامل تردد یک متغیر روز «مرخصی <عنوان>» ساخته می‌شود. قواعد در سرور (services/attendanceLeaveService.ts).
 
-type Unit = "DAY" | "HOUR" | "BOTH";
-const UNIT_FA: Record<Unit, string> = { DAY: "روزانه", HOUR: "ساعتی", BOTH: "روزانه و ساعتی" };
+type Unit = "DAY" | "BOTH";
+const UNIT_FA: Record<Unit, string> = { DAY: "روزانه", BOTH: "روزانه و ساعتی" };
 
 interface TypeRow {
   id: number;
@@ -91,6 +92,7 @@ function TypeList() {
 
 function TypeForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
+  const { openTab } = useTabs();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
   const [form, setForm] = usePersistedState(cacheKey, { title: "", unit: "BOTH" as Unit, isActive: true, requiresAttachment: false, deductsBalance: false, countHolidays: false, description: "" });
@@ -150,7 +152,7 @@ function TypeForm({ editId }: { editId?: number }) {
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
           </div>
           <div className="form-field">
-            <label>واحد <FieldHint label="واحد" text="روزانه: درخواست از تاریخ تا تاریخ. ساعتی: درخواست یک روز با ساعت شروع و پایان. هر دو: درخواست‌دهنده انتخاب می‌کند." /></label>
+            <label>واحد <FieldHint label="واحد" text="روزانه: فقط درخواست از تاریخ تا تاریخ؛ مانده (استحقاق و مصرف) به «روز» است. روزانه و ساعتی: درخواست‌دهنده روزانه یا ساعتی انتخاب می‌کند؛ مانده به «ساعت:دقیقه» است. واحد با وجود مانده‌ی دستی یا قاعده‌ی استحقاق قابل تغییر نیست." /></label>
             <select value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value as Unit })}>
               {(Object.keys(UNIT_FA) as Unit[]).map((u) => <option key={u} value={u}>{UNIT_FA[u]}</option>)}
             </select>
@@ -162,11 +164,18 @@ function TypeForm({ editId }: { editId?: number }) {
             <label className="checkbox-row"><input type="checkbox" checked={form.requiresAttachment} onChange={(e) => setForm({ ...form, requiresAttachment: e.target.checked })} /> مدرک الزامی <FieldHint label="مدرک الزامی" text="تایید درخواست این نوع مرخصی بدون پیوست (تصویر یا PDF، مثلاً گواهی پزشک) ممکن نیست." /></label>
           </div>
           <div className="form-field">
-            <label className="checkbox-row"><input type="checkbox" checked={form.deductsBalance} onChange={(e) => setForm({ ...form, deductsBalance: e.target.checked })} /> از مانده‌ی مرخصی کم شود <FieldHint label="کسر از مانده" text="برای مرحله‌ی «مانده‌ی مرخصی» (استحقاق، مصرف و سیاست مانده‌ی منفی). فعلاً فقط نگه‌داری می‌شود و اثری ندارد." /></label>
+            <label className="checkbox-row"><input type="checkbox" checked={form.deductsBalance} onChange={(e) => setForm({ ...form, deductsBalance: e.target.checked })} /> از مانده‌ی مرخصی کم شود <FieldHint label="کسر از مانده" text="مصرف درخواست‌های این نوع (ثبت‌شده و تاییدشده) از مانده‌ی کارمند کم می‌شود. استحقاق ماهانه و مرخصی منفی را در فرم «قاعده‌ی استحقاق مرخصی» و مانده‌ی اولیه را در «مانده‌ی مرخصی» وارد کنید. اگر مانده منفی شود و مرخصی منفی برای شیفت کارمند مجاز نباشد، ثبت/تایید درخواست رد می‌شود." /></label>
           </div>
           <div className="form-field">
-            <label className="checkbox-row"><input type="checkbox" checked={form.countHolidays} onChange={(e) => setForm({ ...form, countHolidays: e.target.checked })} /> روز تعطیل وسط مرخصی جزو مرخصی حساب شود <FieldHint label="تعطیل وسط مرخصی" text="برای مرحله‌ی «مانده‌ی مرخصی». فعلاً فقط نگه‌داری می‌شود؛ در محاسبه‌ی دقیقه‌ی مرخصی روزِ غیرکاری همیشه صفر است." /></label>
+            <label className="checkbox-row"><input type="checkbox" checked={form.countHolidays} onChange={(e) => setForm({ ...form, countHolidays: e.target.checked })} /> روز تعطیل وسط مرخصی جزو مرخصی حساب شود <FieldHint label="تعطیل وسط مرخصی" text="فقط برای انواعی که از مانده کم می‌شوند: روزِ غیرکاری (تعطیلی شیفت/رسمی) وسط مرخصیِ روزانه هم از مانده کم شود (برای نوع روزانه ۱ روز، برای نوع ساعتی ساعات کاری روزانه‌ی تقویم). وگرنه فقط روزهای کاری کم می‌شوند. اثری روی دقیقه‌ی مرخصی در کارکرد ندارد." /></label>
           </div>
+          {editId && form.deductsBalance && (
+            <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+              <button type="button" className="link-btn" onClick={() => openTab(`/attendance-leave-entitlements?leaveTypeId=${editId}`)}>قاعده‌ی استحقاق و مرخصی منفی این نوع ←</button>
+              {" "}
+              <button type="button" className="link-btn" onClick={() => openTab(`/attendance-leave-balance-entries?leaveTypeId=${editId}`)}>مانده‌ی دستی این نوع ←</button>
+            </div>
+          )}
           <div className="form-field" style={{ gridColumn: "1 / -1" }}>
             <label>توضیحات</label>
             <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />

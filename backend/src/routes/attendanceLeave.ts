@@ -5,6 +5,7 @@ import { findFormPrefix } from "../authz/registry";
 import type { AuthedRequest } from "../middleware/auth";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { AttendanceError } from "../services/attendancePunchService";
+import { balanceOn } from "../services/attendanceLeaveBalanceService";
 import {
   REQUEST_INCLUDE,
   addAttachment,
@@ -18,6 +19,7 @@ import {
   requestShape,
   saveLeaveType,
   unapproveRequest,
+  updateRequest,
 } from "../services/attendanceLeaveService";
 
 // مدیریت تردد › تنظیمات › «نوع مرخصی» و عملیات › «درخواست مرخصی». منطق فقط در services/attendanceLeaveService.ts.
@@ -87,6 +89,20 @@ router.get("/attendance-leave-requests/:id", can(`${F_REQ}.view`), async (req, r
   res.json(requestShape(r));
 });
 
+// مانده‌ی کارمند برای یک نوع مرخصی در پایان یک روز (پیش‌فرض امروز)؛ excludeRequestId = درخواستی که در حال ویرایش است
+router.get("/attendance-leave-requests/balance/of", can(`${F_REQ}.view`), async (req, res) => {
+  try {
+    const employeeId = Number(req.query.employeeId), leaveTypeId = Number(req.query.leaveTypeId);
+    if (!employeeId || !leaveTypeId) return res.json(null);
+    const type = await prisma.attendanceLeaveType.findUnique({ where: { id: leaveTypeId } });
+    if (!type?.deductsBalance) return res.json(null);
+    const d = typeof req.query.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date) ? Math.floor(new Date(`${req.query.date}T00:00:00Z`).getTime() / 86400000) : undefined;
+    res.json(await balanceOn(employeeId, leaveTypeId, d, req.query.excludeRequestId ? Number(req.query.excludeRequestId) : undefined));
+  } catch (e) {
+    fail(res, e, "خطا در محاسبه‌ی مانده");
+  }
+});
+
 router.post("/attendance-leave-requests", can(`${F_REQ}.create`), async (req, res) => {
   try {
     const created = await createRequest(await cleanRequest(req.body), uid(req));
@@ -104,7 +120,7 @@ router.put("/attendance-leave-requests/:id", can(`${F_REQ}.edit`), async (req, r
     assertRecordNotStale(ex.updatedAt, req.body?.updatedAt, "درخواست مرخصی");
     if (ex.status !== "PENDING") throw new AttendanceError("فقط درخواست در وضعیت «ثبت‌شده» قابل ویرایش است؛ ابتدا برگشت از تایید/رد کنید");
     const d = await cleanRequest(req.body, id);
-    await prisma.attendanceLeaveRequest.update({ where: { id }, data: d });
+    await updateRequest(id, d);
     res.json({ id });
   } catch (e) {
     fail(res, e, "خطا در ویرایش درخواست مرخصی");

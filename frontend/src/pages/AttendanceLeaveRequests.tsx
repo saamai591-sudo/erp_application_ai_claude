@@ -24,13 +24,14 @@ import { EmployeePickerField, useEmployeeOptions } from "./AttendancePunches";
 // مدیریت تردد › عملیات › «درخواست مرخصی»: کارمند + نوع مرخصی + روزانه (از تاریخ تا تاریخ) یا ساعتی (یک تاریخ + ساعت شروع/پایان) + دلیل (+ پیوست). «ثبت‌شده» ← تایید / رد (با دلیل)
 // ← برگشت؛ فقط «ثبت‌شده» ویرایش می‌شود و نوعی که «مدرک الزامی» دارد بدون پیوست تایید نمی‌شود. فقط درخواست تاییدشده در کارکرد/فرمول‌ها اثر دارد. قواعد در سرور.
 
-type Unit = "DAY" | "HOUR" | "BOTH";
+type Unit = "DAY" | "BOTH";
 interface TypeOpt {
   id: number;
   title: string;
   isActive: boolean;
   unit: Unit;
   requiresAttachment: boolean;
+  deductsBalance: boolean;
 }
 interface Att {
   id: number;
@@ -173,7 +174,16 @@ function ReqForm({ editId }: { editId?: number }) {
   }, [editId]);
 
   const type = types.find((t) => String(t.id) === form.leaveTypeId);
-  const hourly = type?.unit === "HOUR" ? true : type?.unit === "DAY" ? false : form.hourly;
+  const hourly = type?.unit === "DAY" ? false : form.hourly;
+  // مانده‌ی کارمند برای نوعی که از مانده کم می‌شود (تا تاریخ شروع، بدون احتساب خودِ این درخواست)
+  const [bal, setBal] = useState<{ text: string; date: string; balance: number; typeTitle: string } | null>(null);
+  useEffect(() => {
+    setBal(null);
+    if (!form.employeeId || !type?.deductsBalance || !form.fromDate) return;
+    let dead = false;
+    api.get(`/attendance-leave-requests/balance/of?employeeId=${form.employeeId}&leaveTypeId=${type.id}&date=${form.fromDate}${editId ? `&excludeRequestId=${editId}` : ""}`).then((r) => { if (!dead) setBal(r); }).catch(() => {});
+    return () => { dead = true; };
+  }, [form.employeeId, form.fromDate, type?.id, type?.deductsBalance, editId, meta?.status]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -321,6 +331,12 @@ function ReqForm({ editId }: { editId?: number }) {
             </div>
           </div>
         </fieldset>
+        {bal && (
+          <div className={bal.balance < 0 ? "alert warn" : "alert"} style={{ marginTop: 10, maxWidth: 900, fontSize: 13 }}>
+            مانده‌ی «{bal.typeTitle}» تا تاریخ {formatJalaliDate(bal.date)} (بدون احتساب همین درخواست): <b>{toFaDigits(bal.text)}</b>
+            <FieldHint label="مانده‌ی مرخصی" text="مانده = مانده‌ی دستی + استحقاق ماهانه − مصرف درخواست‌های ثبت‌شده و تاییدشده. اگر با این درخواست مانده در هر روزِ مصرف منفی شود و مرخصی منفی برای شیفت کارمند در آن تاریخ مجاز نباشد، ثبت و تایید رد می‌شود." />
+          </div>
+        )}
         {editId && meta ? (
           <>
             <h4 style={{ margin: "14px 0 6px" }}>پیوست‌ها{type?.requiresAttachment && <RequiredMark />}</h4>

@@ -458,6 +458,7 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "attendance-factors", label: "عوامل تردد", list: "/attendance-factors", create: "/attendance-factors/new", icon: "sliders" },
           { key: "attendance-time-bands", label: "بازه‌های زمانی", list: "/attendance-time-bands", create: "/attendance-time-bands/new", icon: "calendar" },
           { key: "attendance-leave-types", label: "نوع مرخصی", list: "/attendance-leave-types", create: "/attendance-leave-types/new", icon: "tag" },
+          { key: "attendance-leave-entitlements", label: "قاعده‌ی استحقاق مرخصی", list: "/attendance-leave-entitlements", icon: "sliders", type: "operational" },
         ],
       },
       {
@@ -466,6 +467,7 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "attendance-shift-assignments", label: "انتساب شیفت", list: "/attendance-shift-assignments", create: "/attendance-shift-assignments/new", icon: "users" },
           { key: "attendance-day-exceptions", label: "استثنای روز", list: "/attendance-day-exceptions", create: "/attendance-day-exceptions/new", icon: "calendar" },
           { key: "attendance-leave-requests", label: "درخواست مرخصی", list: "/attendance-leave-requests", create: "/attendance-leave-requests/new", icon: "file" },
+          { key: "attendance-leave-balance-entries", label: "مانده‌ی مرخصی", list: "/attendance-leave-balance-entries", create: "/attendance-leave-balance-entries/new", icon: "file" },
           { key: "attendance-punches", label: "ورود و خروج", list: "/attendance-punches", create: "/attendance-punches/new", icon: "calendar" },
           { key: "attendance-correction-requests", label: "درخواست اصلاح تردد", list: "/attendance-correction-requests", create: "/attendance-correction-requests/new", icon: "file" },
         ],

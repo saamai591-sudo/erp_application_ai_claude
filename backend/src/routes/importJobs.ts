@@ -41,6 +41,7 @@ const ENTITY_TYPE_TO_ACTION: Record<string, string> = {
   "payroll-data-entry": `${findFormPrefix("payroll-data-entry")}.edit`,
   "personnel-constant": `${findFormPrefix("personnel-constants")}.edit`,
   "employee-salary-account": `${findFormPrefix("employee-salary-accounts")}.create`,
+  "attendance-leave-balance": `${findFormPrefix("attendance-leave-balance-entries")}.create`,
 };
 
 const router = Router();
