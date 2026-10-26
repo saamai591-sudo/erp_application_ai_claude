@@ -4,10 +4,12 @@ import { AttendanceError, EMPLOYEE_SELECT, assertDayOpen, dayStr, minuteText, pa
 import { getPeriods, periodContains } from "./employmentStatusService";
 import { assertNoRequestConflict, assertShiftAssigned } from "./attendanceLeaveService";
 import { lastCalculatedYm } from "./payrollLoanService";
+import { assertNoPresenceInInterval, workSpan } from "./attendancePresenceService";
 
 // مدیریت تردد › درخواست ماموریت — تنها محل قواعد. هم‌الگوی درخواست مرخصی (روزانه یا ساعتی؛ ثبت‌شده ← تایید / رد ← برگشت) ولی:
-// • کنترل‌ها: دوره‌ی همکاری، «شیفت تخصیص‌یافته تا تاریخ شروع» و عدم هم‌پوشانی با مرخصی/ماموریت دیگر (assertNoRequestConflict دوطرفه). با تردد ثبت‌شده تضاد ندارد
-//   (کارمند ممکن است پیش از رفتن تردد زده باشد) و ماموریتِ ساعتی لازم نیست داخل بازه‌ی کاری باشد.
+// • کنترل‌ها: دوره‌ی همکاری، «شیفت تخصیص‌یافته تا تاریخ شروع»، عدم هم‌پوشانی با مرخصی/ماموریت دیگر (assertNoRequestConflict دوطرفه) و عدم تداخل با ترددِ ثبت‌شده
+//   (assertNoPresence: در بازه‌ی ماموریت تردد منفرد نباشد و شروع/پایان داخل جفت‌تردد نیفتد؛ برای روزانه بازه = شروع شیفت روز اول تا پایان شیفت روز آخر).
+//   ماموریتِ ساعتی لازم نیست داخل بازه‌ی کاری باشد.
 // • پوشش روزانه (فقط تاییدشده): غیبت برداشته می‌شود (متغیر MISSION_MINUTES، services/attendanceMissionCalc.ts).
 // • «پایان ماموریت» (فقط روزانه‌ی تاییدشده): تا قبل از آن «تا تاریخ» قابل ویرایش است؛ بعد از آن تاریخ پایان قطعی است و کل بازه در ماهِ پایان به تفکیک نوع احتساب می‌شود
 //   (گزارش ماموریت بازه‌هایی را به نوعِ دیگر می‌برد). کنترل: تاریخ پایانِ تازه قبل از آخرین ماهِ محاسبه‌شده‌ی حقوق کارمند نباشد و در آینده نباشد.
@@ -97,6 +99,16 @@ export interface CleanMission {
   reason: string;
 }
 
+/** تداخل با ترددِ ثبت‌شده (تابع مشترک با مرخصی ساعتی): ساعتی = بازه‌ی خودش؛ روزانه = شروع شیفتِ روز اول تا پایان شیفتِ روز آخر */
+async function assertNoPresence(q: { employeeId: number; fromDate: Date; toDate: Date; startMinute: number | null; endMinute: number | null }) {
+  if (q.startMinute !== null) {
+    await assertNoPresenceInInterval(q.employeeId, dayNum(q.fromDate) * DAY + q.startMinute, dayNum(q.toDate) * DAY + (q.endMinute as number), "ماموریت");
+    return;
+  }
+  const span = await workSpan(q.employeeId, dayNum(q.fromDate), dayNum(q.toDate));
+  await assertNoPresenceInInterval(q.employeeId, span.s, span.e, "ماموریت");
+}
+
 async function assertCooperation(employeeId: number, fromDate: Date, toDate: Date) {
   const periods = await getPeriods(employeeId);
   for (let d = dayNum(fromDate); d <= dayNum(toDate); d++) {
@@ -132,6 +144,7 @@ export async function cleanMission(b: any, excludeId?: number): Promise<CleanMis
   await assertCooperation(employeeId, fromDate, toDate);
   await assertDayOpen(employeeId, fromDate);
   await assertShiftAssigned(employeeId, fromDate, "ماموریت");
+  await assertNoPresence({ employeeId, fromDate, toDate, startMinute, endMinute });
   await assertNoRequestConflict({ employeeId, fromDate, toDate, startMinute, endMinute }, excludeId, ["PENDING", "APPROVED"], "MISSION");
   return { employeeId, typeId, fromDate, toDate, plannedToDate: toDate, startMinute, endMinute, destination, reason };
 }
@@ -167,6 +180,7 @@ async function validateNewEnd(r: { id: number; employeeId: number; fromDate: Dat
   if (lastEnd && newTo < lastEnd) throw new AttendanceError(`تاریخ پایان ماموریت نمی‌تواند قبل از آخرین ماهِ محاسبه‌شده‌ی حقوق کارمند (تا ${displayDate(lastEnd)}) باشد`);
   await assertCooperation(r.employeeId, r.fromDate, newTo);
   await assertDayOpen(r.employeeId, newTo);
+  await assertNoPresence({ employeeId: r.employeeId, fromDate: r.fromDate, toDate: newTo, startMinute: null, endMinute: null });
   await assertNoRequestConflict({ employeeId: r.employeeId, fromDate: r.fromDate, toDate: newTo, startMinute: null, endMinute: null }, r.id, ["PENDING", "APPROVED"], "MISSION");
 }
 
@@ -220,7 +234,8 @@ export async function approveMission(id: number, userId: number | null) {
     if (r.status !== "PENDING") throw new AttendanceError("فقط درخواست در وضعیت «ثبت‌شده» قابل تایید است");
     await assertDayOpen(r.employeeId, r.fromDate);
     await assertShiftAssigned(r.employeeId, r.fromDate, "ماموریت");
-    // در فاصله‌ی ثبت تا تایید ممکن است درخواست هم‌پوشانِ تاییدشده‌ای ثبت شده باشد
+    // در فاصله‌ی ثبت تا تایید ممکن است ترددی داخل بازه ثبت شده یا درخواست هم‌پوشانِ تاییدشده‌ای آمده باشد
+    await assertNoPresence(r);
     await assertNoRequestConflict(r, id, ["APPROVED"], "MISSION");
     await tx.attendanceMissionRequest.update({ where: { id }, data: { status: "APPROVED", decidedById: userId, decidedAt: new Date(), decisionNote: null } });
   });

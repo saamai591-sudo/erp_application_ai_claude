@@ -4,6 +4,7 @@ import { AttendanceError, EMPLOYEE_SELECT, assertDayOpen, dayStr, minuteText, pa
 import { getPeriods, periodContains } from "./employmentStatusService";
 import { buildWorksheet } from "./attendanceWorksheetService";
 import { assertBalanceAllowed, lockEmployeeBalance, typeHasBalanceData } from "./attendanceLeaveBalanceService";
+import { assertNoPresenceInInterval } from "./attendancePresenceService";
 
 // مدیریت تردد › نوع مرخصی و درخواست مرخصی (مرحله‌ی ۱ و ۲). تنها محل قواعد.
 // نوع مرخصی: واحد (روزانه / روزانه و ساعتی)، «دارای مانده مرخصی» و «روز تعطیل وسط مرخصی» (محاسبه‌ی مانده در attendanceLeaveBalanceService)، «مدرک الزامی» (تایید بدون پیوست ممکن نیست).
@@ -203,16 +204,8 @@ export async function assertShiftAndPresence(q: { employeeId: number; fromDate: 
     const list = segs.map((x) => `${atText(x.s)} تا ${atText(x.e)}`).join("، ");
     if (!segs.some((x) => mine.s >= x.s && mine.s < x.e)) throw new AttendanceError(`شروع مرخصی (${atText(mine.s)}) داخل بازه‌ی کاری شیفت نیست؛ بازه‌های کاری: ${list}`);
     if (!segs.some((x) => mine.e > x.s && mine.e <= x.e)) throw new AttendanceError(`پایان مرخصی (${atText(mine.e)}) داخل بازه‌ی کاری شیفت نیست؛ بازه‌های کاری: ${list}`);
-    for (const r of rows) {
-      for (const [i, o] of (r.pairsAbs ?? []) as [number, number][]) {
-        if (Math.min(o, mine.e) > Math.max(i, mine.s)) throw new AttendanceError(`این مرخصی با حضورِ ثبت‌شده‌ی کارمند (از ${atText(i)} تا ${atText(o)}) تداخل دارد؛ ابتدا ترددها را اصلاح کنید یا بازه‌ی مرخصی را عوض کنید`);
-      }
-    }
-    const punches = await prisma.attendancePunch.findMany({ where: { employeeId: q.employeeId, date: { gte: new Date((f - 1) * DAY_MS), lte: new Date((t + 1) * DAY_MS) } }, select: { date: true, minute: true } });
-    for (const p of punches) {
-      const abs = dayNum(p.date) * DAY + p.minute;
-      if (mine.s < abs && abs < mine.e) throw new AttendanceError(`در بازه‌ی این مرخصی ترددی در ${atText(abs)} ثبت شده است`);
-    }
+    // تداخل با ترددِ ثبت‌شده: تابع مشترکِ مرخصی/ماموریت (جفت‌ترددِ هم‌پوشان یا تردد منفردِ داخل بازه)
+    await assertNoPresenceInInterval(q.employeeId, mine.s, mine.e, "مرخصی");
     return;
   }
   const punches = await prisma.attendancePunch.findMany({ where: { employeeId: q.employeeId, date: { gte: q.fromDate, lte: q.toDate } }, orderBy: [{ date: "asc" }, { minute: "asc" }], select: { date: true, minute: true }, take: 1 });
