@@ -6619,6 +6619,8 @@ model AttendanceLeaveNegativePolicy {
   shiftId     Int
   fromDate    DateTime            @db.Date
   allowed     Boolean
+  /// سقف مرخصی منفی (فقط وقتی allowed): مانده حداکثر تا منفیِ این مقدار می‌رود؛ به «روز» برای نوع روزانه و «دقیقه» برای نوع روزانه و ساعتی؛ خالی = بدون سقف
+  limit       Decimal?            @db.Decimal(12, 4)
   createdById Int?
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt

@@ -236,12 +236,13 @@ export async function ledgerOf(employeeId: number, leaveTypeId: number) {
 
 async function policiesOf(leaveTypeId: number) {
   const rows = await prisma.attendanceLeaveNegativePolicy.findMany({ where: { leaveTypeId }, orderBy: { fromDate: "asc" } });
-  const by = new Map<number, { day: number; allowed: boolean }[]>();
-  for (const r of rows) (by.get(r.shiftId) ?? by.set(r.shiftId, []).get(r.shiftId)!).push({ day: dayNum(r.fromDate), allowed: r.allowed });
-  return (shiftId: number | null, day: number) => {
-    if (shiftId === null) return false;
-    let v = false;
-    for (const p of by.get(shiftId) ?? []) if (p.day <= day) v = p.allowed;
+  const by = new Map<number, { day: number; allowed: boolean; limit: number | null }[]>();
+  for (const r of rows) (by.get(r.shiftId) ?? by.set(r.shiftId, []).get(r.shiftId)!).push({ day: dayNum(r.fromDate), allowed: r.allowed, limit: r.limit === null ? null : Number(r.limit) });
+  /** سیاست مؤثر آن روز: مجاز بودن و سقف (null = بدون سقف) */
+  return (shiftId: number | null, day: number): { allowed: boolean; limit: number | null } => {
+    let v = { allowed: false, limit: null as number | null };
+    if (shiftId === null) return v;
+    for (const p of by.get(shiftId) ?? []) if (p.day <= day) v = { allowed: p.allowed, limit: p.allowed ? p.limit : null };
     return v;
   };
 }
@@ -261,8 +262,10 @@ export async function assertBalanceAllowed(p: { employeeId: number; leaveTypeId:
   const asgs: Asg[] = (await prisma.attendanceShiftAssignment.findMany({ where: { employeeId: p.employeeId }, orderBy: { fromDate: "asc" }, select: { fromDate: true, shiftId: true } })).map((a) => ({ fromDay: dayNum(a.fromDate), shiftId: a.shiftId }));
   for (const d of days) {
     const bal = L.balanceAt(d);
-    if (bal < -EPS && !allowedOn(shiftAt(asgs, d), d)) {
-      throw new AttendanceError(`مانده‌ی مرخصی «${type.title}» تا تاریخ ${displayDate(fromNum(d))} به ${fmtAmount(L.unit, bal)} می‌رسد و مرخصی منفی برای شیفت کارمند در این تاریخ مجاز نیست`);
+    if (bal < -EPS) {
+      const pol = allowedOn(shiftAt(asgs, d), d);
+      if (!pol.allowed) throw new AttendanceError(`مانده‌ی مرخصی «${type.title}» تا تاریخ ${displayDate(fromNum(d))} به ${fmtAmount(L.unit, bal)} می‌رسد و مرخصی منفی برای شیفت کارمند در این تاریخ مجاز نیست`);
+      if (pol.limit !== null && bal < -pol.limit - EPS) throw new AttendanceError(`مانده‌ی مرخصی «${type.title}» تا تاریخ ${displayDate(fromNum(d))} به ${fmtAmount(L.unit, bal)} می‌رسد و از سقف مرخصی منفی (${fmtAmount(L.unit, pol.limit)}) بیشتر است`);
     }
   }
 }
@@ -378,7 +381,11 @@ export async function cleanEntitlement(b: any) {
 // ───────────────────────── مرخصی منفی ─────────────────────────
 
 export function policyShape(r: any) {
+  const unit = (r.leaveType?.unit === "DAY" ? "DAY" : "BOTH") as LeaveUnit;
   return {
+    unit,
+    limit: r.limit === null || r.limit === undefined ? null : Number(r.limit),
+    limitText: r.allowed ? (r.limit === null || r.limit === undefined ? "بدون سقف" : fmtAmount(unit, Number(r.limit))) : "",
     id: r.id,
     leaveTypeId: r.leaveTypeId,
     leaveTypeTitle: r.leaveType?.title ?? "",
@@ -390,15 +397,18 @@ export function policyShape(r: any) {
   };
 }
 
-export const POLICY_INCLUDE = { leaveType: { select: { title: true } }, shift: { select: { title: true } } };
+export const POLICY_INCLUDE = { leaveType: { select: { title: true, unit: true } }, shift: { select: { title: true } } };
 
 export async function cleanPolicy(b: any) {
-  const { type } = await balanceType(b?.leaveTypeId);
+  const { type, unit } = await balanceType(b?.leaveTypeId);
   const shift = Number(b?.shiftId) ? await prisma.attendanceShift.findUnique({ where: { id: Number(b.shiftId) } }) : null;
   if (!shift) throw new AttendanceError("شیفت را انتخاب کنید");
   const fromDate = parseDay(b?.fromDate, "از تاریخ");
   if (typeof b?.allowed !== "boolean") throw new AttendanceError("مجاز/غیرمجاز بودن مرخصی منفی را مشخص کنید");
-  return { leaveTypeId: type.id, shiftId: shift.id, fromDate, allowed: b.allowed as boolean };
+  // سقف: فقط وقتی مجاز است؛ خالی = بدون سقف. به روز (نوع روزانه) یا دقیقه (نوع روزانه و ساعتی)
+  let limit: number | null = null;
+  if (b.allowed === true && b?.limit !== undefined && b?.limit !== null && String(b.limit).trim() !== "") limit = parseAmount(unit, b.limit, "سقف مرخصی منفی", MAX_MANUAL[unit]);
+  return { leaveTypeId: type.id, shiftId: shift.id, fromDate, allowed: b.allowed as boolean, limit };
 }
 
 /** آیا برای این نوع داده‌ی مانده (دستی/استحقاق/مرخصی منفی) وجود دارد؟ (برای قفلِ تغییر واحد) */

@@ -52,6 +52,9 @@ interface PolRow {
   shiftTitle: string;
   fromDate: string;
   allowed: boolean;
+  unit: Unit;
+  limit: number | null;
+  limitText: string;
   updatedAt?: string;
 }
 interface TypeOpt {
@@ -268,6 +271,7 @@ interface PolDlg {
   shiftId: string;
   fromDate: string;
   allowed: boolean;
+  limit: string;
   updatedAt?: string;
 }
 
@@ -296,7 +300,7 @@ function NegativeTab({ types, shifts, leaveTypeId }: TabCtx) {
   return (
     <>
       <div className="header-toolbar" style={{ gap: 4, margin: "8px 0" }}>
-        {canCreate && <button type="button" className="btn" onClick={() => setDlg({ typeId: leaveTypeId, shiftId: "", fromDate: localTodayIso(), allowed: true })}>مرخصی منفی جدید</button>}
+        {canCreate && <button type="button" className="btn" onClick={() => setDlg({ typeId: leaveTypeId, shiftId: "", fromDate: localTodayIso(), allowed: true, limit: "" })}>مرخصی منفی جدید</button>}
         <RefreshButton onClick={reload} />
       </div>
       <ErrorToast message={error} />
@@ -306,7 +310,8 @@ function NegativeTab({ types, shifts, leaveTypeId }: TabCtx) {
           { header: "شیفت", ...s<PolRow>((r) => r.shiftTitle) },
           { header: "از تاریخ", ...s<PolRow>((r) => formatJalaliDate(r.fromDate)), width: "120px" },
           { header: "مرخصی منفی", ...s<PolRow>((r) => (r.allowed ? "مجاز" : "مجاز نیست")), width: "120px" },
-          { header: "", ...s<PolRow>(() => ""), render: (r: PolRow) => (canEdit ? <button type="button" className="link-btn" onClick={() => setDlg({ id: r.id, typeId: String(r.leaveTypeId), shiftId: String(r.shiftId), fromDate: r.fromDate, allowed: r.allowed, updatedAt: r.updatedAt })}>ویرایش</button> : null), width: "70px" },
+          { header: "سقف مرخصی منفی", ...s<PolRow>((r) => r.limitText), width: "140px" },
+          { header: "", ...s<PolRow>(() => ""), render: (r: PolRow) => (canEdit ? <button type="button" className="link-btn" onClick={() => setDlg({ id: r.id, typeId: String(r.leaveTypeId), shiftId: String(r.shiftId), fromDate: r.fromDate, allowed: r.allowed, limit: r.limit === null ? "" : r.unit === "DAY" ? String(r.limit) : minutesToMask(r.limit), updatedAt: r.updatedAt })}>ویرایش</button> : null), width: "70px" },
         ]}
         rows={items}
         onDelete={onDelete}
@@ -319,12 +324,25 @@ function NegativeTab({ types, shifts, leaveTypeId }: TabCtx) {
 function PolicyDialog({ dlg, setDlg, types, shifts, onSaved }: { dlg: PolDlg; setDlg: (d: PolDlg | null) => void; types: TypeOpt[]; shifts: ShiftOpt[]; onSaved: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const upd = (p: Partial<PolDlg>) => setDlg({ ...dlg, ...p });
+  const unit: Unit = types.find((t) => String(t.id) === dlg.typeId)?.unit ?? "DAY";
   async function save() {
     setError(null);
     if (!dlg.typeId) return setError("نوع مرخصی را انتخاب کنید");
     if (!dlg.shiftId) return setError("شیفت را انتخاب کنید");
     if (!dlg.fromDate) return setError("از تاریخ الزامی است");
-    const body = { leaveTypeId: Number(dlg.typeId), shiftId: Number(dlg.shiftId), fromDate: dlg.fromDate, allowed: dlg.allowed, updatedAt: dlg.updatedAt };
+    // سقف (فقط وقتی مجاز است؛ خالی = بدون سقف): روز برای نوع روزانه، ساعت:دقیقه برای نوع روزانه و ساعتی
+    let limit: number | null = null;
+    if (dlg.allowed && dlg.limit.trim() !== "") {
+      if (unit === "DAY") {
+        limit = Number(dlg.limit.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))));
+        if (!Number.isFinite(limit) || limit <= 0) return setError("سقف مرخصی منفی (روز) باید عددی بزرگ‌تر از صفر باشد؛ برای بدون سقف خالی بگذارید");
+      } else {
+        const m = maskToMinutes(dlg.limit);
+        if (m === null || m <= 0) return setError("سقف مرخصی منفی را به شکل ساعت:دقیقه وارد کنید (مثلاً 100:00)؛ برای بدون سقف خالی بگذارید");
+        limit = m;
+      }
+    }
+    const body = { leaveTypeId: Number(dlg.typeId), shiftId: Number(dlg.shiftId), fromDate: dlg.fromDate, allowed: dlg.allowed, limit, updatedAt: dlg.updatedAt };
     try {
       if (dlg.id) await api.put(`/attendance-leave-negative-policies/${dlg.id}`, body);
       else await api.post("/attendance-leave-negative-policies", body);
@@ -344,11 +362,21 @@ function PolicyDialog({ dlg, setDlg, types, shifts, onSaved }: { dlg: PolDlg; se
         </div>
         <div className="form-field">
           <label>مرخصی منفی</label>
-          <select value={dlg.allowed ? "1" : "0"} onChange={(e) => upd({ allowed: e.target.value === "1" })}>
+          <select value={dlg.allowed ? "1" : "0"} onChange={(e) => upd({ allowed: e.target.value === "1", limit: e.target.value === "1" ? dlg.limit : "" })}>
             <option value="1">مجاز است</option>
             <option value="0">مجاز نیست</option>
           </select>
         </div>
+        {dlg.allowed && (
+          <div className="form-field">
+            <label>سقف مرخصی منفی{dlg.typeId ? (unit === "DAY" ? " (روز)" : " (ساعت:دقیقه)") : ""} <FieldHint label="سقف مرخصی منفی" text="مانده‌ی کارمند حداکثر تا منفیِ این مقدار می‌تواند برود (مثلاً ۱۰۰:۰۰ یعنی تا ۱۰۰ ساعت مرخصی منفی). خالی = بدون سقف. ثبت یا تاییدی که مانده را از سقف پایین‌تر ببرد رد می‌شود." /></label>
+            {unit === "DAY" ? (
+              <input dir="ltr" inputMode="decimal" style={{ width: 120, textAlign: "center" }} value={dlg.limit} onChange={(e) => upd({ limit: e.target.value })} placeholder="بدون سقف" />
+            ) : (
+              <TimeInput value={dlg.limit} maxHourDigits={3} width={110} placeholder="بدون سقف" onChange={(t) => upd({ limit: t })} />
+            )}
+          </div>
+        )}
       </div>
       <div className="actions">
         <button type="button" className="btn" onClick={save}>ذخیره</button>
