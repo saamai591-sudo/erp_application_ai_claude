@@ -6,7 +6,7 @@ import { buildWorksheet } from "./attendanceWorksheetService";
 import { assertBalanceAllowed, lockEmployeeBalance, typeHasBalanceData } from "./attendanceLeaveBalanceService";
 
 // مدیریت تردد › نوع مرخصی و درخواست مرخصی (مرحله‌ی ۱ و ۲). تنها محل قواعد.
-// نوع مرخصی: واحد (روزانه / روزانه و ساعتی)، «از مانده کم شود» و «روز تعطیل وسط مرخصی» (محاسبه‌ی مانده در attendanceLeaveBalanceService)، «مدرک الزامی» (تایید بدون پیوست ممکن نیست).
+// نوع مرخصی: واحد (روزانه / روزانه و ساعتی)، «دارای مانده مرخصی» و «روز تعطیل وسط مرخصی» (محاسبه‌ی مانده در attendanceLeaveBalanceService)، «مدرک الزامی» (تایید بدون پیوست ممکن نیست).
 // کنترل مانده‌ی منفی هنگام ثبت/ویرایش و تایید درخواست (assertBalanceAllowed) زیر قفل کارمند انجام می‌شود تا دو درخواست هم‌زمان هر دو از کنترل رد نشوند.
 // درخواست: روزانه (از تاریخ تا تاریخ) یا ساعتی (یک تاریخ + ساعت شروع/پایان همان روز)؛ ثبت‌شده ← تایید / رد (با دلیل) ← برگشت؛ فقط «ثبت‌شده» قابل ویرایش است.
 // اثر روی کارکرد (مشتق، ذخیره نمی‌شود): فقط درخواست «تاییدشده» — به ازای هر نوع مرخصی یک متغیر روز LV<id> و جمع همه‌ی انواع LEAVE_TAKEN (leaveForDay).
@@ -26,6 +26,9 @@ export function leaveTypeShape(t: any) {
     isActive: t.isActive,
     unit: (t.unit === "DAY" ? "DAY" : "BOTH") as "DAY" | "BOTH",
     deductsBalance: t.deductsBalance,
+    entitlementKind: (t.entitlementKind ?? null) as "ANNUAL" | "MONTHLY" | null,
+    hasPerRequestLimit: !!t.hasPerRequestLimit,
+    hasPerMonthLimit: !!t.hasPerMonthLimit,
     requiresAttachment: t.requiresAttachment,
     countHolidays: t.countHolidays,
     description: t.description ?? "",
@@ -39,11 +42,22 @@ export async function saveLeaveType(body: any, id?: number) {
   if (!title) throw new AttendanceError("عنوان نوع مرخصی الزامی است");
   const unit = String(body?.unit ?? "BOTH");
   if (unit !== "DAY" && unit !== "BOTH") throw new AttendanceError("واحد مرخصی نامعتبر است");
+  const deducts = body?.deductsBalance === true;
+  let entitlementKind: "ANNUAL" | "MONTHLY" | null = null;
+  if (deducts) {
+    const k = String(body?.entitlementKind ?? "");
+    if (k !== "ANNUAL" && k !== "MONTHLY") throw new AttendanceError("برای نوعِ «دارای مانده مرخصی» نوع استحقاق (سالانه یا ماهانه) را انتخاب کنید");
+    entitlementKind = k;
+  }
   const data = {
     title,
     unit: unit as any,
     isActive: body?.isActive !== false,
-    deductsBalance: body?.deductsBalance === true,
+    deductsBalance: deducts,
+    entitlementKind: entitlementKind as any,
+    // سقف‌های استفاده فقط برای نوعِ دارای مانده معنا دارند؛ مقدارشان در «قاعده‌ی استحقاق» گرفته می‌شود
+    hasPerRequestLimit: deducts && body?.hasPerRequestLimit === true,
+    hasPerMonthLimit: deducts && body?.hasPerMonthLimit === true,
     requiresAttachment: body?.requiresAttachment === true,
     countHolidays: body?.countHolidays === true,
     description: String(body?.description ?? "").trim() || null,
@@ -57,6 +71,7 @@ export async function saveLeaveType(body: any, id?: number) {
   const ex = await prisma.attendanceLeaveType.findUnique({ where: { id } });
   if (!ex) throw new AttendanceError("نوع مرخصی یافت نشد");
   const exUnit = ex.unit === "DAY" ? "DAY" : "BOTH";
+  if (ex.entitlementKind && entitlementKind && ex.entitlementKind !== entitlementKind && (await typeHasBalanceData(id))) throw new AttendanceError("برای این نوع مرخصی مانده‌ی دستی، قاعده‌ی استحقاق یا مرخصی منفی ثبت شده است؛ نوع استحقاق را نمی‌توان تغییر داد");
   if (unit !== exUnit) {
     // مانده‌ی روزانه «روز» و مانده‌ی روزانه و ساعتی «دقیقه» است؛ با داده‌ی مانده تغییر واحد معنا را عوض می‌کند
     if (await typeHasBalanceData(id)) throw new AttendanceError("برای این نوع مرخصی مانده‌ی دستی، قاعده‌ی استحقاق یا مرخصی منفی ثبت شده است؛ واحد را نمی‌توان تغییر داد");
@@ -260,7 +275,7 @@ export async function approveRequest(id: number, userId: number | null) {
     await assertNoRequestConflict(r, id, ["APPROVED"]);
     await assertShiftAndPresence(r);
     await lockEmployeeBalance(tx, r.employeeId);
-    await assertBalanceAllowed({ employeeId: r.employeeId, leaveTypeId: r.leaveTypeId, fromDate: r.fromDate });
+    await assertBalanceAllowed({ employeeId: r.employeeId, leaveTypeId: r.leaveTypeId, fromDate: r.fromDate, requestId: id });
     await tx.attendanceLeaveRequest.update({ where: { id }, data: { status: "APPROVED", decidedById: userId, decidedAt: new Date(), decisionNote: null } });
   });
 }

@@ -27,6 +27,9 @@ interface TypeRow {
   isActive: boolean;
   unit: Unit;
   deductsBalance: boolean;
+  entitlementKind: "ANNUAL" | "MONTHLY" | null;
+  hasPerRequestLimit: boolean;
+  hasPerMonthLimit: boolean;
   requiresAttachment: boolean;
   countHolidays: boolean;
   description: string;
@@ -78,7 +81,8 @@ function TypeList() {
           { header: "عنوان", ...s((r) => r.title) },
           { header: "واحد", ...s((r) => UNIT_FA[r.unit]), width: "140px" },
           { header: "مدرک الزامی", ...s((r) => yn(r.requiresAttachment)), width: "110px" },
-          { header: "از مانده کم شود", ...s((r) => yn(r.deductsBalance)), width: "130px" },
+          { header: "دارای مانده مرخصی", ...s((r) => yn(r.deductsBalance)), width: "130px" },
+          { header: "نوع استحقاق", ...s((r) => (r.entitlementKind === "ANNUAL" ? "سالانه" : r.entitlementKind === "MONTHLY" ? "ماهانه" : "")), width: "100px" },
           { header: "درخواست‌ها", ...s((r) => toFaDigits(String(r.requestCount ?? 0))), width: "100px" },
           { header: "فعال", ...s((r) => (r.isActive ? "بله" : "خیر")), width: "80px" },
         ]}
@@ -95,7 +99,7 @@ function TypeForm({ editId }: { editId?: number }) {
   const { openTab } = useTabs();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
-  const [form, setForm] = usePersistedState(cacheKey, { title: "", unit: "BOTH" as Unit, isActive: true, requiresAttachment: false, deductsBalance: false, countHolidays: false, description: "" });
+  const [form, setForm] = usePersistedState(cacheKey, { title: "", unit: "BOTH" as Unit, isActive: true, requiresAttachment: false, deductsBalance: false, entitlementKind: "MONTHLY" as "ANNUAL" | "MONTHLY", hasPerRequestLimit: false, hasPerMonthLimit: false, countHolidays: false, description: "" });
   const [updatedAt, setUpdatedAt] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
@@ -105,7 +109,7 @@ function TypeForm({ editId }: { editId?: number }) {
     if (!editId) return;
     const r: TypeRow = await api.get(`/attendance-leave-types/${editId}`);
     setUpdatedAt(r.updatedAt);
-    if (!hasPersistedState(cacheKey)) setForm({ title: r.title, unit: r.unit, isActive: r.isActive, requiresAttachment: r.requiresAttachment, deductsBalance: r.deductsBalance, countHolidays: r.countHolidays, description: r.description });
+    if (!hasPersistedState(cacheKey)) setForm({ title: r.title, unit: r.unit, isActive: r.isActive, requiresAttachment: r.requiresAttachment, deductsBalance: r.deductsBalance, entitlementKind: r.entitlementKind ?? "MONTHLY", hasPerRequestLimit: r.hasPerRequestLimit, hasPerMonthLimit: r.hasPerMonthLimit, countHolidays: r.countHolidays, description: r.description });
   }
   useEffect(() => {
     load().then(() => setLoaded(true)).catch((e) => setError(e.message));
@@ -164,10 +168,27 @@ function TypeForm({ editId }: { editId?: number }) {
             <label className="checkbox-row"><input type="checkbox" checked={form.requiresAttachment} onChange={(e) => setForm({ ...form, requiresAttachment: e.target.checked })} /> مدرک الزامی <FieldHint label="مدرک الزامی" text="تایید درخواست این نوع مرخصی بدون پیوست (تصویر یا PDF، مثلاً گواهی پزشک) ممکن نیست." /></label>
           </div>
           <div className="form-field">
-            <label className="checkbox-row"><input type="checkbox" checked={form.deductsBalance} onChange={(e) => setForm({ ...form, deductsBalance: e.target.checked })} /> از مانده‌ی مرخصی کم شود <FieldHint label="کسر از مانده" text="مصرف درخواست‌های این نوع (ثبت‌شده و تاییدشده) از مانده‌ی کارمند کم می‌شود. استحقاق ماهانه و مرخصی منفی را در فرم «قاعده‌ی استحقاق مرخصی» و مانده‌ی اولیه را در «مانده‌ی مرخصی» وارد کنید. اگر مانده منفی شود و مرخصی منفی برای شیفت کارمند مجاز نباشد، ثبت/تایید درخواست رد می‌شود." /></label>
+            <label className="checkbox-row"><input type="checkbox" checked={form.deductsBalance} onChange={(e) => setForm({ ...form, deductsBalance: e.target.checked })} /> دارای مانده مرخصی <FieldHint label="دارای مانده مرخصی" text="این نوع مرخصی مانده دارد: مصرف درخواست‌های ثبت‌شده و تاییدشده از مانده‌ی کارمند کم می‌شود. مانده‌ی دستی، قاعده‌ی استحقاق (سالانه یا ماهانه) و مرخصی منفی را فقط برای چنین نوعی می‌توان تعریف کرد. اگر مانده منفی شود و مرخصی منفی برای شیفت کارمند مجاز نباشد (یا از سقفش بگذرد)، ثبت/تایید درخواست رد می‌شود." /></label>
           </div>
+          {form.deductsBalance && (
+            <>
+              <div className="form-field">
+                <label>نوع استحقاق<RequiredMark /> <FieldHint label="نوع استحقاق" text="سالانه: مقدار استحقاق یک‌بار در ابتدای هر سال به مانده اضافه می‌شود. ماهانه: هر ماه (در اول یا آخر ماه، با وابستگی به کارکرد اختیاری). مقدار و زمانش در «قاعده‌ی استحقاق مرخصی» هر شیفت تعیین می‌شود. با وجود قاعده یا مانده‌ی دستی قابل تغییر نیست." /></label>
+                <select value={form.entitlementKind} onChange={(e) => setForm({ ...form, entitlementKind: e.target.value as "ANNUAL" | "MONTHLY" })}>
+                  <option value="ANNUAL">سالانه</option>
+                  <option value="MONTHLY">ماهانه</option>
+                </select>
+              </div>
+              <div className="form-field">
+                <label className="checkbox-row"><input type="checkbox" checked={form.hasPerRequestLimit} onChange={(e) => setForm({ ...form, hasPerRequestLimit: e.target.checked })} /> دارای سقف استفاده در هر درخواست <FieldHint label="سقف هر درخواست" text="مصرف یک درخواست از این نوع نباید از سقفی که در «قاعده‌ی استحقاق مرخصی» (برای شیفت و ماه اجرا) تعیین می‌شود بیشتر باشد؛ هنگام ثبت و تایید کنترل می‌شود." /></label>
+              </div>
+              <div className="form-field">
+                <label className="checkbox-row"><input type="checkbox" checked={form.hasPerMonthLimit} onChange={(e) => setForm({ ...form, hasPerMonthLimit: e.target.checked })} /> دارای سقف استفاده در هر ماه <FieldHint label="سقف هر ماه" text="جمع مصرفِ همه‌ی درخواست‌های ثبت‌شده و تاییدشده‌ی این نوع در هر ماه تقویم کاری نباید از سقفی که در «قاعده‌ی استحقاق مرخصی» تعیین می‌شود بیشتر باشد." /></label>
+              </div>
+            </>
+          )}
           <div className="form-field">
-            <label className="checkbox-row"><input type="checkbox" checked={form.countHolidays} onChange={(e) => setForm({ ...form, countHolidays: e.target.checked })} /> روز تعطیل وسط مرخصی جزو مرخصی حساب شود <FieldHint label="تعطیل وسط مرخصی" text="فقط برای انواعی که از مانده کم می‌شوند: روزِ غیرکاری (تعطیلی شیفت/رسمی) وسط مرخصیِ روزانه هم از مانده کم شود (برای نوع روزانه ۱ روز، برای نوع ساعتی ساعات کاری روزانه‌ی تقویم). وگرنه فقط روزهای کاری کم می‌شوند. اثری روی دقیقه‌ی مرخصی در کارکرد ندارد." /></label>
+            <label className="checkbox-row"><input type="checkbox" checked={form.countHolidays} onChange={(e) => setForm({ ...form, countHolidays: e.target.checked })} /> روز تعطیل وسط مرخصی جزو مرخصی حساب شود <FieldHint label="تعطیل وسط مرخصی" text="فقط برای انواعِ «دارای مانده مرخصی»: روزِ غیرکاری (تعطیلی شیفت/رسمی) وسط مرخصیِ روزانه هم دارای مانده مرخصی (برای نوع روزانه ۱ روز، برای نوع ساعتی ساعات کاری روزانه‌ی تقویم). وگرنه فقط روزهای کاری کم می‌شوند. اثری روی دقیقه‌ی مرخصی در کارکرد ندارد." /></label>
           </div>
           {editId && form.deductsBalance && (
             <div className="form-field" style={{ gridColumn: "1 / -1" }}>

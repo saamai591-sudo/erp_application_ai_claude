@@ -6522,6 +6522,11 @@ model AttendanceLeaveType {
   unit               AttendanceLeaveUnit       @default(BOTH)
   /// از مانده‌ی مرخصی کم شود؟ (مرحله‌ی «مانده‌ی مرخصی»؛ فعلاً فقط نگه‌داری می‌شود)
   deductsBalance     Boolean                   @default(false)
+  /// نوع استحقاق (فقط وقتی «دارای مانده مرخصی»): سالانه (ابتدای سال) یا ماهانه
+  entitlementKind    AttendanceEntitlementKind?
+  /// سقف استفاده در هر درخواست / در هر ماه (مقدارشان در «قاعده‌ی استحقاق» هر شیفت و ماه اجرا گرفته می‌شود)
+  hasPerRequestLimit Boolean                   @default(false)
+  hasPerMonthLimit   Boolean                   @default(false)
   /// تایید درخواست بدون پیوست (مدرک) ممکن نیست
   requiresAttachment Boolean                   @default(false)
   /// روز تعطیل وسط مرخصی جزو مرخصی حساب شود؟ (مرحله‌ی «مانده‌ی مرخصی»؛ فعلاً فقط نگه‌داری می‌شود)
@@ -6590,6 +6595,13 @@ enum AttendanceEntitlementBasis {
 enum AttendanceEntitlementTiming {
   START_OF_MONTH
   END_OF_MONTH
+  /// فقط استحقاق سالانه
+  START_OF_YEAR
+}
+
+enum AttendanceEntitlementKind {
+  ANNUAL
+  MONTHLY
 }
 
 /// قاعده‌ی استحقاق ماهانه‌ی مرخصی: نوع × شیفت × ماه اجرا (تقویم کاری)؛ برای ماه M آخرین ماه اجرای ≤ M معتبر است
@@ -6602,6 +6614,9 @@ model AttendanceLeaveEntitlement {
   amount           Decimal                     @db.Decimal(12, 4)
   basis            AttendanceEntitlementBasis  @default(NONE)
   timing           AttendanceEntitlementTiming @default(END_OF_MONTH)
+  /// سقف استفاده در هر درخواست / در هر ماه (روز یا دقیقه)؛ فقط برای نوعی که تیک سقف دارد، وگرنه خالی
+  perRequestLimit  Decimal?                    @db.Decimal(12, 4)
+  perMonthLimit    Decimal?                    @db.Decimal(12, 4)
   createdById      Int?
   createdAt        DateTime                    @default(now())
   updatedAt        DateTime                    @updatedAt

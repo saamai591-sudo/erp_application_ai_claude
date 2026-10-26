@@ -25,9 +25,9 @@ import { usePermissions } from "../lib/usePermissions";
 
 type Unit = "DAY" | "BOTH";
 type Basis = "NONE" | "STANDARD" | "ACTUAL";
-type Timing = "START_OF_MONTH" | "END_OF_MONTH";
+type Timing = "START_OF_MONTH" | "END_OF_MONTH" | "START_OF_YEAR";
 const BASIS_FA: Record<Basis, string> = { NONE: "مستقل از کارکرد", STANDARD: "متناسب با روزهای همکاری (استاندارد)", ACTUAL: "متناسب با کارکرد واقعی" };
-const TIMING_FA: Record<Timing, string> = { START_OF_MONTH: "اول ماه", END_OF_MONTH: "آخر ماه" };
+const TIMING_FA: Record<Timing, string> = { START_OF_MONTH: "اول ماه", END_OF_MONTH: "آخر ماه", START_OF_YEAR: "در ابتدای سال" };
 
 interface EntRow {
   id: number;
@@ -42,6 +42,11 @@ interface EntRow {
   amountText: string;
   basis: Basis;
   timing: Timing;
+  kind: "ANNUAL" | "MONTHLY";
+  perRequestLimit: number | null;
+  perMonthLimit: number | null;
+  perRequestLimitText: string;
+  perMonthLimitText: string;
   updatedAt?: string;
 }
 interface PolRow {
@@ -63,6 +68,9 @@ interface TypeOpt {
   unit: Unit;
   isActive: boolean;
   deductsBalance: boolean;
+  entitlementKind: "ANNUAL" | "MONTHLY" | null;
+  hasPerRequestLimit: boolean;
+  hasPerMonthLimit: boolean;
 }
 interface ShiftOpt {
   id: number;
@@ -88,7 +96,7 @@ export default function AttendanceLeaveEntitlements() {
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint title="قاعده‌ی استحقاق مرخصی" text="استحقاق: مقدار مرخصی که هر ماه به کارمندانِ یک شیفت برای یک نوع مرخصی تعلق می‌گیرد (ماه اجرا از تقویم کاری؛ قاعده‌ی هر ماه آخرین ماه اجرای قبل یا برابر آن است). مرخصی منفی: از چه تاریخی برای یک شیفت اجازه‌ی منفی‌شدن مانده داده شود. فقط انواعی که «از مانده کم شود» دارند." />
+          <InfoHint title="قاعده‌ی استحقاق مرخصی" text="استحقاق: مقدار مرخصی که هر ماه به کارمندانِ یک شیفت برای یک نوع مرخصی تعلق می‌گیرد (ماه اجرا از تقویم کاری؛ قاعده‌ی هر ماه آخرین ماه اجرای قبل یا برابر آن است). مرخصی منفی: از چه تاریخی برای یک شیفت اجازه‌ی منفی‌شدن مانده داده شود. فقط انواعی که «دارای مانده مرخصی» دارند." />
         </div>
         {leaveTypeId && <span style={{ marginInlineStart: 12 }}>نوع: <b>{types.find((t) => String(t.id) === leaveTypeId)?.title ?? ""}</b></span>}
       </div>
@@ -113,7 +121,7 @@ function TypeShiftFields({ types, shifts, typeId, shiftId, onType, onShift, disa
   return (
     <>
       <div className="form-field">
-        <label>نوع مرخصی<RequiredMark /> <FieldHint label="نوع مرخصی" text="فقط انواعی که «از مانده کم شود» دارند." /></label>
+        <label>نوع مرخصی<RequiredMark /> <FieldHint label="نوع مرخصی" text="فقط انواعی که «دارای مانده مرخصی» دارند." /></label>
         <select value={typeId} disabled={disabled} onChange={(e) => onType(e.target.value)}>
           <option value="">— انتخاب —</option>
           {types.filter((t) => t.isActive || String(t.id) === typeId).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
@@ -141,6 +149,8 @@ interface EntDlg {
   amount: string;
   basis: Basis;
   timing: Timing;
+  perRequest: string;
+  perMonth: string;
   updatedAt?: string;
 }
 
@@ -168,10 +178,10 @@ function EntitlementTab({ types, shifts, leaveTypeId }: TabCtx) {
   }
   function openNew() {
     const cur = currentJalaliYearMonth();
-    setDlg({ typeId: leaveTypeId, shiftId: "", year: cur.year, month: cur.month, amount: "", basis: "NONE", timing: "END_OF_MONTH" });
+    setDlg({ typeId: leaveTypeId, shiftId: "", year: cur.year, month: cur.month, amount: "", basis: "NONE", timing: "END_OF_MONTH", perRequest: "", perMonth: "" });
   }
   function openEdit(r: EntRow) {
-    setDlg({ id: r.id, typeId: String(r.leaveTypeId), shiftId: String(r.shiftId), year: r.execYear, month: r.execMonth, amount: r.unit === "DAY" ? String(r.amount) : minutesToMask(r.amount), basis: r.basis, timing: r.timing, updatedAt: r.updatedAt });
+    setDlg({ id: r.id, typeId: String(r.leaveTypeId), shiftId: String(r.shiftId), year: r.execYear, month: r.execMonth, amount: r.unit === "DAY" ? String(r.amount) : minutesToMask(r.amount), basis: r.basis, timing: r.timing, perRequest: r.perRequestLimit === null ? "" : r.unit === "DAY" ? String(r.perRequestLimit) : minutesToMask(r.perRequestLimit), perMonth: r.perMonthLimit === null ? "" : r.unit === "DAY" ? String(r.perMonthLimit) : minutesToMask(r.perMonthLimit), updatedAt: r.updatedAt });
   }
   return (
     <>
@@ -185,9 +195,11 @@ function EntitlementTab({ types, shifts, leaveTypeId }: TabCtx) {
           { header: "نوع مرخصی", ...s<EntRow>((r) => r.leaveTypeTitle), width: "150px" },
           { header: "شیفت", ...s<EntRow>((r) => r.shiftTitle) },
           { header: "ماه اجرا", ...s<EntRow>((r) => `${MONTHS_FA[r.execMonth - 1]} ${toFaDigits(String(r.execYear))}`), width: "140px" },
-          { header: "استحقاق ماهانه", ...s<EntRow>((r) => r.amountText), width: "130px" },
-          { header: "وابسته به کارکرد", ...s<EntRow>((r) => BASIS_FA[r.basis]), width: "240px" },
-          { header: "زمان تخصیص", ...s<EntRow>((r) => TIMING_FA[r.timing]), width: "110px" },
+          { header: "استحقاق (ماهانه/سالانه)", ...s<EntRow>((r) => `${r.amountText} ${r.kind === "ANNUAL" ? "— سالانه" : "— ماهانه"}`), width: "170px" },
+          { header: "وابسته به کارکرد", ...s<EntRow>((r) => (r.kind === "ANNUAL" ? "—" : BASIS_FA[r.basis])), width: "240px" },
+          { header: "زمان تخصیص", ...s<EntRow>((r) => TIMING_FA[r.timing]), width: "120px" },
+          { header: "سقف هر درخواست", ...s<EntRow>((r) => r.perRequestLimitText || "—"), width: "130px" },
+          { header: "سقف هر ماه", ...s<EntRow>((r) => r.perMonthLimitText || "—"), width: "120px" },
           { header: "", ...s<EntRow>(() => ""), render: (r: EntRow) => (canEdit ? <button type="button" className="link-btn" onClick={() => openEdit(r)}>ویرایش</button> : null), width: "70px" },
         ]}
         rows={items}
@@ -202,21 +214,42 @@ function EntitlementDialog({ dlg, setDlg, types, shifts, onSaved }: { dlg: EntDl
   const [error, setError] = useState<string | null>(null);
   const type = types.find((t) => String(t.id) === dlg.typeId);
   const unit: Unit = type?.unit ?? "DAY";
+  const annual = type?.entitlementKind === "ANNUAL";
   const upd = (p: Partial<EntDlg>) => setDlg({ ...dlg, ...p });
+  /** مقدار یک سقف: روز (نوع روزانه) یا ساعت:دقیقه (روزانه و ساعتی) */
+  function parseCap(text: string, label: string): number | string {
+    if (unit === "DAY") {
+      const v = Number(text.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))));
+      return Number.isFinite(v) && v > 0 ? v : `${label} (روز) باید عددی بزرگ‌تر از صفر باشد`;
+    }
+    const m = maskToMinutes(text);
+    return m !== null && m > 0 ? m : `${label} را به شکل ساعت:دقیقه وارد کنید (مثلاً 08:00)`;
+  }
   async function save() {
     setError(null);
     if (!type) return setError("نوع مرخصی را انتخاب کنید");
     if (!dlg.shiftId) return setError("شیفت را انتخاب کنید");
+    let perRequestLimit: number | null = null, perMonthLimit: number | null = null;
+    if (type.hasPerRequestLimit) {
+      const v = parseCap(dlg.perRequest, "سقف استفاده در هر درخواست");
+      if (typeof v === "string") return setError(v);
+      perRequestLimit = v;
+    }
+    if (type.hasPerMonthLimit) {
+      const v = parseCap(dlg.perMonth, "سقف استفاده در هر ماه");
+      if (typeof v === "string") return setError(v);
+      perMonthLimit = v;
+    }
     let amount: number;
     if (unit === "DAY") {
       amount = Number(dlg.amount.replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))));
-      if (!Number.isFinite(amount) || amount <= 0) return setError("استحقاق ماهانه (روز) باید عددی بزرگ‌تر از صفر باشد");
+      if (!Number.isFinite(amount) || amount <= 0) return setError(`${annual ? "استحقاق سالانه" : "استحقاق ماهانه"} (روز) باید عددی بزرگ‌تر از صفر باشد`);
     } else {
       const m = maskToMinutes(dlg.amount);
-      if (m === null || m <= 0) return setError("استحقاق ماهانه را به شکل ساعت:دقیقه وارد کنید (مثلاً 16:00)");
+      if (m === null || m <= 0) return setError(`${annual ? "استحقاق سالانه" : "استحقاق ماهانه"} را به شکل ساعت:دقیقه وارد کنید (مثلاً 16:00)`);
       amount = m;
     }
-    const body = { leaveTypeId: type.id, shiftId: Number(dlg.shiftId), execYear: dlg.year, execMonth: dlg.month, amount, basis: dlg.basis, timing: dlg.basis === "ACTUAL" ? "END_OF_MONTH" : dlg.timing, updatedAt: dlg.updatedAt };
+    const body = { leaveTypeId: type.id, shiftId: Number(dlg.shiftId), execYear: dlg.year, execMonth: dlg.month, amount, basis: annual ? "NONE" : dlg.basis, timing: annual ? "START_OF_YEAR" : dlg.basis === "ACTUAL" ? "END_OF_MONTH" : dlg.timing, perRequestLimit, perMonthLimit, updatedAt: dlg.updatedAt };
     try {
       if (dlg.id) await api.put(`/attendance-leave-entitlements/${dlg.id}`, body);
       else await api.post("/attendance-leave-entitlements", body);
@@ -235,25 +268,49 @@ function EntitlementDialog({ dlg, setDlg, types, shifts, onSaved }: { dlg: EntDl
           <WorkMonthPicker year={dlg.year} month={dlg.month} autoFix={!dlg.id} onChange={(y, m) => upd({ year: y, month: m })} />
         </div>
         <div className="form-field">
-          <label>استحقاق ماهانه{type ? (unit === "DAY" ? " (روز)" : " (ساعت:دقیقه)") : ""}<RequiredMark /></label>
+          <label>{annual ? "استحقاق سالانه" : "استحقاق ماهانه"}{type ? (unit === "DAY" ? " (روز)" : " (ساعت:دقیقه)") : ""}<RequiredMark /></label>
           {unit === "DAY" ? (
             <input dir="ltr" inputMode="decimal" style={{ width: 120, textAlign: "center" }} value={dlg.amount} onChange={(e) => upd({ amount: e.target.value })} placeholder="0" />
           ) : (
             <TimeInput value={dlg.amount} maxHourDigits={3} width={110} onChange={(t) => upd({ amount: t })} />
           )}
         </div>
-        <div className="form-field">
-          <label>وابسته به کارکرد <FieldHint label="وابسته به کارکرد" text="مستقل از کارکرد: مقدار کامل ماه. متناسب با روزهای همکاری: مقدار × (روزهای ماه که کارمند در همکاری بوده و همین شیفت را داشته ÷ روز استاندارد ماه در تقویم کاری، حداکثر ۱). متناسب با کارکرد واقعی: مقدار × (روزهای کاریِ برنامه‌ریزی‌شده که حضور یا مرخصیِ غیررد داشته ÷ روزهای کاریِ برنامه‌ریزی‌شده‌ی کارمند در ماه)؛ این حالت فقط در پایان ماه تخصیص می‌یابد." /></label>
-          <select value={dlg.basis} onChange={(e) => upd({ basis: e.target.value as Basis, timing: e.target.value === "ACTUAL" ? "END_OF_MONTH" : dlg.timing })}>
-            {(Object.keys(BASIS_FA) as Basis[]).map((b) => <option key={b} value={b}>{BASIS_FA[b]}</option>)}
-          </select>
-        </div>
-        <div className="form-field">
-          <label>زمان تخصیص <FieldHint label="زمان تخصیص" text="اول ماه: استحقاق از روز اول ماه به مانده اضافه می‌شود. آخر ماه: در آخرین روز ماه. برای «متناسب با کارکرد واقعی» همیشه آخر ماه است." /></label>
-          <select value={dlg.basis === "ACTUAL" ? "END_OF_MONTH" : dlg.timing} disabled={dlg.basis === "ACTUAL"} onChange={(e) => upd({ timing: e.target.value as Timing })}>
-            {(Object.keys(TIMING_FA) as Timing[]).map((t) => <option key={t} value={t}>{TIMING_FA[t]}</option>)}
-          </select>
-        </div>
+        {!annual && (
+          <>
+          <div className="form-field">
+            <label>وابسته به کارکرد <FieldHint label="وابسته به کارکرد" text="مستقل از کارکرد: مقدار کامل ماه. متناسب با روزهای همکاری: مقدار × (روزهای ماه که کارمند در همکاری بوده و همین شیفت را داشته ÷ روز استاندارد ماه در تقویم کاری، حداکثر ۱). متناسب با کارکرد واقعی: مقدار × (روزهای کاریِ برنامه‌ریزی‌شده که حضور یا مرخصیِ غیررد داشته ÷ روزهای کاریِ برنامه‌ریزی‌شده‌ی کارمند در ماه)؛ این حالت فقط در پایان ماه تخصیص می‌یابد." /></label>
+            <select value={dlg.basis} onChange={(e) => upd({ basis: e.target.value as Basis, timing: e.target.value === "ACTUAL" ? "END_OF_MONTH" : dlg.timing })}>
+              {(Object.keys(BASIS_FA) as Basis[]).map((b) => <option key={b} value={b}>{BASIS_FA[b]}</option>)}
+            </select>
+          </div>
+          <div className="form-field">
+            <label>زمان تخصیص <FieldHint label="زمان تخصیص" text="اول ماه: استحقاق از روز اول ماه به مانده اضافه می‌شود. آخر ماه: در آخرین روز ماه. برای «متناسب با کارکرد واقعی» همیشه آخر ماه است." /></label>
+            <select value={dlg.basis === "ACTUAL" ? "END_OF_MONTH" : dlg.timing} disabled={dlg.basis === "ACTUAL"} onChange={(e) => upd({ timing: e.target.value as Timing })}>
+              {(Object.keys(TIMING_FA) as Timing[]).map((t) => <option key={t} value={t}>{TIMING_FA[t]}</option>)}
+            </select>
+          </div>
+          </>
+        )}
+        {annual && (
+          <div className="form-field">
+            <label>زمان تخصیص <FieldHint label="زمان تخصیص" text="استحقاق سالانه همیشه در ابتدای سال به مانده اضافه می‌شود (برای کارمندِ شروع‌شده در میانه‌ی سال، از اولین روز همکاری‌اش). مقدار کامل است و به کارکرد وابسته نیست." /></label>
+            <select value="START_OF_YEAR" disabled>
+              <option value="START_OF_YEAR">{TIMING_FA.START_OF_YEAR}</option>
+            </select>
+          </div>
+        )}
+        {type?.hasPerRequestLimit && (
+          <div className="form-field">
+            <label>سقف استفاده در هر درخواست{unit === "DAY" ? " (روز)" : " (ساعت:دقیقه)"}<RequiredMark /></label>
+            {unit === "DAY" ? <input dir="ltr" inputMode="decimal" style={{ width: 120, textAlign: "center" }} value={dlg.perRequest} onChange={(e) => upd({ perRequest: e.target.value })} /> : <TimeInput value={dlg.perRequest} maxHourDigits={3} width={110} onChange={(t) => upd({ perRequest: t })} />}
+          </div>
+        )}
+        {type?.hasPerMonthLimit && (
+          <div className="form-field">
+            <label>سقف استفاده در هر ماه{unit === "DAY" ? " (روز)" : " (ساعت:دقیقه)"}<RequiredMark /></label>
+            {unit === "DAY" ? <input dir="ltr" inputMode="decimal" style={{ width: 120, textAlign: "center" }} value={dlg.perMonth} onChange={(e) => upd({ perMonth: e.target.value })} /> : <TimeInput value={dlg.perMonth} maxHourDigits={3} width={110} onChange={(t) => upd({ perMonth: t })} />}
+          </div>
+        )}
       </div>
       <div className="actions">
         <button type="button" className="btn" onClick={save}>ذخیره</button>

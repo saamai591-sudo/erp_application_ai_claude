@@ -106,7 +106,7 @@ function EntryList() {
               backendEntityType="attendance-leave-balance"
               columns={[
                 { key: "personnelCode", label: "کد پرسنلی", required: true, hint: "کد پرسنلی کارمند (صفرهای ابتدای کد مهم نیست)" },
-                { key: "leaveType", label: "نوع مرخصی", required: true, hint: "عنوان دقیق نوع مرخصی (باید «از مانده کم شود» داشته باشد)" },
+                { key: "leaveType", label: "نوع مرخصی", required: true, hint: "عنوان دقیق نوع مرخصی (باید «دارای مانده مرخصی» داشته باشد)" },
                 { key: "date", label: "تاریخ", required: true, hint: "تاریخ شمسی مثل 1405/01/01؛ کارمند باید در آن روز در دوره‌ی همکاری باشد" },
                 { key: "direction", label: "افزایش/کاهش", hint: "«افزایش» یا «کاهش»؛ خالی = افزایش" },
                 { key: "amount", label: "مقدار", required: true, hint: "نوع روزانه: روز (اعشار مجاز)؛ نوع روزانه و ساعتی: ساعت:دقیقه مثل 100:30" },
@@ -259,7 +259,7 @@ function EntryForm({ editId }: { editId?: number }) {
             <EmployeePickerField employees={employees} value={form.employeeId} disabled={!!editId} onSelect={(x) => setForm({ ...form, employeeId: String(x.id) })} />
           </div>
           <div className="form-field">
-            <label>نوع مرخصی<RequiredMark /> <FieldHint label="نوع مرخصی" text="فقط انواعی که «از مانده کم شود» دارند. واحد مقدار به نوع بستگی دارد: روز، یا ساعت:دقیقه." /></label>
+            <label>نوع مرخصی<RequiredMark /> <FieldHint label="نوع مرخصی" text="فقط انواعی که «دارای مانده مرخصی» دارند. واحد مقدار به نوع بستگی دارد: روز، یا ساعت:دقیقه." /></label>
             <select value={form.leaveTypeId} disabled={!!editId} onChange={(e) => setForm({ ...form, leaveTypeId: e.target.value, amount: "" })}>
               <option value="">— انتخاب —</option>
               {types.filter((t) => t.isActive || String(t.id) === form.leaveTypeId).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}

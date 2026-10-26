@@ -9,7 +9,7 @@ import { leaveForDay, type ApprovedLeave } from "./attendanceLeaveService";
 
 // مدیریت تردد › مانده‌ی مرخصی (مرحله‌ی ۳). تنها محل قواعد؛ هیچ مانده‌ای ذخیره نمی‌شود — همیشه از روی این‌ها مشتق می‌شود:
 //   مانده = مانده‌ی دستی (AttendanceLeaveBalanceEntry) + استحقاق ماهانه (AttendanceLeaveEntitlement، به‌ازای نوع × شیفت × ماه اجرا) − مصرف (درخواست‌های غیررد: ثبت‌شده + تاییدشده).
-// واحد: نوع «روزانه» ⇒ روز؛ نوع «روزانه و ساعتی» ⇒ دقیقه (در فرم‌ها hhh:mm). فقط نوعی که «از مانده کم شود» دارد مانده دارد.
+// واحد: نوع «روزانه» ⇒ روز؛ نوع «روزانه و ساعتی» ⇒ دقیقه (در فرم‌ها hhh:mm). فقط نوعی که «دارای مانده مرخصی» دارد مانده دارد.
 // استحقاق ماه M: شیفتِ کارمند در اولین روز ماه (وگرنه اولین انتسابی که داخل ماه شروع می‌شود)؛ قاعده = آخرین «ماه اجرا» ≤ M برای (نوع، شیفت).
 //   NONE = مقدار کامل؛ STANDARD = مقدار × (روزهای ماه که کارمند در همکاری و دارای همان شیفت بوده ÷ روز استاندارد ماه تقویم، حداکثر ۱)؛
 //   ACTUAL = مقدار × (روزهای کاریِ برنامه‌ریزی‌شده که حضور یا مرخصیِ غیررد داشته ÷ روزهای کاریِ برنامه‌ریزی‌شده‌ی کارمند در ماه)، فقط «پایان ماه».
@@ -62,6 +62,8 @@ export interface LedgerEvent {
   delta: number;
   kind: "MANUAL" | "ACCRUAL" | "CONSUME";
   text: string;
+  /** فقط برای مصرف: درخواستِ مبدأ (درخواستِ در حال ثبت = -1) */
+  reqKey?: number;
 }
 
 interface Asg {
@@ -104,7 +106,7 @@ export async function computeLedger(employeeId: number, leaveTypeId: number, opt
   if (!type) throw new AttendanceError("نوع مرخصی یافت نشد");
   const unit: LeaveUnit = type.unit === "DAY" ? "DAY" : "BOTH";
   const events: LedgerEvent[] = [];
-  const push = (day: number, delta: number, kind: LedgerEvent["kind"], text: string) => events.push({ day, date: isoOf(day), delta, kind, text });
+  const push = (day: number, delta: number, kind: LedgerEvent["kind"], text: string, reqKey?: number) => events.push({ day, date: isoOf(day), delta, kind, text, reqKey });
 
   // مانده‌ی دستی
   const entries = await prisma.attendanceLeaveBalanceEntry.findMany({ where: { employeeId, leaveTypeId } });
@@ -136,15 +138,15 @@ export async function computeLedger(employeeId: number, leaveTypeId: number, opt
     if (unit === "DAY") {
       for (let d = f; d <= t; d++) {
         const work = (rows.get(d) ?? []).some(isWorkRow);
-        if (work || type.countHolidays) push(d, -1, "CONSUME", label);
+        if (work || type.countHolidays) push(d, -1, "CONSUME", label, q.id ?? -1);
         maxDay = Math.max(maxDay, d);
       }
     } else {
       const ap: ApprovedLeave[] = [{ employeeId, typeKey: type.key, fromDay: f, toDay: t, startMinute: q.startMinute, endMinute: q.endMinute }];
       for (let d = f - 1; d <= t; d++) {
         const lv = leaveForDay(ap, employeeId, d, rows.get(d) ?? []);
-        if (lv.total > 0) push(d, -lv.total, "CONSUME", label);
-        if (q.startMinute === null && type.countHolidays && d >= f && !(rows.get(d) ?? []).some(isWorkRow)) push(d, -(await dailyMinutesOn(d)), "CONSUME", `${label} (روز غیرکاری)`);
+        if (lv.total > 0) push(d, -lv.total, "CONSUME", label, q.id ?? -1);
+        if (q.startMinute === null && type.countHolidays && d >= f && !(rows.get(d) ?? []).some(isWorkRow)) push(d, -(await dailyMinutesOn(d)), "CONSUME", `${label} (روز غیرکاری)`, q.id ?? -1);
         maxDay = Math.max(maxDay, d);
       }
     }
@@ -162,6 +164,33 @@ export async function computeLedger(employeeId: number, leaveTypeId: number, opt
       const allActive = active; // برای ACTUAL: مرخصی هر نوعِ غیررد روز را «حاضر» می‌کند
       const typeKeys = new Map<number, string>();
       for (const t of await prisma.attendanceLeaveType.findMany({ select: { id: true, key: true } })) typeKeys.set(t.id, t.key);
+      if (type.entitlementKind === "ANNUAL") {
+        // استحقاق سالانه: یک‌بار در ابتدای هر سالِ تقویم کاری (یا اولین روز همکاری در آن سال اگر دیرتر باشد)؛ مقدار کامل (بدون وابستگی به کارکرد).
+        // قاعده‌ی هر سال = آخرین ماه اجرای ≤ ابتدای سال برای شیفتِ کارمند؛ اگر هنوز قاعده‌ای نبود، اولین قاعده‌ای که ماه اجرایش داخل همان سال است (از همان ماه به بعد)
+        const years = [...new Set(months.map((m) => m.year))];
+        const allMonths = await prisma.workCalendarMonth.findMany({ where: { year: { in: years } }, orderBy: { startDate: "asc" } });
+        for (const y of years) {
+          const ms = allMonths.filter((m) => m.year === y);
+          if (ms.length === 0) continue;
+          const ys = dayNum(ms[0].startDate), ye = dayNum(ms[ms.length - 1].endDate);
+          let firstCoopInYear: number | null = null;
+          for (let d = ys; d <= ye; d++) if (periodContains(periods, fromNum(d))) { firstCoopInYear = d; break; }
+          if (firstCoopInYear === null) continue;
+          let credit = Math.max(ys, firstCoopInYear);
+          let shiftId = shiftAt(asgs, credit);
+          if (shiftId === null) shiftId = asgs.find((a) => a.fromDay >= credit && a.fromDay <= ye)?.shiftId ?? null;
+          if (shiftId === null) continue;
+          let best: (typeof rules)[number] | undefined;
+          for (const r of rules) if (r.shiftId === shiftId && dayNum(r.execMonth.startDate) <= ys && (!best || dayNum(r.execMonth.startDate) > dayNum(best.execMonth.startDate))) best = r;
+          if (!best) {
+            for (const r of rules) if (r.shiftId === shiftId && dayNum(r.execMonth.startDate) > ys && dayNum(r.execMonth.startDate) <= ye && (!best || dayNum(r.execMonth.startDate) < dayNum(best.execMonth.startDate))) best = r;
+            if (best) credit = Math.max(credit, dayNum(best.execMonth.startDate));
+          }
+          if (!best) continue;
+          const val = roundFor(unit, Number(best.amount));
+          if (val !== 0) push(credit, val, "ACCRUAL", `استحقاق سالانه ${y}`);
+        }
+      } else
       for (const m of months) {
         const s = dayNum(m.startDate), e = dayNum(m.endDate);
         let shiftId = shiftAt(asgs, s);
@@ -251,10 +280,11 @@ async function policiesOf(leaveTypeId: number) {
  * مانده‌ی پایان هر روزِ مصرف (از روز شروع درخواست به بعد) منفی نشود، مگر مرخصی منفی برای شیفتِ کارمند در آن روز مجاز باشد.
  * extra = درخواستِ در حال ثبت/ویرایش (excludeRequestId = خودش در حالت ویرایش)؛ بدون extra درخواستِ موجود (تایید) در پایگاه داده است.
  */
-export async function assertBalanceAllowed(p: { employeeId: number; leaveTypeId: number; fromDate: Date; extra?: ReqLike; excludeRequestId?: number }) {
+export async function assertBalanceAllowed(p: { employeeId: number; leaveTypeId: number; fromDate: Date; extra?: ReqLike; excludeRequestId?: number; requestId?: number }) {
   const type = await prisma.attendanceLeaveType.findUnique({ where: { id: p.leaveTypeId } });
   if (!type || !type.deductsBalance) return;
   const L = await computeLedger(p.employeeId, p.leaveTypeId, { extra: p.extra, excludeRequestId: p.excludeRequestId });
+  await assertUsageLimits(type, L, p);
   const from = dayNum(p.fromDate) - 1;
   const days = [...new Set(L.events.filter((e) => e.kind === "CONSUME" && e.day >= from).map((e) => e.day))].sort((a, b) => a - b);
   if (days.length === 0) return;
@@ -266,6 +296,52 @@ export async function assertBalanceAllowed(p: { employeeId: number; leaveTypeId:
       const pol = allowedOn(shiftAt(asgs, d), d);
       if (!pol.allowed) throw new AttendanceError(`مانده‌ی مرخصی «${type.title}» تا تاریخ ${displayDate(fromNum(d))} به ${fmtAmount(L.unit, bal)} می‌رسد و مرخصی منفی برای شیفت کارمند در این تاریخ مجاز نیست`);
       if (pol.limit !== null && bal < -pol.limit - EPS) throw new AttendanceError(`مانده‌ی مرخصی «${type.title}» تا تاریخ ${displayDate(fromNum(d))} به ${fmtAmount(L.unit, bal)} می‌رسد و از سقف مرخصی منفی (${fmtAmount(L.unit, pol.limit)}) بیشتر است`);
+    }
+  }
+}
+
+/**
+ * سقف‌های استفاده (فقط نوعی که «سقف در هر درخواست / هر ماه» دارد): مقدارشان از «قاعده‌ی استحقاق» شیفتِ کارمند می‌آید (آخرین ماه اجرای ≤ همان تاریخ/ماه).
+ *  • هر درخواست: مجموع مصرفِ خودِ درخواست ≤ سقف (قاعده‌ی روزِ شروع درخواست)؛
+ *  • هر ماه: مجموع مصرفِ همه‌ی درخواست‌های غیررد آن نوع در هر ماهِ تقویم کاری که درخواست به آن می‌خورد ≤ سقف همان ماه.
+ * قاعده یا سقفِ تعریف‌نشده = بدون کنترل. مصرف واحد نوع مرخصی است (روز یا دقیقه).
+ */
+async function assertUsageLimits(type: { id: number; title: string; hasPerRequestLimit: boolean; hasPerMonthLimit: boolean }, L: Ledger, p: { employeeId: number; leaveTypeId: number; fromDate: Date; extra?: ReqLike; requestId?: number }) {
+  if (!type.hasPerRequestLimit && !type.hasPerMonthLimit) return;
+  const key = p.extra ? (p.extra.id ?? -1) : p.requestId;
+  if (key === undefined) return;
+  const mine = L.events.filter((e) => e.kind === "CONSUME" && e.reqKey === key);
+  if (mine.length === 0) return;
+  const rules = await prisma.attendanceLeaveEntitlement.findMany({ where: { leaveTypeId: type.id }, include: { execMonth: { select: { startDate: true } } } });
+  if (rules.length === 0) return;
+  const asgs: Asg[] = (await prisma.attendanceShiftAssignment.findMany({ where: { employeeId: p.employeeId }, orderBy: { fromDate: "asc" }, select: { fromDate: true, shiftId: true } })).map((a) => ({ fromDay: dayNum(a.fromDate), shiftId: a.shiftId }));
+  const ruleOn = (shiftId: number | null, day: number) => {
+    let best: (typeof rules)[number] | undefined;
+    if (shiftId === null) return undefined;
+    for (const r of rules) if (r.shiftId === shiftId && dayNum(r.execMonth.startDate) <= day && (!best || dayNum(r.execMonth.startDate) > dayNum(best.execMonth.startDate))) best = r;
+    return best;
+  };
+  const unit = L.unit;
+  if (type.hasPerRequestLimit) {
+    const f = dayNum(p.fromDate);
+    const cap = ruleOn(shiftAt(asgs, f), f)?.perRequestLimit;
+    if (cap !== null && cap !== undefined) {
+      const total = mine.reduce((n, e) => n - e.delta, 0);
+      if (total > Number(cap) + EPS) throw new AttendanceError(`مصرف این درخواست (${fmtAmount(unit, total)}) از سقف استفاده در هر درخواست «${type.title}» (${fmtAmount(unit, Number(cap))}) بیشتر است`);
+    }
+  }
+  if (type.hasPerMonthLimit) {
+    const months = await prisma.workCalendarMonth.findMany({ orderBy: { startDate: "asc" } });
+    const monthOf = (day: number) => months.find((m) => dayNum(m.startDate) <= day && day <= dayNum(m.endDate));
+    const touched = new Map<number, (typeof months)[number]>();
+    for (const e of mine) { const m = monthOf(e.day); if (m) touched.set(m.id, m); }
+    for (const m of touched.values()) {
+      const s = dayNum(m.startDate), e = dayNum(m.endDate);
+      const shiftId = shiftAt(asgs, s) ?? asgs.find((a) => a.fromDay >= s && a.fromDay <= e)?.shiftId ?? null;
+      const cap = ruleOn(shiftId, s)?.perMonthLimit;
+      if (cap === null || cap === undefined) continue;
+      const total = L.events.filter((x) => x.kind === "CONSUME" && x.day >= s && x.day <= e).reduce((n, x) => n - x.delta, 0);
+      if (total > Number(cap) + EPS) throw new AttendanceError(`مصرف «${type.title}» در ${MONTHS_FA[m.month - 1]} ${m.year} (${fmtAmount(unit, total)}) از سقف استفاده در هر ماه (${fmtAmount(unit, Number(cap))}) بیشتر می‌شود`);
     }
   }
 }
@@ -293,7 +369,7 @@ function parseAmount(unit: LeaveUnit, raw: unknown, label: string, max: number):
 async function balanceType(id: unknown) {
   const type = Number(id) ? await prisma.attendanceLeaveType.findUnique({ where: { id: Number(id) } }) : null;
   if (!type) throw new AttendanceError("نوع مرخصی را انتخاب کنید");
-  if (!type.deductsBalance) throw new AttendanceError(`نوع مرخصی «${type.title}» از مانده کم نمی‌شود و مانده ندارد؛ گزینه‌ی «از مانده کم شود» را در تعریف نوع فعال کنید`);
+  if (!type.deductsBalance) throw new AttendanceError(`نوع مرخصی «${type.title}» «دارای مانده مرخصی» نیست و مانده ندارد؛ گزینه‌ی «دارای مانده مرخصی» را در تعریف نوع فعال کنید`);
   return { type, unit: (type.unit === "DAY" ? "DAY" : "BOTH") as LeaveUnit };
 }
 
@@ -353,12 +429,17 @@ export function entitlementShape(r: any) {
     amount: Number(r.amount),
     amountText: fmtAmount(unit, Number(r.amount)),
     basis: r.basis as "NONE" | "STANDARD" | "ACTUAL",
-    timing: r.timing as "START_OF_MONTH" | "END_OF_MONTH",
+    timing: r.timing as "START_OF_MONTH" | "END_OF_MONTH" | "START_OF_YEAR",
+    kind: (r.leaveType?.entitlementKind ?? "MONTHLY") as "ANNUAL" | "MONTHLY",
+    perRequestLimit: r.perRequestLimit === null || r.perRequestLimit === undefined ? null : Number(r.perRequestLimit),
+    perMonthLimit: r.perMonthLimit === null || r.perMonthLimit === undefined ? null : Number(r.perMonthLimit),
+    perRequestLimitText: r.perRequestLimit === null || r.perRequestLimit === undefined ? "" : fmtAmount(unit, Number(r.perRequestLimit)),
+    perMonthLimitText: r.perMonthLimit === null || r.perMonthLimit === undefined ? "" : fmtAmount(unit, Number(r.perMonthLimit)),
     updatedAt: r.updatedAt,
   };
 }
 
-export const ENTITLEMENT_INCLUDE = { leaveType: { select: { title: true, unit: true } }, shift: { select: { title: true } }, execMonth: { select: { year: true, month: true } } };
+export const ENTITLEMENT_INCLUDE = { leaveType: { select: { title: true, unit: true, entitlementKind: true } }, shift: { select: { title: true } }, execMonth: { select: { year: true, month: true } } };
 
 export async function cleanEntitlement(b: any) {
   const { type, unit } = await balanceType(b?.leaveTypeId);
@@ -366,16 +447,26 @@ export async function cleanEntitlement(b: any) {
   if (!shift) throw new AttendanceError("شیفت را انتخاب کنید");
   const cal = await getCalendarMonth(Number(b?.execYear), Number(b?.execMonth));
   if (!cal) throw new AttendanceError("ماه اجرا در «تقویم کاری» تعریف نشده است؛ ابتدا تقویم کاری آن سال را بسازید");
-  const basis = String(b?.basis ?? "NONE");
+  const annual = type.entitlementKind === "ANNUAL";
+  let basis = String(b?.basis ?? "NONE");
   if (basis !== "NONE" && basis !== "STANDARD" && basis !== "ACTUAL") throw new AttendanceError("وابستگی به کارکرد نامعتبر است");
   let timing = String(b?.timing ?? "END_OF_MONTH");
-  if (timing !== "START_OF_MONTH" && timing !== "END_OF_MONTH") throw new AttendanceError("زمان تخصیص نامعتبر است");
-  if (basis === "ACTUAL") {
+  if (annual) {
+    // استحقاق سالانه: مقدار کامل در ابتدای سال؛ وابستگی به کارکرد و زمان تخصیص قابل انتخاب نیست
+    basis = "NONE";
+    timing = "START_OF_YEAR";
+  } else {
+    if (timing !== "START_OF_MONTH" && timing !== "END_OF_MONTH") throw new AttendanceError("زمان تخصیص نامعتبر است");
+  }
+  if (!annual && basis === "ACTUAL") {
     if (b?.timing === "START_OF_MONTH") throw new AttendanceError("برای استحقاقِ وابسته به کارکردِ واقعی، زمان تخصیص فقط «آخر ماه» است");
     timing = "END_OF_MONTH";
   }
-  const amount = parseAmount(unit, b?.amount, "مقدار استحقاق ماهانه", MAX_MONTHLY[unit]);
-  return { leaveTypeId: type.id, shiftId: shift.id, execMonthId: cal.id, amount, basis: basis as any, timing: timing as any };
+  const amount = parseAmount(unit, b?.amount, annual ? "مقدار استحقاق سالانه" : "مقدار استحقاق ماهانه", annual ? MAX_MANUAL[unit] : MAX_MONTHLY[unit]);
+  // سقف‌های استفاده: برای نوعی که تیکشان را دارد الزامی (مقدار هر آیتم گرفته می‌شود)، وگرنه خالی
+  const perRequestLimit = type.hasPerRequestLimit ? parseAmount(unit, b?.perRequestLimit, "سقف استفاده در هر درخواست", MAX_MANUAL[unit]) : null;
+  const perMonthLimit = type.hasPerMonthLimit ? parseAmount(unit, b?.perMonthLimit, "سقف استفاده در هر ماه", MAX_MANUAL[unit]) : null;
+  return { leaveTypeId: type.id, shiftId: shift.id, execMonthId: cal.id, amount, basis: basis as any, timing: timing as any, perRequestLimit, perMonthLimit };
 }
 
 // ───────────────────────── مرخصی منفی ─────────────────────────

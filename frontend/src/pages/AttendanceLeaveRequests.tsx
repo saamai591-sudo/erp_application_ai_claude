@@ -175,7 +175,7 @@ function ReqForm({ editId }: { editId?: number }) {
 
   const type = types.find((t) => String(t.id) === form.leaveTypeId);
   const hourly = type?.unit === "DAY" ? false : form.hourly;
-  // مانده‌ی کارمند برای نوعی که از مانده کم می‌شود (تا تاریخ شروع، بدون احتساب خودِ این درخواست)
+  // مانده‌ی کارمند برای نوعِ «دارای مانده مرخصی» (تا تاریخ شروع، بدون احتساب خودِ این درخواست)
   const [bal, setBal] = useState<{ text: string; date: string; balance: number; typeTitle: string } | null>(null);
   useEffect(() => {
     setBal(null);
