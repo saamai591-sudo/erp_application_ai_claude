@@ -101,6 +101,87 @@ export interface Ledger {
   balanceAt: (day: number) => number;
 }
 
+function makeDailyMinutes() {
+  const cache = new Map<number, number>();
+  return async (day: number) => {
+    if (cache.has(day)) return cache.get(day)!;
+    const m = await prisma.workCalendarMonth.findFirst({ where: { startDate: { lte: fromNum(day) }, endDate: { gte: fromNum(day) } }, include: { calendar: { select: { dailyMinutes: true } } } });
+    const v = m?.calendar.dailyMinutes ?? 480;
+    cache.set(day, v);
+    return v;
+  };
+}
+
+/**
+ * مصرفِ یک درخواست به تفکیک روز (واحد نوع: روز یا دقیقه) — تنها محاسبه‌ی مصرف؛ هم مانده/سقف‌ها و هم «مقدار درخواست» در فهرست/فرم از همین می‌آید.
+ * نوع روزانه: ۱ روز برای هر روز کاری (و روز غیرکاری اگر countHolidays)؛ نوع روزانه و ساعتی: دقیقه‌ی مرخصی همان روز (leaveForDay) و روز غیرکاریِ countHolidays = ساعات کاری روزانه‌ی تقویم.
+ */
+export async function requestConsumption(
+  type: { unit: LeaveUnit; key: string; countHolidays: boolean },
+  employeeId: number,
+  q: { fromDate: Date; toDate: Date; startMinute: number | null; endMinute: number | null },
+  rows: Map<number, any[]>,
+  dailyMinutesOn: (day: number) => Promise<number>
+): Promise<{ day: number; amount: number; holiday?: boolean }[]> {
+  const out: { day: number; amount: number; holiday?: boolean }[] = [];
+  const f = dayNum(q.fromDate), t = dayNum(q.toDate);
+  if (type.unit === "DAY") {
+    for (let d = f; d <= t; d++) if ((rows.get(d) ?? []).some(isWorkRow) || type.countHolidays) out.push({ day: d, amount: 1 });
+    return out;
+  }
+  const ap: ApprovedLeave[] = [{ employeeId, typeKey: type.key, fromDay: f, toDay: t, startMinute: q.startMinute, endMinute: q.endMinute }];
+  for (let d = f - 1; d <= t; d++) {
+    const lv = leaveForDay(ap, employeeId, d, rows.get(d) ?? []);
+    if (lv.total > 0) out.push({ day: d, amount: lv.total });
+    if (q.startMinute === null && type.countHolidays && d >= f && !(rows.get(d) ?? []).some(isWorkRow)) out.push({ day: d, amount: await dailyMinutesOn(d), holiday: true });
+  }
+  return out;
+}
+
+const AMOUNT_CACHE = new Map<string, { at: number; v: number }>();
+const unitOfType = (t: { unit: string }): LeaveUnit => (t.unit === "DAY" ? "DAY" : "BOTH");
+
+/** «مقدار» هر درخواست برای فهرست (روز یا دقیقه به واحد نوع)؛ کش کوتاه‌مدت بر پایه‌ی شناسه+زمان ویرایش+وضعیت، با همزمانیِ محدود */
+export async function requestAmounts(reqs: any[]): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  const dm = makeDailyMinutes();
+  const todo: any[] = [];
+  const now = Date.now();
+  for (const r of reqs) {
+    const c = AMOUNT_CACHE.get(`${r.id}:${new Date(r.updatedAt).getTime()}`);
+    if (c && now - c.at < 120000) out.set(r.id, c.v);
+    else todo.push(r);
+  }
+  let i = 0;
+  const worker = async () => {
+    while (i < todo.length) {
+      const r = todo[i++];
+      try {
+        const rows = await loadDayRows(r.employeeId, dayNum(r.fromDate) - 1, dayNum(r.toDate));
+        const parts = await requestConsumption({ unit: unitOfType(r.leaveType), key: r.leaveType.key, countHolidays: r.leaveType.countHolidays }, r.employeeId, r, rows, dm);
+        const v = parts.reduce((n, x) => n + x.amount, 0);
+        out.set(r.id, v);
+        AMOUNT_CACHE.set(`${r.id}:${new Date(r.updatedAt).getTime()}`, { at: Date.now(), v });
+      } catch {
+        // محاسبه‌ی مقدار نباید فهرست را خراب کند
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(6, todo.length) }, worker));
+  return out;
+}
+
+/** مقدار یک درخواستِ هنوز ذخیره‌نشده (پیش‌نمایش فرم) */
+export async function previewRequestAmount(leaveTypeId: number, employeeId: number, q: { fromDate: Date; toDate: Date; startMinute: number | null; endMinute: number | null }) {
+  const type = await prisma.attendanceLeaveType.findUnique({ where: { id: leaveTypeId } });
+  if (!type) return null;
+  const unit = unitOfType(type);
+  const rows = await loadDayRows(employeeId, dayNum(q.fromDate) - 1, dayNum(q.toDate));
+  const parts = await requestConsumption({ unit, key: type.key, countHolidays: type.countHolidays }, employeeId, q, rows, makeDailyMinutes());
+  const amount = parts.reduce((n, x) => n + x.amount, 0);
+  return { unit, amount, text: fmtAmount(unit, amount) };
+}
+
 export async function computeLedger(employeeId: number, leaveTypeId: number, opts: { untilDay?: number; extra?: ReqLike; excludeRequestId?: number } = {}): Promise<Ledger> {
   const type = await prisma.attendanceLeaveType.findUnique({ where: { id: leaveTypeId } });
   if (!type) throw new AttendanceError("نوع مرخصی یافت نشد");
@@ -123,33 +204,16 @@ export async function computeLedger(employeeId: number, leaveTypeId: number, opt
   const mine = active.filter((r) => r.leaveTypeId === leaveTypeId);
 
   let maxDay = opts.untilDay ?? todayNum();
-  const monthCache = new Map<number, number>();
-  const dailyMinutesOn = async (day: number) => {
-    if (monthCache.has(day)) return monthCache.get(day)!;
-    const m = await prisma.workCalendarMonth.findFirst({ where: { startDate: { lte: fromNum(day) }, endDate: { gte: fromNum(day) } }, include: { calendar: { select: { dailyMinutes: true } } } });
-    const v = m?.calendar.dailyMinutes ?? 480;
-    monthCache.set(day, v);
-    return v;
-  };
+  const dailyMinutesOn = makeDailyMinutes();
   for (const q of mine) {
     const f = dayNum(q.fromDate), t = dayNum(q.toDate);
     const rows = await loadDayRows(employeeId, f - 1, t);
     const label = q.number ? `مرخصی شماره ${q.number}` : "مرخصی (درخواست جاری)";
-    if (unit === "DAY") {
-      for (let d = f; d <= t; d++) {
-        const work = (rows.get(d) ?? []).some(isWorkRow);
-        if (work || type.countHolidays) push(d, -1, "CONSUME", label, q.id ?? -1);
-        maxDay = Math.max(maxDay, d);
-      }
-    } else {
-      const ap: ApprovedLeave[] = [{ employeeId, typeKey: type.key, fromDay: f, toDay: t, startMinute: q.startMinute, endMinute: q.endMinute }];
-      for (let d = f - 1; d <= t; d++) {
-        const lv = leaveForDay(ap, employeeId, d, rows.get(d) ?? []);
-        if (lv.total > 0) push(d, -lv.total, "CONSUME", label, q.id ?? -1);
-        if (q.startMinute === null && type.countHolidays && d >= f && !(rows.get(d) ?? []).some(isWorkRow)) push(d, -(await dailyMinutesOn(d)), "CONSUME", `${label} (روز غیرکاری)`, q.id ?? -1);
-        maxDay = Math.max(maxDay, d);
-      }
+    for (const c of await requestConsumption({ unit, key: type.key, countHolidays: type.countHolidays }, employeeId, q, rows, dailyMinutesOn)) {
+      push(c.day, -c.amount, "CONSUME", c.holiday ? `${label} (روز غیرکاری)` : label, q.id ?? -1);
+      maxDay = Math.max(maxDay, c.day);
     }
+    maxDay = Math.max(maxDay, t);
   }
 
   // استحقاق ماهانه
@@ -313,7 +377,6 @@ async function assertUsageLimits(type: { id: number; title: string; hasPerReques
   const mine = L.events.filter((e) => e.kind === "CONSUME" && e.reqKey === key);
   if (mine.length === 0) return;
   const rules = await prisma.attendanceLeaveEntitlement.findMany({ where: { leaveTypeId: type.id }, include: { execMonth: { select: { startDate: true } } } });
-  if (rules.length === 0) return;
   const asgs: Asg[] = (await prisma.attendanceShiftAssignment.findMany({ where: { employeeId: p.employeeId }, orderBy: { fromDate: "asc" }, select: { fromDate: true, shiftId: true } })).map((a) => ({ fromDay: dayNum(a.fromDate), shiftId: a.shiftId }));
   const ruleOn = (shiftId: number | null, day: number) => {
     let best: (typeof rules)[number] | undefined;
@@ -324,7 +387,9 @@ async function assertUsageLimits(type: { id: number; title: string; hasPerReques
   const unit = L.unit;
   if (type.hasPerRequestLimit) {
     const f = dayNum(p.fromDate);
-    const cap = ruleOn(shiftAt(asgs, f), f)?.perRequestLimit;
+    const rule = ruleOn(shiftAt(asgs, f), f);
+    if (!rule) throw new AttendanceError(`برای «${type.title}» و شیفتِ کارمند در تاریخ ${displayDate(p.fromDate)} قاعده‌ی استحقاق (با سقف استفاده) تعریف نشده است؛ ابتدا در «قاعده‌ی استحقاق مرخصی» تعریف کنید`);
+    const cap = rule.perRequestLimit;
     if (cap !== null && cap !== undefined) {
       const total = mine.reduce((n, e) => n - e.delta, 0);
       if (total > Number(cap) + EPS) throw new AttendanceError(`مصرف این درخواست (${fmtAmount(unit, total)}) از سقف استفاده در هر درخواست «${type.title}» (${fmtAmount(unit, Number(cap))}) بیشتر است`);
@@ -338,7 +403,9 @@ async function assertUsageLimits(type: { id: number; title: string; hasPerReques
     for (const m of touched.values()) {
       const s = dayNum(m.startDate), e = dayNum(m.endDate);
       const shiftId = shiftAt(asgs, s) ?? asgs.find((a) => a.fromDay >= s && a.fromDay <= e)?.shiftId ?? null;
-      const cap = ruleOn(shiftId, s)?.perMonthLimit;
+      const rule = ruleOn(shiftId, s);
+      if (!rule) throw new AttendanceError(`برای «${type.title}» و شیفتِ کارمند در ${MONTHS_FA[m.month - 1]} ${m.year} قاعده‌ی استحقاق (با سقف استفاده) تعریف نشده است؛ ابتدا در «قاعده‌ی استحقاق مرخصی» تعریف کنید`);
+      const cap = rule.perMonthLimit;
       if (cap === null || cap === undefined) continue;
       const total = L.events.filter((x) => x.kind === "CONSUME" && x.day >= s && x.day <= e).reduce((n, x) => n - x.delta, 0);
       if (total > Number(cap) + EPS) throw new AttendanceError(`مصرف «${type.title}» در ${MONTHS_FA[m.month - 1]} ${m.year} (${fmtAmount(unit, total)}) از سقف استفاده در هر ماه (${fmtAmount(unit, Number(cap))}) بیشتر می‌شود`);

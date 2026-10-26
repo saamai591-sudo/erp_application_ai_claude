@@ -60,6 +60,8 @@ interface ReqRow {
   decisionNote: string;
   attachments: Att[];
   attachmentCount: number;
+  /** مقدار درخواست: روز (نوع روزانه) یا ساعت:دقیقه (نوع روزانه و ساعتی) */
+  amountText?: string;
   updatedAt?: string;
 }
 
@@ -128,6 +130,7 @@ function ReqList() {
           { header: "نوع مرخصی", ...s((r) => r.leaveTypeTitle), width: "130px" },
           { header: "تاریخ", ...s((r) => dateText(r)), width: "190px" },
           { header: "ساعت", ...s((r) => (r.hourly ? toFaDigits(r.periodText) : "تمام‌روز")), width: "190px" },
+          { header: "مقدار", ...s((r) => toFaDigits(r.amountText || "")), width: "110px" },
           { header: "دلیل", ...s((r) => r.reason) },
           { header: "پیوست", ...s((r) => (r.attachmentCount ? toFaDigits(String(r.attachmentCount)) : "")), width: "70px" },
           { header: "وضعیت", ...s((r) => r.statusTitle), width: "100px" },
@@ -176,6 +179,20 @@ function ReqForm({ editId }: { editId?: number }) {
   const type = types.find((t) => String(t.id) === form.leaveTypeId);
   const hourly = type?.unit === "DAY" ? false : form.hourly;
   // مانده‌ی کارمند برای نوعِ «دارای مانده مرخصی» (تا تاریخ شروع، بدون احتساب خودِ این درخواست)
+  // «مقدار» درخواست (روز یا ساعت:دقیقه به واحد نوع): از روی شیفتِ کارمند و بازه‌ی انتخابی
+  const [amt, setAmt] = useState<string>("");
+  useEffect(() => {
+    setAmt("");
+    if (!form.employeeId || !form.leaveTypeId || !form.fromDate) return;
+    if (hourly && (maskToMinutes(form.start) === null || maskToMinutes(form.end) === null)) return;
+    let dead = false;
+    const q = new URLSearchParams({ employeeId: form.employeeId, leaveTypeId: form.leaveTypeId, fromDate: form.fromDate, toDate: form.toDate || form.fromDate, hourly: String(hourly) });
+    if (hourly) { q.set("startMinute", String(maskToMinutes(form.start))); q.set("endMinute", String(maskToMinutes(form.end))); }
+    const t = setTimeout(() => {
+      api.get(`/attendance-leave-requests/amount/of?${q.toString()}`).then((r) => { if (!dead && r) setAmt(r.text); }).catch(() => {});
+    }, 300);
+    return () => { dead = true; clearTimeout(t); };
+  }, [form.employeeId, form.leaveTypeId, form.fromDate, form.toDate, form.start, form.end, hourly, meta?.status]);
   const [bal, setBal] = useState<{ text: string; date: string; balance: number; typeTitle: string } | null>(null);
   useEffect(() => {
     setBal(null);
@@ -331,6 +348,12 @@ function ReqForm({ editId }: { editId?: number }) {
             </div>
           </div>
         </fieldset>
+        {amt && (
+          <div className="alert" style={{ marginTop: 10, maxWidth: 900, fontSize: 14 }}>
+            مقدار این درخواست: <b>{toFaDigits(amt)}</b>
+            <FieldHint label="مقدار درخواست" text="مصرفِ واقعیِ درخواست از روی شیفتِ کارمند: برای نوع روزانه تعداد روزهای کاری، و برای نوع روزانه و ساعتی ساعت:دقیقه‌ی مرخصیِ آن روزها (مرخصی ساعتی: ساعاتِ هم‌پوشان با بازه‌های کاری)." />
+          </div>
+        )}
         {bal && (
           <div className={bal.balance < 0 ? "alert warn" : "alert"} style={{ marginTop: 10, maxWidth: 900, fontSize: 13 }}>
             مانده‌ی «{bal.typeTitle}» تا تاریخ {formatJalaliDate(bal.date)} (بدون احتساب همین درخواست): <b>{toFaDigits(bal.text)}</b>

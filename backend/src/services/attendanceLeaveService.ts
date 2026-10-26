@@ -173,6 +173,12 @@ export async function assertNoRequestConflict(q: { employeeId: number; fromDate:
  * ولی شروع و پایان باید داخل بازه‌ی کاری باشند)؛ (۲) مرخصی با ترددِ ثبت‌شده تداخل نداشته باشد: ساعتی با حضورِ جفت‌ترددها و ترددِ منفردِ داخل بازه، روزانه با هر تردد در تاریخ‌هایش.
  */
 export async function assertShiftAndPresence(q: { employeeId: number; fromDate: Date; toDate: Date; startMinute: number | null; endMinute: number | null }) {
+  // مرخصی فقط داخل بازه‌ی شیفتِ کارمند: در تاریخ شروع شیفتی باید تخصیص یافته باشد (انتساب از «تاریخ شروع» تا انتساب بعدی ادامه دارد، پس پایان درخواست هم پوشش دارد)
+  const asg = await prisma.attendanceShiftAssignment.findFirst({ where: { employeeId: q.employeeId, fromDate: { lte: q.fromDate } }, select: { id: true } });
+  if (!asg) {
+    const first = await prisma.attendanceShiftAssignment.findFirst({ where: { employeeId: q.employeeId }, orderBy: { fromDate: "asc" }, select: { fromDate: true } });
+    throw new AttendanceError(first ? `در تاریخ ${displayDate(q.fromDate)} شیفتی برای کارمند تخصیص نیافته است (اولین انتساب شیفت از ${displayDate(first.fromDate)} است)؛ مرخصی فقط داخل بازه‌ی شیفتِ کارمند ثبت می‌شود` : "برای کارمند هنوز شیفتی تخصیص نیافته است؛ مرخصی فقط داخل بازه‌ی شیفتِ کارمند ثبت می‌شود");
+  }
   const f = dayNum(q.fromDate), t = dayNum(q.toDate);
   const mine = absInterval(q);
   if (mine) {

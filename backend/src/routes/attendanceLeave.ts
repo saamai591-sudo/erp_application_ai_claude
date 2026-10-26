@@ -5,7 +5,7 @@ import { findFormPrefix } from "../authz/registry";
 import type { AuthedRequest } from "../middleware/auth";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { AttendanceError } from "../services/attendancePunchService";
-import { balanceOn } from "../services/attendanceLeaveBalanceService";
+import { balanceOn, fmtAmount, previewRequestAmount, requestAmounts } from "../services/attendanceLeaveBalanceService";
 import {
   REQUEST_INCLUDE,
   addAttachment,
@@ -32,6 +32,12 @@ const fail = (res: any, e: any, fallback: string) => {
   if (e?.code === "P2002") return res.status(400).json({ error: "عنوان یا شماره‌ی تکراری است" });
   return res.status(400).json({ error: e instanceof AttendanceError ? e.message : e?.message || fallback });
 };
+
+/** «مقدار» درخواست: روز برای نوع روزانه و ساعت:دقیقه برای نوع روزانه و ساعتی (مصرفِ واقعیِ روزهای کاری/ساعات کاریِ شیفت) */
+function withAmount(shape: any, r: any, amount: number | undefined) {
+  const unit = r.leaveType?.unit === "DAY" ? "DAY" : "BOTH";
+  return { ...shape, unit, amount: amount ?? null, amountText: amount === undefined ? "" : fmtAmount(unit, amount) };
+}
 
 // ── نوع مرخصی ──
 router.get("/attendance-leave-types", async (req, res) => {
@@ -80,13 +86,15 @@ router.get("/attendance-leave-requests", can(`${F_REQ}.view`), async (req, res) 
   if (req.query.employeeId) where.employeeId = Number(req.query.employeeId);
   if (req.query.status && ["PENDING", "APPROVED", "REJECTED"].includes(String(req.query.status))) where.status = String(req.query.status);
   const rows = await prisma.attendanceLeaveRequest.findMany({ where, include: { ...REQUEST_INCLUDE, attachments: false, _count: { select: { attachments: true } } }, orderBy: { number: "desc" }, take: 3000 });
-  res.json(rows.map(requestShape));
+  const amounts = await requestAmounts(rows);
+  res.json(rows.map((r) => withAmount(requestShape(r), r, amounts.get(r.id))));
 });
 
 router.get("/attendance-leave-requests/:id", can(`${F_REQ}.view`), async (req, res) => {
   const r = await prisma.attendanceLeaveRequest.findUnique({ where: { id: Number(req.params.id) }, include: REQUEST_INCLUDE });
   if (!r) return res.status(404).json({ error: "درخواست یافت نشد" });
-  res.json(requestShape(r));
+  const amounts = await requestAmounts([r]);
+  res.json(withAmount(requestShape(r), r, amounts.get(r.id)));
 });
 
 // مانده‌ی کارمند برای یک نوع مرخصی در پایان یک روز (پیش‌فرض امروز)؛ excludeRequestId = درخواستی که در حال ویرایش است
@@ -100,6 +108,23 @@ router.get("/attendance-leave-requests/balance/of", can(`${F_REQ}.view`), async 
     res.json(await balanceOn(employeeId, leaveTypeId, d, req.query.excludeRequestId ? Number(req.query.excludeRequestId) : undefined));
   } catch (e) {
     fail(res, e, "خطا در محاسبه‌ی مانده");
+  }
+});
+
+// پیش‌نمایش «مقدار» یک درخواستِ هنوز ذخیره‌نشده (فرم)
+router.get("/attendance-leave-requests/amount/of", can(`${F_REQ}.view`), async (req, res) => {
+  try {
+    const employeeId = Number(req.query.employeeId), leaveTypeId = Number(req.query.leaveTypeId);
+    const day = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00Z`) : null);
+    const from = day(req.query.fromDate);
+    const to = day(req.query.toDate) ?? from;
+    if (!employeeId || !leaveTypeId || !from || !to || to < from || (to.getTime() - from.getTime()) / 86400000 > 366) return res.json(null);
+    const hourly = req.query.hourly === "true";
+    const sm = Number(req.query.startMinute), em = Number(req.query.endMinute);
+    if (hourly && (!Number.isInteger(sm) || !Number.isInteger(em))) return res.json(null);
+    res.json(await previewRequestAmount(leaveTypeId, employeeId, { fromDate: from, toDate: to, startMinute: hourly ? sm : null, endMinute: hourly ? em : null }));
+  } catch (e) {
+    fail(res, e, "خطا در محاسبه‌ی مقدار");
   }
 });
 
