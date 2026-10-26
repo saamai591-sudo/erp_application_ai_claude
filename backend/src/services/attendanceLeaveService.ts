@@ -155,17 +155,30 @@ const absInterval = (q: { fromDate: Date; toDate: Date; startMinute: number | nu
  * تداخل با درخواست‌های دیگر (ثبت‌شده یا تاییدشده): ساعتی با ساعتی فقط اگر بازه‌ی مطلقشان هم‌پوشان باشد؛ هر ترکیب دیگر (روزانه با روزانه یا ساعتی) اگر تاریخ‌هایشان مشترک باشد.
  * این‌جا تنها نقطه‌ی «تداخل بین درخواست‌هاست»؛ درخواست ماموریت که ساخته شود همین تابع را برای آن هم می‌خواند.
  */
-export async function assertNoRequestConflict(q: { employeeId: number; fromDate: Date; toDate: Date; startMinute: number | null; endMinute: number | null }, excludeId: number | undefined, statuses: ("PENDING" | "APPROVED")[]) {
-  const others = await prisma.attendanceLeaveRequest.findMany({
-    where: { employeeId: q.employeeId, status: { in: statuses }, fromDate: { lte: q.toDate }, toDate: { gte: q.fromDate }, ...(excludeId ? { id: { not: excludeId } } : {}) },
-    select: { number: true, fromDate: true, toDate: true, startMinute: true, endMinute: true },
-  });
+export async function assertNoRequestConflict(q: { employeeId: number; fromDate: Date; toDate: Date; startMinute: number | null; endMinute: number | null }, excludeId: number | undefined, statuses: ("PENDING" | "APPROVED")[], selfKind: "LEAVE" | "MISSION" = "LEAVE") {
+  const where = (own: boolean) => ({ employeeId: q.employeeId, status: { in: statuses }, fromDate: { lte: q.toDate }, toDate: { gte: q.fromDate }, ...(own && excludeId ? { id: { not: excludeId } } : {}) });
+  const select = { number: true, fromDate: true, toDate: true, startMinute: true, endMinute: true };
+  // مرخصی و ماموریت یک‌دیگر را دوطرفه کنترل می‌کنند: excludeId فقط به جدولِ نوعِ خودِ درخواست مربوط است
+  const [leaves, missions] = await Promise.all([
+    prisma.attendanceLeaveRequest.findMany({ where: where(selfKind === "LEAVE"), select }),
+    prisma.attendanceMissionRequest.findMany({ where: where(selfKind === "MISSION"), select }),
+  ]);
   const mine = absInterval(q);
-  for (const o of others) {
-    const theirs = absInterval(o);
-    if (mine && theirs && !(mine.s < theirs.e && theirs.s < mine.e)) continue;
-    throw new AttendanceError(`با درخواست مرخصی شماره ${o.number} هم‌پوشانی دارد`);
+  for (const [kindFa, others] of [["مرخصی", leaves], ["ماموریت", missions]] as const) {
+    for (const o of others) {
+      const theirs = absInterval(o);
+      if (mine && theirs && !(mine.s < theirs.e && theirs.s < mine.e)) continue;
+      throw new AttendanceError(`با درخواست ${kindFa} شماره ${o.number} هم‌پوشانی دارد`);
+    }
   }
+}
+
+/** در تاریخ شروع باید شیفتی به کارمند تخصیص یافته باشد (انتساب از «تاریخ شروع» تا انتساب بعدی ادامه دارد، پس پایان هم پوشش دارد) — مشترک بین مرخصی و ماموریت */
+export async function assertShiftAssigned(employeeId: number, fromDate: Date, what: "مرخصی" | "ماموریت" = "مرخصی") {
+  const asg = await prisma.attendanceShiftAssignment.findFirst({ where: { employeeId, fromDate: { lte: fromDate } }, select: { id: true } });
+  if (asg) return;
+  const first = await prisma.attendanceShiftAssignment.findFirst({ where: { employeeId }, orderBy: { fromDate: "asc" }, select: { fromDate: true } });
+  throw new AttendanceError(first ? `در تاریخ ${displayDate(fromDate)} شیفتی برای کارمند تخصیص نیافته است (اولین انتساب شیفت از ${displayDate(first.fromDate)} است)؛ ${what} فقط داخل بازه‌ی شیفتِ کارمند ثبت می‌شود` : `برای کارمند هنوز شیفتی تخصیص نیافته است؛ ${what} فقط داخل بازه‌ی شیفتِ کارمند ثبت می‌شود`);
 }
 
 /**
@@ -173,12 +186,8 @@ export async function assertNoRequestConflict(q: { employeeId: number; fromDate:
  * ولی شروع و پایان باید داخل بازه‌ی کاری باشند)؛ (۲) مرخصی با ترددِ ثبت‌شده تداخل نداشته باشد: ساعتی با حضورِ جفت‌ترددها و ترددِ منفردِ داخل بازه، روزانه با هر تردد در تاریخ‌هایش.
  */
 export async function assertShiftAndPresence(q: { employeeId: number; fromDate: Date; toDate: Date; startMinute: number | null; endMinute: number | null }) {
-  // مرخصی فقط داخل بازه‌ی شیفتِ کارمند: در تاریخ شروع شیفتی باید تخصیص یافته باشد (انتساب از «تاریخ شروع» تا انتساب بعدی ادامه دارد، پس پایان درخواست هم پوشش دارد)
-  const asg = await prisma.attendanceShiftAssignment.findFirst({ where: { employeeId: q.employeeId, fromDate: { lte: q.fromDate } }, select: { id: true } });
-  if (!asg) {
-    const first = await prisma.attendanceShiftAssignment.findFirst({ where: { employeeId: q.employeeId }, orderBy: { fromDate: "asc" }, select: { fromDate: true } });
-    throw new AttendanceError(first ? `در تاریخ ${displayDate(q.fromDate)} شیفتی برای کارمند تخصیص نیافته است (اولین انتساب شیفت از ${displayDate(first.fromDate)} است)؛ مرخصی فقط داخل بازه‌ی شیفتِ کارمند ثبت می‌شود` : "برای کارمند هنوز شیفتی تخصیص نیافته است؛ مرخصی فقط داخل بازه‌ی شیفتِ کارمند ثبت می‌شود");
-  }
+  // مرخصی فقط داخل بازه‌ی شیفتِ کارمند
+  await assertShiftAssigned(q.employeeId, q.fromDate, "مرخصی");
   const f = dayNum(q.fromDate), t = dayNum(q.toDate);
   const mine = absInterval(q);
   if (mine) {

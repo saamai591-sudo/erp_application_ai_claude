@@ -115,6 +115,9 @@ import AttendanceLeaveRequests from "./pages/AttendanceLeaveRequests";
 import AttendanceLeaveBalance from "./pages/AttendanceLeaveBalance";
 import AttendanceLeaveBalanceReport from "./pages/AttendanceLeaveBalanceReport";
 import AttendanceLeaveEntitlements from "./pages/AttendanceLeaveEntitlements";
+import AttendanceMissionTypes from "./pages/AttendanceMissionTypes";
+import AttendanceMissionRequests from "./pages/AttendanceMissionRequests";
+import AttendanceMissionReports from "./pages/AttendanceMissionReports";
 import { EmploymentTypes, EducationLevels, TerminationReasons, DecreeComponents } from "./pages/HrMasters";
 import EmploymentDecrees from "./pages/EmploymentDecrees";
 import LegalParameters from "./pages/LegalParameters";
@@ -519,6 +522,15 @@ export default function App() {
             <Route path="/attendance-leave-requests" element={<AttendanceLeaveRequests />} />
             <Route path="/attendance-leave-requests/new" element={<AttendanceLeaveRequests />} />
             <Route path="/attendance-leave-requests/:id/edit" element={<AttendanceLeaveRequests />} />
+            <Route path="/attendance-mission-types" element={<AttendanceMissionTypes />} />
+            <Route path="/attendance-mission-types/new" element={<AttendanceMissionTypes />} />
+            <Route path="/attendance-mission-types/:id/edit" element={<AttendanceMissionTypes />} />
+            <Route path="/attendance-mission-requests" element={<AttendanceMissionRequests />} />
+            <Route path="/attendance-mission-requests/new" element={<AttendanceMissionRequests />} />
+            <Route path="/attendance-mission-requests/:id/edit" element={<AttendanceMissionRequests />} />
+            <Route path="/attendance-mission-reports" element={<AttendanceMissionReports />} />
+            <Route path="/attendance-mission-reports/new" element={<AttendanceMissionReports />} />
+            <Route path="/attendance-mission-reports/:id/edit" element={<AttendanceMissionReports />} />
             <Route path="/attendance-day-exceptions" element={<AttendanceDayExceptions />} />
             <Route path="/attendance-day-exceptions/new" element={<AttendanceDayExceptions />} />
             <Route path="/attendance-day-exceptions/:id/edit" element={<AttendanceDayExceptions />} />

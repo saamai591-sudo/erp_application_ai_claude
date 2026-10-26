@@ -6,6 +6,8 @@ import { getParameterValue } from "./payrollParameterService";
 import { evaluate, evaluateCondition, parseCondition, parseFormula, collectRefs, collectCondRefs, FormulaError, type Cond, type EvalEnv, type Node, type Ns, type RefInfo } from "./payrollFormula";
 import { bandOverlap, effectiveBands, type EffectiveBand } from "./attendanceTimeBandService";
 import { leaveForDay, loadApprovedLeave, type DayLeave } from "./attendanceLeaveService";
+import { loadMissions, loadSettlements, missionForDay, type DayMission, type DaySettlement } from "./attendanceMissionCalc";
+import { missionTypeKey } from "./attendanceMissionTypeService";
 import { BAND_KEY_RE } from "./attendanceFormulaDefs";
 import { AGG_HINTS, ATT_BASE_HINTS, ATT_GROUP_HINTS, DAY_VAR_HINTS } from "./attendanceFormulaHints";
 import { AGG_VARIANTS, ALLOWED_NS, ATT_BASE_INFO, ATT_LEVEL_FA, ATT_VALUE_TYPE_FA, DAY_VARS, type AttLevel, type AttValueType } from "./attendanceFormulaDefs";
@@ -164,6 +166,7 @@ export async function validateBranches(factor: { id: number | null; key: string;
   const bandRows = [
     ...(await prisma.attendanceTimeBand.findMany({ select: { key: true, title: true, isActive: true } })),
     ...(await prisma.attendanceLeaveType.findMany({ select: { key: true, title: true, isActive: true } })),
+    ...(await prisma.attendanceMissionType.findMany({ select: { id: true, title: true, isActive: true } })).map((t) => ({ key: missionTypeKey(t.id), title: t.title, isActive: t.isActive })),
   ];
   const myRefs: RefInfo[] = [];
   parsed.forEach((p, i) => {
@@ -182,7 +185,7 @@ export async function validateBranches(factor: { id: number | null; key: string;
       }
       if ((r.ns === "V" || r.ns === "T") && BAND_KEY_RE.test(r.key)) {
         const bd = bandRows.find((x) => x.key === r.key);
-        const what = r.key.startsWith("LV") ? "نوع مرخصی" : "بازه‌ی زمانی";
+        const what = r.key.startsWith("LV") ? "نوع مرخصی" : r.key.startsWith("MT") ? "نوع ماموریت" : "بازه‌ی زمانی";
         if (!bd) throw new AttendanceError(`${tag}${what}ِ ارجاع‌شده یافت نشد`);
         if (!bd.isActive) throw new AttendanceError(`${tag}${what} «${bd.title}» غیرفعال است`);
       }
@@ -266,12 +269,14 @@ export async function deleteMethod(factorId: number, methodId: number) {
 // ───────────────────────── پالت فرمول‌ساز ─────────────────────────
 
 export async function palette(level: AttLevel, factorId?: number) {
-  const [factors, params, bandRows, leaveRows] = await Promise.all([
+  const [factors, params, bandRows, leaveRows, missionRows] = await Promise.all([
     prisma.attendanceFactor.findMany({ where: { isActive: true }, orderBy: { id: "asc" } }),
     prisma.payrollParameter.findMany({ where: { isActive: true, kind: "CONSTANT", type: { in: ["NUMBER", "AMOUNT"] } }, orderBy: { id: "asc" } }),
     prisma.attendanceTimeBand.findMany({ where: { isActive: true }, orderBy: { id: "asc" } }),
     prisma.attendanceLeaveType.findMany({ where: { isActive: true }, orderBy: { id: "asc" } }),
+    prisma.attendanceMissionType.findMany({ where: { isActive: true }, orderBy: { id: "asc" } }),
   ]);
+  const missionItems = missionRows.map((t) => ({ key: missionTypeKey(t.id), title: `روزهای ماموریت ${t.title}`, hint: [t.description, "روزهای تقویمیِ ماموریت‌های پایان‌یافته از این نوع؛ در روز پایان ماموریت می‌نشیند (کل بازه). در عامل ماهانه با «تجمیع متغیرهای روز ← جمع ماه» بخوانید."].filter(Boolean).join(" — ") }));
   const leaveItems = leaveRows.map((t) => ({ key: t.key, title: `مرخصی ${t.title}`, hint: [t.description, "مدت مرخصی تاییدشده‌ی این نوع در همان روز (دقیقه): مرخصی تمام‌روز = «ساعت مرخصی» روز شیفت؛ مرخصی ساعتی = بخشی از ساعت درخواستی که با بازه‌های کاری هم‌پوشانی دارد. برای روز غیرکاری صفر است."].filter(Boolean).join(" — ") }));
   const bandItems = bandRows.map((b) => ({ key: b.key, title: `حضور در ${b.title}`, hint: [b.description, "کل حضور (جفت‌ترددها) در این بازه‌ی ساعتی، اعم از داخل شیفت و اضافه‌کار؛ ساعت بازه در «بازه‌های زمانی» تعریف می‌شود و به شیفت وابسته نیست. حداقل مدت یا ضریب را در فرمول بگذارید."].filter(Boolean).join(" — ") }));
   const self = factorId ? factors.find((f) => f.id === factorId) : undefined;
@@ -288,10 +293,11 @@ export async function palette(level: AttLevel, factorId?: number) {
           { ns: "F", title: "عوامل روزانه", hint: ATT_GROUP_HINTS.F, items: pick("DAY"), variants: null },
           ...(bandItems.length ? [{ ns: "V", key: "BANDS", title: "حضور در بازه‌های زمانی", hint: ATT_GROUP_HINTS.BANDS, items: bandItems, variants: null }] : []),
           ...(leaveItems.length ? [{ ns: "V", key: "LEAVES", title: "مرخصی", hint: ATT_GROUP_HINTS.LEAVES, items: leaveItems, variants: null }] : []),
+          ...(missionItems.length ? [{ ns: "V", key: "MISSIONS", title: "ماموریت", hint: ATT_GROUP_HINTS.MISSIONS, items: missionItems, variants: null }] : []),
         ]
       : [
           { ns: "A", title: "تجمیع عوامل روزانه در ماه", hint: ATT_GROUP_HINTS.A, items: pick("DAY"), variants: aggVariants },
-          { ns: "T", title: "تجمیع متغیرهای روز در ماه", hint: ATT_GROUP_HINTS.T, items: [...dayVars, ...bandItems, ...leaveItems], variants: aggVariants },
+          { ns: "T", title: "تجمیع متغیرهای روز در ماه", hint: ATT_GROUP_HINTS.T, items: [...dayVars, ...bandItems, ...leaveItems, ...missionItems], variants: aggVariants },
           { ns: "M", title: "عوامل ماهانه", hint: ATT_GROUP_HINTS.M, items: pick("MONTH"), variants: null },
         ];
   return {
@@ -393,7 +399,7 @@ function runBranches(f: Compiled, env: EvalEnv): Val {
 }
 
 /** متغیرهای یک روز از ردیف‌های «کارکرد روزانه» همان روز */
-function dayVariables(rows: any[], bands: EffectiveBand[] = [], leave?: DayLeave, leaveKeys: string[] = []): { vars: Record<string, number>; incomplete: boolean; shiftTitle: string } {
+function dayVariables(rows: any[], bands: EffectiveBand[] = [], leave?: DayLeave, leaveKeys: string[] = [], mission?: DayMission, settle?: DaySettlement, missionTypeIds: number[] = []): { vars: Record<string, number>; incomplete: boolean; shiftTitle: string } {
   const work = rows.filter((r) => !r.rest);
   const rest = rows.filter((r) => r.rest);
   const ok = work.filter((r) => r.status === "OK");
@@ -416,9 +422,12 @@ function dayVariables(rows: any[], bands: EffectiveBand[] = [], leave?: DayLeave
     IS_REST_DAY: isWork ? 0 : 1,
     IS_SHIFT_OFF_DAY: !isWork && first.dayType === "SHIFT_OFF" ? 1 : 0,
     IS_OFFICIAL_HOLIDAY: !isWork && first.dayType === "OFFICIAL_HOLIDAY" ? 1 : 0,
-    // مرخصی روزانه‌ی تاییدشده غیبت را برمی‌دارد؛ مرخصی ساعتی فقط وقتی که کل ساعت کاری را بپوشاند
-    ABSENT: isWork && work.every((r) => r.status === "NO_PUNCH") && !leave?.hasDaily && (leave?.total ?? 0) < first.dayNetMinutes ? 1 : 0,
+    // مرخصی/ماموریتِ روزانه‌ی تاییدشده غیبت را برمی‌دارد؛ ساعتی فقط وقتی که مجموعشان کل ساعت کاری را بپوشاند
+    ABSENT: isWork && work.every((r) => r.status === "NO_PUNCH") && !leave?.hasDaily && !mission?.hasDaily && (leave?.total ?? 0) + (mission?.total ?? 0) < first.dayNetMinutes ? 1 : 0,
     LEAVE_TAKEN: leave?.total ?? 0,
+    MISSION_MINUTES: mission?.total ?? 0,
+    // احتسابِ ماموریت‌های پایان‌یافته: کل بازه در روز پایان (تجمیع ماهانه‌اش در ماهِ پایان می‌افتد)
+    MISSION_DAYS: settle?.total ?? 0,
     ROWS: work.length,
     INCOMPLETE_ROWS: rows.filter((r) => r.status === "INCOMPLETE").length,
   };
@@ -426,6 +435,7 @@ function dayVariables(rows: any[], bands: EffectiveBand[] = [], leave?: DayLeave
   const pairs: [number, number][] = rows.filter((r) => r.status === "OK" || r.status === "WORK_ON_REST").flatMap((r) => r.pairsAbs ?? []);
   for (const b of bands) if (b.startMinute !== null && b.endMinute !== null) vars[b.key] = bandOverlap(pairs, b.startMinute, b.endMinute);
   for (const k of leaveKeys) vars[k] = leave?.byKey[k] ?? 0;
+  for (const id of missionTypeIds) vars[missionTypeKey(id)] = settle?.byType[id] ?? 0;
   return { vars, incomplete: vars.INCOMPLETE_ROWS > 0, shiftTitle: first.shiftTitle };
 }
 
@@ -444,7 +454,13 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
   const bands = await effectiveBands(cal.endDate);
   const leaveTypes = await prisma.attendanceLeaveType.findMany({ where: { isActive: true }, select: { key: true, title: true }, orderBy: { id: "asc" } });
   const leaveKeys = leaveTypes.map((t) => t.key);
-  const bandTitle = new Map<string, string>([...bands.map((b) => [b.key, `حضور در ${b.title}`] as [string, string]), ...leaveTypes.map((t) => [t.key, `مرخصی ${t.title}`] as [string, string])]);
+  const missionTypes = await prisma.attendanceMissionType.findMany({ where: { isActive: true }, select: { id: true, title: true }, orderBy: { id: "asc" } });
+  const missionTypeIds = missionTypes.map((t) => t.id);
+  const bandTitle = new Map<string, string>([
+    ...bands.map((b) => [b.key, `حضور در ${b.title}`] as [string, string]),
+    ...leaveTypes.map((t) => [t.key, `مرخصی ${t.title}`] as [string, string]),
+    ...missionTypes.map((t) => [missionTypeKey(t.id), `روزهای ماموریت ${t.title}`] as [string, string]),
+  ]);
   const dayFactors = compiled.filter((f) => f.level === "DAY");
   const monthFactors = compiled.filter((f) => f.level === "MONTH");
   const showSet = new Set((await prisma.attendanceFactor.findMany({ where: { showInWorksheet: true }, select: { id: true } })).map((x) => x.id));
@@ -506,7 +522,10 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
   };
 
   const ws = await buildWorksheet({ from, to, employeeId: opts.employeeId, employeeIds: opts.employeeIds, includeRest: true });
-  const approvedLeave = await loadApprovedLeave([...new Set(ws.rows.map((r: any) => r.employeeId as number))], dayNum(from), dayNum(to));
+  const wsEmployeeIds = [...new Set(ws.rows.map((r: any) => r.employeeId as number))];
+  const approvedLeave = await loadApprovedLeave(wsEmployeeIds, dayNum(from), dayNum(to));
+  const approvedMissions = await loadMissions(wsEmployeeIds, dayNum(from), dayNum(to));
+  const settlements = await loadSettlements(wsEmployeeIds, dayNum(from), dayNum(to));
   const rowsByEmp = new Map<number, any[]>();
   for (const r of ws.rows) (rowsByEmp.get(r.employeeId) ?? rowsByEmp.set(r.employeeId, []).get(r.employeeId)!).push(r);
 
@@ -519,7 +538,8 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
     const dayRows: { date: string; vars: Record<string, number>; incomplete: boolean; shiftTitle: string; values: Record<string, Val> }[] = [];
 
     for (const date of dates) {
-      const dv = dayVariables(byDate.get(date)!, bands, leaveForDay(approvedLeave, empId, dayNum(new Date(date)), byDate.get(date)!), leaveKeys);
+      const dn = dayNum(new Date(date));
+      const dv = dayVariables(byDate.get(date)!, bands, leaveForDay(approvedLeave, empId, dn, byDate.get(date)!), leaveKeys, missionForDay(approvedMissions, empId, dn, byDate.get(date)!), settlements.get(`${empId}:${dn}`), missionTypeIds);
       const values: Record<string, Val> = {};
       const env: EvalEnv = {
         scalar: (ns, key) => {
@@ -600,7 +620,7 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
     from: dayStr(from),
     to: dayStr(to),
     factors: factorsOut,
-    bands: [...bands.map((b) => ({ key: b.key, title: `حضور در ${b.title}` })), ...leaveTypes.map((t) => ({ key: t.key, title: `مرخصی ${t.title}` }))],
+    bands: [...bands.map((b) => ({ key: b.key, title: `حضور در ${b.title}` })), ...leaveTypes.map((t) => ({ key: t.key, title: `مرخصی ${t.title}` })), ...missionTypes.map((t) => ({ key: missionTypeKey(t.id), title: `روزهای ماموریت ${t.title}` }))],
     employees,
     days,
     summary: { employees: employees.length, days: days.length, incompleteDays: days.filter((d) => d.incomplete).length, factorErrors: factorsOut.filter((f) => f.error).length },

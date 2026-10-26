@@ -633,6 +633,7 @@ export const REGISTRY: ModuleDef[] = [
           { key: "attendance-time-bands", title: "بازه‌های زمانی", baseActions: CRUD },
           { key: "attendance-leave-types", title: "نوع مرخصی", baseActions: CRUD },
           { key: "attendance-leave-entitlements", title: "قاعده‌ی استحقاق مرخصی", baseActions: CRUD },
+          { key: "attendance-mission-types", title: "نوع ماموریت", baseActions: CRUD },
         ],
       },
       {
@@ -652,6 +653,27 @@ export const REGISTRY: ModuleDef[] = [
             ],
           },
           { key: "attendance-leave-balance-entries", title: "مانده‌ی مرخصی", baseActions: CRUD },
+          {
+            key: "attendance-mission-requests",
+            title: "درخواست ماموریت",
+            baseActions: CRUD,
+            actions: [
+              { key: "approve", title: "تایید" },
+              { key: "reject", title: "رد" },
+              { key: "unapprove", title: "برگشت از تایید / رد" },
+              { key: "finish", title: "پایان ماموریت و برگشت پایان" },
+            ],
+          },
+          {
+            key: "attendance-mission-reports",
+            title: "گزارش ماموریت",
+            baseActions: CRUD,
+            actions: [
+              { key: "approve", title: "تایید" },
+              { key: "reject", title: "رد" },
+              { key: "unapprove", title: "برگشت از تایید / رد" },
+            ],
+          },
           { key: "attendance-punches", title: "ورود و خروج", baseActions: CRUD },
           {
             key: "attendance-correction-requests",

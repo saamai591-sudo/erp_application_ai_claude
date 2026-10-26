@@ -6,6 +6,7 @@ import { employeeIdsInPeriod, getPeriods, periodContains } from "./employmentSta
 import { buildWorksheet } from "./attendanceWorksheetService";
 import { getCalendarMonth } from "./workCalendarService";
 import { leaveForDay, type ApprovedLeave } from "./attendanceLeaveService";
+import { loadMissions, missionForDay } from "./attendanceMissionCalc";
 
 // مدیریت تردد › مانده‌ی مرخصی (مرحله‌ی ۳). تنها محل قواعد؛ هیچ مانده‌ای ذخیره نمی‌شود — همیشه از روی این‌ها مشتق می‌شود:
 //   مانده = مانده‌ی دستی (AttendanceLeaveBalanceEntry) + استحقاق ماهانه (AttendanceLeaveEntitlement، به‌ازای نوع × شیفت × ماه اجرا) − مصرف (درخواست‌های غیررد: ثبت‌شده + تاییدشده).
@@ -278,6 +279,7 @@ export async function computeLedger(employeeId: number, leaveTypeId: number, opt
           note = ` (متناسب با ${sameShiftCoop} روز از ${m.standardDays} روز استاندارد)`;
         } else if (best.basis === "ACTUAL") {
           const rows = await loadDayRows(employeeId, s, e);
+          const ms = await loadMissions([employeeId], s, e);
           const lv: ApprovedLeave[] = allActive.map((r) => ({ employeeId, typeKey: typeKeys.get(r.leaveTypeId) ?? "", fromDay: dayNum(r.fromDate), toDay: dayNum(r.toDate), startMinute: r.startMinute, endMinute: r.endMinute }));
           let scheduled = 0, present = 0;
           for (const [d, rs] of rows) {
@@ -285,10 +287,11 @@ export async function computeLedger(employeeId: number, leaveTypeId: number, opt
             scheduled++;
             const hasPunch = rs.some((r) => (r.punches?.length ?? 0) > 0);
             const l = leaveForDay(lv, employeeId, d, rs);
-            if (hasPunch || l.hasDaily || l.total > 0) present++;
+            const m = missionForDay(ms, employeeId, d, rs);
+            if (hasPunch || l.hasDaily || l.total > 0 || m.hasDaily || m.total > 0) present++;
           }
           ratio = scheduled > 0 ? Math.min(1, present / scheduled) : 0;
-          note = ` (حضور/مرخصی ${present} روز از ${scheduled} روز کاری)`;
+          note = ` (حضور/مرخصی/ماموریت ${present} روز از ${scheduled} روز کاری)`;
         }
         const val = roundFor(unit, amount * ratio);
         if (val === 0) continue;

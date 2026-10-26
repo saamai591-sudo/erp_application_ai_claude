@@ -4808,6 +4808,7 @@ model Employee {
   attendancePunches AttendancePunch[]
   attendanceCorrections AttendanceCorrectionRequest[]
   attendanceLeaveRequests AttendanceLeaveRequest[]
+  attendanceMissionRequests AttendanceMissionRequest[]
   attendanceLeaveBalanceEntries AttendanceLeaveBalanceEntry[]
   attendanceShiftAssignments AttendanceShiftAssignment[]
   payrollIssueSettings PayrollIssueSetting[]
@@ -6564,6 +6565,76 @@ model AttendanceLeaveRequest {
   attachments  AttendanceLeaveAttachment[]
 
   @@index([employeeId, fromDate, toDate])
+}
+
+/// نوع ماموریت (خشکی، دریا، …). دقیقاً یک نوع «پایه» است (partial unique index در migration): روزهای بدون «گزارش ماموریت» به آن تعلق می‌گیرد.
+/// متغیر روزِ احتسابِ هر نوع با کلید MT<id> ساخته می‌شود
+model AttendanceMissionType {
+  id          Int                       @id @default(autoincrement())
+  title       String                    @unique
+  isBase      Boolean                   @default(false)
+  isActive    Boolean                   @default(true)
+  description String?
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+  requests    AttendanceMissionRequest[]
+  reports     AttendanceMissionReport[]
+}
+
+/// درخواست ماموریت: روزانه (از تاریخ تا تاریخ) یا ساعتی (یک تاریخ + ساعت شروع/پایان). تاییدشده = روزهای آن غیبت نمی‌خورد؛
+/// «پایان ماموریت» (endedAt) تاریخ پایان را قطعی می‌کند و کل بازه در ماهِ پایان به تفکیک نوع احتساب می‌شود (گزارش ماموریت نوع‌های غیرپایه را جدا می‌کند)
+model AttendanceMissionRequest {
+  id            Int                        @id @default(autoincrement())
+  number        Int                        @unique
+  employeeId    Int
+  /// نوع ماموریتِ کل بازه (پیش‌فرض: نوع پایه)؛ بازه‌های نوع دیگر با «گزارش ماموریت» می‌آیند
+  typeId        Int
+  fromDate      DateTime                   @db.Date
+  /// پایان فعلی (تا پیش از «پایان ماموریت» قابل ویرایش؛ بعدش پایان واقعی)
+  toDate        DateTime                   @db.Date
+  /// پایان برنامه‌ایِ ثبت‌اولیه (فقط برای سابقه)
+  plannedToDate DateTime                   @db.Date
+  /// فقط ساعتی (دقیقه از ۰۰:۰۰ همان روز)
+  startMinute   Int?
+  endMinute     Int?
+  destination   String
+  reason        String
+  status        AttendanceCorrectionStatus @default(PENDING)
+  decidedById   Int?
+  decidedAt     DateTime?
+  decisionNote  String?
+  endedAt       DateTime?
+  endedById     Int?
+  createdById   Int?
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+  employee      Employee                   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  type          AttendanceMissionType      @relation(fields: [typeId], references: [id], onDelete: Restrict)
+  reports       AttendanceMissionReport[]
+
+  @@index([employeeId, fromDate, toDate])
+}
+
+/// گزارش ماموریت: برای یک درخواستِ پایان‌یافته، بازه‌ای از آن را به یک نوع ماموریت (مثلاً دریا) می‌برد؛ فقط گزارش تاییدشده شمرده می‌شود
+model AttendanceMissionReport {
+  id           Int                        @id @default(autoincrement())
+  number       Int                        @unique
+  requestId    Int
+  typeId       Int
+  fromDate     DateTime                   @db.Date
+  toDate       DateTime                   @db.Date
+  description  String?
+  status       AttendanceCorrectionStatus @default(PENDING)
+  decidedById  Int?
+  decidedAt    DateTime?
+  decisionNote String?
+  createdById  Int?
+  createdAt    DateTime                   @default(now())
+  updatedAt    DateTime                   @updatedAt
+  request      AttendanceMissionRequest   @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  type         AttendanceMissionType      @relation(fields: [typeId], references: [id], onDelete: Restrict)
+
+  @@index([requestId])
 }
 
 /// مانده‌ی اولیه / اصلاح دستی مانده‌ی مرخصی: مقدار علامت‌دار (افزایش +، کاهش −) به «روز» برای نوع روزانه و به «دقیقه» برای نوع روزانه و ساعتی
