@@ -28,6 +28,14 @@ export interface Column<T> {
   width?: string;
   /** اگر مشخص شود، امکان فیلتر روی این ستون فعال می‌شود */
   filterType?: ColumnFilterType;
+  /**
+   * فیلتر «انتخابی» (مثل ستون‌های enum: وضعیت، نوع، فعال، …): فهرست صریح گزینه‌ها برای ستونِ filterType="string".
+   * اگر ندهید و فهرست سمت مرورگر فیلتر می‌شود، گزینه‌ها خودکار از مقدارهای ردیف‌ها ساخته می‌شود وقتی تعداد مقدارهای
+   * متفاوت کم باشد (resolveFilterOptions). در serverPaging فقط صفحه‌ی جاری در مرورگر است، پس آنجا همیشه فیلتر متنی می‌ماند.
+   */
+  filterOptions?: string[];
+  /** true = هرگز فیلتر انتخابیِ خودکار نشود (فقط فیلتر متنی) */
+  noEnumFilter?: boolean;
   /** مقدار خام (نه JSX) برای اعمال فیلتر؛ برای ستون‌های تاریخ باید رشته میلادی YYYY-MM-DD باشد */
   filterValue?: (row: T) => string | number | null | undefined;
   /** مقدار خام برای مرتب‌سازی؛ اگر مشخص نشود از filterValue استفاده می‌شود */
@@ -76,6 +84,34 @@ export interface ActiveFilter {
   operator: string;
   value?: string;
   value2?: string;
+  /** عملگر "in" (فیلتر انتخابی): مقدارهای انتخاب‌شده؛ "" = خالی */
+  values?: string[];
+}
+
+/** حداکثر تعداد مقدارهای متفاوت برای تشخیص خودکار «ستون انتخابی» */
+export const ENUM_FILTER_MAX_VALUES = 12;
+/** برچسب گزینه‌ی مقدار خالی در فیلتر انتخابی */
+export const ENUM_EMPTY_LABEL = "(خالی)";
+
+/**
+ * گزینه‌های فیلتر انتخابیِ یک ستون، یا undefined = فیلتر معمولی. ستونِ متنی که فهرستش سمت مرورگر فیلتر می‌شود
+ * (serverPaged=false) انتخابی است اگر filterOptions صریح داشته باشد، یا مقدارهای متفاوتش حداکثر ENUM_FILTER_MAX_VALUES و
+ * حداکثر نصف تعداد ردیف‌ها باشد (تا ستون‌های عنوان/شرح که هر ردیفشان تقریباً یکتاست متنی بمانند) و مقدار بلندی نداشته باشد.
+ */
+export function resolveFilterOptions<T>(col: { filterType?: ColumnFilterType; filterValue?: (row: T) => string | number | null | undefined; filterOptions?: string[]; noEnumFilter?: boolean }, rows: T[], serverPaged: boolean): string[] | undefined {
+  if (serverPaged || col.filterType !== "string" || !col.filterValue || col.noEnumFilter) return undefined;
+  if (col.filterOptions) return col.filterOptions;
+  const set = new Set<string>();
+  for (const r of rows) {
+    const v = (col.filterValue(r) ?? "").toString().trim();
+    if (v.length > 40) return undefined;
+    set.add(v);
+    if (set.size > ENUM_FILTER_MAX_VALUES) return undefined;
+  }
+  const real = [...set].filter((v) => v !== "");
+  if (real.length < 2 || real.length > rows.length / 2) return undefined;
+  const sorted = real.sort((a, b) => a.localeCompare(b, "fa"));
+  return set.has("") ? [...sorted, ""] : sorted;
 }
 
 const OPERATORS: Record<ColumnFilterType, { value: string; label: string }[]> = {
@@ -121,6 +157,10 @@ export function matchesFilter(raw: string | number | null | undefined, type: Col
   }
   if (type === "string") {
     const str = (raw ?? "").toString();
+    if (filter.operator === "in") {
+      const vals = filter.values ?? [];
+      return vals.length === 0 || vals.includes(str.trim());
+    }
     if (filter.operator === "empty") return str.trim() === "";
     if (filter.operator === "notEmpty") return str.trim() !== "";
     const needle = (filter.value ?? "").toString().trim().toLowerCase();
@@ -159,6 +199,7 @@ export function FilterIcon({ active }: { active: boolean }) {
 
 export function FilterPopover({
   type,
+  options,
   active,
   position,
   onApply,
@@ -166,6 +207,8 @@ export function FilterPopover({
   onClose,
 }: {
   type: ColumnFilterType;
+  /** فیلتر انتخابی (چک‌باکس) به‌جای فیلتر متنی؛ نگاه کنید به resolveFilterOptions */
+  options?: string[];
   active: ActiveFilter | null;
   position: { top: number; left: number };
   onApply: (f: ActiveFilter) => void;
@@ -176,8 +219,19 @@ export function FilterPopover({
   const [operator, setOperator] = useState(active?.operator ?? ops[0].value);
   const [value, setValue] = useState(active?.value ?? "");
   const [value2, setValue2] = useState(active?.value2 ?? "");
+  // حالت انتخابی: با فیلتر متنیِ قبلی (غیر از "in") یا با لینک «جستجوی متنی» به حالت متنی می‌رود
+  const [textMode, setTextMode] = useState(!options || (!!active && active.operator !== "in"));
+  const [picked, setPicked] = useState<string[]>(active?.operator === "in" ? active.values ?? [] : []);
+  const enumMode = !!options && !textMode;
+  const togglePick = (v: string) => setPicked((p) => (p.includes(v) ? p.filter((x) => x !== v) : [...p, v]));
 
   function apply() {
+    if (enumMode) {
+      if (picked.length === 0) onClear();
+      else onApply({ operator: "in", values: picked });
+      onClose();
+      return;
+    }
     onApply({ operator, value, value2 });
     onClose();
   }
@@ -186,26 +240,48 @@ export function FilterPopover({
     <>
       <div className="filter-backdrop" onClick={onClose} />
       <div className="filter-popover" style={{ position: "fixed", top: position.top, left: position.left }} onClick={(e) => e.stopPropagation()}>
-        <select value={operator} onChange={(e) => setOperator(e.target.value)} className="filter-op-select">
-          {ops.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
+        {enumMode && (
+          <div className="filter-enum-list" style={{ maxHeight: 240, overflowY: "auto", marginBottom: 6, minWidth: 170 }}>
+            {options!.map((o) => (
+              <label key={o} className="checkbox-row" style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 2px", cursor: "pointer", fontSize: 13 }}>
+                <input type="checkbox" checked={picked.includes(o)} onChange={() => togglePick(o)} />
+                <span>{o === "" ? ENUM_EMPTY_LABEL : o}</span>
+              </label>
+            ))}
+            <div style={{ display: "flex", gap: 10, marginTop: 4, fontSize: 11.5 }}>
+              <button type="button" className="link-btn" onClick={() => setPicked(options!)}>همه</button>
+              <button type="button" className="link-btn" onClick={() => setPicked([])}>هیچ‌کدام</button>
+              <button type="button" className="link-btn" onClick={() => setTextMode(true)}>جستجوی متنی</button>
+            </div>
+          </div>
+        )}
+        {!enumMode && options && (
+          <div style={{ marginBottom: 6, fontSize: 11.5 }}>
+            <button type="button" className="link-btn" onClick={() => setTextMode(false)}>انتخاب از فهرست</button>
+          </div>
+        )}
+        {!enumMode && (
+          <select value={operator} onChange={(e) => setOperator(e.target.value)} className="filter-op-select">
+            {ops.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        )}
 
-        {!needsNoValue(operator) && type === "date" && (operator === "contains" || operator === "notContains") && (
+        {!enumMode && !needsNoValue(operator) && type === "date" && (operator === "contains" || operator === "notContains") && (
           <input className="filter-value-input" value={value} onChange={(e) => setValue(e.target.value)} placeholder="متن جستجو" />
         )}
-        {!needsNoValue(operator) && type === "date" && operator !== "contains" && operator !== "notContains" && (
+        {!enumMode && !needsNoValue(operator) && type === "date" && operator !== "contains" && operator !== "notContains" && (
           <div style={{ marginBottom: 6 }}>
             <JalaliDatePicker value={value} onChange={setValue} placeholder="تاریخ" />
           </div>
         )}
-        {!needsNoValue(operator) && needsTwoValues(operator) && type === "date" && (
+        {!enumMode && !needsNoValue(operator) && needsTwoValues(operator) && type === "date" && (
           <div style={{ marginBottom: 6 }}>
             <JalaliDatePicker value={value2} onChange={setValue2} placeholder="تا تاریخ" />
           </div>
         )}
-        {!needsNoValue(operator) && type !== "date" && (
+        {!enumMode && !needsNoValue(operator) && type !== "date" && (
           <input
             className="filter-value-input"
             value={value}
@@ -839,6 +915,7 @@ export function DataTable<T extends { id: number | string }>({
               <FilterPopover
                 key={c.header}
                 type={c.filterType}
+                options={resolveFilterOptions(c, rows, !!serverPaging)}
                 active={filters[c.header] ?? null}
                 position={popoverPos}
                 onApply={(f) =>

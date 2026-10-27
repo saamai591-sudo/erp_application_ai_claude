@@ -9,7 +9,7 @@ import { exportGridToCsv, printGrid, deriveGridName, ExportColumn } from "../lib
 import { useAutoPortalTarget } from "../lib/useAutoPortalTarget";
 import { GridSort, nextSort, sortStateOf, makeComparator } from "../lib/gridSort";
 import { useFxEnabled } from "../lib/useEntitlements";
-import { ActiveFilter, ColumnFilterType, FilterIcon, FilterPopover, matchesFilter } from "./DataTable";
+import { ActiveFilter, ColumnFilterType, FilterIcon, FilterPopover, matchesFilter, resolveFilterOptions } from "./DataTable";
 
 export interface BalanceTableColumn<T> {
   header: string;
@@ -19,6 +19,9 @@ export interface BalanceTableColumn<T> {
   sortValue?: (row: T) => string | number | null | undefined;
   /** اگر مشخص شود، امکان فیلتر روی این ستون فعال می‌شود (دقیقاً همان قرارداد ستون‌های DataTable) */
   filterType?: ColumnFilterType;
+  /** فیلتر انتخابی (چک‌باکس)؛ نگاه کنید به Column.filterOptions در DataTable.tsx */
+  filterOptions?: string[];
+  noEnumFilter?: boolean;
   /** مقدار خام برای اعمال فیلتر؛ اگر ندهید از filterValue استفاده نمی‌شود و آیکن فیلتر نمایش داده نمی‌شود */
   filterValue?: (row: T) => string | number | null | undefined;
   /** طبق تصمیم صریح کاربر: فقط ستون‌های عددیِ اعشاری/غیرصحیح (جمع بدهکار/بستانکار، مانده و...) باید در
@@ -419,6 +422,7 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
           <FilterPopover
             key={c.header}
             type={c.filterType}
+            options={resolveFilterOptions(c, rows, !!serverPaging)}
             active={filters[c.header] ?? null}
             position={popoverPos}
             onApply={(f) =>
