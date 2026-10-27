@@ -1,5 +1,5 @@
 import { prisma } from "../lib/prisma";
-import { AttendanceError, dayStr } from "./attendancePunchService";
+import { AttendanceError, assertFromMonthOpenForAll, dayStr } from "./attendancePunchService";
 import { buildWorksheet } from "./attendanceWorksheetService";
 import { getCalendarMonth } from "./workCalendarService";
 import { getParameterValue } from "./payrollParameterService";
@@ -79,6 +79,8 @@ export async function saveFactor(body: any, id?: number) {
   if (!ex) throw new AttendanceError("عامل یافت نشد");
   if (body?.source && body.source !== ex.source) throw new AttendanceError("منبع عامل (محاسباتی / مجوز) بعد از ثبت قابل تغییر نیست");
   const level = body?.level ? levelOf(body.level) : ex.level;
+  const storedItems = await prisma.attendanceCalculationItem.count({ where: { factorId: id } });
+  if (storedItems > 0 && (level !== ex.level || data.valueType !== ex.valueType)) throw new AttendanceError(`نتیجه‌ی این عامل در ${storedItems} محاسبه‌ی تردد ذخیره شده است؛ سطح و نوع مقدارش قابل تغییر نیست (ابتدا محاسبه‌ها را حذف کنید)`);
   const permitValues = ex.source === "PERMIT" ? await prisma.attendancePermitValue.count({ where: { factorId: id } }) : 0;
   if (permitValues > 0 && (level !== ex.level || data.valueType !== ex.valueType)) throw new AttendanceError(`این عامل مجوز ${permitValues} مقدار ثبت‌شده دارد؛ سطح و نوع مقدارش قابل تغییر نیست`);
   if (level !== ex.level) {
@@ -96,6 +98,8 @@ export async function saveFactor(body: any, id?: number) {
 export async function deleteFactor(id: number) {
   const f = await prisma.attendanceFactor.findUnique({ where: { id } });
   if (!f) throw new AttendanceError("عامل یافت نشد");
+  const storedItems = await prisma.attendanceCalculationItem.count({ where: { factorId: id } });
+  if (storedItems > 0) throw new AttendanceError(`نتیجه‌ی این عامل در ${storedItems} محاسبه‌ی تردد ذخیره شده است و حذف نمی‌شود؛ می‌توانید آن را غیرفعال کنید`);
   const permitValues = await prisma.attendancePermitValue.count({ where: { factorId: id } });
   if (permitValues > 0) throw new AttendanceError(`این عامل مجوز ${permitValues} مقدار ثبت‌شده دارد و حذف نمی‌شود؛ ابتدا مقدارها را در «مجوزها» حذف کنید`);
   const by = await factorsReferencing(f.key);
@@ -253,6 +257,12 @@ export async function saveMethod(factorId: number, body: any, methodId?: number)
   const year = Number(body?.execYear), month = Number(body?.execMonth);
   const cal = await getCalendarMonth(year, month);
   if (!cal) throw new AttendanceError(`ماه ${month} سال ${year} در «تقویم کاری» تعریف نشده است؛ ابتدا تقویم کاری آن سال را بسازید`);
+  // روش از ماه اجرا به بعد اثر دارد؛ ماهی که از آن به بعد «محاسبه تردد» شده قفل است (ماه قبلیِ یک روش در حال ویرایش هم)
+  await assertFromMonthOpenForAll(cal.startDate);
+  if (methodId) {
+    const old = await prisma.attendanceFactorMethod.findFirst({ where: { id: methodId, factorId }, include: { execCalendarMonth: true } });
+    if (old) await assertFromMonthOpenForAll(old.execCalendarMonth.startDate);
+  }
   const branches = cleanBranches(body?.branches);
   await validateBranches({ id: factor.id, key: factor.key, level: factor.level as AttLevel }, branches);
   const clash = await prisma.attendanceFactorMethod.findFirst({ where: { factorId, execCalendarMonthId: cal.id, ...(methodId ? { id: { not: methodId } } : {}) } });
@@ -270,8 +280,9 @@ export async function saveMethod(factorId: number, body: any, methodId?: number)
 }
 
 export async function deleteMethod(factorId: number, methodId: number) {
-  const m = await prisma.attendanceFactorMethod.findFirst({ where: { id: methodId, factorId } });
+  const m = await prisma.attendanceFactorMethod.findFirst({ where: { id: methodId, factorId }, include: { execCalendarMonth: true } });
   if (!m) throw new AttendanceError("روش یافت نشد");
+  await assertFromMonthOpenForAll(m.execCalendarMonth.startDate);
   await prisma.attendanceFactorMethod.delete({ where: { id: methodId } });
 }
 
@@ -340,6 +351,8 @@ interface Compiled {
   deps: string[];
   /** عامل مجوز: مقدار از «مجوزها» می‌آید (روش و فرمول ندارد) */
   permit?: boolean;
+  /** روشِ مؤثرِ این ماه (برای ذخیره در ردیف محاسبه) */
+  methodId?: number | null;
 }
 interface Val {
   value: number | null;
@@ -360,7 +373,7 @@ async function compileFactors(monthEnd: Date): Promise<Compiled[]> {
   return rows.map((f) => {
     const level = f.level as AttLevel;
     const eff = f.methods.filter((m) => m.execCalendarMonth.startDate <= monthEnd).sort((a, b) => b.execCalendarMonth.startDate.getTime() - a.execCalendarMonth.startDate.getTime())[0];
-    const base: Compiled = { id: f.id, key: f.key, title: f.title, level, valueType: f.valueType as AttValueType, branches: null, error: null, deps: [] };
+    const base: Compiled = { id: f.id, key: f.key, title: f.title, level, valueType: f.valueType as AttValueType, branches: null, error: null, deps: [], methodId: eff?.id ?? null };
     if (f.source === "PERMIT") return { ...base, permit: true };
     if (!eff) return { ...base, error: "برای این ماه روش محاسبه‌ای تعریف نشده است" };
     try {
@@ -485,7 +498,7 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
   const dayFactors = compiled.filter((f) => f.level === "DAY");
   const monthFactors = compiled.filter((f) => f.level === "MONTH");
   const showSet = new Set((await prisma.attendanceFactor.findMany({ where: { showInWorksheet: true }, select: { id: true } })).map((x) => x.id));
-  const factorsOut = compiled.map((f) => ({ key: f.key, id: f.id, title: f.title, level: f.level, valueType: f.valueType, error: f.error, showInWorksheet: showSet.has(f.id) }));
+  const factorsOut = compiled.map((f) => ({ key: f.key, id: f.id, title: f.title, level: f.level, valueType: f.valueType, error: f.error, showInWorksheet: showSet.has(f.id), methodId: f.methodId ?? null }));
 
   // پارامترهای مبنا: مقدار معتبر در پایان ماه (یک بار)
   const paramCache = new Map<string, number>();

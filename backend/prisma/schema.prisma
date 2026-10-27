@@ -5173,6 +5173,7 @@ enum PayrollSectionKind {
 /// عامل حقوق (هویت): عنوان + کلید داخلی که سیستم خودکار می‌سازد و به کاربر نمایش داده نمی‌شود. طبقه، روش و فرمول در رکوردهای تاریخ‌دار
 /// «روش محاسبه عامل» (PayrollFactorMethod) می‌آید.
 model PayrollComponent {
+  attendanceItems AttendanceCalculationItem[]
   paymentPrepLines PayrollPaymentPrepLine[]
   fileFieldRefs FileStructureFieldRef[]
   paymentTypeItems PayrollPaymentTypeItem[]
@@ -6414,6 +6415,7 @@ model AttendanceFactor {
   updatedAt   DateTime                @updatedAt
   methods     AttendanceFactorMethod[]
   permitValues AttendancePermitValue[]
+  calcItems   AttendanceCalculationItem[]
 }
 
 enum AttendanceFactorSource {
@@ -6451,6 +6453,7 @@ model AttendanceFactorMethod {
   factor              AttendanceFactor             @relation(fields: [factorId], references: [id], onDelete: Cascade)
   execCalendarMonth   WorkCalendarMonth            @relation("AttendanceMethodExecMonth", fields: [execCalendarMonthId], references: [id], onDelete: Restrict)
   branches            AttendanceFactorMethodBranch[]
+  calcItems           AttendanceCalculationItem[]
 
   @@unique([factorId, execCalendarMonthId])
 }
@@ -6665,9 +6668,40 @@ model AttendanceCalculation {
   hasErrors       Boolean           @default(false)
   employee        Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   calendarMonth   WorkCalendarMonth @relation(fields: [calendarMonthId], references: [id], onDelete: Restrict)
+  items           AttendanceCalculationItem[]
 
   @@unique([employeeId, calendarMonthId])
   @@index([calendarMonthId])
+}
+
+/// ردیفِ ذخیره‌ی نتیجه‌ی یک عامل در یک محاسبه‌ی تردد (مثل ردیف فیش حقوق): برای هر عامل تردد (محاسباتی یا مجوز) یک ردیف؛ عامل ماهانه → value، عامل روزانه → days (مقدار هر روز).
+/// payrollComponentId برای نتیجه‌ی فرمول‌های «مخصوص حقوق» است (در فرم «روش محاسبه» پر می‌شود)؛ دقیقاً یکی از factorId / payrollComponentId پر است (CHECK در migration).
+/// methodId = روشِ مؤثرِ استفاده‌شده (Restrict: روشِ استفاده‌شده در محاسبه حذف نمی‌شود).
+model AttendanceCalculationItem {
+  id                 Int                     @id @default(autoincrement())
+  calculationId      Int
+  factorId           Int?
+  payrollComponentId Int?
+  level              AttendanceFactorLevel
+  valueType          AttendanceValueType
+  /// مقدار عامل ماهانه (TIME به دقیقه)؛ برای عامل روزانه null
+  value              Decimal?                @db.Decimal(20, 4)
+  error              String?
+  /// شماره‌ی شاخه‌ی اجراشده (۰ = هیچ‌کدام)
+  branch             Int?
+  expression         String?
+  methodId           Int?
+  /// عامل روزانه: [{d:"YYYY-MM-DD", v:عدد|null, b:شاخه, e:خطا}] به ترتیب تاریخ
+  days               Json?
+  calculation        AttendanceCalculation   @relation(fields: [calculationId], references: [id], onDelete: Cascade)
+  factor             AttendanceFactor?       @relation(fields: [factorId], references: [id], onDelete: Restrict)
+  payrollComponent   PayrollComponent?       @relation(fields: [payrollComponentId], references: [id], onDelete: Restrict)
+  method             AttendanceFactorMethod? @relation(fields: [methodId], references: [id], onDelete: Restrict)
+
+  @@unique([calculationId, factorId])
+  @@unique([calculationId, payrollComponentId])
+  @@index([factorId])
+  @@index([methodId])
 }
 
 /// گزارش ماموریت: برای یک درخواستِ پایان‌یافته، بازه‌ای از آن را به یک نوع ماموریت (مثلاً دریا) می‌برد؛ فقط گزارش تاییدشده شمرده می‌شود

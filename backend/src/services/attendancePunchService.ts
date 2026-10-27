@@ -91,6 +91,15 @@ export async function assertMonthFromOpen(employeeId: number, monthStart: Date) 
   if (c) throw new AttendanceError(`محاسبات تردد «${calcLabel(c)}» برای این کارمند انجام شده و مقدارِ ماهانه از ماه ${displayDate(monthStart)} به بعد را عوض می‌کند؛ ${LOCK_HINT}`);
 }
 
+/** تغییری که از «ماه M» به بعد روی نتیجه‌ی همه‌ی کارمندان اثر دارد (مثل روش محاسبه‌ی عامل): اگر برای هر کارمندی ماهِ M یا بعدش «محاسبه تردد» شده باشد رد می‌شود */
+export async function assertFromMonthOpenForAll(monthStart: Date, what = "روش محاسبه") {
+  const c = await prisma.attendanceCalculation.findFirst({
+    where: { calendarMonth: { startDate: { gte: monthStart } } },
+    select: { calendarMonth: { select: { year: true, month: true } } },
+  });
+  if (c) throw new AttendanceError(`محاسبات تردد «${calcLabel(c)}» دست‌کم برای یک کارمند انجام شده و ${what} از ماه ${displayDate(monthStart)} به بعد نتیجه‌ی آن را عوض می‌کند؛ ${LOCK_HINT} (برای همه‌ی کارمندان)`);
+}
+
 /** تغییری که روی همه‌ی کارمندان اثر دارد (مثل استثنای روز): اگر برای هر کارمندی ماهِ شامل آن تاریخ محاسبه شده باشد رد می‌شود */
 export async function assertDateOpenForAll(date: Date) {
   const c = await prisma.attendanceCalculation.findFirst({

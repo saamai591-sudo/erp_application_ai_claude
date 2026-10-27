@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
+import { Modal } from "../components/Modal";
 import { InfoHint } from "../components/InfoHint";
 import { ScrollGridWithTotals } from "../components/ScrollGridWithTotals";
 import { AttendanceMonthField, EMPTY_MONTH, AttendanceMonth } from "../components/AttendanceMonthField";
@@ -13,8 +14,20 @@ import { usePersistedState } from "../lib/usePersistedState";
 // مدیریت تردد › عملیات › «محاسبه تردد»: ماه را انتخاب می‌کنید، «لود اطلاعات» فهرست کارمندان را می‌آورد، کارمندان مورد نظر را تیک می‌زنید و «محاسبه» برای هر کدام یک رکورد
 // (کارمند × ماه) می‌سازد. وجودِ رکورد = قفلِ اطلاعات تردد آن کارمند در بازه‌ی تردد همان ماه؛ «حذف محاسبه» قفل را برمی‌دارد. قواعد در سرور (services/attendanceCalculationService.ts).
 
+interface ItemRow {
+  id: number;
+  title: string;
+  source: "COMPUTED" | "PERMIT";
+  level: "DAY" | "MONTH";
+  valueText: string;
+  error: string;
+  dayCount: number | null;
+  errorDays: number | null;
+  daySumText: string;
+}
 interface Calc {
   id: number;
+  itemCount?: number;
   calculatedAt: string;
   days: number;
   incompleteDays: number;
@@ -57,6 +70,16 @@ export default function AttendanceCalculations() {
   const [outcomes, setOutcomes] = useState<Record<number, Outcome>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [detail, setDetail] = useState<{ title: string; items: ItemRow[] } | null>(null);
+  async function showItems(r: Row) {
+    if (!r.calculation) return;
+    try {
+      const d = await api.get(`/attendance-calculations/${r.calculation.id}/items`);
+      setDetail({ title: `${r.personnelCode} ${r.fullName}`, items: d.items });
+    } catch (e) {
+      showError((e as ApiError).message);
+    }
+  }
 
   const P = "attendance.operations.attendance-calculation";
   const pickedSet = useMemo(() => new Set(picked), [picked]);
@@ -167,7 +190,7 @@ export default function AttendanceCalculations() {
       {rows && (
         <ScrollGridWithTotals
           fill
-          totals={[{ cells: [null, "جمع", `${toFaDigits(String(rows.length))} نفر`, `${toFaDigits(String(rows.filter((r) => r.calculation).length))} محاسبه‌شده`, toFaDigits(String(rows.reduce((a, r) => a + (r.calculation?.days ?? 0), 0))), toFaDigits(String(rows.reduce((a, r) => a + (r.calculation?.incompleteDays ?? 0), 0))), null] }]}
+          totals={[{ cells: [null, "جمع", `${toFaDigits(String(rows.length))} نفر`, `${toFaDigits(String(rows.filter((r) => r.calculation).length))} محاسبه‌شده`, toFaDigits(String(rows.reduce((a, r) => a + (r.calculation?.days ?? 0), 0))), toFaDigits(String(rows.reduce((a, r) => a + (r.calculation?.incompleteDays ?? 0), 0))), null, null] }]}
           head={
             <tr>
               <th style={{ width: 40 }}>
@@ -179,10 +202,11 @@ export default function AttendanceCalculations() {
               <th style={{ width: 90 }}>روز محاسبه‌شده</th>
               <th style={{ width: 90 }}>روز ناقص</th>
               <th>توضیح</th>
+              <th style={{ width: 70 }} />
             </tr>
           }
         >
-          {rows.length === 0 && <tr><td colSpan={7} style={{ textAlign: "center", opacity: 0.7 }}>کارمندی با همکاری در بازه‌ی تردد این ماه یافت نشد</td></tr>}
+          {rows.length === 0 && <tr><td colSpan={8} style={{ textAlign: "center", opacity: 0.7 }}>کارمندی با همکاری در بازه‌ی تردد این ماه یافت نشد</td></tr>}
           {rows.map((r) => {
             const o = outcomes[r.employeeId];
             return (
@@ -200,10 +224,35 @@ export default function AttendanceCalculations() {
                   {!o && !r.calculation && r.blockedReason && <span style={{ color: "#c0392b" }}>{r.blockedReason}</span>}
                   {!o && r.calculation && r.calculation.factorErrors > 0 && <span style={{ color: "#b45309" }}>{toFaDigits(String(r.calculation.factorErrors))} عامل ماهانه خطا داشت</span>}
                 </td>
+                <td>{r.calculation && <button type="button" className="link-btn" onClick={() => showItems(r)}>ریز</button>}</td>
               </tr>
             );
           })}
         </ScrollGridWithTotals>
+      )}
+      {detail && (
+        <Modal title={`ریز محاسبه‌ی تردد — ${detail.title}`} onClose={() => setDetail(null)} wide>
+          <div style={{ maxHeight: 420, overflow: "auto" }}>
+            <table className="hr-table">
+              <thead><tr><th>عامل</th><th style={{ width: 90 }}>سطح</th><th style={{ width: 160 }}>مقدار</th><th>توضیح</th></tr></thead>
+              <tbody>
+                {detail.items.length === 0 && <tr><td colSpan={4} style={{ opacity: 0.7, textAlign: "center" }}>عاملی ذخیره نشده است</td></tr>}
+                {detail.items.map((i) => (
+                  <tr key={i.id}>
+                    <td>{i.title}{i.source === "PERMIT" ? " (مجوز)" : ""}</td>
+                    <td>{i.level === "DAY" ? "روزانه" : "ماهانه"}</td>
+                    <td>{i.level === "MONTH" ? (i.error ? "—" : toFaDigits(i.valueText)) : `جمع: ${toFaDigits(i.daySumText)}`}</td>
+                    <td>
+                      {i.error && <span style={{ color: "#c0392b" }}>{i.error}</span>}
+                      {!i.error && i.level === "DAY" && <span style={{ opacity: 0.75 }}>{toFaDigits(String(i.dayCount ?? 0))} روز{i.errorDays ? ` — ${toFaDigits(String(i.errorDays))} روز با خطا` : ""}</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="actions"><button type="button" className="btn" onClick={() => setDetail(null)}>بستن</button></div>
+        </Modal>
       )}
     </div>
   );

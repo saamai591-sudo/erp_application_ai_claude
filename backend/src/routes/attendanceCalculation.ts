@@ -3,7 +3,7 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import type { AuthedRequest } from "../middleware/auth";
 import { AttendanceError } from "../services/attendancePunchService";
-import { calculateAttendance, deleteAttendanceCalculations, monthRows } from "../services/attendanceCalculationService";
+import { calculateAttendance, calculationItems, deleteAttendanceCalculations, monthRows } from "../services/attendanceCalculationService";
 
 // مدیریت تردد › عملیات › «محاسبه تردد» (یک رکورد برای هر کارمند در هر ماه؛ وجودش = قفل اطلاعات تردد آن ماه). منطق فقط در services/attendanceCalculationService.ts.
 
@@ -14,6 +14,14 @@ const fail = (res: any, e: any, fallback: string) => res.status(400).json({ erro
 router.get("/attendance-calculations/month", can(`${F}.view`), async (req, res) => {
   try {
     res.json(await monthRows(Number(req.query.year), Number(req.query.month)));
+  } catch (e) {
+    fail(res, e, "خطا در بارگذاری");
+  }
+});
+
+router.get("/attendance-calculations/:id/items", can(`${F}.view`), async (req, res) => {
+  try {
+    res.json(await calculationItems(Number(req.params.id)));
   } catch (e) {
     fail(res, e, "خطا در بارگذاری");
   }
