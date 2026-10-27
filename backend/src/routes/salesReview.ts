@@ -1,8 +1,7 @@
 import { Router } from "express";
-import { getSaleLines, getSaleReturnLines, SaleLine, SaleReturnLine } from "../services/salesReviewService";
+import { dimensionRows, documentsPage, groupedSums, ledgerPage, mergeSaleReturn, type GroupedRow } from "../services/salesReviewSql";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
-import { applyServerFilterSort, ServerColumnDef } from "../utils/tableFilters";
 import { loadGoodsGroupTree, ancestorGroupAtLevel, fullGoodsGroupCode } from "../utils/goodsGroupTree";
 import { prisma } from "../lib/prisma";
 
@@ -55,150 +54,65 @@ function parseFilters(q: CommonQuery) {
   };
 }
 
-type ReviewLine = SaleLine | SaleReturnLine;
-
-interface DimBucket {
-  quantity: number;
-  amount: number;
-  discount: number;
-  vatAmount: number;
-  returnedQuantity: number;
-  returnedAmount: number;
-  returnedDiscount: number;
-  returnedVatAmount: number;
-  itemIds: Set<number>;
-  sample: ReviewLine;
-}
-
-/**
- * جمع‌بندی خطوط خام (فروش + برگشت) بر اساس یک کلید دلخواه (keyOf) — دقیقاً هم‌الگوی buildRows در
- * warehouseReview.ts، فقط بدون بخش اول‌دوره/وارده/صادره (این گزارش مانده‌ی تجمعی ندارد، فقط جمع‌ساده‌ی
- * بازه است). طبق تصمیم صریح کاربر، «خالص»های هر ردیف (تخفیف/ارزش‌افزوده/خالص فروش/خالص) دو‌طرفه‌اند —
- * سهم فروش منهای سهم برگشت — تا برگشتِ کامل یک ردیف دقیقاً صفر شود.
- */
-function aggregate(
-  saleLines: SaleLine[],
-  returnLines: SaleReturnLine[],
-  keyOf: (l: ReviewLine) => string | null,
-  rowMeta: (key: string, sample: ReviewLine, goodsItemIds: number[]) => Record<string, any>
-): Record<string, any>[] {
-  const buckets = new Map<string, DimBucket>();
-  function bucketFor(key: string, sample: ReviewLine): DimBucket {
-    if (!buckets.has(key)) {
-      buckets.set(key, {
-        quantity: 0,
-        amount: 0,
-        discount: 0,
-        vatAmount: 0,
-        returnedQuantity: 0,
-        returnedAmount: 0,
-        returnedDiscount: 0,
-        returnedVatAmount: 0,
-        itemIds: new Set(),
-        sample,
-      });
-    }
-    return buckets.get(key)!;
-  }
-
-  for (const l of saleLines) {
-    const key = keyOf(l);
-    if (key === null) continue;
-    const b = bucketFor(key, l);
-    b.quantity += l.quantity;
-    b.amount += l.amount;
-    b.discount += l.discount;
-    b.vatAmount += l.vatAmount;
-    b.itemIds.add(l.goodsItemId);
-  }
-  for (const l of returnLines) {
-    const key = keyOf(l);
-    if (key === null) continue;
-    const b = bucketFor(key, l);
-    b.returnedQuantity += l.quantity;
-    b.returnedAmount += l.amount;
-    b.returnedDiscount += l.discount;
-    b.returnedVatAmount += l.vatAmount;
-    b.itemIds.add(l.goodsItemId);
-  }
-
-  return Array.from(buckets.entries())
-    .map(([key, b]) => {
-      const netDiscount = b.discount - b.returnedDiscount;
-      const netVatAmount = b.vatAmount - b.returnedVatAmount;
-      const netAmount = b.amount - b.returnedAmount - netDiscount;
-      return {
-        id: key,
-        ...rowMeta(key, b.sample, Array.from(b.itemIds)),
-        quantity: b.quantity,
-        returnedQuantity: b.returnedQuantity,
-        netQuantity: b.quantity - b.returnedQuantity,
-        amount: b.amount,
-        returnedAmount: b.returnedAmount,
-        discount: netDiscount,
-        netAmount,
-        vatAmount: netVatAmount,
-        netTotal: netAmount + netVatAmount,
-      };
-    })
-    .filter((r) => r.quantity !== 0 || r.returnedQuantity !== 0 || r.amount !== 0 || r.returnedAmount !== 0 || r.discount !== 0 || r.vatAmount !== 0);
-}
+// همه‌ی تب‌ها در SQL جمع زده می‌شوند (services/salesReviewSql.ts)؛ معنای محاسبه همان aggregate قدیمی است: فروش (غیرباطل) و برگشت جدا جمع و سپس ادغام «خالص».
+const fail = (res: any, e: any) => res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
 
 router.get("/sales-review/sales-centers", can(`${FORM}.view`), async (req, res) => {
   try {
     const f = parseFilters(req.query as CommonQuery);
-    const [lines, returnLines] = await Promise.all([getSaleLines(f), getSaleReturnLines(f)]);
     res.json(
-      aggregate(
-        lines,
-        returnLines,
-        (l) => String(l.salesCenterId),
-        (_key, l) => ({ salesCenterId: l.salesCenterId, code: l.salesCenterCode, title: l.salesCenterTitle })
+      await dimensionRows(
+        f,
+        ["salesCenterId", "salesCenterCode", "salesCenterTitle"],
+        (m) => String(m.salesCenterId),
+        (m) => ({ salesCenterId: m.salesCenterId, code: m.salesCenterCode, title: m.salesCenterTitle }),
+        false
       )
     );
   } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
+    fail(res, e);
   }
 });
 
 router.get("/sales-review/sales-types", can(`${FORM}.view`), async (req, res) => {
   try {
     const f = parseFilters(req.query as CommonQuery);
-    const [lines, returnLines] = await Promise.all([getSaleLines(f), getSaleReturnLines(f)]);
     res.json(
-      aggregate(
-        lines,
-        returnLines,
-        (l) => String(l.salesTypeId),
-        (_key, l) => ({ salesTypeId: l.salesTypeId, code: l.salesTypeCode, title: l.salesTypeTitle })
+      await dimensionRows(
+        f,
+        ["salesTypeId", "salesTypeCode", "salesTypeTitle"],
+        (m) => String(m.salesTypeId),
+        (m) => ({ salesTypeId: m.salesTypeId, code: m.salesTypeCode, title: m.salesTypeTitle }),
+        false
       )
     );
   } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
+    fail(res, e);
   }
 });
 
 router.get("/sales-review/customers", can(`${FORM}.view`), async (req, res) => {
   try {
     const f = parseFilters(req.query as CommonQuery);
-    const [lines, returnLines] = await Promise.all([getSaleLines(f), getSaleReturnLines(f)]);
     res.json(
-      aggregate(
-        lines,
-        returnLines,
-        (l) => String(l.customerId),
-        (_key, l) => ({ customerId: l.customerId, code: l.customerCode, title: l.customerTitle })
+      await dimensionRows(
+        f,
+        ["customerId", "customerCode", "customerTitle"],
+        (m) => String(m.customerId),
+        (m) => ({ customerId: m.customerId, code: m.customerCode, title: m.customerTitle }),
+        false
       )
     );
   } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
+    fail(res, e);
   }
 });
 
 // تب‌های «سطح گروه کالا» — یک endpoint پارامتری (levelOrder)، دقیقاً هم‌الگوی
 // warehouseReview.ts#/warehouse-review/goods-group-level طبق درخواست صریح کاربر («گروه کالا در مرور
 // فروش باید دقیقاً هم‌رفتار مرور تعدادی-مبلغی انبار باشد؛ به‌ازای هر سطح سلسله‌مراتب گروه کالا یک تب»).
-// کمک‌توابع درخت گروه کالا در utils/goodsGroupTree.ts مشترک با آن گزارش است.
+// کمک‌توابع درخت گروه کالا در utils/goodsGroupTree.ts مشترک با آن گزارش است. جمع در SQL به‌ازای گروه کالای هر ردیف انجام می‌شود و سپس در حافظه (تعداد گروه‌ها کم است)
+// به نیای سطح خواسته‌شده بالا می‌رود.
 router.get("/sales-review/goods-group-level", can(`${FORM}.view`), async (req, res) => {
   try {
     const q = req.query as CommonQuery & { levelOrder?: string };
@@ -207,200 +121,96 @@ router.get("/sales-review/goods-group-level", can(`${FORM}.view`), async (req, r
     if (!targetLevel) return res.status(404).json({ error: "سطح گروه کالا یافت نشد" });
 
     const f = parseFilters(q);
-    const [lines, returnLines] = await Promise.all([getSaleLines(f), getSaleReturnLines(f)]);
     const { groupById, levelById } = await loadGoodsGroupTree();
-
-    const rows = aggregate(
-      lines,
-      returnLines,
-      (l) => {
-        const ancestorId = ancestorGroupAtLevel(l.goodsGroupId, targetLevel.id, groupById);
-        return ancestorId == null ? null : String(ancestorId);
-      },
-      (key, _l, goodsItemIds) => {
-        const groupId = Number(key);
+    const [sale, ret] = await Promise.all([groupedSums("SALE", f, ["goodsGroupId"]), groupedSums("RETURN", f, ["goodsGroupId"])]);
+    // گروه‌های هر طرف به نیای سطح هدف تجمیع می‌شوند (گروهی که نیایی در آن سطح ندارد کنار می‌رود)
+    const roll = (rows: GroupedRow[]): GroupedRow[] => {
+      const map = new Map<number, GroupedRow & { set: Set<number> }>();
+      for (const r of rows) {
+        const anc = ancestorGroupAtLevel(r.meta.goodsGroupId, targetLevel.id, groupById);
+        if (anc == null) continue;
+        let b = map.get(anc);
+        if (!b) map.set(anc, (b = { meta: { goodsGroupId: anc }, quantity: 0, amount: 0, discount: 0, vatAmount: 0, itemIds: [], set: new Set() }));
+        b.quantity += r.quantity; b.amount += r.amount; b.discount += r.discount; b.vatAmount += r.vatAmount;
+        r.itemIds.forEach((i) => b!.set.add(i));
+      }
+      return [...map.values()].map((b) => ({ ...b, itemIds: [...b.set] }));
+    };
+    const rows = mergeSaleReturn(
+      roll(sale),
+      roll(ret),
+      (m) => String(m.goodsGroupId),
+      (m, goodsItemIds) => {
+        const groupId = Number(m.goodsGroupId);
         const g = groupById.get(groupId);
-        return {
-          goodsGroupId: groupId,
-          code: fullGoodsGroupCode(groupId, groupById, levelById),
-          title: g?.title ?? `#${groupId}`,
-          goodsItemIds,
-        };
+        return { goodsGroupId: groupId, code: fullGoodsGroupCode(groupId, groupById, levelById), title: g?.title ?? `#${groupId}`, goodsItemIds };
       }
     );
     res.json(rows);
   } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
+    fail(res, e);
   }
 });
 
 router.get("/sales-review/accounting-groups", can(`${FORM}.view`), async (req, res) => {
   try {
     const f = parseFilters(req.query as CommonQuery);
-    const [lines, returnLines] = await Promise.all([getSaleLines(f), getSaleReturnLines(f)]);
     res.json(
-      aggregate(
-        lines,
-        returnLines,
-        (l) => String(l.accountingGroupId),
-        (_key, l, goodsItemIds) => ({ accountingGroupId: l.accountingGroupId, code: l.accountingGroupCode, title: l.accountingGroupTitle, goodsItemIds })
+      await dimensionRows(
+        f,
+        ["accountingGroupId", "accountingGroupCode", "accountingGroupTitle"],
+        (m) => String(m.accountingGroupId),
+        (m, goodsItemIds) => ({ accountingGroupId: m.accountingGroupId, code: m.accountingGroupCode, title: m.accountingGroupTitle, goodsItemIds })
       )
     );
   } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
+    fail(res, e);
   }
 });
 
 router.get("/sales-review/goods-items", can(`${FORM}.view`), async (req, res) => {
   try {
     const f = parseFilters(req.query as CommonQuery);
-    const [lines, returnLines] = await Promise.all([getSaleLines(f), getSaleReturnLines(f)]);
     res.json(
-      aggregate(
-        lines,
-        returnLines,
-        (l) => String(l.goodsItemId),
-        (_key, l) => ({ goodsItemId: l.goodsItemId, code: l.goodsItemCode, title: l.goodsItemTitle })
+      await dimensionRows(
+        f,
+        ["goodsItemId", "goodsItemCode", "goodsItemTitle"],
+        (m) => String(m.goodsItemId),
+        (m) => ({ goodsItemId: m.goodsItemId, code: m.goodsItemCode, title: m.goodsItemTitle }),
+        false
       )
     );
   } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
+    fail(res, e);
   }
 });
 
-// طبق متن مستند، تب «اسناد» فقط فاکتور فروش را فهرست می‌کند (بدون ستون/نوع برگشتی) — returnLines همیشه
-// آرایه‌ی خالی است، پس aggregate() هم مثل قبل رفتار می‌کند (returnedAmount/returnedQuantity هر ردیف صفر).
+// طبق متن مستند، تب «اسناد» فقط فاکتور فروش را فهرست می‌کند (بدون ستون/نوع برگشتی): فقط طرف فروش جمع می‌شود و ستون‌های برگشتیِ هر ردیف صفر است.
 router.get("/sales-review/documents", can(`${FORM}.view`), async (req, res) => {
   try {
     const f = parseFilters(req.query as CommonQuery);
-    const lines = await getSaleLines(f);
-    const rows = aggregate(
-      lines,
-      [],
-      (l) => String((l as SaleLine).salesInvoiceId),
-      (_key, l) => ({
-        salesInvoiceId: (l as SaleLine).salesInvoiceId,
-        number: (l as SaleLine).salesInvoiceNumber,
-        date: l.date,
-        customerCode: l.customerCode,
-        customerTitle: l.customerTitle,
-      })
-    );
-    rows.sort((a, b) => a.date.getTime() - b.date.getTime() || a.number - b.number);
-    res.json(rows);
+    const page = Math.max(1, parseInt((req.query.page as string) || "1", 10));
+    const pageSize = Math.min(1000, Math.max(1, parseInt((req.query.pageSize as string) || "100", 10)));
+    const { rows, total } = await documentsPage(f, { page, pageSize, filters: req.query.filters, sortField: req.query.sortField as string | undefined, sortDir: req.query.sortDir as string | undefined, sorts: req.query.sorts });
+    res.json({ rows, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
   } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
+    fail(res, e);
   }
 });
 
-interface LedgerRow {
-  id: number;
-  type: string;
-  documentId: number;
-  number: number;
-  date: Date;
-  customerCode: number;
-  customerTitle: string;
-  goodsItemCode: string;
-  goodsItemTitle: string;
-  unitTitle: string;
-  quantity: number;
-  unitPrice: number;
-  amount: number;
-  discount: number;
-  netAmount: number;
-  vatAmount: number;
-  netTotal: number;
-}
-
-/** ستون‌های قابل فیلتر/مرتب‌سازی تب «گردش» — دقیقاً هم‌الگوی ledgerColumnDefs در warehouseReview.ts. */
-const LEDGER_COLUMN_DEFS: Record<string, ServerColumnDef<LedgerRow>> = {
-  type: { type: "string", get: (r) => r.type },
-  number: { type: "number", get: (r) => r.number },
-  date: { type: "date", get: (r) => r.date },
-  customerCode: { type: "number", get: (r) => r.customerCode },
-  customerTitle: { type: "string", get: (r) => r.customerTitle },
-  goodsItemCode: { type: "string", get: (r) => r.goodsItemCode },
-  goodsItemTitle: { type: "string", get: (r) => r.goodsItemTitle },
-  quantity: { type: "number", get: (r) => r.quantity },
-  unitPrice: { type: "number", get: (r) => r.unitPrice },
-  amount: { type: "number", get: (r) => r.amount },
-  discount: { type: "number", get: (r) => r.discount },
-  netAmount: { type: "number", get: (r) => r.netAmount },
-  vatAmount: { type: "number", get: (r) => r.vatAmount },
-  netTotal: { type: "number", get: (r) => r.netTotal },
-};
-
 // طبق متن مستند («نوع: شامل فروش و برگشت از فروش»)، این تب هر دو نوع ردیف را با هم، مرتب‌شده بر اساس
 // تاریخ، فهرست می‌کند. هر ردیف مبلغ/تخفیف/ارزش‌افزوده/خالص خودش را (نه معکوس‌شده) نشان می‌دهد — ستون
-// «نوع» تشخیص فروش/برگشت را به عهده‌ی خواننده می‌گذارد، دقیقاً هم‌الگوی این‌که سند حسابداری هر کدام
-// جداگانه صادر می‌شود (نگاه کنید به routes/salesReturnInvoices.ts). id ردیف‌های برگشتی منفیِ lineId
-// خودشان است (نه lineId خام) چون SalesInvoiceLine و SalesReturnInvoiceLine دو دنباله‌ی id کاملاً جدا و
-// بالقوه هم‌پوشان‌اند — منفی‌کردن یک طرف، بدون نیاز به offset دلخواه، همیشه یکتایی id را در کل جدول
-// گردش تضمین می‌کند (هر دو دنباله از ۱ شروع می‌شوند و فقط اعداد صحیح مثبت‌اند).
+// «نوع» تشخیص فروش/برگشت را به عهده‌ی خواننده می‌گذارد. id ردیف‌های برگشتی منفیِ lineId خودشان است تا
+// یکتایی id در کل جدول گردش تضمین شود. فیلتر/مرتب‌سازی/صفحه‌بندی همه در SQL است (services/salesReviewSql.ts#ledgerPage).
 router.get("/sales-review/ledger", can(`${FORM}.view`), async (req, res) => {
   try {
     const f = parseFilters(req.query as CommonQuery);
     const page = Math.max(1, parseInt((req.query.page as string) || "1", 10));
     const pageSize = Math.min(1000, Math.max(1, parseInt((req.query.pageSize as string) || "100", 10)));
-
-    const [lines, returnLines] = await Promise.all([getSaleLines(f), getSaleReturnLines(f)]);
-
-    const saleRows: LedgerRow[] = lines.map((l) => {
-      const netAmount = l.amount - l.discount;
-      return {
-        id: l.lineId,
-        type: "فروش",
-        documentId: l.salesInvoiceId,
-        number: l.salesInvoiceNumber,
-        date: l.date,
-        customerCode: l.customerCode,
-        customerTitle: l.customerTitle,
-        goodsItemCode: l.goodsItemCode,
-        goodsItemTitle: l.goodsItemTitle,
-        unitTitle: l.unitTitle,
-        quantity: l.quantity,
-        unitPrice: l.quantity !== 0 ? l.amount / l.quantity : 0,
-        amount: l.amount,
-        discount: l.discount,
-        netAmount,
-        vatAmount: l.vatAmount,
-        netTotal: netAmount + l.vatAmount,
-      };
-    });
-    const returnRows: LedgerRow[] = returnLines.map((l) => {
-      const netAmount = l.amount - l.discount;
-      return {
-        id: -l.lineId,
-        type: "برگشت از فروش",
-        documentId: l.salesReturnInvoiceId,
-        number: l.salesReturnInvoiceNumber,
-        date: l.date,
-        customerCode: l.customerCode,
-        customerTitle: l.customerTitle,
-        goodsItemCode: l.goodsItemCode,
-        goodsItemTitle: l.goodsItemTitle,
-        unitTitle: l.unitTitle,
-        quantity: l.quantity,
-        unitPrice: l.quantity !== 0 ? l.amount / l.quantity : 0,
-        amount: l.amount,
-        discount: l.discount,
-        netAmount,
-        vatAmount: l.vatAmount,
-        netTotal: netAmount + l.vatAmount,
-      };
-    });
-
-    const withTotals = [...saleRows, ...returnRows].sort((a, b) => a.date.getTime() - b.date.getTime() || a.number - b.number || a.id - b.id);
-
-    const filteredSorted = applyServerFilterSort(withTotals, LEDGER_COLUMN_DEFS, req.query.filters, req.query.sortField as string | undefined, req.query.sortDir as string | undefined, req.query.sorts);
-    const total = filteredSorted.length;
-    const start = (page - 1) * pageSize;
-    const rows = filteredSorted.slice(start, start + pageSize);
-
+    const { rows, total } = await ledgerPage(f, { page, pageSize, filters: req.query.filters, sortField: req.query.sortField as string | undefined, sortDir: req.query.sortDir as string | undefined, sorts: req.query.sorts });
     res.json({ rows, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
   } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در دریافت گزارش" });
+    fail(res, e);
   }
 });
 

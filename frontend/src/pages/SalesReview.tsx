@@ -161,6 +161,19 @@ const LEDGER_COLUMNS: (BalanceTableColumn<LedgerRow> & { field: string })[] = [
 ];
 const LEDGER_SORT_FIELD_MAP: Record<string, string> = Object.fromEntries(LEDGER_COLUMNS.map((c) => [c.header, c.field]));
 
+// تب «اسناد»: نگاشت هدر ستون ← کلید سرور (backend/src/services/salesReviewSql.ts#DOC_COLS). ستون «تخفیف» عمداً نیست
+// (نمایشش علامت‌معکوس است و فیلتر/مرتب‌سازی سرور روی مقدار خام اشتباه می‌شد).
+const DOC_SORT_FIELD_MAP: Record<string, string> = {
+  شماره: "number",
+  تاریخ: "date",
+  "کد مشتری": "customerCode",
+  "عنوان مشتری": "customerTitle",
+  مبلغ: "amount",
+  "خالص فروش": "netAmount",
+  "ارزش افزوده": "vatAmount",
+  خالص: "netTotal",
+};
+
 function numCol(header: string, field: keyof DimRow): BalanceTableColumn<DimRow> {
   return {
     header,
@@ -205,6 +218,11 @@ export default function SalesReview() {
   const [ledgerTotalPages, setLedgerTotalPages] = useState(snapshot?.ledgerTotalPages ?? 1);
   const [ledgerSort, setLedgerSort] = useState<{ header: string; dir: "asc" | "desc" } | null>(snapshot?.ledgerSort ?? null);
   const [ledgerFilters, setLedgerFilters] = useState<Record<string, ActiveFilter>>(snapshot?.ledgerFilters ?? {});
+  const [docsPage, setDocsPage] = useState(snapshot?.docsView?.page ?? 1);
+  const [docsPageSize, setDocsPageSize] = useState(snapshot?.docsView?.pageSize ?? 25);
+  const [docsTotal, setDocsTotal] = useState(snapshot?.docsView?.total ?? 0);
+  const [docsSort, setDocsSort] = useState<{ header: string; dir: "asc" | "desc" } | null>(snapshot?.docsView?.sort ?? null);
+  const [docsFilters, setDocsFilters] = useState<Record<string, ActiveFilter>>(snapshot?.docsView?.filters ?? {});
   const [error, setError] = useState<string | null>(null);
 
   const chain = useChainedMultiSelect(snapshot?.chainState);
@@ -225,8 +243,9 @@ export default function SalesReview() {
       ledgerTotalPages,
       ledgerSort,
       ledgerFilters,
+      docsView: { page: docsPage, pageSize: docsPageSize, total: docsTotal, sort: docsSort, filters: docsFilters },
     });
-  }, [chain.selections, chain.order, activeTab, filters, tabData, tabView.viewState, tabLoader.loadedTabs, ledgerRows, ledgerPage, ledgerPageSize, ledgerTotal, ledgerTotalPages, ledgerSort, ledgerFilters]);
+  }, [chain.selections, chain.order, activeTab, filters, tabData, tabView.viewState, tabLoader.loadedTabs, ledgerRows, ledgerPage, ledgerPageSize, ledgerTotal, ledgerTotalPages, ledgerSort, ledgerFilters, docsPage, docsPageSize, docsTotal, docsSort, docsFilters]);
 
   useEffect(() => {
     async function init() {
@@ -279,6 +298,11 @@ export default function SalesReview() {
     const invoiceIds = new Set<string>();
     for (const t of chain.tabsBefore(tabIndex)) {
       if (t === LEDGER_TAB) continue;
+      // تب «اسناد» سمت سرور صفحه‌بندی می‌شود (انتخاب‌ها بین صفحه‌ها می‌ماند)؛ شناسه‌ی ردیف همان شناسه‌ی فاکتور است، نیازی به یافتن ردیف نیست
+      if (t === DOCUMENTS_TAB) {
+        chain.get(t).forEach((id) => invoiceIds.add(String(id)));
+        continue;
+      }
       const rows = tabData[t] || [];
       for (const id of chain.get(t)) {
         const row = rows.find((r) => String(r.id) === String(id));
@@ -288,7 +312,6 @@ export default function SalesReview() {
         if (t === CUSTOMER_TAB && row.customerId != null) customerIds.add(String(row.customerId));
         if ((isGroupLevelTab(t) || t === ACCOUNTING_GROUP_TAB) && row.goodsItemIds) row.goodsItemIds.forEach((gid) => goodsItemIds.add(String(gid)));
         if (t === GOODS_ITEM_TAB && row.goodsItemId != null) goodsItemIds.add(String(row.goodsItemId));
-        if (t === DOCUMENTS_TAB && row.salesInvoiceId != null) invoiceIds.add(String(row.salesInvoiceId));
       }
     }
     return { salesCenterIds, salesTypeIds, customerIds, goodsItemIds, invoiceIds };
@@ -322,6 +345,41 @@ export default function SalesReview() {
       },
       setError
     );
+  }
+
+  async function loadDocs(page = 1, pageSize = docsPageSize, sort = docsSort, colFilters = docsFilters) {
+    await tabLoader.run(
+      DOCUMENTS_TAB,
+      async (isStale) => {
+        const p = buildParams(DOCUMENTS_TAB);
+        p.set("page", String(page));
+        p.set("pageSize", String(pageSize));
+        appendSortParams(p, sort, DOC_SORT_FIELD_MAP);
+        const serverFilters: Record<string, ActiveFilter> = {};
+        for (const [header, f] of Object.entries(colFilters)) {
+          const field = DOC_SORT_FIELD_MAP[header];
+          if (field) serverFilters[field] = f;
+        }
+        if (Object.keys(serverFilters).length) p.set("filters", JSON.stringify(serverFilters));
+        const data = await api.get(`/sales-review/documents?${p.toString()}`);
+        if (isStale()) return;
+        setTabData((prev) => ({ ...prev, [DOCUMENTS_TAB]: data.rows }));
+        setDocsPage(data.page);
+        setDocsPageSize(data.pageSize);
+        setDocsTotal(data.total);
+      },
+      setError
+    );
+  }
+
+  function onDocsSortChange(sort: { header: string; dir: "asc" | "desc" } | null) {
+    setDocsSort(sort);
+    loadDocs(1, docsPageSize, sort, docsFilters);
+  }
+
+  function onDocsFiltersChange(f: Record<string, ActiveFilter>) {
+    setDocsFilters(f);
+    loadDocs(1, docsPageSize, docsSort, f);
   }
 
   async function loadLedger(page = 1, pageSize = ledgerPageSize, sort = ledgerSort, colFilters = ledgerFilters) {
@@ -376,6 +434,7 @@ export default function SalesReview() {
     tabLoader.loadedTabs,
     (tab) => {
       if (tab === LEDGER_TAB) loadLedger();
+      else if (tab === DOCUMENTS_TAB) loadDocs();
       else loadDimTab(tab);
     },
     activationDepsKey
@@ -383,6 +442,7 @@ export default function SalesReview() {
 
   function refreshCurrentTab() {
     if (activeTab === LEDGER_TAB) loadLedger();
+    else if (activeTab === DOCUMENTS_TAB) loadDocs();
     else loadDimTab(activeTab);
   }
 
@@ -401,6 +461,9 @@ export default function SalesReview() {
     setLedgerPage(1);
     setLedgerSort(null);
     setLedgerFilters({});
+    setDocsPage(1);
+    setDocsSort(null);
+    setDocsFilters({});
     tabLoader.resetLoaded();
     setActiveTab(0);
   }
@@ -411,6 +474,7 @@ export default function SalesReview() {
     setTabData({});
     setLedgerRows([]);
     setLedgerPage(1);
+    setDocsPage(1);
     tabLoader.resetLoaded();
   }
 
@@ -434,7 +498,7 @@ export default function SalesReview() {
       return [
         ...prefix,
         numCol("مبلغ", "amount"),
-        negatedNumCol("تخفیف", "discount"),
+        { header: "تخفیف", render: (r) => <SignedCell value={-(r.discount || 0)} />, decimal: true, totalValue: (r) => -(r.discount || 0) },
         numCol("خالص فروش", "netAmount"),
         numCol("ارزش افزوده", "vatAmount"),
         numCol("خالص", "netTotal"),
@@ -491,7 +555,30 @@ export default function SalesReview() {
         onClearFilters={clearFilters}
       />
 
-      {activeTab !== LEDGER_TAB && (
+      {activeTab === DOCUMENTS_TAB && (
+        <SelectableBalanceTable
+          stateKey={DOCUMENTS_TAB}
+          rows={tabData[DOCUMENTS_TAB] || []}
+          columns={columns}
+          selected={chain.get(DOCUMENTS_TAB)}
+          onToggle={onToggleRow}
+          loading={tabLoader.loading}
+          restoreFilters={docsFilters}
+          restoreSort={docsSort}
+          serverPaging={{
+            page: docsPage,
+            pageSize: docsPageSize,
+            total: docsTotal,
+            loading: tabLoader.loading,
+            onPageChange: (page) => loadDocs(page),
+            onPageSizeChange: (size) => loadDocs(1, size, docsSort, docsFilters),
+            onSortChange: onDocsSortChange,
+            onFiltersChange: onDocsFiltersChange,
+          }}
+        />
+      )}
+
+      {activeTab !== LEDGER_TAB && activeTab !== DOCUMENTS_TAB && (
         <SelectableBalanceTable
           stateKey={activeTab}
           rows={tabData[activeTab] || []}

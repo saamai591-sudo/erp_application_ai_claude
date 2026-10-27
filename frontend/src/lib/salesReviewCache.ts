@@ -17,6 +17,8 @@ export interface SalesReviewSnapshot {
   ledgerTotalPages: number;
   ledgerSort?: { header: string; dir: "asc" | "desc" } | null;
   ledgerFilters?: Record<string, ActiveFilter>;
+  /** تب «اسناد» هم مثل گردش سمت سرور صفحه‌بندی می‌شود؛ ردیف‌های صفحه‌ی جاری در tabData است */
+  docsView?: { page: number; pageSize: number; total: number; sort: { header: string; dir: "asc" | "desc" } | null; filters: Record<string, ActiveFilter> };
 }
 
 // دقیقاً هم‌الگوی warehouseReviewCache.ts — یک نمونه‌ی واحد (این گزارش برخلاف مرور انبار، دو نما/mode ندارد).
