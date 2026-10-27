@@ -62,11 +62,14 @@ export default function AttendancePermits() {
 }
 
 function PermitList() {
-  const cacheKey = "/attendance-permits";
+  const location = useLocation();
+  // لینک «مشاهده سوابق» از پرونده‌ی کارمند: ?employeeId=
+  const empQ = new URLSearchParams(location.search).get("employeeId");
+  const cacheKey = `/attendance-permits${empQ ? `?employeeId=${empQ}` : ""}`;
   const [items, setItems] = usePersistedState<Row[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
   async function reload() {
-    api.get("/attendance-permits").then((r) => { setItems(r); setError(null); }).catch((e) => setError(e.message));
+    api.get(`/attendance-permits${empQ ? `?employeeId=${empQ}` : ""}`).then((r) => { setItems(r); setError(null); }).catch((e) => setError(e.message));
   }
   useEffect(() => {
     if (!hasPersistedState(cacheKey)) reload();

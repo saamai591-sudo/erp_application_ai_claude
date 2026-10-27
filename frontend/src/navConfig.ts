@@ -481,6 +481,7 @@ const RAW_MODULES: ModuleGroup[] = [
       {
         title: "عملیات",
         items: [
+          { key: "attendance-employees", label: "کارکنان", list: "/attendance-employees", icon: "users", type: "operational" },
           { key: "attendance-shift-assignments", label: "انتساب شیفت", list: "/attendance-shift-assignments", create: "/attendance-shift-assignments/new", icon: "users" },
           { key: "attendance-day-exceptions", label: "استثنای روز", list: "/attendance-day-exceptions", create: "/attendance-day-exceptions/new", icon: "calendar" },
           { key: "attendance-leave-requests", label: "درخواست مرخصی", list: "/attendance-leave-requests", create: "/attendance-leave-requests/new", icon: "file" },

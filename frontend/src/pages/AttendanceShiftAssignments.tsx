@@ -57,11 +57,14 @@ export default function AttendanceShiftAssignments() {
 }
 
 function AsgList() {
-  const cacheKey = "/attendance-shift-assignments";
+  const location = useLocation();
+  // لینک «سوابق انتساب» از پرونده‌ی کارمند: ?employeeId= فقط انتساب‌های همان کارمند را می‌آورد
+  const empQ = new URLSearchParams(location.search).get("employeeId");
+  const cacheKey = `/attendance-shift-assignments${empQ ? `?employeeId=${empQ}` : ""}`;
   const [items, setItems] = usePersistedState<AsgRow[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
   async function reload() {
-    api.get("/attendance-shift-assignments").then((r) => { setItems(r); setError(null); }).catch((e) => setError(e.message));
+    api.get(`/attendance-shift-assignments${empQ ? `?employeeId=${empQ}` : ""}`).then((r) => { setItems(r); setError(null); }).catch((e) => setError(e.message));
   }
   useEffect(() => {
     if (!hasPersistedState(cacheKey)) reload();
@@ -118,6 +121,9 @@ function AsgForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     api.get("/attendance-shifts").then((r: ShiftOpt[]) => setShifts(r)).catch(() => {});
+    // «انتساب جدید» از پرونده‌ی کارمند: ?employeeId=
+    const eid = new URLSearchParams(window.location.search).get("employeeId");
+    if (!editId && eid) setForm((f) => (f.employeeId ? f : { ...f, employeeId: eid }));
     if (!editId) return;
     api.get(`/attendance-shift-assignments/${editId}`).then((r: AsgRow) => {
       setUpdatedAt(r.updatedAt);
