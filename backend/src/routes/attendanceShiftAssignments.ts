@@ -4,7 +4,8 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { AttendanceError } from "../services/attendancePunchService";
-import { ASSIGNMENT_INCLUDE, assignmentShape, createAssignment, deleteAssignment, updateAssignment } from "../services/attendanceShiftAssignmentService";
+import { ASSIGNMENT_INCLUDE, BulkAssignmentError, assignmentShape, bulkCreateAssignments, createAssignment, deleteAssignment, updateAssignment } from "../services/attendanceShiftAssignmentService";
+import { sendBulkError } from "../lib/bulkError";
 
 // مدیریت تردد › عملیات › «انتساب شیفت». منطق فقط در services/attendanceShiftAssignmentService.ts.
 
@@ -27,6 +28,16 @@ router.get("/attendance-shift-assignments/:id", can(`${FORM}.view`), async (req,
   const a = await prisma.attendanceShiftAssignment.findUnique({ where: { id: Number(req.params.id) }, include: ASSIGNMENT_INCLUDE });
   if (!a) return res.status(404).json({ error: "انتساب یافت نشد" });
   res.json(assignmentShape(a));
+});
+
+// انتساب گروهی شیفت (فهرست «کارکنان»): همان دسترسی ثبت انتساب؛ همه‌یا‌هیچ با جزئیات هر کارمند
+router.post("/attendance-shift-assignments/bulk", can(`${FORM}.create`), async (req, res) => {
+  try {
+    res.status(201).json(await bulkCreateAssignments(req.body, (req as any).user?.id ?? null));
+  } catch (e) {
+    if (e instanceof BulkAssignmentError) return sendBulkError(res, 400, e.message, e.details as unknown as Record<string, unknown>[]);
+    fail(res, e, "خطا در انتساب گروهی");
+  }
 });
 
 router.post("/attendance-shift-assignments", can(`${FORM}.create`), async (req, res) => {

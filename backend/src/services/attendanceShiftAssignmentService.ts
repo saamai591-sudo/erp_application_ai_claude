@@ -82,6 +82,56 @@ export async function createAssignment(b: any, userId: number | null): Promise<{
   return { id: c.id };
 }
 
+export interface BulkProblem {
+  personnelCode: string;
+  fullName: string;
+  reason: string;
+}
+/** خطای عملیات گروهی: هیچ انتسابی ثبت نشده و برای هر کارمندِ مشکل‌دار یک ردیف دلیل هست (قرارداد lib/bulkError.ts) */
+export class BulkAssignmentError extends AttendanceError {
+  constructor(message: string, public details: BulkProblem[]) {
+    super(message);
+  }
+}
+
+/**
+ * انتساب گروهیِ شیفت (از فهرست «کارکنان»): یک شیفت و یک تاریخ شروع برای چند کارمند. همان کنترل‌های ثبت تکی برای هر کارمند (همکاری در تاریخ شروع، شیفت فعال،
+ * قفل «محاسبه تردد»، نبودن انتسابِ هم‌تاریخ، درخواست مرخصی/ماموریتِ وابسته به بازه‌ی اثر)، همه‌یا‌هیچ: اگر حتی یک کارمند مشکل داشته باشد چیزی ثبت نمی‌شود و
+ * دلیل هر کارمند برمی‌گردد.
+ */
+export async function bulkCreateAssignments(b: any, userId: number | null): Promise<{ created: number }> {
+  const ids = [...new Set((Array.isArray(b?.employeeIds) ? b.employeeIds : []).map(Number).filter((n: number) => Number.isInteger(n) && n > 0))] as number[];
+  if (ids.length === 0) throw new AttendanceError("کارمندی انتخاب نشده است");
+  const shiftId = Number(b?.shiftId);
+  if (!shiftId) throw new AttendanceError("شیفت را انتخاب کنید");
+  const fromDate = parseDay(b?.fromDate, "تاریخ شروع");
+  const shift = await prisma.attendanceShift.findUnique({ where: { id: shiftId } });
+  if (!shift) throw new AttendanceError("شیفت یافت نشد");
+  if (!shift.isActive) throw new AttendanceError("این شیفت غیرفعال است");
+  if (shift.cycleType === "ROTATING" && !shift.cycleStartDate) throw new AttendanceError(`برای شیفت چرخشی «${shift.title}» تاریخ روز ۱ چرخه تعیین نشده است؛ آن را در تعریف شیفت وارد کنید`);
+  const note = typeof b?.note === "string" && b.note.trim() ? b.note.trim() : null;
+  const emps = await prisma.employee.findMany({ where: { id: { in: ids } }, select: EMPLOYEE_SELECT });
+  const byId = new Map(emps.map((e) => [e.id, e]));
+  const problems: BulkProblem[] = [];
+  for (const id of ids) {
+    const e = byId.get(id);
+    const row = { personnelCode: e?.personnelCode ?? String(id), fullName: e ? personName(e.party) : "" };
+    try {
+      if (!e) throw new AttendanceError("کارمند یافت نشد");
+      await assertEmployeeWorking(id, fromDate);
+      await assertFromDateOpen(id, fromDate);
+      if (await prisma.attendanceShiftAssignment.findFirst({ where: { employeeId: id, fromDate }, select: { id: true } })) throw new AttendanceError("برای این کارمند در همین تاریخ شروع، انتساب دیگری ثبت شده است");
+      const msg = await requestsInSpan(id, fromDate, await nextStart(id, fromDate));
+      if (msg) throw new AttendanceError(msg);
+    } catch (err: any) {
+      problems.push({ ...row, reason: err instanceof AttendanceError ? err.message : err?.message || "خطا" });
+    }
+  }
+  if (problems.length) throw new BulkAssignmentError(`انتساب گروهی انجام نشد؛ ${problems.length} کارمند از ${ids.length} مشکل دارد (هیچ انتسابی ثبت نشد)`, problems);
+  await prisma.$transaction(ids.map((employeeId) => prisma.attendanceShiftAssignment.create({ data: { employeeId, shiftId, fromDate, note, createdById: userId } })));
+  return { created: ids.length };
+}
+
 export async function updateAssignment(id: number, b: any): Promise<void> {
   const ex = await prisma.attendanceShiftAssignment.findUnique({ where: { id } });
   if (!ex) throw new AttendanceError("انتساب یافت نشد");

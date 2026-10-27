@@ -4,6 +4,11 @@ import { ErrorToast } from "../components/ErrorToast";
 import { DataTable } from "../components/DataTable";
 import { RefreshButton } from "../components/RefreshButton";
 import { InfoHint } from "../components/InfoHint";
+import { Modal } from "../components/Modal";
+import { BulkErrorDialog } from "../components/BulkErrorDialog";
+import { JalaliDatePicker } from "../components/JalaliDatePicker";
+import { RequiredMark } from "../components/RequiredMark";
+import { showToast } from "../lib/toast";
 import { toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { api, ApiError } from "../lib/api";
@@ -22,6 +27,11 @@ interface ListRow {
   statusTitle: string;
   currentShift: string;
   shiftFrom: string | null;
+}
+interface BulkRow {
+  personnelCode: string;
+  fullName: string;
+  reason: string;
 }
 interface Asg {
   id: number;
@@ -62,11 +72,37 @@ function EmployeeList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const s = (f: (r: ListRow) => string, extra: object = {}) => ({ render: (r: ListRow) => f(r), filterType: "string" as const, filterValue: (r: ListRow) => f(r), ...extra });
+  const { hasPermission } = usePermissions();
+  // انتساب گروهی شیفت: چند کارمند انتخاب‌شده ← یک شیفت و یک تاریخ شروع (همان دسترسی ثبت انتساب)
+  const [bulk, setBulk] = useState<ListRow[] | null>(null);
+  const [shifts, setShifts] = useState<{ id: number; title: string; isActive: boolean }[]>([]);
+  const [form, setForm] = useState({ shiftId: "", fromDate: "", note: "" });
+  const [busy, setBusy] = useState(false);
+  const [bulkError, setBulkError] = useState<ApiError | null>(null);
+  async function openBulk(rows: ListRow[]) {
+    setForm({ shiftId: "", fromDate: "", note: "" });
+    setBulk(rows);
+    if (shifts.length === 0) api.get("/attendance-shifts").then((r) => setShifts(r)).catch(() => {});
+  }
+  async function submitBulk() {
+    if (!bulk) return;
+    setBusy(true);
+    try {
+      const r = await api.post("/attendance-shift-assignments/bulk", { employeeIds: bulk.map((x) => x.employeeId), shiftId: Number(form.shiftId), fromDate: form.fromDate, note: form.note });
+      setBulk(null);
+      showToast(`انتساب شیفت برای ${toFaDigits(String(r.created))} کارمند ثبت شد`);
+      await reload();
+    } catch (e) {
+      setBulkError(e as ApiError);
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint title="کارکنان" text="فهرست کارمندان با وضعیت همکاری و شیفتِ فعلی. با باز کردن هر کارمند، پرونده‌ی تردد او (شیفت، مجوزها، محاسبات تردد) نمایش داده می‌شود؛ ثبت و ویرایش در فرم‌های «انتساب شیفت»، «مجوزها» و «محاسبه تردد» انجام می‌شود." />
+          <InfoHint title="کارکنان" text="فهرست کارمندان با وضعیت همکاری و شیفتِ فعلی. با باز کردن هر کارمند، پرونده‌ی تردد او (شیفت، مجوزها، محاسبات تردد) نمایش داده می‌شود؛ ثبت و ویرایش در فرم‌های «انتساب شیفت»، «مجوزها» و «محاسبه تردد» انجام می‌شود. برای انتساب شیفت به چند کارمند، ردیف‌ها را تیک بزنید و از منوی «عملیات»، «انتساب گروهی شیفت» را انتخاب کنید." />
           <RefreshButton onClick={reload} />
         </div>
       </div>
@@ -81,7 +117,46 @@ function EmployeeList() {
         ]}
         rows={items}
         edit={{ path: (r: ListRow) => `/attendance-employees/${r.employeeId}/edit` }}
+        bulkActions={hasPermission("attendance.operations.attendance-shift-assignments.create") ? [{ label: (n) => `انتساب گروهی شیفت (${toFaDigits(String(n))})`, onClick: openBulk }] : undefined}
       />
+      {bulk && !bulkError && (
+        <Modal title="انتساب گروهی شیفت" onClose={() => setBulk(null)}>
+          <p style={{ marginTop: 0, fontSize: 13 }}>یک شیفت و تاریخ شروع برای <b>{toFaDigits(String(bulk.length))} کارمند</b> انتخاب‌شده ثبت می‌شود. اگر برای حتی یک کارمند مشکلی باشد (مثلاً همکاری در آن تاریخ، قفل محاسبه تردد یا درخواست مرخصی/ماموریت وابسته) هیچ انتسابی ثبت نمی‌شود و دلیل هر کارمند نمایش داده می‌شود.</p>
+          <div className="form-grid">
+            <div className="form-field">
+              <label>شیفت<RequiredMark /></label>
+              <select value={form.shiftId} onChange={(e) => setForm({ ...form, shiftId: e.target.value })}>
+                <option value="">انتخاب کنید</option>
+                {shifts.filter((x) => x.isActive).map((x) => <option key={x.id} value={x.id}>{x.title}</option>)}
+              </select>
+            </div>
+            <div className="form-field">
+              <label>از تاریخ<RequiredMark /></label>
+              <JalaliDatePicker value={form.fromDate} onChange={(v) => setForm({ ...form, fromDate: v })} />
+            </div>
+            <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+              <label>توضیح</label>
+              <input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+            </div>
+          </div>
+          <div className="actions" style={{ marginTop: 12 }}>
+            <button type="button" className="btn" disabled={busy || !form.shiftId || !form.fromDate} onClick={submitBulk}>تایید و ثبت انتساب</button>
+            <button type="button" className="btn secondary" onClick={() => setBulk(null)}>انصراف</button>
+          </div>
+        </Modal>
+      )}
+      {bulkError && (
+        <BulkErrorDialog
+          error={bulkError}
+          gridName="خطاهای انتساب گروهی شیفت"
+          detailColumns={[
+            { header: "کد پرسنلی", render: (r: BulkRow) => toFaDigits(r.personnelCode) },
+            { header: "کارمند", render: (r: BulkRow) => r.fullName },
+            { header: "علت", render: (r: BulkRow) => r.reason },
+          ]}
+          onClose={() => setBulkError(null)}
+        />
+      )}
     </div>
   );
 }
