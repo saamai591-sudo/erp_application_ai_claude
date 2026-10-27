@@ -850,6 +850,36 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
 }
 
 /**
+ * سازگاری «روش» با ورودی‌های ماهانه‌ی ثبت‌شده‌ی عامل حقوق: روشِ تازه از ماه اجرا (تا شروع روش بعدی) اثر دارد، پس اگر در همان بازه
+ * ورودی ماهانه‌ای هست که با نوع روش نمی‌خواند، ثبت/ویرایش رد می‌شود — وگرنه مقدار از «ورود اطلاعات» ناپدید می‌شود (آن فرم فقط عامل‌های
+ * دستی را نشان می‌دهد) یا حقوق آن را بی‌صدا به‌جای مقدار تردد می‌خواند. ورودی‌های «دستی» = همه‌ی ورودی‌هایی که از «ارسال به حقوق» نیامده‌اند.
+ *  - روش غیر از «ورود دستی» + ورودی دستی در بازه ⇒ رد (اول در «ورود اطلاعات» حذف کنید)
+ *  - روش غیر از «ورود از تردد» + ورودیِ ارسال‌شده از تردد در بازه ⇒ رد (اول «برگشت از حقوق»)
+ * ماه‌های قبل از ماه اجرا آزادند. فقط برای عامل حقوق (عامل حکم ورودی ماهانه ندارد).
+ */
+export async function assertInputsFitMethod(componentId: number, method: string, execStart: Date, nextStart: Date | null): Promise<void> {
+  const months = await prisma.workCalendarMonth.findMany({ where: { startDate: nextStart ? { gte: execStart, lt: nextStart } : { gte: execStart } }, select: { year: true, month: true } });
+  if (months.length === 0) return;
+  const inputs = await prisma.payrollFactorInput.findMany({ where: { componentId, OR: months.map((m) => ({ year: m.year, month: m.month })) }, select: { employeeId: true, year: true, month: true } });
+  if (inputs.length === 0) return;
+  const sent = await prisma.attendanceCalculation.findMany({
+    where: { sentToPayrollAt: { not: null }, items: { some: { payrollComponentId: componentId } }, calendarMonth: { startDate: nextStart ? { gte: execStart, lt: nextStart } : { gte: execStart } } },
+    select: { employeeId: true, calendarMonth: { select: { year: true, month: true } } },
+  });
+  const sentKeys = new Set(sent.map((c) => `${c.employeeId}:${c.calendarMonth.year}:${c.calendarMonth.month}`));
+  const fromAttendance = inputs.filter((i) => sentKeys.has(`${i.employeeId}:${i.year}:${i.month}`));
+  const manual = inputs.filter((i) => !sentKeys.has(`${i.employeeId}:${i.year}:${i.month}`));
+  const monthsOf = (list: typeof inputs) => [...new Set(list.map((i) => `${i.year}/${String(i.month).padStart(2, "0")}`))].sort().slice(0, 4).join("، ");
+  if (manual.length > 0 && method !== "MANUAL") {
+    throw new PayrollCalcError(`برای این عامل در «ورود اطلاعات» ${manual.length} مقدار ماهانه از ماه اجرای این روش به بعد ثبت شده است (ماه‌ها: ${monthsOf(manual)}) و با روش «${METHOD_FA[method] ?? method}» نمی‌خواند؛ ابتدا آن مقدارها را در «ورود اطلاعات» حذف کنید`);
+  }
+  if (fromAttendance.length > 0 && method !== "ATTENDANCE") {
+    throw new PayrollCalcError(`${fromAttendance.length} مقدار این عامل از «محاسبه تردد» به حقوق ارسال شده است (ماه‌ها: ${monthsOf(fromAttendance)}) و با روش «${METHOD_FA[method] ?? method}» نمی‌خواند؛ ابتدا در «محاسبه تردد» «برگشت از حقوق» بزنید`);
+  }
+}
+
+
+/**
  * پیام قفل «روش محاسبه عامل»: اگر هر ردیفِ فیشی با این روش محاسبه شده باشد (یا ردیف قدیمیِ بدون methodId برای همان عامل)، تا حذف آن فیش‌ها
  * روش قابل ویرایش/حذف/تایید نیست. null = قفل نیست.
  */

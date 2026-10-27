@@ -4,7 +4,7 @@ import { can, userHasAction } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { AuthedRequest } from "../middleware/auth";
 import type { BranchInput } from "../services/payrollCalculationService";
-import { METHOD_FA, PayrollCalcError, calculatePayroll, validateFactorMethod, methodLockMessage, lockedMethodIds, getBaseCalcType, dependentSlipMessage, createPayrollComponent } from "../services/payrollCalculationService";
+import { METHOD_FA, PayrollCalcError, assertInputsFitMethod, calculatePayroll, validateFactorMethod, methodLockMessage, lockedMethodIds, getBaseCalcType, dependentSlipMessage, createPayrollComponent } from "../services/payrollCalculationService";
 import { getEffectiveDecrees } from "../services/employmentDecreeService";
 import { buildPayrollSlipsPrint } from "../services/payrollSlipPrint";
 import { buildPayrollListPrint } from "../services/payrollListPrint";
@@ -405,6 +405,7 @@ router.post("/payroll-methods", can(`${F_METH}.create`), async (req, res) => {
     if (latest && execStart <= latest.execCalendarMonth.startDate) {
       throw new PayrollCalcError(`ماه اجرا باید بعد از ماه اجرای آخرین روش این عامل (${execYm(latest).year}/${execYm(latest).month}) باشد`);
     }
+    if (basis === "payroll") await assertInputsFitMethod(factorId, data.method, execStart, null);
     const created = await prisma.payrollFactorMethod.create({
       data: { ...where, ...data, branches: { create: branches.map((x, i) => ({ seq: i + 1, conditionText: x.conditionText, formulaText: x.formulaText })) }, bases: { create: basisRows(basisIds, noEffectIds) } },
     });
@@ -431,6 +432,7 @@ router.put("/payroll-methods/:id", can(`${F_METH}.edit`), async (req, res) => {
     ]);
     if (prev && execStart <= prev.execCalendarMonth.startDate) throw new PayrollCalcError(`ماه اجرا باید بعد از روش قبلی (${execYm(prev).year}/${execYm(prev).month}) بماند`);
     if (next && execStart >= next.execCalendarMonth.startDate) throw new PayrollCalcError(`ماه اجرا باید قبل از روش بعدی (${execYm(next).year}/${execYm(next).month}) بماند`);
+    if (m.payrollComponentId) await assertInputsFitMethod(m.payrollComponentId, data.method, execStart, next ? next.execCalendarMonth.startDate : null);
     await prisma.payrollFactorMethod.update({
       where: { id },
       data: { ...data, branches: { deleteMany: {}, create: branches.map((x, i) => ({ seq: i + 1, conditionText: x.conditionText, formulaText: x.formulaText })) }, bases: { deleteMany: {}, create: basisRows(basisIds, noEffectIds) } },
