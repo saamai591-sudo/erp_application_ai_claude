@@ -17,7 +17,7 @@ import { usePersistedState } from "../lib/usePersistedState";
 interface ItemRow {
   id: number;
   title: string;
-  source: "COMPUTED" | "PERMIT";
+  source: "COMPUTED" | "PERMIT" | "PAYROLL";
   level: "DAY" | "MONTH";
   valueText: string;
   error: string;
@@ -28,6 +28,7 @@ interface ItemRow {
 interface Calc {
   id: number;
   itemCount?: number;
+  sentToPayrollAt: string | null;
   calculatedAt: string;
   days: number;
   incompleteDays: number;
@@ -86,6 +87,8 @@ export default function AttendanceCalculations() {
   const pickedRows = (rows ?? []).filter((r) => pickedSet.has(r.employeeId));
   const hasCalculatedPicked = pickedRows.some((r) => r.calculation);
   const hasUncalculatedPicked = pickedRows.some((r) => !r.calculation);
+  const hasUnsentPicked = pickedRows.some((r) => r.calculation && !r.calculation.sentToPayrollAt);
+  const hasSentPicked = pickedRows.some((r) => r.calculation?.sentToPayrollAt);
   const selectable = (rows ?? []).filter((r) => !r.blockedReason || r.calculation);
   const allSelected = selectable.length > 0 && selectable.every((r) => pickedSet.has(r.employeeId));
 
@@ -127,6 +130,25 @@ export default function AttendanceCalculations() {
     }
   }
 
+  // ارسال به حقوق / برگشت از حقوق: برای ردیف‌های محاسبه‌شده‌ی انتخاب‌شده (هر کارمند مستقل؛ نتیجه‌ی هر ردیف در ستون توضیح)
+  async function payrollAction(kind: "send-to-payroll" | "return-from-payroll") {
+    const targets = pickedRows.filter((r) => (kind === "send-to-payroll" ? r.calculation && !r.calculation.sentToPayrollAt : r.calculation?.sentToPayrollAt));
+    if (targets.length === 0) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const r = await api.post(`/attendance-calculations/${kind}`, { year: sel.year, month: sel.month, employeeIds: targets.map((x) => x.employeeId) });
+      const map: Record<number, Outcome> = {};
+      for (const x of r.results) map[x.employeeId] = x;
+      setOutcomes(map);
+      await reload();
+    } catch (e) {
+      showError((e as ApiError).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function remove() {
     const targets = pickedRows.filter((r) => r.calculation);
     if (targets.length === 0) return;
@@ -151,7 +173,7 @@ export default function AttendanceCalculations() {
         <div className="header-toolbar" style={{ gap: 6 }}>
           <InfoHint
             title="محاسبه تردد"
-            text="ماه را انتخاب کنید و «لود اطلاعات» بزنید تا فهرست کارمندان بیاید؛ کارمندان را تیک بزنید و «محاسبه» را بزنید. محاسبه‌ی هر کارمند در هر ماه یک رکورد می‌سازد و اطلاعات تردد او در بازه‌ی تردد همان ماه قفل می‌شود: ترددها، درخواست‌های مرخصی/ماموریت/اصلاح تردد، مجوزها، انتساب شیفت و (برای همه) استثنای روز. ردیفِ محاسبه‌شده دوباره محاسبه نمی‌شود؛ برای تغییر اطلاعات ابتدا «حذف محاسبه» بزنید."
+            text="ماه را انتخاب کنید و «لود اطلاعات» بزنید تا فهرست کارمندان بیاید؛ کارمندان را تیک بزنید و «محاسبه» را بزنید. محاسبه‌ی هر کارمند در هر ماه یک رکورد می‌سازد و اطلاعات تردد او در بازه‌ی تردد همان ماه قفل می‌شود: ترددها، درخواست‌های مرخصی/ماموریت/اصلاح تردد، مجوزها، انتساب شیفت و (برای همه) استثنای روز. ردیفِ محاسبه‌شده دوباره محاسبه نمی‌شود؛ برای تغییر اطلاعات ابتدا «حذف محاسبه» بزنید. «ارسال به حقوق» نتیجه‌ی عوامل حقوقی (روش «ورود از تردد») را در ورودی‌های حقوق همان ماه می‌نویسد؛ تا «برگشت از حقوق» محاسبه حذف نمی‌شود و تا فیش حقوق وجود دارد هیچ‌کدام ممکن نیست."
           />
           {hasPermission(`${P}.calculate`) && (
             <button
@@ -163,6 +185,16 @@ export default function AttendanceCalculations() {
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
             >
               <CalcIcon /> محاسبه{hasUncalculatedPicked && picked.length ? ` (${toFaDigits(String(picked.length))})` : ""}
+            </button>
+          )}
+          {hasPermission(`${P}.sendToPayroll`) && (
+            <button type="button" className="btn secondary" disabled={busy || !hasUnsentPicked} onClick={() => payrollAction("send-to-payroll")} title={hasUnsentPicked ? "نوشتن نتیجه‌ی عوامل حقوقی در ورودی‌های حقوق این ماه" : "ردیف محاسبه‌شده‌ی ارسال‌نشده‌ای انتخاب نشده است"}>
+              ارسال به حقوق
+            </button>
+          )}
+          {hasPermission(`${P}.returnFromPayroll`) && (
+            <button type="button" className="btn secondary" disabled={busy || !hasSentPicked} onClick={() => payrollAction("return-from-payroll")} title={hasSentPicked ? "حذف ورودی‌های ارسال‌شده از حقوق این ماه" : "ردیف ارسال‌شده‌ای انتخاب نشده است"}>
+              برگشت از حقوق
             </button>
           )}
           {hasPermission(`${P}.delete`) && (
@@ -198,7 +230,7 @@ export default function AttendanceCalculations() {
               </th>
               <th style={{ width: 110 }}>کد پرسنل</th>
               <th>کارمند</th>
-              <th style={{ width: 150 }}>وضعیت</th>
+              <th style={{ width: 220 }}>وضعیت</th>
               <th style={{ width: 90 }}>روز محاسبه‌شده</th>
               <th style={{ width: 90 }}>روز ناقص</th>
               <th>توضیح</th>
@@ -215,12 +247,13 @@ export default function AttendanceCalculations() {
                 <td>{toFaDigits(r.personnelCode)}</td>
                 <td>{r.fullName}</td>
                 <td>
-                  {r.calculation ? <span style={{ color: "#0a8f5a" }}>محاسبه‌شده{r.calculation.hasErrors ? " — با خطا" : ""}</span> : <span style={{ opacity: 0.6 }}>محاسبه نشده</span>}
+                  {r.calculation ? <span style={{ color: "#0a8f5a" }}>محاسبه‌شده{r.calculation.hasErrors ? " — با خطا" : ""}{r.calculation.sentToPayrollAt ? " — ارسال‌شده به حقوق" : ""}</span> : <span style={{ opacity: 0.6 }}>محاسبه نشده</span>}
                 </td>
                 <td>{r.calculation ? toFaDigits(String(r.calculation.days)) : "—"}</td>
                 <td>{r.calculation ? toFaDigits(String(r.calculation.incompleteDays)) : "—"}</td>
                 <td>
                   {o && !o.ok && <span style={{ color: "#c0392b" }}>{o.error}</span>}
+                  {o && o.ok && <span style={{ color: "#0a8f5a" }}>انجام شد</span>}
                   {!o && !r.calculation && r.blockedReason && <span style={{ color: "#c0392b" }}>{r.blockedReason}</span>}
                   {!o && r.calculation && r.calculation.factorErrors > 0 && <span style={{ color: "#b45309" }}>{toFaDigits(String(r.calculation.factorErrors))} عامل ماهانه خطا داشت</span>}
                 </td>
@@ -239,7 +272,7 @@ export default function AttendanceCalculations() {
                 {detail.items.length === 0 && <tr><td colSpan={4} style={{ opacity: 0.7, textAlign: "center" }}>عاملی ذخیره نشده است</td></tr>}
                 {detail.items.map((i) => (
                   <tr key={i.id}>
-                    <td>{i.title}{i.source === "PERMIT" ? " (مجوز)" : ""}</td>
+                    <td>{i.title}{i.source === "PERMIT" ? " (مجوز)" : i.source === "PAYROLL" ? " (حقوق)" : ""}</td>
                     <td>{i.level === "DAY" ? "روزانه" : "ماهانه"}</td>
                     <td>{i.level === "MONTH" ? (i.error ? "—" : toFaDigits(i.valueText)) : `جمع: ${toFaDigits(i.daySumText)}`}</td>
                     <td>

@@ -17,7 +17,7 @@ async function calendarMonth(year: number, month: number) {
 }
 
 export function calculationShape(c: any) {
-  return { id: c.id, calculatedAt: c.calculatedAt, days: c.days, incompleteDays: c.incompleteDays, factorErrors: c.factorErrors, hasErrors: c.hasErrors, itemCount: c._count?.items ?? undefined };
+  return { id: c.id, sentToPayrollAt: c.sentToPayrollAt ?? null, calculatedAt: c.calculatedAt, days: c.days, incompleteDays: c.incompleteDays, factorErrors: c.factorErrors, hasErrors: c.hasErrors, itemCount: c._count?.items ?? undefined };
 }
 
 /** کارمندانِ دارای همکاری در بازه‌ی تردد ماه + وضعیت محاسبه‌ی هر کدام */
@@ -146,6 +146,83 @@ export async function deleteAttendanceCalculations(year: number, month: number, 
   const cal = await calendarMonth(year, month);
   const ids = [...new Set(employeeIds.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
   if (ids.length === 0) throw new AttendanceError("کارمندی انتخاب نشده است");
-  const r = await prisma.attendanceCalculation.deleteMany({ where: { calendarMonthId: cal.id, employeeId: { in: ids } } });
+  const sent = await prisma.attendanceCalculation.findFirst({ where: { calendarMonthId: cal.id, employeeId: { in: ids }, sentToPayrollAt: { not: null } }, select: { employee: { select: { personnelCode: true } } } });
+  if (sent) throw new AttendanceError(`محاسبه‌ی کارمند با کد پرسنلی ${sent.employee.personnelCode} به حقوق ارسال شده است؛ ابتدا «برگشت از حقوق» را بزنید`);
+  const r = await prisma.attendanceCalculation.deleteMany({ where: { calendarMonthId: cal.id, employeeId: { in: ids }, sentToPayrollAt: null } });
   return r.count;
+}
+
+// ───────────────────────── ارسال به حقوق / برگشت از حقوق ─────────────────────────
+// ارسال: نتیجه‌ی عوامل حقوقی (ردیف‌های payrollComponentId) در PayrollFactorInput همان کارمند و ماه نوشته می‌شود؛ حقوق مستقیم از تردد نمی‌خواند.
+// هر کارمند مستقل و همه‌یا‌هیچ است. واحد: زمان از دقیقه به ساعتِ اعشاری (مثل «ورود اطلاعات» حقوق). برگشت: همان ورودی‌ها حذف می‌شود.
+// تا فیش حقوقِ آن کارمند و ماه (هر نوع محاسبه) وجود دارد هیچ‌کدام مجاز نیست.
+
+const payrollInputValue = (valueType: string, v: number) => (valueType === "TIME" ? Math.round((v / 60) * 10000) / 10000 : Math.round(v * 10000) / 10000);
+
+async function loadForPayroll(year: number, month: number, employeeIds: number[]) {
+  const cal = await calendarMonth(year, month);
+  const ids = [...new Set(employeeIds.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (ids.length === 0) throw new AttendanceError("کارمندی انتخاب نشده است");
+  const calcs = await prisma.attendanceCalculation.findMany({
+    where: { calendarMonthId: cal.id, employeeId: { in: ids } },
+    include: { employee: { select: { personnelCode: true } }, items: { where: { payrollComponentId: { not: null } } } },
+  });
+  return { cal, ids, byEmp: new Map(calcs.map((c) => [c.employeeId, c])) };
+}
+
+export async function sendToPayroll(year: number, month: number, employeeIds: number[], userId: number | null): Promise<CalcOutcome[]> {
+  const { cal, ids, byEmp } = await loadForPayroll(year, month, employeeIds);
+  const out: CalcOutcome[] = [];
+  for (const id of ids) {
+    const c = byEmp.get(id);
+    if (!c) { out.push({ employeeId: id, ok: false, error: "برای این کارمند در این ماه «محاسبه تردد» انجام نشده است" }); continue; }
+    if (c.sentToPayrollAt) { out.push({ employeeId: id, ok: false, error: "قبلاً به حقوق ارسال شده است؛ برای ارسال دوباره ابتدا «برگشت از حقوق» بزنید" }); continue; }
+    if (c.items.length === 0) { out.push({ employeeId: id, ok: false, error: "چیزی برای ارسال به حقوق وجود ندارد (عامل حقوقیِ «ورود از تردد» برای این ماه نتیجه‌ای ندارد)" }); continue; }
+    const bad = c.items.filter((i) => i.error || i.value === null);
+    if (bad.length) {
+      const titles = (await prisma.payrollComponent.findMany({ where: { id: { in: bad.map((b) => b.payrollComponentId!) } }, select: { title: true } })).map((t) => t.title);
+      out.push({ employeeId: id, ok: false, error: `نتیجه‌ی این عامل‌های حقوقی خطا دارد و ارسال نشد: ${titles.join("، ")}` });
+      continue;
+    }
+    try {
+      await prisma.$transaction(async (tx) => {
+        const slip = await tx.payrollSlip.findFirst({ where: { employeeId: id, year, month }, select: { id: true } });
+        if (slip) throw new AttendanceError("برای این کارمند و ماه فیش حقوق محاسبه شده است؛ ابتدا محاسبه‌ی حقوق را حذف کنید");
+        const comps = c.items.map((i) => i.payrollComponentId!);
+        const existing = await tx.payrollFactorInput.findMany({ where: { employeeId: id, year, month, componentId: { in: comps } }, include: { component: { select: { title: true } } } });
+        if (existing.length) throw new AttendanceError(`برای این عامل‌ها در «ورود اطلاعات» حقوق قبلاً مقدار ثبت شده است: ${existing.map((e) => e.component.title).join("، ")}`);
+        const claim = await tx.attendanceCalculation.updateMany({ where: { id: c.id, sentToPayrollAt: null }, data: { sentToPayrollAt: new Date(), sentToPayrollById: userId } });
+        if (claim.count !== 1) throw new AttendanceError("هم‌زمان توسط کاربر دیگری ارسال شد");
+        await tx.payrollFactorInput.createMany({ data: c.items.map((i) => ({ employeeId: id, year, month, componentId: i.payrollComponentId!, value: payrollInputValue(i.valueType, Number(i.value)) })) });
+      });
+      out.push({ employeeId: id, ok: true });
+    } catch (err: any) {
+      out.push({ employeeId: id, ok: false, error: err instanceof AttendanceError ? err.message : err?.message || "خطا در ارسال" });
+    }
+  }
+  void cal;
+  return out;
+}
+
+export async function returnFromPayroll(year: number, month: number, employeeIds: number[]): Promise<CalcOutcome[]> {
+  const { ids, byEmp } = await loadForPayroll(year, month, employeeIds);
+  const out: CalcOutcome[] = [];
+  for (const id of ids) {
+    const c = byEmp.get(id);
+    if (!c) { out.push({ employeeId: id, ok: false, error: "برای این کارمند در این ماه «محاسبه تردد» انجام نشده است" }); continue; }
+    if (!c.sentToPayrollAt) { out.push({ employeeId: id, ok: false, error: "این محاسبه به حقوق ارسال نشده است" }); continue; }
+    try {
+      await prisma.$transaction(async (tx) => {
+        const slip = await tx.payrollSlip.findFirst({ where: { employeeId: id, year, month }, select: { id: true } });
+        if (slip) throw new AttendanceError("برای این کارمند و ماه فیش حقوق محاسبه شده است؛ ابتدا محاسبه‌ی حقوق را حذف کنید");
+        const claim = await tx.attendanceCalculation.updateMany({ where: { id: c.id, sentToPayrollAt: { not: null } }, data: { sentToPayrollAt: null, sentToPayrollById: null } });
+        if (claim.count !== 1) throw new AttendanceError("این محاسبه هم‌زمان توسط کاربر دیگری برگشت داده شد");
+        await tx.payrollFactorInput.deleteMany({ where: { employeeId: id, year, month, componentId: { in: c.items.map((i) => i.payrollComponentId!) } } });
+      });
+      out.push({ employeeId: id, ok: true });
+    } catch (err: any) {
+      out.push({ employeeId: id, ok: false, error: err instanceof AttendanceError ? err.message : err?.message || "خطا در برگشت" });
+    }
+  }
+  return out;
 }

@@ -6674,6 +6674,9 @@ model AttendanceCalculation {
   /// تعداد عوامل ماهانه‌ای که در محاسبه خطا دادند
   factorErrors    Int               @default(0)
   hasErrors       Boolean           @default(false)
+  /// «ارسال به حقوق»: نتیجه‌ی عوامل حقوقی در ورودی‌های ماهانه‌ی حقوق نوشته شده است (تا «برگشت از حقوق»)
+  sentToPayrollAt   DateTime?
+  sentToPayrollById Int?
   employee        Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   calendarMonth   WorkCalendarMonth @relation(fields: [calendarMonthId], references: [id], onDelete: Restrict)
   items           AttendanceCalculationItem[]

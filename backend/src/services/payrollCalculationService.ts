@@ -689,11 +689,11 @@ export async function calculatePayroll(employeeId: number, year: number, month: 
         trace = { expression: "0", operands: [], method: METHOD_FA[m.method], note: `کارمند در سازمان «${n.orgTitle ?? ""}» غیرمشمول است؛ مبلغ صفر در نظر گرفته شد` };
       } else if (n.source === "PAYROLL_COMPONENT" && INPUT_METHODS.includes(m.method)) {
         const stored = inputByComp.get(compId);
-        // ورود دستی: مقدار ثبت‌نشده = صفر (ISNULL(x, 0)). ورود از تردد/خزانه: نبودن مقدار یعنی خوراک سیستم نرسیده؛ خطای روشن می‌دهد
-        if (stored === undefined && m.method !== "MANUAL") throw new FormulaError(`مقدار ورودی (${METHOD_FA[m.method]}) برای این ماه ثبت نشده است`);
+        // ورود دستی و ورود از تردد: مقدار ثبت‌نشده = صفر (ISNULL(x, 0)). ورود از خزانه: نبودن مقدار یعنی خوراک سیستم نرسیده؛ خطای روشن می‌دهد
+        if (stored === undefined && m.method === "TREASURY") throw new FormulaError(`مقدار ورودی (${METHOD_FA[m.method]}) برای این ماه ثبت نشده است`);
         const v = stored ?? 0;
         amount = v;
-        trace = { expression: String(v), operands: [], method: METHOD_FA[m.method], note: stored === undefined ? "مقداری در «ورود اطلاعات» ثبت نشده بود؛ صفر در نظر گرفته شد" : undefined };
+        trace = { expression: String(v), operands: [], method: METHOD_FA[m.method], note: stored === undefined ? (m.method === "ATTENDANCE" ? "مقداری از «محاسبه تردد» به حقوق ارسال نشده بود؛ صفر در نظر گرفته شد" : "مقداری در «ورود اطلاعات» ثبت نشده بود؛ صفر در نظر گرفته شد") : undefined };
       } else {
         if (n.parseError) throw new FormulaError(n.parseError);
         const branches = n.parsed!;

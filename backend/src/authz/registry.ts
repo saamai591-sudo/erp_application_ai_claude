@@ -660,7 +660,11 @@ export const REGISTRY: ModuleDef[] = [
             key: "attendance-calculation",
             title: "محاسبه تردد",
             baseActions: ["view", "delete"],
-            actions: [{ key: "calculate", title: "محاسبه" }],
+            actions: [
+              { key: "calculate", title: "محاسبه" },
+              { key: "sendToPayroll", title: "ارسال به حقوق" },
+              { key: "returnFromPayroll", title: "برگشت از حقوق" },
+            ],
           },
           {
             key: "attendance-mission-requests",
