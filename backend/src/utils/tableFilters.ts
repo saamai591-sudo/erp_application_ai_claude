@@ -8,6 +8,8 @@ export interface FilterSpec {
   operator: string;
   value?: string;
   value2?: string;
+  /** عملگر in (فیلتر انتخابی)؛ فقط مسیرهایی که پشتیبانی می‌کنند می‌خوانند */
+  values?: string[];
 }
 export type FiltersMap = Record<string, FilterSpec>;
 

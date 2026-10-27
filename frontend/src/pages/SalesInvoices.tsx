@@ -2,7 +2,8 @@ import { FormEvent, useEffect, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
 import { showError, showToast } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { DataTable } from "../components/DataTable";
+import { ActiveFilter, DataTable, JOURNAL_ENTRY_COLUMN_HEADER } from "../components/DataTable";
+import { GridSort, appendSortParams } from "../lib/gridSort";
 import { FormPage } from "../components/FormPage";
 import { PrintButton } from "../components/PrintButton";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
@@ -131,24 +132,54 @@ function VoidIcon() {
   );
 }
 
+// ستون‌های قابل فیلتر/مرتب‌سازی سمت سرور (صفحه‌بندی سمت سرور برای دیتای حجیم). «مبلغ کل» و «پیش‌دریافت» مقدار محاسبه‌شده‌ی همان صفحه‌اند.
+const SERVER_FIELD_MAP: Record<string, string> = {
+  "شماره": "number",
+  "تاریخ": "date",
+  "مشتری": "customerTitle",
+  "نوع فروش": "salesTypeTitle",
+  "مرکز فروش": "salesCenterTitle",
+  "وضعیت": "status",
+  [JOURNAL_ENTRY_COLUMN_HEADER]: "journalEntryReferenceNumber",
+};
+
 function SalesInvoiceList() {
-  const cacheKey = "/sales-invoices";
-  const [items, setItems] = usePersistedState<ListRow[]>(cacheKey, []);
+  const [items, setItems] = useState<ListRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [filters, setFilters] = useState<Record<string, ActiveFilter>>({});
+  const [sort, setSort] = useState<GridSort | null>(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
 
   async function reload() {
+    setLoading(true);
     try {
-      setItems(await api.get("/sales-invoices"));
+      const params = new URLSearchParams();
+      params.set("page", String(page));
+      params.set("pageSize", String(pageSize));
+      appendSortParams(params, sort, SERVER_FIELD_MAP);
+      const serverFilters: Record<string, ActiveFilter> = {};
+      for (const [header, f] of Object.entries(filters)) {
+        const field = SERVER_FIELD_MAP[header];
+        if (field) serverFilters[field] = f;
+      }
+      if (Object.keys(serverFilters).length) params.set("filters", JSON.stringify(serverFilters));
+      const data = await api.get(`/sales-invoices?${params.toString()}`);
+      setItems(data.rows);
+      setTotal(data.total);
       setError(null);
     } catch (e) {
       setError((e as ApiError).message);
+    } finally {
+      setLoading(false);
     }
   }
   useEffect(() => {
-    if (!hasPersistedState(cacheKey)) reload();
+    reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [page, pageSize, filters, sort]);
 
   async function onDelete(row: ListRow) {
     try {
@@ -176,8 +207,9 @@ function SalesInvoiceList() {
           { header: "مشتری", render: (r) => r.customerTitle, filterType: "string", filterValue: (r) => r.customerTitle },
           { header: "نوع فروش", render: (r) => r.salesTypeTitle || "—", filterType: "string", filterValue: (r) => r.salesTypeTitle || "" },
           { header: "مرکز فروش", render: (r) => r.salesCenterTitle || "—", filterType: "string", filterValue: (r) => r.salesCenterTitle || "" },
-          { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount), filterType: "number", filterValue: (r) => r.totalAmount, decimal: true },
-          { header: "پیش‌دریافت", render: (r) => formatAmountFa(r.advanceAmount), filterType: "number", filterValue: (r) => r.advanceAmount, decimal: true },
+          // مقدار محاسبه‌شده‌ی همان صفحه: فیلتر/مرتب‌سازی سمت سرور ندارد، فقط جمع پای گرید
+          { header: "مبلغ کل", render: (r) => formatAmountFa(r.totalAmount), decimal: true, totalValue: (r) => r.totalAmount },
+          { header: "پیش‌دریافت", render: (r) => formatAmountFa(r.advanceAmount), decimal: true, totalValue: (r) => r.advanceAmount },
           {
             header: "وضعیت",
             render: (r) => <span style={r.status === "VOIDED" ? { color: "var(--danger)" } : undefined}>{SALES_INVOICE_STATUS_FA[r.status]}</span>,
@@ -189,6 +221,25 @@ function SalesInvoiceList() {
         rows={items}
         edit={{ path: (r) => `/sales-invoices/${r.id}/edit` }}
         onDelete={onDelete}
+        serverPaging={{
+          page,
+          pageSize,
+          total,
+          loading,
+          onPageChange: setPage,
+          onPageSizeChange: (n) => {
+            setPageSize(n);
+            setPage(1);
+          },
+          onFiltersChange: (next) => {
+            setFilters(next);
+            setPage(1);
+          },
+          onSortChange: (next) => {
+            setSort(next);
+            setPage(1);
+          },
+        }}
       />
     </div>
   );

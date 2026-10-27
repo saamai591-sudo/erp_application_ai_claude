@@ -16,6 +16,7 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { EffectiveTreasurySettings } from "../services/treasurySettingService";
 import { assertNotSentToTax } from "../services/taxInvoiceSendService";
+import { dateWhere, numberWhere, parseFilters, parseSorts, stringWhere } from "../utils/tableFilters";
 import { emitWorkflowEvent } from "../services/workflowEngineService";
 import { findIssuingDocType } from "../services/documentTypeService";
 
@@ -782,33 +783,109 @@ interface HeaderBody {
   lines: LineInput[];
 }
 
-router.get("/sales-invoices", can(`${FORM}.view`), async (_req, res) => {
-  const items = await prisma.salesInvoice.findMany({
-    include: { customer: { include: { party: true } }, salesType: true, salesCenter: true, fiscalPeriod: true, currency: true, journalEntry: true, lines: true },
-    orderBy: { id: "desc" },
-  });
-  // جمع پیش‌دریافت‌های تخصیص‌یافته به هر فاکتور (پیش‌دریافت عادی + پیش‌دریافت ارزش افزوده، به ارز فاکتور)؛ برای ستون «پیش‌دریافت» فهرست و جمع پای گرید
-  const advanceSums = await prisma.salesInvoiceAdvanceAllocation.groupBy({ by: ["salesInvoiceId"], _sum: { amount: true } });
+const SALES_INVOICE_STATUS_FA: Record<string, string> = { DRAFT: "ثبت", VOIDED: "باطل شده" };
+
+/**
+ * فهرست فاکتورهای فروش با صفحه‌بندی/فیلتر/مرتب‌سازی سمت سرور (دیتای حجیم: صدها هزار فاکتور). با پارامتر page پاسخ `{rows,total,page,pageSize,totalPages}` است؛
+ * بدون page صفحه‌ی اول (دیگر آرایه‌ی کامل برنمی‌گردد: با صدها هزار فاکتور ممکن نبود). فیلتر/مرتب‌سازی روی ستون‌های شماره، تاریخ، مشتری، نوع فروش، مرکز فروش، وضعیت و شماره سند حسابداری؛
+ * «مبلغ کل» و «پیش‌دریافت» مقدار محاسبه‌شده‌ی همان صفحه‌اند (فیلتر/مرتب‌سازی سمت سرور ندارند) — مثل فهرست اسناد حسابداری.
+ */
+router.get("/sales-invoices", can(`${FORM}.view`), async (req, res) => {
+  const { page: pageRaw, pageSize: pageSizeRaw, sortField, sortDir, sorts: sortsRaw, filters: filtersRaw } = req.query as Record<string, string | undefined>;
+  const page = Math.max(1, parseInt(pageRaw ?? "", 10) || 1);
+  const pageSize = Math.min(200, Math.max(1, parseInt(pageSizeRaw ?? "", 10) || 25));
+  const filters = parseFilters(filtersRaw);
+
+  const and: any[] = [];
+  if (filters.number) {
+    const w = numberWhere(filters.number);
+    if (w) and.push({ number: w });
+  }
+  if (filters.date) {
+    const w = dateWhere(filters.date);
+    if (w) and.push({ date: w });
+  }
+  if (filters.salesTypeTitle) {
+    const w = stringWhere(filters.salesTypeTitle);
+    if (w) and.push({ salesType: { title: w } });
+  }
+  if (filters.salesCenterTitle) {
+    const w = stringWhere(filters.salesCenterTitle);
+    if (w) and.push({ salesCenter: { title: w } });
+  }
+  if (filters.journalEntryReferenceNumber) {
+    const w = numberWhere(filters.journalEntryReferenceNumber);
+    if (w) and.push({ journalEntry: { referenceNumber: w } });
+  }
+  if (filters.customerTitle) {
+    // عنوان مشتری = نام (حقوقی) یا نام + نام خانوادگی (حقیقی)؛ جست‌وجو روی هر سه ستون
+    const f = filters.customerTitle;
+    const needle = (f.value ?? "").trim();
+    if (needle && (f.operator === "contains" || f.operator === "notContains")) {
+      const m = { contains: needle, mode: "insensitive" as const };
+      const hit = { customer: { party: { OR: [{ name: m }, { firstName: m }, { lastName: m }] } } };
+      and.push(f.operator === "contains" ? hit : { NOT: hit });
+    }
+  }
+  if (filters.status) {
+    const f = filters.status;
+    const needle = (f.value ?? "").trim();
+    if (f.operator === "contains" || f.operator === "notContains" || f.operator === "in") {
+      const matched = Object.entries(SALES_INVOICE_STATUS_FA)
+        .filter(([, label]) => (f.operator === "in" ? (f.values ?? []).includes(label) : needle ? label.includes(needle) : true))
+        .map(([k]) => k);
+      if (f.operator === "notContains") and.push(matched.length ? { status: { notIn: matched } } : {});
+      else and.push(matched.length ? { status: { in: matched } } : { id: -1 });
+    }
+  }
+  const where = and.length ? { AND: and } : undefined;
+
+  const orderFor = (field: string, dir: "asc" | "desc"): any =>
+    (
+      ({
+        number: { number: dir },
+        date: { date: dir },
+        customerTitle: [{ customer: { party: { name: dir } } }, { customer: { party: { lastName: dir } } }],
+        salesTypeTitle: { salesType: { title: dir } },
+        salesCenterTitle: { salesCenter: { title: dir } },
+        status: { status: dir },
+        journalEntryReferenceNumber: { journalEntry: { referenceNumber: dir } },
+      }) as Record<string, any>
+    )[field];
+  const sortOrder = parseSorts(sortsRaw, sortField, sortDir).flatMap((k) => [orderFor(k.field, k.dir)].flat()).filter(Boolean);
+  const orderBy = [...sortOrder, { id: "desc" as const }];
+
+  const [total, items] = await Promise.all([
+    prisma.salesInvoice.count({ where }),
+    prisma.salesInvoice.findMany({
+      where,
+      include: { customer: { include: { party: true } }, salesType: true, salesCenter: true, currency: true, journalEntry: { select: { referenceNumber: true } }, lines: { select: { amount: true } } },
+      orderBy,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
+  // جمع پیش‌دریافت‌های تخصیص‌یافته به فاکتورهای همین صفحه (پیش‌دریافت عادی + ارزش افزوده، به ارز فاکتور)؛ برای ستون «پیش‌دریافت»
+  const advanceSums = await prisma.salesInvoiceAdvanceAllocation.groupBy({ by: ["salesInvoiceId"], where: { salesInvoiceId: { in: items.map((d: any) => d.id) } }, _sum: { amount: true } });
   const advanceByInvoice = new Map<number, number>(advanceSums.map((a: any) => [a.salesInvoiceId, Number(a._sum.amount ?? 0)]));
-  res.json(
-    items.map((d: any) => ({
-      id: d.id,
-      number: d.number,
-      date: d.date,
-      customerId: d.customerId,
-      customerTitle: partyDisplayName(d.customer.party),
-      salesTypeId: d.salesTypeId,
-      salesTypeTitle: d.salesType.title,
-      salesCenterId: d.salesCenterId,
-      salesCenterTitle: d.salesCenter.title,
-      currencyTitle: d.currency.title,
-      status: d.status,
-      journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
-      lineCount: d.lines.length,
-      totalAmount: d.lines.reduce((s: number, l: any) => s + Number(l.amount), 0),
-      advanceAmount: advanceByInvoice.get(d.id) ?? 0,
-    }))
-  );
+  const rows = items.map((d: any) => ({
+    id: d.id,
+    number: d.number,
+    date: d.date,
+    customerId: d.customerId,
+    customerTitle: partyDisplayName(d.customer.party),
+    salesTypeId: d.salesTypeId,
+    salesTypeTitle: d.salesType.title,
+    salesCenterId: d.salesCenterId,
+    salesCenterTitle: d.salesCenter.title,
+    currencyTitle: d.currency.title,
+    status: d.status,
+    journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
+    lineCount: d.lines.length,
+    totalAmount: d.lines.reduce((s: number, l: any) => s + Number(l.amount), 0),
+    advanceAmount: advanceByInvoice.get(d.id) ?? 0,
+  }));
+  res.json({ rows, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
 });
 
 router.get("/sales-invoices/:id", can(`${FORM}.view`), async (req, res) => {
