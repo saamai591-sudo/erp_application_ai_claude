@@ -47,6 +47,8 @@ export function factorShape(f: any) {
     valueTypeTitle: ATT_VALUE_TYPE_FA[f.valueType as AttValueType],
     isActive: f.isActive,
     showInWorksheet: !!f.showInWorksheet,
+    source: (f.source ?? "COMPUTED") as "COMPUTED" | "PERMIT",
+    sourceTitle: f.source === "PERMIT" ? "مجوز" : "محاسباتی",
     description: f.description ?? "",
     methodCount: f._count?.methods,
     updatedAt: f.updatedAt,
@@ -67,14 +69,18 @@ export async function saveFactor(body: any, id?: number) {
   const data = { title, valueType, isActive: body?.isActive !== false, showInWorksheet: body?.showInWorksheet === true, description: String(body?.description ?? "").trim() || null };
   if (!id) {
     const level = levelOf(body?.level);
+    const source = body?.source === "PERMIT" ? "PERMIT" : "COMPUTED";
     return prisma.$transaction(async (tx) => {
-      const f = await tx.attendanceFactor.create({ data: { ...data, showInWorksheet: data.showInWorksheet && level === "DAY", level, key: `TMP${Date.now()}${Math.floor(Math.random() * 1000)}` } });
+      const f = await tx.attendanceFactor.create({ data: { ...data, source, showInWorksheet: data.showInWorksheet && level === "DAY", level, key: `TMP${Date.now()}${Math.floor(Math.random() * 1000)}` } });
       return tx.attendanceFactor.update({ where: { id: f.id }, data: { key: `AF${f.id}` } });
     });
   }
   const ex = await prisma.attendanceFactor.findUnique({ where: { id }, include: { _count: { select: { methods: true } } } });
   if (!ex) throw new AttendanceError("عامل یافت نشد");
+  if (body?.source && body.source !== ex.source) throw new AttendanceError("منبع عامل (محاسباتی / مجوز) بعد از ثبت قابل تغییر نیست");
   const level = body?.level ? levelOf(body.level) : ex.level;
+  const permitValues = ex.source === "PERMIT" ? await prisma.attendancePermitValue.count({ where: { factorId: id } }) : 0;
+  if (permitValues > 0 && (level !== ex.level || data.valueType !== ex.valueType)) throw new AttendanceError(`این عامل مجوز ${permitValues} مقدار ثبت‌شده دارد؛ سطح و نوع مقدارش قابل تغییر نیست`);
   if (level !== ex.level) {
     if (ex._count.methods > 0) throw new AttendanceError("سطح عاملی که روش محاسبه دارد قابل تغییر نیست؛ ابتدا روش‌هایش را حذف کنید");
     const by = await factorsReferencing(ex.key);
@@ -90,6 +96,8 @@ export async function saveFactor(body: any, id?: number) {
 export async function deleteFactor(id: number) {
   const f = await prisma.attendanceFactor.findUnique({ where: { id } });
   if (!f) throw new AttendanceError("عامل یافت نشد");
+  const permitValues = await prisma.attendancePermitValue.count({ where: { factorId: id } });
+  if (permitValues > 0) throw new AttendanceError(`این عامل مجوز ${permitValues} مقدار ثبت‌شده دارد و حذف نمی‌شود؛ ابتدا مقدارها را در «مجوزها» حذف کنید`);
   const by = await factorsReferencing(f.key);
   if (by.length) throw new AttendanceError(`این عامل در فرمول عامل‌های دیگر استفاده شده است و حذف نمی‌شود: ${by.slice(0, 5).join("، ")}${by.length > 5 ? " …" : ""}`);
   await prisma.attendanceFactor.delete({ where: { id } });
@@ -241,6 +249,7 @@ export async function listMethods(factorId: number) {
 export async function saveMethod(factorId: number, body: any, methodId?: number) {
   const factor = await prisma.attendanceFactor.findUnique({ where: { id: factorId } });
   if (!factor) throw new AttendanceError("عامل یافت نشد");
+  if (factor.source === "PERMIT") throw new AttendanceError("عامل مجوز روش محاسبه ندارد؛ مقدارش را در «مجوزها» وارد کنید");
   const year = Number(body?.execYear), month = Number(body?.execMonth);
   const cal = await getCalendarMonth(year, month);
   if (!cal) throw new AttendanceError(`ماه ${month} سال ${year} در «تقویم کاری» تعریف نشده است؛ ابتدا تقویم کاری آن سال را بسازید`);
@@ -283,7 +292,16 @@ export async function palette(level: AttLevel, factorId?: number) {
   const pick = (lv: AttLevel) =>
     factors
       .filter((f) => f.level === lv && f.id !== self?.id)
-      .map((f) => ({ key: f.key, title: f.title, hint: [f.description, lv === "DAY" ? "عامل روزانه؛ مقدارش برای هر روز جداگانه محاسبه می‌شود." : "عامل ماهانه؛ یک مقدار برای کل ماه."].filter(Boolean).join(" — ") }));
+      .map((f) => ({
+        key: f.key,
+        title: f.title,
+        hint: [
+          f.description,
+          f.source === "PERMIT"
+            ? lv === "DAY" ? "عامل مجوز روزانه؛ مقدار هر روز را در «مجوزها» وارد می‌کنید و ثبت‌نشده = ۰." : "عامل مجوز ماهانه؛ مقدار را در «مجوزها» از یک ماه به بعد وارد می‌کنید (تا مقدار بعدی ادامه دارد) و ثبت‌نشده = ۰."
+            : lv === "DAY" ? "عامل روزانه؛ مقدارش برای هر روز جداگانه محاسبه می‌شود." : "عامل ماهانه؛ یک مقدار برای کل ماه.",
+        ].filter(Boolean).join(" — "),
+      }));
   const aggVariants = Object.entries(AGG_VARIANTS).map(([key, title]) => ({ key, title, hint: AGG_HINTS[key] }));
   const dayVars = Object.entries(DAY_VARS).map(([key, title]) => ({ key, title, hint: DAY_VAR_HINTS[key] }));
   const groups =
@@ -320,6 +338,8 @@ interface Compiled {
   branches: { cond: Cond | null; formula: Node; condText: string; formulaText: string }[] | null;
   error: string | null;
   deps: string[];
+  /** عامل مجوز: مقدار از «مجوزها» می‌آید (روش و فرمول ندارد) */
+  permit?: boolean;
 }
 interface Val {
   value: number | null;
@@ -341,6 +361,7 @@ async function compileFactors(monthEnd: Date): Promise<Compiled[]> {
     const level = f.level as AttLevel;
     const eff = f.methods.filter((m) => m.execCalendarMonth.startDate <= monthEnd).sort((a, b) => b.execCalendarMonth.startDate.getTime() - a.execCalendarMonth.startDate.getTime())[0];
     const base: Compiled = { id: f.id, key: f.key, title: f.title, level, valueType: f.valueType as AttValueType, branches: null, error: null, deps: [] };
+    if (f.source === "PERMIT") return { ...base, permit: true };
     if (!eff) return { ...base, error: "برای این ماه روش محاسبه‌ای تعریف نشده است" };
     try {
       const sorted = [...eff.branches].sort((a, b) => a.seq - b.seq);
@@ -526,6 +547,30 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
   const approvedLeave = await loadApprovedLeave(wsEmployeeIds, dayNum(from), dayNum(to));
   const approvedMissions = await loadMissions(wsEmployeeIds, dayNum(from), dayNum(to));
   const settlements = await loadSettlements(wsEmployeeIds, dayNum(from), dayNum(to));
+
+  // مقدار عامل‌های مجوز: روزانه = ردیفِ همان تاریخ؛ ماهانه = آخرین ردیف تا همین ماه (تا مقدار بعدی ادامه دارد)؛ ثبت‌نشده = ۰
+  const permitIds = compiled.filter((f) => f.permit).map((f) => f.id);
+  const permitDay = new Map<string, number>();
+  const permitMonthRows = new Map<string, { start: number; value: number }[]>();
+  if (permitIds.length && wsEmployeeIds.length) {
+    const pr = await prisma.attendancePermitValue.findMany({
+      where: { employeeId: { in: wsEmployeeIds }, factorId: { in: permitIds }, OR: [{ date: { gte: from, lte: to } }, { calendarMonthId: { not: null }, calendarMonth: { startDate: { lte: cal.startDate } } }] },
+      select: { employeeId: true, factorId: true, date: true, value: true, calendarMonth: { select: { startDate: true } } },
+    });
+    for (const r of pr) {
+      if (r.date) permitDay.set(`${r.employeeId}:${r.factorId}:${dayNum(r.date)}`, Number(r.value));
+      else if (r.calendarMonth) {
+        const k = `${r.employeeId}:${r.factorId}`;
+        (permitMonthRows.get(k) ?? permitMonthRows.set(k, []).get(k)!).push({ start: dayNum(r.calendarMonth.startDate), value: Number(r.value) });
+      }
+    }
+  }
+  const permitVal = (v: number | undefined): Val => (v === undefined ? { value: 0, branch: 0, expression: "مجوز ثبت نشده (صفر)" } : { value: v, branch: 0, expression: "مجوز ثبت‌شده" });
+  const permitMonthValue = (empId: number, factorId: number): number | undefined => {
+    let best: { start: number; value: number } | undefined;
+    for (const r of permitMonthRows.get(`${empId}:${factorId}`) ?? []) if (r.start <= dayNum(cal.startDate) && (!best || r.start > best.start)) best = r;
+    return best?.value;
+  };
   const rowsByEmp = new Map<number, any[]>();
   for (const r of ws.rows) (rowsByEmp.get(r.employeeId) ?? rowsByEmp.set(r.employeeId, []).get(r.employeeId)!).push(r);
 
@@ -559,7 +604,7 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
         brackets: noBrackets,
         label: labelOf,
       };
-      for (const f of dayFactors) values[f.key] = runBranches(f, env);
+      for (const f of dayFactors) values[f.key] = f.permit ? permitVal(permitDay.get(`${empId}:${f.id}:${dn}`)) : runBranches(f, env);
       dayRows.push({ date, vars: dv.vars, incomplete: dv.incomplete, shiftTitle: dv.shiftTitle, values });
     }
 
@@ -599,7 +644,7 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
       brackets: noBrackets,
       label: labelOf,
     };
-    for (const f of monthFactors) mvals[f.key] = runBranches(f, menv);
+    for (const f of monthFactors) mvals[f.key] = f.permit ? permitVal(permitMonthValue(empId, f.id)) : runBranches(f, menv);
 
     const emp = rows[0];
     employees.push({

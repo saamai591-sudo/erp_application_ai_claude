@@ -653,6 +653,7 @@ export const REGISTRY: ModuleDef[] = [
             ],
           },
           { key: "attendance-leave-balance-entries", title: "مانده‌ی مرخصی", baseActions: CRUD },
+          { key: "attendance-permits", title: "مجوزها", baseActions: CRUD },
           {
             key: "attendance-calculation",
             title: "محاسبه تردد",

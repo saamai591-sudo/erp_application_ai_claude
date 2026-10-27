@@ -244,7 +244,7 @@ function RepForm({ editId }: { editId?: number }) {
         {meta && (
           <div className={meta.status === "REJECTED" ? "alert warn" : "alert"} style={{ marginBottom: 12, maxWidth: 900 }}>
             <b>وضعیت: {meta.statusTitle}</b>
-            {meta.status === "APPROVED" && <div style={{ marginTop: 4, fontSize: 13 }}>این گزارش در احتسابِ ماموریت شمرده می‌شود.{meta.locked ? " حقوق ماهِ پایانِ ماموریت محاسبه شده و گزارش قفل است." : " برای ویرایش، ابتدا برگشت از تایید کنید."}</div>}
+            {meta.status === "APPROVED" && <div style={{ marginTop: 4, fontSize: 13 }}>این گزارش در احتسابِ ماموریت شمرده می‌شود.{meta.locked ? " «محاسبه تردد» ماهِ پایانِ ماموریت انجام شده و گزارش قفل است." : " برای ویرایش، ابتدا برگشت از تایید کنید."}</div>}
             {meta.status === "REJECTED" && <div style={{ marginTop: 4, fontSize: 13 }}>دلیل رد: {meta.decisionNote || "—"}</div>}
           </div>
         )}

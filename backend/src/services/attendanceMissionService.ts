@@ -1,9 +1,8 @@
 import { prisma } from "../lib/prisma";
 import { displayDate } from "../utils/dateDisplay";
-import { AttendanceError, EMPLOYEE_SELECT, assertDayOpen, assertDaysOpen, dayStr, minuteText, parseDay, personName } from "./attendancePunchService";
+import { AttendanceError, EMPLOYEE_SELECT, assertDayOpen, assertDaysOpen, dateLocked, dayStr, minuteText, parseDay, personName, type LockRange } from "./attendancePunchService";
 import { getPeriods, periodContains } from "./employmentStatusService";
 import { assertNoRequestConflict, assertShiftAssigned } from "./attendanceLeaveService";
-import { lastCalculatedYm } from "./payrollLoanService";
 import { assertNoPresenceInInterval, workSpan } from "./attendancePresenceService";
 
 // مدیریت تردد › درخواست ماموریت — تنها محل قواعد. هم‌الگوی درخواست مرخصی (روزانه یا ساعتی؛ ثبت‌شده ← تایید / رد ← برگشت) ولی:
@@ -26,32 +25,13 @@ export const STATUS_FA = { PENDING: "ثبت‌شده", APPROVED: "تاییدشد
 
 const hm = (m: number) => `${Math.trunc(m / 60)}:${String(m % 60).padStart(2, "0")}`;
 
-/** پایانِ آخرین ماهِ محاسبه‌شده‌ی حقوق هر کارمند (تقویم کاری)؛ کارمندِ بدون فیش در نتیجه نیست */
-export async function lastCalculatedEnds(employeeIds: number[]): Promise<Map<number, Date>> {
-  const out = new Map<number, Date>();
-  const last = await lastCalculatedYm([...new Set(employeeIds)]);
-  if (last.size === 0) return out;
-  const pairs = [...new Set([...last.values()].map((v) => `${v.year}:${v.month}`))].map((s) => ({ year: Number(s.split(":")[0]), month: Number(s.split(":")[1]) }));
-  const months = await prisma.workCalendarMonth.findMany({ where: { OR: pairs }, select: { year: true, month: true, endDate: true } });
-  const endOf = new Map(months.map((m) => [`${m.year}:${m.month}`, m.endDate]));
-  for (const [empId, v] of last) {
-    const e = endOf.get(`${v.year}:${v.month}`);
-    if (e) out.set(empId, e);
-  }
-  return out;
-}
-
-export async function lastCalculatedEnd(employeeId: number): Promise<Date | null> {
-  return (await lastCalculatedEnds([employeeId])).get(employeeId) ?? null;
-}
-
-export function missionShape(r: any, lastCalcEnd: Date | null = null) {
+export function missionShape(r: any, ranges?: LockRange[]) {
   const hourly = r.startMinute !== null && r.startMinute !== undefined;
   const days = dayNum(r.toDate) - dayNum(r.fromDate) + 1;
   const minutes = hourly ? dayNum(r.toDate) * DAY + r.endMinute - (dayNum(r.fromDate) * DAY + r.startMinute) : 0;
   const ended = !!r.endedAt;
-  // پایان‌یافته‌ای که ماه پایانش محاسبه‌ی حقوق شده، دیگر تغییر (برگشت پایان، گزارش) نمی‌پذیرد
-  const locked = ended && !!lastCalcEnd && lastCalcEnd >= r.toDate;
+  // پایان‌یافته‌ای که ماهِ پایانش «محاسبه تردد» شده، دیگر تغییر (برگشت پایان، گزارش) نمی‌پذیرد
+  const locked = ended && dateLocked(ranges, r.toDate);
   return {
     id: r.id,
     number: r.number,
@@ -79,7 +59,6 @@ export function missionShape(r: any, lastCalcEnd: Date | null = null) {
     /** «تا تاریخ» فقط برای تاییدشده‌ی روزانه‌ی پایان‌نیافته ویرایش می‌شود */
     canEditEnd: r.status === "APPROVED" && !hourly && !ended,
     locked,
-    lastCalcEnd: lastCalcEnd ? dayStr(lastCalcEnd) : null,
     reportCount: r._count?.reports ?? (r.reports ?? []).length,
     updatedAt: r.updatedAt,
   };
@@ -170,14 +149,12 @@ export const lockMission = (tx: any, requestId: number) => tx.$executeRawUnsafe(
 
 /**
  * کنترل‌های تاریخ پایانِ تازه برای درخواست روزانه‌ی تاییدشده (تغییر «تا تاریخ» یا «پایان ماموریت»): بعد از شروع، حداکثر ۳۶۶ روز،
- * قبل از پایانِ آخرین ماهِ محاسبه‌شده‌ی حقوق کارمند نباشد، کارمند در همه‌ی روزها در همکاری باشد و با درخواست دیگری هم‌پوشان نشود.
+ * روزهای تغییرکرده در ماهِ «محاسبه تردد»شده نباشد (assertDaysOpen)، کارمند در همه‌ی روزها در همکاری باشد و با درخواست دیگری هم‌پوشان نشود.
  */
 async function validateNewEnd(r: { id: number; employeeId: number; fromDate: Date; toDate: Date; startMinute: number | null }, newTo: Date) {
   if (r.startMinute !== null) throw new AttendanceError("پایان ماموریت فقط برای ماموریت روزانه است");
   if (newTo < r.fromDate) throw new AttendanceError("تاریخ پایان قبل از تاریخ شروع ماموریت است");
   if (dayNum(newTo) - dayNum(r.fromDate) + 1 > MAX_REQUEST_DAYS) throw new AttendanceError(`ماموریت حداکثر ${MAX_REQUEST_DAYS} روز در هر درخواست است`);
-  const lastEnd = await lastCalculatedEnd(r.employeeId);
-  if (lastEnd && newTo < lastEnd) throw new AttendanceError(`تاریخ پایان ماموریت نمی‌تواند قبل از آخرین ماهِ محاسبه‌شده‌ی حقوق کارمند (تا ${displayDate(lastEnd)}) باشد`);
   await assertCooperation(r.employeeId, r.fromDate, newTo);
   // روزهای بین پایان قبلی و تازه (و هر دو سر) عوض می‌شوند و احتسابِ ماهِ پایان هم از روزِ پایان می‌آید
   await assertDaysOpen(r.employeeId, r.toDate, newTo);
@@ -213,7 +190,7 @@ export async function finishMission(id: number, endDateRaw: unknown, userId: num
   });
 }
 
-/** برگشت پایان: فقط وقتی ماهِ پایان محاسبه‌ی حقوق نشده و گزارشی برای آن ثبت نشده باشد */
+/** برگشت پایان: فقط وقتی ماهِ پایان «محاسبه تردد» نشده و گزارشی برای آن ثبت نشده باشد */
 export async function unfinishMission(id: number) {
   await prisma.$transaction(async (tx) => {
     await lockMission(tx, id);
@@ -221,8 +198,6 @@ export async function unfinishMission(id: number) {
     if (!r) throw new AttendanceError("درخواست یافت نشد");
     if (!r.endedAt) throw new AttendanceError("پایان این ماموریت ثبت نشده است");
     await assertDayOpen(r.employeeId, r.toDate);
-    const lastEnd = await lastCalculatedEnd(r.employeeId);
-    if (lastEnd && lastEnd >= r.toDate) throw new AttendanceError(`حقوق کارمند تا ${displayDate(lastEnd)} محاسبه شده است؛ برای برگشت پایان ماموریت ابتدا محاسبه‌ی آن ماه را حذف کنید`);
     if (r._count.reports > 0) throw new AttendanceError("برای این ماموریت گزارش ثبت شده است؛ ابتدا گزارش‌ها را حذف کنید");
     await tx.attendanceMissionRequest.update({ where: { id }, data: { endedAt: null, endedById: null } });
   });

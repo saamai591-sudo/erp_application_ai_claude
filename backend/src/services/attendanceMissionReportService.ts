@@ -1,20 +1,20 @@
 import { prisma } from "../lib/prisma";
 import { displayDate } from "../utils/dateDisplay";
-import { AttendanceError, EMPLOYEE_SELECT, assertDayOpen, dayStr, parseDay, personName } from "./attendancePunchService";
-import { STATUS_FA, lastCalculatedEnd, lastCalculatedEnds, lockMission } from "./attendanceMissionService";
+import { AttendanceError, EMPLOYEE_SELECT, assertDayOpen, calculatedRanges, dateLocked, dayStr, parseDay, personName, type LockRange } from "./attendancePunchService";
+import { STATUS_FA, lockMission } from "./attendanceMissionService";
 
 // مدیریت تردد › گزارش ماموریت — تنها محل قواعد. برای یک درخواستِ ماموریت روزانه‌ی تاییدشده و پایان‌یافته، بازه‌ای از آن را به یک نوع ماموریت (مثلاً دریا) می‌برد.
 // روزهای بدون گزارش به نوعِ خودِ درخواست (پیش‌فرض: نوع پایه) تعلق دارد (attendanceMissionCalc.loadSettlements). فقط گزارش تاییدشده شمرده می‌شود.
-// قفل: وقتی ماهِ پایانِ ماموریت در حقوقِ کارمند محاسبه شده، ثبت/تایید/برگشت گزارش رد می‌شود (محاسبه را اول حذف کنید).
+// قفل: وقتی ماهِ پایانِ ماموریت برای کارمند «محاسبه تردد» شده، ثبت/تایید/برگشت گزارش رد می‌شود (assertDayOpen؛ محاسبه را اول حذف کنید).
 
 const DAY_MS = 86400000;
 const dayNum = (d: Date) => Math.floor(d.getTime() / DAY_MS);
 
 export const REPORT_INCLUDE = { request: { include: { employee: { select: EMPLOYEE_SELECT }, type: true } }, type: true };
 
-export function reportShape(r: any, lastCalcEnd: Date | null = null) {
+export function reportShape(r: any, ranges?: LockRange[]) {
   const req = r.request;
-  const locked = !!lastCalcEnd && !!req && lastCalcEnd >= req.toDate;
+  const locked = !!req && dateLocked(ranges, req.toDate);
   return {
     id: r.id,
     number: r.number,
@@ -43,8 +43,8 @@ export function reportShape(r: any, lastCalcEnd: Date | null = null) {
 }
 
 export async function reportShapes(rows: any[]) {
-  const ends = await lastCalculatedEnds(rows.map((r) => r.request?.employeeId).filter(Boolean));
-  return rows.map((r) => reportShape(r, ends.get(r.request?.employeeId) ?? null));
+  const ranges = await calculatedRanges(rows.map((r) => r.request?.employeeId).filter(Boolean));
+  return rows.map((r) => reportShape(r, ranges.get(r.request?.employeeId)));
 }
 
 export interface CleanReport {
@@ -55,7 +55,7 @@ export interface CleanReport {
   description: string | null;
 }
 
-/** درخواست‌هایی که می‌شود برایشان گزارش نوشت: تاییدشده، روزانه، پایان‌یافته و ماه پایانشان محاسبه‌ی حقوق نشده */
+/** درخواست‌هایی که می‌شود برایشان گزارش نوشت: تاییدشده، روزانه، پایان‌یافته و ماه پایانشان «محاسبه تردد» نشده */
 export async function reportableRequests() {
   const rows = await prisma.attendanceMissionRequest.findMany({
     where: { status: "APPROVED", endedAt: { not: null }, startMinute: null },
@@ -63,9 +63,9 @@ export async function reportableRequests() {
     orderBy: { number: "desc" },
     take: 3000,
   });
-  const ends = await lastCalculatedEnds(rows.map((r) => r.employeeId));
+  const ranges = await calculatedRanges(rows.map((r) => r.employeeId));
   return rows
-    .filter((r) => { const e = ends.get(r.employeeId); return !e || e < r.toDate; })
+    .filter((r) => !dateLocked(ranges.get(r.employeeId), r.toDate))
     .map((r) => ({
       id: r.id,
       number: r.number,
@@ -93,8 +93,6 @@ async function validateReport(d: CleanReport, excludeId?: number) {
   if (d.toDate < d.fromDate) throw new AttendanceError("تاریخ پایان قبل از تاریخ شروع است");
   if (d.fromDate < req.fromDate || d.toDate > req.toDate) throw new AttendanceError(`بازه‌ی گزارش باید داخل بازه‌ی ماموریت (${displayDate(req.fromDate)} تا ${displayDate(req.toDate)}) باشد`);
   await assertDayOpen(req.employeeId, req.toDate);
-  const lastEnd = await lastCalculatedEnd(req.employeeId);
-  if (lastEnd && lastEnd >= req.toDate) throw new AttendanceError(`حقوق کارمند تا ${displayDate(lastEnd)} محاسبه شده و ماهِ پایانِ این ماموریت قفل است؛ برای تغییر گزارش ابتدا محاسبه‌ی آن ماه را حذف کنید`);
   const others = await prisma.attendanceMissionReport.findMany({
     where: { requestId: d.requestId, status: { in: ["PENDING", "APPROVED"] }, fromDate: { lte: d.toDate }, toDate: { gte: d.fromDate }, ...(excludeId ? { id: { not: excludeId } } : {}) },
     select: { number: true },
@@ -175,8 +173,6 @@ export async function unapproveReport(id: number) {
     if (r.status === "PENDING") throw new AttendanceError("گزارش در وضعیت «ثبت‌شده» است");
     if (r.status === "APPROVED") {
       await assertDayOpen(r.request.employeeId, r.request.toDate);
-      const lastEnd = await lastCalculatedEnd(r.request.employeeId);
-      if (lastEnd && lastEnd >= r.request.toDate) throw new AttendanceError(`حقوق کارمند تا ${displayDate(lastEnd)} محاسبه شده و ماهِ پایانِ این ماموریت قفل است؛ ابتدا محاسبه‌ی آن ماه را حذف کنید`);
     } else {
       await validateReport(r, id); // ردشده که دوباره «ثبت‌شده» می‌شود باید هنوز معتبر و بدون هم‌پوشانی باشد
     }

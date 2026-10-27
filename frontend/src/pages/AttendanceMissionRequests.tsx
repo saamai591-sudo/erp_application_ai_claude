@@ -55,7 +55,6 @@ interface ReqRow {
   ended: boolean;
   canEditEnd: boolean;
   locked: boolean;
-  lastCalcEnd: string | null;
   reportCount: number;
   updatedAt?: string;
 }
@@ -262,8 +261,8 @@ function ReqForm({ editId }: { editId?: number }) {
         {meta && (
           <div className={meta.status === "REJECTED" ? "alert warn" : "alert"} style={{ marginBottom: 12, maxWidth: 900 }}>
             <b>وضعیت: {meta.statusTitle}{meta.status === "APPROVED" && daily ? (meta.ended ? " — پایان‌یافته" : " — در جریان") : ""}</b>
-            {meta.status === "APPROVED" && !meta.ended && daily && <div style={{ marginTop: 4, fontSize: 13 }}>روزهای ماموریت غیبت نمی‌خورد. تا ثبت «پایان ماموریت» می‌توانید «تا تاریخ» را تغییر دهید (نه قبل از آخرین ماهِ محاسبه‌شده‌ی حقوق کارمند{meta.lastCalcEnd ? ` — ${formatJalaliDate(meta.lastCalcEnd)}` : ""}). پایان برنامه‌ای ثبت‌اولیه: {formatJalaliDate(meta.plannedToDate)}.</div>}
-            {meta.status === "APPROVED" && meta.ended && <div style={{ marginTop: 4, fontSize: 13 }}>پایان ماموریت ثبت شده است؛ کل بازه ({toFaDigits(meta.amountText)}) در ماهِ پایان به تفکیک نوع احتساب می‌شود.{meta.locked ? " حقوق آن ماه محاسبه شده و ماموریت قفل است." : ""}</div>}
+            {meta.status === "APPROVED" && !meta.ended && daily && <div style={{ marginTop: 4, fontSize: 13 }}>روزهای ماموریت غیبت نمی‌خورد. تا ثبت «پایان ماموریت» می‌توانید «تا تاریخ» را تغییر دهید (نه در ماهی که «محاسبه تردد»ش برای این کارمند انجام شده). پایان برنامه‌ای ثبت‌اولیه: {formatJalaliDate(meta.plannedToDate)}.</div>}
+            {meta.status === "APPROVED" && meta.ended && <div style={{ marginTop: 4, fontSize: 13 }}>پایان ماموریت ثبت شده است؛ کل بازه ({toFaDigits(meta.amountText)}) در ماهِ پایان به تفکیک نوع احتساب می‌شود.{meta.locked ? " «محاسبه تردد» آن ماه انجام شده و ماموریت قفل است." : ""}</div>}
             {meta.status === "APPROVED" && meta.hourly && <div style={{ marginTop: 4, fontSize: 13 }}>ماموریت ساعتی تاییدشده ویرایش نمی‌شود و «پایان» ندارد؛ برای تغییر ابتدا برگشت از تایید کنید.</div>}
             {meta.status === "REJECTED" && <div style={{ marginTop: 4, fontSize: 13 }}>دلیل رد: {meta.decisionNote || "—"}</div>}
           </div>

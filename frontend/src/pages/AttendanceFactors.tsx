@@ -19,7 +19,8 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 
 // مدیریت تردد › تنظیمات › «عوامل تردد»: عامل روزانه (برای هر روزِ هر کارمند از متغیرهای کارکرد همان روز) و عامل ماهانه (از تجمیع عوامل روزانه و عوامل ماهانه‌ی دیگر).
-// هر عامل «روش»‌های تاریخ‌دار دارد (ماه اجرا از تقویم کاری) و هر روش شاخه‌های شرط ← فرمول؛ فرمول را همان فرمول‌ساز حقوق می‌سازد. قواعد در سرور (services/attendanceFactorService.ts).
+// «منبع» عامل: محاسباتی (روش‌های تاریخ‌دار با شاخه‌های شرط ← فرمول) یا مجوز (روش ندارد؛ مقدارش را کاربر برای هر کارمند در «مجوزها» وارد می‌کند و در فرمول‌ها با [F:…] / [M:…] خوانده می‌شود).
+// هر عامل محاسباتی «روش»‌های تاریخ‌دار دارد (ماه اجرا از تقویم کاری) و هر روش شاخه‌های شرط ← فرمول؛ فرمول را همان فرمول‌ساز حقوق می‌سازد. قواعد در سرور (services/attendanceFactorService.ts).
 
 type Level = "DAY" | "MONTH";
 interface FactorRow {
@@ -29,6 +30,8 @@ interface FactorRow {
   levelTitle: string;
   valueType: "NUMBER" | "TIME" | "DAYS";
   valueTypeTitle: string;
+  source: "COMPUTED" | "PERMIT";
+  sourceTitle: string;
   isActive: boolean;
   showInWorksheet?: boolean;
   description: string;
@@ -86,6 +89,7 @@ function FactorList() {
       <DataTable
         columns={[
           { header: "عنوان", ...s((r) => r.title) },
+          { header: "منبع", ...s((r) => r.sourceTitle), width: "100px" },
           { header: "سطح", ...s((r) => r.levelTitle), width: "110px" },
           { header: "نوع مقدار", ...s((r) => r.valueTypeTitle), width: "170px" },
           { header: "روش‌ها", ...s((r) => toFaDigits(String(r.methodCount ?? 0))), width: "90px" },
@@ -112,7 +116,7 @@ function FactorForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
-  const [form, setForm] = usePersistedState(cacheKey, { title: "", level: "DAY" as Level, valueType: "TIME", isActive: true, showInWorksheet: false, description: "" });
+  const [form, setForm] = usePersistedState(cacheKey, { title: "", source: "COMPUTED" as "COMPUTED" | "PERMIT", level: "DAY" as Level, valueType: "TIME", isActive: true, showInWorksheet: false, description: "" });
   const [updatedAt, setUpdatedAt] = useState<string | undefined>();
   const [methods, setMethods] = useState<MethodRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -126,7 +130,7 @@ function FactorForm({ editId }: { editId?: number }) {
     const r: FactorRow = await api.get(`/attendance-factors/${editId}`);
     setUpdatedAt(r.updatedAt);
     setMethods(r.methods ?? []);
-    if (!hasPersistedState(cacheKey)) setForm({ title: r.title, level: r.level, valueType: r.valueType, isActive: r.isActive, showInWorksheet: !!r.showInWorksheet, description: r.description });
+    if (!hasPersistedState(cacheKey)) setForm({ title: r.title, source: r.source, level: r.level, valueType: r.valueType, isActive: r.isActive, showInWorksheet: !!r.showInWorksheet, description: r.description });
   }
   useEffect(() => {
     load().then(() => setLoaded(true)).catch((e) => setError(e.message));
@@ -186,6 +190,7 @@ function FactorForm({ editId }: { editId?: number }) {
   }
 
   const levelLocked = !!editId && methods.length > 0;
+  const permit = form.source === "PERMIT";
   if (!loaded) return null;
   return (
     <FormPage title={editId ? "ویرایش عامل تردد" : "عامل تردد جدید"} formId="attendance-factor-form" closePath="/attendance-factors" newPath="/attendance-factors/new" onDelete={editId ? handleDelete : undefined}>
@@ -195,6 +200,13 @@ function FactorForm({ editId }: { editId?: number }) {
           <div className="form-field">
             <label>عنوان<RequiredMark /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+          </div>
+          <div className="form-field">
+            <label>منبع<RequiredMark /> <FieldHint label="منبع عامل" text="محاسباتی: مقدار از روش و فرمول محاسبه می‌شود. مجوز: روش و فرمول ندارد و مقدارش را برای هر کارمند در فرم «مجوزها» وارد می‌کنید (روزانه برای یک تاریخ، ماهانه از یک ماه به بعد)؛ در فرمول‌ها مثل هر عامل دیگر خوانده می‌شود و ثبت‌نشده = ۰ (مثلاً سقفِ اضافه‌کار ماهانه یا مجوز اضافه‌کار یک روز). منبع بعد از ثبت قابل تغییر نیست." /></label>
+            <select value={form.source} disabled={!!editId} onChange={(e) => setForm({ ...form, source: e.target.value as "COMPUTED" | "PERMIT" })}>
+              <option value="COMPUTED">محاسباتی</option>
+              <option value="PERMIT">مجوز</option>
+            </select>
           </div>
           <div className="form-field">
             <label>سطح<RequiredMark /> <FieldHint label="سطح عامل" text="روزانه: برای هر روز از متغیرهای همان روز محاسبه می‌شود. ماهانه: از تجمیع ماه (جمع/بیشترین/تعداد روز) عوامل روزانه و متغیرهای روز و عوامل ماهانه‌ی دیگر. تا وقتی عامل روش دارد قابل تغییر نیست." /></label>
@@ -225,7 +237,9 @@ function FactorForm({ editId }: { editId?: number }) {
           </div>
         </div>
 
-        {editId ? (
+        {permit ? (
+          <p style={{ opacity: 0.75, fontSize: 13, maxWidth: 640 }}>عامل مجوز روش و فرمول ندارد؛ مقدارش را برای هر کارمند در فرم «مجوزها» وارد کنید{form.level === "MONTH" ? " (مقدار ماهانه از ماه ثبت‌شده تا مقدار بعدی ادامه دارد)" : " (مقدار روزانه برای یک تاریخ)"}. ثبت‌نشده = ۰.</p>
+        ) : editId ? (
           <>
             <h3 className="hr-section">
               روش‌های محاسبه <FieldHint label="روش محاسبه" text="هر روش از «ماه اجرا» (ماه تقویم کاری) به بعد معتبر است تا روش بعدی همین عامل؛ برای ماهی که قبل از اولین روش باشد، نتیجه خطای «روش تعریف نشده» می‌دهد." />

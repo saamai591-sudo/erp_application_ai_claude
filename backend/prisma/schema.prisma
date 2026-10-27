@@ -4810,6 +4810,7 @@ model Employee {
   attendanceLeaveRequests AttendanceLeaveRequest[]
   attendanceMissionRequests AttendanceMissionRequest[]
   attendanceCalculations AttendanceCalculation[]
+  attendancePermitValues AttendancePermitValue[]
   attendanceLeaveBalanceEntries AttendanceLeaveBalanceEntry[]
   attendanceShiftAssignments AttendanceShiftAssignment[]
   payrollIssueSettings PayrollIssueSetting[]
@@ -5369,6 +5370,7 @@ model WorkCalendarMonth {
   calendar         WorkCalendar @relation(fields: [calendarId], references: [id], onDelete: Cascade)
   /// محاسبات تردد (یک رکورد برای هر کارمند در هر ماه؛ Restrict: ماهِ دارای محاسبه حذف نمی‌شود)
   attendanceCalculations AttendanceCalculation[]
+  attendancePermitValues AttendancePermitValue[]
   /// ارجاع‌های حقوق و دستمزد به این ردیف (همه Restrict: ماه/تقویمِ استفاده‌شده حذف نمی‌شود)
   issueMethods     PayrollFactorMethod[]    @relation("MethodIssueMonth")
   execMethods      PayrollFactorMethod[]    @relation("MethodExecMonth")
@@ -6405,10 +6407,38 @@ model AttendanceFactor {
   isActive    Boolean                 @default(true)
   /// نمایش مقدار این عامل (فقط روزانه) در ستون‌های «کارکرد روزانه» و «مرور کارکرد»
   showInWorksheet Boolean             @default(false)
+  /// منبع مقدار: محاسباتی (روش + فرمول) یا مجوز (مقدار را کاربر در «مجوزها» وارد می‌کند؛ روش ندارد)
+  source      AttendanceFactorSource  @default(COMPUTED)
   description String?
   createdAt   DateTime                @default(now())
   updatedAt   DateTime                @updatedAt
   methods     AttendanceFactorMethod[]
+  permitValues AttendancePermitValue[]
+}
+
+enum AttendanceFactorSource {
+  COMPUTED
+  PERMIT
+}
+
+/// مقدار عامل مجوز برای یک کارمند: روزانه = برای یک «تاریخ»، ماهانه = از یک «ماه» تا مقدار بعدی (مقدار هر ماه = آخرین ردیف تا آن ماه). TIME به دقیقه ذخیره می‌شود.
+/// دقیقاً یکی از date / calendarMonthId پر است (CHECK در migration)؛ برای هر کارمند و عامل در هر تاریخ یا ماه فقط یک مقدار. قفل با «محاسبات تردد» (assertDayOpen / assertFromDateOpen).
+model AttendancePermitValue {
+  id              Int                @id @default(autoincrement())
+  employeeId      Int
+  factorId        Int
+  date            DateTime?          @db.Date
+  calendarMonthId Int?
+  value           Decimal            @db.Decimal(14, 4)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  employee        Employee           @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  factor          AttendanceFactor   @relation(fields: [factorId], references: [id], onDelete: Restrict)
+  calendarMonth   WorkCalendarMonth? @relation(fields: [calendarMonthId], references: [id], onDelete: Restrict)
+
+  @@unique([employeeId, factorId, date])
+  @@unique([employeeId, factorId, calendarMonthId])
+  @@index([factorId])
 }
 
 /// روش محاسبه‌ی عامل از «ماه اجرا» (ماه تقویم کاری) به بعد؛ روشِ مؤثر هر ماه = آخرین روشی که ماه اجرایش ≤ آن ماه است

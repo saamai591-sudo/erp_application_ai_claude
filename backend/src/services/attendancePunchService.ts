@@ -58,6 +58,21 @@ export async function assertDaysOpen(employeeId: number, from: Date, to: Date = 
 
 export const assertDayOpen = (employeeId: number, date: Date) => assertDaysOpen(employeeId, date, date);
 
+/** بازه‌های تردد ماه‌های محاسبه‌شده‌ی هر کارمند (برای نمایش «قفل» در فهرست‌ها بدون کوئری به ازای هر ردیف) */
+export interface LockRange {
+  start: Date;
+  end: Date;
+}
+export async function calculatedRanges(employeeIds: number[]): Promise<Map<number, LockRange[]>> {
+  const out = new Map<number, LockRange[]>();
+  const ids = [...new Set(employeeIds)];
+  if (ids.length === 0) return out;
+  const rows = await prisma.attendanceCalculation.findMany({ where: { employeeId: { in: ids } }, select: { employeeId: true, calendarMonth: { select: { trafficStartDate: true, trafficEndDate: true } } } });
+  for (const r of rows) (out.get(r.employeeId) ?? out.set(r.employeeId, []).get(r.employeeId)!).push({ start: r.calendarMonth.trafficStartDate, end: r.calendarMonth.trafficEndDate });
+  return out;
+}
+export const dateLocked = (ranges: LockRange[] | undefined, d: Date) => !!ranges?.some((r) => r.start <= d && d <= r.end);
+
 /** تغییری که روزِ «از تاریخ» و همه‌ی روزهای بعدش را عوض می‌کند (مثل انتساب شیفت): ماه محاسبه‌شده‌ای که پایانش ≥ آن تاریخ است قفل می‌کند */
 export async function assertFromDateOpen(employeeId: number, from: Date) {
   const c = await prisma.attendanceCalculation.findFirst({
@@ -65,6 +80,15 @@ export async function assertFromDateOpen(employeeId: number, from: Date) {
     select: { calendarMonth: { select: { year: true, month: true } } },
   });
   if (c) throw new AttendanceError(`محاسبات تردد «${calcLabel(c)}» برای این کارمند انجام شده و روزهای بعد از ${displayDate(from)} را شامل می‌شود؛ ${LOCK_HINT}`);
+}
+
+/** ردیفی که از «ماه M» به بعد اثر دارد (مثل مقدار ماهانه‌ی مجوز): اگر برای کارمند ماهِ M یا ماه‌های بعدش محاسبه شده باشد رد می‌شود */
+export async function assertMonthFromOpen(employeeId: number, monthStart: Date) {
+  const c = await prisma.attendanceCalculation.findFirst({
+    where: { employeeId, calendarMonth: { startDate: { gte: monthStart } } },
+    select: { calendarMonth: { select: { year: true, month: true } } },
+  });
+  if (c) throw new AttendanceError(`محاسبات تردد «${calcLabel(c)}» برای این کارمند انجام شده و مقدارِ ماهانه از ماه ${displayDate(monthStart)} به بعد را عوض می‌کند؛ ${LOCK_HINT}`);
 }
 
 /** تغییری که روی همه‌ی کارمندان اثر دارد (مثل استثنای روز): اگر برای هر کارمندی ماهِ شامل آن تاریخ محاسبه شده باشد رد می‌شود */

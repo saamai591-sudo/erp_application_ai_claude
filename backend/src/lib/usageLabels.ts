@@ -49,6 +49,7 @@ export const USAGE_META: Record<string, UsageMeta> = {
   AttendanceLeaveEntitlement: { label: "قاعده‌ی استحقاق مرخصی", base: "/attendance-leave-entitlements" },
   AttendanceLeaveNegativePolicy: { label: "مرخصی منفی", base: "/attendance-leave-entitlements" },
   AttendanceLeaveRequest: { label: "درخواست مرخصی", base: "/attendance-leave-requests", title: (r) => `شماره ${r.number}` },
+  AttendancePermitValue: { label: "مقدار مجوز", base: "/attendance-permits" },
   AttendanceCalculation: { label: "محاسبات تردد", base: "/attendance-calculation" },
   AttendanceMissionType: { label: "نوع ماموریت", base: "/attendance-mission-types" },
   AttendanceMissionRequest: { label: "درخواست ماموریت", base: "/attendance-mission-requests", title: (r) => `شماره ${r.number}` },

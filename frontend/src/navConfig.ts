@@ -485,6 +485,7 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "attendance-day-exceptions", label: "استثنای روز", list: "/attendance-day-exceptions", create: "/attendance-day-exceptions/new", icon: "calendar" },
           { key: "attendance-leave-requests", label: "درخواست مرخصی", list: "/attendance-leave-requests", create: "/attendance-leave-requests/new", icon: "file" },
           { key: "attendance-leave-balance-entries", label: "مانده‌ی مرخصی", list: "/attendance-leave-balance-entries", create: "/attendance-leave-balance-entries/new", icon: "file" },
+          { key: "attendance-permits", label: "مجوزها", list: "/attendance-permits", create: "/attendance-permits/new", icon: "file" },
           { key: "attendance-calculation", label: "محاسبه تردد", list: "/attendance-calculation", icon: "file", type: "operational" },
           { key: "attendance-mission-requests", label: "درخواست ماموریت", list: "/attendance-mission-requests", create: "/attendance-mission-requests/new", icon: "file" },
           { key: "attendance-mission-reports", label: "گزارش ماموریت", list: "/attendance-mission-reports", create: "/attendance-mission-reports/new", icon: "file" },

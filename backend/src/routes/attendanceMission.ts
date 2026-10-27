@@ -6,7 +6,8 @@ import type { AuthedRequest } from "../middleware/auth";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { AttendanceError } from "../services/attendancePunchService";
 import { deleteMissionType, missionTypeShape, saveMissionType } from "../services/attendanceMissionTypeService";
-import { MISSION_INCLUDE, approveMission, changeMissionEnd, cleanMission, createMission, finishMission, lastCalculatedEnds, missionShape, rejectMission, unapproveMission, unfinishMission } from "../services/attendanceMissionService";
+import { MISSION_INCLUDE, approveMission, changeMissionEnd, cleanMission, createMission, finishMission, missionShape, rejectMission, unapproveMission, unfinishMission } from "../services/attendanceMissionService";
+import { calculatedRanges } from "../services/attendancePunchService";
 import { REPORT_INCLUDE, approveReport, cleanReport, createReport, rejectReport, reportShapes, reportableRequests, unapproveReport, updateReport } from "../services/attendanceMissionReportService";
 
 // مدیریت تردد › نوع ماموریت، درخواست ماموریت (+ پایان ماموریت) و گزارش ماموریت. منطق فقط در سرویس‌ها.
@@ -68,15 +69,15 @@ router.get("/attendance-mission-requests", can(`${F_REQ}.view`), async (req, res
   if (req.query.employeeId) where.employeeId = Number(req.query.employeeId);
   if (req.query.status && ["PENDING", "APPROVED", "REJECTED"].includes(String(req.query.status))) where.status = String(req.query.status);
   const rows = await prisma.attendanceMissionRequest.findMany({ where, include: MISSION_INCLUDE, orderBy: { number: "desc" }, take: 3000 });
-  const ends = await lastCalculatedEnds(rows.map((r) => r.employeeId));
-  res.json(rows.map((r) => missionShape(r, ends.get(r.employeeId) ?? null)));
+  const ranges = await calculatedRanges(rows.map((r) => r.employeeId));
+  res.json(rows.map((r) => missionShape(r, ranges.get(r.employeeId))));
 });
 
 router.get("/attendance-mission-requests/:id", can(`${F_REQ}.view`), async (req, res) => {
   const r = await prisma.attendanceMissionRequest.findUnique({ where: { id: Number(req.params.id) }, include: MISSION_INCLUDE });
   if (!r) return res.status(404).json({ error: "درخواست یافت نشد" });
-  const ends = await lastCalculatedEnds([r.employeeId]);
-  res.json(missionShape(r, ends.get(r.employeeId) ?? null));
+  const ranges = await calculatedRanges([r.employeeId]);
+  res.json(missionShape(r, ranges.get(r.employeeId)));
 });
 
 router.post("/attendance-mission-requests", can(`${F_REQ}.create`), async (req, res) => {
