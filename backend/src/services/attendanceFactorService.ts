@@ -1,7 +1,7 @@
 import { prisma } from "../lib/prisma";
-import { AttendanceError, assertFromMonthOpenForAll, dayStr } from "./attendancePunchService";
+import { AttendanceError, dayStr } from "./attendancePunchService";
+import { formulaUsers } from "./attendanceFormulaUsage";
 import { buildWorksheet } from "./attendanceWorksheetService";
-import { getCalendarMonth } from "./workCalendarService";
 import { getParameterValue } from "./payrollParameterService";
 import { evaluate, evaluateCondition, parseCondition, parseFormula, collectRefs, collectCondRefs, FormulaError, type Cond, type EvalEnv, type Node, type Ns, type RefInfo } from "./payrollFormula";
 import { bandOverlap, effectiveBands, type EffectiveBand } from "./attendanceTimeBandService";
@@ -58,8 +58,7 @@ export function factorShape(f: any) {
 /** عامل‌هایی که متنِ یکی از شاخه‌های روش‌هایشان به این عامل ارجاع می‌دهد */
 export async function factorsReferencing(key: string): Promise<string[]> {
   const re = new RegExp(`\\[(F|A|M):${key}(:[A-Za-z_]+)?\\]`, "i");
-  const rows = await prisma.attendanceFactor.findMany({ include: { methods: { include: { branches: true } } } });
-  return rows.filter((f) => f.key !== key && f.methods.some((m) => m.branches.some((b) => re.test(b.formulaText) || re.test(b.conditionText ?? "")))).map((f) => f.title);
+  return formulaUsers(re, key);
 }
 
 export async function saveFactor(body: any, id?: number) {
@@ -232,60 +231,6 @@ export async function validateBranches(factor: { id: number | null; key: string;
 const nsTitle = (ns: Ns) =>
   ns === "V" ? "متغیر روز" : ns === "F" ? "عامل روزانه" : ns === "A" ? "تجمیع عامل روزانه" : ns === "T" ? "تجمیع متغیر روز" : ns === "M" ? "عامل ماهانه" : ns === "P" ? "پارامتر" : "اطلاعات پایه";
 
-// ───────────────────────── روش‌ها ─────────────────────────
-
-export function methodShape(m: any) {
-  return {
-    id: m.id,
-    factorId: m.factorId,
-    execYear: m.execCalendarMonth.year,
-    execMonth: m.execCalendarMonth.month,
-    branches: [...m.branches].sort((a: any, b: any) => a.seq - b.seq).map((b: any) => ({ conditionText: b.conditionText ?? "", formulaText: b.formulaText })),
-    updatedAt: m.updatedAt,
-  };
-}
-
-export async function listMethods(factorId: number) {
-  const rows = await prisma.attendanceFactorMethod.findMany({ where: { factorId }, include: { branches: true, execCalendarMonth: true }, orderBy: { execCalendarMonth: { startDate: "desc" } } });
-  return rows.map(methodShape);
-}
-
-export async function saveMethod(factorId: number, body: any, methodId?: number) {
-  const factor = await prisma.attendanceFactor.findUnique({ where: { id: factorId } });
-  if (!factor) throw new AttendanceError("عامل یافت نشد");
-  if (factor.source === "PERMIT") throw new AttendanceError("عامل مجوز روش محاسبه ندارد؛ مقدارش را در «مجوزها» وارد کنید");
-  const year = Number(body?.execYear), month = Number(body?.execMonth);
-  const cal = await getCalendarMonth(year, month);
-  if (!cal) throw new AttendanceError(`ماه ${month} سال ${year} در «تقویم کاری» تعریف نشده است؛ ابتدا تقویم کاری آن سال را بسازید`);
-  // روش از ماه اجرا به بعد اثر دارد؛ ماهی که از آن به بعد «محاسبه تردد» شده قفل است (ماه قبلیِ یک روش در حال ویرایش هم)
-  await assertFromMonthOpenForAll(cal.startDate);
-  if (methodId) {
-    const old = await prisma.attendanceFactorMethod.findFirst({ where: { id: methodId, factorId }, include: { execCalendarMonth: true } });
-    if (old) await assertFromMonthOpenForAll(old.execCalendarMonth.startDate);
-  }
-  const branches = cleanBranches(body?.branches);
-  await validateBranches({ id: factor.id, key: factor.key, level: factor.level as AttLevel }, branches);
-  const clash = await prisma.attendanceFactorMethod.findFirst({ where: { factorId, execCalendarMonthId: cal.id, ...(methodId ? { id: { not: methodId } } : {}) } });
-  if (clash) throw new AttendanceError("برای این ماه اجرا قبلاً روشی ثبت شده است؛ آن را ویرایش کنید");
-  const rows = branches.map((b, i) => ({ seq: i + 1, conditionText: b.conditionText || null, formulaText: b.formulaText }));
-  if (!methodId) {
-    return prisma.attendanceFactorMethod.create({ data: { factorId, execCalendarMonthId: cal.id, branches: { create: rows } }, include: { branches: true, execCalendarMonth: true } });
-  }
-  const ex = await prisma.attendanceFactorMethod.findFirst({ where: { id: methodId, factorId } });
-  if (!ex) throw new AttendanceError("روش یافت نشد");
-  return prisma.$transaction(async (tx) => {
-    await tx.attendanceFactorMethodBranch.deleteMany({ where: { methodId } });
-    return tx.attendanceFactorMethod.update({ where: { id: methodId }, data: { execCalendarMonthId: cal.id, branches: { create: rows } }, include: { branches: true, execCalendarMonth: true } });
-  });
-}
-
-export async function deleteMethod(factorId: number, methodId: number) {
-  const m = await prisma.attendanceFactorMethod.findFirst({ where: { id: methodId, factorId }, include: { execCalendarMonth: true } });
-  if (!m) throw new AttendanceError("روش یافت نشد");
-  await assertFromMonthOpenForAll(m.execCalendarMonth.startDate);
-  await prisma.attendanceFactorMethod.delete({ where: { id: methodId } });
-}
-
 // ───────────────────────── پالت فرمول‌ساز ─────────────────────────
 
 export async function palette(level: AttLevel, factorId?: number) {
@@ -351,8 +296,22 @@ interface Compiled {
   deps: string[];
   /** عامل مجوز: مقدار از «مجوزها» می‌آید (روش و فرمول ندارد) */
   permit?: boolean;
-  /** روشِ مؤثرِ این ماه (برای ذخیره در ردیف محاسبه) */
+  /** روشِ مؤثرِ این ماه (برای ذخیره در ردیف محاسبه؛ عامل روزانه: آخرین روشِ مؤثر تا پایان بازه‌ی تردد) */
   methodId?: number | null;
+  /** عامل روزانه: روش‌های تاریخ‌دار (صعودی)؛ برای هر روز آخرین روشِ با تاریخ ≤ آن روز اجرا می‌شود */
+  variants?: Variant[];
+  /** عامل حقوقِ دارای روش «ورود از تردد» (روش از فرم «روش محاسبه»): شناسه‌ی عامل حقوق */
+  payrollComponentId?: number;
+  /** عامل در حلقه‌ی ارجاع افتاده (خطای حلقه روی همه‌ی روزها اثر دارد) */
+  cycle?: boolean;
+}
+interface Variant {
+  /** شماره‌ی روز شروع اثر */
+  from: number;
+  methodId: number;
+  branches: Compiled["branches"];
+  error: string | null;
+  deps: string[];
 }
 interface Val {
   value: number | null;
@@ -364,7 +323,17 @@ interface Val {
 
 const dayNum = (d: Date) => Math.floor(d.getTime() / DAY_MS);
 
-async function compileFactors(monthEnd: Date): Promise<Compiled[]> {
+function compileMethod(branchRows: { seq: number; conditionText: string | null; formulaText: string }[], level: AttLevel) {
+  const sorted = [...branchRows].sort((x, y) => x.seq - y.seq);
+  const branches = sorted.map((b, i) => {
+    const p = parseBranch({ conditionText: b.conditionText ?? "", formulaText: b.formulaText }, i, sorted.length > 1);
+    return { cond: p.cond, formula: p.formula, condText: b.conditionText ?? "", formulaText: b.formulaText, refs: p.refs };
+  });
+  return { branches, deps: sameLevelDeps(branches.flatMap((x) => x.refs), level) };
+}
+
+/** عامل‌های تردد با روش مؤثر: ماهانه = آخرین ماه اجرای ≤ پایان ماه؛ روزانه = همه‌ی روش‌های تاریخ‌دار (هر روز روشِ خودش) */
+async function compileFactors(monthEnd: Date, trafficEnd: Date): Promise<Compiled[]> {
   const rows = await prisma.attendanceFactor.findMany({
     where: { isActive: true },
     orderBy: { id: "asc" },
@@ -372,21 +341,57 @@ async function compileFactors(monthEnd: Date): Promise<Compiled[]> {
   });
   return rows.map((f) => {
     const level = f.level as AttLevel;
-    const eff = f.methods.filter((m) => m.execCalendarMonth.startDate <= monthEnd).sort((a, b) => b.execCalendarMonth.startDate.getTime() - a.execCalendarMonth.startDate.getTime())[0];
-    const base: Compiled = { id: f.id, key: f.key, title: f.title, level, valueType: f.valueType as AttValueType, branches: null, error: null, deps: [], methodId: eff?.id ?? null };
+    const base: Compiled = { id: f.id, key: f.key, title: f.title, level, valueType: f.valueType as AttValueType, branches: null, error: null, deps: [], methodId: null };
     if (f.source === "PERMIT") return { ...base, permit: true };
-    if (!eff) return { ...base, error: "برای این ماه روش محاسبه‌ای تعریف نشده است" };
+    if (level === "DAY") {
+      const variants: Variant[] = f.methods
+        .filter((m) => m.effectiveDate)
+        .sort((x, y) => x.effectiveDate!.getTime() - y.effectiveDate!.getTime())
+        .map((m) => {
+          try {
+            const c = compileMethod(m.branches, level);
+            return { from: dayNum(m.effectiveDate!), methodId: m.id, branches: c.branches, error: null, deps: c.deps };
+          } catch (e: any) {
+            return { from: dayNum(m.effectiveDate!), methodId: m.id, branches: null, error: e?.message || "روش نامعتبر است", deps: [] };
+          }
+        });
+      const last = [...variants].reverse().find((v) => v.from <= dayNum(trafficEnd));
+      return { ...base, variants, branches: last?.branches ?? null, error: last ? last.error : "برای این ماه روش محاسبه‌ای تعریف نشده است", deps: [...new Set(variants.flatMap((v) => v.deps))], methodId: last?.methodId ?? null };
+    }
+    const eff = f.methods.filter((m) => m.execCalendarMonth && m.execCalendarMonth.startDate <= monthEnd).sort((x, y) => y.execCalendarMonth!.startDate.getTime() - x.execCalendarMonth!.startDate.getTime())[0];
+    const withMethod: Compiled = { ...base, methodId: eff?.id ?? null };
+    if (!eff) return { ...withMethod, error: "برای این ماه روش محاسبه‌ای تعریف نشده است" };
     try {
-      const sorted = [...eff.branches].sort((a, b) => a.seq - b.seq);
-      const branches = sorted.map((b, i) => {
-        const p = parseBranch({ conditionText: b.conditionText ?? "", formulaText: b.formulaText }, i, sorted.length > 1);
-        return { cond: p.cond, formula: p.formula, condText: b.conditionText ?? "", formulaText: b.formulaText, refs: p.refs };
-      });
-      return { ...base, branches, deps: sameLevelDeps(branches.flatMap((b) => b.refs), level) };
+      const c = compileMethod(eff.branches, level);
+      return { ...withMethod, branches: c.branches, deps: c.deps };
     } catch (e: any) {
-      return { ...base, error: e?.message || "روش نامعتبر است" };
+      return { ...withMethod, error: e?.message || "روش نامعتبر است" };
     }
   });
+}
+
+/** عامل‌های حقوقی که روش مؤثرِ حقوقی‌شان در این ماه «ورود از تردد» است (و مبلغی نیستند)؛ فرمولشان از فرم «روش محاسبه» می‌آید و بعد از عامل‌های ماهانه حساب می‌شود */
+async function compilePayrollMethods(monthEnd: Date): Promise<Compiled[]> {
+  const comps = await prisma.payrollComponent.findMany({
+    where: { isActive: true, methods: { some: { method: "ATTENDANCE" } } },
+    orderBy: { id: "asc" },
+    include: { methods: { include: { execCalendarMonth: true } }, attendanceMethods: { include: { branches: true, execCalendarMonth: true } } },
+  });
+  const out: Compiled[] = [];
+  for (const c of comps) {
+    const pm = c.methods.filter((m) => m.execCalendarMonth.startDate <= monthEnd).sort((x, y) => y.execCalendarMonth.startDate.getTime() - x.execCalendarMonth.startDate.getTime())[0];
+    if (!pm || pm.method !== "ATTENDANCE" || pm.valueType === "AMOUNT") continue;
+    const base: Compiled = { id: c.id, key: `PC${c.id}`, title: c.title, level: "MONTH", valueType: pm.valueType as AttValueType, branches: null, error: null, deps: [], methodId: null, payrollComponentId: c.id };
+    const eff = c.attendanceMethods.filter((m) => m.execCalendarMonth && m.execCalendarMonth.startDate <= monthEnd).sort((x, y) => y.execCalendarMonth!.startDate.getTime() - x.execCalendarMonth!.startDate.getTime())[0];
+    if (!eff) { out.push({ ...base, error: "برای این ماه روش محاسبه‌ی تردد (فرم «روش محاسبه») تعریف نشده است" }); continue; }
+    try {
+      const cm = compileMethod(eff.branches, "MONTH");
+      out.push({ ...base, methodId: eff.id, branches: cm.branches, deps: cm.deps });
+    } catch (e: any) {
+      out.push({ ...base, methodId: eff.id, error: e?.message || "روش نامعتبر است" });
+    }
+  }
+  return out;
 }
 
 /** ترتیب محاسبه (وابسته‌ها بعد از وابستگی‌ها)؛ عامل‌های درگیر حلقه خطا می‌گیرند */
@@ -398,6 +403,7 @@ function orderFactors(list: Compiled[]): Compiled[] {
     if (state.get(f.key) === 2) return;
     if (state.get(f.key) === 1) {
       f.error = f.error ?? "ارجاع دوری بین عامل‌ها";
+      f.cycle = true;
       return;
     }
     state.set(f.key, 1);
@@ -412,7 +418,7 @@ function orderFactors(list: Compiled[]): Compiled[] {
   return out;
 }
 
-function runBranches(f: Compiled, env: EvalEnv): Val {
+function runBranches(f: { branches: Compiled["branches"]; error: string | null }, env: EvalEnv): Val {
   if (f.error || !f.branches) return { value: null, error: f.error ?? "روش نامعتبر است" };
   try {
     for (let i = 0; i < f.branches.length; i++) {
@@ -431,6 +437,18 @@ function runBranches(f: Compiled, env: EvalEnv): Val {
     return { value: null, error: e instanceof FormulaError ? e.message : e?.message || "خطا در محاسبه" };
   }
 }
+
+/** عامل روزانه در یک روز: آخرین روشِ با تاریخ شروع ≤ آن روز */
+function runDayFactor(f: Compiled, dn: number, env: EvalEnv): Val {
+  if (f.cycle) return { value: null, error: f.error ?? "ارجاع دوری بین عامل‌ها" };
+  let v: Variant | undefined;
+  for (const x of f.variants ?? []) if (x.from <= dn) v = x;
+  if (!v) return { value: null, error: "برای این روز روش محاسبه‌ای تعریف نشده است (تاریخ شروع اثر روش‌ها بعد از این روز است)" };
+  return runBranches({ branches: v.branches, error: v.error }, env);
+}
+
+/** همه‌ی شاخه‌های ترکیب‌شده‌ی یک عامل (برای پیش‌خوانی پارامترها) */
+const allBranchesOf = (f: Compiled) => (f.variants ? f.variants.flatMap((v) => v.branches ?? []) : f.branches ?? []);
 
 /** متغیرهای یک روز از ردیف‌های «کارکرد روزانه» همان روز */
 function dayVariables(rows: any[], bands: EffectiveBand[] = [], leave?: DayLeave, leaveKeys: string[] = [], mission?: DayMission, settle?: DaySettlement, missionTypeIds: number[] = []): { vars: Record<string, number>; incomplete: boolean; shiftTitle: string } {
@@ -484,7 +502,8 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
   const cal = await prisma.workCalendarMonth.findFirst({ where: { month: opts.month, calendar: { year: opts.year } }, include: { calendar: true } });
   if (!cal) throw new AttendanceError(`ماه ${opts.month} سال ${opts.year} در «تقویم کاری» تعریف نشده است`);
   const from = cal.trafficStartDate, to = cal.trafficEndDate;
-  const compiled = orderFactors(await compileFactors(cal.endDate));
+  const compiled = orderFactors(await compileFactors(cal.endDate, to));
+  const payrollCompiled = await compilePayrollMethods(cal.endDate);
   const bands = await effectiveBands(cal.endDate);
   const leaveTypes = await prisma.attendanceLeaveType.findMany({ where: { isActive: true }, select: { key: true, title: true }, orderBy: { id: "asc" } });
   const leaveKeys = leaveTypes.map((t) => t.key);
@@ -515,7 +534,7 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
   const factorTitle = new Map(compiled.map((f) => [f.key, f.title]));
   // پارامترهای استفاده‌شده را پیش‌خوانی می‌کنیم تا ارزیابی همگام بماند
   const used = new Set<string>();
-  for (const f of compiled) for (const b of f.branches ?? []) {
+  for (const f of [...compiled, ...payrollCompiled]) for (const b of allBranchesOf(f)) {
     for (const r of [...(b.cond ? collectCondRefs(b.cond) : []), ...collectRefs(b.formula)]) if (r.ns === "P") used.add(r.key);
   }
   const paramErr = new Map<string, string>();
@@ -617,7 +636,7 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
         brackets: noBrackets,
         label: labelOf,
       };
-      for (const f of dayFactors) values[f.key] = f.permit ? permitVal(permitDay.get(`${empId}:${f.id}:${dn}`)) : runBranches(f, env);
+      for (const f of dayFactors) values[f.key] = f.permit ? permitVal(permitDay.get(`${empId}:${f.id}:${dn}`)) : runDayFactor(f, dn, env);
       dayRows.push({ date, vars: dv.vars, incomplete: dv.incomplete, shiftTitle: dv.shiftTitle, values });
     }
 
@@ -658,6 +677,9 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
       label: labelOf,
     };
     for (const f of monthFactors) mvals[f.key] = f.permit ? permitVal(permitMonthValue(empId, f.id)) : runBranches(f, menv);
+    // عامل‌های حقوقیِ «ورود از تردد»: بعد از عامل‌های ماهانه (فقط از آن‌ها و تجمیع روزها می‌خوانند)
+    const pvals: Record<string, Val> = {};
+    for (const f of payrollCompiled) pvals[f.key] = runBranches(f, menv);
 
     const emp = rows[0];
     employees.push({
@@ -667,6 +689,7 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
       days: dayRows.length,
       incompleteDays: dayRows.filter((d) => d.incomplete).length,
       values: mvals,
+      payroll: pvals,
     });
     for (const d of dayRows) days.push({ employeeId: empId, personnelCode: emp.personnelCode, employeeName: emp.employeeName, date: d.date, shiftTitle: d.shiftTitle, incomplete: d.incomplete, vars: d.vars, values: d.values });
   }
@@ -678,6 +701,7 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
     from: dayStr(from),
     to: dayStr(to),
     factors: factorsOut,
+    payrollFactors: payrollCompiled.map((f) => ({ key: f.key, componentId: f.payrollComponentId!, title: f.title, valueType: f.valueType, error: f.error, methodId: f.methodId ?? null })),
     bands: [...bands.map((b) => ({ key: b.key, title: `حضور در ${b.title}` })), ...leaveTypes.map((t) => ({ key: t.key, title: `مرخصی ${t.title}` })), ...missionTypes.map((t) => ({ key: missionTypeKey(t.id), title: `روزهای ماموریت ${t.title}` }))],
     employees,
     days,

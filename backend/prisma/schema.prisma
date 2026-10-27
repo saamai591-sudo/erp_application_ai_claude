@@ -5174,6 +5174,7 @@ enum PayrollSectionKind {
 /// «روش محاسبه عامل» (PayrollFactorMethod) می‌آید.
 model PayrollComponent {
   attendanceItems AttendanceCalculationItem[]
+  attendanceMethods AttendanceFactorMethod[] @relation("AttendanceMethodPayroll")
   paymentPrepLines PayrollPaymentPrepLine[]
   fileFieldRefs FileStructureFieldRef[]
   paymentTypeItems PayrollPaymentTypeItem[]
@@ -6446,16 +6447,23 @@ model AttendancePermitValue {
 /// روش محاسبه‌ی عامل از «ماه اجرا» (ماه تقویم کاری) به بعد؛ روشِ مؤثر هر ماه = آخرین روشی که ماه اجرایش ≤ آن ماه است
 model AttendanceFactorMethod {
   id                  Int                          @id @default(autoincrement())
-  factorId            Int
-  execCalendarMonthId Int
+  /// هدف روش دقیقاً یکی از «عامل تردد» یا «عامل حقوق» است (CHECK در migration)
+  factorId            Int?
+  payrollComponentId  Int?
+  /// عامل ماهانه و عامل حقوق: ماه اجرا (ماه تقویم کاری)؛ عامل روزانه: تاریخ شروع اثر (دقیقاً یکی از این دو — CHECK)
+  execCalendarMonthId Int?
+  effectiveDate       DateTime?                    @db.Date
   createdAt           DateTime                     @default(now())
   updatedAt           DateTime                     @updatedAt
-  factor              AttendanceFactor             @relation(fields: [factorId], references: [id], onDelete: Cascade)
-  execCalendarMonth   WorkCalendarMonth            @relation("AttendanceMethodExecMonth", fields: [execCalendarMonthId], references: [id], onDelete: Restrict)
+  factor              AttendanceFactor?            @relation(fields: [factorId], references: [id], onDelete: Cascade)
+  payrollComponent    PayrollComponent?            @relation("AttendanceMethodPayroll", fields: [payrollComponentId], references: [id], onDelete: Restrict)
+  execCalendarMonth   WorkCalendarMonth?           @relation("AttendanceMethodExecMonth", fields: [execCalendarMonthId], references: [id], onDelete: Restrict)
   branches            AttendanceFactorMethodBranch[]
   calcItems           AttendanceCalculationItem[]
 
   @@unique([factorId, execCalendarMonthId])
+  @@unique([factorId, effectiveDate])
+  @@unique([payrollComponentId, execCalendarMonthId])
 }
 
 /// شاخه‌های روش: از بالا اولین شاخه‌ای که شرطش برقرار است اجرا می‌شود (شرط خالی فقط برای آخرین شاخه)

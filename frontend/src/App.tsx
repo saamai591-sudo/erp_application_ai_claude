@@ -107,6 +107,7 @@ import AttendanceShiftAssignments from "./pages/AttendanceShiftAssignments";
 import AttendanceWorksheet from "./pages/AttendanceWorksheet";
 import AttendanceFactors from "./pages/AttendanceFactors";
 import AttendanceFactorResults from "./pages/AttendanceFactorResults";
+import AttendanceMethods from "./pages/AttendanceMethods";
 import AttendanceReview from "./pages/AttendanceReview";
 import AttendanceTimeBands from "./pages/AttendanceTimeBands";
 import AttendanceDayExceptions from "./pages/AttendanceDayExceptions";
@@ -512,6 +513,9 @@ export default function App() {
             <Route path="/attendance-factors" element={<AttendanceFactors />} />
             <Route path="/attendance-factors/new" element={<AttendanceFactors />} />
             <Route path="/attendance-factors/:id/edit" element={<AttendanceFactors />} />
+            <Route path="/attendance-methods" element={<AttendanceMethods />} />
+            <Route path="/attendance-methods/new" element={<AttendanceMethods />} />
+            <Route path="/attendance-methods/:id/edit" element={<AttendanceMethods />} />
             <Route path="/attendance-factor-results" element={<AttendanceFactorResults />} />
             <Route path="/attendance-review" element={<AttendanceReview />} />
             <Route path="/attendance-leave-balance-report" element={<AttendanceLeaveBalanceReport />} />

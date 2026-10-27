@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import { formulaUsers } from "./attendanceFormulaUsage";
 import { AttendanceError } from "./attendancePunchService";
 
 // مدیریت تردد › نوع ماموریت (خشکی، دریا، …) — تنها محل قواعد. دقیقاً یک نوع «پایه» است (partial unique index): روزهای ماموریتِ بدون گزارش به آن تعلق می‌گیرد.
@@ -32,8 +33,7 @@ export async function saveMissionType(body: any, id?: number) {
 /** عنوان عامل‌های تردد که به متغیر این نوع ارجاع داده‌اند */
 export async function factorsUsingMissionType(id: number): Promise<string[]> {
   const re = new RegExp(`\\[(V|T):${missionTypeKey(id)}(:[A-Za-z_]+)?\\]`, "i");
-  const rows = await prisma.attendanceFactor.findMany({ include: { methods: { include: { branches: true } } } });
-  return rows.filter((f) => f.methods.some((m) => m.branches.some((b) => re.test(b.formulaText) || re.test(b.conditionText ?? "")))).map((f) => f.title);
+  return formulaUsers(re);
 }
 
 export async function deleteMissionType(id: number) {

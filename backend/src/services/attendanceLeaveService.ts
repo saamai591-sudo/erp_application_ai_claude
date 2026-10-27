@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import { formulaUsers } from "./attendanceFormulaUsage";
 import { displayDate } from "../utils/dateDisplay";
 import { AttendanceError, EMPLOYEE_SELECT, assertDaysOpen, dayStr, minuteText, parseDay, personName } from "./attendancePunchService";
 import { getPeriods, periodContains } from "./employmentStatusService";
@@ -87,8 +88,7 @@ export async function saveLeaveType(body: any, id?: number) {
 /** عامل‌هایی که فرمولشان به متغیر این نوع مرخصی ارجاع می‌دهد */
 export async function factorsUsingLeaveType(id: number): Promise<string[]> {
   const re = new RegExp(`\\[(V|T):${leaveVarKey(id)}(:[A-Za-z_]+)?\\]`, "i");
-  const rows = await prisma.attendanceFactor.findMany({ include: { methods: { include: { branches: true } } } });
-  return rows.filter((f) => f.methods.some((m) => m.branches.some((b) => re.test(b.formulaText) || re.test(b.conditionText ?? "")))).map((f) => f.title);
+  return formulaUsers(re);
 }
 
 export async function deleteLeaveType(id: number) {

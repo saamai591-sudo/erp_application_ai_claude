@@ -46,10 +46,14 @@ export async function monthRows(year: number, month: number) {
   return { from: dayStr(cal.trafficStartDate), to: dayStr(cal.trafficEndDate), rows };
 }
 
-/** نتیجه‌ی محاسبه‌ی یک کارمند → ردیف‌های ذخیره (یک ردیف برای هر عامل تردد فعال) */
+/** نتیجه‌ی محاسبه‌ی یک کارمند → ردیف‌های ذخیره (یک ردیف برای هر عامل تردد فعال + یک ردیف برای هر عامل حقوقِ «ورود از تردد») */
 function buildItems(results: any, employeeId: number, emp: any) {
   const dayRows = (results.days as any[]).filter((d) => d.employeeId === employeeId);
-  return (results.factors as any[]).map((f) => {
+  const payrollItems = ((results.payrollFactors ?? []) as any[]).map((f) => {
+    const v = emp.payroll?.[f.key] as { value: number | null; branch?: number; expression?: string; error?: string } | undefined;
+    return { payrollComponentId: f.componentId as number, level: "MONTH" as const, valueType: f.valueType as "NUMBER" | "TIME" | "DAYS", methodId: (f.methodId ?? null) as number | null, value: v?.value ?? null, error: v?.error ?? f.error ?? null, branch: v?.branch ?? null, expression: v?.expression ?? null, days: undefined as unknown as any };
+  });
+  const factorItems = (results.factors as any[]).map((f) => {
     const base = { factorId: f.id as number, level: f.level as "DAY" | "MONTH", valueType: f.valueType as "NUMBER" | "TIME" | "DAYS", methodId: (f.methodId ?? null) as number | null };
     if (f.level === "MONTH") {
       const v = emp.values[f.key] as { value: number | null; branch?: number; expression?: string; error?: string } | undefined;
@@ -61,13 +65,14 @@ function buildItems(results: any, employeeId: number, emp: any) {
     });
     return { ...base, value: null, error: f.error ?? null, branch: null, expression: null, days };
   });
+  return [...factorItems, ...payrollItems];
 }
 
 /** ریز ردیف‌های ذخیره‌ی یک محاسبه (برای نمایش) */
 export async function calculationItems(id: number) {
   const c = await prisma.attendanceCalculation.findUnique({
     where: { id },
-    include: { employee: { select: EMPLOYEE_SELECT }, calendarMonth: { select: { year: true, month: true } }, items: { include: { factor: { select: { title: true, source: true } } }, orderBy: { id: "asc" } } },
+    include: { employee: { select: EMPLOYEE_SELECT }, calendarMonth: { select: { year: true, month: true } }, items: { include: { factor: { select: { title: true, source: true } }, payrollComponent: { select: { title: true } } }, orderBy: { id: "asc" } } },
   });
   if (!c) throw new AttendanceError("محاسبه یافت نشد");
   return {
@@ -83,8 +88,9 @@ export async function calculationItems(id: number) {
       return {
         id: i.id,
         factorId: i.factorId,
-        title: i.factor?.title ?? "",
-        source: i.factor?.source ?? "COMPUTED",
+        payrollComponentId: i.payrollComponentId,
+        title: i.factor?.title ?? i.payrollComponent?.title ?? "",
+        source: i.payrollComponentId ? "PAYROLL" : i.factor?.source ?? "COMPUTED",
         level: i.level,
         valueType: i.valueType,
         value: v,

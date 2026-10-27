@@ -59,7 +59,7 @@ export const USAGE_META: Record<string, UsageMeta> = {
   AttendanceTimeBand: { label: "بازه‌ی زمانی تردد", base: "/attendance-time-bands" },
   AttendanceTimeBandVersion: { label: "نسخه‌ی بازه‌ی زمانی تردد", base: "/attendance-time-bands", title: (r) => `#${r.id}` },
   AttendanceFactor: { label: "عامل تردد", base: "/attendance-factors" },
-  AttendanceFactorMethod: { label: "روش محاسبه‌ی عامل تردد", base: "/attendance-factors", title: (r) => `#${r.id}` },
+  AttendanceFactorMethod: { label: "روش محاسبه‌ی تردد", base: "/attendance-methods", title: (r) => `#${r.id}` },
   AttendancePunch: { label: "تردد", base: "/attendance-punches", title: (r) => `#${r.id}` },
   AttendanceCorrectionRequest: { label: "درخواست اصلاح تردد", base: "/attendance-correction-requests", title: (r) => `شماره ${r.number}` },
   PositionJob: { label: "شغل مورد نیاز پست", title: (r) => `#${r.id}` },

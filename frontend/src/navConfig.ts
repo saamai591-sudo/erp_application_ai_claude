@@ -472,6 +472,7 @@ const RAW_MODULES: ModuleGroup[] = [
         items: [
           { key: "attendance-shifts", label: "شیفت", list: "/attendance-shifts", create: "/attendance-shifts/new", icon: "calendar" },
           { key: "attendance-factors", label: "عوامل تردد", list: "/attendance-factors", create: "/attendance-factors/new", icon: "sliders" },
+          { key: "attendance-methods", label: "روش محاسبه", list: "/attendance-methods", create: "/attendance-methods/new", icon: "sliders" },
           { key: "attendance-time-bands", label: "بازه‌های زمانی", list: "/attendance-time-bands", create: "/attendance-time-bands/new", icon: "calendar" },
           { key: "attendance-leave-types", label: "نوع مرخصی", list: "/attendance-leave-types", create: "/attendance-leave-types/new", icon: "tag" },
           { key: "attendance-leave-entitlements", label: "قاعده‌ی استحقاق مرخصی", list: "/attendance-leave-entitlements", icon: "sliders", type: "operational" },

@@ -630,6 +630,7 @@ export const REGISTRY: ModuleDef[] = [
         forms: [
           { key: "attendance-shifts", title: "شیفت", baseActions: CRUD },
           { key: "attendance-factors", title: "عوامل تردد", baseActions: CRUD },
+          { key: "attendance-methods", title: "روش محاسبه", baseActions: CRUD },
           { key: "attendance-time-bands", title: "بازه‌های زمانی", baseActions: CRUD },
           { key: "attendance-leave-types", title: "نوع مرخصی", baseActions: CRUD },
           { key: "attendance-leave-entitlements", title: "قاعده‌ی استحقاق مرخصی", baseActions: CRUD },

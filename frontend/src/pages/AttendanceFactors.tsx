@@ -3,16 +3,15 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ErrorToast } from "../components/ErrorToast";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
-import { Modal } from "../components/Modal";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
-import { FormulaBuilder, FormulaBranch } from "../components/FormulaBuilder";
-import { WorkMonthPicker } from "../components/WorkMonthPicker";
 import { MONTHS_FA } from "../lib/payrollLabels";
 import { toFaDigits } from "../lib/formatAmount";
+import { formatJalaliDate } from "../lib/formatDate";
+import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
@@ -20,7 +19,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 
 // مدیریت تردد › تنظیمات › «عوامل تردد»: عامل روزانه (برای هر روزِ هر کارمند از متغیرهای کارکرد همان روز) و عامل ماهانه (از تجمیع عوامل روزانه و عوامل ماهانه‌ی دیگر).
 // «منبع» عامل: محاسباتی (روش‌های تاریخ‌دار با شاخه‌های شرط ← فرمول) یا مجوز (روش ندارد؛ مقدارش را کاربر برای هر کارمند در «مجوزها» وارد می‌کند و در فرمول‌ها با [F:…] / [M:…] خوانده می‌شود).
-// هر عامل محاسباتی «روش»‌های تاریخ‌دار دارد (ماه اجرا از تقویم کاری) و هر روش شاخه‌های شرط ← فرمول؛ فرمول را همان فرمول‌ساز حقوق می‌سازد. قواعد در سرور (services/attendanceFactorService.ts).
+// روش‌های محاسبه‌ی عامل (فرمول) در فرم «روش محاسبه» تعریف می‌شود؛ این فرم فقط فهرست روش‌های عامل را می‌خواند و پیوند می‌دهد. قواعد در سرور (services/attendanceFactorService.ts).
 
 type Level = "DAY" | "MONTH";
 interface FactorRow {
@@ -41,12 +40,14 @@ interface FactorRow {
 }
 interface MethodRow {
   id: number;
-  execYear: number;
-  execMonth: number;
-  branches: FormulaBranch[];
+  execYear: number | null;
+  execMonth: number | null;
+  effectiveDate: string | null;
+  branches: { conditionText: string; formulaText: string }[];
+  locked: boolean;
 }
 
-const ymText = (y: number, m: number) => `${MONTHS_FA[m - 1] ?? m} ${toFaDigits(String(y))}`;
+const whenText = (m: MethodRow) => (m.effectiveDate ? `از ${formatJalaliDate(m.effectiveDate)}` : m.execMonth ? `${MONTHS_FA[m.execMonth - 1] ?? m.execMonth} ${toFaDigits(String(m.execYear))}` : "");
 
 export default function AttendanceFactors() {
   const location = useLocation();
@@ -105,13 +106,6 @@ function FactorList() {
   );
 }
 
-interface MethodDraft {
-  id?: number;
-  year: number;
-  month: number;
-  branches: FormulaBranch[];
-}
-
 function FactorForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -121,8 +115,7 @@ function FactorForm({ editId }: { editId?: number }) {
   const [methods, setMethods] = useState<MethodRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
-  const [dlg, setDlg] = useState<MethodDraft | null>(null);
-  const [builder, setBuilder] = useState(false);
+  const { openTab } = useTabs();
   const { flash } = useSavedFlash();
 
   async function load() {
@@ -162,28 +155,6 @@ function FactorForm({ editId }: { editId?: number }) {
     try {
       await api.del(`/attendance-factors/${editId}`);
       navigate("/attendance-factors");
-    } catch (e) {
-      showError((e as ApiError).message);
-    }
-  }
-
-  async function saveMethod() {
-    if (!dlg || !editId) return;
-    const body = { execYear: dlg.year, execMonth: dlg.month, branches: dlg.branches };
-    try {
-      if (dlg.id) await api.put(`/attendance-factors/${editId}/methods/${dlg.id}`, body);
-      else await api.post(`/attendance-factors/${editId}/methods`, body);
-      setDlg(null);
-      await load();
-    } catch (e) {
-      showError((e as ApiError).message);
-    }
-  }
-  async function removeMethod(m: MethodRow) {
-    if (!editId || !window.confirm(`روش ماه اجرای ${ymText(m.execYear, m.execMonth)} حذف شود؟`)) return;
-    try {
-      await api.del(`/attendance-factors/${editId}/methods/${m.id}`);
-      await load();
     } catch (e) {
       showError((e as ApiError).message);
     }
@@ -242,23 +213,20 @@ function FactorForm({ editId }: { editId?: number }) {
         ) : editId ? (
           <>
             <h3 className="hr-section">
-              روش‌های محاسبه <FieldHint label="روش محاسبه" text="هر روش از «ماه اجرا» (ماه تقویم کاری) به بعد معتبر است تا روش بعدی همین عامل؛ برای ماهی که قبل از اولین روش باشد، نتیجه خطای «روش تعریف نشده» می‌دهد." />
+              روش‌های محاسبه <FieldHint label="روش محاسبه" text="روش‌ها در فرم «روش محاسبه» تعریف می‌شوند. عامل روزانه: هر روش از «تاریخ شروع اثر» به بعد معتبر است؛ عامل ماهانه: از «ماه اجرا» (ماه تقویم کاری). برای روزی/ماهی که قبل از اولین روش باشد نتیجه خطای «روش تعریف نشده» است." />
             </h3>
-            <button type="button" className="btn secondary" onClick={() => setDlg({ year: 0, month: 0, branches: [{ conditionText: "", formulaText: "" }] })}>+ روش جدید</button>
+            <button type="button" className="btn secondary" onClick={() => openTab(`/attendance-methods/new?kind=${form.level}&factorId=${editId}`)}>+ تعریف روش</button>
             {methods.length === 0 ? (
               <p style={{ opacity: 0.7, fontSize: 13 }}>هنوز روشی تعریف نشده است.</p>
             ) : (
               <table className="hr-table" style={{ maxWidth: 640, marginTop: 8 }}>
-                <thead><tr><th>ماه اجرا</th><th>فرمول</th><th style={{ width: 150 }}></th></tr></thead>
+                <thead><tr><th>{form.level === "DAY" ? "تاریخ شروع اثر" : "ماه اجرا"}</th><th>فرمول</th><th style={{ width: 150 }}></th></tr></thead>
                 <tbody>
                   {methods.map((m) => (
                     <tr key={m.id}>
-                      <td>{ymText(m.execYear, m.execMonth)}</td>
-                      <td>{m.branches.length > 1 ? `${toFaDigits(String(m.branches.length))} شاخه` : m.branches[0]?.conditionText ? "با شرط" : "ساده"}</td>
-                      <td>
-                        <button type="button" className="link-btn" onClick={() => setDlg({ id: m.id, year: m.execYear, month: m.execMonth, branches: m.branches })}>ویرایش</button>{" "}
-                        <button type="button" className="link-btn" onClick={() => removeMethod(m)}>حذف</button>
-                      </td>
+                      <td>{whenText(m)}</td>
+                      <td>{m.branches.length > 1 ? `${toFaDigits(String(m.branches.length))} شاخه` : m.branches[0]?.conditionText ? "با شرط" : "ساده"}{m.locked ? " — قفل" : ""}</td>
+                      <td><button type="button" className="link-btn" onClick={() => openTab(`/attendance-methods/${m.id}/edit`)}>مشاهده / ویرایش ←</button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -266,44 +234,10 @@ function FactorForm({ editId }: { editId?: number }) {
             )}
           </>
         ) : (
-          <p style={{ opacity: 0.7, fontSize: 13 }}>پس از ثبت عامل می‌توانید روش‌های محاسبه (فرمول) آن را تعریف کنید.</p>
+          <p style={{ opacity: 0.7, fontSize: 13 }}>پس از ثبت عامل می‌توانید روش‌های محاسبه (فرمول) آن را در فرم «روش محاسبه» تعریف کنید.</p>
         )}
       </form>
 
-      {dlg && !builder && (
-        <Modal title={dlg.id ? "ویرایش روش محاسبه" : "روش محاسبه‌ی جدید"} onClose={() => setDlg(null)}>
-          <div className="form-grid">
-            <div className="form-field">
-              <label>ماه اجرا<RequiredMark /></label>
-              <WorkMonthPicker year={dlg.year} month={dlg.month} autoFix={!dlg.id} onChange={(y, m) => setDlg((d) => (d ? { ...d, year: y, month: m } : d))} />
-            </div>
-            <div className="form-field">
-              <label>فرمول</label>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <button type="button" className="btn secondary" onClick={() => setBuilder(true)} style={{ fontFamily: "serif", fontStyle: "italic", fontSize: 16 }}>fx</button>
-                {dlg.branches.some((b) => b.formulaText.trim()) ? <span style={{ color: "#0a8f5a" }}>فرمول تعریف شده است{dlg.branches.length > 1 ? ` (${dlg.branches.length} شاخه)` : ""}</span> : <span style={{ opacity: 0.6 }}>تعریف نشده</span>}
-              </div>
-            </div>
-          </div>
-          <div className="actions" style={{ marginTop: 12 }}>
-            <button type="button" className="btn" disabled={!dlg.year || !dlg.branches.some((b) => b.formulaText.trim())} onClick={saveMethod}>ثبت روش</button>
-            <button type="button" className="btn secondary" onClick={() => setDlg(null)}>انصراف</button>
-          </div>
-        </Modal>
-      )}
-      {dlg && builder && editId && (
-        <FormulaBuilder
-          factorId={String(editId)}
-          factorTitle={form.title}
-          attendanceLevel={form.level}
-          branches={dlg.branches}
-          onClose={() => setBuilder(false)}
-          onSave={(bs) => {
-            setDlg({ ...dlg, branches: bs });
-            setBuilder(false);
-          }}
-        />
-      )}
     </FormPage>
   );
 }

@@ -28,7 +28,7 @@ interface Palette {
   params: { key: string; title: string; type: string; personnel?: "HR" | "PAYROLL" | null }[];
 }
 
-/** پالت فرمول‌ساز تردد (سرور: GET /attendance-factors/palette): دسته‌ها (متغیر روز، عامل روزانه، تجمیع …) ← مورد ← نوع تجمیع */
+/** پالت فرمول‌ساز تردد (سرور: GET /attendance-methods/palette): دسته‌ها (متغیر روز، عامل روزانه، تجمیع …) ← مورد ← نوع تجمیع */
 interface AttPalette {
   level: "DAY" | "MONTH";
   groups: { ns: string; key?: string; title: string; hint?: string; items: { key: string; title: string; hint?: string }[]; variants: { key: string; title: string; hint?: string }[] | null }[];
@@ -95,7 +95,7 @@ export function FormulaBuilder({
   /** عنوان عاملی که فرمولش تعریف می‌شود؛ در عنوان پنجره نمایش داده می‌شود */
   factorTitle: string;
   method?: string;
-  /** حالت «عوامل تردد»: سطح عامل (روزانه/ماهانه)؛ پالت و بررسی از مسیرهای /attendance-factors می‌آید */
+  /** حالت «عوامل تردد»: سطح عامل (روزانه/ماهانه)؛ پالت و بررسی از مسیرهای /attendance-methods می‌آید */
   attendanceLevel?: "DAY" | "MONTH";
   branches: FormulaBranch[];
   /** مبناهایی که این عامل عضو آن‌هاست (برای کنترل ارجاع دوری هنگام «بررسی») */
@@ -129,7 +129,7 @@ export function FormulaBuilder({
   useEffect(() => {
     // عامل‌های قابل استفاده به نوع محاسبه‌ی عاملِ در دست تعریف بستگی دارد (سرور بر اساس عامل انتخاب‌شده فیلتر می‌کند)
     if (attendanceLevel) {
-      api.get(`/attendance-factors/palette?level=${attendanceLevel}&factorId=${encodeURIComponent(factorId)}`).then(setAttPal).catch((e) => setErr(e.message));
+      api.get(`/attendance-methods/palette?level=${attendanceLevel}&factorId=${encodeURIComponent(factorId)}`).then(setAttPal).catch((e) => setErr(e.message));
       return;
     }
     api.get(`/payroll-methods/palette?basis=${basis}&factorId=${encodeURIComponent(factorId)}`).then(setPal).catch((e) => setErr(e.message));
@@ -346,7 +346,7 @@ export function FormulaBuilder({
     setErr(null);
     try {
       const r = attendanceLevel
-        ? await api.post("/attendance-factors/validate", { level: attendanceLevel, factorId: Number(factorId) || null, branches: toBranches() }, { silent: true } as any)
+        ? await api.post("/attendance-methods/validate", { level: attendanceLevel, factorId: Number(factorId) || null, branches: toBranches() }, { silent: true } as any)
         : await api.post("/payroll-methods/validate", { basis, factorId: Number(factorId) || null, method, branches: toBranches(), basisIds: basisIds ?? [] }, { silent: true } as any);
       if (r.ok) setOk(true);
       else setErr(r.error);

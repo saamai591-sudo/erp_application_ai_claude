@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import { formulaUsers } from "./attendanceFormulaUsage";
 import { AttendanceError } from "./attendancePunchService";
 import { getCalendarMonth } from "./workCalendarService";
 import { BAND_KEY_RE } from "./attendanceFormulaDefs";
@@ -36,8 +37,7 @@ export async function saveBand(body: any, id?: number) {
 /** فرمول‌هایی که به متغیر این بازه ارجاع می‌دهند (عنوان عامل‌ها) */
 export async function factorsUsingBand(id: number): Promise<string[]> {
   const re = new RegExp(`\\[(V|T):${bandVarKey(id)}(:[A-Za-z_]+)?\\]`, "i");
-  const rows = await prisma.attendanceFactor.findMany({ include: { methods: { include: { branches: true } } } });
-  return rows.filter((f) => f.methods.some((m) => m.branches.some((b) => re.test(b.formulaText) || re.test(b.conditionText ?? "")))).map((f) => f.title);
+  return formulaUsers(re);
 }
 
 export async function deleteBand(id: number) {
