@@ -49,9 +49,35 @@ async function lockMessage(a: { employeeId: number; fromDate: Date }): Promise<s
   return n > 0 ? `${n} تردد با اختصاص دستی به پنجره از ${displayDate(a.fromDate)} به بعد برای این کارمند ثبت شده است؛ ابتدا اختصاص آن‌ها را بردارید` : null;
 }
 
+/**
+ * درخواست‌های مرخصی/ماموریتِ در جریان یا تاییدشده (رد‌شده‌ها نه) که در «بازه‌ی اثر» یک انتساب افتاده‌اند: انتساب از تاریخ شروعش تا شروع انتسابِ بعدیِ همان کارمند
+ * (بی‌پایان اگر بعدی نباشد) روزها را به شیفت می‌دهد، و مرخصی/ماموریت بر پایه‌ی همان شیفت اعتبارسنجی و محاسبه شده است (باید روز اول شیفت داشته باشد، ساعتی در
+ * بازه‌های کاری شیفت باشد، مصرف مانده از روزهای کاری شیفت می‌آید). پس ثبت، تغییر یا حذف انتسابی که این بازه را عوض کند تا وجود آن‌ها رد می‌شود.
+ */
+async function requestsInSpan(employeeId: number, from: Date, to: Date | null): Promise<string | null> {
+  const overlap = { employeeId, status: { in: ["PENDING", "APPROVED"] as ("PENDING" | "APPROVED")[] }, toDate: { gte: from }, ...(to ? { fromDate: { lt: to } } : {}) };
+  const [leaves, missions] = await Promise.all([
+    prisma.attendanceLeaveRequest.findMany({ where: overlap, select: { number: true }, orderBy: { number: "asc" }, take: 6 }),
+    prisma.attendanceMissionRequest.findMany({ where: overlap, select: { number: true }, orderBy: { number: "asc" }, take: 6 }),
+  ]);
+  if (leaves.length === 0 && missions.length === 0) return null;
+  const parts: string[] = [];
+  if (leaves.length) parts.push(`درخواست مرخصی شماره ${leaves.map((x) => x.number).join("، ")}`);
+  if (missions.length) parts.push(`درخواست ماموریت شماره ${missions.map((x) => x.number).join("، ")}`);
+  return `برای این کارمند در بازه‌ی اثر این انتساب (از ${displayDate(from)}${to ? ` تا ${displayDate(new Date(to.getTime() - 86400000))}` : " به بعد"}) ${parts.join(" و ")} ثبت شده است؛ ابتدا آن‌ها را حذف یا رد کنید`;
+}
+
+/** شروع انتسابِ بعدی همان کارمند پس از تاریخ داده‌شده (به‌جز خودِ انتساب excludeId)؛ null = بی‌پایان */
+async function nextStart(employeeId: number, after: Date, excludeId?: number): Promise<Date | null> {
+  const n = await prisma.attendanceShiftAssignment.findFirst({ where: { employeeId, fromDate: { gt: after }, ...(excludeId ? { id: { not: excludeId } } : {}) }, orderBy: { fromDate: "asc" }, select: { fromDate: true } });
+  return n?.fromDate ?? null;
+}
+
 export async function createAssignment(b: any, userId: number | null): Promise<{ id: number }> {
   const d = await clean(b);
   await assertFromDateOpen(d.employeeId, d.fromDate);
+  const msg = await requestsInSpan(d.employeeId, d.fromDate, await nextStart(d.employeeId, d.fromDate));
+  if (msg) throw new AttendanceError(msg);
   const c = await prisma.attendanceShiftAssignment.create({ data: { ...d, createdById: userId } });
   return { id: c.id };
 }
@@ -65,6 +91,13 @@ export async function updateAssignment(id: number, b: any): Promise<void> {
   const d = await clean(b);
   await assertFromDateOpen(d.employeeId, d.fromDate);
   if (d.employeeId !== ex.employeeId) throw new AttendanceError("کارمند انتساب قابل تغییر نیست؛ انتساب را حذف و دوباره ثبت کنید");
+  // فقط تغییر شیفت یا تاریخ شروع بازه را عوض می‌کند (توضیح آزاد است)
+  if (d.shiftId !== ex.shiftId || d.fromDate.getTime() !== ex.fromDate.getTime()) {
+    const old = await requestsInSpan(ex.employeeId, ex.fromDate, await nextStart(ex.employeeId, ex.fromDate, id));
+    if (old) throw new AttendanceError(old);
+    const neu = await requestsInSpan(d.employeeId, d.fromDate, await nextStart(d.employeeId, d.fromDate, id));
+    if (neu) throw new AttendanceError(neu);
+  }
   await prisma.attendanceShiftAssignment.update({ where: { id }, data: d });
 }
 
@@ -74,5 +107,7 @@ export async function deleteAssignment(id: number): Promise<void> {
   const lock = await lockMessage(ex);
   if (lock) throw new AttendanceError(lock);
   await assertFromDateOpen(ex.employeeId, ex.fromDate);
+  const msg = await requestsInSpan(ex.employeeId, ex.fromDate, await nextStart(ex.employeeId, ex.fromDate, id));
+  if (msg) throw new AttendanceError(msg);
   await prisma.attendanceShiftAssignment.delete({ where: { id } });
 }
