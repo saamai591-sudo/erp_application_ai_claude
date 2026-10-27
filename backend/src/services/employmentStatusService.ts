@@ -182,17 +182,21 @@ function checkSequence(recs: StatusRec[], touchedId?: number) {
   }
 }
 
-/** هر انتصاب، حکم تاییدشده، فیش محاسبه‌شده و وام باید داخل یکی از دوره‌های همکاری بماند */
+/** هر انتصاب، انتساب شیفت تردد، حکم تاییدشده، فیش محاسبه‌شده و وام باید داخل یکی از دوره‌های همکاری بماند */
 async function assertCovered(employeeId: number, periods: Period[], db: Db) {
   const inAny = (d: Date) => periodContains(periods, d);
-  const [assignments, decrees, slips, loans] = await Promise.all([
+  const [assignments, shiftAssignments, decrees, slips, loans] = await Promise.all([
     db.employeeAssignment.findMany({ where: { employeeId }, select: { fromDate: true } }),
+    db.attendanceShiftAssignment.findMany({ where: { employeeId }, select: { fromDate: true, shift: { select: { title: true } } }, orderBy: { fromDate: "asc" } }),
     db.employmentDecree.findMany({ where: { employeeId, status: "APPROVED" }, select: { number: true, effectiveDate: true } }),
     db.payrollSlip.findMany({ where: { employeeId }, select: { year: true, month: true }, distinct: ["year", "month"] }),
     db.loan.findMany({ where: { employeeId }, select: { number: true, paymentDate: true } }),
   ]);
   const badA = assignments.find((x) => !inAny(x.fromDate));
   if (badA) throw new HrError(`با این تغییر، انتصابی با شروع ${day(badA.fromDate)} از دوره‌های همکاری بیرون می‌افتد`);
+  // انتساب شیفت تردد در همان تاریخ شروع باید در دوره‌ی همکاری باشد (کنترل ثبتِ انتساب در attendanceShiftAssignmentService یک‌طرفه بود)
+  const badS = shiftAssignments.find((x) => !inAny(x.fromDate));
+  if (badS) throw new HrError(`با این تغییر، انتساب شیفت تردد «${badS.shift.title}» با شروع ${day(badS.fromDate)} از دوره‌های همکاری بیرون می‌افتد؛ ابتدا آن را در «انتساب شیفت» حذف یا اصلاح کنید`);
   const badD = decrees.find((x) => !inAny(x.effectiveDate));
   if (badD) throw new HrError(`با این تغییر، حکم شماره ${badD.number} (تاریخ اعمال ${day(badD.effectiveDate)}) از دوره‌های همکاری بیرون می‌افتد`);
   const badL = loans.find((x) => !inAny(x.paymentDate));
@@ -205,20 +209,22 @@ async function assertCovered(employeeId: number, periods: Period[], db: Db) {
   }
 }
 
-/** تغییر تاریخ شروع همکاری: هیچ سابقه‌ی تحصیلی، تاهل، ایثارگری، انتصاب یا حکمی قبل از تاریخ جدید نباشد */
+/** تغییر تاریخ شروع همکاری: هیچ سابقه‌ی تحصیلی، تاهل، ایثارگری، انتصاب، انتساب شیفت تردد یا حکمی قبل از تاریخ جدید نباشد */
 async function assertNothingBeforeStart(employeeId: number, start: Date, db: Db) {
-  const [edu, mar, vet, asg, dec] = await Promise.all([
+  const [edu, mar, vet, asg, dec, shiftAsg] = await Promise.all([
     db.employeeEducationRecord.findFirst({ where: { employeeId, effectiveDate: { lt: start } }, orderBy: { effectiveDate: "asc" }, select: { effectiveDate: true } }),
     db.employeeMaritalRecord.findFirst({ where: { employeeId, effectiveDate: { lt: start } }, orderBy: { effectiveDate: "asc" }, select: { effectiveDate: true } }),
     db.employeeVeteranRecord.findFirst({ where: { employeeId, effectiveDate: { lt: start } }, orderBy: { effectiveDate: "asc" }, select: { effectiveDate: true } }),
     db.employeeAssignment.findFirst({ where: { employeeId, fromDate: { lt: start } }, orderBy: { fromDate: "asc" }, select: { fromDate: true } }),
     db.employmentDecree.findFirst({ where: { employeeId, effectiveDate: { lt: start } }, orderBy: { effectiveDate: "asc" }, select: { effectiveDate: true } }),
+    db.attendanceShiftAssignment.findFirst({ where: { employeeId, fromDate: { lt: start } }, orderBy: { fromDate: "asc" }, select: { fromDate: true } }),
   ]);
   const found: string[] = [];
   if (edu) found.push(`سابقه‌ی تحصیلی (${day(edu.effectiveDate)})`);
   if (mar) found.push(`سابقه‌ی تاهل (${day(mar.effectiveDate)})`);
   if (vet) found.push(`سابقه‌ی ایثارگری (${day(vet.effectiveDate)})`);
   if (asg) found.push(`انتصاب (${day(asg.fromDate)})`);
+  if (shiftAsg) found.push(`انتساب شیفت تردد (${day(shiftAsg.fromDate)})`);
   if (dec) found.push(`حکم کارگزینی (${day(dec.effectiveDate)})`);
   if (found.length) throw new HrError(`امکان تغییر شروع همکاری به ${day(start)} وجود ندارد، به دلیل ثبت اطلاعات قبل از آن تاریخ: ${found.join("، ")}`);
 }
