@@ -644,16 +644,6 @@ export const REGISTRY: ModuleDef[] = [
           { key: "attendance-employees", title: "کارکنان", baseActions: ["view"] },
           { key: "attendance-shift-assignments", title: "انتساب شیفت", baseActions: CRUD },
           { key: "attendance-day-exceptions", title: "استثنای روز", baseActions: CRUD },
-          {
-            key: "attendance-leave-requests",
-            title: "درخواست مرخصی",
-            baseActions: CRUD,
-            actions: [
-              { key: "approve", title: "تایید" },
-              { key: "reject", title: "رد" },
-              { key: "unapprove", title: "برگشت از تایید / رد" },
-            ],
-          },
           { key: "attendance-leave-balance-entries", title: "مانده‌ی مرخصی", baseActions: CRUD },
           { key: "attendance-permits", title: "مجوزها", baseActions: CRUD },
           {
@@ -667,17 +657,6 @@ export const REGISTRY: ModuleDef[] = [
             ],
           },
           {
-            key: "attendance-mission-requests",
-            title: "درخواست ماموریت",
-            baseActions: CRUD,
-            actions: [
-              { key: "approve", title: "تایید" },
-              { key: "reject", title: "رد" },
-              { key: "unapprove", title: "برگشت از تایید / رد" },
-              { key: "finish", title: "پایان ماموریت و برگشت پایان" },
-            ],
-          },
-          {
             key: "attendance-mission-reports",
             title: "گزارش ماموریت",
             baseActions: CRUD,
@@ -688,6 +667,33 @@ export const REGISTRY: ModuleDef[] = [
             ],
           },
           { key: "attendance-punches", title: "ورود و خروج", baseActions: CRUD },
+        ],
+      },
+      {
+        key: "requests",
+        title: "درخواست‌های پرسنلی",
+        forms: [
+          {
+            key: "attendance-leave-requests",
+            title: "درخواست مرخصی",
+            baseActions: CRUD,
+            actions: [
+              { key: "approve", title: "تایید" },
+              { key: "reject", title: "رد" },
+              { key: "unapprove", title: "برگشت از تایید / رد" },
+            ],
+          },
+          {
+            key: "attendance-mission-requests",
+            title: "درخواست ماموریت",
+            baseActions: CRUD,
+            actions: [
+              { key: "approve", title: "تایید" },
+              { key: "reject", title: "رد" },
+              { key: "unapprove", title: "برگشت از تایید / رد" },
+              { key: "finish", title: "پایان ماموریت و برگشت پایان" },
+            ],
+          },
           {
             key: "attendance-correction-requests",
             title: "درخواست اصلاح تردد",

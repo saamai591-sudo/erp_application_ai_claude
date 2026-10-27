@@ -201,9 +201,9 @@ function ReqForm({ editId }: { editId?: number }) {
   const pending = !editId || meta?.status === "PENDING";
   const extra = editId && meta ? (
     <>
-      {meta.status === "PENDING" && hasPermission("attendance.operations.attendance-correction-requests.approve") && <button type="button" className="btn" disabled={busy} onClick={() => act("approve")}>تایید</button>}
-      {meta.status === "PENDING" && hasPermission("attendance.operations.attendance-correction-requests.reject") && <button type="button" className="btn secondary" disabled={busy} onClick={() => setRejectOpen(true)}>رد</button>}
-      {meta.status !== "PENDING" && hasPermission("attendance.operations.attendance-correction-requests.unapprove") && <button type="button" className="btn secondary" disabled={busy} onClick={() => act("unapprove")}>برگشت از {meta.status === "APPROVED" ? "تایید" : "رد"}</button>}
+      {meta.status === "PENDING" && hasPermission("attendance.requests.attendance-correction-requests.approve") && <button type="button" className="btn" disabled={busy} onClick={() => act("approve")}>تایید</button>}
+      {meta.status === "PENDING" && hasPermission("attendance.requests.attendance-correction-requests.reject") && <button type="button" className="btn secondary" disabled={busy} onClick={() => setRejectOpen(true)}>رد</button>}
+      {meta.status !== "PENDING" && hasPermission("attendance.requests.attendance-correction-requests.unapprove") && <button type="button" className="btn secondary" disabled={busy} onClick={() => act("unapprove")}>برگشت از {meta.status === "APPROVED" ? "تایید" : "رد"}</button>}
     </>
   ) : null;
 

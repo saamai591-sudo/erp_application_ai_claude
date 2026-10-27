@@ -241,7 +241,7 @@ function ReqForm({ editId }: { editId?: number }) {
   if (!loaded) return null;
   const pending = !editId || meta?.status === "PENDING";
   const canEditEnd = !!meta?.canEditEnd;
-  const P = "attendance.operations.attendance-mission-requests";
+  const P = "attendance.requests.attendance-mission-requests";
   const daily = !!meta && !meta.hourly;
   const extra = editId && meta ? (
     <>

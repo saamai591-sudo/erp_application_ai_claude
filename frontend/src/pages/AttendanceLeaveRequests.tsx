@@ -283,7 +283,7 @@ function ReqForm({ editId }: { editId?: number }) {
 
   if (!loaded) return null;
   const pending = !editId || meta?.status === "PENDING";
-  const P = "attendance.operations.attendance-leave-requests";
+  const P = "attendance.requests.attendance-leave-requests";
   const extra = editId && meta ? (
     <>
       {meta.status === "PENDING" && hasPermission(`${P}.approve`) && <button type="button" className="btn" disabled={busy} onClick={() => act("approve")}>تایید</button>}
