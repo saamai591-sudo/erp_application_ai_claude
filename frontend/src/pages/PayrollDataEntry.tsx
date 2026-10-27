@@ -13,6 +13,8 @@ import { useCalcTypes } from "../lib/useCalcTypes";
 import { WorkMonthPicker } from "../components/WorkMonthPicker";
 import { ExcelImportButton } from "../components/ExcelImport";
 import { ScrollGridWithTotals } from "../components/ScrollGridWithTotals";
+import { Modal } from "../components/Modal";
+import { usePermissions } from "../lib/usePermissions";
 
 // حقوق و دستمزد › عملیات › ورود اطلاعات: ماه را انتخاب کنید، «لود اطلاعات» را بزنید؛ گرید کد پرسنل، عنوان و به‌ازای هر عاملِ «ورود دستی» یک ستون
 // دارد. فرمت مجاز هر ستون را نوع پارامتر عامل تعیین می‌کند: ساعت دقیقه hhh:mm — روز عدد صحیح — عدد اعشاری — مبلغ اعشار تا ارز پایه.
@@ -68,6 +70,10 @@ export default function PayrollDataEntry() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { flash } = useSavedFlash();
+  const { hasPermission } = usePermissions();
+  // انتخاب ردیف‌ها (کارمندان) برای «حذف اطلاعات» و پنجره‌ی انتخاب عامل‌ها
+  const [picked, setPicked] = usePersistedState<number[]>("form:/payroll-data-entry:picked", []);
+  const [delDlg, setDelDlg] = useState<number[] | null>(null);
 
   const key = (e: number, c: number) => `${e}:${c}`;
 
@@ -81,8 +87,31 @@ export default function PayrollDataEntry() {
       setData(d);
       setOrig(init);
       setCells(init);
+      // انتخاب قبلی فقط برای ردیف‌هایی که هنوز هستند و قفل نیستند می‌ماند
+      setPicked(picked.filter((id) => d.rows.some((r) => r.employeeId === id && !r.locked)));
     } catch (e) {
       setError((e as ApiError).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const pickedSet = useMemo(() => new Set(picked), [picked]);
+  const selectableRows = (data?.rows ?? []).filter((r) => !r.locked);
+  const allPicked = selectableRows.length > 0 && selectableRows.every((r) => pickedSet.has(r.employeeId));
+  const togglePick = (id: number) => setPicked(pickedSet.has(id) ? picked.filter((x) => x !== id) : [...picked, id]);
+
+  async function deleteData() {
+    if (!data || !delDlg || delDlg.length === 0) return;
+    const rowsToClear = (data.rows ?? []).filter((r) => pickedSet.has(r.employeeId) && !r.locked);
+    setBusy(true);
+    try {
+      const r = await api.post("/payroll-data-entry/delete", { year: Number(sel.year), month: Number(sel.month), calcTypeId: Number(typeId), employeeIds: rowsToClear.map((x) => x.employeeId), componentIds: delDlg });
+      setDelDlg(null);
+      flash(r.deleted > 0 ? `${toFaDigits(String(r.deleted))} مقدار حذف شد` : "مقداری برای حذف وجود نداشت");
+      await load();
+    } catch (e) {
+      showError((e as ApiError).message);
     } finally {
       setBusy(false);
     }
@@ -213,6 +242,17 @@ export default function PayrollDataEntry() {
           <button type="button" className="btn" disabled={busy || !data || dirty.length === 0} onClick={save}>
             ذخیره{dirty.length ? ` (${toFaDigits(String(dirty.length))} تغییر)` : ""}
           </button>
+          {hasPermission("payroll.operations.payroll-data-entry.deleteData") && (
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={busy || !data || data.columns.length === 0 || picked.length === 0 || dirty.length > 0}
+              onClick={() => setDelDlg([])}
+              title={dirty.length > 0 ? "ابتدا تغییرات ذخیره‌نشده را ذخیره کنید" : picked.length === 0 ? "ابتدا ردیف‌ها (کارمندان) را انتخاب کنید" : "حذف اطلاعات عامل‌های انتخابی برای کارمندان انتخاب‌شده"}
+            >
+              حذف اطلاعات{picked.length ? ` (${toFaDigits(String(picked.length))} نفر)` : ""}
+            </button>
+          )}
         </div>
       </div>
 
@@ -220,9 +260,12 @@ export default function PayrollDataEntry() {
       {data && data.columns.length > 0 && (
         <ScrollGridWithTotals
           fill
-          totals={[{ cells: [null, `جمع (${toFaDigits(String(data.rows.length))} نفر)`, ...data.columns.map((c) => columnTotal(c))] }]}
+          totals={[{ cells: [null, null, `جمع (${toFaDigits(String(data.rows.length))} نفر)`, ...data.columns.map((c) => columnTotal(c))] }]}
           head={
               <tr>
+                <th style={{ width: 40 }}>
+                  <input type="checkbox" checked={allPicked} disabled={selectableRows.length === 0} onChange={() => setPicked(allPicked ? [] : selectableRows.map((r) => r.employeeId))} />
+                </th>
                 <th style={{ width: 110 }}>کد پرسنل</th>
                 <th>عنوان</th>
                 {data.columns.map((c) => (
@@ -234,9 +277,10 @@ export default function PayrollDataEntry() {
               </tr>
           }
         >
-              {data.rows.length === 0 && <tr><td colSpan={2 + data.columns.length} style={{ textAlign: "center", opacity: 0.7 }}>کارمندی با همکاری در این ماه یافت نشد</td></tr>}
+              {data.rows.length === 0 && <tr><td colSpan={3 + data.columns.length} style={{ textAlign: "center", opacity: 0.7 }}>کارمندی با همکاری در این ماه یافت نشد</td></tr>}
               {data.rows.map((r) => (
                 <tr key={r.employeeId}>
+                  <td><input type="checkbox" checked={pickedSet.has(r.employeeId)} disabled={r.locked} onChange={() => togglePick(r.employeeId)} /></td>
                   <td>{toFaDigits(r.personnelCode)}</td>
                   <td>{r.fullName}{r.locked && <span title="این نوع محاسبه برای این ماه انجام شده؛ برای ویرایش، ابتدا محاسبه را حذف کنید" style={{ marginInlineStart: 6, opacity: 0.7, fontSize: 12 }}>🔒 محاسبه‌شده</span>}</td>
                   {data.columns.map((c) => (
@@ -246,6 +290,34 @@ export default function PayrollDataEntry() {
               ))}
         </ScrollGridWithTotals>
       )}
+      {delDlg && data && (() => {
+        const pickedRows = data.rows.filter((r) => pickedSet.has(r.employeeId));
+        // تعداد مقدارهای موجود هر عامل بین کارمندان انتخاب‌شده (از آخرین بارگذاری)
+        const countOf = (c: Column) => pickedRows.filter((r) => (orig[key(r.employeeId, c.componentId)] ?? "") !== "").length;
+        const allCols = data.columns.map((c) => c.componentId);
+        const allChosen = allCols.length > 0 && allCols.every((id) => delDlg.includes(id));
+        return (
+          <Modal title="حذف اطلاعات ماهانه" onClose={() => setDelDlg(null)}>
+            <p style={{ marginTop: 0, fontSize: 13 }}>مقدار عامل‌های انتخابی برای <b>{toFaDigits(String(pickedRows.length))} نفر</b> انتخاب‌شده حذف می‌شود. عامل‌ها را انتخاب کنید:</p>
+            <div style={{ maxHeight: 300, overflowY: "auto", marginBottom: 8 }}>
+              <label className="checkbox-row" style={{ display: "flex", gap: 6, padding: "3px 0", fontWeight: 600 }}>
+                <input type="checkbox" checked={allChosen} onChange={() => setDelDlg(allChosen ? [] : allCols)} /> همه‌ی عامل‌ها
+              </label>
+              {data.columns.map((c) => (
+                <label key={c.componentId} className="checkbox-row" style={{ display: "flex", gap: 6, padding: "3px 0", alignItems: "center" }}>
+                  <input type="checkbox" checked={delDlg.includes(c.componentId)} onChange={() => setDelDlg(delDlg.includes(c.componentId) ? delDlg.filter((x) => x !== c.componentId) : [...delDlg, c.componentId])} />
+                  <span>{c.title}</span>
+                  <span style={{ opacity: 0.6, fontSize: 12 }}>({VALUE_TYPE_FA[c.valueType]} — {toFaDigits(String(countOf(c)))} مقدار ثبت‌شده)</span>
+                </label>
+              ))}
+            </div>
+            <div className="actions">
+              <button type="button" className="btn" disabled={busy || delDlg.length === 0} onClick={deleteData}>تایید و حذف</button>
+              <button type="button" className="btn secondary" onClick={() => setDelDlg(null)}>انصراف</button>
+            </div>
+          </Modal>
+        );
+      })()}
     </div>
   );
 }

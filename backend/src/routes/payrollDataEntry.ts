@@ -165,6 +165,42 @@ export async function saveDataEntries(ctx: DataEntryContext, entries: { employee
   return parsed.length;
 }
 
+/**
+ * حذف گروهیِ اطلاعات ماهانه برای کارمندان و عامل‌های انتخاب‌شده (همه‌یا‌هیچ). کنترل‌ها مثل ذخیره: عامل باید در این ماه «ورود دستی» باشد،
+ * کارمند در این ماه همکاری داشته باشد و حقوق همین نوع محاسبه برای هیچ‌یک از کارمندان انتخاب‌شده محاسبه نشده باشد (قفل). فقط ورودی‌های
+ * عامل‌های «ورود دستی» حذف می‌شود، پس مقدارهای ارسال‌شده از تردد هرگز با این کار پاک نمی‌شود. تعداد ردیف حذف‌شده برگردانده می‌شود.
+ */
+export async function deleteDataEntries(ctx: DataEntryContext, employeeIdsRaw: unknown, componentIdsRaw: unknown): Promise<number> {
+  const { year, month, range, calcType, columns } = ctx;
+  const employeeIds = [...new Set((Array.isArray(employeeIdsRaw) ? employeeIdsRaw : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  const componentIds = [...new Set((Array.isArray(componentIdsRaw) ? componentIdsRaw : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (employeeIds.length === 0) throw new DErr("کارمندی انتخاب نشده است");
+  if (componentIds.length === 0) throw new DErr("عاملی انتخاب نشده است");
+  const colIds = new Set(columns.map((c) => c.componentId));
+  const badComp = componentIds.find((id) => !colIds.has(id));
+  if (badComp !== undefined) throw new DErr("یکی از عامل‌های انتخاب‌شده در این ماه «ورود دستی» نیست");
+  const valid = new Set(await employeeIdsInPeriod(range.start, range.end, employeeIds));
+  if (employeeIds.some((id) => !valid.has(id))) throw new DErr("کارمندی در این ماه همکاری ندارد یا یافت نشد");
+  const calc = await prisma.payrollSlip.findFirst({ where: { year, month, calcTypeId: calcType.id, employeeId: { in: employeeIds } }, include: { employee: { select: { personnelCode: true } } } });
+  if (calc) throw new DErr(`«${calcType.title}» این ماه برای کارمند ${calc.employee.personnelCode} محاسبه شده است؛ برای حذف اطلاعات ماهانه ابتدا محاسبه را حذف کنید`);
+  return prisma.$transaction(async (tx) => {
+    // محاسبه ممکن است هم‌زمان انجام شده باشد؛ دوباره زیر تراکنش بررسی می‌شود
+    const again = await tx.payrollSlip.count({ where: { year, month, calcTypeId: calcType.id, employeeId: { in: employeeIds } } });
+    if (again > 0) throw new DErr("در همین لحظه حقوق یکی از کارمندان محاسبه شد؛ دوباره تلاش کنید");
+    return (await tx.payrollFactorInput.deleteMany({ where: { year, month, employeeId: { in: employeeIds }, componentId: { in: componentIds } } })).count;
+  });
+}
+
+router.post("/payroll-data-entry/delete", can(`${F}.deleteData`), async (req, res) => {
+  const b = req.body as { year: number; month: number; calcTypeId?: number; employeeIds: number[]; componentIds: number[] };
+  try {
+    const ctx = await prepareDataEntry(b.year, b.month, b.calcTypeId);
+    res.json({ deleted: await deleteDataEntries(ctx, b.employeeIds, b.componentIds) });
+  } catch (e) {
+    fail(res, e);
+  }
+});
+
 router.put("/payroll-data-entry", can(`${F}.edit`), async (req, res) => {
   const b = req.body as { year: number; month: number; calcTypeId?: number; entries: { employeeId: number; componentId: number; value: string | null }[] };
   try {

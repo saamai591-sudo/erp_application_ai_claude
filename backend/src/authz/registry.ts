@@ -753,7 +753,7 @@ export const REGISTRY: ModuleDef[] = [
         key: "operations",
         title: "عملیات",
         forms: [
-          { key: "payroll-data-entry", title: "ورود اطلاعات", baseActions: ["view", "edit"] },
+          { key: "payroll-data-entry", title: "ورود اطلاعات", baseActions: ["view", "edit"], actions: [{ key: "deleteData", title: "حذف اطلاعات" }] },
           { key: "personnel-constants", title: "مقادیر ثابت پرسنل", baseActions: ["view", "edit"] },
           {
             key: "payroll-payment-preps",
