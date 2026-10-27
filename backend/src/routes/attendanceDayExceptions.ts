@@ -5,7 +5,7 @@ import { findFormPrefix } from "../authz/registry";
 import type { AuthedRequest } from "../middleware/auth";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { AttendanceError } from "../services/attendancePunchService";
-import { exceptionShape, saveException } from "../services/attendanceDayExceptionService";
+import { deleteException, exceptionShape, saveException } from "../services/attendanceDayExceptionService";
 
 // مدیریت تردد › عملیات › «استثنای روز» (اصلاح ساعت شروع/پایان یا تعطیلی برای یک تاریخ). منطق فقط در services/attendanceDayExceptionService.ts.
 
@@ -47,7 +47,7 @@ router.put("/attendance-day-exceptions/:id", can(`${FORM}.edit`), async (req, re
 
 router.delete("/attendance-day-exceptions/:id", can(`${FORM}.delete`), async (req, res) => {
   try {
-    await prisma.attendanceDayException.delete({ where: { id: Number(req.params.id) } });
+    await deleteException(Number(req.params.id));
     res.json({ ok: true });
   } catch (e) {
     fail(res, e, "خطا در حذف استثنا");

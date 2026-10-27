@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { displayDate } from "../utils/dateDisplay";
-import { AttendanceError, EMPLOYEE_SELECT, assertEmployeeWorking, dayStr, parseDay, personName } from "./attendancePunchService";
+import { AttendanceError, EMPLOYEE_SELECT, assertEmployeeWorking, assertFromDateOpen, dayStr, parseDay, personName } from "./attendancePunchService";
 
 // مدیریت تردد › انتساب شیفت: تنها نویسنده‌ی AttendanceShiftAssignment. هر کارمند از «تاریخ شروع» هر انتساب تا شروع انتساب بعدی آن شیفت را دارد
 // (مؤثر در یک تاریخ = آخرین انتساب با تاریخ شروع ≤ آن تاریخ؛ ریشه‌ی تشخیص روز چرخه در attendanceWindowService). شیفت چرخشی «تاریخِ روز ۱ چرخه» می‌خواهد؛
@@ -51,6 +51,7 @@ async function lockMessage(a: { employeeId: number; fromDate: Date }): Promise<s
 
 export async function createAssignment(b: any, userId: number | null): Promise<{ id: number }> {
   const d = await clean(b);
+  await assertFromDateOpen(d.employeeId, d.fromDate);
   const c = await prisma.attendanceShiftAssignment.create({ data: { ...d, createdById: userId } });
   return { id: c.id };
 }
@@ -60,7 +61,9 @@ export async function updateAssignment(id: number, b: any): Promise<void> {
   if (!ex) throw new AttendanceError("انتساب یافت نشد");
   const lock = await lockMessage(ex);
   if (lock) throw new AttendanceError(lock);
+  await assertFromDateOpen(ex.employeeId, ex.fromDate);
   const d = await clean(b);
+  await assertFromDateOpen(d.employeeId, d.fromDate);
   if (d.employeeId !== ex.employeeId) throw new AttendanceError("کارمند انتساب قابل تغییر نیست؛ انتساب را حذف و دوباره ثبت کنید");
   await prisma.attendanceShiftAssignment.update({ where: { id }, data: d });
 }
@@ -70,5 +73,6 @@ export async function deleteAssignment(id: number): Promise<void> {
   if (!ex) throw new AttendanceError("انتساب یافت نشد");
   const lock = await lockMessage(ex);
   if (lock) throw new AttendanceError(lock);
+  await assertFromDateOpen(ex.employeeId, ex.fromDate);
   await prisma.attendanceShiftAssignment.delete({ where: { id } });
 }

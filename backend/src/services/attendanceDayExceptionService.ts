@@ -1,5 +1,5 @@
 import { prisma } from "../lib/prisma";
-import { AttendanceError, dayStr, minuteText, parseDay } from "./attendancePunchService";
+import { AttendanceError, assertDateOpenForAll, dayStr, minuteText, parseDay } from "./attendancePunchService";
 import type { TimelineRow } from "./attendanceShiftService";
 import { DAY_TYPE_FA, type AttDayType } from "./attendanceFormulaDefs";
 
@@ -101,6 +101,14 @@ export function effectText(e: { effect: string; newStartMinute: number | null; n
   return parts.join(" و ");
 }
 
+/** حذف استثنای روز (قفل: اگر ماهِ آن تاریخ برای کسی محاسبه شده باشد رد می‌شود) */
+export async function deleteException(id: number) {
+  const old = await prisma.attendanceDayException.findUnique({ where: { id }, select: { date: true } });
+  if (!old) throw new AttendanceError("استثنا یافت نشد");
+  await assertDateOpenForAll(old.date);
+  await prisma.attendanceDayException.delete({ where: { id } });
+}
+
 export function exceptionShape(r: any) {
   return {
     id: r.id,
@@ -126,9 +134,14 @@ function cleanMinute(v: unknown, label: string): number | null {
 }
 
 export async function saveException(body: any, userId: number | null, id?: number) {
+  if (id) {
+    const old = await prisma.attendanceDayException.findUnique({ where: { id }, select: { date: true } });
+    if (old) await assertDateOpenForAll(old.date);
+  }
   const title = String(body?.title ?? "").trim().replace(/\s+/g, " ");
   if (!title) throw new AttendanceError("عنوان استثنا الزامی است");
   const date = parseDay(body?.date, "تاریخ");
+  await assertDateOpenForAll(date);
   const allShifts = body?.allShifts === true;
   const shiftIds: number[] = allShifts ? [] : [...new Set<number>((Array.isArray(body?.shiftIds) ? body.shiftIds : []).map(Number).filter((n: number) => Number.isInteger(n) && n > 0))];
   if (!allShifts && shiftIds.length === 0) throw new AttendanceError("«همه‌ی شیفت‌ها» را بزنید یا دست‌کم یک شیفت انتخاب کنید");

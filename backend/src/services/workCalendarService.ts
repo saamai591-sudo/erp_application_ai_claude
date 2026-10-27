@@ -90,7 +90,7 @@ export async function missingMonthMessage(year: number, month: number): Promise<
 
 /** ماه‌های استفاده‌شده‌ی یک سال: فیش محاسبه‌شده، ورودی ماهانه یا روش محاسبه (ماه صدور یا اجرا) یا وام (شروع قسط، اصلاح، تعلیق) */
 export async function usedMonths(year: number): Promise<Set<number>> {
-  const [slips, inputs, execs, issues, values, loanStarts, adjMonths, suspFrom, suspTo] = await Promise.all([
+  const [slips, inputs, execs, issues, values, loanStarts, adjMonths, suspFrom, suspTo, attCalcs] = await Promise.all([
     prisma.payrollSlip.findMany({ where: { year }, distinct: ["month"], select: { month: true } }),
     prisma.payrollFactorInput.findMany({ where: { year }, distinct: ["month"], select: { month: true } }),
     prisma.payrollFactorMethod.findMany({ where: { execCalendarMonth: { year } }, select: { execCalendarMonth: { select: { month: true } } } }),
@@ -100,6 +100,7 @@ export async function usedMonths(year: number): Promise<Set<number>> {
     prisma.loanAdjustment.findMany({ where: { fromMonth: { year } }, select: { fromMonth: { select: { month: true } } } }),
     prisma.loanSuspension.findMany({ where: { fromMonth: { year } }, select: { fromMonth: { select: { month: true } } } }),
     prisma.loanSuspension.findMany({ where: { toMonth: { year } }, select: { toMonth: { select: { month: true } } } }),
+    prisma.attendanceCalculation.findMany({ where: { calendarMonth: { year } }, distinct: ["calendarMonthId"], select: { calendarMonth: { select: { month: true } } } }),
   ]);
   return new Set<number>([
     ...slips.map((x) => x.month),
@@ -111,5 +112,6 @@ export async function usedMonths(year: number): Promise<Set<number>> {
     ...adjMonths.map((x) => x.fromMonth.month),
     ...suspFrom.map((x) => x.fromMonth.month),
     ...suspTo.map((x) => x.toMonth.month),
+    ...attCalcs.map((x) => x.calendarMonth.month),
   ]);
 }

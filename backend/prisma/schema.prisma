@@ -4809,6 +4809,7 @@ model Employee {
   attendanceCorrections AttendanceCorrectionRequest[]
   attendanceLeaveRequests AttendanceLeaveRequest[]
   attendanceMissionRequests AttendanceMissionRequest[]
+  attendanceCalculations AttendanceCalculation[]
   attendanceLeaveBalanceEntries AttendanceLeaveBalanceEntry[]
   attendanceShiftAssignments AttendanceShiftAssignment[]
   payrollIssueSettings PayrollIssueSetting[]
@@ -5366,6 +5367,8 @@ model WorkCalendarMonth {
   trafficStartDate DateTime     @db.Date
   trafficEndDate   DateTime     @db.Date
   calendar         WorkCalendar @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  /// محاسبات تردد (یک رکورد برای هر کارمند در هر ماه؛ Restrict: ماهِ دارای محاسبه حذف نمی‌شود)
+  attendanceCalculations AttendanceCalculation[]
   /// ارجاع‌های حقوق و دستمزد به این ردیف (همه Restrict: ماه/تقویمِ استفاده‌شده حذف نمی‌شود)
   issueMethods     PayrollFactorMethod[]    @relation("MethodIssueMonth")
   execMethods      PayrollFactorMethod[]    @relation("MethodExecMonth")
@@ -6613,6 +6616,28 @@ model AttendanceMissionRequest {
   reports       AttendanceMissionReport[]
 
   @@index([employeeId, fromDate, toDate])
+}
+
+/// محاسبات تردد: یک رکورد برای هر کارمند در هر ماهِ تقویم کاری که با «محاسبه» ساخته می‌شود و با «حذف محاسبه» برمی‌گردد. وجودِ رکورد = قفلِ همه‌ی اطلاعات تردد آن کارمند در بازه‌ی تردد
+/// همان ماه (ترددها، درخواست‌های مرخصی/ماموریت/اصلاح، مجوزها، انتساب شیفت و استثنای روز). ردیف‌های ذخیره‌ی نتیجه‌ی هر عامل (مثل ردیف‌های فیش حقوق) بعداً با ارجاع به این جدول اضافه می‌شود.
+model AttendanceCalculation {
+  id              Int               @id @default(autoincrement())
+  employeeId      Int
+  calendarMonthId Int
+  calculatedAt    DateTime          @default(now())
+  calculatedById  Int?
+  /// روزهای دارای شیفتِ محاسبه‌شده
+  days            Int
+  /// روزهایی که بازه‌ی ناقص (تعداد فردِ تردد) داشتند
+  incompleteDays  Int               @default(0)
+  /// تعداد عوامل ماهانه‌ای که در محاسبه خطا دادند
+  factorErrors    Int               @default(0)
+  hasErrors       Boolean           @default(false)
+  employee        Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  calendarMonth   WorkCalendarMonth @relation(fields: [calendarMonthId], references: [id], onDelete: Restrict)
+
+  @@unique([employeeId, calendarMonthId])
+  @@index([calendarMonthId])
 }
 
 /// گزارش ماموریت: برای یک درخواستِ پایان‌یافته، بازه‌ای از آن را به یک نوع ماموریت (مثلاً دریا) می‌برد؛ فقط گزارش تاییدشده شمرده می‌شود

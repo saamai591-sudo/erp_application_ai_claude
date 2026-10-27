@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { displayDate } from "../utils/dateDisplay";
-import { AttendanceError, EMPLOYEE_SELECT, assertDayOpen, dayStr, minuteText, parseDay, personName } from "./attendancePunchService";
+import { AttendanceError, EMPLOYEE_SELECT, assertDaysOpen, dayStr, minuteText, parseDay, personName } from "./attendancePunchService";
 import { getPeriods, periodContains } from "./employmentStatusService";
 import { buildWorksheet } from "./attendanceWorksheetService";
 import { assertBalanceAllowed, lockEmployeeBalance, typeHasBalanceData } from "./attendanceLeaveBalanceService";
@@ -241,7 +241,7 @@ export async function cleanRequest(b: any, excludeId?: number): Promise<CleanReq
     if (!periodContains(periods, new Date(d * DAY_MS))) throw new AttendanceError(`کارمند در تاریخ ${displayDate(new Date(d * DAY_MS))} در دوره‌ی همکاری نیست`);
   }
   const q = { employeeId, fromDate, toDate, startMinute, endMinute };
-  await assertDayOpen(employeeId, fromDate);
+  await assertDaysOpen(employeeId, fromDate, toDate);
   // اول کنترل شیفت و حضور (پیام روشن‌تر)، بعد تداخل با درخواست‌های دیگر
   await assertShiftAndPresence(q);
   await assertNoRequestConflict(q, excludeId, ["PENDING", "APPROVED"]);
@@ -278,7 +278,7 @@ export async function approveRequest(id: number, userId: number | null) {
     if (!r) throw new AttendanceError("درخواست یافت نشد");
     if (r.status !== "PENDING") throw new AttendanceError("فقط درخواست در وضعیت «ثبت‌شده» قابل تایید است");
     if (r.leaveType.requiresAttachment && r._count.attachments === 0) throw new AttendanceError(`برای نوع مرخصی «${r.leaveType.title}» پیوست (مدرک) الزامی است؛ ابتدا مدرک را پیوست کنید`);
-    await assertDayOpen(r.employeeId, r.fromDate);
+    await assertDaysOpen(r.employeeId, r.fromDate, r.toDate);
     // در فاصله‌ی ثبت تا تایید ممکن است درخواست هم‌پوشان تاییدشده یا ترددِ تداخل‌دار ثبت شده باشد
     await assertNoRequestConflict(r, id, ["APPROVED"]);
     await assertShiftAndPresence(r);
@@ -298,10 +298,10 @@ export async function rejectRequest(id: number, userId: number | null, note: unk
 export async function unapproveRequest(id: number) {
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100012, ${Number(id)})`);
-    const r = await tx.attendanceLeaveRequest.findUnique({ where: { id }, select: { status: true, employeeId: true, fromDate: true, leaveTypeId: true } });
+    const r = await tx.attendanceLeaveRequest.findUnique({ where: { id }, select: { status: true, employeeId: true, fromDate: true, toDate: true, leaveTypeId: true } });
     if (!r) throw new AttendanceError("درخواست یافت نشد");
     if (r.status === "PENDING") throw new AttendanceError("درخواست در وضعیت «ثبت‌شده» است");
-    if (r.status === "APPROVED") await assertDayOpen(r.employeeId, r.fromDate);
+    if (r.status === "APPROVED") await assertDaysOpen(r.employeeId, r.fromDate, r.toDate);
     else {
       // درخواست ردشده دوباره «ثبت‌شده» و مصرف‌کننده‌ی مانده می‌شود
       await lockEmployeeBalance(tx, r.employeeId);

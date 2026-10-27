@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { displayDate } from "../utils/dateDisplay";
-import { AttendanceError, EMPLOYEE_SELECT, dayStr, parseDay, personName } from "./attendancePunchService";
+import { AttendanceError, EMPLOYEE_SELECT, assertDayOpen, dayStr, parseDay, personName } from "./attendancePunchService";
 import { STATUS_FA, lastCalculatedEnd, lastCalculatedEnds, lockMission } from "./attendanceMissionService";
 
 // مدیریت تردد › گزارش ماموریت — تنها محل قواعد. برای یک درخواستِ ماموریت روزانه‌ی تاییدشده و پایان‌یافته، بازه‌ای از آن را به یک نوع ماموریت (مثلاً دریا) می‌برد.
@@ -92,6 +92,7 @@ async function validateReport(d: CleanReport, excludeId?: number) {
   if (type.id === req.typeId) throw new AttendanceError(`نوع گزارش با نوعِ خودِ درخواست («${type.title}») یکی است؛ گزارش فقط برای بازه‌هایی با نوعِ متفاوت لازم است`);
   if (d.toDate < d.fromDate) throw new AttendanceError("تاریخ پایان قبل از تاریخ شروع است");
   if (d.fromDate < req.fromDate || d.toDate > req.toDate) throw new AttendanceError(`بازه‌ی گزارش باید داخل بازه‌ی ماموریت (${displayDate(req.fromDate)} تا ${displayDate(req.toDate)}) باشد`);
+  await assertDayOpen(req.employeeId, req.toDate);
   const lastEnd = await lastCalculatedEnd(req.employeeId);
   if (lastEnd && lastEnd >= req.toDate) throw new AttendanceError(`حقوق کارمند تا ${displayDate(lastEnd)} محاسبه شده و ماهِ پایانِ این ماموریت قفل است؛ برای تغییر گزارش ابتدا محاسبه‌ی آن ماه را حذف کنید`);
   const others = await prisma.attendanceMissionReport.findMany({
@@ -173,6 +174,7 @@ export async function unapproveReport(id: number) {
     if (!r) throw new AttendanceError("گزارش یافت نشد");
     if (r.status === "PENDING") throw new AttendanceError("گزارش در وضعیت «ثبت‌شده» است");
     if (r.status === "APPROVED") {
+      await assertDayOpen(r.request.employeeId, r.request.toDate);
       const lastEnd = await lastCalculatedEnd(r.request.employeeId);
       if (lastEnd && lastEnd >= r.request.toDate) throw new AttendanceError(`حقوق کارمند تا ${displayDate(lastEnd)} محاسبه شده و ماهِ پایانِ این ماموریت قفل است؛ ابتدا محاسبه‌ی آن ماه را حذف کنید`);
     } else {

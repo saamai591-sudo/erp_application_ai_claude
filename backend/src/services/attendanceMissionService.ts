@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma";
 import { displayDate } from "../utils/dateDisplay";
-import { AttendanceError, EMPLOYEE_SELECT, assertDayOpen, dayStr, minuteText, parseDay, personName } from "./attendancePunchService";
+import { AttendanceError, EMPLOYEE_SELECT, assertDayOpen, assertDaysOpen, dayStr, minuteText, parseDay, personName } from "./attendancePunchService";
 import { getPeriods, periodContains } from "./employmentStatusService";
 import { assertNoRequestConflict, assertShiftAssigned } from "./attendanceLeaveService";
 import { lastCalculatedYm } from "./payrollLoanService";
@@ -142,7 +142,7 @@ export async function cleanMission(b: any, excludeId?: number): Promise<CleanMis
     if (len > DAY) throw new AttendanceError("ماموریت ساعتی حداکثر ۲۴ ساعتِ پیوسته است؛ برای مدت بیشتر «ماموریت روزانه» ثبت کنید");
   } else if (dayNum(toDate) - dayNum(fromDate) + 1 > MAX_REQUEST_DAYS) throw new AttendanceError(`ماموریت حداکثر ${MAX_REQUEST_DAYS} روز در هر درخواست است`);
   await assertCooperation(employeeId, fromDate, toDate);
-  await assertDayOpen(employeeId, fromDate);
+  await assertDaysOpen(employeeId, fromDate, toDate);
   await assertShiftAssigned(employeeId, fromDate, "ماموریت");
   await assertNoPresence({ employeeId, fromDate, toDate, startMinute, endMinute });
   await assertNoRequestConflict({ employeeId, fromDate, toDate, startMinute, endMinute }, excludeId, ["PENDING", "APPROVED"], "MISSION");
@@ -172,14 +172,15 @@ export const lockMission = (tx: any, requestId: number) => tx.$executeRawUnsafe(
  * کنترل‌های تاریخ پایانِ تازه برای درخواست روزانه‌ی تاییدشده (تغییر «تا تاریخ» یا «پایان ماموریت»): بعد از شروع، حداکثر ۳۶۶ روز،
  * قبل از پایانِ آخرین ماهِ محاسبه‌شده‌ی حقوق کارمند نباشد، کارمند در همه‌ی روزها در همکاری باشد و با درخواست دیگری هم‌پوشان نشود.
  */
-async function validateNewEnd(r: { id: number; employeeId: number; fromDate: Date; startMinute: number | null }, newTo: Date) {
+async function validateNewEnd(r: { id: number; employeeId: number; fromDate: Date; toDate: Date; startMinute: number | null }, newTo: Date) {
   if (r.startMinute !== null) throw new AttendanceError("پایان ماموریت فقط برای ماموریت روزانه است");
   if (newTo < r.fromDate) throw new AttendanceError("تاریخ پایان قبل از تاریخ شروع ماموریت است");
   if (dayNum(newTo) - dayNum(r.fromDate) + 1 > MAX_REQUEST_DAYS) throw new AttendanceError(`ماموریت حداکثر ${MAX_REQUEST_DAYS} روز در هر درخواست است`);
   const lastEnd = await lastCalculatedEnd(r.employeeId);
   if (lastEnd && newTo < lastEnd) throw new AttendanceError(`تاریخ پایان ماموریت نمی‌تواند قبل از آخرین ماهِ محاسبه‌شده‌ی حقوق کارمند (تا ${displayDate(lastEnd)}) باشد`);
   await assertCooperation(r.employeeId, r.fromDate, newTo);
-  await assertDayOpen(r.employeeId, newTo);
+  // روزهای بین پایان قبلی و تازه (و هر دو سر) عوض می‌شوند و احتسابِ ماهِ پایان هم از روزِ پایان می‌آید
+  await assertDaysOpen(r.employeeId, r.toDate, newTo);
   await assertNoPresence({ employeeId: r.employeeId, fromDate: r.fromDate, toDate: newTo, startMinute: null, endMinute: null });
   await assertNoRequestConflict({ employeeId: r.employeeId, fromDate: r.fromDate, toDate: newTo, startMinute: null, endMinute: null }, r.id, ["PENDING", "APPROVED"], "MISSION");
 }
@@ -219,6 +220,7 @@ export async function unfinishMission(id: number) {
     const r = await tx.attendanceMissionRequest.findUnique({ where: { id }, include: { _count: { select: { reports: true } } } });
     if (!r) throw new AttendanceError("درخواست یافت نشد");
     if (!r.endedAt) throw new AttendanceError("پایان این ماموریت ثبت نشده است");
+    await assertDayOpen(r.employeeId, r.toDate);
     const lastEnd = await lastCalculatedEnd(r.employeeId);
     if (lastEnd && lastEnd >= r.toDate) throw new AttendanceError(`حقوق کارمند تا ${displayDate(lastEnd)} محاسبه شده است؛ برای برگشت پایان ماموریت ابتدا محاسبه‌ی آن ماه را حذف کنید`);
     if (r._count.reports > 0) throw new AttendanceError("برای این ماموریت گزارش ثبت شده است؛ ابتدا گزارش‌ها را حذف کنید");
@@ -232,7 +234,7 @@ export async function approveMission(id: number, userId: number | null) {
     const r = await tx.attendanceMissionRequest.findUnique({ where: { id } });
     if (!r) throw new AttendanceError("درخواست یافت نشد");
     if (r.status !== "PENDING") throw new AttendanceError("فقط درخواست در وضعیت «ثبت‌شده» قابل تایید است");
-    await assertDayOpen(r.employeeId, r.fromDate);
+    await assertDaysOpen(r.employeeId, r.fromDate, r.toDate);
     await assertShiftAssigned(r.employeeId, r.fromDate, "ماموریت");
     // در فاصله‌ی ثبت تا تایید ممکن است ترددی داخل بازه ثبت شده یا درخواست هم‌پوشانِ تاییدشده‌ای آمده باشد
     await assertNoPresence(r);
@@ -255,7 +257,7 @@ export async function unapproveMission(id: number) {
     if (!r) throw new AttendanceError("درخواست یافت نشد");
     if (r.status === "PENDING") throw new AttendanceError("درخواست در وضعیت «ثبت‌شده» است");
     if (r.endedAt) throw new AttendanceError("پایان این ماموریت ثبت شده است؛ ابتدا «برگشت پایان» را بزنید");
-    if (r.status === "APPROVED") await assertDayOpen(r.employeeId, r.fromDate);
+    if (r.status === "APPROVED") await assertDaysOpen(r.employeeId, r.fromDate, r.toDate);
     else await assertNoRequestConflict(r, id, ["PENDING", "APPROVED"], "MISSION"); // ردشده که دوباره «ثبت‌شده» می‌شود نباید با درخواست فعالِ دیگری هم‌پوشان باشد
     await tx.attendanceMissionRequest.update({ where: { id }, data: { status: "PENDING", decidedById: null, decidedAt: null, decisionNote: null } });
   });

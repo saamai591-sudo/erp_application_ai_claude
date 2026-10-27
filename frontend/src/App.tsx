@@ -115,6 +115,7 @@ import AttendanceLeaveRequests from "./pages/AttendanceLeaveRequests";
 import AttendanceLeaveBalance from "./pages/AttendanceLeaveBalance";
 import AttendanceLeaveBalanceReport from "./pages/AttendanceLeaveBalanceReport";
 import AttendanceLeaveEntitlements from "./pages/AttendanceLeaveEntitlements";
+import AttendanceCalculations from "./pages/AttendanceCalculations";
 import AttendanceMissionTypes from "./pages/AttendanceMissionTypes";
 import AttendanceMissionRequests from "./pages/AttendanceMissionRequests";
 import AttendanceMissionReports from "./pages/AttendanceMissionReports";
@@ -522,6 +523,7 @@ export default function App() {
             <Route path="/attendance-leave-requests" element={<AttendanceLeaveRequests />} />
             <Route path="/attendance-leave-requests/new" element={<AttendanceLeaveRequests />} />
             <Route path="/attendance-leave-requests/:id/edit" element={<AttendanceLeaveRequests />} />
+            <Route path="/attendance-calculation" element={<AttendanceCalculations />} />
             <Route path="/attendance-mission-types" element={<AttendanceMissionTypes />} />
             <Route path="/attendance-mission-types/new" element={<AttendanceMissionTypes />} />
             <Route path="/attendance-mission-types/:id/edit" element={<AttendanceMissionTypes />} />
