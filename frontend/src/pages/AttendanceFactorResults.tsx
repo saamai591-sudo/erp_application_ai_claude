@@ -10,7 +10,7 @@ import { toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { api } from "../lib/api";
 import { usePersistedState } from "../lib/usePersistedState";
-import { EmployeePickerField, useEmployeeOptions } from "./AttendancePunches";
+import { EmployeePickerField } from "./AttendancePunches";
 
 // مدیریت تردد › گزارش › «نتایج عوامل تردد»: محاسبه‌ی عوامل روزانه و ماهانه برای یک ماه تقویم کاری (بازه‌ی تردد همان ماه). مشتق و ذخیره‌نشده؛ هر مقدار ردپای فرمول
 // (شاخه‌ی اجراشده و عبارت جایگذاری‌شده) دارد که در «جزئیات» دیده می‌شود. روزِ دارای بازه‌ی ناقص «ناقص» علامت می‌خورد. قواعد در سرور (services/attendanceFactorService.ts).
@@ -88,14 +88,19 @@ const TIME_VARS = new Set(["PLANNED", "PLANNED_GROSS", "PRESENCE", "PRESENCE_IN_
 
 export default function AttendanceFactorResults() {
   const key = "/attendance-factor-results";
-  const [filter, setFilter] = usePersistedState(`${key}:filter`, { year: 0, month: 0, employeeId: "" });
+  const [filter, setFilter] = usePersistedState(`${key}:filter`, { year: 0, month: 0, to: "", employeeId: "" });
   const monthOf = { ...EMPTY_MONTH, year: filter.year, month: filter.month };
   const [tab, setTab] = usePersistedState(`${key}:tab`, "month");
   const [data, setData] = usePersistedState<Result | null>(key, null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState<{ title: string; vars?: Record<string, number>; values: Record<string, Val> } | null>(null);
-  const employees = useEmployeeOptions();
+  // کارمندان قابل انتخاب: انتسابِ شیفت تا پایان بازه‌ی تردد ماه انتخابی
+  const [employees, setEmployees] = useState<{ id: number; personnelCode: string; fullName: string }[]>([]);
+  useEffect(() => {
+    if (!filter.to) return;
+    api.get(`/attendance-factors/results/employees?to=${filter.to}`).then((rows: { id: number; code: string; name: string }[]) => setEmployees(rows.map((r) => ({ id: r.id, personnelCode: r.code, fullName: r.name })))).catch(() => {});
+  }, [filter.to]);
 
   async function load() {
     if (!filter.year || !filter.month) return;
@@ -140,7 +145,7 @@ export default function AttendanceFactorResults() {
       <ErrorToast message={error} />
       <div className="card ar-filters">
         <div style={{ display: "flex", alignItems: "flex-end", gap: 14, flexWrap: "wrap" }}>
-        <AttendanceMonthField value={monthOf} onChange={(v) => (v.year !== filter.year || v.month !== filter.month) && setFilter({ ...filter, year: v.year, month: v.month })} />
+        <AttendanceMonthField value={monthOf} onChange={(v) => (v.year !== filter.year || v.month !== filter.month || v.to !== filter.to) && setFilter({ ...filter, year: v.year, month: v.month, to: v.to, employeeId: employees.some((e) => String(e.id) === filter.employeeId) && v.to === filter.to ? filter.employeeId : "" })} />
         <div className="form-field-inline">
           <label>کارمند</label>
           <div style={{ display: "flex", gap: 4 }}>

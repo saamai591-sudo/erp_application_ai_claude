@@ -25,9 +25,9 @@ router.get("/attendance-worksheet", can(`${FORM}.view`), async (req, res) => {
   }
 });
 
-router.get("/attendance-review/employees", can(`${F_REVIEW}.view`), async (_req, res) => {
+router.get("/attendance-review/employees", can(`${F_REVIEW}.view`), async (req, res) => {
   try {
-    res.json(await listReviewEmployees());
+    res.json(await listReviewEmployees(parseDay(req.query.to, "تاریخ پایان بازه‌ی تردد")));
   } catch (e) {
     fail(res, e);
   }

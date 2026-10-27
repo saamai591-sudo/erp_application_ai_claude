@@ -19,21 +19,29 @@ export async function employeeOfUser(userId: number) {
   return prisma.employee.findFirst({ where: { partyId: u.partyId }, select: EMPLOYEE_SELECT });
 }
 
-/** فهرست کارمندان برای تب اول «مرور کارکرد»: کارمندانِ دارای انتسابِ شیفت یا تردد */
-export async function listReviewEmployees() {
-  const [asg, pun] = await Promise.all([
-    prisma.attendanceShiftAssignment.findMany({ select: { employeeId: true }, distinct: ["employeeId"] }),
-    prisma.attendancePunch.findMany({ select: { employeeId: true }, distinct: ["employeeId"] }),
-  ]);
-  const ids = [...new Set([...asg.map((x) => x.employeeId), ...pun.map((x) => x.employeeId)])];
+/**
+ * قاعده‌ی فهرست کارمندان در گزارش‌ها/محاسبات تردد: فقط کارمندی که تا «تاریخ پایانِ بازه‌ی تردد ماه انتخاب‌شده» (کوچکتر یا مساوی) انتسابِ شیفت دارد.
+ * تنها محل این قاعده (محاسبه تردد، مرور کارکرد و انتخاب کارمند در نتایج عوامل از همین استفاده می‌کنند).
+ */
+export async function employeeIdsWithShiftBy(to: Date, among?: number[]): Promise<Set<number>> {
+  const rows = await prisma.attendanceShiftAssignment.findMany({
+    where: { fromDate: { lte: to }, ...(among ? { employeeId: { in: among } } : {}) },
+    select: { employeeId: true },
+    distinct: ["employeeId"],
+  });
+  return new Set(rows.map((r) => r.employeeId));
+}
+
+/** فهرست کارمندان (مرور کارکرد و انتخاب کارمند نتایج عوامل): کارمندانی که تا تاریخ `to` انتسابِ شیفت دارند؛ شیفت = آخرین انتساب تا همان تاریخ */
+export async function listReviewEmployees(to: Date) {
+  const ids = [...(await employeeIdsWithShiftBy(to))];
   if (ids.length === 0) return [];
   const [emps, asgs] = await Promise.all([
     prisma.employee.findMany({ where: { id: { in: ids } }, select: EMPLOYEE_SELECT, orderBy: { personnelCode: "asc" } }),
-    prisma.attendanceShiftAssignment.findMany({ where: { employeeId: { in: ids } }, orderBy: [{ employeeId: "asc" }, { fromDate: "asc" }], include: { shift: { select: { title: true } } } }),
+    prisma.attendanceShiftAssignment.findMany({ where: { employeeId: { in: ids }, fromDate: { lte: to } }, orderBy: [{ employeeId: "asc" }, { fromDate: "asc" }], include: { shift: { select: { title: true } } } }),
   ]);
-  const today = dayNum(new Date());
   const shiftOf = new Map<number, string>();
-  for (const a of asgs) if (dayNum(a.fromDate) <= today) shiftOf.set(a.employeeId, a.shift.title);
+  for (const a of asgs) shiftOf.set(a.employeeId, a.shift.title);
   return emps.map((e) => ({ id: e.id, code: e.personnelCode, name: personName(e.party), shiftTitle: shiftOf.get(e.id) ?? "" }));
 }
 

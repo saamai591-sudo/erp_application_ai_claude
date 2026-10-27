@@ -26,7 +26,7 @@ interface EmpRow {
 const EMP_TAB = 0;
 const TAB_LABELS = ["کارمندان", "کارکرد", "ریز ورود و خروج"];
 const INFO_TEXT =
-  "در تب «کارمندان» یک یا چند کارمند را انتخاب کنید و سپس تب «کارکرد» یا «ریز ورود و خروج» را بزنید تا فقط برای همان‌ها نمایش داده شود؛ بدون انتخاب، همه‌ی کارمندان نمایش داده می‌شوند. " +
+  "در تب «کارمندان» (کارمندانی که تا پایان بازه‌ی تردد ماه انتخابی انتسابِ شیفت دارند) یک یا چند کارمند را انتخاب کنید و سپس تب «کارکرد» یا «ریز ورود و خروج» را بزنید تا فقط برای همان‌ها نمایش داده شود؛ بدون انتخاب، همه‌ی کارمندان نمایش داده می‌شوند. " +
   "بازه‌ی گزارش = بازه‌ی تردد ماه انتخابی (پیش‌فرض ماه جاری). ستون‌های عوامل، عامل‌های تردد روزانه‌ای هستند که «نمایش در گزارش کارکرد» دارند.";
 
 export default function AttendanceReview() {
@@ -45,11 +45,14 @@ export default function AttendanceReview() {
     setAttendanceReviewSnapshot({ chainState: { selections: chain.selections, order: chain.order }, activeTab, filters, employees, data, loadedKey, tabViewState: tabView.viewState });
   }, [chain.selections, chain.order, activeTab, filters, employees, data, loadedKey, tabView.viewState]);
 
-  async function loadEmployees() {
+  // فهرست کارمندان به ماه انتخابی وابسته است: فقط انتسابِ شیفت تا پایان بازه‌ی تردد همان ماه
+  const [employeesTo, setEmployeesTo] = useState(snapshot?.employees ? snapshot.filters.to : "");
+  async function loadEmployees(to: string) {
     setLoading(true);
     try {
-      const rows: { id: number; code: string; name: string; shiftTitle: string }[] = await api.get("/attendance-review/employees");
+      const rows: { id: number; code: string; name: string; shiftTitle: string }[] = await api.get(`/attendance-review/employees?to=${to}`);
       setEmployees(rows);
+      setEmployeesTo(to);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -58,11 +61,12 @@ export default function AttendanceReview() {
     }
   }
   useEffect(() => {
-    if (!employees) loadEmployees();
+    if (filters.to && filters.to !== employeesTo) loadEmployees(filters.to);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [filters.to]);
 
-  const selectedIds = useMemo(() => Array.from(chain.get(EMP_TAB)).map(Number).sort((a, b) => a - b), [chain.selections]);
+  // انتخاب‌های قبلیِ کارمندی که با ماه جدید دیگر در فهرست نیست کنار می‌رود
+  const selectedIds = useMemo(() => Array.from(chain.get(EMP_TAB)).map(Number).filter((id) => !employees || employees.some((e) => Number(e.id) === id)).sort((a, b) => a - b), [chain.selections, employees]);
   const key = `${filters.from}|${filters.to}|${selectedIds.join(",")}`;
 
   async function loadWorksheet() {
@@ -82,15 +86,15 @@ export default function AttendanceReview() {
     }
   }
   useEffect(() => {
-    if (activeTab !== EMP_TAB && employees && filters.year && key !== loadedKey) loadWorksheet();
+    if (activeTab !== EMP_TAB && employees && filters.year && employeesTo === filters.to && key !== loadedKey) loadWorksheet();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, key, employees, filters.year]);
+  }, [activeTab, key, employees, employeesTo, filters.year]);
 
   const empColumns = useMemo(
     (): BalanceTableColumn<EmpRow>[] => [
       { header: "کد پرسنلی", render: (r) => toFaDigits(r.code), sortValue: (r) => r.code, width: "120px", filterType: "string", filterValue: (r) => r.code },
       { header: "کارمند", render: (r) => r.name, sortValue: (r) => r.name, filterType: "string", filterValue: (r) => r.name },
-      { header: "شیفت جاری", render: (r) => r.shiftTitle, sortValue: (r) => r.shiftTitle, filterType: "string", filterValue: (r) => r.shiftTitle },
+      { header: "شیفت", render: (r) => r.shiftTitle, sortValue: (r) => r.shiftTitle, filterType: "string", filterValue: (r) => r.shiftTitle },
     ],
     []
   );
@@ -104,7 +108,7 @@ export default function AttendanceReview() {
   }
 
   const tabDefs = TAB_LABELS.map((label, idx) => ({ key: `att-${idx}`, label, count: idx === EMP_TAB ? chain.get(EMP_TAB).size : 0 }));
-  const refresh = () => (activeTab === EMP_TAB ? loadEmployees() : loadWorksheet());
+  const refresh = () => (activeTab === EMP_TAB ? loadEmployees(filters.to) : loadWorksheet());
 
   return (
     <div>

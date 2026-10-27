@@ -3,6 +3,7 @@ import { AttendanceError, EMPLOYEE_SELECT, dayStr, personName } from "./attendan
 import { employeeIdsInPeriod } from "./employmentStatusService";
 import { computeAttendanceResults } from "./attendanceFactorService";
 import { valueText } from "./attendancePermitService";
+import { employeeIdsWithShiftBy } from "./attendanceWorksheetReportService";
 
 // مدیریت تردد › عملیات › «محاسبه تردد» — تنها نویسنده‌ی AttendanceCalculation.
 // یک رکورد برای هر کارمند در هر ماهِ «تقویم کاری». «محاسبه» نتیجه‌ی ماه را از روی داده می‌سازد (computeAttendanceResults) و رکورد خلاصه را می‌نویسد؛ «حذف محاسبه» آن را برمی‌گرداند.
@@ -23,15 +24,16 @@ export function calculationShape(c: any) {
 /** کارمندانِ دارای همکاری در بازه‌ی تردد ماه + وضعیت محاسبه‌ی هر کدام */
 export async function monthRows(year: number, month: number) {
   const cal = await calendarMonth(year, month);
-  const ids = await employeeIdsInPeriod(cal.trafficStartDate, cal.trafficEndDate);
+  // فقط کارمندانی که تا پایان بازه‌ی تردد این ماه انتسابِ شیفت دارند (employeeIdsWithShiftBy)
+  const coop = await employeeIdsInPeriod(cal.trafficStartDate, cal.trafficEndDate);
+  const withShift = await employeeIdsWithShiftBy(cal.trafficEndDate, coop);
+  const ids = coop.filter((id) => withShift.has(id));
   if (ids.length === 0) return { from: dayStr(cal.trafficStartDate), to: dayStr(cal.trafficEndDate), rows: [] };
-  const [emps, calcs, assigned] = await Promise.all([
+  const [emps, calcs] = await Promise.all([
     prisma.employee.findMany({ where: { id: { in: ids } }, select: EMPLOYEE_SELECT, orderBy: { personnelCode: "asc" } }),
     prisma.attendanceCalculation.findMany({ where: { calendarMonthId: cal.id, employeeId: { in: ids } }, include: { _count: { select: { items: true } } } }),
-    prisma.attendanceShiftAssignment.findMany({ where: { employeeId: { in: ids }, fromDate: { lte: cal.trafficEndDate } }, select: { employeeId: true }, distinct: ["employeeId"] }),
   ]);
   const calcOf = new Map(calcs.map((c) => [c.employeeId, c]));
-  const hasShift = new Set(assigned.map((a) => a.employeeId));
   const rows = emps.map((e) => {
     const c = calcOf.get(e.id);
     return {
@@ -39,8 +41,7 @@ export async function monthRows(year: number, month: number) {
       personnelCode: e.personnelCode,
       fullName: personName(e.party),
       calculation: c ? calculationShape(c) : null,
-      // بدون انتسابِ شیفت تا پایان ماه روزِ کاری برای محاسبه نیست
-      blockedReason: !c && !hasShift.has(e.id) ? "شیفتی به کارمند تخصیص نیافته است" : null,
+      blockedReason: null as string | null,
     };
   });
   return { from: dayStr(cal.trafficStartDate), to: dayStr(cal.trafficEndDate), rows };

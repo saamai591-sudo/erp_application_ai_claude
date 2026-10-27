@@ -6,6 +6,8 @@ import { assertRecordNotStale } from "../utils/concurrency";
 import { AttendanceError } from "../services/attendancePunchService";
 import { computeAttendanceResults, deleteFactor, factorShape, saveFactor } from "../services/attendanceFactorService";
 import { listMethods } from "../services/attendanceMethodService";
+import { listReviewEmployees } from "../services/attendanceWorksheetReportService";
+import { parseDay } from "../services/attendancePunchService";
 
 // مدیریت تردد › تنظیمات › «عوامل تردد» (تعریف عامل روزانه/ماهانه/مجوز؛ روش‌های محاسبه‌شان در فرم «روش محاسبه» تعریف می‌شود و اینجا فقط خوانده می‌شود) و گزارش «نتایج عوامل تردد». منطق فقط در services/attendanceFactorService.ts.
 
@@ -23,6 +25,15 @@ router.get("/attendance-factors", async (req, res) => {
   if (req.query.level) where.level = req.query.level;
   const rows = await prisma.attendanceFactor.findMany({ where, orderBy: { id: "asc" }, include: { _count: { select: { methods: true } } } });
   res.json(rows.map(factorShape));
+});
+
+// کارمندان قابل انتخاب در «نتایج عوامل تردد»: انتسابِ شیفت تا پایان بازه‌ی تردد ماه (employeeIdsWithShiftBy)
+router.get("/attendance-factors/results/employees", can(`${F_RES}.view`), async (req, res) => {
+  try {
+    res.json(await listReviewEmployees(parseDay(req.query.to, "تاریخ پایان بازه‌ی تردد")));
+  } catch (e) {
+    fail(res, e, "خطا در بارگذاری");
+  }
 });
 
 router.get("/attendance-factors/results", can(`${F_RES}.view`), async (req, res) => {
