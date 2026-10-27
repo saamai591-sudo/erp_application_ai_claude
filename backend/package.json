@@ -14,7 +14,8 @@
     "backup-goods-technical-spec": "tsx src/scripts/backupGoodsTechnicalSpec.ts",
     "backfill-old-goods-code": "tsx src/scripts/backfillOldGoodsCode.ts",
     "restore-goods-technical-spec": "tsx src/scripts/restoreGoodsTechnicalSpec.ts",
-    "delete-goods-without-transactions": "tsx src/scripts/deleteGoodsItemsWithoutTransactions.ts"
+    "delete-goods-without-transactions": "tsx src/scripts/deleteGoodsItemsWithoutTransactions.ts",
+    "seed-test-sales-invoices": "tsx src/scripts/seedTestSalesInvoices.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.19.1",
