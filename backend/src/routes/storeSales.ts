@@ -5,7 +5,7 @@ import { findFormPrefix } from "../authz/registry";
 import type { AuthedRequest } from "../middleware/auth";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { paidBySale, receiptShape } from "../services/storeReceiptService";
-import { StoreSaleError, createStoreSale, deleteStoreSale, saleShape, sellableItems, updateStoreSale } from "../services/storeSaleService";
+import { StoreSaleError, createStoreSale, declareStoreSaleCredit, deleteStoreSale, revokeStoreSaleCredit, saleShape, sellableItems, updateStoreSale } from "../services/storeSaleService";
 
 // فروش فروشگاهی › عملیات › «فروش فروشگاهی»؛ منطق فقط در services/storeSaleService.ts.
 
@@ -47,6 +47,24 @@ router.get("/store-sales/:id", can(`${FORM}.view`), async (req, res) => {
   const receipts = await prisma.storeReceipt.findMany({ where: { saleId: s.id }, include: { station: { select: { title: true } }, cashBox: { select: { title: true } }, cardReader: { select: { title: true } } }, orderBy: { id: "asc" } });
   const paid = receipts.reduce((n, r) => n + Number(r.amount), 0);
   res.json({ ...saleShape(s, true, paid), receipts: receipts.map((r) => receiptShape(r)) });
+});
+
+// «ثبت نسیه» عامدانه‌ی باقیمانده‌ی دریافت (و لغو آن)
+router.post("/store-sales/:id/declare-credit", can(`${FORM}.declareCredit`), async (req, res) => {
+  try {
+    await declareStoreSaleCredit(Number(req.params.id), req.body?.note ? String(req.body.note) : null, (req as AuthedRequest).user?.id ?? null);
+    res.json({ ok: true });
+  } catch (e) {
+    fail(res, e, "خطا در ثبت نسیه");
+  }
+});
+router.post("/store-sales/:id/revoke-credit", can(`${FORM}.declareCredit`), async (req, res) => {
+  try {
+    await revokeStoreSaleCredit(Number(req.params.id));
+    res.json({ ok: true });
+  } catch (e) {
+    fail(res, e, "خطا در لغو نسیه");
+  }
 });
 
 router.post("/store-sales", can(`${FORM}.create`), async (req, res) => {

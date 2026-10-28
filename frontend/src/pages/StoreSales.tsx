@@ -82,6 +82,9 @@ interface ListRow {
   paid: number;
   remaining: number;
   paymentStatus: "UNPAID" | "PARTIAL" | "PAID";
+  creditDeclared?: boolean;
+  creditNote?: string;
+  settled?: boolean;
 }
 interface ReceiptRow {
   id: number;
@@ -183,6 +186,7 @@ function SaleList() {
           { header: "مبلغ قابل پرداخت", ...n((r) => r.payable), width: "140px" },
           { header: "دریافت‌شده", ...n((r) => r.paid), width: "120px" },
           { header: "باقی‌مانده", ...n((r) => r.remaining), width: "120px" },
+          { header: "نسیه", render: (r: ListRow) => (r.creditDeclared ? "نسیه" : r.settled === false ? "تسویه‌نشده" : ""), filterType: "string" as const, filterValue: (r: ListRow) => (r.creditDeclared ? "نسیه" : r.settled === false ? "تسویه‌نشده" : ""), width: "110px" },
           { header: "وضعیت پرداخت", ...s((r) => PAYMENT_FA[r.paymentStatus]), width: "110px" },
           { header: "وضعیت تحویل", ...s((r) => DELIVERY_FA[r.deliveryStatus]), width: "110px" },
         ]}
@@ -207,6 +211,9 @@ function SaleForm({ editId }: { editId?: number }) {
   const { hasPermission } = usePermissions();
   const { openTab } = useTabs();
   const [cashDialog, setCashDialog] = useState(false);
+  const [credit, setCredit] = useState<{ declared: boolean; note: string }>({ declared: false, note: "" });
+  const [creditDialog, setCreditDialog] = useState(false);
+  const [creditNote, setCreditNote] = useState("");
   const [paying, setPaying] = useState(false);
   const [cardDialog, setCardDialog] = useState(false);
   const [stations, setStations] = useState<StationOpt[]>([]);
@@ -229,6 +236,7 @@ function SaleForm({ editId }: { editId?: number }) {
         const d: Detail = await api.get(`/store-sales/${editId}`);
         setMeta({ number: d.number, deliveryStatus: d.deliveryStatus, updatedAt: d.updatedAt });
         setReceipts(d.receipts ?? []);
+        setCredit({ declared: !!d.creditDeclared, note: d.creditNote ?? "" });
         setPayInfo({ payable: d.payable, paid: d.paid, remaining: d.remaining, status: d.paymentStatus });
         setNewRec((x) => ({ ...x, date: localTodayIso() < d.date ? d.date : x.date, amount: d.remaining > 0 ? String(d.remaining) : "" }));
         if (!hasPersistedState(`${cacheKey}:header`)) {
@@ -273,7 +281,8 @@ function SaleForm({ editId }: { editId?: number }) {
   const customer = customers.find((c) => String(c.id) === header.customerId);
   const delivered = !!editId && meta?.deliveryStatus === "DELIVERED";
   const hasReceipts = !!editId && receipts.length > 0;
-  const locked = delivered || hasReceipts;
+  const locked = delivered || hasReceipts || credit.declared;
+  const canDeclareCredit = !!editId && !delivered && hasPermission("store-sales.operations.store-sales.declareCredit");
   const canReceive = !!editId && hasPermission("store-sales.operations.store-receipts.create");
   const canDeleteReceipt = hasPermission("store-sales.operations.store-receipts.delete");
   const canEditReceipt = hasPermission("store-sales.operations.store-receipts.edit");
@@ -343,6 +352,7 @@ function SaleForm({ editId }: { editId?: number }) {
         const d: Detail = await api.get(`/store-sales/${editId}`);
         setMeta({ number: d.number, deliveryStatus: d.deliveryStatus, updatedAt: d.updatedAt });
         setReceipts(d.receipts ?? []);
+        setCredit({ declared: !!d.creditDeclared, note: d.creditNote ?? "" });
         setPayInfo({ payable: d.payable, paid: d.paid, remaining: d.remaining, status: d.paymentStatus });
         setNewRec((x) => ({ ...x, date: localTodayIso() < d.date ? d.date : x.date, amount: d.remaining > 0 ? String(d.remaining) : "" }));
       } else {
@@ -359,6 +369,7 @@ function SaleForm({ editId }: { editId?: number }) {
     const d: Detail = await api.get(`/store-sales/${editId}`);
     setMeta({ number: d.number, deliveryStatus: d.deliveryStatus, updatedAt: d.updatedAt });
     setReceipts(d.receipts ?? []);
+        setCredit({ declared: !!d.creditDeclared, note: d.creditNote ?? "" });
     setPayInfo({ payable: d.payable, paid: d.paid, remaining: d.remaining, status: d.paymentStatus });
     setNewRec((x) => ({ ...x, amount: d.remaining > 0 ? String(d.remaining) : "" }));
   }
@@ -387,6 +398,25 @@ function SaleForm({ editId }: { editId?: number }) {
       setError((err as ApiError).message);
     } finally {
       setPaying(false);
+    }
+  }
+  async function declareCredit() {
+    setError(null);
+    try {
+      await api.post(`/store-sales/${editId}/declare-credit`, { note: creditNote });
+      setCreditDialog(false);
+      await reloadSale();
+    } catch (err) {
+      setCreditDialog(false);
+      setError((err as ApiError).message);
+    }
+  }
+  async function revokeCredit() {
+    try {
+      await api.post(`/store-sales/${editId}/revoke-credit`, {});
+      await reloadSale();
+    } catch (err) {
+      showError((err as ApiError).message);
     }
   }
   async function saveReceipt(r: ReceiptRow, v: { amount: number; description: string }) {
@@ -425,6 +455,13 @@ function SaleForm({ editId }: { editId?: number }) {
       <form id="store-sale-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
         {delivered && <div className="alert warn">این فروش تحویل شده است و قابل ویرایش یا حذف نیست.</div>}
+        {!delivered && credit.declared && (
+          <div className="alert warn" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span>باقیمانده‌ی این فروش به‌صورت <b>نسیه</b> ثبت شده است{credit.note ? ` — ${credit.note}` : ""}؛ ویرایش یا حذف فروش ممکن نیست.</span>
+            {canDeclareCredit && <button type="button" className="btn secondary" onClick={revokeCredit}>لغو نسیه</button>}
+          </div>
+        )}
+        {!delivered && !credit.declared && payInfo.remaining > 0 && <div className="alert warn">این فروش تسویه نشده است. یا دریافت را ثبت کنید یا باقیمانده را عامدانه «نسیه» کنید؛ فروشِ تسویه‌نشده‌ای که نسیه نشده باشد قابل تحویل نیست.</div>}
         {!delivered && hasReceipts && <div className="alert warn">برای این فروش دریافت ثبت شده است؛ برای ویرایش یا حذف فروش ابتدا دریافت‌ها را حذف کنید.</div>}
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
           <div className="form-grid">
@@ -587,6 +624,23 @@ function SaleForm({ editId }: { editId?: number }) {
             <p style={{ margin: "0 0 8px", fontSize: 13 }}>
               قابل پرداخت: <b>{formatAmountFa(payInfo.payable)}</b> — دریافت‌شده: <b>{formatAmountFa(payInfo.paid)}</b> — باقی‌مانده: <b>{formatAmountFa(payInfo.remaining)}</b> — وضعیت: <span className="badge">{PAYMENT_FA[payInfo.status]}</span>
             </p>
+            {canDeclareCredit && !credit.declared && payInfo.remaining > 0 && (
+              <button type="button" className="btn secondary" style={{ marginBottom: 8 }} onClick={() => setCreditDialog(true)}>
+                ثبت باقیمانده ({formatAmountFa(payInfo.remaining)}) به‌عنوان نسیه
+              </button>
+            )}
+            {creditDialog && (
+              <Modal title="ثبت نسیه" onClose={() => setCreditDialog(false)}>
+                <p style={{ fontSize: 16, margin: "8px 0 12px" }}>
+                  مبلغ <b>{formatAmountFa(payInfo.remaining)}</b> به‌صورت نسیه ثبت شود؟ بعد از آن ویرایش و حذف فروش بسته می‌شود (با «لغو نسیه» باز می‌شود).
+                </p>
+                <div className="form-field"><label>توضیح (اختیاری)</label><input value={creditNote} onChange={(e) => setCreditNote(e.target.value)} /></div>
+                <div className="actions" style={{ gap: 12, marginTop: 10 }}>
+                  <button type="button" className="btn" onClick={declareCredit}>بله، نسیه ثبت شود</button>
+                  <button type="button" className="btn secondary" onClick={() => setCreditDialog(false)}>انصراف</button>
+                </div>
+              </Modal>
+            )}
             {cardDialog && (
               <StoreCardReceiptDialog
                 readers={station?.cardReaders ?? []}

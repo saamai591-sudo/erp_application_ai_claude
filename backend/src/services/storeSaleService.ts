@@ -168,11 +168,38 @@ const userId = () => getRequestContext()?.userId ?? null;
 
 /** هر فروش فقط وقتی قابل ویرایش/حذف است که تحویل‌نشده و بدون دریافت باشد */
 export async function assertSaleEditable(id: number) {
-  const s = await prisma.storeSale.findUnique({ where: { id }, select: { id: true, deliveryStatus: true } });
+  const s = await prisma.storeSale.findUnique({ where: { id }, select: { id: true, deliveryStatus: true, creditDeclaredAt: true } });
   if (!s) throw new StoreSaleError("فروش یافت نشد");
+  if (s.creditDeclaredAt) throw new StoreSaleError("برای این فروش «نسیه» ثبت شده است؛ ابتدا نسیه را لغو کنید");
   if (s.deliveryStatus === "DELIVERED") throw new StoreSaleError("این فروش تحویل شده است و قابل ویرایش یا حذف نیست");
   if (await prisma.storeReceipt.findFirst({ where: { saleId: id }, select: { id: true } })) throw new StoreSaleError("برای این فروش دریافت ثبت شده است؛ ابتدا دریافت‌ها را حذف کنید");
   return s;
+}
+
+/**
+ * «ثبت نسیه»: کاربر عامدانه می‌گوید باقیمانده‌ی این فروش نسیه است. فقط وقتی باقیمانده‌ی دریافت مثبت است و فروش تحویل نشده؛ بعد از آن فروش «تسویه‌شده یا نسیه» حساب می‌شود
+ * (settled) و فرم ویرایش/حذف فروش قفل است (مبلغ نسیه نباید عوض شود). دریافت‌های بعدی هنوز ثبت می‌شود. زیر قفل «فروش» (7100022) تا با ثبت هم‌زمان دریافت ناسازگار نشود.
+ */
+export async function declareStoreSaleCredit(id: number, note: string | null, userId: number | null) {
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100022, ${id})`);
+    const s = await tx.storeSale.findUnique({ where: { id }, include: { lines: { select: { amount: true, vatAmount: true } } } });
+    if (!s) throw new StoreSaleError("فروش یافت نشد");
+    if (s.deliveryStatus === "DELIVERED") throw new StoreSaleError("این فروش تحویل شده است");
+    if (s.creditDeclaredAt) throw new StoreSaleError("نسیه‌ی این فروش قبلاً ثبت شده است");
+    const agg = await tx.storeReceipt.aggregate({ where: { saleId: id }, _sum: { amount: true } });
+    const remaining = saleTotals(s.lines).payable - Number(agg._sum.amount ?? 0);
+    if (!(remaining > 1e-6)) throw new StoreSaleError("این فروش باقیمانده‌ای ندارد؛ نسیه‌ای برای ثبت نیست");
+    await tx.storeSale.update({ where: { id }, data: { creditDeclaredAt: new Date(), creditDeclaredById: userId, creditNote: note?.trim() || null } });
+  });
+}
+
+export async function revokeStoreSaleCredit(id: number) {
+  const s = await prisma.storeSale.findUnique({ where: { id }, select: { deliveryStatus: true, creditDeclaredAt: true } });
+  if (!s) throw new StoreSaleError("فروش یافت نشد");
+  if (!s.creditDeclaredAt) throw new StoreSaleError("برای این فروش نسیه‌ای ثبت نشده است");
+  if (s.deliveryStatus === "DELIVERED") throw new StoreSaleError("این فروش تحویل شده است");
+  await prisma.storeSale.update({ where: { id }, data: { creditDeclaredAt: null, creditDeclaredById: null, creditNote: null } });
 }
 
 export async function createStoreSale(body: StoreSaleBody, allowPriceChange: boolean) {
@@ -274,6 +301,10 @@ export function saleShape(s: any, withLines = false, paid = 0) {
     paid,
     remaining: Math.max(0, totals.payable - paid),
     paymentStatus: (paid <= 1e-6 ? "UNPAID" : paid + 1e-6 >= totals.payable ? "PAID" : "PARTIAL") as "UNPAID" | "PARTIAL" | "PAID",
+    creditDeclared: !!s.creditDeclaredAt,
+    creditNote: s.creditNote ?? "",
+    /** تسویه‌شده یا نسیهٔ عامدانه؛ فروشِ غیرِ settled در فرم تحویلِ بعدی قابل تحویل نیست */
+    settled: !!s.creditDeclaredAt || totals.payable - paid <= 1e-6,
     updatedAt: s.updatedAt,
   };
   if (!withLines) return base;

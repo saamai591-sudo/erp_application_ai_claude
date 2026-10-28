@@ -6952,6 +6952,10 @@ model StoreSale {
   customerId     Int
   description    String?
   deliveryStatus StoreSaleDeliveryStatus @default(NOT_DELIVERED)
+  /// «ثبت نسیه»: کاربر عامدانه باقیمانده‌ی دریافت را نسیه اعلام کرده است؛ فروشی که نه تسویه شده نه نسیه اعلام شده «تسویه‌نشده» است و (در فرم تحویل بعدی) قابل تحویل نیست
+  creditDeclaredAt   DateTime?
+  creditDeclaredById Int?
+  creditNote         String?
   createdById    Int?
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
