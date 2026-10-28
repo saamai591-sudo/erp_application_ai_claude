@@ -453,6 +453,8 @@ model BankAccount {
   treasuryAccountSettings TreasuryAccountSetting[]
   chequeBookLeaves       ChequeBookLeaf[]
   cardReaders            CardReader[]
+  stationLinks               SalesStationBankAccount[]
+  storeReceipts              StoreReceipt[]
 
   @@unique([bankPartyId, accountNumber])
   treasuryOpeningLines TreasuryOpeningBankAccount[]
@@ -6921,6 +6923,18 @@ model SalesStation {
   storeReceipts StoreReceipt[]
   cardReaders   SalesStationCardReader[]
   shifts        SalesShift[]
+  bankAccounts  SalesStationBankAccount[]
+}
+
+/// حساب‌های بانکیِ قابل دریافت (حواله) برای ایستگاه فروش
+model SalesStationBankAccount {
+  id            Int          @id @default(autoincrement())
+  stationId     Int
+  bankAccountId Int
+  station       SalesStation @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  bankAccount   BankAccount  @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+
+  @@unique([stationId, bankAccountId])
 }
 
 /// شیفت فروش: هر ایستگاه چند شیفت دارد. در فروش فروشگاهی «شیفت + تاریخ شروع شیفت» جایگزین انتخاب ایستگاه است (ایستگاه از شیفت می‌آید)؛ ساعت شروع/پایان فقط اطلاعات است.
@@ -7029,6 +7043,10 @@ model StoreReceipt {
   /// دریافت نقد: صندوقِ ایستگاه؛ دریافت کارتی: خالی (و cardReaderId پر) — CHECK در migration 20270202100000
   cashBoxId      Int?
   cardReaderId   Int?
+  /// دریافت حواله: حساب بانکیِ مقصد (باید به ایستگاه اختصاص داده شده باشد)
+  bankAccountId  Int?
+  /// شماره پیگیری — اختیاری، برای دریافت کارتخوان و حواله
+  referenceNumber String?
   amount         Decimal      @db.Decimal(36, 10)
   description    String?
   createdById    Int?
@@ -7039,6 +7057,7 @@ model StoreReceipt {
   station        SalesStation @relation(fields: [stationId], references: [id])
   cashBox        CashBox?     @relation(fields: [cashBoxId], references: [id])
   cardReader     CardReader?  @relation(fields: [cardReaderId], references: [id], onDelete: Restrict)
+  bankAccount    BankAccount? @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
 
   @@unique([fiscalPeriodId, number])
   @@index([saleId])

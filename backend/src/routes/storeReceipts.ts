@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
+import { BANK_ACCOUNT_TITLE_INCLUDE } from "../utils/detailValues";
 import { StoreSaleError } from "../services/storeSaleService";
 import { createStoreReceipt, createStoreReceipts, deleteStoreReceipt, payableSales, receiptShape, updateStoreReceipt } from "../services/storeReceiptService";
 
@@ -15,6 +16,7 @@ const INCLUDE = {
   station: { select: { title: true } },
   cashBox: { select: { title: true } },
   cardReader: { select: { title: true } },
+  bankAccount: { include: BANK_ACCOUNT_TITLE_INCLUDE },
   sale: { select: { number: true, customer: { select: { party: { select: { detailTitle: true, name: true, firstName: true, lastName: true } } } } } },
 } as const;
 
@@ -48,11 +50,11 @@ router.post("/store-receipts", can(`${FORM}.create`), async (req, res) => {
 });
 
 // ثبت هم‌زمانِ چند دریافت کارتی (از دیالوگ «دریافت با کارتخوان» فرم فروش): { saleId, date, description?, items: [{ cardReaderId, amount }] } — همه‌یا‌هیچ
-router.post("/store-receipts/card-batch", can(`${FORM}.create`), async (req, res) => {
+router.post(["/store-receipts/card-batch", "/store-receipts/batch"], can(`${FORM}.create`), async (req, res) => {
   try {
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
-    if (!items.length) throw new StoreSaleError("حداقل یک کارتخوان را انتخاب کنید");
-    if (items.some((x: any) => !x?.cardReaderId)) throw new StoreSaleError("برای هر ردیف کارتخوان الزامی است");
+    if (!items.length) throw new StoreSaleError("حداقل یک ردیف را انتخاب کنید");
+    if (items.some((x: any) => !x?.cardReaderId && !x?.bankAccountId)) throw new StoreSaleError("برای هر ردیف کارتخوان یا حساب بانکی الزامی است");
     const created = await createStoreReceipts({ ...req.body, items });
     res.status(201).json({ created });
   } catch (e) {

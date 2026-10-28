@@ -43,6 +43,7 @@ interface StationRow {
   costCenterTitle: string;
   description: string;
   cardReaders?: CardReaderOpt[];
+  bankAccounts?: { id: number }[];
   updatedAt?: string;
 }
 interface CardReaderOpt {
@@ -133,7 +134,7 @@ function StationList() {
   );
 }
 
-const EMPTY = { title: "", isActive: true, offering: "GOODS" as Offering, cashBoxId: "", warehouseId: "", salesTypeId: "", customerId: "", costCenterId: "", description: "", cardReaderIds: [] as number[] };
+const EMPTY = { title: "", isActive: true, offering: "GOODS" as Offering, cashBoxId: "", warehouseId: "", salesTypeId: "", customerId: "", costCenterId: "", description: "", cardReaderIds: [] as number[], bankAccountIds: [] as number[] };
 
 function StationForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
@@ -149,14 +150,17 @@ function StationForm({ editId }: { editId?: number }) {
   const [costCenters, setCostCenters] = useState<CostCenterOpt[]>([]);
   const [allReaders, setAllReaders] = useState<CardReaderOpt[]>([]);
   const [pickReaders, setPickReaders] = useState(false);
+  const [allBanks, setAllBanks] = useState<{ id: number; detailCode: string; detailTitle: string; isActive?: boolean }[]>([]);
+  const [pickBanks, setPickBanks] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const { flash } = useSavedFlash();
 
   useEffect(() => {
-    Promise.all([api.get("/cash-boxes"), api.get("/warehouses"), api.get("/sales-types"), api.get("/customers"), api.get("/cost-centers"), api.get("/card-readers")])
-      .then(([cb, w, st, c, cc, crs]) => {
+    Promise.all([api.get("/cash-boxes"), api.get("/warehouses"), api.get("/sales-types"), api.get("/customers"), api.get("/cost-centers"), api.get("/card-readers"), api.get("/banking/accounts")])
+      .then(([cb, w, st, c, cc, crs, bas]) => {
         setAllReaders(crs);
+        setAllBanks(bas);
         setCashBoxes(cb);
         setWarehouses((w as Opt[]).filter((x) => x.isActive !== false));
         setSalesTypes(st);
@@ -168,7 +172,7 @@ function StationForm({ editId }: { editId?: number }) {
     api.get(`/sales-stations/${editId}`).then((r: StationRow) => {
       setCode(r.code);
       setUpdatedAt(r.updatedAt);
-      if (!hasPersistedState(cacheKey)) setForm({ title: r.title, isActive: r.isActive, offering: r.offering, cashBoxId: String(r.cashBoxId), warehouseId: r.warehouseId ? String(r.warehouseId) : "", salesTypeId: String(r.salesTypeId), customerId: String(r.customerId), costCenterId: String(r.costCenterId), description: r.description, cardReaderIds: (r.cardReaders ?? []).map((x) => x.id) });
+      if (!hasPersistedState(cacheKey)) setForm({ title: r.title, isActive: r.isActive, offering: r.offering, cashBoxId: String(r.cashBoxId), warehouseId: r.warehouseId ? String(r.warehouseId) : "", salesTypeId: String(r.salesTypeId), customerId: String(r.customerId), costCenterId: String(r.costCenterId), description: r.description, cardReaderIds: (r.cardReaders ?? []).map((x) => x.id), bankAccountIds: (r.bankAccounts ?? []).map((x) => x.id) });
       setLoaded(true);
     }).catch((e) => setError(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -196,6 +200,7 @@ function StationForm({ editId }: { editId?: number }) {
       costCenterId: Number(form.costCenterId),
       description: form.description,
       cardReaderIds: form.cardReaderIds ?? [],
+      bankAccountIds: form.bankAccountIds ?? [],
       updatedAt,
     };
     try {
@@ -229,6 +234,8 @@ function StationForm({ editId }: { editId?: number }) {
   const warehouse = pick(warehouses, form.warehouseId);
   const cashBox = pick(cashBoxes, form.cashBoxId);
   const salesType = pick(salesTypes, form.salesTypeId);
+  const bankIds = form.bankAccountIds ?? [];
+  const stationBanks = bankIds.map((id) => allBanks.find((b) => b.id === id)).filter((x): x is NonNullable<typeof x> => !!x);
   const readerIds = form.cardReaderIds ?? [];
   const stationReaders = readerIds.map((id) => allReaders.find((r) => r.id === id)).filter((x): x is CardReaderOpt => !!x);
 
@@ -338,6 +345,46 @@ function StationForm({ editId }: { editId?: number }) {
             </table>
           </div>
         </PartySectionCard>
+        <PartySectionCard id="station-banks" title="حساب‌های بانکی دریافت" onAdd={() => setPickBanks(true)} addLabel="افزودن حساب بانکی">
+          <div>
+            <div style={{ margin: "0 0 8px" }}>
+              <span style={{ fontSize: 12, opacity: 0.75 }}>حواله‌ی فروش‌های این ایستگاه فقط به همین حساب‌های بانکی قابل ثبت است («دریافت با حواله»).</span>
+            </div>
+            <table className="je-lines-table">
+              <thead>
+                <tr><th>کد تفصیل</th><th>عنوان تفصیل</th><th></th></tr>
+              </thead>
+              <tbody>
+                {stationBanks.length === 0 && <tr><td colSpan={3} style={{ textAlign: "center", opacity: 0.7 }}>حساب بانکی‌ای برای دریافت تعریف نشده است</td></tr>}
+                {stationBanks.map((b) => (
+                  <tr key={b.id}>
+                    <td>{toFaDigits(b.detailCode)}</td>
+                    <td>{toFaDigits(b.detailTitle)}</td>
+                    <td><button type="button" className="btn danger" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => setForm({ ...form, bankAccountIds: bankIds.filter((x) => x !== b.id) })}>حذف</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </PartySectionCard>
+        {pickBanks && (
+          <MultiPickerDialog<{ id: number; detailCode: string; detailTitle: string; isActive?: boolean }>
+            title="افزودن حساب بانکی"
+            rows={allBanks.filter((b) => b.isActive !== false || bankIds.includes(b.id))}
+            columns={[
+              { header: "کد تفصیل", render: (b) => toFaDigits(b.detailCode), filterValue: (b) => b.detailCode, width: "130px" },
+              { header: "عنوان تفصیل", render: (b) => toFaDigits(b.detailTitle), filterValue: (b) => b.detailTitle },
+            ]}
+            initialChecked={new Set(bankIds)}
+            confirmLabel="تایید"
+            wide
+            onConfirm={(checked) => {
+              setForm({ ...form, bankAccountIds: allBanks.filter((b) => checked.has(b.id)).map((b) => b.id) });
+              setPickBanks(false);
+            }}
+            onClose={() => setPickBanks(false)}
+          />
+        )}
         {pickReaders && (
           <MultiPickerDialog<CardReaderOpt>
             title="افزودن کارتخوان به ایستگاه"

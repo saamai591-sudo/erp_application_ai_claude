@@ -24,12 +24,27 @@ import { Modal } from "../components/Modal";
 import { AmountInput } from "../components/AmountInput";
 import { localTodayIso } from "../lib/formatDate";
 import { stageFormPrefill, takeFormPrefill } from "../lib/formPrefill";
-import { StoreCardReceiptDialog, StationCardReader, ExistingReceiptsTable } from "../components/StoreCardReceiptDialog";
+import { StoreCardReceiptDialog, ExistingReceiptsTable, ExistingReceipt, ReceiptPayee } from "../components/StoreCardReceiptDialog";
 
 // فروش فروشگاهی › عملیات › «فروش فروشگاهی»: اول تاریخ و ایستگاه انتخاب می‌شود؛ ردیف‌ها با بارکدخوان (فیلد بارکد کالا) یا جست‌وجو اضافه می‌شوند، مقدار پیش‌فرض ۱ و قابل‌تغییر است.
 // فی از «اعلامیه قیمت فروش» با حوزه‌ی همان ایستگاه خوانده می‌شود (پله‌ی مقدار هم)؛ کالای بدون فی در آن اعلامیه اصلاً قابل انتخاب نیست. فی فقط با مجوز «تغییر فی» قابل تغییر است.
 // سند حسابداری و حواله انبار ندارد؛ تا وقتی «تحویل‌نشده» است تعدادش از موجودی گزارش‌ها کم می‌شود. قواعد نهایی در سرور (services/storeSaleService.ts).
 
+interface StationCardReader {
+  id: number;
+  code: number;
+  title: string;
+  terminalNumber: string;
+  merchantNumber: string;
+  bankAccountId: number;
+  bankAccountCode: string;
+  bankAccountTitle: string;
+}
+interface StationBank {
+  id: number;
+  detailCode: string;
+  detailTitle: string;
+}
 interface StationOpt {
   id: number;
   code: number;
@@ -39,6 +54,7 @@ interface StationOpt {
   customerCode: number | null;
   customerTitle: string;
   cardReaders?: StationCardReader[];
+  bankAccounts?: StationBank[];
 }
 interface CustomerOpt {
   id: number;
@@ -106,8 +122,10 @@ interface ReceiptRow {
   amount: number;
   description: string;
   updatedAt?: string;
-  method?: "CASH" | "CARD";
+  method?: "CASH" | "CARD" | "TRANSFER";
   cardReaderTitle?: string;
+  bankAccountTitle?: string;
+  referenceNumber?: string;
 }
 interface DetailLine {
   goodsItemId: number;
@@ -231,6 +249,7 @@ function SaleForm({ editId }: { editId?: number }) {
   const [creditNote, setCreditNote] = useState("");
   const [paying, setPaying] = useState(false);
   const [cardDialog, setCardDialog] = useState(false);
+  const [transferDialog, setTransferDialog] = useState(false);
   const [stations, setStations] = useState<StationOpt[]>([]);
   const [shifts, setShifts] = useState<ShiftOpt[]>([]);
   const [customers, setCustomers] = useState<CustomerOpt[]>([]);
@@ -308,8 +327,12 @@ function SaleForm({ editId }: { editId?: number }) {
   const canEditReceipt = hasPermission("store-sales.operations.store-receipts.edit");
   /** تسویه‌شده (باقیمانده صفر) یا نسیه‌ی عامدانه */
   const settledNow = credit.declared || payInfo.remaining <= 1e-6;
-  const cashReceipts = receipts.filter((r) => r.method !== "CARD");
+  const cashReceipts = receipts.filter((r) => (r.method ?? "CASH") === "CASH");
+  const toExisting = (rs: ReceiptRow[]): ExistingReceipt[] => rs.map((r) => ({ id: r.id, number: r.number, date: r.date, amount: r.amount, description: r.description, payeeTitle: r.method === "CARD" ? r.cardReaderTitle : r.bankAccountTitle, referenceNumber: r.referenceNumber, updatedAt: r.updatedAt }));
   const cardReceipts = receipts.filter((r) => r.method === "CARD");
+  const transferReceipts = receipts.filter((r) => r.method === "TRANSFER");
+  const cardPayees: ReceiptPayee[] = (station?.cardReaders ?? []).map((c) => ({ id: c.id, label: `${toFaDigits(String(c.code))} — ${c.title}`, terminal: c.terminalNumber, account: `${toFaDigits(c.bankAccountCode)} - ${toFaDigits(c.bankAccountTitle)}` }));
+  const transferPayees: ReceiptPayee[] = (station?.bankAccounts ?? []).map((b) => ({ id: b.id, label: `${toFaDigits(b.detailCode)} - ${toFaDigits(b.detailTitle)}` }));
   const canChangePrice = !!sell?.canChangePrice;
 
   /** فی ردیف: دستی (اگر مجاز و وارد شده) وگرنه فی اعلامیه با پله‌ی مقدار (آینه‌ی سرور؛ مرجع نهایی سرور است) */
@@ -410,14 +433,16 @@ function SaleForm({ editId }: { editId?: number }) {
     }
   }
   /** دریافت کارتی از چند کارتخوان در یک تراکنش (همه‌یا‌هیچ) — مبلغ‌ها از دیالوگ می‌آید؛ سرور سقف جمعِ (نقد + کارتی) را دوباره کنترل می‌کند */
-  async function payByCards(items: { cardReaderId: number; amount: number }[]) {
+  async function payBatch(kind: "CARD" | "TRANSFER", items: { id: number; amount: number; referenceNumber: string }[]) {
     if (!editId || paying) return;
     setPaying(true);
     setError(null);
     try {
       const today = localTodayIso();
-      await api.post("/store-receipts/card-batch", { saleId: editId, date: today < header.date ? header.date : today, items, description: "" });
+      const body = items.map((x) => (kind === "CARD" ? { cardReaderId: x.id, amount: x.amount, referenceNumber: x.referenceNumber } : { bankAccountId: x.id, amount: x.amount, referenceNumber: x.referenceNumber }));
+      await api.post("/store-receipts/batch", { saleId: editId, date: today < header.date ? header.date : today, items: body, description: "" });
       setCardDialog(false);
+      setTransferDialog(false);
       await reloadSale();
     } catch (err) {
       setError((err as ApiError).message);
@@ -444,17 +469,17 @@ function SaleForm({ editId }: { editId?: number }) {
       showError((err as ApiError).message);
     }
   }
-  async function saveReceipt(r: ReceiptRow, v: { amount: number; description: string }) {
+  async function saveReceipt(r: { id: number; date: string; updatedAt?: string }, v: { amount: number; description: string; referenceNumber?: string }) {
     setError(null);
     try {
-      await api.put(`/store-receipts/${r.id}`, { date: r.date, amount: v.amount, description: v.description, updatedAt: r.updatedAt });
+      await api.put(`/store-receipts/${r.id}`, { date: r.date, amount: v.amount, description: v.description, referenceNumber: v.referenceNumber, updatedAt: r.updatedAt });
       await reloadSale();
     } catch (err) {
       showError((err as ApiError).message);
       await reloadSale();
     }
   }
-  async function removeReceipt(r: ReceiptRow) {
+  async function removeReceipt(r: { id: number }) {
     try {
       await api.del(`/store-receipts/${r.id}`);
       await reloadSale();
@@ -670,6 +695,11 @@ function SaleForm({ editId }: { editId?: number }) {
                 <span style={{ fontSize: 15, opacity: 0.85 }}>جمع دریافت‌شده</span>
                 <span style={{ fontSize: 20, fontWeight: 700 }}>{formatAmountFa(cardReceipts.reduce((n, r) => n + r.amount, 0))}</span>
               </button>
+              <button type="button" onClick={() => setTransferDialog(true)} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--accent, #3b6ea8)", background: "var(--surface, #fff)", color: "var(--accent, #3b6ea8)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
+                <span style={{ fontSize: 24, fontWeight: 800 }}>دریافت با حواله</span>
+                <span style={{ fontSize: 15, opacity: 0.85 }}>جمع دریافت‌شده</span>
+                <span style={{ fontSize: 20, fontWeight: 700 }}>{formatAmountFa(transferReceipts.reduce((n, r) => n + r.amount, 0))}</span>
+              </button>
               <button type="button" onClick={() => setCreditDialog(true)} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--danger, #b03a2e)", background: "var(--danger-soft, #fbeae8)", color: "var(--danger, #a32d22)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
                 <span style={{ fontSize: 24, fontWeight: 800 }}>نسیه</span>
                 <span style={{ fontSize: 15, opacity: 0.85 }}>{credit.declared ? "مبلغ نسیه" : "ثبت باقیمانده به‌عنوان نسیه"}</span>
@@ -715,24 +745,42 @@ function SaleForm({ editId }: { editId?: number }) {
             )}
             {cardDialog && (
               <StoreCardReceiptDialog
-                readers={station?.cardReaders ?? []}
+                mode="CARD"
+                payees={cardPayees}
                 remaining={payInfo.remaining}
                 decimalPlaces={dp}
                 busy={paying}
-                existing={cardReceipts}
+                existing={toExisting(cardReceipts)}
                 canEdit={canEditReceipt}
                 canDelete={canDeleteReceipt}
                 canAdd={canReceive}
                 onSaveExisting={saveReceipt}
                 onDeleteExisting={removeReceipt}
                 onClose={() => setCardDialog(false)}
-                onSubmit={payByCards}
+                onSubmit={(items) => payBatch("CARD", items)}
+              />
+            )}
+            {transferDialog && (
+              <StoreCardReceiptDialog
+                mode="TRANSFER"
+                payees={transferPayees}
+                remaining={payInfo.remaining}
+                decimalPlaces={dp}
+                busy={paying}
+                existing={toExisting(transferReceipts)}
+                canEdit={canEditReceipt}
+                canDelete={canDeleteReceipt}
+                canAdd={canReceive}
+                onSaveExisting={saveReceipt}
+                onDeleteExisting={removeReceipt}
+                onClose={() => setTransferDialog(false)}
+                onSubmit={(items) => payBatch("TRANSFER", items)}
               />
             )}
             {cashDialog && (
               <Modal title="دریافت نقد" onClose={() => setCashDialog(false)} wide>
                 <h4 style={{ margin: "0 0 6px" }}>دریافت‌های نقدیِ ثبت‌شده</h4>
-                <ExistingReceiptsTable receipts={cashReceipts} canEdit={canEditReceipt} canDelete={canDeleteReceipt} onSave={saveReceipt} onDelete={removeReceipt} />
+                <ExistingReceiptsTable receipts={toExisting(cashReceipts)} canEdit={canEditReceipt} canDelete={canDeleteReceipt} onSave={saveReceipt} onDelete={removeReceipt} />
                 {canReceive && payInfo.remaining > 0 && (
                   <>
                     <h4 style={{ margin: "16px 0 6px" }}>دریافت نقد جدید</h4>

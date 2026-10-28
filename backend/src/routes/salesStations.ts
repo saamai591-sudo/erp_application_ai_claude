@@ -23,6 +23,7 @@ const INCLUDE = {
   salesType: { select: { id: true, title: true } },
   customer: { select: { id: true, code: true, party: { select: { detailTitle: true, name: true, firstName: true, lastName: true, category: true } } } },
   costCenter: { select: { id: true, title: true, detailCode: true } },
+  bankAccounts: { include: { bankAccount: { select: { id: true, detailCode: true, accountNumber: true, ...BANK_ACCOUNT_TITLE_INCLUDE } } }, orderBy: { bankAccountId: "asc" } },
   cardReaders: { include: { cardReader: { include: { bankAccount: { select: { id: true, detailCode: true, accountNumber: true, ...BANK_ACCOUNT_TITLE_INCLUDE } } } } }, orderBy: { cardReader: { code: "asc" } } },
 } as const;
 
@@ -61,6 +62,7 @@ export function stationShape(s: any) {
       bankAccountCode: l.cardReader.bankAccount?.detailCode ?? "",
       bankAccountTitle: l.cardReader.bankAccount ? bankAccountDetailTitle(l.cardReader.bankAccount) : "",
     })),
+    bankAccounts: (s.bankAccounts ?? []).map((l: any) => ({ id: l.bankAccount.id, detailCode: l.bankAccount.detailCode, detailTitle: bankAccountDetailTitle(l.bankAccount) })),
     updatedAt: s.updatedAt,
   };
 }
@@ -98,7 +100,16 @@ async function clean(b: any) {
     const found = await prisma.cardReader.count({ where: { id: { in: cardReaderIds } } });
     if (found !== cardReaderIds.length) throw new StationError("کارتخوان یافت نشد");
   }
-  return { cardReaderIds, title, offering: offering as Offering, cashBoxId, warehouseId, salesTypeId, customerId, costCenterId, description, isActive: b?.isActive !== false };
+  // حساب‌های بانکیِ قابل دریافت: مجموعه‌ی کامل (undefined = دست‌نخورده)
+  let bankAccountIds: number[] | undefined;
+  if (b?.bankAccountIds !== undefined) {
+    if (!Array.isArray(b.bankAccountIds)) throw new StationError("فهرست حساب‌های بانکی نامعتبر است");
+    bankAccountIds = [...new Set<number>(b.bankAccountIds.map((x: unknown) => Number(x)))];
+    if (bankAccountIds.some((x) => !x)) throw new StationError("حساب بانکی نامعتبر است");
+    const found = await prisma.bankAccount.count({ where: { id: { in: bankAccountIds } } });
+    if (found !== bankAccountIds.length) throw new StationError("حساب بانکی یافت نشد");
+  }
+  return { cardReaderIds, bankAccountIds, title, offering: offering as Offering, cashBoxId, warehouseId, salesTypeId, customerId, costCenterId, description, isActive: b?.isActive !== false };
 }
 
 const fail = (res: any, e: any, fallback: string) => {
@@ -120,11 +131,11 @@ router.get("/sales-stations/:id", async (req, res) => {
 
 router.post("/sales-stations", can(`${FORM}.create`), async (req, res) => {
   try {
-    const { cardReaderIds, ...data } = await clean(req.body);
+    const { cardReaderIds, bankAccountIds, ...data } = await clean(req.body);
     for (let attempt = 0; ; attempt++) {
       try {
         const code = await nextSerialNumber(prisma.salesStation, "code");
-        const created = await prisma.salesStation.create({ data: { ...data, code, cardReaders: { create: (cardReaderIds ?? []).map((cardReaderId) => ({ cardReaderId })) } }, include: INCLUDE });
+        const created = await prisma.salesStation.create({ data: { ...data, code, cardReaders: { create: (cardReaderIds ?? []).map((cardReaderId) => ({ cardReaderId })) }, bankAccounts: { create: (bankAccountIds ?? []).map((bankAccountId) => ({ bankAccountId })) } }, include: INCLUDE });
         return res.status(201).json(stationShape(created));
       } catch (e: any) {
         if (e?.code === "P2002" && String(e?.meta?.target ?? "").includes("code") && attempt < 3) continue;
@@ -142,7 +153,7 @@ router.put("/sales-stations/:id", can(`${FORM}.edit`), async (req, res) => {
     const ex = await prisma.salesStation.findUnique({ where: { id } });
     if (!ex) return res.status(404).json({ error: "ایستگاه فروش یافت نشد" });
     assertRecordNotStale(ex.updatedAt, req.body?.updatedAt, "ایستگاه فروش");
-    const { cardReaderIds, ...data } = await clean(req.body);
+    const { cardReaderIds, bankAccountIds, ...data } = await clean(req.body);
     const updated = await prisma.$transaction(async (tx) => {
       if (cardReaderIds) {
         // کارتخوانِ حذف‌شده از ایستگاه نباید در دریافتِ همین ایستگاه استفاده شده باشد
@@ -152,6 +163,14 @@ router.put("/sales-stations/:id", can(`${FORM}.edit`), async (req, res) => {
         const have = new Set((await tx.salesStationCardReader.findMany({ where: { stationId: id }, select: { cardReaderId: true } })).map((x) => x.cardReaderId));
         const add = cardReaderIds.filter((x) => !have.has(x));
         if (add.length) await tx.salesStationCardReader.createMany({ data: add.map((cardReaderId) => ({ stationId: id, cardReaderId })) });
+      }
+      if (bankAccountIds) {
+        const used = await tx.storeReceipt.findMany({ where: { stationId: id, bankAccountId: { not: null, notIn: bankAccountIds } }, select: { bankAccountId: true }, distinct: ["bankAccountId"], take: 5 });
+        if (used.length) throw new StationError("حساب بانکی‌ای که در دریافت‌های این ایستگاه استفاده شده از فهرست حذف نمی‌شود");
+        await tx.salesStationBankAccount.deleteMany({ where: { stationId: id, bankAccountId: { notIn: bankAccountIds } } });
+        const haveB = new Set((await tx.salesStationBankAccount.findMany({ where: { stationId: id }, select: { bankAccountId: true } })).map((x) => x.bankAccountId));
+        const addB = bankAccountIds.filter((x) => !haveB.has(x));
+        if (addB.length) await tx.salesStationBankAccount.createMany({ data: addB.map((bankAccountId) => ({ stationId: id, bankAccountId })) });
       }
       return tx.salesStation.update({ where: { id }, data, include: INCLUDE });
     });
