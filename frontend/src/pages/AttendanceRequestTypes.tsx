@@ -122,9 +122,21 @@ function TypeForm({ editId }: { editId?: number }) {
 
   const leave = form.nature === "LEAVE";
   const lt = leaveTypes.find((t) => String(t.id) === form.leaveTypeId);
-  // نوع مرخصیِ «روزانه» نوع درخواست ساعتی نمی‌پذیرد
-  const hourlyBlocked = leave && lt?.unit === "DAY";
+  // واحد وابسته به نوع مرخصی است: نوع مرخصیِ «روز» فقط واحد «روزانه» دارد؛ تا نوع مرخصی انتخاب نشده واحد هم انتخاب نمی‌شود
   const locked = usage > 0;
+  const dayOnly = leave && lt?.unit === "DAY";
+  const unitDisabled = locked || (leave && !lt);
+  const [unitNote, setUnitNote] = useState<string | null>(null);
+  function changeLeaveType(id: string) {
+    const t = leaveTypes.find((x) => String(x.id) === id);
+    if (t?.unit === "DAY" && form.unit === "HOURLY") {
+      setUnitNote(`نوع مرخصی «${t.title}» فقط روزانه است؛ واحد روی «روزانه» تنظیم شد.`);
+      setForm({ ...form, leaveTypeId: id, unit: "DAILY" });
+    } else {
+      setUnitNote(null);
+      setForm({ ...form, leaveTypeId: id });
+    }
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -170,27 +182,30 @@ function TypeForm({ editId }: { editId?: number }) {
           </div>
           <div className="form-field">
             <label>ماهیت<RequiredMark /></label>
-            <select value={form.nature} disabled={locked} onChange={(e) => setForm({ ...form, nature: e.target.value, leaveTypeId: e.target.value === "LEAVE" ? form.leaveTypeId : "" })}>
+            <select value={form.nature} disabled={locked} onChange={(e) => { setUnitNote(null); setForm({ ...form, nature: e.target.value, leaveTypeId: e.target.value === "LEAVE" ? form.leaveTypeId : "" }); }}>
               <option value="LEAVE">مرخصی</option>
               <option value="MISSION">ماموریت</option>
             </select>
           </div>
-          <div className="form-field">
-            <label>واحد<RequiredMark /> <FieldHint label="واحد" text="روزانه: درخواست از تاریخ تا تاریخ. ساعتی: یک بازه‌ی پیوسته با ساعت شروع و پایان. فرم درخواست همین را می‌خواند. ماموریتِ ساعتی گزارش ندارد." /></label>
-            <select value={hourlyBlocked ? "DAILY" : form.unit} disabled={locked} onChange={(e) => setForm({ ...form, unit: e.target.value })}>
-              <option value="DAILY">روزانه</option>
-              <option value="HOURLY" disabled={hourlyBlocked}>ساعتی</option>
-            </select>
-          </div>
           {leave && (
             <div className="form-field">
-              <label>نوع مرخصی<RequiredMark /> <FieldHint label="نوع مرخصی" text="مانده، استحقاق و سقف‌های مرخصی روی همین نوع مرخصی می‌ماند؛ نوع درخواست‌های روزانه و ساعتیِ یک نوع مرخصی از یک مانده کم می‌کنند. نوع مرخصیِ «روزانه» فقط نوع درخواست روزانه می‌پذیرد." /></label>
-              <select value={form.leaveTypeId} disabled={locked} onChange={(e) => setForm({ ...form, leaveTypeId: e.target.value, unit: leaveTypes.find((t) => String(t.id) === e.target.value)?.unit === "DAY" ? "DAILY" : form.unit })}>
+              <label>نوع مرخصی<RequiredMark /> <FieldHint label="نوع مرخصی" text="مانده، استحقاق و سقف‌های مرخصی روی همین نوع مرخصی می‌ماند؛ نوع درخواست‌های روزانه و ساعتیِ یک نوع مرخصی از یک مانده کم می‌کنند. واحد نوع درخواست بعد از انتخاب نوع مرخصی تعیین می‌شود: نوع مرخصیِ «روز» فقط واحد روزانه دارد." /></label>
+              <select value={form.leaveTypeId} disabled={locked} onChange={(e) => changeLeaveType(e.target.value)}>
                 <option value="">— انتخاب کنید —</option>
                 {leaveTypes.filter((t) => t.isActive || String(t.id) === form.leaveTypeId).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
               </select>
             </div>
           )}
+          <div className="form-field">
+            <label>واحد<RequiredMark /> <FieldHint label="واحد" text="روزانه: درخواست از تاریخ تا تاریخ. ساعتی: یک بازه‌ی پیوسته با ساعت شروع و پایان. فرم درخواست همین را می‌خواند. برای مرخصی، واحد به نوع مرخصی وابسته است (نوع مرخصیِ «روز» فقط روزانه). ماموریتِ ساعتی گزارش ندارد." /></label>
+            <select value={form.unit} disabled={unitDisabled} onChange={(e) => { setUnitNote(null); setForm({ ...form, unit: e.target.value }); }}>
+              <option value="DAILY">روزانه</option>
+              {!dayOnly && <option value="HOURLY">ساعتی</option>}
+            </select>
+            {leave && !lt && <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>ابتدا نوع مرخصی را انتخاب کنید.</div>}
+            {dayOnly && <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>نوع مرخصیِ «{lt?.title}» فقط روزانه است.</div>}
+            {unitNote && <div style={{ fontSize: 12, color: "#b45309", marginTop: 2 }}>{unitNote}</div>}
+          </div>
           <div className="form-field">
             <label className="checkbox-row"><input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} /> فعال</label>
           </div>
