@@ -23,6 +23,7 @@ import { useTabs } from "../lib/TabsContext";
 import { Modal } from "../components/Modal";
 import { AmountInput } from "../components/AmountInput";
 import { localTodayIso } from "../lib/formatDate";
+import { stageFormPrefill, takeFormPrefill } from "../lib/formPrefill";
 import { StoreCardReceiptDialog, StationCardReader, ExistingReceiptsTable } from "../components/StoreCardReceiptDialog";
 
 // فروش فروشگاهی › عملیات › «فروش فروشگاهی»: اول تاریخ و ایستگاه انتخاب می‌شود؛ ردیف‌ها با بارکدخوان (فیلد بارکد کالا) یا جست‌وجو اضافه می‌شوند، مقدار پیش‌فرض ۱ و قابل‌تغییر است.
@@ -244,7 +245,9 @@ function SaleForm({ editId }: { editId?: number }) {
           setRows(d.lines.map((l) => ({ goodsItemId: l.goodsItemId, code: l.goodsItemCode, title: l.goodsItemTitle, unitTitle: l.unitTitle, quantity: String(l.quantity), priceOverride: "", stored: { unitPrice: l.unitPrice, vatAmount: l.vatAmount }, description: l.description })));
         }
       } else if (!hasPersistedState(`${cacheKey}:header`)) {
-        setHeader({ date: defaultDocumentDate(fp), stationId: "", customerId: "", description: "" });
+        // «فاکتور جدید» از یک فروش دیگر: همان ایستگاه و تاریخ (و مشتری پیش‌فرض ایستگاه)
+        const pre = takeFormPrefill<{ stationId: string; customerId: string; date: string }>(location.pathname);
+        setHeader({ date: pre?.date || defaultDocumentDate(fp), stationId: pre?.stationId ?? "", customerId: pre?.customerId ?? "", description: "" });
         setRows([]);
       }
       setLoaded(true);
@@ -610,6 +613,17 @@ function SaleForm({ editId }: { editId?: number }) {
         {editId && (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14, margin: "16px 0 8px" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  stageFormPrefill("/store-sales/new", { stationId: header.stationId, customerId: station ? String(station.customerId) : "", date: header.date });
+                  openTab("/store-sales/new");
+                }}
+                style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--accent, #3b6ea8)", background: "var(--surface, #fff)", color: "var(--accent, #3b6ea8)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}
+              >
+                <span style={{ fontSize: 24, fontWeight: 800 }}>فاکتور جدید</span>
+                <span style={{ fontSize: 15, opacity: 0.85 }}>همان ایستگاه و تاریخ</span>
+              </button>
               <button type="button" onClick={() => setCashDialog(true)} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--success, #1f9d55)", background: "var(--success-soft, #e6f6ec)", color: "var(--success, #17803f)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
                 <span style={{ fontSize: 24, fontWeight: 800 }}>دریافت نقد</span>
                 <span style={{ fontSize: 15, opacity: 0.85 }}>جمع دریافت‌شده</span>
@@ -624,6 +638,10 @@ function SaleForm({ editId }: { editId?: number }) {
                 <span style={{ fontSize: 24, fontWeight: 800 }}>نسیه</span>
                 <span style={{ fontSize: 15, opacity: 0.85 }}>{credit.declared ? "مبلغ نسیه" : "ثبت باقیمانده به‌عنوان نسیه"}</span>
                 <span style={{ fontSize: 20, fontWeight: 700 }}>{formatAmountFa(credit.declared ? payInfo.remaining : 0)}</span>
+              </button>
+              {/* کارکرد کارت چاپ بعداً تعریف می‌شود؛ فعلاً فقط کارت است */}
+              <button type="button" style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--ink-soft, #6b7280)", background: "var(--surface, #fff)", color: "var(--ink-soft, #4b5563)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
+                <span style={{ fontSize: 24, fontWeight: 800 }}>چاپ</span>
               </button>
             </div>
             <p style={{ margin: "0 0 8px", fontSize: 13 }}>
