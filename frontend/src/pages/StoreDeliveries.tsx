@@ -17,6 +17,7 @@ import { fetchSelectedFiscalPeriod, defaultDocumentDate } from "../lib/fiscalYea
 import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
+import { usePermissions } from "../lib/usePermissions";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 
 // فروش فروشگاهی › عملیات › «تحویل فروش»: کاربر در پنجره‌ی اول ایستگاه و «تا تاریخ» را می‌دهد (تاریخ باید در دوره‌ی مالی جاری باشد) و «تایید» را می‌زند؛ فروش‌ها و دریافت‌های تحویل‌نشده‌ی
@@ -61,6 +62,7 @@ interface Delivery {
   number?: number;
   date: string;
   status?: keyof typeof STATUS_FA;
+  issues?: { id: number; number: number; date: string; warehouseTitle: string }[];
   stationId: number;
   stationTitle: string;
   methods: MethodDef[];
@@ -158,6 +160,7 @@ function DeliveryForm({ editId }: { editId?: number }) {
   const [updatedAt, setUpdatedAt] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
   const { flash } = useSavedFlash();
+  const { hasPermission } = usePermissions();
 
   useEffect(() => {
     api.get("/sales-stations?activeOnly=true").then(setStations).catch(() => {});
@@ -202,6 +205,33 @@ function DeliveryForm({ editId }: { editId?: number }) {
         flash();
         navigate(`/store-deliveries/${created.id}/edit`);
       }
+    } catch (err) {
+      setError((err as ApiError).message);
+    }
+  }
+  async function reloadSaved() {
+    if (!editId) return;
+    const d: Delivery & { updatedAt?: string } = await api.get(`/store-sale-deliveries/${editId}`);
+    setData(d);
+    setUpdatedAt(d.updatedAt);
+    setStatuses(Object.fromEntries(d.sales.map((x) => [String(x.saleId), x.status])));
+  }
+  async function confirmDelivery() {
+    if (!editId || !window.confirm("با تایید تحویل فروش، اسناد انبار (حواله فروش فروشگاهی) صادر می‌شود. ادامه می‌دهید؟")) return;
+    setError(null);
+    try {
+      await api.post(`/store-sale-deliveries/${editId}/confirm`, {});
+      await reloadSaved();
+    } catch (err) {
+      setError((err as ApiError).message);
+    }
+  }
+  async function unconfirmDelivery() {
+    if (!editId || !window.confirm("با لغو تایید، حواله‌های انبار این تحویل فروش حذف می‌شوند. ادامه می‌دهید؟")) return;
+    setError(null);
+    try {
+      await api.post(`/store-sale-deliveries/${editId}/unconfirm`, {});
+      await reloadSaved();
     } catch (err) {
       setError((err as ApiError).message);
     }
@@ -253,7 +283,20 @@ function DeliveryForm({ editId }: { editId?: number }) {
   const tabs = [{ key: "SALES", label: `فروش (${toFaDigits(String(sales.length))})` }, ...methods.map((m) => ({ key: m.key, label: `${m.title} (${toFaDigits(String((data?.receipts ?? []).filter((r) => r.method === m.key).length))})` }))];
 
   return (
-    <FormPage title={editId ? `تحویل فروش شماره ${toFaDigits(String(data?.number ?? ""))}` : "تحویل فروش جدید"} formId="store-delivery-form" closePath="/store-deliveries" newPath="/store-deliveries/new" onDelete={editId && editable ? handleDelete : undefined} saveDisabled={!data || !editable}>
+    <FormPage title={editId ? `تحویل فروش شماره ${toFaDigits(String(data?.number ?? ""))}` : "تحویل فروش جدید"} formId="store-delivery-form" closePath="/store-deliveries" newPath="/store-deliveries/new" onDelete={editId && editable ? handleDelete : undefined} saveDisabled={!data || !editable}
+      toolbarExtra={
+        editId && data ? (
+          <>
+            {data.status === "REGISTERED" && hasPermission("store-sales.operations.store-deliveries.confirm") && (
+              <button type="button" className="btn" onClick={confirmDelivery}>تایید</button>
+            )}
+            {data.status === "CONFIRMED" && hasPermission("store-sales.operations.store-deliveries.unconfirm") && (
+              <button type="button" className="btn secondary" onClick={unconfirmDelivery}>لغو تایید</button>
+            )}
+          </>
+        ) : undefined
+      }
+    >
       {askModal}
       <form id="store-delivery-form" onSubmit={onSubmit}>
         <ErrorToast message={asking ? null : error} />
@@ -277,6 +320,11 @@ function DeliveryForm({ editId }: { editId?: number }) {
                 <input disabled value={editId && data.status ? STATUS_FA[data.status] : "ثبت‌نشده"} />
               </div>
             </div>
+            {editId && (data.issues?.length ?? 0) > 0 && (
+              <p style={{ margin: "6px 0", fontSize: 13 }}>
+                حواله‌های انبار: {data.issues!.map((i) => `شماره ${toFaDigits(String(i.number))} (${i.warehouseTitle} — ${formatJalaliDate(i.date)})`).join("، ")}
+              </p>
+            )}
             <div className="party-tabs" style={{ marginTop: 8 }}>
               {tabs.map((t) => (
                 <button key={t.key} type="button" className={`party-tab ${tab === t.key ? "active" : ""}`} onClick={() => setTab(t.key)}>

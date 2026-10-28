@@ -40,6 +40,8 @@ export interface StockExcludeOptions {
   excludeProductionConsumptionReturnId?: number;
   excludeFixedAssetIssueId?: number;
   excludeInventoryCountingShortageId?: number;
+  excludeStoreSaleIssueId?: number;
+  excludeStoreSaleReturnId?: number;
   /** فروش فروشگاهیِ در حال ویرایش (تعداد فروش‌های «تحویل‌نشده» از موجودی کم می‌شود) */
   excludeStoreSaleId?: number;
 }
@@ -66,6 +68,8 @@ interface SignedTypeRule {
 export const SIGNED_TYPES: SignedTypeRule[] = [
   { documentType: "INITIAL_INVENTORY", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeInitialInventoryId" },
   { documentType: "WAREHOUSE_RECEIPT", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeWarehouseReceiptId" },
+  { documentType: "STORE_SALE_RETURN", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeStoreSaleReturnId" },
+  { documentType: "STORE_SALE_ISSUE", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeStoreSaleIssueId" },
   { documentType: "SALES_RETURN", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeSalesReturnId" },
   { documentType: "PRODUCTION_RECEIPT", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeProductionReceiptId" },
   { documentType: "CENTER_CONSUMPTION_RETURN", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeCenterConsumptionReturnId" },

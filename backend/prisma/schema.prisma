@@ -2631,6 +2631,8 @@ enum InventoryDocumentType {
   INVENTORY_COUNTING_SHORTAGE // Inventory Count Shortage — سند مستقل، بدون مبنا، بدون تایید حسابداری فردی (فقط تایید انبار دسته‌ای)
   SALES_DELIVERY // Sales Issue
   SALES_RETURN
+  STORE_SALE_ISSUE // حواله فروش فروشگاهی — با «تایید تحویل فروش» خودکار ساخته می‌شود (وابسته به لایسنس فروش فروشگاهی)
+  STORE_SALE_RETURN // برگشت حواله فروش فروشگاهی
   SUPPLIER_RETURN
   PRODUCTION_RECEIPT
   CENTER_CONSUMPTION
@@ -2686,6 +2688,9 @@ model InventoryDocument {
   lines             InventoryDocumentLine[]
   purchaseCostLines PurchaseCostLine[]
   quantityClose     WarehouseQuantityClose?
+  /// حواله‌ی فروش فروشگاهی که «تایید تحویل فروش» ساخته (خالی برای بقیه‌ی اسناد)
+  storeDeliveryId   Int?
+  storeDelivery     StoreSaleDelivery?       @relation(fields: [storeDeliveryId], references: [id], onDelete: Restrict)
 
   @@unique([documentType, fiscalPeriodId, number])
   details           InventoryDocumentDetail[]
@@ -7101,6 +7106,8 @@ model StoreSaleDelivery {
   items          StoreSaleDeliverySale[]
   sales          StoreSale[]
   receipts       StoreReceipt[]
+  inventoryDocuments InventoryDocument[]
+  confirmedAt    DateTime?
 
   @@unique([fiscalPeriodId, number])
   @@index([stationId, date])

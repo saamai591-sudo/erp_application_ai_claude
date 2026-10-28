@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { StoreSaleError } from "../services/storeSaleService";
-import { buildDeliveryPreview, createStoreDelivery, deleteStoreDelivery, listStoreDeliveries, loadStoreDelivery, updateStoreDelivery } from "../services/storeSaleDeliveryService";
+import { buildDeliveryPreview, confirmStoreDelivery, createStoreDelivery, deleteStoreDelivery, listStoreDeliveries, listStoreSaleIssues, loadStoreDelivery, unconfirmStoreDelivery, updateStoreDelivery } from "../services/storeSaleDeliveryService";
 
 // فروش فروشگاهی › عملیات › «تحویل فروش»؛ منطق فقط در services/storeSaleDeliveryService.ts.
 
@@ -58,6 +58,33 @@ router.delete("/store-sale-deliveries/:id", can(`${FORM}.delete`), async (req, r
   } catch (e) {
     fail(res, e, "خطا در حذف تحویل فروش");
   }
+});
+
+router.post("/store-sale-deliveries/:id/confirm", can(`${FORM}.confirm`), async (req, res) => {
+  try {
+    res.json(await confirmStoreDelivery(Number(req.params.id)));
+  } catch (e) {
+    fail(res, e, "خطا در تایید تحویل فروش");
+  }
+});
+
+router.post("/store-sale-deliveries/:id/unconfirm", can(`${FORM}.unconfirm`), async (req, res) => {
+  try {
+    await unconfirmStoreDelivery(Number(req.params.id));
+    res.json({ ok: true });
+  } catch (e) {
+    fail(res, e, "خطا در لغو تایید تحویل فروش");
+  }
+});
+
+// فهرست فقط‌خواندنیِ حواله / برگشت حواله‌ی فروش فروشگاهی (اسناد انبارِ ساخته‌شده با تایید تحویل)
+const ISSUE_FORM = findFormPrefix("store-sale-issues");
+const RETURN_FORM = findFormPrefix("store-sale-returns");
+router.get("/store-sale-issues", can(`${ISSUE_FORM}.view`), async (_req, res) => {
+  res.json(await listStoreSaleIssues("ISSUE"));
+});
+router.get("/store-sale-returns", can(`${RETURN_FORM}.view`), async (_req, res) => {
+  res.json(await listStoreSaleIssues("RETURN"));
 });
 
 export default router;

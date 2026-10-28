@@ -268,6 +268,8 @@ const RAW_MODULES: ModuleGroup[] = [
         items: [
           { key: "store-sales", label: "فروش فروشگاهی", list: "/store-sales", create: "/store-sales/new", icon: "cart" },
           { key: "store-deliveries", label: "تحویل فروش", list: "/store-deliveries", create: "/store-deliveries/new", icon: "cart" },
+          { key: "store-sale-issues", label: "حواله فروش فروشگاهی", list: "/store-sale-issues", icon: "ledger", type: "report" },
+          { key: "store-sale-returns", label: "برگشت حواله فروش فروشگاهی", list: "/store-sale-returns", icon: "ledger", type: "report" },
           { key: "store-receipts", label: "دریافت فروشگاهی", list: "/store-receipts", create: "/store-receipts/new", icon: "wallet" },
         ],
       },

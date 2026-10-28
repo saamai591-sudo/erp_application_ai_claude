@@ -77,6 +77,8 @@ const DOC_TYPE_FA: Record<string, string> = {
   WAREHOUSE_ADJUSTMENT: "اضافات انبارگردانی",
   SALES_DELIVERY: "حواله فروش",
   SALES_RETURN: "برگشت از فروش",
+  STORE_SALE_ISSUE: "حواله فروش فروشگاهی",
+  STORE_SALE_RETURN: "برگشت حواله فروش فروشگاهی",
   SUPPLIER_RETURN: "برگشت به تامین‌کننده",
   PRODUCTION_RECEIPT: "رسید تولید",
   CENTER_CONSUMPTION: "مصرف مرکز هزینه",
@@ -92,6 +94,7 @@ const DOC_TYPE_FA: Record<string, string> = {
 // دقیقاً همان جهت‌ها/علائم warehouseStockService.SIGNED_TYPES — صادره یعنی OUT
 export const OUTBOUND_DOC_TYPES = new Set([
   "SALES_DELIVERY",
+  "STORE_SALE_ISSUE",
   "CENTER_CONSUMPTION",
   "PROJECT_CONSUMPTION",
   "PRODUCTION_CONSUMPTION",
@@ -131,6 +134,8 @@ export async function getMovements(f: MovementFilters): Promise<Movement[]> {
             "WAREHOUSE_ADJUSTMENT",
             "SALES_DELIVERY",
             "SALES_RETURN",
+            "STORE_SALE_ISSUE",
+            "STORE_SALE_RETURN",
             "SUPPLIER_RETURN",
             "PRODUCTION_RECEIPT",
             "CENTER_CONSUMPTION",

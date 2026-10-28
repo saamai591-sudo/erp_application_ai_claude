@@ -5,6 +5,8 @@ export const WAREHOUSE_DOC_TYPE_FA: Record<string, string> = {
   WAREHOUSE_TRANSFER_IN: "رسید انتقال",
   WAREHOUSE_ADJUSTMENT: "اضافات انبارگردانی",
   SALES_RETURN: "برگشت از فروش",
+  STORE_SALE_RETURN: "برگشت حواله فروش فروشگاهی",
+  STORE_SALE_ISSUE: "حواله فروش فروشگاهی",
   PRODUCTION_RECEIPT: "رسید تولید",
   CENTER_CONSUMPTION_RETURN: "برگشت مصرف مرکز هزینه",
   PROJECT_CONSUMPTION_RETURN: "برگشت مصرف پروژه",

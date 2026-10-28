@@ -68,9 +68,10 @@ import { getPreviousYearAccountingCloseProblem, lockOpeningYearShared, assertFis
 // نام صریح‌تر (USER_PRICED_TYPES) هم export می‌شود.
 const IN_GIVEN_TYPES = new Set(["INITIAL_INVENTORY", "WAREHOUSE_RECEIPT", "PRODUCTION_RECEIPT", "WAREHOUSE_ADJUSTMENT"]);
 export const USER_PRICED_TYPES = IN_GIVEN_TYPES;
-const IN_COMPUTED_TYPES = new Set(["SALES_RETURN", "CENTER_CONSUMPTION_RETURN", "PROJECT_CONSUMPTION_RETURN", "PRODUCTION_CONSUMPTION_RETURN"]);
+const IN_COMPUTED_TYPES = new Set(["SALES_RETURN", "STORE_SALE_RETURN", "CENTER_CONSUMPTION_RETURN", "PROJECT_CONSUMPTION_RETURN", "PRODUCTION_CONSUMPTION_RETURN"]);
 const OUT_COMPUTED_TYPES = new Set([
   "SALES_DELIVERY",
+  "STORE_SALE_ISSUE",
   "CENTER_CONSUMPTION",
   "PROJECT_CONSUMPTION",
   "PRODUCTION_CONSUMPTION",
@@ -95,6 +96,8 @@ export const DOC_TYPE_FA: Record<string, string> = {
   WAREHOUSE_ADJUSTMENT: "اضافات انبارگردانی",
   SALES_DELIVERY: "حواله فروش",
   SALES_RETURN: "برگشت از فروش",
+  STORE_SALE_ISSUE: "حواله فروش فروشگاهی",
+  STORE_SALE_RETURN: "برگشت حواله فروش فروشگاهی",
   SUPPLIER_RETURN: "برگشت به تامین‌کننده",
   PRODUCTION_RECEIPT: "رسید تولید",
   CENTER_CONSUMPTION: "مصرف مرکز هزینه",

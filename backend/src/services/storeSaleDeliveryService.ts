@@ -2,6 +2,11 @@ import { prisma } from "../lib/prisma";
 import { getRequestContext } from "../lib/requestContext";
 import { assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { BANK_ACCOUNT_TITLE_INCLUDE, bankAccountDetailTitle } from "../utils/detailValues";
+import { assertDateNotConfirmed } from "../utils/journalEntryValidation";
+import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
+import { assertWarehouseOpenForDate } from "./warehouseConfirmationService";
+import { applyDocumentEffects, assertSafeToApplyEffects, assertSafeToReverseEffects, reverseDocumentEffects } from "./documentEffectsService";
+import { recomputeGoodsItemHasTransactions, recomputeWarehouseHasTransactions } from "../utils/warehouseTracking";
 import { StoreSaleError, saleTotals } from "./storeSaleService";
 
 // فروش فروشگاهی › «تحویل فروش» — تنها محل قواعد. یک تحویل = همه‌ی فروش‌ها و دریافت‌های تحویل‌نشده‌ی یک ایستگاه تا «تاریخ» (کاربر ایستگاه و تاریخ را در پنجره‌ی اول می‌دهد؛ دکمه‌ی «لود» ندارد).
@@ -207,7 +212,9 @@ export async function loadStoreDelivery(id: number) {
     status: d.status,
     stationId: d.stationId,
     stationTitle: d.station.title,
+    issues: await prisma.inventoryDocument.findMany({ where: { storeDeliveryId: d.id }, select: { id: true, number: true, date: true, documentType: true, warehouse: { select: { title: true } } }, orderBy: [{ date: "asc" }, { id: "asc" }] }).then((r) => r.map((x) => ({ id: x.id, number: x.number, date: dayStr(x.date), warehouseTitle: x.warehouse?.title ?? "" }))),
     updatedAt: d.updatedAt,
+    confirmedAt: d.confirmedAt,
     methods: DELIVERY_METHODS,
     sales: d.items.map((it) => {
       const amount = Number(it.amount);
@@ -246,5 +253,148 @@ export async function listStoreDeliveries() {
     receiptCount: d._count.receipts,
     net: d.items.reduce((n, i) => n + Number(i.amount) + Number(i.vat), 0),
     unsettled: d.items.reduce((n, i) => n + Number(i.unsettledAmount), 0),
+  }));
+}
+
+/**
+ * «تایید» تحویل فروش: برای هر (انبار × تاریخ فروش) یک حواله‌ی انبار از نوع «حواله فروش فروشگاهی» می‌سازد (فقط ردیف‌های کالا؛ فروش فقط‌خدمت حواله ندارد).
+ * همه‌یا‌هیچ: اول وضعیت تحویل «تایید» می‌شود (تا فروش‌های همین تحویل دیگر به‌عنوان «کسر موقت» از موجودی شمرده نشوند و دوبار حساب نشوند)، بعد برای هر حواله قفل انبار/تاریخ سند،
+ * کنترل موجودی منفی و اثر سند اعمال می‌شود؛ هر خطا کل تراکنش را برمی‌گرداند. کالای دارای ردیابی (سریال/بچ/محل) پشتیبانی نمی‌شود و با پیام روشن رد می‌شود.
+ */
+export async function confirmStoreDelivery(id: number) {
+  const d = await prisma.storeSaleDelivery.findUnique({
+    where: { id },
+    include: {
+      station: { select: { title: true } },
+      sales: { include: { lines: { include: { goodsItem: { select: { kind: true, title: true, trackingMethod: true, isLocationTracked: true } } }, orderBy: { rowOrder: "asc" } } } },
+    },
+  });
+  if (!d) throw new StoreSaleError("تحویل فروش یافت نشد");
+  if (d.status !== "REGISTERED") throw new StoreSaleError("این تحویل فروش قبلاً تایید شده است");
+
+  // گروه‌بندی: (انبار|تاریخ) ← (کالا|واحد) ← مقدار
+  const groups = new Map<string, { warehouseId: number; date: Date; lines: Map<string, { goodsItemId: number; unitId: number; quantity: number }> }>();
+  for (const sale of d.sales) {
+    for (const l of sale.lines) {
+      if (l.goodsItem.kind !== "GOODS") continue;
+      if (l.goodsItem.trackingMethod !== "NONE" || l.goodsItem.isLocationTracked) throw new StoreSaleError(`کالای «${l.goodsItem.title}» (فروش شماره ${sale.number}) دارای ردیابی سریال/بچ/محل است و در تحویل فروش فروشگاهی پشتیبانی نمی‌شود`);
+      if (!sale.warehouseId) throw new StoreSaleError(`برای فروش شماره ${sale.number} انبار ثبت نشده است`);
+      const key = `${sale.warehouseId}|${dayStr(sale.date)}`;
+      const g = groups.get(key) ?? { warehouseId: sale.warehouseId, date: sale.date, lines: new Map() };
+      const lk = `${l.goodsItemId}|${l.unitId}`;
+      const cur = g.lines.get(lk) ?? { goodsItemId: l.goodsItemId, unitId: l.unitId, quantity: 0 };
+      cur.quantity += Number(l.quantity);
+      g.lines.set(lk, cur);
+      groups.set(key, g);
+    }
+  }
+
+  // کنترل‌های پیش‌از‌تراکنش (قفل تاریخ انبار / دوره‌ی مالی / سند حسابداری تاییدشده)
+  const prepared: { warehouse: any; fpId: number; date: Date; lines: { goodsItemId: number; unitId: number; quantity: number }[] }[] = [];
+  for (const g of [...groups.values()].sort((a, b) => a.date.getTime() - b.date.getTime() || a.warehouseId - b.warehouseId)) {
+    // eslint-disable-next-line no-await-in-loop
+    const warehouse = await prisma.warehouse.findUnique({ where: { id: g.warehouseId } });
+    if (!warehouse) throw new StoreSaleError("انبار یافت نشد");
+    if (!warehouse.isActive) throw new StoreSaleError(`انبار «${warehouse.title}» غیرفعال است`);
+    // eslint-disable-next-line no-await-in-loop
+    const fp = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: g.date }, toDate: { gte: g.date } } });
+    if (!fp) throw new StoreSaleError("تاریخ فروش در هیچ دوره مالی تعریف نشده است");
+    // eslint-disable-next-line no-await-in-loop
+    await assertWithinCurrentFiscalPeriod(fp.id);
+    // eslint-disable-next-line no-await-in-loop
+    await assertDateNotConfirmed(prisma, g.date, fp.id);
+    // eslint-disable-next-line no-await-in-loop
+    await assertWarehouseOpenForDate(g.warehouseId, g.date);
+    prepared.push({ warehouse, fpId: fp.id, date: g.date, lines: [...g.lines.values()] });
+  }
+
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100025, ${d.stationId})`);
+    const claimed = await tx.storeSaleDelivery.updateMany({ where: { id, status: "REGISTERED" }, data: { status: "CONFIRMED", confirmedAt: new Date() } });
+    if (claimed.count !== 1) throw new StoreSaleError("این تحویل فروش هم‌زمان تایید شد");
+    const goodsIds = new Set<number>();
+    const warehouseIds = new Set<number>();
+    for (const p of prepared) {
+      const effectLines = p.lines.map((l) => ({ goodsItemId: l.goodsItemId, quantity: l.quantity }));
+      // eslint-disable-next-line no-await-in-loop
+      await assertSafeToApplyEffects(tx, { documentType: "STORE_SALE_ISSUE", warehouseId: p.warehouse.id, date: p.date }, effectLines, p.warehouse.stockControl);
+      // eslint-disable-next-line no-await-in-loop
+      await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100026, ${p.fpId})`);
+      // eslint-disable-next-line no-await-in-loop
+      const last = await tx.inventoryDocument.findFirst({ where: { documentType: "STORE_SALE_ISSUE", fiscalPeriodId: p.fpId }, orderBy: { number: "desc" }, select: { number: true } });
+      // eslint-disable-next-line no-await-in-loop
+      const doc = await tx.inventoryDocument.create({
+        data: {
+          documentType: "STORE_SALE_ISSUE",
+          warehouseId: p.warehouse.id,
+          fiscalPeriodId: p.fpId,
+          number: (last?.number ?? 0) + 1,
+          date: p.date,
+          basis: "NO_BASIS",
+          description: `تحویل فروش شماره ${d.number} — ${d.station.title}`,
+          creationType: "SYSTEM",
+          status: "REGISTERED",
+          storeDeliveryId: id,
+          lines: { create: p.lines.map((l, idx) => ({ goodsItemId: l.goodsItemId, unitId: l.unitId, quantity: l.quantity, rowOrder: idx })) },
+        },
+      });
+      // eslint-disable-next-line no-await-in-loop
+      await applyDocumentEffects(tx, { id: doc.id, documentType: "STORE_SALE_ISSUE", warehouseId: p.warehouse.id, date: p.date }, effectLines);
+      effectLines.forEach((l) => goodsIds.add(l.goodsItemId));
+      warehouseIds.add(p.warehouse.id);
+    }
+    return { issues: prepared.length };
+  });
+}
+
+/** «لغو تایید»: حواله‌های انبار این تحویل حذف می‌شوند؛ اگر حواله‌ای تایید انبار شده یا مبلغ/پیش‌نویس/سند حسابداری دارد رد می‌شود */
+export async function unconfirmStoreDelivery(id: number) {
+  const d = await prisma.storeSaleDelivery.findUnique({ where: { id } });
+  if (!d) throw new StoreSaleError("تحویل فروش یافت نشد");
+  if (d.status === "ACCOUNTED") throw new StoreSaleError("برای این تحویل فروش سند حسابداری صادر شده است؛ ابتدا سند را حذف کنید");
+  if (d.status !== "CONFIRMED") throw new StoreSaleError("این تحویل فروش در وضعیت «ثبت» است و تایید نشده");
+  const docs = await prisma.inventoryDocument.findMany({ where: { storeDeliveryId: id }, include: { lines: { select: { id: true, goodsItemId: true, quantity: true } }, warehouse: true } });
+  for (const doc of docs) {
+    if (doc.status === "FINALIZED") throw new StoreSaleError(`حواله فروش فروشگاهی شماره ${doc.number} با تایید انبار نهایی شده است؛ ابتدا تایید انبار را برگردانید`);
+    // eslint-disable-next-line no-await-in-loop
+    const withJe = await prisma.documentItemAmount.findFirst({ where: { line: { documentId: doc.id }, OR: [{ journalEntryId: { not: null } }, { warehouseJournalEntryIssuanceId: { not: null } }] }, select: { id: true } });
+    if (withJe) throw new StoreSaleError(`اسناد انبار این تحویل دارای پیش‌نویس یا سند حسابداری است (حواله شماره ${doc.number})؛ ابتدا آن را حذف کنید`);
+    // eslint-disable-next-line no-await-in-loop
+    await assertWarehouseOpenForDate(doc.warehouseId!, doc.date);
+    // eslint-disable-next-line no-await-in-loop
+    await assertSafeToReverseEffects(prisma, { id: doc.id, documentType: doc.documentType, warehouseId: doc.warehouseId!, date: doc.date }, doc.lines.map((l) => ({ goodsItemId: l.goodsItemId, quantity: Number(l.quantity) })), doc.warehouse!.stockControl);
+  }
+  await prisma.$transaction(async (tx) => {
+    for (const doc of docs) {
+      // eslint-disable-next-line no-await-in-loop
+      await reverseDocumentEffects(tx, { id: doc.id, documentType: doc.documentType, warehouseId: doc.warehouseId!, date: doc.date });
+      // eslint-disable-next-line no-await-in-loop
+      await tx.inventoryDocument.delete({ where: { id: doc.id } });
+    }
+    await tx.storeSaleDelivery.update({ where: { id }, data: { status: "REGISTERED", confirmedAt: null } });
+    await recomputeGoodsItemHasTransactions([...new Set(docs.flatMap((x) => x.lines.map((l) => l.goodsItemId)))], tx);
+    await recomputeWarehouseHasTransactions([...new Set(docs.map((x) => x.warehouseId!))], tx);
+  });
+}
+
+/** فهرست حواله/برگشت حواله‌های فروش فروشگاهی (فقط‌خواندنی؛ با تایید/لغو تایید تحویل ساخته/حذف می‌شوند) */
+export async function listStoreSaleIssues(kind: "ISSUE" | "RETURN") {
+  const rows = await prisma.inventoryDocument.findMany({
+    where: { documentType: kind === "ISSUE" ? "STORE_SALE_ISSUE" : "STORE_SALE_RETURN" },
+    include: { warehouse: { select: { title: true } }, lines: { select: { quantity: true } }, storeDelivery: { select: { number: true, station: { select: { title: true } } } } },
+    orderBy: { id: "desc" },
+    take: 5000,
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    number: r.number,
+    date: dayStr(r.date),
+    warehouseTitle: r.warehouse?.title ?? "",
+    status: r.status,
+    lineCount: r.lines.length,
+    quantity: r.lines.reduce((n, l) => n + Number(l.quantity), 0),
+    deliveryNumber: r.storeDelivery?.number ?? null,
+    stationTitle: r.storeDelivery?.station.title ?? "",
+    description: r.description ?? "",
   }));
 }

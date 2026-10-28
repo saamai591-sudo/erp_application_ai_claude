@@ -118,6 +118,8 @@ const INVENTORY_KINDS: Record<string, BaseEntity | null> = {
   INVENTORY_COUNTING_SHORTAGE: null,
   SALES_DELIVERY: "Party",
   SALES_RETURN: "Party",
+  STORE_SALE_ISSUE: null,
+  STORE_SALE_RETURN: null,
   SUPPLIER_RETURN: "Party",
   PRODUCTION_RECEIPT: "CostCenter",
   CENTER_CONSUMPTION: "CostCenter",
