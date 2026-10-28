@@ -509,7 +509,7 @@ export const REGISTRY: ModuleDef[] = [
         title: "عملیات",
         forms: [{ key: "store-sales", title: "فروش فروشگاهی", baseActions: CRUD, actions: [{ key: "changePrice", title: "تغییر فی" }, { key: "declareCredit", title: "ثبت نسیه" }] },
           { key: "store-receipts", title: "دریافت فروشگاهی", baseActions: CRUD },
-          { key: "store-deliveries", title: "تحویل فروش", baseActions: CRUD, actions: [{ key: "confirm", title: "تایید" }, { key: "unconfirm", title: "لغو تایید" }] },
+          { key: "store-deliveries", title: "تحویل فروش", baseActions: CRUD, actions: [{ key: "confirm", title: "تایید" }, { key: "unconfirm", title: "لغو تایید" }, { key: "issueJournalEntry", title: "صدور سند حسابداری" }, { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" }] },
           { key: "store-sale-issues", title: "حواله فروش فروشگاهی", baseActions: ["view"] },
           { key: "store-sale-returns", title: "برگشت حواله فروش فروشگاهی", baseActions: ["view"] },
         ],

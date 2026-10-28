@@ -200,6 +200,7 @@ export async function loadStoreDelivery(id: number) {
     where: { id },
     include: {
       station: { select: { title: true } },
+      journalEntry: { select: { referenceNumber: true } },
       items: { include: { sale: { select: { number: true, date: true, customer: { select: { party: { select: { detailTitle: true, name: true, firstName: true, lastName: true } } } } } } }, orderBy: { saleId: "asc" } },
     },
   });
@@ -214,6 +215,8 @@ export async function loadStoreDelivery(id: number) {
     stationTitle: d.station.title,
     issues: await prisma.inventoryDocument.findMany({ where: { storeDeliveryId: d.id }, select: { id: true, number: true, date: true, documentType: true, warehouse: { select: { title: true } } }, orderBy: [{ date: "asc" }, { id: "asc" }] }).then((r) => r.map((x) => ({ id: x.id, number: x.number, date: dayStr(x.date), warehouseTitle: x.warehouse?.title ?? "" }))),
     updatedAt: d.updatedAt,
+    journalEntryId: d.journalEntryId,
+    journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
     confirmedAt: d.confirmedAt,
     methods: DELIVERY_METHODS,
     sales: d.items.map((it) => {
@@ -239,7 +242,7 @@ export async function loadStoreDelivery(id: number) {
 
 export async function listStoreDeliveries() {
   const rows = await prisma.storeSaleDelivery.findMany({
-    include: { station: { select: { title: true } }, items: { select: { amount: true, vat: true, unsettledAmount: true } }, _count: { select: { receipts: true } } },
+    include: { station: { select: { title: true } }, journalEntry: { select: { referenceNumber: true } }, items: { select: { amount: true, vat: true, unsettledAmount: true } }, _count: { select: { receipts: true } } },
     orderBy: { id: "desc" },
     take: 5000,
   });
@@ -249,6 +252,7 @@ export async function listStoreDeliveries() {
     date: dayStr(d.date),
     stationTitle: d.station.title,
     status: d.status,
+    journalEntryReferenceNumber: d.journalEntry?.referenceNumber ?? null,
     saleCount: d.items.length,
     receiptCount: d._count.receipts,
     net: d.items.reduce((n, i) => n + Number(i.amount) + Number(i.vat), 0),
@@ -351,7 +355,7 @@ export async function confirmStoreDelivery(id: number) {
 export async function unconfirmStoreDelivery(id: number) {
   const d = await prisma.storeSaleDelivery.findUnique({ where: { id } });
   if (!d) throw new StoreSaleError("تحویل فروش یافت نشد");
-  if (d.status === "ACCOUNTED") throw new StoreSaleError("برای این تحویل فروش سند حسابداری صادر شده است؛ ابتدا سند را حذف کنید");
+  if (d.journalEntryId) throw new StoreSaleError("برای این تحویل فروش سند حسابداری صادر شده است؛ ابتدا سند را حذف کنید");
   if (d.status !== "CONFIRMED") throw new StoreSaleError("این تحویل فروش در وضعیت «ثبت» است و تایید نشده");
   const docs = await prisma.inventoryDocument.findMany({ where: { storeDeliveryId: id }, include: { lines: { select: { id: true, goodsItemId: true, quantity: true } }, warehouse: true } });
   for (const doc of docs) {

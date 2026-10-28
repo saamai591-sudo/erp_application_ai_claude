@@ -62,6 +62,8 @@ interface Delivery {
   number?: number;
   date: string;
   status?: keyof typeof STATUS_FA;
+  journalEntryId?: number | null;
+  journalEntryReferenceNumber?: number | null;
   issues?: { id: number; number: number; date: string; warehouseTitle: string }[];
   stationId: number;
   stationTitle: string;
@@ -236,6 +238,26 @@ function DeliveryForm({ editId }: { editId?: number }) {
       setError((err as ApiError).message);
     }
   }
+  async function issueJournal() {
+    if (!editId || !window.confirm("برای کل این تحویل فروش یک سند حسابداری به تاریخ تحویل صادر شود؟")) return;
+    setError(null);
+    try {
+      await api.post(`/store-sale-deliveries/${editId}/issue-journal-entry`, {});
+      await reloadSaved();
+    } catch (err) {
+      setError((err as ApiError).message);
+    }
+  }
+  async function revertJournal() {
+    if (!editId || !window.confirm("سند حسابداری این تحویل فروش حذف شود؟")) return;
+    setError(null);
+    try {
+      await api.del(`/store-sale-deliveries/${editId}/journal-entry`);
+      await reloadSaved();
+    } catch (err) {
+      setError((err as ApiError).message);
+    }
+  }
   async function handleDelete() {
     if (!editId) return;
     try {
@@ -290,8 +312,14 @@ function DeliveryForm({ editId }: { editId?: number }) {
             {data.status === "REGISTERED" && hasPermission("store-sales.operations.store-deliveries.confirm") && (
               <button type="button" className="btn" onClick={confirmDelivery}>تایید</button>
             )}
-            {data.status === "CONFIRMED" && hasPermission("store-sales.operations.store-deliveries.unconfirm") && (
+            {data.status === "CONFIRMED" && !data.journalEntryId && hasPermission("store-sales.operations.store-deliveries.unconfirm") && (
               <button type="button" className="btn secondary" onClick={unconfirmDelivery}>لغو تایید</button>
+            )}
+            {data.status === "CONFIRMED" && !data.journalEntryId && hasPermission("store-sales.operations.store-deliveries.issueJournalEntry") && (
+              <button type="button" className="btn" onClick={issueJournal}>صدور سند حسابداری</button>
+            )}
+            {data.journalEntryId && hasPermission("store-sales.operations.store-deliveries.revertJournalEntry") && (
+              <button type="button" className="btn secondary" onClick={revertJournal}>حذف سند حسابداری</button>
             )}
           </>
         ) : undefined
@@ -320,6 +348,9 @@ function DeliveryForm({ editId }: { editId?: number }) {
                 <input disabled value={editId && data.status ? STATUS_FA[data.status] : "ثبت‌نشده"} />
               </div>
             </div>
+            {editId && data.journalEntryReferenceNumber != null && (
+              <p style={{ margin: "6px 0", fontSize: 13 }}>شماره سند حسابداری: {toFaDigits(String(data.journalEntryReferenceNumber))}</p>
+            )}
             {editId && (data.issues?.length ?? 0) > 0 && (
               <p style={{ margin: "6px 0", fontSize: 13 }}>
                 حواله‌های انبار: {data.issues!.map((i) => `شماره ${toFaDigits(String(i.number))} (${i.warehouseTitle} — ${formatJalaliDate(i.date)})`).join("، ")}

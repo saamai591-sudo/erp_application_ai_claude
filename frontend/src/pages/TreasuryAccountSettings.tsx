@@ -33,6 +33,9 @@ const ACCOUNT_TYPE_FA: Record<string, string> = {
   CHEQUE_IN_COLLECTION: "اسناد در جریان وصول",
   FX_GAIN_LOSS: "سود و زیان تسعیر ارز",
   BOUNCED_PAYABLE_CHEQUE: "چک پرداختیِ برگشتی (بدهی به طرف حساب)",
+  CARD_IN_COLLECTION: "در جریان وصول از کارتخوان",
+  STORE_CASH_DIFF_EXPENSE: "کسر و اضافی صندوق - هزینه",
+  STORE_CASH_DIFF_CASHIER: "کسر و اضافی صندوق - حساب صندوقدار",
   PETTY_CASH: "تنخواه",
 };
 
@@ -50,6 +53,9 @@ const TARGET_FIELD: Record<string, TargetField | null> = {
   CHEQUE_IN_COLLECTION: "bankAccountId",
   FX_GAIN_LOSS: null,
   BOUNCED_PAYABLE_CHEQUE: null,
+  CARD_IN_COLLECTION: null,
+  STORE_CASH_DIFF_EXPENSE: null,
+  STORE_CASH_DIFF_CASHIER: null,
   PETTY_CASH: "pettyCashId",
 };
 

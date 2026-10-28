@@ -31,6 +31,9 @@ const TARGET_FIELD: Record<string, string | null> = {
   CHEQUE_IN_COLLECTION: "bankAccountId",
   FX_GAIN_LOSS: null,
   BOUNCED_PAYABLE_CHEQUE: null,
+  CARD_IN_COLLECTION: null,
+  STORE_CASH_DIFF_EXPENSE: null,
+  STORE_CASH_DIFF_CASHIER: null,
   PETTY_CASH: "pettyCashId",
 };
 

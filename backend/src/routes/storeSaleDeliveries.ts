@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { StoreSaleError } from "../services/storeSaleService";
+import { issueStoreDeliveryJournal, revertStoreDeliveryJournal } from "../services/storeSaleDeliveryJournalService";
 import { buildDeliveryPreview, confirmStoreDelivery, createStoreDelivery, deleteStoreDelivery, listStoreDeliveries, listStoreSaleIssues, loadStoreDelivery, unconfirmStoreDelivery, updateStoreDelivery } from "../services/storeSaleDeliveryService";
 
 // فروش فروشگاهی › عملیات › «تحویل فروش»؛ منطق فقط در services/storeSaleDeliveryService.ts.
@@ -74,6 +75,24 @@ router.post("/store-sale-deliveries/:id/unconfirm", can(`${FORM}.unconfirm`), as
     res.json({ ok: true });
   } catch (e) {
     fail(res, e, "خطا در لغو تایید تحویل فروش");
+  }
+});
+
+router.post("/store-sale-deliveries/:id/issue-journal-entry", can(`${FORM}.issueJournalEntry`), async (req, res) => {
+  try {
+    const entry = await issueStoreDeliveryJournal(Number(req.params.id));
+    res.json({ ok: true, journalEntryId: entry.id, referenceNumber: entry.referenceNumber });
+  } catch (e) {
+    fail(res, e, "خطا در صدور سند حسابداری تحویل فروش");
+  }
+});
+
+router.delete("/store-sale-deliveries/:id/journal-entry", can(`${FORM}.revertJournalEntry`), async (req, res) => {
+  try {
+    await revertStoreDeliveryJournal(Number(req.params.id));
+    res.json({ ok: true });
+  } catch (e) {
+    fail(res, e, "خطا در حذف سند حسابداری تحویل فروش");
   }
 });
 

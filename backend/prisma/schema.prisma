@@ -769,6 +769,7 @@ model DocumentType {
 }
 
 model JournalEntry {
+  storeSaleDeliveries StoreSaleDelivery[]
   payrollSlips PayrollSlip[]
   id                  Int                  @id @default(autoincrement())
   consolidationSource ConsolidatedDocumentSource?
@@ -1626,6 +1627,12 @@ enum TreasuryAccountType {
   BOUNCED_PAYABLE_CHEQUE
   // معینِ بستانکارِ سند حسابداریِ «خلاصه تنخواه» (اسناد.services/pettyCashSummaryJournalEntryService.ts) — به‌ازای هر تنخواه (فیلد pettyCashId)
   PETTY_CASH
+  // «در جریان وصول از کارتخوان» — معین بدهکارِ دریافت‌های کارتخوانِ سند تحویل فروش؛ بدون مورد هدف (یک رکورد)
+  CARD_IN_COLLECTION
+  // «کسر و اضافی صندوق - هزینه» (وضعیت «کسری صندوق» در تحویل فروش)؛ بدون مورد هدف
+  STORE_CASH_DIFF_EXPENSE
+  // «کسر و اضافی صندوق - حساب صندوقدار» (وضعیت «به حساب صادرکننده»)؛ بدون مورد هدف، تفصیل = طرف‌حسابِ صادرکننده
+  STORE_CASH_DIFF_CASHIER
 }
 
 model Supplier {
@@ -7108,6 +7115,9 @@ model StoreSaleDelivery {
   receipts       StoreReceipt[]
   inventoryDocuments InventoryDocument[]
   confirmedAt    DateTime?
+  /// سند حسابداری تحویل فروش؛ وجود آن (و شماره‌اش در هدر فرم) یعنی سند صادر شده — وضعیت تحویل عوض نمی‌شود
+  journalEntryId Int?
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: Restrict)
 
   @@unique([fiscalPeriodId, number])
   @@index([stationId, date])
