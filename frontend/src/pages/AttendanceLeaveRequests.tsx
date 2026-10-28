@@ -21,7 +21,7 @@ import { usePermissions } from "../lib/usePermissions";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { EmployeePickerField, useEmployeeOptions } from "./AttendancePunches";
 
-// مدیریت تردد › عملیات › «درخواست مرخصی»: کارمند + نوع مرخصی + روزانه (از تاریخ تا تاریخ) یا ساعتی (یک تاریخ + ساعت شروع/پایان) + دلیل (+ پیوست). «ثبت‌شده» ← تایید / رد (با دلیل)
+// مدیریت تردد › درخواست‌های پرسنلی › «درخواست مرخصی»: کارمند + «نوع درخواست» (ماهیت مرخصی؛ نوع مرخصی و روزانه/ساعتی‌بودن از آن می‌آید، چک‌باکس «ساعتی» نداریم) + روزانه (از تاریخ تا تاریخ) یا ساعتی (یک تاریخ + ساعت شروع/پایان) + دلیل (+ پیوست). «ثبت‌شده» ← تایید / رد (با دلیل)
 // ← برگشت؛ فقط «ثبت‌شده» ویرایش می‌شود و نوعی که «مدرک الزامی» دارد بدون پیوست تایید نمی‌شود. فقط درخواست تاییدشده در کارکرد/فرمول‌ها اثر دارد. قواعد در سرور.
 
 type Unit = "DAY" | "BOTH";
@@ -32,6 +32,15 @@ interface TypeOpt {
   unit: Unit;
   requiresAttachment: boolean;
   deductsBalance: boolean;
+}
+/** نوع درخواستِ ماهیت مرخصی: واحدش تعیین می‌کند فرم روزانه است یا ساعتی */
+interface ReqTypeOpt {
+  id: number;
+  title: string;
+  isActive: boolean;
+  unit: "DAILY" | "HOURLY";
+  leaveTypeId: number;
+  leaveTypeTitle: string;
 }
 interface Att {
   id: number;
@@ -45,6 +54,8 @@ interface ReqRow {
   employeeId: number;
   personnelCode: string;
   employeeName: string;
+  requestTypeId: number;
+  requestTypeTitle: string;
   leaveTypeId: number;
   leaveTypeTitle: string;
   requiresAttachment: boolean;
@@ -127,6 +138,7 @@ function ReqList() {
           { header: "شماره", ...s((r) => toFaDigits(String(r.number))), width: "80px" },
           { header: "کد پرسنلی", ...s((r) => toFaDigits(r.personnelCode)), width: "110px" },
           { header: "کارمند", ...s((r) => r.employeeName) },
+          { header: "نوع درخواست", ...s((r) => r.requestTypeTitle), width: "150px" },
           { header: "نوع مرخصی", ...s((r) => r.leaveTypeTitle), width: "130px" },
           { header: "تاریخ", ...s((r) => dateText(r)), width: "190px" },
           { header: "ساعت", ...s((r) => (r.hourly ? toFaDigits(r.periodText) : "تمام‌روز")), width: "190px" },
@@ -149,8 +161,9 @@ function ReqForm({ editId }: { editId?: number }) {
   const location = useLocation();
   const { hasPermission } = usePermissions();
   const cacheKey = `form:${location.pathname}:form`;
-  const [form, setForm] = usePersistedState(cacheKey, { employeeId: "", leaveTypeId: "", hourly: false, fromDate: localTodayIso(), toDate: "", start: "", end: "", reason: "" });
+  const [form, setForm] = usePersistedState(cacheKey, { employeeId: "", requestTypeId: "", fromDate: localTodayIso(), toDate: "", start: "", end: "", reason: "" });
   const [meta, setMeta] = useState<{ number: number; status: string; statusTitle: string; decisionNote: string; updatedAt?: string; attachments: Att[] } | null>(null);
+  const [reqTypes, setReqTypes] = useState<ReqTypeOpt[]>([]);
   const [types, setTypes] = useState<TypeOpt[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
@@ -160,7 +173,7 @@ function ReqForm({ editId }: { editId?: number }) {
   const employees = useEmployeeOptions();
   const { flash } = useSavedFlash();
 
-  const toForm = (r: ReqRow) => ({ employeeId: String(r.employeeId), leaveTypeId: String(r.leaveTypeId), hourly: r.hourly, fromDate: r.fromDate, toDate: r.toDate === r.fromDate ? "" : r.toDate, start: r.startMinute !== null ? minutesToMask(r.startMinute) : "", end: r.endMinute !== null ? minutesToMask(r.endMinute) : "", reason: r.reason });
+  const toForm = (r: ReqRow) => ({ employeeId: String(r.employeeId), requestTypeId: String(r.requestTypeId), fromDate: r.fromDate, toDate: r.toDate === r.fromDate ? "" : r.toDate, start: r.startMinute !== null ? minutesToMask(r.startMinute) : "", end: r.endMinute !== null ? minutesToMask(r.endMinute) : "", reason: r.reason });
   async function load() {
     const r: ReqRow = await api.get(`/attendance-leave-requests/${editId}`);
     setMeta({ number: r.number, status: r.status, statusTitle: r.statusTitle, decisionNote: r.decisionNote, updatedAt: r.updatedAt, attachments: r.attachments });
@@ -168,6 +181,7 @@ function ReqForm({ editId }: { editId?: number }) {
   }
   useEffect(() => {
     api.get("/attendance-leave-types").then((r: TypeOpt[]) => setTypes(r)).catch(() => {});
+    api.get("/attendance-request-types?nature=LEAVE").then((r: ReqTypeOpt[]) => setReqTypes(r)).catch(() => {});
     if (!editId) return;
     load().then((r) => {
       if (!hasPersistedState(cacheKey)) setForm(toForm(r));
@@ -176,23 +190,26 @@ function ReqForm({ editId }: { editId?: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
 
-  const type = types.find((t) => String(t.id) === form.leaveTypeId);
-  const hourly = type?.unit === "DAY" ? false : form.hourly;
+  // نوع درخواست هم نوع مرخصی را مشخص می‌کند و هم روزانه/ساعتی‌بودن را
+  const reqType = reqTypes.find((t) => String(t.id) === form.requestTypeId);
+  const leaveTypeId = reqType ? String(reqType.leaveTypeId) : "";
+  const type = types.find((t) => String(t.id) === leaveTypeId);
+  const hourly = reqType?.unit === "HOURLY";
   // مانده‌ی کارمند برای نوعِ «دارای مانده مرخصی» (تا تاریخ شروع، بدون احتساب خودِ این درخواست)
   // «مقدار» درخواست (روز یا ساعت:دقیقه به واحد نوع): از روی شیفتِ کارمند و بازه‌ی انتخابی
   const [amt, setAmt] = useState<string>("");
   useEffect(() => {
     setAmt("");
-    if (!form.employeeId || !form.leaveTypeId || !form.fromDate) return;
+    if (!form.employeeId || !leaveTypeId || !form.fromDate) return;
     if (hourly && (maskToMinutes(form.start) === null || maskToMinutes(form.end) === null)) return;
     let dead = false;
-    const q = new URLSearchParams({ employeeId: form.employeeId, leaveTypeId: form.leaveTypeId, fromDate: form.fromDate, toDate: form.toDate || form.fromDate, hourly: String(hourly) });
+    const q = new URLSearchParams({ employeeId: form.employeeId, leaveTypeId, fromDate: form.fromDate, toDate: form.toDate || form.fromDate, hourly: String(hourly) });
     if (hourly) { q.set("startMinute", String(maskToMinutes(form.start))); q.set("endMinute", String(maskToMinutes(form.end))); }
     const t = setTimeout(() => {
       api.get(`/attendance-leave-requests/amount/of?${q.toString()}`).then((r) => { if (!dead && r) setAmt(r.text); }).catch(() => {});
     }, 300);
     return () => { dead = true; clearTimeout(t); };
-  }, [form.employeeId, form.leaveTypeId, form.fromDate, form.toDate, form.start, form.end, hourly, meta?.status]);
+  }, [form.employeeId, leaveTypeId, form.fromDate, form.toDate, form.start, form.end, hourly, meta?.status]);
   const [bal, setBal] = useState<{ text: string; date: string; balance: number; typeTitle: string } | null>(null);
   useEffect(() => {
     setBal(null);
@@ -206,7 +223,7 @@ function ReqForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
     if (!form.employeeId) return setError("کارمند را انتخاب کنید");
-    if (!form.leaveTypeId) return setError("نوع مرخصی را انتخاب کنید");
+    if (!form.requestTypeId) return setError("نوع درخواست را انتخاب کنید");
     if (!form.fromDate) return setError("تاریخ الزامی است");
     if (!form.reason.trim()) return setError("دلیل درخواست الزامی است");
     let startMinute: number | null = null, endMinute: number | null = null;
@@ -215,7 +232,7 @@ function ReqForm({ editId }: { editId?: number }) {
       endMinute = maskToMinutes(form.end);
       if (startMinute === null || endMinute === null) return setError("ساعت شروع و پایان مرخصی را کامل وارد کنید");
     }
-    const body = { employeeId: Number(form.employeeId), leaveTypeId: Number(form.leaveTypeId), hourly, fromDate: form.fromDate, toDate: form.toDate || form.fromDate, startMinute, endMinute, reason: form.reason };
+    const body = { employeeId: Number(form.employeeId), requestTypeId: Number(form.requestTypeId), fromDate: form.fromDate, toDate: form.toDate || form.fromDate, startMinute, endMinute, reason: form.reason };
     try {
       if (editId) {
         await api.put(`/attendance-leave-requests/${editId}`, { ...body, updatedAt: meta?.updatedAt });
@@ -311,17 +328,13 @@ function ReqForm({ editId }: { editId?: number }) {
               <EmployeePickerField employees={employees} value={form.employeeId} onSelect={(x) => setForm({ ...form, employeeId: String(x.id) })} />
             </div>
             <div className="form-field">
-              <label>نوع مرخصی<RequiredMark /></label>
-              <select value={form.leaveTypeId} onChange={(e) => setForm({ ...form, leaveTypeId: e.target.value })}>
+              <label>نوع درخواست<RequiredMark /> <FieldHint label="نوع درخواست" text="نوع مرخصی و اینکه درخواست روزانه است یا ساعتی از «نوع درخواست» (تنظیمات › نوع درخواست) تعیین می‌شود." /></label>
+              <select value={form.requestTypeId} onChange={(e) => setForm({ ...form, requestTypeId: e.target.value })}>
                 <option value="">— انتخاب کنید —</option>
-                {types.filter((t) => t.isActive || String(t.id) === form.leaveTypeId).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+                {reqTypes.filter((t) => t.isActive || String(t.id) === form.requestTypeId).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
               </select>
+              {reqType && <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>نوع مرخصی: {reqType.leaveTypeTitle} — {hourly ? "ساعتی" : "روزانه"}</div>}
             </div>
-            {type?.unit === "BOTH" && (
-              <div className="form-field">
-                <label className="checkbox-row"><input type="checkbox" checked={form.hourly} onChange={(e) => setForm({ ...form, hourly: e.target.checked })} /> مرخصی ساعتی</label>
-              </div>
-            )}
             <div className="form-field">
               <label>از تاریخ<RequiredMark /></label>
               <JalaliDatePicker value={form.fromDate} onChange={(v) => setForm({ ...form, fromDate: v })} />

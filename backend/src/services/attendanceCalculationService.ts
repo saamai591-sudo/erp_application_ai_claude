@@ -4,6 +4,7 @@ import { employeeIdsInPeriod } from "./employmentStatusService";
 import { computeAttendanceResults } from "./attendanceFactorService";
 import { valueText } from "./attendancePermitService";
 import { employeeIdsWithShiftBy } from "./attendanceWorksheetReportService";
+import { missionCalculationBlockers } from "./attendanceMissionService";
 
 // مدیریت تردد › عملیات › «محاسبه تردد» — تنها نویسنده‌ی AttendanceCalculation.
 // یک رکورد برای هر کارمند در هر ماهِ «تقویم کاری». «محاسبه» نتیجه‌ی ماه را از روی داده می‌سازد (computeAttendanceResults) و رکورد خلاصه را می‌نویسد؛ «حذف محاسبه» آن را برمی‌گرداند.
@@ -122,12 +123,17 @@ export async function calculateAttendance(year: number, month: number, employeeI
   const inPeriod = new Set(await employeeIdsInPeriod(cal.trafficStartDate, cal.trafficEndDate, ids));
   const existing = new Set((await prisma.attendanceCalculation.findMany({ where: { calendarMonthId: cal.id, employeeId: { in: ids } }, select: { employeeId: true } })).map((x) => x.employeeId));
   const todo = ids.filter((id) => inPeriod.has(id) && !existing.has(id));
-  const results = todo.length ? await computeAttendanceResults({ year, month, employeeIds: todo }) : null;
+  // کنترل ماموریت: پایان‌نیافته یا نیازمند گزارشِ تاییدشده (پیش از محاسبه، تا کارمندِ دارای مشکل اصلاً محاسبه نشود)
+  const blockers = await missionCalculationBlockers(todo, cal.trafficStartDate, cal.trafficEndDate);
+  const toCompute = todo.filter((id) => !blockers.has(id));
+  const results = toCompute.length ? await computeAttendanceResults({ year, month, employeeIds: toCompute }) : null;
   const byEmp = new Map<number, any>((results?.employees ?? []).map((e: any) => [e.employeeId, e]));
   const out: CalcOutcome[] = [];
   for (const id of ids) {
     if (!inPeriod.has(id)) { out.push({ employeeId: id, ok: false, error: "کارمند در بازه‌ی تردد این ماه همکاری ندارد" }); continue; }
     if (existing.has(id)) { out.push({ employeeId: id, ok: false, error: "این ماه قبلاً محاسبه شده است؛ ابتدا «حذف محاسبه» بزنید" }); continue; }
+    const mb = blockers.get(id);
+    if (mb) { out.push({ employeeId: id, ok: false, error: mb.join("؛ ") }); continue; }
     const e = byEmp.get(id);
     if (!e) { out.push({ employeeId: id, ok: false, error: "برای این کارمند در این ماه روزِ دارای شیفت نیست (شیفت تخصیص نیافته است)" }); continue; }
     const items = buildItems(results!, id, e);

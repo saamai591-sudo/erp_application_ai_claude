@@ -38,8 +38,10 @@ export function missionShape(r: any, ranges?: LockRange[]) {
     employeeId: r.employeeId,
     personnelCode: r.employee?.personnelCode ?? "",
     employeeName: r.employee ? personName(r.employee.party) : "",
-    typeId: r.typeId,
-    typeTitle: r.type?.title ?? "",
+    requestTypeId: r.requestTypeId,
+    requestTypeTitle: r.requestType?.title ?? "",
+    /** نوع درخواست گزارش می‌خواهد؟ (حداقل یک نوع ماموریتِ فعال به آن وصل است) */
+    requiresReport: (r.requestType?.missionTypes ?? []).some((m: any) => m.isActive),
     fromDate: dayStr(r.fromDate),
     toDate: dayStr(r.toDate),
     plannedToDate: dayStr(r.plannedToDate),
@@ -64,11 +66,11 @@ export function missionShape(r: any, ranges?: LockRange[]) {
   };
 }
 
-export const MISSION_INCLUDE = { employee: { select: EMPLOYEE_SELECT }, type: true, _count: { select: { reports: true } } };
+export const MISSION_INCLUDE = { employee: { select: EMPLOYEE_SELECT }, requestType: { include: { missionTypes: { select: { isActive: true } } } }, _count: { select: { reports: true } } };
 
 export interface CleanMission {
   employeeId: number;
-  typeId: number;
+  requestTypeId: number;
   fromDate: Date;
   toDate: Date;
   plannedToDate: Date;
@@ -98,16 +100,16 @@ async function assertCooperation(employeeId: number, fromDate: Date, toDate: Dat
 export async function cleanMission(b: any, excludeId?: number): Promise<CleanMission> {
   const employeeId = Number(b?.employeeId);
   if (!employeeId) throw new AttendanceError("کارمند الزامی است");
-  let typeId = Number(b?.typeId);
-  if (!typeId) typeId = (await prisma.attendanceMissionType.findFirst({ where: { isBase: true }, select: { id: true } }))?.id ?? 0;
-  const type = typeId ? await prisma.attendanceMissionType.findUnique({ where: { id: typeId } }) : null;
-  if (!type) throw new AttendanceError("نوع ماموریت را انتخاب کنید");
-  if (!type.isActive) throw new AttendanceError(`نوع ماموریت «${type.title}» غیرفعال است`);
+  // نوع درخواست (ماهیت ماموریت) واحد را هم مشخص می‌کند: ساعتی یا روزانه؛ چک‌باکس «ساعتی» ندارد
+  const requestTypeId = Number(b?.requestTypeId);
+  const type = requestTypeId ? await prisma.attendanceRequestType.findUnique({ where: { id: requestTypeId } }) : null;
+  if (!type || type.nature !== "MISSION") throw new AttendanceError("نوع درخواست ماموریت را انتخاب کنید");
+  if (!type.isActive) throw new AttendanceError(`نوع درخواست «${type.title}» غیرفعال است`);
   const destination = typeof b?.destination === "string" ? b.destination.trim() : "";
   if (!destination) throw new AttendanceError("مقصد ماموریت الزامی است");
   const reason = typeof b?.reason === "string" ? b.reason.trim() : "";
   if (!reason) throw new AttendanceError("شرح ماموریت الزامی است");
-  const hourly = b?.hourly === true;
+  const hourly = type.unit === "HOURLY";
   const fromDate = parseDay(b?.fromDate, "از تاریخ");
   const toDate = !b?.toDate ? fromDate : parseDay(b.toDate, "تا تاریخ");
   if (toDate < fromDate) throw new AttendanceError("تاریخ پایان قبل از تاریخ شروع است");
@@ -125,7 +127,7 @@ export async function cleanMission(b: any, excludeId?: number): Promise<CleanMis
   await assertShiftAssigned(employeeId, fromDate, "ماموریت");
   await assertNoPresence({ employeeId, fromDate, toDate, startMinute, endMinute });
   await assertNoRequestConflict({ employeeId, fromDate, toDate, startMinute, endMinute }, excludeId, ["PENDING", "APPROVED"], "MISSION");
-  return { employeeId, typeId, fromDate, toDate, plannedToDate: toDate, startMinute, endMinute, destination, reason };
+  return { employeeId, requestTypeId, fromDate, toDate, plannedToDate: toDate, startMinute, endMinute, destination, reason };
 }
 
 async function nextNumber(tx: any): Promise<number> {
@@ -236,4 +238,41 @@ export async function unapproveMission(id: number) {
     else await assertNoRequestConflict(r, id, ["PENDING", "APPROVED"], "MISSION"); // ردشده که دوباره «ثبت‌شده» می‌شود نباید با درخواست فعالِ دیگری هم‌پوشان باشد
     await tx.attendanceMissionRequest.update({ where: { id }, data: { status: "PENDING", decidedById: null, decidedAt: null, decisionNote: null } });
   });
+}
+
+/**
+ * کنترل‌های «محاسبه تردد» برای ماموریت (هر کارمند): بازه‌ی [from, to] = بازه‌ی تردد ماه.
+ *  ۱) ماموریت روزانه‌ی تاییدشده‌ای که تاریخ پایانش در بازه است ولی «پایان ماموریت» ثبت نشده در محاسبه شمرده نمی‌شود ← خطا (وگرنه کارمند ماموریتش را نمی‌گیرد).
+ *  ۲) ماموریت پایان‌یافته‌ی روزانه که نوع درخواستش گزارش می‌خواهد (حداقل یک نوع ماموریتِ فعال به آن وصل است) و گزارشِ تاییدشده ندارد ← خطا.
+ * خروجی: پیام‌های هر کارمند (نبودن کلید = مشکلی نیست).
+ */
+export async function missionCalculationBlockers(employeeIds: number[], from: Date, to: Date): Promise<Map<number, string[]>> {
+  const out = new Map<number, string[]>();
+  if (employeeIds.length === 0) return out;
+  const rows = await prisma.attendanceMissionRequest.findMany({
+    where: { employeeId: { in: employeeIds }, status: "APPROVED", startMinute: null, toDate: { gte: from, lte: to } },
+    select: {
+      employeeId: true,
+      number: true,
+      fromDate: true,
+      toDate: true,
+      endedAt: true,
+      requestType: { select: { title: true, missionTypes: { where: { isActive: true }, select: { id: true } } } },
+      reports: { select: { status: true } },
+    },
+    orderBy: { number: "asc" },
+  });
+  const add = (id: number, msg: string) => (out.get(id) ?? out.set(id, []).get(id)!).push(msg);
+  for (const r of rows) {
+    const span = `از ${displayDate(r.fromDate)} تا ${displayDate(r.toDate)}`;
+    if (!r.endedAt) {
+      add(r.employeeId, `درخواست ماموریت شماره ${r.number} (${span}) پایان نیافته است؛ «پایان ماموریت» را ثبت کنید`);
+      continue;
+    }
+    if (r.requestType.missionTypes.length === 0) continue;
+    if (r.reports.some((p) => p.status === "APPROVED")) continue;
+    const pending = r.reports.some((p) => p.status === "PENDING");
+    add(r.employeeId, `برای درخواست ماموریت شماره ${r.number} (${r.requestType.title}، ${span}) گزارش ماموریتِ تاییدشده ثبت نشده است${pending ? " (گزارش ثبت‌شده هنوز تایید نشده)" : ""}`);
+  }
+  return out;
 }

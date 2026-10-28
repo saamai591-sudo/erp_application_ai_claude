@@ -19,12 +19,13 @@ import { usePermissions } from "../lib/usePermissions";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 
 // مدیریت تردد › عملیات › «گزارش ماموریت»: برای یک درخواستِ ماموریت روزانه‌ی پایان‌یافته، بازه‌ای از آن را به یک نوع ماموریت (مثلاً دریا) می‌برد. «ثبت‌شده» ← تایید / رد (با دلیل) ← برگشت.
-// فقط گزارش تاییدشده شمرده می‌شود؛ روزهای بدون گزارش به نوعِ خودِ درخواست تعلق دارد. وقتی حقوقِ ماهِ پایانِ ماموریت محاسبه شده، گزارش قفل است. قواعد در سرور.
+// فقط گزارش تاییدشده شمرده می‌شود؛ روزهای بدون گزارش در «روز گزارش‌نشده‌ی نوع درخواست» می‌آید. نوع گزارش فقط از «نوع ماموریت»‌های وصل‌به‌نوعِ درخواستِ همان ماموریت انتخاب می‌شود. وقتی حقوقِ ماهِ پایانِ ماموریت محاسبه شده، گزارش قفل است. قواعد در سرور.
 
 interface TypeOpt {
   id: number;
   title: string;
   isActive: boolean;
+  requestTypeId: number;
 }
 interface ReqOpt {
   id: number;
@@ -34,8 +35,8 @@ interface ReqOpt {
   destination: string;
   fromDate: string;
   toDate: string;
-  typeId: number;
-  typeTitle: string;
+  requestTypeId: number;
+  requestTypeTitle: string;
 }
 interface RepRow {
   id: number;
@@ -118,8 +119,8 @@ function RepList() {
           { header: "کارمند", ...s((r) => r.employeeName) },
           { header: "مقصد", ...s((r) => r.destination) },
           { header: "بازه‌ی ماموریت", ...s((r) => range(r.requestFrom, r.requestTo)), width: "190px" },
-          { header: "نوع ماموریت", ...s((r) => r.requestTypeTitle), width: "110px" },
-          { header: "نوع گزارش", ...s((r) => r.typeTitle), width: "110px" },
+          { header: "نوع درخواست", ...s((r) => r.requestTypeTitle), width: "120px" },
+          { header: "نوع ماموریت (گزارش)", ...s((r) => r.typeTitle), width: "140px" },
           { header: "بازه‌ی گزارش", ...s((r) => range(r.fromDate, r.toDate)), width: "190px" },
           { header: "روز", ...s((r) => toFaDigits(String(r.days))), width: "60px" },
           { header: "وضعیت", ...s((r) => r.statusTitle), width: "100px" },
@@ -173,7 +174,7 @@ function RepForm({ editId }: { editId?: number }) {
   }, [editId]);
 
   const req = requests.find((x) => String(x.id) === form.requestId);
-  const reqTypeId = req?.typeId ?? meta?.requestTypeId ?? undefined;
+  const reqTypeId = req?.requestTypeId ?? meta?.requestTypeId ?? undefined;
 
   function pickRequest(id: string) {
     const r = requests.find((x) => String(x.id) === id);
@@ -257,7 +258,7 @@ function RepForm({ editId }: { editId?: number }) {
               ) : (
                 <select value={form.requestId} onChange={(e) => pickRequest(e.target.value)}>
                   <option value="">— انتخاب کنید —</option>
-                  {requests.map((r) => <option key={r.id} value={r.id}>{`${toFaDigits(String(r.number))} — ${toFaDigits(r.personnelCode)} ${r.employeeName} — ${r.destination} (${range(r.fromDate, r.toDate)}، نوع ${r.typeTitle})`}</option>)}
+                  {requests.map((r) => <option key={r.id} value={r.id}>{`${toFaDigits(String(r.number))} — ${toFaDigits(r.personnelCode)} ${r.employeeName} — ${r.destination} (${range(r.fromDate, r.toDate)}، نوع ${r.requestTypeTitle})`}</option>)}
                 </select>
               )}
             </div>
@@ -265,7 +266,7 @@ function RepForm({ editId }: { editId?: number }) {
               <label>نوع ماموریت در این بازه<RequiredMark /> <FieldHint label="نوع ماموریت" text="نوعی که این بازه به آن برده می‌شود (مثلاً دریا). نباید با نوعِ خودِ درخواست یکی باشد؛ روزهای بدون گزارش خودبه‌خود به نوعِ درخواست تعلق دارند." /></label>
               <select value={form.typeId} onChange={(e) => setForm({ ...form, typeId: e.target.value })}>
                 <option value="">— انتخاب کنید —</option>
-                {types.filter((t) => (t.isActive || String(t.id) === form.typeId) && t.id !== reqTypeId).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+                {types.filter((t) => (t.isActive || String(t.id) === form.typeId) && t.requestTypeId === reqTypeId).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
               </select>
             </div>
             <div className="form-field">

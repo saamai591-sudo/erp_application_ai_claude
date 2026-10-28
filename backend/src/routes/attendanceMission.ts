@@ -23,12 +23,12 @@ const fail = (res: any, e: any, fallback: string) => res.status(400).json({ erro
 
 // فهرست نوع‌ها لوکاپِ بازِ انتخابگرهاست (مثل نوع مرخصی)
 router.get("/attendance-mission-types", async (_req, res) => {
-  const rows = await prisma.attendanceMissionType.findMany({ orderBy: { id: "asc" } });
+  const rows = await prisma.attendanceMissionType.findMany({ orderBy: { id: "asc" }, include: { requestType: { select: { title: true } } } });
   res.json(rows.map(missionTypeShape));
 });
 
 router.get("/attendance-mission-types/:id", async (req, res) => {
-  const t = await prisma.attendanceMissionType.findUnique({ where: { id: Number(req.params.id) } });
+  const t = await prisma.attendanceMissionType.findUnique({ where: { id: Number(req.params.id) }, include: { requestType: { select: { title: true } } } });
   if (!t) return res.status(404).json({ error: "نوع ماموریت یافت نشد" });
   res.json(missionTypeShape(t));
 });

@@ -13,13 +13,14 @@ import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 
-// مدیریت تردد › تنظیمات › «نوع ماموریت» (خشکی، دریا، …): عنوان، «نوع پایه» (دقیقاً یکی؛ روزهای ماموریتِ بدون «گزارش ماموریت» به آن تعلق می‌گیرد) و فعال.
-// برای هر نوعِ فعال، در فرمول‌ساز عوامل تردد یک متغیر روز «روزهای ماموریت <عنوان>» ساخته می‌شود. قواعد در سرور (services/attendanceMissionTypeService.ts).
+// مدیریت تردد › تنظیمات › «نوع ماموریت» = نوع «گزارش ماموریت» (دریا، هوایی، …): عنوان، «نوع درخواست» (ماهیت ماموریتِ روزانه) و فعال. نوع درخواستی که نوع ماموریتِ فعال دارد در محاسبه گزارشِ تاییدشده می‌خواهد.
+// برای هر نوعِ فعال، در فرمول‌ساز عوامل تردد یک متغیر روز «طول گزارش ماموریت <عنوان>» ساخته می‌شود. قواعد در سرور (services/attendanceMissionTypeService.ts).
 
 interface TypeRow {
   id: number;
   title: string;
-  isBase: boolean;
+  requestTypeId: number;
+  requestTypeTitle: string;
   isActive: boolean;
   description: string;
   updatedAt?: string;
@@ -57,7 +58,7 @@ function TypeList() {
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint title="نوع ماموریت" text="انواع ماموریت (خشکی، دریا، …). دقیقاً یک نوع «پایه» است: روزهای ماموریتی که برایشان «گزارش ماموریت» ثبت نشده به آن تعلق می‌گیرد. برای هر نوع در فرمول‌سازِ عوامل تردد یک متغیر روز «روزهای ماموریت <عنوان>» ساخته می‌شود." />
+          <InfoHint title="نوع ماموریت" text="انواع گزارش ماموریت (دریا، هوایی، …). هر نوع به یک «نوع درخواست» ماموریتِ روزانه وصل است و همین اتصال تعیین می‌کند کدام نوع درخواست‌ها برای «محاسبه تردد» گزارشِ تاییدشده لازم دارند. برای هر نوع در فرمول‌سازِ عوامل تردد یک متغیر روز «طول گزارش ماموریت <عنوان>» ساخته می‌شود." />
           <NewRecordButton path="/attendance-mission-types/new" />
           <RefreshButton onClick={reload} />
         </div>
@@ -66,7 +67,7 @@ function TypeList() {
       <DataTable
         columns={[
           { header: "عنوان", ...s((r) => r.title) },
-          { header: "نوع پایه", ...s((r) => (r.isBase ? "بله" : "")), width: "100px" },
+          { header: "نوع درخواست", ...s((r) => r.requestTypeTitle), width: "160px" },
           { header: "فعال", ...s((r) => (r.isActive ? "بله" : "خیر")), width: "80px" },
           { header: "توضیحات", ...s((r) => r.description) },
         ]}
@@ -82,9 +83,9 @@ function TypeForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
-  const [form, setForm] = usePersistedState(cacheKey, { title: "", isBase: false, isActive: true, description: "" });
+  const [form, setForm] = usePersistedState(cacheKey, { title: "", requestTypeId: "", isActive: true, description: "" });
+  const [reqTypes, setReqTypes] = useState<{ id: number; title: string; isActive: boolean; unit: string }[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | undefined>();
-  const [wasBase, setWasBase] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const { flash } = useSavedFlash();
@@ -93,10 +94,10 @@ function TypeForm({ editId }: { editId?: number }) {
     if (!editId) return;
     const r: TypeRow = await api.get(`/attendance-mission-types/${editId}`);
     setUpdatedAt(r.updatedAt);
-    setWasBase(r.isBase);
-    if (!hasPersistedState(cacheKey)) setForm({ title: r.title, isBase: r.isBase, isActive: r.isActive, description: r.description });
+    if (!hasPersistedState(cacheKey)) setForm({ title: r.title, requestTypeId: String(r.requestTypeId), isActive: r.isActive, description: r.description });
   }
   useEffect(() => {
+    api.get("/attendance-request-types?nature=MISSION").then((r) => setReqTypes(r)).catch(() => {});
     load().then(() => setLoaded(true)).catch((e) => setError(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
@@ -105,13 +106,14 @@ function TypeForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
     if (!form.title.trim()) return setError("عنوان نوع ماموریت الزامی است");
+    if (!form.requestTypeId) return setError("نوع درخواست را انتخاب کنید");
     try {
       if (editId) {
-        await api.put(`/attendance-mission-types/${editId}`, { ...form, updatedAt });
+        await api.put(`/attendance-mission-types/${editId}`, { ...form, requestTypeId: Number(form.requestTypeId), updatedAt });
         flash();
         await load();
       } else {
-        const created = await api.post("/attendance-mission-types", form);
+        const created = await api.post("/attendance-mission-types", { ...form, requestTypeId: Number(form.requestTypeId) });
         flash();
         navigate(`/attendance-mission-types/${created.id}/edit`);
       }
@@ -132,19 +134,23 @@ function TypeForm({ editId }: { editId?: number }) {
 
   if (!loaded) return null;
   return (
-    <FormPage title={editId ? "ویرایش نوع ماموریت" : "نوع ماموریت جدید"} formId="attendance-mission-type-form" closePath="/attendance-mission-types" newPath="/attendance-mission-types/new" onDelete={editId && !wasBase ? handleDelete : undefined}>
+    <FormPage title={editId ? "ویرایش نوع ماموریت" : "نوع ماموریت جدید"} formId="attendance-mission-type-form" closePath="/attendance-mission-types" newPath="/attendance-mission-types/new" onDelete={editId ? handleDelete : undefined}>
       <form id="attendance-mission-type-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
         <div className="form-grid">
           <div className="form-field">
-            <label>عنوان<RequiredMark /> <FieldHint label="عنوان" text="مثلاً «خشکی» یا «دریا». متغیر روز «روزهای ماموریت <عنوان>» در فرمول‌ساز ظاهر می‌شود." /></label>
+            <label>عنوان<RequiredMark /> <FieldHint label="عنوان" text="مثلاً «دریا». متغیر روز «طول گزارش ماموریت <عنوان>» در فرمول‌ساز ظاهر می‌شود." /></label>
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
           </div>
           <div className="form-field">
-            <label className="checkbox-row"><input type="checkbox" checked={form.isBase} disabled={wasBase} onChange={(e) => setForm({ ...form, isBase: e.target.checked })} /> نوع پایه <FieldHint label="نوع پایه" text="دقیقاً یک نوع پایه وجود دارد. روزهای ماموریتی که با «گزارش ماموریت» به نوع دیگری برده نشده باشند (و پیش‌فرضِ نوعِ درخواست) به نوع پایه تعلق می‌گیرند. با پایه‌کردن یک نوع دیگر، پایه‌ی قبلی خودکار برداشته می‌شود." /></label>
+            <label>نوع درخواست<RequiredMark /> <FieldHint label="نوع درخواست" text="نوع درخواستِ ماموریتی که این نوع گزارش مربوط به آن است. نوع درخواستی که نوع ماموریتِ فعال دارد، در «محاسبه تردد» برای هر درخواستِ پایان‌یافته‌اش گزارشِ تاییدشده می‌خواهد. فقط نوع درخواست‌های روزانه قابل انتخاب‌اند (ماموریت ساعتی گزارش ندارد)." /></label>
+            <select value={form.requestTypeId} onChange={(e) => setForm({ ...form, requestTypeId: e.target.value })}>
+              <option value="">— انتخاب کنید —</option>
+              {reqTypes.filter((t) => t.unit === "DAILY" && (t.isActive || String(t.id) === form.requestTypeId)).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+            </select>
           </div>
           <div className="form-field">
-            <label className="checkbox-row"><input type="checkbox" checked={form.isActive} disabled={form.isBase} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} /> فعال</label>
+            <label className="checkbox-row"><input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} /> فعال</label>
           </div>
           <div className="form-field" style={{ gridColumn: "1 / -1" }}>
             <label>توضیحات</label>

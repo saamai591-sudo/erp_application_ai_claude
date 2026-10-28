@@ -6580,6 +6580,7 @@ model AttendanceLeaveType {
   createdAt          DateTime                  @default(now())
   updatedAt          DateTime                  @updatedAt
   requests           AttendanceLeaveRequest[]
+  requestTypes       AttendanceRequestType[]
   balanceEntries     AttendanceLeaveBalanceEntry[]
   entitlements       AttendanceLeaveEntitlement[]
   negativePolicies   AttendanceLeaveNegativePolicy[]
@@ -6590,6 +6591,8 @@ model AttendanceLeaveRequest {
   id           Int                          @id @default(autoincrement())
   number       Int                          @unique
   employeeId   Int
+  /// نوع درخواست (روزانه/ساعتی) — تنها منبع تعیین ساعتی‌بودن؛ leaveTypeId همیشه همان نوع مرخصیِ نوع درخواست است (قید ترکیبی)
+  requestTypeId Int
   leaveTypeId  Int
   fromDate     DateTime                     @db.Date
   toDate       DateTime                     @db.Date
@@ -6606,33 +6609,63 @@ model AttendanceLeaveRequest {
   updatedAt    DateTime                     @updatedAt
   employee     Employee                     @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   leaveType    AttendanceLeaveType          @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+  requestType  AttendanceRequestType        @relation(fields: [requestTypeId, leaveTypeId], references: [id, leaveTypeId], onDelete: Restrict)
   attachments  AttendanceLeaveAttachment[]
 
   @@index([employeeId, fromDate, toDate])
 }
 
-/// نوع ماموریت (خشکی، دریا، …). دقیقاً یک نوع «پایه» است (partial unique index در migration): روزهای بدون «گزارش ماموریت» به آن تعلق می‌گیرد.
-/// متغیر روزِ احتسابِ هر نوع با کلید MT<id> ساخته می‌شود
-model AttendanceMissionType {
-  id          Int                       @id @default(autoincrement())
-  title       String                    @unique
-  isBase      Boolean                   @default(false)
-  isActive    Boolean                   @default(true)
-  description String?
-  createdAt   DateTime                  @default(now())
-  updatedAt   DateTime                  @updatedAt
-  requests    AttendanceMissionRequest[]
-  reports     AttendanceMissionReport[]
+enum AttendanceRequestNature {
+  LEAVE
+  MISSION
 }
 
-/// درخواست ماموریت: روزانه (از تاریخ تا تاریخ) یا ساعتی (یک تاریخ + ساعت شروع/پایان). تاییدشده = روزهای آن غیبت نمی‌خورد؛
-/// «پایان ماموریت» (endedAt) تاریخ پایان را قطعی می‌کند و کل بازه در ماهِ پایان به تفکیک نوع احتساب می‌شود (گزارش ماموریت نوع‌های غیرپایه را جدا می‌کند)
+enum AttendanceRequestUnit {
+  DAILY
+  HOURLY
+}
+
+/// نوع درخواست (مدیریت تردد › تنظیمات): ماهیت مرخصی یا ماموریت + واحد (روزانه/ساعتی) — واحد فرم درخواست از همین‌جا می‌آید.
+/// ماهیت مرخصی ← نوع مرخصی الزامی (مانده/استحقاق روی نوع مرخصی می‌ماند)؛ ماهیت ماموریت ← بدون نوع مرخصی. «نیازمند گزارش» ذخیره نمی‌شود: نوع درخواستی که حداقل یک «نوع ماموریت» (گزارش) فعال به آن وصل باشد گزارش می‌خواهد.
+/// متغیر روزِ طول درخواست هر نوع درخواست ماموریت با کلید RQ<id> (و روز گزارش‌نشده‌اش RU<id>) ساخته می‌شود
+model AttendanceRequestType {
+  id              Int                       @id @default(autoincrement())
+  title           String                    @unique
+  nature          AttendanceRequestNature
+  unit            AttendanceRequestUnit
+  leaveTypeId     Int?
+  isActive        Boolean                   @default(true)
+  description     String?
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  leaveType       AttendanceLeaveType?      @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+  leaveRequests   AttendanceLeaveRequest[]
+  missionRequests AttendanceMissionRequest[]
+  missionTypes    AttendanceMissionType[]
+
+  @@unique([id, leaveTypeId])
+}
+
+/// نوع ماموریت = نوع «گزارش ماموریت» (دریا، هوایی، …) و وابسته به یک نوع درخواست ماموریت (روزانه). متغیر روزِ احتسابِ هر نوع با کلید MT<id> ساخته می‌شود
+model AttendanceMissionType {
+  id            Int                       @id @default(autoincrement())
+  title         String                    @unique
+  requestTypeId Int
+  isActive      Boolean                   @default(true)
+  description   String?
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+  requestType   AttendanceRequestType     @relation(fields: [requestTypeId], references: [id], onDelete: Restrict)
+  reports       AttendanceMissionReport[]
+}
+
+/// درخواست ماموریت: روزانه یا ساعتی بر اساس واحد نوع درخواست (روزانه: از تاریخ تا تاریخ، ساعتی: یک تاریخ + ساعت شروع/پایان). تاییدشده = روزهای آن غیبت نمی‌خورد؛
+/// «پایان ماموریت» (endedAt) تاریخ پایان را قطعی می‌کند و کل بازه در ماهِ پایان به تفکیک نوع درخواست احتساب می‌شود (گزارش ماموریت بازه‌هایی را به نوع گزارش می‌برد)
 model AttendanceMissionRequest {
   id            Int                        @id @default(autoincrement())
   number        Int                        @unique
   employeeId    Int
-  /// نوع ماموریتِ کل بازه (پیش‌فرض: نوع پایه)؛ بازه‌های نوع دیگر با «گزارش ماموریت» می‌آیند
-  typeId        Int
+  requestTypeId Int
   fromDate      DateTime                   @db.Date
   /// پایان فعلی (تا پیش از «پایان ماموریت» قابل ویرایش؛ بعدش پایان واقعی)
   toDate        DateTime                   @db.Date
@@ -6653,7 +6686,7 @@ model AttendanceMissionRequest {
   createdAt     DateTime                   @default(now())
   updatedAt     DateTime                   @updatedAt
   employee      Employee                   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-  type          AttendanceMissionType      @relation(fields: [typeId], references: [id], onDelete: Restrict)
+  requestType   AttendanceRequestType      @relation(fields: [requestTypeId], references: [id], onDelete: Restrict)
   reports       AttendanceMissionReport[]
 
   @@index([employeeId, fromDate, toDate])

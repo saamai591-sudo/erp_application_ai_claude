@@ -80,6 +80,8 @@ export async function saveLeaveType(body: any, id?: number) {
     if (unit === "DAY") {
       const bad = await prisma.attendanceLeaveRequest.count({ where: { leaveTypeId: id, startMinute: { not: null } } });
       if (bad > 0) throw new AttendanceError("درخواست ساعتیِ ثبت‌شده‌ای با این نوع وجود دارد؛ واحد را نمی‌توان به «روزانه» محدود کرد");
+      const badTypes = await prisma.attendanceRequestType.count({ where: { leaveTypeId: id, unit: "HOURLY" } });
+      if (badTypes > 0) throw new AttendanceError("نوع درخواستِ ساعتی به این نوع مرخصی وصل است؛ واحد را نمی‌توان به «روزانه» محدود کرد (ابتدا آن نوع درخواست را حذف یا روزانه کنید)");
     }
   }
   return prisma.attendanceLeaveType.update({ where: { id }, data });
@@ -94,6 +96,8 @@ export async function factorsUsingLeaveType(id: number): Promise<string[]> {
 export async function deleteLeaveType(id: number) {
   const by = await factorsUsingLeaveType(id);
   if (by.length) throw new AttendanceError(`این نوع مرخصی در فرمول عامل‌های دیگر استفاده شده است و حذف نمی‌شود: ${by.slice(0, 5).join("، ")}${by.length > 5 ? " …" : ""}`);
+  const rt = await prisma.attendanceRequestType.count({ where: { leaveTypeId: id } });
+  if (rt) throw new AttendanceError(`${rt} نوع درخواست به این نوع مرخصی وصل است و حذف نمی‌شود؛ ابتدا آن‌ها را حذف کنید`);
   await prisma.attendanceLeaveType.delete({ where: { id } });
 }
 
@@ -109,6 +113,8 @@ export function requestShape(r: any) {
     employeeId: r.employeeId,
     personnelCode: r.employee?.personnelCode ?? "",
     employeeName: r.employee ? personName(r.employee.party) : "",
+    requestTypeId: r.requestTypeId,
+    requestTypeTitle: r.requestType?.title ?? "",
     leaveTypeId: r.leaveTypeId,
     leaveTypeTitle: r.leaveType?.title ?? "",
     requiresAttachment: !!r.leaveType?.requiresAttachment,
@@ -128,7 +134,7 @@ export function requestShape(r: any) {
   };
 }
 
-export const REQUEST_INCLUDE = { employee: { select: EMPLOYEE_SELECT }, leaveType: true, attachments: { select: { id: true, fileName: true, mimeType: true, size: true } } };
+export const REQUEST_INCLUDE = { employee: { select: EMPLOYEE_SELECT }, leaveType: true, requestType: true, attachments: { select: { id: true, fileName: true, mimeType: true, size: true } } };
 
 async function nextNumber(tx: any): Promise<number> {
   const last = await tx.attendanceLeaveRequest.findFirst({ orderBy: { number: "desc" }, select: { number: true } });
@@ -137,6 +143,7 @@ async function nextNumber(tx: any): Promise<number> {
 
 export interface CleanRequest {
   employeeId: number;
+  requestTypeId: number;
   leaveTypeId: number;
   fromDate: Date;
   toDate: Date;
@@ -215,13 +222,17 @@ export async function assertShiftAndPresence(q: { employeeId: number; fromDate: 
 export async function cleanRequest(b: any, excludeId?: number): Promise<CleanRequest> {
   const employeeId = Number(b?.employeeId);
   if (!employeeId) throw new AttendanceError("کارمند الزامی است");
-  const leaveTypeId = Number(b?.leaveTypeId);
-  const type = leaveTypeId ? await prisma.attendanceLeaveType.findUnique({ where: { id: leaveTypeId } }) : null;
-  if (!type) throw new AttendanceError("نوع مرخصی را انتخاب کنید");
+  // نوع درخواست (ماهیت مرخصی) هم نوع مرخصی را مشخص می‌کند و هم روزانه/ساعتی‌بودن را؛ چک‌باکس «ساعتی» ندارد
+  const requestTypeId = Number(b?.requestTypeId);
+  const rtype = requestTypeId ? await prisma.attendanceRequestType.findUnique({ where: { id: requestTypeId }, include: { leaveType: true } }) : null;
+  if (!rtype || rtype.nature !== "LEAVE" || !rtype.leaveType) throw new AttendanceError("نوع درخواست مرخصی را انتخاب کنید");
+  if (!rtype.isActive) throw new AttendanceError(`نوع درخواست «${rtype.title}» غیرفعال است`);
+  const type = rtype.leaveType;
+  const leaveTypeId = type.id;
   if (!type.isActive) throw new AttendanceError(`نوع مرخصی «${type.title}» غیرفعال است`);
   const reason = typeof b?.reason === "string" ? b.reason.trim() : "";
   if (!reason) throw new AttendanceError("دلیل درخواست الزامی است");
-  const hourly = b?.hourly === true;
+  const hourly = rtype.unit === "HOURLY";
   if (hourly && type.unit === "DAY") throw new AttendanceError(`نوع مرخصی «${type.title}» فقط روزانه است`);
   const fromDate = parseDay(b?.fromDate, "از تاریخ");
   const toDate = !b?.toDate ? fromDate : parseDay(b.toDate, "تا تاریخ");
@@ -245,7 +256,7 @@ export async function cleanRequest(b: any, excludeId?: number): Promise<CleanReq
   // اول کنترل شیفت و حضور (پیام روشن‌تر)، بعد تداخل با درخواست‌های دیگر
   await assertShiftAndPresence(q);
   await assertNoRequestConflict(q, excludeId, ["PENDING", "APPROVED"]);
-  return { employeeId, leaveTypeId, fromDate, toDate, startMinute, endMinute, reason };
+  return { employeeId, requestTypeId, leaveTypeId, fromDate, toDate, startMinute, endMinute, reason };
 }
 
 export async function createRequest(d: CleanRequest, userId: number | null) {

@@ -8,6 +8,7 @@ import { bandOverlap, effectiveBands, type EffectiveBand } from "./attendanceTim
 import { leaveForDay, loadApprovedLeave, type DayLeave } from "./attendanceLeaveService";
 import { loadMissions, loadSettlements, missionForDay, type DayMission, type DaySettlement } from "./attendanceMissionCalc";
 import { missionTypeKey } from "./attendanceMissionTypeService";
+import { requestTypeKey, unreportedKey } from "./attendanceRequestTypeService";
 import { BAND_KEY_RE } from "./attendanceFormulaDefs";
 import { AGG_HINTS, ATT_BASE_HINTS, ATT_GROUP_HINTS, DAY_VAR_HINTS } from "./attendanceFormulaHints";
 import { AGG_VARIANTS, ALLOWED_NS, ATT_BASE_INFO, ATT_LEVEL_FA, ATT_VALUE_TYPE_FA, DAY_VARS, type AttLevel, type AttValueType } from "./attendanceFormulaDefs";
@@ -178,6 +179,10 @@ export async function validateBranches(factor: { id: number | null; key: string;
     ...(await prisma.attendanceTimeBand.findMany({ select: { key: true, title: true, isActive: true } })),
     ...(await prisma.attendanceLeaveType.findMany({ select: { key: true, title: true, isActive: true } })),
     ...(await prisma.attendanceMissionType.findMany({ select: { id: true, title: true, isActive: true } })).map((t) => ({ key: missionTypeKey(t.id), title: t.title, isActive: t.isActive })),
+    ...(await prisma.attendanceRequestType.findMany({ where: { nature: "MISSION" }, select: { id: true, title: true, isActive: true } })).flatMap((t) => [
+      { key: requestTypeKey(t.id), title: t.title, isActive: t.isActive },
+      { key: unreportedKey(t.id), title: t.title, isActive: t.isActive },
+    ]),
   ];
   const myRefs: RefInfo[] = [];
   parsed.forEach((p, i) => {
@@ -196,7 +201,7 @@ export async function validateBranches(factor: { id: number | null; key: string;
       }
       if ((r.ns === "V" || r.ns === "T") && BAND_KEY_RE.test(r.key)) {
         const bd = bandRows.find((x) => x.key === r.key);
-        const what = r.key.startsWith("LV") ? "نوع مرخصی" : r.key.startsWith("MT") ? "نوع ماموریت" : "بازه‌ی زمانی";
+        const what = r.key.startsWith("LV") ? "نوع مرخصی" : r.key.startsWith("MT") ? "نوع ماموریت" : r.key.startsWith("RQ") || r.key.startsWith("RU") ? "نوع درخواست ماموریت" : "بازه‌ی زمانی";
         if (!bd) throw new AttendanceError(`${tag}${what}ِ ارجاع‌شده یافت نشد`);
         if (!bd.isActive) throw new AttendanceError(`${tag}${what} «${bd.title}» غیرفعال است`);
       }
@@ -234,14 +239,22 @@ const nsTitle = (ns: Ns) =>
 // ───────────────────────── پالت فرمول‌ساز ─────────────────────────
 
 export async function palette(level: AttLevel, factorId?: number) {
-  const [factors, params, bandRows, leaveRows, missionRows] = await Promise.all([
+  const [factors, params, bandRows, leaveRows, missionRows, requestRows] = await Promise.all([
     prisma.attendanceFactor.findMany({ where: { isActive: true }, orderBy: { id: "asc" } }),
     prisma.payrollParameter.findMany({ where: { isActive: true, kind: "CONSTANT", type: { in: ["NUMBER", "AMOUNT"] } }, orderBy: { id: "asc" } }),
     prisma.attendanceTimeBand.findMany({ where: { isActive: true }, orderBy: { id: "asc" } }),
     prisma.attendanceLeaveType.findMany({ where: { isActive: true }, orderBy: { id: "asc" } }),
-    prisma.attendanceMissionType.findMany({ where: { isActive: true }, orderBy: { id: "asc" } }),
+    prisma.attendanceMissionType.findMany({ where: { isActive: true }, orderBy: { id: "asc" }, include: { requestType: { select: { title: true } } } }),
+    // فقط نوع درخواست‌های ماموریتِ روزانه (احتسابِ ماموریت فقط برای روزانه است)
+    prisma.attendanceRequestType.findMany({ where: { isActive: true, nature: "MISSION", unit: "DAILY" }, orderBy: { id: "asc" } }),
   ]);
-  const missionItems = missionRows.map((t) => ({ key: missionTypeKey(t.id), title: `روزهای ماموریت ${t.title}`, hint: [t.description, "روزهای تقویمیِ ماموریت‌های پایان‌یافته از این نوع؛ در روز پایان ماموریت می‌نشیند (کل بازه). در عامل ماهانه با «تجمیع متغیرهای روز ← جمع ماه» بخوانید."].filter(Boolean).join(" — ") }));
+  const missionItems = [
+    ...requestRows.flatMap((t) => [
+      { key: requestTypeKey(t.id), title: `طول درخواست ماموریت ${t.title}`, hint: [t.description, "کل روزهای تقویمیِ درخواست‌های ماموریتِ پایان‌یافته‌ی این نوع (بدون توجه به گزارش)؛ در روز پایان ماموریت می‌نشیند. در عامل ماهانه با «تجمیع متغیرهای روز ← جمع ماه» بخوانید."].filter(Boolean).join(" — ") },
+      { key: unreportedKey(t.id), title: `روز گزارش‌نشده‌ی ${t.title}`, hint: "طول درخواست‌های ماموریتِ پایان‌یافته‌ی این نوع منهای روزهای گزارش‌های تاییدشده‌ی آن‌ها؛ برای درخواستِ بدون گزارش برابر کل طول درخواست است." },
+    ]),
+    ...missionRows.map((t) => ({ key: missionTypeKey(t.id), title: `طول گزارش ماموریت ${t.title}`, hint: [t.description, `روزهای گزارش‌های تاییدشده‌ی این نوع ماموریت (نوع درخواست: ${t.requestType.title})؛ در روز پایان ماموریت می‌نشیند. در عامل ماهانه با «تجمیع متغیرهای روز ← جمع ماه» بخوانید.`].filter(Boolean).join(" — ") })),
+  ];
   const leaveItems = leaveRows.map((t) => ({ key: t.key, title: `مرخصی ${t.title}`, hint: [t.description, "مدت مرخصی تاییدشده‌ی این نوع در همان روز (دقیقه): مرخصی تمام‌روز = «ساعت مرخصی» روز شیفت؛ مرخصی ساعتی = بخشی از ساعت درخواستی که با بازه‌های کاری هم‌پوشانی دارد. برای روز غیرکاری صفر است."].filter(Boolean).join(" — ") }));
   const bandItems = bandRows.map((b) => ({ key: b.key, title: `حضور در ${b.title}`, hint: [b.description, "کل حضور (جفت‌ترددها) در این بازه‌ی ساعتی، اعم از داخل شیفت و اضافه‌کار؛ ساعت بازه در «بازه‌های زمانی» تعریف می‌شود و به شیفت وابسته نیست. حداقل مدت یا ضریب را در فرمول بگذارید."].filter(Boolean).join(" — ") }));
   const self = factorId ? factors.find((f) => f.id === factorId) : undefined;
@@ -451,7 +464,7 @@ function runDayFactor(f: Compiled, dn: number, env: EvalEnv): Val {
 const allBranchesOf = (f: Compiled) => (f.variants ? f.variants.flatMap((v) => v.branches ?? []) : f.branches ?? []);
 
 /** متغیرهای یک روز از ردیف‌های «کارکرد روزانه» همان روز */
-function dayVariables(rows: any[], bands: EffectiveBand[] = [], leave?: DayLeave, leaveKeys: string[] = [], mission?: DayMission, settle?: DaySettlement, missionTypeIds: number[] = []): { vars: Record<string, number>; incomplete: boolean; shiftTitle: string } {
+function dayVariables(rows: any[], bands: EffectiveBand[] = [], leave?: DayLeave, leaveKeys: string[] = [], mission?: DayMission, settle?: DaySettlement, missionTypeIds: number[] = [], requestTypeIds: number[] = []): { vars: Record<string, number>; incomplete: boolean; shiftTitle: string } {
   const work = rows.filter((r) => !r.rest);
   const rest = rows.filter((r) => r.rest);
   const ok = work.filter((r) => r.status === "OK");
@@ -480,6 +493,7 @@ function dayVariables(rows: any[], bands: EffectiveBand[] = [], leave?: DayLeave
     MISSION_MINUTES: mission?.total ?? 0,
     // احتسابِ ماموریت‌های پایان‌یافته: کل بازه در روز پایان (تجمیع ماهانه‌اش در ماهِ پایان می‌افتد)
     MISSION_DAYS: settle?.total ?? 0,
+    MISSION_REPORT_DAYS: settle?.reportTotal ?? 0,
     ROWS: work.length,
     INCOMPLETE_ROWS: rows.filter((r) => r.status === "INCOMPLETE").length,
   };
@@ -488,6 +502,10 @@ function dayVariables(rows: any[], bands: EffectiveBand[] = [], leave?: DayLeave
   for (const b of bands) if (b.startMinute !== null && b.endMinute !== null) vars[b.key] = bandOverlap(pairs, b.startMinute, b.endMinute);
   for (const k of leaveKeys) vars[k] = leave?.byKey[k] ?? 0;
   for (const id of missionTypeIds) vars[missionTypeKey(id)] = settle?.byType[id] ?? 0;
+  for (const id of requestTypeIds) {
+    vars[requestTypeKey(id)] = settle?.byRequestType[id] ?? 0;
+    vars[unreportedKey(id)] = settle?.unreportedByRequestType[id] ?? 0;
+  }
   return { vars, incomplete: vars.INCOMPLETE_ROWS > 0, shiftTitle: first.shiftTitle };
 }
 
@@ -509,10 +527,13 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
   const leaveKeys = leaveTypes.map((t) => t.key);
   const missionTypes = await prisma.attendanceMissionType.findMany({ where: { isActive: true }, select: { id: true, title: true }, orderBy: { id: "asc" } });
   const missionTypeIds = missionTypes.map((t) => t.id);
+  const requestTypes = await prisma.attendanceRequestType.findMany({ where: { isActive: true, nature: "MISSION", unit: "DAILY" }, select: { id: true, title: true }, orderBy: { id: "asc" } });
+  const requestTypeIds = requestTypes.map((t) => t.id);
   const bandTitle = new Map<string, string>([
     ...bands.map((b) => [b.key, `حضور در ${b.title}`] as [string, string]),
     ...leaveTypes.map((t) => [t.key, `مرخصی ${t.title}`] as [string, string]),
-    ...missionTypes.map((t) => [missionTypeKey(t.id), `روزهای ماموریت ${t.title}`] as [string, string]),
+    ...missionTypes.map((t) => [missionTypeKey(t.id), `طول گزارش ماموریت ${t.title}`] as [string, string]),
+    ...requestTypes.flatMap((t) => [[requestTypeKey(t.id), `طول درخواست ماموریت ${t.title}`] as [string, string], [unreportedKey(t.id), `روز گزارش‌نشده‌ی ${t.title}`] as [string, string]]),
   ]);
   const dayFactors = compiled.filter((f) => f.level === "DAY");
   const monthFactors = compiled.filter((f) => f.level === "MONTH");
@@ -616,7 +637,7 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
 
     for (const date of dates) {
       const dn = dayNum(new Date(date));
-      const dv = dayVariables(byDate.get(date)!, bands, leaveForDay(approvedLeave, empId, dn, byDate.get(date)!), leaveKeys, missionForDay(approvedMissions, empId, dn, byDate.get(date)!), settlements.get(`${empId}:${dn}`), missionTypeIds);
+      const dv = dayVariables(byDate.get(date)!, bands, leaveForDay(approvedLeave, empId, dn, byDate.get(date)!), leaveKeys, missionForDay(approvedMissions, empId, dn, byDate.get(date)!), settlements.get(`${empId}:${dn}`), missionTypeIds, requestTypeIds);
       const values: Record<string, Val> = {};
       const env: EvalEnv = {
         scalar: (ns, key) => {
@@ -702,7 +723,7 @@ export async function computeAttendanceResults(opts: ComputeOpts) {
     to: dayStr(to),
     factors: factorsOut,
     payrollFactors: payrollCompiled.map((f) => ({ key: f.key, componentId: f.payrollComponentId!, title: f.title, valueType: f.valueType, error: f.error, methodId: f.methodId ?? null })),
-    bands: [...bands.map((b) => ({ key: b.key, title: `حضور در ${b.title}` })), ...leaveTypes.map((t) => ({ key: t.key, title: `مرخصی ${t.title}` })), ...missionTypes.map((t) => ({ key: missionTypeKey(t.id), title: `روزهای ماموریت ${t.title}` }))],
+    bands: [...bands.map((b) => ({ key: b.key, title: `حضور در ${b.title}` })), ...leaveTypes.map((t) => ({ key: t.key, title: `مرخصی ${t.title}` })), ...missionTypes.map((t) => ({ key: missionTypeKey(t.id), title: `طول گزارش ماموریت ${t.title}` })), ...requestTypes.flatMap((t) => [{ key: requestTypeKey(t.id), title: `طول درخواست ماموریت ${t.title}` }, { key: unreportedKey(t.id), title: `روز گزارش‌نشده‌ی ${t.title}` }])],
     employees,
     days,
     summary: { employees: employees.length, days: days.length, incompleteDays: days.filter((d) => d.incomplete).length, factorErrors: factorsOut.filter((f) => f.error).length },

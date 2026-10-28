@@ -21,15 +21,17 @@ import { useTabs } from "../lib/TabsContext";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { EmployeePickerField, useEmployeeOptions } from "./AttendancePunches";
 
-// مدیریت تردد › عملیات › «درخواست ماموریت»: کارمند + نوع ماموریت (پیش‌فرض: نوع پایه) + روزانه (از تاریخ تا تاریخ) یا ساعتی (یک تاریخ + ساعت شروع/پایان) + مقصد + شرح.
+// مدیریت تردد › درخواست‌های پرسنلی › «درخواست ماموریت»: کارمند + «نوع درخواست» (ماهیت ماموریت؛ روزانه یا ساعتی‌بودن از واحد آن می‌آید و چک‌باکس «ساعتی» نداریم) + روزانه (از تاریخ تا تاریخ) یا ساعتی (یک تاریخ + ساعت شروع/پایان) + مقصد + شرح.
 // «ثبت‌شده» ← تایید / رد (با دلیل) ← برگشت. تاییدشده = روزهای ماموریت غیبت نمی‌خورد. برای تاییدشده‌ی روزانه تا قبل از «پایان ماموریت» فقط «تا تاریخ» قابل تغییر است
-// (تمدید/کوتاه‌کردن)؛ «پایان ماموریت» تاریخ پایان را قطعی می‌کند و کل بازه در ماهِ پایان به تفکیک نوع احتساب می‌شود («گزارش ماموریت» بازه‌ی نوع‌های دیگر را جدا می‌کند). قواعد در سرور.
+// (تمدید/کوتاه‌کردن)؛ «پایان ماموریت» تاریخ پایان را قطعی می‌کند و کل بازه در ماهِ پایان به تفکیک نوع درخواست احتساب می‌شود؛ نوع درخواستی که «نوع ماموریت» (گزارش) دارد برای محاسبه گزارشِ تاییدشده می‌خواهد. قواعد در سرور.
 
+/** نوع درخواستِ ماهیت ماموریت؛ واحدش تعیین می‌کند فرم روزانه است یا ساعتی */
 interface TypeOpt {
   id: number;
   title: string;
-  isBase: boolean;
   isActive: boolean;
+  unit: "DAILY" | "HOURLY";
+  requiresReport: boolean;
 }
 interface ReqRow {
   id: number;
@@ -37,8 +39,9 @@ interface ReqRow {
   employeeId: number;
   personnelCode: string;
   employeeName: string;
-  typeId: number;
-  typeTitle: string;
+  requestTypeId: number;
+  requestTypeTitle: string;
+  requiresReport: boolean;
   fromDate: string;
   toDate: string;
   plannedToDate: string;
@@ -95,7 +98,7 @@ function ReqList() {
     <div>
       <div className="page-header">
         <div className="header-toolbar" style={{ gap: 4 }}>
-          <InfoHint title="درخواست ماموریت" text="ماموریت روزانه (از تاریخ تا تاریخ) یا ساعتی. درخواست «تاییدشده» غیبتِ روزهای ماموریت را برمی‌دارد. برای ماموریت روزانه، تا قبل از «پایان ماموریت» می‌توان «تا تاریخ» را تغییر داد؛ با ثبت پایان، کل روزهای ماموریت در ماهِ پایان به تفکیک نوع احتساب می‌شود (بازه‌ی نوع‌های غیرپایه با «گزارش ماموریت»)." />
+          <InfoHint title="درخواست ماموریت" text="ماموریت روزانه (از تاریخ تا تاریخ) یا ساعتی. درخواست «تاییدشده» غیبتِ روزهای ماموریت را برمی‌دارد. برای ماموریت روزانه، تا قبل از «پایان ماموریت» می‌توان «تا تاریخ» را تغییر داد؛ با ثبت پایان، کل روزهای ماموریت در ماهِ پایان به تفکیک نوع درخواست احتساب می‌شود. برای نوع درخواستی که «نوع ماموریت» (گزارش) دارد، «محاسبه تردد» گزارشِ تاییدشده می‌خواهد." />
           <NewRecordButton path="/attendance-mission-requests/new" />
           <RefreshButton onClick={reload} />
           <select value={status} onChange={(e) => setStatus(e.target.value)} style={{ marginInlineStart: 8 }}>
@@ -113,7 +116,7 @@ function ReqList() {
           { header: "شماره", ...s((r) => toFaDigits(String(r.number))), width: "80px" },
           { header: "کد پرسنلی", ...s((r) => toFaDigits(r.personnelCode)), width: "110px" },
           { header: "کارمند", ...s((r) => r.employeeName) },
-          { header: "نوع", ...s((r) => r.typeTitle), width: "100px" },
+          { header: "نوع درخواست", ...s((r) => r.requestTypeTitle), width: "140px" },
           { header: "تاریخ", ...s((r) => dateText(r)), width: "190px" },
           { header: "ساعت", ...s((r) => (r.hourly ? toFaDigits(r.periodText) : "تمام‌روز")), width: "170px" },
           { header: "مدت", ...s((r) => toFaDigits(r.amountText)), width: "100px" },
@@ -137,7 +140,7 @@ function ReqForm({ editId }: { editId?: number }) {
   const { openTab } = useTabs();
   const { hasPermission } = usePermissions();
   const cacheKey = `form:${location.pathname}:form`;
-  const [form, setForm] = usePersistedState(cacheKey, { employeeId: "", typeId: "", hourly: false, fromDate: localTodayIso(), toDate: "", start: "", end: "", destination: "", reason: "" });
+  const [form, setForm] = usePersistedState(cacheKey, { employeeId: "", requestTypeId: "", fromDate: localTodayIso(), toDate: "", start: "", end: "", destination: "", reason: "" });
   const [meta, setMeta] = useState<ReqRow | null>(null);
   const [types, setTypes] = useState<TypeOpt[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -150,18 +153,14 @@ function ReqForm({ editId }: { editId?: number }) {
   const employees = useEmployeeOptions();
   const { flash } = useSavedFlash();
 
-  const toForm = (r: ReqRow) => ({ employeeId: String(r.employeeId), typeId: String(r.typeId), hourly: r.hourly, fromDate: r.fromDate, toDate: r.toDate === r.fromDate ? "" : r.toDate, start: r.startMinute !== null ? minutesToMask(r.startMinute) : "", end: r.endMinute !== null ? minutesToMask(r.endMinute) : "", destination: r.destination, reason: r.reason });
+  const toForm = (r: ReqRow) => ({ employeeId: String(r.employeeId), requestTypeId: String(r.requestTypeId), fromDate: r.fromDate, toDate: r.toDate === r.fromDate ? "" : r.toDate, start: r.startMinute !== null ? minutesToMask(r.startMinute) : "", end: r.endMinute !== null ? minutesToMask(r.endMinute) : "", destination: r.destination, reason: r.reason });
   async function load() {
     const r: ReqRow = await api.get(`/attendance-mission-requests/${editId}`);
     setMeta(r);
     return r;
   }
   useEffect(() => {
-    api.get("/attendance-mission-types").then((r: TypeOpt[]) => {
-      setTypes(r);
-      // نوع پیش‌فرضِ درخواست تازه = نوع پایه
-      if (!editId) setForm((f) => (f.typeId ? f : { ...f, typeId: String(r.find((t) => t.isBase)?.id ?? "") }));
-    }).catch(() => {});
+    api.get("/attendance-request-types?nature=MISSION").then((r: TypeOpt[]) => setTypes(r)).catch(() => {});
     if (!editId) return;
     load().then((r) => {
       if (!hasPersistedState(cacheKey)) setForm(toForm(r));
@@ -170,7 +169,9 @@ function ReqForm({ editId }: { editId?: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
 
-  const hourly = form.hourly;
+  // واحد نوع درخواست تعیین می‌کند ساعتی است یا روزانه (در ویرایش، از خود درخواست)
+  const reqType = types.find((t) => String(t.id) === form.requestTypeId);
+  const hourly = reqType ? reqType.unit === "HOURLY" : !!meta?.hourly;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -187,7 +188,7 @@ function ReqForm({ editId }: { editId?: number }) {
       return;
     }
     if (!form.employeeId) return setError("کارمند را انتخاب کنید");
-    if (!form.typeId) return setError("نوع ماموریت را انتخاب کنید");
+    if (!form.requestTypeId) return setError("نوع درخواست را انتخاب کنید");
     if (!form.fromDate) return setError("تاریخ الزامی است");
     if (!form.destination.trim()) return setError("مقصد ماموریت الزامی است");
     if (!form.reason.trim()) return setError("شرح ماموریت الزامی است");
@@ -197,7 +198,7 @@ function ReqForm({ editId }: { editId?: number }) {
       endMinute = maskToMinutes(form.end);
       if (startMinute === null || endMinute === null) return setError("ساعت شروع و پایان ماموریت را کامل وارد کنید");
     }
-    const body = { employeeId: Number(form.employeeId), typeId: Number(form.typeId), hourly, fromDate: form.fromDate, toDate: form.toDate || form.fromDate, startMinute, endMinute, destination: form.destination, reason: form.reason };
+    const body = { employeeId: Number(form.employeeId), requestTypeId: Number(form.requestTypeId), fromDate: form.fromDate, toDate: form.toDate || form.fromDate, startMinute, endMinute, destination: form.destination, reason: form.reason };
     try {
       if (editId) {
         await api.put(`/attendance-mission-requests/${editId}`, { ...body, updatedAt: meta?.updatedAt });
@@ -249,7 +250,7 @@ function ReqForm({ editId }: { editId?: number }) {
       {meta.status === "PENDING" && hasPermission(`${P}.reject`) && <button type="button" className="btn secondary" disabled={busy} onClick={() => setRejectOpen(true)}>رد</button>}
       {meta.status === "APPROVED" && daily && !meta.ended && hasPermission(`${P}.finish`) && <button type="button" className="btn" disabled={busy} onClick={() => { setFinishDate(form.toDate || form.fromDate); setFinishOpen(true); }}>پایان ماموریت</button>}
       {meta.ended && !meta.locked && hasPermission(`${P}.finish`) && <button type="button" className="btn secondary" disabled={busy} onClick={() => act("unfinish")}>برگشت پایان</button>}
-      {meta.ended && hasPermission("attendance.operations.attendance-mission-reports.create") && !meta.locked && <button type="button" className="btn secondary" onClick={() => openTab(`/attendance-mission-reports/new?requestId=${meta.id}`)}>ثبت گزارش ماموریت</button>}
+      {meta.ended && meta.requiresReport && hasPermission("attendance.operations.attendance-mission-reports.create") && !meta.locked && <button type="button" className="btn secondary" onClick={() => openTab(`/attendance-mission-reports/new?requestId=${meta.id}`)}>ثبت گزارش ماموریت</button>}
       {meta.status !== "PENDING" && !meta.ended && hasPermission(`${P}.unapprove`) && <button type="button" className="btn secondary" disabled={busy} onClick={() => act("unapprove")}>برگشت از {meta.status === "APPROVED" ? "تایید" : "رد"}</button>}
     </>
   ) : null;
@@ -274,14 +275,12 @@ function ReqForm({ editId }: { editId?: number }) {
               <EmployeePickerField employees={employees} value={form.employeeId} onSelect={(x) => setForm({ ...form, employeeId: String(x.id) })} />
             </div>
             <div className="form-field">
-              <label>نوع ماموریت<RequiredMark /> <FieldHint label="نوع ماموریت" text="نوعِ کل بازه (پیش‌فرض: نوع پایه، مثلاً خشکی). اگر بخشی از ماموریت از نوع دیگری بود (مثلاً دریا)، بعد از پایان ماموریت با «گزارش ماموریت» ثبت می‌شود." /></label>
-              <select value={form.typeId} onChange={(e) => setForm({ ...form, typeId: e.target.value })}>
+              <label>نوع درخواست<RequiredMark /> <FieldHint label="نوع درخواست" text="روزانه یا ساعتی‌بودن ماموریت از واحدِ «نوع درخواست» (تنظیمات › نوع درخواست) می‌آید. ماموریت ساعتی «پایان ماموریت» و گزارش ندارد: یک بازه‌ی پیوسته از تاریخ و ساعت شروع تا تاریخ و ساعت پایان (حداکثر ۲۴ ساعت) که فقط بخش هم‌پوشان با بازه‌های کاریِ شیفت غیبت را برمی‌دارد." /></label>
+              <select value={form.requestTypeId} onChange={(e) => setForm({ ...form, requestTypeId: e.target.value })}>
                 <option value="">— انتخاب کنید —</option>
-                {types.filter((t) => t.isActive || String(t.id) === form.typeId).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+                {types.filter((t) => t.isActive || String(t.id) === form.requestTypeId).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
               </select>
-            </div>
-            <div className="form-field">
-              <label className="checkbox-row"><input type="checkbox" checked={form.hourly} onChange={(e) => setForm({ ...form, hourly: e.target.checked })} /> ماموریت ساعتی <FieldHint label="ماموریت ساعتی" text="یک بازه‌ی پیوسته از تاریخ و ساعت شروع تا تاریخ و ساعت پایان (حداکثر ۲۴ ساعت). فقط بخشی که با بازه‌های کاریِ شیفت هم‌پوشانی دارد غیبت را برمی‌دارد. ماموریت ساعتی «پایان ماموریت» و گزارش ندارد." /></label>
+              {reqType && <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>{hourly ? "ساعتی" : "روزانه"}{reqType.requiresReport ? " — این نوع برای محاسبه گزارش ماموریتِ تاییدشده می‌خواهد" : ""}</div>}
             </div>
             <div className="form-field">
               <label>از تاریخ<RequiredMark /></label>

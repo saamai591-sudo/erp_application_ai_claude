@@ -4,8 +4,8 @@ import { prisma } from "../lib/prisma";
 // دو چیز جداست:
 //  ۱) «پوشش» روزانه (missionForDay): ماموریت تاییدشده غیبت را برمی‌دارد. تمام‌روز در یک روز کاری = ساعت کاری خالصِ همان روز؛ ساعتی = بخشی از بازه‌ی درخواست که با
 //     بازه‌های کاریِ همان روز هم‌پوشانی دارد (محور زمان پیوسته، مثل مرخصی ساعتی). روز غیرکاری دقیقه‌ی ماموریت ندارد.
-//  ۲) «احتساب» (loadSettlements): فقط برای ماموریت روزانه‌ی تاییدشده و پایان‌یافته؛ کل بازه (روز تقویمی) در روزِ پایان و به تفکیک نوع ثبت می‌شود
-//     (گزارش‌های تاییدشده بازه‌هایی را به نوع دیگر می‌برند، باقیمانده به نوع خود درخواست)، تا تجمیع ماهانه‌ی آن روز در ماهِ پایان بیفتد.
+//  ۲) «احتساب» (loadSettlements): فقط برای ماموریت روزانه‌ی تاییدشده و پایان‌یافته؛ در روزِ پایان ثبت می‌شود (تا تجمیع ماهانه‌ی آن روز در ماهِ پایان بیفتد):
+//     طول درخواست (به تفکیک نوع درخواست)، طول گزارش‌های تاییدشده (به تفکیک نوع ماموریت و کل) و روز گزارش‌نشده‌ی هر نوع درخواست. هیچ «نوع پایه»ای نیست؛ تفاوت را فرمول می‌سازد.
 
 const DAY_MS = 86400000;
 const dayNum = (d: Date) => Math.floor(d.getTime() / DAY_MS);
@@ -57,34 +57,44 @@ export function missionForDay(missions: ApprovedMission[], employeeId: number, d
 }
 
 export interface DaySettlement {
-  /** کل روزهای تقویمیِ ماموریت (همه‌ی انواع) */
+  /** کل روزهای تقویمیِ درخواست‌ها (همه‌ی نوع درخواست‌ها) = «طول درخواست» */
   total: number;
-  /** روز به تفکیک نوع ماموریت (کلید = id نوع) */
+  /** کل روزهای گزارش‌های تاییدشده (همه‌ی نوع‌ها) = «طول گزارش» */
+  reportTotal: number;
+  /** طول درخواست به تفکیک نوع درخواست (کلید = id نوع درخواست) */
+  byRequestType: Record<number, number>;
+  /** روز گزارش‌نشده (طول درخواست − گزارش‌های تاییدشده) به تفکیک نوع درخواست */
+  unreportedByRequestType: Record<number, number>;
+  /** روزهای گزارش‌های تاییدشده به تفکیک نوع ماموریت (نوع گزارش؛ کلید = id نوع ماموریت) */
   byType: Record<number, number>;
 }
 
-/** احتسابِ ماموریت‌های پایان‌یافته‌ی تاییدشده که روز پایانشان در بازه است؛ کلید نتیجه `<employeeId>:<dayNum روز پایان>` */
+const addTo = (rec: Record<number, number>, k: number, n: number) => {
+  rec[k] = (rec[k] ?? 0) + n;
+};
+
+/** احتسابِ ماموریت‌های روزانه‌ی پایان‌یافته‌ی تاییدشده که روز پایانشان در بازه است؛ کلید نتیجه `<employeeId>:<dayNum روز پایان>` (کل در روز پایان می‌نشیند تا تجمیع ماهانه‌ی آن روز در ماهِ پایان بیفتد) */
 export async function loadSettlements(employeeIds: number[], fromDay: number, toDay: number): Promise<Map<string, DaySettlement>> {
   const out = new Map<string, DaySettlement>();
   if (employeeIds.length === 0) return out;
   const rows = await prisma.attendanceMissionRequest.findMany({
     where: { employeeId: { in: employeeIds }, status: "APPROVED", endedAt: { not: null }, startMinute: null, toDate: { gte: new Date(fromDay * DAY_MS), lte: new Date(toDay * DAY_MS) } },
-    select: { employeeId: true, typeId: true, fromDate: true, toDate: true, reports: { where: { status: "APPROVED" }, select: { typeId: true, fromDate: true, toDate: true } } },
+    select: { employeeId: true, requestTypeId: true, fromDate: true, toDate: true, reports: { where: { status: "APPROVED" }, select: { typeId: true, fromDate: true, toDate: true } } },
   });
   for (const r of rows) {
     const total = dayNum(r.toDate) - dayNum(r.fromDate) + 1;
-    const byType: Record<number, number> = {};
+    const key = `${r.employeeId}:${dayNum(r.toDate)}`;
+    const cur = out.get(key) ?? { total: 0, reportTotal: 0, byRequestType: {}, unreportedByRequestType: {}, byType: {} };
     let reported = 0;
     for (const p of r.reports) {
       const n = dayNum(p.toDate) - dayNum(p.fromDate) + 1;
-      byType[p.typeId] = (byType[p.typeId] ?? 0) + n;
+      addTo(cur.byType, p.typeId, n);
       reported += n;
     }
-    byType[r.typeId] = (byType[r.typeId] ?? 0) + Math.max(0, total - reported);
-    const key = `${r.employeeId}:${dayNum(r.toDate)}`;
-    const cur = out.get(key) ?? { total: 0, byType: {} };
     cur.total += total;
-    for (const [t, n] of Object.entries(byType)) cur.byType[Number(t)] = (cur.byType[Number(t)] ?? 0) + n;
+    cur.reportTotal += reported;
+    addTo(cur.byRequestType, r.requestTypeId, total);
+    addTo(cur.unreportedByRequestType, r.requestTypeId, Math.max(0, total - reported));
     out.set(key, cur);
   }
   return out;

@@ -4,13 +4,13 @@ import { AttendanceError, EMPLOYEE_SELECT, assertDayOpen, calculatedRanges, date
 import { STATUS_FA, lockMission } from "./attendanceMissionService";
 
 // مدیریت تردد › گزارش ماموریت — تنها محل قواعد. برای یک درخواستِ ماموریت روزانه‌ی تاییدشده و پایان‌یافته، بازه‌ای از آن را به یک نوع ماموریت (مثلاً دریا) می‌برد.
-// روزهای بدون گزارش به نوعِ خودِ درخواست (پیش‌فرض: نوع پایه) تعلق دارد (attendanceMissionCalc.loadSettlements). فقط گزارش تاییدشده شمرده می‌شود.
+// روزهای بدونِ گزارشِ یک درخواست در متغیر «روز گزارش‌نشده‌ی نوع درخواست» (RU<id>) می‌آید (attendanceMissionCalc.loadSettlements). فقط گزارش تاییدشده شمرده می‌شود.
 // قفل: وقتی ماهِ پایانِ ماموریت برای کارمند «محاسبه تردد» شده، ثبت/تایید/برگشت گزارش رد می‌شود (assertDayOpen؛ محاسبه را اول حذف کنید).
 
 const DAY_MS = 86400000;
 const dayNum = (d: Date) => Math.floor(d.getTime() / DAY_MS);
 
-export const REPORT_INCLUDE = { request: { include: { employee: { select: EMPLOYEE_SELECT }, type: true } }, type: true };
+export const REPORT_INCLUDE = { request: { include: { employee: { select: EMPLOYEE_SELECT }, requestType: true } }, type: true };
 
 export function reportShape(r: any, ranges?: LockRange[]) {
   const req = r.request;
@@ -26,8 +26,8 @@ export function reportShape(r: any, ranges?: LockRange[]) {
     destination: req?.destination ?? "",
     requestFrom: req ? dayStr(req.fromDate) : "",
     requestTo: req ? dayStr(req.toDate) : "",
-    requestTypeId: req?.typeId ?? null,
-    requestTypeTitle: req?.type?.title ?? "",
+    requestTypeId: req?.requestTypeId ?? null,
+    requestTypeTitle: req?.requestType?.title ?? "",
     typeId: r.typeId,
     typeTitle: r.type?.title ?? "",
     fromDate: dayStr(r.fromDate),
@@ -58,8 +58,9 @@ export interface CleanReport {
 /** درخواست‌هایی که می‌شود برایشان گزارش نوشت: تاییدشده، روزانه، پایان‌یافته و ماه پایانشان «محاسبه تردد» نشده */
 export async function reportableRequests() {
   const rows = await prisma.attendanceMissionRequest.findMany({
-    where: { status: "APPROVED", endedAt: { not: null }, startMinute: null },
-    include: { employee: { select: EMPLOYEE_SELECT }, type: true },
+    // فقط درخواست‌هایی که نوع درخواستشان نوع ماموریتِ فعال (نوع گزارش) دارد
+    where: { status: "APPROVED", endedAt: { not: null }, startMinute: null, requestType: { missionTypes: { some: { isActive: true } } } },
+    include: { employee: { select: EMPLOYEE_SELECT }, requestType: true },
     orderBy: { number: "desc" },
     take: 3000,
   });
@@ -75,8 +76,8 @@ export async function reportableRequests() {
       destination: r.destination,
       fromDate: dayStr(r.fromDate),
       toDate: dayStr(r.toDate),
-      typeId: r.typeId,
-      typeTitle: r.type.title,
+      requestTypeId: r.requestTypeId,
+      requestTypeTitle: r.requestType.title,
     }));
 }
 
@@ -89,7 +90,7 @@ async function validateReport(d: CleanReport, excludeId?: number) {
   const type = await prisma.attendanceMissionType.findUnique({ where: { id: d.typeId } });
   if (!type) throw new AttendanceError("نوع ماموریت را انتخاب کنید");
   if (!type.isActive) throw new AttendanceError(`نوع ماموریت «${type.title}» غیرفعال است`);
-  if (type.id === req.typeId) throw new AttendanceError(`نوع گزارش با نوعِ خودِ درخواست («${type.title}») یکی است؛ گزارش فقط برای بازه‌هایی با نوعِ متفاوت لازم است`);
+  if (type.requestTypeId !== req.requestTypeId) throw new AttendanceError(`نوع ماموریت «${type.title}» به نوع درخواستِ این ماموریت وصل نیست؛ فقط نوع‌های ماموریتِ همان نوع درخواست مجازند`);
   if (d.toDate < d.fromDate) throw new AttendanceError("تاریخ پایان قبل از تاریخ شروع است");
   if (d.fromDate < req.fromDate || d.toDate > req.toDate) throw new AttendanceError(`بازه‌ی گزارش باید داخل بازه‌ی ماموریت (${displayDate(req.fromDate)} تا ${displayDate(req.toDate)}) باشد`);
   await assertDayOpen(req.employeeId, req.toDate);

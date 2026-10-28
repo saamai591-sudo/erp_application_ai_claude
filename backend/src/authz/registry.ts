@@ -633,6 +633,7 @@ export const REGISTRY: ModuleDef[] = [
           { key: "attendance-methods", title: "روش محاسبه", baseActions: CRUD },
           { key: "attendance-time-bands", title: "بازه‌های زمانی", baseActions: CRUD },
           { key: "attendance-leave-types", title: "نوع مرخصی", baseActions: CRUD },
+          { key: "attendance-request-types", title: "نوع درخواست", baseActions: CRUD },
           { key: "attendance-leave-entitlements", title: "قاعده‌ی استحقاق مرخصی", baseActions: CRUD },
           { key: "attendance-mission-types", title: "نوع ماموریت", baseActions: CRUD },
         ],
