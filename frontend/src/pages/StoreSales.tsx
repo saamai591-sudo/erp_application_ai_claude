@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ScrollGridWithTotals } from "../components/ScrollGridWithTotals";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ErrorToast } from "../components/ErrorToast";
 import { DataTable } from "../components/DataTable";
@@ -606,23 +607,36 @@ function SaleForm({ editId }: { editId?: number }) {
               </div>
             </fieldset>
 
-            <div className="grid-wrap je-lines-wrap">
-              <div className="je-lines-scroll grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }}>
-                <table className="je-lines-table mobile-cards">
-                  <thead>
-                    <tr>
-                      <th>ردیف</th>
-                      <th>کالا</th>
-                      <th>واحد</th>
-                      <th>مقدار</th>
-                      <th>فی</th>
-                      <th>مبلغ</th>
-                      <th>ارزش افزوده</th>
-                      <th>شرح</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
+            <ScrollGridWithTotals
+              tableClassName="je-lines-table mobile-cards"
+              maxHeight="calc(100vh - 560px)"
+              head={
+                <tr>
+                  <th>ردیف</th>
+                  <th>کالا</th>
+                  <th>واحد</th>
+                  <th>مقدار</th>
+                  <th>فی</th>
+                  <th>مبلغ</th>
+                  <th>ارزش افزوده</th>
+                  <th>شرح</th>
+                  <th></th>
+                </tr>
+              }
+              totals={[
+                {
+                  cells: [
+                    null,
+                    rows.length === 0 ? "بدون ردیف" : `جمع (${toFaDigits(String(rows.length))} ردیف)`,
+                    null, null, null,
+                    formatAmountFa(totalAmount),
+                    formatAmountFa(totalVat),
+                    `قابل پرداخت: ${formatAmountFa(totalAmount + totalVat)}`,
+                    null,
+                  ],
+                },
+              ]}
+            >
                     {rows.length === 0 && (
                       <tr><td colSpan={9} style={{ textAlign: "center", opacity: 0.7 }}>با بارکدخوان یا جست‌وجو کالا اضافه کنید</td></tr>
                     )}
@@ -657,16 +671,7 @@ function SaleForm({ editId }: { editId?: number }) {
                         </tr>
                       );
                     })}
-                  </tbody>
-                </table>
-              </div>
-              <div className="grid-footer je-lines-footer">
-                <span className="grid-footer-info">{rows.length === 0 ? "بدون ردیف" : `${toFaDigits(String(rows.length))} ردیف`}</span>
-                <span className="je-lines-totals">
-                  جمع مبلغ: {formatAmountFa(totalAmount)} — ارزش افزوده: {formatAmountFa(totalVat)} — <b>قابل پرداخت: {formatAmountFa(totalAmount + totalVat)}</b>
-                </span>
-              </div>
-            </div>
+            </ScrollGridWithTotals>
           </>
         )}
         {editId && (

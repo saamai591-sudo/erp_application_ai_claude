@@ -18,6 +18,7 @@ import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePermissions } from "../lib/usePermissions";
+import { useTabs } from "../lib/TabsContext";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 
 // فروش فروشگاهی › عملیات › «تحویل فروش»: کاربر در پنجره‌ی اول ایستگاه و «تا تاریخ» را می‌دهد (تاریخ باید در دوره‌ی مالی جاری باشد) و «تایید» را می‌زند؛ فروش‌ها و دریافت‌های تحویل‌نشده‌ی
@@ -86,6 +87,26 @@ interface StationOpt {
   id: number;
   code: number;
   title: string;
+}
+
+function PlusIcon() {
+  return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>;
+}
+function UndoIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M7 8H4V5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4.5 8A8 8 0 1 1 4 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function EyeIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
 }
 
 export default function StoreDeliveries() {
@@ -163,6 +184,7 @@ function DeliveryForm({ editId }: { editId?: number }) {
   const [error, setError] = useState<string | null>(null);
   const { flash } = useSavedFlash();
   const { hasPermission } = usePermissions();
+  const { openTab } = useTabs();
 
   useEffect(() => {
     api.get("/sales-stations?activeOnly=true").then(setStations).catch(() => {});
@@ -304,8 +326,19 @@ function DeliveryForm({ editId }: { editId?: number }) {
   const methods = data?.methods ?? [];
   const tabs = [{ key: "SALES", label: `فروش (${toFaDigits(String(sales.length))})` }, ...methods.map((m) => ({ key: m.key, label: `${m.title} (${toFaDigits(String((data?.receipts ?? []).filter((r) => r.method === m.key).length))})` }))];
 
+  // منوی آبشاریِ استاندارد فرم‌ها (هم‌الگوی فاکتور فروش): صدور / مشاهده / حذف سند حسابداری
+  const extraActions: { label: string; icon: JSX.Element; onClick: () => void }[] = [];
+  if (editId && data) {
+    if (data.journalEntryId) {
+      extraActions.push({ label: "مشاهده سند حسابداری", icon: <EyeIcon />, onClick: () => openTab(`/journal-entries/${data.journalEntryId}/edit`) });
+      if (hasPermission("store-sales.operations.store-deliveries.revertJournalEntry")) extraActions.push({ label: "حذف سند حسابداری", icon: <UndoIcon />, onClick: revertJournal });
+    } else if (data.status === "CONFIRMED" && hasPermission("store-sales.operations.store-deliveries.issueJournalEntry")) {
+      extraActions.push({ label: "صدور سند حسابداری", icon: <PlusIcon />, onClick: issueJournal });
+    }
+  }
+
   return (
-    <FormPage title={editId ? `تحویل فروش شماره ${toFaDigits(String(data?.number ?? ""))}` : "تحویل فروش جدید"} formId="store-delivery-form" closePath="/store-deliveries" newPath="/store-deliveries/new" onDelete={editId && editable ? handleDelete : undefined} saveDisabled={!data || !editable}
+    <FormPage title={editId ? `تحویل فروش شماره ${toFaDigits(String(data?.number ?? ""))}` : "تحویل فروش جدید"} formId="store-delivery-form" closePath="/store-deliveries" newPath="/store-deliveries/new" onDelete={editId && editable ? handleDelete : undefined} saveDisabled={!data || !editable} extraActions={extraActions}
       toolbarExtra={
         editId && data ? (
           <>
@@ -314,12 +347,6 @@ function DeliveryForm({ editId }: { editId?: number }) {
             )}
             {data.status === "CONFIRMED" && !data.journalEntryId && hasPermission("store-sales.operations.store-deliveries.unconfirm") && (
               <button type="button" className="btn secondary" onClick={unconfirmDelivery}>لغو تایید</button>
-            )}
-            {data.status === "CONFIRMED" && !data.journalEntryId && hasPermission("store-sales.operations.store-deliveries.issueJournalEntry") && (
-              <button type="button" className="btn" onClick={issueJournal}>صدور سند حسابداری</button>
-            )}
-            {data.journalEntryId && hasPermission("store-sales.operations.store-deliveries.revertJournalEntry") && (
-              <button type="button" className="btn secondary" onClick={revertJournal}>حذف سند حسابداری</button>
             )}
           </>
         ) : undefined
