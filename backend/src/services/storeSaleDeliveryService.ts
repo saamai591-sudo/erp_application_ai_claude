@@ -257,7 +257,7 @@ export async function listStoreDeliveries() {
 }
 
 /**
- * «تایید» تحویل فروش: برای هر (انبار × تاریخ فروش) یک حواله‌ی انبار از نوع «حواله فروش فروشگاهی» می‌سازد (فقط ردیف‌های کالا؛ فروش فقط‌خدمت حواله ندارد).
+ * «تایید» تحویل فروش: برای هر انبار یک حواله‌ی انبار به تاریخ خودِ تحویل (کل تحویل = یک حواله؛ مقدار هر کالا از همه‌ی فروش‌ها تجمیع می‌شود، مثلاً ۱۰ بار فروش یک کالا = یک ردیف با مقدار ۱۰) از نوع «حواله فروش فروشگاهی» می‌سازد (فقط ردیف‌های کالا؛ فروش فقط‌خدمت حواله ندارد).
  * همه‌یا‌هیچ: اول وضعیت تحویل «تایید» می‌شود (تا فروش‌های همین تحویل دیگر به‌عنوان «کسر موقت» از موجودی شمرده نشوند و دوبار حساب نشوند)، بعد برای هر حواله قفل انبار/تاریخ سند،
  * کنترل موجودی منفی و اثر سند اعمال می‌شود؛ هر خطا کل تراکنش را برمی‌گرداند. کالای دارای ردیابی (سریال/بچ/محل) پشتیبانی نمی‌شود و با پیام روشن رد می‌شود.
  */
@@ -272,15 +272,15 @@ export async function confirmStoreDelivery(id: number) {
   if (!d) throw new StoreSaleError("تحویل فروش یافت نشد");
   if (d.status !== "REGISTERED") throw new StoreSaleError("این تحویل فروش قبلاً تایید شده است");
 
-  // گروه‌بندی: (انبار|تاریخ) ← (کالا|واحد) ← مقدار
+  // گروه‌بندی: انبار ← (کالا|واحد) ← مقدار؛ تاریخ حواله = تاریخ تحویل
   const groups = new Map<string, { warehouseId: number; date: Date; lines: Map<string, { goodsItemId: number; unitId: number; quantity: number }> }>();
   for (const sale of d.sales) {
     for (const l of sale.lines) {
       if (l.goodsItem.kind !== "GOODS") continue;
       if (l.goodsItem.trackingMethod !== "NONE" || l.goodsItem.isLocationTracked) throw new StoreSaleError(`کالای «${l.goodsItem.title}» (فروش شماره ${sale.number}) دارای ردیابی سریال/بچ/محل است و در تحویل فروش فروشگاهی پشتیبانی نمی‌شود`);
       if (!sale.warehouseId) throw new StoreSaleError(`برای فروش شماره ${sale.number} انبار ثبت نشده است`);
-      const key = `${sale.warehouseId}|${dayStr(sale.date)}`;
-      const g = groups.get(key) ?? { warehouseId: sale.warehouseId, date: sale.date, lines: new Map() };
+      const key = String(sale.warehouseId);
+      const g = groups.get(key) ?? { warehouseId: sale.warehouseId, date: d.date, lines: new Map() };
       const lk = `${l.goodsItemId}|${l.unitId}`;
       const cur = g.lines.get(lk) ?? { goodsItemId: l.goodsItemId, unitId: l.unitId, quantity: 0 };
       cur.quantity += Number(l.quantity);
@@ -298,7 +298,7 @@ export async function confirmStoreDelivery(id: number) {
     if (!warehouse.isActive) throw new StoreSaleError(`انبار «${warehouse.title}» غیرفعال است`);
     // eslint-disable-next-line no-await-in-loop
     const fp = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: g.date }, toDate: { gte: g.date } } });
-    if (!fp) throw new StoreSaleError("تاریخ فروش در هیچ دوره مالی تعریف نشده است");
+    if (!fp) throw new StoreSaleError("تاریخ تحویل در هیچ دوره مالی تعریف نشده است");
     // eslint-disable-next-line no-await-in-loop
     await assertWithinCurrentFiscalPeriod(fp.id);
     // eslint-disable-next-line no-await-in-loop
