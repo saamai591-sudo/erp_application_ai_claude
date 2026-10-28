@@ -30,6 +30,7 @@ interface RecRow {
   saleNumber: number | null;
   stationTitle: string;
   cashBoxTitle: string;
+  cardReaderTitle?: string;
   customerTitle: string;
   amount: number;
   description: string;
@@ -91,7 +92,7 @@ function ReceiptList() {
           { header: "شماره فروش", ...s((r) => toFaDigits(String(r.saleNumber ?? ""))), width: "100px" },
           { header: "ایستگاه", ...s((r) => r.stationTitle) },
           { header: "مشتری", ...s((r) => r.customerTitle) },
-          { header: "صندوق", ...s((r) => r.cashBoxTitle) },
+          { header: "صندوق / کارتخوان", ...s((r) => (r.cardReaderTitle ? `کارتخوان: ${r.cardReaderTitle}` : r.cashBoxTitle)) },
           { header: "مبلغ", render: (r) => formatAmountFa(r.amount), filterType: "number", filterValue: (r) => r.amount, decimal: true, width: "130px" },
           { header: "شرح", ...s((r) => r.description) },
         ]}
@@ -127,7 +128,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
       .catch(() => {});
     if (!editId) return;
     api.get(`/store-receipts/${editId}`).then((r: RecRow) => {
-      setMeta({ number: r.number, updatedAt: r.updatedAt, cashBoxTitle: r.cashBoxTitle });
+      setMeta({ number: r.number, updatedAt: r.updatedAt, cashBoxTitle: r.cardReaderTitle ? `کارتخوان: ${r.cardReaderTitle}` : r.cashBoxTitle });
       if (!hasPersistedState(cacheKey)) setForm({ saleId: String(r.saleId), date: r.date, amount: String(r.amount), description: r.description });
       setLoaded(true);
     }).catch((e) => setError(e.message));
@@ -152,7 +153,7 @@ function ReceiptForm({ editId }: { editId?: number }) {
         await api.put(`/store-receipts/${editId}`, body);
         flash();
         const r: RecRow = await api.get(`/store-receipts/${editId}`);
-        setMeta({ number: r.number, updatedAt: r.updatedAt, cashBoxTitle: r.cashBoxTitle });
+        setMeta({ number: r.number, updatedAt: r.updatedAt, cashBoxTitle: r.cardReaderTitle ? `کارتخوان: ${r.cardReaderTitle}` : r.cashBoxTitle });
       } else {
         const created = await api.post("/store-receipts", body);
         flash();

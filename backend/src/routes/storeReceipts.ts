@@ -4,7 +4,7 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { StoreSaleError } from "../services/storeSaleService";
-import { createStoreReceipt, deleteStoreReceipt, payableSales, receiptShape, updateStoreReceipt } from "../services/storeReceiptService";
+import { createStoreReceipt, createStoreReceipts, deleteStoreReceipt, payableSales, receiptShape, updateStoreReceipt } from "../services/storeReceiptService";
 
 // فروش فروشگاهی › عملیات › «دریافت فروشگاهی»؛ منطق فقط در services/storeReceiptService.ts.
 
@@ -14,6 +14,7 @@ const router = Router();
 const INCLUDE = {
   station: { select: { title: true } },
   cashBox: { select: { title: true } },
+  cardReader: { select: { title: true } },
   sale: { select: { number: true, customer: { select: { party: { select: { detailTitle: true, name: true, firstName: true, lastName: true } } } } } },
 } as const;
 
@@ -43,6 +44,19 @@ router.post("/store-receipts", can(`${FORM}.create`), async (req, res) => {
     res.status(201).json({ id: c.id, number: c.number });
   } catch (e) {
     fail(res, e, "خطا در ثبت دریافت");
+  }
+});
+
+// ثبت هم‌زمانِ چند دریافت کارتی (از دیالوگ «دریافت با کارتخوان» فرم فروش): { saleId, date, description?, items: [{ cardReaderId, amount }] } — همه‌یا‌هیچ
+router.post("/store-receipts/card-batch", can(`${FORM}.create`), async (req, res) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!items.length) throw new StoreSaleError("حداقل یک کارتخوان را انتخاب کنید");
+    if (items.some((x: any) => !x?.cardReaderId)) throw new StoreSaleError("برای هر ردیف کارتخوان الزامی است");
+    const created = await createStoreReceipts({ ...req.body, items });
+    res.status(201).json({ created });
+  } catch (e) {
+    fail(res, e, "خطا در ثبت دریافت کارتی");
   }
 });
 

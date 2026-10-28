@@ -9,6 +9,7 @@ import { InfoHint } from "../components/InfoHint";
 import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { RecordPickerField } from "../components/RecordPicker";
+import { MultiPickerDialog } from "../components/MultiRecordPicker";
 import { CostCenterPickerField } from "../components/TypePickerFields";
 import { toFaDigits } from "../lib/formatAmount";
 import { api, ApiError } from "../lib/api";
@@ -40,7 +41,18 @@ interface StationRow {
   costCenterId: number;
   costCenterTitle: string;
   description: string;
+  cardReaders?: CardReaderOpt[];
   updatedAt?: string;
+}
+interface CardReaderOpt {
+  id: number;
+  code: number;
+  title: string;
+  terminalNumber: string;
+  merchantNumber: string;
+  bankAccountId: number;
+  bankAccountCode: string;
+  bankAccountTitle: string;
 }
 interface Opt {
   id: number;
@@ -120,7 +132,7 @@ function StationList() {
   );
 }
 
-const EMPTY = { title: "", isActive: true, offering: "GOODS" as Offering, cashBoxId: "", warehouseId: "", salesTypeId: "", customerId: "", costCenterId: "", description: "" };
+const EMPTY = { title: "", isActive: true, offering: "GOODS" as Offering, cashBoxId: "", warehouseId: "", salesTypeId: "", customerId: "", costCenterId: "", description: "", cardReaderIds: [] as number[] };
 
 function StationForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
@@ -134,13 +146,17 @@ function StationForm({ editId }: { editId?: number }) {
   const [salesTypes, setSalesTypes] = useState<Opt[]>([]);
   const [customers, setCustomers] = useState<CustomerOpt[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenterOpt[]>([]);
+  const [allReaders, setAllReaders] = useState<CardReaderOpt[]>([]);
+  const [tab, setTab] = useState<"main" | "readers">("main");
+  const [pickReaders, setPickReaders] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const { flash } = useSavedFlash();
 
   useEffect(() => {
-    Promise.all([api.get("/cash-boxes"), api.get("/warehouses"), api.get("/sales-types"), api.get("/customers"), api.get("/cost-centers")])
-      .then(([cb, w, st, c, cc]) => {
+    Promise.all([api.get("/cash-boxes"), api.get("/warehouses"), api.get("/sales-types"), api.get("/customers"), api.get("/cost-centers"), api.get("/card-readers")])
+      .then(([cb, w, st, c, cc, crs]) => {
+        setAllReaders(crs);
         setCashBoxes(cb);
         setWarehouses((w as Opt[]).filter((x) => x.isActive !== false));
         setSalesTypes(st);
@@ -152,7 +168,7 @@ function StationForm({ editId }: { editId?: number }) {
     api.get(`/sales-stations/${editId}`).then((r: StationRow) => {
       setCode(r.code);
       setUpdatedAt(r.updatedAt);
-      if (!hasPersistedState(cacheKey)) setForm({ title: r.title, isActive: r.isActive, offering: r.offering, cashBoxId: String(r.cashBoxId), warehouseId: r.warehouseId ? String(r.warehouseId) : "", salesTypeId: String(r.salesTypeId), customerId: String(r.customerId), costCenterId: String(r.costCenterId), description: r.description });
+      if (!hasPersistedState(cacheKey)) setForm({ title: r.title, isActive: r.isActive, offering: r.offering, cashBoxId: String(r.cashBoxId), warehouseId: r.warehouseId ? String(r.warehouseId) : "", salesTypeId: String(r.salesTypeId), customerId: String(r.customerId), costCenterId: String(r.costCenterId), description: r.description, cardReaderIds: (r.cardReaders ?? []).map((x) => x.id) });
       setLoaded(true);
     }).catch((e) => setError(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -179,6 +195,7 @@ function StationForm({ editId }: { editId?: number }) {
       customerId: Number(form.customerId),
       costCenterId: Number(form.costCenterId),
       description: form.description,
+      cardReaderIds: form.cardReaderIds ?? [],
       updatedAt,
     };
     try {
@@ -212,12 +229,19 @@ function StationForm({ editId }: { editId?: number }) {
   const warehouse = pick(warehouses, form.warehouseId);
   const cashBox = pick(cashBoxes, form.cashBoxId);
   const salesType = pick(salesTypes, form.salesTypeId);
+  const readerIds = form.cardReaderIds ?? [];
+  const stationReaders = readerIds.map((id) => allReaders.find((r) => r.id === id)).filter((x): x is CardReaderOpt => !!x);
 
   if (!loaded) return null;
   return (
     <FormPage title={editId ? "ویرایش ایستگاه فروش" : "ایستگاه فروش جدید"} formId="sales-station-form" closePath="/sales-stations" newPath="/sales-stations/new" onDelete={editId ? handleDelete : undefined}>
       <form id="sales-station-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
+        <div className="party-tabs">
+          <button type="button" className={`party-tab ${tab === "main" ? "active" : ""}`} onClick={() => setTab("main")}>مشخصات</button>
+          <button type="button" className={`party-tab ${tab === "readers" ? "active" : ""}`} onClick={() => setTab("readers")}>{`کارتخوان‌ها (${toFaDigits(String(readerIds.length))})`}</button>
+        </div>
+        {tab === "main" && (
         <div className="form-grid">
           <div className="form-field">
             <label>کد</label>
@@ -292,6 +316,54 @@ function StationForm({ editId }: { editId?: number }) {
             <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
           </div>
         </div>
+        )}
+        {tab === "readers" && (
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "8px 0" }}>
+              <button type="button" className="btn" onClick={() => setPickReaders(true)}>افزودن کارتخوان</button>
+              <span style={{ fontSize: 12, opacity: 0.75 }}>فقط کارتخوان‌های این فهرست در «دریافت با کارتخوان» فروش‌های این ایستگاه قابل انتخاب‌اند.</span>
+            </div>
+            <table className="je-lines-table">
+              <thead>
+                <tr><th>کد</th><th>عنوان</th><th>شماره پایانه</th><th>شماره پذیرنده</th><th>حساب بانکی</th><th></th></tr>
+              </thead>
+              <tbody>
+                {stationReaders.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", opacity: 0.7 }}>کارتخوانی به این ایستگاه اختصاص داده نشده است</td></tr>}
+                {stationReaders.map((r) => (
+                  <tr key={r.id}>
+                    <td>{toFaDigits(String(r.code))}</td>
+                    <td>{r.title}</td>
+                    <td>{toFaDigits(r.terminalNumber)}</td>
+                    <td>{toFaDigits(r.merchantNumber)}</td>
+                    <td>{toFaDigits(r.bankAccountCode)} - {toFaDigits(r.bankAccountTitle)}</td>
+                    <td><button type="button" className="btn danger" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => setForm({ ...form, cardReaderIds: readerIds.filter((x) => x !== r.id) })}>حذف</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {pickReaders && (
+          <MultiPickerDialog<CardReaderOpt>
+            title="افزودن کارتخوان به ایستگاه"
+            rows={allReaders}
+            columns={[
+              { header: "کد", render: (c) => toFaDigits(String(c.code)), filterValue: (c) => String(c.code), width: "70px" },
+              { header: "عنوان", render: (c) => c.title, filterValue: (c) => c.title },
+              { header: "شماره پایانه", render: (c) => toFaDigits(c.terminalNumber), filterValue: (c) => c.terminalNumber, width: "130px" },
+              { header: "شماره پذیرنده", render: (c) => toFaDigits(c.merchantNumber), filterValue: (c) => c.merchantNumber, width: "130px" },
+              { header: "حساب بانکی", render: (c) => `${toFaDigits(c.bankAccountCode)} - ${toFaDigits(c.bankAccountTitle)}`, filterValue: (c) => `${c.bankAccountCode} ${c.bankAccountTitle}` },
+            ]}
+            initialChecked={new Set(readerIds)}
+            confirmLabel="تایید"
+            wide
+            onConfirm={(checked) => {
+              setForm({ ...form, cardReaderIds: allReaders.filter((r) => checked.has(r.id)).map((r) => r.id) });
+              setPickReaders(false);
+            }}
+            onClose={() => setPickReaders(false)}
+          />
+        )}
       </form>
     </FormPage>
   );

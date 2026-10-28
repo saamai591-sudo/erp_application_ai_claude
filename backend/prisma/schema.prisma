@@ -472,6 +472,8 @@ model CardReader {
   bankAccount    BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
 
   receiptInstrumentLines ReceiptInstrumentLine[]
+  stationLinks           SalesStationCardReader[]
+  storeReceipts          StoreReceipt[]
 
   @@unique([terminalNumber, merchantNumber])
 }
@@ -6917,6 +6919,18 @@ model SalesStation {
   priceListScopes SalesPriceListStation[]
   storeSales      StoreSale[]
   storeReceipts StoreReceipt[]
+  cardReaders   SalesStationCardReader[]
+}
+
+/// کارتخوان‌های اختصاص‌یافته به ایستگاه فروش (فقط همین‌ها در دریافت کارتیِ فروش آن ایستگاه قابل انتخاب‌اند)
+model SalesStationCardReader {
+  id           Int          @id @default(autoincrement())
+  stationId    Int
+  cardReaderId Int
+  station      SalesStation @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  cardReader   CardReader   @relation(fields: [cardReaderId], references: [id], onDelete: Restrict)
+
+  @@unique([stationId, cardReaderId])
 }
 
 enum StoreSaleDeliveryStatus {
@@ -6984,7 +6998,9 @@ model StoreReceipt {
   saleId         Int
   /// کپی ایستگاه و صندوقِ آن در لحظه‌ی ثبت
   stationId      Int
-  cashBoxId      Int
+  /// دریافت نقد: صندوقِ ایستگاه؛ دریافت کارتی: خالی (و cardReaderId پر) — CHECK در migration 20270202100000
+  cashBoxId      Int?
+  cardReaderId   Int?
   amount         Decimal      @db.Decimal(36, 10)
   description    String?
   createdById    Int?
@@ -6993,7 +7009,8 @@ model StoreReceipt {
   fiscalPeriod   FiscalPeriod @relation(fields: [fiscalPeriodId], references: [id])
   sale           StoreSale    @relation(fields: [saleId], references: [id], onDelete: Restrict)
   station        SalesStation @relation(fields: [stationId], references: [id])
-  cashBox        CashBox      @relation(fields: [cashBoxId], references: [id])
+  cashBox        CashBox?     @relation(fields: [cashBoxId], references: [id])
+  cardReader     CardReader?  @relation(fields: [cardReaderId], references: [id], onDelete: Restrict)
 
   @@unique([fiscalPeriodId, number])
   @@index([saleId])

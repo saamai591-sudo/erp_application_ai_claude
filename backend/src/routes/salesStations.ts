@@ -4,9 +4,10 @@ import { nextSerialNumber } from "../utils/coding";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
+import { BANK_ACCOUNT_TITLE_INCLUDE, bankAccountDetailTitle } from "../utils/detailValues";
 
 // فروش فروشگاهی › تنظیمات › «ایستگاه فروش»: صندوقِ دریافت نقد، انبارِ کسر موجودی (فقط وقتی ارائه شامل کالاست)، نوع ارائه (کالا / خدمت / هر دو)، نوع فروش،
-// مشتری پیش‌فرض و مرکز هزینه. کارتخوان فعلاً تعریف نمی‌شود (در آینده به همین فرم اضافه می‌شود). فی ایستگاه از «اعلامیه قیمت فروش» با حوزه‌ی «ایستگاه» می‌آید.
+// مشتری پیش‌فرض و مرکز هزینه. کارتخوان‌های ایستگاه در تب «کارتخوان‌ها» تعیین می‌شود (برای دریافت کارتیِ فروش). فی ایستگاه از «اعلامیه قیمت فروش» با حوزه‌ی «ایستگاه» می‌آید.
 
 const FORM = findFormPrefix("sales-stations");
 const router = Router();
@@ -22,6 +23,7 @@ const INCLUDE = {
   salesType: { select: { id: true, title: true } },
   customer: { select: { id: true, code: true, party: { select: { detailTitle: true, name: true, firstName: true, lastName: true, category: true } } } },
   costCenter: { select: { id: true, title: true, detailCode: true } },
+  cardReaders: { include: { cardReader: { include: { bankAccount: { select: { id: true, detailCode: true, accountNumber: true, ...BANK_ACCOUNT_TITLE_INCLUDE } } } } }, orderBy: { cardReader: { code: "asc" } } },
 } as const;
 
 function customerTitle(c: any): string {
@@ -49,6 +51,16 @@ export function stationShape(s: any) {
     costCenterId: s.costCenterId,
     costCenterTitle: s.costCenter?.title ?? "",
     description: s.description ?? "",
+    cardReaders: (s.cardReaders ?? []).map((l: any) => ({
+      id: l.cardReader.id,
+      code: l.cardReader.code,
+      title: l.cardReader.title,
+      terminalNumber: l.cardReader.terminalNumber,
+      merchantNumber: l.cardReader.merchantNumber,
+      bankAccountId: l.cardReader.bankAccountId,
+      bankAccountCode: l.cardReader.bankAccount?.detailCode ?? "",
+      bankAccountTitle: l.cardReader.bankAccount ? bankAccountDetailTitle(l.cardReader.bankAccount) : "",
+    })),
     updatedAt: s.updatedAt,
   };
 }
@@ -77,7 +89,16 @@ async function clean(b: any) {
   const costCenterId = Number(b?.costCenterId);
   if (!costCenterId || !(await prisma.costCenter.findUnique({ where: { id: costCenterId } }))) throw new StationError("مرکز هزینه را انتخاب کنید");
   const description = String(b?.description ?? "").trim() || null;
-  return { title, offering: offering as Offering, cashBoxId, warehouseId, salesTypeId, customerId, costCenterId, description, isActive: b?.isActive !== false };
+  // کارتخوان‌ها: مجموعه‌ی کامل (undefined = دست‌نخورده)
+  let cardReaderIds: number[] | undefined;
+  if (b?.cardReaderIds !== undefined) {
+    if (!Array.isArray(b.cardReaderIds)) throw new StationError("فهرست کارتخوان‌ها نامعتبر است");
+    cardReaderIds = [...new Set<number>(b.cardReaderIds.map((x: unknown) => Number(x)))];
+    if (cardReaderIds.some((x) => !x)) throw new StationError("کارتخوان نامعتبر است");
+    const found = await prisma.cardReader.count({ where: { id: { in: cardReaderIds } } });
+    if (found !== cardReaderIds.length) throw new StationError("کارتخوان یافت نشد");
+  }
+  return { cardReaderIds, title, offering: offering as Offering, cashBoxId, warehouseId, salesTypeId, customerId, costCenterId, description, isActive: b?.isActive !== false };
 }
 
 const fail = (res: any, e: any, fallback: string) => {
@@ -99,11 +120,11 @@ router.get("/sales-stations/:id", async (req, res) => {
 
 router.post("/sales-stations", can(`${FORM}.create`), async (req, res) => {
   try {
-    const data = await clean(req.body);
+    const { cardReaderIds, ...data } = await clean(req.body);
     for (let attempt = 0; ; attempt++) {
       try {
         const code = await nextSerialNumber(prisma.salesStation, "code");
-        const created = await prisma.salesStation.create({ data: { ...data, code }, include: INCLUDE });
+        const created = await prisma.salesStation.create({ data: { ...data, code, cardReaders: { create: (cardReaderIds ?? []).map((cardReaderId) => ({ cardReaderId })) } }, include: INCLUDE });
         return res.status(201).json(stationShape(created));
       } catch (e: any) {
         if (e?.code === "P2002" && String(e?.meta?.target ?? "").includes("code") && attempt < 3) continue;
@@ -121,8 +142,19 @@ router.put("/sales-stations/:id", can(`${FORM}.edit`), async (req, res) => {
     const ex = await prisma.salesStation.findUnique({ where: { id } });
     if (!ex) return res.status(404).json({ error: "ایستگاه فروش یافت نشد" });
     assertRecordNotStale(ex.updatedAt, req.body?.updatedAt, "ایستگاه فروش");
-    const data = await clean(req.body);
-    const updated = await prisma.salesStation.update({ where: { id }, data, include: INCLUDE });
+    const { cardReaderIds, ...data } = await clean(req.body);
+    const updated = await prisma.$transaction(async (tx) => {
+      if (cardReaderIds) {
+        // کارتخوانِ حذف‌شده از ایستگاه نباید در دریافتِ همین ایستگاه استفاده شده باشد
+        const used = await tx.storeReceipt.findMany({ where: { stationId: id, cardReaderId: { not: null, notIn: cardReaderIds } }, select: { cardReader: { select: { title: true } } }, distinct: ["cardReaderId"], take: 5 });
+        if (used.length) throw new StationError(`کارتخوان «${used.map((u) => u.cardReader?.title).join("، ")}» در دریافت‌های این ایستگاه استفاده شده و حذف نمی‌شود`);
+        await tx.salesStationCardReader.deleteMany({ where: { stationId: id, cardReaderId: { notIn: cardReaderIds } } });
+        const have = new Set((await tx.salesStationCardReader.findMany({ where: { stationId: id }, select: { cardReaderId: true } })).map((x) => x.cardReaderId));
+        const add = cardReaderIds.filter((x) => !have.has(x));
+        if (add.length) await tx.salesStationCardReader.createMany({ data: add.map((cardReaderId) => ({ stationId: id, cardReaderId })) });
+      }
+      return tx.salesStation.update({ where: { id }, data, include: INCLUDE });
+    });
     res.json(stationShape(updated));
   } catch (e) {
     fail(res, e, "خطا در ویرایش ایستگاه فروش");

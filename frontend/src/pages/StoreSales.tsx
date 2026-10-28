@@ -23,6 +23,7 @@ import { useTabs } from "../lib/TabsContext";
 import { Modal } from "../components/Modal";
 import { AmountInput } from "../components/AmountInput";
 import { localTodayIso } from "../lib/formatDate";
+import { StoreCardReceiptDialog, StationCardReader } from "../components/StoreCardReceiptDialog";
 
 // فروش فروشگاهی › عملیات › «فروش فروشگاهی»: اول تاریخ و ایستگاه انتخاب می‌شود؛ ردیف‌ها با بارکدخوان (فیلد بارکد کالا) یا جست‌وجو اضافه می‌شوند، مقدار پیش‌فرض ۱ و قابل‌تغییر است.
 // فی از «اعلامیه قیمت فروش» با حوزه‌ی همان ایستگاه خوانده می‌شود (پله‌ی مقدار هم)؛ کالای بدون فی در آن اعلامیه اصلاً قابل انتخاب نیست. فی فقط با مجوز «تغییر فی» قابل تغییر است.
@@ -36,6 +37,7 @@ interface StationOpt {
   customerId: number;
   customerCode: number | null;
   customerTitle: string;
+  cardReaders?: StationCardReader[];
 }
 interface CustomerOpt {
   id: number;
@@ -87,6 +89,8 @@ interface ReceiptRow {
   date: string;
   amount: number;
   description: string;
+  method?: "CASH" | "CARD";
+  cardReaderTitle?: string;
 }
 interface DetailLine {
   goodsItemId: number;
@@ -203,6 +207,7 @@ function SaleForm({ editId }: { editId?: number }) {
   const { openTab } = useTabs();
   const [confirmPay, setConfirmPay] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [cardDialog, setCardDialog] = useState(false);
   const [stations, setStations] = useState<StationOpt[]>([]);
   const [customers, setCustomers] = useState<CustomerOpt[]>([]);
   const [sell, setSell] = useState<SellableResponse | null>(null);
@@ -364,6 +369,22 @@ function SaleForm({ editId }: { editId?: number }) {
       setError((err as ApiError).message);
     }
   }
+  /** دریافت کارتی از چند کارتخوان در یک تراکنش (همه‌یا‌هیچ) — مبلغ‌ها از دیالوگ می‌آید؛ سرور سقف جمعِ (نقد + کارتی) را دوباره کنترل می‌کند */
+  async function payByCards(items: { cardReaderId: number; amount: number }[]) {
+    if (!editId || paying) return;
+    setPaying(true);
+    setError(null);
+    try {
+      const today = localTodayIso();
+      await api.post("/store-receipts/card-batch", { saleId: editId, date: today < header.date ? header.date : today, items, description: "" });
+      setCardDialog(false);
+      await reloadSale();
+    } catch (err) {
+      setError((err as ApiError).message);
+    } finally {
+      setPaying(false);
+    }
+  }
   /** دریافت نقدِ تمام باقی‌مانده با یک ضربه (کارت بزرگِ لمسی): دریافتِ امروز (یا تاریخ فروش اگر امروز قبل از آن باشد) به مبلغ باقی‌مانده */
   async function payRemaining() {
     if (!editId || paying) return;
@@ -464,7 +485,18 @@ function SaleForm({ editId }: { editId?: number }) {
               <span style={{ fontSize: 24, fontWeight: 800 }}>رسید دریافت با مبلغ دلخواه</span>
               <span style={{ fontSize: 15, opacity: 0.8 }}>باز کردن فرم دریافت این فروش</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setCardDialog(true)}
+              style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--warning, #c27a12)", background: "var(--warning-soft, #fdf3e3)", color: "var(--warning, #a8650c)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}
+            >
+              <span style={{ fontSize: 24, fontWeight: 800 }}>دریافت با کارتخوان</span>
+              <span style={{ fontSize: 15, opacity: 0.85 }}>{toFaDigits(String(station?.cardReaders?.length ?? 0))} کارتخوان در این ایستگاه</span>
+            </button>
           </div>
+        )}
+        {cardDialog && (
+          <StoreCardReceiptDialog readers={station?.cardReaders ?? []} remaining={payInfo.remaining} decimalPlaces={dp} busy={paying} onClose={() => setCardDialog(false)} onSubmit={payByCards} />
         )}
         {confirmPay && (
           <Modal title="تایید دریافت نقد" onClose={() => setConfirmPay(false)}>
@@ -586,7 +618,7 @@ function SaleForm({ editId }: { editId?: number }) {
         {editId && (
           <div className="card" style={{ marginTop: 16, padding: 14 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-              <h4 style={{ margin: 0 }}>دریافت (نقد)</h4>
+              <h4 style={{ margin: 0 }}>دریافت (نقد / کارتخوان)</h4>
               {hasPermission("store-sales.operations.store-receipts.create") && payInfo.remaining > 0 && (
                 <button type="button" className="link-btn" onClick={() => openTab(`/store-receipts/new?saleId=${editId}`)}>دریافت جدید در فرم کامل ←</button>
               )}
@@ -596,14 +628,15 @@ function SaleForm({ editId }: { editId?: number }) {
             </p>
             <table className="je-lines-table">
               <thead>
-                <tr><th>شماره</th><th>تاریخ</th><th>مبلغ</th><th>شرح</th><th></th></tr>
+                <tr><th>شماره</th><th>تاریخ</th><th>روش</th><th>مبلغ</th><th>شرح</th><th></th></tr>
               </thead>
               <tbody>
-                {receipts.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", opacity: 0.7 }}>دریافتی ثبت نشده است</td></tr>}
+                {receipts.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", opacity: 0.7 }}>دریافتی ثبت نشده است</td></tr>}
                 {receipts.map((r) => (
                   <tr key={r.id}>
                     <td>{hasPermission("store-sales.operations.store-receipts.view") ? <button type="button" className="link-btn" onClick={() => openTab(`/store-receipts/${r.id}/edit`)}>{toFaDigits(String(r.number))}</button> : toFaDigits(String(r.number))}</td>
                     <td>{formatJalaliDate(r.date)}</td>
+                    <td>{r.method === "CARD" ? `کارتخوان — ${r.cardReaderTitle ?? ""}` : "نقد"}</td>
                     <td>{formatAmountFa(r.amount)}</td>
                     <td>{r.description}</td>
                     <td>{canDeleteReceipt && <button type="button" className="btn danger" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => removeReceipt(r)}>حذف</button>}</td>

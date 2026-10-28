@@ -3,7 +3,8 @@ import { getRequestContext } from "../lib/requestContext";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { StoreSaleError, saleTotals } from "./storeSaleService";
 
-// فروش فروشگاهی › «دریافت فروشگاهی» — تنها محل قواعد (فقط نقد، به صندوقِ ایستگاهِ همان فروش؛ بدون سند حسابداری).
+// فروش فروشگاهی › «دریافت فروشگاهی» — تنها محل قواعد (نقد به صندوقِ ایستگاهِ همان فروش، یا کارتی با یکی از کارتخوان‌های اختصاص‌یافته به آن ایستگاه؛ بدون سند حسابداری).
+// • جمع «همه»ی دریافت‌ها (نقد + کارتی) از مبلغ قابل پرداخت بیشتر نمی‌شود؛ باقی‌مانده‌ی هر دو روش از همین جمع مشترک محاسبه می‌شود.
 // • هر دریافت به «یک فروش» وصل است؛ یک فروش چند دریافت می‌تواند داشته باشد و جمع دریافت‌ها از «مبلغ قابل پرداخت» (مبلغ + ارزش افزوده) بیشتر نمی‌شود.
 // • تاریخ دریافت داخل دوره‌ی مالی جاری و نه قبل از تاریخ فروش؛ مبلغ مثبت و حداکثر به اعشار ارز پایه.
 // • وضعیت پرداخت فروش مشتق است (پرداخت‌نشده / جزئی / تسویه) و ذخیره نمی‌شود. فروشِ دارای دریافت ویرایش/حذف نمی‌شود (services/storeSaleService.ts).
@@ -24,6 +25,13 @@ interface Body {
   date?: string;
   amount?: number | string;
   description?: string | null;
+  /** دریافت کارتی: کارتخوان (باید به ایستگاه فروش اختصاص داده شده باشد)؛ خالی = نقد */
+  cardReaderId?: number | null;
+}
+
+export interface CardReceiptItem {
+  cardReaderId?: number;
+  amount?: number | string;
 }
 
 function parseDate(raw: unknown): Date {
@@ -55,21 +63,58 @@ async function assertWithinPayable(tx: any, saleId: number, amount: number, excl
   return sale;
 }
 
-export async function createStoreReceipt(body: Body) {
+/**
+ * ثبت یک یا چند دریافت برای یک فروش در یک تراکنش (همه‌یا‌هیچ). هر قلم: بدون cardReaderId = نقد (صندوق ایستگاه)، با cardReaderId = کارتی.
+ * سقف جمع (قابل پرداخت) برای مجموعِ همه‌ی اقلامِ این فراخوانی + دریافت‌های قبلی (نقد و کارتی) کنترل می‌شود.
+ */
+export async function createStoreReceipts(body: Body & { items?: CardReceiptItem[] }) {
   const saleId = Number(body.saleId);
   if (!saleId) throw new StoreSaleError("فروش را انتخاب کنید");
-  const { date, fp, amount, description } = await checked(body);
+  const items: { amount: number; cardReaderId: number | null; description: string | null }[] = [];
+  const raw = Array.isArray(body.items) && body.items.length ? body.items : [{ amount: body.amount, cardReaderId: body.cardReaderId }];
+  let date!: Date;
+  let fp!: { id: number };
+  for (const [i, it] of raw.entries()) {
+    const c = await checked({ date: body.date, amount: it.amount, description: body.description });
+    date = c.date;
+    fp = c.fp;
+    const cardReaderId = it.cardReaderId ? Number(it.cardReaderId) : null;
+    if (it.cardReaderId && !cardReaderId) throw new StoreSaleError(`ردیف ${i + 1}: کارتخوان نامعتبر است`);
+    items.push({ amount: c.amount, cardReaderId, description: c.description });
+  }
+  const readerIds = items.map((x) => x.cardReaderId).filter((x): x is number => !!x);
+  if (new Set(readerIds).size !== readerIds.length) throw new StoreSaleError("یک کارتخوان بیش از یک بار انتخاب شده است");
   return prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100022, ${saleId})`);
-    const sale = await assertWithinPayable(tx, saleId, amount);
+    const sale = await assertWithinPayable(tx, saleId, items.reduce((n, x) => n + x.amount, 0));
     if (date.getTime() < sale.date.getTime()) throw new StoreSaleError("تاریخ دریافت نمی‌تواند قبل از تاریخ فروش باشد");
-    const station = await tx.salesStation.findUnique({ where: { id: sale.stationId }, select: { cashBoxId: true } });
+    const station = await tx.salesStation.findUnique({ where: { id: sale.stationId }, select: { cashBoxId: true, title: true, cardReaders: { select: { cardReaderId: true } } } });
+    const allowed = new Set(station!.cardReaders.map((x: { cardReaderId: number }) => x.cardReaderId));
+    for (const id of readerIds) {
+      if (!allowed.has(id)) {
+        const r = await tx.cardReader.findUnique({ where: { id }, select: { title: true } });
+        throw new StoreSaleError(`کارتخوان «${r?.title ?? id}» به ایستگاه «${station!.title}» اختصاص داده نشده است`);
+      }
+    }
     await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100023, ${fp.id})`);
     const last = await tx.storeReceipt.findFirst({ where: { fiscalPeriodId: fp.id }, orderBy: { number: "desc" }, select: { number: true } });
-    return tx.storeReceipt.create({
-      data: { fiscalPeriodId: fp.id, number: (last?.number ?? 0) + 1, date, saleId, stationId: sale.stationId, cashBoxId: station!.cashBoxId, amount, description, createdById: getRequestContext()?.userId ?? null },
-    });
+    let number = last?.number ?? 0;
+    const created: { id: number; number: number }[] = [];
+    for (const it of items) {
+      number += 1;
+      // eslint-disable-next-line no-await-in-loop
+      const r = await tx.storeReceipt.create({
+        data: { fiscalPeriodId: fp.id, number, date, saleId, stationId: sale.stationId, cashBoxId: it.cardReaderId ? null : station!.cashBoxId, cardReaderId: it.cardReaderId, amount: it.amount, description: it.description, createdById: getRequestContext()?.userId ?? null },
+      });
+      created.push({ id: r.id, number: r.number });
+    }
+    return created;
   });
+}
+
+export async function createStoreReceipt(body: Body) {
+  const [one] = await createStoreReceipts(body);
+  return one;
 }
 
 export async function updateStoreReceipt(id: number, body: Body) {
@@ -101,6 +146,9 @@ export function receiptShape(r: any) {
     saleNumber: r.sale?.number ?? null,
     stationTitle: r.station?.title ?? "",
     cashBoxTitle: r.cashBox?.title ?? "",
+    method: r.cardReaderId ? "CARD" : "CASH",
+    cardReaderId: r.cardReaderId ?? null,
+    cardReaderTitle: r.cardReader?.title ?? "",
     customerTitle: p ? p.detailTitle || `${p.firstName || ""} ${p.lastName || ""}`.trim() || p.name || "" : "",
     amount: Number(r.amount),
     description: r.description ?? "",
