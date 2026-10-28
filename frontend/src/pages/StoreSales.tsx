@@ -620,25 +620,43 @@ function SaleForm({ editId }: { editId?: number }) {
                 <span style={{ fontSize: 15, opacity: 0.85 }}>جمع دریافت‌شده</span>
                 <span style={{ fontSize: 20, fontWeight: 700 }}>{formatAmountFa(cardReceipts.reduce((n, r) => n + r.amount, 0))}</span>
               </button>
+              <button type="button" onClick={() => setCreditDialog(true)} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--danger, #b03a2e)", background: "var(--danger-soft, #fbeae8)", color: "var(--danger, #a32d22)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
+                <span style={{ fontSize: 24, fontWeight: 800 }}>نسیه</span>
+                <span style={{ fontSize: 15, opacity: 0.85 }}>{credit.declared ? "مبلغ نسیه" : "ثبت باقیمانده به‌عنوان نسیه"}</span>
+                <span style={{ fontSize: 20, fontWeight: 700 }}>{formatAmountFa(credit.declared ? payInfo.remaining : 0)}</span>
+              </button>
             </div>
             <p style={{ margin: "0 0 8px", fontSize: 13 }}>
               قابل پرداخت: <b>{formatAmountFa(payInfo.payable)}</b> — دریافت‌شده: <b>{formatAmountFa(payInfo.paid)}</b> — باقی‌مانده: <b>{formatAmountFa(payInfo.remaining)}</b> — وضعیت: <span className="badge">{PAYMENT_FA[payInfo.status]}</span>
             </p>
-            {canDeclareCredit && !credit.declared && payInfo.remaining > 0 && (
-              <button type="button" className="btn secondary" style={{ marginBottom: 8 }} onClick={() => setCreditDialog(true)}>
-                ثبت باقیمانده ({formatAmountFa(payInfo.remaining)}) به‌عنوان نسیه
-              </button>
-            )}
             {creditDialog && (
-              <Modal title="ثبت نسیه" onClose={() => setCreditDialog(false)}>
-                <p style={{ fontSize: 16, margin: "8px 0 12px" }}>
-                  مبلغ <b>{formatAmountFa(payInfo.remaining)}</b> به‌صورت نسیه ثبت شود؟ بعد از آن ویرایش و حذف فروش بسته می‌شود (با «لغو نسیه» باز می‌شود).
-                </p>
-                <div className="form-field"><label>توضیح (اختیاری)</label><input value={creditNote} onChange={(e) => setCreditNote(e.target.value)} /></div>
-                <div className="actions" style={{ gap: 12, marginTop: 10 }}>
-                  <button type="button" className="btn" onClick={declareCredit}>بله، نسیه ثبت شود</button>
-                  <button type="button" className="btn secondary" onClick={() => setCreditDialog(false)}>انصراف</button>
-                </div>
+              <Modal title="نسیه" onClose={() => setCreditDialog(false)}>
+                {credit.declared ? (
+                  <>
+                    <p style={{ fontSize: 16, margin: "8px 0 12px" }}>
+                      مبلغ <b>{formatAmountFa(payInfo.remaining)}</b> به‌صورت نسیه ثبت شده است{credit.note ? ` — ${credit.note}` : ""}. تا وقتی نسیه ثبت است ویرایش و حذف فروش بسته است.
+                    </p>
+                    <div className="actions" style={{ gap: 12, marginTop: 10 }}>
+                      {canDeclareCredit && <button type="button" className="btn" onClick={async () => { await revokeCredit(); setCreditDialog(false); }}>لغو نسیه</button>}
+                      <button type="button" className="btn secondary" onClick={() => setCreditDialog(false)}>بستن</button>
+                    </div>
+                  </>
+                ) : payInfo.remaining <= 0 ? (
+                  <p style={{ fontSize: 16, margin: "8px 0 12px" }}>این فروش باقیمانده‌ای ندارد؛ نسیه‌ای برای ثبت نیست.</p>
+                ) : !canDeclareCredit ? (
+                  <p style={{ fontSize: 16, margin: "8px 0 12px" }}>شما مجوز «ثبت نسیه» ندارید.</p>
+                ) : (
+                  <>
+                    <p style={{ fontSize: 16, margin: "8px 0 12px" }}>
+                      مبلغ <b>{formatAmountFa(payInfo.remaining)}</b> به‌صورت نسیه ثبت شود؟ بعد از آن ویرایش و حذف فروش بسته می‌شود (با «لغو نسیه» باز می‌شود).
+                    </p>
+                    <div className="form-field"><label>توضیح (اختیاری)</label><input value={creditNote} onChange={(e) => setCreditNote(e.target.value)} /></div>
+                    <div className="actions" style={{ gap: 12, marginTop: 10 }}>
+                      <button type="button" className="btn" onClick={declareCredit}>بله، نسیه ثبت شود</button>
+                      <button type="button" className="btn secondary" onClick={() => setCreditDialog(false)}>انصراف</button>
+                    </div>
+                  </>
+                )}
               </Modal>
             )}
             {cardDialog && (
