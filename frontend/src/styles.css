@@ -936,6 +936,8 @@ body {
 .je-lines-table td { white-space: normal; }
 /* انتخابگر (select) داخل سلول گرید: هم‌قد یک ردیف متنی تا ردیفِ دارای انتخابگر بلندتر از ردیف‌های دیگر نشود */
 .je-lines-table td select { padding: 2px 6px; height: 26px; line-height: 1.2; min-height: 0; }
+/* سلولی که فقط یک انتخابگر دارد padding عمودی ندارد تا ردیفش با ردیف‌های متنی (۲۷px) هم‌ارتفاع بماند */
+.je-lines-table td:has(> select:only-child) { padding-top: 0; padding-bottom: 0; vertical-align: middle; }
 .je-lines-table select, .je-lines-table input {
   width: 100%;
   padding: 6px 7px;
