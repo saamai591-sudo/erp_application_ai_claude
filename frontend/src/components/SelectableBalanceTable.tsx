@@ -29,6 +29,8 @@ export interface BalanceTableColumn<T> {
   decimal?: boolean;
   /** مقدار خام برای محاسبه‌ی جمع (فقط وقتی decimal=true)؛ اگر ندهید از filterValue استفاده می‌شود */
   totalValue?: (row: T) => string | number | null | undefined;
+  /** قالب نمایش خودِ جمع (پیش‌فرض: مبلغ با جداکننده)؛ مثلاً ستونِ زمان که جمعش «ساعت:دقیقه» نشان داده شود */
+  totalFormat?: (sum: number) => string;
   /** مقدار علامت‌دار برای خروجی اکسل/چاپ (مثلاً صادره منفی)؛ نگاه کنید به ExportColumn.exportValue در lib/gridExport.ts */
   exportValue?: (row: T) => string | number | null | undefined;
   /** ستونِ مربوط به زیرسیستم ارزی؛ وقتی FX در لایسنس نیست حذف می‌شود */
@@ -402,7 +404,7 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
                 <td style={{ width: colWidths[base] }}>جمع</td>
                 {columns.map((c, i) => (
                   <td key={c.header} style={{ width: colWidths[base + 1 + i] }}>
-                    {columnTotals[i] !== null ? formatAmountFa(columnTotals[i]!) : ""}
+                    {columnTotals[i] !== null ? (c.totalFormat ? c.totalFormat(columnTotals[i]!) : formatAmountFa(columnTotals[i]!)) : ""}
                   </td>
                 ))}
               </tr>

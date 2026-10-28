@@ -144,8 +144,8 @@ export default function AttendanceReview() {
           onSortChange={tabView.onSortChange}
         />
       )}
-      {activeTab === 1 && <WorksheetGrid data={data} showEmployee />}
-      {activeTab === 2 && <PunchGrid data={data} showEmployee />}
+      {activeTab === 1 && <WorksheetGrid data={data} showEmployee review />}
+      {activeTab === 2 && <PunchGrid data={data} showEmployee review />}
     </div>
   );
 }

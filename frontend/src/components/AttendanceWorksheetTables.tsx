@@ -1,4 +1,5 @@
 import { DataTable } from "./DataTable";
+import { SelectableBalanceTable } from "./SelectableBalanceTable";
 import { minutesToMask } from "./TimeInput";
 import { toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
@@ -6,6 +7,8 @@ import { formatJalaliDate } from "../lib/formatDate";
 // دو تبِ مشترکِ گزارش‌های «کارکرد روزانه» و «مرور کارکرد» (داده‌ی هر دو از services/attendanceWorksheetReportService.ts می‌آید، پس ستون‌ها یکی است):
 // «کارکرد» = یک ردیف برای هر روزِ هر کارمند با ردیف‌های شیفت، اولین ورود، آخرین خروج و عامل‌های روزانه‌ای که «نمایش در گزارش کارکرد» دارند؛
 // «ریز ورود و خروج» = تک‌تک ترددها با ردیف شیفت و جهتِ مشتق. showEmployee = ستون «کارمند» (گزارش چندکارمندی).
+// review = گزارش چندکارمندیِ «مرور کارکرد»: طبق استاندارد مرورها از SelectableBalanceTable (بدون انتخاب ردیف) استفاده می‌کند تا آیکن‌های اکسل/چاپ در نوار تب‌ها بیایند؛
+// بدونِ review (صفحه‌ی «کارکرد روزانه») همان DataTable با نوار سرصفحه‌ی خودِ صفحه است.
 // ردیف «جمع» پای گریدِ «کارکرد»: جمعِ ستون‌های عاملِ روزانه روی صفحه‌ی جاری (مثل همه‌ی گریدها)؛ زمان به «ساعت:دقیقه»، عدد/روز با جداکننده.
 
 export interface FactorCol {
@@ -61,7 +64,7 @@ const fmtVal = (v: DayVal | undefined, t: FactorCol["valueType"]) => {
 
 const s = <T,>(f: (r: T) => string, extra: object = {}) => ({ render: (r: T) => f(r), filterType: "string" as const, filterValue: (r: T) => f(r), ...extra });
 
-export function WorksheetGrid({ data, showEmployee }: { data: WorksheetData | null; showEmployee?: boolean }) {
+export function WorksheetGrid({ data, showEmployee, review }: { data: WorksheetData | null; showEmployee?: boolean; review?: boolean }) {
   const cols: any[] = [
     { header: "کد پرسنلی", ...s<DayRow>((r) => toFaDigits(r.personnelCode)), width: "100px" },
     ...(showEmployee ? [{ header: "کارمند", ...s<DayRow>((r) => r.employeeName), width: "170px" }] : []),
@@ -78,10 +81,11 @@ export function WorksheetGrid({ data, showEmployee }: { data: WorksheetData | nu
       totalFormat: f.valueType === "TIME" ? (n: number) => toFaDigits(minutesToMask(Math.round(n))) : undefined,
     })),
   ];
+  if (review) return <SelectableBalanceTable<DayRow> stateKey="ws-rows" selectable={false} columns={cols} rows={data?.rows ?? []} emptyText="کارکردی یافت نشد" />;
   return <DataTable<DayRow> columns={cols} rows={data?.rows ?? []} />;
 }
 
-export function PunchGrid({ data, showEmployee }: { data: WorksheetData | null; showEmployee?: boolean }) {
+export function PunchGrid({ data, showEmployee, review }: { data: WorksheetData | null; showEmployee?: boolean; review?: boolean }) {
   const cols: any[] = [
     { header: "کد پرسنلی", ...s<PunchRow>((r) => toFaDigits(r.personnelCode)), width: "100px" },
     ...(showEmployee ? [{ header: "کارمند", ...s<PunchRow>((r) => r.employeeName), width: "170px" }] : []),
@@ -90,5 +94,6 @@ export function PunchGrid({ data, showEmployee }: { data: WorksheetData | null; 
     { header: "ساعت", ...s<PunchRow>((r) => toFaDigits(r.time) + (r.manual ? " *" : "")), width: "110px" },
     { header: "جهت", ...s<PunchRow>((r) => r.direction), width: "110px" },
   ];
+  if (review) return <SelectableBalanceTable<PunchRow> stateKey="ws-punches" selectable={false} columns={cols} rows={data?.punches ?? []} emptyText="ترددی یافت نشد" />;
   return <DataTable<PunchRow> columns={cols} rows={data?.punches ?? []} />;
 }
