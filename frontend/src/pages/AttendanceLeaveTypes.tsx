@@ -188,7 +188,7 @@ function TypeForm({ editId }: { editId?: number }) {
             </>
           )}
           <div className="form-field">
-            <label className="checkbox-row"><input type="checkbox" checked={form.countHolidays} onChange={(e) => setForm({ ...form, countHolidays: e.target.checked })} /> روز تعطیل وسط مرخصی جزو مرخصی حساب شود <FieldHint label="تعطیل وسط مرخصی" text="فقط برای انواعِ «دارای مانده مرخصی»: روزِ غیرکاری (تعطیلی شیفت/رسمی) وسط مرخصیِ روزانه هم دارای مانده مرخصی (برای نوع روزانه ۱ روز، برای نوع ساعتی ساعات کاری روزانه‌ی تقویم). وگرنه فقط روزهای کاری کم می‌شوند. اثری روی دقیقه‌ی مرخصی در کارکرد ندارد." /></label>
+            <label className="checkbox-row"><input type="checkbox" checked={form.countHolidays} onChange={(e) => setForm({ ...form, countHolidays: e.target.checked })} /> روز تعطیل وسط مرخصی جزو مرخصی حساب شود <FieldHint label="تعطیل وسط مرخصی" text="روزِ غیرکاری (تعطیلی شیفت/رسمی) داخل مرخصیِ روزانه هم جزو مرخصی حساب می‌شود: برای نوع مرخصیِ «روز» ۱ روز و برای «روز و ساعت» ساعات کاری روزانه‌ی تقویم. این قاعده هم روی مانده‌ی مرخصی (برای انواعِ «دارای مانده مرخصی») و هم روی مقدارِ «مدت مرخصی» در فرمول‌های تردد (طبقه‌ی «درخواست») اثر دارد؛ وگرنه فقط روزهای کاری حساب می‌شوند. مرخصی ساعتی تعطیلی ندارد." /></label>
           </div>
           {editId && form.deductsBalance && (
             <div className="form-field" style={{ gridColumn: "1 / -1" }}>

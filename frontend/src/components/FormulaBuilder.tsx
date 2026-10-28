@@ -31,7 +31,19 @@ interface Palette {
 /** پالت فرمول‌ساز تردد (سرور: GET /attendance-methods/palette): دسته‌ها (متغیر روز، عامل روزانه، تجمیع …) ← مورد ← نوع تجمیع */
 interface AttPalette {
   level: "DAY" | "MONTH";
-  groups: { ns: string; key?: string; title: string; hint?: string; items: { key: string; title: string; hint?: string }[]; variants: { key: string; title: string; hint?: string }[] | null }[];
+  groups: {
+    ns: string;
+    key?: string;
+    title: string;
+    hint?: string;
+    items: { key: string; title: string; hint?: string }[];
+    variants: { key: string; title: string; hint?: string }[] | null;
+    /** گروه چهارستونه (درخواست/گزارش): گروه ← نوع ← مقدار؛ valueSuffix به انتهای عملوند اضافه می‌شود (مثلاً :SUM در عامل ماهانه) */
+    nested?: { key: string; title: string; types: { key: string; title: string; hint?: string; values: { key: string; title: string; hint?: string }[] }[] }[];
+    valueSuffix?: string;
+  }[];
+  /** متغیرهای قدیمی که دیگر در پالت نیستند ولی در فرمول‌های موجود کار می‌کنند؛ فقط برای عنوان چیپ‌ها */
+  legacy?: { key: string; title: string }[];
   baseHint?: string;
   baseInfo: { key: string; title: string; hint?: string }[];
   params: { key: string; title: string; type: string }[];
@@ -121,6 +133,7 @@ export function FormulaBuilder({
   const [cat, setCat] = useState<string>("");
   const [cls, setCls] = useState<string>("");
   const [fac, setFac] = useState<string>("");
+  const [sub, setSub] = useState<string>("");
   const [num, setNum] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
@@ -157,6 +170,16 @@ export function FormulaBuilder({
           if (g.variants) for (const v of g.variants) m.set(`${g.ns}:${i.key}:${v.key}`.toUpperCase(), `${i.title} — ${v.title}`);
           else m.set(`${g.ns}:${i.key}`.toUpperCase(), i.title);
         }
+      for (const g of attPal.groups)
+        for (const n of g.nested ?? [])
+          for (const t of n.types)
+            for (const v of t.values) m.set(`${g.ns}:${v.key}${g.valueSuffix ?? ""}`.toUpperCase(), `${n.title} ${t.title} — ${v.title}`);
+      // متغیرهای قدیمی (فقط عنوان): V:KEY و T:KEY با نوع تجمیع
+      const aggTitles = new Map((attPal.groups.find((g) => g.ns === "T" && g.variants)?.variants ?? []).map((v) => [v.key, v.title]));
+      for (const l of attPal.legacy ?? []) {
+        m.set(`V:${l.key}`.toUpperCase(), l.title);
+        for (const [vk, vt] of aggTitles) m.set(`T:${l.key}:${vk}`.toUpperCase(), `${l.title} — ${vt}`);
+      }
       for (const b of attPal.baseInfo) m.set(`B:${b.key}`, b.title);
       for (const p of attPal.params) m.set(`P:${p.key}`, p.title);
     }
@@ -566,10 +589,20 @@ export function FormulaBuilder({
       </div>
 
       {tab === "factors" && att && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-          {col("دسته", attCats.map((c) => item(c.title, cat === c.key, () => { setCat(c.key); setFac(""); }, c.hint)))}
-          {col(cat === "BASE" ? "اطلاعات پایه" : "مورد", cat === "BASE" ? attPal?.baseInfo.map((b) => item(b.title, false, () => push(`[B:${b.key}]`), b.hint)) : attItems.map((i) => item(i.title, fac === i.key, () => attPick(i), i.hint)))}
-          {col("مقدار", attGroup?.variants && fac ? attGroup.variants.map((v) => item(v.title, false, () => push(`[${attGroup.ns}:${fac}:${v.key}]`), v.hint)) : null)}
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${attGroup?.nested ? 4 : 3}, 1fr)`, gap: 8 }}>
+          {col("دسته", attCats.map((c) => item(c.title, cat === c.key, () => { setCat(c.key); setFac(""); setSub(""); }, c.hint)))}
+          {attGroup?.nested ? (
+            <>
+              {col("گروه", attGroup.nested.map((n) => item(n.title, sub === n.key, () => { setSub(n.key); setFac(""); })))}
+              {col("نوع", attGroup.nested.find((n) => n.key === sub)?.types.map((t) => item(t.title, fac === t.key, () => setFac(t.key), t.hint)) ?? null)}
+              {col("مقدار", attGroup.nested.find((n) => n.key === sub)?.types.find((t) => t.key === fac)?.values.map((v) => item(v.title, false, () => push(`[${attGroup.ns}:${v.key}${attGroup.valueSuffix ?? ""}]`), v.hint)) ?? null)}
+            </>
+          ) : (
+            <>
+              {col(cat === "BASE" ? "اطلاعات پایه" : "مورد", cat === "BASE" ? attPal?.baseInfo.map((b) => item(b.title, false, () => push(`[B:${b.key}]`), b.hint)) : attItems.map((i) => item(i.title, fac === i.key, () => attPick(i), i.hint)))}
+              {col("مقدار", attGroup?.variants && fac ? attGroup.variants.map((v) => item(v.title, false, () => push(`[${attGroup.ns}:${fac}:${v.key}]`), v.hint)) : null)}
+            </>
+          )}
         </div>
       )}
 

@@ -353,6 +353,12 @@ export async function deleteAttachment(id: number) {
 export interface ApprovedLeave {
   employeeId: number;
   typeKey: string;
+  /** فقط برای مقدار فرمول‌ها (leaveValuesByRequestType)؛ محاسبه‌ی مانده آن‌ها را نمی‌خواند */
+  requestTypeId?: number;
+  /** نوع مرخصی «روز» (مقدار به روز) یا «روز و ساعت» (مقدار به دقیقه) */
+  unitDay?: boolean;
+  /** روز تعطیل داخل مرخصی روزانه هم جزو مرخصی حساب می‌شود */
+  countHolidays?: boolean;
   fromDay: number;
   toDay: number;
   startMinute: number | null;
@@ -364,9 +370,9 @@ export async function loadApprovedLeave(employeeIds: number[], fromDay: number, 
   if (employeeIds.length === 0) return [];
   const rows = await prisma.attendanceLeaveRequest.findMany({
     where: { employeeId: { in: employeeIds }, status: "APPROVED", fromDate: { lte: new Date((toDay + 1) * DAY_MS) }, toDate: { gte: new Date((fromDay - 1) * DAY_MS) } },
-    include: { leaveType: { select: { key: true } } },
+    include: { leaveType: { select: { key: true, unit: true, countHolidays: true } } },
   });
-  return rows.map((r) => ({ employeeId: r.employeeId, typeKey: r.leaveType.key, fromDay: dayNum(r.fromDate), toDay: dayNum(r.toDate), startMinute: r.startMinute, endMinute: r.endMinute }));
+  return rows.map((r) => ({ employeeId: r.employeeId, typeKey: r.leaveType.key, requestTypeId: r.requestTypeId, unitDay: r.leaveType.unit === "DAY", countHolidays: r.leaveType.countHolidays, fromDay: dayNum(r.fromDate), toDay: dayNum(r.toDate), startMinute: r.startMinute, endMinute: r.endMinute }));
 }
 
 export interface DayLeave {
@@ -401,6 +407,36 @@ export function leaveForDay(reqs: ApprovedLeave[], employeeId: number, day: numb
       out.byKey[q.typeKey] = (out.byKey[q.typeKey] ?? 0) + minutes;
       out.total += minutes;
     }
+  }
+  return out;
+}
+
+/**
+ * مقدار مرخصیِ تاییدشده‌ی یک روز به تفکیک «نوع درخواست» (متغیر RL<id> در فرمول‌ها):
+ *  • نوع مرخصیِ «روز و ساعت» ← دقیقه: درخواست روزانه در روز کاری = «ساعت مرخصی» همان روز شیفت، ساعتی = هم‌پوشانی با بازه‌های کاری؛
+ *  • نوع مرخصیِ «روز» ← روز: هر روز کاریِ پوشش‌داده‌شده ۱.
+ * روز غیرکاری (تعطیلی شیفت/رسمی) فقط وقتی نوع مرخصی «روز تعطیل جزو مرخصی» باشد و درخواست روزانه آن را بپوشاند مقدار دارد: ساعت کاری روزانه‌ی تقویم (دقیقه) یا ۱ (روز) — همان قاعده‌ی مصرف مانده.
+ */
+export function leaveValuesByRequestType(reqs: ApprovedLeave[], employeeId: number, day: number, dayRows: any[], calendarDailyMinutes: number): Record<number, number> {
+  const out: Record<number, number> = {};
+  const work = dayRows.filter((r) => !r.rest);
+  const holiday = work.length === 0 && dayRows.length > 0;
+  for (const q of reqs) {
+    if (q.employeeId !== employeeId || q.requestTypeId === undefined) continue;
+    let minutes = 0;
+    if (q.startMinute === null) {
+      if (day < q.fromDay || day > q.toDay) continue;
+      if (work.length) minutes = work[0].dayLeaveMinutes ?? 0;
+      else if (holiday && q.countHolidays) minutes = calendarDailyMinutes;
+    } else {
+      const qs = q.fromDay * 1440 + q.startMinute, qe = q.toDay * 1440 + (q.endMinute as number);
+      for (const r of work) {
+        const s = day * 1440 + (r.segStartRel as number), e = day * 1440 + (r.segEndRel as number);
+        minutes += Math.max(0, Math.min(qe, e) - Math.max(qs, s));
+      }
+    }
+    if (minutes <= 0) continue;
+    out[q.requestTypeId] = (out[q.requestTypeId] ?? 0) + (q.unitDay ? 1 : minutes);
   }
   return out;
 }

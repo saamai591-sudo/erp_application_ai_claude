@@ -43,8 +43,11 @@ export const DAY_VARS: Record<string, string> = {
   INCOMPLETE_ROWS: "تعداد بازه‌های ناقص (تعداد فردِ تردد)",
 };
 
-/** متغیر روزِ خودکارِ هر «بازه‌ی زمانی» (TB<id>)، هر «نوع مرخصی» (LV<id>)، هر «نوع ماموریت» (MT<id>: روزهای گزارش‌های تاییدشده‌ی آن نوع) و هر «نوع درخواست ماموریت» (RQ<id>: طول درخواست‌ها، RU<id>: روز گزارش‌نشده) — همه در روز پایان ماموریت */
-export const BAND_KEY_RE = /^(TB|LV|MT|RQ|RU)\d+$/;
+/** متغیر روزِ خودکارِ هر «بازه‌ی زمانی» (TB<id>)، هر «نوع مرخصی» (LV<id>)، هر «نوع ماموریت» (MT<id>: روزهای گزارش‌های تاییدشده‌ی آن نوع، در روز پایان ماموریت)، هر «نوع درخواست ماموریت» (RQ<id>) و هر «نوع درخواست مرخصی» (RL<id>) */
+export const BAND_KEY_RE = /^(TB|LV|MT|RQ|RL)\d+$/;
+
+/** متغیرهای عمومیِ مرخصی/ماموریت که برای فرمول‌های موجود می‌مانند ولی دیگر در پالت نیستند (جایشان طبقه‌های «درخواست» و «گزارش» است) */
+export const PALETTE_HIDDEN_DAY_VARS = ["LEAVE_TAKEN", "MISSION_MINUTES", "MISSION_DAYS", "MISSION_REPORT_DAYS"];
 
 export const AGG_VARIANTS: Record<string, string> = { SUM: "جمع ماه", MAX: "بیشترین روز", DAYS: "تعداد روزهای دارای مقدار" };
 

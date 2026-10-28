@@ -7,10 +7,13 @@ import { AttendanceError } from "./attendancePunchService";
 //  • ماهیت مرخصی: نوع مرخصی الزامی (مانده/استحقاق/سقف روی نوع مرخصی می‌ماند)؛ نوع مرخصیِ «روزانه» فقط نوع درخواست روزانه می‌پذیرد، «روزانه و ساعتی» هر دو.
 //  • ماهیت ماموریت: بدون نوع مرخصی. «نیازمند گزارش» ذخیره نمی‌شود: نوع درخواستی که حداقل یک «نوع ماموریت» (گزارش) فعال به آن وصل است گزارش می‌خواهد؛
 //    نوع درخواست ساعتی نمی‌تواند نوع ماموریت داشته باشد (گزارش و احتساب فقط روزانه است).
-// کلید متغیر روز: RQ<id> = طول درخواست‌های (روزانه‌ی پایان‌یافته‌ی) این نوع، RU<id> = روزهای گزارش‌نشده‌ی آن‌ها.
+// کلید متغیر روز: ماهیت مرخصی ← RL<id> (مدت مرخصی تاییدشده‌ی این نوع درخواست: دقیقه برای نوع مرخصیِ «روز و ساعت»، روز برای نوع مرخصیِ «روز»)؛
+// ماهیت ماموریت ← RQ<id> (روزانه: طول درخواست‌های پایان‌یافته به روز در روز پایان؛ ساعتی: دقیقه‌ی ماموریت همان روز).
 
+/** متغیر روز نوع درخواست ماموریت */
 export const requestTypeKey = (id: number) => `RQ${id}`;
-export const unreportedKey = (id: number) => `RU${id}`;
+/** متغیر روز نوع درخواست مرخصی */
+export const leaveRequestKey = (id: number) => `RL${id}`;
 
 export const NATURE_FA = { LEAVE: "مرخصی", MISSION: "ماموریت" } as const;
 export const UNIT_FA = { DAILY: "روزانه", HOURLY: "ساعتی" } as const;
@@ -19,7 +22,7 @@ export function requestTypeShape(t: any) {
   const missionTypes = (t.missionTypes ?? []) as { isActive: boolean }[];
   return {
     id: t.id,
-    key: requestTypeKey(t.id),
+    key: t.nature === "LEAVE" ? leaveRequestKey(t.id) : requestTypeKey(t.id),
     title: t.title,
     nature: t.nature as keyof typeof NATURE_FA,
     natureTitle: NATURE_FA[t.nature as keyof typeof NATURE_FA],
@@ -80,9 +83,9 @@ export async function saveRequestType(body: any, id?: number) {
   return prisma.attendanceRequestType.create({ data: { title, nature: nature as any, unit: unit as any, leaveTypeId, isActive, description }, include: REQUEST_TYPE_INCLUDE });
 }
 
-/** عامل‌هایی که فرمولشان به متغیرهای این نوع درخواست (RQ/RU) ارجاع می‌دهند */
+/** عامل‌هایی که فرمولشان به متغیر این نوع درخواست (RQ/RL) ارجاع می‌دهند */
 export async function factorsUsingRequestType(id: number): Promise<string[]> {
-  const re = new RegExp(`\\[(V|T):(${requestTypeKey(id)}|${unreportedKey(id)})(:[A-Za-z_]+)?\\]`, "i");
+  const re = new RegExp(`\\[(V|T):(${requestTypeKey(id)}|${leaveRequestKey(id)})(:[A-Za-z_]+)?\\]`, "i");
   return formulaUsers(re);
 }
 
