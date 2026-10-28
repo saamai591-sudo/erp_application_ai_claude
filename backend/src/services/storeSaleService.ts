@@ -31,6 +31,9 @@ export interface StoreSaleLineInput {
 export interface StoreSaleBody {
   date?: string;
   stationId?: number;
+  /** شیفت + تاریخ شروع شیفت (جایگزین انتخاب ایستگاه؛ ایستگاه از شیفت می‌آید) */
+  shiftId?: number;
+  shiftDate?: string;
   customerId?: number;
   description?: string | null;
   lines?: StoreSaleLineInput[];
@@ -53,6 +56,19 @@ async function loadStation(id: unknown) {
   if (!station) throw new StoreSaleError("ایستگاه فروش را انتخاب کنید");
   if (!station.isActive) throw new StoreSaleError(`ایستگاه «${station.title}» غیرفعال است`);
   return station;
+}
+
+/** شیفتِ فعال + قاعده‌ی تاریخ: تاریخ فاکتور از تاریخ شروع شیفت کوچک‌تر نیست و حداکثر یک روز بعد از آن است (شیفتِ عبورکرده از نیمه‌شب) */
+async function loadShift(body: StoreSaleBody, date: Date) {
+  const shift = Number(body.shiftId) ? await prisma.salesShift.findUnique({ where: { id: Number(body.shiftId) } }) : null;
+  if (!shift) throw new StoreSaleError("شیفت را انتخاب کنید");
+  if (!shift.isActive) throw new StoreSaleError(`شیفت «${shift.title}» غیرفعال است`);
+  const shiftDate = parseDate(body.shiftDate);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  if (date.getTime() < shiftDate.getTime()) throw new StoreSaleError(`تاریخ فاکتور (${displayDate(date)}) نمی‌تواند قبل از تاریخ شروع شیفت (${displayDate(shiftDate)}) باشد`);
+  if (date.getTime() > shiftDate.getTime() + 86400000) throw new StoreSaleError(`تاریخ فاکتور (${displayDate(date)}) بیش از یک روز بعد از تاریخ شروع شیفت (${displayDate(shiftDate)}) است`);
+  void fmt;
+  return { shift, shiftDate };
 }
 
 type Station = Awaited<ReturnType<typeof loadStation>>;
@@ -204,7 +220,8 @@ export async function revokeStoreSaleCredit(id: number) {
 
 export async function createStoreSale(body: StoreSaleBody, allowPriceChange: boolean) {
   const date = parseDate(body.date);
-  const station = await loadStation(body.stationId);
+  const { shift, shiftDate } = await loadShift(body, date);
+  const station = await loadStation(shift.stationId);
   const fp = await fiscalPeriodOf(date);
   const customer = await resolveCustomer(body.customerId, station);
   const lines = await cleanLines(body.lines, station, date, allowPriceChange);
@@ -223,6 +240,8 @@ export async function createStoreSale(body: StoreSaleBody, allowPriceChange: boo
         number: (last?.number ?? 0) + 1,
         date,
         stationId: station.id,
+        shiftId: shift.id,
+        shiftDate,
         warehouseId,
         salesTypeId: station.salesTypeId,
         costCenterId: station.costCenterId,
@@ -241,6 +260,8 @@ export async function updateStoreSale(id: number, body: StoreSaleBody, allowPric
   if (!ex) throw new StoreSaleError("فروش یافت نشد");
   if (body.stationId && Number(body.stationId) !== ex.stationId) throw new StoreSaleError("ایستگاه فروش بعد از ثبت قابل تغییر نیست");
   const date = parseDate(body.date);
+  const { shift, shiftDate } = await loadShift(body, date);
+  if (shift.stationId !== ex.stationId) throw new StoreSaleError("شیفت باید از همان ایستگاهِ فروش باشد؛ ایستگاه بعد از ثبت قابل تغییر نیست");
   const station = await loadStation(ex.stationId);
   const fp = await fiscalPeriodOf(date);
   if (fp.id !== ex.fiscalPeriodId) throw new StoreSaleError("تاریخ فروش را نمی‌توان به دوره‌ی مالی دیگری برد");
@@ -260,6 +281,8 @@ export async function updateStoreSale(id: number, body: StoreSaleBody, allowPric
       where: { id },
       data: {
         date,
+        shiftId: shift.id,
+        shiftDate,
         warehouseId,
         customerId: customer.id,
         description: body.description ? String(body.description).trim() || null : null,
@@ -290,6 +313,9 @@ export function saleShape(s: any, withLines = false, paid = 0) {
     date: dayStr(s.date),
     stationId: s.stationId,
     stationTitle: s.station?.title ?? "",
+    shiftId: s.shiftId ?? null,
+    shiftTitle: s.shift?.title ?? "",
+    shiftDate: s.shiftDate ? dayStr(s.shiftDate) : null,
     customerId: s.customerId,
     customerTitle: s.customer?.party ? s.customer.party.detailTitle || `${s.customer.party.firstName || ""} ${s.customer.party.lastName || ""}`.trim() || s.customer.party.name || "" : "",
     description: s.description ?? "",

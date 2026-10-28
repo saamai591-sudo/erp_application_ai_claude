@@ -69,11 +69,23 @@ interface SellableResponse {
   items: Sellable[];
   canChangePrice: boolean;
 }
+interface ShiftOpt {
+  id: number;
+  code: number;
+  title: string;
+  stationId: number;
+  stationTitle: string;
+  startTime: string;
+  endTime: string;
+}
 interface ListRow {
   id: number;
   number: number;
   date: string;
   stationTitle: string;
+  shiftId?: number | null;
+  shiftTitle?: string;
+  shiftDate?: string | null;
   customerTitle: string;
   lineCount: number;
   totalAmount: number;
@@ -180,6 +192,8 @@ function SaleList() {
           { header: "شماره", ...s((r) => toFaDigits(String(r.number))), width: "80px", filterType: "number", filterValue: (r: ListRow) => r.number },
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10), width: "110px" },
           { header: "ایستگاه", ...s((r) => r.stationTitle) },
+          { header: "شیفت", ...s((r) => r.shiftTitle || "—"), width: "120px" },
+          { header: "تاریخ شروع شیفت", render: (r) => (r.shiftDate ? formatJalaliDate(r.shiftDate) : "—"), filterType: "date", filterValue: (r) => (r.shiftDate ?? "").slice(0, 10), width: "130px" },
           { header: "مشتری", ...s((r) => r.customerTitle) },
           { header: "ردیف", ...n((r) => r.lineCount), width: "70px", decimal: false },
           { header: "مبلغ", ...n((r) => r.totalAmount), width: "120px" },
@@ -203,7 +217,7 @@ function SaleForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
-  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", stationId: "", customerId: "", description: "" });
+  const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", stationId: "", shiftId: "", shiftDate: "", customerId: "", description: "" });
   const [rows, setRows] = usePersistedState<Row[]>(`${cacheKey}:rows`, []);
   const [meta, setMeta] = useState<{ number: number; deliveryStatus: "NOT_DELIVERED" | "DELIVERED"; updatedAt?: string } | null>(null);
   const [receipts, setReceipts] = useState<ReceiptRow[]>([]);
@@ -218,6 +232,7 @@ function SaleForm({ editId }: { editId?: number }) {
   const [paying, setPaying] = useState(false);
   const [cardDialog, setCardDialog] = useState(false);
   const [stations, setStations] = useState<StationOpt[]>([]);
+  const [shifts, setShifts] = useState<ShiftOpt[]>([]);
   const [customers, setCustomers] = useState<CustomerOpt[]>([]);
   const [sell, setSell] = useState<SellableResponse | null>(null);
   const [sellError, setSellError] = useState<string | null>(null);
@@ -230,8 +245,9 @@ function SaleForm({ editId }: { editId?: number }) {
   // ── بارگذاری اولیه ──
   useEffect(() => {
     async function init() {
-      const [st, cu, fp] = await Promise.all([api.get("/sales-stations?activeOnly=true"), api.get("/customers"), fetchSelectedFiscalPeriod()]);
+      const [st, cu, fp, sh] = await Promise.all([api.get("/sales-stations?activeOnly=true"), api.get("/customers"), fetchSelectedFiscalPeriod(), api.get("/sales-shifts?activeOnly=true")]);
       setStations(st);
+      setShifts(sh);
       setCustomers((cu as CustomerOpt[]).filter((c) => c.isActive !== false));
       if (editId) {
         const d: Detail = await api.get(`/store-sales/${editId}`);
@@ -241,13 +257,13 @@ function SaleForm({ editId }: { editId?: number }) {
         setPayInfo({ payable: d.payable, paid: d.paid, remaining: d.remaining, status: d.paymentStatus });
         setNewRec((x) => ({ ...x, date: localTodayIso() < d.date ? d.date : x.date, amount: d.remaining > 0 ? String(d.remaining) : "" }));
         if (!hasPersistedState(`${cacheKey}:header`)) {
-          setHeader({ date: d.date, stationId: String(d.stationId), customerId: String(d.customerId), description: d.description });
+          setHeader({ date: d.date, stationId: String(d.stationId), shiftId: d.shiftId ? String(d.shiftId) : "", shiftDate: d.shiftDate ?? "", customerId: String(d.customerId), description: d.description });
           setRows(d.lines.map((l) => ({ goodsItemId: l.goodsItemId, code: l.goodsItemCode, title: l.goodsItemTitle, unitTitle: l.unitTitle, quantity: String(l.quantity), priceOverride: "", stored: { unitPrice: l.unitPrice, vatAmount: l.vatAmount }, description: l.description })));
         }
       } else if (!hasPersistedState(`${cacheKey}:header`)) {
         // «فاکتور جدید» از یک فروش دیگر: همان ایستگاه و تاریخ (و مشتری پیش‌فرض ایستگاه)
-        const pre = takeFormPrefill<{ stationId: string; customerId: string; date: string }>(location.pathname);
-        setHeader({ date: pre?.date || defaultDocumentDate(fp), stationId: pre?.stationId ?? "", customerId: pre?.customerId ?? "", description: "" });
+        const pre = takeFormPrefill<{ stationId: string; shiftId: string; shiftDate: string; customerId: string }>(location.pathname);
+        setHeader({ date: defaultDocumentDate(fp), stationId: pre?.stationId ?? "", shiftId: pre?.shiftId ?? "", shiftDate: pre?.shiftDate ?? "", customerId: pre?.customerId ?? "", description: "" });
         setRows([]);
       }
       setLoaded(true);
@@ -257,7 +273,7 @@ function SaleForm({ editId }: { editId?: number }) {
   }, [editId]);
 
   // ── اقلام قابل‌فروشِ (ایستگاه، تاریخ) ──
-  const ready = !!header.date && !!header.stationId;
+  const ready = !!header.date && !!header.stationId && !!header.shiftId && !!header.shiftDate;
   useEffect(() => {
     setSell(null);
     setSellError(null);
@@ -281,6 +297,7 @@ function SaleForm({ editId }: { editId?: number }) {
   }, [sell]);
   const dp = sell?.decimalPlaces ?? 0;
   const station = stations.find((s) => String(s.id) === header.stationId);
+  const shift = shifts.find((x) => String(x.id) === header.shiftId);
   const customer = customers.find((c) => String(c.id) === header.customerId);
   const delivered = !!editId && meta?.deliveryStatus === "DELIVERED";
   const hasReceipts = !!editId && receipts.length > 0;
@@ -339,12 +356,15 @@ function SaleForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
     if (!header.date) return setError("تاریخ فروش را انتخاب کنید");
-    if (!header.stationId) return setError("ایستگاه فروش را انتخاب کنید");
+    if (!header.shiftId) return setError("شیفت را انتخاب کنید");
+    if (!header.shiftDate) return setError("تاریخ شروع شیفت را وارد کنید");
+    if (header.date < header.shiftDate) return setError("تاریخ فاکتور نمی‌تواند قبل از تاریخ شروع شیفت باشد");
     if (rows.length === 0) return setError("حداقل یک ردیف اضافه کنید");
     for (const [i, r] of rows.entries()) if (!(qtyOf(r) > 0)) return setError(`مقدار ردیف ${toFaDigits(String(i + 1))} باید عددی بزرگ‌تر از صفر باشد`);
     const body = {
       date: header.date,
-      stationId: Number(header.stationId),
+      shiftId: Number(header.shiftId),
+      shiftDate: header.shiftDate,
       customerId: header.customerId ? Number(header.customerId) : undefined,
       description: header.description,
       lines: rows.map((r) => ({ goodsItemId: r.goodsItemId, quantity: qtyOf(r), unitPrice: r.priceOverride !== "" && canChangePrice ? Number(r.priceOverride) : undefined, description: r.description })),
@@ -475,18 +495,30 @@ function SaleForm({ editId }: { editId?: number }) {
               <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
             </div>
             <div className="form-field">
-              <label>ایستگاه فروش<RequiredMark /> <FieldHint label="ایستگاه فروش" text="اول تاریخ و ایستگاه را انتخاب کنید؛ فی و اقلام قابل‌فروش از اعلامیه‌ی قیمتِ همین ایستگاه می‌آید. بعد از ثبت، ایستگاه قابل تغییر نیست." /></label>
-              <RecordPickerField<StationOpt>
-                title="انتخاب ایستگاه فروش"
-                disabled={!!editId || (rows.length > 0 && !editId)}
-                displayValue={station ? `${toFaDigits(String(station.code))} — ${station.title}` : ""}
-                rows={stations}
+              <label>شیفت<RequiredMark /> <FieldHint label="شیفت" text="شیفت و تاریخ شروع شیفت جای انتخاب ایستگاه را می‌گیرند؛ ایستگاه از شیفت می‌آید و فی و اقلام قابل‌فروش از اعلامیه‌ی قیمتِ همان ایستگاه است. ایستگاه بعد از ثبت قابل تغییر نیست." /></label>
+              <RecordPickerField<ShiftOpt>
+                title="انتخاب شیفت"
+                displayValue={shift ? `${shift.title} — ${shift.stationTitle}` : ""}
+                rows={editId || rows.length > 0 ? shifts.filter((x) => String(x.stationId) === header.stationId) : shifts}
                 columns={[
-                  { header: "کد", render: (x) => toFaDigits(String(x.code)), filterValue: (x) => String(x.code), width: "80px" },
-                  { header: "عنوان", render: (x) => x.title, filterValue: (x) => x.title },
+                  { header: "شیفت", render: (x) => x.title, filterValue: (x) => x.title },
+                  { header: "ایستگاه", render: (x) => x.stationTitle, filterValue: (x) => x.stationTitle },
+                  { header: "ساعت", render: (x) => `${toFaDigits(x.startTime)} تا ${toFaDigits(x.endTime)}`, filterValue: (x) => `${x.startTime} ${x.endTime}`, width: "130px" },
                 ]}
-                onSelect={(x) => setHeader({ ...header, stationId: String(x.id), customerId: String(x.customerId) })}
+                onSelect={(x) => {
+                  const st = stations.find((q) => q.id === x.stationId);
+                  const stationChanged = String(x.stationId) !== header.stationId;
+                  setHeader({ ...header, shiftId: String(x.id), stationId: String(x.stationId), shiftDate: header.shiftDate || header.date, customerId: stationChanged && st ? String(st.customerId) : header.customerId });
+                }}
               />
+            </div>
+            <div className="form-field">
+              <label>تاریخ شروع شیفت<RequiredMark /> <FieldHint label="تاریخ شروع شیفت" text="روزی که شیفت شروع شده است؛ شیفت‌های شبانه بعد از نیمه‌شب تاریخ فاکتورشان روز بعد است ولی تاریخ شروع شیفت همان روز قبل می‌ماند. تاریخ فاکتور نباید قبل از آن (و بیش از یک روز بعد از آن) باشد." /></label>
+              <JalaliDatePicker value={header.shiftDate} onChange={(v) => setHeader({ ...header, shiftDate: v })} />
+            </div>
+            <div className="form-field">
+              <label>ایستگاه فروش</label>
+              <input disabled value={station ? `${toFaDigits(String(station.code))} — ${station.title}` : ""} placeholder="از شیفت می‌آید" />
             </div>
             <div className="form-field">
               <label>مشتری <FieldHint label="مشتری" text="پیش‌فرض از ایستگاه می‌آید و قابل تغییر است." /></label>
@@ -620,13 +652,13 @@ function SaleForm({ editId }: { editId?: number }) {
                 disabled={!settledNow}
                 title={settledNow ? undefined : "تا وقتی فروش تسویه نشده (یا باقیمانده نسیه نشده) فاکتور جدید ممکن نیست"}
                 onClick={() => {
-                  stageFormPrefill("/store-sales/new", { stationId: header.stationId, customerId: station ? String(station.customerId) : "", date: header.date });
+                  stageFormPrefill("/store-sales/new", { stationId: header.stationId, shiftId: header.shiftId, shiftDate: header.shiftDate, customerId: station ? String(station.customerId) : "", date: header.date });
                   openTab("/store-sales/new");
                 }}
                 style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--accent, #3b6ea8)", background: "var(--surface, #fff)", color: "var(--accent, #3b6ea8)", opacity: settledNow ? 1 : 0.45, cursor: settledNow ? "pointer" : "not-allowed", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}
               >
                 <span style={{ fontSize: 24, fontWeight: 800 }}>فاکتور جدید</span>
-                <span style={{ fontSize: 15, opacity: 0.85 }}>{settledNow ? "همان ایستگاه و تاریخ" : "ابتدا فروش را تسویه یا نسیه کنید"}</span>
+                <span style={{ fontSize: 15, opacity: 0.85 }}>{settledNow ? "همان شیفت و تاریخ شروع" : "ابتدا فروش را تسویه یا نسیه کنید"}</span>
               </button>
               <button type="button" onClick={() => setCashDialog(true)} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--success, #1f9d55)", background: "var(--success-soft, #e6f6ec)", color: "var(--success, #17803f)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
                 <span style={{ fontSize: 24, fontWeight: 800 }}>دریافت نقد</span>

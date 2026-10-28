@@ -502,7 +502,7 @@ export const REGISTRY: ModuleDef[] = [
       {
         key: "config",
         title: "تنظیمات",
-        forms: [{ key: "sales-stations", title: "ایستگاه فروش", baseActions: CRUD }],
+        forms: [{ key: "sales-stations", title: "ایستگاه فروش", baseActions: CRUD }, { key: "sales-shifts", title: "شیفت فروش", baseActions: CRUD }],
       },
       {
         key: "operations",

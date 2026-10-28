@@ -12,9 +12,10 @@ import { StoreSaleError, createStoreSale, declareStoreSaleCredit, deleteStoreSal
 const FORM = findFormPrefix("store-sales");
 const router = Router();
 
-const INCLUDE = { station: { select: { id: true, title: true } }, customer: { select: { party: { select: { detailTitle: true, name: true, firstName: true, lastName: true } } } }, lines: true } as const;
+const INCLUDE = { station: { select: { id: true, title: true } }, shift: { select: { id: true, title: true } }, customer: { select: { party: { select: { detailTitle: true, name: true, firstName: true, lastName: true } } } }, lines: true } as const;
 const DETAIL_INCLUDE = {
   station: { select: { id: true, title: true } },
+  shift: { select: { id: true, title: true } },
   customer: { select: { party: { select: { detailTitle: true, name: true, firstName: true, lastName: true } } } },
   lines: { include: { goodsItem: { select: { fullCode: true, title: true, barcode: true } }, unit: { select: { title: true } } }, orderBy: { rowOrder: "asc" } },
 } as const;

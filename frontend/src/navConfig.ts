@@ -258,7 +258,10 @@ const RAW_MODULES: ModuleGroup[] = [
     subModules: [
       {
         title: "تنظیمات",
-        items: [{ key: "sales-stations", label: "ایستگاه فروش", list: "/sales-stations", create: "/sales-stations/new", icon: "store" }],
+        items: [
+          { key: "sales-stations", label: "ایستگاه فروش", list: "/sales-stations", create: "/sales-stations/new", icon: "store" },
+          { key: "sales-shifts", label: "شیفت فروش", list: "/sales-shifts", create: "/sales-shifts/new", icon: "store" },
+        ],
       },
       {
         title: "عملیات",

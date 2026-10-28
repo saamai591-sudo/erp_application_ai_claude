@@ -6920,6 +6920,26 @@ model SalesStation {
   storeSales      StoreSale[]
   storeReceipts StoreReceipt[]
   cardReaders   SalesStationCardReader[]
+  shifts        SalesShift[]
+}
+
+/// شیفت فروش: هر ایستگاه چند شیفت دارد. در فروش فروشگاهی «شیفت + تاریخ شروع شیفت» جایگزین انتخاب ایستگاه است (ایستگاه از شیفت می‌آید)؛ ساعت شروع/پایان فقط اطلاعات است.
+model SalesShift {
+  id          Int          @id @default(autoincrement())
+  code        Int          @unique
+  stationId   Int
+  title       String
+  /// HH:mm — فقط اطلاعاتی (پایان می‌تواند کوچک‌تر از شروع باشد = شیفتِ عبورکرده از نیمه‌شب)
+  startTime   String
+  endTime     String
+  isActive    Boolean      @default(true)
+  description String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  station     SalesStation @relation(fields: [stationId], references: [id], onDelete: Restrict)
+  sales       StoreSale[]
+
+  @@unique([stationId, title])
 }
 
 /// کارتخوان‌های اختصاص‌یافته به ایستگاه فروش (فقط همین‌ها در دریافت کارتیِ فروش آن ایستگاه قابل انتخاب‌اند)
@@ -6953,6 +6973,10 @@ model StoreSale {
   description    String?
   deliveryStatus StoreSaleDeliveryStatus @default(NOT_DELIVERED)
   /// «ثبت نسیه»: کاربر عامدانه باقیمانده‌ی دریافت را نسیه اعلام کرده است؛ فروشی که نه تسویه شده نه نسیه اعلام شده «تسویه‌نشده» است و (در فرم تحویل بعدی) قابل تحویل نیست
+  /// شیفت و «تاریخ شروع شیفت» (ترکیب = هویت نوبت کاری)؛ تاریخ فاکتور (date) می‌تواند تا یک روز بعد از آن باشد ولی کوچک‌تر نیست. فروش‌های قدیمیِ قبل از این قابلیت خالی‌اند.
+  shiftId        Int?
+  shiftDate      DateTime?               @db.Date
+  shift          SalesShift?             @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   creditDeclaredAt   DateTime?
   creditDeclaredById Int?
   creditNote         String?
