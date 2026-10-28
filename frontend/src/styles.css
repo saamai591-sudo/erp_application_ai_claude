@@ -2184,3 +2184,11 @@ td .badge { padding: 0 9px; line-height: 1.5; vertical-align: middle; }
 
 /* چک‌باکس انتخاب ردیف در فهرست‌ها: بدون margin پیش‌فرض و بدون خط متنی اطرافش تا ارتفاع ردیف را زیاد نکند */
 .grid-scroll-area tbody td > input[type="checkbox"] { display: block; margin: 0 auto; }
+
+/* گرید ردیف‌های فرم‌ها (سند حسابداری، فاکتور، ...): ردیف فشرده — padding کمتر برای سلول/ورودی/انتخابگر و انتخابگر تک‌خطی (متن بلند با «…» بریده می‌شود، tooltip کامل) */
+.je-lines-table td { padding: 2px 4px; }
+.je-lines-table select, .je-lines-table input { padding: 3px 6px; }
+.je-lines-table td select { height: 24px; }
+.je-lines-table .picker-field { padding: 3px 8px; }
+.je-lines-table .picker-field > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.je-lines-table .picker-clear-btn { width: 24px; height: 24px; }
