@@ -64,7 +64,7 @@ export function ExistingReceiptsTable({
           <th style={{ width: 170 }}>مبلغ</th>
           {hasRef && <th style={{ width: 150 }}>شماره پیگیری</th>}
           <th>شرح</th>
-          <th style={{ width: 150 }}></th>
+          <th style={{ width: 130 }}></th>
         </tr>
       </thead>
       <tbody>
@@ -207,7 +207,7 @@ export function StoreCardReceiptDialog({
                   <th style={{ width: 170 }}>مبلغ</th>
                   <th style={{ width: 150 }}>شماره پیگیری</th>
                   <th style={{ width: 150 }}>باقی‌مانده بعد از این ردیف</th>
-                  {isCard && <th style={{ width: 150 }}></th>}
+                  {isCard && <th style={{ width: 130 }}></th>}
                 </tr>
               </thead>
               <tbody>
