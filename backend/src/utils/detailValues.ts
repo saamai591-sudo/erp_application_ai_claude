@@ -1,8 +1,20 @@
 import { prisma } from "../lib/prisma";
 
-/** عنوان تفصیلیِ حساب بانکی — تنها محل تعریف؛ هم در سند حسابداری و هم در انتخابگر مشترک حساب بانکی (detailTitle) استفاده می‌شود */
-export function bankAccountDetailTitle(accountNumber: string): string {
-  return `حساب ${accountNumber}`;
+/** رابطه‌هایی که عنوان تفصیلیِ حساب بانکی از آن‌ها ساخته می‌شود (برای include در کوئری‌ها) */
+export const BANK_ACCOUNT_TITLE_INCLUDE = { accountType: { select: { title: true } }, bankBranch: { select: { title: true, bankParty: { select: { detailTitle: true } } } } } as const;
+
+export interface BankAccountTitleSource {
+  accountNumber: string;
+  accountType?: { title: string } | null;
+  bankBranch?: { title: string; bankParty?: { detailTitle: string } | null } | null;
+}
+
+/**
+ * عنوان تفصیلیِ حساب بانکی = «نوع حساب - بانک - شعبه - شماره حساب» — تنها محل تعریف؛ هم در سند حسابداری و هم در انتخابگر مشترک حساب بانکی (detailTitle)
+ * و فرم حساب بانکی استفاده می‌شود. بانک = عنوان تفصیلِ طرف‌حسابِ بانکِ شعبه؛ بخشِ در دسترس نبودنی (رابطه include نشده) حذف می‌شود.
+ */
+export function bankAccountDetailTitle(a: BankAccountTitleSource): string {
+  return [a.accountType?.title, a.bankBranch?.bankParty?.detailTitle, a.bankBranch?.title, a.accountNumber].filter((x) => !!x && String(x).trim() !== "").join(" - ");
 }
 
 async function titleForEntity(entityTable: string, entityId: number): Promise<string> {
@@ -17,8 +29,8 @@ async function titleForEntity(entityTable: string, entityId: number): Promise<st
       return c?.title || "—";
     }
     case "BankAccount": {
-      const b = await prisma.bankAccount.findUnique({ where: { id: entityId } });
-      return b ? bankAccountDetailTitle(b.accountNumber) : "—";
+      const b = await prisma.bankAccount.findUnique({ where: { id: entityId }, include: BANK_ACCOUNT_TITLE_INCLUDE });
+      return b ? bankAccountDetailTitle(b) : "—";
     }
     case "CostCenter": {
       const cc = await prisma.costCenter.findUnique({ where: { id: entityId } });

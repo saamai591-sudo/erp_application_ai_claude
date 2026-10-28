@@ -20,6 +20,7 @@ interface Branch { id: number; title: string; bankParty: { name: string } }
 interface Account {
   id: number;
   detailCode: string;
+  detailTitle?: string;
   accountNumber: string;
   accountTypeId?: number;
   bankBranchId?: number;
@@ -88,6 +89,7 @@ function AccountList() {
       <DataTable
         columns={[
           { header: "کد", render: (r) => toFaDigits(r.detailCode), width: "100px", filterType: "string", filterValue: (r) => r.detailCode },
+          { header: "عنوان تفصیل", render: (r) => r.detailTitle ?? "", filterType: "string", filterValue: (r) => r.detailTitle ?? "" },
           { header: "نوع حساب", render: (r) => r.accountType?.title, filterType: "string", filterValue: (r) => r.accountType?.title },
           { header: "شعبه", render: (r) => r.bankBranch?.title, filterType: "string", filterValue: (r) => r.bankBranch?.title },
           { header: "شماره حساب", render: (r) => r.accountNumber, filterType: "string", filterValue: (r) => r.accountNumber },
@@ -110,7 +112,23 @@ function AccountForm({ editId }: { editId?: number }) {
   const [form, setForm] = usePersistedState(cacheKey, { accountTypeId: "", bankBranchId: "", accountNumber: "", isActive: true });
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
+  const [detailCode, setDetailCode] = useState("");
+  const [detailTitle, setDetailTitle] = useState("");
   const { flash } = useSavedFlash();
+
+  // «کد تفصیل» (خودکار، فقط خواندنی) و «عنوان تفصیل» = نوع حساب - بانک - شعبه - شماره حساب: عنوانِ زنده از سرور (همان تابعِ تنها‌محلِ ساخت) گرفته می‌شود تا قالب در فرانت تکرار نشود
+  useEffect(() => {
+    if (!editId) return;
+    api.get("/banking/accounts").then((items: Account[]) => setDetailCode(items.find((i) => i.id === editId)?.detailCode ?? "")).catch(() => {});
+  }, [editId]);
+  useEffect(() => {
+    let dead = false;
+    const t = setTimeout(() => {
+      const q = new URLSearchParams({ accountTypeId: form.accountTypeId, bankBranchId: form.bankBranchId, accountNumber: form.accountNumber });
+      api.get(`/banking/accounts/detail-title-preview?${q.toString()}`).then((r) => { if (!dead) setDetailTitle(r.detailTitle ?? ""); }).catch(() => {});
+    }, 250);
+    return () => { dead = true; clearTimeout(t); };
+  }, [form.accountTypeId, form.bankBranchId, form.accountNumber]);
 
   useEffect(() => {
     api.get("/banking/account-types").then(setTypes);
@@ -183,6 +201,14 @@ function AccountForm({ editId }: { editId?: number }) {
       <form id="account-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
         <div className="form-grid">
+          <div className="form-field">
+            <label>کد تفصیل <FieldHint label="کد تفصیل" text="به‌صورت خودکار توسط سیستم صادر می‌شود و قابل ویرایش نیست." /></label>
+            <input dir="ltr" disabled value={detailCode ? toFaDigits(detailCode) : ""} placeholder="پس از ذخیره صادر می‌شود" />
+          </div>
+          <div className="form-field">
+            <label>عنوان تفصیل <FieldHint label="عنوان تفصیل" text="به‌صورت خودکار از «نوع حساب - بانک - شعبه - شماره حساب» ساخته می‌شود و در اسناد حسابداری همین عنوان نمایش داده می‌شود؛ با تغییر فیلدها به‌روز می‌شود." /></label>
+            <input disabled value={toFaDigits(detailTitle)} />
+          </div>
           <div className="form-field">
             <label>نوع حساب<RequiredMark /></label>
             <select value={form.accountTypeId} onChange={(e) => setForm({ ...form, accountTypeId: e.target.value })}>

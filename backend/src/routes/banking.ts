@@ -121,7 +121,16 @@ router.get("/accounts", async (_req, res) => {
     orderBy: { detailCode: "asc" },
   });
   // detailTitle: عنوان تفصیلی حساب بانکی (برای انتخابگر مشترک BankAccountPicker)
-  res.json(accounts.map((a) => ({ ...a, detailTitle: bankAccountDetailTitle(a.accountNumber) })));
+  res.json(accounts.map((a) => ({ ...a, detailTitle: bankAccountDetailTitle(a) })));
+});
+
+// پیش‌نمایشِ زنده‌ی «عنوان تفصیل» برای فرم حساب بانکی (همان تابع تنها‌محلِ ساخت عنوان؛ فرانت قالب را تکرار نمی‌کند)
+router.get("/accounts/detail-title-preview", async (req, res) => {
+  const [accountType, bankBranch] = await Promise.all([
+    Number(req.query.accountTypeId) ? prisma.bankAccountType.findUnique({ where: { id: Number(req.query.accountTypeId) }, select: { title: true } }) : null,
+    Number(req.query.bankBranchId) ? prisma.bankBranch.findUnique({ where: { id: Number(req.query.bankBranchId) }, select: { title: true, bankParty: { select: { detailTitle: true } } } }) : null,
+  ]);
+  res.json({ detailTitle: bankAccountDetailTitle({ accountNumber: String(req.query.accountNumber ?? "").trim(), accountType, bankBranch }) });
 });
 
 router.post("/accounts", can(`${BANK_ACCOUNTS}.create`), async (req, res) => {

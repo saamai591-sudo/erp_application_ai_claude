@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
-import { bankAccountDetailTitle } from "../utils/detailValues";
+import { BANK_ACCOUNT_TITLE_INCLUDE, bankAccountDetailTitle } from "../utils/detailValues";
 import { toEnglishDigits } from "../utils/digits";
 
 // «کارتخوان» (مدیریت خزانه › تنظیمات): کد خودکار (آخرین کد + ۱)، شماره پایانه و شماره پذیرنده (رشته‌ی اجباری)، حساب بانکی و عنوان.
@@ -12,7 +12,7 @@ import { toEnglishDigits } from "../utils/digits";
 const FORM = findFormPrefix("card-readers");
 const router = Router();
 
-const INCLUDE = { bankAccount: { select: { id: true, detailCode: true, accountNumber: true, isActive: true } } };
+const INCLUDE = { bankAccount: { select: { id: true, detailCode: true, accountNumber: true, isActive: true, ...BANK_ACCOUNT_TITLE_INCLUDE } } };
 
 function shape(r: any) {
   return {
@@ -22,7 +22,7 @@ function shape(r: any) {
     merchantNumber: r.merchantNumber,
     bankAccountId: r.bankAccountId,
     bankAccountCode: r.bankAccount?.detailCode ?? "",
-    bankAccountTitle: r.bankAccount ? bankAccountDetailTitle(r.bankAccount.accountNumber) : "",
+    bankAccountTitle: r.bankAccount ? bankAccountDetailTitle(r.bankAccount) : "",
     title: r.title,
     updatedAt: r.updatedAt,
   };
