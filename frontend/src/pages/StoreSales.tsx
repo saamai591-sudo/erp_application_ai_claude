@@ -23,7 +23,7 @@ import { useTabs } from "../lib/TabsContext";
 import { Modal } from "../components/Modal";
 import { AmountInput } from "../components/AmountInput";
 import { localTodayIso } from "../lib/formatDate";
-import { StoreCardReceiptDialog, StationCardReader } from "../components/StoreCardReceiptDialog";
+import { StoreCardReceiptDialog, StationCardReader, ExistingReceiptsTable } from "../components/StoreCardReceiptDialog";
 
 // فروش فروشگاهی › عملیات › «فروش فروشگاهی»: اول تاریخ و ایستگاه انتخاب می‌شود؛ ردیف‌ها با بارکدخوان (فیلد بارکد کالا) یا جست‌وجو اضافه می‌شوند، مقدار پیش‌فرض ۱ و قابل‌تغییر است.
 // فی از «اعلامیه قیمت فروش» با حوزه‌ی همان ایستگاه خوانده می‌شود (پله‌ی مقدار هم)؛ کالای بدون فی در آن اعلامیه اصلاً قابل انتخاب نیست. فی فقط با مجوز «تغییر فی» قابل تغییر است.
@@ -89,6 +89,7 @@ interface ReceiptRow {
   date: string;
   amount: number;
   description: string;
+  updatedAt?: string;
   method?: "CASH" | "CARD";
   cardReaderTitle?: string;
 }
@@ -205,7 +206,7 @@ function SaleForm({ editId }: { editId?: number }) {
   const [newRec, setNewRec] = useState({ date: localTodayIso(), amount: "", description: "" });
   const { hasPermission } = usePermissions();
   const { openTab } = useTabs();
-  const [confirmPay, setConfirmPay] = useState(false);
+  const [cashDialog, setCashDialog] = useState(false);
   const [paying, setPaying] = useState(false);
   const [cardDialog, setCardDialog] = useState(false);
   const [stations, setStations] = useState<StationOpt[]>([]);
@@ -275,6 +276,9 @@ function SaleForm({ editId }: { editId?: number }) {
   const locked = delivered || hasReceipts;
   const canReceive = !!editId && hasPermission("store-sales.operations.store-receipts.create");
   const canDeleteReceipt = hasPermission("store-sales.operations.store-receipts.delete");
+  const canEditReceipt = hasPermission("store-sales.operations.store-receipts.edit");
+  const cashReceipts = receipts.filter((r) => r.method !== "CARD");
+  const cardReceipts = receipts.filter((r) => r.method === "CARD");
   const canChangePrice = !!sell?.canChangePrice;
 
   /** فی ردیف: دستی (اگر مجاز و وارد شده) وگرنه فی اعلامیه با پله‌ی مقدار (آینه‌ی سرور؛ مرجع نهایی سرور است) */
@@ -385,21 +389,14 @@ function SaleForm({ editId }: { editId?: number }) {
       setPaying(false);
     }
   }
-  /** دریافت نقدِ تمام باقی‌مانده با یک ضربه (کارت بزرگِ لمسی): دریافتِ امروز (یا تاریخ فروش اگر امروز قبل از آن باشد) به مبلغ باقی‌مانده */
-  async function payRemaining() {
-    if (!editId || paying) return;
-    setPaying(true);
+  async function saveReceipt(r: ReceiptRow, v: { amount: number; description: string }) {
     setError(null);
     try {
-      const today = localTodayIso();
-      await api.post("/store-receipts", { saleId: editId, date: today < header.date ? header.date : today, amount: payInfo.remaining, description: "" });
-      setConfirmPay(false);
+      await api.put(`/store-receipts/${r.id}`, { date: r.date, amount: v.amount, description: v.description, updatedAt: r.updatedAt });
       await reloadSale();
     } catch (err) {
-      setConfirmPay(false);
-      setError((err as ApiError).message);
-    } finally {
-      setPaying(false);
+      showError((err as ApiError).message);
+      await reloadSale();
     }
   }
   async function removeReceipt(r: ReceiptRow) {
@@ -467,48 +464,6 @@ function SaleForm({ editId }: { editId?: number }) {
           </div>
         </fieldset>
 
-        {canReceive && payInfo.remaining > 0 && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14, margin: "14px 0" }}>
-            <button
-              type="button"
-              onClick={() => setConfirmPay(true)}
-              style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--success, #1f9d55)", background: "var(--success-soft, #e6f6ec)", color: "var(--success, #17803f)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}
-            >
-              <span style={{ fontSize: 24, fontWeight: 800 }}>دریافت نقد — تسویه</span>
-              <span style={{ fontSize: 20, fontWeight: 700 }}>{formatAmountFa(payInfo.remaining)}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => openTab(`/store-receipts/new?saleId=${editId}`)}
-              style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--accent, #3b6ea8)", background: "var(--surface, #fff)", color: "var(--accent, #3b6ea8)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}
-            >
-              <span style={{ fontSize: 24, fontWeight: 800 }}>رسید دریافت با مبلغ دلخواه</span>
-              <span style={{ fontSize: 15, opacity: 0.8 }}>باز کردن فرم دریافت این فروش</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setCardDialog(true)}
-              style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--warning, #c27a12)", background: "var(--warning-soft, #fdf3e3)", color: "var(--warning, #a8650c)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}
-            >
-              <span style={{ fontSize: 24, fontWeight: 800 }}>دریافت با کارتخوان</span>
-              <span style={{ fontSize: 15, opacity: 0.85 }}>{toFaDigits(String(station?.cardReaders?.length ?? 0))} کارتخوان در این ایستگاه</span>
-            </button>
-          </div>
-        )}
-        {cardDialog && (
-          <StoreCardReceiptDialog readers={station?.cardReaders ?? []} remaining={payInfo.remaining} decimalPlaces={dp} busy={paying} onClose={() => setCardDialog(false)} onSubmit={payByCards} />
-        )}
-        {confirmPay && (
-          <Modal title="تایید دریافت نقد" onClose={() => setConfirmPay(false)}>
-            <p style={{ fontSize: 20, textAlign: "center", margin: "12px 0 20px" }}>
-              مبلغ <b>{formatAmountFa(payInfo.remaining)}</b> نقد دریافت شد؟
-            </p>
-            <div className="actions" style={{ gap: 14 }}>
-              <button type="button" className="btn" style={{ flex: 1, minHeight: 64, fontSize: 20 }} disabled={paying} onClick={payRemaining}>بله، ثبت دریافت</button>
-              <button type="button" className="btn secondary" style={{ flex: 1, minHeight: 64, fontSize: 20 }} onClick={() => setConfirmPay(false)}>انصراف</button>
-            </div>
-          </Modal>
-        )}
         {!ready && <p style={{ opacity: 0.75, margin: "14px 0" }}>ابتدا تاریخ و ایستگاه فروش را انتخاب کنید.</p>}
         {ready && sellError && <div className="alert warn" style={{ marginTop: 10 }}>{sellError}</div>}
 
@@ -616,43 +571,56 @@ function SaleForm({ editId }: { editId?: number }) {
           </>
         )}
         {editId && (
-          <div className="card" style={{ marginTop: 16, padding: 14 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-              <h4 style={{ margin: 0 }}>دریافت (نقد / کارتخوان)</h4>
-              {hasPermission("store-sales.operations.store-receipts.create") && payInfo.remaining > 0 && (
-                <button type="button" className="link-btn" onClick={() => openTab(`/store-receipts/new?saleId=${editId}`)}>دریافت جدید در فرم کامل ←</button>
-              )}
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14, margin: "16px 0 8px" }}>
+              <button type="button" onClick={() => setCashDialog(true)} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--success, #1f9d55)", background: "var(--success-soft, #e6f6ec)", color: "var(--success, #17803f)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
+                <span style={{ fontSize: 24, fontWeight: 800 }}>دریافت نقد</span>
+                <span style={{ fontSize: 15, opacity: 0.85 }}>جمع دریافت‌شده</span>
+                <span style={{ fontSize: 20, fontWeight: 700 }}>{formatAmountFa(cashReceipts.reduce((n, r) => n + r.amount, 0))}</span>
+              </button>
+              <button type="button" onClick={() => setCardDialog(true)} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--warning, #c27a12)", background: "var(--warning-soft, #fdf3e3)", color: "var(--warning, #a8650c)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
+                <span style={{ fontSize: 24, fontWeight: 800 }}>دریافت با کارتخوان</span>
+                <span style={{ fontSize: 15, opacity: 0.85 }}>جمع دریافت‌شده</span>
+                <span style={{ fontSize: 20, fontWeight: 700 }}>{formatAmountFa(cardReceipts.reduce((n, r) => n + r.amount, 0))}</span>
+              </button>
             </div>
             <p style={{ margin: "0 0 8px", fontSize: 13 }}>
               قابل پرداخت: <b>{formatAmountFa(payInfo.payable)}</b> — دریافت‌شده: <b>{formatAmountFa(payInfo.paid)}</b> — باقی‌مانده: <b>{formatAmountFa(payInfo.remaining)}</b> — وضعیت: <span className="badge">{PAYMENT_FA[payInfo.status]}</span>
             </p>
-            <table className="je-lines-table">
-              <thead>
-                <tr><th>شماره</th><th>تاریخ</th><th>روش</th><th>مبلغ</th><th>شرح</th><th></th></tr>
-              </thead>
-              <tbody>
-                {receipts.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", opacity: 0.7 }}>دریافتی ثبت نشده است</td></tr>}
-                {receipts.map((r) => (
-                  <tr key={r.id}>
-                    <td>{hasPermission("store-sales.operations.store-receipts.view") ? <button type="button" className="link-btn" onClick={() => openTab(`/store-receipts/${r.id}/edit`)}>{toFaDigits(String(r.number))}</button> : toFaDigits(String(r.number))}</td>
-                    <td>{formatJalaliDate(r.date)}</td>
-                    <td>{r.method === "CARD" ? `کارتخوان — ${r.cardReaderTitle ?? ""}` : "نقد"}</td>
-                    <td>{formatAmountFa(r.amount)}</td>
-                    <td>{r.description}</td>
-                    <td>{canDeleteReceipt && <button type="button" className="btn danger" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => removeReceipt(r)}>حذف</button>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {canReceive && payInfo.remaining > 0 && (
-              <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginTop: 10 }}>
-                <div className="form-field-inline"><label>تاریخ</label><JalaliDatePicker fiscalYear value={newRec.date} onChange={(v) => setNewRec({ ...newRec, date: v })} /></div>
-                <div className="form-field-inline"><label>مبلغ</label><div style={{ width: 150 }}><AmountInput value={newRec.amount} onChange={(v) => setNewRec({ ...newRec, amount: v })} allowDecimal /></div></div>
-                <div className="form-field-inline"><label>شرح</label><input value={newRec.description} onChange={(e) => setNewRec({ ...newRec, description: e.target.value })} /></div>
-                <button type="button" className="btn" onClick={addReceipt}>ثبت دریافت</button>
-              </div>
+            {cardDialog && (
+              <StoreCardReceiptDialog
+                readers={station?.cardReaders ?? []}
+                remaining={payInfo.remaining}
+                decimalPlaces={dp}
+                busy={paying}
+                existing={cardReceipts}
+                canEdit={canEditReceipt}
+                canDelete={canDeleteReceipt}
+                canAdd={canReceive}
+                onSaveExisting={saveReceipt}
+                onDeleteExisting={removeReceipt}
+                onClose={() => setCardDialog(false)}
+                onSubmit={payByCards}
+              />
             )}
-          </div>
+            {cashDialog && (
+              <Modal title="دریافت نقد" onClose={() => setCashDialog(false)} wide>
+                <h4 style={{ margin: "0 0 6px" }}>دریافت‌های نقدیِ ثبت‌شده</h4>
+                <ExistingReceiptsTable receipts={cashReceipts} canEdit={canEditReceipt} canDelete={canDeleteReceipt} onSave={saveReceipt} onDelete={removeReceipt} />
+                {canReceive && payInfo.remaining > 0 && (
+                  <>
+                    <h4 style={{ margin: "16px 0 6px" }}>دریافت نقد جدید</h4>
+                    <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+                      <div className="form-field-inline"><label>تاریخ</label><JalaliDatePicker fiscalYear value={newRec.date} onChange={(v) => setNewRec({ ...newRec, date: v })} /></div>
+                      <div className="form-field-inline"><label>مبلغ</label><div style={{ width: 150 }}><AmountInput value={newRec.amount} onChange={(v) => setNewRec({ ...newRec, amount: v })} allowDecimal /></div></div>
+                      <div className="form-field-inline"><label>شرح</label><input value={newRec.description} onChange={(e) => setNewRec({ ...newRec, description: e.target.value })} /></div>
+                      <button type="button" className="btn" onClick={addReceipt}>ثبت دریافت</button>
+                    </div>
+                  </>
+                )}
+              </Modal>
+            )}
+          </>
         )}
       </form>
     </FormPage>
