@@ -6,6 +6,7 @@ import { formatJalaliDate } from "../lib/formatDate";
 // دو تبِ مشترکِ گزارش‌های «کارکرد روزانه» و «مرور کارکرد» (داده‌ی هر دو از services/attendanceWorksheetReportService.ts می‌آید، پس ستون‌ها یکی است):
 // «کارکرد» = یک ردیف برای هر روزِ هر کارمند با ردیف‌های شیفت، اولین ورود، آخرین خروج و عامل‌های روزانه‌ای که «نمایش در گزارش کارکرد» دارند؛
 // «ریز ورود و خروج» = تک‌تک ترددها با ردیف شیفت و جهتِ مشتق. showEmployee = ستون «کارمند» (گزارش چندکارمندی).
+// ردیف «جمع» پای گریدِ «کارکرد»: جمعِ ستون‌های عاملِ روزانه روی صفحه‌ی جاری (مثل همه‌ی گریدها)؛ زمان به «ساعت:دقیقه»، عدد/روز با جداکننده.
 
 export interface FactorCol {
   key: string;
@@ -68,7 +69,14 @@ export function WorksheetGrid({ data, showEmployee }: { data: WorksheetData | nu
     { header: "ردیف شیفت", ...s<DayRow>((r) => toFaDigits(r.shiftText)), width: "200px" },
     { header: "اولین ورود", ...s<DayRow>((r) => (r.firstIn ? toFaDigits(r.firstIn) : "")), width: "100px" },
     { header: "آخرین خروج", ...s<DayRow>((r) => (r.lastOut ? toFaDigits(r.lastOut) : "")), width: "100px" },
-    ...(data?.factors ?? []).map((f) => ({ header: f.title, ...s<DayRow>((r) => fmtVal(r.values[f.key], f.valueType)), width: "130px" })),
+    ...(data?.factors ?? []).map((f) => ({
+      header: f.title,
+      ...s<DayRow>((r) => fmtVal(r.values[f.key], f.valueType)),
+      width: "130px",
+      decimal: true,
+      totalValue: (r: DayRow) => r.values[f.key]?.value ?? null,
+      totalFormat: f.valueType === "TIME" ? (n: number) => toFaDigits(minutesToMask(Math.round(n))) : undefined,
+    })),
   ];
   return <DataTable<DayRow> columns={cols} rows={data?.rows ?? []} />;
 }

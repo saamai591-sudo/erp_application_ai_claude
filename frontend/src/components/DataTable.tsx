@@ -53,6 +53,8 @@ export interface Column<T> {
    * سرور پشتیبانی نمی‌شود، اما باید بتوان همچنان جمعشان را روی همان صفحه‌ی فعلی نمایش داد.
    */
   totalValue?: (row: T) => string | number | null | undefined;
+  /** قالب نمایش خودِ جمع (پیش‌فرض: مبلغ با جداکننده)؛ مثلاً ستونِ زمان که مقدارش دقیقه است جمعش را «ساعت:دقیقه» نشان می‌دهد */
+  totalFormat?: (sum: number) => string;
   /** ستونِ مربوط به زیرسیستم ارزی (ارز، نرخ ارز، مبلغ ارزی…): وقتی FX در لایسنس نیست ستون اصلاً ساخته نمی‌شود */
   fxOnly?: boolean;
 }
@@ -855,7 +857,7 @@ export function DataTable<T extends { id: number | string }>({
                   <td style={{ width: colWidths[1] }}>جمع</td>
                   {columns.map((c, i) => (
                     <td key={c.header} style={{ width: colWidths[i + 2] }}>
-                      {columnTotals[i] !== null ? formatAmountFa(columnTotals[i]!) : ""}
+                      {columnTotals[i] !== null ? (c.totalFormat ? c.totalFormat(columnTotals[i]!) : formatAmountFa(columnTotals[i]!)) : ""}
                     </td>
                   ))}
                   {colWidths.slice(columns.length + 2).map((w, k) => (
