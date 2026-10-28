@@ -830,12 +830,12 @@ export function DataTable<T extends { id: number | string }>({
                   <td>
                     <div style={{ display: "flex", gap: 6 }}>
                       {edit && (
-                        <button className="btn secondary" style={{ padding: "5px 10px", fontSize: 12 }} onClick={() => handleEdit(row)}>
+                        <button className="btn secondary row-action" onClick={() => handleEdit(row)}>
                           ویرایش
                         </button>
                       )}
                       {onDelete && (
-                        <button className="btn danger" style={{ padding: "5px 10px", fontSize: 12 }} onClick={() => onDelete(row)}>
+                        <button className="btn danger row-action" onClick={() => onDelete(row)}>
                           حذف
                         </button>
                       )}

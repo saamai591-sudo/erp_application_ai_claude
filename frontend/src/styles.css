@@ -2172,3 +2172,6 @@ html[data-fx="off"] .fx-only { display: none !important; }
 .wf-bell { position: relative; }
 .wf-bell-badge { position: absolute; top: -4px; inset-inline-end: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #e5484d; color: #fff; font-size: 10px; line-height: 16px; text-align: center; }
 .wf-bell-badge.warn { background: #f59e0b; }
+
+/* دکمه‌های «ویرایش/حذف» ردیف فهرست‌ها: کوچک و تک‌خطی تا ارتفاع ردیف از ردیف متنی بیشتر نشود (پایه‌ی همه‌ی فهرست‌ها) */
+.row-action { padding: 0 9px; font-size: 11.5px; line-height: 1.15; white-space: nowrap; box-shadow: none; }
