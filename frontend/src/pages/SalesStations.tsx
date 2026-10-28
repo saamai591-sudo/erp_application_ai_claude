@@ -10,6 +10,7 @@ import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { RecordPickerField } from "../components/RecordPicker";
 import { MultiPickerDialog } from "../components/MultiRecordPicker";
+import { PartySectionCard } from "../components/PartySections";
 import { CostCenterPickerField } from "../components/TypePickerFields";
 import { toFaDigits } from "../lib/formatAmount";
 import { api, ApiError } from "../lib/api";
@@ -147,7 +148,6 @@ function StationForm({ editId }: { editId?: number }) {
   const [customers, setCustomers] = useState<CustomerOpt[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenterOpt[]>([]);
   const [allReaders, setAllReaders] = useState<CardReaderOpt[]>([]);
-  const [tab, setTab] = useState<"main" | "readers">("main");
   const [pickReaders, setPickReaders] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
@@ -237,11 +237,7 @@ function StationForm({ editId }: { editId?: number }) {
     <FormPage title={editId ? "ویرایش ایستگاه فروش" : "ایستگاه فروش جدید"} formId="sales-station-form" closePath="/sales-stations" newPath="/sales-stations/new" onDelete={editId ? handleDelete : undefined}>
       <form id="sales-station-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
-        <div className="party-tabs">
-          <button type="button" className={`party-tab ${tab === "main" ? "active" : ""}`} onClick={() => setTab("main")}>مشخصات</button>
-          <button type="button" className={`party-tab ${tab === "readers" ? "active" : ""}`} onClick={() => setTab("readers")}>{`کارتخوان‌ها (${toFaDigits(String(readerIds.length))})`}</button>
-        </div>
-        {tab === "main" && (
+        <PartySectionCard id="station-main" title="مشخصات">
         <div className="form-grid">
           <div className="form-field">
             <label>کد</label>
@@ -316,11 +312,10 @@ function StationForm({ editId }: { editId?: number }) {
             <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
           </div>
         </div>
-        )}
-        {tab === "readers" && (
+        </PartySectionCard>
+        <PartySectionCard id="station-readers" title="کارتخوان‌ها" onAdd={() => setPickReaders(true)} addLabel="افزودن کارتخوان">
           <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "8px 0" }}>
-              <button type="button" className="btn" onClick={() => setPickReaders(true)}>افزودن کارتخوان</button>
+            <div style={{ margin: "0 0 8px" }}>
               <span style={{ fontSize: 12, opacity: 0.75 }}>فقط کارتخوان‌های این فهرست در «دریافت با کارتخوان» فروش‌های این ایستگاه قابل انتخاب‌اند.</span>
             </div>
             <table className="je-lines-table">
@@ -342,7 +337,7 @@ function StationForm({ editId }: { editId?: number }) {
               </tbody>
             </table>
           </div>
-        )}
+        </PartySectionCard>
         {pickReaders && (
           <MultiPickerDialog<CardReaderOpt>
             title="افزودن کارتخوان به ایستگاه"
