@@ -2178,3 +2178,9 @@ html[data-fx="off"] .fx-only { display: none !important; }
 
 /* ردیف فهرست‌ها: padding عمودی کم (ردیف فشرده‌تر؛ پایه‌ی همه‌ی DataTable/SelectableBalanceTable و جدول‌های انتخابگر داخل .grid-scroll-area) */
 .grid-scroll-area table:not(.je-lines-table) tbody td { padding-top: 3px; padding-bottom: 3px; }
+
+/* نشان (badge) داخل سلول جدول: فشرده تا ارتفاع ردیف را زیاد نکند */
+td .badge { padding: 0 9px; line-height: 1.5; vertical-align: middle; }
+
+/* چک‌باکس انتخاب ردیف در فهرست‌ها: بدون margin پیش‌فرض و بدون خط متنی اطرافش تا ارتفاع ردیف را زیاد نکند */
+.grid-scroll-area tbody td > input[type="checkbox"] { display: block; margin: 0 auto; }
