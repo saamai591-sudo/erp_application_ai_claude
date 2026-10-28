@@ -57,6 +57,7 @@ function statusLabel(status: DocStatus, accountingStatus?: AccountingStatus, has
 interface PartyOption { id: number; detailCode: string; category: "INDIVIDUAL" | "LEGAL"; isActive: boolean; firstName: string | null; lastName: string | null; name: string | null }
 interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null; decimalPlaces: number }
 interface CashBoxOption { id: number; title: string }
+interface CardReaderOption { id: number; code: number; title: string; terminalNumber: string; merchantNumber: string; bankAccountId: number; bankAccountCode: string; bankAccountTitle: string }
 interface BankAccountOption { id: number; accountNumber: string; detailCode: string; detailTitle: string; bankBranch: { title: string }; currencyId: number | null; currency: { title: string } | null }
 interface BankBranchOption { id: number; title: string }
 interface ChequeTypeOption { id: number; code: number; title: string }
@@ -97,6 +98,7 @@ interface DetailInstrumentLine {
   chequeTypeId: number | null;
   chequeItemId: number | null;
   posTerminal: string | null;
+  cardReaderId: number | null;
   description: string | null;
 }
 interface DetailSettlementLine {
@@ -273,6 +275,7 @@ interface InstrumentRowState {
   chequeBankBranchId: string;
   chequeTypeId: string;
   posTerminal: string;
+  cardReaderId: string;
   description: string;
   // فقط برای ردیف‌های موجود (id دار) که از سرور آمده‌اند؛ برای تشخیص «قفل» بودن ردیف در سند
   // «تایید»شده استفاده می‌شود (نگاه کنید به DetailInstrumentLine).
@@ -284,7 +287,7 @@ function nextClientKey() {
   return `new-${Date.now()}-${clientKeySeq}`;
 }
 function emptyInstrumentRow(): InstrumentRowState {
-  return { clientKey: nextClientKey(), type: "CASH", amount: "", currencyId: "", fxRate: "", cashBoxId: "", bankAccountId: "", referenceNumber: "", chequeNumber: "", chequeDueDate: "", chequeBankBranchId: "", chequeTypeId: "", posTerminal: "", description: "" };
+  return { clientKey: nextClientKey(), type: "CASH", amount: "", currencyId: "", fxRate: "", cashBoxId: "", bankAccountId: "", referenceNumber: "", chequeNumber: "", chequeDueDate: "", chequeBankBranchId: "", chequeTypeId: "", posTerminal: "", cardReaderId: "", description: "" };
 }
 const BASIS_FIELD: Record<Exclude<ReceiptBasisType, "NONE">, "salesInvoiceId" | "purchaseInvoiceId" | "salesOrderId" | "salesQuoteId"> = {
   SALES_INVOICE: "salesInvoiceId",
@@ -335,6 +338,7 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
   const [cashBoxes, setCashBoxes] = useState<CashBoxOption[]>([]);
   const [bankAccounts, setBankAccounts] = useState<BankAccountOption[]>([]);
+  const [cardReaders, setCardReaders] = useState<CardReaderOption[]>([]);
   const [bankBranches, setBankBranches] = useState<BankBranchOption[]>([]);
   const [chequeTypes, setChequeTypes] = useState<ChequeTypeOption[]>([]);
   const [receiptTypes, setReceiptTypes] = useState<ReceiptTypeOption[]>([]);
@@ -382,6 +386,7 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         chequeBankBranchId: l.chequeBankBranchId ? String(l.chequeBankBranchId) : "",
         chequeTypeId: l.chequeTypeId ? String(l.chequeTypeId) : "",
         posTerminal: l.posTerminal || "",
+        cardReaderId: l.cardReaderId ? String(l.cardReaderId) : "",
         description: l.description || "",
         chequeItemId: l.chequeItemId,
       }))
@@ -413,9 +418,9 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
 
   useEffect(() => {
     async function init() {
-      const [ps, cs, cbs, bas, bbs, rts, customers, suppliers, fp, cts]: [
+      const [ps, cs, cbs, bas, bbs, rts, customers, suppliers, fp, cts, crs]: [
         PartyOption[], CurrencyOption[], CashBoxOption[], BankAccountOption[], BankBranchOption[],
-        ReceiptTypeOption[], { partyId: number }[], { partyId: number }[], FiscalPeriodRange | null, ChequeTypeOption[]
+        ReceiptTypeOption[], { partyId: number }[], { partyId: number }[], FiscalPeriodRange | null, ChequeTypeOption[], CardReaderOption[]
       ] = await Promise.all([
         api.get("/parties"),
         api.get("/currencies"),
@@ -427,8 +432,10 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         api.get("/suppliers"),
         fetchSelectedFiscalPeriod(),
         api.get("/receivable-cheque-types"),
+        api.get("/card-readers"),
       ]);
       setChequeTypes(cts);
+      setCardReaders(crs);
       setParties(ps);
       setCurrencies(cs);
       setCashBoxes(cbs);
@@ -548,7 +555,9 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
     if (r.type === "CASH") {
       if (!r.cashBoxId) return "انتخاب صندوق الزامی است";
       if (!r.currencyId) return "انتخاب ارز الزامی است";
-    } else if (r.type === "BANK_TRANSFER" || r.type === "POS") {
+    } else if (r.type === "POS") {
+      if (!r.cardReaderId) return "انتخاب کارتخوان الزامی است";
+    } else if (r.type === "BANK_TRANSFER") {
       if (!r.bankAccountId) return "انتخاب حساب بانکی الزامی است";
     } else if (r.type === "CHEQUE") {
       if (!r.chequeNumber) return "شماره چک الزامی است";
@@ -626,6 +635,7 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         chequeBankBranchId: r.chequeBankBranchId ? Number(r.chequeBankBranchId) : null,
         chequeTypeId: r.type === "CHEQUE" && r.chequeTypeId ? Number(r.chequeTypeId) : null,
         posTerminal: r.posTerminal || null,
+        cardReaderId: r.type === "POS" && r.cardReaderId ? Number(r.cardReaderId) : null,
         description: r.description || null,
       }));
   }
@@ -944,7 +954,7 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                             const type = e.target.value as InstrumentType;
                             // طبق سند: چک همیشه با ارز پایه؛ حواله/پوز از ارز حساب بانکی (تا انتخاب حساب، خالی)
                             const currencyId = type === "CHEQUE" ? String(baseCurrency.id) : type === "CASH" ? row.currencyId : "";
-                            updateInstrumentRow(idx, { type, currencyId, fxRate: type === "CHEQUE" ? "1" : row.fxRate });
+                            updateInstrumentRow(idx, { type, currencyId, fxRate: type === "CHEQUE" ? "1" : row.fxRate, ...(type === "POS" || row.type === "POS" ? { cardReaderId: "", bankAccountId: "", posTerminal: "" } : {}) });
                           }}
                           disabled={typeDisabled}
                         >
@@ -974,7 +984,32 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                             ))}
                           </select>
                         )}
-                        {(row.type === "BANK_TRANSFER" || row.type === "POS") && (
+                        {row.type === "POS" && (
+                          <RecordPickerField
+                            title="انتخاب کارتخوان"
+                            placeholder="انتخاب کارتخوان"
+                            displayValue={(() => {
+                              const cr = cardReaders.find((c) => String(c.id) === row.cardReaderId);
+                              return cr ? `${toFaDigits(String(cr.code))} - ${cr.title} (پایانه ${toFaDigits(cr.terminalNumber)}، پذیرنده ${toFaDigits(cr.merchantNumber)})` : "";
+                            })()}
+                            rows={cardReaders}
+                            columns={[
+                              { header: "کد", render: (c: CardReaderOption) => toFaDigits(String(c.code)), filterValue: (c: CardReaderOption) => String(c.code), width: "70px" },
+                              { header: "عنوان", render: (c: CardReaderOption) => c.title, filterValue: (c: CardReaderOption) => c.title },
+                              { header: "شماره پایانه", render: (c: CardReaderOption) => toFaDigits(c.terminalNumber), filterValue: (c: CardReaderOption) => c.terminalNumber, width: "130px" },
+                              { header: "شماره پذیرنده", render: (c: CardReaderOption) => toFaDigits(c.merchantNumber), filterValue: (c: CardReaderOption) => c.merchantNumber, width: "130px" },
+                              { header: "حساب بانکی", render: (c: CardReaderOption) => `${toFaDigits(c.bankAccountCode)} - ${toFaDigits(c.bankAccountTitle)}`, filterValue: (c: CardReaderOption) => `${c.bankAccountCode} ${c.bankAccountTitle}` },
+                            ]}
+                            onSelect={(c: CardReaderOption) => {
+                              // حساب بانکی (و در نتیجه ارز ردیف) از خود کارتخوان می‌آید
+                              const acc = bankAccounts.find((a) => a.id === c.bankAccountId);
+                              const currencyId = acc?.currencyId ? String(acc.currencyId) : "";
+                              updateInstrumentRow(idx, { cardReaderId: String(c.id), bankAccountId: String(c.bankAccountId), posTerminal: c.terminalNumber, currencyId, fxRate: acc?.currencyId === baseCurrency.id ? "1" : row.fxRate });
+                            }}
+                            onClear={() => updateInstrumentRow(idx, { cardReaderId: "", bankAccountId: "", posTerminal: "", currencyId: "" })}
+                          />
+                        )}
+                        {row.type === "BANK_TRANSFER" && (
                           <div style={{ display: "flex", gap: 6 }}>
                             <div style={{ flex: 1 }}>
                               <BankAccountPicker
@@ -987,9 +1022,9 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                               />
                             </div>
                             <input
-                              placeholder={row.type === "POS" ? "شماره ترمینال" : "شماره پیگیری"}
-                              value={row.type === "POS" ? row.posTerminal : row.referenceNumber}
-                              onChange={(e) => updateInstrumentRow(idx, row.type === "POS" ? { posTerminal: e.target.value } : { referenceNumber: e.target.value })}
+                              placeholder="شماره پیگیری"
+                              value={row.referenceNumber}
+                              onChange={(e) => updateInstrumentRow(idx, { referenceNumber: e.target.value })}
                              
                               style={{ flex: 1 }}
                             />

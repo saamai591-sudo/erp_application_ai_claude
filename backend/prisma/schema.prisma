@@ -471,6 +471,8 @@ model CardReader {
   updatedAt      DateTime    @updatedAt
   bankAccount    BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
 
+  receiptInstrumentLines ReceiptInstrumentLine[]
+
   @@unique([terminalNumber, merchantNumber])
 }
 
@@ -3185,8 +3187,11 @@ model ReceiptInstrumentLine {
   // (نگاه کنید به توضیح بالای ChequeItem.step).
   chequeStep         Int?
   posTerminal        String?
+  // ردیف نوع POS: کارتخوان انتخاب‌شده (حساب بانکی از خود کارتخوان می‌آید؛ posTerminal = شماره‌ی پایانه‌ی آن در لحظه‌ی ثبت). ردیف‌های قدیمیِ POS بدون کارتخوان‌اند.
+  cardReaderId       Int?
   description        String?
   currency           Currency                @relation(fields: [currencyId], references: [id])
+  cardReader         CardReader?             @relation(fields: [cardReaderId], references: [id], onDelete: Restrict)
   bankAccount        BankAccount?            @relation("ReceiptInstrumentBankAccount", fields: [bankAccountId], references: [id])
   cashBox            CashBox?                @relation(fields: [cashBoxId], references: [id])
   chequeBankBranch   BankBranch?             @relation("ReceiptInstrumentChequeBankBranch", fields: [chequeBankBranchId], references: [id])

@@ -73,6 +73,7 @@ const ACCOUNTING_LOCK_MESSAGE = "این سند «تایید حسابداری» �
 interface InstrumentLineInput {
   clientKey: string;
   type: "CASH" | "BANK_TRANSFER" | "CHEQUE" | "POS";
+  cardReaderId?: number | null;
   amount: number;
   currencyId?: number | null;
   fxRate?: number | null;
@@ -156,6 +157,14 @@ async function cleanOneInstrumentLine(l: InstrumentLineInput, idx: number, baseC
   if (!(amount > 0)) throw new Error(`مبلغ ردیف ابزار ${idx + 1} باید عددی مثبت باشد`);
 
   let currencyId: number;
+  // POS: حساب بانکی و شماره‌ی پایانه از «کارتخوان» انتخاب‌شده می‌آید (کاربر حساب را جدا انتخاب نمی‌کند)
+  let cardReader: { id: number; terminalNumber: string; bankAccountId: number } | null = null;
+  if (l.type === "POS") {
+    if (!l.cardReaderId) throw new Error(`ردیف ${idx + 1}: انتخاب کارتخوان الزامی است`);
+    cardReader = await prisma.cardReader.findUnique({ where: { id: l.cardReaderId }, select: { id: true, terminalNumber: true, bankAccountId: true } });
+    if (!cardReader) throw new Error(`ردیف ${idx + 1}: کارتخوان یافت نشد`);
+    l = { ...l, bankAccountId: cardReader.bankAccountId };
+  }
   if (l.type === "CASH") {
     if (!l.cashBoxId) throw new Error(`ردیف ${idx + 1}: انتخاب صندوق الزامی است`);
     if (!l.currencyId) throw new Error(`ردیف ${idx + 1}: انتخاب ارز الزامی است`);
@@ -202,7 +211,8 @@ async function cleanOneInstrumentLine(l: InstrumentLineInput, idx: number, baseC
     chequeDueDate: l.type === "CHEQUE" ? new Date(l.chequeDueDate!) : null,
     chequeBankBranchId: l.type === "CHEQUE" ? l.chequeBankBranchId || null : null,
     chequeTypeId: l.type === "CHEQUE" ? l.chequeTypeId || null : null,
-    posTerminal: l.type === "POS" ? l.posTerminal || null : null,
+    posTerminal: cardReader ? cardReader.terminalNumber : null,
+    cardReaderId: cardReader ? cardReader.id : null,
     description: l.description || null,
   };
 }
@@ -680,6 +690,7 @@ function serializeReceipt(d: any) {
       chequeTypeId: l.chequeTypeId,
       chequeItemId: l.chequeItemId,
       posTerminal: l.posTerminal,
+      cardReaderId: l.cardReaderId,
       description: l.description,
     })),
     settlementLines: d.settlementLines.map((l: any) => ({

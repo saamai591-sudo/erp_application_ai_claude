@@ -4,7 +4,7 @@
 
 const COMPARED_FIELDS = [
   "type", "amount", "currencyId", "fxRate", "cashBoxId", "bankAccountId", "referenceNumber", "feeAmount", "chequeItemId", "chequeNumber",
-  "chequeDueDate", "chequeBankBranchId", "payableChequeTypeId", "chequeTypeId", "chequeBookLeafId", "chequeStep", "posTerminal", "description",
+  "chequeDueDate", "chequeBankBranchId", "payableChequeTypeId", "chequeTypeId", "chequeBookLeafId", "chequeStep", "posTerminal", "cardReaderId", "description",
 ];
 
 function normalize(v: any): string | number | null {
