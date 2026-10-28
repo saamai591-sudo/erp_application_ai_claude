@@ -289,6 +289,8 @@ function SaleForm({ editId }: { editId?: number }) {
   const canReceive = !!editId && hasPermission("store-sales.operations.store-receipts.create");
   const canDeleteReceipt = hasPermission("store-sales.operations.store-receipts.delete");
   const canEditReceipt = hasPermission("store-sales.operations.store-receipts.edit");
+  /** تسویه‌شده (باقیمانده صفر) یا نسیه‌ی عامدانه */
+  const settledNow = credit.declared || payInfo.remaining <= 1e-6;
   const cashReceipts = receipts.filter((r) => r.method !== "CARD");
   const cardReceipts = receipts.filter((r) => r.method === "CARD");
   const canChangePrice = !!sell?.canChangePrice;
@@ -615,14 +617,16 @@ function SaleForm({ editId }: { editId?: number }) {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14, margin: "16px 0 8px" }}>
               <button
                 type="button"
+                disabled={!settledNow}
+                title={settledNow ? undefined : "تا وقتی فروش تسویه نشده (یا باقیمانده نسیه نشده) فاکتور جدید ممکن نیست"}
                 onClick={() => {
                   stageFormPrefill("/store-sales/new", { stationId: header.stationId, customerId: station ? String(station.customerId) : "", date: header.date });
                   openTab("/store-sales/new");
                 }}
-                style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--accent, #3b6ea8)", background: "var(--surface, #fff)", color: "var(--accent, #3b6ea8)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}
+                style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--accent, #3b6ea8)", background: "var(--surface, #fff)", color: "var(--accent, #3b6ea8)", opacity: settledNow ? 1 : 0.45, cursor: settledNow ? "pointer" : "not-allowed", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}
               >
                 <span style={{ fontSize: 24, fontWeight: 800 }}>فاکتور جدید</span>
-                <span style={{ fontSize: 15, opacity: 0.85 }}>همان ایستگاه و تاریخ</span>
+                <span style={{ fontSize: 15, opacity: 0.85 }}>{settledNow ? "همان ایستگاه و تاریخ" : "ابتدا فروش را تسویه یا نسیه کنید"}</span>
               </button>
               <button type="button" onClick={() => setCashDialog(true)} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--success, #1f9d55)", background: "var(--success-soft, #e6f6ec)", color: "var(--success, #17803f)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
                 <span style={{ fontSize: 24, fontWeight: 800 }}>دریافت نقد</span>
