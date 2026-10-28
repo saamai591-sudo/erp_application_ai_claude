@@ -10,6 +10,7 @@ import { RequiredMark } from "../components/RequiredMark";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { RecordPickerField } from "../components/RecordPicker";
 import { Modal } from "../components/Modal";
+import { ScrollGridWithTotals } from "../components/ScrollGridWithTotals";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
 import { fetchSelectedFiscalPeriod, defaultDocumentDate } from "../lib/fiscalYearDefaultDate";
@@ -285,89 +286,84 @@ function DeliveryForm({ editId }: { editId?: number }) {
             </div>
 
             {tab === "SALES" && (
-              <div className="je-lines-wrap" style={{ overflowX: "auto" }}>
-                <table className="je-lines-table">
-                  <thead>
-                    <tr>
-                      {["شماره", "تاریخ", "مشتری", "مبلغ فاکتور", "ارزش افزوده", "خالص"].map(th)}
-                      {methods.map((m) => th(m.title))}
-                      {["مبلغ نسیه", "مانده تسویه‌نشده", "وضعیت"].map(th)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sales.length === 0 && <tr><td colSpan={9 + methods.length} style={{ textAlign: "center", opacity: 0.7 }}>فروشی برای تحویل وجود ندارد</td></tr>}
-                    {sales.map((r) => (
-                      <tr key={r.saleId}>
-                        <td>{toFaDigits(String(r.number))}</td>
-                        <td>{formatJalaliDate(r.date)}</td>
-                        <td>{r.customerTitle}</td>
-                        <td>{formatAmountFa(r.amount)}</td>
-                        <td>{formatAmountFa(r.vat)}</td>
-                        <td>{formatAmountFa(r.net)}</td>
-                        {methods.map((m) => <td key={m.key}>{formatAmountFa(r.paidByMethod[m.key] ?? 0)}</td>)}
-                        <td>{formatAmountFa(r.credit)}</td>
-                        <td style={{ color: r.unsettled !== 0 ? "var(--danger, #c0392b)" : undefined }}>{formatAmountFa(r.unsettled)}</td>
-                        <td style={{ minWidth: 160 }}>
-                          {r.unsettled !== 0 && editable ? (
-                            <select value={r.status} onChange={(e) => setStatuses({ ...statuses, [String(r.saleId)]: e.target.value as Settlement })}>
-                              {UNSETTLED_CHOICES.map((c) => <option key={c} value={c}>{SETTLEMENT_FA[c]}</option>)}
-                            </select>
-                          ) : SETTLEMENT_FA[r.status]}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  {sales.length > 0 && (
-                    <tfoot>
-                      <tr style={{ fontWeight: 700 }}>
-                        <td colSpan={3}>جمع</td>
-                        <td>{formatAmountFa(sum(sales, (r) => r.amount))}</td>
-                        <td>{formatAmountFa(sum(sales, (r) => r.vat))}</td>
-                        <td>{formatAmountFa(sum(sales, (r) => r.net))}</td>
-                        {methods.map((m) => <td key={m.key}>{formatAmountFa(sum(sales, (r) => r.paidByMethod[m.key] ?? 0))}</td>)}
-                        <td>{formatAmountFa(sum(sales, (r) => r.credit))}</td>
-                        <td>{formatAmountFa(sum(sales, (r) => r.unsettled))}</td>
-                        <td></td>
-                      </tr>
-                    </tfoot>
-                  )}
-                </table>
-              </div>
+              <ScrollGridWithTotals
+                tableClassName="je-lines-table"
+                maxHeight="calc(100vh - 360px)"
+                head={
+                  <tr>
+                    {["شماره", "تاریخ", "مشتری", "مبلغ فاکتور", "ارزش افزوده", "خالص"].map(th)}
+                    {methods.map((m) => th(m.title))}
+                    {["مبلغ نسیه", "مانده تسویه‌نشده", "وضعیت"].map(th)}
+                  </tr>
+                }
+                totals={
+                  sales.length === 0
+                    ? []
+                    : [
+                        {
+                          cells: [
+                            "جمع", null, null,
+                            formatAmountFa(sum(sales, (r) => r.amount)),
+                            formatAmountFa(sum(sales, (r) => r.vat)),
+                            formatAmountFa(sum(sales, (r) => r.net)),
+                            ...methods.map((m) => formatAmountFa(sum(sales, (r) => r.paidByMethod[m.key] ?? 0))),
+                            formatAmountFa(sum(sales, (r) => r.credit)),
+                            formatAmountFa(sum(sales, (r) => r.unsettled)),
+                            null,
+                          ],
+                        },
+                      ]
+                }
+              >
+                {sales.length === 0 && <tr><td colSpan={9 + methods.length} style={{ textAlign: "center", opacity: 0.7 }}>فروشی برای تحویل وجود ندارد</td></tr>}
+                {sales.map((r) => (
+                  <tr key={r.saleId}>
+                    <td>{toFaDigits(String(r.number))}</td>
+                    <td>{formatJalaliDate(r.date)}</td>
+                    <td>{r.customerTitle}</td>
+                    <td>{formatAmountFa(r.amount)}</td>
+                    <td>{formatAmountFa(r.vat)}</td>
+                    <td>{formatAmountFa(r.net)}</td>
+                    {methods.map((m) => <td key={m.key}>{formatAmountFa(r.paidByMethod[m.key] ?? 0)}</td>)}
+                    <td>{formatAmountFa(r.credit)}</td>
+                    <td style={{ color: r.unsettled !== 0 ? "var(--danger, #c0392b)" : undefined }}>{formatAmountFa(r.unsettled)}</td>
+                    <td style={{ minWidth: 160 }}>
+                      {r.unsettled !== 0 && editable ? (
+                        <select value={r.status} onChange={(e) => setStatuses({ ...statuses, [String(r.saleId)]: e.target.value as Settlement })}>
+                          {UNSETTLED_CHOICES.map((c) => <option key={c} value={c}>{SETTLEMENT_FA[c]}</option>)}
+                        </select>
+                      ) : SETTLEMENT_FA[r.status]}
+                    </td>
+                  </tr>
+                ))}
+              </ScrollGridWithTotals>
             )}
 
             {methods.map((m) => {
               if (tab !== m.key) return null;
               const rows = (data.receipts ?? []).filter((r) => r.method === m.key);
               const payeeHeader = m.key === "CASH" ? "صندوق" : m.key === "CARD" ? "کارتخوان" : "حساب بانکی";
+              const heads = ["شماره دریافت", "تاریخ", "شماره فروش", payeeHeader, ...(m.key === "CASH" ? [] : ["شماره پیگیری"]), "مبلغ"];
               return (
-                <div key={m.key} className="je-lines-wrap" style={{ overflowX: "auto" }}>
-                  <table className="je-lines-table">
-                    <thead>
-                      <tr>{["شماره دریافت", "تاریخ", "شماره فروش", payeeHeader, ...(m.key === "CASH" ? [] : ["شماره پیگیری"]), "مبلغ"].map(th)}</tr>
-                    </thead>
-                    <tbody>
-                      {rows.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", opacity: 0.7 }}>دریافتی وجود ندارد</td></tr>}
-                      {rows.map((r) => (
-                        <tr key={r.id}>
-                          <td>{toFaDigits(String(r.number))}</td>
-                          <td>{formatJalaliDate(r.date)}</td>
-                          <td>{r.saleNumber != null ? toFaDigits(String(r.saleNumber)) : ""}</td>
-                          <td>{toFaDigits(r.payeeTitle)}</td>
-                          {m.key !== "CASH" && <td dir="ltr">{r.referenceNumber}</td>}
-                          <td>{formatAmountFa(r.amount)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    {rows.length > 0 && (
-                      <tfoot>
-                        <tr style={{ fontWeight: 700 }}>
-                          <td colSpan={m.key === "CASH" ? 4 : 5}>جمع</td>
-                          <td>{formatAmountFa(rows.reduce((t, r) => t + r.amount, 0))}</td>
-                        </tr>
-                      </tfoot>
-                    )}
-                  </table>
-                </div>
+                <ScrollGridWithTotals
+                  key={m.key}
+                  tableClassName="je-lines-table"
+                  maxHeight="calc(100vh - 360px)"
+                  head={<tr>{heads.map(th)}</tr>}
+                  totals={rows.length === 0 ? [] : [{ cells: ["جمع", ...heads.slice(1, -1).map(() => null), formatAmountFa(rows.reduce((t, r) => t + r.amount, 0))] }]}
+                >
+                  {rows.length === 0 && <tr><td colSpan={heads.length} style={{ textAlign: "center", opacity: 0.7 }}>دریافتی وجود ندارد</td></tr>}
+                  {rows.map((r) => (
+                    <tr key={r.id}>
+                      <td>{toFaDigits(String(r.number))}</td>
+                      <td>{formatJalaliDate(r.date)}</td>
+                      <td>{r.saleNumber != null ? toFaDigits(String(r.saleNumber)) : ""}</td>
+                      <td>{toFaDigits(r.payeeTitle)}</td>
+                      {m.key !== "CASH" && <td dir="ltr">{r.referenceNumber}</td>}
+                      <td>{formatAmountFa(r.amount)}</td>
+                    </tr>
+                  ))}
+                </ScrollGridWithTotals>
               );
             })}
           </>
