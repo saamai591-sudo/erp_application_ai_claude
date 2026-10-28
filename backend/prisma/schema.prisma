@@ -452,9 +452,26 @@ model BankAccount {
   chequeDeposits         ChequeDeposit[]
   treasuryAccountSettings TreasuryAccountSetting[]
   chequeBookLeaves       ChequeBookLeaf[]
+  cardReaders            CardReader[]
 
   @@unique([bankPartyId, accountNumber])
   treasuryOpeningLines TreasuryOpeningBankAccount[]
+}
+
+/// کارتخوان (مدیریت خزانه › تنظیمات): دستگاه پذیرش کارت یک حساب بانکی. کد خودکار (آخرین + ۱)؛ شماره پایانه و شماره پذیرنده رشته‌اند (صفر اول مهم است).
+/// فعلاً فقط تعریف پایه است؛ بعداً در دریافت و پرداخت (ردیف کارت) استفاده می‌شود.
+model CardReader {
+  id             Int         @id @default(autoincrement())
+  code           Int         @unique
+  terminalNumber String
+  merchantNumber String
+  bankAccountId  Int
+  title          String      @unique
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  bankAccount    BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+
+  @@unique([terminalNumber, merchantNumber])
 }
 
 // طبق Documents/دسته چک.md — دسته چک: برگه‌های چک پرداختنی خامِ اخذشده از بانک، برای کنترل شماره‌های

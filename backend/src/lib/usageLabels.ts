@@ -137,6 +137,7 @@ export const USAGE_META: Record<string, UsageMeta> = {
   Payment: { label: "پرداخت", base: "/payments", title: num },
   ChequeItem: { label: "چک", title: (r) => `شماره ${r.number}` },
   PettyCash: { label: "تنخواه", base: "/petty-cashes" },
+  CardReader: { label: "کارتخوان", base: "/card-readers" },
   PettyCashCustodian: { label: "تنخواه‌دار", base: "/petty-cash-custodians" },
   PettyCashPayment: { label: "پرداخت از تنخواه", base: "/petty-cash-payments", title: num },
   PettyCashSummary: { label: "خلاصه تنخواه", base: "/petty-cash-summaries", title: num },

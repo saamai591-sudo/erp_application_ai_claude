@@ -869,6 +869,7 @@ export const REGISTRY: ModuleDef[] = [
           { key: "cheque-book-leaves", title: "دسته چک", baseActions: CRUD, actions: [{ key: "void", title: "ابطال" }] },
           { key: "petty-cashes", title: "تنخواه", baseActions: CRUD },
           { key: "petty-cash-custodians", title: "تنخواه‌دار", baseActions: CRUD },
+          { key: "card-readers", title: "کارتخوان", baseActions: CRUD },
         ],
       },
       {

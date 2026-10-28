@@ -121,6 +121,7 @@ import AttendancePermits from "./pages/AttendancePermits";
 import AttendanceEmployees from "./pages/AttendanceEmployees";
 import AttendanceMissionTypes from "./pages/AttendanceMissionTypes";
 import AttendanceRequestTypes from "./pages/AttendanceRequestTypes";
+import CardReaders from "./pages/CardReaders";
 import AttendanceMissionRequests from "./pages/AttendanceMissionRequests";
 import AttendanceMissionReports from "./pages/AttendanceMissionReports";
 import { EmploymentTypes, EducationLevels, TerminationReasons, DecreeComponents } from "./pages/HrMasters";
@@ -657,6 +658,9 @@ export default function App() {
             <Route path="/trade-ledgers" element={<TradeLedgers />} />
             <Route path="/trade-ledgers/new" element={<TradeLedgers />} />
             <Route path="/trade-ledgers/:id/edit" element={<TradeLedgers />} />
+            <Route path="/card-readers" element={<CardReaders />} />
+            <Route path="/card-readers/new" element={<CardReaders />} />
+            <Route path="/card-readers/:id/edit" element={<CardReaders />} />
             <Route path="/petty-cashes" element={<PettyCashes />} />
             <Route path="/petty-cashes/new" element={<PettyCashes />} />
             <Route path="/petty-cashes/:id/edit" element={<PettyCashes />} />

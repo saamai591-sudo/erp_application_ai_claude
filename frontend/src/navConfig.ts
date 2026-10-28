@@ -311,6 +311,7 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "cheque-book-leaves", label: "دسته چک", list: "/cheque-book-leaves", create: "/cheque-book-leaves/new", icon: "tag" },
           { key: "petty-cashes", label: "تنخواه", list: "/petty-cashes", create: "/petty-cashes/new", icon: "wallet" },
           { key: "petty-cash-custodians", label: "تنخواه‌دار", list: "/petty-cash-custodians", create: "/petty-cash-custodians/new", icon: "wallet" },
+          { key: "card-readers", label: "کارتخوان", list: "/card-readers", create: "/card-readers/new", icon: "bank" },
         ],
       },
       {
