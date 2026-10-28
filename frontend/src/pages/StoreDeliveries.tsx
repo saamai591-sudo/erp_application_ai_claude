@@ -338,7 +338,7 @@ function DeliveryForm({ editId }: { editId?: number }) {
   }
 
   return (
-    <FormPage title={editId ? `تحویل فروش شماره ${toFaDigits(String(data?.number ?? ""))}` : "تحویل فروش جدید"} formId="store-delivery-form" closePath="/store-deliveries" newPath="/store-deliveries/new" onDelete={editId && editable ? handleDelete : undefined} saveDisabled={!data || !editable} extraActions={extraActions}
+    <FormPage title={editId ? `تحویل فروش شماره ${toFaDigits(String(data?.number ?? ""))}` : "تحویل فروش جدید"} formId="store-delivery-form" closePath="/store-deliveries" newPath="/store-deliveries/new" onDelete={editId && editable ? handleDelete : undefined} saveDisabled={!data || !editable} extraActions={extraActions} fillHeight
       toolbarExtra={
         editId && data ? (
           <>
@@ -353,7 +353,7 @@ function DeliveryForm({ editId }: { editId?: number }) {
       }
     >
       {askModal}
-      <form id="store-delivery-form" onSubmit={onSubmit}>
+      <form id="store-delivery-form" onSubmit={onSubmit} className="je-form-fill">
         <ErrorToast message={asking ? null : error} />
         {data && (
           <>
@@ -394,7 +394,7 @@ function DeliveryForm({ editId }: { editId?: number }) {
             {tab === "SALES" && (
               <ScrollGridWithTotals
                 tableClassName="je-lines-table"
-                maxHeight="calc(100vh - 360px)"
+                fill
                 head={
                   <tr>
                     {["شماره", "تاریخ", "مشتری", "مبلغ فاکتور", "ارزش افزوده", "خالص"].map(th)}
@@ -454,7 +454,7 @@ function DeliveryForm({ editId }: { editId?: number }) {
                 <ScrollGridWithTotals
                   key={m.key}
                   tableClassName="je-lines-table"
-                  maxHeight="calc(100vh - 360px)"
+                  fill
                   head={<tr>{heads.map(th)}</tr>}
                   totals={rows.length === 0 ? [] : [{ cells: ["جمع", ...heads.slice(1, -1).map(() => null), formatAmountFa(rows.reduce((t, r) => t + r.amount, 0))] }]}
                 >
