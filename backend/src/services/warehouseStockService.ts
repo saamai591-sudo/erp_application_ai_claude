@@ -134,7 +134,7 @@ export async function computeStockAsOf(
     .findMany({
       where: {
         goodsItemId,
-        sale: { warehouseId, deliveryStatus: "NOT_DELIVERED", date: { lte: asOfDate }, ...(opts.excludeStoreSaleId ? { NOT: { id: opts.excludeStoreSaleId } } : {}) },
+        sale: { warehouseId, OR: [{ deliveryStatus: "NOT_DELIVERED" }, { delivery: { status: "REGISTERED" } }], date: { lte: asOfDate }, ...(opts.excludeStoreSaleId ? { NOT: { id: opts.excludeStoreSaleId } } : {}) },
       },
       select: { quantity: true },
     })

@@ -71,6 +71,12 @@ async function loadShift(body: StoreSaleBody, date: Date) {
   return { shift, shiftDate };
 }
 
+/** بعد از ثبتِ «تحویل فروش»، در آن ایستگاه تراکنشی با تاریخ ≤ تاریخ آخرین تحویل ثبت نمی‌شود (فروش و دریافت) */
+export async function assertAfterLastDelivery(stationId: number, date: Date) {
+  const last = await prisma.storeSaleDelivery.findFirst({ where: { stationId }, orderBy: { date: "desc" }, select: { date: true, number: true } });
+  if (last && date.getTime() <= last.date.getTime()) throw new StoreSaleError(`برای این ایستگاه تحویل فروش شماره ${last.number} تا تاریخ ${displayDate(last.date)} ثبت شده است؛ ثبت تراکنش با این تاریخ ممکن نیست`);
+}
+
 type Station = Awaited<ReturnType<typeof loadStation>>;
 const kindAllowed = (offering: string, kind: string) => offering === "BOTH" || (offering === "GOODS" ? kind === "GOODS" : kind === "SERVICE");
 
@@ -222,6 +228,7 @@ export async function createStoreSale(body: StoreSaleBody, allowPriceChange: boo
   const date = parseDate(body.date);
   const { shift, shiftDate } = await loadShift(body, date);
   const station = await loadStation(shift.stationId);
+  await assertAfterLastDelivery(station.id, date);
   const fp = await fiscalPeriodOf(date);
   const customer = await resolveCustomer(body.customerId, station);
   const lines = await cleanLines(body.lines, station, date, allowPriceChange);
@@ -263,6 +270,7 @@ export async function updateStoreSale(id: number, body: StoreSaleBody, allowPric
   const { shift, shiftDate } = await loadShift(body, date);
   if (shift.stationId !== ex.stationId) throw new StoreSaleError("شیفت باید از همان ایستگاهِ فروش باشد؛ ایستگاه بعد از ثبت قابل تغییر نیست");
   const station = await loadStation(ex.stationId);
+  await assertAfterLastDelivery(station.id, date);
   const fp = await fiscalPeriodOf(date);
   if (fp.id !== ex.fiscalPeriodId) throw new StoreSaleError("تاریخ فروش را نمی‌توان به دوره‌ی مالی دیگری برد");
   const customer = await resolveCustomer(body.customerId, station);

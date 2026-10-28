@@ -1,7 +1,7 @@
 import { prisma } from "../lib/prisma";
 import { getRequestContext } from "../lib/requestContext";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
-import { StoreSaleError, saleTotals } from "./storeSaleService";
+import { StoreSaleError, assertAfterLastDelivery, saleTotals } from "./storeSaleService";
 import { bankAccountDetailTitle } from "../utils/detailValues";
 
 // فروش فروشگاهی › «دریافت فروشگاهی» — تنها محل قواعد (نقد به صندوقِ ایستگاهِ همان فروش، یا کارتی با یکی از کارتخوان‌های اختصاص‌یافته به آن ایستگاه؛ بدون سند حسابداری).
@@ -99,6 +99,7 @@ export async function createStoreReceipts(body: Body & { items?: CardReceiptItem
     await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100022, ${saleId})`);
     const sale = await assertWithinPayable(tx, saleId, items.reduce((n, x) => n + x.amount, 0));
     if (date.getTime() < sale.date.getTime()) throw new StoreSaleError("تاریخ دریافت نمی‌تواند قبل از تاریخ فروش باشد");
+    await assertAfterLastDelivery(sale.stationId, date);
     const station = await tx.salesStation.findUnique({ where: { id: sale.stationId }, select: { cashBoxId: true, title: true, cardReaders: { select: { cardReaderId: true } }, bankAccounts: { select: { bankAccountId: true } } } });
     const allowed = new Set(station!.cardReaders.map((x: { cardReaderId: number }) => x.cardReaderId));
     for (const id of readerIds) {
@@ -138,6 +139,7 @@ export async function createStoreReceipt(body: Body) {
 export async function updateStoreReceipt(id: number, body: Body) {
   const ex = await prisma.storeReceipt.findUnique({ where: { id } });
   if (!ex) throw new StoreSaleError("دریافت یافت نشد");
+  if (ex.deliveryId) throw new StoreSaleError("این دریافت در «تحویل فروش» بسته شده و قابل ویرایش نیست");
   if (body.saleId && Number(body.saleId) !== ex.saleId) throw new StoreSaleError("فروشِ یک دریافت بعد از ثبت قابل تغییر نیست");
   const { date, fp, amount, description } = await checked(body);
   if (fp.id !== ex.fiscalPeriodId) throw new StoreSaleError("تاریخ دریافت را نمی‌توان به دوره‌ی مالی دیگری برد");
@@ -152,7 +154,9 @@ export async function updateStoreReceipt(id: number, body: Body) {
 }
 
 export async function deleteStoreReceipt(id: number) {
-  if (!(await prisma.storeReceipt.findUnique({ where: { id }, select: { id: true } }))) throw new StoreSaleError("دریافت یافت نشد");
+  const ex = await prisma.storeReceipt.findUnique({ where: { id }, select: { id: true, deliveryId: true } });
+  if (!ex) throw new StoreSaleError("دریافت یافت نشد");
+  if (ex.deliveryId) throw new StoreSaleError("این دریافت در «تحویل فروش» بسته شده و قابل حذف نیست");
   await prisma.storeReceipt.delete({ where: { id } });
 }
 

@@ -171,6 +171,7 @@ model ExchangeRate {
 }
 
 model FiscalPeriod {
+  storeSaleDeliveries StoreSaleDelivery[]
   id                        Int                        @id @default(autoincrement())
   consolidationRuns         JournalConsolidationRun[]
   consolidatedDocuments     ConsolidatedDocument[]
@@ -6924,6 +6925,7 @@ model SalesStation {
   cardReaders   SalesStationCardReader[]
   shifts        SalesShift[]
   bankAccounts  SalesStationBankAccount[]
+  deliveries    StoreSaleDelivery[]
 }
 
 /// حساب‌های بانکیِ قابل دریافت (حواله) برای ایستگاه فروش
@@ -6990,6 +6992,10 @@ model StoreSale {
   /// شیفت و «تاریخ شروع شیفت» (ترکیب = هویت نوبت کاری)؛ تاریخ فاکتور (date) می‌تواند تا یک روز بعد از آن باشد ولی کوچک‌تر نیست. فروش‌های قدیمیِ قبل از این قابلیت خالی‌اند.
   shiftId        Int?
   shiftDate      DateTime?               @db.Date
+  /// «تحویل فروش» که این فروش در آن بسته شده است (خالی = تحویل‌نشده)
+  deliveryId     Int?
+  delivery       StoreSaleDelivery?      @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+  deliveryItem   StoreSaleDeliverySale?
   shift          SalesShift?             @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   creditDeclaredAt   DateTime?
   creditDeclaredById Int?
@@ -7043,6 +7049,9 @@ model StoreReceipt {
   /// دریافت نقد: صندوقِ ایستگاه؛ دریافت کارتی: خالی (و cardReaderId پر) — CHECK در migration 20270202100000
   cashBoxId      Int?
   cardReaderId   Int?
+  /// «تحویل فروش» که این دریافت در آن بسته شده است (خالی = هنوز در هیچ تحویلی نیامده)
+  deliveryId     Int?
+  delivery       StoreSaleDelivery? @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
   /// دریافت حواله: حساب بانکیِ مقصد (باید به ایستگاه اختصاص داده شده باشد)
   bankAccountId  Int?
   /// شماره پیگیری — اختیاری، برای دریافت کارتخوان و حواله
@@ -7061,4 +7070,54 @@ model StoreReceipt {
 
   @@unique([fiscalPeriodId, number])
   @@index([saleId])
+}
+
+enum StoreDeliveryStatus {
+  REGISTERED
+  CONFIRMED
+  ACCOUNTED
+}
+
+enum StoreSettlementStatus {
+  SETTLED
+  TO_CUSTOMER
+  TO_ISSUER
+  CASH_SHORTAGE
+}
+
+/// تحویل فروش (فروش فروشگاهی): همه‌ی فروش‌ها و دریافت‌های تحویل‌نشده‌ی یک ایستگاه تا «تاریخ» را می‌بندد. ثبت ← تایید (حواله انبار) ← سند حسابداری.
+model StoreSaleDelivery {
+  id             Int                   @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime              @db.Date
+  stationId      Int
+  status         StoreDeliveryStatus   @default(REGISTERED)
+  createdById    Int?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  fiscalPeriod   FiscalPeriod          @relation(fields: [fiscalPeriodId], references: [id])
+  station        SalesStation          @relation(fields: [stationId], references: [id])
+  items          StoreSaleDeliverySale[]
+  sales          StoreSale[]
+  receipts       StoreReceipt[]
+
+  @@unique([fiscalPeriodId, number])
+  @@index([stationId, date])
+}
+
+/// عکس لحظه‌ی ثبت هر فروشِ تحویل (مبالغ تا تاریخ تحویل) + وضعیت تسویه‌ی انتخابی کاربر
+model StoreSaleDeliverySale {
+  id               Int                   @id @default(autoincrement())
+  deliveryId       Int
+  saleId           Int                   @unique
+  amount           Decimal               @db.Decimal(36, 10)
+  vat              Decimal               @db.Decimal(36, 10)
+  /// جمع دریافت‌ها تا تاریخ تحویل به تفکیک روش: {"CASH": n, "CARD": n, "TRANSFER": n}
+  paidByMethod     Json
+  creditAmount     Decimal               @db.Decimal(36, 10)
+  unsettledAmount  Decimal               @db.Decimal(36, 10)
+  settlementStatus StoreSettlementStatus
+  delivery         StoreSaleDelivery     @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  sale             StoreSale             @relation(fields: [saleId], references: [id], onDelete: Cascade)
 }

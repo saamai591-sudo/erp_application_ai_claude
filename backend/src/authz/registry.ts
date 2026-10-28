@@ -509,6 +509,7 @@ export const REGISTRY: ModuleDef[] = [
         title: "عملیات",
         forms: [{ key: "store-sales", title: "فروش فروشگاهی", baseActions: CRUD, actions: [{ key: "changePrice", title: "تغییر فی" }, { key: "declareCredit", title: "ثبت نسیه" }] },
           { key: "store-receipts", title: "دریافت فروشگاهی", baseActions: CRUD },
+          { key: "store-deliveries", title: "تحویل فروش", baseActions: CRUD },
         ],
       },
     ],
