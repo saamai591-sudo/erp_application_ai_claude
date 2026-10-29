@@ -12,6 +12,7 @@ import { NewRecordButton } from "../components/NewRecordButton";
 import { ExcelImportButton } from "../components/ExcelImport";
 import { DownstreamMenu } from "../components/DownstreamMenu";
 import { PrintButton } from "../components/PrintButton";
+import { PartyContactButton } from "../components/PartyContactButton";
 import { QUOTE_DOWNSTREAM_ACTIONS } from "../components/DownstreamDialogs";
 import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
@@ -43,7 +44,7 @@ import { CloseFollowUpDialog, FOLLOWUP_FA, FollowUpBanner, useQuoteFollowUp } fr
 
 type Status = "DRAFT" | "APPROVED";
 
-interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null; detailTitle?: string | null } }
+interface CustomerOption { id: number; code: number; partyId?: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null; detailTitle?: string | null } }
 interface CurrencyOption { id: number; code: string; title: string; decimalPlaces?: number }
 interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
 
@@ -585,6 +586,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
       toolbarExtra={editId ? (
         <>
           <PrintButton docType="SALES_QUOTE" sourceId={editId} title="چاپ پیش‌فاکتور" />
+          <PartyContactButton partyId={customers.find((x) => String(x.id) === header.customerId)?.partyId} />
           {hasPermission("sales.operations.sales-quotes.create") && (
             <button type="button" className="toolbar-icon-btn" onClick={duplicateQuote} title="تکثیر پیش‌فاکتور (نسخه‌ی جدید با تاریخ امروز، ذخیره‌نشده)">
               <DuplicateIcon />
