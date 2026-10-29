@@ -2201,3 +2201,23 @@ td .badge { padding: 0 9px; line-height: 1.5; vertical-align: middle; }
   .record-nav { margin-inline-start: 2px; padding-inline-start: 4px; gap: 0; flex-wrap: wrap; }
   .record-nav-pos { min-width: 0; font-size: 11px; padding: 0 2px; }
 }
+
+/* موبایل: نوار ابزار فرم = بستن / ذخیره / جدید + دکمه‌ی «⋯»؛ ناوبری رکورد، اکشن‌های toolbarExtra و منوی عملیات فقط با باز شدن «⋯» دیده می‌شوند (با برچسب متنی از title) */
+.toolbar-extra { display: contents; }
+.toolbar-more-toggle, .toolbar-menu-mobile { display: none; }
+@media (max-width: 700px) {
+  .toolbar-more-toggle { display: inline-flex; }
+  .toolbar-menu-wrap { display: none; }
+  .form-toolbar:not(.more-open) .record-nav,
+  .form-toolbar:not(.more-open) .toolbar-extra { display: none; }
+  .form-toolbar.more-open .toolbar-menu-mobile { display: contents; }
+  .form-toolbar.more-open .form-toolbar-right,
+  .form-toolbar.more-open .form-toolbar-left { flex-basis: 100%; }
+  .form-toolbar.more-open .toolbar-extra .toolbar-icon-btn { width: auto; padding: 0 10px; gap: 6px; }
+  .form-toolbar.more-open .toolbar-extra .toolbar-icon-btn::after { content: attr(title); font-size: 12px; white-space: nowrap; }
+  .form-toolbar.more-open .toolbar-menu-mobile .toolbar-menu-item { width: auto; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+}
+@media (max-width: 700px) {
+  .form-toolbar.more-open .toolbar-extra .toolbar-icon-btn { max-width: 100%; overflow: hidden; }
+  .form-toolbar.more-open .toolbar-extra .toolbar-icon-btn::after { overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+}

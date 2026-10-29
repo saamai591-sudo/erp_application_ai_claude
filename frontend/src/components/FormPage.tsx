@@ -101,6 +101,8 @@ export function FormPage({
   const navigate = useNavigate();
   const { resetActiveTabToNew, recordNav, activeTabId, closeTab } = useTabs();
   const [menuOpen, setMenuOpen] = useState(false);
+  // موبایل: همه‌ی اکشن‌ها جز بستن/ذخیره/جدید پشت یک دکمه‌ی «⋯» جمع می‌شوند (فقط CSS تصمیم می‌گیرد چه چیزی پنهان باشد)
+  const [moreOpen, setMoreOpen] = useState(false);
 
   // میان‌بر Ctrl+S (در مک Cmd+S): همان دکمه‌ی «ذخیره»ی نوار ابزار را فعال می‌کند (پس وضعیت غیرفعال بودن ذخیره رعایت می‌شود) و ذخیره‌ی
   // پیش‌فرض مرورگر را مهار می‌کند. وقتی یک دیالوگ (انتخابگر و…) باز است یا فرم در تب فعال دیده نمی‌شود، کاری نمی‌کند.
@@ -160,7 +162,7 @@ export function FormPage({
 
   return (
     <div onInput={handleInput} className={fillHeight ? undefined : "form-page-scroll"}>
-      <div className="form-toolbar">
+      <div className={`form-toolbar${moreOpen ? " more-open" : ""}`}>
         <div className="form-toolbar-right">
           <button type="button" className="toolbar-icon-btn" onClick={handleClose} title="بستن">
             <CloseIcon />
@@ -194,7 +196,10 @@ export function FormPage({
               <PlusIcon />
             </button>
           )}
-          {toolbarExtra}
+          <button type="button" className={`toolbar-icon-btn toolbar-more-toggle${moreOpen ? " active" : ""}`} onClick={() => setMoreOpen((v) => !v)} title="سایر عملیات">
+            <KebabIcon />
+          </button>
+          <span className="toolbar-extra">{toolbarExtra}</span>
           {hasMenu && (
             <div className="toolbar-menu-wrap">
               <button type="button" className="toolbar-icon-btn" onClick={() => setMenuOpen((v) => !v)} title="عملیات بیشتر">
@@ -218,6 +223,22 @@ export function FormPage({
                     )}
                   </div>
                 </>
+              )}
+            </div>
+          )}
+          {hasMenu && (
+            <div className="toolbar-menu-mobile">
+              {extraActions?.map((action, i) => (
+                <button key={i} type="button" className="toolbar-menu-item" onClick={() => { setMoreOpen(false); handleExtraAction(action); }}>
+                  {action.icon}
+                  {action.label}
+                </button>
+              ))}
+              {onDelete && (
+                <button type="button" className="toolbar-menu-item danger" onClick={() => { setMoreOpen(false); handleDelete(); }}>
+                  <TrashIcon />
+                  حذف
+                </button>
               )}
             </div>
           )}
