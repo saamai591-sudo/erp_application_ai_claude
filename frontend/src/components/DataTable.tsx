@@ -422,12 +422,12 @@ export function DataTable<T extends { id: number | string }>({
   bulkActionsContainer,
   serverPaging,
   stateKey,
-  mobileRows,
+  mobileColumns,
 }: {
   columns: Column<T>[];
   rows: T[];
-  /** موبایل (≤۷۰۰px): هر رکورد به‌جای ردیف جدول با اسکرول افقی، یک «ردیف چندخطی» می‌شود (هر مقدار با برچسب ستونش؛ سرستون/فیلتر در موبایل پنهان است). پیش‌فرض خاموش. */
-  mobileRows?: boolean;
+  /** موبایل (≤۷۰۰px): فقط ستون‌های با این عنوان‌ها (و دکمه‌های ردیف) نمایش داده می‌شوند تا جدول (با سرستون، فیلتر و مرتب‌سازی) اسکرول افقی نخورد. پیش‌فرض: همه‌ی ستون‌ها. */
+  mobileColumns?: string[];
   /** اگر مشخص شود، دکمه‌ی «ویرایش» نمایش داده می‌شود و همیشه فرم را در یک تب جدید باز می‌کند (هرگز تب فهرست را بازنویسی نمی‌کند) */
   edit?: EditAction<T>;
   onDelete?: (row: T) => void;
@@ -770,20 +770,20 @@ export function DataTable<T extends { id: number | string }>({
       {effectiveBulkContainer ? createPortal(bulkToolbar, effectiveBulkContainer) : bulkToolbar}
       <div className="grid-wrap">
       <div ref={scrollAreaRef} className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }} onScroll={syncFooterScroll}>
-        <table className={mobileRows ? "mobile-rows" : undefined} style={bestFit ? { tableLayout: "fixed", width: sumWidths(bestFit) } : undefined}>
+        <table style={bestFit ? { tableLayout: "fixed", width: sumWidths(bestFit) } : undefined}>
           <thead>
             <tr ref={theadRowRef}>
-              <th style={{ width: bestFit ? bestFit[0] : 34 }}>
+              <th className={mobileColumns ? "mc-hide" : undefined} style={{ width: bestFit ? bestFit[0] : 34 }}>
                 <input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} />
               </th>
-              <th style={{ width: bestFit ? bestFit[1] : 44 }}>ردیف</th>
+              <th className={mobileColumns ? "mc-hide" : undefined} style={{ width: bestFit ? bestFit[1] : 44 }}>ردیف</th>
               {columns.map((c, ci) => {
                 const hasFilter = !!c.filterType && !!c.filterValue;
                 const isActive = !!filters[c.header];
                 const canSort = !!(c.sortValue || c.filterValue);
                 const sortState = sortStateOf(sort, c.header);
                 return (
-                  <th key={c.header} style={{ width: bestFit ? bestFit[ci + 2] : c.width }}>
+                  <th key={c.header} className={mobileColumns && !mobileColumns.includes(c.header) ? "mc-hide" : undefined} style={{ width: bestFit ? bestFit[ci + 2] : c.width }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                       <span
                         onClick={canSort ? (e) => toggleSort(c, e.ctrlKey || e.shiftKey || e.metaKey) : undefined}
@@ -822,15 +822,15 @@ export function DataTable<T extends { id: number | string }>({
             )}
             {pageRows.map((row, idx) => (
               <tr key={row.id}>
-                <td className="mr-check">
+                <td className={mobileColumns ? "mc-hide" : undefined}>
                   <input type="checkbox" checked={selected.has(row.id)} onChange={() => toggleRow(row.id)} />
                 </td>
-                <td className="mr-num">{toFaDigits(String(pageStart + idx + 1))}</td>
+                <td className={mobileColumns ? "mc-hide" : undefined}>{toFaDigits(String(pageStart + idx + 1))}</td>
                 {columns.map((c) => (
-                  <td key={c.header} data-label={c.header} ref={mobileRows ? (el) => { if (el) { const tx = (el.textContent ?? "").trim(); el.dataset.empty = ["", "—"].includes(tx) ? "1" : ""; el.dataset.long = tx.length > 14 ? "1" : ""; } } : undefined}>{renderCell(c.render(row))}</td>
+                  <td key={c.header} className={mobileColumns && !mobileColumns.includes(c.header) ? "mc-hide" : undefined}>{renderCell(c.render(row))}</td>
                 ))}
                 {(edit || onDelete) && (
-                  <td className="mr-actions">
+                  <td>
                     <div style={{ display: "flex", gap: 6 }}>
                       {edit && (
                         <button className="btn secondary row-action" onClick={() => handleEdit(row)}>

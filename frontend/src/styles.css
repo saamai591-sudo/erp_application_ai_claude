@@ -2222,36 +2222,20 @@ td .badge { padding: 0 9px; line-height: 1.5; vertical-align: middle; }
   .form-toolbar.more-open .toolbar-extra .toolbar-icon-btn::after { overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
 }
 
-/* فهرست‌های DataTable با mobileRows: در موبایل هر رکورد یک ردیف چندخطی بدون اسکرول افقی؛ برچسب هر مقدار از data-label (عنوان ستون) می‌آید */
+/* DataTable با mobileColumns: در موبایل فقط ستون‌های اصلی (سرستون/فیلتر/مرتب‌سازی سر جایشان) و دکمه‌های ردیف؛ بقیه‌ی ستون‌ها پنهان */
 @media (max-width: 700px) {
-  table.mobile-rows, table.mobile-rows tbody { display: block; width: 100% !important; table-layout: auto; }
-  table.mobile-rows thead { display: none; }
-  table.mobile-rows tbody tr { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
-  table.mobile-rows tbody td { display: block; border: none !important; padding: 0 !important; flex: 1 1 22%; min-width: 56px; width: auto !important; font-size: 12.5px; }
-  table.mobile-rows tbody td[data-label]::before { content: attr(data-label); display: block; font-size: 10px; opacity: .65; margin-bottom: 1px; }
-  table.mobile-rows td.mr-check { flex: 0 0 auto; min-width: 0; }
-  table.mobile-rows td.mr-num { display: none; }
-  table.mobile-rows td.mr-actions { flex: 0 0 auto; margin-inline-start: auto; align-self: flex-end; }
-  table.mobile-rows tbody td[data-empty="1"] { display: none; }
+  .grid-scroll-area table th.mc-hide, .grid-scroll-area table td.mc-hide { display: none; }
+  .grid-scroll-area table:has(th.mc-hide) { width: 100% !important; table-layout: auto; }
+  .grid-scroll-area table:has(th.mc-hide) th, .grid-scroll-area table:has(th.mc-hide) td { width: auto !important; padding-inline: 5px; }
+  .grid-scroll-area table:has(th.mc-hide) td { word-break: break-word; }
+  .grid-scroll-area table:has(th.mc-hide) .row-action { padding: 2px 6px; font-size: 11px; }
 }
 @media (max-width: 700px) {
-  table.mobile-rows tbody td[data-long="1"] { flex: 2 1 45%; }
-  table.mobile-rows tbody td[data-label]::before { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-}
-/* چیدمان شبکه‌ایِ نهایی ردیف موبایل: ۴ ستون مساوی، متن‌های بلند دو ستون، تیک انتخاب کنار ردیف، دکمه‌های ردیف آخر */
-@media (max-width: 700px) {
-  table.mobile-rows tbody tr { position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 8px; padding: 8px 10px; padding-inline-start: 30px; }
-  table.mobile-rows tbody td { flex: none; min-width: 0; overflow-wrap: anywhere; }
-  table.mobile-rows tbody td[data-long="1"] { grid-column: span 2; }
-  table.mobile-rows td.mr-check { position: absolute; inset-inline-start: 8px; top: 9px; }
-  table.mobile-rows td.mr-actions { grid-column: span 3; justify-self: end; align-self: center; margin: 0; }
+  .grid-scroll-area table:has(th.mc-hide) th > div { flex-wrap: wrap !important; gap: 2px !important; }
+  .grid-scroll-area table:has(th.mc-hide) th, .grid-scroll-area table:has(th.mc-hide) td { padding-inline: 3px; font-size: 11.5px; }
+  .grid-scroll-area table:has(th.mc-hide) td:last-child > div { gap: 3px !important; }
+  .grid-scroll-area table:has(th.mc-hide) .row-action { padding: 2px 5px; font-size: 10.5px; }
 }
 @media (max-width: 700px) {
-  table.mobile-rows tbody tr { padding: 6px 8px; gap: 4px 6px; }
-  table.mobile-rows tbody td { font-size: 11.5px; }
-  table.mobile-rows td.mr-check { position: static; order: 99; align-self: center; justify-self: end; }
-  table.mobile-rows td.mr-actions { order: 98; }
-}
-@media (max-width: 700px) {
-  table.mobile-rows td.mr-actions { grid-column: span 2; }
+  .grid-scroll-area:has(th.mc-hide) { padding: 0 !important; }
 }
