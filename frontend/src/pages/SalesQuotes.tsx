@@ -168,6 +168,7 @@ function SalesQuoteList() {
         rows={items}
         edit={{ path: (r) => `/sales-quotes/${r.id}/edit` }}
         onDelete={onDelete}
+        mobileRows
       />
     </div>
   );

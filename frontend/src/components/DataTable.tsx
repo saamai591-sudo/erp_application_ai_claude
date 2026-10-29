@@ -422,9 +422,12 @@ export function DataTable<T extends { id: number | string }>({
   bulkActionsContainer,
   serverPaging,
   stateKey,
+  mobileRows,
 }: {
   columns: Column<T>[];
   rows: T[];
+  /** موبایل (≤۷۰۰px): هر رکورد به‌جای ردیف جدول با اسکرول افقی، یک «ردیف چندخطی» می‌شود (هر مقدار با برچسب ستونش؛ سرستون/فیلتر در موبایل پنهان است). پیش‌فرض خاموش. */
+  mobileRows?: boolean;
   /** اگر مشخص شود، دکمه‌ی «ویرایش» نمایش داده می‌شود و همیشه فرم را در یک تب جدید باز می‌کند (هرگز تب فهرست را بازنویسی نمی‌کند) */
   edit?: EditAction<T>;
   onDelete?: (row: T) => void;
@@ -767,7 +770,7 @@ export function DataTable<T extends { id: number | string }>({
       {effectiveBulkContainer ? createPortal(bulkToolbar, effectiveBulkContainer) : bulkToolbar}
       <div className="grid-wrap">
       <div ref={scrollAreaRef} className="card grid-scroll-area" style={{ overflowX: "auto", overflowY: "auto" }} onScroll={syncFooterScroll}>
-        <table style={bestFit ? { tableLayout: "fixed", width: sumWidths(bestFit) } : undefined}>
+        <table className={mobileRows ? "mobile-rows" : undefined} style={bestFit ? { tableLayout: "fixed", width: sumWidths(bestFit) } : undefined}>
           <thead>
             <tr ref={theadRowRef}>
               <th style={{ width: bestFit ? bestFit[0] : 34 }}>
@@ -819,15 +822,15 @@ export function DataTable<T extends { id: number | string }>({
             )}
             {pageRows.map((row, idx) => (
               <tr key={row.id}>
-                <td>
+                <td className="mr-check">
                   <input type="checkbox" checked={selected.has(row.id)} onChange={() => toggleRow(row.id)} />
                 </td>
-                <td>{toFaDigits(String(pageStart + idx + 1))}</td>
+                <td className="mr-num">{toFaDigits(String(pageStart + idx + 1))}</td>
                 {columns.map((c) => (
-                  <td key={c.header}>{renderCell(c.render(row))}</td>
+                  <td key={c.header} data-label={c.header} ref={mobileRows ? (el) => { if (el) { const tx = (el.textContent ?? "").trim(); el.dataset.empty = ["", "—"].includes(tx) ? "1" : ""; el.dataset.long = tx.length > 14 ? "1" : ""; } } : undefined}>{renderCell(c.render(row))}</td>
                 ))}
                 {(edit || onDelete) && (
-                  <td>
+                  <td className="mr-actions">
                     <div style={{ display: "flex", gap: 6 }}>
                       {edit && (
                         <button className="btn secondary row-action" onClick={() => handleEdit(row)}>
