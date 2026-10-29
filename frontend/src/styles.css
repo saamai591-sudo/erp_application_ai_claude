@@ -2192,3 +2192,12 @@ td .badge { padding: 0 9px; line-height: 1.5; vertical-align: middle; }
 .je-lines-table .picker-field { padding: 3px 8px; }
 .je-lines-table .picker-field > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .je-lines-table .picker-clear-btn { width: 24px; height: 24px; }
+
+/* نوار ابزار فرم در موبایل: آیکن‌ها هیچ‌وقت از صفحه بیرون نزنند — گروه‌ها به چند ردیف می‌شکنند، ناوبری رکورد فشرده می‌شود و هدف لمسی بزرگ‌تر است */
+@media (max-width: 700px) {
+  .form-toolbar { flex-wrap: wrap; row-gap: 4px; }
+  .form-toolbar-left, .form-toolbar-right { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+  .form-toolbar-left .toolbar-icon-btn, .form-toolbar-right .toolbar-icon-btn { width: 34px; height: 34px; }
+  .record-nav { margin-inline-start: 2px; padding-inline-start: 4px; gap: 0; flex-wrap: wrap; }
+  .record-nav-pos { min-width: 0; font-size: 11px; padding: 0 2px; }
+}
