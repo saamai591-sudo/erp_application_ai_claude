@@ -1,6 +1,6 @@
 {
   "name": "accounting-erp-backend",
-  "version": "1.40.2",
+  "version": "1.40.3",
   "private": true,
   "scripts": {
     "dev": "tsx watch src/index.ts",
