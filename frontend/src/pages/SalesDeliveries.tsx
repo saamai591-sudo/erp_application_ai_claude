@@ -381,13 +381,14 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
     const p = takeFormPrefill<DeliveryFromQuotePrefill>(location.pathname);
     if (!p) return;
     (async () => {
-      setHeader((h) => ({ ...h, date: p.date, basis: "SALES_QUOTE", warehouseId: String(p.warehouseId), partyId: String(p.partyId) }));
+      const fromOrder = !!p.orderId;
+      setHeader((h) => ({ ...h, date: p.date, basis: fromOrder ? "SALES_ORDER" : "SALES_QUOTE", warehouseId: String(p.warehouseId), partyId: String(p.partyId) }));
       try {
         const params = new URLSearchParams({ destDate: p.date, partyId: String(p.partyId) });
-        const lines: PickableLine[] = await api.get(`/sales-deliveries/pickable-sales-quote-lines?${params.toString()}`);
-        const mine = lines.filter((l) => l.salesQuoteId === p.quoteId);
+        const lines: (PickableLine & { salesOrderId?: number })[] = await api.get(`/sales-deliveries/${fromOrder ? "pickable-sales-order-lines" : "pickable-sales-quote-lines"}?${params.toString()}`);
+        const mine = lines.filter((l) => (fromOrder ? l.salesOrderId === p.orderId : l.salesQuoteId === p.quoteId));
         if (mine.length === 0) {
-          setError("هیچ ردیف قابل‌تحویلی از این پیش‌فاکتور باقی نمانده است");
+          setError(fromOrder ? "هیچ ردیف قابل‌تحویلی از این سفارش باقی نمانده است" : "هیچ ردیف قابل‌تحویلی از این پیش‌فاکتور باقی نمانده است");
           return;
         }
         onSourceLinesPicked(0, mine);

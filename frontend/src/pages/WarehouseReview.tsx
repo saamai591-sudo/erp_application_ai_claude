@@ -139,7 +139,8 @@ function infoText(mode: ReviewMode) {
 // dir="ltr" چون در متن راست‌به‌چپ، پرانتز/کاما/ارقام باید به ترتیب چپ‌به‌راست خودشان بمانند
 function formatAccountingAmount(value: number, isOutbound: boolean) {
   const text = formatAmountFa(Math.abs(value));
-  if (!isOutbound) return text;
+  // مقدار واقعاً منفی (مثلاً مانده‌ی منفی) هم به همان قالب حسابداری نمایش داده می‌شود، نه به‌صورت عدد مثبت
+  if (!isOutbound && !(value < 0)) return text;
   return (
     <span dir="ltr" style={{ color: "var(--danger)" }}>
       ({text})
@@ -202,9 +203,9 @@ function ledgerColumns(mode: ReviewMode): (BalanceTableColumn<LedgerRow> & { fie
   }
   // «مانده در خط» عمداً بدون sortValue/filterType است — یک مقدار تجمعی وابسته به ترتیب پردازش سرور
   // است، نه یک مقدار مستقیم قابل فیلتر/مرتب‌سازی (دقیقاً هم‌قرارداد LEDGER_COLUMNS در AccountsReview.tsx).
-  cols.push({ header: "مانده در خط", field: "runningQuantity", render: (r) => formatAmountFa(r.runningQuantity) });
+  cols.push({ header: "مانده در خط", field: "runningQuantity", render: (r) => formatAccountingAmount(r.runningQuantity, false) });
   if (mode === "amount") {
-    cols.push({ header: "مانده مبلغی در خط", field: "runningAmount", render: (r) => formatAmountFa(r.runningAmount) });
+    cols.push({ header: "مانده مبلغی در خط", field: "runningAmount", render: (r) => formatAccountingAmount(r.runningAmount, false) });
   }
   cols.push(
     { header: "کد تفصیل", field: "detailCode", render: (r) => (r.detailCode ? toFaDigits(r.detailCode) : "—"), sortValue: (r) => r.detailCode || "", filterType: "string", filterValue: (r) => r.detailCode || "" },

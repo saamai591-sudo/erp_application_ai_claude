@@ -24,6 +24,9 @@ import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, vali
 import { resolveVatRatePercent, computeLineVat } from "../lib/vatCalculation";
 import { useVatRates, vatRateForDate } from "../lib/useVatRates";
 import { DescriptionField } from "../components/DescriptionField";
+import { DownstreamMenu } from "../components/DownstreamMenu";
+import { ORDER_DOWNSTREAM_ACTIONS, OrderFromQuotePrefill } from "../components/DownstreamDialogs";
+import { takeFormPrefill } from "../lib/formPrefill";
 
 // «سفارش فروش» (تایید مشتری) — مرحله دوم زنجیره فروش. مبنا: بدون مبنا / پیش‌فاکتور. طبق تصمیم
 // صریح کاربر، «مانده‌ای» فقط برای حواله فروش/فاکتور فروش لازم است؛ اینجا (مثل سفارش خرید از استعلام
@@ -258,20 +261,19 @@ function SalesOrderForm({ editId }: { editId?: number }) {
   // مقدار پیشنهادی مالیات بر ارزش افزوده — طبق تصمیم صریح کاربر، همیشه به همان ارز هدر محاسبه می‌شود
   // (نه ارز مبنا، چون این فرم fxRate ندارد)؛ فقط پیش‌فرض اولیه است، کاربر می‌تواند بعداً خودش مقدار را
   // ویرایش کند — دقیقاً هم‌الگوی SalesQuotes.tsx.
-  function computeSuggestedVat(amount: number, discount: number, goodsItemId: string): string {
+  function computeSuggestedVat(amount: number, discount: number, goodsItemId: string, date = header.date, currencyId = header.currencyId): string {
     const item = goodsItems.find((g) => g.id === Number(goodsItemId));
-    return String(computeLineVat(amount, discount, resolveVatRatePercent(item, vatRateForDate(vatRates, header.date)), currencies.find((c) => String(c.id) === String(header.currencyId))?.decimalPlaces ?? 2));
+    return String(computeLineVat(amount, discount, resolveVatRatePercent(item, vatRateForDate(vatRates, date)), currencies.find((c) => String(c.id) === String(currencyId))?.decimalPlaces ?? 2));
   }
-  function onSourceLineChange(idx: number, sourceSalesQuoteLineId: string) {
-    const src = pickableLines.find((l) => String(l.sourceSalesQuoteLineId) === sourceSalesQuoteLineId);
-    if (!src) return;
+  // ردیف سفارش از یک ردیف پیش‌فاکتورِ قابل‌انتخاب (هم انتخابگر ردیف و هم «صدور سفارش از پیش‌فاکتور» از همین استفاده می‌کنند)
+  function rowFromQuoteLine(src: PickableQuoteLine, date = header.date, currencyId = header.currencyId): Partial<RowState> {
     const quantity = src.remaining;
     const unitPrice = Number(src.unitPrice);
     const amount = Math.round(unitPrice * quantity * 100) / 100;
     // تخفیف هم مثل فی از ردیف پیش‌فاکتور می‌آید (تخفیف هر واحد × مقدار) — سرور هم همین را اعمال می‌کند
     const discount = Math.round(Number(src.unitDiscount || 0) * quantity * 100) / 100;
-    updateRow(idx, {
-      sourceSalesQuoteLineId,
+    return {
+      sourceSalesQuoteLineId: String(src.sourceSalesQuoteLineId),
       goodsItemId: String(src.goodsItemId),
       goodsItemCode: src.goodsItemCode,
       goodsItemTitle: src.goodsItemTitle,
@@ -281,9 +283,38 @@ function SalesOrderForm({ editId }: { editId?: number }) {
       unitPrice: String(unitPrice),
       amount: String(amount),
       discount: String(discount),
-      vatAmount: computeSuggestedVat(amount, discount, String(src.goodsItemId)),
-    });
+      vatAmount: computeSuggestedVat(amount, discount, String(src.goodsItemId), date, currencyId),
+    };
   }
+  function onSourceLineChange(idx: number, sourceSalesQuoteLineId: string) {
+    const src = pickableLines.find((l) => String(l.sourceSalesQuoteLineId) === sourceSalesQuoteLineId);
+    if (!src) return;
+    updateRow(idx, { ...rowFromQuoteLine(src), sourceSalesQuoteLineId });
+  }
+
+  // «صدور سفارش از پیش‌فاکتور» (components/DownstreamDialogs.tsx): هدر پر می‌شود و همه‌ی ردیف‌های دارای مانده‌ی همان پیش‌فاکتور با همان منطق انتخابگر ردیف می‌نشیند؛
+  // سندی ساخته نمی‌شود و ذخیره از همان POST معمولی (با همه‌ی کنترل‌های سرور) است.
+  useEffect(() => {
+    if (!loaded || editId) return;
+    const p = takeFormPrefill<OrderFromQuotePrefill>(location.pathname);
+    if (!p) return;
+    (async () => {
+      setHeader({ date: p.date, basis: "QUOTE", customerId: String(p.customerId), salesTypeId: String(p.salesTypeId), salesCenterId: String(p.salesCenterId), currencyId: String(p.currencyId), description: "" });
+      try {
+        const params = new URLSearchParams({ customerId: String(p.customerId), currencyId: String(p.currencyId), salesCenterId: String(p.salesCenterId), destDate: p.date });
+        const lines: PickableQuoteLine[] = await api.get(`/sales-orders/pickable-quote-lines?${params.toString()}`);
+        const mine = lines.filter((l) => l.salesQuoteId === p.quoteId);
+        if (mine.length === 0) {
+          setError("هیچ ردیف دارای مانده‌ای از این پیش‌فاکتور باقی نمانده است");
+          return;
+        }
+        setRows(mine.map((src) => ({ ...emptyRow(), ...rowFromQuoteLine(src, p.date, String(p.currencyId)) })));
+      } catch (e: any) {
+        setError(e.message);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
   function onDiscountChange(idx: number, discount: string) {
     const row = rows[idx];
     updateRow(idx, { discount, vatAmount: computeSuggestedVat(Number(row.amount) || 0, Number(discount) || 0, row.goodsItemId) });
@@ -420,6 +451,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
       onDelete={editId && status === "DRAFT" ? handleDelete : undefined}
       saveDisabled={locked}
       extraActions={extraActions}
+      toolbarExtra={editId ? <DownstreamMenu actions={ORDER_DOWNSTREAM_ACTIONS} sourceId={editId} disabledReason={status !== "APPROVED" ? "سفارش فروش تایید نشده است؛ ابتدا آن را تایید کنید" : null} /> : undefined}
       wide
     >
       <form id="sales-order-form" onSubmit={onSubmit}>

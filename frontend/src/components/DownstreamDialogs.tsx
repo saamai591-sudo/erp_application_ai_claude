@@ -18,10 +18,21 @@ import { DownstreamAction } from "./DownstreamMenu";
 // مصرف takeFormPrefill) و ذخیره از همان POST معمولی می‌گذرد — پس صدور از راهبری و صدور مستقل نتیجه‌ی یکسان دارند.
 
 export interface DeliveryFromQuotePrefill {
-  quoteId: number;
+  /** یکی از این دو: مبنای پیش‌فاکتور یا سفارش فروش */
+  quoteId?: number;
+  orderId?: number;
   date: string;
   warehouseId: number;
   partyId: number;
+}
+
+export interface OrderFromQuotePrefill {
+  quoteId: number;
+  date: string;
+  customerId: number;
+  salesTypeId: number;
+  salesCenterId: number;
+  currencyId: number;
 }
 
 export interface InvoiceFromDeliveryPrefill {
@@ -46,6 +57,7 @@ export interface PurchaseInvoiceFromReceiptPrefill {
 
 const NEW_DELIVERY_PATH = "/sales-deliveries/new";
 const NEW_INVOICE_PATH = "/sales-invoices/new";
+const NEW_ORDER_PATH = "/sales-orders/new";
 const NEW_PURCHASE_INVOICE_PATH = "/purchase-invoices/new";
 
 /** تاریخ پیش‌فرض: امروز (اگر در دوره مالی انتخاب‌شده است)، و حداقل تاریخ سند مبدأ */
@@ -148,6 +160,187 @@ function QuoteToDeliveryDialog({ sourceId, onClose }: { sourceId: number; onClos
             </div>
           </div>
           <p style={{ fontSize: 12, color: "var(--ink-soft)", margin: "6px 0 0" }}>با تایید، فرم «حواله فروش جدید» با همین اطلاعات و ردیف‌های پیش‌فاکتور باز می‌شود؛ سند تا «ذخیره» ساخته نمی‌شود.</p>
+          <div className="actions">
+            <button type="button" className="btn" onClick={confirm} disabled={!!info.reason}>تایید</button>
+            <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// پیش‌فاکتور ← سفارش فروش
+// ---------------------------------------------------------------------------------------------------------------------------
+
+function QuoteToOrderDialog({ sourceId, onClose }: { sourceId: number; onClose: () => void }) {
+  const { openTab } = useTabs();
+  const [quote, setQuote] = useState<{ number: number; date: string; status: string; customerId: number; salesTypeId: number; salesCenterId: number; currencyId: number } | null>(null);
+  const [lineCount, setLineCount] = useState(0);
+  const [fp, setFp] = useState<FiscalPeriodRange | null>(null);
+  const [date, setDate] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const [q, period] = await Promise.all([api.get(`/sales-quotes/${sourceId}`), fetchSelectedFiscalPeriod()]);
+        const d = initialDate(period, q.date);
+        const params = new URLSearchParams({ customerId: String(q.customerId), currencyId: String(q.currencyId), salesCenterId: String(q.salesCenterId), destDate: d });
+        const lines: { salesQuoteId: number }[] = q.status === "APPROVED" ? await api.get(`/sales-orders/pickable-quote-lines?${params.toString()}`) : [];
+        if (!alive) return;
+        setQuote(q);
+        setFp(period);
+        setDate(d);
+        setLineCount(lines.filter((l) => l.salesQuoteId === sourceId).length);
+      } catch (e: any) {
+        showError(e.message);
+        onClose();
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceId]);
+
+  const reason = !quote ? null : quote.status !== "APPROVED" ? "پیش‌فاکتور تایید نشده است؛ ابتدا آن را تایید کنید" : lineCount === 0 ? "هیچ ردیف دارای مانده‌ای در این پیش‌فاکتور نیست" : null;
+
+  function confirm() {
+    if (!quote) return;
+    if (reason) return showError(reason);
+    if (!date) return showError("تاریخ الزامی است");
+    if (date < quote.date.slice(0, 10)) return showError("تاریخ سفارش نمی‌تواند قبل از تاریخ پیش‌فاکتور باشد");
+    const dateError = validateDocumentDate(date, fp);
+    if (dateError) return showError(dateError);
+    const prefill: OrderFromQuotePrefill = { quoteId: sourceId, date, customerId: quote.customerId, salesTypeId: quote.salesTypeId, salesCenterId: quote.salesCenterId, currencyId: quote.currencyId };
+    stageFormPrefill(NEW_ORDER_PATH, prefill);
+    openTab(NEW_ORDER_PATH);
+    onClose();
+  }
+
+  return (
+    <Modal title="صدور سفارش فروش از پیش‌فاکتور" onClose={onClose}>
+      {!quote ? (
+        <p style={{ color: "var(--ink-soft)" }}>در حال بارگذاری…</p>
+      ) : (
+        <>
+          <p style={{ margin: "0 0 10px", fontSize: 13, lineHeight: 1.9 }}>
+            پیش‌فاکتور شماره {toFaDigits(String(quote.number))}
+            <br />
+            ردیف‌های دارای مانده: <b>{toFaDigits(String(lineCount))}</b>
+          </p>
+          {reason && <p style={{ color: "var(--danger, #c0392b)", fontSize: 13 }}>{reason}</p>}
+          <div className="form-grid">
+            <div className="form-field">
+              <label>تاریخ سفارش<RequiredMark /></label>
+              <JalaliDatePicker fiscalYear value={date} onChange={setDate} disabled={!!reason} />
+            </div>
+          </div>
+          <p style={{ fontSize: 12, color: "var(--ink-soft)", margin: "6px 0 0" }}>با تایید، فرم «سفارش فروش جدید» با همین اطلاعات و ردیف‌های پیش‌فاکتور باز می‌شود؛ سند تا «ذخیره» ساخته نمی‌شود.</p>
+          <div className="actions">
+            <button type="button" className="btn" onClick={confirm} disabled={!!reason}>تایید</button>
+            <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// سفارش فروش ← حواله فروش
+// ---------------------------------------------------------------------------------------------------------------------------
+
+interface OrderInfo {
+  orderId: number;
+  number: number;
+  date: string;
+  status: string;
+  partyId: number;
+  partyTitle: string;
+  lines: { id: number }[];
+  reason: string | null;
+}
+
+function OrderToDeliveryDialog({ sourceId, onClose }: { sourceId: number; onClose: () => void }) {
+  const { openTab } = useTabs();
+  const [info, setInfo] = useState<OrderInfo | null>(null);
+  const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
+  const [fp, setFp] = useState<FiscalPeriodRange | null>(null);
+  const [warehouseId, setWarehouseId] = useState("");
+  const [date, setDate] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([api.get(`/sales-deliveries/from-order/${sourceId}`), api.get("/warehouses"), fetchSelectedFiscalPeriod()])
+      .then(([o, w, period]: [OrderInfo, WarehouseOption[], FiscalPeriodRange | null]) => {
+        if (!alive) return;
+        setInfo(o);
+        setWarehouses(w.filter((x) => x.isActive));
+        setFp(period);
+        setDate(initialDate(period, o.date));
+      })
+      .catch((e) => {
+        showError(e.message);
+        onClose();
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceId]);
+
+  function confirm() {
+    if (!info) return;
+    if (info.reason) return showError(info.reason);
+    if (!warehouseId) return showError("انبار الزامی است");
+    if (!date) return showError("تاریخ الزامی است");
+    if (date < info.date.slice(0, 10)) return showError("تاریخ حواله نمی‌تواند قبل از تاریخ سفارش باشد");
+    const dateError = validateDocumentDate(date, fp);
+    if (dateError) return showError(dateError);
+    const prefill: DeliveryFromQuotePrefill = { orderId: info.orderId, date, warehouseId: Number(warehouseId), partyId: info.partyId };
+    stageFormPrefill(NEW_DELIVERY_PATH, prefill);
+    openTab(NEW_DELIVERY_PATH);
+    onClose();
+  }
+
+  const warehouse = warehouses.find((w) => String(w.id) === warehouseId);
+
+  return (
+    <Modal title="صدور حواله فروش از سفارش فروش" onClose={onClose}>
+      {!info ? (
+        <p style={{ color: "var(--ink-soft)" }}>در حال بارگذاری…</p>
+      ) : (
+        <>
+          <p style={{ margin: "0 0 10px", fontSize: 13, lineHeight: 1.9 }}>
+            سفارش فروش شماره {toFaDigits(String(info.number))} — {info.partyTitle}
+            <br />
+            ردیف‌های کالای دارای مانده‌ی قابل‌تحویل: <b>{toFaDigits(String(info.lines.length))}</b>
+          </p>
+          {info.reason && <p style={{ color: "var(--danger, #c0392b)", fontSize: 13 }}>{info.reason}</p>}
+          <div className="form-grid">
+            <div className="form-field">
+              <label>انبار<RequiredMark /></label>
+              <RecordPickerField<WarehouseOption>
+                title="انتخاب انبار"
+                displayValue={warehouse ? `${toFaDigits(String(warehouse.code))} — ${warehouse.title}` : ""}
+                rows={warehouses}
+                columns={[
+                  { header: "کد", render: (w) => toFaDigits(String(w.code)), filterValue: (w) => String(w.code), width: "90px" },
+                  { header: "عنوان", render: (w) => w.title, filterValue: (w) => w.title },
+                ]}
+                onSelect={(w) => setWarehouseId(String(w.id))}
+                disabled={!!info.reason}
+              />
+            </div>
+            <div className="form-field">
+              <label>تاریخ حواله<RequiredMark /></label>
+              <JalaliDatePicker fiscalYear value={date} onChange={setDate} disabled={!!info.reason} />
+            </div>
+          </div>
+          <p style={{ fontSize: 12, color: "var(--ink-soft)", margin: "6px 0 0" }}>با تایید، فرم «حواله فروش جدید» با همین اطلاعات و ردیف‌های سفارش باز می‌شود؛ سند تا «ذخیره» ساخته نمی‌شود.</p>
           <div className="actions">
             <button type="button" className="btn" onClick={confirm} disabled={!!info.reason}>تایید</button>
             <button type="button" className="btn secondary" onClick={onClose}>انصراف</button>
@@ -460,7 +653,12 @@ function ReceiptToPurchaseInvoiceDialog({ sourceId, onClose }: { sourceId: numbe
 // ---------------------------------------------------------------------------------------------------------------------------
 
 export const QUOTE_DOWNSTREAM_ACTIONS: DownstreamAction[] = [
+  { key: "order", label: "صدور سفارش فروش", permission: "sales.operations.sales-orders.create", Dialog: QuoteToOrderDialog },
   { key: "delivery", label: "صدور حواله فروش", permission: "sales.operations.sales-deliveries.create", Dialog: QuoteToDeliveryDialog },
+];
+
+export const ORDER_DOWNSTREAM_ACTIONS: DownstreamAction[] = [
+  { key: "delivery", label: "صدور حواله فروش", permission: "sales.operations.sales-deliveries.create", Dialog: OrderToDeliveryDialog },
 ];
 
 export const DELIVERY_DOWNSTREAM_ACTIONS: DownstreamAction[] = [

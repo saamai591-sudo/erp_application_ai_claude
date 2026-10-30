@@ -16,13 +16,20 @@ export interface DownstreamAction {
   Dialog: ComponentType<{ sourceId: number; onClose: () => void }>;
 }
 
-function DownstreamIcon() {
+// آیکن «راهبری» (فلش خمیده به سند بعدی)؛ وقتی بیش از یک فرم مقصد وجود دارد، یک علامت Combo (فلش پایین) کنارش می‌آید
+function DownstreamIcon({ combo }: { combo: boolean }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-      <path d="M4 5h9a3 3 0 013 3v2M16 10l-2.5-2.5M16 10l2.5-2.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" transform="translate(-1 0)" />
-      <path d="M12 14l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4 12h5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 1 }}>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+        <path d="M8 6 H21 V18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" />
+        <path d="M3 6 L8 2.8 V9.2 Z" fill="currentColor" />
+      </svg>
+      {combo && (
+        <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
+          <path d="M2 3.5 5 6.5 8 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+    </span>
   );
 }
 
@@ -44,10 +51,10 @@ export function DownstreamMenu({ actions, sourceId, disabledReason }: { actions:
   return (
     <>
       <div className="toolbar-menu-wrap">
-        <button type="button" className="toolbar-icon-btn" onClick={() => setOpen((v) => !v)} title="صدور سند بعدی">
-          <DownstreamIcon />
+        <button type="button" className="toolbar-icon-btn" onClick={() => (allowed.length === 1 ? choose(allowed[0]) : setOpen((v) => !v))} title={allowed.length === 1 ? allowed[0].label : "صدور سند بعدی"}>
+          <DownstreamIcon combo={allowed.length > 1} />
         </button>
-        {open && (
+        {open && allowed.length > 1 && (
           <>
             <div className="filter-backdrop" onClick={() => setOpen(false)} />
             <div className="toolbar-menu">

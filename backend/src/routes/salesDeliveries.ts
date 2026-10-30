@@ -261,15 +261,14 @@ async function customerIdOfQueryParty(req: any): Promise<number | null> {
   return partyId ? await resolveCustomerIdForParty(partyId) : null;
 }
 
-router.get("/sales-deliveries/pickable-sales-order-lines", can(`${FORM}.view`), async (req, res) => {
-  const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
-  const customerId = await customerIdOfQueryParty(req);
-  if (!customerId) return res.json([]);
-  // حوالهٔ در حال ویرایش از مانده کم نمی‌شود (وگرنه ردیفی که همین حواله کل مانده‌اش را گرفته از انتخابگر حذف می‌شد)
-  const excludeDeliveryId = req.query.excludeDeliveryId ? Number(req.query.excludeDeliveryId) : null;
+/**
+ * ردیف‌های قابل‌تحویلِ سفارش‌های فروش تاییدشده‌ی یک مشتری (مانده > ۰، فقط کالا) — تنها پیاده‌سازی؛ هم انتخابگر ردیف مبنای فرم حواله
+ * (pickable-sales-order-lines) و هم «صدور حواله از سفارش فروش» (from-order) از همین تابع استفاده می‌کنند. orderId: فقط ردیف‌های همان یک سفارش.
+ */
+async function pickableSalesOrderLines(customerId: number, destDate: Date | null, excludeDeliveryId: number | null, orderId?: number) {
   const lines = await prisma.salesOrderLine.findMany({
     // ردیف خدمت وارد انبار/حواله نمی‌شود — فقط ردیف‌های کالا قابل انتخاب‌اند.
-    where: { goodsItem: { kind: "GOODS" }, salesOrder: { status: "APPROVED", customerId, ...(destDate ? { date: { lte: destDate } } : {}) } },
+    where: { goodsItem: { kind: "GOODS" }, salesOrder: { status: "APPROVED", customerId, ...(destDate ? { date: { lte: destDate } } : {}), ...(orderId ? { id: orderId } : {}) } },
     include: {
       salesOrder: { include: { customer: { include: { party: true } } } },
       goodsItem: true,
@@ -306,7 +305,35 @@ router.get("/sales-deliveries/pickable-sales-order-lines", can(`${FORM}.view`), 
       };
     })
     .filter((r: any) => r.remaining > 0);
-  res.json(result);
+  return result;
+}
+
+router.get("/sales-deliveries/pickable-sales-order-lines", can(`${FORM}.view`), async (req, res) => {
+  const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
+  const customerId = await customerIdOfQueryParty(req);
+  if (!customerId) return res.json([]);
+  // حوالهٔ در حال ویرایش از مانده کم نمی‌شود (وگرنه ردیفی که همین حواله کل مانده‌اش را گرفته از انتخابگر حذف می‌شد)
+  const excludeDeliveryId = req.query.excludeDeliveryId ? Number(req.query.excludeDeliveryId) : null;
+  res.json(await pickableSalesOrderLines(customerId, destDate, excludeDeliveryId));
+});
+
+// پیش‌بررسی «صدور حواله از سفارش فروش» (راهبری از فرم سفارش فروش)؛ هم‌الگوی from-quote
+router.get("/sales-deliveries/from-order/:orderId", can(`${FORM}.create`), async (req, res) => {
+  const orderId = Number(req.params.orderId);
+  const order = await prisma.salesOrder.findUnique({ where: { id: orderId }, include: { customer: { include: { party: true } } } });
+  if (!order) return res.status(404).json({ error: "سفارش فروش یافت نشد" });
+  const party = order.customer.party;
+  const base = {
+    orderId: order.id,
+    number: order.number,
+    date: order.date,
+    status: order.status,
+    partyId: party.id,
+    partyTitle: party.category === "LEGAL" ? party.name : `${party.firstName || ""} ${party.lastName || ""}`.trim(),
+  };
+  if (order.status !== "APPROVED") return res.json({ ...base, lines: [], reason: "سفارش فروش تایید نشده است؛ ابتدا آن را تایید کنید" });
+  const lines = await pickableSalesOrderLines(order.customerId, null, null, order.id);
+  res.json({ ...base, lines, reason: lines.length === 0 ? "هیچ ردیف کالایی با مانده‌ی قابل‌تحویل در این سفارش نیست" : null });
 });
 
 // =========================================================================
