@@ -216,6 +216,7 @@ const RAW_MODULES: ModuleGroup[] = [
         items: [
           { key: "warehousing-warehouse-review", label: "مرور تعدادی", list: "/warehousing/warehouse-review", icon: "tree", type: "report" },
           { key: "accounting-warehouse-review", label: "مرور مبلغی", list: "/warehouse-accounting/warehouse-review", icon: "tree", type: "report" },
+          { key: "stock-analysis", label: "آنالیز موجودی", list: "/warehousing/stock-analysis", icon: "ledger", type: "report" },
         ],
       },
     ],

@@ -416,6 +416,7 @@ export const REGISTRY: ModuleDef[] = [
         forms: [
           { key: "warehousing-warehouse-review", title: "مرور تعدادی", baseActions: ["view"] },
           { key: "accounting-warehouse-review", title: "مرور مبلغی", baseActions: ["view"] },
+          { key: "stock-analysis", title: "آنالیز موجودی", baseActions: ["view"] },
         ],
       },
     ],

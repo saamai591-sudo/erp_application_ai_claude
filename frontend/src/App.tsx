@@ -175,6 +175,7 @@ import TreasuryYearClose from "./pages/TreasuryYearClose";
 import PurchaseInvoices from "./pages/PurchaseInvoices";
 import ServicePurchaseInvoices from "./pages/ServicePurchaseInvoices";
 import WarehouseReview from "./pages/WarehouseReview";
+import StockAnalysis from "./pages/StockAnalysis";
 import Receipts from "./pages/Receipts";
 import Payments from "./pages/Payments";
 import Cheques from "./pages/Cheques";
@@ -341,6 +342,7 @@ export default function App() {
             <Route path="/warehousing/warehouse-receipts/new" element={<WarehouseReceipts />} />
             <Route path="/warehousing/warehouse-receipts/:id/edit" element={<WarehouseReceipts />} />
             <Route path="/warehousing/warehouse-review" element={<WarehouseReview mode="qty" />} />
+            <Route path="/warehousing/stock-analysis" element={<StockAnalysis />} />
             <Route path="/warehouse-accounting/warehouse-review" element={<WarehouseReview mode="amount" />} />
 
             <Route path="/center-consumptions" element={<CenterConsumptions />} />
