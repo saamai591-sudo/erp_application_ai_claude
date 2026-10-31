@@ -1,0 +1,23 @@
+# وابستگی‌ها و خروجی build
+node_modules/
+dist/
+*.tsbuildinfo
+
+# محیط و رازها (هرگز commit نشوند)
+.env
+.env.*
+!.env.example
+docker-compose.override.yml
+
+# پشتیبان دیتابیس و فایل‌های موقت
+backups/
+*.dump
+*.tar
+*.stackdump
+~$*
+*.bak
+*.bak-*
+
+# فایل‌های موقت توسعه
+backend/t[0-9]*.js
+docs-pr.cjs
