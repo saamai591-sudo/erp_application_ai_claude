@@ -15,6 +15,7 @@ import { getAccountsReviewSnapshot, setAccountsReviewSnapshot, DetailQueryState 
 import { api } from "../lib/api";
 import { appendSortParams } from "../lib/gridSort";
 import { InfoHint } from "../components/InfoHint";
+import { useDetailLevels } from "../lib/useDetailLevels";
 import { ActiveFilter, ColumnFilterType } from "../components/DataTable";
 
 interface Level { id: number; order: number; title: string }
@@ -183,9 +184,15 @@ export default function AccountsReview() {
 
   const accountTabCount = levels.length;
   const detailTabStart = accountTabCount;
-  const ledgerTabIndex = accountTabCount + 3;
+  const detailLevels = useDetailLevels();
+  const ledgerTabIndex = accountTabCount + detailLevels;
+  // فقط سطح‌های تفصیلِ فعال در «سطوح تفصیل» تب دارند (تعداد فعال همیشه ۱..n پشت‌سرهم است)
+  const activeDetailSlots = DETAIL_SLOTS.filter((s) => s <= detailLevels);
 
   const [periods, setPeriods] = useState<FiscalPeriodRange[]>([]);
+  useEffect(() => {
+    if (activeTab > ledgerTabIndex) setActiveTab(ledgerTabIndex);
+  }, [activeTab, ledgerTabIndex]);
   const chain = useChainedMultiSelect(snapshot?.chainState);
   const tabView = useReviewTabViewState(activeTab, snapshot?.balanceViewState ?? {});
 
@@ -502,7 +509,7 @@ export default function AccountsReview() {
 
   const tabDefs = [
     ...levels.map((lvl, idx) => ({ key: `lvl-${lvl.id}`, label: lvl.title, count: chain.get(idx).size })),
-    ...DETAIL_SLOTS.map((slot) => ({ key: `detail-${slot}`, label: `تفصیل ${toFaDigits(String(slot))}`, count: chain.get(detailTabStart + slot - 1).size })),
+    ...activeDetailSlots.map((slot) => ({ key: `detail-${slot}`, label: `تفصیل ${toFaDigits(String(slot))}`, count: chain.get(detailTabStart + slot - 1).size })),
     { key: "ledger", label: "گردش", count: 0 },
   ];
 

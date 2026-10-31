@@ -11,6 +11,7 @@ import { usePersistedState } from "../lib/usePersistedState";
 import { showError, showToast } from "../lib/toast";
 import { api, ApiError } from "../lib/api";
 import { useFxEnabled } from "../lib/useEntitlements";
+import { invalidateDetailLevels } from "../lib/useDetailLevels";
 
 // «رویه‌ها و تنظیمات حسابداری» — طبق Documents/رویه ها و تنظیمات حسابداری.md. یک فرم با چند زبانه (فعلاً «تنظیمات ارز» و «ارزش افزوده») که همه‌ی
 // تنظیمات آن تاریخ‌محورند: هر رکورد یک «تاریخ شروع اعتبار» یکتا دارد و مقدار معتبر برای هر تاریخ، آخرین رکوردِ با تاریخ شروع ≤ آن تاریخ است.
@@ -125,23 +126,27 @@ const TABS: { key: TabKey; label: string }[] = [
 // سطوح تفصیل: تنظیم تکی و بدون تاریخ؛ سه چک‌باکس پشت‌سرهم (تفصیل ۲ بدون ۱ و تفصیل ۳ بدون ۲ فعال نمی‌شود؛ برداشتن از آخر به اول).
 // پشت صحنه فقط یک عدد (۰ تا ۳) ذخیره می‌شود. برداشتن تیک سطحی که حسابی از آن استفاده می‌کند توسط سرور رد می‌شود.
 function DetailLevelsTab() {
+  const [saved, setSaved] = useState(3);
   const [levels, setLevels] = useState(3);
   const [usage, setUsage] = useState<Record<string, number>>({});
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     api.get("/accounting-settings/detail-levels").then((r: { levels: number; usage: Record<string, number> }) => {
+      setSaved(r.levels);
       setLevels(r.levels);
       setUsage(r.usage);
       setLoaded(true);
     }).catch((e: ApiError) => showError(e.message));
   }, []);
-  async function change(next: number) {
+  async function save() {
     setBusy(true);
     try {
-      const r: { levels: number; usage: Record<string, number> } = await api.put("/accounting-settings/detail-levels", { levels: next });
+      const r: { levels: number; usage: Record<string, number> } = await api.put("/accounting-settings/detail-levels", { levels });
+      setSaved(r.levels);
       setLevels(r.levels);
       setUsage(r.usage);
+      invalidateDetailLevels(r.levels);
       showToast("تنظیم سطوح تفصیل ذخیره شد");
     } catch (e) {
       showError((e as ApiError).message);
@@ -153,28 +158,34 @@ function DetailLevelsTab() {
   return (
     <div>
       <p style={{ margin: "0 0 12px", color: "var(--ink-soft)", fontSize: 13 }}>
-        سطح‌های تفصیلِ فعال در تعریف حساب. تفصیل ۲ بدون تفصیل ۱ و تفصیل ۳ بدون تفصیل ۲ فعال نمی‌شود؛ برداشتن تیک هم از آخر به اول است و تا وقتی حسابی از یک سطح استفاده می‌کند، آن سطح برداشته نمی‌شود.
+        سطح‌های تفصیلِ فعال در تعریف حساب. تفصیل ۲ بدون تفصیل ۱ و تفصیل ۳ بدون تفصیل ۲ فعال نمی‌شود؛ برداشتن تیک هم از آخر به اول است و تا وقتی حسابی از یک سطح استفاده می‌کند، آن سطح برداشته نمی‌شود. تغییرات با «ذخیره» اعمال می‌شود.
       </p>
-      {[1, 2, 3].map((n) => {
-        const checked = levels >= n;
-        const canTick = !checked && levels === n - 1;
-        const used = usage[String(n)] ?? 0;
-        const canUntick = checked && levels === n && used === 0;
-        const disabled = busy || (!checked && !canTick) || (checked && !canUntick);
-        let note = "";
-        if (checked && levels === n && used > 0) note = `${toFaDigits(String(used))} حساب از این سطح استفاده می‌کند`;
-        else if (checked && levels > n) note = `ابتدا تفصیل ${toFaDigits(String(n + 1))} را بردارید`;
-        else if (!checked && !canTick) note = `ابتدا تفصیل ${toFaDigits(String(n - 1))} را فعال کنید`;
-        return (
-          <div key={n} className="form-field" style={{ marginBottom: 8 }}>
-            <label className="checkbox-row">
-              <input type="checkbox" checked={checked} disabled={disabled} onChange={() => change(checked ? n - 1 : n)} />
+      <div style={{ display: "flex", gap: 28, alignItems: "center", flexWrap: "wrap" }}>
+        {[1, 2, 3].map((n) => {
+          const checked = levels >= n;
+          const canTick = !checked && levels === n - 1;
+          const used = usage[String(n)] ?? 0;
+          // سطحی که از قبل ذخیره شده و حسابی از آن استفاده می‌کند برداشته نمی‌شود؛ سطحی که همین حالا (ذخیره‌نشده) تیک خورده آزاد است
+          const canUntick = checked && levels === n && (n > saved || used === 0);
+          const disabled = busy || (!checked && !canTick) || (checked && !canUntick);
+          let note = "";
+          if (checked && levels === n && n <= saved && used > 0) note = `${toFaDigits(String(used))} حساب از این سطح استفاده می‌کند`;
+          else if (checked && levels > n) note = `ابتدا تفصیل ${toFaDigits(String(n + 1))} را بردارید`;
+          else if (!checked && !canTick) note = `ابتدا تفصیل ${toFaDigits(String(n - 1))} را فعال کنید`;
+          return (
+            <label key={n} className="checkbox-row" title={note} style={{ whiteSpace: "nowrap" }}>
+              <input type="checkbox" checked={checked} disabled={disabled} onChange={() => setLevels(checked ? n - 1 : n)} />
               تفصیل {toFaDigits(String(n))}
-              {note && <span style={{ color: "var(--ink-soft)", fontSize: 12, marginInlineStart: 8 }}>({note})</span>}
             </label>
-          </div>
-        );
-      })}
+          );
+        })}
+        <button type="button" className="btn" disabled={busy || levels === saved} onClick={save}>ذخیره</button>
+      </div>
+      {[1, 2, 3].some((n) => levels === n && n <= saved && (usage[String(n)] ?? 0) > 0) && (
+        <p style={{ margin: "10px 0 0", color: "var(--ink-soft)", fontSize: 12 }}>
+          {[1, 2, 3].filter((n) => levels === n && n <= saved && (usage[String(n)] ?? 0) > 0).map((n) => `تفصیل ${toFaDigits(String(n))}: ${toFaDigits(String(usage[String(n)]))} حساب از این سطح استفاده می‌کند`).join(" — ")}
+        </p>
+      )}
     </div>
   );
 }

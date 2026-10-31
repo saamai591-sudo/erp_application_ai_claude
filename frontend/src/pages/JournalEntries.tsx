@@ -26,6 +26,7 @@ import { api, ApiError } from "../lib/api";
 import { appendSortParams } from "../lib/gridSort";
 import { InfoHint } from "../components/InfoHint";
 import { RequiredMark } from "../components/RequiredMark";
+import { useDetailLevels } from "../lib/useDetailLevels";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
 
 interface DocType { id: number; title: string; isSystem: boolean; systemKey: string | null }
@@ -109,6 +110,7 @@ const SERVER_FIELD_MAP: Record<string, string> = {
 };
 
 function EntryList() {
+  const detailLevels = useDetailLevels();
   const [items, setItems] = useState<Entry[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -272,9 +274,7 @@ function EntryList() {
               { key: "documentType", label: "نوع سند", required: true, hint: "باید دقیقاً عنوان یک نوع سند موجود باشد" },
               { key: "description", label: "شرح سند", required: true },
               { key: "accountCode", label: "کد کامل حساب", required: true },
-              { key: "detail1Code", label: "کد تفصیل ۱" },
-              { key: "detail2Code", label: "کد تفصیل ۲" },
-              { key: "detail3Code", label: "کد تفصیل ۳" },
+              ...([1, 2, 3] as const).filter((n) => n <= detailLevels).map((n) => ({ key: `detail${n}Code`, label: `کد تفصیل ${n === 1 ? "۱" : n === 2 ? "۲" : "۳"}` })),
               { key: "debit", label: "بدهکار" },
               { key: "credit", label: "بستانکار" },
               { key: "currencyCode", label: "کد ارز", hint: "خالی = ارز پایه" },
@@ -379,6 +379,7 @@ function emptyRow(baseCurrencyId: string): RowState {
 }
 
 function EntryForm({ editId }: { editId?: number }) {
+  const detailLevels = useDetailLevels();
   const navigate = useNavigate();
   const { openTab } = useTabs();
   const location = useLocation();
@@ -854,9 +855,9 @@ function EntryForm({ editId }: { editId?: number }) {
               <tr ref={linesTheadRef}>
                 <th>ردیف</th>
                 <th>حساب</th>
-                <th>تفصیل ۱</th>
-                <th>تفصیل ۲</th>
-                <th>تفصیل ۳</th>
+                {detailLevels >= 1 && <th>تفصیل ۱</th>}
+                {detailLevels >= 2 && <th>تفصیل ۲</th>}
+                {detailLevels >= 3 && <th>تفصیل ۳</th>}
                 <th className="fx-only">ارز</th>
                 <th>بدهکار</th>
                 <th>بستانکار</th>
@@ -886,7 +887,7 @@ function EntryForm({ editId }: { editId?: number }) {
                         onSelect={(a) => onAccountChange(idx, String(a.id))}
                       />
                     </td>
-                    <td style={{ minWidth: 62 }}>
+                    {detailLevels >= 1 && <td style={{ minWidth: 62 }}>
                       {account?.detailType1Id ? (
                         <RecordPickerField
                           title="انتخاب تفصیل سطح ۱"
@@ -900,8 +901,8 @@ function EntryForm({ editId }: { editId?: number }) {
                           onSelect={(o) => updateRow(idx, { detail1Code: o.code })}
                         />
                       ) : <span style={{ color: "var(--ink-soft)" }}>—</span>}
-                    </td>
-                    <td style={{ minWidth: 62 }}>
+                    </td>}
+                    {detailLevels >= 2 && <td style={{ minWidth: 62 }}>
                       {account?.detailType2Id ? (
                         <RecordPickerField
                           title="انتخاب تفصیل سطح ۲"
@@ -915,8 +916,8 @@ function EntryForm({ editId }: { editId?: number }) {
                           onSelect={(o) => updateRow(idx, { detail2Code: o.code })}
                         />
                       ) : <span style={{ color: "var(--ink-soft)" }}>—</span>}
-                    </td>
-                    <td style={{ minWidth: 62 }}>
+                    </td>}
+                    {detailLevels >= 3 && <td style={{ minWidth: 62 }}>
                       {account?.detailType3Id ? (
                         <RecordPickerField
                           title="انتخاب تفصیل سطح ۳"
@@ -930,7 +931,7 @@ function EntryForm({ editId }: { editId?: number }) {
                           onSelect={(o) => updateRow(idx, { detail3Code: o.code })}
                         />
                       ) : <span style={{ color: "var(--ink-soft)" }}>—</span>}
-                    </td>
+                    </td>}
                     <td className="fx-only" style={{ minWidth: 100 }}>
                       <select
                         value={row.currencyId}

@@ -5,6 +5,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { TreeView, TreeNode } from "../components/TreeView";
 import { FormPage } from "../components/FormPage";
 import { api, ApiError } from "../lib/api";
+import { useDetailLevels } from "../lib/useDetailLevels";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { RefreshButton } from "../components/RefreshButton";
@@ -168,10 +169,7 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
   const [loaded, setLoaded] = useState(hasPersistedState(`${cacheKey}:form`));
   const { flash } = useSavedFlash();
 
-  const [detailLevels, setDetailLevels] = useState(3);
-  useEffect(() => {
-    api.get("/accounting-settings/detail-levels").then((r: { levels: number }) => setDetailLevels(r.levels)).catch(() => {});
-  }, []);
+  const detailLevels = useDetailLevels();
 
   useEffect(() => {
     async function init() {
