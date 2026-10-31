@@ -2,7 +2,7 @@ import { NextFunction, Response } from "express";
 import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
 import { getEntitlements, isFeatureEnabled } from "../license/licenseService";
-import { isRegisteredActionKey, requiredFeatureOfActionKey } from "./registry";
+import { isRegisteredActionKey, requiredFeatureOfActionKey, requiredModuleOfActionKey } from "./registry";
 
 /**
  * اجتماع (union) کدهای Action ای که کاربر از طریق نقش‌هایش (RoleAction) و/یا اعطای مستقیم
@@ -30,6 +30,8 @@ export async function getUserActionKeys(userId: number): Promise<Set<string>> {
   return new Set(
     Array.from(codes).filter((k) => {
       if (allowedModules && !allowedModules.has(k.split(".")[0])) return false;
+      const extraModule = requiredModuleOfActionKey(k);
+      if (allowedModules && extraModule && !allowedModules.has(extraModule)) return false;
       const feature = requiredFeatureOfActionKey(k);
       return !feature || isFeatureEnabled(ent, feature);
     })
@@ -61,6 +63,10 @@ export function can(actionKey: string) {
     // ماژول در لایسنس نیست ⇒ پیام مشخص (نه «دسترسی ندارید»)
     const ent = await getEntitlements();
     if (ent.modules && !ent.modules.includes(actionKey.split(".")[0])) {
+      return res.status(403).json({ error: "این بخش در لایسنس شما فعال نیست", code: "MODULE_NOT_LICENSED" });
+    }
+    const extraModule = requiredModuleOfActionKey(actionKey);
+    if (ent.modules && extraModule && !ent.modules.includes(extraModule)) {
       return res.status(403).json({ error: "این بخش در لایسنس شما فعال نیست", code: "MODULE_NOT_LICENSED" });
     }
     const feature = requiredFeatureOfActionKey(actionKey);

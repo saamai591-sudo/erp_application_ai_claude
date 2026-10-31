@@ -42,6 +42,8 @@ export interface FormDef {
   actions?: CustomActionDef[];
   /** فرم فقط وقتی در لایسنس این «قابلیت» (مثلاً FX) فعال باشد دیده می‌شود/قابل استفاده است */
   requiresFeature?: string;
+  /** فرم علاوه بر ماژول خودش، به یک ماژول اختیاریِ دیگر هم نیاز دارد (مثلاً حواله فروش به «مدیریت موجودی و انبار»)؛ بدون آن ماژول در لایسنس، فرم و مجوزهایش دیده/استفاده نمی‌شود */
+  requiresModule?: string;
 }
 
 export interface SubModuleDef {
@@ -261,11 +263,11 @@ export const REGISTRY: ModuleDef[] = [
         title: "تنظیمات",
         forms: [
           { key: "units-of-measure", title: "واحد سنجش", baseActions: CRUD },
-          { key: "warehouse-groups", title: "گروه انبار", baseActions: CRUD },
-          { key: "warehouses", title: "انبار", baseActions: CRUD },
-          { key: "physical-locations", title: "محل فیزیکی", baseActions: CRUD },
-          { key: "batches", title: "بچ", baseActions: CRUD },
-          { key: "serials", title: "سریال", baseActions: CRUD },
+          { key: "warehouse-groups", title: "گروه انبار", baseActions: CRUD, requiresModule: "inventory" },
+          { key: "warehouses", title: "انبار", baseActions: CRUD, requiresModule: "inventory" },
+          { key: "physical-locations", title: "محل فیزیکی", baseActions: CRUD, requiresModule: "inventory" },
+          { key: "batches", title: "بچ", baseActions: CRUD, requiresModule: "inventory" },
+          { key: "serials", title: "سریال", baseActions: CRUD, requiresModule: "inventory" },
           {
             key: "goods-group-levels",
             title: "سطح گروه کالا",
@@ -276,7 +278,7 @@ export const REGISTRY: ModuleDef[] = [
           { key: "goods-attributes", title: "ویژگی کالا خدمت", baseActions: CRUD },
           { key: "accounting-groups", title: "گروه حسابداری", baseActions: CRUD },
           { key: "goods-service-accounting", title: "حسابداری کالا و خدمت", baseActions: CRUD },
-          { key: "warehouse-doc-details", title: "تفصیل‌های سند انبار", baseActions: CRUD },
+          { key: "warehouse-doc-details", title: "تفصیل‌های سند انبار", baseActions: CRUD, requiresModule: "inventory" },
           { key: "detail-rules", title: "قواعد تفصیل", baseActions: CRUD },
           { key: "goods-request-types", title: "نوع درخواست کالا", baseActions: CRUD },
         ],
@@ -538,7 +540,7 @@ export const REGISTRY: ModuleDef[] = [
         forms: [
           { key: "sales-quotes", title: "پیش‌فاکتور", baseActions: CRUD, actions: [...APPROVE_UNAPPROVE, { key: "closeFollowUp", title: "بستن/بازگشایی پیگیری" }] },
           { key: "sales-orders", title: "سفارش فروش", baseActions: CRUD, actions: APPROVE_UNAPPROVE },
-          { key: "sales-deliveries", title: "حواله فروش", baseActions: CRUD, actions: [VIEW_ACCOUNTING] },
+          { key: "sales-deliveries", title: "حواله فروش", baseActions: CRUD, actions: [VIEW_ACCOUNTING], requiresModule: "inventory" },
           {
             key: "sales-invoices",
             title: "فاکتور فروش",
@@ -1081,6 +1083,17 @@ export function isRegisteredActionKey(key: string): boolean {
 
 // پیشوند فرم (module.sub.form) ← قابلیت لازم؛ فقط فرم‌های دارای requiresFeature
 let featureByFormPrefix: Map<string, string> | null = null;
+// پیشوند فرم ← ماژول اضافیِ لازم؛ فقط فرم‌های دارای requiresModule
+let moduleByFormPrefix: Map<string, string> | null = null;
+/** ماژول اضافیِ لازمِ یک کلید دسترسی (یا undefined) */
+export function requiredModuleOfActionKey(key: string): string | undefined {
+  if (!moduleByFormPrefix) {
+    moduleByFormPrefix = new Map();
+    for (const mod of REGISTRY) for (const sub of mod.subModules) for (const f of sub.forms) if (f.requiresModule) moduleByFormPrefix.set(`${mod.key}.${sub.key}.${f.key}`, f.requiresModule);
+  }
+  return moduleByFormPrefix.get(key.split(".").slice(0, 3).join("."));
+}
+
 /** قابلیتِ لازمِ یک کلید دسترسی (یا undefined اگر محدود به قابلیت نیست) */
 export function requiredFeatureOfActionKey(key: string): string | undefined {
   if (!featureByFormPrefix) {

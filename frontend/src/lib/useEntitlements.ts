@@ -71,3 +71,13 @@ export function useFxEnabled(): boolean {
   if (!entitlements) return true;
   return !entitlements.features || entitlements.features.includes("FX");
 }
+
+/**
+ * آیا یک ماژول اختیاری لایسنس (مثلاً «inventory» = مدیریت موجودی و انبار) فعال است؟ قبل از بارگذاری true است (پرشی ایجاد نشود).
+ * false ⇒ فیلدها/ستون‌ها/گزینه‌هایی که فقط با آن ماژول معنی دارند (ردیابی بچ/سریال، محل فیزیکی، گروه انبار، …) نمایش داده نمی‌شوند. اجرای واقعی همیشه با بک‌اند است.
+ */
+export function useModuleEnabled(moduleKey: string): boolean {
+  const { entitlements } = useEntitlements();
+  if (!entitlements) return true;
+  return !entitlements.modules || entitlements.modules.includes(moduleKey);
+}

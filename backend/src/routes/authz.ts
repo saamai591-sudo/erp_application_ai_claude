@@ -26,6 +26,7 @@ router.get("/authz/tree", async (_req, res) => {
       title: sub.title,
       forms: sub.forms
         .filter((form) => !form.requiresFeature || isFeatureEnabled(ent, form.requiresFeature))
+        .filter((form) => !form.requiresModule || !ent.modules || ent.modules.includes(form.requiresModule))
         .map((form) => {
         const prefix = `${mod.key}.${sub.key}.${form.key}`;
         const baseActions = form.baseActions.map((b) => ({

@@ -1,3 +1,4 @@
+import { useModuleEnabled } from "../lib/useEntitlements";
 import { RequiredMark } from "./RequiredMark";
 import { FormEvent, useEffect, useState } from "react";
 import { ErrorToast } from "./ErrorToast";
@@ -199,6 +200,7 @@ function computePreview(
 // =========================================================================
 
 export function GoodsItemList({ kind }: { kind: ItemKind }) {
+  const inventoryOn = useModuleEnabled("inventory");
   const label = KIND_FA[kind];
   const basePath = kind === "GOODS" ? "/goods" : "/services";
   const cacheKey = `/goods-items?kind=${kind}`;
@@ -249,10 +251,14 @@ export function GoodsItemList({ kind }: { kind: ItemKind }) {
                     { key: "weightRatio", label: "نسبت وزنی", hint: "اگر واحد وزنی پر شده باشد الزامی است" },
                     { key: "technicalSpec", label: "مشخصه فنی" },
                     { key: "barcode", label: "بارکد" },
-                    { key: "reorderControl", label: "کنترل نقطه سفارش", hint: "بله / خیر" },
-                    { key: "reorderPoint", label: "مقدار نقطه سفارش", hint: "اگر کنترل نقطه سفارش «بله» باشد الزامی است" },
-                    { key: "trackingMethod", label: "روش ردیابی", hint: "بدون ردیابی / بچ / سریال" },
-                    { key: "isLocationTracked", label: "محل‌پذیر", hint: "بله / خیر" },
+                    ...(inventoryOn
+                      ? ([
+                          { key: "reorderControl", label: "کنترل نقطه سفارش", hint: "بله / خیر" },
+                          { key: "reorderPoint", label: "مقدار نقطه سفارش", hint: "اگر کنترل نقطه سفارش «بله» باشد الزامی است" },
+                          { key: "trackingMethod", label: "روش ردیابی", hint: "بدون ردیابی / بچ / سریال" },
+                          { key: "isLocationTracked", label: "محل‌پذیر", hint: "بله / خیر" },
+                        ] as const)
+                      : []),
                   ] as const)
                 : []),
               ...(kind === "SERVICE"
@@ -316,6 +322,8 @@ const DEFAULT_FORM = {
 type FormState = typeof DEFAULT_FORM;
 
 export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: number }) {
+  // بدون ماژول «مدیریت موجودی و انبار» در لایسنس: نقطه سفارش، ردیابی (بچ/سریال)، محل فیزیکی و «بهای موجودی» خدمت نمایش داده نمی‌شوند
+  const inventoryOn = useModuleEnabled("inventory");
   const navigate = useNavigate();
   const location = useLocation();
   const label = KIND_FA[kind];
@@ -482,9 +490,9 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
   const tabs: { key: typeof tab; label: string; show: boolean }[] = [
     { key: "main", label: `${groupLabel} و عنوان`, show: true },
     { key: "attrs", label: "ویژگی", show: attrRows.length > 0 },
-    { key: "inventory", label: "مدیریت موجودی", show: kind === "GOODS" },
+    { key: "inventory", label: "مدیریت موجودی", show: kind === "GOODS" && inventoryOn },
     { key: "accounting", label: `حسابداری ${label}`, show: true },
-    { key: "tracking", label: "ردیابی", show: kind === "GOODS" },
+    { key: "tracking", label: "ردیابی", show: kind === "GOODS" && inventoryOn },
   ];
 
   return (
@@ -659,7 +667,7 @@ export function GoodsItemForm({ kind, editId }: { kind: ItemKind; editId?: numbe
                   title="هزینه: معین بدهکار خرید این خدمت در «حسابداری کالا و خدمت» (نوع «خرید خدمت») تعریف می‌شود. بهای موجودی: معین خرید جداگانه ندارد؛ خرید این خدمت حتماً به یک رسید انبار وصل می‌شود و بدهکار از معین موجودی همان رسید می‌آید."
                 >
                   <option value="EXPENSE">هزینه</option>
-                  <option value="INVENTORY_COST">بهای موجودی</option>
+                  {(inventoryOn || form.accountingTreatment === "INVENTORY_COST") && <option value="INVENTORY_COST">بهای موجودی</option>}
                 </select>
               </div>
             )}

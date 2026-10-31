@@ -1,3 +1,4 @@
+import { useModuleEnabled } from "../lib/useEntitlements";
 import { FormEvent, useEffect, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
 import { showError } from "../lib/toast";
@@ -146,6 +147,7 @@ export default function GoodsServiceAccounting() {
 }
 
 function SettingList() {
+  const inventoryOn = useModuleEnabled("inventory");
   const cacheKey = "/goods-service-accounting";
   const [items, setItems] = usePersistedState<GoodsServiceAccountingSetting[]>(cacheKey, []);
   const [error, setError] = useState<string | null>(null);
@@ -183,7 +185,7 @@ function SettingList() {
           { header: "گروه حسابداری", render: (r) => r.accountingGroup?.title || "—", filterType: "string", filterValue: (r) => r.accountingGroup?.title || "" },
           { header: "نوع حساب", render: (r) => ACCOUNT_TYPE_FA[r.accountType] || r.accountType },
           { header: "خدمت", render: (r) => r.service ? `${toFaDigits(r.service.fullCode)} — ${r.service.title}` : "—", filterType: "string", filterValue: (r) => r.service?.title || "" },
-          { header: "گروه انبار", render: (r) => r.warehouseGroup?.title || "—" },
+          ...(inventoryOn ? [{ header: "گروه انبار", render: (r: any) => r.warehouseGroup?.title || "—" }] : []),
           {
             header: "نوع سند / نوع خرید / نوع فروش",
             render: (r) =>
@@ -217,6 +219,8 @@ const DEFAULT_SETTING_FORM = {
 };
 
 function SettingForm({ editId }: { editId?: number }) {
+  // بدون ماژول انبار: انواع حساب انباری (موجودی کالا، رسید/حواله انبار) انتخاب نمی‌شوند؛ رکورد قدیمیِ همان نوع هنوز درست نمایش داده می‌شود
+  const inventoryOn = useModuleEnabled("inventory");
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
@@ -368,7 +372,7 @@ function SettingForm({ editId }: { editId?: number }) {
               onChange={(e) => setForm({ ...form, accountType: e.target.value })}
             >
               <option value="">انتخاب کنید</option>
-              {Object.entries(ACCOUNT_TYPE_FA).map(([k, v]) => (
+              {Object.entries(ACCOUNT_TYPE_FA).filter(([k]) => inventoryOn || !(INVENTORY_TYPES.has(k) || WAREHOUSE_DOC_TYPES.has(k)) || k === form.accountType).map(([k, v]) => (
                 <option key={k} value={k}>{v}</option>
               ))}
             </select>
