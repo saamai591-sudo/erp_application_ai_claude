@@ -92,6 +92,7 @@
   --nc-mod-attendance: #8ea2ff;
   --nc-mod-workflow: #5eead4;
   --nc-mod-store: #ff9f6b;
+  --nc-mod-club: #e879f9;
   --nc-sub-ops: #ffd23f;
   --nc-sub-structure: #5ab8ff;
   --nc-sub-report: #ff7fb8;
@@ -173,6 +174,7 @@
   --nc-mod-attendance: #8ea2ff;
   --nc-mod-workflow: #5eead4;
   --nc-mod-store: #ff9f6b;
+  --nc-mod-club: #e879f9;
   --nc-sub-ops: #ffd23f;
   --nc-sub-structure: #5ab8ff;
   --nc-sub-report: #ff7fb8;
@@ -328,6 +330,7 @@
   --nc-mod-attendance: #8ea2ff;
   --nc-mod-workflow: #5eead4;
   --nc-mod-store: #ff9f6b;
+  --nc-mod-club: #e879f9;
   --nc-sub-ops: #ffd23f;
   --nc-sub-structure: #5ab8ff;
   --nc-sub-report: #ff7fb8;
@@ -554,6 +557,7 @@ body {
 .module-icon.mod-ic-clock { color: var(--nc-mod-attendance); }
 .module-icon.mod-ic-inbox { color: var(--nc-mod-workflow); }
 .module-icon.mod-ic-store { color: var(--nc-mod-store); }
+.module-icon.mod-ic-gift { color: var(--nc-mod-club); }
 
 .nav-submodule { margin: 4px 0 8px 0; padding-right: 8px; margin-right: 10px; }
 .submodule-title {
@@ -2053,6 +2057,7 @@ html[data-fx="off"] .fx-only { display: none !important; }
   --nc-mod-payroll: var(--icon-mono);
   --nc-mod-attendance: var(--icon-mono);
   --nc-mod-store: var(--icon-mono);
+  --nc-mod-club: var(--icon-mono);
   --nc-sub-ops: var(--icon-mono);
   --nc-sub-structure: var(--icon-mono);
   --nc-sub-report: var(--icon-mono);
@@ -2204,9 +2209,9 @@ td .badge { padding: 0 9px; line-height: 1.5; vertical-align: middle; }
 
 /* موبایل: نوار ابزار فرم = بستن / ذخیره / جدید + دکمه‌ی «⋯»؛ ناوبری رکورد، اکشن‌های toolbarExtra و منوی عملیات فقط با باز شدن «⋯» دیده می‌شوند (با برچسب متنی از title) */
 .toolbar-extra { display: contents; }
-.toolbar-more-toggle, .toolbar-menu-mobile { display: none; }
+.form-toolbar .toolbar-more-toggle, .form-toolbar .toolbar-menu-mobile { display: none; }
 @media (max-width: 700px) {
-  .toolbar-more-toggle { display: inline-flex; }
+  .form-toolbar .toolbar-more-toggle { display: inline-flex; }
   .toolbar-menu-wrap { display: none; }
   .form-toolbar:not(.more-open) .record-nav,
   .form-toolbar:not(.more-open) .toolbar-extra { display: none; }
@@ -2239,3 +2244,39 @@ td .badge { padding: 0 9px; line-height: 1.5; vertical-align: middle; }
 @media (max-width: 700px) {
   .grid-scroll-area:has(th.mc-hide) { padding: 0 !important; }
 }
+
+/* فرم‌های فروش/برگشت فروش فروشگاهی روی مانیتور کوچک صندوق: هدر فشرده (۳ ستون، فیلد کوتاه‌تر) تا جای بیشتری برای ثبت ردیف‌ها بماند */
+.form-grid.store-compact { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 12px; }
+.form-grid.store-compact .form-field { margin-bottom: 0; gap: 6px; }
+.form-grid.store-compact .form-field.span-2 { grid-column: span 2; }
+.form-grid.store-compact .form-field label { min-width: 52px; font-size: 11.5px; }
+.form-grid.store-compact .form-field input,
+.form-grid.store-compact .form-field select,
+.form-grid.store-compact .jalali-date-input,
+.form-grid.store-compact .form-field button.picker-field { padding-top: 2px; padding-bottom: 2px; font-size: 12px; min-height: 24px; height: 26px; }
+@media (max-width: 900px) { .form-grid.store-compact { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 700px) { .form-grid.store-compact { grid-template-columns: 1fr; } .form-grid.store-compact .form-field.span-2 { grid-column: auto; } }
+
+.form-grid.store-compact .store-label { flex: 1; min-width: 0; padding: 3px 9px; border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); background: var(--surface-2, transparent); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ویترین کالا (فرم فروش/برگشت فروش فروشگاهی): سایدبار چسبیده به سمت راست فرم، باز و بسته */
+.showcase-layout { display: flex; align-items: flex-start; gap: 10px; }
+.showcase-main { flex: 1; min-width: 0; }
+.showcase-sidebar { position: sticky; top: 0; align-self: flex-start; display: flex; flex-direction: row; gap: 4px; max-height: calc(100vh - 150px); }
+.showcase-toggle { align-self: stretch; width: 22px; border: 1px solid var(--line-strong); background: var(--surface); border-radius: var(--radius-sm); cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 0; font-size: 16px; color: var(--ink-soft); }
+.showcase-toggle:hover { background: var(--surface-2, var(--surface)); }
+.showcase-toggle-label { writing-mode: vertical-rl; font-size: 11.5px; letter-spacing: 0; }
+.showcase-sidebar.collapsed { max-height: 220px; }
+.showcase-body { width: 270px; display: flex; flex-direction: column; gap: 6px; overflow: hidden; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); padding: 6px; }
+.showcase-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.showcase-tab { border: 1px solid var(--line-strong); background: var(--surface); border-radius: 999px; padding: 3px 10px; font-size: 12px; font-family: inherit; cursor: pointer; color: var(--ink-soft); }
+.showcase-tab.active { background: var(--accent, #3b6ea8); border-color: var(--accent, #3b6ea8); color: #fff; }
+.showcase-title { font-weight: 700; font-size: 12.5px; padding: 0 2px; }
+.showcase-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; overflow-y: auto; padding: 2px; }
+.showcase-tile { min-height: 64px; border: 2px solid var(--accent, #3b6ea8); background: var(--surface); color: var(--accent, #3b6ea8); border-radius: 12px; cursor: pointer; font-family: inherit; padding: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; touch-action: manipulation; }
+.showcase-tile:hover:not(:disabled) { background: var(--accent-soft, #e8f0fa); }
+.showcase-tile:active:not(:disabled) { transform: scale(0.97); }
+.showcase-tile:disabled { opacity: 0.4; cursor: not-allowed; border-style: dashed; }
+.showcase-tile-title { font-weight: 700; font-size: 13px; text-align: center; line-height: 1.25; }
+.showcase-tile-price { font-size: 11.5px; opacity: 0.85; }
+@media (max-width: 700px) { .showcase-layout { flex-direction: column; } .showcase-sidebar { position: static; width: 100%; max-height: none; } .showcase-body { width: 100%; } .showcase-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }

@@ -4,7 +4,7 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { StoreSaleError } from "../services/storeSaleService";
 import { issueStoreDeliveryJournal, revertStoreDeliveryJournal } from "../services/storeSaleDeliveryJournalService";
-import { buildDeliveryPreview, confirmStoreDelivery, createStoreDelivery, deleteStoreDelivery, listStoreDeliveries, listStoreSaleIssues, loadStoreDelivery, unconfirmStoreDelivery, updateStoreDelivery } from "../services/storeSaleDeliveryService";
+import { buildDeliveryPreview, confirmStoreDelivery, createStoreDelivery, deleteStoreDelivery, listStoreDeliveries, listStoreSaleIssues, loadStoreDelivery, loadStoreSaleIssue, unconfirmStoreDelivery, updateStoreDelivery } from "../services/storeSaleDeliveryService";
 
 // فروش فروشگاهی › عملیات › «تحویل فروش»؛ منطق فقط در services/storeSaleDeliveryService.ts.
 
@@ -104,6 +104,20 @@ router.get("/store-sale-issues", can(`${ISSUE_FORM}.view`), async (_req, res) =>
 });
 router.get("/store-sale-returns", can(`${RETURN_FORM}.view`), async (_req, res) => {
   res.json(await listStoreSaleIssues("RETURN"));
+});
+router.get("/store-sale-issues/:id", can(`${ISSUE_FORM}.view`), async (req, res) => {
+  try {
+    res.json(await loadStoreSaleIssue(Number(req.params.id), "ISSUE"));
+  } catch (e) {
+    res.status(404).json({ error: (e as Error).message });
+  }
+});
+router.get("/store-sale-returns/:id", can(`${RETURN_FORM}.view`), async (req, res) => {
+  try {
+    res.json(await loadStoreSaleIssue(Number(req.params.id), "RETURN"));
+  } catch (e) {
+    res.status(404).json({ error: (e as Error).message });
+  }
 });
 
 export default router;

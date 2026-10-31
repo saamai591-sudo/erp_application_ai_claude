@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
+import { getDetailLevels } from "../services/accountingSettingsService";
 
 const FORM = findFormPrefix("accounts");
 
@@ -25,6 +26,16 @@ async function accountIdsWithTransactions(): Promise<Set<number>> {
     }
   }
   return result;
+}
+
+// سطح‌های تفصیلِ غیرفعال در «رویه‌ها و تنظیمات حسابداری › سطوح تفصیل» برای حساب قابل تعیین نیستند
+async function assertDetailLevelsAllowed(data: { detailType1Id?: number | null; detailType2Id?: number | null; detailType3Id?: number | null }) {
+  const levels = await getDetailLevels();
+  for (const n of [1, 2, 3] as const) {
+    if (n > levels && (data as any)[`detailType${n}Id`]) {
+      throw new Error(`تفصیل سطح ${n} در «رویه‌ها و تنظیمات حسابداری › سطوح تفصیل» فعال نشده است`);
+    }
+  }
 }
 
 router.get("/", async (_req, res) => {
@@ -105,6 +116,7 @@ router.post("/", can(`${FORM}.create`), async (req, res) => {
       data.detailType1Id = body.detailType1Id || null;
       data.detailType2Id = body.detailType2Id || null;
       data.detailType3Id = body.detailType3Id || null;
+      await assertDetailLevelsAllowed(data);
     }
 
     const created = await prisma.account.create({ data });
@@ -178,6 +190,11 @@ router.put("/:id", can(`${FORM}.edit`), async (req, res) => {
     data.detailType1Id = body.detailType1Id ?? null;
     data.detailType2Id = body.detailType2Id ?? null;
     data.detailType3Id = body.detailType3Id ?? null;
+    try {
+      await assertDetailLevelsAllowed(data);
+    } catch (e: any) {
+      return res.status(400).json({ error: e.message });
+    }
   }
 
   const updated = await prisma.account.update({ where: { id }, data });

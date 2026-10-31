@@ -51,7 +51,7 @@ function parseDate(raw: unknown): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
-async function loadStation(id: unknown) {
+export async function loadStation(id: unknown) {
   const station = Number(id) ? await prisma.salesStation.findUnique({ where: { id: Number(id) }, include: { warehouse: true } }) : null;
   if (!station) throw new StoreSaleError("ایستگاه فروش را انتخاب کنید");
   if (!station.isActive) throw new StoreSaleError(`ایستگاه «${station.title}» غیرفعال است`);
@@ -59,7 +59,7 @@ async function loadStation(id: unknown) {
 }
 
 /** شیفتِ فعال + قاعده‌ی تاریخ: تاریخ فاکتور از تاریخ شروع شیفت کوچک‌تر نیست و حداکثر یک روز بعد از آن است (شیفتِ عبورکرده از نیمه‌شب) */
-async function loadShift(body: StoreSaleBody, date: Date) {
+export async function loadShift(body: StoreSaleBody, date: Date) {
   const shift = Number(body.shiftId) ? await prisma.salesShift.findUnique({ where: { id: Number(body.shiftId) } }) : null;
   if (!shift) throw new StoreSaleError("شیفت را انتخاب کنید");
   if (!shift.isActive) throw new StoreSaleError(`شیفت «${shift.title}» غیرفعال است`);
@@ -111,7 +111,7 @@ export async function sellableItems(stationId: number, date: Date) {
   return { priceListId, priceListNumber: list?.number ?? null, decimalPlaces: currency.decimalPlaces, items };
 }
 
-interface CleanLine {
+export interface CleanLine {
   goodsItemId: number;
   unitId: number;
   quantity: number;
@@ -124,7 +124,7 @@ interface CleanLine {
 }
 
 /** اعتبارسنجی و محاسبه‌ی ردیف‌ها (فی، مبلغ، ارزش افزوده) — مشترک ثبت و ویرایش */
-async function cleanLines(lines: StoreSaleLineInput[] | undefined, station: Station, date: Date, allowPriceChange: boolean): Promise<CleanLine[]> {
+export async function cleanLines(lines: StoreSaleLineInput[] | undefined, station: Station, date: Date, allowPriceChange: boolean): Promise<CleanLine[]> {
   if (!Array.isArray(lines) || lines.length === 0) throw new StoreSaleError("فروش باید حداقل یک ردیف داشته باشد");
   const currency = await baseCurrency();
   const dp = currency.decimalPlaces;
@@ -171,7 +171,7 @@ async function assertStock(station: Station, warehouseId: number | null, lines: 
   for (const [goodsItemId, qty] of totals) await assertNoNegativeStockAfterChange({ warehouseId, goodsItemId, asOfDate: date, delta: -qty, excludeStoreSaleId });
 }
 
-async function resolveCustomer(raw: unknown, station: Station) {
+export async function resolveCustomer(raw: unknown, station: Station) {
   const id = Number(raw) || station.customerId;
   const c = await prisma.customer.findUnique({ where: { id } });
   if (!c) throw new StoreSaleError("مشتری یافت نشد");
@@ -195,6 +195,7 @@ export async function assertSaleEditable(id: number) {
   if (s.creditDeclaredAt) throw new StoreSaleError("برای این فروش «نسیه» ثبت شده است؛ ابتدا نسیه را لغو کنید");
   if (s.deliveryStatus === "DELIVERED") throw new StoreSaleError("این فروش تحویل شده است و قابل ویرایش یا حذف نیست");
   if (await prisma.storeReceipt.findFirst({ where: { saleId: id }, select: { id: true } })) throw new StoreSaleError("برای این فروش دریافت ثبت شده است؛ ابتدا دریافت‌ها را حذف کنید");
+  if (await prisma.storeSaleReturn.findFirst({ where: { saleId: id }, select: { id: true } })) throw new StoreSaleError("برای این فروش برگشت فروش ثبت شده است؛ ابتدا برگشت‌ها را حذف کنید");
   return s;
 }
 

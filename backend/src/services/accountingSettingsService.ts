@@ -17,7 +17,29 @@ let vatCache: { at: number; rows: VatRow[] } | null = null;
 let methodCache: { at: number; rows: MethodRow[] } | null = null;
 let purchaseMethodCache: { at: number; rows: MethodRow[] } | null = null;
 
+let detailLevelsCache: { at: number; levels: number } | null = null;
+
+/** تعداد سطوح تفصیل قابل استفاده در تعریف حساب (۱ تا ۳)؛ تنظیم تکی و بدون تاریخ — پیش‌فرض ۳ */
+export async function getDetailLevels(): Promise<number> {
+  if (!detailLevelsCache || Date.now() - detailLevelsCache.at > CACHE_TTL_MS) {
+    const row = await prisma.accountingDetailLevelSetting.findUnique({ where: { id: 1 } });
+    detailLevelsCache = { at: Date.now(), levels: row?.levels ?? 3 };
+  }
+  return detailLevelsCache.levels;
+}
+
+/** تعداد حساب‌هایی که برای هر سطح تفصیل (۱ تا ۳) نوع تفصیل دارند — قفل برداشتن تیک سطح */
+export async function detailLevelUsage(): Promise<Record<1 | 2 | 3, number>> {
+  const [a, b, c] = await Promise.all([
+    prisma.account.count({ where: { detailType1Id: { not: null } } }),
+    prisma.account.count({ where: { detailType2Id: { not: null } } }),
+    prisma.account.count({ where: { detailType3Id: { not: null } } }),
+  ]);
+  return { 1: a, 2: b, 3: c };
+}
+
 export function invalidateAccountingSettingsCache() {
+  detailLevelsCache = null;
   vatCache = null;
   methodCache = null;
   purchaseMethodCache = null;

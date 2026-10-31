@@ -8,7 +8,7 @@ import { formatJalaliDate } from "../lib/formatDate";
 import { api } from "../lib/api";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 
-// فروش فروشگاهی › «حواله / برگشت حواله فروش فروشگاهی»: فهرست فقط‌خواندنیِ اسناد انبارِ ساخته‌شده با «تایید» تحویل فروش (با «لغو تایید» حذف می‌شوند).
+// مدیریت موجودی و انبار › «حواله / برگشت حواله فروش فروشگاهی»: فهرست فقط‌خواندنیِ اسناد انبارِ ساخته‌شده با «تایید» تحویل فروش (با «لغو تایید» حذف می‌شوند).
 // قیمت‌گذاری، تایید انبار و سند حسابداری انبار مثل هر حواله‌ی دیگر از فرم‌های مشترک انبار انجام می‌شود.
 
 interface Row {
@@ -21,6 +21,7 @@ interface Row {
   quantity: number;
   deliveryNumber: number | null;
   stationTitle: string;
+  counterpartTitle: string;
   description: string;
 }
 const STATUS_FA: Record<string, string> = { REGISTERED: "ثبت", FINALIZED: "تایید انبار" };
@@ -52,6 +53,7 @@ export default function StoreSaleIssues({ kind }: { kind: "ISSUE" | "RETURN" }) 
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10), width: "110px" },
           { header: "انبار", ...s((r) => r.warehouseTitle) },
           { header: "ایستگاه فروش", ...s((r) => r.stationTitle) },
+          { header: "طرف مقابل (مرکز هزینه)", ...s((r) => r.counterpartTitle) },
           { header: "تحویل فروش", ...s((r) => (r.deliveryNumber != null ? toFaDigits(String(r.deliveryNumber)) : "")), width: "100px" },
           { header: "وضعیت", ...s((r) => STATUS_FA[r.status] ?? r.status), width: "110px" },
           { header: "تعداد ردیف", render: (r) => formatAmountFa(r.lineCount), filterType: "number" as const, filterValue: (r: Row) => r.lineCount, width: "100px" },
@@ -59,6 +61,7 @@ export default function StoreSaleIssues({ kind }: { kind: "ISSUE" | "RETURN" }) 
           { header: "شرح", ...s((r) => r.description) },
         ]}
         rows={items}
+        edit={{ path: (r: Row) => `${path}/${r.id}/edit` }}
       />
     </div>
   );

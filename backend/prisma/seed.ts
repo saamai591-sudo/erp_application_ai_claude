@@ -33,7 +33,6 @@ async function main() {
     { order: 1, title: "گروه", codeLength: 1 },
     { order: 2, title: "کل", codeLength: 2 },
     { order: 3, title: "معین", codeLength: 3 },
-    { order: 4, title: "جزء", codeLength: 3 },
   ];
   for (const lvl of levels) {
     await prisma.reportingLevel.upsert({ where: { order: lvl.order }, update: {}, create: lvl });

@@ -168,6 +168,11 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
   const [loaded, setLoaded] = useState(hasPersistedState(`${cacheKey}:form`));
   const { flash } = useSavedFlash();
 
+  const [detailLevels, setDetailLevels] = useState(3);
+  useEffect(() => {
+    api.get("/accounting-settings/detail-levels").then((r: { levels: number }) => setDetailLevels(r.levels)).catch(() => {});
+  }, []);
+
   useEffect(() => {
     async function init() {
       const [lvls, dts, accs]: [Level[], DetailType[], AccountRow[]] = await Promise.all([
@@ -322,27 +327,27 @@ function AccountForm({ editId, parentId }: { editId?: number; parentId?: number 
                   تسعیرپذیر
                 </label>
               </div>
-              <div className="form-field full">
+              {detailLevels >= 1 && <div className="form-field full">
                 <label>تفصیل سطح ۱ (اختیاری)</label>
                 <select value={form.detailType1Id} disabled={hasTx} onChange={(e) => setForm({ ...form, detailType1Id: e.target.value })}>
                   <option value="">ندارد</option>
                   {detailTypes.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
                 </select>
-              </div>
-              <div className="form-field full">
+              </div>}
+              {detailLevels >= 2 && <div className="form-field full">
                 <label>تفصیل سطح ۲ (اختیاری)</label>
                 <select value={form.detailType2Id} disabled={hasTx} onChange={(e) => setForm({ ...form, detailType2Id: e.target.value })}>
                   <option value="">ندارد</option>
                   {detailTypes.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
                 </select>
-              </div>
-              <div className="form-field full">
+              </div>}
+              {detailLevels >= 3 && <div className="form-field full">
                 <label>تفصیل سطح ۳ (اختیاری)</label>
                 <select value={form.detailType3Id} disabled={hasTx} onChange={(e) => setForm({ ...form, detailType3Id: e.target.value })}>
                   <option value="">ندارد</option>
                   {detailTypes.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
                 </select>
-              </div>
+              </div>}
             </>
           )}
         </div>

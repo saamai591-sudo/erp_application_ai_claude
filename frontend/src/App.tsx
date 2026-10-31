@@ -88,8 +88,17 @@ import SalesQuoteLostReasons from "./pages/SalesQuoteLostReasons";
 import SalesPriceLists from "./pages/SalesPriceLists";
 import SalesStations from "./pages/SalesStations";
 import SalesShifts from "./pages/SalesShifts";
+import StoreShowcases from "./pages/StoreShowcases";
+import VoucherTypes from "./pages/VoucherTypes";
+import VoucherBatches from "./pages/VoucherBatches";
+import VoucherSales from "./pages/VoucherSales";
+import Vouchers from "./pages/Vouchers";
+import VoucherLiability from "./pages/VoucherLiability";
 import StoreDeliveries from "./pages/StoreDeliveries";
 import StoreSaleIssues from "./pages/StoreSaleIssues";
+import StoreReturns from "./pages/StoreReturns";
+import StorePayments from "./pages/StorePayments";
+import StoreSaleIssueView from "./pages/StoreSaleIssueView";
 import StoreSales from "./pages/StoreSales";
 import StoreReceipts from "./pages/StoreReceipts";
 import FrequentDescriptions from "./pages/FrequentDescriptions";
@@ -460,6 +469,12 @@ export default function App() {
             <Route path="/store-receipts" element={<StoreReceipts />} />
             <Route path="/store-receipts/new" element={<StoreReceipts />} />
             <Route path="/store-receipts/:id/edit" element={<StoreReceipts />} />
+            <Route path="/store-returns" element={<StoreReturns />} />
+            <Route path="/store-returns/new" element={<StoreReturns />} />
+            <Route path="/store-returns/:id/edit" element={<StoreReturns />} />
+            <Route path="/store-payments" element={<StorePayments />} />
+            <Route path="/store-payments/new" element={<StorePayments />} />
+            <Route path="/store-payments/:id/edit" element={<StorePayments />} />
             <Route path="/store-sales" element={<StoreSales />} />
             <Route path="/store-sales/new" element={<StoreSales />} />
             <Route path="/store-sales/:id/edit" element={<StoreSales />} />
@@ -468,9 +483,24 @@ export default function App() {
             <Route path="/sales-stations/:id/edit" element={<SalesStations />} />
             <Route path="/store-sale-issues" element={<StoreSaleIssues kind="ISSUE" />} />
             <Route path="/store-sale-returns" element={<StoreSaleIssues kind="RETURN" />} />
+            <Route path="/store-sale-issues/:id/edit" element={<StoreSaleIssueView kind="ISSUE" />} />
+            <Route path="/store-sale-returns/:id/edit" element={<StoreSaleIssueView kind="RETURN" />} />
             <Route path="/store-deliveries" element={<StoreDeliveries />} />
             <Route path="/store-deliveries/new" element={<StoreDeliveries />} />
             <Route path="/store-deliveries/:id/edit" element={<StoreDeliveries />} />
+            <Route path="/voucher-types" element={<VoucherTypes />} />
+            <Route path="/voucher-types/new" element={<VoucherTypes />} />
+            <Route path="/voucher-types/:id/edit" element={<VoucherTypes />} />
+            <Route path="/voucher-batches" element={<VoucherBatches />} />
+            <Route path="/voucher-batches/new" element={<VoucherBatches />} />
+            <Route path="/voucher-sales" element={<VoucherSales />} />
+            <Route path="/voucher-sales/new" element={<VoucherSales />} />
+            <Route path="/voucher-sales/:id/edit" element={<VoucherSales />} />
+            <Route path="/vouchers" element={<Vouchers />} />
+            <Route path="/voucher-liability" element={<VoucherLiability />} />
+            <Route path="/store-showcases" element={<StoreShowcases />} />
+            <Route path="/store-showcases/new" element={<StoreShowcases />} />
+            <Route path="/store-showcases/:id/edit" element={<StoreShowcases />} />
             <Route path="/sales-shifts" element={<SalesShifts />} />
             <Route path="/sales-shifts/new" element={<SalesShifts />} />
             <Route path="/sales-shifts/:id/edit" element={<SalesShifts />} />

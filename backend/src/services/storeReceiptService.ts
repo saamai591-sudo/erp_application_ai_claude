@@ -1,3 +1,5 @@
+import { getEntitlements } from "../license/licenseService";
+import { normalizeSerial, redeemVoucherInTx, releaseVoucherInTx } from "./voucherService";
 import { prisma } from "../lib/prisma";
 import { getRequestContext } from "../lib/requestContext";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
@@ -73,6 +75,9 @@ async function assertWithinPayable(tx: any, saleId: number, amount: number, excl
  * سقف جمع (قابل پرداخت) برای مجموعِ همه‌ی اقلامِ این فراخوانی + دریافت‌های قبلی (نقد و کارتی) کنترل می‌شود.
  */
 export async function createStoreReceipts(body: Body & { items?: CardReceiptItem[] }) {
+  // دریافت با بن (باشگاه مشتریان): ارزش اسمی هر بن مبلغ دریافت است؛ سریال‌ها در تراکنش مصرف می‌شوند
+  const voucherSerials = (Array.isArray(body.items) ? body.items : []).map((x) => (x as any).voucherSerial).filter(Boolean);
+  if (voucherSerials.length) return createVoucherReceipts(body, voucherSerials as string[]);
   const saleId = Number(body.saleId);
   if (!saleId) throw new StoreSaleError("فروش را انتخاب کنید");
   const items: { amount: number; cardReaderId: number | null; bankAccountId: number | null; referenceNumber: string | null; description: string | null }[] = [];
@@ -131,6 +136,41 @@ export async function createStoreReceipts(body: Body & { items?: CardReceiptItem
   });
 }
 
+/** دریافت با بن: هر سریال یک دریافت؛ مبلغ = ارزش اسمیِ بن (ثابت، خرد نمی‌شود) و جمعِ همه‌ی دریافت‌ها از قابل پرداخت فروش بیشتر نمی‌شود */
+async function createVoucherReceipts(body: Body & { items?: CardReceiptItem[] }, serialsRaw: string[]) {
+  const saleId = Number(body.saleId);
+  if (!saleId) throw new StoreSaleError("فروش را انتخاب کنید");
+  const ent = await getEntitlements();
+  if (ent.modules && !ent.modules.includes("customer-club")) throw new StoreSaleError("ماژول «باشگاه مشتریان» برای این نصب لایسنس نشده است");
+  const { date, fp, description } = await checked({ date: body.date, amount: 1, description: body.description });
+  const serials = serialsRaw.map(normalizeSerial);
+  if (new Set(serials).size !== serials.length) throw new StoreSaleError("یک بن بیش از یک بار انتخاب شده است");
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100022, ${saleId})`);
+    const sale = await tx.storeSale.findUnique({ where: { id: saleId } });
+    if (!sale) throw new StoreSaleError("فروش یافت نشد");
+    if (date.getTime() < sale.date.getTime()) throw new StoreSaleError("تاریخ دریافت نمی‌تواند قبل از تاریخ فروش باشد");
+    await assertAfterLastDelivery(sale.stationId, date);
+    const redeemed: { id: number; faceValue: number; serial: string }[] = [];
+    for (const serial of serials) {
+      // eslint-disable-next-line no-await-in-loop
+      redeemed.push(await redeemVoucherInTx(tx, serial, date));
+    }
+    await assertWithinPayable(tx, saleId, redeemed.reduce((n, v) => n + v.faceValue, 0));
+    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100023, ${fp.id})`);
+    const last = await tx.storeReceipt.findFirst({ where: { fiscalPeriodId: fp.id }, orderBy: { number: "desc" }, select: { number: true } });
+    let number = last?.number ?? 0;
+    const created: { id: number; number: number }[] = [];
+    for (const v of redeemed) {
+      number += 1;
+      // eslint-disable-next-line no-await-in-loop
+      const r = await tx.storeReceipt.create({ data: { fiscalPeriodId: fp.id, number, date, saleId, stationId: sale.stationId, voucherId: v.id, referenceNumber: v.serial, amount: v.faceValue, description, createdById: getRequestContext()?.userId ?? null } });
+      created.push({ id: r.id, number: r.number });
+    }
+    return created;
+  });
+}
+
 export async function createStoreReceipt(body: Body) {
   const [one] = await createStoreReceipts(body);
   return one;
@@ -142,13 +182,14 @@ export async function updateStoreReceipt(id: number, body: Body) {
   if (ex.deliveryId) throw new StoreSaleError("این دریافت در «تحویل فروش» بسته شده و قابل ویرایش نیست");
   if (body.saleId && Number(body.saleId) !== ex.saleId) throw new StoreSaleError("فروشِ یک دریافت بعد از ثبت قابل تغییر نیست");
   const { date, fp, amount, description } = await checked(body);
+  if (ex.voucherId && Math.abs(amount - Number(ex.amount)) > 1e-6) throw new StoreSaleError("مبلغ دریافت با بن همان ارزش اسمیِ بن است و تغییر نمی‌کند؛ برای تغییر، دریافت را حذف و بن دیگری ثبت کنید");
   if (fp.id !== ex.fiscalPeriodId) throw new StoreSaleError("تاریخ دریافت را نمی‌توان به دوره‌ی مالی دیگری برد");
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100022, ${ex.saleId})`);
     const sale = await assertWithinPayable(tx, ex.saleId, amount, id);
     if (date.getTime() < sale.date.getTime()) throw new StoreSaleError("تاریخ دریافت نمی‌تواند قبل از تاریخ فروش باشد");
     // شماره پیگیری فقط برای دریافت کارتخوان/حواله معنا دارد
-    const refNo = ex.cashBoxId ? undefined : body.referenceNumber === undefined ? undefined : String(body.referenceNumber ?? "").trim().slice(0, 100) || null;
+    const refNo = ex.cashBoxId || ex.voucherId ? undefined : body.referenceNumber === undefined ? undefined : String(body.referenceNumber ?? "").trim().slice(0, 100) || null;
     await tx.storeReceipt.update({ where: { id }, data: { date, amount, description, ...(refNo !== undefined ? { referenceNumber: refNo } : {}) } });
   });
 }
@@ -157,7 +198,11 @@ export async function deleteStoreReceipt(id: number) {
   const ex = await prisma.storeReceipt.findUnique({ where: { id }, select: { id: true, deliveryId: true } });
   if (!ex) throw new StoreSaleError("دریافت یافت نشد");
   if (ex.deliveryId) throw new StoreSaleError("این دریافت در «تحویل فروش» بسته شده و قابل حذف نیست");
-  await prisma.storeReceipt.delete({ where: { id } });
+  await prisma.$transaction(async (tx) => {
+    const r = await tx.storeReceipt.findUnique({ where: { id }, select: { voucherId: true } });
+    await tx.storeReceipt.delete({ where: { id } });
+    if (r?.voucherId) await releaseVoucherInTx(tx, r.voucherId);
+  });
 }
 
 export function receiptShape(r: any) {
@@ -170,12 +215,13 @@ export function receiptShape(r: any) {
     saleNumber: r.sale?.number ?? null,
     stationTitle: r.station?.title ?? "",
     cashBoxTitle: r.cashBox?.title ?? "",
-    method: r.cardReaderId ? "CARD" : r.bankAccountId ? "TRANSFER" : "CASH",
+    method: r.voucherId ? "VOUCHER" : r.cardReaderId ? "CARD" : r.bankAccountId ? "TRANSFER" : "CASH",
     bankAccountId: r.bankAccountId ?? null,
     bankAccountTitle: r.bankAccount ? bankAccountDetailTitle(r.bankAccount) : "",
     referenceNumber: r.referenceNumber ?? "",
     cardReaderId: r.cardReaderId ?? null,
     cardReaderTitle: r.cardReader?.title ?? "",
+    voucherSerial: r.voucher?.serial ?? "",
     customerTitle: p ? p.detailTitle || `${p.firstName || ""} ${p.lastName || ""}`.trim() || p.name || "" : "",
     amount: Number(r.amount),
     description: r.description ?? "",

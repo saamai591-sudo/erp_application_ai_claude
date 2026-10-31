@@ -114,18 +114,76 @@ const PURCHASE_METHOD_CONFIG: DatedSettingConfig<DatedRow & { method: MethodValu
   validate: (value) => (value ? null : "روش شناسایی پیش‌پرداخت ارزی خرید الزامی است"),
 };
 
-type TabKey = "currency" | "purchaseCurrency" | "vat";
+type TabKey = "currency" | "purchaseCurrency" | "vat" | "detailLevels";
 const TABS: { key: TabKey; label: string }[] = [
   { key: "currency", label: "تنظیمات ارز فروش" },
   { key: "purchaseCurrency", label: "تنظیمات ارز خرید" },
   { key: "vat", label: "ارزش افزوده" },
+  { key: "detailLevels", label: "سطوح تفصیل" },
 ];
+
+// سطوح تفصیل: تنظیم تکی و بدون تاریخ؛ سه چک‌باکس پشت‌سرهم (تفصیل ۲ بدون ۱ و تفصیل ۳ بدون ۲ فعال نمی‌شود؛ برداشتن از آخر به اول).
+// پشت صحنه فقط یک عدد (۰ تا ۳) ذخیره می‌شود. برداشتن تیک سطحی که حسابی از آن استفاده می‌کند توسط سرور رد می‌شود.
+function DetailLevelsTab() {
+  const [levels, setLevels] = useState(3);
+  const [usage, setUsage] = useState<Record<string, number>>({});
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api.get("/accounting-settings/detail-levels").then((r: { levels: number; usage: Record<string, number> }) => {
+      setLevels(r.levels);
+      setUsage(r.usage);
+      setLoaded(true);
+    }).catch((e: ApiError) => showError(e.message));
+  }, []);
+  async function change(next: number) {
+    setBusy(true);
+    try {
+      const r: { levels: number; usage: Record<string, number> } = await api.put("/accounting-settings/detail-levels", { levels: next });
+      setLevels(r.levels);
+      setUsage(r.usage);
+      showToast("تنظیم سطوح تفصیل ذخیره شد");
+    } catch (e) {
+      showError((e as ApiError).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!loaded) return null;
+  return (
+    <div>
+      <p style={{ margin: "0 0 12px", color: "var(--ink-soft)", fontSize: 13 }}>
+        سطح‌های تفصیلِ فعال در تعریف حساب. تفصیل ۲ بدون تفصیل ۱ و تفصیل ۳ بدون تفصیل ۲ فعال نمی‌شود؛ برداشتن تیک هم از آخر به اول است و تا وقتی حسابی از یک سطح استفاده می‌کند، آن سطح برداشته نمی‌شود.
+      </p>
+      {[1, 2, 3].map((n) => {
+        const checked = levels >= n;
+        const canTick = !checked && levels === n - 1;
+        const used = usage[String(n)] ?? 0;
+        const canUntick = checked && levels === n && used === 0;
+        const disabled = busy || (!checked && !canTick) || (checked && !canUntick);
+        let note = "";
+        if (checked && levels === n && used > 0) note = `${toFaDigits(String(used))} حساب از این سطح استفاده می‌کند`;
+        else if (checked && levels > n) note = `ابتدا تفصیل ${toFaDigits(String(n + 1))} را بردارید`;
+        else if (!checked && !canTick) note = `ابتدا تفصیل ${toFaDigits(String(n - 1))} را فعال کنید`;
+        return (
+          <div key={n} className="form-field" style={{ marginBottom: 8 }}>
+            <label className="checkbox-row">
+              <input type="checkbox" checked={checked} disabled={disabled} onChange={() => change(checked ? n - 1 : n)} />
+              تفصیل {toFaDigits(String(n))}
+              {note && <span style={{ color: "var(--ink-soft)", fontSize: 12, marginInlineStart: 8 }}>({note})</span>}
+            </label>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function AccountingSettings() {
   const [storedTab, setTab] = usePersistedState<TabKey>("/accounting-settings:tab", "currency");
   // بدون قابلیت FX در لایسنس، زبانه‌های «تنظیمات ارز فروش/خرید» معنایی ندارند و نمایش داده نمی‌شوند
   const fxEnabled = useFxEnabled();
-  const tabs = fxEnabled ? TABS : TABS.filter((t) => t.key === "vat");
+  const tabs = fxEnabled ? TABS : TABS.filter((t) => t.key === "vat" || t.key === "detailLevels");
   const tab: TabKey = tabs.some((t) => t.key === storedTab) ? storedTab : "vat";
   return (
     <div>
@@ -148,6 +206,7 @@ export default function AccountingSettings() {
         {tab === "currency" && <DatedSettingTab key="currency" config={METHOD_CONFIG} />}
         {tab === "purchaseCurrency" && <DatedSettingTab key="purchaseCurrency" config={PURCHASE_METHOD_CONFIG} />}
         {tab === "vat" && <DatedSettingTab key="vat" config={VAT_CONFIG} />}
+        {tab === "detailLevels" && <DetailLevelsTab key="detailLevels" />}
       </div>
     </div>
   );

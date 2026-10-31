@@ -295,6 +295,11 @@ router.get("/detail-summary", async (req: AuthedRequest, res) => {
 
   const codes = grouped.map((g) => g[slotField]).filter(Boolean);
   const titles = await resolveDetailTitles(codes);
+  // نوع تفصیلِ هر کد (ستون «نوع تفصیل»): یک پرس‌وجوی دسته‌ای روی DetailCodeUsage
+  const usages = codes.length
+    ? await prisma.detailCodeUsage.findMany({ where: { code: { in: codes } }, select: { code: true, detailType: { select: { title: true } } } })
+    : [];
+  const typeTitles = new Map<string, string>(usages.map((u) => [u.code, u.detailType.title]));
 
   const results = grouped
     .map((g) => {
@@ -306,6 +311,7 @@ router.get("/detail-summary", async (req: AuthedRequest, res) => {
         id: code,
         code,
         title: titles[code] || code,
+        detailTypeTitle: typeTitles.get(code) ?? "",
         hasChildren: false,
         totalDebit,
         totalCredit,
@@ -324,6 +330,7 @@ router.get("/detail-summary", async (req: AuthedRequest, res) => {
   const DETAIL_COLUMNS: Record<string, ServerColumnDef<(typeof results)[number]>> = {
     code: { type: "string", get: (r) => r.code },
     title: { type: "string", get: (r) => r.title },
+    detailTypeTitle: { type: "string", get: (r) => r.detailTypeTitle },
     totalDebit: { type: "number", get: (r) => r.totalDebit },
     totalCredit: { type: "number", get: (r) => r.totalCredit },
     balanceDebit: { type: "number", get: (r) => r.balanceDebit },

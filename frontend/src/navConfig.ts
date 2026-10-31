@@ -172,6 +172,7 @@ const RAW_MODULES: ModuleGroup[] = [
           // نگاه کنید به project_sales_delivery_request_deferred.md.
           { key: "sales-deliveries", label: "حواله فروش", list: "/sales-deliveries", create: "/sales-deliveries/new", icon: "ledger" },
           { key: "inventory-counting-shortages", label: "کسری انبارگردانی", list: "/inventory-counting-shortages", create: "/inventory-counting-shortages/new", icon: "file" },
+          { key: "store-sale-issues", label: "حواله فروش فروشگاهی", list: "/store-sale-issues", icon: "ledger" },
         ],
       },
       {
@@ -187,6 +188,7 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "project-consumption-returns", label: "برگشت مصرف پروژه", list: "/project-consumption-returns", create: "/project-consumption-returns/new", icon: "file" },
           { key: "production-consumption-returns", label: "برگشت مصرف تولید", list: "/production-consumption-returns", create: "/production-consumption-returns/new", icon: "file" },
           { key: "sales-returns", label: "برگشت از فروش", list: "/sales-returns", create: "/sales-returns/new", icon: "file" },
+          { key: "store-sale-returns", label: "برگشت حواله فروش فروشگاهی", list: "/store-sale-returns", icon: "ledger" },
         ],
       },
       {
@@ -255,6 +257,27 @@ const RAW_MODULES: ModuleGroup[] = [
     ],
   },
   {
+    title: "باشگاه مشتریان",
+    subModules: [
+      {
+        title: "تنظیمات",
+        items: [{ key: "voucher-types", label: "نوع بن‌کارت", list: "/voucher-types", create: "/voucher-types/new", icon: "tag" }],
+      },
+      {
+        title: "عملیات",
+        items: [
+          { key: "voucher-batches", label: "صدور بن‌کارت", list: "/voucher-batches", create: "/voucher-batches/new", icon: "gift" },
+          { key: "voucher-sales", label: "فروش بن‌کارت به سازمان", list: "/voucher-sales", create: "/voucher-sales/new", icon: "cart" },
+          { key: "vouchers", label: "بن‌کارت‌ها", list: "/vouchers", icon: "file", type: "report" },
+        ],
+      },
+      {
+        title: "گزارش",
+        items: [{ key: "voucher-liability", label: "تعهد بن‌کارت‌ها", list: "/voucher-liability", icon: "chart", type: "report" }],
+      },
+    ],
+  },
+  {
     title: "فروش فروشگاهی",
     subModules: [
       {
@@ -262,6 +285,7 @@ const RAW_MODULES: ModuleGroup[] = [
         items: [
           { key: "sales-stations", label: "ایستگاه فروش", list: "/sales-stations", create: "/sales-stations/new", icon: "store" },
           { key: "sales-shifts", label: "شیفت فروش", list: "/sales-shifts", create: "/sales-shifts/new", icon: "store" },
+          { key: "store-showcases", label: "ویترین کالا", list: "/store-showcases", create: "/store-showcases/new", icon: "store" },
         ],
       },
       {
@@ -269,9 +293,9 @@ const RAW_MODULES: ModuleGroup[] = [
         items: [
           { key: "store-sales", label: "فروش فروشگاهی", list: "/store-sales", create: "/store-sales/new", icon: "cart" },
           { key: "store-deliveries", label: "تحویل فروش", list: "/store-deliveries", create: "/store-deliveries/new", icon: "cart" },
-          { key: "store-sale-issues", label: "حواله فروش فروشگاهی", list: "/store-sale-issues", icon: "ledger", type: "report" },
-          { key: "store-sale-returns", label: "برگشت حواله فروش فروشگاهی", list: "/store-sale-returns", icon: "ledger", type: "report" },
           { key: "store-receipts", label: "دریافت فروشگاهی", list: "/store-receipts", create: "/store-receipts/new", icon: "wallet" },
+          { key: "store-returns", label: "برگشت فروش فروشگاهی", list: "/store-returns", create: "/store-returns/new", icon: "file" },
+          { key: "store-payments", label: "پرداخت فروشگاهی", list: "/store-payments", create: "/store-payments/new", icon: "wallet" },
         ],
       },
     ],

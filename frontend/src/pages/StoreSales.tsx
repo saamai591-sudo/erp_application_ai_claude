@@ -11,6 +11,10 @@ import { FieldHint } from "../components/FieldHint";
 import { RequiredMark } from "../components/RequiredMark";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { RecordPickerField } from "../components/RecordPicker";
+import { ShiftPromptDialog } from "../components/ShiftPromptDialog";
+import { ShowcaseLayout } from "../components/ShowcaseSidebar";
+import { StoreVoucherDialog } from "../components/StoreVoucherDialog";
+import { useModuleEnabled } from "../lib/useEntitlements";
 import { DescriptionField } from "../components/DescriptionField";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
@@ -24,12 +28,16 @@ import { useTabs } from "../lib/TabsContext";
 import { Modal } from "../components/Modal";
 import { AmountInput } from "../components/AmountInput";
 import { localTodayIso } from "../lib/formatDate";
+import { isTabDirty, currentTabPath } from "../lib/unsavedChanges";
 import { stageFormPrefill, takeFormPrefill } from "../lib/formPrefill";
 import { StoreCardReceiptDialog, ExistingReceiptsTable, ExistingReceipt, ReceiptPayee } from "../components/StoreCardReceiptDialog";
 
 // فروش فروشگاهی › عملیات › «فروش فروشگاهی»: اول تاریخ و ایستگاه انتخاب می‌شود؛ ردیف‌ها با بارکدخوان (فیلد بارکد کالا) یا جست‌وجو اضافه می‌شوند، مقدار پیش‌فرض ۱ و قابل‌تغییر است.
 // فی از «اعلامیه قیمت فروش» با حوزه‌ی همان ایستگاه خوانده می‌شود (پله‌ی مقدار هم)؛ کالای بدون فی در آن اعلامیه اصلاً قابل انتخاب نیست. فی فقط با مجوز «تغییر فی» قابل تغییر است.
 // سند حسابداری و حواله انبار ندارد؛ تا وقتی «تحویل‌نشده» است تعدادش از موجودی گزارش‌ها کم می‌شود. قواعد نهایی در سرور (services/storeSaleService.ts).
+
+/** ارقام فارسی/عربی → لاتین (بارکدخوان و تایپ دستی یکسان جست‌وجو شوند) */
+const normDigits = (v: string) => v.replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0)).replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660));
 
 interface StationCardReader {
   id: number;
@@ -123,7 +131,8 @@ interface ReceiptRow {
   amount: number;
   description: string;
   updatedAt?: string;
-  method?: "CASH" | "CARD" | "TRANSFER";
+  method?: "CASH" | "CARD" | "TRANSFER" | "VOUCHER";
+  voucherSerial?: string;
   cardReaderTitle?: string;
   bankAccountTitle?: string;
   referenceNumber?: string;
@@ -243,7 +252,7 @@ function SaleForm({ editId }: { editId?: number }) {
   const [payInfo, setPayInfo] = useState<{ payable: number; paid: number; remaining: number; status: "UNPAID" | "PARTIAL" | "PAID" }>({ payable: 0, paid: 0, remaining: 0, status: "UNPAID" });
   const [newRec, setNewRec] = useState({ date: localTodayIso(), amount: "", description: "" });
   const { hasPermission } = usePermissions();
-  const { openTab } = useTabs();
+  const { openTab, closeTab, activeTabId } = useTabs();
   const [cashDialog, setCashDialog] = useState(false);
   const [credit, setCredit] = useState<{ declared: boolean; note: string }>({ declared: false, note: "" });
   const [creditDialog, setCreditDialog] = useState(false);
@@ -251,6 +260,8 @@ function SaleForm({ editId }: { editId?: number }) {
   const [paying, setPaying] = useState(false);
   const [cardDialog, setCardDialog] = useState(false);
   const [transferDialog, setTransferDialog] = useState(false);
+  const [voucherDialog, setVoucherDialog] = useState(false);
+  const clubEnabled = useModuleEnabled("customer-club");
   const [stations, setStations] = useState<StationOpt[]>([]);
   const [shifts, setShifts] = useState<ShiftOpt[]>([]);
   const [customers, setCustomers] = useState<CustomerOpt[]>([]);
@@ -312,7 +323,13 @@ function SaleForm({ editId }: { editId?: number }) {
   const itemMap = useMemo(() => new Map((sell?.items ?? []).map((i) => [i.id, i])), [sell]);
   const byBarcode = useMemo(() => {
     const m = new Map<string, Sellable>();
-    for (const i of sell?.items ?? []) if (i.barcode) m.set(i.barcode.trim(), i);
+    for (const i of sell?.items ?? []) if (i.barcode) m.set(normDigits(i.barcode.trim()), i);
+    return m;
+  }, [sell]);
+  /** جست‌وجوی «بارکد» هم کد کالا را می‌پذیرد (بارکد اولویت دارد) */
+  const byCode = useMemo(() => {
+    const m = new Map<string, Sellable>();
+    for (const i of sell?.items ?? []) if (i.fullCode) m.set(normDigits(i.fullCode.trim()), i);
     return m;
   }, [sell]);
   const dp = sell?.decimalPlaces ?? 0;
@@ -329,9 +346,10 @@ function SaleForm({ editId }: { editId?: number }) {
   /** تسویه‌شده (باقیمانده صفر) یا نسیه‌ی عامدانه */
   const settledNow = credit.declared || payInfo.remaining <= 1e-6;
   const cashReceipts = receipts.filter((r) => (r.method ?? "CASH") === "CASH");
-  const toExisting = (rs: ReceiptRow[]): ExistingReceipt[] => rs.map((r) => ({ id: r.id, number: r.number, date: r.date, amount: r.amount, description: r.description, payeeTitle: r.method === "CARD" ? r.cardReaderTitle : r.bankAccountTitle, referenceNumber: r.referenceNumber, updatedAt: r.updatedAt }));
+  const toExisting = (rs: ReceiptRow[]): ExistingReceipt[] => rs.map((r) => ({ id: r.id, number: r.number, date: r.date, amount: r.amount, description: r.description, payeeTitle: r.method === "CARD" ? r.cardReaderTitle : r.method === "VOUCHER" ? r.voucherSerial : r.bankAccountTitle, referenceNumber: r.referenceNumber, updatedAt: r.updatedAt }));
   const cardReceipts = receipts.filter((r) => r.method === "CARD");
   const transferReceipts = receipts.filter((r) => r.method === "TRANSFER");
+  const voucherReceipts = receipts.filter((r) => r.method === "VOUCHER");
   const cardPayees: ReceiptPayee[] = (station?.cardReaders ?? []).map((c) => ({ id: c.id, label: `${toFaDigits(String(c.code))} — ${c.title}`, terminal: c.terminalNumber, account: `${toFaDigits(c.bankAccountCode)} - ${toFaDigits(c.bankAccountTitle)}` }));
   const transferPayees: ReceiptPayee[] = (station?.bankAccounts ?? []).map((b) => ({ id: b.id, label: `${toFaDigits(b.detailCode)} - ${toFaDigits(b.detailTitle)}` }));
   const canChangePrice = !!sell?.canChangePrice;
@@ -365,9 +383,10 @@ function SaleForm({ editId }: { editId?: number }) {
   function onBarcodeEnter() {
     const code = barcode.trim();
     if (!code) return;
-    const it = byBarcode.get(code);
+    const key = normDigits(code);
+    const it = byBarcode.get(key) ?? byCode.get(key);
     if (!it) {
-      showToast(`بارکد «${code}» یافت نشد یا کالا در اعلامیه‌ی قیمت این ایستگاه فی ندارد`, "error");
+      showToast(`بارکد/کد «${code}» یافت نشد یا کالا در اعلامیه‌ی قیمت این ایستگاه فی ندارد`, "error");
     } else addItem(it);
     setBarcode("");
     barcodeRef.current?.focus();
@@ -378,13 +397,18 @@ function SaleForm({ editId }: { editId?: number }) {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    await save();
+  }
+
+  /** ذخیره‌ی فروش؛ true = ذخیره شد (یا خطایی نبود). کارت‌ها قبل از بازشدن، تغییرات ذخیره‌نشده را با همین تابع ذخیره می‌کنند. */
+  async function save(): Promise<boolean> {
     setError(null);
-    if (!header.date) return setError("تاریخ فروش را انتخاب کنید");
-    if (!header.shiftId) return setError("شیفت را انتخاب کنید");
-    if (!header.shiftDate) return setError("تاریخ شروع شیفت را وارد کنید");
-    if (header.date < header.shiftDate) return setError("تاریخ فاکتور نمی‌تواند قبل از تاریخ شروع شیفت باشد");
-    if (rows.length === 0) return setError("حداقل یک ردیف اضافه کنید");
-    for (const [i, r] of rows.entries()) if (!(qtyOf(r) > 0)) return setError(`مقدار ردیف ${toFaDigits(String(i + 1))} باید عددی بزرگ‌تر از صفر باشد`);
+    if (!header.date) { setError("تاریخ فروش را انتخاب کنید"); return false; }
+    if (!header.shiftId) { setError("شیفت را انتخاب کنید"); return false; }
+    if (!header.shiftDate) { setError("تاریخ شروع شیفت را وارد کنید"); return false; }
+    if (header.date < header.shiftDate) { setError("تاریخ فاکتور نمی‌تواند قبل از تاریخ شروع شیفت باشد"); return false; }
+    if (rows.length === 0) { setError("حداقل یک ردیف اضافه کنید"); return false; }
+    for (const [i, r] of rows.entries()) if (!(qtyOf(r) > 0)) { setError(`مقدار ردیف ${toFaDigits(String(i + 1))} باید عددی بزرگ‌تر از صفر باشد`); return false; }
     const body = {
       date: header.date,
       shiftId: Number(header.shiftId),
@@ -408,10 +432,21 @@ function SaleForm({ editId }: { editId?: number }) {
         const created = await api.post("/store-sales", body);
         flash();
         navigate(`/store-sales/${created.id}/edit`);
+        return false; // فرم به رکورد تازه می‌رود؛ کارت‌ها فقط روی فروش ذخیره‌شده فعال‌اند
       }
+      return true;
     } catch (err) {
       setError((err as ApiError).message);
+      return false;
     }
+  }
+
+  /** کلیک روی هر کارت: اگر تغییر ذخیره‌نشده هست اول ذخیره می‌شود و فقط در صورت موفقیت کارت باز می‌شود */
+  async function openCard(action: () => void) {
+    if (!locked && isTabDirty(currentTabPath())) {
+      if (!(await save())) return;
+    }
+    action();
   }
 
   async function reloadSale() {
@@ -444,6 +479,21 @@ function SaleForm({ editId }: { editId?: number }) {
       await api.post("/store-receipts/batch", { saleId: editId, date: today < header.date ? header.date : today, items: body, description: "" });
       setCardDialog(false);
       setTransferDialog(false);
+      await reloadSale();
+    } catch (err) {
+      setError((err as ApiError).message);
+    } finally {
+      setPaying(false);
+    }
+  }
+  async function payVouchers(serials: string[]) {
+    if (!editId || paying) return;
+    setPaying(true);
+    setError(null);
+    try {
+      const today = localTodayIso();
+      await api.post("/store-receipts/batch", { saleId: editId, date: today < header.date ? header.date : today, items: serials.map((voucherSerial) => ({ voucherSerial })), description: "" });
+      setVoucherDialog(false);
       await reloadSale();
     } catch (err) {
       setError((err as ApiError).message);
@@ -500,9 +550,22 @@ function SaleForm({ editId }: { editId?: number }) {
   }
 
   if (!loaded) return null;
+  const needShift = !header.shiftId && !locked;
   const linesLocked = locked || !sell || !sell.priceListId;
   return (
     <FormPage title={editId ? `فروش فروشگاهی شماره ${toFaDigits(String(meta?.number ?? ""))}` : "فروش فروشگاهی جدید"} formId="store-sale-form" closePath="/store-sales" newPath="/store-sales/new" onDelete={editId && !locked ? handleDelete : undefined} saveDisabled={locked}>
+      {needShift && (
+        <ShiftPromptDialog
+          shifts={header.stationId ? shifts.filter((x) => String(x.stationId) === header.stationId) : shifts}
+          defaultDate={header.date}
+          onCancel={() => { if (activeTabId) closeTab(activeTabId, { preferPath: "/store-sales" }); }}
+          onConfirm={(x, shiftDate) => {
+            const st = stations.find((q) => q.id === x.stationId);
+            setHeader({ ...header, shiftId: String(x.id), stationId: String(x.stationId), shiftDate, customerId: header.customerId || (st ? String(st.customerId) : "") });
+          }}
+        />
+      )}
+      <ShowcaseLayout stationId={header.stationId} sellable={itemMap} onPick={addItem} disabled={linesLocked} visible={ready && !!sell?.priceListId && !locked}>
       <form id="store-sale-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
         {delivered && <div className="alert warn">این فروش تحویل شده است و قابل ویرایش یا حذف نیست.</div>}
@@ -515,36 +578,18 @@ function SaleForm({ editId }: { editId?: number }) {
         {!delivered && !credit.declared && payInfo.remaining > 0 && <div className="alert warn">این فروش تسویه نشده است. یا دریافت را ثبت کنید یا باقیمانده را عامدانه «نسیه» کنید؛ فروشِ تسویه‌نشده‌ای که نسیه نشده باشد قابل تحویل نیست.</div>}
         {!delivered && hasReceipts && <div className="alert warn">برای این فروش دریافت ثبت شده است؛ برای ویرایش یا حذف فروش ابتدا دریافت‌ها را حذف کنید.</div>}
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
-          <div className="form-grid">
+          <div className="form-grid store-compact">
             <div className="form-field">
               <label>تاریخ<RequiredMark /></label>
               <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
             </div>
-            <div className="form-field">
-              <label>شیفت<RequiredMark /> <FieldHint label="شیفت" text="شیفت و تاریخ شروع شیفت جای انتخاب ایستگاه را می‌گیرند؛ ایستگاه از شیفت می‌آید و فی و اقلام قابل‌فروش از اعلامیه‌ی قیمتِ همان ایستگاه است. ایستگاه بعد از ثبت قابل تغییر نیست." /></label>
-              <RecordPickerField<ShiftOpt>
-                title="انتخاب شیفت"
-                displayValue={shift ? `${shift.title} — ${shift.stationTitle}` : ""}
-                rows={editId || rows.length > 0 ? shifts.filter((x) => String(x.stationId) === header.stationId) : shifts}
-                columns={[
-                  { header: "شیفت", render: (x) => x.title, filterValue: (x) => x.title },
-                  { header: "ایستگاه", render: (x) => x.stationTitle, filterValue: (x) => x.stationTitle },
-                  { header: "ساعت", render: (x) => `${toFaDigits(x.startTime)} تا ${toFaDigits(x.endTime)}`, filterValue: (x) => `${x.startTime} ${x.endTime}`, width: "130px" },
-                ]}
-                onSelect={(x) => {
-                  const st = stations.find((q) => q.id === x.stationId);
-                  const stationChanged = String(x.stationId) !== header.stationId;
-                  setHeader({ ...header, shiftId: String(x.id), stationId: String(x.stationId), shiftDate: header.shiftDate || header.date, customerId: stationChanged && st ? String(st.customerId) : header.customerId });
-                }}
-              />
-            </div>
-            <div className="form-field">
-              <label>تاریخ شروع شیفت<RequiredMark /> <FieldHint label="تاریخ شروع شیفت" text="روزی که شیفت شروع شده است؛ شیفت‌های شبانه بعد از نیمه‌شب تاریخ فاکتورشان روز بعد است ولی تاریخ شروع شیفت همان روز قبل می‌ماند. تاریخ فاکتور نباید قبل از آن (و بیش از یک روز بعد از آن) باشد." /></label>
-              <JalaliDatePicker value={header.shiftDate} onChange={(v) => setHeader({ ...header, shiftDate: v })} />
-            </div>
-            <div className="form-field">
-              <label>ایستگاه فروش</label>
-              <input disabled value={station ? `${toFaDigits(String(station.code))} — ${station.title}` : ""} placeholder="از شیفت می‌آید" />
+            <div className="form-field span-2">
+              <label>شیفت</label>
+              <div className="store-label" title="شیفت و تاریخ شروع شیفت هنگام باز کردن فرم جدید گرفته می‌شود و در فرم قابل ویرایش نیست">
+                {shift ? <><b>{shift.title}</b> — {shift.stationTitle}</> : <span style={{ opacity: 0.6 }}>—</span>}
+                <span style={{ opacity: 0.7 }}> | شروع شیفت: </span>
+                <b>{header.shiftDate ? formatJalaliDate(header.shiftDate) : "—"}</b>
+              </div>
             </div>
             <div className="form-field">
               <label>مشتری <FieldHint label="مشتری" text="پیش‌فرض از ایستگاه می‌آید و قابل تغییر است." /></label>
@@ -571,13 +616,13 @@ function SaleForm({ editId }: { editId?: number }) {
           <>
             <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: "12px 0 6px" }}>
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <label style={{ fontWeight: 600 }}>بارکد</label>
+                <label style={{ fontWeight: 600 }}>بارکد / کد کالا</label>
                 <input
                   ref={barcodeRef}
                   dir="ltr"
                   autoFocus={!editId}
                   style={{ width: 220, textAlign: "center" }}
-                  placeholder="بارکد را اسکن کنید و Enter بزنید"
+                  placeholder="بارکد یا کد کالا را وارد کنید و Enter بزنید"
                   value={barcode}
                   onChange={(e) => setBarcode(e.target.value)}
                   onKeyDown={(e) => {
@@ -681,35 +726,48 @@ function SaleForm({ editId }: { editId?: number }) {
                 type="button"
                 disabled={!settledNow}
                 title={settledNow ? undefined : "تا وقتی فروش تسویه نشده (یا باقیمانده نسیه نشده) فاکتور جدید ممکن نیست"}
-                onClick={() => {
+                onClick={() => openCard(() => {
                   stageFormPrefill("/store-sales/new", { stationId: header.stationId, shiftId: header.shiftId, shiftDate: header.shiftDate, customerId: station ? String(station.customerId) : "", date: header.date });
                   openTab("/store-sales/new");
-                }}
+                })}
                 style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--accent, #3b6ea8)", background: "var(--surface, #fff)", color: "var(--accent, #3b6ea8)", opacity: settledNow ? 1 : 0.45, cursor: settledNow ? "pointer" : "not-allowed", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}
               >
                 <span style={{ fontSize: 24, fontWeight: 800 }}>فاکتور جدید</span>
                 <span style={{ fontSize: 15, opacity: 0.85 }}>{settledNow ? "همان شیفت و تاریخ شروع" : "ابتدا فروش را تسویه یا نسیه کنید"}</span>
               </button>
-              <button type="button" onClick={() => setCashDialog(true)} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--success, #1f9d55)", background: "var(--success-soft, #e6f6ec)", color: "var(--success, #17803f)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
+              <button type="button" onClick={() => openCard(() => setCashDialog(true))} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--success, #1f9d55)", background: "var(--success-soft, #e6f6ec)", color: "var(--success, #17803f)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
                 <span style={{ fontSize: 24, fontWeight: 800 }}>دریافت نقد</span>
                 <span style={{ fontSize: 15, opacity: 0.85 }}>جمع دریافت‌شده</span>
                 <span style={{ fontSize: 20, fontWeight: 700 }}>{formatAmountFa(cashReceipts.reduce((n, r) => n + r.amount, 0))}</span>
               </button>
-              <button type="button" onClick={() => setCardDialog(true)} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--warning, #c27a12)", background: "var(--warning-soft, #fdf3e3)", color: "var(--warning, #a8650c)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
+              <button type="button" onClick={() => openCard(() => setCardDialog(true))} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--warning, #c27a12)", background: "var(--warning-soft, #fdf3e3)", color: "var(--warning, #a8650c)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
                 <span style={{ fontSize: 24, fontWeight: 800 }}>دریافت با کارتخوان</span>
                 <span style={{ fontSize: 15, opacity: 0.85 }}>جمع دریافت‌شده</span>
                 <span style={{ fontSize: 20, fontWeight: 700 }}>{formatAmountFa(cardReceipts.reduce((n, r) => n + r.amount, 0))}</span>
               </button>
-              <button type="button" onClick={() => setTransferDialog(true)} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--accent, #3b6ea8)", background: "var(--surface, #fff)", color: "var(--accent, #3b6ea8)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
+              <button type="button" onClick={() => openCard(() => setTransferDialog(true))} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--accent, #3b6ea8)", background: "var(--surface, #fff)", color: "var(--accent, #3b6ea8)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
                 <span style={{ fontSize: 24, fontWeight: 800 }}>دریافت با حواله</span>
                 <span style={{ fontSize: 15, opacity: 0.85 }}>جمع دریافت‌شده</span>
                 <span style={{ fontSize: 20, fontWeight: 700 }}>{formatAmountFa(transferReceipts.reduce((n, r) => n + r.amount, 0))}</span>
               </button>
-              <button type="button" onClick={() => setCreditDialog(true)} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--danger, #b03a2e)", background: "var(--danger-soft, #fbeae8)", color: "var(--danger, #a32d22)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
+              {clubEnabled && (
+                <button type="button" onClick={() => openCard(() => setVoucherDialog(true))} style={{ minHeight: 110, borderRadius: 16, border: "2px solid #a855f7", background: "var(--surface, #fff)", color: "#9333ea", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
+                  <span style={{ fontSize: 24, fontWeight: 800 }}>دریافت با بن‌کارت</span>
+                  <span style={{ fontSize: 15, opacity: 0.85 }}>جمع دریافت‌شده</span>
+                  <span style={{ fontSize: 20, fontWeight: 700 }}>{formatAmountFa(voucherReceipts.reduce((n, r) => n + r.amount, 0))}</span>
+                </button>
+              )}
+              <button type="button" onClick={() => openCard(() => setCreditDialog(true))} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--danger, #b03a2e)", background: "var(--danger-soft, #fbeae8)", color: "var(--danger, #a32d22)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
                 <span style={{ fontSize: 24, fontWeight: 800 }}>نسیه</span>
                 <span style={{ fontSize: 15, opacity: 0.85 }}>{credit.declared ? "مبلغ نسیه" : "ثبت باقیمانده به‌عنوان نسیه"}</span>
                 <span style={{ fontSize: 20, fontWeight: 700 }}>{formatAmountFa(credit.declared ? payInfo.remaining : 0)}</span>
               </button>
+              {hasPermission("store-sales.operations.store-returns.create") && (
+                <button type="button" onClick={() => openCard(() => openTab(`/store-returns/new?saleId=${editId}`))} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--danger, #b03a2e)", background: "var(--surface, #fff)", color: "var(--danger, #a32d22)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
+                  <span style={{ fontSize: 24, fontWeight: 800 }}>برگشت فروش</span>
+                  <span style={{ fontSize: 15, opacity: 0.85 }}>ثبت برگشت برای این فروش</span>
+                </button>
+              )}
               {/* کارکرد کارت چاپ بعداً تعریف می‌شود؛ فعلاً فقط کارت است */}
               <button type="button" style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--ink-soft, #6b7280)", background: "var(--surface, #fff)", color: "var(--ink-soft, #4b5563)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
                 <span style={{ fontSize: 24, fontWeight: 800 }}>چاپ</span>
@@ -765,6 +823,19 @@ function SaleForm({ editId }: { editId?: number }) {
                 onSubmit={(items) => payBatch("CARD", items)}
               />
             )}
+            {voucherDialog && (
+              <StoreVoucherDialog
+                remaining={payInfo.remaining}
+                date={localTodayIso() < header.date ? header.date : localTodayIso()}
+                busy={paying}
+                existing={toExisting(voucherReceipts)}
+                canDelete={canDeleteReceipt}
+                canAdd={canReceive}
+                onDeleteExisting={removeReceipt}
+                onClose={() => setVoucherDialog(false)}
+                onSubmit={payVouchers}
+              />
+            )}
             {transferDialog && (
               <StoreCardReceiptDialog
                 mode="TRANSFER"
@@ -802,6 +873,7 @@ function SaleForm({ editId }: { editId?: number }) {
           </>
         )}
       </form>
+      </ShowcaseLayout>
     </FormPage>
   );
 }

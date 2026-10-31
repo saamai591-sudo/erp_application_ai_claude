@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
-import { invalidateAccountingSettingsCache } from "../services/accountingSettingsService";
+import { detailLevelUsage, getDetailLevels, invalidateAccountingSettingsCache } from "../services/accountingSettingsService";
 
 const FORM = findFormPrefix("accounting-settings");
 
@@ -29,6 +29,33 @@ function parseRatePercent(value: unknown): number {
   if (!(n > 0) || n > 100) throw new Error("نرخ ارزش افزوده باید بیشتر از صفر و حداکثر ۱۰۰٪ باشد");
   return n;
 }
+
+// -------------------------------------------------------------------------
+// سطوح تفصیل — تنظیم تکی و بدون تاریخ: تعداد سطوح تفصیل قابل استفاده در تعریف حساب (۰ تا ۳؛ سه چک‌باکس پشت‌سرهم در فرم).
+// خواندن برای همه‌ی کاربران وارد‌شده (فرم حساب باید سطح‌های غیرفعال را مخفی کند). کاهش تعداد فقط وقتی مجاز است که هیچ حسابی
+// از سطح‌های حذف‌شونده نوع تفصیل نداشته باشد.
+// -------------------------------------------------------------------------
+
+router.get("/accounting-settings/detail-levels", async (_req, res) => {
+  const [levels, usage] = await Promise.all([getDetailLevels(), detailLevelUsage()]);
+  res.json({ levels, usage });
+});
+
+router.put("/accounting-settings/detail-levels", can(`${FORM}.edit`), async (req, res) => {
+  const levels = Number(req.body.levels);
+  if (!Number.isInteger(levels) || levels < 0 || levels > 3) return res.status(400).json({ error: "تعداد سطوح تفصیل باید عددی بین ۰ تا ۳ باشد" });
+  const current = await getDetailLevels();
+  if (levels < current) {
+    const usage = await detailLevelUsage();
+    for (let n = current; n > levels; n--) {
+      const cnt = usage[n as 1 | 2 | 3];
+      if (cnt > 0) return res.status(400).json({ error: `تفصیل ${n} را نمی‌توان برداشت؛ ${cnt} حساب برای این سطح نوع تفصیل دارد` });
+    }
+  }
+  await prisma.accountingDetailLevelSetting.upsert({ where: { id: 1 }, update: { levels }, create: { id: 1, levels } });
+  invalidateAccountingSettingsCache();
+  res.json({ levels, usage: await detailLevelUsage() });
+});
 
 // -------------------------------------------------------------------------
 // نرخ ارزش افزوده — خواندن برای همه‌ی کاربران وارد‌شده (فرم‌های فاکتور/پیش‌فاکتور برای نمایش زنده‌ی مالیات به آن نیاز دارند)

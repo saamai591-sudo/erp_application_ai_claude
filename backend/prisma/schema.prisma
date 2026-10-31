@@ -184,6 +184,7 @@ model FiscalPeriod {
   createdAt                 DateTime                   @default(now())
   accountClosings           AccountClosing[]
   storeSales                StoreSale[]
+  voucherSales              VoucherSale[]
   storeReceipts             StoreReceipt[]
   pettyCashPayments         PettyCashPayment[]
   pettyCashSummaries        PettyCashSummary[]
@@ -432,6 +433,7 @@ model BankBranch {
 }
 
 model BankAccount {
+  storePayments StorePayment[]
   id                     Int                     @id @default(autoincrement())
   detailCode             String                  @unique
   accountTypeId          Int
@@ -566,6 +568,7 @@ model SalesCenter {
 }
 
 model CashBox {
+  storePayments StorePayment[]
   id                     Int                     @id @default(autoincrement())
   detailCode             String                  @unique
   title                  String                  @unique
@@ -807,6 +810,7 @@ model JournalEntry {
   pettyCashSummary    PettyCashSummary?
 
   @@unique([fiscalPeriodId, number])
+  voucherSales VoucherSale[]
 }
 
 /// طبق تصمیم صریح کاربر (۱۴۰۵/۰۶/۱۶): این فرم اکنون یک چرخه‌ی ذخیره→صدور واقعی دارد، دقیقاً هم‌الگوی
@@ -938,6 +942,7 @@ model ImportJob {
 
 model UnitOfMeasure {
   storeSaleLines StoreSaleLine[]
+  storeReturnLines StoreSaleReturnLine[]
   id                         Int                         @id @default(autoincrement())
   code                       Int                         @unique
   title                      String                      @unique
@@ -1120,6 +1125,8 @@ model GoodsAttributeItem {
 
 model GoodsItem {
   storeSaleLines StoreSaleLine[]
+  storeReturnLines StoreSaleReturnLine[]
+  storeShowcaseItems StoreShowcaseItem[]
   id                            Int                            @id @default(autoincrement())
   kind                          GoodsItemKind
   goodsGroupId                  Int
@@ -1633,6 +1640,8 @@ enum TreasuryAccountType {
   STORE_CASH_DIFF_EXPENSE
   // «کسر و اضافی صندوق - حساب صندوقدار» (وضعیت «به حساب صادرکننده»)؛ بدون مورد هدف، تفصیل = طرف‌حسابِ صادرکننده
   STORE_CASH_DIFF_CASHIER
+  VOUCHER_LIABILITY
+  VOUCHER_RECEIVABLE
 }
 
 model Supplier {
@@ -2349,6 +2358,8 @@ model Customer {
   salesQuotes     SalesQuote[]
   salesStations   SalesStation[]
   storeSales      StoreSale[]
+  storeReturns    StoreSaleReturn[]
+  voucherSales    VoucherSale[]
 }
 
 model SalesQuote {
@@ -2463,6 +2474,7 @@ model SalesPriceList {
   quoteLines    SalesQuoteLine[]
   stations      SalesPriceListStation[]
   storeSaleLines StoreSaleLine[]
+  storeReturnLines StoreSaleReturnLine[]
 }
 
 model SalesPriceListScope {
@@ -3947,6 +3959,13 @@ model TreasuryYearClose {
 enum AdvanceReceiptFxMethod {
   HISTORICAL_RATE          // نرخ تاریخی پیش‌دریافت
   TRANSACTION_DATE_RATE    // نرخ تاریخ معامله/فاکتور (اختلاف نرخ = تفاوت تسعیر ارز)
+}
+
+/// تنظیم تکی (id=1) «سطوح تفصیل»: تعداد سطوح تفصیل قابل استفاده در تعریف حساب (۱ تا ۳؛ بدون تاریخ)
+model AccountingDetailLevelSetting {
+  id        Int      @id @default(1)
+  levels    Int      @default(3)
+  updatedAt DateTime @updatedAt
 }
 
 model AccountingVatRate {
@@ -6923,6 +6942,8 @@ model SalesStation {
   salesTypeId  Int
   customerId   Int
   costCenterId Int
+  /// وضعیت پیش‌فرض فروش‌های تسویه‌نشده در «تحویل فروش» (TO_CUSTOMER | TO_ISSUER | CASH_SHORTAGE؛ SETTLED مجاز نیست — CHECK در migration)
+  defaultUnsettledStatus StoreSettlementStatus @default(TO_CUSTOMER)
   description  String?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
@@ -6937,10 +6958,50 @@ model SalesStation {
   cardReaders   SalesStationCardReader[]
   shifts        SalesShift[]
   bankAccounts  SalesStationBankAccount[]
+  showcases    SalesStationShowcase[]
   deliveries    StoreSaleDelivery[]
 }
 
 /// حساب‌های بانکیِ قابل دریافت (حواله) برای ایستگاه فروش
+/// ویترین کالا: مجموعه‌ی کاشی‌های فروش سریع (کالا + عنوان نمایشی) که در سایدبار فرم فروش/برگشت فروش فروشگاهی نمایش داده می‌شود
+model StoreShowcase {
+  id        Int                    @id @default(autoincrement())
+  code      Int                    @unique
+  title     String                 @unique
+  isActive  Boolean                @default(true)
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+  items     StoreShowcaseItem[]
+  stations  SalesStationShowcase[]
+}
+
+model StoreShowcaseItem {
+  id           Int           @id @default(autoincrement())
+  showcaseId   Int
+  goodsItemId  Int
+  /// عنوان روی کاشی؛ پیش‌فرض عنوان کالا و قابل ویرایش
+  displayTitle String
+  rowOrder     Int           @default(0)
+  showcase     StoreShowcase @relation(fields: [showcaseId], references: [id], onDelete: Cascade)
+  goodsItem    GoodsItem     @relation(fields: [goodsItemId], references: [id], onDelete: Restrict)
+
+  @@unique([showcaseId, goodsItemId])
+  @@index([goodsItemId])
+}
+
+/// تخصیص چند‌به‌چند ویترین به ایستگاه؛ rowOrder = ترتیب تب‌های ویترین در سایدبارِ همان ایستگاه
+model SalesStationShowcase {
+  id         Int           @id @default(autoincrement())
+  stationId  Int
+  showcaseId Int
+  rowOrder   Int           @default(0)
+  station    SalesStation  @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  showcase   StoreShowcase @relation(fields: [showcaseId], references: [id], onDelete: Cascade)
+
+  @@unique([stationId, showcaseId])
+  @@index([showcaseId])
+}
+
 model SalesStationBankAccount {
   id            Int          @id @default(autoincrement())
   stationId     Int
@@ -6966,6 +7027,7 @@ model SalesShift {
   updatedAt   DateTime     @updatedAt
   station     SalesStation @relation(fields: [stationId], references: [id], onDelete: Restrict)
   sales       StoreSale[]
+  returns     StoreSaleReturn[]
 
   @@unique([stationId, title])
 }
@@ -7020,6 +7082,7 @@ model StoreSale {
   customer       Customer                @relation(fields: [customerId], references: [id])
   lines          StoreSaleLine[]
   receipts       StoreReceipt[]
+  returns        StoreSaleReturn[]
 
   @@unique([fiscalPeriodId, number])
   @@index([stationId, date])
@@ -7044,6 +7107,7 @@ model StoreSaleLine {
   goodsItem   GoodsItem @relation(fields: [goodsItemId], references: [id])
   unit        UnitOfMeasure @relation(fields: [unitId], references: [id])
   priceList   SalesPriceList? @relation(fields: [priceListId], references: [id])
+  returnLines StoreSaleReturnLine[]
 
   @@index([saleId])
   @@index([goodsItemId])
@@ -7066,6 +7130,9 @@ model StoreReceipt {
   delivery       StoreSaleDelivery? @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
   /// دریافت حواله: حساب بانکیِ مقصد (باید به ایستگاه اختصاص داده شده باشد)
   bankAccountId  Int?
+  /// دریافت با «بن» (باشگاه مشتریان): بنِ مصرف‌شده؛ یکتا ⇒ هر بن یک‌بار مصرف می‌شود
+  voucherId      Int?         @unique
+  voucher        Voucher?     @relation(fields: [voucherId], references: [id], onDelete: Restrict)
   /// شماره پیگیری — اختیاری، برای دریافت کارتخوان و حواله
   referenceNumber String?
   amount         Decimal      @db.Decimal(36, 10)
@@ -7113,6 +7180,8 @@ model StoreSaleDelivery {
   items          StoreSaleDeliverySale[]
   sales          StoreSale[]
   receipts       StoreReceipt[]
+  returns        StoreSaleReturn[]
+  payments       StorePayment[]
   inventoryDocuments InventoryDocument[]
   confirmedAt    DateTime?
   /// سند حسابداری تحویل فروش؛ وجود آن (و شماره‌اش در هدر فرم) یعنی سند صادر شده — وضعیت تحویل عوض نمی‌شود
@@ -7127,7 +7196,9 @@ model StoreSaleDelivery {
 model StoreSaleDeliverySale {
   id               Int                   @id @default(autoincrement())
   deliveryId       Int
-  saleId           Int                   @unique
+  /// دقیقاً یکی از saleId (ردیف فروش) یا returnId (ردیف برگشت فروش؛ مبالغ منفی) — CHECK در migration 20270211100000
+  saleId           Int?                  @unique
+  returnId         Int?                  @unique
   amount           Decimal               @db.Decimal(36, 10)
   vat              Decimal               @db.Decimal(36, 10)
   /// جمع دریافت‌ها تا تاریخ تحویل به تفکیک روش: {"CASH": n, "CARD": n, "TRANSFER": n}
@@ -7136,5 +7207,182 @@ model StoreSaleDeliverySale {
   unsettledAmount  Decimal               @db.Decimal(36, 10)
   settlementStatus StoreSettlementStatus
   delivery         StoreSaleDelivery     @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
-  sale             StoreSale             @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  sale             StoreSale?            @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  return           StoreSaleReturn?      @relation(fields: [returnId], references: [id], onDelete: Cascade)
+}
+
+/// برگشت فروش فروشگاهی: سند مستقل وابسته به یک فروش (هر وضعیتی)؛ اثر انبار و حسابداری فقط با «تحویل فروش» بعدی همان ایستگاه (ردیف نوع «برگشت فروش» در تب فروش).
+model StoreSaleReturn {
+  id             Int                 @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime            @db.Date
+  /// فروشِ مبنا — اختیاری (برگشتِ بدون مبنا، مثلاً فروشِ قبل از راه‌اندازی سیستم)
+  saleId         Int?
+  stationId      Int
+  /// شیفت و تاریخ شروع شیفت (مثل فروش)
+  shiftId        Int?
+  shiftDate      DateTime?           @db.Date
+  /// کپی انبار/نوع فروش/مرکز هزینه/مشتریِ ایستگاه (یا فروشِ مبنا) در لحظه‌ی ثبت
+  warehouseId    Int?
+  salesTypeId    Int
+  costCenterId   Int
+  customerId     Int
+  shift          SalesShift?         @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  customer       Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  description    String?
+  /// «تحویل فروش» که این برگشت در آن بسته شده است (خالی = تحویل‌نشده)
+  deliveryId     Int?
+  delivery       StoreSaleDelivery?  @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+  deliveryItem   StoreSaleDeliverySale?
+  createdById    Int?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  sale           StoreSale?          @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  lines          StoreSaleReturnLine[]
+  payments       StorePayment[]
+
+  @@unique([fiscalPeriodId, number])
+  @@index([saleId])
+  @@index([stationId, date])
+}
+
+model StoreSaleReturnLine {
+  id         Int             @id @default(autoincrement())
+  returnId   Int
+  rowOrder   Int             @default(0)
+  /// ردیف فروشِ مبدأ — فقط در برگشتِ دارای مبنا
+  saleLineId Int?
+  goodsItemId Int
+  unitId     Int
+  unitPrice  Decimal         @db.Decimal(36, 10)
+  /// اعلامیه‌ی قیمتِ منبعِ فی (برگشتِ بدون مبنا) و «قیمت اعلامیه» برای ممیزی
+  priceListId Int?
+  listPrice  Decimal?        @db.Decimal(36, 10)
+  quantity   Decimal         @db.Decimal(36, 10)
+  amount     Decimal         @db.Decimal(36, 10)
+  vatAmount  Decimal         @db.Decimal(36, 10)
+  return     StoreSaleReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  saleLine   StoreSaleLine?  @relation(fields: [saleLineId], references: [id], onDelete: Restrict)
+  goodsItem  GoodsItem       @relation(fields: [goodsItemId], references: [id], onDelete: Restrict)
+  unit       UnitOfMeasure   @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  priceList  SalesPriceList? @relation(fields: [priceListId], references: [id], onDelete: Restrict)
+
+  @@index([returnId])
+  @@index([saleLineId])
+}
+
+/// پرداخت فروشگاهی: بازپرداخت پول به مشتری بابت یک برگشت فروش (نقد از صندوق ایستگاه یا حواله از حساب‌های بانکیِ ایستگاه)؛ بدون سند حسابداری مستقل — اثرش با «تحویل فروش» می‌آید.
+model StorePayment {
+  id              Int             @id @default(autoincrement())
+  fiscalPeriodId  Int
+  number          Int
+  date            DateTime        @db.Date
+  returnId        Int
+  stationId       Int
+  /// دقیقاً یکی از cashBoxId (نقد) یا bankAccountId (حواله) — CHECK در migration
+  cashBoxId       Int?
+  bankAccountId   Int?
+  referenceNumber String?
+  amount          Decimal         @db.Decimal(36, 10)
+  description     String?
+  deliveryId      Int?
+  delivery        StoreSaleDelivery? @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+  createdById     Int?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  return          StoreSaleReturn @relation(fields: [returnId], references: [id], onDelete: Restrict)
+  cashBox         CashBox?        @relation(fields: [cashBoxId], references: [id])
+  bankAccount     BankAccount?    @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+
+  @@unique([fiscalPeriodId, number])
+  @@index([returnId])
+}
+
+// ───────────── باشگاه مشتریان › بن‌کارت (بنِ صادرشده توسط خودمان) ─────────────
+
+enum VoucherStatus {
+  /// ایجادشده و هنوز به سازمانی فروخته نشده (بدهی نیست)
+  CREATED
+  /// فروخته‌شده به سازمان (بدهی ما)
+  SOLD
+  /// مصرف‌شده در یک دریافت فروش فروشگاهی
+  USED
+  VOID
+}
+
+/// نوع بن: ارزش اسمیِ ثابت + مدت اعتبار
+model VoucherType {
+  id           Int            @id @default(autoincrement())
+  code         Int            @unique
+  title        String         @unique
+  faceValue    Decimal        @db.Decimal(36, 10)
+  /// مدت اعتبار از تاریخ صدور (روز)؛ خالی = بدون انقضا
+  validityDays Int?
+  isActive     Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  batches      VoucherBatch[]
+  vouchers     Voucher[]
+}
+
+/// دسته‌ی صدور: سریال‌های تازه‌ی یک نوع بن
+model VoucherBatch {
+  id          Int         @id @default(autoincrement())
+  number      Int         @unique
+  typeId      Int
+  date        DateTime    @db.Date
+  count       Int
+  validUntil  DateTime?   @db.Date
+  description String?
+  createdById Int?
+  createdAt   DateTime    @default(now())
+  type        VoucherType @relation(fields: [typeId], references: [id], onDelete: Restrict)
+  vouchers    Voucher[]
+}
+
+/// فروش بن به سازمان: بدهی ما به حاملِ بن از اینجا شروع می‌شود (سند حسابداری: بدهکار طلب از سازمان، بستانکار بدهی بن)
+model VoucherSale {
+  id             Int           @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime      @db.Date
+  customerId     Int
+  description    String?
+  journalEntryId Int?
+  createdById    Int?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  fiscalPeriod   FiscalPeriod  @relation(fields: [fiscalPeriodId], references: [id])
+  customer       Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  vouchers       Voucher[]
+
+  @@unique([fiscalPeriodId, number])
+  @@index([customerId])
+}
+
+model Voucher {
+  id         Int           @id @default(autoincrement())
+  /// سریالِ یکتا و غیرقابل‌حدس (تصادفی + رقم کنترل)
+  serial     String        @unique
+  typeId     Int
+  batchId    Int
+  /// کپی ارزش اسمی در لحظه‌ی صدور
+  faceValue  Decimal       @db.Decimal(36, 10)
+  validUntil DateTime?     @db.Date
+  status     VoucherStatus @default(CREATED)
+  saleId     Int?
+  voidReason String?
+  voidedAt   DateTime?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  type       VoucherType   @relation(fields: [typeId], references: [id], onDelete: Restrict)
+  batch      VoucherBatch  @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  sale       VoucherSale?  @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  receipt    StoreReceipt?
+
+  @@index([typeId, status])
+  @@index([batchId])
+  @@index([saleId])
 }

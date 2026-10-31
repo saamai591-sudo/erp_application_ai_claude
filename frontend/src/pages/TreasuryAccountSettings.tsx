@@ -36,6 +36,8 @@ const ACCOUNT_TYPE_FA: Record<string, string> = {
   CARD_IN_COLLECTION: "در جریان وصول از کارتخوان",
   STORE_CASH_DIFF_EXPENSE: "کسر و اضافی صندوق - هزینه",
   STORE_CASH_DIFF_CASHIER: "کسر و اضافی صندوق - حساب صندوقدار",
+  VOUCHER_LIABILITY: "بدهی بن‌کارت",
+  VOUCHER_RECEIVABLE: "طلب از سازمان بابت بن‌کارت",
   PETTY_CASH: "تنخواه",
 };
 
@@ -56,6 +58,8 @@ const TARGET_FIELD: Record<string, TargetField | null> = {
   CARD_IN_COLLECTION: null,
   STORE_CASH_DIFF_EXPENSE: null,
   STORE_CASH_DIFF_CASHIER: null,
+  VOUCHER_LIABILITY: null,
+  VOUCHER_RECEIVABLE: null,
   PETTY_CASH: "pettyCashId",
 };
 

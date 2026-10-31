@@ -332,6 +332,8 @@ export const REGISTRY: ModuleDef[] = [
           { key: "warehousing-warehouse-transfer-out", title: "حواله انتقالی", baseActions: CRUD, actions: [VIEW_ACCOUNTING] },
           // «حواله فروش» در این ساب‌ماژول فقط میان‌بر منو است؛ Form واقعی زیر ماژول «فروش» ثبت شده.
           { key: "inventory-counting-shortages", title: "کسری انبارگردانی", baseActions: CRUD, actions: [VIEW_ACCOUNTING] },
+          // سند سیستمی تحویل فروش فروشگاهی: فقط مشاهده (ایجاد/ویرایش/حذف فقط با تایید/لغو تایید تحویل فروش)؛ وابسته به لایسنس «فروش فروشگاهی»
+          { key: "store-sale-issues", title: "حواله فروش فروشگاهی", baseActions: ["view"], requiresModule: "store-sales" },
         ],
       },
       {
@@ -347,6 +349,7 @@ export const REGISTRY: ModuleDef[] = [
           { key: "project-consumption-returns", title: "برگشت مصرف پروژه", baseActions: CRUD, actions: [VIEW_ACCOUNTING] },
           { key: "production-consumption-returns", title: "برگشت مصرف تولید", baseActions: CRUD, actions: [VIEW_ACCOUNTING] },
           { key: "sales-returns", title: "برگشت از فروش", baseActions: CRUD, actions: [VIEW_ACCOUNTING] },
+          { key: "store-sale-returns", title: "برگشت حواله فروش فروشگاهی", baseActions: ["view"], requiresModule: "store-sales" },
         ],
       },
       {
@@ -499,22 +502,47 @@ export const REGISTRY: ModuleDef[] = [
     ],
   },
   {
+    key: "customer-club",
+    title: "باشگاه مشتریان",
+    subModules: [
+      {
+        key: "config",
+        title: "تنظیمات",
+        forms: [{ key: "voucher-types", title: "نوع بن‌کارت", baseActions: CRUD }],
+      },
+      {
+        key: "operations",
+        title: "عملیات",
+        forms: [
+          { key: "voucher-batches", title: "صدور بن‌کارت", baseActions: ["view", "create"] },
+          { key: "voucher-sales", title: "فروش بن‌کارت به سازمان", baseActions: CRUD, actions: [{ key: "issueJournalEntry", title: "صدور سند حسابداری" }, { key: "deleteJournalEntry", title: "حذف سند حسابداری" }] },
+          { key: "vouchers", title: "بن‌کارت‌ها", baseActions: ["view"], actions: [{ key: "void", title: "ابطال بن" }] },
+        ],
+      },
+      {
+        key: "reports",
+        title: "گزارش",
+        forms: [{ key: "voucher-liability", title: "تعهد بن‌کارت‌ها", baseActions: ["view"] }],
+      },
+    ],
+  },
+  {
     key: "store-sales",
     title: "فروش فروشگاهی",
     subModules: [
       {
         key: "config",
         title: "تنظیمات",
-        forms: [{ key: "sales-stations", title: "ایستگاه فروش", baseActions: CRUD }, { key: "sales-shifts", title: "شیفت فروش", baseActions: CRUD }],
+        forms: [{ key: "sales-stations", title: "ایستگاه فروش", baseActions: CRUD }, { key: "sales-shifts", title: "شیفت فروش", baseActions: CRUD }, { key: "store-showcases", title: "ویترین کالا", baseActions: CRUD }],
       },
       {
         key: "operations",
         title: "عملیات",
         forms: [{ key: "store-sales", title: "فروش فروشگاهی", baseActions: CRUD, actions: [{ key: "changePrice", title: "تغییر فی" }, { key: "declareCredit", title: "ثبت نسیه" }] },
           { key: "store-receipts", title: "دریافت فروشگاهی", baseActions: CRUD },
+          { key: "store-returns", title: "برگشت فروش فروشگاهی", baseActions: CRUD },
+          { key: "store-payments", title: "پرداخت فروشگاهی", baseActions: CRUD },
           { key: "store-deliveries", title: "تحویل فروش", baseActions: CRUD, actions: [{ key: "confirm", title: "تایید" }, { key: "unconfirm", title: "لغو تایید" }, { key: "issueJournalEntry", title: "صدور سند حسابداری" }, { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" }] },
-          { key: "store-sale-issues", title: "حواله فروش فروشگاهی", baseActions: ["view"] },
-          { key: "store-sale-returns", title: "برگشت حواله فروش فروشگاهی", baseActions: ["view"] },
         ],
       },
     ],

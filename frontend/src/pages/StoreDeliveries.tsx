@@ -35,7 +35,12 @@ interface MethodDef {
   title: string;
 }
 interface SaleRow {
-  saleId: number;
+  /** SALE = فروش، RETURN = برگشت فروش (مبالغ منفی)؛ rowKey کلید یکتا و کلید وضعیت‌ها (فروش: شناسه، برگشت: R<شناسه>) */
+  kind: "SALE" | "RETURN";
+  rowKey: string;
+  saleId: number | null;
+  returnId: number | null;
+  saleNumber: number;
   number: number;
   date: string;
   customerTitle: string;
@@ -58,6 +63,18 @@ interface ReceiptRow {
   payeeTitle: string;
   referenceNumber: string;
 }
+interface PaymentRow {
+  id: number;
+  number: number;
+  date: string;
+  method: string;
+  returnId: number;
+  returnNumber: number | null;
+  saleNumber: number | null;
+  amount: number;
+  payeeTitle: string;
+  referenceNumber: string;
+}
 interface Delivery {
   id?: number;
   number?: number;
@@ -71,6 +88,7 @@ interface Delivery {
   methods: MethodDef[];
   sales: SaleRow[];
   receipts: ReceiptRow[];
+  payments?: PaymentRow[];
 }
 interface ListRow {
   id: number;
@@ -195,7 +213,7 @@ function DeliveryForm({ editId }: { editId?: number }) {
     api.get(`/store-sale-deliveries/${editId}`).then((d: Delivery & { updatedAt?: string }) => {
       setData(d);
       setUpdatedAt(d.updatedAt);
-      setStatuses(Object.fromEntries(d.sales.map((s) => [String(s.saleId), s.status])));
+      setStatuses(Object.fromEntries(d.sales.map((s) => [s.rowKey, s.status])));
       setLoaded(true);
     }).catch((e) => setError(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -207,14 +225,14 @@ function DeliveryForm({ editId }: { editId?: number }) {
       const d: Delivery = await api.post("/store-sale-deliveries/preview", { stationId: Number(pre.stationId), date: pre.date, statuses: nextStatuses });
       setData(d);
       setAsking(false);
-      setStatuses(Object.fromEntries(d.sales.map((s) => [String(s.saleId), s.status])));
+      setStatuses(Object.fromEntries(d.sales.map((s) => [s.rowKey, s.status])));
     } catch (e) {
       setError((e as ApiError).message);
     }
   }
 
   const editable = !editId || data?.status === "REGISTERED";
-  const sales: SaleRow[] = (data?.sales ?? []).map((s) => ({ ...s, status: s.unsettled !== 0 ? statuses[String(s.saleId)] ?? s.status : "SETTLED" }));
+  const sales: SaleRow[] = (data?.sales ?? []).map((s) => ({ ...s, status: s.unsettled !== 0 ? statuses[s.rowKey] ?? s.status : "SETTLED" }));
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -238,7 +256,7 @@ function DeliveryForm({ editId }: { editId?: number }) {
     const d: Delivery & { updatedAt?: string } = await api.get(`/store-sale-deliveries/${editId}`);
     setData(d);
     setUpdatedAt(d.updatedAt);
-    setStatuses(Object.fromEntries(d.sales.map((x) => [String(x.saleId), x.status])));
+    setStatuses(Object.fromEntries(d.sales.map((x) => [x.rowKey, x.status])));
   }
   async function confirmDelivery() {
     if (!editId || !window.confirm("با تایید تحویل فروش، اسناد انبار (حواله فروش فروشگاهی) صادر می‌شود. ادامه می‌دهید؟")) return;
@@ -324,7 +342,12 @@ function DeliveryForm({ editId }: { editId?: number }) {
 
   const th = (c: string) => <th key={c}>{c}</th>;
   const methods = data?.methods ?? [];
-  const tabs = [{ key: "SALES", label: `فروش (${toFaDigits(String(sales.length))})` }, ...methods.map((m) => ({ key: m.key, label: `${m.title} (${toFaDigits(String((data?.receipts ?? []).filter((r) => r.method === m.key).length))})` }))];
+  const payments = data?.payments ?? [];
+  const tabs = [
+    { key: "SALES", label: `فروش و برگشت فروش (${toFaDigits(String(sales.length))})` },
+    ...methods.map((m) => ({ key: m.key, label: `${m.title} (${toFaDigits(String((data?.receipts ?? []).filter((r) => r.method === m.key).length))})` })),
+    { key: "PAYMENTS", label: `پرداخت‌ها (${toFaDigits(String(payments.length))})` },
+  ];
 
   // منوی آبشاریِ استاندارد فرم‌ها (هم‌الگوی فاکتور فروش): صدور / مشاهده / حذف سند حسابداری
   const extraActions: { label: string; icon: JSX.Element; onClick: () => void }[] = [];
@@ -397,7 +420,7 @@ function DeliveryForm({ editId }: { editId?: number }) {
                 fill
                 head={
                   <tr>
-                    {["شماره", "تاریخ", "مشتری", "مبلغ فاکتور", "ارزش افزوده", "خالص"].map(th)}
+                    {["نوع", "شماره", "تاریخ", "مشتری", "مبلغ فاکتور", "ارزش افزوده", "خالص"].map(th)}
                     {methods.map((m) => th(m.title))}
                     {["مبلغ نسیه", "مانده تسویه‌نشده", "وضعیت"].map(th)}
                   </tr>
@@ -408,7 +431,7 @@ function DeliveryForm({ editId }: { editId?: number }) {
                     : [
                         {
                           cells: [
-                            "جمع", null, null,
+                            "جمع", null, null, null,
                             formatAmountFa(sum(sales, (r) => r.amount)),
                             formatAmountFa(sum(sales, (r) => r.vat)),
                             formatAmountFa(sum(sales, (r) => r.net)),
@@ -421,9 +444,10 @@ function DeliveryForm({ editId }: { editId?: number }) {
                       ]
                 }
               >
-                {sales.length === 0 && <tr><td colSpan={9 + methods.length} style={{ textAlign: "center", opacity: 0.7 }}>فروشی برای تحویل وجود ندارد</td></tr>}
+                {sales.length === 0 && <tr><td colSpan={10 + methods.length} style={{ textAlign: "center", opacity: 0.7 }}>فروش یا برگشت فروشی برای تحویل وجود ندارد</td></tr>}
                 {sales.map((r) => (
-                  <tr key={r.saleId}>
+                  <tr key={r.rowKey}>
+                    <td>{r.kind === "RETURN" ? <span className="badge" title={r.saleNumber != null ? `برگشت از فروش شماره ${r.saleNumber}` : "برگشت بدون مبنا"}>برگشت فروش</span> : "فروش"}</td>
                     <td>{toFaDigits(String(r.number))}</td>
                     <td>{formatJalaliDate(r.date)}</td>
                     <td>{r.customerTitle}</td>
@@ -435,7 +459,7 @@ function DeliveryForm({ editId }: { editId?: number }) {
                     <td style={{ color: r.unsettled !== 0 ? "var(--danger, #c0392b)" : undefined }}>{formatAmountFa(r.unsettled)}</td>
                     <td style={{ minWidth: 160 }}>
                       {r.unsettled !== 0 && editable ? (
-                        <select value={r.status} onChange={(e) => setStatuses({ ...statuses, [String(r.saleId)]: e.target.value as Settlement })}>
+                        <select value={r.status} onChange={(e) => setStatuses({ ...statuses, [r.rowKey]: e.target.value as Settlement })}>
                           {UNSETTLED_CHOICES.map((c) => <option key={c} value={c}>{SETTLEMENT_FA[c]}</option>)}
                         </select>
                       ) : SETTLEMENT_FA[r.status]}
@@ -445,10 +469,33 @@ function DeliveryForm({ editId }: { editId?: number }) {
               </ScrollGridWithTotals>
             )}
 
+            {tab === "PAYMENTS" && (
+              <ScrollGridWithTotals
+                tableClassName="je-lines-table"
+                fill
+                head={<tr>{["شماره پرداخت", "تاریخ", "شماره برگشت", "از فروش شماره", "روش", "صندوق / حساب بانکی", "شماره پیگیری", "مبلغ"].map(th)}</tr>}
+                totals={payments.length === 0 ? [] : [{ cells: ["جمع", null, null, null, null, null, null, formatAmountFa(payments.reduce((t, r) => t + r.amount, 0))] }]}
+              >
+                {payments.length === 0 && <tr><td colSpan={8} style={{ textAlign: "center", opacity: 0.7 }}>پرداختی (بازپرداخت به مشتری) وجود ندارد</td></tr>}
+                {payments.map((r) => (
+                  <tr key={r.id}>
+                    <td>{toFaDigits(String(r.number))}</td>
+                    <td>{formatJalaliDate(r.date)}</td>
+                    <td>{r.returnNumber != null ? toFaDigits(String(r.returnNumber)) : ""}</td>
+                    <td>{r.saleNumber != null ? toFaDigits(String(r.saleNumber)) : ""}</td>
+                    <td>{r.method === "TRANSFER" ? "حواله" : "نقد"}</td>
+                    <td>{toFaDigits(r.payeeTitle)}</td>
+                    <td dir="ltr">{r.referenceNumber}</td>
+                    <td>{formatAmountFa(r.amount)}</td>
+                  </tr>
+                ))}
+              </ScrollGridWithTotals>
+            )}
+
             {methods.map((m) => {
               if (tab !== m.key) return null;
               const rows = (data.receipts ?? []).filter((r) => r.method === m.key);
-              const payeeHeader = m.key === "CASH" ? "صندوق" : m.key === "CARD" ? "کارتخوان" : "حساب بانکی";
+              const payeeHeader = m.key === "CASH" ? "صندوق" : m.key === "CARD" ? "کارتخوان" : m.key === "VOUCHER" ? "سریال بن" : "حساب بانکی";
               const heads = ["شماره دریافت", "تاریخ", "شماره فروش", payeeHeader, ...(m.key === "CASH" ? [] : ["شماره پیگیری"]), "مبلغ"];
               return (
                 <ScrollGridWithTotals

@@ -72,6 +72,12 @@ export const JOURNAL_ENTRY_ISSUED_MESSAGE = "سند با موفقیت صادر �
  * بقیه‌ی اعتبارسنجی‌های خاصِ حساب (سطح حساب، زیرحساب‌نداشتن، ارزی/غیرارزی و ...) همچنان بر عهده‌ی خودِ
  * فراخواننده است، چون این قوانین بسته به سناریوی فراخوانی (ورودی مستقیم کاربر یا داده‌ی از پیش محاسبه‌شده) فرق می‌کند.
  */
+/** ردیف‌های سند: اول بدهکارها، بعد بستانکارها (پایدار)، و rowOrder دوباره از ۰ شماره‌گذاری می‌شود تا نمایش سند هم همین ترتیب را داشته باشد */
+function debitsFirst<T extends { debit: any; credit: any; rowOrder: number }>(lines: T[]): T[] {
+  const isCreditOnly = (l: T) => !(Number(l.debit) > 0) && Number(l.credit) > 0;
+  return [...lines.filter((l) => !isCreditOnly(l)), ...lines.filter(isCreditOnly)].map((l, i) => ({ ...l, rowOrder: i }));
+}
+
 export async function issueJournalEntry(opts: IssueJournalEntryOptions): Promise<IssueJournalEntryResult> {
   if (!Array.isArray(opts.lines) || opts.lines.length === 0) {
     throw new Error("سند باید حداقل یک ردیف داشته باشد");
@@ -183,7 +189,8 @@ export async function issueJournalEntry(opts: IssueJournalEntryOptions): Promise
       issuingSystem: opts.issuingSystem,
       isManual: opts.isManual ?? false,
       status: opts.status ?? "DRAFT",
-      lines: { create: computedLines },
+      // ترتیب ردیف‌های سند: اول بدهکارها، بعد بستانکارها (مرتب‌سازیِ پایدار؛ ترتیب نسبیِ ردیف‌های هم‌طرف همان ترتیب فراخواننده می‌ماند)
+      lines: { create: debitsFirst(computedLines) },
     },
   });
 

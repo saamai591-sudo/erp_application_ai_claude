@@ -46,7 +46,7 @@ router.get("/store-sales", can(`${FORM}.view`), async (req, res) => {
 router.get("/store-sales/:id", can(`${FORM}.view`), async (req, res) => {
   const s = await prisma.storeSale.findUnique({ where: { id: Number(req.params.id) }, include: DETAIL_INCLUDE });
   if (!s) return res.status(404).json({ error: "فروش یافت نشد" });
-  const receipts = await prisma.storeReceipt.findMany({ where: { saleId: s.id }, include: { station: { select: { title: true } }, cashBox: { select: { title: true } }, cardReader: { select: { title: true } }, bankAccount: { include: BANK_ACCOUNT_TITLE_INCLUDE } }, orderBy: { id: "asc" } });
+  const receipts = await prisma.storeReceipt.findMany({ where: { saleId: s.id }, include: { station: { select: { title: true } }, cashBox: { select: { title: true } }, cardReader: { select: { title: true } }, voucher: { select: { serial: true } }, bankAccount: { include: BANK_ACCOUNT_TITLE_INCLUDE } }, orderBy: { id: "asc" } });
   const paid = receipts.reduce((n, r) => n + Number(r.amount), 0);
   res.json({ ...saleShape(s, true, paid), receipts: receipts.map((r) => receiptShape(r)) });
 });

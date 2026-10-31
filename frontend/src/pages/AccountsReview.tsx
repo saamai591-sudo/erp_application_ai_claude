@@ -24,6 +24,8 @@ interface BalanceRow {
   code: string;
   title: string;
   hasChildren: boolean;
+  /** فقط در تب‌های تفصیل */
+  detailTypeTitle?: string;
   totalDebit: number;
   totalCredit: number;
   balance: number;
@@ -84,12 +86,24 @@ const balanceColumns = [
 
 // ستون‌های تب‌های تفصیل همان balanceColumns هستند؛ فیلتر/مرتب‌سازی همه‌ی ستون‌ها (از جمله «مانده بدهکار/بستانکار») سمت سرور و
 // روی نتیجه‌ی تجمیع‌شده‌ی /reports/detail-summary انجام می‌شود (فیلدهای balanceDebit/balanceCredit). جمع پای گرید سمت کلاینت است.
-const detailBalanceColumns = balanceColumns;
+// + ستون «نوع تفصیل» (نوع تفصیلِ هر ردیف) درست قبل از «جمع بدهکار»
+const detailBalanceColumns = [
+  ...balanceColumns.slice(0, 2),
+  {
+    header: "نوع تفصیل",
+    render: (r: BalanceRow) => r.detailTypeTitle ?? "",
+    sortValue: (r: BalanceRow) => r.detailTypeTitle ?? "",
+    filterType: "string" as ColumnFilterType,
+    filterValue: (r: BalanceRow) => r.detailTypeTitle ?? "",
+  },
+  ...balanceColumns.slice(2),
+];
 
 // نگاشت عنوان فارسی ستون به نام فیلد سمت سرور (route بک‌اند /reports/detail-summary)
 const DETAIL_SORT_FIELD_MAP: Record<string, string> = {
   "کد": "code",
   "عنوان": "title",
+  "نوع تفصیل": "detailTypeTitle",
   "جمع بدهکار": "totalDebit",
   "جمع بستانکار": "totalCredit",
   "مانده بدهکار": "balanceDebit",

@@ -40,6 +40,7 @@ interface StationRow {
   customerCode: number | null;
   customerTitle: string;
   costCenterId: number;
+  defaultUnsettledStatus: string;
   costCenterTitle: string;
   description: string;
   cardReaders?: CardReaderOpt[];
@@ -134,7 +135,7 @@ function StationList() {
   );
 }
 
-const EMPTY = { title: "", isActive: true, offering: "GOODS" as Offering, cashBoxId: "", warehouseId: "", salesTypeId: "", customerId: "", costCenterId: "", description: "", cardReaderIds: [] as number[], bankAccountIds: [] as number[] };
+const EMPTY = { title: "", isActive: true, offering: "GOODS" as Offering, cashBoxId: "", warehouseId: "", salesTypeId: "", customerId: "", costCenterId: "", defaultUnsettledStatus: "TO_CUSTOMER", description: "", cardReaderIds: [] as number[], bankAccountIds: [] as number[], showcaseIds: [] as number[] };
 
 function StationForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
@@ -150,6 +151,8 @@ function StationForm({ editId }: { editId?: number }) {
   const [costCenters, setCostCenters] = useState<CostCenterOpt[]>([]);
   const [allReaders, setAllReaders] = useState<CardReaderOpt[]>([]);
   const [pickReaders, setPickReaders] = useState(false);
+  const [allShowcases, setAllShowcases] = useState<{ id: number; code: number; title: string; itemCount: number; isActive: boolean }[]>([]);
+  const [pickShowcases, setPickShowcases] = useState(false);
   const [allBanks, setAllBanks] = useState<{ id: number; detailCode: string; detailTitle: string; isActive?: boolean }[]>([]);
   const [pickBanks, setPickBanks] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -157,8 +160,9 @@ function StationForm({ editId }: { editId?: number }) {
   const { flash } = useSavedFlash();
 
   useEffect(() => {
-    Promise.all([api.get("/cash-boxes"), api.get("/warehouses"), api.get("/sales-types"), api.get("/customers"), api.get("/cost-centers"), api.get("/card-readers"), api.get("/banking/accounts")])
-      .then(([cb, w, st, c, cc, crs, bas]) => {
+    Promise.all([api.get("/cash-boxes"), api.get("/warehouses"), api.get("/sales-types"), api.get("/customers"), api.get("/cost-centers"), api.get("/card-readers"), api.get("/banking/accounts"), api.get("/store-showcases").catch(() => [])])
+      .then(([cb, w, st, c, cc, crs, bas, shw]) => {
+        setAllShowcases(shw);
         setAllReaders(crs);
         setAllBanks(bas);
         setCashBoxes(cb);
@@ -172,7 +176,7 @@ function StationForm({ editId }: { editId?: number }) {
     api.get(`/sales-stations/${editId}`).then((r: StationRow) => {
       setCode(r.code);
       setUpdatedAt(r.updatedAt);
-      if (!hasPersistedState(cacheKey)) setForm({ title: r.title, isActive: r.isActive, offering: r.offering, cashBoxId: String(r.cashBoxId), warehouseId: r.warehouseId ? String(r.warehouseId) : "", salesTypeId: String(r.salesTypeId), customerId: String(r.customerId), costCenterId: String(r.costCenterId), description: r.description, cardReaderIds: (r.cardReaders ?? []).map((x) => x.id), bankAccountIds: (r.bankAccounts ?? []).map((x) => x.id) });
+      if (!hasPersistedState(cacheKey)) setForm({ title: r.title, isActive: r.isActive, offering: r.offering, cashBoxId: String(r.cashBoxId), warehouseId: r.warehouseId ? String(r.warehouseId) : "", salesTypeId: String(r.salesTypeId), customerId: String(r.customerId), costCenterId: String(r.costCenterId), defaultUnsettledStatus: r.defaultUnsettledStatus || "TO_CUSTOMER", description: r.description, cardReaderIds: (r.cardReaders ?? []).map((x) => x.id), bankAccountIds: (r.bankAccounts ?? []).map((x) => x.id), showcaseIds: ((r as any).showcases ?? []).map((x: { id: number }) => x.id) });
       setLoaded(true);
     }).catch((e) => setError(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -198,9 +202,11 @@ function StationForm({ editId }: { editId?: number }) {
       salesTypeId: Number(form.salesTypeId),
       customerId: Number(form.customerId),
       costCenterId: Number(form.costCenterId),
+      defaultUnsettledStatus: form.defaultUnsettledStatus,
       description: form.description,
       cardReaderIds: form.cardReaderIds ?? [],
       bankAccountIds: form.bankAccountIds ?? [],
+      showcaseIds: form.showcaseIds ?? [],
       updatedAt,
     };
     try {
@@ -236,6 +242,15 @@ function StationForm({ editId }: { editId?: number }) {
   const salesType = pick(salesTypes, form.salesTypeId);
   const bankIds = form.bankAccountIds ?? [];
   const stationBanks = bankIds.map((id) => allBanks.find((b) => b.id === id)).filter((x): x is NonNullable<typeof x> => !!x);
+  const showcaseIds = form.showcaseIds ?? [];
+  const stationShowcases = showcaseIds.map((id) => allShowcases.find((x) => x.id === id)).filter((x): x is NonNullable<typeof x> => !!x);
+  const moveShowcase = (i: number, d: number) => {
+    const next = [...showcaseIds];
+    const j = i + d;
+    if (j < 0 || j >= next.length) return;
+    [next[i], next[j]] = [next[j], next[i]];
+    setForm({ ...form, showcaseIds: next });
+  };
   const readerIds = form.cardReaderIds ?? [];
   const stationReaders = readerIds.map((id) => allReaders.find((r) => r.id === id)).filter((x): x is CardReaderOpt => !!x);
 
@@ -314,6 +329,14 @@ function StationForm({ editId }: { editId?: number }) {
             <label>مرکز هزینه<RequiredMark /></label>
             <CostCenterPickerField costCenters={costCenters} value={form.costCenterId} onChange={(id) => setForm({ ...form, costCenterId: id })} />
           </div>
+          <div className="form-field">
+            <label>وضعیت پیش‌فرض فاکتورهای تسویه‌نشده<RequiredMark /></label>
+            <select value={form.defaultUnsettledStatus} onChange={(e) => setForm({ ...form, defaultUnsettledStatus: e.target.value })} title="هنگام تحویل فروش، وضعیت فروش‌های تسویه‌نشده‌ی این ایستگاه با همین مقدار پیش‌فرض می‌شود و کاربر می‌تواند در فرم تحویل فروش تغییرش دهد">
+              <option value="TO_CUSTOMER">به حساب مشتری</option>
+              <option value="TO_ISSUER">به حساب صادرکننده</option>
+              <option value="CASH_SHORTAGE">کسری صندوق</option>
+            </select>
+          </div>
           <div className="form-field" style={{ gridColumn: "1 / -1" }}>
             <label>توضیحات</label>
             <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
@@ -367,6 +390,54 @@ function StationForm({ editId }: { editId?: number }) {
             </table>
           </div>
         </PartySectionCard>
+        <PartySectionCard id="station-showcases" title="ویترین‌ها" onAdd={() => setPickShowcases(true)} addLabel="افزودن ویترین">
+          <div>
+            <div style={{ margin: "0 0 8px" }}>
+              <span style={{ fontSize: 12, opacity: 0.75 }}>ویترین‌های این ایستگاه به‌صورت تب در سایدبارِ فرم فروش (و برگشت فروشِ بدون مبنا) نمایش داده می‌شوند؛ ترتیب تب‌ها همین ترتیب است. تخصیص از فرم «ویترین کالا» هم ممکن است.</span>
+            </div>
+            <table className="je-lines-table">
+              <thead>
+                <tr><th style={{ width: 60 }}>ترتیب</th><th>کد</th><th>عنوان ویترین</th><th>تعداد کالا</th><th></th></tr>
+              </thead>
+              <tbody>
+                {stationShowcases.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", opacity: 0.7 }}>ویترینی برای این ایستگاه تعیین نشده است</td></tr>}
+                {stationShowcases.map((x, i) => (
+                  <tr key={x.id}>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <button type="button" className="btn secondary" style={{ padding: "2px 7px", fontSize: 11 }} disabled={i === 0} onClick={() => moveShowcase(i, -1)} title="بالا">▲</button>{" "}
+                      <button type="button" className="btn secondary" style={{ padding: "2px 7px", fontSize: 11 }} disabled={i === stationShowcases.length - 1} onClick={() => moveShowcase(i, 1)} title="پایین">▼</button>
+                    </td>
+                    <td>{toFaDigits(String(x.code))}</td>
+                    <td>{x.title}{!x.isActive && <span className="badge" style={{ marginInlineStart: 6 }}>غیرفعال</span>}</td>
+                    <td>{toFaDigits(String(x.itemCount))}</td>
+                    <td><button type="button" className="btn danger" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => setForm({ ...form, showcaseIds: showcaseIds.filter((v) => v !== x.id) })}>حذف</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </PartySectionCard>
+        {pickShowcases && (
+          <MultiPickerDialog<{ id: number; code: number; title: string; itemCount: number; isActive: boolean }>
+            title="افزودن ویترین به ایستگاه"
+            rows={allShowcases.filter((x) => x.isActive || showcaseIds.includes(x.id))}
+            columns={[
+              { header: "کد", render: (x) => toFaDigits(String(x.code)), filterValue: (x) => String(x.code), width: "70px" },
+              { header: "عنوان", render: (x) => x.title, filterValue: (x) => x.title },
+              { header: "تعداد کالا", render: (x) => toFaDigits(String(x.itemCount)), filterValue: (x) => String(x.itemCount), width: "100px" },
+            ]}
+            initialChecked={new Set(showcaseIds)}
+            confirmLabel="تایید"
+            onConfirm={(checked) => {
+              // ترتیب موجود حفظ می‌شود؛ ویترین‌های تازه به انتها اضافه می‌شوند
+              const kept = showcaseIds.filter((v) => checked.has(v));
+              const added = allShowcases.filter((x) => checked.has(x.id) && !showcaseIds.includes(x.id)).map((x) => x.id);
+              setForm({ ...form, showcaseIds: [...kept, ...added] });
+              setPickShowcases(false);
+            }}
+            onClose={() => setPickShowcases(false)}
+          />
+        )}
         {pickBanks && (
           <MultiPickerDialog<{ id: number; detailCode: string; detailTitle: string; isActive?: boolean }>
             title="افزودن حساب بانکی"
