@@ -21,3 +21,9 @@ backups/
 # فایل‌های موقت توسعه
 backend/t[0-9]*.js
 docs-pr.cjs
+
+# فایل‌های ویرایشگر
+.vs/
+.vscode/
+*.suo
+*.user
