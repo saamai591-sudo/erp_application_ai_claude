@@ -249,6 +249,7 @@ export const REGISTRY: ModuleDef[] = [
         title: "گزارش",
         forms: [
           { key: "account-review", title: "مرور حسابها", baseActions: ["view"] },
+          { key: "account-balance", title: "تراز حسابها", baseActions: ["view"] },
           { key: "olap-reports", title: "گزارش تحلیلی (OLAP)", baseActions: CRUD },
         ],
       },
@@ -508,15 +509,19 @@ export const REGISTRY: ModuleDef[] = [
       {
         key: "config",
         title: "تنظیمات",
-        forms: [{ key: "voucher-types", title: "نوع بن‌کارت", baseActions: CRUD }],
+        forms: [
+          { key: "voucher-types", title: "نوع بن‌کارت", baseActions: CRUD },
+          { key: "loyalty-charge-types", title: "نوع شارژ کارت وفاداری", baseActions: CRUD },
+        ],
       },
       {
         key: "operations",
         title: "عملیات",
         forms: [
-          { key: "voucher-batches", title: "صدور بن‌کارت", baseActions: ["view", "create"] },
           { key: "voucher-sales", title: "فروش بن‌کارت به سازمان", baseActions: CRUD, actions: [{ key: "issueJournalEntry", title: "صدور سند حسابداری" }, { key: "deleteJournalEntry", title: "حذف سند حسابداری" }] },
-          { key: "vouchers", title: "بن‌کارت‌ها", baseActions: ["view"], actions: [{ key: "void", title: "ابطال بن" }] },
+          { key: "loyalty-cards", title: "کارت وفاداری", baseActions: CRUD },
+          { key: "loyalty-charges", title: "شارژ کارت وفاداری", baseActions: ["view", "create", "delete"], actions: [{ key: "bulkCharge", title: "شارژ گروهی کارت‌ها" }] },
+          { key: "vouchers", title: "بن‌کارت‌ها", baseActions: ["view", "create", "delete"], actions: [{ key: "issue", title: "صدور بن‌کارت" }, { key: "void", title: "ابطال بن" }] },
         ],
       },
       {
@@ -533,7 +538,7 @@ export const REGISTRY: ModuleDef[] = [
       {
         key: "config",
         title: "تنظیمات",
-        forms: [{ key: "sales-stations", title: "ایستگاه فروش", baseActions: CRUD }, { key: "sales-shifts", title: "شیفت فروش", baseActions: CRUD }, { key: "store-showcases", title: "ویترین کالا", baseActions: CRUD }],
+        forms: [{ key: "sales-stations", title: "ایستگاه فروش", baseActions: CRUD }, { key: "sales-shifts", title: "شیفت فروش", baseActions: CRUD }, { key: "store-showcases", title: "ویترین کالا", baseActions: CRUD }, { key: "print-groups", title: "گروه چاپ", baseActions: CRUD }],
       },
       {
         key: "operations",
@@ -904,6 +909,7 @@ export const REGISTRY: ModuleDef[] = [
           { key: "petty-cashes", title: "تنخواه", baseActions: CRUD },
           { key: "petty-cash-custodians", title: "تنخواه‌دار", baseActions: CRUD },
           { key: "card-readers", title: "کارتخوان", baseActions: CRUD },
+          { key: "card-terminal-agents", title: "عامل محلی (کارتخوان و چاپ)", baseActions: CRUD },
         ],
       },
       {

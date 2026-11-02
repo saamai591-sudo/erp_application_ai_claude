@@ -97,6 +97,7 @@ const RAW_MODULES: ModuleGroup[] = [
         title: "گزارش",
         items: [
           { key: "account-review", label: "مرور حسابها", list: "/account-review", icon: "tree", type: "report" },
+          { key: "account-balance", label: "تراز حسابها", list: "/account-balance", icon: "ledger", type: "report" },
           { key: "olap-reports", label: "گزارش تحلیلی (OLAP)", list: "/olap-reports", create: "/olap-reports/new", icon: "trend" },
         ],
       },
@@ -261,14 +262,18 @@ const RAW_MODULES: ModuleGroup[] = [
     subModules: [
       {
         title: "تنظیمات",
-        items: [{ key: "voucher-types", label: "نوع بن‌کارت", list: "/voucher-types", create: "/voucher-types/new", icon: "tag" }],
+        items: [
+          { key: "voucher-types", label: "نوع بن‌کارت", list: "/voucher-types", create: "/voucher-types/new", icon: "tag" },
+          { key: "loyalty-charge-types", label: "نوع شارژ کارت وفاداری", list: "/loyalty-charge-types", create: "/loyalty-charge-types/new", icon: "tag" },
+        ],
       },
       {
         title: "عملیات",
         items: [
-          { key: "voucher-batches", label: "صدور بن‌کارت", list: "/voucher-batches", create: "/voucher-batches/new", icon: "gift" },
+          { key: "loyalty-cards", label: "کارت وفاداری", list: "/loyalty-cards", create: "/loyalty-cards/new", icon: "card" },
+          { key: "loyalty-charges", label: "شارژ کارت وفاداری", list: "/loyalty-charges", create: "/loyalty-charges/new", icon: "wallet" },
+          { key: "vouchers", label: "بن‌کارت‌ها", list: "/vouchers", create: "/vouchers/new", icon: "gift" },
           { key: "voucher-sales", label: "فروش بن‌کارت به سازمان", list: "/voucher-sales", create: "/voucher-sales/new", icon: "cart" },
-          { key: "vouchers", label: "بن‌کارت‌ها", list: "/vouchers", icon: "file", type: "report" },
         ],
       },
       {
@@ -286,6 +291,7 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "sales-stations", label: "ایستگاه فروش", list: "/sales-stations", create: "/sales-stations/new", icon: "store" },
           { key: "sales-shifts", label: "شیفت فروش", list: "/sales-shifts", create: "/sales-shifts/new", icon: "store" },
           { key: "store-showcases", label: "ویترین کالا", list: "/store-showcases", create: "/store-showcases/new", icon: "store" },
+          { key: "print-groups", label: "گروه چاپ", list: "/print-groups", create: "/print-groups/new", icon: "tag" },
         ],
       },
       {
@@ -343,6 +349,7 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "petty-cashes", label: "تنخواه", list: "/petty-cashes", create: "/petty-cashes/new", icon: "wallet" },
           { key: "petty-cash-custodians", label: "تنخواه‌دار", list: "/petty-cash-custodians", create: "/petty-cash-custodians/new", icon: "wallet" },
           { key: "card-readers", label: "کارتخوان", list: "/card-readers", create: "/card-readers/new", icon: "bank" },
+          { key: "card-terminal-agents", label: "عامل محلی (کارتخوان و چاپ)", list: "/card-terminal-agents", icon: "bank" },
         ],
       },
       {

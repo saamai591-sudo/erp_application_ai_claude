@@ -33,12 +33,15 @@ export function Modal({
   onClose,
   children,
   wide,
+  closeButton,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   /** برای دیالوگ‌های دارای گرید/ستون‌های زیاد: عرض بزرگ‌تر (تا ۱۲۰۰px) */
   wide?: boolean;
+  /** دکمه‌ی × گوشه‌ی دیالوگ برای بستن */
+  closeButton?: boolean;
 }) {
   // در مرحله‌ی رندر خوانده می‌شود (قبل از commit)، چون autoFocus فیلدهای داخل دیالوگ در commit فوکوس را می‌دزدد.
   const [trigger] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
@@ -46,7 +49,10 @@ export function Modal({
 
   return createPortal(
     <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={wide ? "modal modal-wide" : "modal"}>
+      <div className={wide ? "modal modal-wide" : "modal"} style={closeButton ? { position: "relative" } : undefined}>
+        {closeButton && (
+          <button type="button" onClick={onClose} title="بستن" aria-label="بستن" style={{ position: "absolute", top: 8, insetInlineEnd: 10, width: 30, height: 30, border: "none", background: "transparent", fontSize: 24, lineHeight: 1, cursor: "pointer", color: "inherit", opacity: 0.7 }}>×</button>
+        )}
         <h3>{title}</h3>
         {children}
       </div>

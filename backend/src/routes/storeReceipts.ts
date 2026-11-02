@@ -17,6 +17,7 @@ const INCLUDE = {
   cashBox: { select: { title: true } },
   cardReader: { select: { title: true } },
   voucher: { select: { serial: true } },
+  loyaltyCharge: { select: { number: true, card: { select: { cardNumber: true } }, type: { select: { title: true } } } },
   bankAccount: { include: BANK_ACCOUNT_TITLE_INCLUDE },
   sale: { select: { number: true, customer: { select: { party: { select: { detailTitle: true, name: true, firstName: true, lastName: true } } } } } },
 } as const;
@@ -55,7 +56,7 @@ router.post(["/store-receipts/card-batch", "/store-receipts/batch"], can(`${FORM
   try {
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
     if (!items.length) throw new StoreSaleError("حداقل یک ردیف را انتخاب کنید");
-    if (items.some((x: any) => !x?.cardReaderId && !x?.bankAccountId && !x?.voucherSerial)) throw new StoreSaleError("برای هر ردیف کارتخوان، حساب بانکی یا سریال بن الزامی است");
+    if (items.some((x: any) => !x?.cardReaderId && !x?.bankAccountId && !x?.voucherSerial && !x?.loyaltyChargeId)) throw new StoreSaleError("برای هر ردیف کارتخوان، حساب بانکی، سریال بن یا شارژ کارت وفاداری الزامی است");
     const created = await createStoreReceipts({ ...req.body, items });
     res.status(201).json({ created });
   } catch (e) {

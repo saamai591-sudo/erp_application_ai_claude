@@ -38,6 +38,7 @@ const ACCOUNT_TYPE_FA: Record<string, string> = {
   STORE_CASH_DIFF_CASHIER: "کسر و اضافی صندوق - حساب صندوقدار",
   VOUCHER_LIABILITY: "بدهی بن‌کارت",
   VOUCHER_RECEIVABLE: "طلب از سازمان بابت بن‌کارت",
+  LOYALTY_DISCOUNT_EXPENSE: "هزینه‌ی تخفیف وفاداری",
   PETTY_CASH: "تنخواه",
 };
 
@@ -60,6 +61,7 @@ const TARGET_FIELD: Record<string, TargetField | null> = {
   STORE_CASH_DIFF_CASHIER: null,
   VOUCHER_LIABILITY: null,
   VOUCHER_RECEIVABLE: null,
+  LOYALTY_DISCOUNT_EXPENSE: null,
   PETTY_CASH: "pettyCashId",
 };
 

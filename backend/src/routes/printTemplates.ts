@@ -21,11 +21,13 @@ const VIEW_GUARD_BY_TYPE: Record<string, ReturnType<typeof can>> = {
   SALES_QUOTE: can(`${findFormPrefix("sales-quotes")}.view`),
   SALES_INVOICE: can(`${findFormPrefix("sales-invoices")}.view`),
   JOURNAL_ENTRY: can(`${findFormPrefix("journal-entries")}.view`),
+  STORE_SALE: can(`${findFormPrefix("store-sales")}.view`),
+  STORE_SALE_ORDER: can(`${findFormPrefix("store-sales")}.view`),
 };
 
 const router = Router();
 
-const PAPERS = ["A4", "A5"];
+const PAPERS = ["A4", "A5", "ROLL_80"];
 const ORIENTATIONS = ["PORTRAIT", "LANDSCAPE"];
 const DIGITS = ["LATIN", "PERSIAN"];
 

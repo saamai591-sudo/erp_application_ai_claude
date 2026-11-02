@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
 import { nextSerialNumber } from "../utils/coding";
+import { cleanStationPrinters, syncStationPrinters } from "../services/storePrintService";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { assertRecordNotStale } from "../utils/concurrency";
@@ -26,6 +27,7 @@ const INCLUDE = {
   costCenter: { select: { id: true, title: true, detailCode: true } },
   bankAccounts: { include: { bankAccount: { select: { id: true, detailCode: true, accountNumber: true, ...BANK_ACCOUNT_TITLE_INCLUDE } } }, orderBy: { bankAccountId: "asc" } },
   showcases: { include: { showcase: { select: { id: true, code: true, title: true, isActive: true } } }, orderBy: { rowOrder: "asc" } },
+  printers: { include: { printGroup: { select: { id: true, title: true } } }, orderBy: { rowOrder: "asc" } },
   cardReaders: { include: { cardReader: { include: { bankAccount: { select: { id: true, detailCode: true, accountNumber: true, ...BANK_ACCOUNT_TITLE_INCLUDE } } } } }, orderBy: { cardReader: { code: "asc" } } },
 } as const;
 
@@ -54,6 +56,7 @@ export function stationShape(s: any) {
     costCenterId: s.costCenterId,
     costCenterTitle: s.costCenter?.title ?? "",
     defaultUnsettledStatus: s.defaultUnsettledStatus as string,
+    autoPrintReceipt: !!s.autoPrintReceipt,
     description: s.description ?? "",
     showcases: (s.showcases ?? []).map((l: any) => ({ id: l.showcase.id, code: l.showcase.code, title: l.showcase.title, isActive: l.showcase.isActive })),
     cardReaders: (s.cardReaders ?? []).map((l: any) => ({
@@ -67,6 +70,7 @@ export function stationShape(s: any) {
       bankAccountTitle: l.cardReader.bankAccount ? bankAccountDetailTitle(l.cardReader.bankAccount) : "",
     })),
     bankAccounts: (s.bankAccounts ?? []).map((l: any) => ({ id: l.bankAccount.id, detailCode: l.bankAccount.detailCode, detailTitle: bankAccountDetailTitle(l.bankAccount) })),
+    printers: (s.printers ?? []).map((p: any) => ({ id: p.id, printerName: p.printerName, printType: p.printType as string, paper: p.paper as string, printGroupId: p.printGroupId ?? null, printGroupTitle: p.printGroup?.title ?? "", isActive: p.isActive })),
     updatedAt: s.updatedAt,
   };
 }
@@ -117,7 +121,7 @@ async function clean(b: any) {
   if (!["TO_CUSTOMER", "TO_ISSUER", "CASH_SHORTAGE"].includes(defaultUnsettledStatus)) throw new StationError("وضعیت پیش‌فرض فاکتورهای تسویه‌نشده نامعتبر است");
   if (b?.showcaseIds !== undefined && !Array.isArray(b.showcaseIds)) throw new StationError("فهرست ویترین‌ها نامعتبر است");
   const showcaseIds: number[] | undefined = b?.showcaseIds === undefined ? undefined : b.showcaseIds.map((x: unknown) => Number(x));
-  return { cardReaderIds, bankAccountIds, showcaseIds, title, offering: offering as Offering, cashBoxId, warehouseId, salesTypeId, customerId, costCenterId, defaultUnsettledStatus: defaultUnsettledStatus as "TO_CUSTOMER" | "TO_ISSUER" | "CASH_SHORTAGE", description, isActive: b?.isActive !== false };
+  return { cardReaderIds, bankAccountIds, showcaseIds, title, offering: offering as Offering, cashBoxId, warehouseId, salesTypeId, customerId, costCenterId, defaultUnsettledStatus: defaultUnsettledStatus as "TO_CUSTOMER" | "TO_ISSUER" | "CASH_SHORTAGE", description, autoPrintReceipt: !!b?.autoPrintReceipt, isActive: b?.isActive !== false };
 }
 
 const fail = (res: any, e: any, fallback: string) => {
@@ -140,12 +144,14 @@ router.get("/sales-stations/:id", async (req, res) => {
 router.post("/sales-stations", can(`${FORM}.create`), async (req, res) => {
   try {
     const { cardReaderIds, bankAccountIds, showcaseIds, ...data } = await clean(req.body);
+    const pr = await cleanStationPrinters(req.body);
     for (let attempt = 0; ; attempt++) {
       try {
         const code = await nextSerialNumber(prisma.salesStation, "code");
         const created = await prisma.salesStation.create({ data: { ...data, code, cardReaders: { create: (cardReaderIds ?? []).map((cardReaderId) => ({ cardReaderId })) }, bankAccounts: { create: (bankAccountIds ?? []).map((bankAccountId) => ({ bankAccountId })) } }, include: INCLUDE });
         if (showcaseIds) await prisma.$transaction((tx) => setStationShowcases(tx, created.id, showcaseIds));
-        return res.status(201).json(stationShape(showcaseIds ? await prisma.salesStation.findUniqueOrThrow({ where: { id: created.id }, include: INCLUDE }) : created));
+        if (pr.printers) await prisma.$transaction((tx) => syncStationPrinters(tx, created.id, pr.printers!));
+        return res.status(201).json(stationShape(showcaseIds || pr.printers ? await prisma.salesStation.findUniqueOrThrow({ where: { id: created.id }, include: INCLUDE }) : created));
       } catch (e: any) {
         if (e?.code === "P2002" && String(e?.meta?.target ?? "").includes("code") && attempt < 3) continue;
         throw e;
@@ -163,6 +169,7 @@ router.put("/sales-stations/:id", can(`${FORM}.edit`), async (req, res) => {
     if (!ex) return res.status(404).json({ error: "ایستگاه فروش یافت نشد" });
     assertRecordNotStale(ex.updatedAt, req.body?.updatedAt, "ایستگاه فروش");
     const { cardReaderIds, bankAccountIds, showcaseIds, ...data } = await clean(req.body);
+    const pr = await cleanStationPrinters(req.body);
     const updated = await prisma.$transaction(async (tx) => {
       if (cardReaderIds) {
         // کارتخوانِ حذف‌شده از ایستگاه نباید در دریافتِ همین ایستگاه استفاده شده باشد
@@ -182,6 +189,7 @@ router.put("/sales-stations/:id", can(`${FORM}.edit`), async (req, res) => {
         if (addB.length) await tx.salesStationBankAccount.createMany({ data: addB.map((bankAccountId) => ({ stationId: id, bankAccountId })) });
       }
       if (showcaseIds) await setStationShowcases(tx, id, showcaseIds);
+      if (pr.printers) await syncStationPrinters(tx, id, pr.printers);
       return tx.salesStation.update({ where: { id }, data, include: INCLUDE });
     });
     res.json(stationShape(updated));

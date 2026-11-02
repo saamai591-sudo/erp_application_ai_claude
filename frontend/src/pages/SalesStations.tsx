@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { inPosApp, listLocalPrinters, PosPrinter } from "../lib/posApp";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ErrorToast } from "../components/ErrorToast";
 import { DataTable } from "../components/DataTable";
@@ -41,12 +42,24 @@ interface StationRow {
   customerTitle: string;
   costCenterId: number;
   defaultUnsettledStatus: string;
+  autoPrintReceipt?: boolean;
   costCenterTitle: string;
   description: string;
   cardReaders?: CardReaderOpt[];
   bankAccounts?: { id: number }[];
+  printers?: { printerName: string; printType: "INVOICE" | "ORDER"; paper?: Paper; printGroupId: number | null; isActive: boolean }[];
   updatedAt?: string;
 }
+type Paper = "ROLL_80" | "A4" | "A5";
+interface PrinterRow {
+  paper: Paper;
+  printerName: string;
+  printType: "INVOICE" | "ORDER";
+  /** "" = همه‌ی کالاها */
+  printGroupId: string;
+  isActive: boolean;
+}
+interface PrintGroupOpt { id: number; title: string; isActive: boolean }
 interface CardReaderOpt {
   id: number;
   code: number;
@@ -135,7 +148,7 @@ function StationList() {
   );
 }
 
-const EMPTY = { title: "", isActive: true, offering: "GOODS" as Offering, cashBoxId: "", warehouseId: "", salesTypeId: "", customerId: "", costCenterId: "", defaultUnsettledStatus: "TO_CUSTOMER", description: "", cardReaderIds: [] as number[], bankAccountIds: [] as number[], showcaseIds: [] as number[] };
+const EMPTY = { title: "", isActive: true, offering: "GOODS" as Offering, cashBoxId: "", warehouseId: "", salesTypeId: "", customerId: "", costCenterId: "", defaultUnsettledStatus: "TO_CUSTOMER", autoPrintReceipt: false, printers: [] as PrinterRow[], description: "", cardReaderIds: [] as number[], bankAccountIds: [] as number[], showcaseIds: [] as number[] };
 
 function StationForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
@@ -153,6 +166,12 @@ function StationForm({ editId }: { editId?: number }) {
   const [pickReaders, setPickReaders] = useState(false);
   const [allShowcases, setAllShowcases] = useState<{ id: number; code: number; title: string; itemCount: number; isActive: boolean }[]>([]);
   const [pickShowcases, setPickShowcases] = useState(false);
+  const [localPrinters, setLocalPrinters] = useState<PosPrinter[]>([]);
+  const [printGroups, setPrintGroups] = useState<PrintGroupOpt[]>([]);
+  useEffect(() => {
+    if (inPosApp()) listLocalPrinters().then(setLocalPrinters);
+    api.get("/print-groups").then(setPrintGroups).catch(() => setPrintGroups([]));
+  }, []);
   const [allBanks, setAllBanks] = useState<{ id: number; detailCode: string; detailTitle: string; isActive?: boolean }[]>([]);
   const [pickBanks, setPickBanks] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -176,7 +195,7 @@ function StationForm({ editId }: { editId?: number }) {
     api.get(`/sales-stations/${editId}`).then((r: StationRow) => {
       setCode(r.code);
       setUpdatedAt(r.updatedAt);
-      if (!hasPersistedState(cacheKey)) setForm({ title: r.title, isActive: r.isActive, offering: r.offering, cashBoxId: String(r.cashBoxId), warehouseId: r.warehouseId ? String(r.warehouseId) : "", salesTypeId: String(r.salesTypeId), customerId: String(r.customerId), costCenterId: String(r.costCenterId), defaultUnsettledStatus: r.defaultUnsettledStatus || "TO_CUSTOMER", description: r.description, cardReaderIds: (r.cardReaders ?? []).map((x) => x.id), bankAccountIds: (r.bankAccounts ?? []).map((x) => x.id), showcaseIds: ((r as any).showcases ?? []).map((x: { id: number }) => x.id) });
+      if (!hasPersistedState(cacheKey)) setForm({ title: r.title, isActive: r.isActive, offering: r.offering, cashBoxId: String(r.cashBoxId), warehouseId: r.warehouseId ? String(r.warehouseId) : "", salesTypeId: String(r.salesTypeId), customerId: String(r.customerId), costCenterId: String(r.costCenterId), defaultUnsettledStatus: r.defaultUnsettledStatus || "TO_CUSTOMER", autoPrintReceipt: !!r.autoPrintReceipt, printers: (r.printers ?? []).map((p) => ({ printerName: p.printerName, printType: p.printType, paper: (p.paper ?? "ROLL_80") as Paper, printGroupId: p.printGroupId ? String(p.printGroupId) : "", isActive: p.isActive })), description: r.description, cardReaderIds: (r.cardReaders ?? []).map((x) => x.id), bankAccountIds: (r.bankAccounts ?? []).map((x) => x.id), showcaseIds: ((r as any).showcases ?? []).map((x: { id: number }) => x.id) });
       setLoaded(true);
     }).catch((e) => setError(e.message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -203,6 +222,8 @@ function StationForm({ editId }: { editId?: number }) {
       customerId: Number(form.customerId),
       costCenterId: Number(form.costCenterId),
       defaultUnsettledStatus: form.defaultUnsettledStatus,
+      autoPrintReceipt: form.autoPrintReceipt,
+      printers: (form.printers ?? []).map((p) => ({ printerName: p.printerName, printType: p.printType, paper: p.paper, printGroupId: p.printType === "ORDER" && p.printGroupId ? Number(p.printGroupId) : null, isActive: p.isActive })),
       description: form.description,
       cardReaderIds: form.cardReaderIds ?? [],
       bankAccountIds: form.bankAccountIds ?? [],
@@ -337,6 +358,12 @@ function StationForm({ editId }: { editId?: number }) {
               <option value="CASH_SHORTAGE">کسری صندوق</option>
             </select>
           </div>
+          <div className="form-field">
+            <label className="checkbox-row">
+              <input type="checkbox" checked={form.autoPrintReceipt} onChange={(e) => setForm({ ...form, autoPrintReceipt: e.target.checked })} /> چاپ خودکار رسید پس از تسویه کامل
+              <FieldHint label="چاپ خودکار رسید" text="وقتی فروش به‌طور کامل تسویه شد، رسید بدون پیش‌نمایش چاپ می‌شود. برای چاپ بی‌صدا مرورگر صندوق باید با سوئیچ --kiosk-printing اجرا شود؛ در غیر این صورت پنجره‌ی چاپ مرورگر باز می‌شود." />
+            </label>
+          </div>
           <div className="form-field" style={{ gridColumn: "1 / -1" }}>
             <label>توضیحات</label>
             <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
@@ -386,6 +413,72 @@ function StationForm({ editId }: { editId?: number }) {
                     <td><button type="button" className="btn danger" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => setForm({ ...form, bankAccountIds: bankIds.filter((x) => x !== b.id) })}>حذف</button></td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </PartySectionCard>
+        <PartySectionCard
+          id="station-printers"
+          title="چاپگرها"
+          onAdd={() => setForm({ ...form, printers: [...(form.printers ?? []), { printerName: "", printType: "INVOICE", paper: "ROLL_80", printGroupId: "", isActive: true }] })}
+          addLabel="افزودن چاپگر"
+        >
+          <div>
+            <div style={{ margin: "0 0 8px" }}>
+              <span style={{ fontSize: 12, opacity: 0.75 }}>«فاکتور» = رسید مشتری (همه‌ی کالاها) با کارت «چاپ فاکتور». «سفارش» = برگه‌ی آشپزخانه/بار با کارت «چاپ سفارش»؛ برای چاپگر سفارش می‌توانید یک «گروه چاپ» انتخاب کنید تا فقط اقلام همان گروه چاپ شود. بدون چاپگر فاکتور، «چاپ» همان چاپ مستقیم مرورگر است.</span>
+            </div>
+            {!inPosApp() && <div className="alert warn" style={{ marginBottom: 8 }}>برای انتخاب از فهرست چاپگرهای ویندوز، این فرم را در «برنامه‌ی صندوق» باز کنید؛ در مرورگر فقط می‌توانید نام چاپگر را دستی بنویسید.</div>}
+            <table className="je-lines-table">
+              <thead><tr><th>چاپگر</th><th style={{ width: 130 }}>کاغذ</th><th style={{ width: 140 }}>نوع چاپ</th><th style={{ width: 160 }}>محتوا</th><th style={{ width: 200 }}>گروه چاپ</th><th style={{ width: 60 }}>فعال</th><th style={{ width: 70 }}></th></tr></thead>
+              <tbody>
+                {(form.printers ?? []).length === 0 && <tr><td colSpan={7} style={{ textAlign: "center", opacity: 0.7 }}>چاپگری تعریف نشده است</td></tr>}
+                {(form.printers ?? []).map((p, i) => {
+                  const names = localPrinters.map((x) => x.name);
+                  const setRow = (patch: Partial<PrinterRow>) => setForm({ ...form, printers: form.printers.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
+                  return (
+                    <tr key={i}>
+                      <td>
+                        {inPosApp() ? (
+                          <select value={p.printerName} onChange={(e) => setRow({ printerName: e.target.value })}>
+                            <option value="">— انتخاب چاپگر —</option>
+                            {p.printerName && !names.includes(p.printerName) && <option value={p.printerName}>{p.printerName} (روی این کامپیوتر نیست)</option>}
+                            {names.map((n) => <option key={n} value={n}>{n}</option>)}
+                          </select>
+                        ) : (
+                          <input dir="ltr" value={p.printerName} placeholder="نام دقیق چاپگر در ویندوز" onChange={(e) => setRow({ printerName: e.target.value })} />
+                        )}
+                      </td>
+                      <td>
+                        <select value={p.paper} onChange={(e) => setRow({ paper: e.target.value as Paper })} title="چاپگر حرارتی رسید: رول ۸۰ میلی‌متری. چاپگر لیزری/معمولی: A4 یا A5 (رسید بالای برگه چاپ می‌شود)">
+                          <option value="ROLL_80">رول ۸۰ میلی‌متری</option>
+                          <option value="A4">A4</option>
+                          <option value="A5">A5</option>
+                        </select>
+                      </td>
+                      <td>
+                        <select value={p.printType} onChange={(e) => setRow({ printType: e.target.value as "INVOICE" | "ORDER", printGroupId: e.target.value === "INVOICE" ? "" : p.printGroupId })}>
+                          <option value="INVOICE">چاپ فاکتور</option>
+                          <option value="ORDER">چاپ سفارش</option>
+                        </select>
+                      </td>
+                      <td>
+                        <select value={p.printGroupId ? "GROUP" : "ALL"} disabled={p.printType === "INVOICE"} onChange={(e) => setRow({ printGroupId: e.target.value === "ALL" ? "" : String(printGroups.find((g) => g.isActive)?.id ?? "") })}>
+                          <option value="ALL">همه‌ی کالاها</option>
+                          <option value="GROUP">گروه چاپ خاص</option>
+                        </select>
+                      </td>
+                      <td>
+                        {p.printType === "ORDER" && p.printGroupId ? (
+                          <select value={p.printGroupId} onChange={(e) => setRow({ printGroupId: e.target.value })}>
+                            {printGroups.filter((g) => g.isActive || String(g.id) === p.printGroupId).map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}
+                          </select>
+                        ) : <span style={{ opacity: 0.4 }}>—</span>}
+                      </td>
+                      <td style={{ textAlign: "center" }}><input type="checkbox" checked={p.isActive} onChange={(e) => setRow({ isActive: e.target.checked })} /></td>
+                      <td><button type="button" className="btn danger" style={{ padding: "4px 8px", fontSize: 11 }} onClick={() => setForm({ ...form, printers: form.printers.filter((_, k) => k !== i) })}>حذف</button></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

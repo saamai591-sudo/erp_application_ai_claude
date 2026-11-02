@@ -33,6 +33,7 @@ import OpeningClosing from "./pages/OpeningClosing";
 import DocumentConfirmation from "./pages/DocumentConfirmation";
 import JournalConsolidation from "./pages/JournalConsolidation";
 import AccountsReview from "./pages/AccountsReview";
+import AccountBalance from "./pages/AccountBalance";
 import OlapReports from "./pages/OlapReports";
 import UnitsOfMeasure from "./pages/UnitsOfMeasure";
 import WarehouseGroups from "./pages/WarehouseGroups";
@@ -90,9 +91,11 @@ import SalesStations from "./pages/SalesStations";
 import SalesShifts from "./pages/SalesShifts";
 import StoreShowcases from "./pages/StoreShowcases";
 import VoucherTypes from "./pages/VoucherTypes";
-import VoucherBatches from "./pages/VoucherBatches";
 import VoucherSales from "./pages/VoucherSales";
 import Vouchers from "./pages/Vouchers";
+import LoyaltyChargeTypes from "./pages/LoyaltyChargeTypes";
+import LoyaltyCards from "./pages/LoyaltyCards";
+import LoyaltyCharges from "./pages/LoyaltyCharges";
 import VoucherLiability from "./pages/VoucherLiability";
 import StoreDeliveries from "./pages/StoreDeliveries";
 import StoreSaleIssues from "./pages/StoreSaleIssues";
@@ -134,6 +137,8 @@ import AttendanceEmployees from "./pages/AttendanceEmployees";
 import AttendanceMissionTypes from "./pages/AttendanceMissionTypes";
 import AttendanceRequestTypes from "./pages/AttendanceRequestTypes";
 import CardReaders from "./pages/CardReaders";
+import CardTerminalAgents from "./pages/CardTerminalAgents";
+import PrintGroups from "./pages/PrintGroups";
 import AttendanceMissionRequests from "./pages/AttendanceMissionRequests";
 import AttendanceMissionReports from "./pages/AttendanceMissionReports";
 import { EmploymentTypes, EducationLevels, TerminationReasons, DecreeComponents } from "./pages/HrMasters";
@@ -298,6 +303,7 @@ export default function App() {
             <Route path="/journal-consolidation/new" element={<JournalConsolidation />} />
             <Route path="/journal-consolidation/:id/edit" element={<JournalConsolidation />} />
             <Route path="/account-review" element={<AccountsReview />} />
+            <Route path="/account-balance" element={<AccountBalance />} />
             <Route path="/olap-reports" element={<OlapReports />} />
             <Route path="/olap-reports/new" element={<OlapReports />} />
             <Route path="/olap-reports/:id/edit" element={<OlapReports />} />
@@ -491,13 +497,23 @@ export default function App() {
             <Route path="/voucher-types" element={<VoucherTypes />} />
             <Route path="/voucher-types/new" element={<VoucherTypes />} />
             <Route path="/voucher-types/:id/edit" element={<VoucherTypes />} />
-            <Route path="/voucher-batches" element={<VoucherBatches />} />
-            <Route path="/voucher-batches/new" element={<VoucherBatches />} />
             <Route path="/voucher-sales" element={<VoucherSales />} />
             <Route path="/voucher-sales/new" element={<VoucherSales />} />
             <Route path="/voucher-sales/:id/edit" element={<VoucherSales />} />
             <Route path="/vouchers" element={<Vouchers />} />
+            <Route path="/vouchers/new" element={<Vouchers />} />
+            <Route path="/loyalty-charge-types" element={<LoyaltyChargeTypes />} />
+            <Route path="/loyalty-charge-types/new" element={<LoyaltyChargeTypes />} />
+            <Route path="/loyalty-charge-types/:id/edit" element={<LoyaltyChargeTypes />} />
+            <Route path="/loyalty-cards" element={<LoyaltyCards />} />
+            <Route path="/loyalty-cards/new" element={<LoyaltyCards />} />
+            <Route path="/loyalty-cards/:id/edit" element={<LoyaltyCards />} />
+            <Route path="/loyalty-charges" element={<LoyaltyCharges />} />
+            <Route path="/loyalty-charges/new" element={<LoyaltyCharges />} />
             <Route path="/voucher-liability" element={<VoucherLiability />} />
+            <Route path="/print-groups" element={<PrintGroups />} />
+            <Route path="/print-groups/new" element={<PrintGroups />} />
+            <Route path="/print-groups/:id/edit" element={<PrintGroups />} />
             <Route path="/store-showcases" element={<StoreShowcases />} />
             <Route path="/store-showcases/new" element={<StoreShowcases />} />
             <Route path="/store-showcases/:id/edit" element={<StoreShowcases />} />
@@ -704,6 +720,7 @@ export default function App() {
             <Route path="/card-readers" element={<CardReaders />} />
             <Route path="/card-readers/new" element={<CardReaders />} />
             <Route path="/card-readers/:id/edit" element={<CardReaders />} />
+            <Route path="/card-terminal-agents" element={<CardTerminalAgents />} />
             <Route path="/petty-cashes" element={<PettyCashes />} />
             <Route path="/petty-cashes/new" element={<PettyCashes />} />
             <Route path="/petty-cashes/:id/edit" element={<PettyCashes />} />

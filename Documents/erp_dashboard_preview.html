@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>پیش‌نمایش داشبورد ERP</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&display=swap');
+:root{
+  --navy:#123f63; --navy2:#0b3555; --blue:#2376d8; --teal:#0b8790;
+  --ink:#172b43; --muted:#71839a; --line:#e3ebf3; --canvas:#f4f8fc; --white:#fff;
+  --green:#12866c; --red:#d64550; --amber:#b96b08; --purple:#7b4bd1;
+  --shadow:0 5px 18px rgba(22,55,86,.055);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--canvas);color:var(--ink);font-family:"Vazirmatn",Tahoma,sans-serif;font-size:14px}
+button{font:inherit;cursor:pointer}
+.app{min-height:100vh;display:flex;flex-direction:column}
+.topbar{height:62px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:18px;padding:0 24px;position:sticky;top:0;z-index:5}
+.user{display:flex;align-items:center;gap:9px;white-space:nowrap;font-weight:600}
+.avatar{width:34px;height:34px;border-radius:50%;background:#e8f0f8;color:#597692;display:grid;place-items:center;border:1px solid #d7e3ef}
+.vline{height:30px;width:1px;background:var(--line)}
+.period{display:flex;align-items:center;gap:8px;color:#63778e;white-space:nowrap;font-size:13px}
+.search{margin-right:auto;display:flex;align-items:center;gap:10px;width:min(350px,28vw);padding:9px 13px;border:1px solid #dce6f0;border-radius:11px;background:#f8fafc;color:#8291a5}
+.search kbd{font-size:11px;border:1px solid #d5e0eb;border-radius:5px;padding:2px 5px;background:#fff;white-space:nowrap}
+.top-icon{width:36px;height:36px;border:0;background:transparent;color:#506780;position:relative;border-radius:10px;display:grid;place-items:center}
+.top-icon:hover{background:#edf5fb}
+.dot{position:absolute;top:2px;right:2px;background:#d9414c;color:#fff;border-radius:99px;font-size:10px;min-width:17px;height:17px;display:grid;place-items:center}
+.layout{display:flex;min-height:calc(100vh - 62px)}
+.sidebar{width:258px;flex-shrink:0;background:#fff;border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:calc(100vh - 62px)}
+.brand{height:62px;display:flex;align-items:center;justify-content:space-between;padding:0 19px;background:linear-gradient(120deg,var(--navy2),var(--navy));color:#fff;font-size:17px;font-weight:800}
+.brand-mark{width:30px;height:30px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2);border-radius:9px;display:grid;place-items:center}
+.nav{padding:12px 10px;overflow:auto}
+.nav-item{width:100%;display:flex;align-items:center;gap:12px;border:0;background:transparent;color:#314b65;padding:10px 12px;margin:3px 0;border-radius:10px;text-align:right;font-weight:600;min-height:43px;transition:.15s}
+.nav-item .ic{width:21px;height:21px;display:grid;place-items:center;color:#52708d;flex-shrink:0}
+.nav-item .chev{margin-right:auto;color:#90a0b2}
+.nav-item:hover{background:#f1f6fb}
+.nav-item.active{background:#e7f1ff;color:#1559a7;box-shadow:inset -3px 0 #2c7cda}
+.nav-item.active .ic{color:#176dca}
+.nav-item.open{background:#edf7f5;color:#176d70}
+.nav-item.open .ic{color:#07858c}
+.nav-sub{margin:2px 4px 8px 0;padding-right:16px;border-right:1px solid #d8e6ee}
+.sub-item{display:flex;align-items:center;gap:10px;padding:9px 10px;margin:2px 0;border-radius:8px;color:#60758d;font-size:13px;text-decoration:none}
+.sub-item:before{content:"";width:6px;height:6px;border:1.5px solid #9eb1c4;border-radius:2px}
+.sub-item:hover,.sub-item.selected{background:#f3f7fb;color:#1b5e98}
+.sub-item.selected:before{background:#2d83d9;border-color:#2d83d9}
+.nav-caption{font-size:11px;color:#9aaabd;font-weight:700;padding:17px 12px 6px}
+.favorites{border-top:1px solid var(--line);padding:12px 10px;margin-top:auto}
+.fav-title{font-size:12px;color:#7d8fa3;font-weight:700;padding:5px 12px 8px;display:flex;gap:7px;align-items:center}
+.main{min-width:0;flex:1;padding:22px 24px 28px}
+.welcome{position:relative;overflow:hidden;min-height:148px;border:1px solid #d8e9f8;border-radius:15px;background:linear-gradient(105deg,#eaf6ff 0%,#f8fcff 45%,#fff 100%);display:flex;align-items:center;padding:24px 30px;margin-bottom:20px}
+.welcome:before,.welcome:after{content:"";position:absolute;border-radius:50%;background:rgba(56,154,218,.06)}
+.welcome:before{width:330px;height:330px;left:-70px;top:-210px}
+.welcome:after{width:220px;height:220px;left:180px;bottom:-175px}
+.welcome-content{position:relative;z-index:1;margin-right:auto;text-align:right}
+.welcome h1{font-size:23px;line-height:1.6;margin:0 0 5px;font-weight:800;color:#142f4d}
+.welcome p{margin:0;color:#6d8198;font-size:13px}
+.welcome-date{margin-top:12px;color:#8194aa;font-size:12px;display:flex;align-items:center;gap:7px}
+.hero-illustration{width:190px;height:105px;position:relative;display:flex;align-items:flex-end;justify-content:center;margin-left:20px}
+.chart-window{width:128px;height:82px;border-radius:12px 12px 4px 4px;background:rgba(255,255,255,.94);border:2px solid #4e9bc2;box-shadow:0 10px 22px #b6d7e9;position:relative;padding:14px 12px 8px;display:flex;align-items:flex-end;gap:8px}
+.chart-window:before{content:"";position:absolute;top:0;left:0;right:0;height:12px;background:#1d6c8c;border-radius:8px 8px 0 0}
+.bar{flex:1;border-radius:4px 4px 0 0;background:linear-gradient(#45a0f4,#1d70ce)}
+.bar:nth-child(1){height:23px}.bar:nth-child(2){height:37px}.bar:nth-child(3){height:50px}.bar:nth-child(4){height:63px}
+.pie{position:absolute;bottom:0;left:0;width:54px;height:54px;border-radius:15px;background:white;box-shadow:0 5px 15px #bdd8e8;display:grid;place-items:center;color:#0c8991}
+.hero-leaf{position:absolute;left:4px;bottom:0;width:40px;height:70px;background:#9ee1db;opacity:.7;border-radius:100% 0 100% 0;transform:rotate(-25deg)}
+.section{background:#fff;border:1px solid var(--line);border-radius:15px;box-shadow:var(--shadow);padding:17px 18px;margin-bottom:18px}
+.section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.section-head h2{font-size:16px;margin:0;font-weight:800;color:#18334f}
+.section-head .hint{font-size:12px;color:#8798aa}
+.module-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:12px}
+.module{border:1px solid transparent;border-radius:13px;min-height:145px;padding:17px 9px 12px;text-align:center;display:flex;align-items:center;flex-direction:column;gap:7px;transition:transform .15s,box-shadow .15s}
+.module:hover{transform:translateY(-3px);box-shadow:0 8px 18px rgba(30,70,110,.10)}
+.module .module-icon{width:45px;height:45px;border-radius:13px;display:grid;place-items:center;margin-bottom:2px}
+.module strong{font-size:14px;font-weight:700}
+.module small{font-size:11px;line-height:1.7;color:#61758a}
+.module .go{width:25px;height:25px;border-radius:50%;display:grid;place-items:center;background:#fff;border:1px solid currentColor;margin-top:auto;opacity:.9}
+.blue{background:#e9f3ff;color:#2376d8}.blue .module-icon{background:#d5e8ff}
+.teal{background:#e5f7f4;color:#0b7f88}.teal .module-icon{background:#c9efea}
+.orange{background:#fff3e2;color:#b66b08}.orange .module-icon{background:#ffe4bd}
+.purple{background:#f2ebff;color:#8050cb}.purple .module-icon{background:#e6d9ff}
+.red{background:#fff0f0;color:#d3424e}.red .module-icon{background:#ffdddd}
+.green{background:#e8f7ee;color:#168365}.green .module-icon{background:#d0f0dd}
+.slate{background:#eef2f6;color:#51677f}.slate .module-icon{background:#dfe7ef}
+.lower-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px}
+.panel{background:#fff;border:1px solid var(--line);border-radius:15px;box-shadow:var(--shadow);padding:17px;min-width:0}
+.panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:13px}
+.panel-title{display:flex;align-items:center;gap:9px;font-weight:800;font-size:15px}
+.panel-title .mini-icon{width:31px;height:31px;border-radius:9px;background:#edf5ff;color:#2675cb;display:grid;place-items:center}
+.see-all{border:0;background:transparent;color:#2879ce;font-size:12px;font-weight:600}
+.quick-list,.doc-list,.notice-list{display:flex;flex-direction:column;gap:7px}
+.quick{display:flex;align-items:center;gap:10px;padding:9px 10px;background:#f6f9fc;border:1px solid #edf2f7;border-radius:9px;color:#2d4660;text-decoration:none;font-size:13px;font-weight:500}
+.quick:hover{background:#edf5ff;border-color:#d9e8f7}
+.quick .qic{width:27px;height:27px;border-radius:8px;display:grid;place-items:center;background:#e4efff;color:#2774c7}
+.quick .arrow{margin-right:auto;color:#94a6b8}
+.doc,.notice{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #edf1f5}
+.doc:last-child,.notice:last-child{border-bottom:0}
+.doc-icon{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex-shrink:0}
+.doc-main{min-width:0;flex:1}
+.doc-main strong,.notice-main strong{display:block;font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.doc-main small,.notice-main small{display:block;font-size:11px;color:#8293a6;margin-top:3px}
+.status{font-size:10px;padding:5px 8px;border-radius:7px;white-space:nowrap;font-weight:600}
+.status.ok{background:#def6eb;color:#087a5b}.status.new{background:#e3f1ff;color:#1c6ab6}.status.wait{background:#fff0d9;color:#9a5b00}
+.notice-time{font-size:10px;color:#94a2b2;white-space:nowrap;align-self:flex-start;margin-top:4px}
+.notice.warn{background:#fffafa;border-radius:9px;padding:10px;margin:0;border-bottom:0}
+.notice-icon{width:34px;height:34px;border-radius:10px;background:#fff0f0;color:#d54551;display:grid;place-items:center;flex-shrink:0}
+.notice-icon.info{background:#eaf4ff;color:#2678cc}.notice-icon.gear{background:#eff2f7;color:#5b718a}.notice-icon.amber{background:#fff3df;color:#b8730b}
+@media(max-width:1250px){.module-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.lower-grid{grid-template-columns:1fr 1fr}.sidebar{width:238px}.hero-illustration{width:140px}}
+@media(max-width:900px){.sidebar{width:205px}.main{padding:14px}.topbar{padding:0 12px;gap:9px}.period{display:none}.module-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.lower-grid{grid-template-columns:1fr}.welcome h1{font-size:20px}.hero-illustration{display:none}}
+@media(max-width:620px){.layout{display:block}.sidebar{width:100%;min-height:auto;border-left:0}.nav{display:grid;grid-template-columns:1fr 1fr}.nav-sub,.favorites,.nav-caption{display:none}.brand{height:52px}.main{padding:12px}.topbar{height:54px}.user span,.vline,.search kbd{display:none}.search{width:auto;flex:1}.module-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.welcome{padding:20px}.welcome h1{font-size:18px}.module{min-height:132px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="user"><div class="avatar"><i data-lucide="user-round"></i></div><span>مدیر سیستم</span><i data-lucide="chevron-down" style="width:14px"></i></div>
+    <div class="vline"></div>
+    <div class="period"><i data-lucide="calendar-days"></i><span>دوره مالی: ۱۴۰۳/۰۷/۰۱ تا ۱۴۰۴/۱۲/۲۹</span></div>
+    <div class="search"><i data-lucide="search"></i><span>جستجو در سیستم...</span><kbd>Ctrl + K</kbd></div>
+    <button class="top-icon" aria-label="اعلان‌ها"><i data-lucide="bell"></i><span class="dot">3</span></button>
+    <button class="top-icon" aria-label="تنظیمات"><i data-lucide="settings"></i></button>
+    <button class="top-icon" aria-label="راهنما"><i data-lucide="circle-help"></i></button>
+  </header>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand"><span>حسابداری ERP</span><span class="brand-mark"><i data-lucide="panel-right-close"></i></span></div>
+      <nav class="nav">
+        <button class="nav-item active"><span class="ic"><i data-lucide="house"></i></span>صفحه اصلی</button>
+        <button class="nav-item"><span class="ic"><i data-lucide="settings"></i></span>تنظیمات <i class="chev" data-lucide="chevron-left"></i></button>
+        <button class="nav-item"><span class="ic"><i data-lucide="database"></i></span>اطلاعات پایه <i class="chev" data-lucide="chevron-left"></i></button>
+        <button class="nav-item"><span class="ic"><i data-lucide="calculator"></i></span>حسابداری <i class="chev" data-lucide="chevron-left"></i></button>
+        <button class="nav-item"><span class="ic"><i data-lucide="shopping-cart"></i></span>خرید و تأمین <i class="chev" data-lucide="chevron-left"></i></button>
+        <button class="nav-item"><span class="ic"><i data-lucide="store"></i></span>فروش <i class="chev" data-lucide="chevron-left"></i></button>
+        <button class="nav-item"><span class="ic"><i data-lucide="package"></i></span>انبار <i class="chev" data-lucide="chevron-left"></i></button>
+        <button class="nav-item"><span class="ic"><i data-lucide="landmark"></i></span>خزانه‌داری <i class="chev" data-lucide="chevron-left"></i></button>
+        <button class="nav-item"><span class="ic"><i data-lucide="building-2"></i></span>مدیریت دارایی و انبار <i class="chev" data-lucide="chevron-left"></i></button>
+        <button class="nav-item"><span class="ic"><i data-lucide="wrench"></i></span>تعمیرات و نگهداری <i class="chev" data-lucide="chevron-left"></i></button>
+        <button class="nav-item"><span class="ic"><i data-lucide="users-round"></i></span>منابع انسانی <i class="chev" data-lucide="chevron-left"></i></button>
+        <button class="nav-item"><span class="ic"><i data-lucide="chart-no-axes-column"></i></span>گزارش‌ها <i class="chev" data-lucide="chevron-left"></i></button>
+        <button class="nav-item"><span class="ic"><i data-lucide="zap"></i></span>عملیات <i class="chev" data-lucide="chevron-left"></i></button>
+      </nav>
+      <div class="favorites">
+        <div class="fav-title"><i data-lucide="star" style="width:15px"></i> دسترسی‌های پرکاربرد</div>
+        <a class="sub-item selected" href="#"><i data-lucide="file-text" style="width:16px"></i> پیش‌فاکتور فروش</a>
+        <a class="sub-item" href="#"><i data-lucide="file-text" style="width:16px"></i> فاکتور فروش</a>
+        <a class="sub-item" href="#"><i data-lucide="file-text" style="width:16px"></i> دریافت از مشتری</a>
+      </div>
+    </aside>
+    <main class="main">
+      <section class="welcome">
+        <div class="hero-illustration" aria-hidden="true">
+          <div class="hero-leaf"></div>
+          <div class="chart-window"><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div></div>
+          <div class="pie"><i data-lucide="chart-pie" style="width:30px;height:30px"></i></div>
+        </div>
+        <div class="welcome-content">
+          <h1>به نرم‌افزار حسابداری خوش آمدید</h1>
+          <p>از طریق دسترسی‌های سریع زیر به ماژول‌های مختلف سیستم دسترسی پیدا کنید.</p>
+          <div class="welcome-date"><i data-lucide="calendar-days" style="width:16px"></i> شنبه، ۲۹ اسفند ۱۴۰۴</div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head"><h2>دسترسی سریع به ماژول‌ها</h2><span class="hint">برای ورود، یک ماژول را انتخاب کنید</span></div>
+        <div class="module-grid">
+          <button class="module blue"><span class="module-icon"><i data-lucide="calculator" style="width:27px;height:27px"></i></span><strong>حسابداری</strong><small>ثبت و گزارش اسناد</small><span class="go"><i data-lucide="arrow-left" style="width:15px"></i></span></button>
+          <button class="module teal"><span class="module-icon"><i data-lucide="package" style="width:27px;height:27px"></i></span><strong>انبار</strong><small>مدیریت موجودی</small><span class="go"><i data-lucide="arrow-left" style="width:15px"></i></span></button>
+          <button class="module green"><span class="module-icon"><i data-lucide="boxes" style="width:27px;height:27px"></i></span><strong>خرید و تأمین</strong><small>درخواست و سفارش</small><span class="go"><i data-lucide="arrow-left" style="width:15px"></i></span></button>
+          <button class="module orange"><span class="module-icon"><i data-lucide="shopping-cart" style="width:27px;height:27px"></i></span><strong>فروش</strong><small>پیش‌فاکتور و فاکتور</small><span class="go"><i data-lucide="arrow-left" style="width:15px"></i></span></button>
+          <button class="module purple"><span class="module-icon"><i data-lucide="store" style="width:27px;height:27px"></i></span><strong>خزانه‌داری</strong><small>دریافت و پرداخت</small><span class="go"><i data-lucide="arrow-left" style="width:15px"></i></span></button>
+          <button class="module red"><span class="module-icon"><i data-lucide="users-round" style="width:27px;height:27px"></i></span><strong>منابع انسانی</strong><small>کارکنان و پرسنل</small><span class="go"><i data-lucide="arrow-left" style="width:15px"></i></span></button>
+          <button class="module slate"><span class="module-icon"><i data-lucide="wrench" style="width:27px;height:27px"></i></span><strong>تعمیرات و نگهداری</strong><small>مدیریت دارایی‌ها</small><span class="go"><i data-lucide="arrow-left" style="width:15px"></i></span></button>
+        </div>
+      </section>
+
+      <div class="lower-grid">
+        <section class="panel">
+          <div class="panel-head"><div class="panel-title"><span class="mini-icon"><i data-lucide="star"></i></span>دسترسی‌های پرکاربرد</div><button class="see-all">مدیریت دسترسی‌ها</button></div>
+          <div class="quick-list">
+            <a href="#" class="quick"><span class="qic"><i data-lucide="file-plus"></i></span>ثبت فاکتور فروش <i class="arrow" data-lucide="chevron-left"></i></a>
+            <a href="#" class="quick"><span class="qic" style="color:#0b8588;background:#e0f5f2"><i data-lucide="package-check"></i></span>ثبت رسید انبار <i class="arrow" data-lucide="chevron-left"></i></a>
+            <a href="#" class="quick"><span class="qic" style="color:#bd4850;background:#ffeded"><i data-lucide="banknote"></i></span>دریافت از مشتری <i class="arrow" data-lucide="chevron-left"></i></a>
+            <a href="#" class="quick"><span class="qic" style="color:#b66b08;background:#fff0d9"><i data-lucide="wallet"></i></span>پرداخت به تأمین‌کننده <i class="arrow" data-lucide="chevron-left"></i></a>
+            <a href="#" class="quick"><span class="qic" style="color:#168365;background:#e4f7ec"><i data-lucide="file-text"></i></span>ثبت سند حسابداری جدید <i class="arrow" data-lucide="chevron-left"></i></a>
+            <a href="#" class="quick"><span class="qic" style="color:#8050cb;background:#f0eaff"><i data-lucide="chart-column"></i></span>گزارش مانده حساب <i class="arrow" data-lucide="chevron-left"></i></a>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><div class="panel-title"><span class="mini-icon" style="background:#e9f7f0;color:#138567"><i data-lucide="files"></i></span>سندهای اخیر</div><button class="see-all">مشاهده همه</button></div>
+          <div class="doc-list">
+            <div class="doc"><span class="doc-icon" style="background:#f1eaff;color:#8050cb"><i data-lucide="file-text"></i></span><div class="doc-main"><strong>فاکتور فروش</strong><small>شرکت نمونه · ۱۴۰۴/۰۵/۲۸</small></div><span class="status ok">تأیید شده</span></div>
+            <div class="doc"><span class="doc-icon" style="background:#e5f7f2;color:#0b8588"><i data-lucide="package-check"></i></span><div class="doc-main"><strong>رسید انبار</strong><small>انبار مرکزی · ۱۴۰۴/۰۵/۲۷</small></div><span class="status new">ثبت شده</span></div>
+            <div class="doc"><span class="doc-icon" style="background:#ffeded;color:#d3424e"><i data-lucide="wallet"></i></span><div class="doc-main"><strong>دریافت از مشتری</strong><small>شرکت الف · ۱۴۰۴/۰۵/۲۶</small></div><span class="status ok">تأیید شده</span></div>
+            <div class="doc"><span class="doc-icon" style="background:#fff2df;color:#b66b08"><i data-lucide="shopping-cart"></i></span><div class="doc-main"><strong>خرید کالا</strong><small>تأمین‌کننده ب · ۱۴۰۴/۰۵/۲۵</small></div><span class="status new">ثبت شده</span></div>
+            <div class="doc"><span class="doc-icon" style="background:#eaf3ff;color:#2776ce"><i data-lucide="calculator"></i></span><div class="doc-main"><strong>سند حسابداری</strong><small>انتقال وجه · ۱۴۰۴/۰۵/۲۴</small></div><span class="status wait">پیش‌نویس</span></div>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><div class="panel-title"><span class="mini-icon" style="background:#fff4df;color:#b8730b"><i data-lucide="bell"></i></span>اعلان‌ها و موارد مهم</div><button class="see-all">مشاهده همه</button></div>
+          <div class="notice-list">
+            <div class="notice warn"><span class="notice-icon"><i data-lucide="alarm-clock"></i></span><div class="notice-main"><strong>سررسید چک</strong><small>چک شماره ۱۲۳۴۵ فردا سررسید می‌شود.</small></div><span class="notice-time">۲ ساعت قبل</span></div>
+            <div class="notice"><span class="notice-icon info"><i data-lucide="file-check"></i></span><div class="notice-main"><strong>درخواست تأیید</strong><small>یک سند حسابداری در انتظار تأیید است.</small></div><span class="notice-time">۵ ساعت قبل</span></div>
+            <div class="notice"><span class="notice-icon gear"><i data-lucide="settings"></i></span><div class="notice-main"><strong>به‌روزرسانی سیستم</strong><small>نسخه جدید سیستم آماده نصب است.</small></div><span class="notice-time">۱ روز قبل</span></div>
+            <div class="notice"><span class="notice-icon amber"><i data-lucide="triangle-alert"></i></span><div class="notice-main"><strong>موجودی پایین</strong><small>موجودی یک کالا کمتر از حد مجاز است.</small></div><span class="notice-time">۱ روز قبل</span></div>
+            <div class="notice"><span class="notice-icon" style="background:#e3f7ee;color:#138567"><i data-lucide="chart-no-axes-column"></i></span><div class="notice-main"><strong>گزارش ماهانه</strong><small>گزارش عملکرد ماه گذشته آماده است.</small></div><span class="notice-time">۲ روز قبل</span></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>if(window.lucide){lucide.createIcons();}</script>
+</body>
+</html>

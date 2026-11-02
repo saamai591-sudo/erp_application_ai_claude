@@ -435,7 +435,7 @@ export async function deleteStorePayment(id: number) {
 }
 
 export const PAYMENT_INCLUDE = {
-  station: { select: { title: true } },
+  // StorePayment رابطه‌ی prisma با ایستگاه ندارد (فقط stationId)؛ عنوان ایستگاه با withStationTitles پر می‌شود
   cashBox: { select: { title: true } },
   bankAccount: { include: BANK_ACCOUNT_TITLE_INCLUDE },
   return: { select: { number: true, sale: { select: { number: true } }, customer: { select: { party: { select: { detailTitle: true, name: true, firstName: true, lastName: true } } } } } },
@@ -463,14 +463,23 @@ export function paymentShape(p: any) {
   };
 }
 
+async function withStationTitles<T extends { stationId: number }>(rows: T[]): Promise<(T & { station: { title: string } | null })[]> {
+  const ids = [...new Set(rows.map((r) => r.stationId))];
+  const sts = ids.length ? await prisma.salesStation.findMany({ where: { id: { in: ids } }, select: { id: true, title: true } }) : [];
+  const m = new Map(sts.map((x) => [x.id, x.title]));
+  return rows.map((r) => ({ ...r, station: m.has(r.stationId) ? { title: m.get(r.stationId)! } : null }));
+}
+
 export async function listStorePayments(returnId?: number) {
   const rows = await prisma.storePayment.findMany({ where: returnId ? { returnId } : {}, include: PAYMENT_INCLUDE as any, orderBy: { id: "desc" }, take: 5000 });
-  return rows.map(paymentShape);
+  return (await withStationTitles(rows as any[])).map(paymentShape);
 }
 
 export async function loadStorePayment(id: number) {
   const p = await prisma.storePayment.findUnique({ where: { id }, include: PAYMENT_INCLUDE as any });
-  return p ? paymentShape(p) : null;
+  if (!p) return null;
+  const [withStation] = await withStationTitles([p as any]);
+  return paymentShape(withStation);
 }
 
 /** برگشت‌های دارای باقی‌مانده‌ی پرداخت (برای انتخابگر فرم پرداخت؛ includeReturnId = برگشتِ پرداختِ در حال ویرایش) */

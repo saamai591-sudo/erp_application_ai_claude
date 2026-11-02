@@ -24,6 +24,8 @@ function shape(r: any) {
     bankAccountCode: r.bankAccount?.detailCode ?? "",
     bankAccountTitle: r.bankAccount ? bankAccountDetailTitle(r.bankAccount) : "",
     title: r.title,
+    driver: r.driver,
+    agentId: r.agentId ?? null,
     updatedAt: r.updatedAt,
   };
 }
@@ -36,7 +38,7 @@ function requiredText(raw: unknown, label: string, digits = false): string {
   return v;
 }
 
-async function clean(body: any, existing?: { bankAccountId: number }) {
+async function clean(body: any, existing?: { bankAccountId: number; driver?: string; agentId?: number | null }) {
   const title = requiredText(body?.title, "عنوان");
   const terminalNumber = requiredText(body?.terminalNumber, "شماره پایانه", true);
   const merchantNumber = requiredText(body?.merchantNumber, "شماره پذیرنده", true);
@@ -46,7 +48,15 @@ async function clean(body: any, existing?: { bankAccountId: number }) {
   if (!acc) throw new Error("حساب بانکی نامعتبر است");
   // حساب غیرفعال برای انتخاب تازه پذیرفته نمی‌شود؛ حسابِ قبلیِ همین کارتخوان (که بعداً غیرفعال شده) می‌ماند
   if (!acc.isActive && existing?.bankAccountId !== bankAccountId) throw new Error("حساب بانکی انتخاب‌شده غیرفعال است");
-  return { title, terminalNumber, merchantNumber, bankAccountId };
+  const driver = body?.driver === undefined || body?.driver === "" ? existing?.driver ?? "MANUAL" : String(body.driver);
+  if (driver !== "MANUAL" && driver !== "SIMULATOR") throw new Error("درایور کارتخوان نامعتبر است");
+  let agentId: number | null = existing?.agentId ?? null;
+  if (body?.agentId !== undefined) agentId = body.agentId ? Number(body.agentId) : null;
+  if (agentId) {
+    if (!(await prisma.cardTerminalAgent.findUnique({ where: { id: agentId }, select: { id: true } }))) throw new Error("عامل کارتخوان نامعتبر است");
+    if (driver === "MANUAL") throw new Error("کارتخوان با اتصال «دستی» عامل محلی نمی‌خواهد؛ یا اتصال را عوض کنید یا عامل را بردارید");
+  }
+  return { title, terminalNumber, merchantNumber, bankAccountId, driver: driver as "MANUAL" | "SIMULATOR", agentId };
 }
 
 async function assertNoDuplicate(d: { title: string; terminalNumber: string; merchantNumber: string }, excludeId?: number) {

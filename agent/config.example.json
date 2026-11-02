@@ -1,0 +1,8 @@
+{
+  "serverUrl": "https://erp.example.ir",
+  "token": "توکن-ساخته‌شده-در-ERP",
+  "pollMs": 2000,
+  "readers": {
+    "1": { "ip": "192.168.1.50", "port": 8080 }
+  }
+}

@@ -88,7 +88,11 @@ function CardReaderForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
-  const [form, setForm] = usePersistedState(cacheKey, { code: "", terminalNumber: "", merchantNumber: "", bankAccountId: "", title: "" });
+  const [agents, setAgents] = useState<{ id: number; name: string; online: boolean }[]>([]);
+  useEffect(() => {
+    api.get("/card-terminal-agents").then(setAgents).catch(() => setAgents([]));
+  }, []);
+  const [form, setForm] = usePersistedState(cacheKey, { code: "", terminalNumber: "", merchantNumber: "", bankAccountId: "", title: "", driver: "MANUAL", agentId: "" });
   const [updatedAt, setUpdatedAt] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
@@ -98,7 +102,7 @@ function CardReaderForm({ editId }: { editId?: number }) {
     if (!editId) return;
     const r: Row = await api.get(`/card-readers/${editId}`);
     setUpdatedAt(r.updatedAt);
-    if (!hasPersistedState(cacheKey)) setForm({ code: String(r.code), terminalNumber: r.terminalNumber, merchantNumber: r.merchantNumber, bankAccountId: String(r.bankAccountId), title: r.title });
+    if (!hasPersistedState(cacheKey)) setForm({ code: String(r.code), terminalNumber: r.terminalNumber, merchantNumber: r.merchantNumber, bankAccountId: String(r.bankAccountId), title: r.title, driver: (r as any).driver ?? "MANUAL", agentId: (r as any).agentId ? String((r as any).agentId) : "" });
   }
   useEffect(() => {
     load().then(() => setLoaded(true)).catch((e) => setError(e.message));
@@ -113,7 +117,7 @@ function CardReaderForm({ editId }: { editId?: number }) {
     if (!form.merchantNumber.trim()) return setError("شماره پذیرنده الزامی است");
     if (!form.bankAccountId) return setError("حساب بانکی الزامی است");
     // کد عمداً ارسال نمی‌شود: فقط سرور آن را می‌دهد
-    const body = { title: form.title, terminalNumber: form.terminalNumber, merchantNumber: form.merchantNumber, bankAccountId: Number(form.bankAccountId) };
+    const body = { title: form.title, terminalNumber: form.terminalNumber, merchantNumber: form.merchantNumber, bankAccountId: Number(form.bankAccountId), driver: form.driver, agentId: form.agentId ? Number(form.agentId) : null };
     try {
       if (editId) {
         await api.put(`/card-readers/${editId}`, { ...body, updatedAt });
@@ -165,6 +169,24 @@ function CardReaderForm({ editId }: { editId?: number }) {
             <label>حساب بانکی<RequiredMark /></label>
             <BankAccountPicker value={form.bankAccountId} onChange={(id) => setForm({ ...form, bankAccountId: id })} />
           </div>
+          <div className="form-field">
+            <label>اتصال به دستگاه <FieldHint label="اتصال به دستگاه" text="دستی: مبلغ از فرم فروش ثبت می‌شود و شماره پیگیری را خودتان از روی دستگاه وارد می‌کنید. شبیه‌ساز: فقط برای آزمایش؛ پس از چند ثانیه خودکار موفق می‌شود (مبلغ تمام‌شده به 111 = رد بانک، تمام‌شده به 222 = نتیجه‌ی نامشخص)." /></label>
+            <select value={form.driver} onChange={(e) => setForm({ ...form, driver: e.target.value, agentId: e.target.value === "MANUAL" ? "" : form.agentId })}>
+              <option value="MANUAL">دستی (بدون اتصال)</option>
+              <option value="SIMULATOR">شبیه‌ساز (آزمایشی)</option>
+            </select>
+          </div>
+          {form.driver !== "MANUAL" && (
+            <div className="form-field">
+              <label>عامل محلی <FieldHint label="عامل محلی" text="اگر کارتخوان در شبکه‌ی محل است و سرور جای دیگری، عاملی را که روی کامپیوتر همان محل نصب شده انتخاب کنید. خالی = درایور روی خود سرور اجرا می‌شود (فقط برای آزمایش یا دستگاه‌های قابل‌دسترس از سرور)." /></label>
+              <select value={form.agentId} onChange={(e) => setForm({ ...form, agentId: e.target.value })}>
+                <option value="">— بدون عامل (اجرا روی سرور) —</option>
+                {agents.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}{a.online ? " — آنلاین" : " — آفلاین"}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </form>
     </FormPage>

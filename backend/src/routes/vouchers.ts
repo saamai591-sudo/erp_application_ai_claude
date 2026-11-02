@@ -9,6 +9,7 @@ import {
   createVoucherSale,
   createVoucherType,
   deleteVoucherSale,
+  deleteVouchers,
   issueVoucherBatch,
   issueVoucherSaleJournal,
   listVoucherBatches,
@@ -27,7 +28,6 @@ import {
 // باشگاه مشتریان › بن‌کارت؛ منطق فقط در services/voucherService.ts.
 
 const TYPE = findFormPrefix("voucher-types");
-const BATCH = findFormPrefix("voucher-batches");
 const SALE = findFormPrefix("voucher-sales");
 const LIST = findFormPrefix("vouchers");
 const REPORT = findFormPrefix("voucher-liability");
@@ -78,10 +78,10 @@ router.get("/voucher-types/:id", can(`${TYPE}.view`), async (req, res) => {
 });
 
 // ── صدور دسته‌ای ──
-router.get("/voucher-batches", can(`${BATCH}.view`), async (_req, res) => {
+router.get("/voucher-batches", can(`${LIST}.view`), async (_req, res) => {
   res.json(await listVoucherBatches());
 });
-router.post("/voucher-batches", can(`${BATCH}.create`), async (req, res) => {
+router.post("/voucher-batches", can(`${LIST}.issue`), async (req, res) => {
   try {
     const b = await issueVoucherBatch(req.body);
     res.status(201).json({ id: b.id, number: b.number });
@@ -105,6 +105,23 @@ router.get("/vouchers/lookup", async (req, res) => {
     res.json(await lookupVoucher(req.query.serial, new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))));
   } catch (e) {
     fail(res, e, "خطا در استعلام بن");
+  }
+});
+// ثبت بنِ تکی (سریال دلخواه یا تصادفی)؛ صدور دسته‌ای = POST /voucher-batches
+router.post("/vouchers", can(`${LIST}.create`), async (req, res) => {
+  try {
+    const b = await issueVoucherBatch({ ...req.body, count: 1 });
+    const v = await prisma.voucher.findFirst({ where: { batchId: b.id }, select: { id: true, serial: true } });
+    res.status(201).json({ id: v?.id, serial: v?.serial, batchNumber: b.number });
+  } catch (e) {
+    fail(res, e, "خطا در ثبت بن");
+  }
+});
+router.post("/vouchers/delete", can(`${LIST}.delete`), async (req, res) => {
+  try {
+    res.json(await deleteVouchers(req.body?.ids));
+  } catch (e) {
+    fail(res, e, "خطا در حذف بن");
   }
 });
 router.post("/vouchers/:id/void", can(`${LIST}.void`), async (req, res) => {

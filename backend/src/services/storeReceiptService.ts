@@ -1,5 +1,6 @@
 import { getEntitlements } from "../license/licenseService";
 import { normalizeSerial, redeemVoucherInTx, releaseVoucherInTx } from "./voucherService";
+import { authenticateCard, redeemChargesInTx } from "./loyaltyService";
 import { prisma } from "../lib/prisma";
 import { getRequestContext } from "../lib/requestContext";
 import { assertWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
@@ -31,9 +32,13 @@ interface Body {
   /** دریافت کارتی: کارتخوان (باید به ایستگاه فروش اختصاص داده شده باشد)؛ خالی = نقد */
   cardReaderId?: number | null;
   referenceNumber?: string | null;
+  /** دریافت با کارت وفاداری: شماره‌ی کارت + کلمه‌ی عبور (هنگام ثبت دوباره کنترل می‌شود) */
+  loyalty?: { cardNumber?: string; password?: string };
 }
 
 export interface CardReceiptItem {
+  /** دریافت با کارت وفاداری: شارژ انتخابی (مبلغ را سرور حساب می‌کند) */
+  loyaltyChargeId?: number;
   /** دقیقاً یکی از cardReaderId (کارتخوان) یا bankAccountId (حواله)؛ هیچ‌کدام = نقد */
   cardReaderId?: number;
   bankAccountId?: number;
@@ -47,7 +52,7 @@ function parseDate(raw: unknown): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
-async function checked(body: Body) {
+export async function checked(body: Body) {
   const date = parseDate(body.date);
   const fp = await prisma.fiscalPeriod.findFirst({ where: { fromDate: { lte: date }, toDate: { gte: date } } });
   if (!fp) throw new StoreSaleError("این تاریخ در هیچ دوره مالی تعریف نشده است");
@@ -60,7 +65,7 @@ async function checked(body: Body) {
   return { date, fp, amount, description };
 }
 
-async function assertWithinPayable(tx: any, saleId: number, amount: number, excludeReceiptId?: number) {
+export async function assertWithinPayable(tx: any, saleId: number, amount: number, excludeReceiptId?: number) {
   const sale = await tx.storeSale.findUnique({ where: { id: saleId }, include: { lines: { select: { amount: true, vatAmount: true } } } });
   if (!sale) throw new StoreSaleError("فروش یافت نشد");
   const payable = saleTotals(sale.lines).payable;
@@ -78,6 +83,10 @@ export async function createStoreReceipts(body: Body & { items?: CardReceiptItem
   // دریافت با بن (باشگاه مشتریان): ارزش اسمی هر بن مبلغ دریافت است؛ سریال‌ها در تراکنش مصرف می‌شوند
   const voucherSerials = (Array.isArray(body.items) ? body.items : []).map((x) => (x as any).voucherSerial).filter(Boolean);
   if (voucherSerials.length) return createVoucherReceipts(body, voucherSerials as string[]);
+  const loyaltyItems = (Array.isArray(body.items) ? body.items : [])
+    .map((x) => ({ id: Number((x as any).loyaltyChargeId), amount: (x as any).amount === undefined || (x as any).amount === null || (x as any).amount === "" ? undefined : Number((x as any).amount) }))
+    .filter((x) => x.id > 0);
+  if (loyaltyItems.length) return createLoyaltyReceipts(body, loyaltyItems);
   const saleId = Number(body.saleId);
   if (!saleId) throw new StoreSaleError("فروش را انتخاب کنید");
   const items: { amount: number; cardReaderId: number | null; bankAccountId: number | null; referenceNumber: string | null; description: string | null }[] = [];
@@ -171,6 +180,39 @@ async function createVoucherReceipts(body: Body & { items?: CardReceiptItem[] },
   });
 }
 
+/**
+ * دریافت با کارت وفاداری (باشگاه مشتریان): مبلغ هر دریافت را سرور از شارژ حساب می‌کند (مبلغی: min(مانده، باقی‌مانده‌ی فاکتور)؛ درصدی: درصد × قابل پرداخت)؛
+ * کلمه‌ی عبور کارت هنگام ثبت دوباره کنترل می‌شود تا بدون استعلام نتوان شارژ را خرج کرد. جمع همه‌ی دریافت‌ها از قابل پرداخت بیشتر نمی‌شود.
+ */
+async function createLoyaltyReceipts(body: Body & { items?: CardReceiptItem[] }, chargeItems: { id: number; amount?: number }[]) {
+  const saleId = Number(body.saleId);
+  if (!saleId) throw new StoreSaleError("فروش را انتخاب کنید");
+  const ent = await getEntitlements();
+  if (ent.modules && !ent.modules.includes("customer-club")) throw new StoreSaleError("ماژول «باشگاه مشتریان» برای این نصب لایسنس نشده است");
+  const { date, fp, description } = await checked({ date: body.date, amount: 1, description: body.description });
+  const card = await authenticateCard(body.loyalty?.cardNumber, body.loyalty?.password, date);
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100022, ${saleId})`);
+    const sale = await tx.storeSale.findUnique({ where: { id: saleId } });
+    if (!sale) throw new StoreSaleError("فروش یافت نشد");
+    if (date.getTime() < sale.date.getTime()) throw new StoreSaleError("تاریخ دریافت نمی‌تواند قبل از تاریخ فروش باشد");
+    await assertAfterLastDelivery(sale.stationId, date);
+    const redeemed = await redeemChargesInTx(tx, saleId, card.id, chargeItems, date);
+    await assertWithinPayable(tx, saleId, redeemed.reduce((n, v) => n + v.amount, 0));
+    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100023, ${fp.id})`);
+    const last = await tx.storeReceipt.findFirst({ where: { fiscalPeriodId: fp.id }, orderBy: { number: "desc" }, select: { number: true } });
+    let number = last?.number ?? 0;
+    const created: { id: number; number: number }[] = [];
+    for (const v of redeemed) {
+      number += 1;
+      // eslint-disable-next-line no-await-in-loop
+      const r = await tx.storeReceipt.create({ data: { fiscalPeriodId: fp.id, number, date, saleId, stationId: sale.stationId, loyaltyChargeId: v.chargeId, referenceNumber: v.cardNumber, amount: v.amount, description, createdById: getRequestContext()?.userId ?? null } });
+      created.push({ id: r.id, number: r.number });
+    }
+    return created;
+  });
+}
+
 export async function createStoreReceipt(body: Body) {
   const [one] = await createStoreReceipts(body);
   return one;
@@ -182,6 +224,7 @@ export async function updateStoreReceipt(id: number, body: Body) {
   if (ex.deliveryId) throw new StoreSaleError("این دریافت در «تحویل فروش» بسته شده و قابل ویرایش نیست");
   if (body.saleId && Number(body.saleId) !== ex.saleId) throw new StoreSaleError("فروشِ یک دریافت بعد از ثبت قابل تغییر نیست");
   const { date, fp, amount, description } = await checked(body);
+  if (ex.loyaltyChargeId && Math.abs(amount - Number(ex.amount)) > 1e-6) throw new StoreSaleError("مبلغ دریافت با کارت وفاداری را سرور از شارژ حساب کرده و تغییر نمی‌کند؛ برای تغییر، دریافت را حذف و دوباره ثبت کنید");
   if (ex.voucherId && Math.abs(amount - Number(ex.amount)) > 1e-6) throw new StoreSaleError("مبلغ دریافت با بن همان ارزش اسمیِ بن است و تغییر نمی‌کند؛ برای تغییر، دریافت را حذف و بن دیگری ثبت کنید");
   if (fp.id !== ex.fiscalPeriodId) throw new StoreSaleError("تاریخ دریافت را نمی‌توان به دوره‌ی مالی دیگری برد");
   await prisma.$transaction(async (tx) => {
@@ -189,7 +232,7 @@ export async function updateStoreReceipt(id: number, body: Body) {
     const sale = await assertWithinPayable(tx, ex.saleId, amount, id);
     if (date.getTime() < sale.date.getTime()) throw new StoreSaleError("تاریخ دریافت نمی‌تواند قبل از تاریخ فروش باشد");
     // شماره پیگیری فقط برای دریافت کارتخوان/حواله معنا دارد
-    const refNo = ex.cashBoxId || ex.voucherId ? undefined : body.referenceNumber === undefined ? undefined : String(body.referenceNumber ?? "").trim().slice(0, 100) || null;
+    const refNo = ex.cashBoxId || ex.voucherId || ex.loyaltyChargeId ? undefined : body.referenceNumber === undefined ? undefined : String(body.referenceNumber ?? "").trim().slice(0, 100) || null;
     await tx.storeReceipt.update({ where: { id }, data: { date, amount, description, ...(refNo !== undefined ? { referenceNumber: refNo } : {}) } });
   });
 }
@@ -215,13 +258,15 @@ export function receiptShape(r: any) {
     saleNumber: r.sale?.number ?? null,
     stationTitle: r.station?.title ?? "",
     cashBoxTitle: r.cashBox?.title ?? "",
-    method: r.voucherId ? "VOUCHER" : r.cardReaderId ? "CARD" : r.bankAccountId ? "TRANSFER" : "CASH",
+    method: r.loyaltyChargeId ? "LOYALTY" : r.voucherId ? "VOUCHER" : r.cardReaderId ? "CARD" : r.bankAccountId ? "TRANSFER" : "CASH",
     bankAccountId: r.bankAccountId ?? null,
     bankAccountTitle: r.bankAccount ? bankAccountDetailTitle(r.bankAccount) : "",
     referenceNumber: r.referenceNumber ?? "",
     cardReaderId: r.cardReaderId ?? null,
     cardReaderTitle: r.cardReader?.title ?? "",
     voucherSerial: r.voucher?.serial ?? "",
+    loyaltyCardNumber: r.loyaltyCharge?.card?.cardNumber ?? "",
+    loyaltyChargeTitle: r.loyaltyCharge ? `شارژ ${r.loyaltyCharge.number} — ${r.loyaltyCharge.type?.title ?? ""}` : "",
     customerTitle: p ? p.detailTitle || `${p.firstName || ""} ${p.lastName || ""}`.trim() || p.name || "" : "",
     amount: Number(r.amount),
     description: r.description ?? "",

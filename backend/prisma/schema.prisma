@@ -358,6 +358,7 @@ model Party {
   gender             Gender?
   /// نقش «کارمند» (منابع انسانی)
   employee           Employee?
+  loyaltyCards LoyaltyCard[]
 }
 
 model PartyAddress {
@@ -472,10 +473,16 @@ model CardReader {
   merchantNumber String
   bankAccountId  Int
   title          String      @unique
+  /// درایور اتصال به دستگاه (services/cardTerminalService.ts): MANUAL = بدون اتصال، کاربر نتیجه را دستی ثبت می‌کند
+  driver         CardReaderDriver @default(MANUAL)
+  /// عامل محلی (agent) که به این کارتخوان در شبکه‌ی محل وصل است؛ خالی = درایور روی سرور اجرا می‌شود
+  agentId        Int?
+  agent          CardTerminalAgent? @relation(fields: [agentId], references: [id], onDelete: Restrict)
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
   bankAccount    BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
 
+  transactions           CardReaderTransaction[]
   receiptInstrumentLines ReceiptInstrumentLine[]
   stationLinks           SalesStationCardReader[]
   storeReceipts          StoreReceipt[]
@@ -1084,6 +1091,7 @@ model GoodsGroup {
 
   @@unique([parentId, code])
   detailRuleRows      DetailRuleRow[]
+  printGroupLinks PrintGroupGoodsGroup[]
 }
 
 model GoodsGroupAttribute {
@@ -1192,6 +1200,7 @@ model GoodsItem {
   @@unique([goodsGroupId, code])
   salesPriceListLines SalesPriceListLine[]
   salesPriceRules SalesPriceRule[]
+  printGroupItems PrintGroupItem[]
 }
 
 model GoodsItemAttributeValue {
@@ -1642,6 +1651,7 @@ enum TreasuryAccountType {
   STORE_CASH_DIFF_CASHIER
   VOUCHER_LIABILITY
   VOUCHER_RECEIVABLE
+  LOYALTY_DISCOUNT_EXPENSE
 }
 
 model Supplier {
@@ -4597,11 +4607,15 @@ enum PrintDocumentType {
   SALES_QUOTE
   SALES_INVOICE
   JOURNAL_ENTRY
+  STORE_SALE
+  STORE_SALE_ORDER
 }
 
 enum PrintPaper {
   A4
   A5
+  /// رول حرارتی ۸۰ میلی‌متر (طول پیوسته؛ اندازه‌ی کاغذ از درایور چاپگر می‌آید)
+  ROLL_80
 }
 
 enum PrintOrientation {
@@ -6944,6 +6958,12 @@ model SalesStation {
   costCenterId Int
   /// وضعیت پیش‌فرض فروش‌های تسویه‌نشده در «تحویل فروش» (TO_CUSTOMER | TO_ISSUER | CASH_SHORTAGE؛ SETTLED مجاز نیست — CHECK در migration)
   defaultUnsettledStatus StoreSettlementStatus @default(TO_CUSTOMER)
+  /// چاپ خودکارِ رسید (بدون پیش‌نمایش) وقتی فروش به‌طور کامل تسویه شد
+  autoPrintReceipt Boolean @default(false)
+  /// عامل محلیِ چاپگرهای این ایستگاه (چاپگرها از همین عامل انتخاب می‌شوند)؛ خالی = چاپگری تعریف نشده
+  printAgentId Int?
+  printAgent   CardTerminalAgent? @relation("StationPrintAgent", fields: [printAgentId], references: [id], onDelete: Restrict)
+  printers     SalesStationPrinter[]
   description  String?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
@@ -7087,6 +7107,10 @@ model StoreSale {
   @@unique([fiscalPeriodId, number])
   @@index([stationId, date])
   @@index([warehouseId, deliveryStatus, date])
+  cardTransactions CardReaderTransaction[]
+  orderBatches StoreSaleOrderBatch[]
+  orderSent    StoreSaleOrderSent[]
+  printJobs    PrintJob[]
 }
 
 model StoreSaleLine {
@@ -7114,6 +7138,218 @@ model StoreSaleLine {
 }
 
 /// دریافت فروشگاهی (فقط نقد): سند مستقلِ وابسته به یک فروش؛ بدون سند حسابداری. هر فروش چند دریافت می‌تواند داشته باشد و جمعشان از مبلغ قابل پرداخت فروش بیشتر نمی‌شود.
+enum CardReaderDriver {
+  MANUAL
+  SIMULATOR
+}
+
+enum CardTransactionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  CANCELLED
+  UNKNOWN
+}
+
+/// درخواست پرداخت به کارتخوان (فروش فروشگاهی). رسید فروش فقط با موفقیت تراکنش ساخته می‌شود (receiptId)؛ PENDING/UNKNOWN مبلغ را «رزرو» می‌کند.
+model CardReaderTransaction {
+  id            Int                   @id @default(autoincrement())
+  requestUid    String                @unique
+  saleId        Int
+  cardReaderId  Int
+  driver        CardReaderDriver
+  date          DateTime              @db.Date
+  amount        Decimal               @db.Decimal(36, 10)
+  status        CardTransactionStatus @default(PENDING)
+  referenceNumber String?
+  maskedCard    String?
+  errorCode     String?
+  errorMessage  String?
+  receiptId     Int?                  @unique
+  createdById   Int?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  completedAt   DateTime?
+  sale          StoreSale             @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  cardReader    CardReader            @relation(fields: [cardReaderId], references: [id], onDelete: Restrict)
+  receipt       StoreReceipt?         @relation(fields: [receiptId], references: [id], onDelete: SetNull)
+  /// عاملی که دستور این تراکنش را اجرا می‌کند (خالی = درایور سرور)
+  agentId       Int?
+  agent         CardTerminalAgent?    @relation(fields: [agentId], references: [id], onDelete: Restrict)
+  commands      CardTerminalCommand[]
+
+  @@index([saleId])
+}
+
+enum CardCommandKind {
+  SEND
+}
+
+enum CardCommandStatus {
+  QUEUED
+  CLAIMED
+  DONE
+  EXPIRED
+}
+
+/// عامل محلی کارتخوان: برنامه‌ای روی کامپیوتر محل که به دستگاه‌های شبکه‌ی محلی وصل است و دستورها را از سرور می‌گیرد (فقط اتصال خروجی). توکن فقط به‌صورت هش ذخیره می‌شود.
+model CardTerminalAgent {
+  id         Int       @id @default(autoincrement())
+  name       String    @unique
+  tokenHash  String    @unique
+  isActive   Boolean   @default(true)
+  lastSeenAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  readers      CardReader[]
+  transactions CardReaderTransaction[]
+  commands     CardTerminalCommand[]
+  /// فهرست نام چاپگرهای نصب‌شده روی کامپیوتر عامل (عامل گزارش می‌دهد) و زمان آخرین گزارش
+  printers     Json?
+  printersAt   DateTime?
+  stations     SalesStation[] @relation("StationPrintAgent")
+  printJobs    PrintJob[]
+}
+
+enum PrintJobStatus {
+  QUEUED
+  CLAIMED
+  PRINTED
+  FAILED
+}
+
+enum StorePrinterType {
+  INVOICE
+  ORDER
+}
+
+/// نوع کاغذ چاپگر: رول حرارتی ۸۰mm (ارتفاع = طول محتوا) یا کاغذ استاندارد برای چاپگر لیزری/معمولی
+enum StorePrinterPaper {
+  ROLL_80
+  A4
+  A5
+}
+
+/// گروه چاپ (فروش فروشگاهی): مجموعه‌ای از کالاها و/یا گروه‌های کالا که اقلامشان روی یک چاپگرِ سفارش (مثلاً آشپزخانه) چاپ می‌شود
+model PrintGroup {
+  id          Int      @id @default(autoincrement())
+  code        Int      @unique
+  title       String   @unique
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  items       PrintGroupItem[]
+  goodsGroups PrintGroupGoodsGroup[]
+  printers    SalesStationPrinter[]
+}
+
+model PrintGroupItem {
+  id           Int        @id @default(autoincrement())
+  printGroupId Int
+  goodsItemId  Int
+  printGroup   PrintGroup @relation(fields: [printGroupId], references: [id], onDelete: Cascade)
+  goodsItem    GoodsItem  @relation(fields: [goodsItemId], references: [id], onDelete: Restrict)
+
+  @@unique([printGroupId, goodsItemId])
+}
+
+model PrintGroupGoodsGroup {
+  id           Int        @id @default(autoincrement())
+  printGroupId Int
+  goodsGroupId Int
+  printGroup   PrintGroup @relation(fields: [printGroupId], references: [id], onDelete: Cascade)
+  goodsGroup   GoodsGroup @relation(fields: [goodsGroupId], references: [id], onDelete: Restrict)
+
+  @@unique([printGroupId, goodsGroupId])
+}
+
+/// چاپگرهای یک ایستگاه فروش: نوع «فاکتور» (همه‌ی کالاها) یا «سفارش» (همه‌ی کالاها یا یک گروه چاپ)
+model SalesStationPrinter {
+  id           Int              @id @default(autoincrement())
+  stationId    Int
+  rowOrder     Int              @default(0)
+  printerName  String
+  printType    StorePrinterType
+  paper        StorePrinterPaper @default(ROLL_80)
+  printGroupId Int?
+  isActive     Boolean          @default(true)
+  station      SalesStation     @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  printGroup   PrintGroup?      @relation(fields: [printGroupId], references: [id], onDelete: Restrict)
+
+  @@index([stationId])
+}
+
+/// هر بار «چاپ سفارش»: عکس‌فوری اقلام جدید/لغوشده (payload) برای چاپ مجدد و ممیزی؛ seq = شماره‌ی نوبت ارسال همان فروش
+model StoreSaleOrderBatch {
+  id          Int      @id @default(autoincrement())
+  saleId      Int
+  seq         Int
+  mode        String
+  payload     Json
+  createdById Int?
+  createdAt   DateTime @default(now())
+  sale        StoreSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  jobs        PrintJob[]
+
+  @@unique([saleId, seq])
+}
+
+/// مقدار هر کالا که تا الان به آشپزخانه فرستاده شده (برای ارسال افزایشی)؛ کلید = فروش + کالا چون سطرهای فروش با هر ویرایش بازسازی می‌شوند
+model StoreSaleOrderSent {
+  saleId      Int
+  goodsItemId Int
+  /// عنوان و واحد در لحظه‌ی ارسال (برای برگه‌ی «لغو» وقتی قلم از فروش حذف شده)
+  title       String    @default("")
+  unitTitle   String    @default("")
+  quantity    Decimal   @db.Decimal(36, 10)
+  sale        StoreSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  @@id([saleId, goodsItemId])
+}
+
+/// کار چاپ برای یک چاپگر ویندوز؛ چاپ را برنامه‌ی صندوق (کلاینت) انجام می‌دهد و نتیجه را برمی‌گرداند. html عکس‌فوریِ ثابت‌شده است (فونت/لوگو هنگام تحویل به کلاینت پر می‌شود). agentId فقط برای کارهای قدیمیِ مسیر عامل است
+model PrintJob {
+  id           Int              @id @default(autoincrement())
+  agentId      Int?
+  printerName  String
+  kind         StorePrinterType
+  paper        StorePrinterPaper @default(ROLL_80)
+  saleId       Int?
+  batchId      Int?
+  title        String
+  html         String           @db.Text
+  status       PrintJobStatus   @default(QUEUED)
+  errorMessage String?
+  createdById  Int?
+  createdAt    DateTime         @default(now())
+  claimedAt    DateTime?
+  doneAt       DateTime?
+  agent        CardTerminalAgent? @relation(fields: [agentId], references: [id], onDelete: Restrict)
+  sale         StoreSale?       @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  batch        StoreSaleOrderBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+
+  @@index([agentId, status])
+  @@index([saleId])
+}
+
+/// دستور سرور به عامل برای یک تراکنش (QUEUED → CLAIMED → DONE؛ برداشته‌نشده تا مهلت = EXPIRED یعنی مطمئناً به دستگاه نرسیده)
+model CardTerminalCommand {
+  id            Int               @id @default(autoincrement())
+  transactionId Int
+  agentId       Int
+  kind          CardCommandKind   @default(SEND)
+  status        CardCommandStatus @default(QUEUED)
+  createdAt     DateTime          @default(now())
+  claimedAt     DateTime?
+  doneAt        DateTime?
+  transaction   CardReaderTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  agent         CardTerminalAgent @relation(fields: [agentId], references: [id], onDelete: Restrict)
+
+  @@index([agentId, status])
+  @@index([transactionId])
+}
+
 model StoreReceipt {
   id             Int          @id @default(autoincrement())
   fiscalPeriodId Int
@@ -7133,6 +7369,9 @@ model StoreReceipt {
   /// دریافت با «بن» (باشگاه مشتریان): بنِ مصرف‌شده؛ یکتا ⇒ هر بن یک‌بار مصرف می‌شود
   voucherId      Int?         @unique
   voucher        Voucher?     @relation(fields: [voucherId], references: [id], onDelete: Restrict)
+  /// دریافت با «کارت وفاداری» (باشگاه مشتریان): شارژی که این دریافت از آن مصرف شده؛ یک شارژ می‌تواند چند دریافت داشته باشد (مانده‌دار / درصدیِ چندبارمصرف)
+  loyaltyChargeId Int?
+  loyaltyCharge  LoyaltyCharge? @relation(fields: [loyaltyChargeId], references: [id], onDelete: Restrict)
   /// شماره پیگیری — اختیاری، برای دریافت کارتخوان و حواله
   referenceNumber String?
   amount         Decimal      @db.Decimal(36, 10)
@@ -7146,6 +7385,7 @@ model StoreReceipt {
   cashBox        CashBox?     @relation(fields: [cashBoxId], references: [id])
   cardReader     CardReader?  @relation(fields: [cardReaderId], references: [id], onDelete: Restrict)
   bankAccount    BankAccount? @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+  cardTransaction CardReaderTransaction?
 
   @@unique([fiscalPeriodId, number])
   @@index([saleId])
@@ -7385,4 +7625,66 @@ model Voucher {
   @@index([typeId, status])
   @@index([batchId])
   @@index([saleId])
+}
+
+// ───── باشگاه مشتریان › کارت وفاداری ─────
+enum LoyaltyChargeKind {
+  AMOUNT
+  PERCENT
+}
+
+/// نوع شارژ کارت وفاداری: مبلغی (مقدار = مبلغ) یا درصدی (مقدار = درصد تخفیف از مبلغ فاکتور)
+model LoyaltyChargeType {
+  id        Int               @id @default(autoincrement())
+  code      Int               @unique
+  title     String            @unique
+  kind      LoyaltyChargeKind
+  value     Decimal           @db.Decimal(36, 10)
+  /// «تنها یک‌بار قابل استفاده باشد»: اولین مصرف کل شارژ را می‌بندد
+  singleUse Boolean           @default(false)
+  isActive  Boolean           @default(true)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  charges   LoyaltyCharge[]
+}
+
+model LoyaltyCard {
+  id           Int             @id @default(autoincrement())
+  partyId      Int
+  cardNumber   String          @unique
+  /// bcrypt
+  passwordHash String
+  issueDate    DateTime        @db.Date
+  expiryDate   DateTime?       @db.Date
+  isActive     Boolean         @default(true)
+  createdById  Int?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  party        Party           @relation(fields: [partyId], references: [id], onDelete: Restrict)
+  charges      LoyaltyCharge[]
+
+  @@index([partyId])
+}
+
+/// یک شارژ روی یک کارت؛ نوع/مقدار/یک‌بارمصرف در لحظه‌ی شارژ کپی می‌شوند. مانده و وضعیت از دریافت‌های فروش فروشگاهی مشتق می‌شود (ذخیره نمی‌شود).
+model LoyaltyCharge {
+  id          Int               @id @default(autoincrement())
+  number      Int               @unique
+  cardId      Int
+  typeId      Int
+  kind        LoyaltyChargeKind
+  value       Decimal           @db.Decimal(36, 10)
+  singleUse   Boolean
+  date        DateTime          @db.Date
+  expiryDate  DateTime?         @db.Date
+  description String?
+  createdById Int?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  card        LoyaltyCard       @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  type        LoyaltyChargeType @relation(fields: [typeId], references: [id], onDelete: Restrict)
+  receipts    StoreReceipt[]
+
+  @@index([cardId])
+  @@index([typeId])
 }

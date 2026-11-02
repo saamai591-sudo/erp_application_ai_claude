@@ -14,6 +14,10 @@ import { RecordPickerField } from "../components/RecordPicker";
 import { ShiftPromptDialog } from "../components/ShiftPromptDialog";
 import { ShowcaseLayout } from "../components/ShowcaseSidebar";
 import { StoreVoucherDialog } from "../components/StoreVoucherDialog";
+import { StoreLoyaltyDialog } from "../components/StoreLoyaltyDialog";
+import { PrintButton } from "../components/PrintButton";
+import { directPrint } from "../lib/directPrint";
+import { inPosApp, runPrintJobs } from "../lib/posApp";
 import { useModuleEnabled } from "../lib/useEntitlements";
 import { DescriptionField } from "../components/DescriptionField";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
@@ -64,6 +68,8 @@ interface StationOpt {
   customerTitle: string;
   cardReaders?: StationCardReader[];
   bankAccounts?: StationBank[];
+  autoPrintReceipt?: boolean;
+  printers?: { printType: "INVOICE" | "ORDER"; isActive: boolean }[];
 }
 interface CustomerOpt {
   id: number;
@@ -131,8 +137,9 @@ interface ReceiptRow {
   amount: number;
   description: string;
   updatedAt?: string;
-  method?: "CASH" | "CARD" | "TRANSFER" | "VOUCHER";
+  method?: "CASH" | "CARD" | "TRANSFER" | "VOUCHER" | "LOYALTY";
   voucherSerial?: string;
+  loyaltyCardNumber?: string;
   cardReaderTitle?: string;
   bankAccountTitle?: string;
   referenceNumber?: string;
@@ -261,6 +268,7 @@ function SaleForm({ editId }: { editId?: number }) {
   const [cardDialog, setCardDialog] = useState(false);
   const [transferDialog, setTransferDialog] = useState(false);
   const [voucherDialog, setVoucherDialog] = useState(false);
+  const [loyaltyDialog, setLoyaltyDialog] = useState(false);
   const clubEnabled = useModuleEnabled("customer-club");
   const [stations, setStations] = useState<StationOpt[]>([]);
   const [shifts, setShifts] = useState<ShiftOpt[]>([]);
@@ -346,10 +354,11 @@ function SaleForm({ editId }: { editId?: number }) {
   /** تسویه‌شده (باقیمانده صفر) یا نسیه‌ی عامدانه */
   const settledNow = credit.declared || payInfo.remaining <= 1e-6;
   const cashReceipts = receipts.filter((r) => (r.method ?? "CASH") === "CASH");
-  const toExisting = (rs: ReceiptRow[]): ExistingReceipt[] => rs.map((r) => ({ id: r.id, number: r.number, date: r.date, amount: r.amount, description: r.description, payeeTitle: r.method === "CARD" ? r.cardReaderTitle : r.method === "VOUCHER" ? r.voucherSerial : r.bankAccountTitle, referenceNumber: r.referenceNumber, updatedAt: r.updatedAt }));
+  const toExisting = (rs: ReceiptRow[]): ExistingReceipt[] => rs.map((r) => ({ id: r.id, number: r.number, date: r.date, amount: r.amount, description: r.description, payeeTitle: r.method === "CARD" ? r.cardReaderTitle : r.method === "VOUCHER" ? r.voucherSerial : r.method === "LOYALTY" ? r.loyaltyCardNumber : r.bankAccountTitle, referenceNumber: r.referenceNumber, updatedAt: r.updatedAt }));
   const cardReceipts = receipts.filter((r) => r.method === "CARD");
   const transferReceipts = receipts.filter((r) => r.method === "TRANSFER");
   const voucherReceipts = receipts.filter((r) => r.method === "VOUCHER");
+  const loyaltyReceipts = receipts.filter((r) => r.method === "LOYALTY");
   const cardPayees: ReceiptPayee[] = (station?.cardReaders ?? []).map((c) => ({ id: c.id, label: `${toFaDigits(String(c.code))} — ${c.title}`, terminal: c.terminalNumber, account: `${toFaDigits(c.bankAccountCode)} - ${toFaDigits(c.bankAccountTitle)}` }));
   const transferPayees: ReceiptPayee[] = (station?.bankAccounts ?? []).map((b) => ({ id: b.id, label: `${toFaDigits(b.detailCode)} - ${toFaDigits(b.detailTitle)}` }));
   const canChangePrice = !!sell?.canChangePrice;
@@ -449,6 +458,39 @@ function SaleForm({ editId }: { editId?: number }) {
     action();
   }
 
+  const hasPrinter = (t: "INVOICE" | "ORDER") => !!station?.printers?.some((p) => p.printType === t && p.isActive);
+  /** نتیجه‌ی چاپ هر چاپگر را اعلام می‌کند (کارها را همین برنامه‌ی صندوق چاپ کرده و نتیجه را به سرور هم داده است) */
+  function announce(results: { printer: string; ok: boolean; error: string }[]) {
+    const failed = results.filter((r) => !r.ok);
+    if (failed.length) showError(failed.map((r) => `چاپگر «${r.printer}»: ${r.error || "ناموفق"}`).join("\n"));
+    else showToast(results.length > 1 ? `روی ${toFaDigits(String(results.length))} چاپگر چاپ شد` : "به چاپگر ارسال شد");
+  }
+  /** چاپ فاکتور: با چاپگر نوع «فاکتور» ایستگاه (چاپ مستقیم ویندوز در برنامه‌ی صندوق)؛ وگرنه چاپ مرورگر */
+  async function printInvoice() {
+    if (!editId) return;
+    try {
+      if (hasPrinter("INVOICE") && inPosApp()) {
+        const r = await api.post(`/store-sales/${editId}/print`, { kind: "INVOICE" }, { silent: true });
+        announce(await runPrintJobs(r.jobs));
+      } else {
+        await directPrint("STORE_SALE", editId);
+      }
+    } catch (e) {
+      showError((e as Error).message);
+    }
+  }
+  /** چاپ سفارش (آشپزخانه/بار): NEW = فقط اقلام جدید/لغوشده از آخرین ارسال، ALL = چاپ مجدد کل سفارش. فقط در برنامه‌ی صندوق */
+  async function printOrder(mode: "NEW" | "ALL") {
+    if (!editId) return;
+    if (!inPosApp()) return showError("چاپ سفارش روی چاپگر آشپزخانه فقط از «برنامه‌ی صندوق» ممکن است؛ سامانه را در آن برنامه باز کنید");
+    try {
+      const r = await api.post(`/store-sales/${editId}/print`, { kind: "ORDER", mode }, { silent: true });
+      if (r.unrouted?.length) showToast(`این اقلام به هیچ چاپگری نرسید: ${r.unrouted.join("، ")}`, "error");
+      announce(await runPrintJobs(r.jobs));
+    } catch (e) {
+      showError((e as Error).message);
+    }
+  }
   async function reloadSale() {
     const d: Detail = await api.get(`/store-sales/${editId}`);
     setMeta({ number: d.number, deliveryStatus: d.deliveryStatus, updatedAt: d.updatedAt });
@@ -456,6 +498,18 @@ function SaleForm({ editId }: { editId?: number }) {
         setCredit({ declared: !!d.creditDeclared, note: d.creditNote ?? "" });
     setPayInfo({ payable: d.payable, paid: d.paid, remaining: d.remaining, status: d.paymentStatus });
     setNewRec((x) => ({ ...x, amount: d.remaining > 0 ? String(d.remaining) : "" }));
+    // چاپ خودکار رسید (بدون پیش‌نمایش) وقتی فروش به‌طور کامل تسویه شد؛ برای هر فروش در هر نشست مرورگر فقط یک‌بار
+    if (station?.autoPrintReceipt && editId && d.paid > 0 && d.remaining <= 0) {
+      const key = "store-sale-printed:" + editId;
+      let done = false;
+      try {
+        done = sessionStorage.getItem(key) === "1";
+        if (!done) sessionStorage.setItem(key, "1");
+      } catch {
+        /* sessionStorage در دسترس نیست؛ بدون محافظ تکرار */
+      }
+      if (!done) printInvoice();
+    }
   }
   async function addReceipt() {
     setError(null);
@@ -497,6 +551,22 @@ function SaleForm({ editId }: { editId?: number }) {
       await reloadSale();
     } catch (err) {
       setError((err as ApiError).message);
+    } finally {
+      setPaying(false);
+    }
+  }
+  async function payLoyalty(card: { cardNumber: string; password: string }, items: { loyaltyChargeId: number; amount?: number }[]): Promise<string | null> {
+    if (!editId || paying) return null;
+    setPaying(true);
+    setError(null);
+    try {
+      const today = localTodayIso();
+      await api.post("/store-receipts/batch", { saleId: editId, date: today < header.date ? header.date : today, loyalty: card, items, description: "" });
+      setLoyaltyDialog(false);
+      await reloadSale();
+      return null;
+    } catch (err) {
+      return (err as ApiError).message;
     } finally {
       setPaying(false);
     }
@@ -553,7 +623,7 @@ function SaleForm({ editId }: { editId?: number }) {
   const needShift = !header.shiftId && !locked;
   const linesLocked = locked || !sell || !sell.priceListId;
   return (
-    <FormPage title={editId ? `فروش فروشگاهی شماره ${toFaDigits(String(meta?.number ?? ""))}` : "فروش فروشگاهی جدید"} formId="store-sale-form" closePath="/store-sales" newPath="/store-sales/new" onDelete={editId && !locked ? handleDelete : undefined} saveDisabled={locked}>
+    <FormPage title={editId ? `فروش فروشگاهی شماره ${toFaDigits(String(meta?.number ?? ""))}` : "فروش فروشگاهی جدید"} formId="store-sale-form" closePath="/store-sales" newPath="/store-sales/new" onDelete={editId && !locked ? handleDelete : undefined} saveDisabled={locked} toolbarExtra={editId ? <PrintButton docType="STORE_SALE" sourceId={editId} title="پیش‌نمایش رسید" /> : undefined}>
       {needShift && (
         <ShiftPromptDialog
           shifts={header.stationId ? shifts.filter((x) => String(x.stationId) === header.stationId) : shifts}
@@ -757,6 +827,13 @@ function SaleForm({ editId }: { editId?: number }) {
                   <span style={{ fontSize: 20, fontWeight: 700 }}>{formatAmountFa(voucherReceipts.reduce((n, r) => n + r.amount, 0))}</span>
                 </button>
               )}
+              {clubEnabled && (
+                <button type="button" onClick={() => openCard(() => setLoyaltyDialog(true))} style={{ minHeight: 110, borderRadius: 16, border: "2px solid #0d9488", background: "var(--surface, #fff)", color: "#0f766e", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
+                  <span style={{ fontSize: 24, fontWeight: 800 }}>دریافت با کارت وفاداری</span>
+                  <span style={{ fontSize: 15, opacity: 0.85 }}>جمع دریافت‌شده</span>
+                  <span style={{ fontSize: 20, fontWeight: 700 }}>{formatAmountFa(loyaltyReceipts.reduce((n, r) => n + r.amount, 0))}</span>
+                </button>
+              )}
               <button type="button" onClick={() => openCard(() => setCreditDialog(true))} style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--danger, #b03a2e)", background: "var(--danger-soft, #fbeae8)", color: "var(--danger, #a32d22)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
                 <span style={{ fontSize: 24, fontWeight: 800 }}>نسیه</span>
                 <span style={{ fontSize: 15, opacity: 0.85 }}>{credit.declared ? "مبلغ نسیه" : "ثبت باقیمانده به‌عنوان نسیه"}</span>
@@ -768,10 +845,22 @@ function SaleForm({ editId }: { editId?: number }) {
                   <span style={{ fontSize: 15, opacity: 0.85 }}>ثبت برگشت برای این فروش</span>
                 </button>
               )}
-              {/* کارکرد کارت چاپ بعداً تعریف می‌شود؛ فعلاً فقط کارت است */}
-              <button type="button" style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--ink-soft, #6b7280)", background: "var(--surface, #fff)", color: "var(--ink-soft, #4b5563)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
-                <span style={{ fontSize: 24, fontWeight: 800 }}>چاپ</span>
+              <button type="button" onClick={() => openCard(() => printInvoice())} title="چاپ رسید روی چاپگر (بدون پیش‌نمایش)" style={{ minHeight: 110, borderRadius: 16, border: "2px solid var(--ink-soft, #6b7280)", background: "var(--surface, #fff)", color: "var(--ink-soft, #4b5563)", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
+                <span style={{ fontSize: 24, fontWeight: 800 }}>چاپ فاکتور</span>
+                <span style={{ fontSize: 15, opacity: 0.85 }}>رسید روی چاپگر</span>
               </button>
+              {hasPrinter("ORDER") && (
+                <button type="button" onClick={() => openCard(() => printOrder("NEW"))} title="چاپ اقلام جدید (از آخرین ارسال) روی چاپگرهای سفارش" style={{ minHeight: 110, borderRadius: 16, border: "2px solid #c27a12", background: "var(--surface, #fff)", color: "#a8650c", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
+                  <span style={{ fontSize: 24, fontWeight: 800 }}>چاپ سفارش</span>
+                  <span style={{ fontSize: 15, opacity: 0.85 }}>اقلام جدید برای آشپزخانه/بار</span>
+                </button>
+              )}
+              {hasPrinter("ORDER") && (
+                <button type="button" onClick={() => openCard(() => printOrder("ALL"))} title="چاپ دوباره‌ی کل سفارش روی چاپگرهای سفارش (بدون تغییر در اقلام ارسال‌شده)" style={{ minHeight: 110, borderRadius: 16, border: "2px solid #6b7280", background: "var(--surface, #fff)", color: "#4b5563", cursor: "pointer", fontFamily: "inherit", padding: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, touchAction: "manipulation" }}>
+                  <span style={{ fontSize: 24, fontWeight: 800 }}>چاپ مجدد کل سفارش</span>
+                  <span style={{ fontSize: 15, opacity: 0.85 }}>همه‌ی اقلام این فروش</span>
+                </button>
+              )}
             </div>
             <p style={{ margin: "0 0 8px", fontSize: 13 }}>
               قابل پرداخت: <b>{formatAmountFa(payInfo.payable)}</b> — دریافت‌شده: <b>{formatAmountFa(payInfo.paid)}</b> — باقی‌مانده: <b>{formatAmountFa(payInfo.remaining)}</b> — وضعیت: <span className="badge">{PAYMENT_FA[payInfo.status]}</span>
@@ -809,6 +898,9 @@ function SaleForm({ editId }: { editId?: number }) {
             {cardDialog && (
               <StoreCardReceiptDialog
                 mode="CARD"
+                saleId={editId}
+                txDate={localTodayIso() < header.date ? header.date : localTodayIso()}
+                onChanged={() => reloadSale()}
                 payees={cardPayees}
                 remaining={payInfo.remaining}
                 decimalPlaces={dp}
@@ -836,6 +928,20 @@ function SaleForm({ editId }: { editId?: number }) {
                 onSubmit={payVouchers}
               />
             )}
+            {loyaltyDialog && editId && (
+              <StoreLoyaltyDialog
+                saleId={editId}
+                remaining={payInfo.remaining}
+                date={localTodayIso() < header.date ? header.date : localTodayIso()}
+                busy={paying}
+                existing={toExisting(loyaltyReceipts)}
+                canDelete={canDeleteReceipt}
+                canAdd={canReceive}
+                onDeleteExisting={removeReceipt}
+                onClose={() => setLoyaltyDialog(false)}
+                onSubmit={payLoyalty}
+              />
+            )}
             {transferDialog && (
               <StoreCardReceiptDialog
                 mode="TRANSFER"
@@ -854,7 +960,7 @@ function SaleForm({ editId }: { editId?: number }) {
               />
             )}
             {cashDialog && (
-              <Modal title="دریافت نقد" onClose={() => setCashDialog(false)} wide>
+              <Modal title="دریافت نقد" onClose={() => setCashDialog(false)} wide closeButton>
                 <h4 style={{ margin: "0 0 6px" }}>دریافت‌های نقدیِ ثبت‌شده</h4>
                 <ExistingReceiptsTable receipts={toExisting(cashReceipts)} canEdit={canEditReceipt} canDelete={canDeleteReceipt} onSave={saveReceipt} onDelete={removeReceipt} />
                 {canReceive && payInfo.remaining > 0 && (

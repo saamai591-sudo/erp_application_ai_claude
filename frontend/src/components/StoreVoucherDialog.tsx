@@ -62,7 +62,7 @@ export function StoreVoucherDialog({
   }
 
   return (
-    <Modal title="دریافت با بن‌کارت" onClose={onClose} wide>
+    <Modal title="دریافت با بن‌کارت" onClose={onClose} wide closeButton>
       <h4 style={{ margin: "0 0 6px" }}>دریافت‌های ثبت‌شده با بن</h4>
       <ExistingReceiptsTable receipts={existing} payeeHeader="سریال بن" canEdit={false} canDelete={canDelete} onSave={() => {}} onDelete={onDeleteExisting} />
       {canAdd && remaining > 0 && (

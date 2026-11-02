@@ -495,7 +495,7 @@ function DeliveryForm({ editId }: { editId?: number }) {
             {methods.map((m) => {
               if (tab !== m.key) return null;
               const rows = (data.receipts ?? []).filter((r) => r.method === m.key);
-              const payeeHeader = m.key === "CASH" ? "صندوق" : m.key === "CARD" ? "کارتخوان" : m.key === "VOUCHER" ? "سریال بن" : "حساب بانکی";
+              const payeeHeader = m.key === "CASH" ? "صندوق" : m.key === "CARD" ? "کارتخوان" : m.key === "VOUCHER" ? "سریال بن" : m.key === "LOYALTY" ? "شماره‌ی کارت" : "حساب بانکی";
               const heads = ["شماره دریافت", "تاریخ", "شماره فروش", payeeHeader, ...(m.key === "CASH" ? [] : ["شماره پیگیری"]), "مبلغ"];
               return (
                 <ScrollGridWithTotals

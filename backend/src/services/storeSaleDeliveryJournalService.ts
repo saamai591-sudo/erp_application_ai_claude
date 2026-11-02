@@ -55,6 +55,7 @@ export async function issueStoreDeliveryJournal(id: number) {
     include: {
       cashBox: { select: { id: true, title: true, detailCode: true } },
       cardReader: { select: { title: true, bankAccount: { select: { detailCode: true } } } },
+      loyaltyCharge: { select: { number: true, card: { select: { cardNumber: true } } } },
       voucher: { select: { serial: true, sale: { select: { customer: { select: { party: { select: { detailCode: true } } } } } } } },
       bankAccount: { select: { id: true, detailCode: true } },
       sale: { select: { number: true, id: true, customer: { select: { party: { select: { detailCode: true } } } }, salesTypeId: true, costCenterId: true, deliveryId: true, deliveryItem: true } },
@@ -76,7 +77,7 @@ export async function issueStoreDeliveryJournal(id: number) {
     (await prisma.goodsServiceAccountingSetting.findMany({ where: { accountType: { in: ["SALES_REVENUE", "SALES_VAT", "SALES_RECEIVABLE"] } }, include: { account: true } })) as any[]
   );
   const treasury = new EffectiveTreasurySettings(
-    (await prisma.treasuryAccountSetting.findMany({ where: { accountType: { in: ["CASH_BOX", "BANK_ACCOUNT", "CARD_IN_COLLECTION", "STORE_CASH_DIFF_EXPENSE", "STORE_CASH_DIFF_CASHIER", "VOUCHER_LIABILITY"] } }, include: { account: true } })) as any[]
+    (await prisma.treasuryAccountSetting.findMany({ where: { accountType: { in: ["CASH_BOX", "BANK_ACCOUNT", "CARD_IN_COLLECTION", "STORE_CASH_DIFF_EXPENSE", "STORE_CASH_DIFF_CASHIER", "VOUCHER_LIABILITY", "LOYALTY_DISCOUNT_EXPENSE"] } }, include: { account: true } })) as any[]
   );
   const salesTypes = new Map((await prisma.salesType.findMany({ select: { id: true, title: true } })).map((t) => [t.id, t.title]));
   const saleOf = (i: (typeof d.items)[number]) => (i.sale ?? i.return) as { costCenterId: number; salesTypeId: number; createdById: number | null; number: number; customer: { party: { detailCode: string } } };
@@ -168,7 +169,12 @@ export async function issueStoreDeliveryJournal(id: number) {
   for (const r of receipts) {
     const amount = Number(r.amount);
     const rd = `بابت دریافت شماره ${r.number} فروش شماره ${r.sale.number} — ${desc}`;
-    if (r.voucherId) {
+    if (r.loyaltyChargeId) {
+      // مصرف شارژ کارت وفاداری = تخفیفِ بازاریابی: هزینه‌ی تخفیف وفاداری بدهکار می‌شود (تفصیل: مشتریِ فروش و مرکز هزینه‌ی ایستگاه)
+      const s = treasury.find(date, (x: any) => x.accountType === "LOYALTY_DISCOUNT_EXPENSE");
+      if (!s) missing("حساب «هزینه‌ی تخفیف وفاداری» در «تعیین حسابهای معین» (مدیریت خزانه) تعریف نشده است");
+      else await add(s.account, [r.sale.customer.party.detailCode, costCenters.get(r.sale.costCenterId) ?? null], amount, 0, `${rd} (کارت وفاداری ${r.loyaltyCharge?.card?.cardNumber ?? ""})`);
+    } else if (r.voucherId) {
       // مصرف بن: بدهی بن‌کارت (تفصیل: سازمانِ خریدارِ بن) بدهکار می‌شود
       const s = treasury.find(date, (x: any) => x.accountType === "VOUCHER_LIABILITY");
       if (!s) missing("حساب «بدهی بن‌کارت» در «تعیین حسابهای معین» (مدیریت خزانه) تعریف نشده است");

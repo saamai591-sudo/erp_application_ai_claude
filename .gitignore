@@ -27,3 +27,8 @@ docs-pr.cjs
 .vscode/
 *.suo
 *.user
+
+# عامل کارتخوان: تنظیمات و وضعیت محلی
+agent/config.json
+agent/pending-results.json
+agent/agent.log*

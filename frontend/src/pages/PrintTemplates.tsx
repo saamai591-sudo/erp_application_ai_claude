@@ -31,9 +31,9 @@ interface DesignSchemaMeta {
   defaults: Design;
 }
 interface DocTypeMeta { type: string; title: string; fields: FieldDoc[]; textKeys: { key: string; title: string }[]; designSchema: DesignSchemaMeta | null; visualLayout: boolean }
-interface TemplateRow { id: number; documentType: string; documentTypeTitle: string; title: string; paper: "A4" | "A5"; orientation: "PORTRAIT" | "LANDSCAPE"; marginMm: number; isDefault: boolean; isActive: boolean; visual?: boolean }
+interface TemplateRow { id: number; documentType: string; documentTypeTitle: string; title: string; paper: "A4" | "A5" | "ROLL_80"; orientation: "PORTRAIT" | "LANDSCAPE"; marginMm: number; isDefault: boolean; isActive: boolean; visual?: boolean }
 
-const PAPER_FA: Record<string, string> = { A4: "A4", A5: "A5" };
+const PAPER_FA: Record<string, string> = { A4: "A4", A5: "A5", ROLL_80: "رول ۸۰mm" };
 const ORIENTATION_FA: Record<string, string> = { PORTRAIT: "عمودی", LANDSCAPE: "افقی" };
 
 export default function PrintTemplates() {
@@ -344,6 +344,7 @@ function TemplateForm({ editId }: { editId?: number }) {
             <select value={form.paper} onChange={(e) => setForm({ ...form, paper: e.target.value })}>
               <option value="A4">A4</option>
               <option value="A5">A5</option>
+              <option value="ROLL_80">رول حرارتی ۸۰mm</option>
             </select>
           </div>
           <div className="form-field">

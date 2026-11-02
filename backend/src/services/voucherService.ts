@@ -137,11 +137,18 @@ export async function updateVoucherType(id: number, b: VoucherTypeBody) {
 
 const MAX_BATCH = 20000;
 
-export async function issueVoucherBatch(body: { typeId?: number; count?: number | string; date?: string; validUntil?: string | null; description?: string | null }) {
+/**
+ * `serial` فقط برای بنِ تکی (ثبت دستی، مثلاً کارت از قبل چاپ‌شده): ۱۱ رقم با رقم کنترل درست؛ خالی = سریال تصادفی.
+ * بنِ تکی هم یک «دسته‌ی یک‌تایی» است تا فهرست دسته‌ها و تعهدات یکدست بماند.
+ */
+export async function issueVoucherBatch(body: { typeId?: number; count?: number | string; date?: string; validUntil?: string | null; description?: string | null; serial?: string | null }) {
   const type = Number(body.typeId) ? await prisma.voucherType.findUnique({ where: { id: Number(body.typeId) } }) : null;
   if (!type) throw new VoucherError("نوع بن را انتخاب کنید");
   if (!type.isActive) throw new VoucherError(`نوع بن «${type.title}» غیرفعال است`);
-  const count = Number(body.count);
+  // سریال دستی هر مقداری می‌تواند باشد (بدون رقم کنترل)، به شرط اینکه تکراری نباشد
+  const typedSerial = normalizeSerial(body.serial);
+  if (typedSerial.length > 50) throw new VoucherError("سریال نباید بیش از ۵۰ نویسه باشد");
+  const count = typedSerial ? 1 : Number(body.count);
   if (!Number.isInteger(count) || count < 1 || count > MAX_BATCH) throw new VoucherError(`تعداد باید عدد صحیح بین ۱ تا ${MAX_BATCH} باشد`);
   const date = parseDate(body.date, "تاریخ صدور");
   let validUntil: Date | null = null;
@@ -155,6 +162,11 @@ export async function issueVoucherBatch(body: { typeId?: number; count?: number 
     await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100040, 1)`);
     const last = await tx.voucherBatch.findFirst({ orderBy: { number: "desc" }, select: { number: true } });
     const batch = await tx.voucherBatch.create({ data: { number: (last?.number ?? 0) + 1, typeId: type.id, date, count, validUntil, description: body.description ? String(body.description).trim() || null : null, createdById: userId() } });
+    if (typedSerial) {
+      if (await tx.voucher.findUnique({ where: { serial: typedSerial }, select: { id: true } })) throw new VoucherError(`سریال ${typedSerial} قبلاً در سیستم ثبت شده است`);
+      await tx.voucher.create({ data: { serial: typedSerial, typeId: type.id, batchId: batch.id, faceValue: type.faceValue, validUntil } });
+      return batch;
+    }
     // سریال‌های تصادفی؛ برخوردِ احتمالی با skipDuplicates رد می‌شود و تا رسیدن به تعداد تکرار می‌شود
     let made = 0;
     for (let round = 0; made < count && round < 20; round++) {
@@ -389,13 +401,45 @@ export async function voidVoucher(id: number, reason: unknown) {
   if (r.count !== 1) throw new VoucherError("وضعیت بن هم‌زمان تغییر کرد؛ دوباره تلاش کنید");
 }
 
+/**
+ * حذف بن‌های استفاده‌نشده (همه‌یا‌هیچ): فقط بنی که هنوز به سازمانی فروخته نشده (ایجادشده، یا باطل‌شده پیش از فروش) و دریافتی ندارد.
+ * بن فروخته‌شده بدهی ماست و باید باطل شود. تعداد دسته کم می‌شود و دسته‌ی خالی‌شده حذف می‌شود.
+ */
+export async function deleteVouchers(idsRaw: unknown) {
+  const ids = [...new Set((Array.isArray(idsRaw) ? idsRaw : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (!ids.length) throw new VoucherError("بنی انتخاب نشده است");
+  if (ids.length > 50000) throw new VoucherError("تعداد بن‌های انتخابی بیش از حد مجاز است");
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(7100040, 1)`);
+    const rows = await tx.voucher.findMany({ where: { id: { in: ids } }, select: { id: true, serial: true, status: true, saleId: true, batchId: true, receipt: { select: { id: true } } } });
+    if (rows.length !== ids.length) throw new VoucherError("برخی از بن‌های انتخابی یافت نشدند؛ فهرست را تازه کنید");
+    const bad = rows.filter((v) => v.saleId != null || v.receipt || (v.status !== "CREATED" && v.status !== "VOID"));
+    if (bad.length) {
+      const names = bad.slice(0, 5).map((v) => v.serial).join("، ");
+      throw new VoucherError(`فقط بن‌های فروخته‌نشده و بدون دریافت قابل حذف‌اند؛ بن فروخته‌شده یا مصرف‌شده را باطل کنید. ${bad.length} بن غیرقابل حذف است: ${names}${bad.length > 5 ? " …" : ""}`);
+    }
+    const r = await tx.voucher.deleteMany({ where: { id: { in: ids }, saleId: null, status: { in: ["CREATED", "VOID"] }, receipt: null } });
+    if (r.count !== ids.length) throw new VoucherError("وضعیت برخی بن‌ها هم‌زمان تغییر کرد؛ دوباره تلاش کنید");
+    const perBatch = new Map<number, number>();
+    for (const v of rows) perBatch.set(v.batchId, (perBatch.get(v.batchId) ?? 0) + 1);
+    for (const [batchId, n] of perBatch) {
+      // eslint-disable-next-line no-await-in-loop
+      const left = await tx.voucher.count({ where: { batchId } });
+      // eslint-disable-next-line no-await-in-loop
+      if (left === 0) await tx.voucherBatch.delete({ where: { id: batchId } });
+      // eslint-disable-next-line no-await-in-loop
+      else await tx.voucherBatch.update({ where: { id: batchId }, data: { count: { decrement: n } } });
+    }
+    return { deleted: r.count };
+  }, { timeout: 120000 });
+}
+
 // ───────────────────────── مصرف در فروش فروشگاهی ─────────────────────────
 
 /** استعلام یک بن برای دریافت (بدون تغییر): مشکل = پیام فارسی یا null */
 export async function lookupVoucher(serialRaw: unknown, date: Date) {
   const serial = normalizeSerial(serialRaw);
   if (!serial) throw new VoucherError("سریال بن را وارد کنید");
-  if (!serialIsValid(serial)) return { serial, problem: "سریال نامعتبر است (رقم کنترل درست نیست)", voucher: null as any };
   const v = await prisma.voucher.findUnique({ where: { serial }, include: { type: { select: { title: true } }, sale: { select: { number: true, customer: { select: { party: { select: { detailTitle: true, name: true, firstName: true, lastName: true } } } } } } } });
   if (!v) return { serial, problem: "این سریال در سیستم وجود ندارد", voucher: null as any };
   let problem: string | null = null;
@@ -414,7 +458,7 @@ export async function lookupVoucher(serialRaw: unknown, date: Date) {
 export async function redeemVoucherInTx(tx: any, serialRaw: unknown, date: Date): Promise<{ id: number; faceValue: number; serial: string }> {
   const serial = normalizeSerial(serialRaw);
   const v = await tx.voucher.findUnique({ where: { serial } });
-  if (!v || !serialIsValid(serial)) throw new VoucherError(`سریال بن «${serial}» نامعتبر یا ناموجود است`);
+  if (!v) throw new VoucherError(`سریال بن «${serial}» نامعتبر یا ناموجود است`);
   if (v.status !== "SOLD") throw new VoucherError(`بن ${serial} قابل مصرف نیست (${v.status === "USED" ? "قبلاً مصرف شده" : v.status === "VOID" ? "باطل شده" : "هنوز فروخته نشده"})`);
   if (v.validUntil && v.validUntil.getTime() < date.getTime()) throw new VoucherError(`بن ${serial} در تاریخ ${displayDate(v.validUntil)} منقضی شده است`);
   const r = await tx.voucher.updateMany({ where: { id: v.id, status: "SOLD" }, data: { status: "USED" } });

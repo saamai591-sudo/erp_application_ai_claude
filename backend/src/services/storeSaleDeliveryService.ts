@@ -28,9 +28,10 @@ export const DELIVERY_METHODS = [
   { key: "CARD", title: "کارتخوان" },
   { key: "TRANSFER", title: "حواله" },
   { key: "VOUCHER", title: "بن‌کارت" },
+  { key: "LOYALTY", title: "کارت وفاداری" },
 ] as const;
 type MethodKey = (typeof DELIVERY_METHODS)[number]["key"];
-const methodOf = (r: any): MethodKey => (r.voucherId ? "VOUCHER" : r.cardReaderId ? "CARD" : r.bankAccountId ? "TRANSFER" : "CASH");
+const methodOf = (r: any): MethodKey => (r.loyaltyChargeId ? "LOYALTY" : r.voucherId ? "VOUCHER" : r.cardReaderId ? "CARD" : r.bankAccountId ? "TRANSFER" : "CASH");
 
 export const SETTLEMENT_STATUSES = ["SETTLED", "TO_CUSTOMER", "TO_ISSUER", "CASH_SHORTAGE"] as const;
 type Settlement = (typeof SETTLEMENT_STATUSES)[number];
@@ -59,7 +60,7 @@ function receiptRow(r: any) {
     saleId: r.saleId,
     saleNumber: r.sale?.number ?? null,
     amount: Number(r.amount),
-    payeeTitle: method === "VOUCHER" ? r.voucher?.serial ?? "" : method === "CARD" ? r.cardReader?.title ?? "" : method === "TRANSFER" ? (r.bankAccount ? bankAccountDetailTitle(r.bankAccount) : "") : r.cashBox?.title ?? "",
+    payeeTitle: method === "LOYALTY" ? r.loyaltyCharge?.card?.cardNumber ?? "" : method === "VOUCHER" ? r.voucher?.serial ?? "" : method === "CARD" ? r.cardReader?.title ?? "" : method === "TRANSFER" ? (r.bankAccount ? bankAccountDetailTitle(r.bankAccount) : "") : r.cashBox?.title ?? "",
     referenceNumber: r.referenceNumber ?? "",
   };
 }
@@ -68,6 +69,7 @@ const RECEIPT_INCLUDE = {
   cashBox: { select: { title: true } },
   cardReader: { select: { title: true } },
   voucher: { select: { serial: true } },
+  loyaltyCharge: { select: { card: { select: { cardNumber: true } } } },
   bankAccount: { include: BANK_ACCOUNT_TITLE_INCLUDE },
   sale: { select: { number: true } },
 } as const;
@@ -124,15 +126,15 @@ export async function buildDeliveryPreview(stationId: number, dateRaw: unknown, 
 
   const paid = new Map<number, Record<MethodKey, number>>();
   for (const r of receipts) {
-    const m = paid.get(r.saleId) ?? { CASH: 0, CARD: 0, TRANSFER: 0, VOUCHER: 0 };
+    const m = paid.get(r.saleId) ?? { CASH: 0, CARD: 0, TRANSFER: 0, VOUCHER: 0, LOYALTY: 0 };
     m[methodOf(r)] += Number(r.amount);
     paid.set(r.saleId, m);
   }
 
   const saleRows = sales.map((s) => {
     const t = saleTotals(s.lines);
-    const byMethod = paid.get(s.id) ?? { CASH: 0, CARD: 0, TRANSFER: 0, VOUCHER: 0 };
-    const paidTotal = byMethod.CASH + byMethod.CARD + byMethod.TRANSFER + byMethod.VOUCHER;
+    const byMethod = paid.get(s.id) ?? { CASH: 0, CARD: 0, TRANSFER: 0, VOUCHER: 0, LOYALTY: 0 };
+    const paidTotal = byMethod.CASH + byMethod.CARD + byMethod.TRANSFER + byMethod.VOUCHER + byMethod.LOYALTY;
     const credit = s.creditDeclaredAt ? Math.max(0, round(t.payable - paidTotal)) : 0;
     const unsettled = round(t.payable - paidTotal - credit);
     let status: Settlement = "SETTLED";
@@ -163,14 +165,14 @@ export async function buildDeliveryPreview(stationId: number, dateRaw: unknown, 
   // برگشت‌ها: همان ساختار فروش با مبالغ منفی؛ «پرداخت‌شده» = پرداخت‌های تحویل‌نشده‌ی تا تاریخ (نقد/حواله) و مانده = قابل پرداخت − پرداخت‌شده
   const paidRet = new Map<number, Record<MethodKey, number>>();
   for (const p of payments) {
-    const m = paidRet.get(p.returnId) ?? { CASH: 0, CARD: 0, TRANSFER: 0, VOUCHER: 0 };
+    const m = paidRet.get(p.returnId) ?? { CASH: 0, CARD: 0, TRANSFER: 0, VOUCHER: 0, LOYALTY: 0 };
     m[p.bankAccountId ? "TRANSFER" : "CASH"] += Number(p.amount);
     paidRet.set(p.returnId, m);
   }
   const returnRows = returns.map((r) => {
     const t = returnTotals(r.lines);
-    const m = paidRet.get(r.id) ?? { CASH: 0, CARD: 0, TRANSFER: 0, VOUCHER: 0 };
-    const paidTotal = m.CASH + m.CARD + m.TRANSFER + m.VOUCHER;
+    const m = paidRet.get(r.id) ?? { CASH: 0, CARD: 0, TRANSFER: 0, VOUCHER: 0, LOYALTY: 0 };
+    const paidTotal = m.CASH + m.CARD + m.TRANSFER + m.VOUCHER + m.LOYALTY;
     const unsettled = round(t.payable - paidTotal); // مثبت = هنوز به مشتری پرداخت نشده
     let status: Settlement = "SETTLED";
     if (Math.abs(unsettled) > EPS) {
@@ -189,7 +191,7 @@ export async function buildDeliveryPreview(stationId: number, dateRaw: unknown, 
       amount: -t.amount,
       vat: -t.vat,
       net: -t.payable,
-      paidByMethod: { CASH: -m.CASH, CARD: -m.CARD, TRANSFER: -m.TRANSFER, VOUCHER: -m.VOUCHER } as Record<string, number>,
+      paidByMethod: { CASH: -m.CASH, CARD: -m.CARD, TRANSFER: -m.TRANSFER, VOUCHER: -m.VOUCHER, LOYALTY: -m.LOYALTY } as Record<string, number>,
       credit: 0,
       unsettled: -unsettled,
       status,

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<title>تنظیمات برنامه‌ی صندوق</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+<style>
+  body { font-family: Tahoma, "Segoe UI", sans-serif; margin: 0; background: #f4f5f8; color: #222; }
+  .box { max-width: 520px; margin: 24px auto; background: #fff; border-radius: 10px; padding: 24px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 18px; color: #666; font-size: 13px; line-height: 1.8; }
+  label { display: block; margin: 14px 0 4px; font-size: 13px; font-weight: bold; }
+  input[type=text], input[type=password] { width: 100%; box-sizing: border-box; padding: 9px; border: 1px solid #c5c8d2; border-radius: 6px; font-size: 14px; direction: ltr; text-align: left; }
+  .hint { font-size: 12px; color: #777; margin-top: 3px; line-height: 1.7; }
+  .chk { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 13px; }
+  .row { display: flex; gap: 8px; margin-top: 22px; }
+  button { padding: 10px 18px; border: 0; border-radius: 6px; background: #5b3fd1; color: #fff; font-size: 14px; cursor: pointer; }
+  button.sec { background: #e3e5ec; color: #333; }
+  button:disabled { opacity: .5; cursor: default; }
+  #msg { margin-top: 16px; padding: 10px; border-radius: 6px; font-size: 13px; line-height: 1.8; display: none; }
+  #msg.ok { display: block; background: #e6f6ec; color: #17653a; }
+  #msg.err { display: block; background: #fdeceb; color: #a1281d; }
+  #msg.info { display: block; background: #eef1fb; color: #34408a; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>اتصال به سرور ERP</h1>
+  <p class="sub">آدرس سامانه و توکن عامل را وارد کنید. توکن در ERP: مدیریت خزانه › تنظیمات › «عامل محلی» ← عامل جدید ساخته می‌شود (برای هر صندوق یک عامل جدا).</p>
+
+  <label for="appUrl">آدرس سامانه</label>
+  <input id="appUrl" type="text" placeholder="https://erp.example.ir" />
+  <div class="hint">همان آدرسی که در مرورگر باز می‌کردید.</div>
+
+  <label for="token">توکن عامل</label>
+  <input id="token" type="password" placeholder="توکن را از ERP کپی کنید" autocomplete="off" />
+
+  <div class="chk"><input id="fullscreen" type="checkbox" /><label for="fullscreen" style="margin:0;font-weight:normal">اجرای تمام‌صفحه (F11 برای تغییر)</label></div>
+
+  <div id="apiRow" style="display:none">
+    <label for="apiUrl">آدرس API (تشخیص خودکار)</label>
+    <input id="apiUrl" type="text" />
+    <div class="hint">فقط اگر تشخیص خودکار درست نبود تغییر دهید.</div>
+  </div>
+
+  <div id="msg"></div>
+  <div class="row">
+    <button id="save">اتصال و ذخیره</button>
+    <button id="enter" class="sec" style="display:none">ورود به برنامه</button>
+    <button id="cancel" class="sec" style="display:none">انصراف</button>
+  </div>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const msg = (cls, text) => { const m = $("msg"); m.className = cls; m.textContent = text; };
+  let hadConfig = false;
+  (async () => {
+    const c = await pos.getConfig();
+    hadConfig = !!(c.appUrl && c.token);
+    $("appUrl").value = c.appUrl || "";
+    $("token").value = c.token || "";
+    $("apiUrl").value = c.apiUrl || "";
+    $("fullscreen").checked = !!c.fullscreen;
+    if (c.apiUrl) $("apiRow").style.display = "block";
+    if (hadConfig) $("cancel").style.display = "";
+  })();
+  $("cancel").onclick = () => pos.done();
+  $("enter").onclick = () => pos.done();
+  $("save").onclick = async () => {
+    $("save").disabled = true;
+    try {
+      let appUrl = $("appUrl").value.trim().replace(/\/+$/, "");
+      const token = $("token").value.trim();
+      if (!/^https?:\/\//i.test(appUrl)) return msg("err", "آدرس باید با http:// یا https:// شروع شود.");
+      if (token.length < 16 || /\s/.test(token)) return msg("err", "توکن معتبر نیست؛ آن را دقیقاً از ERP کپی کنید.");
+      msg("info", "در حال بررسی آدرس سامانه...");
+      let apiUrl = $("apiRow").style.display === "block" ? $("apiUrl").value.trim().replace(/\/+$/, "") : "";
+      if (!apiUrl) {
+        const p = await pos.probe(appUrl);
+        if (!p.ok) return msg("err", p.error);
+        apiUrl = p.apiUrl;
+        $("apiUrl").value = apiUrl;
+      }
+      msg("info", "در حال اتصال عامل (بررسی توکن)...");
+      const r = await pos.save({ appUrl, apiUrl, token, fullscreen: $("fullscreen").checked });
+      if (r.online) {
+        msg("ok", "وصل شد ✔ عامل در ERP «آنلاین» است. برای ادامه روی «ورود به برنامه» بزنید.");
+        $("enter").style.display = "";
+        $("cancel").style.display = "none";
+      } else {
+        $("apiRow").style.display = "block";
+        $("enter").style.display = "";
+        msg("err", "تنظیمات ذخیره شد ولی عامل وصل نشد: " + (r.error || "پاسخی از سرور نیامد") + " — آدرس یا توکن را بررسی کنید، یا با «ورود به برنامه» ادامه دهید.");
+      }
+    } catch (e) {
+      msg("err", String(e.message || e));
+    } finally {
+      $("save").disabled = false;
+    }
+  };
+</script>
+</body>
+</html>

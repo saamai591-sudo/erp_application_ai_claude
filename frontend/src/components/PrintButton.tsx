@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Modal } from "./Modal";
 import { absoluteApiUrl, api, ApiError } from "../lib/api";
 import { formatJalaliDate } from "../lib/formatDate";
+import { directPrint } from "../lib/directPrint";
+import { showError } from "../lib/toast";
 
 // دکمه‌ی «چاپ» نوار ابزار فرم‌ها (toolbarExtra): قالب‌های فعالِ همان نوع سند را می‌آورد، سند را با قالب انتخابی در سرور رندر می‌کند و در
 // یک iframe بدون اسکریپت (sandbox + CSP داخل خود سند) نشان می‌دهد؛ «چاپ» همان iframe را با چاپ مرورگر می‌فرستد (اندازه‌ی کاغذ را @page خود قالب تعیین می‌کند).
@@ -283,6 +285,32 @@ function PrintDialog({ docType, sourceId, onClose }: { docType: string; sourceId
         <ShareDialog docType={docType} sourceId={sourceId} templateId={templateId} digits={digits} title={fileName} onClose={() => setShareOpen(false)} />
       )}
     </Modal>
+  );
+}
+
+/** چاپ مستقیم با قالب پیش‌فرض، بدون پیش‌نمایش (برای رسید صندوق؛ با مرورگرِ حالت kiosk-printing بی‌صدا روی چاپگر پیش‌فرض می‌رود) */
+export function DirectPrintButton({ docType, sourceId, title = "چاپ مستقیم (بدون پیش‌نمایش)" }: { docType: string; sourceId: number; title?: string }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      type="button"
+      className="toolbar-icon-btn"
+      title={title}
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await directPrint(docType, sourceId);
+        } catch (e) {
+          showError((e as Error).message);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <PrintIcon />
+      <span style={{ fontSize: 10, marginInlineStart: 2 }}>⚡</span>
+    </button>
   );
 }
 

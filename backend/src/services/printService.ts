@@ -52,7 +52,10 @@ export interface PrintLayout {
   contentHeightMm: number;
 }
 
-const PAPER_MM: Record<string, [number, number]> = { A4: [210, 297], A5: [148, 210] };
+const PAPER_MM: Record<string, [number, number]> = { A4: [210, 297], A5: [148, 210], ROLL_80: [80, 297] };
+
+/** اندازه‌های کاغذ قالب چاپ؛ ROLL_80 = رول حرارتی ۸۰ میلی‌متر (@page بدون size تا اندازه‌ی کاغذ از درایور چاپگر بیاید) */
+export type PrintPaperKind = "A4" | "A5" | "ROLL_80";
 
 export function printLayout(paper: string, orientation: string, marginMm: number): PrintLayout {
   const [w0, h0] = PAPER_MM[paper] ?? PAPER_MM.A4;
@@ -530,6 +533,223 @@ PRINT_DOC_TYPES.JOURNAL_ENTRY = {
   sample: sampleJournalEntry,
 };
 
+// ─── رسید فروش فروشگاهی (رول حرارتی ۸۰ میلی‌متر) ─────────────────────────────
+
+const STORE_PAY_FA: Record<string, string> = { CASH: "نقد", CARD: "کارتخوان", TRANSFER: "حواله", VOUCHER: "بن‌کارت", LOYALTY: "کارت وفاداری" };
+
+const DOC_FIELDS_STORE_SALE: PrintFieldDoc[] = [
+  { path: "doc.number", title: "شماره فروش", group: "سند" },
+  { path: "doc.date", title: "تاریخ (شمسی)", group: "سند" },
+  { path: "doc.time", title: "ساعت ثبت (به وقت تهران)", group: "سند" },
+  { path: "doc.station", title: "ایستگاه فروش", group: "سند" },
+  { path: "doc.shift", title: "شیفت", group: "سند" },
+  { path: "doc.cashier", title: "ثبت‌کننده (صندوق‌دار)", group: "سند" },
+  { path: "doc.description", title: "توضیحات", group: "سند" },
+  { path: "customer.name", title: "نام مشتری", group: "مشتری" },
+  { path: "customer.isDefault", title: "مشتری همان مشتری پیش‌فرض ایستگاه است (برای پنهان‌کردن)", group: "مشتری" },
+  { path: "lines", title: "اقلام (داخل {{#each lines}} … {{/each}})", group: "ردیف‌ها", list: true },
+  { path: "row", title: "ردیف: شماره", group: "ردیف‌ها" },
+  { path: "title", title: "ردیف: عنوان کالا/خدمت", group: "ردیف‌ها" },
+  { path: "quantity", title: "ردیف: تعداد", group: "ردیف‌ها" },
+  { path: "unit", title: "ردیف: واحد", group: "ردیف‌ها" },
+  { path: "unitPrice", title: "ردیف: مبلغ واحد", group: "ردیف‌ها" },
+  { path: "amount", title: "ردیف: مبلغ", group: "ردیف‌ها" },
+  { path: "vat", title: "ردیف: ارزش افزوده", group: "ردیف‌ها" },
+  { path: "net", title: "ردیف: مبلغ با ارزش افزوده", group: "ردیف‌ها" },
+  { path: "totals.amount", title: "جمع مبلغ", group: "جمع‌ها" },
+  { path: "totals.vat", title: "جمع ارزش افزوده", group: "جمع‌ها" },
+  { path: "totals.payable", title: "قابل پرداخت", group: "جمع‌ها" },
+  { path: "totals.paid", title: "دریافت‌شده", group: "جمع‌ها" },
+  { path: "totals.remaining", title: "باقی‌مانده", group: "جمع‌ها" },
+  { path: "payments", title: "دریافت‌ها (داخل {{#each payments}}؛ title، amount، reference)", group: "دریافت‌ها", list: true },
+  { path: "hasRemaining", title: "باقی‌مانده دارد (برای نمایش شرطی)", group: "دریافت‌ها" },
+];
+
+async function loadStoreSale(id: number): Promise<PrintData> {
+  const s = await prisma.storeSale.findUnique({
+    where: { id },
+    include: {
+      station: { select: { title: true, customerId: true } },
+      shift: { select: { title: true } },
+      customer: { include: { party: true } },
+      lines: { include: { goodsItem: true, unit: true }, orderBy: { rowOrder: "asc" } },
+      receipts: { orderBy: { id: "asc" } },
+    },
+  });
+  if (!s) throw new Error("فروش فروشگاهی یافت نشد");
+  const base = await prisma.currency.findFirst({ where: { isBase: true } });
+  const dec = base?.decimalPlaces ?? 0;
+  const cashier = s.createdById ? await prisma.user.findUnique({ where: { id: s.createdById }, select: { firstName: true, lastName: true } }) : null;
+  const time = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Tehran", hour: "2-digit", minute: "2-digit", hour12: false }).format(s.createdAt);
+  let amountSum = 0;
+  let vatSum = 0;
+  const lines = s.lines.map((l, i) => {
+    const amount = Number(l.amount);
+    const vat = Number(l.vatAmount);
+    amountSum += amount;
+    vatSum += vat;
+    return {
+      row: i + 1,
+      title: l.goodsItem.rawTitle,
+      quantity: fmtNumber(Number(l.quantity), 6),
+      unit: l.unit.title,
+      unitPrice: fmtNumber(Number(l.unitPrice), dec),
+      amount: fmtNumber(amount, dec),
+      vat: fmtNumber(vat, dec),
+      net: fmtNumber(amount + vat, dec),
+    };
+  });
+  const payable = amountSum + vatSum;
+  const paid = s.receipts.reduce((n, r) => n + Number(r.amount), 0);
+  const remaining = Math.max(0, payable - paid);
+  const method = (r: any) => (r.loyaltyChargeId ? "LOYALTY" : r.voucherId ? "VOUCHER" : r.cardReaderId ? "CARD" : r.bankAccountId ? "TRANSFER" : "CASH");
+  return {
+    company: await loadCompany(),
+    doc: {
+      number: s.number,
+      date: formatJalaliDateForMessage(s.date),
+      time,
+      station: s.station.title,
+      shift: s.shift?.title ?? "",
+      cashier: cashier ? `${cashier.firstName} ${cashier.lastName}`.trim() : "",
+      description: s.description ?? "",
+    },
+    customer: { name: partyName(s.customer.party), isDefault: s.customerId === s.station.customerId },
+    lines,
+    totals: { amount: fmtNumber(amountSum, dec), vat: fmtNumber(vatSum, dec), payable: fmtNumber(payable, dec), paid: fmtNumber(paid, dec), remaining: fmtNumber(remaining, dec) },
+    payments: s.receipts.map((r) => ({ title: STORE_PAY_FA[method(r)], amount: fmtNumber(Number(r.amount), dec), reference: r.referenceNumber ?? "" })),
+    hasRemaining: remaining > 0.000001,
+  };
+}
+
+function sampleStoreSale(): PrintData {
+  return {
+    company: { name: "فروشگاه نمونه", economicCode: "", registrationNumber: "", nationalId: "", phone: "021-12345678", address: "", postalCode: "", website: "", logo: "", stamp: "", bankAccounts: [] },
+    doc: { number: 125, date: "1405/01/21", time: "14:35", station: "ایستگاه ۱", shift: "صبح", cashier: "علی احمدی", description: "" },
+    customer: { name: "مشتری متفرقه", isDefault: true },
+    lines: [
+      { row: 1, title: "نوشابه ۱.۵ لیتری", quantity: "2", unit: "عدد", unitPrice: "450,000", amount: "900,000", vat: "81,000", net: "981,000" },
+      { row: 2, title: "چیپس", quantity: "1", unit: "عدد", unitPrice: "250,000", amount: "250,000", vat: "22,500", net: "272,500" },
+    ],
+    totals: { amount: "1,150,000", vat: "103,500", payable: "1,253,500", paid: "1,253,500", remaining: "0" },
+    payments: [{ title: "کارتخوان", amount: "1,000,000", reference: "123456" }, { title: "نقد", amount: "253,500", reference: "" }],
+    hasRemaining: false,
+  };
+}
+
+PRINT_DOC_TYPES.STORE_SALE = {
+  title: "رسید فروش فروشگاهی",
+  fields: [...DOC_FIELDS_STORE_SALE, ...COMPANY_FIELDS],
+  textKeys: [
+    { key: "title", title: "عنوان رسید" },
+    { key: "footer", title: "متن پایین رسید" },
+    { key: "fileName", title: "نام فایل هنگام ذخیره به‌صورت PDF (مثلاً {{doc.number}})" },
+  ],
+  defaultFileName: "رسید فروش {{doc.number}} - {{company.name}}",
+  load: loadStoreSale,
+  latestSourceId: async () => (await prisma.storeSale.findFirst({ orderBy: { id: "desc" }, select: { id: true } }))?.id ?? null,
+  sample: sampleStoreSale,
+};
+
+// ─── برگه‌ی سفارش آشپزخانه/بار (رول حرارتی ۸۰ میلی‌متر) ───────────────────────────
+
+const DOC_FIELDS_STORE_ORDER: PrintFieldDoc[] = [
+  { path: "doc.number", title: "شماره فروش", group: "سند" },
+  { path: "doc.seq", title: "شماره‌ی نوبت ارسال سفارش همین فروش", group: "سند" },
+  { path: "doc.modeTitle", title: "نوع برگه (سفارش جدید / چاپ مجدد کل سفارش)", group: "سند" },
+  { path: "doc.group", title: "نام گروه چاپ این چاپگر (خالی = همه‌ی کالاها)", group: "سند" },
+  { path: "doc.date", title: "تاریخ (شمسی)", group: "سند" },
+  { path: "doc.time", title: "ساعت ارسال (به وقت تهران)", group: "سند" },
+  { path: "doc.station", title: "ایستگاه فروش", group: "سند" },
+  { path: "doc.description", title: "توضیحات فروش", group: "سند" },
+  { path: "lines", title: "اقلام جدید (داخل {{#each lines}}؛ row، title، quantity، unit، description)", group: "ردیف‌ها", list: true },
+  { path: "cancelled", title: "اقلام لغوشده (داخل {{#each cancelled}}؛ title، quantity، unit)", group: "ردیف‌ها", list: true },
+];
+
+interface OrderPayloadItem { goodsItemId: number; title: string; unit: string; quantity: number; description: string }
+export interface OrderPayload { items: OrderPayloadItem[]; cancelled: OrderPayloadItem[] }
+
+/** داده‌ی برگه‌ی سفارش؛ items/cancelled از پیش براساس گروه چاپِ چاپگر فیلتر شده‌اند */
+export async function buildStoreOrderData(args: { saleId: number; seq: number; mode: string; at: Date; items: OrderPayloadItem[]; cancelled: OrderPayloadItem[]; groupTitle: string }): Promise<PrintData> {
+  const s = await prisma.storeSale.findUnique({ where: { id: args.saleId }, select: { number: true, description: true, station: { select: { title: true } } } });
+  if (!s) throw new Error("فروش فروشگاهی یافت نشد");
+  const time = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Tehran", hour: "2-digit", minute: "2-digit", hour12: false }).format(args.at);
+  const row = (x: OrderPayloadItem, i: number) => ({ row: i + 1, title: x.title, quantity: fmtNumber(x.quantity, 6), unit: x.unit, description: x.description });
+  return {
+    company: await loadCompany(),
+    doc: {
+      number: s.number,
+      seq: args.seq,
+      modeTitle: args.mode === "ALL" ? "چاپ مجدد کل سفارش" : "سفارش جدید",
+      group: args.groupTitle,
+      date: formatJalaliDateForMessage(args.at),
+      time,
+      station: s.station.title,
+      description: s.description ?? "",
+    },
+    lines: args.items.map(row),
+    cancelled: args.cancelled.map(row),
+    hasLines: args.items.length > 0,
+    hasCancelled: args.cancelled.length > 0,
+  };
+}
+
+async function loadStoreOrder(batchId: number): Promise<PrintData> {
+  const b = await prisma.storeSaleOrderBatch.findUnique({ where: { id: batchId } });
+  if (!b) throw new Error("نوبت سفارش یافت نشد");
+  const p = b.payload as unknown as OrderPayload;
+  return buildStoreOrderData({ saleId: b.saleId, seq: b.seq, mode: b.mode, at: b.createdAt, items: p.items ?? [], cancelled: p.cancelled ?? [], groupTitle: "" });
+}
+
+function sampleStoreOrder(): PrintData {
+  return {
+    company: { name: "رستوران نمونه", economicCode: "", registrationNumber: "", nationalId: "", phone: "", address: "", postalCode: "", website: "", logo: "", stamp: "", bankAccounts: [] },
+    doc: { number: 125, seq: 2, modeTitle: "سفارش جدید", group: "آشپزخانه", date: "1405/01/21", time: "14:35", station: "ایستگاه ۱", description: "" },
+    lines: [
+      { row: 1, title: "چلوکباب کوبیده", quantity: "2", unit: "پرس", description: "یکی بدون گوجه" },
+      { row: 2, title: "جوجه کباب", quantity: "1", unit: "پرس", description: "" },
+    ],
+    cancelled: [{ row: 1, title: "سوپ جو", quantity: "1", unit: "کاسه", description: "" }],
+    hasLines: true,
+    hasCancelled: true,
+  };
+}
+
+PRINT_DOC_TYPES.STORE_SALE_ORDER = {
+  title: "برگه‌ی سفارش فروش فروشگاهی (آشپزخانه/بار)",
+  fields: [...DOC_FIELDS_STORE_ORDER, ...COMPANY_FIELDS],
+  textKeys: [
+    { key: "title", title: "عنوان برگه" },
+    { key: "cancelTitle", title: "عنوان بخش اقلام لغوشده" },
+    { key: "fileName", title: "نام فایل هنگام ذخیره به‌صورت PDF" },
+  ],
+  defaultFileName: "سفارش {{doc.number}}-{{doc.seq}}",
+  load: loadStoreOrder,
+  latestSourceId: async () => (await prisma.storeSaleOrderBatch.findFirst({ orderBy: { id: "desc" }, select: { id: true } }))?.id ?? null,
+  sample: sampleStoreOrder,
+};
+
+/**
+ * رندر یک سند با داده‌ی آماده (بدون load از دیتابیس) با قالب پیش‌فرض همان نوع — برای کارهای چاپِ ارسالی به عامل.
+ * forShare: فونت/لوگو داخل HTML نمی‌آید (نشانگر می‌ماند و هنگام برداشتنِ عامل با hydrateSharedHtml پر می‌شود) تا ذخیره‌ی کار چاپ سبک بماند.
+ */
+export async function renderWithDefaultTemplate(docType: string, data: PrintData, opts?: { forShare?: boolean }): Promise<{ html: string; title: string }> {
+  await ensureDefaultPrintTemplates();
+  const tpl = await prisma.printTemplate.findFirst({ where: { documentType: docType as any, isActive: true }, orderBy: [{ isDefault: "desc" }, { id: "asc" }] });
+  if (!tpl) throw new Error("قالب چاپ فعالی برای این نوع سند تعریف نشده است");
+  const def = getPrintDocType(docType);
+  const texts: Record<string, string> = (tpl.texts as any) ?? {};
+  const title = buildPrintFileName(texts.fileName ?? "", data, def.defaultFileName);
+  let html = renderPrintDocument({ title, html: tpl.html, texts, paper: tpl.paper as PrintPaperKind, orientation: tpl.orientation, marginMm: tpl.marginMm, digits: tpl.digits, documentType: docType, design: tpl.design, fontPlaceholder: !!opts?.forShare }, data);
+  if (opts?.forShare) {
+    const logo: string = data.company?.logo ?? "";
+    const stamp: string = data.company?.stamp ?? "";
+    if (logo) html = html.split(logo).join(SHARE_LOGO_MARK);
+    if (stamp) html = html.split(stamp).join(SHARE_STAMP_MARK);
+  }
+  return { html, title };
+}
+
 export function getPrintDocType(type: string): PrintDocTypeDef {
   const def = PRINT_DOC_TYPES[type];
   if (!def) throw new Error("نوع سند چاپ نامعتبر است");
@@ -558,7 +778,7 @@ export type PrintDigitsMode = "LATIN" | "PERSIAN";
 export interface RenderInput {
   html: string;
   texts: Record<string, string>;
-  paper: "A4" | "A5";
+  paper: PrintPaperKind;
   orientation: "PORTRAIT" | "LANDSCAPE";
   marginMm: number;
   digits?: PrintDigitsMode;
@@ -641,7 +861,7 @@ export async function hydrateSharedHtml(html: string): Promise<string> {
 /** قاب سند چاپی (فونت، CSP، @page، ارقام فارسی اختیاری) دور یک بدنه‌ی HTML آماده؛ برای سندهایی که قالب DB ندارند (مثل فیش حقوقی) */
 export function wrapPrintHtml(
   bodyHtml: string,
-  input: { title?: string; paper: "A4" | "A5"; orientation: "PORTRAIT" | "LANDSCAPE"; marginMm: number; digits?: PrintDigitsMode; fontPlaceholder?: boolean }
+  input: { title?: string; paper: PrintPaperKind; orientation: "PORTRAIT" | "LANDSCAPE"; marginMm: number; digits?: PrintDigitsMode; fontPlaceholder?: boolean }
 ): string {
   let body = bodyHtml;
   const size = `${input.paper} ${input.orientation === "LANDSCAPE" ? "landscape" : "portrait"}`;
@@ -649,10 +869,11 @@ export function wrapPrintHtml(
   const digits: PrintDigitsMode = input.digits === "PERSIAN" ? "PERSIAN" : "LATIN";
   if (digits === "PERSIAN") body = toPersianDigitsInHtml(body);
   return `<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${CSP}"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(input.title ?? "")}</title><style>${input.fontPlaceholder ? SHARE_FONT_MARK : embeddedFontCss()}
-@page { size: ${size}; margin: ${margin}mm; }
+${input.paper === "ROLL_80" ? `@page { margin: ${margin}mm; }` : `@page { size: ${size}; margin: ${margin}mm; }`}
 html, body { margin: 0; padding: 0; }
 /* پیش‌نمایش روی صفحه هم حاشیه‌ی چاپی را نشان بدهد (در چاپ، @page حاشیه را اعمال می‌کند) */
 @media screen { body { padding: ${margin}mm; box-sizing: border-box; } }
+${input.paper === "ROLL_80" ? "@media screen { body { max-width: 80mm; margin: 0 auto; } }" : ""}
 body { font-family: "Vazirmatn", Tahoma, sans-serif; font-size: 9pt; color: #111; direction: rtl; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 </style></head><body>${body}</body></html>`;
 }

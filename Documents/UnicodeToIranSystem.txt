@@ -1,0 +1,502 @@
+using System.Collections;
+using System.Text;
+
+namespace Saturn.Common.Infrastructure.Util
+{
+    public class UnicodeToIranSystem
+    {
+        private readonly Hashtable _ht = [];
+        private bool _isDate;
+        private bool _rtl;
+
+        private readonly List<string> _seperatedBefore = new[]
+            {
+                "ء", "ر", "ز", "ژ", "آ", "أ",
+                "ؤ","إ","ا","د","ذ","ذ","ء"
+            }
+            .ToList();
+
+        public UnicodeToIranSystem()
+        {
+            _ht.Add(" ", 0x20);
+            _ht.Add("!", 0x21);
+            _ht.Add("#", 0x23);
+            _ht.Add("$", 0x24);
+            _ht.Add("%", 0x25);
+            _ht.Add("&", 0x26);
+            _ht.Add("'", 0x27);
+            _ht.Add("(", 40);
+            _ht.Add(")", 0x29);
+            _ht.Add("*", 0x2a);
+            _ht.Add("+", 0x2b);
+            _ht.Add(",", 0x2c);
+            _ht.Add("-", 0x2d);
+            _ht.Add(".", 0x2e);
+            _ht.Add("/", 0x2f);
+            _ht.Add("0", 0x30);
+            _ht.Add("1", 0x31);
+            _ht.Add("2", 50);
+            _ht.Add("3", 0x33);
+            _ht.Add("4", 0x34);
+            _ht.Add("5", 0x35);
+            _ht.Add("6", 0x36);
+            _ht.Add("7", 0x37);
+            _ht.Add("8", 0x38);
+            _ht.Add("9", 0x39);
+            _ht.Add(":", 0x3a);
+            _ht.Add(";", 0x3b);
+            _ht.Add("<", 60);
+            _ht.Add("=", 0x3d);
+            _ht.Add(">", 0x3e);
+            _ht.Add("?", 0x3f);
+            _ht.Add("@", 0x40);
+            _ht.Add("A", 0x41);
+            _ht.Add("B", 0x42);
+            _ht.Add("C", 0x43);
+            _ht.Add("D", 0x44);
+            _ht.Add("E", 0x45);
+            _ht.Add("F", 70);
+            _ht.Add("G", 0x47);
+            _ht.Add("H", 0x48);
+            _ht.Add("I", 0x49);
+            _ht.Add("J", 0x4a);
+            _ht.Add("K", 0x4b);
+            _ht.Add("L", 0x4c);
+            _ht.Add("M", 0x4d);
+            _ht.Add("N", 0x4e);
+            _ht.Add("O", 0x4f);
+            _ht.Add("P", 80);
+            _ht.Add("Q", 0x51);
+            _ht.Add("R", 0x52);
+            _ht.Add("S", 0x53);
+            _ht.Add("T", 0x54);
+            _ht.Add("U", 0x55);
+            _ht.Add("V", 0x56);
+            _ht.Add("W", 0x57);
+            _ht.Add("X", 0x58);
+            _ht.Add("Y", 0x59);
+            _ht.Add("Z", 90);
+            _ht.Add("[", 0x5b);
+            _ht.Add(@"\", 0x5c);
+            _ht.Add("]", 0x5d);
+            _ht.Add("^", 0x5e);
+            _ht.Add("_", 0x5f);
+            _ht.Add("`", 0x60);
+            _ht.Add("a", 0x61);
+            _ht.Add("b", 0x62);
+            _ht.Add("c", 0x63);
+            _ht.Add("d", 100);
+            _ht.Add("e", 0x65);
+            _ht.Add("f", 0x66);
+            _ht.Add("g", 0x67);
+            _ht.Add("h", 0x68);
+            _ht.Add("i", 0x69);
+            _ht.Add("j", 0x6a);
+            _ht.Add("k", 0x6b);
+            _ht.Add("l", 0x6c);
+            _ht.Add("m", 0x6d);
+            _ht.Add("n", 110);
+            _ht.Add("o", 0x6f);
+            _ht.Add("p", 0x70);
+            _ht.Add("q", 0x71);
+            _ht.Add("r", 0x72);
+            _ht.Add("s", 0x73);
+            _ht.Add("t", 0x74);
+            _ht.Add("u", 0x75);
+            _ht.Add("v", 0x76);
+            _ht.Add("w", 0x77);
+            _ht.Add("x", 120);
+            _ht.Add("y", 0x79);
+            _ht.Add("z", 0x7a);
+            _ht.Add("{", 0x7b);
+            _ht.Add("|", 0x7c);
+            _ht.Add("}", 0x7d);
+            _ht.Add("~", 0x7e);
+            _ht.Add("\x007f", 0x7f);
+            _ht.Add("،", 0x8a);
+            _ht.Add("", 0x8b);
+            _ht.Add("؟", 140);
+            _ht.Add("آ", 0x90);
+            _ht.Add("ئ", 0x8e);
+            _ht.Add("ء", 0x8f);
+            _ht.Add(" ا ", 0x90);
+            _ht.Add(" ا", 0x90);
+            _ht.Add("ا", 0x91);
+            _ht.Add("ا ", 0x91);
+            _ht.Add("ب ", 0x92);
+            _ht.Add(" ب ", 0x92);
+            _ht.Add("ب", 0x93);
+            _ht.Add("پ ", 0x94);
+            _ht.Add(" پ ", 0x94);
+            _ht.Add("پ", 0x95);
+            _ht.Add("ت ", 150);
+            _ht.Add(" ت ", 150);
+            _ht.Add("ت", 0x97);
+            _ht.Add("ث ", 0x98);
+            _ht.Add(" ث ", 0x98);
+            _ht.Add("ث", 0x99);
+            _ht.Add("ج ", 0x9a);
+            _ht.Add(" ج ", 0x9a);
+            _ht.Add("ج", 0x9b);
+            _ht.Add("چ ", 0x9c);
+            _ht.Add(" چ ", 0x9c);
+            _ht.Add("چ", 0x9d);
+            _ht.Add("ح ", 0x9e);
+            _ht.Add(" ح ", 0x9e);
+            _ht.Add("ح", 0x9f);
+            _ht.Add("خ ", 160);
+            _ht.Add(" خ ", 160);
+            _ht.Add("خ", 0xa1);
+            _ht.Add("د", 0xa2);
+            _ht.Add("ذ", 0xa3);
+            _ht.Add("ر", 0xa4);
+            _ht.Add("ز", 0xa5);
+            _ht.Add("ژ", 0xa6);
+            _ht.Add("س ", 0xa7);
+            _ht.Add(" س ", 0xa7);
+            _ht.Add("س", 0xa8);
+            _ht.Add("ش ", 0xa9);
+            _ht.Add(" ش ", 0xa9);
+            _ht.Add("ش", 170);
+            _ht.Add("ص ", 0xab);
+            _ht.Add(" ص ", 0xab);
+            _ht.Add("ص", 0xac);
+            _ht.Add("ض ", 0xad);
+            _ht.Add(" ض ", 0xad);
+            _ht.Add("ض", 0xae);
+            _ht.Add("ط", 0xaf);
+            _ht.Add("░", 0xb0);
+            _ht.Add("▒", 0xb1);
+            _ht.Add("▓", 0xb2);
+            _ht.Add("│", 0xb3);
+            _ht.Add("┤", 180);
+            _ht.Add("╡", 0xb5);
+            _ht.Add("╢", 0xb6);
+            _ht.Add("╖", 0xb7);
+            _ht.Add("╕", 0xb8);
+            _ht.Add("╣", 0xb9);
+            _ht.Add("║", 0xba);
+            _ht.Add("╗", 0xbb);
+            _ht.Add("╝", 0xbc);
+            _ht.Add("╜", 0xbd);
+            _ht.Add("╛", 190);
+            _ht.Add("┐", 0xbf);
+            _ht.Add("└", 0xc0);
+            _ht.Add("┴", 0xc1);
+            _ht.Add("┬", 0xc2);
+            _ht.Add("├", 0xc3);
+            _ht.Add("─", 0xc4);
+            _ht.Add("┼", 0xc5);
+            _ht.Add("╞", 0xc6);
+            _ht.Add("╟", 0xc7);
+            _ht.Add("╚", 200);
+            _ht.Add("╔", 0xc9);
+            _ht.Add("╩", 0xca);
+            _ht.Add("╦", 0xcb);
+            _ht.Add("╠", 0xcc);
+            _ht.Add("═", 0xcd);
+            _ht.Add("╬", 0xce);
+            _ht.Add("╧", 0xcf);
+            _ht.Add("╨", 0xd0);
+            _ht.Add("╤", 0xd1);
+            _ht.Add("╥", 210);
+            _ht.Add("╙", 0xd3);
+            _ht.Add("╘", 0xd4);
+            _ht.Add("╒", 0xd5);
+            _ht.Add("╓", 0xd6);
+            _ht.Add("╫", 0xd7);
+            _ht.Add("╪", 0xd8);
+            _ht.Add("┘", 0xd9);
+            _ht.Add("┌", 0xda);
+            _ht.Add("█", 0xdb);
+            _ht.Add("▄", 220);
+            _ht.Add("▌", 0xdd);
+            _ht.Add("▐", 0xde);
+            _ht.Add("▀", 0xdf);
+            _ht.Add("ظ", 0xe0);
+            _ht.Add(" ع ", 0xe1);//ﻉ
+            _ht.Add("ع ", 0xe2);//ﻊ
+            _ht.Add("ع", 0xe3);//ﻌ
+            _ht.Add(" ع", 0xe4);//ﻋ
+            _ht.Add(" غ ", 229);//ﻍ
+            _ht.Add("غ ", 230);//ﻎ
+            _ht.Add("غ", 231);//ﻐ
+            _ht.Add(" غ", 232);//ﻏ
+            _ht.Add("ف ", 0xe9);
+            _ht.Add("ف", 0xea);
+            _ht.Add("ق ", 0xeb);
+            _ht.Add(" ق ", 0xeb);
+            _ht.Add("ق", 0xec);
+            _ht.Add("ک ", 0xed);
+            _ht.Add(" ک ", 0xed);
+            _ht.Add("ک", 0xee);
+            _ht.Add("گ ", 0xef);
+            _ht.Add(" گ ", 0xef);
+            _ht.Add("گ", 240);
+            _ht.Add("ل ", 0xf1);
+            _ht.Add(" ل ", 0xf1);
+            _ht.Add("لا", 0xf2);
+            _ht.Add("ل", 0xf3);
+            _ht.Add("م ", 0xf4);
+            _ht.Add(" م ", 0xf4);
+            _ht.Add("م", 0xf5);
+            _ht.Add("ن ", 0xf6);
+            _ht.Add(" ن ", 0xf6);
+            _ht.Add("ن", 0xf7);
+            _ht.Add("و", 0xf8);
+            //this.ht.Add("ه ", 0xf9);
+            //this.ht.Add("ه", 250);
+            _ht.Add("ه ", 249);
+            _ht.Add(" ه ", 249);
+            _ht.Add("ه", 251);
+            _ht.Add(" ه", 251);
+
+            _ht.Add("ی ", 0xfc);//252به خاطر مشکل ی عوض شد 
+            _ht.Add(" ی ", 0xfc);//253
+            _ht.Add(" ی", 0xfe);//254
+            _ht.Add("ی", 0xfe);//254
+        }
+
+        public string Convert(string unicodeStr, bool IsDate, bool RTL)
+        {
+            var bytes = ConvertToByte(unicodeStr, IsDate, RTL);
+            return Encoding.Default.GetString(bytes);
+        }
+
+        public byte[] ConvertByte(string unicodeStr, bool IsDate, bool RTL)
+        {
+            return ConvertToByte(unicodeStr, IsDate, RTL);
+        }
+
+        public byte[] ConvertLineWithComma(string unicodeStrWithComma, bool IsDate, bool RTL)
+        {
+            _isDate = IsDate;
+            _rtl = RTL;
+            var b = ","u8.ToArray();
+            var separator = new char[] { ',' };
+            var strArray = unicodeStrWithComma.Split(separator);
+            var a = Array.Empty<byte>();
+            foreach (var str in strArray)
+            {
+                if (a.Length != 0)
+                {
+                    a = ConcateByteArray(a, b);
+                }
+                a = ConcateByteArray(a, new UnicodeToIranSystem().ConvertByte(str, false, true));
+            }
+            return a;
+        }
+
+        private List<byte> ConvertReverse(byte[] b)
+        {
+            var list = new List<byte>();
+            for (var i = b.Length - 1; i >= 0; i--)
+            {
+                list.Add(b[i]);
+            }
+            return list;
+        }
+
+        public void SaveAsIranSystem(string[] strArr, string path)
+        {
+            try
+            {
+                var num = 1;
+                using var writer = new BinaryWriter(new FileStream(path, FileMode.Create));
+                foreach (var str in strArr)
+                {
+                    var buffer = ConvertToByte(str, false, true);
+                    writer.Write(buffer);
+                    if (num != strArr.Length)
+                    {
+                        writer.Write(System.Convert.ToByte(13));
+                        writer.Write(System.Convert.ToByte(10));
+                    }
+                    num++;
+                }
+                writer.Close();
+            }
+            catch (Exception)
+            {
+                throw;
+            }
+        }
+
+        private byte[] ConcateByteArray(byte[] a, byte[] b)
+        {
+            int num2;
+            var buffer = new byte[a.Length + b.Length];
+            var index = 0;
+            for (num2 = 0; num2 < a.Length; num2++)
+            {
+                buffer[index] = a[num2];
+                index++;
+            }
+            var length = a.Length;
+            for (num2 = 0; num2 < b.Length; num2++)
+            {
+                buffer[length] = b[num2];
+                length++;
+            }
+            return buffer;
+        }
+
+        private byte[] Convert(byte[] ca, bool isDate)
+        {
+            var chArray = new char[2];
+            var num = 0;
+            var flag = true;
+            var list = new List<byte>();
+            var list2 = new List<byte>();
+            if (_rtl)
+            {
+                ConvertRtl(ca, chArray, ref num, ref flag, list, list2);
+            }
+            else if (isDate)
+            {
+                ConvertDate(ca, list);
+            }
+            else
+            {
+                for (var num2 = 0; num2 < ca.Length; num2++)
+                {
+                    list.Add(ca[num2]);
+                }
+            }
+            return list.ToArray();
+        }
+
+        private int ConvertRtl(byte[] ca, char[] chArray, ref int num, ref bool flag, List<byte> list, List<byte> list2)
+        {
+            int num2;
+            for (num2 = ca.Length - 1; num2 >= 0; num2--)
+            {
+                if (((((ca[num2].ToString().CompareTo("47") >= 0) && (ca[num2].ToString().CompareTo("57") <= 0)) ||
+                      ((ca[num2].ToString().CompareTo("65") >= 0) && (ca[num2].ToString().CompareTo("90") <= 0))) ||
+                     (((ca[num2].ToString().CompareTo("97") >= 0) && (ca[num2].ToString().CompareTo("122") <= 0)) ||
+                      ((ca[num2].ToString().CompareTo("128") >= 0) && (ca[num2].ToString().CompareTo("137") <= 0)))) ||
+                    ((list2.Count > 0) && (ca[num2].ToString() == "44")))
+                {
+                    list2.Add(ca[num2]);
+                    flag = false;
+                }
+                else if (ca[num2].ToString() == "10")
+                {
+                    if (!flag)
+                    {
+                        list.AddRange(ConvertReverse(list2.ToArray()));
+                        list2.Clear();
+                        flag = true;
+                    }
+                    list.Add(System.Convert.ToByte(10));
+                    num2--;
+                }
+                else
+                {
+                    if (!flag)
+                    {
+                        list.AddRange(ConvertReverse(list2.ToArray()));
+                        list2.Clear();
+                        flag = true;
+                    }
+                    list.Add(ca[num2]);
+                    num++;
+                    if (chArray[1] == ' ')
+                    {
+                        list.Add(System.Convert.ToByte(_ht[System.Convert.ToString(chArray[1])]));
+                        num++;
+                    }
+                }
+            }
+            list.AddRange(ConvertReverse(list2.ToArray()));
+            return num2;
+        }
+
+        private static int ConvertDate(byte[] ca, List<byte> list)
+        {
+            int num2;
+            var stack = new Stack<int>();
+            for (num2 = 0; num2 < ca.Length; num2++)
+            {
+                if (ca[num2] != 0x2f)
+                {
+                    stack.Push(ca[num2]);
+                }
+                else if (stack.Count > 0)
+                {
+                    while (stack.Count > 0)
+                    {
+                        list.Add(System.Convert.ToByte(stack.Pop()));
+                    }
+                    list.Add(System.Convert.ToByte(0x2f));
+                }
+                if ((stack.Count > 0) && (num2 == (ca.Length - 1)))
+                {
+                    while (stack.Count > 0)
+                    {
+                        list.Add(System.Convert.ToByte(stack.Pop()));
+                    }
+                }
+            }
+
+            return num2;
+        }
+
+        private byte[] ConvertToByte(string unicodeStr, bool IsDate, bool RTL)
+        {
+            _isDate = IsDate;
+            _rtl = RTL;
+            if (!string.IsNullOrEmpty(unicodeStr))
+            {
+                unicodeStr = unicodeStr.Replace(((char)(8207)).ToString(), "").Replace(((char)(8206)).ToString(), "");
+            }
+
+            var list = new List<byte>();
+            for (var i = 0; i < unicodeStr.Length; i++)
+            {
+                var ch = unicodeStr[i];
+                var before = i == 0 ? ' ' : unicodeStr[i - 1];
+                var after = i == unicodeStr.Length - 1 ? ' ' : unicodeStr[i + 1];
+                var key = FindKey(ch.ToString(), before, after);
+                if (!char.Equals(ch, ' ') && (before.ToString() + ch) != "لا")
+                {
+                    list.Add(System.Convert.ToByte(key));
+                }
+                else if (char.Equals(ch, ' '))
+                {
+                    list.Add(System.Convert.ToByte(' '));
+                }
+            }
+            return Convert(list.ToArray(), _isDate);
+        }
+
+        private bool IsEnglishCharOrNumber(char? c)
+        {
+            if (!c.HasValue) return false;
+
+            if (('a' <= c && c <= 'z') ||
+                ('A' <= c && c <= 'Z'))
+                return true;
+
+            return char.IsDigit(c.Value);
+        }
+
+        private object FindKey(string item, char? before = null, char? after = null)
+        {
+            var key = item;
+            if (before.HasValue && (before == ' ' || _seperatedBefore.Contains(before.ToString())
+                                    || IsEnglishCharOrNumber(before)))
+                key = " " + key;
+            if (after.HasValue && (after == ' ' || IsEnglishCharOrNumber(after)))
+                key += " ";
+
+            if (item + after == "لا")
+            {
+                key = item + after;
+            }
+
+            var result = _ht[key];
+            return result ?? _ht[item];
+        }
+    }
+}

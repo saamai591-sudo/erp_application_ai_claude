@@ -2,9 +2,9 @@
 // قالب = HTML/CSS با متغیرهای Handlebars؛ فهرست متغیرهای هر نوع سند در services/printService.ts (فیلدهای دیکشنری) آمده است.
 
 export interface DefaultPrintTemplate {
-  documentType: "SALES_QUOTE" | "SALES_INVOICE" | "JOURNAL_ENTRY";
+  documentType: "SALES_QUOTE" | "SALES_INVOICE" | "JOURNAL_ENTRY" | "STORE_SALE" | "STORE_SALE_ORDER";
   title: string;
-  paper: "A4" | "A5";
+  paper: "A4" | "A5" | "ROLL_80";
   orientation: "PORTRAIT" | "LANDSCAPE";
   marginMm: number;
   digits: "LATIN" | "PERSIAN";
@@ -254,6 +254,96 @@ const JOURNAL_ENTRY_HTML = `<style>
 </div>
 {{/each}}`;
 
+/** رسید فروشگاهی روی رول حرارتی ۸۰ میلی‌متر: ستون باریک، بدون جدول عریض؛ هر قلم دو سطر (عنوان / تعداد × فی ... مبلغ) */
+const STORE_SALE_HTML = `<style>
+  .r { font-size: 9pt; line-height: 1.55; }
+  .c { text-align: center; }
+  .hr { border-top: 1px dashed #000; margin: 5px 0; }
+  .r table { width: 100%; border-collapse: collapse; }
+  .r td { padding: 1px 0; vertical-align: top; }
+  .n { text-align: left; white-space: nowrap; }
+  .b { font-weight: 700; }
+</style>
+<div class="r">
+  {{#if company.logo}}<div class="c"><img src="{{company.logo}}" style="max-width: 38mm; max-height: 16mm;"></div>{{/if}}
+  <div class="c b" style="font-size: 11pt;">{{company.name}}</div>
+  {{#if company.phone}}<div class="c">تلفن: {{company.phone}}</div>{{/if}}
+  <div class="c">{{t.title}}</div>
+  <div class="hr"></div>
+  <table>
+    <tr><td>شماره:</td><td class="n b">{{doc.number}}</td></tr>
+    <tr><td>تاریخ:</td><td class="n">{{doc.date}} — {{doc.time}}</td></tr>
+    {{#if doc.station}}<tr><td>ایستگاه:</td><td class="n">{{doc.station}}</td></tr>{{/if}}
+    {{#if doc.cashier}}<tr><td>صندوق‌دار:</td><td class="n">{{doc.cashier}}</td></tr>{{/if}}
+    {{#unless customer.isDefault}}<tr><td>مشتری:</td><td class="n">{{customer.name}}</td></tr>{{/unless}}
+  </table>
+  <div class="hr"></div>
+  <table>
+    {{#each lines}}
+    <tr><td colspan="2" class="b">{{row}}. {{title}}</td></tr>
+    <tr><td>{{quantity}} {{unit}} × {{unitPrice}}</td><td class="n">{{net}}</td></tr>
+    {{/each}}
+  </table>
+  <div class="hr"></div>
+  <table>
+    <tr><td>جمع:</td><td class="n">{{totals.amount}}</td></tr>
+    <tr><td>ارزش افزوده:</td><td class="n">{{totals.vat}}</td></tr>
+    <tr class="b"><td>قابل پرداخت:</td><td class="n">{{totals.payable}}</td></tr>
+  </table>
+  {{#if payments.length}}
+  <div class="hr"></div>
+  <table>
+    {{#each payments}}
+    <tr><td>{{title}}{{#if reference}} ({{reference}}){{/if}}</td><td class="n">{{amount}}</td></tr>
+    {{/each}}
+    {{#if hasRemaining}}<tr class="b"><td>باقی‌مانده:</td><td class="n">{{@root.totals.remaining}}</td></tr>{{/if}}
+  </table>
+  {{/if}}
+  {{#if t.footer}}<div class="hr"></div><div class="c">{{t.footer}}</div>{{/if}}
+</div>`;
+
+/** برگه‌ی سفارش آشپزخانه/بار روی رول ۸۰mm: تعداد درشت + عنوان؛ بدون قیمت؛ اقلام لغوشده جدا */
+const STORE_SALE_ORDER_HTML = `<style>
+  .r { font-size: 10pt; line-height: 1.55; }
+  .c { text-align: center; }
+  .hr { border-top: 1px dashed #000; margin: 5px 0; }
+  .r table { width: 100%; border-collapse: collapse; }
+  .r td { padding: 2px 0; vertical-align: top; }
+  .n { text-align: left; white-space: nowrap; }
+  .b { font-weight: 700; }
+  .q { font-size: 14pt; font-weight: 700; white-space: nowrap; padding-left: 6px; }
+  .note { font-size: 8.5pt; }
+</style>
+<div class="r">
+  <div class="c b" style="font-size: 13pt;">{{t.title}}</div>
+  {{#if doc.group}}<div class="c b" style="font-size: 12pt;">{{doc.group}}</div>{{/if}}
+  <div class="c">{{doc.modeTitle}}</div>
+  <div class="hr"></div>
+  <table>
+    <tr><td>فروش:</td><td class="n b">{{doc.number}} — نوبت {{doc.seq}}</td></tr>
+    <tr><td>زمان:</td><td class="n">{{doc.date}} — {{doc.time}}</td></tr>
+    {{#if doc.station}}<tr><td>ایستگاه:</td><td class="n">{{doc.station}}</td></tr>{{/if}}
+  </table>
+  {{#if hasLines}}
+  <div class="hr"></div>
+  <table>
+    {{#each lines}}
+    <tr><td class="q">{{quantity}}</td><td><span class="b">{{title}}</span> <span class="note">({{unit}})</span>{{#if description}}<div class="note">{{description}}</div>{{/if}}</td></tr>
+    {{/each}}
+  </table>
+  {{/if}}
+  {{#if hasCancelled}}
+  <div class="hr"></div>
+  <div class="c b">{{#if t.cancelTitle}}{{t.cancelTitle}}{{else}}لغو شد{{/if}}</div>
+  <table>
+    {{#each cancelled}}
+    <tr><td class="q">{{quantity}}</td><td><span class="b">{{title}}</span> <span class="note">({{unit}})</span></td></tr>
+    {{/each}}
+  </table>
+  {{/if}}
+  {{#if doc.description}}<div class="hr"></div><div class="note">{{doc.description}}</div>{{/if}}
+</div>`;
+
 export const DEFAULT_PRINT_TEMPLATES: DefaultPrintTemplate[] = [
   {
     documentType: "SALES_QUOTE",
@@ -288,6 +378,26 @@ export const DEFAULT_PRINT_TEMPLATES: DefaultPrintTemplate[] = [
       watermark: "صورتحساب نهایی",
       fileName: "صورتحساب فروش {{customer.name}} - {{company.name}}",
     },
+  },
+  {
+    documentType: "STORE_SALE_ORDER",
+    title: "برگه‌ی سفارش آشپزخانه/بار (رول حرارتی ۸۰ میلی‌متر)",
+    paper: "ROLL_80",
+    orientation: "PORTRAIT",
+    marginMm: 2,
+    digits: "PERSIAN",
+    html: STORE_SALE_ORDER_HTML,
+    texts: { title: "سفارش", cancelTitle: "⛔ لغو شد", fileName: "سفارش {{doc.number}}-{{doc.seq}}" },
+  },
+  {
+    documentType: "STORE_SALE",
+    title: "رسید فروش فروشگاهی (رول حرارتی ۸۰ میلی‌متر)",
+    paper: "ROLL_80",
+    orientation: "PORTRAIT",
+    marginMm: 2,
+    digits: "PERSIAN",
+    html: STORE_SALE_HTML,
+    texts: { title: "رسید فروش", footer: "با تشکر از خرید شما", fileName: "رسید فروش {{doc.number}} - {{company.name}}" },
   },
   {
     documentType: "JOURNAL_ENTRY",

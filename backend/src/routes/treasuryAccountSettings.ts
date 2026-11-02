@@ -36,6 +36,7 @@ const TARGET_FIELD: Record<string, string | null> = {
   STORE_CASH_DIFF_CASHIER: null,
   VOUCHER_LIABILITY: null,
   VOUCHER_RECEIVABLE: null,
+  LOYALTY_DISCOUNT_EXPENSE: null,
   PETTY_CASH: "pettyCashId",
 };
 

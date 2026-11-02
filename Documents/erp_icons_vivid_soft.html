@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>مقایسه دو سبک آیکن ERP</title><style>
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&display=swap');
+*{box-sizing:border-box}body{margin:0;background:#f4f8fc;color:#172b43;font-family:Vazirmatn,Tahoma,sans-serif;font-size:14px}
+button{font:inherit;cursor:pointer;border:0}.top{height:60px;background:#fff;border-bottom:1px solid #e2eaf2;display:flex;align-items:center;gap:18px;padding:0 22px}.brand{background:#123f63;color:#fff;font-weight:800;padding:17px 20px;font-size:17px}.user{font-weight:600}.period{color:#72849a;font-size:12px}.search{margin-right:auto;background:#f7f9fc;border:1px solid #e0e8f0;border-radius:10px;padding:10px 15px;color:#8797a9;width:250px}
+.layout{display:flex;min-height:calc(100vh - 60px)}aside{width:250px;flex-shrink:0;background:#fff;border-left:1px solid #e1e9f1;padding:14px 10px}.nav{padding:11px 12px;border-radius:10px;display:flex;align-items:center;gap:12px;margin:4px 0;color:#304c67;font-weight:600;min-height:43px}.nav.active{background:#e6f1ff;color:#145da9;box-shadow:inset -3px 0 #287bd1}.nav .arr{margin-right:auto;color:#93a5b7}main{padding:22px;flex:1;min-width:0}.welcome{border:1px solid #d9e9f8;border-radius:15px;background:linear-gradient(110deg,#e8f5ff,#fff);padding:25px 30px;margin-bottom:18px}.welcome h1{margin:0 0 6px;font-size:23px}.welcome p{margin:0;color:#71859b;font-size:13px}.section,.panel{background:#fff;border:1px solid #e2eaf2;border-radius:15px;padding:17px;box-shadow:0 5px 18px rgba(22,55,86,.045);margin-bottom:18px}.head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.head h2{font-size:16px;margin:0}.hint{color:#8b9aac;font-size:12px}.modules{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:11px}.module{border:1px solid transparent;border-radius:13px;min-height:137px;padding:15px 8px 11px;display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;transition:.15s}.module:hover{transform:translateY(-3px);box-shadow:0 8px 18px #dce7f1}.mi{width:45px;height:45px;border-radius:13px;display:grid;place-items:center;font-size:27px;font-weight:800}.module strong{font-size:13px}.module small{font-size:11px;color:#667b90;line-height:1.7}.lower{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}.panel h3{margin:0;font-size:15px}.quick{padding:10px;border-radius:9px;background:#f6f9fc;margin:7px 0;display:flex;align-items:center;gap:10px;font-size:12px}.quick .mini{margin-right:auto;color:#93a5b7}.doc{display:flex;align-items:center;gap:9px;padding:11px 0;border-bottom:1px solid #edf1f5;font-size:12px}.doc:last-child{border-bottom:0}.doc span:nth-child(2){flex:1}.tag{font-size:10px;padding:5px 8px;border-radius:7px;background:#def6eb;color:#087a5b}.notice{padding:11px 0;border-bottom:1px solid #edf1f5;display:flex;gap:10px;align-items:center;font-size:12px}.notice:last-child{border:0}.muted{color:#8092a6;font-size:11px;margin-top:4px}
+
+/* انتخاب سبک */
+body[data-theme="soft"] .mi{background:var(--pale);color:var(--accent);filter:saturate(1.35);box-shadow:inset 0 0 0 1px rgba(23,43,67,.035)}
+body[data-theme="soft"] .mi svg{stroke-width:2.6}
+body[data-theme="soft"] .module{background:var(--card);border-color:var(--edge)}
+body[data-theme="soft"] .nav-icon{filter:saturate(1.45);font-weight:800}
+body[data-theme="soft"] .nav-icon svg{stroke-width:2.6}
+body[data-theme="soft"] .module strong{color:#172b43}
+body[data-theme="soft"] .module small{color:#536b82}
+body[data-theme="bold"] .mi{background:var(--accent);color:white}
+body[data-theme="bold"] .module{background:#fff;border-color:#e3eaf2}
+body[data-theme="bold"] .module strong{color:#172b43}
+body[data-theme="bold"] .module:hover{border-color:var(--accent)}
+.nav-icon{width:22px;height:22px;display:grid;place-items:center;color:var(--accent)}
+body[data-theme="bold"] .nav-icon{background:var(--accent);color:white;border-radius:7px;width:28px;height:28px}
+.nav.active .nav-icon{color:var(--accent)}
+body[data-theme="bold"] .nav.active .nav-icon{background:var(--accent);color:white}
+@media(max-width:1200px){.modules{grid-template-columns:repeat(4,minmax(0,1fr))}.lower{grid-template-columns:1fr 1fr}aside{width:220px}}
+@media(max-width:800px){aside{width:185px}.modules{grid-template-columns:repeat(2,minmax(0,1fr))}.lower{grid-template-columns:1fr}.period{display:none}}
+@media(max-width:580px){.layout{display:block}aside{width:100%;display:grid;grid-template-columns:1fr 1fr}.nav{margin:2px}.modules{grid-template-columns:repeat(2,minmax(0,1fr))}main{padding:12px}.top{padding:0 10px}.user{display:none}.search{width:auto}}
+</style></head>
+<body data-theme="soft" style="--accent:#1268d3;--pale:#dcecff;--card:#edf5ff;--edge:#e0edfc">
+<div class="top"><div class="user">◉ مدیر سیستم</div><div class="period">دوره مالی: ۱۴۰۳/۰۷/۰۱ تا ۱۴۰۴/۱۲/۲۹</div><div class="search">⌕　 جستجو در سیستم...</div><span>♧</span><span>⚙</span></div>
+<div class="layout">
+<aside>
+  <div class="brand" style="grid-column:1/-1;margin:-14px -10px 8px">حسابداری ERP</div>
+  <div class="nav active"><span class="nav-icon">⌂</span>صفحه اصلی</div>
+  <div class="nav"><span class="nav-icon" style="--accent:#8050cb;color:#8050cb">⚙</span>تنظیمات <span class="arr">‹</span></div>
+  <div class="nav"><span class="nav-icon" style="--accent:#0b8588;color:#0b8588">▤</span>اطلاعات پایه <span class="arr">‹</span></div>
+  <div class="nav"><span class="nav-icon" style="--accent:#2675ce;color:#2675ce">▦</span>حسابداری <span class="arr">‹</span></div>
+  <div class="nav"><span class="nav-icon" style="--accent:#d97706;color:#d97706">🛒</span>خرید و تأمین <span class="arr">‹</span></div>
+  <div class="nav"><span class="nav-icon" style="--accent:#8050cb;color:#8050cb">▣</span>فروش <span class="arr">‹</span></div>
+  <div class="nav"><span class="nav-icon" style="--accent:#0b8588;color:#0b8588">⬡</span>انبار <span class="arr">‹</span></div>
+  <div class="nav"><span class="nav-icon" style="--accent:#d64550;color:#d64550">▤</span>خزانه‌داری <span class="arr">‹</span></div>
+  <div class="nav"><span class="nav-icon" style="--accent:#64748b;color:#64748b">▥</span>مدیریت دارایی <span class="arr">‹</span></div>
+  <div class="nav"><span class="nav-icon" style="--accent:#b66b08;color:#b66b08">⚒</span>تعمیرات و نگهداری <span class="arr">‹</span></div>
+  <div class="nav"><span class="nav-icon" style="--accent:#0b8588;color:#0b8588">♙</span>منابع انسانی <span class="arr">‹</span></div>
+  <div class="nav"><span class="nav-icon" style="--accent:#2675ce;color:#2675ce">▥</span>گزارش‌ها <span class="arr">‹</span></div>
+</aside>
+<main>
+  <section class="welcome"><h1>به نرم‌افزار حسابداری خوش آمدید</h1><p>از طریق دسترسی‌های سریع زیر به ماژول‌های مختلف سیستم دسترسی پیدا کنید.</p><div class="muted">◷　شنبه، ۲۹ اسفند ۱۴۰۴</div></section>
+  <section class="section"><div class="head"><h2>دسترسی سریع به ماژول‌ها</h2><span class="hint">برای ورود، یک ماژول را انتخاب کنید</span></div>
+  <div class="modules">
+    <button class="module" style="--accent:#1268d3;--pale:#dcecff;--card:#edf5ff;--edge:#e0edfc"><span class="mi">▦</span><strong>حسابداری</strong><small>ثبت و گزارش اسناد</small></button>
+    <button class="module" style="--accent:#007f86;--pale:#c9efea;--card:#e5f7f4;--edge:#d7f1ec"><span class="mi">⬡</span><strong>انبار</strong><small>مدیریت موجودی</small></button>
+    <button class="module" style="--accent:#087b52;--pale:#d0f0dd;--card:#e8f7ee;--edge:#d8f0e1"><span class="mi">▣</span><strong>خرید و تأمین</strong><small>درخواست و سفارش</small></button>
+    <button class="module" style="--accent:#c45b00;--pale:#ffe4bd;--card:#fff3e2;--edge:#ffebd0"><span class="mi">🛒</span><strong>فروش</strong><small>پیش‌فاکتور و فاکتور</small></button>
+    <button class="module" style="--accent:#7438c8;--pale:#e6d9ff;--card:#f2ebff;--edge:#e9ddff"><span class="mi">▤</span><strong>خزانه‌داری</strong><small>دریافت و پرداخت</small></button>
+    <button class="module" style="--accent:#c62836;--pale:#ffdddd;--card:#fff0f0;--edge:#ffe2e2"><span class="mi">♙</span><strong>منابع انسانی</strong><small>کارکنان و پرسنل</small></button>
+    <button class="module" style="--accent:#40566e;--pale:#dfe7ef;--card:#eef2f6;--edge:#e3e9ef"><span class="mi">⚒</span><strong>تعمیرات و نگهداری</strong><small>مدیریت دارایی‌ها</small></button>
+  </div></section>
+  <div class="lower">
+    <section class="panel"><div class="head"><h3>دسترسی‌های پرکاربرد</h3><span class="hint">مشاهده همه</span></div>
+      <div class="quick">▣　 ثبت فاکتور فروش <span class="mini">‹</span></div><div class="quick">⬡　 ثبت رسید انبار <span class="mini">‹</span></div><div class="quick">▤　 دریافت از مشتری <span class="mini">‹</span></div><div class="quick">▥　 ثبت سند حسابداری جدید <span class="mini">‹</span></div>
+    </section>
+    <section class="panel"><div class="head"><h3>سندهای اخیر</h3><span class="hint">مشاهده همه</span></div>
+      <div class="doc"><span style="color:#8050cb">▤</span><span>فاکتور فروش</span><span class="tag">تأیید شده</span></div><div class="doc"><span style="color:#0b8588">⬡</span><span>رسید انبار</span><span class="tag">ثبت شده</span></div><div class="doc"><span style="color:#d3424e">▤</span><span>دریافت از مشتری</span><span class="tag">تأیید شده</span></div><div class="doc"><span style="color:#2675ce">▦</span><span>سند حسابداری</span><span class="tag" style="background:#fff0d9;color:#9a5b00">پیش‌نویس</span></div>
+    </section>
+    <section class="panel"><div class="head"><h3>اعلان‌ها و موارد مهم</h3><span class="hint">مشاهده همه</span></div>
+      <div class="notice"><span style="color:#d64550">◷</span><div><b>سررسید چک</b><div class="muted">چک شماره ۱۲۳۴۵ فردا سررسید می‌شود.</div></div></div><div class="notice"><span style="color:#2675ce">▤</span><div><b>درخواست تأیید</b><div class="muted">یک سند حسابداری در انتظار تأیید است.</div></div></div><div class="notice"><span style="color:#b66b08">⚠</span><div><b>موجودی پایین</b><div class="muted">موجودی یک کالا کمتر از حد مجاز است.</div></div></div>
+    </section>
+  </div>
+</main></div>
+<script>
+const params=new URLSearchParams(location.search);
+function setTheme(theme){
+ document.body.dataset.theme=theme;
+ document.querySelectorAll('[data-choice]').forEach(b=>b.style.fontWeight=b.dataset.choice===theme?'800':'500');
+}
+document.addEventListener('DOMContentLoaded',()=>setTheme(params.get('theme')||'soft'));
+</script>
+</body></html>

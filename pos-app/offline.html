@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<title>عدم دسترسی به سرور</title>
+<style>
+  body { font-family: Tahoma, "Segoe UI", sans-serif; background: #f4f5f8; color: #333; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+  .box { text-align: center; background: #fff; padding: 36px 44px; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,.08); max-width: 460px; }
+  h1 { font-size: 18px; margin: 0 0 10px; }
+  p { color: #666; font-size: 14px; line-height: 1.9; margin: 0 0 6px; }
+  code { direction: ltr; display: inline-block; color: #444; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #e0a100; margin-left: 6px; animation: b 1s infinite alternate; }
+  @keyframes b { from { opacity: .3 } to { opacity: 1 } }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1><span class="dot"></span>اتصال به سرور برقرار نیست</h1>
+  <p>اینترنت یا شبکه‌ی محل را بررسی کنید. هر چند ثانیه خودکار دوباره تلاش می‌شود.</p>
+  <p><code id="u"></code></p>
+  <p style="font-size:12px;margin-top:14px">تغییر آدرس یا توکن: Ctrl+Shift+S</p>
+</div>
+<script>
+  const target = new URLSearchParams(location.search).get("url") || "";
+  document.getElementById("u").textContent = target;
+  async function tryOnce() {
+    try {
+      await fetch(target, { mode: "no-cors", cache: "no-store", signal: AbortSignal.timeout(4000) });
+      location.href = target;
+    } catch { /* دوباره */ }
+  }
+  setInterval(tryOnce, 5000);
+</script>
+</body>
+</html>

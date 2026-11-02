@@ -1,0 +1,889 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<StiSerializer version="1.02" type="Net" application="StiReport">
+  <Dictionary Ref="1" type="Dictionary" isKey="true">
+    <BusinessObjects isList="true" count="0" />
+    <Databases isList="true" count="0" />
+    <DataSources isList="true" count="1">
+      <Data Ref="2" type="DataTableSource" isKey="true">
+        <Alias>Data</Alias>
+        <Columns isList="true" count="12">
+          <value>SlID,System.Int32</value>
+          <value>KeyField,System.Int32</value>
+          <value>FirstDebit,System.Decimal</value>
+          <value>PeriodDebit,System.Decimal</value>
+          <value>RemainDebit,System.Decimal</value>
+          <value>CurrentDebit,System.Decimal</value>
+          <value>FirstCredit,System.Decimal</value>
+          <value>PeriodCredit,System.Decimal</value>
+          <value>RemainCredit,System.Decimal</value>
+          <value>CurrentCredit,System.Decimal</value>
+          <value>FullCode,System.String</value>
+          <value>Title,System.String</value>
+        </Columns>
+        <Dictionary isRef="1" />
+        <Key>3c09dd794f114638b2e585db71b3d586</Key>
+        <Name>Data</Name>
+        <NameInSource>Data</NameInSource>
+      </Data>
+    </DataSources>
+    <Relations isList="true" count="0" />
+    <Report isRef="0" />
+    <Resources isList="true" count="0" />
+    <Variables isList="true" count="169">
+      <value>,ToDay,ToDay,,System.String,_x0039_5_x002F_08_x002F_11_x0020_,False,False,False,False</value>
+      <value>,ReportTitle,ReportTitle,,System.String,تراز_x0020_حسابها_x0028_معین_x0029_,False,False,False,False</value>
+      <value>,FilterString,FilterString,,System.String,,False,False,False,False</value>
+      <value>ReportParameters,FromDate,FromDate,,System.DateTime,_x0033__x002F_20_x002F_2016_x0020_12:00:00_x0020_AM,False,False,False,False</value>
+      <value>ReportParameters,ToDate,ToDate,,System.DateTime,_x0033__x002F_20_x002F_2017_x0020_12:00:00_x0020_AM,False,False,False,False</value>
+      <value>ReportParameters,documentTypeIds,documentTypeIds,,System.String,_x0031__x002C_2_x002C_6_x002C_8_x002C_9,False,False,False,False</value>
+      <value>SaturnVariable,Address,Address,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,Address2,Address2,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AgentToOtherOrganization,AgentToOtherOrganization,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AgreementNeedConfirm,AgreementNeedConfirm,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AgreementSerialAgreementType,AgreementSerialAgreementType,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AgreementSerialAgreementTypeForm,AgreementSerialAgreementTypeForm,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AgreementSerialEditable,AgreementSerialEditable,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AgreementSerialPersonel,AgreementSerialPersonel,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AgreementSerialStartNo,AgreementSerialStartNo,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AgreementSerialYear,AgreementSerialYear,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AgreementShowExpLen,AgreementShowExpLen,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AssetCategoryLevelsCount,AssetCategoryLevelsCount,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AssetControlSl,AssetControlSl,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutomaticExportingTransitiveReceipt,AutomaticExportingTransitiveReceipt,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherDebitCreditNote,AutoVoucherDebitCreditNote,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherGuarantyOperation,AutoVoucherGuarantyOperation,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherInvoice,AutoVoucherInvoice,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherPaymentCheqeFlow,AutoVoucherPaymentCheqeFlow,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherPaymentCommitment,AutoVoucherPaymentCommitment,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherPaymentCommitmentRecall,AutoVoucherPaymentCommitmentRecall,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherPaymentReceipt,AutoVoucherPaymentReceipt,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherPettyCashCost,AutoVoucherPettyCashCost,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherPurchaseInvoice,AutoVoucherPurchaseInvoice,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherReceiptCheqeFlow,AutoVoucherReceiptCheqeFlow,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherReceiveCommitment,AutoVoucherReceiveCommitment,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherReceiveCommitmentRecall,AutoVoucherReceiveCommitmentRecall,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherReceiveReceipt,AutoVoucherReceiveReceipt,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherReturnedInvoice,AutoVoucherReturnedInvoice,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherReturnedOutgoing,AutoVoucherReturnedOutgoing,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherReturnedSaleInvoice,AutoVoucherReturnedSaleInvoice,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherReturnedStockReceipt,AutoVoucherReturnedStockReceipt,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherRevisionCost,AutoVoucherRevisionCost,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,AutoVoucherStockReceipt,AutoVoucherStockReceipt,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,BAddress,BAddress,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,BankAccountNegativeStoreControl,BankAccountNegativeStoreControl,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,BaseBranch,BaseBranch,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,BaseCurrency,BaseCurrency,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,BaseDocumentForReserve,BaseDocumentForReserve,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,BCode,BCode,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,BFax,BFax,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,BIsActive,BIsActive,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,BPhone,BPhone,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,BSupervisor,BSupervisor,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,BSupervisor2,BSupervisor2,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,BTitle,BTitle,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,BTitle2,BTitle2,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ByProtestedDocumentSl,ByProtestedDocumentSl,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CalendarMonth,CalendarMonth,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CashNegativeStoreControl,CashNegativeStoreControl,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CExchangeUnit,CExchangeUnit,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CheqeBookControl,CheqeBookControl,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CodeInPartyCreation,CodeInPartyCreation,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CompanyName,CompanyName,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CompanyName2,CompanyName2,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ContraParty,ContraParty,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CPrecisionCount,CPrecisionCount,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CPrecisionTitle,CPrecisionTitle,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CPrecisionTitle2,CPrecisionTitle2,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CTitle,CTitle,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CTitle2,CTitle2,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CurrecnyOtherReceivedDocumentSl,CurrecnyOtherReceivedDocumentSl,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CurrencyByProtestedDocumentSl,CurrencyByProtestedDocumentSl,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CurrencyPaymentsAccountId,CurrencyPaymentsAccountId,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CurrencyprePaymentAccountId,CurrencyprePaymentAccountId,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CurrencyPreReceive,CurrencyPreReceive,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CurrencyReceivableAccounts,CurrencyReceivableAccounts,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CurrencyReceivedDocumentSl,CurrencyReceivedDocumentSl,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CurrencyTheReceiptDocumentSl,CurrencyTheReceiptDocumentSl,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,DateInSaleDocumentsIsControlable,DateInSaleDocumentsIsControlable,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,DEFAULT_FININCIAL_PERIOD,DEFAULT_FININCIAL_PERIOD,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,DEFAULT_FININCIAL_PERIOD_EndDate,DEFAULT_FININCIAL_PERIOD_EndDate,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,DEFAULT_FININCIAL_PERIOD_StartDate,DEFAULT_FININCIAL_PERIOD_StartDate,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,DEFAULT_FININCIAL_PERIOD_Title,DEFAULT_FININCIAL_PERIOD_Title,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,DenyBlackList,DenyBlackList,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,Depreciation,Depreciation,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,DlLength,DlLength,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,EconomicCode,EconomicCode,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,EditDescAfterConfirm,EditDescAfterConfirm,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,Email,Email,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,EmployerCompanyName,EmployerCompanyName,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,EmployerCompanyType,EmployerCompanyType,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,EmployerFirstName,EmployerFirstName,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,EmployerLastName,EmployerLastName,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,EmployerType,EmployerType,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,Fax,Fax,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,FinancialPeriod,FinancialPeriod,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,FirstSignFirstName,FirstSignFirstName,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,FirstSignLastName,FirstSignLastName,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,FirstSignNationalID,FirstSignNationalID,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,FirstSignPosition,FirstSignPosition,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,GlLength,GlLength,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,GuarantyReceivedMaturity,GuarantyReceivedMaturity,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,IndependentStuffCoding,IndependentStuffCoding,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,InventoryIsDLType,InventoryIsDLType,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,InvoiceNeedConfirm,InvoiceNeedConfirm,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,IsPaymentSystemInstalled,IsPaymentSystemInstalled,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,IsPurchaseRequestSurveyable,IsPurchaseRequestSurveyable,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,IsReturnRequestSurveyable,IsReturnRequestSurveyable,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,IsStuffRequestSurveyable,IsStuffRequestSurveyable,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,NationalID,NationalID,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,NegativeInventoryMustBeChecked,NegativeInventoryMustBeChecked,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,OrganizationHierarchy,OrganizationHierarchy,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,OtheExpensesId,OtheExpensesId,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,OtherPaymentsAccountId,OtherPaymentsAccountId,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,OtherReceivedDocumentSl,OtherReceivedDocumentSl,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,PayableDutySL,PayableDutySL,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,PayableTaxSL,PayableTaxSL,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,PaymentCheqesMaturity,PaymentCheqesMaturity,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,PaymentRequestNeedConfirm,PaymentRequestNeedConfirm,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,PaymentsAccountId,PaymentsAccountId,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,Phone,Phone,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,PlaqueLength,PlaqueLength,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,PlLength,PlLength,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,PostalCode,PostalCode,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,PourcentageCost,PourcentageCost,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,PourcentagePayable,PourcentagePayable,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,PrePaymentAccountId,PrePaymentAccountId,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,PrepaymentDutySL,PrepaymentDutySL,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,PrepaymentTaxSL,PrepaymentTaxSL,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,PreReceive,PreReceive,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,PricingStages,PricingStages,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,PurchaseDiscountSliD,PurchaseDiscountSliD,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,QuotationNeedConfirm,QuotationNeedConfirm,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ReceivableAccounts,ReceivableAccounts,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ReceivedCheqesMaturity,ReceivedCheqesMaturity,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ReceivedDocumentSl,ReceivedDocumentSl,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ReceiveRequestNeedConfirm,ReceiveRequestNeedConfirm,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,RegisterCode,RegisterCode,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ReservedStoreIsControlable,ReservedStoreIsControlable,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,RollInParty,RollInParty,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,SaleDiscountSlID,SaleDiscountSlID,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,SaleVoucherWithDiscount,SaleVoucherWithDiscount,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,SameCustomerCodeAndDlCode,SameCustomerCodeAndDlCode,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,SecondSignFirstName,SecondSignFirstName,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,SecondSignLastName,SecondSignLastName,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,SecondSignNationalID,SecondSignNationalID,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,SecondSignPosition,SecondSignPosition,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,SessionTimeout,SessionTimeout,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ShamsiToDay,ShamsiToDay,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ShowBarcode,ShowBarcode,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ShowBarcodeInStockDocument,ShowBarcodeInStockDocument,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ShowBarcodeInVendorDocument,ShowBarcodeInVendorDocument,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ShowIrancode,ShowIrancode,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ShowIrancodeInStockDocument,ShowIrancodeInStockDocument,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ShowIrancodeInVendorDocument,ShowIrancodeInVendorDocument,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ShowMainQuantityUnitTitle,ShowMainQuantityUnitTitle,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ShowReferenceNumber,ShowReferenceNumber,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ShowStuffCodeInStockDocument,ShowStuffCodeInStockDocument,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ShowSubQuantity,ShowSubQuantity,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,ShowTechnicalCode,ShowTechnicalCode,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,SlLength,SlLength,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,SmtpPassword,SmtpPassword,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,SmtpPort,SmtpPort,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,SmtpServer,SmtpServer,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,SmtpUser,SmtpUser,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,StuffTitleCanBeRepited,StuffTitleCanBeRepited,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,TheReceiptDocumentSl,TheReceiptDocumentSl,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,TheSameCode,TheSameCode,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,TranslationBetweenStocksHasAccountingVoucher,TranslationBetweenStocksHasAccountingVoucher,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,UsersCanEditFee,UsersCanEditFee,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,WarningOfProtest,WarningOfProtest,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,Website,Website,,System.String,,False,False,False,False</value>
+      <value>SaturnVariable,CompanyLogo,CompanyLogo,,System.Drawing.Image,,False,False,False,False</value>
+    </Variables>
+  </Dictionary>
+  <EngineVersion>EngineV2</EngineVersion>
+  <GlobalizationStrings isList="true" count="0" />
+  <Key>3ec2e032eca549d5bf6a16f3736038cf</Key>
+  <MetaTags isList="true" count="0" />
+  <Pages isList="true" count="1">
+    <Page1 Ref="3" type="Page" isKey="true">
+      <Border>None;Black;2;Solid;False;4;Black</Border>
+      <Brush>Transparent</Brush>
+      <Components isList="true" count="5">
+        <ReportHeaderBand Ref="4" type="PageHeaderBand" isKey="true">
+          <Border>Top, Left, Right;Black;0.100000001490116;Solid;False;4;Black</Border>
+          <Brush>Transparent</Brush>
+          <ClientRectangle>0,0.4,19.01,2</ClientRectangle>
+          <Components isList="true" count="10">
+            <txtCompanyHeader Ref="5" type="Text" isKey="true">
+              <Border>None;Black;1;Solid;False;4;Black</Border>
+              <Brush>Transparent</Brush>
+              <ClientRectangle>2.8,0,12.3,1</ClientRectangle>
+              <ComponentStyle>CompanyNameStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,18,Bold</Font>
+              <HorAlignment>Center</HorAlignment>
+              <Margins>0,0,0,0</Margins>
+              <Name>txtCompanyHeader</Name>
+              <Page isRef="3" />
+              <Parent isRef="4" />
+              <Text>{CompanyName}</Text>
+              <TextBrush>Black</TextBrush>
+              <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+              <Type>Expression</Type>
+              <VertAlignment>Center</VertAlignment>
+            </txtCompanyHeader>
+            <txtHeader Ref="6" type="Text" isKey="true">
+              <Border>None;Black;1;Solid;False;4;Black</Border>
+              <Brush>Transparent</Brush>
+              <ClientRectangle>2.8,1,12.3,0.5</ClientRectangle>
+              <ComponentStyle>ReportNameStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,10,Bold</Font>
+              <HorAlignment>Center</HorAlignment>
+              <Margins>0,0,0,0</Margins>
+              <Name>txtHeader</Name>
+              <Page isRef="3" />
+              <Parent isRef="4" />
+              <Text>{ReportTitle}</Text>
+              <TextBrush>Black</TextBrush>
+              <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+              <Type>Expression</Type>
+              <VertAlignment>Center</VertAlignment>
+            </txtHeader>
+            <txtDateLabel Ref="7" type="Text" isKey="true">
+              <Border>None;Black;1;Solid;False;4;Black</Border>
+              <Brush>Transparent</Brush>
+              <ClientRectangle>2,0.2,1.2,0.8</ClientRectangle>
+              <ComponentStyle>OtherHeaderStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12,Bold</Font>
+              <HorAlignment>Center</HorAlignment>
+              <Margins>0,0,0,0</Margins>
+              <Name>txtDateLabel</Name>
+              <Page isRef="3" />
+              <Parent isRef="4" />
+              <Text>تاریخ:</Text>
+              <TextBrush>Black</TextBrush>
+              <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+              <Type>Expression</Type>
+              <VertAlignment>Center</VertAlignment>
+            </txtDateLabel>
+            <txtPageLabel Ref="8" type="Text" isKey="true">
+              <Border>None;Black;1;Solid;False;4;Black</Border>
+              <Brush>Transparent</Brush>
+              <ClientRectangle>2,1,1.2,0.8</ClientRectangle>
+              <ComponentStyle>OtherHeaderStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12,Bold</Font>
+              <HorAlignment>Center</HorAlignment>
+              <Margins>0,0,0,0</Margins>
+              <Name>txtPageLabel</Name>
+              <Page isRef="3" />
+              <Parent isRef="4" />
+              <Text>صفحه:</Text>
+              <TextBrush>Black</TextBrush>
+              <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+              <Type>Expression</Type>
+              <VertAlignment>Center</VertAlignment>
+            </txtPageLabel>
+            <txtDate Ref="9" type="Text" isKey="true">
+              <Border>None;Black;1;Solid;False;4;Black</Border>
+              <Brush>Transparent</Brush>
+              <ClientRectangle>0.1,0.2,1.9,0.8</ClientRectangle>
+              <ComponentStyle>OtherHeaderStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12,Bold</Font>
+              <HorAlignment>Center</HorAlignment>
+              <Margins>0,0,0,0</Margins>
+              <Name>txtDate</Name>
+              <Page isRef="3" />
+              <Parent isRef="4" />
+              <Text>{ToDay}</Text>
+              <TextBrush>Black</TextBrush>
+              <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+              <Type>Expression</Type>
+              <VertAlignment>Center</VertAlignment>
+            </txtDate>
+            <txtPage Ref="10" type="Text" isKey="true">
+              <Border>None;Black;1;Solid;False;4;Black</Border>
+              <Brush>Transparent</Brush>
+              <ClientRectangle>0.1,1,1.9,0.8</ClientRectangle>
+              <ComponentStyle>OtherHeaderStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12,Bold</Font>
+              <HorAlignment>Center</HorAlignment>
+              <Margins>0,0,0,0</Margins>
+              <Name>txtPage</Name>
+              <Page isRef="3" />
+              <Parent isRef="4" />
+              <Text>{PageNumber}</Text>
+              <TextBrush>Black</TextBrush>
+              <Type>Expression</Type>
+              <VertAlignment>Center</VertAlignment>
+            </txtPage>
+            <Text3 Ref="11" type="Text" isKey="true">
+              <Brush>Transparent</Brush>
+              <ClientRectangle>15.2,0.2,2.2,0.6</ClientRectangle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12,Bold</Font>
+              <Guid>4c64baf9c8cc41269b450f1e7629f3b7</Guid>
+              <Margins>0,0,0,0</Margins>
+              <Name>Text3</Name>
+              <Page isRef="3" />
+              <Parent isRef="4" />
+              <Text>{Saturn.StimulFunction.DateHelper.GregorianToHijri(FromDate)}  </Text>
+              <TextBrush>Black</TextBrush>
+              <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+              <Type>Expression</Type>
+              <VertAlignment>Center</VertAlignment>
+            </Text3>
+            <Text4 Ref="12" type="Text" isKey="true">
+              <Brush>Transparent</Brush>
+              <ClientRectangle>15.2,0.8,2.2,0.6</ClientRectangle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12,Bold</Font>
+              <Guid>ef0118e6b18e431290e10eb1ca6e57ed</Guid>
+              <Margins>0,0,0,0</Margins>
+              <Name>Text4</Name>
+              <Page isRef="3" />
+              <Parent isRef="4" />
+              <Text>{Saturn.StimulFunction.DateHelper.GregorianToHijri(ToDate)}</Text>
+              <TextBrush>Black</TextBrush>
+              <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+              <Type>Expression</Type>
+              <VertAlignment>Center</VertAlignment>
+            </Text4>
+            <Text1 Ref="13" type="Text" isKey="true">
+              <Border>None;Black;1;Solid;False;4;Black</Border>
+              <Brush>Transparent</Brush>
+              <ClientRectangle>17.4,0.2,1.4,0.6</ClientRectangle>
+              <ComponentStyle>OtherHeaderStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12,Bold</Font>
+              <Guid>2bc0c3d1297745adac9358fc3373d49c</Guid>
+              <HorAlignment>Center</HorAlignment>
+              <Margins>0,0,0,0</Margins>
+              <Name>Text1</Name>
+              <Page isRef="3" />
+              <Parent isRef="4" />
+              <Text>از تاریخ:</Text>
+              <TextBrush>Black</TextBrush>
+              <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+              <Type>Expression</Type>
+              <VertAlignment>Center</VertAlignment>
+            </Text1>
+            <Text2 Ref="14" type="Text" isKey="true">
+              <Border>None;Black;1;Solid;False;4;Black</Border>
+              <Brush>Transparent</Brush>
+              <ClientRectangle>17.4,0.8,1.4,0.6</ClientRectangle>
+              <ComponentStyle>OtherHeaderStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12,Bold</Font>
+              <Guid>006e2fc2ef3848718fb74955d4b3b4af</Guid>
+              <HorAlignment>Center</HorAlignment>
+              <Margins>0,0,0,0</Margins>
+              <Name>Text2</Name>
+              <Page isRef="3" />
+              <Parent isRef="4" />
+              <Text>تا تاریخ:</Text>
+              <TextBrush>Black</TextBrush>
+              <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+              <Type>Expression</Type>
+              <VertAlignment>Center</VertAlignment>
+            </Text2>
+          </Components>
+          <Conditions isList="true" count="0" />
+          <Expressions isList="true" count="0" />
+          <Name>ReportHeaderBand</Name>
+          <Page isRef="3" />
+          <Parent isRef="3" />
+        </ReportHeaderBand>
+        <Text5 Ref="15" type="Text" isKey="true">
+          <Border>None;Black;1;Solid;False;4;Black</Border>
+          <Brush>Transparent</Brush>
+          <ClientRectangle>6.8,-0.6,7,0.6</ClientRectangle>
+          <ComponentStyle>OtherHeaderStyle</ComponentStyle>
+          <Conditions isList="true" count="0" />
+          <Expressions isList="true" count="0" />
+          <Font>B Nazanin,12,Bold</Font>
+          <Guid>0956917066164a0bb9dc09c14cdb14fc</Guid>
+          <HorAlignment>Center</HorAlignment>
+          <Margins>0,0,0,0</Margins>
+          <Name>Text5</Name>
+          <Page isRef="3" />
+          <Parent isRef="3" />
+          <Text>نرم افزار حسابداری سام</Text>
+          <TextBrush>Black</TextBrush>
+          <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+          <Type>Expression</Type>
+          <VertAlignment>Center</VertAlignment>
+        </Text5>
+        <tableHeaderBand Ref="16" type="Stimulsoft.Report.Components.StiColumnHeaderBand" isKey="true">
+          <Brush>Transparent</Brush>
+          <ClientRectangle>0,3.2,19.01,1.6</ClientRectangle>
+          <Components isList="true" count="5">
+            <CellHeader2 Ref="17" type="Text" isKey="true">
+              <Border>All;Black;1;Solid;False;4;[192:80:77]</Border>
+              <Brush>LightGray</Brush>
+              <ClientRectangle>9.32,0,7.38,1.6</ClientRectangle>
+              <ComponentStyle>ColumnHeaderStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12,Bold</Font>
+              <HorAlignment>Center</HorAlignment>
+              <Margins>0,0,0,0</Margins>
+              <Name>CellHeader2</Name>
+              <Page isRef="3" />
+              <Parent isRef="16" />
+              <Text>عنوان معین</Text>
+              <TextBrush>Black</TextBrush>
+              <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+              <Type>Expression</Type>
+              <VertAlignment>Center</VertAlignment>
+            </CellHeader2>
+            <CellHeader3 Ref="18" type="Text" isKey="true">
+              <Border>All;Black;1;Solid;False;4;[192:80:77]</Border>
+              <Brush>LightGray</Brush>
+              <ClientRectangle>16.7,0,2.3,1.6</ClientRectangle>
+              <ComponentStyle>ColumnHeaderStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12,Bold</Font>
+              <HorAlignment>Center</HorAlignment>
+              <Margins>0,0,0,0</Margins>
+              <Name>CellHeader3</Name>
+              <Page isRef="3" />
+              <Parent isRef="16" />
+              <Text>کد معین</Text>
+              <TextBrush>Black</TextBrush>
+              <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+              <Type>Expression</Type>
+              <VertAlignment>Center</VertAlignment>
+            </CellHeader3>
+            <CellHeader0 Ref="19" type="Text" isKey="true">
+              <Border>All;Black;1;Solid;False;4;[192:80:77]</Border>
+              <Brush>LightGray</Brush>
+              <ClientRectangle>0,0.8,4.8,0.8</ClientRectangle>
+              <ComponentStyle>ColumnHeaderStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12,Bold</Font>
+              <Guid>0d0288e8e6ba4e62b38ea106d1a09b7f</Guid>
+              <HorAlignment>Center</HorAlignment>
+              <Margins>0,0,0,0</Margins>
+              <Name>CellHeader0</Name>
+              <Page isRef="3" />
+              <Parent isRef="16" />
+              <Text> بستانکار</Text>
+              <TextBrush>Black</TextBrush>
+              <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+              <Type>Expression</Type>
+              <VertAlignment>Center</VertAlignment>
+            </CellHeader0>
+            <CellHeader1 Ref="20" type="Text" isKey="true">
+              <Border>All;Black;1;Solid;False;4;[192:80:77]</Border>
+              <Brush>LightGray</Brush>
+              <ClientRectangle>4.8,0.8,4.6,0.8</ClientRectangle>
+              <ComponentStyle>ColumnHeaderStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12,Bold</Font>
+              <Guid>b4035d4b66324cad8dc459cee22c968d</Guid>
+              <HorAlignment>Center</HorAlignment>
+              <Margins>0,0,0,0</Margins>
+              <Name>CellHeader1</Name>
+              <Page isRef="3" />
+              <Parent isRef="16" />
+              <Text> بدهکار</Text>
+              <TextBrush>Black</TextBrush>
+              <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+              <Type>Expression</Type>
+              <VertAlignment>Center</VertAlignment>
+            </CellHeader1>
+            <Text6 Ref="21" type="Text" isKey="true">
+              <Border>All;Black;1;Solid;False;4;[192:80:77]</Border>
+              <Brush>LightGray</Brush>
+              <ClientRectangle>0,0,9.4,0.8</ClientRectangle>
+              <ComponentStyle>ColumnHeaderStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12,Bold</Font>
+              <Guid>7ea387c2e1fc4552b6ffd0c4867b8b51</Guid>
+              <HorAlignment>Center</HorAlignment>
+              <Margins>0,0,0,0</Margins>
+              <Name>Text6</Name>
+              <Page isRef="3" />
+              <Parent isRef="16" />
+              <Text>مانده</Text>
+              <TextBrush>Black</TextBrush>
+              <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+              <Type>Expression</Type>
+              <VertAlignment>Center</VertAlignment>
+            </Text6>
+          </Components>
+          <Conditions isList="true" count="0" />
+          <Expressions isList="true" count="0" />
+          <Name>tableHeaderBand</Name>
+          <Page isRef="3" />
+          <Parent isRef="3" />
+        </tableHeaderBand>
+        <tableDataBand Ref="22" type="DataBand" isKey="true">
+          <Brush>Transparent</Brush>
+          <BusinessObjectGuid isNull="true" />
+          <ClientRectangle>0,5.6,19.01,1</ClientRectangle>
+          <Components isList="true" count="4">
+            <CellData0 Ref="23" type="Text" isKey="true">
+              <Border>All;Black;1;Solid;False;4;Black</Border>
+              <Brush>Transparent</Brush>
+              <CanGrow>True</CanGrow>
+              <ClientRectangle>0,0,4.3,1</ClientRectangle>
+              <ComponentStyle>DataStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <ExcelValue>{Data.RemainCredit}</ExcelValue>
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12</Font>
+              <GrowToHeight>True</GrowToHeight>
+              <HorAlignment>Center</HorAlignment>
+              <Margins>0,0,0,0</Margins>
+              <Name>CellData0</Name>
+              <Page isRef="3" />
+              <Parent isRef="22" />
+              <ShrinkFontToFit>True</ShrinkFontToFit>
+              <Text>{Data.RemainCredit}</Text>
+              <TextBrush>Black</TextBrush>
+              <TextFormat Ref="24" type="CustomFormat" isKey="true">
+                <StringFormat>###,###,###,###.####;(###,###,###,###.####)</StringFormat>
+              </TextFormat>
+              <TextOptions>,,RightToLeft=True,,,A=0</TextOptions>
+              <Type>DataColumn</Type>
+              <VertAlignment>Center</VertAlignment>
+            </CellData0>
+            <CellData1 Ref="25" type="Text" isKey="true">
+              <Border>Top, Right, Bottom;Black;1;Solid;False;4;Black</Border>
+              <Brush>Transparent</Brush>
+              <CanGrow>True</CanGrow>
+              <ClientRectangle>4.3,0,4.82,1</ClientRectangle>
+              <ComponentStyle>DataStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <ExcelValue>{Data.RemainDebit}</ExcelValue>
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12</Font>
+              <GrowToHeight>True</GrowToHeight>
+              <HorAlignment>Center</HorAlignment>
+              <Margins>0,0,0,0</Margins>
+              <Name>CellData1</Name>
+              <Page isRef="3" />
+              <Parent isRef="22" />
+              <ShrinkFontToFit>True</ShrinkFontToFit>
+              <Text>{Data.RemainDebit}</Text>
+              <TextBrush>Black</TextBrush>
+              <TextFormat Ref="26" type="CustomFormat" isKey="true">
+                <StringFormat>###,###,###,###.####;(###,###,###,###.####)</StringFormat>
+              </TextFormat>
+              <TextOptions>,,RightToLeft=True,,,A=0</TextOptions>
+              <Type>DataColumn</Type>
+              <VertAlignment>Center</VertAlignment>
+            </CellData1>
+            <CellData2 Ref="27" type="Text" isKey="true">
+              <Border>Top, Right, Bottom;Black;1;Solid;False;4;Black</Border>
+              <Brush>Transparent</Brush>
+              <CanGrow>True</CanGrow>
+              <ClientRectangle>9.12,0,7.58,1</ClientRectangle>
+              <ComponentStyle>DataStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <ExcelValue>{Data.Title}</ExcelValue>
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12</Font>
+              <GrowToHeight>True</GrowToHeight>
+              <Margins>0,0,0,0</Margins>
+              <Name>CellData2</Name>
+              <Page isRef="3" />
+              <Parent isRef="22" />
+              <Text>{Data.Title}</Text>
+              <TextBrush>Black</TextBrush>
+              <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+              <Type>DataColumn</Type>
+              <VertAlignment>Center</VertAlignment>
+            </CellData2>
+            <CellData3 Ref="28" type="Text" isKey="true">
+              <Border>Top, Right, Bottom;Black;1;Solid;False;4;Black</Border>
+              <Brush>Transparent</Brush>
+              <CanGrow>True</CanGrow>
+              <ClientRectangle>16.7,0,2.3,1</ClientRectangle>
+              <ComponentStyle>DataStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <ExcelValue>{Data.FullCode}</ExcelValue>
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12</Font>
+              <GrowToHeight>True</GrowToHeight>
+              <Margins>0,0,0,0</Margins>
+              <Name>CellData3</Name>
+              <Page isRef="3" />
+              <Parent isRef="22" />
+              <Text>{Data.FullCode}</Text>
+              <TextBrush>Black</TextBrush>
+              <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+              <Type>DataColumn</Type>
+              <VertAlignment>Center</VertAlignment>
+            </CellData3>
+          </Components>
+          <Conditions isList="true" count="0" />
+          <DataSourceName>Data</DataSourceName>
+          <Expressions isList="true" count="0" />
+          <Filters isList="true" count="0" />
+          <Name>tableDataBand</Name>
+          <Page isRef="3" />
+          <Parent isRef="3" />
+          <Sort isList="true" count="2">
+            <value>ASC</value>
+            <value>FullCode</value>
+          </Sort>
+        </tableDataBand>
+        <tableSummaryBand Ref="29" type="ReportSummaryBand" isKey="true">
+          <Brush>Transparent</Brush>
+          <ClientRectangle>0,7.4,19.01,1</ClientRectangle>
+          <Components isList="true" count="3">
+            <CellSummary0 Ref="30" type="Text" isKey="true">
+              <Border>All;Black;1;Solid;False;4;[192:80:77]</Border>
+              <Brush>LightGray</Brush>
+              <ClientRectangle>0,0,4.3,1</ClientRectangle>
+              <ComponentStyle>SummaryStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12,Bold</Font>
+              <HorAlignment>Center</HorAlignment>
+              <Margins>0,0,0,0</Margins>
+              <Name>CellSummary0</Name>
+              <Page isRef="3" />
+              <Parent isRef="29" />
+              <ShrinkFontToFit>True</ShrinkFontToFit>
+              <Text>{Sum(Data.RemainCredit)}</Text>
+              <TextBrush>Black</TextBrush>
+              <TextFormat Ref="31" type="CustomFormat" isKey="true">
+                <StringFormat>###,###,###,###.####;(###,###,###,###.####)</StringFormat>
+              </TextFormat>
+              <TextOptions>,,RightToLeft=True,,,A=0</TextOptions>
+              <Type>Totals</Type>
+              <VertAlignment>Center</VertAlignment>
+            </CellSummary0>
+            <CellSummary1 Ref="32" type="Text" isKey="true">
+              <Border>All;Black;1;Solid;False;4;[192:80:77]</Border>
+              <Brush>LightGray</Brush>
+              <ClientRectangle>4.3,0,4.82,1</ClientRectangle>
+              <ComponentStyle>SummaryStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12,Bold</Font>
+              <HorAlignment>Center</HorAlignment>
+              <Margins>0,0,0,0</Margins>
+              <Name>CellSummary1</Name>
+              <Page isRef="3" />
+              <Parent isRef="29" />
+              <ShrinkFontToFit>True</ShrinkFontToFit>
+              <Text>{Sum(Data.RemainDebit)}</Text>
+              <TextBrush>Black</TextBrush>
+              <TextFormat Ref="33" type="CustomFormat" isKey="true">
+                <StringFormat>###,###,###,###.####;(###,###,###,###.####)</StringFormat>
+              </TextFormat>
+              <TextOptions>,,RightToLeft=True,,,A=0</TextOptions>
+              <Type>Totals</Type>
+              <VertAlignment>Center</VertAlignment>
+            </CellSummary1>
+            <CellSummary3 Ref="34" type="Text" isKey="true">
+              <Border>All;Black;1;Solid;False;4;[192:80:77]</Border>
+              <Brush>LightGray</Brush>
+              <ClientRectangle>9.1,0,4.4,1</ClientRectangle>
+              <ComponentStyle>SummaryStyle</ComponentStyle>
+              <Conditions isList="true" count="0" />
+              <Expressions isList="true" count="0" />
+              <Font>B Nazanin,12,Bold</Font>
+              <Margins>0,0,0,0</Margins>
+              <Name>CellSummary3</Name>
+              <Page isRef="3" />
+              <Parent isRef="29" />
+              <Text>جمع کل</Text>
+              <TextBrush>Black</TextBrush>
+              <TextOptions>,,RightToLeft=True,,WordWrap=True,A=0</TextOptions>
+              <Type>Expression</Type>
+              <VertAlignment>Center</VertAlignment>
+            </CellSummary3>
+          </Components>
+          <Conditions isList="true" count="0" />
+          <Expressions isList="true" count="0" />
+          <Name>tableSummaryBand</Name>
+          <Page isRef="3" />
+          <Parent isRef="3" />
+        </tableSummaryBand>
+      </Components>
+      <Conditions isList="true" count="0" />
+      <Expressions isList="true" count="0" />
+      <Guid>525e45360f8840c4842f53e792e95e48</Guid>
+      <Margins>1,1,1,1</Margins>
+      <Name>Page1</Name>
+      <PageHeight>29.7</PageHeight>
+      <PageWidth>21.01</PageWidth>
+      <PaperSize>A3</PaperSize>
+      <Report isRef="0" />
+    </Page1>
+  </Pages>
+  <ReferencedAssemblies isList="true" count="9">
+    <value>System.Dll</value>
+    <value>System.Drawing.Dll</value>
+    <value>System.Windows.Forms.Dll</value>
+    <value>System.Data.Dll</value>
+    <value>System.Xml.Dll</value>
+    <value>Stimulsoft.Controls.Dll</value>
+    <value>Stimulsoft.Base.Dll</value>
+    <value>Stimulsoft.Report.Dll</value>
+    <value>Saturn.StimulFunction.dll</value>
+  </ReferencedAssemblies>
+  <ReportAlias>Report</ReportAlias>
+  <ReportChanged>12/6/2016 2:04:22 PM</ReportChanged>
+  <ReportCreated>11/1/2016 10:34:04 AM</ReportCreated>
+  <ReportGuid>3b3340986ea5472e855651dd10eb328f</ReportGuid>
+  <ReportName>Report</ReportName>
+  <ReportUnit>Centimeters</ReportUnit>
+  <ReportVersion>2022.1.1.0</ReportVersion>
+  <Script>using System;
+using System.Drawing;
+using System.Windows.Forms;
+using System.Data;
+using Stimulsoft.Controls;
+using Stimulsoft.Base.Drawing;
+using Stimulsoft.Report;
+using Stimulsoft.Report.Dialogs;
+using Stimulsoft.Report.Components;
+
+namespace Reports
+{
+    public class Report : Stimulsoft.Report.StiReport
+    {
+        public Report()        {
+            this.InitializeComponent();
+        }
+
+        #region StiReport Designer generated code - do not modify
+		#endregion StiReport Designer generated code - do not modify
+    }
+}
+</Script>
+  <ScriptLanguage>CSharp</ScriptLanguage>
+  <Styles isList="true" count="8">
+    <ReportNameStyle Ref="35" type="Stimulsoft.Report.StiStyle" isKey="true">
+      <AllowUseBorderSides>False</AllowUseBorderSides>
+      <AllowUseHorAlignment>True</AllowUseHorAlignment>
+      <AllowUseVertAlignment>True</AllowUseVertAlignment>
+      <Border>Bottom;Black;1;Solid;False;4;Black</Border>
+      <Brush>Transparent</Brush>
+      <Conditions isList="true" count="0" />
+      <Font>B Nazanin,10,Bold</Font>
+      <HorAlignment>Center</HorAlignment>
+      <Name>ReportNameStyle</Name>
+      <NegativeTextBrush>Red</NegativeTextBrush>
+      <TextBrush>Black</TextBrush>
+      <VertAlignment>Center</VertAlignment>
+    </ReportNameStyle>
+    <OtherHeaderStyle Ref="36" type="Stimulsoft.Report.StiStyle" isKey="true">
+      <AllowUseBorderSides>False</AllowUseBorderSides>
+      <AllowUseHorAlignment>True</AllowUseHorAlignment>
+      <AllowUseVertAlignment>True</AllowUseVertAlignment>
+      <Border>Bottom;Black;1;Solid;False;4;Black</Border>
+      <Brush>Transparent</Brush>
+      <Conditions isList="true" count="0" />
+      <Font>B Nazanin,12,Bold</Font>
+      <HorAlignment>Center</HorAlignment>
+      <Name>OtherHeaderStyle</Name>
+      <NegativeTextBrush>Red</NegativeTextBrush>
+      <TextBrush>Black</TextBrush>
+      <VertAlignment>Center</VertAlignment>
+    </OtherHeaderStyle>
+    <GroupHeaderStyle Ref="37" type="Stimulsoft.Report.StiStyle" isKey="true">
+      <AllowUseBorderSides>False</AllowUseBorderSides>
+      <AllowUseHorAlignment>True</AllowUseHorAlignment>
+      <AllowUseVertAlignment>True</AllowUseVertAlignment>
+      <Border>Bottom;Black;1;Solid;False;4;Black</Border>
+      <Brush>Transparent</Brush>
+      <Conditions isList="true" count="0" />
+      <Font>B Nazanin,10</Font>
+      <Name>GroupHeaderStyle</Name>
+      <NegativeTextBrush>Red</NegativeTextBrush>
+      <TextBrush>Black</TextBrush>
+      <VertAlignment>Center</VertAlignment>
+    </GroupHeaderStyle>
+    <GroupDataStyle Ref="38" type="Stimulsoft.Report.StiStyle" isKey="true">
+      <AllowUseBorderSides>False</AllowUseBorderSides>
+      <AllowUseHorAlignment>True</AllowUseHorAlignment>
+      <AllowUseVertAlignment>True</AllowUseVertAlignment>
+      <Border>Bottom;Black;1;Solid;False;4;Black</Border>
+      <Brush>Transparent</Brush>
+      <Conditions isList="true" count="0" />
+      <Font>B Nazanin,10</Font>
+      <Name>GroupDataStyle</Name>
+      <NegativeTextBrush>Red</NegativeTextBrush>
+      <TextBrush>Black</TextBrush>
+      <VertAlignment>Center</VertAlignment>
+    </GroupDataStyle>
+    <CompanyNameStyle Ref="39" type="Stimulsoft.Report.StiStyle" isKey="true">
+      <AllowUseBorderSides>False</AllowUseBorderSides>
+      <AllowUseHorAlignment>True</AllowUseHorAlignment>
+      <AllowUseVertAlignment>True</AllowUseVertAlignment>
+      <Border>All;Black;1;Solid;False;4;Black</Border>
+      <Brush>Transparent</Brush>
+      <Conditions isList="true" count="0" />
+      <Font>B Nazanin,18,Bold</Font>
+      <HorAlignment>Center</HorAlignment>
+      <Name>CompanyNameStyle</Name>
+      <NegativeTextBrush>Red</NegativeTextBrush>
+      <TextBrush>Black</TextBrush>
+      <VertAlignment>Center</VertAlignment>
+    </CompanyNameStyle>
+    <DataStyle Ref="40" type="Stimulsoft.Report.StiStyle" isKey="true">
+      <AllowUseBorderSides>False</AllowUseBorderSides>
+      <Brush>Transparent</Brush>
+      <Conditions isList="true" count="0" />
+      <Font>B Nazanin,12</Font>
+      <HorAlignment>Right</HorAlignment>
+      <Name>DataStyle</Name>
+      <NegativeTextBrush>Red</NegativeTextBrush>
+      <TextBrush>Black</TextBrush>
+      <VertAlignment>Center</VertAlignment>
+    </DataStyle>
+    <SummaryStyle Ref="41" type="Stimulsoft.Report.StiStyle" isKey="true">
+      <Border>All;Black;1;Solid;False;4;[192:80:77]</Border>
+      <Brush>LightGray</Brush>
+      <Conditions isList="true" count="0" />
+      <Description>GroupSummeryStyle1</Description>
+      <Font>B Nazanin,12,Bold</Font>
+      <HorAlignment>Right</HorAlignment>
+      <Name>SummaryStyle</Name>
+      <NegativeTextBrush>Red</NegativeTextBrush>
+      <TextBrush>Black</TextBrush>
+      <VertAlignment>Center</VertAlignment>
+    </SummaryStyle>
+    <ColumnHeaderStyle Ref="42" type="Stimulsoft.Report.StiStyle" isKey="true">
+      <AllowUseHorAlignment>True</AllowUseHorAlignment>
+      <AllowUseVertAlignment>True</AllowUseVertAlignment>
+      <Border>All;Black;1;Solid;False;4;[192:80:77]</Border>
+      <Brush>LightGray</Brush>
+      <Conditions isList="true" count="0" />
+      <Description>GroupSummeryStyle1</Description>
+      <Font>B Nazanin,12,Bold</Font>
+      <HorAlignment>Center</HorAlignment>
+      <Name>ColumnHeaderStyle</Name>
+      <NegativeTextBrush>Red</NegativeTextBrush>
+      <TextBrush>Black</TextBrush>
+      <VertAlignment>Center</VertAlignment>
+    </ColumnHeaderStyle>
+  </Styles>
+</StiSerializer>
