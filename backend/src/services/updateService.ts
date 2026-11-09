@@ -209,5 +209,5 @@ export async function applyRelease(version: string) {
   const reasons = await eligibility(it.manifest, cur);
   if (reasons.length) throw new UpdateError(reasons.join("؛ "));
   const c = await creds();
-  await updaterCall("POST", "/apply", { payload: it.payload, signature: it.signature, registry: { host: c.full, user: c.user, password: c.password }, fromVersion: cur });
+  await updaterCall("POST", "/apply", { payload: Buffer.from(it.payload, "utf8").toString("base64"), signature: it.signature, registry: { host: c.full, user: c.user, password: c.password }, fromVersion: cur });
 }
