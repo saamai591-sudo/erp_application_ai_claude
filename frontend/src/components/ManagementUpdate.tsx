@@ -81,6 +81,7 @@ export function ManagementUpdate({ token, onUnauthorized }: { token: string; onU
   const loadSettings = useCallback(async () => {
     const s: Settings = await call("/settings");
     setSettings(s);
+    if ((s as any).currentVersion) setCurrent((s as any).currentVersion);
     setForm((f) => ({ ...f, host: s.host, user: s.user }));
   }, [call]);
 
@@ -158,22 +159,21 @@ export function ManagementUpdate({ token, onUnauthorized }: { token: string; onU
   }
 
   const running = status?.status === "RUNNING";
-  const field: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4 };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <h3 style={{ margin: 0 }}>به‌روزرسانی نسخه</h3>
-      <div>
-        نسخه‌ی نصب‌شده: <strong dir="ltr">{current || "—"}</strong>
-      </div>
+    <>
+      <h3 className="mg-h">
+        به‌روزرسانی نسخه
+        <span className="badge">نسخه‌ی نصب‌شده: <span dir="ltr">{current || "—"}</span></span>
+      </h3>
 
-      {error && <div className="error-box">{error}</div>}
-      {message && <div className="success-box">{message}</div>}
+      {error && <div className="alert error" style={{ margin: 0 }}>{error}</div>}
+      {message && <div className="alert warn" style={{ margin: 0 }}>{message}</div>}
 
       {running && (
-        <div className="card" style={{ padding: 12 }}>
-          <strong>{STATUS_FA.RUNNING}</strong> (به نسخه‌ی <span dir="ltr">{status?.version}</span>) — این صفحه را نبندید.
-          <ol style={{ margin: "8px 0 0", paddingInlineStart: 20 }}>
+        <div className="mg-section">
+          <h4>{STATUS_FA.RUNNING} (به نسخه‌ی <span dir="ltr">{status?.version}</span>) — این صفحه را نبندید.</h4>
+          <ol className="mg-steps">
             {status?.steps.map((s, i) => (
               <li key={i}>{s.text}</li>
             ))}
@@ -182,49 +182,53 @@ export function ManagementUpdate({ token, onUnauthorized }: { token: string; onU
       )}
 
       {status && !running && status.status !== "IDLE" && (
-        <div className="card" style={{ padding: 12 }}>
-          آخرین به‌روزرسانی (<span dir="ltr">{status.fromVersion || "?"} → {status.version}</span>): <strong>{STATUS_FA[status.status]}</strong>
-          {status.error && <div style={{ color: "#b00020", marginTop: 4 }}>{status.error}</div>}
-          {status.backupFile && <div style={{ marginTop: 4 }}>پشتیبانِ پیش از به‌روزرسانی: <code dir="ltr">{status.backupFile}</code></div>}
+        <div className="mg-section">
+          <div>
+            آخرین به‌روزرسانی (<span dir="ltr">{status.fromVersion || "?"} → {status.version}</span>): <strong>{STATUS_FA[status.status]}</strong>
+          </div>
+          {status.error && <div className="alert error" style={{ margin: 0 }}>{status.error}</div>}
+          {status.backupFile && <div className="mg-muted">پشتیبانِ پیش از به‌روزرسانی: <code dir="ltr">{status.backupFile}</code></div>}
         </div>
       )}
 
-      <div className="card" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-        <strong>اتصال به ریجستری نسخه‌ها</strong>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-          <label style={field}>
-            آدرس ریجستری (مثلاً repo.saam.ir/saamai؛ پیشوند مسیر اختیاری است)
+      <div className="mg-section">
+        <h4>اتصال به ریجستری نسخه‌ها</h4>
+        <div className="mg-grid">
+          <label className="mg-field">
+            آدرس ریجستری (مثلاً repo.saam.ir/saam-ai؛ پیشوند مسیر اختیاری است)
             <input dir="ltr" value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} />
           </label>
-          <label style={field}>
+          <label className="mg-field">
             نام کاربری
             <input dir="ltr" value={form.user} onChange={(e) => setForm({ ...form, user: e.target.value })} autoComplete="off" />
           </label>
-          <label style={field}>
+          <label className="mg-field">
             رمز {settings?.hasPassword ? "(خالی = بدون تغییر)" : ""}
             <input type="password" dir="ltr" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} autoComplete="new-password" />
           </label>
         </div>
-        <div>
+        <div className="mg-actions">
           <button type="button" className="btn" disabled={busy || running} onClick={saveSettings}>ذخیره‌ی اتصال</button>
         </div>
       </div>
 
-      <div className="card" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <strong>نسخه‌های موجود</strong>
+      <div className="mg-section">
+        <div className="mg-release-row">
+          <h4>نسخه‌های موجود</h4>
+          <span className="spacer" />
           <button type="button" className="btn secondary" disabled={busy || !settings?.hasPassword} onClick={() => loadVersions(true)}>
             بررسی دوباره
           </button>
         </div>
-        {releases === null && !error && <div>در حال خواندن فهرست…</div>}
-        {releases && releases.length === 0 && <div>نسخه‌ی امضاشده‌ای در ریجستری پیدا نشد.</div>}
+        {releases === null && !error && <div className="mg-muted">در حال خواندن فهرست…</div>}
+        {releases && releases.length === 0 && <div className="mg-muted">نسخه‌ی امضاشده‌ای در ریجستری پیدا نشد.</div>}
         {releases?.map((r) => (
-          <div key={r.version} style={{ borderTop: "1px solid #ddd", paddingTop: 8 }}>
-            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <div key={r.version} className="mg-release">
+            <div className="mg-release-row">
               <strong dir="ltr">{r.version}</strong>
-              <span>{r.releasedAt ? timeFa(r.releasedAt) : ""}</span>
-              {r.current && <span style={{ color: "#2e7d32" }}>نسخه‌ی فعلی</span>}
+              <span className="mg-muted">{r.releasedAt ? timeFa(r.releasedAt) : ""}</span>
+              {r.current && <span className="badge success">نسخه‌ی فعلی</span>}
+              <span className="spacer" />
               <button type="button" className="btn secondary" onClick={() => setOpen(open === r.version ? null : r.version)}>
                 {open === r.version ? "بستن توضیحات" : "تغییرات"}
               </button>
@@ -232,50 +236,52 @@ export function ManagementUpdate({ token, onUnauthorized }: { token: string; onU
                 به‌روزرسانی به این نسخه
               </button>
             </div>
-            {!r.eligible && !r.current && r.reasons.length > 0 && <div style={{ color: "#b26a00", marginTop: 4 }}>{r.reasons.join("؛ ")}</div>}
-            {r.manualNote && <div style={{ color: "#b26a00", marginTop: 4 }}>توجه: {r.manualNote}</div>}
-            {open === r.version && <pre style={{ whiteSpace: "pre-wrap", margin: "8px 0 0", fontFamily: "inherit" }}>{r.changelog || "توضیحی ثبت نشده است."}</pre>}
+            {!r.eligible && !r.current && r.reasons.length > 0 && <div className="mg-note">{r.reasons.join("؛ ")}</div>}
+            {r.manualNote && <div className="mg-note">توجه: {r.manualNote}</div>}
+            {open === r.version && <pre className="mg-pre">{r.changelog || "توضیحی ثبت نشده است."}</pre>}
           </div>
         ))}
       </div>
 
       {status?.history && status.history.length > 0 && (
-        <div className="card" style={{ padding: 12 }}>
-          <strong>تاریخچه‌ی به‌روزرسانی‌ها</strong>
-          <table className="table" style={{ marginTop: 8 }}>
-            <thead>
-              <tr><th>زمان</th><th>از</th><th>به</th><th>نتیجه</th></tr>
-            </thead>
-            <tbody>
-              {status.history.map((h, i) => (
-                <tr key={i}>
-                  <td>{timeFa(h.startedAt)}</td>
-                  <td dir="ltr">{h.from || "—"}</td>
-                  <td dir="ltr">{h.to}</td>
-                  <td>{STATUS_FA[h.status] ?? h.status}{h.error ? ` — ${h.error}` : ""}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="mg-section">
+          <h4>تاریخچه‌ی به‌روزرسانی‌ها</h4>
+          <div className="mg-tablewrap">
+            <table>
+              <thead>
+                <tr><th>زمان</th><th>از</th><th>به</th><th>نتیجه</th></tr>
+              </thead>
+              <tbody>
+                {status.history.map((h, i) => (
+                  <tr key={i}>
+                    <td>{timeFa(h.startedAt)}</td>
+                    <td dir="ltr">{h.from || "—"}</td>
+                    <td dir="ltr">{h.to}</td>
+                    <td>{STATUS_FA[h.status] ?? h.status}{h.error ? ` — ${h.error}` : ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
       {confirmVersion && (
         <div className="modal-overlay" onClick={() => setConfirmVersion(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
-            <h3 style={{ marginTop: 0 }}>به‌روزرسانی به نسخه‌ی <span dir="ltr">{confirmVersion}</span></h3>
-            <ul style={{ paddingInlineStart: 20 }}>
+            <h3>به‌روزرسانی به نسخه‌ی <span dir="ltr">{confirmVersion}</span></h3>
+            <ul className="mg-steps">
               <li>پیش از شروع، از دیتابیس پشتیبان گرفته می‌شود.</li>
               <li>سیستم چند دقیقه در دسترس نخواهد بود؛ از کاربران بخواهید کارشان را ذخیره کنند.</li>
               <li>اگر نسخه‌ی جدید سالم بالا نیاید، خودکار به نسخه‌ی قبلی برمی‌گردد.</li>
             </ul>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button type="button" className="btn secondary" onClick={() => setConfirmVersion(null)}>انصراف</button>
+            <div className="actions">
               <button type="button" className="btn" onClick={() => apply(confirmVersion)}>شروع به‌روزرسانی</button>
+              <button type="button" className="btn secondary" onClick={() => setConfirmVersion(null)}>انصراف</button>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

@@ -2350,3 +2350,80 @@ td .badge { padding: 0 9px; line-height: 1.5; vertical-align: middle; }
   .content > .party-statement-page { flex-direction: column; align-items: stretch; }
   .party-statement-aside { width: auto !important; position: static !important; }
 }
+
+/* ===== صفحه‌ی «مدیریت» (/management): هم‌سبک صفحه‌ی ورود و فرم‌های اصلی؛ فقط از متغیرهای تم استفاده می‌کند ===== */
+.mg-page {
+  min-height: 100vh; display: flex; justify-content: center; align-items: flex-start; padding: 36px 16px;
+  background:
+    radial-gradient(900px 500px at 85% -10%, color-mix(in srgb, var(--primary) 16%, transparent), transparent 70%),
+    radial-gradient(700px 480px at -5% 110%, color-mix(in srgb, var(--primary) 12%, transparent), transparent 70%),
+    var(--bg);
+}
+.mg-shell { width: 100%; max-width: 560px; background: var(--surface); border-radius: 22px; overflow: hidden; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.16), 0 2px 8px rgba(15, 23, 42, 0.06); }
+.mg-shell.wide { max-width: 1000px; }
+.mg-head {
+  position: relative; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 18px 24px; color: #fff; overflow: hidden;
+  background: linear-gradient(155deg, color-mix(in srgb, var(--primary) 82%, #ffffff) 0%, var(--primary) 45%, color-mix(in srgb, var(--primary) 55%, #000000) 100%);
+}
+.mg-head::after { content: ""; position: absolute; width: 260px; height: 260px; border-radius: 50%; background: rgba(255, 255, 255, 0.07); top: -120px; left: -70px; pointer-events: none; }
+.mg-brand { position: relative; z-index: 1; display: flex; align-items: center; gap: 12px; min-width: 0; }
+.mg-logo { width: 46px; height: 46px; border-radius: 12px; background: #fff; display: flex; align-items: center; justify-content: center; padding: 5px; flex-shrink: 0; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2); }
+.mg-logo img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+.mg-logo span { font-size: 22px; font-weight: 800; color: var(--primary); line-height: 1; }
+.mg-title { margin: 0; font-size: 17px; font-weight: 800; line-height: 1.5; }
+.mg-subtitle { margin: 0; font-size: 12px; opacity: 0.85; }
+.mg-head .btn { position: relative; z-index: 1; background: rgba(255, 255, 255, 0.16); color: #fff; border: 1px solid rgba(255, 255, 255, 0.4); box-shadow: none; }
+.mg-head .btn:hover { background: rgba(255, 255, 255, 0.28); filter: none; }
+.mg-body { padding: 22px 24px 26px; display: flex; flex-direction: column; gap: 16px; }
+.mg-layout { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+.mg-nav { flex: 0 0 190px; display: flex; flex-direction: column; gap: 4px; }
+.mg-nav button {
+  text-align: right; font: inherit; font-size: 13px; font-weight: 600; color: var(--ink-soft); background: transparent; border: 0; border-radius: var(--radius-sm);
+  padding: 10px 14px; cursor: pointer; border-inline-start: 3px solid transparent; transition: background 0.12s, color 0.12s;
+}
+.mg-nav button:hover { background: var(--bg); color: var(--ink); }
+.mg-nav button.active { background: var(--primary-soft); color: var(--primary); border-inline-start-color: var(--primary); }
+.mg-main { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.mg-h { margin: 0; font-size: 16px; font-weight: 800; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mg-muted { color: var(--ink-soft); font-size: 12.5px; line-height: 1.9; }
+.mg-section { border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 12px; background: var(--surface); }
+.mg-section > h4 { margin: 0; font-size: 13.5px; font-weight: 700; }
+.mg-section.dashed { border-style: dashed; background: var(--bg); }
+.mg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+.mg-field { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); min-width: 0; }
+.mg-field.full { grid-column: 1 / -1; }
+.mg-field input:not([type="checkbox"]):not([type="radio"]), .mg-field select {
+  height: 38px; padding: 0 12px; border: 1.5px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; font-weight: 400; width: 100%; box-sizing: border-box;
+}
+.mg-field input[type="file"] { height: auto; padding: 8px 10px; }
+.mg-field input:focus-visible, .mg-field select:focus-visible { outline: 0; border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent); }
+.mg-field input:disabled { background: var(--bg); cursor: not-allowed; }
+.mg-check { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ink); cursor: pointer; }
+.mg-check input { width: 16px; height: 16px; accent-color: var(--primary); }
+.mg-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mg-tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+.mg-tablewrap table { font-size: 12.5px; }
+.mg-tablewrap th { white-space: nowrap; }
+.mg-tablewrap .btn { padding: 4px 10px; font-size: 12px; }
+.mg-kv { width: 100%; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; border-collapse: separate; border-spacing: 0; }
+.mg-kv th { width: 34%; background: var(--bg); font-weight: 600; text-align: right; color: var(--ink-soft); font-size: 12.5px; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.mg-kv td { padding: 9px 12px; font-size: 13px; border-bottom: 1px solid var(--line); text-align: right; }
+.mg-kv tr:last-child th, .mg-kv tr:last-child td { border-bottom: 0; }
+.mg-release { padding: 12px 2px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.mg-release:first-of-type { border-top: 0; }
+.mg-release-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.mg-release-row .spacer { flex: 1; }
+.mg-note { font-size: 12.5px; color: var(--warning); }
+.mg-ok { color: var(--success); font-weight: 600; font-size: 12.5px; }
+.mg-pre { white-space: pre-wrap; margin: 4px 0 0; font: inherit; font-size: 12.5px; line-height: 1.9; background: var(--bg); border-radius: var(--radius-sm); padding: 10px 12px; }
+.mg-mono { font-family: Consolas, monospace; letter-spacing: 1px; }
+.mg-steps { margin: 6px 0 0; padding-inline-start: 20px; font-size: 13px; line-height: 2; }
+.mg-link { color: var(--primary); font-weight: 600; text-decoration: none; }
+.mg-link:hover { text-decoration: underline; }
+@media (max-width: 760px) {
+  .mg-page { padding: 12px 8px; }
+  .mg-nav { flex: 1 1 100%; flex-direction: row; overflow-x: auto; }
+  .mg-nav button { white-space: nowrap; border-inline-start: 0; border-bottom: 3px solid transparent; }
+  .mg-nav button.active { border-bottom-color: var(--primary); }
+  .mg-body { padding: 16px; }
+}

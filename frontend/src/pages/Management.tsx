@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatJalaliDate } from "../lib/formatDate";
+import { Branding, DEFAULT_TITLE, fetchBranding } from "../lib/branding";
 import { ManagementBackup } from "../components/ManagementBackup";
 import { ManagementUpdate } from "../components/ManagementUpdate";
 
@@ -150,6 +151,11 @@ export default function Management() {
     [saveToken]
   );
 
+  const [brand, setBrand] = useState<Branding | null>(null);
+  useEffect(() => {
+    fetchBranding().then(setBrand);
+  }, []);
+
   useEffect(() => {
     loadPublic();
   }, [loadPublic]);
@@ -253,159 +259,178 @@ export default function Management() {
   const uploadSection = !activated || showUpload;
   const passwordOk = password.replace(/-/g, "").length === 12;
 
-  const card: React.CSSProperties = { width: "100%", maxWidth: loggedIn ? 920 : 560, padding: 20, display: "flex", flexDirection: "column", gap: 14 };
+  const companyName = brand?.name || "";
+  const initial = (companyName || DEFAULT_TITLE).trim().charAt(0);
+  const SECTIONS: { key: "license" | "backup" | "update"; label: string }[] = [
+    { key: "license", label: "لایسنس" },
+    { key: "backup", label: "تنظیمات پشتیبان‌گیری" },
+    { key: "update", label: "به‌روزرسانی" },
+  ];
+
+  const passwordInput = (disabled: boolean, placeholder: string, onEnter: () => void) => (
+    <input
+      dir="ltr"
+      className="mg-mono"
+      autoComplete="off"
+      disabled={disabled}
+      value={password}
+      placeholder={placeholder}
+      onChange={(e) => setPassword(formatInput(e.target.value))}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onEnter();
+      }}
+    />
+  );
+
+  function renderUploadFields() {
+    return (
+      <>
+        <label className="mg-field">
+          فایل لایسنس
+          <input ref={fileRef} type="file" accept=".lic,.json,application/json,text/plain" onChange={onPickFile} />
+        </label>
+        <label className="mg-field" style={{ opacity: fileText ? 1 : 0.55 }}>
+          کلمه‌ی عبور (همراه لایسنس از فروشنده دریافت کنید)
+          {passwordInput(!fileText, fileText ? "XXXX-XXXX-XXXX" : "ابتدا فایل لایسنس را انتخاب کنید", () => { if (fileText && passwordOk && !busy) activate(); })}
+        </label>
+        <div className="mg-actions">
+          <button type="button" className="btn" disabled={!fileText || !passwordOk || busy} onClick={activate}>
+            {activated ? "ثبت لایسنس" : "فعال‌سازی"}
+          </button>
+          {fileName && <span className="mg-muted">{fileName}</span>}
+        </div>
+      </>
+    );
+  }
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "40px 16px", background: "var(--bg, #f6f7f9)" }} dir="rtl">
-      <div className="card" style={card}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h2 style={{ margin: 0 }}>{loggedIn ? "مدیریت" : "مدیریت لایسنس"}</h2>
-          {loggedIn && <button type="button" className="btn secondary" onClick={logout}>خروج</button>}
-        </div>
-
-        {error && <div className="alert error">{error}</div>}
-        {info && <div className="alert">{info}</div>}
-        {keyMissing && <div className="alert">این ساخت کلید لایسنس ندارد؛ فایل لایسنس تایید نمی‌شود (نسخه‌ی توسعه/آزمایشی).</div>}
-        {pub && pub.enforced && !pub.allowed && (
-          <div className="alert error">
-            ورود به نرم‌افزار تا فعال‌سازی لایسنس معتبر بسته است. {pub.message}
-          </div>
-        )}
-        {pub && pub.allowed && pub.activated && (
-          <div>
-            <a href="/login">ورود به نرم‌افزار</a>
-          </div>
-        )}
-
-        {!pub && !error && <div>در حال بارگذاری…</div>}
-
-        {/* ── بعد از ورود: وضعیت ───────────────────────────────────────── */}
-        {loggedIn && status && (
-          <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
-            {/* منوی سمت راست (راست‌به‌چپ: اولین فرزند در سمت راست است) */}
-            <nav style={{ flex: "0 0 170px", display: "flex", flexDirection: "column", gap: 6 }} aria-label="منوی مدیریت">
-              <button type="button" className={section === "license" ? "btn" : "btn secondary"} style={{ textAlign: "right" }} onClick={() => setSection("license")}>لایسنس</button>
-              <button type="button" className={section === "backup" ? "btn" : "btn secondary"} style={{ textAlign: "right" }} onClick={() => setSection("backup")}>تنظیمات پشتیبان‌گیری</button>
-              <button type="button" className={section === "update" ? "btn" : "btn secondary"} style={{ textAlign: "right" }} onClick={() => setSection("update")}>به‌روزرسانی</button>
-            </nav>
-            <div style={{ flex: "1 1 420px", minWidth: 0, display: "flex", flexDirection: "column", gap: 14 }}>
-            {section === "license" && (
-          <>
-            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <strong>وضعیت:</strong>
-              <span className={`badge ${STATE_BADGE[status.state]}`}>{STATE_FA[status.state]}</span>
-              <span style={{ color: "#555" }}>{status.message}</span>
-            </div>
-            {status.license && (
-              <table className="kv-table" style={{ width: "100%" }}>
-                <tbody>
-                  <tr><th>سریال لایسنس</th><td dir="ltr"><b>{status.license.serial || "ندارد (لایسنس قدیمی)"}</b></td></tr>
-                  <tr><th>شماره لایسنس</th><td dir="ltr">{status.license.licenseNumber} (ترتیب {status.license.sequence})</td></tr>
-                  <tr><th>مشتری</th><td>{status.license.customer}</td></tr>
-                  <tr><th>نوع</th><td>{MODEL_FA[status.license.model]}</td></tr>
-                  <tr><th>تاریخ صدور</th><td>{dateFa(status.license.issuedAt)}</td></tr>
-                  <tr><th>شروع</th><td>{dateFa(status.license.startsAt)}</td></tr>
-                  {status.license.model === "PERPETUAL" ? (
-                    <tr><th>پشتیبانی و به‌روزرسانی تا</th><td>{dateFa(status.license.supportUntil)}</td></tr>
-                  ) : (
-                    <tr><th>اعتبار اشتراک تا</th><td>{dateFa(status.license.validUntil)}</td></tr>
-                  )}
-                  <tr><th>سقف کاربر</th><td>{status.license.maxUsers ?? "نامحدود"}</td></tr>
-                  <tr><th>ماژول‌ها (علاوه بر پایه: تنظیمات، اطلاعات پایه، حسابداری)</th><td>{status.license.modules ? (status.license.modules.map((m) => MODULE_FA[m] ?? m).join("، ") || "هیچ‌کدام") : "همه"}</td></tr>
-                  <tr><th>قابلیت‌ها</th><td>{status.license.features ? (status.license.features.map((f) => FEATURE_FA[f] ?? f).join("، ") || "هیچ‌کدام") : "همه"}</td></tr>
-                </tbody>
-              </table>
-            )}
+    <div className="mg-page" dir="rtl">
+      <div className={`mg-shell${loggedIn ? " wide" : ""}`}>
+        <header className="mg-head">
+          <div className="mg-brand">
+            <div className="mg-logo">{brand?.logoUrl ? <img src={brand.logoUrl} alt={companyName} /> : <span>{initial}</span>}</div>
             <div>
-              <strong>شناسه‌ی نصب:</strong> <code dir="ltr">{status.installId}</code>
-            </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button type="button" className="btn secondary" onClick={downloadRequest}>دانلود فایل اطلاعات سرور</button>
-              <button type="button" className="btn secondary" onClick={() => { setShowUpload((v) => !v); setError(null); }}>
-                بارگذاری لایسنس تازه
-              </button>
-            </div>
-          </>
-            )}
-            {section === "backup" && token && <ManagementBackup token={token} onUnauthorized={() => saveToken(null)} />}
-            {section === "update" && token && <ManagementUpdate token={token} onUnauthorized={() => saveToken(null)} />}
+              <h1 className="mg-title">{loggedIn ? "مدیریت" : "مدیریت لایسنس"}</h1>
+              <p className="mg-subtitle">{companyName || DEFAULT_TITLE}</p>
             </div>
           </div>
-        )}
+          {loggedIn && <button type="button" className="btn secondary" onClick={logout}>خروج</button>}
+        </header>
 
-        {/* ── لایسنس معتبر ثبت شده ولی هنوز وارد نشده: ورود با کلمه‌ی عبور ───── */}
-        {activated && !loggedIn && pub && (
-          <>
-            <div>لایسنس این سرور ثبت شده است. برای ورود، کلمه‌ی عبور مدیریت را وارد کنید.</div>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              کلمه‌ی عبور
-              <input
-                dir="ltr"
-                autoComplete="off"
-                value={password}
-                placeholder="XXXX-XXXX-XXXX"
-                onChange={(e) => setPassword(formatInput(e.target.value))}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && passwordOk && !busy) login();
-                }}
-                style={{ fontFamily: "Consolas, monospace", letterSpacing: 1 }}
-              />
-            </label>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button type="button" className="btn" disabled={!passwordOk || busy} onClick={login}>ورود</button>
-              <button type="button" className="btn secondary" onClick={() => { setShowUpload((v) => !v); setError(null); setPassword(""); }}>
-                لایسنس تازه دارم / کلمه‌ی عبور را فراموش کرده‌ام
-              </button>
+        <div className="mg-body">
+          {error && <div className="alert error" style={{ margin: 0 }}>{error}</div>}
+          {info && <div className="alert warn" style={{ margin: 0 }}>{info}</div>}
+          {keyMissing && <div className="alert warn" style={{ margin: 0 }}>این ساخت کلید لایسنس ندارد؛ فایل لایسنس تایید نمی‌شود (نسخه‌ی توسعه/آزمایشی).</div>}
+          {pub && pub.enforced && !pub.allowed && (
+            <div className="alert error" style={{ margin: 0 }}>ورود به نرم‌افزار تا فعال‌سازی لایسنس معتبر بسته است. {pub.message}</div>
+          )}
+          {pub && pub.allowed && pub.activated && (
+            <div>
+              <a className="mg-link" href="/login">← ورود به نرم‌افزار</a>
             </div>
-          </>
-        )}
+          )}
 
-        {/* ── فعال‌سازی / بارگذاری لایسنس ──────────────────────────────── */}
-        {pub && uploadSection && (!loggedIn || section === "license") && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14, borderTop: activated ? "1px solid var(--line, #ddd)" : "none", paddingTop: activated ? 14 : 0 }}>
-            {!activated && (
-              <>
-                <div>
-                  <div style={{ fontWeight: 700, marginBottom: 4 }}>۱) فایل اطلاعات سرور</div>
-                  <div style={{ color: "#555", fontSize: 13, marginBottom: 8 }}>
+          {!pub && !error && <div className="mg-muted">در حال بارگذاری…</div>}
+
+          {/* ── بعد از ورود: منو + بخش انتخاب‌شده ───────────────────────── */}
+          {loggedIn && status && (
+            <div className="mg-layout">
+              {/* منوی سمت راست (راست‌به‌چپ: اولین فرزند در سمت راست است) */}
+              <nav className="mg-nav" aria-label="منوی مدیریت">
+                {SECTIONS.map((s) => (
+                  <button key={s.key} type="button" className={section === s.key ? "active" : ""} onClick={() => setSection(s.key)}>
+                    {s.label}
+                  </button>
+                ))}
+              </nav>
+              <div className="mg-main">
+                {section === "license" && (
+                  <>
+                    <h3 className="mg-h">
+                      وضعیت لایسنس
+                      <span className={`badge ${STATE_BADGE[status.state]}`}>{STATE_FA[status.state]}</span>
+                    </h3>
+                    <div className="mg-muted">{status.message}</div>
+                    {status.license && (
+                      <table className="mg-kv">
+                        <tbody>
+                          <tr><th>سریال لایسنس</th><td dir="ltr"><b>{status.license.serial || "ندارد (لایسنس قدیمی)"}</b></td></tr>
+                          <tr><th>شماره لایسنس</th><td dir="ltr">{status.license.licenseNumber} (ترتیب {status.license.sequence})</td></tr>
+                          <tr><th>مشتری</th><td>{status.license.customer}</td></tr>
+                          <tr><th>نوع</th><td>{MODEL_FA[status.license.model]}</td></tr>
+                          <tr><th>تاریخ صدور</th><td>{dateFa(status.license.issuedAt)}</td></tr>
+                          <tr><th>شروع</th><td>{dateFa(status.license.startsAt)}</td></tr>
+                          {status.license.model === "PERPETUAL" ? (
+                            <tr><th>پشتیبانی و به‌روزرسانی تا</th><td>{dateFa(status.license.supportUntil)}</td></tr>
+                          ) : (
+                            <tr><th>اعتبار اشتراک تا</th><td>{dateFa(status.license.validUntil)}</td></tr>
+                          )}
+                          <tr><th>سقف کاربر</th><td>{status.license.maxUsers ?? "نامحدود"}</td></tr>
+                          <tr><th>ماژول‌ها (علاوه بر پایه: تنظیمات، اطلاعات پایه، حسابداری)</th><td>{status.license.modules ? (status.license.modules.map((m) => MODULE_FA[m] ?? m).join("، ") || "هیچ‌کدام") : "همه"}</td></tr>
+                          <tr><th>قابلیت‌ها</th><td>{status.license.features ? (status.license.features.map((f) => FEATURE_FA[f] ?? f).join("، ") || "هیچ‌کدام") : "همه"}</td></tr>
+                          <tr><th>شناسه‌ی نصب</th><td><code dir="ltr">{status.installId}</code></td></tr>
+                        </tbody>
+                      </table>
+                    )}
+                    <div className="mg-actions">
+                      <button type="button" className="btn secondary" onClick={downloadRequest}>دانلود فایل اطلاعات سرور</button>
+                      <button type="button" className="btn secondary" onClick={() => { setShowUpload((v) => !v); setError(null); }}>
+                        بارگذاری لایسنس تازه
+                      </button>
+                    </div>
+                    {pub && uploadSection && (
+                      <div className="mg-section">
+                        <h4>بارگذاری لایسنس تازه</h4>
+                        {renderUploadFields()}
+                      </div>
+                    )}
+                  </>
+                )}
+                {section === "backup" && token && <ManagementBackup token={token} onUnauthorized={() => saveToken(null)} />}
+                {section === "update" && token && <ManagementUpdate token={token} onUnauthorized={() => saveToken(null)} />}
+              </div>
+            </div>
+          )}
+
+          {/* ── لایسنس معتبر ثبت شده ولی هنوز وارد نشده: ورود با کلمه‌ی عبور ───── */}
+          {activated && !loggedIn && pub && (
+            <>
+              <div className="mg-muted">لایسنس این سرور ثبت شده است. برای ورود، کلمه‌ی عبور مدیریت را وارد کنید.</div>
+              <label className="mg-field">
+                کلمه‌ی عبور
+                {passwordInput(false, "XXXX-XXXX-XXXX", () => { if (passwordOk && !busy) login(); })}
+              </label>
+              <div className="mg-actions">
+                <button type="button" className="btn" disabled={!passwordOk || busy} onClick={login}>ورود</button>
+                <button type="button" className="btn secondary" onClick={() => { setShowUpload((v) => !v); setError(null); setPassword(""); }}>
+                  لایسنس تازه دارم / کلمه‌ی عبور را فراموش کرده‌ام
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* ── فعال‌سازی (هنوز لایسنسی ثبت نشده) یا لایسنس تازه قبل از ورود ── */}
+          {pub && uploadSection && !loggedIn && (
+            <div className="mg-section">
+              {!activated ? (
+                <>
+                  <h4>۱) فایل اطلاعات سرور</h4>
+                  <div className="mg-muted">
                     این فایل فقط شامل نام دیتابیس، شناسه‌ی دیتابیس، شناسه‌ی نصب و نسخه‌ی برنامه است. آن را برای فروشنده بفرستید تا لایسنس صادر کند.
                   </div>
-                  <button type="button" className="btn secondary" onClick={downloadRequest}>دانلود فایل اطلاعات سرور</button>
-                </div>
-                <div style={{ fontWeight: 700 }}>۲) فعال‌سازی</div>
-              </>
-            )}
-            {activated && <div style={{ fontWeight: 700 }}>بارگذاری لایسنس تازه</div>}
-            {!activated && pub.state !== "NO_LICENSE" && pub.state !== "UNCONFIGURED" && (
-              <div className="alert">{pub.message} — لایسنس تازه لازم است.</div>
-            )}
-            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              فایل لایسنس
-              <input ref={fileRef} type="file" accept=".lic,.json,application/json,text/plain" onChange={onPickFile} />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4, opacity: fileText ? 1 : 0.55 }}>
-              کلمه‌ی عبور (همراه لایسنس از فروشنده دریافت کنید)
-              <input
-                dir="ltr"
-                autoComplete="off"
-                disabled={!fileText}
-                value={password}
-                placeholder={fileText ? "XXXX-XXXX-XXXX" : "ابتدا فایل لایسنس را انتخاب کنید"}
-                onChange={(e) => setPassword(formatInput(e.target.value))}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && fileText && passwordOk && !busy) activate();
-                }}
-                style={{ fontFamily: "Consolas, monospace", letterSpacing: 1 }}
-              />
-            </label>
-            <div>
-              <button type="button" className="btn" disabled={!fileText || !passwordOk || busy} onClick={activate}>
-                {activated ? "ثبت لایسنس" : "فعال‌سازی"}
-              </button>
-              {fileName && <span style={{ marginInlineStart: 10, color: "#555", fontSize: 12 }}>{fileName}</span>}
+                  <div><button type="button" className="btn secondary" onClick={downloadRequest}>دانلود فایل اطلاعات سرور</button></div>
+                  <h4>۲) فعال‌سازی</h4>
+                </>
+              ) : (
+                <h4>بارگذاری لایسنس تازه</h4>
+              )}
+              {!activated && pub.state !== "NO_LICENSE" && pub.state !== "UNCONFIGURED" && (
+                <div className="alert warn" style={{ margin: 0 }}>{pub.message} — لایسنس تازه لازم است.</div>
+              )}
+              {renderUploadFields()}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

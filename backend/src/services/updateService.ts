@@ -50,7 +50,7 @@ export function currentVersion(): string {
 
 export async function getSettings() {
   const s = await prisma.updateSettings.findUnique({ where: { id: 1 } });
-  return { host: s?.registryHost ?? "", user: s?.registryUser ?? "", hasPassword: !!s?.registryPasswordEnc };
+  return { host: s?.registryHost ?? "", user: s?.registryUser ?? "", hasPassword: !!s?.registryPasswordEnc, currentVersion: currentVersion() };
 }
 
 /** password === undefined ⇒ رمز قبلی بدون تغییر می‌ماند */

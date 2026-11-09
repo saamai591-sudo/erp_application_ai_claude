@@ -186,135 +186,137 @@ export function ManagementBackup({ token, onUnauthorized }: { token: string; onU
     return <div>{error ? <div className="alert error">{error}</div> : "در حال بارگذاری پشتیبان‌گیری…"}</div>;
   }
 
-  const cell: React.CSSProperties = { padding: "6px 8px", borderBottom: "1px solid var(--line, #ddd)", textAlign: "right", verticalAlign: "top", fontSize: 13 };
-  const field: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4 };
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <h3 style={{ margin: 0 }}>پشتیبان‌گیری خودکار</h3>
+    <>
+      <h3 className="mg-h">
+        پشتیبان‌گیری خودکار
         <span className={`badge ${data.policy.enabled ? "success" : "warning"}`}>{data.policy.enabled ? "روشن" : "خاموش"}</span>
         {data.running && <span className="badge">در حال اجرا…</span>}
-      </div>
+      </h3>
 
-      {error && <div className="alert error">{error}</div>}
-      {message && <div className="alert">{message}</div>}
+      {error && <div className="alert error" style={{ margin: 0 }}>{error}</div>}
+      {message && <div className="alert warn" style={{ margin: 0 }}>{message}</div>}
       {data.state.warnings.map((w) => (
-        <div key={w} className="alert">{w}</div>
+        <div key={w} className="alert warn" style={{ margin: 0 }}>{w}</div>
       ))}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
-        <label style={{ ...field, gridColumn: "1 / -1", flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <div className="mg-section">
+        <h4>سیاست پشتیبان‌گیری</h4>
+        <label className="mg-check">
           <input type="checkbox" checked={form.enabled} onChange={(e) => patch({ enabled: e.target.checked })} />
           پشتیبان‌گیری خودکار فعال باشد
         </label>
 
-        <label style={field}>
-          تکرار
-          <select value={form.frequency} onChange={(e) => patch({ frequency: e.target.value as Frequency })}>
-            <option value="INTERVAL">هر چند ساعت</option>
-            <option value="DAILY">هر روز</option>
-            <option value="WEEKLY">هر هفته</option>
-          </select>
-        </label>
-
-        {form.frequency === "INTERVAL" && (
-          <label style={field}>
-            فاصله (ساعت)
-            <input type="number" min={1} max={744} value={form.intervalHours} onChange={(e) => patch({ intervalHours: Number(e.target.value) })} />
+        <div className="mg-grid">
+          <label className="mg-field">
+            تکرار
+            <select value={form.frequency} onChange={(e) => patch({ frequency: e.target.value as Frequency })}>
+              <option value="INTERVAL">هر چند ساعت</option>
+              <option value="DAILY">هر روز</option>
+              <option value="WEEKLY">هر هفته</option>
+            </select>
           </label>
-        )}
 
-        {form.frequency !== "INTERVAL" && (
-          <label style={field}>
-            ساعت اجرا (به وقت تهران)
-            <input type="time" dir="ltr" value={form.timeOfDay} onChange={(e) => patch({ timeOfDay: e.target.value })} />
-          </label>
-        )}
+          {form.frequency === "INTERVAL" && (
+            <label className="mg-field">
+              فاصله (ساعت)
+              <input type="number" min={1} max={744} value={form.intervalHours} onChange={(e) => patch({ intervalHours: Number(e.target.value) })} />
+            </label>
+          )}
 
-        {form.frequency === "WEEKLY" && (
-          <div style={{ ...field, gridColumn: "1 / -1" }}>
-            روزهای هفته
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              {WEEKDAYS.map((name, d) => (
-                <label key={d} style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                  <input
-                    type="checkbox"
-                    checked={form.weekdays.includes(d)}
-                    onChange={(e) => patch({ weekdays: e.target.checked ? [...form.weekdays, d].sort() : form.weekdays.filter((x) => x !== d) })}
-                  />
-                  {name}
-                </label>
-              ))}
+          {form.frequency !== "INTERVAL" && (
+            <label className="mg-field">
+              ساعت اجرا (به وقت تهران)
+              <input type="time" dir="ltr" value={form.timeOfDay} onChange={(e) => patch({ timeOfDay: e.target.value })} />
+            </label>
+          )}
+
+          {form.frequency === "WEEKLY" && (
+            <div className="mg-field full">
+              روزهای هفته
+              <div className="mg-actions" style={{ gap: 16 }}>
+                {WEEKDAYS.map((name, d) => (
+                  <label key={d} className="mg-check">
+                    <input
+                      type="checkbox"
+                      checked={form.weekdays.includes(d)}
+                      onChange={(e) => patch({ weekdays: e.target.checked ? [...form.weekdays, d].sort() : form.weekdays.filter((x) => x !== d) })}
+                    />
+                    {name}
+                  </label>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        <label style={field}>
-          تعداد نسخه‌های اخیر که نگه داشته می‌شود
-          <input type="number" min={2} max={365} value={form.keepRecent} onChange={(e) => patch({ keepRecent: Number(e.target.value) })} />
-        </label>
-        <label style={field}>
-          علاوه بر آن، نسخه‌ی ماهانه برای چند ماه (۰ = هیچ)
-          <input type="number" min={0} max={60} value={form.keepMonthly} onChange={(e) => patch({ keepMonthly: Number(e.target.value) })} />
-        </label>
+          <label className="mg-field">
+            تعداد نسخه‌های اخیر که نگه داشته می‌شود
+            <input type="number" min={2} max={365} value={form.keepRecent} onChange={(e) => patch({ keepRecent: Number(e.target.value) })} />
+          </label>
+          <label className="mg-field">
+            علاوه بر آن، نسخه‌ی ماهانه برای چند ماه (۰ = هیچ)
+            <input type="number" min={0} max={60} value={form.keepMonthly} onChange={(e) => patch({ keepMonthly: Number(e.target.value) })} />
+          </label>
+        </div>
+
+        <div className="mg-actions">
+          <button type="button" className="btn" disabled={busy} onClick={savePolicy}>ذخیره‌ی سیاست</button>
+          <button type="button" className="btn secondary" disabled={busy || data.running || !data.state.toolOk || !data.state.dirOk} onClick={runNow}>
+            پشتیبان همین حالا
+          </button>
+          <span className="mg-muted">
+            نوبت بعدی: {data.policy.enabled ? dateTimeFa(data.policy.nextRunAt) : "—"}
+            {data.state.freeBytes !== null && <> — فضای آزاد دیسک پشتیبان: {sizeFa(data.state.freeBytes)}</>}
+          </span>
+        </div>
       </div>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <button type="button" className="btn" disabled={busy} onClick={savePolicy}>ذخیره‌ی سیاست</button>
-        <button type="button" className="btn secondary" disabled={busy || data.running || !data.state.toolOk || !data.state.dirOk} onClick={runNow}>
-          پشتیبان همین حالا
-        </button>
-        <span style={{ color: "#555", fontSize: 12 }}>
-          نوبت بعدی: {data.policy.enabled ? dateTimeFa(data.policy.nextRunAt) : "—"}
-          {data.state.freeBytes !== null && <> — فضای آزاد دیسک پشتیبان: {sizeFa(data.state.freeBytes)}</>}
-        </span>
+      <div className="mg-section dashed">
+        <div className="mg-muted">
+          <strong>مقصد بیرون از سرور (SFTP):</strong> هنوز در دسترس نیست. تا آن زمان فایل‌ها را از جدول زیر دانلود کنید و جای امن نگه دارید.
+        </div>
       </div>
 
-      <div style={{ border: "1px dashed var(--line, #ccc)", borderRadius: 6, padding: 10, fontSize: 13, color: "#555" }}>
-        <strong>مقصد بیرون از سرور (SFTP):</strong> هنوز در دسترس نیست. تا آن زمان فایل‌ها را از جدول زیر دانلود کنید و جای امن نگه دارید.
-      </div>
-
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <div className="mg-tablewrap">
+        <table>
           <thead>
             <tr>
               {["زمان شروع", "نوع", "وضعیت", "حجم", "نسخه‌ی برنامه", "تست بازگردانی", ""].map((h) => (
-                <th key={h} style={{ ...cell, fontWeight: 700, background: "var(--bg, #f6f7f9)" }}>{h}</th>
+                <th key={h}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {data.runs.length === 0 && (
-              <tr><td colSpan={7} style={{ ...cell, textAlign: "center", color: "#777" }}>هنوز پشتیبانی گرفته نشده است</td></tr>
+              <tr><td colSpan={7} className="empty-state">هنوز پشتیبانی گرفته نشده است</td></tr>
             )}
             {data.runs.map((r) => (
               <tr key={r.id}>
-                <td style={cell}>{dateTimeFa(r.startedAt)}</td>
-                <td style={cell}>{r.trigger === "MANUAL" ? "دستی" : "خودکار"}</td>
-                <td style={cell}>
+                <td>{dateTimeFa(r.startedAt)}</td>
+                <td>{r.trigger === "MANUAL" ? "دستی" : "خودکار"}</td>
+                <td>
                   {r.status === "SUCCESS" && <span className="badge success">موفق{r.fileDeleted ? " (فایل پاک شده)" : ""}</span>}
                   {r.status === "FAILED" && <span className="badge danger" title={r.errorMessage || ""}>ناموفق</span>}
                   {r.status === "RUNNING" && <span className="badge">در حال اجرا</span>}
-                  {r.status === "FAILED" && r.errorMessage && <div style={{ color: "#b00", fontSize: 12, maxWidth: 320 }}>{r.errorMessage}</div>}
+                  {r.status === "FAILED" && r.errorMessage && <div className="mg-muted" style={{ color: "var(--danger)", maxWidth: 320 }}>{r.errorMessage}</div>}
                 </td>
-                <td style={cell}>{sizeFa(r.sizeBytes)}</td>
-                <td style={cell} dir="ltr">{r.appVersion || "—"}</td>
-                <td style={cell}>
+                <td>{sizeFa(r.sizeBytes)}</td>
+                <td dir="ltr">{r.appVersion || "—"}</td>
+                <td>
                   {r.testedAt ? (
-                    <span style={{ color: r.testOk ? "var(--success, #2e7d32)" : "#b00" }} title={r.testMessage || ""}>
+                    <span style={{ color: r.testOk ? "var(--success)" : "var(--danger)" }} title={r.testMessage || ""}>
                       {r.testOk ? "موفق" : "ناموفق"} — {dateTimeFa(r.testedAt)}
                     </span>
                   ) : (
                     "—"
                   )}
                 </td>
-                <td style={{ ...cell, whiteSpace: "nowrap" }}>
+                <td style={{ whiteSpace: "nowrap" }}>
                   {r.status === "SUCCESS" && !r.fileDeleted && (
-                    <>
-                      <button type="button" className="btn secondary" onClick={() => download(r)}>دانلود</button>{" "}
+                    <div className="mg-actions">
+                      <button type="button" className="btn secondary" onClick={() => download(r)}>دانلود</button>
                       <button type="button" className="btn secondary" disabled={busy || data.running} onClick={() => testRestore(r)}>تست بازگردانی</button>
-                    </>
+                    </div>
                   )}
                 </td>
               </tr>
@@ -328,21 +330,23 @@ export function ManagementBackup({ token, onUnauthorized }: { token: string; onU
           {showAudit ? "پنهان‌کردن" : "نمایش"} گزارش رویدادها
         </button>
         {showAudit && (
-          <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
-            <tbody>
-              {data.audit.length === 0 && <tr><td style={{ ...cell, color: "#777" }}>رویدادی ثبت نشده است</td></tr>}
-              {data.audit.map((a) => (
-                <tr key={a.id}>
-                  <td style={cell}>{dateTimeFa(a.at)}</td>
-                  <td style={cell}>{AUDIT_FA[a.action] || a.action}</td>
-                  <td style={cell}>{a.detail || ""}</td>
-                  <td style={cell} dir="ltr">{a.ip || ""}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="mg-tablewrap" style={{ marginTop: 10 }}>
+            <table>
+              <tbody>
+                {data.audit.length === 0 && <tr><td className="empty-state">رویدادی ثبت نشده است</td></tr>}
+                {data.audit.map((a) => (
+                  <tr key={a.id}>
+                    <td>{dateTimeFa(a.at)}</td>
+                    <td>{AUDIT_FA[a.action] || a.action}</td>
+                    <td>{a.detail || ""}</td>
+                    <td dir="ltr">{a.ip || ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
-    </div>
+    </>
   );
 }
