@@ -6,6 +6,8 @@ import { findChequeUses } from "../utils/chequeUsage";
 import { can } from "../authz/guard";
 import { assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { findFormPrefix } from "../authz/registry";
+import { cleanOpeningGuarantees, syncOpeningGuarantees, deleteOpeningGuarantees, loadOpeningGuarantees, openingGuaranteeCounts } from "../services/guaranteeOpeningService";
+import { getGuaranteeAccountingView, saveGuaranteeAccountingDetails } from "../services/guaranteeJournalEntryService";
 
 const FORM = findFormPrefix("treasury-openings");
 
@@ -59,6 +61,9 @@ interface OpeningBody {
   cashBoxLines?: CashLineIn[];
   receivableCheques?: ChequeIn[];
   payableCheques?: ChequeIn[];
+  /** ضمانت‌نامه‌های افتتاحیه (چک/سفته/ضمانت‌نامه) به تفکیک جهت؛ هر ردیف شامل partyId و فیلدهای ابزار (routes/guarantees.ts#cleanGuaranteeInstruments) */
+  receiptGuarantees?: any[];
+  paymentGuarantees?: any[];
   updatedAt?: string;
 }
 
@@ -131,6 +136,7 @@ async function serializeOpening(o: any) {
     locked: locks[i] || c.parentChequeId != null,
   });
   const all = cheques.map((c: any, i: number) => ({ c, i }));
+  const guarantees = await loadOpeningGuarantees(o.id);
   return {
     id: o.id,
     date: o.date,
@@ -171,6 +177,8 @@ async function serializeOpening(o: any) {
       baseBalance: Number(l.baseBalance),
       systemGenerated: l.isSystemGenerated,
     })),
+    receiptGuarantees: guarantees.RECEIPT,
+    paymentGuarantees: guarantees.PAYMENT,
     receivableCheques: all.filter(({ c }: any) => c.direction === "RECEIVABLE").map(({ c, i }: any) => mapCheque(c, i)),
     payableCheques: all.filter(({ c }: any) => c.direction === "PAYABLE").map(({ c, i }: any) => mapCheque(c, i)),
   };
@@ -188,6 +196,7 @@ router.get("/treasury-openings", can(`${FORM}.view`), async (_req, res) => {
   const result = [];
   for (const o of items as any[]) {
     const cheques = await loadOpeningCheques(o.fiscalPeriodId);
+    const gc = await openingGuaranteeCounts(o.id);
     result.push({
       id: o.id,
       date: o.date,
@@ -198,6 +207,8 @@ router.get("/treasury-openings", can(`${FORM}.view`), async (_req, res) => {
       bankAccountCount: o.bankAccountLines.length,
       cashBoxCount: o.cashBoxLines.length,
       pettyCashCount: o.pettyCashLines.length,
+      receiptGuaranteeCount: gc.receipt,
+      paymentGuaranteeCount: gc.payment,
     });
   }
   res.json(result);
@@ -475,6 +486,32 @@ async function resolvePeriod(body: OpeningBody) {
   return { date, period };
 }
 
+// ردیف‌های حسابداری (معین + تفصیل) ضمانت‌نامه‌های افتتاحیه — برای پنجره‌ی «تفصیل‌ها»ی تب ضمانت‌نامه (همان قرارداد TreasuryAccountingPanel)
+async function openingGuaranteeDoc(docId: number) {
+  const d = await withoutFiscalPeriodScope(() => prisma.guaranteeDocument.findUnique({ where: { id: docId }, select: { id: true, openingId: true, opening: { select: { isSystemGenerated: true } } } }));
+  if (!d || d.openingId == null) throw new Error("سند ضمانت‌نامه‌ی افتتاحیه یافت نشد");
+  return d;
+}
+router.get("/treasury-openings/guarantee-docs/:docId/accounting-lines", can(`${FORM}.view`), async (req, res) => {
+  try {
+    const d = await openingGuaranteeDoc(Number(req.params.docId));
+    res.json(await withoutFiscalPeriodScope(() => getGuaranteeAccountingView(d.id)));
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا" });
+  }
+});
+router.put("/treasury-openings/guarantee-docs/:docId/accounting-lines", can(`${FORM}.edit`), async (req, res) => {
+  try {
+    const d = await openingGuaranteeDoc(Number(req.params.docId));
+    if (d.opening?.isSystemGenerated) throw new Error(SYSTEM_LOCK_MESSAGE);
+    const rows = Array.isArray(req.body?.lines) ? req.body.lines : [];
+    await withoutFiscalPeriodScope(() => saveGuaranteeAccountingDetails(d.id, rows));
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "خطا در ذخیره" });
+  }
+});
+
 router.post("/treasury-openings", can(`${FORM}.create`), async (req, res) => {
   const body = req.body as OpeningBody;
   try {
@@ -488,6 +525,8 @@ router.post("/treasury-openings", can(`${FORM}.create`), async (req, res) => {
     const bankLines = await cleanBankLines(body.bankAccountLines, base.id);
     const cashLines = await cleanCashLines(body.cashBoxLines, base.id);
     const pettyCashLines = await cleanPettyCashLines(body.pettyCashLines, base.id);
+    const receiptG = await cleanOpeningGuarantees(body.receiptGuarantees, "RECEIPT", "ضمانت‌نامه‌های دریافتی");
+    const paymentG = await cleanOpeningGuarantees(body.paymentGuarantees, "PAYMENT", "ضمانت‌نامه‌های پرداختی");
 
     const id = await prisma.$transaction(async (tx: any) => {
       const o = await tx.treasuryOpening.create({ data: { fiscalPeriodId: period.id, date, isSystemGenerated: false } });
@@ -496,6 +535,11 @@ router.post("/treasury-openings", can(`${FORM}.create`), async (req, res) => {
       for (const [i, l] of cashLines.entries()) await tx.treasuryOpeningCashBox.create({ data: { ...l, openingId: o.id, rowOrder: i } });
       await syncCheques(tx, period.id, "RECEIVABLE", body.receivableCheques || [], base.id, "چک‌های دریافتی");
       await syncCheques(tx, period.id, "PAYABLE", body.payableCheques || [], base.id, "چک‌های پرداختی");
+      const op = { id: o.id, fiscalPeriodId: period.id, date };
+      await withoutFiscalPeriodScope(async () => {
+        await syncOpeningGuarantees(tx, op, "RECEIPT", receiptG, "ضمانت‌نامه‌های دریافتی");
+        await syncOpeningGuarantees(tx, op, "PAYMENT", paymentG, "ضمانت‌نامه‌های پرداختی");
+      });
       return o.id;
     });
     res.status(201).json({ id });
@@ -521,6 +565,8 @@ router.put("/treasury-openings/:id", can(`${FORM}.edit`), async (req, res) => {
     const bankLines = await cleanBankLines(body.bankAccountLines, base.id);
     const cashLines = await cleanCashLines(body.cashBoxLines, base.id);
     const pettyCashLines = await cleanPettyCashLines(body.pettyCashLines, base.id);
+    const receiptG = await cleanOpeningGuarantees(body.receiptGuarantees, "RECEIPT", "ضمانت‌نامه‌های دریافتی");
+    const paymentG = await cleanOpeningGuarantees(body.paymentGuarantees, "PAYMENT", "ضمانت‌نامه‌های پرداختی");
 
     await prisma.$transaction(async (tx: any) => {
       await syncBankLines(tx, id, bankLines);
@@ -529,6 +575,11 @@ router.put("/treasury-openings/:id", can(`${FORM}.edit`), async (req, res) => {
       await syncCheques(tx, existing.fiscalPeriodId, "RECEIVABLE", body.receivableCheques || [], base.id, "چک‌های دریافتی");
       await syncCheques(tx, existing.fiscalPeriodId, "PAYABLE", body.payableCheques || [], base.id, "چک‌های پرداختی");
       await tx.treasuryOpening.update({ where: { id }, data: { date } });
+      const op = { id, fiscalPeriodId: existing.fiscalPeriodId, date };
+      await withoutFiscalPeriodScope(async () => {
+        await syncOpeningGuarantees(tx, op, "RECEIPT", receiptG, "ضمانت‌نامه‌های دریافتی");
+        await syncOpeningGuarantees(tx, op, "PAYMENT", paymentG, "ضمانت‌نامه‌های پرداختی");
+      });
     });
     res.json({ id });
   } catch (e: any) {
@@ -546,6 +597,7 @@ router.delete("/treasury-openings/:id", can(`${FORM}.delete`), async (req, res) 
     await prisma.$transaction(async (tx: any) => {
       await syncCheques(tx, existing.fiscalPeriodId, "RECEIVABLE", [], (await getBaseCurrency()).id, "چک‌های دریافتی");
       await syncCheques(tx, existing.fiscalPeriodId, "PAYABLE", [], (await getBaseCurrency()).id, "چک‌های پرداختی");
+      await withoutFiscalPeriodScope(() => deleteOpeningGuarantees(tx, { id, fiscalPeriodId: existing.fiscalPeriodId, date: existing.date }));
       await tx.treasuryOpening.delete({ where: { id } });
     });
     res.status(204).send();

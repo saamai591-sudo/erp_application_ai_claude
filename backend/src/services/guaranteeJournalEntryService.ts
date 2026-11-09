@@ -46,8 +46,8 @@ export interface PlannedGuaranteeLine {
 
 const keyOf = (r: { role: string; instrumentId: number }) => `${r.role}:${r.instrumentId}`;
 
-async function loadDoc(id: number) {
-  const doc = await prisma.guaranteeDocument.findUnique({
+async function loadDoc(id: number, client: any = prisma) {
+  const doc = await client.guaranteeDocument.findUnique({
     where: { id },
     include: { party: true, instruments: { include: { currency: true, guaranteeType: true }, orderBy: { rowOrder: "asc" } } },
   });
@@ -123,16 +123,17 @@ const sourcesOf = (d: { detail1Code?: string | null; detail2Code?: string | null
   }) as { detail1Source: "AUTO" | "MANUAL"; detail2Source: "AUTO" | "MANUAL"; detail3Source: "AUTO" | "MANUAL" };
 
 /** همگام‌سازی ردیف‌های حسابداری با ابزارهای سند (idempotent؛ مثل syncReceiptAccountingLines) */
-export async function syncGuaranteeAccountingLines(docId: number) {
-  const doc = await loadDoc(docId);
+/** client: در صورت ارسال (تراکنش افتتاحیه) همه‌ی خواندن/نوشتن‌ها روی همان تراکنش انجام می‌شود */
+export async function syncGuaranteeAccountingLines(docId: number, client: any = prisma) {
+  const doc = await loadDoc(docId, client);
   const settings = await loadSettings();
   const { plan, errors } = await buildGuaranteePlan(doc, settings);
   if (errors.length > 0) throw new Error(errors.join("\n"));
-  const existing = await prisma.guaranteeAccountingLine.findMany({ where: { documentId: docId } });
-  const byKey = new Map(existing.map((e) => [keyOf(e), e]));
+  const existing = await client.guaranteeAccountingLine.findMany({ where: { documentId: docId } });
+  const byKey = new Map<string, any>(existing.map((e: any) => [keyOf(e), e]));
   const auto = await autoDims(plan);
   const wanted = new Set<string>();
-  await prisma.$transaction(async (tx: any) => {
+  const run = async (tx: any) => {
     for (const p of plan) {
       const key = keyOf(p);
       wanted.add(key);
@@ -148,9 +149,11 @@ export async function syncGuaranteeAccountingLines(docId: number) {
         if (refChanged || Object.keys(patch).length > 0) await tx.guaranteeAccountingLine.update({ where: { id: cur.id }, data: { ...(refChanged ? { treasurySettingId: p.treasurySettingId } : {}), ...patch } });
       }
     }
-    const stale = existing.filter((e) => !wanted.has(keyOf(e))).map((e) => e.id);
+    const stale = existing.filter((e: any) => !wanted.has(keyOf(e))).map((e: any) => e.id);
     if (stale.length) await tx.guaranteeAccountingLine.deleteMany({ where: { id: { in: stale } } });
-  });
+  };
+  if (client === prisma) await prisma.$transaction(run);
+  else await run(client);
 }
 
 export async function accountingApproveGuarantee(docId: number, userId: number | null) {

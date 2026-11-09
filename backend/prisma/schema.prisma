@@ -176,6 +176,8 @@ model ExchangeRate {
 
 model FiscalPeriod {
   guaranteeReturns GuaranteeReturn[]
+  guaranteeOperations GuaranteeOperation[]
+  guaranteeExtensions GuaranteeExtension[]
   guaranteeDocuments GuaranteeDocument[]
   inventoryCounts InventoryCount[]
   countTagIssues                 InventoryCountTagIssue[]
@@ -326,6 +328,8 @@ model DetailCodeUsage {
 
 model Party {
   guaranteeReturns GuaranteeReturn[]
+  guaranteeOperations GuaranteeOperation[]
+  guaranteeExtensions GuaranteeExtension[]
   guaranteeDocuments GuaranteeDocument[]
   guaranteeBankInstruments GuaranteeInstrument[] @relation("GuaranteeInstrumentBank")
   purchaseReturns            PurchaseReturn[]
@@ -811,6 +815,7 @@ model DocumentType {
 
 model JournalEntry {
   guaranteeReturn GuaranteeReturn?
+  guaranteeOperation GuaranteeOperation?
   guaranteeDocument GuaranteeDocument?
   purchaseReturn                PurchaseReturn?
   assetInsuranceRuns            AssetInsuranceRun[]
@@ -4032,6 +4037,8 @@ model TreasuryOpening {
   bankAccountLines  TreasuryOpeningBankAccount[]
   cashBoxLines      TreasuryOpeningCashBox[]
   pettyCashLines    TreasuryOpeningPettyCash[]
+  /// ضمانت‌نامه‌های افتتاحیه (استقرار): سندهای دریافت/پرداخت تضمینِ علامت‌دار با openingId — به‌ازای هر جهت و هر طرف‌حساب یک سند (services/guaranteeOpeningService.ts)
+  guaranteeDocuments GuaranteeDocument[]
 }
 
 model TreasuryOpeningBankAccount {
@@ -8616,6 +8623,9 @@ model GuaranteeDocument {
   journalEntryId         Int?                     @unique
   journalEntry           JournalEntry?            @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
   accountingLines        GuaranteeAccountingLine[]
+  /// سند افتتاحیه (ساخته‌شده از «عملیات اول دوره»): بدون تایید حسابداری و سند؛ ردیف‌های حسابداری‌اش موقع ثبت افتتاحیه ساخته می‌شود
+  openingId              Int?
+  opening                TreasuryOpening?         @relation(fields: [openingId], references: [id], onDelete: Restrict)
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
   fiscalPeriod    FiscalPeriod          @relation(fields: [fiscalPeriodId], references: [id])
@@ -8625,11 +8635,14 @@ model GuaranteeDocument {
   instruments     GuaranteeInstrument[]
 
   @@unique([direction, fiscalPeriodId, number])
+  @@index([openingId])
 }
 
 /// ابزار تضمین: چک / سفته / ضمانت‌نامه (فیلدهای هر نوع در routes/guarantees.ts اعتبارسنجی می‌شود)
 model GuaranteeInstrument {
   returnLine GuaranteeReturnLine?
+  operationLines GuaranteeOperationLine[]
+  extensionLines GuaranteeExtensionLine[]
   id              Int                     @id @default(autoincrement())
   documentId      Int
   rowOrder        Int                     @default(0)
@@ -8730,4 +8743,77 @@ model UpdateSettings {
   registryUser        String?
   registryPasswordEnc String?
   updatedAt           DateTime @updatedAt
+}
+
+enum GuaranteeOperationKind {
+  REDUCE
+  INCREASE
+  CANCEL
+}
+
+/// «عملیات ضمانت‌نامه‌ی دریافتی/پرداختی» (تقلیل، افزایش، ابطال): فقط ابزار ضمانت‌نامه؛ هر سند یک نوع عملیات دارد و سند حسابداری دارد
+/// (services/guaranteeOperationJournalService.ts). مبلغ/وضعیت فعلیِ ابزار ذخیره نمی‌شود و از روی ابزار + عملیات‌ها و تمدیدها محاسبه می‌شود (services/guaranteeOperationService.ts).
+model GuaranteeOperation {
+  id             Int                     @id @default(autoincrement())
+  direction      GuaranteeDirection
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime                @db.Date
+  partyId        Int
+  kind           GuaranteeOperationKind
+  description    String?
+  journalEntryId Int?                    @unique
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  fiscalPeriod   FiscalPeriod            @relation(fields: [fiscalPeriodId], references: [id])
+  party          Party                   @relation(fields: [partyId], references: [id])
+  journalEntry   JournalEntry?           @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  lines          GuaranteeOperationLine[]
+
+  @@unique([direction, fiscalPeriodId, number])
+}
+
+model GuaranteeOperationLine {
+  id           Int                 @id @default(autoincrement())
+  operationId  Int
+  instrumentId Int
+  rowOrder     Int                 @default(0)
+  /// مبلغ تغییر (مثبت) به ارز ابزار؛ در ابطال = مبلغ فعلیِ ابزار در لحظه‌ی ابطال
+  changeAmount Decimal?            @db.Decimal(18, 2)
+  operation    GuaranteeOperation  @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  instrument   GuaranteeInstrument @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
+
+  @@index([operationId])
+  @@index([instrumentId])
+}
+
+/// «تمدید ضمانت‌نامه دریافتی/پرداختی»: سررسید جدیدِ ابزار «ضمانت‌نامه»؛ بدون سند حسابداری
+model GuaranteeExtension {
+  id             Int                      @id @default(autoincrement())
+  direction      GuaranteeDirection
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime                 @db.Date
+  partyId        Int
+  description    String?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  fiscalPeriod   FiscalPeriod             @relation(fields: [fiscalPeriodId], references: [id])
+  party          Party                    @relation(fields: [partyId], references: [id])
+  lines          GuaranteeExtensionLine[]
+
+  @@unique([direction, fiscalPeriodId, number])
+}
+
+model GuaranteeExtensionLine {
+  id           Int                 @id @default(autoincrement())
+  extensionId  Int
+  instrumentId Int
+  rowOrder     Int                 @default(0)
+  newDueDate   DateTime            @db.Date
+  extension    GuaranteeExtension  @relation(fields: [extensionId], references: [id], onDelete: Cascade)
+  instrument   GuaranteeInstrument @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
+
+  @@index([extensionId])
+  @@index([instrumentId])
 }

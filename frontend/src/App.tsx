@@ -163,6 +163,9 @@ import CardReaders from "./pages/CardReaders";
 import GuaranteeTypes from "./pages/GuaranteeTypes";
 import Guarantees from "./pages/Guarantees";
 import GuaranteeReturns from "./pages/GuaranteeReturns";
+import GuaranteeOperations from "./pages/GuaranteeOperations";
+import GuaranteeExtensions from "./pages/GuaranteeExtensions";
+import GuaranteeReview from "./pages/GuaranteeReview";
 import PrintGroups from "./pages/PrintGroups";
 import AttendanceMissionRequests from "./pages/AttendanceMissionRequests";
 import AttendanceMissionReports from "./pages/AttendanceMissionReports";
@@ -784,6 +787,16 @@ export default function App() {
             <Route path="/guarantee-types" element={<GuaranteeTypes />} />
             <Route path="/guarantee-types/new" element={<GuaranteeTypes />} />
             <Route path="/guarantee-types/:id/edit" element={<GuaranteeTypes />} />
+            {(["guarantee-receipt-extensions", "guarantee-payment-extensions"] as const).flatMap((seg) => [
+              <Route key={seg} path={`/${seg}`} element={<GuaranteeExtensions direction={seg === "guarantee-receipt-extensions" ? "RECEIPT" : "PAYMENT"} />} />,
+              <Route key={seg + "-new"} path={`/${seg}/new`} element={<GuaranteeExtensions direction={seg === "guarantee-receipt-extensions" ? "RECEIPT" : "PAYMENT"} />} />,
+              <Route key={seg + "-edit"} path={`/${seg}/:id/edit`} element={<GuaranteeExtensions direction={seg === "guarantee-receipt-extensions" ? "RECEIPT" : "PAYMENT"} />} />,
+            ])}
+            {(["guarantee-receipt-operations", "guarantee-payment-operations"] as const).flatMap((seg) => [
+              <Route key={seg} path={`/${seg}`} element={<GuaranteeOperations direction={seg === "guarantee-receipt-operations" ? "RECEIPT" : "PAYMENT"} />} />,
+              <Route key={seg + "-new"} path={`/${seg}/new`} element={<GuaranteeOperations direction={seg === "guarantee-receipt-operations" ? "RECEIPT" : "PAYMENT"} />} />,
+              <Route key={seg + "-edit"} path={`/${seg}/:id/edit`} element={<GuaranteeOperations direction={seg === "guarantee-receipt-operations" ? "RECEIPT" : "PAYMENT"} />} />,
+            ])}
             {(["guarantee-receipt-returns", "guarantee-payment-returns"] as const).flatMap((seg) => [
               <Route key={seg} path={`/${seg}`} element={<GuaranteeReturns direction={seg === "guarantee-receipt-returns" ? "RECEIPT" : "PAYMENT"} />} />,
               <Route key={seg + "-new"} path={`/${seg}/new`} element={<GuaranteeReturns direction={seg === "guarantee-receipt-returns" ? "RECEIPT" : "PAYMENT"} />} />,
@@ -863,6 +876,8 @@ export default function App() {
             <Route path="/bank-account-review" element={<BankAccountReview />} />
             <Route path="/cash-review" element={<CashReview />} />
             <Route path="/petty-cash-review" element={<PettyCashReview />} />
+            <Route path="/guarantee-receipt-review" element={<GuaranteeReview direction="RECEIPT" />} />
+            <Route path="/guarantee-payment-review" element={<GuaranteeReview direction="PAYMENT" />} />
             <Route path="/receivable-documents-review" element={<ChequeDocumentsReview kind="receivable" />} />
             <Route path="/payable-documents-review" element={<ChequeDocumentsReview kind="payable" />} />
             <Route path="/treasury-openings" element={<TreasuryOpenings />} />

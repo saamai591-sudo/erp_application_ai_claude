@@ -84,7 +84,7 @@ export function createGuaranteeReturnRouter(direction: Direction, formKey: strin
       if (i.document.direction !== direction) throw new Error(`${row}: این ابزار از سند ${direction === "RECEIPT" ? "پرداخت" : "دریافت"} تضمین است`);
       if (!(RETURNABLE as readonly string[]).includes(i.type)) throw new Error(`${row}: فقط چک و سفته قابل استرداد است`);
       if (i.document.partyId !== partyId) throw new Error(`${row}: طرف حساب ابزار با طرف حساب سند استرداد یکی نیست`);
-      if (!i.document.journalEntryId) throw new Error(`${row} (${INSTR_FA[i.type]} ${i.number}): برای سند اصلی (شماره ${i.document.number}) هنوز سند حسابداری صادر نشده است`);
+      if (!i.document.journalEntryId && i.document.openingId == null) throw new Error(`${row} (${INSTR_FA[i.type]} ${i.number}): برای سند اصلی (شماره ${i.document.number}) هنوز سند حسابداری صادر نشده است`);
       if (i.returnLine && i.returnLine.returnId !== ownId) throw new Error(`${row} (${INSTR_FA[i.type]} ${i.number}): این ابزار قبلاً استرداد شده است`);
       if (i.document.date.getTime() > date.getTime()) throw new Error(`${row}: تاریخ استرداد نمی‌تواند قبل از تاریخ سند اصلی (شماره ${i.document.number}) باشد`);
     }
@@ -105,7 +105,7 @@ export function createGuaranteeReturnRouter(direction: Direction, formKey: strin
       where: {
         type: { in: [...RETURNABLE] },
         returnLine: null,
-        document: { direction, partyId, journalEntryId: { not: null }, ...(date && !Number.isNaN(date.getTime()) ? { date: { lte: date } } : {}) },
+        document: { direction, partyId, OR: [{ journalEntryId: { not: null } }, { openingId: { not: null } }], ...(date && !Number.isNaN(date.getTime()) ? { date: { lte: date } } : {}) },
       },
       include: { guaranteeType: { select: { title: true } }, document: { select: { id: true, number: true, date: true } } },
       orderBy: [{ documentId: "asc" }, { rowOrder: "asc" }],

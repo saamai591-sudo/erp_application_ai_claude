@@ -193,7 +193,7 @@ export function ManagementUpdate({ token, onUnauthorized }: { token: string; onU
         <strong>اتصال به ریجستری نسخه‌ها</strong>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
           <label style={field}>
-            آدرس ریجستری (مثلاً saamai-repo.saam.ir)
+            آدرس ریجستری (مثلاً repo.saam.ir/saamai؛ پیشوند مسیر اختیاری است)
             <input dir="ltr" value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} />
           </label>
           <label style={field}>

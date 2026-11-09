@@ -19,6 +19,7 @@ import { api, ApiError } from "../lib/api";
 import { BankAccountPicker } from "../components/BankAccountPicker";
 import { partyDisplayName } from "./Users";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod } from "../lib/fiscalYearDefaultDate";
+import { GuaranteeOpeningTab, GuaRow, guaRowFromServer, guaRowsToPayload } from "../components/GuaranteeOpeningTab";
 
 // ماژول «خزانه‌داری» > افتتاحیه دریافت و پرداخت — طبق Documents/افتتاحیه دریافت و پرداخت و بستن سال.md. به‌ازای هر دوره‌ی
 // مالی یک فرم با چهار تب: چک‌های دریافتی، چک‌های پرداختی، حساب‌های بانکی، صندوق‌ها (نگاه کنید به
@@ -53,6 +54,8 @@ interface ListRow {
   bankAccountCount: number;
   cashBoxCount: number;
   pettyCashCount: number;
+  receiptGuaranteeCount?: number;
+  paymentGuaranteeCount?: number;
 }
 
 interface ChequeRow {
@@ -80,8 +83,8 @@ interface CashRow { key: string; cashBoxId: string; currencyId: string; balance:
 const RECEIVABLE_STATUS_FA: Record<string, string> = { IN_HAND: "در دست", IN_COLLECTION: "واگذار به وصول", BOUNCED: "برگشتی" };
 const PAYABLE_STATUS_FA: Record<string, string> = { ISSUED: "صادرشده" };
 
-type TabKey = "receivable" | "payable" | "bank" | "cash" | "petty";
-const TAB_LABEL: Record<TabKey, string> = { receivable: "چک‌های دریافتی", payable: "چک‌های پرداختی", bank: "حساب‌های بانکی", cash: "صندوق‌ها", petty: "تنخواه‌ها" };
+type TabKey = "receivable" | "payable" | "bank" | "cash" | "petty" | "guaReceipt" | "guaPayment";
+const TAB_LABEL: Record<TabKey, string> = { receivable: "چک‌های دریافتی", payable: "چک‌های پرداختی", bank: "حساب‌های بانکی", cash: "صندوق‌ها", petty: "تنخواه‌ها", guaReceipt: "ضمانت‌نامه‌های دریافتی", guaPayment: "ضمانت‌نامه‌های پرداختی" };
 
 const INFO_TEXT =
   "ثبت اطلاعات افتتاحیه‌ی دریافت و پرداخت یک دوره‌ی مالی: چک‌های دریافتی و پرداختی، مانده‌ی اول دوره‌ی حساب‌های بانکی و صندوق‌ها. " +
@@ -166,6 +169,8 @@ function OpeningList() {
           { header: "حساب‌های بانکی", render: (r: ListRow) => toFaDigits(String(r.bankAccountCount)), width: "120px" },
           { header: "صندوق‌ها", render: (r: ListRow) => toFaDigits(String(r.cashBoxCount)), width: "100px" },
           { header: "تنخواه‌ها", render: (r: ListRow) => toFaDigits(String(r.pettyCashCount ?? 0)), width: "100px" },
+          { header: "ضمانت‌نامه‌های دریافتی", render: (r: ListRow) => toFaDigits(String(r.receiptGuaranteeCount ?? 0)), width: "130px" },
+          { header: "ضمانت‌نامه‌های پرداختی", render: (r: ListRow) => toFaDigits(String(r.paymentGuaranteeCount ?? 0)), width: "130px" },
         ]}
         rows={items}
         edit={{ path: (r: ListRow) => `/treasury-openings/${r.id}/edit` }}
@@ -216,6 +221,8 @@ function OpeningForm({ editId }: { editId?: number }) {
   const [bankRows, setBankRows] = usePersistedState<BankRow[]>(`${cacheKey}:bank`, []);
   const [cashRows, setCashRows] = usePersistedState<CashRow[]>(`${cacheKey}:cash`, []);
   const [pettyRows, setPettyRows] = usePersistedState<PettyRow[]>(`${cacheKey}:petty`, []);
+  const [guaRecv, setGuaRecv] = usePersistedState<GuaRow[]>(`${cacheKey}:guaRecv`, []);
+  const [guaPay, setGuaPay] = usePersistedState<GuaRow[]>(`${cacheKey}:guaPay`, []);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -246,6 +253,8 @@ function OpeningForm({ editId }: { editId?: number }) {
     setReceivable(d.receivableCheques.map(toCheque));
     setPayable(d.payableCheques.map(toCheque));
     setBankRows(d.bankAccountLines.map((l: any) => ({ key: nextKey(), bankAccountId: String(l.bankAccountId), balance: String(l.balance), baseBalance: String(l.baseBalance), systemGenerated: !!l.systemGenerated })));
+    setGuaRecv((d.receiptGuarantees || []).map(guaRowFromServer));
+    setGuaPay((d.paymentGuarantees || []).map(guaRowFromServer));
     setPettyRows((d.pettyCashLines || []).map((l: any) => ({ key: nextKey(), custodianId: String(l.custodianId), balance: String(l.balance), baseBalance: String(l.baseBalance), systemGenerated: !!l.systemGenerated })));
     setCashRows(d.cashBoxLines.map((l: any) => ({ key: nextKey(), cashBoxId: String(l.cashBoxId), currencyId: String(l.currencyId), balance: String(l.balance), baseBalance: String(l.baseBalance), systemGenerated: !!l.systemGenerated })));
   }
@@ -344,6 +353,8 @@ function OpeningForm({ editId }: { editId?: number }) {
       cashBoxLines: cashRows.map((r) => ({ cashBoxId: Number(r.cashBoxId), currencyId: Number(r.currencyId), balance: Number(r.balance) || 0, baseBalance: Number(r.baseBalance) || 0 })),
       receivableCheques: buildCheques(receivable, "receivable"),
       payableCheques: buildCheques(payable, "payable"),
+      receiptGuarantees: guaRowsToPayload(guaRecv),
+      paymentGuarantees: guaRowsToPayload(guaPay),
     };
     try {
       if (editId) {
@@ -698,7 +709,8 @@ function OpeningForm({ editId }: { editId?: number }) {
 
         {/* دکمه‌های تب‌ها عمداً بیرون از fieldset قفل‌شده‌اند تا در حالت فقط‌خواندنی هم بتوان بین تب‌ها جابه‌جا شد و اقلام را دید */}
         <div className="party-tabs">
-          {(Object.keys(TAB_LABEL) as TabKey[]).map((k) => (
+          {/* ضمانت‌نامه‌ها با بستن سال منتقل نمی‌شوند؛ پس در افتتاحیه‌ی سیستمی این دو تب همیشه خالی است و نمایش داده نمی‌شود */}
+          {(Object.keys(TAB_LABEL) as TabKey[]).filter((k) => !(lockedBySystem && (k === "guaReceipt" || k === "guaPayment"))).map((k) => (
             <button key={k} type="button" className={`party-tab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>
               {TAB_LABEL[k]}
             </button>
@@ -711,6 +723,8 @@ function OpeningForm({ editId }: { editId?: number }) {
         {tab === "bank" && bankTable()}
         {tab === "cash" && cashTable()}
         {tab === "petty" && pettyTable()}
+        {!lockedBySystem && tab === "guaReceipt" && <GuaranteeOpeningTab direction="RECEIPT" title={TAB_LABEL.guaReceipt} rows={guaRecv} setRows={setGuaRecv} date={date} parties={parties as any} bankAccounts={bankAccounts as any} branches={branches as any} currencies={currencies} />}
+        {!lockedBySystem && tab === "guaPayment" && <GuaranteeOpeningTab direction="PAYMENT" title={TAB_LABEL.guaPayment} rows={guaPay} setRows={setGuaPay} date={date} parties={parties as any} bankAccounts={bankAccounts as any} branches={branches as any} currencies={currencies} />}
         </fieldset>
       </form>
     </FormPage>

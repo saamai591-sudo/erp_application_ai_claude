@@ -39,7 +39,7 @@ export async function issueGuaranteeReturnJournal(id: number) {
   for (const [idx, l] of ret.lines.entries()) {
     const i = l.instrument;
     const label = `ردیف ${idx + 1} (${INSTR_FA[i.type] ?? i.type} ${i.number})`;
-    if (!i.document.journalEntryId) {
+    if (!i.document.journalEntryId && i.document.openingId == null) {
       errors.push(`${label}: برای سند ${word} تضمین شماره ${i.document.number} سند حسابداری صادر نشده است`);
       continue;
     }

@@ -162,6 +162,8 @@ export const USAGE_META: Record<string, UsageMeta> = {
   AssetLocation: { label: "شاخه‌ی موقعیت دارایی", base: "/asset-locations" },
   CardReader: { label: "کارتخوان", base: "/card-readers" },
   GuaranteeType: { label: "نوع تضمین", base: "/guarantee-types" },
+  GuaranteeExtension: { label: "تمدید ضمانت‌نامه", title: (r: any) => `شماره ${r.number}` },
+  GuaranteeOperation: { label: "عملیات ضمانت‌نامه", title: (r: any) => `شماره ${r.number}` },
   GuaranteeReturn: { label: "استرداد تضمین", title: (r: any) => `شماره ${r.number}` },
   GuaranteeDocument: { label: "سند تضمین", title: (r: any) => `شماره ${r.number}` },
   PettyCashCustodian: { label: "تنخواه‌دار", base: "/petty-cash-custodians" },

@@ -14,7 +14,8 @@ import { getLabels, listTags, RegistryCreds, RegistryError } from "./registryCli
 export class UpdateError extends Error {}
 
 const RELEASE_REPO = "accounting-erp-release";
-const HOST_RE = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d{1,5})?$/i;
+// آدرس ریجستری = میزبان[:پورت] و در صورت نیاز یک پیشوند مسیر (مثلاً repo.saam.ir/saamai) برای وقتی که ایمیج‌ها در مخزنِ مشترک با پیشوند از بقیه جدا می‌شوند
+const HOST_RE = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d{1,5})?(\/[a-z0-9]+([._-][a-z0-9]+)*)*$/i;
 const SALT = "erp-update-registry-password-v1";
 const MAX_VERSIONS = 40;
 
@@ -56,7 +57,7 @@ export async function getSettings() {
 export async function saveSettings(input: { host: string; user: string; password?: string }) {
   const host = String(input.host || "").trim().toLowerCase();
   const user = String(input.user || "").trim();
-  if (!HOST_RE.test(host)) throw new UpdateError("آدرس ریجستری نامعتبر است (فقط نام میزبان و در صورت لزوم :پورت، بدون https://)");
+  if (!HOST_RE.test(host)) throw new UpdateError("آدرس ریجستری نامعتبر است (نام میزبان و در صورت لزوم :پورت و پیشوند مسیر، بدون https://؛ مثلاً repo.saam.ir/saamai)");
   if (!user) throw new UpdateError("نام کاربری ریجستری الزامی است");
   const old = await prisma.updateSettings.findUnique({ where: { id: 1 } });
   let enc = old?.registryPasswordEnc ?? null;
@@ -70,10 +71,16 @@ export async function saveSettings(input: { host: string; user: string; password
   invalidateCache();
 }
 
-async function creds(): Promise<RegistryCreds> {
+const releaseRepo = (c: { prefix: string }) => (c.prefix ? `${c.prefix}/${RELEASE_REPO}` : RELEASE_REPO);
+
+async function creds(): Promise<RegistryCreds & { prefix: string; full: string }> {
   const s = await prisma.updateSettings.findUnique({ where: { id: 1 } });
   if (!s?.registryHost || !s.registryUser || !s.registryPasswordEnc) throw new UpdateError("اتصال به ریجستری نسخه‌ها هنوز تنظیم نشده است");
-  return { host: s.registryHost, user: s.registryUser, password: decrypt(s.registryPasswordEnc) };
+  // registryHost می‌تواند پیشوند مسیر هم داشته باشد: میزبان برای اتصال، پیشوند جلوی نام مخزن‌ها (مثلاً saamai/accounting-erp-release)
+  const slash = s.registryHost.indexOf("/");
+  const host = slash < 0 ? s.registryHost : s.registryHost.slice(0, slash);
+  const prefix = slash < 0 ? "" : s.registryHost.slice(slash + 1);
+  return { host, user: s.registryUser, password: decrypt(s.registryPasswordEnc), prefix, full: s.registryHost };
 }
 
 export interface ReleaseItem {
@@ -97,7 +104,7 @@ async function loadVerified(force: boolean) {
   const c = await creds();
   let tags: string[];
   try {
-    tags = await listTags(c, RELEASE_REPO);
+    tags = await listTags(c, releaseRepo(c));
   } catch (e) {
     if (e instanceof RegistryError) throw new UpdateError(e.message);
     throw e;
@@ -108,7 +115,7 @@ async function loadVerified(force: boolean) {
   const worker = async () => {
     for (let t = queue.shift(); t; t = queue.shift()) {
       try {
-        const labels = await getLabels(c, RELEASE_REPO, t);
+        const labels = await getLabels(c, releaseRepo(c), t);
         const { manifest, payload } = verifyManifest(labels["erp.release.manifest"] || "", labels["erp.release.signature"] || "");
         // تگِ ریجستری باید با نسخه‌ی داخل manifest امضاشده یکی باشد (جلوگیری از جابه‌جاکردن manifest نسخه‌ی دیگر زیر یک تگ)
         if (manifest.version !== t) continue;
@@ -202,5 +209,5 @@ export async function applyRelease(version: string) {
   const reasons = await eligibility(it.manifest, cur);
   if (reasons.length) throw new UpdateError(reasons.join("؛ "));
   const c = await creds();
-  await updaterCall("POST", "/apply", { payload: it.payload, signature: it.signature, registry: c, fromVersion: cur });
+  await updaterCall("POST", "/apply", { payload: it.payload, signature: it.signature, registry: { host: c.full, user: c.user, password: c.password }, fromVersion: cur });
 }

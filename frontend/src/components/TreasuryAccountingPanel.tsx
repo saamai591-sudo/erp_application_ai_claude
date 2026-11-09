@@ -24,7 +24,7 @@ interface AccLine {
 const SIDE_FA = { DEBIT: "بدهکار", CREDIT: "بستانکار" } as const;
 
 // side/title: فقط برای «اعلامیه بدهکار بستانکار» (/party-settlements) که دو پنل دارد — بخش دریافت و بخش پرداخت (?side=RECEIPT|PAYMENT)
-export function TreasuryAccountingPanel({ basePath, docId, editable, reloadKey, side, title }: { basePath: "/receipts" | "/payments" | "/party-settlements" | "/guarantee-receipts" | "/guarantee-payments"; docId: number; editable: boolean; reloadKey?: string | number; side?: "RECEIPT" | "PAYMENT"; title?: string }) {
+export function TreasuryAccountingPanel({ basePath, docId, editable, reloadKey, side, title }: { basePath: "/receipts" | "/payments" | "/party-settlements" | "/guarantee-receipts" | "/guarantee-payments" | "/treasury-openings/guarantee-docs"; docId: number; editable: boolean; reloadKey?: string | number; side?: "RECEIPT" | "PAYMENT"; title?: string }) {
   const q = side ? `?side=${side}` : "";
   const [lines, setLines] = useState<AccLine[]>([]);
   const [errors, setErrors] = useState<string[]>([]);

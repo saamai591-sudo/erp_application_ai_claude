@@ -32,7 +32,8 @@ const HISTORY_FILE = path.join(BACKUP_DIR, "update-history.json");
 
 const SEMVER = /^\d+\.\d+\.\d+$/;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
-const HOST_RE = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d{1,5})?$/i;
+// میزبان[:پورت] با پیشوند مسیر اختیاری (repo.saam.ir/saamai)
+const HOST_RE = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d{1,5})?(\/[a-z0-9]+([._-][a-z0-9]+)*)*$/i;
 
 // ─── وضعیت ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -245,7 +246,7 @@ async function apply({ manifest, registry, fromVersion }) {
     }
 
     step("ورود به ریجستری");
-    await run("docker", ["login", registry.host, "-u", registry.user, "--password-stdin"], { input: registry.password, env: dockerEnv, timeoutMs: 60000 });
+    await run("docker", ["login", registry.host.split("/")[0], "-u", registry.user, "--password-stdin"], { input: registry.password, env: dockerEnv, timeoutMs: 60000 });
 
     step("بررسی سلامت نصب فعلی (دیتابیس)");
     migBefore = await dbMigrationCount(base);
