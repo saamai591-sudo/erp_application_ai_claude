@@ -26,9 +26,10 @@ router.get("/", async (_req, res) => {
 router.post("/", can(`${FORM}.create`), async (req, res) => {
   const { title, fromDate, toDate } = req.body as { title: string; fromDate: string; toDate: string };
 
-  if (!title || !/^\d{4}$/.test(title)) {
-    return res.status(400).json({ error: "عنوان باید یک عدد ۴ رقمی باشد" });
-  }
+  // عنوان: «nnnn» یا «nnnn-nnnn» (دوره‌ی مالی دوسالانه؛ سال دوم باید یکی بعد از سال اول باشد)
+  const titleMatch = typeof title === "string" ? /^(\d{4})(?:-(\d{4}))?$/.exec(title) : null;
+  if (!titleMatch) return res.status(400).json({ error: "عنوان باید یک عدد ۴ رقمی (nnnn) یا به صورت nnnn-nnnn باشد" });
+  if (titleMatch[2] && Number(titleMatch[2]) !== Number(titleMatch[1]) + 1) return res.status(400).json({ error: "در عنوان nnnn-nnnn، سال دوم باید یک سال بعد از سال اول باشد" });
   if (!fromDate || !toDate) return res.status(400).json({ error: "از تاریخ و تا تاریخ الزامی است" });
 
   const from = new Date(fromDate);

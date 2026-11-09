@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Modal } from "./Modal";
 import { usePickerKeyboard } from "./pickerKeyboard";
 import { useFxEnabled } from "../lib/useEntitlements";
+import { RequiredMark } from "./RequiredMark";
 
 export interface PickerColumn<T> {
   header: string;
@@ -22,6 +23,8 @@ export function RecordPickerField<T extends { id: number | string }>({
   resultInDisplayOrder,
   onOpen,
   placeholder,
+  inlineLabel,
+  inlineRequired,
   disabled,
   title,
   onClear,
@@ -46,6 +49,9 @@ export function RecordPickerField<T extends { id: number | string }>({
    * پیش‌شرط، مثل الزامی‌بودن فیلدهای سرصفحه — نگاه کنید به guardRowEntry در فرم‌های مبنادار) */
   onOpen?: () => void | boolean;
   placeholder?: string;
+  /** برچسبِ فیلد داخل خودِ فیلد: خالی = به‌جای placeholder (کم‌رنگ)، پر = ناپدید می‌شود و عنوان تمام عرض را می‌گیرد؛ متن کامل با نام فیلد در tooltip. فرم، <label> کناری را برنمی‌دارد خودش حذف می‌کند */
+  inlineLabel?: string;
+  inlineRequired?: boolean;
   disabled?: boolean;
   title: string;
   /** اگر داده شود و فیلد مقداری داشته باشد، دکمه‌ی کوچک «پاک کردن» کنار فیلد نمایش داده می‌شود (برای فیلدهای اختیاری) */
@@ -59,13 +65,14 @@ export function RecordPickerField<T extends { id: number | string }>({
         <button
           type="button"
           className="picker-field"
+          title={inlineLabel ? `${inlineLabel}${displayValue ? `: ${displayValue}` : ""}` : displayValue || undefined}
           disabled={disabled}
           onClick={() => {
             if (onOpen?.() === false) return;
             setOpen(true);
           }}
         >
-          <span>{displayValue || <span className="picker-placeholder">{placeholder || "انتخاب کنید"}</span>}</span>
+          <span>{displayValue || <span className="picker-placeholder">{inlineLabel ? <>{inlineLabel}{inlineRequired && <RequiredMark />}</> : placeholder || "انتخاب کنید"}</span>}</span>
           <SearchIcon />
         </button>
         {onClear && displayValue && !disabled && (

@@ -14,6 +14,8 @@ import { showError } from "../lib/toast";
 import { toFaDigits } from "../lib/formatAmount";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { Modal } from "../components/Modal";
+import { discoverCardDevices, inPosApp, PosCardDevice } from "../lib/posApp";
 
 // «کارتخوان» (مدیریت خزانه › تنظیمات): کد (خودکار: آخرین + ۱، فقط‌خواندنی) + شماره پایانه + شماره پذیرنده (رشته‌ی اجباری) + حساب بانکی (انتخابگر مشترک) + عنوان.
 // فعلاً فقط تعریف پایه است؛ بعداً در دریافت و پرداخت (ردیف کارت) استفاده می‌شود. قواعد در سرور (routes/cardReaders.ts).
@@ -88,11 +90,24 @@ function CardReaderForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
-  const [agents, setAgents] = useState<{ id: number; name: string; online: boolean }[]>([]);
-  useEffect(() => {
-    api.get("/card-terminal-agents").then(setAgents).catch(() => setAgents([]));
-  }, []);
-  const [form, setForm] = usePersistedState(cacheKey, { code: "", terminalNumber: "", merchantNumber: "", bankAccountId: "", title: "", driver: "MANUAL", agentId: "" });
+  const [form, setForm] = usePersistedState(cacheKey, { code: "", terminalNumber: "", merchantNumber: "", bankAccountId: "", title: "", driver: "MANUAL", deviceIp: "", devicePort: "" });
+  const [found, setFound] = useState<PosCardDevice[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  async function searchDevices() {
+    setSearching(true);
+    setError(null);
+    try {
+      setFound(await discoverCardDevices());
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSearching(false);
+    }
+  }
+  function pickDevice(d: PosCardDevice) {
+    setForm({ ...form, terminalNumber: d.terminalId, merchantNumber: d.merchantId, deviceIp: d.ip, devicePort: String(d.port) });
+    setFound(null);
+  }
   const [updatedAt, setUpdatedAt] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
@@ -102,7 +117,7 @@ function CardReaderForm({ editId }: { editId?: number }) {
     if (!editId) return;
     const r: Row = await api.get(`/card-readers/${editId}`);
     setUpdatedAt(r.updatedAt);
-    if (!hasPersistedState(cacheKey)) setForm({ code: String(r.code), terminalNumber: r.terminalNumber, merchantNumber: r.merchantNumber, bankAccountId: String(r.bankAccountId), title: r.title, driver: (r as any).driver ?? "MANUAL", agentId: (r as any).agentId ? String((r as any).agentId) : "" });
+    if (!hasPersistedState(cacheKey)) setForm({ code: String(r.code), terminalNumber: r.terminalNumber, merchantNumber: r.merchantNumber, bankAccountId: String(r.bankAccountId), title: r.title, driver: (r as any).driver ?? "MANUAL", deviceIp: (r as any).deviceIp ?? "", devicePort: (r as any).devicePort ? String((r as any).devicePort) : "" });
   }
   useEffect(() => {
     load().then(() => setLoaded(true)).catch((e) => setError(e.message));
@@ -117,7 +132,7 @@ function CardReaderForm({ editId }: { editId?: number }) {
     if (!form.merchantNumber.trim()) return setError("شماره پذیرنده الزامی است");
     if (!form.bankAccountId) return setError("حساب بانکی الزامی است");
     // کد عمداً ارسال نمی‌شود: فقط سرور آن را می‌دهد
-    const body = { title: form.title, terminalNumber: form.terminalNumber, merchantNumber: form.merchantNumber, bankAccountId: Number(form.bankAccountId), driver: form.driver, agentId: form.agentId ? Number(form.agentId) : null };
+    const body = { title: form.title, terminalNumber: form.terminalNumber, merchantNumber: form.merchantNumber, bankAccountId: Number(form.bankAccountId), driver: form.driver, deviceIp: form.driver === "SADAD" || form.driver === "PARSIAN" ? (form.deviceIp ?? "").trim() : "", devicePort: (form.driver === "SADAD" || form.driver === "PARSIAN") && (form.devicePort ?? "").trim() ? Number(form.devicePort) : null };
     try {
       if (editId) {
         await api.put(`/card-readers/${editId}`, { ...body, updatedAt });
@@ -170,25 +185,60 @@ function CardReaderForm({ editId }: { editId?: number }) {
             <BankAccountPicker value={form.bankAccountId} onChange={(id) => setForm({ ...form, bankAccountId: id })} />
           </div>
           <div className="form-field">
-            <label>اتصال به دستگاه <FieldHint label="اتصال به دستگاه" text="دستی: مبلغ از فرم فروش ثبت می‌شود و شماره پیگیری را خودتان از روی دستگاه وارد می‌کنید. شبیه‌ساز: فقط برای آزمایش؛ پس از چند ثانیه خودکار موفق می‌شود (مبلغ تمام‌شده به 111 = رد بانک، تمام‌شده به 222 = نتیجه‌ی نامشخص)." /></label>
-            <select value={form.driver} onChange={(e) => setForm({ ...form, driver: e.target.value, agentId: e.target.value === "MANUAL" ? "" : form.agentId })}>
+            <label>اتصال به دستگاه <FieldHint label="اتصال به دستگاه" text="دستی: مبلغ از فرم فروش ثبت می‌شود و شماره پیگیری را خودتان از روی دستگاه وارد می‌کنید. سداد: «برنامه‌ی صندوق» مستقیم با پایانه‌ی سداد در شبکه‌ی محل حرف می‌زند و نیازی به عامل یا توکن نیست؛شماره پایانه و پذیرنده را دقیقاً مطابق دستگاه وارد کنید (با همان شماره‌ی پایانه، آدرس دستگاه خودکار پیدا می‌شود)." /></label>
+            <select value={form.driver} onChange={(e) => setForm({ ...form, driver: e.target.value })}>
               <option value="MANUAL">دستی (بدون اتصال)</option>
-              <option value="SIMULATOR">شبیه‌ساز (آزمایشی)</option>
+              <option value="SADAD">سداد (PcPos) — از برنامه‌ی صندوق</option>
+              <option value="PARSIAN">پارسیان (PEC) — از برنامه‌ی صندوق</option>
             </select>
           </div>
-          {form.driver !== "MANUAL" && (
-            <div className="form-field">
-              <label>عامل محلی <FieldHint label="عامل محلی" text="اگر کارتخوان در شبکه‌ی محل است و سرور جای دیگری، عاملی را که روی کامپیوتر همان محل نصب شده انتخاب کنید. خالی = درایور روی خود سرور اجرا می‌شود (فقط برای آزمایش یا دستگاه‌های قابل‌دسترس از سرور)." /></label>
-              <select value={form.agentId} onChange={(e) => setForm({ ...form, agentId: e.target.value })}>
-                <option value="">— بدون عامل (اجرا روی سرور) —</option>
-                {agents.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}{a.online ? " — آنلاین" : " — آفلاین"}</option>
-                ))}
-              </select>
-            </div>
+          {(form.driver === "SADAD" || form.driver === "PARSIAN") && (
+            <>
+              <div className="form-field">
+                <label>آی‌پی دستگاه{form.driver === "PARSIAN" && <RequiredMark />} <FieldHint label="آی‌پی دستگاه" text="آدرس کارتخوان در شبکه‌ی محل. اگر پر باشد، برنامه‌ی صندوق مستقیم به همین آدرس وصل می‌شود؛ اگر خالی باشد، دستگاه با «شماره پایانه» از روی پخش خودش پیدا می‌شود (نیازمند همان زیرشبکه). برای ثابت‌ماندن آدرس، آن را در روتر برای دستگاه رزرو کنید." /></label>
+                <input dir="ltr" placeholder="مثلاً 192.168.1.50" value={form.deviceIp ?? ""} onChange={(e) => setForm({ ...form, deviceIp: e.target.value })} />
+              </div>
+              <div className="form-field">
+                <label>پورت دستگاه <FieldHint label="پورت دستگاه" text="خالی = پورت استاندارد درایور (سداد 8888، پارسیان 1362)." /></label>
+                <input dir="ltr" placeholder={form.driver === "PARSIAN" ? "1362" : "8888"} value={form.devicePort ?? ""} onChange={(e) => setForm({ ...form, devicePort: e.target.value })} />
+              </div>
+              {form.driver === "SADAD" && inPosApp() && (
+                <div className="form-field">
+                  <label>جستجو در شبکه</label>
+                  <button type="button" className="btn secondary" disabled={searching} onClick={searchDevices}>{searching ? "در حال جستجو…" : "جستجوی کارتخوان در شبکه"}</button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </form>
+      {found && (
+        <Modal title="کارتخوان‌های سداد پیداشده در شبکه" onClose={() => setFound(null)}>
+          {found.length === 0 ? (
+            <p>دستگاهی پیدا نشد. مطمئن شوید کارتخوان روشن و در «حالت شبکه» است، این کامپیوتر در همان شبکه است و فایروال ویندوز اجازه می‌دهد (پخش UDP روی پورت‌های 100 و 8010). در غیر این صورت آی‌پی را دستی وارد کنید.</p>
+          ) : (
+            <>
+              <p style={{ fontSize: 13 }}>دستگاه مورد نظر را انتخاب کنید؛ شماره پایانه، شماره پذیرنده، آی‌پی و پورت پر می‌شود.</p>
+              <table className="je-lines-table">
+                <thead><tr><th>نام پذیرنده</th><th>آی‌پی</th><th>پورت</th><th>شماره پایانه</th><th>شماره پذیرنده</th><th>مدل</th><th></th></tr></thead>
+                <tbody>
+                  {found.map((d) => (
+                    <tr key={d.ip + d.terminalId}>
+                      <td>{d.name}</td>
+                      <td dir="ltr">{d.ip}</td>
+                      <td dir="ltr">{d.port}</td>
+                      <td dir="ltr">{d.terminalId}</td>
+                      <td dir="ltr">{d.merchantId}</td>
+                      <td dir="ltr">{d.model}</td>
+                      <td><button type="button" className="btn" onClick={() => pickDevice(d)}>انتخاب</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </Modal>
+      )}
     </FormPage>
   );
 }

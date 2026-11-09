@@ -11,7 +11,7 @@ import { DetailPicker } from "./WarehouseDocDetailFields";
 interface Slot { detailTypeId: number; detailTypeTitle: string; code: string | null; codeTitle: string | null; locked?: boolean }
 interface AccLine {
   id: number | null;
-  role: "INSTRUMENT" | "SUBJECT" | "FX" | "FEE";
+  role: string;
   label: string;
   accountTitle: string;
   accountCode: string;
@@ -23,7 +23,9 @@ interface AccLine {
 
 const SIDE_FA = { DEBIT: "بدهکار", CREDIT: "بستانکار" } as const;
 
-export function TreasuryAccountingPanel({ basePath, docId, editable, reloadKey }: { basePath: "/receipts" | "/payments"; docId: number; editable: boolean; reloadKey?: string | number }) {
+// side/title: فقط برای «اعلامیه بدهکار بستانکار» (/party-settlements) که دو پنل دارد — بخش دریافت و بخش پرداخت (?side=RECEIPT|PAYMENT)
+export function TreasuryAccountingPanel({ basePath, docId, editable, reloadKey, side, title }: { basePath: "/receipts" | "/payments" | "/party-settlements" | "/guarantee-receipts" | "/guarantee-payments"; docId: number; editable: boolean; reloadKey?: string | number; side?: "RECEIPT" | "PAYMENT"; title?: string }) {
+  const q = side ? `?side=${side}` : "";
   const [lines, setLines] = useState<AccLine[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [draft, setDraft] = useState<Record<number, (string | null)[]>>({});
@@ -33,7 +35,7 @@ export function TreasuryAccountingPanel({ basePath, docId, editable, reloadKey }
   async function load() {
     setLoading(true);
     try {
-      const v: { lines: AccLine[]; errors: string[] } = await api.get(`${basePath}/${docId}/accounting-lines`);
+      const v: { lines: AccLine[]; errors: string[] } = await api.get(`${basePath}/${docId}/accounting-lines${q}`);
       setLines(v.lines);
       setErrors(v.errors);
       const d: Record<number, (string | null)[]> = {};
@@ -60,7 +62,7 @@ export function TreasuryAccountingPanel({ basePath, docId, editable, reloadKey }
       const payload = lines
         .filter((l) => l.id != null)
         .map((l) => ({ id: l.id, detail1Code: draft[l.id as number]?.[0] ?? null, detail2Code: draft[l.id as number]?.[1] ?? null, detail3Code: draft[l.id as number]?.[2] ?? null }));
-      await api.put(`${basePath}/${docId}/accounting-lines`, { lines: payload });
+      await api.put(`${basePath}/${docId}/accounting-lines${q}`, { lines: payload });
       showToast("اطلاعات حسابداری ذخیره شد");
       await load();
     } catch (e: any) {
@@ -74,7 +76,7 @@ export function TreasuryAccountingPanel({ basePath, docId, editable, reloadKey }
 
   return (
     <div style={{ marginTop: 22 }}>
-      <h4 style={{ margin: "0 0 6px" }}>اطلاعات حسابداری (پیش‌نویس سند)</h4>
+      <h4 style={{ margin: "0 0 6px" }}>{title ?? "اطلاعات حسابداری (پیش‌نویس سند)"}</h4>
       <p style={{ fontSize: 12, color: "var(--ink-soft)", margin: "0 0 8px" }}>
         تفصیل‌های قابل‌فراخوانی خودکار پر شده‌اند (🔒 = قفل)؛ بقیه را انتخاب و «ذخیره‌ی اطلاعات حسابداری» را بزنید. صدور سند حسابداری فقط با تفصیل‌های ذخیره‌شده انجام می‌شود.
         {missing > 0 && <b style={{ color: "var(--danger, #c0392b)" }}> {toFaDigits(String(missing))} ردیف هنوز تفصیل خالی دارد.</b>}

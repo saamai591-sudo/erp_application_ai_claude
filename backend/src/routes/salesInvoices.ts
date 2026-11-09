@@ -1,3 +1,4 @@
+import { RECEIPT_DOC_INCLUDE, receiptLineDoc } from "../services/settlementDocRef";
 import { EffectiveSettings } from "../services/goodsAccountingSettingService";
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
@@ -585,7 +586,7 @@ function priceFromBase(baseAmount: number, baseDiscount: number, baseQty: number
 }
 
 /** ردیف‌های قابل صورتحساب (مانده > ۰) یک سند مبنا */
-async function basisDocumentLines(type: LineBasis, docId: number, excludeInvoiceId?: number): Promise<BasisLineRow[]> {
+export async function basisDocumentLines(type: LineBasis, docId: number, excludeInvoiceId?: number): Promise<BasisLineRow[]> {
   const out: BasisLineRow[] = [];
   if (type === "SALES_DELIVERY") {
     const doc = await loadDeliveryDoc(docId);
@@ -734,35 +735,43 @@ router.get("/sales-invoices/basis-lines", can(`${FORM}.view`), async (req, res) 
 // پیش‌بررسی «صدور فاکتور از حواله» (راهبری از فرم حواله فروش): مشتریِ حواله، و نوع فروش/مرکز فروش/ارزی که از سند مبنای حواله (سفارش/پیش‌فاکتور) می‌آید
 // (null = حواله‌ی بدون مبنا؛ کاربر در دیالوگ انتخاب می‌کند)، و ردیف‌های قابل‌صورتحساب همان حواله — با همان basisDocumentLines که انتخابگر مبنا استفاده می‌کند.
 // خودِ فاکتور اینجا ساخته نمی‌شود؛ فرم فاکتور با همان انتخابگر پر می‌شود و ذخیره از همان POST معمولی (با همه‌ی اعتبارسنجی‌ها) می‌گذرد.
+/** پیش‌بررسی صدور فاکتور از یک حواله — تنها پیاده‌سازی؛ هم route زیر و هم «دستیار» از آن می‌خوانند. null = حواله یافت نشد */
+export async function deliveryInvoiceInfo(deliveryId: number) {
+  const doc = await loadDeliveryDoc(deliveryId);
+  if (!doc) return null;
+  const party = doc.detailCode ? await prisma.party.findFirst({ where: { detailCode: doc.detailCode } }) : null;
+  const customer = party ? await prisma.customer.findUnique({ where: { partyId: party.id } }) : null;
+  const bases = new Map<string, { salesTypeId: number; salesCenterId: number; currencyId: number }>();
+  for (const l of doc.lines as any[]) {
+    const b: any = l.sourceSalesOrderLine?.salesOrder ?? l.sourceSalesQuoteLine?.salesQuote;
+    if (!b) continue;
+    bases.set(`${b.salesTypeId}-${b.salesCenterId}-${b.currencyId}`, { salesTypeId: b.salesTypeId, salesCenterId: b.salesCenterId, currencyId: b.currencyId });
+  }
+  const baseList = [...bases.values()];
+  const lines = await basisDocumentLines("SALES_DELIVERY", deliveryId);
+  const remainingLines = lines.filter((l) => l.remaining > 0);
+  let reason: string | null = null;
+  if (!customer) reason = "طرف مقابل این حواله مشتری نیست؛ صدور فاکتور فروش ممکن نیست";
+  else if (baseList.length > 1) reason = "ردیف‌های این حواله به سفارش/پیش‌فاکتورهایی با نوع فروش، مرکز فروش یا ارز متفاوت وابسته‌اند؛ در یک فاکتور نمی‌آیند";
+  else if (remainingLines.length === 0) reason = "هیچ ردیفِ قابل‌صورتحسابی (مانده > ۰) در این حواله نیست";
+  return {
+    deliveryId,
+    number: doc.number,
+    date: doc.date,
+    customerId: customer?.id ?? null,
+    base: baseList.length === 1 ? baseList[0] : null,
+    remainingLineCount: remainingLines.length,
+    remainingLines,
+    reason,
+  };
+}
+
 router.get("/sales-invoices/from-delivery/:deliveryId", can(`${FORM}.create`), async (req, res) => {
   try {
-    const deliveryId = Number(req.params.deliveryId);
-    const doc = await loadDeliveryDoc(deliveryId);
-    if (!doc) return res.status(404).json({ error: "حواله فروش یافت نشد" });
-    const party = doc.detailCode ? await prisma.party.findFirst({ where: { detailCode: doc.detailCode } }) : null;
-    const customer = party ? await prisma.customer.findUnique({ where: { partyId: party.id } }) : null;
-    const bases = new Map<string, { salesTypeId: number; salesCenterId: number; currencyId: number }>();
-    for (const l of doc.lines as any[]) {
-      const b: any = l.sourceSalesOrderLine?.salesOrder ?? l.sourceSalesQuoteLine?.salesQuote;
-      if (!b) continue;
-      bases.set(`${b.salesTypeId}-${b.salesCenterId}-${b.currencyId}`, { salesTypeId: b.salesTypeId, salesCenterId: b.salesCenterId, currencyId: b.currencyId });
-    }
-    const baseList = [...bases.values()];
-    const lines = await basisDocumentLines("SALES_DELIVERY", deliveryId);
-    const remainingLines = lines.filter((l) => l.remaining > 0);
-    let reason: string | null = null;
-    if (!customer) reason = "طرف مقابل این حواله مشتری نیست؛ صدور فاکتور فروش ممکن نیست";
-    else if (baseList.length > 1) reason = "ردیف‌های این حواله به سفارش/پیش‌فاکتورهایی با نوع فروش، مرکز فروش یا ارز متفاوت وابسته‌اند؛ در یک فاکتور نمی‌آیند";
-    else if (remainingLines.length === 0) reason = "هیچ ردیفِ قابل‌صورتحسابی (مانده > ۰) در این حواله نیست";
-    res.json({
-      deliveryId,
-      number: doc.number,
-      date: doc.date,
-      customerId: customer?.id ?? null,
-      base: baseList.length === 1 ? baseList[0] : null,
-      remainingLineCount: remainingLines.length,
-      reason,
-    });
+    const info = await deliveryInvoiceInfo(Number(req.params.deliveryId));
+    if (!info) return res.status(404).json({ error: "حواله فروش یافت نشد" });
+    const { remainingLines: _drop, ...out } = info;
+    res.json(out);
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در بررسی حواله" });
   }
@@ -1172,7 +1181,8 @@ router.put("/sales-invoices/:id/advance-allocations", can(`${FORM}.allocateAdvan
   }
 });
 
-router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournalEntry`), async (req, res) => {
+// منطق صدور سند در یک تابع نام‌دار تا کار زمان‌بندی‌شده‌ی «صدور سند حسابداری» (jobs/issuers) دقیقاً همین را صدا بزند، نه نسخه‌ی دوم
+export async function issueSalesInvoiceJournalHandler(req: any, res: any) {
   const id = Number(req.params.id);
   const invoice = await prisma.salesInvoice.findUnique({
     where: { id },
@@ -1299,7 +1309,7 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
     const advanceAdjustLines: IssueLineInput[] = [];
     const allocations = await prisma.salesInvoiceAdvanceAllocation.findMany({
       where: { salesInvoiceId: id },
-      include: { receiptSettlementLine: { include: { receipt: true, receiptType: true } } },
+      include: { receiptSettlementLine: { include: { ...RECEIPT_DOC_INCLUDE, receiptType: true } } },
       orderBy: { id: "asc" },
     });
     if (allocations.length > 0) {
@@ -1321,7 +1331,7 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
         const natureTitle = a.nature === "ADVANCE_VAT_RECEIPT" ? "پیش‌دریافت ارزش افزوده" : "پیش‌دریافت";
         const account = treasurySettings.find(invoice.date, (s: any) => s.accountType === "RECEIPT_SUBJECT" && s.receiptTypeId === rt.id)?.account;
         if (!account) {
-          errors.push(`برای نوع دریافت «${rt.title}» (${natureTitle} رسید شماره ${l.receipt.number}) معینِ ${natureTitle} تعریف نشده است`);
+          errors.push(`برای نوع دریافت «${rt.title}» (${natureTitle} رسید شماره ${receiptLineDoc(l).number}) معینِ ${natureTitle} تعریف نشده است`);
           continue;
         }
         const rowRate = Number(l.fxRate);
@@ -1331,7 +1341,7 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
         bucket.inv += atInvoice;
         bucket.hist += hist;
         const details = resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode);
-        const advDescription = `بابت تخصیص ${natureTitle} رسید شماره ${l.receipt.number} به فاکتور فروش ${invoice.number} ${customerName}`.trim();
+        const advDescription = `بابت تخصیص ${natureTitle} رسید شماره ${receiptLineDoc(l).number} به فاکتور فروش ${invoice.number} ${customerName}`.trim();
         if (account.isCurrency && !invIsBase) {
           advanceDebitLines.push({ accountId: account.id, ...details, currencyId: invoice.currencyId, debit: amount, credit: 0, fxRate: rowRate, description: advDescription });
         } else {
@@ -1491,7 +1501,8 @@ router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournal
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در صدور سند حسابداری" });
   }
-});
+}
+router.post("/sales-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournalEntry`), issueSalesInvoiceJournalHandler);
 
 router.delete("/sales-invoices/:id/journal-entry", can(`${FORM}.revertJournalEntry`), async (req, res) => {
   const id = Number(req.params.id);

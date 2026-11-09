@@ -26,6 +26,9 @@ interface Problem {
   message: string;
 }
 interface CandidateRow {
+  /** نوع پیشنهادی از «قواعد نوع صورتحساب» (null = قاعده‌ای منطبق نشد) */
+  suggestedType: 1 | 2 | null;
+  typeError: string | null;
   id: number;
   number: number;
   date: string;
@@ -132,7 +135,8 @@ export default function TaxInvoiceSubmission() {
     load();
   }, [load]);
 
-  const optOf = (id: number): Opt => opts[id] ?? DEFAULT_OPT;
+  // پیش‌فرض نوع از قواعد نوع صورتحساب می‌آید؛ کاربر می‌تواند تغییرش بدهد
+  const optOf = (id: number): Opt => opts[id] ?? { ...DEFAULT_OPT, invoiceType: rows.find((r) => r.id === id)?.suggestedType ?? DEFAULT_OPT.invoiceType };
 
   /** تغییر یک گزینه‌ی ردیف: گزینه‌ها را نگه می‌دارد و اعتبارسنجی همان فاکتور را از سرور دوباره می‌گیرد */
   async function setOpt(id: number, patch: Partial<Opt>) {
@@ -244,7 +248,8 @@ export default function TaxInvoiceSubmission() {
               header: "نوع صورتحساب",
               width: "130px",
               render: (r) => (
-                <select className={sel} value={optOf(r.id).invoiceType} onChange={(e) => setOpt(r.id, { invoiceType: Number(e.target.value) as 1 | 2 })} title="نوع ۱: با اطلاعات خریدار (اعتبار مالیاتی برای خریدار) — نوع ۲: بدون اطلاعات خریدار، همیشه نقدی">
+                <select className={sel} value={!opts[r.id] && r.typeError ? "" : optOf(r.id).invoiceType} onChange={(e) => setOpt(r.id, { invoiceType: Number(e.target.value) as 1 | 2 })} title="نوع ۱: با اطلاعات خریدار (اعتبار مالیاتی برای خریدار) — نوع ۲: بدون اطلاعات خریدار، همیشه نقدی">
+                  {!opts[r.id] && r.typeError && <option value="" disabled>تعیین نشده</option>}
                   <option value={1}>نوع ۱ (با خریدار)</option>
                   <option value={2}>نوع ۲</option>
                 </select>

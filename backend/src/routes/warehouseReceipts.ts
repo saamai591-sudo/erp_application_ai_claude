@@ -14,6 +14,7 @@ import { userHasAction, can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmounts, computeUnitCost } from "../services/documentItemAmountService";
 import { saveDocumentDetails, loadDocumentDetails } from "../services/docDetailService";
+import { tempLineRemaining, tempNetBySource, tempLineUsage } from "../services/tempReceiptService";
 
 const FORM = findFormPrefix("warehousing-warehouse-receipts");
 
@@ -54,6 +55,7 @@ interface LineInput {
   sourceSupplyRequestLineId?: number | null;
   sourcePurchaseOrderLineId?: number | null;
   sourceDeliveryAuthorizationLineId?: number | null;
+  sourceTempReceiptLineId?: number | null;
   goodsItemId?: number | null;
   unitId?: number | null;
   quantity: number;
@@ -67,7 +69,7 @@ interface LineInput {
 interface HeaderBody {
   warehouseId: number;
   date: string;
-  basis: "NO_BASIS" | "SUPPLY_REQUEST" | "PURCHASE_ORDER" | "DELIVERY_AUTHORIZATION";
+  basis: "NO_BASIS" | "SUPPLY_REQUEST" | "PURCHASE_ORDER" | "DELIVERY_AUTHORIZATION" | "TEMP_RECEIPT";
   // طبق تصمیم صریح کاربر («انتخابگر تفصیل پایه»): فرانت‌اند دیگر partyId عددی نمی‌فرستد — کد تفصیل را
   // مستقیماً از پیکر (که فقط code/title نشان می‌دهد) می‌فرستد؛ اعتبارسنجی/رزولوشن به id عددی همین‌جا،
   // با assertDetailSelectorValid، متمرکز شده است.
@@ -88,7 +90,7 @@ async function resolveSupplierIdForParty(partyId: number): Promise<number | null
   return supplier ? supplier.id : null;
 }
 
-async function validateWarehouseAndPeriod(warehouseId: number, date: Date) {
+export async function validateWarehouseAndPeriod(warehouseId: number, date: Date) {
   const warehouse = await prisma.warehouse.findUnique({ where: { id: warehouseId } });
   if (!warehouse) throw new Error("انبار یافت نشد");
   if (!warehouse.isActive) throw new Error("این انبار غیرفعال است و امکان ثبت رسید انبار برای آن وجود ندارد");
@@ -117,7 +119,7 @@ async function supplyRequestLineRemaining(id: number, excludeReceiptId?: number)
   return { line, remaining };
 }
 
-async function purchaseOrderLineRemaining(id: number, excludeReceiptId?: number) {
+export async function purchaseOrderLineRemaining(id: number, excludeReceiptId?: number, excludeTempReceiptId?: number) {
   const line = await prisma.purchaseOrderLine.findUnique({
     where: { id },
     include: { purchaseOrder: true, deliveryAuthorizationLines: true, inventoryLines: { include: { document: true } } },
@@ -127,11 +129,12 @@ async function purchaseOrderLineRemaining(id: number, excludeReceiptId?: number)
   const directlyReceived = line.inventoryLines
     .filter((r: any) => r.document.documentType === "WAREHOUSE_RECEIPT" && (!excludeReceiptId || r.documentId !== excludeReceiptId))
     .reduce((s: number, r: any) => s + Number(r.quantity), 0);
-  const remaining = Number(line.quantity) - reservedByDeliveryAuth - directlyReceived;
+  const tempNet = (await tempNetBySource("sourcePurchaseOrderLineId", [id], excludeTempReceiptId)).get(id) || 0;
+  const remaining = Number(line.quantity) - reservedByDeliveryAuth - directlyReceived - tempNet;
   return { line, remaining };
 }
 
-async function deliveryAuthorizationLineRemaining(id: number, excludeReceiptId?: number) {
+export async function deliveryAuthorizationLineRemaining(id: number, excludeReceiptId?: number, excludeTempReceiptId?: number) {
   const line = await prisma.deliveryAuthorizationLine.findUnique({
     where: { id },
     include: { deliveryAuthorization: true, inventoryLines: { include: { document: true } } },
@@ -140,7 +143,8 @@ async function deliveryAuthorizationLineRemaining(id: number, excludeReceiptId?:
   const received = line.inventoryLines
     .filter((r: any) => r.document.documentType === "WAREHOUSE_RECEIPT" && (!excludeReceiptId || r.documentId !== excludeReceiptId))
     .reduce((s: number, r: any) => s + Number(r.quantity), 0);
-  const remaining = Number(line.quantity) - received;
+  const tempNet = (await tempNetBySource("sourceDeliveryAuthorizationLineId", [id], excludeTempReceiptId)).get(id) || 0;
+  const remaining = Number(line.quantity) - received - tempNet;
   return { line, remaining };
 }
 
@@ -149,7 +153,8 @@ async function validateLines(
   basis: string,
   partySupplierId: number | null,
   excludeReceiptId?: number,
-  existingSerialIds?: Set<number>
+  existingSerialIds?: Set<number>,
+  ctx?: { partyDetailCode?: string | null; date?: Date }
 ) {
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("رسید انبار باید حداقل یک ردیف کالا داشته باشد");
   // طبق تصمیم صریح کاربر: طرف مقابل رسید بدون‌مبنا باید از قبل به‌عنوان تامین‌کننده تعریف‌شده باشد —
@@ -165,6 +170,7 @@ async function validateLines(
     sourceSupplyRequestLineId: number | null;
     sourcePurchaseOrderLineId: number | null;
     sourceDeliveryAuthorizationLineId: number | null;
+    sourceTempReceiptLineId: number | null;
     goodsItemId: number;
     unitId: number;
     quantity: number;
@@ -183,8 +189,24 @@ async function validateLines(
     let sourceSupplyRequestLineId: number | null = null;
     let sourcePurchaseOrderLineId: number | null = null;
     let sourceDeliveryAuthorizationLineId: number | null = null;
+    let sourceTempReceiptLineId: number | null = null;
 
-    if (basis === "SUPPLY_REQUEST") {
+    if (basis === "TEMP_RECEIPT") {
+      // رسید موقت (انبار قرنطینه) ← رسید قطعی: عمداً کنترل برابری انبار ندارد
+      if (!l.sourceTempReceiptLineId) throw new Error(`ردیف ${idx + 1}: انتخاب ردیف رسید موقت الزامی است`);
+      const info = await tempLineRemaining(l.sourceTempReceiptLineId, excludeReceiptId);
+      if (!info) throw new Error(`ردیف رسید موقت برای ردیف ${idx + 1} یافت نشد`);
+      if (qty > info.remaining) throw new Error(`مقدار ردیف ${idx + 1} از باقیمانده‌ی رسید موقت (${info.remaining}) بیشتر است`);
+      if (!ctx?.partyDetailCode || info.line.document.detailCode !== ctx.partyDetailCode) {
+        throw new Error(`تامین‌کننده‌ی رسید موقت ردیف ${idx + 1} با طرف مقابل انتخاب‌شده در هدر یکسان نیست`);
+      }
+      if (ctx.date && info.line.document.date.getTime() > ctx.date.getTime()) {
+        throw new Error(`تاریخ رسید موقت ردیف ${idx + 1} از تاریخ این رسید بعدتر است`);
+      }
+      sourceTempReceiptLineId = info.line.id;
+      goodsItemId = info.line.goodsItemId;
+      unitId = info.line.unitId;
+    } else if (basis === "SUPPLY_REQUEST") {
       if (!l.sourceSupplyRequestLineId) throw new Error(`ردیف ${idx + 1}: انتخاب ردیف درخواست تامین الزامی است`);
       const info = await supplyRequestLineRemaining(l.sourceSupplyRequestLineId, excludeReceiptId);
       if (!info) throw new Error(`ردیف درخواست تامین برای ردیف ${idx + 1} یافت نشد`);
@@ -234,6 +256,7 @@ async function validateLines(
       sourceSupplyRequestLineId,
       sourcePurchaseOrderLineId,
       sourceDeliveryAuthorizationLineId,
+      sourceTempReceiptLineId,
       goodsItemId,
       unitId,
       quantity: qty,
@@ -293,13 +316,11 @@ router.get("/warehouse-receipts/pickable-supply-request-lines", can(`${FORM}.vie
   res.json(result);
 });
 
-router.get("/warehouse-receipts/pickable-purchase-order-lines", can(`${FORM}.view`), async (req, res) => {
-  const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
-  const partyDetailCode = (req.query.partyDetailCode as string) || null;
+export async function pickablePurchaseOrderLines(destDate: Date | null, partyDetailCode: string | null, excludeTempReceiptId?: number): Promise<any[]> {
   const party = partyDetailCode ? await prisma.party.findUnique({ where: { detailCode: partyDetailCode } }) : null;
   // فقط سفارش‌های خریدی که تامین‌کننده‌شان با طرف مقابل انتخاب‌شده در هدر رسید یکی است
   const supplierId = party ? await resolveSupplierIdForParty(party.id) : null;
-  if (partyDetailCode && !supplierId) return res.json([]); // طرف مقابل انتخاب‌شده تامین‌کننده نیست ⇒ هیچ سفارش خریدی مطابق نیست
+  if (partyDetailCode && !supplierId) return []; // طرف مقابل انتخاب‌شده تامین‌کننده نیست ⇒ هیچ سفارش خریدی مطابق نیست
   const lines = await prisma.purchaseOrderLine.findMany({
     where: { purchaseOrder: { status: "APPROVED", ...(supplierId ? { supplierId } : {}), ...(destDate ? { date: { lte: destDate } } : {}) } },
     include: {
@@ -311,13 +332,14 @@ router.get("/warehouse-receipts/pickable-purchase-order-lines", can(`${FORM}.vie
     },
     orderBy: { id: "desc" },
   });
+  const tempNet = await tempNetBySource("sourcePurchaseOrderLineId", lines.map((l: any) => l.id), excludeTempReceiptId);
   const result = lines
     .map((l: any) => {
       const reservedByDeliveryAuth = l.deliveryAuthorizationLines.reduce((s: number, d: any) => s + Number(d.quantity), 0);
       const directlyReceived = l.inventoryLines
         .filter((r: any) => r.document.documentType === "WAREHOUSE_RECEIPT")
         .reduce((s: number, r: any) => s + Number(r.quantity), 0);
-      const done = reservedByDeliveryAuth + directlyReceived;
+      const done = reservedByDeliveryAuth + directlyReceived + (tempNet.get(l.id) || 0);
       const quantity = Number(l.quantity);
       const remaining = quantity - done;
       return {
@@ -337,24 +359,28 @@ router.get("/warehouse-receipts/pickable-purchase-order-lines", can(`${FORM}.vie
       };
     })
     .filter((r: any) => r.remaining > 0);
-  res.json(result);
+  return result;
+}
+
+router.get("/warehouse-receipts/pickable-purchase-order-lines", can(`${FORM}.view`), async (req, res) => {
+  const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
+  res.json(await pickablePurchaseOrderLines(destDate, (req.query.partyDetailCode as string) || null));
 });
 
-router.get("/warehouse-receipts/pickable-delivery-authorization-lines", can(`${FORM}.view`), async (req, res) => {
-  const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
-  const partyDetailCode = (req.query.partyDetailCode as string) || null;
+export async function pickableDeliveryAuthorizationLines(destDate: Date | null, partyDetailCode: string | null, excludeTempReceiptId?: number): Promise<any[]> {
   const party = partyDetailCode ? await prisma.party.findUnique({ where: { detailCode: partyDetailCode } }) : null;
   // فقط مجوزهای تحویلی که تامین‌کننده‌شان با طرف مقابل انتخاب‌شده در هدر رسید یکی است
   const supplierId = party ? await resolveSupplierIdForParty(party.id) : null;
-  if (partyDetailCode && !supplierId) return res.json([]); // طرف مقابل انتخاب‌شده تامین‌کننده نیست ⇒ هیچ مجوز تحویلی مطابق نیست
+  if (partyDetailCode && !supplierId) return []; // طرف مقابل انتخاب‌شده تامین‌کننده نیست ⇒ هیچ مجوز تحویلی مطابق نیست
   const lines = await prisma.deliveryAuthorizationLine.findMany({
     where: { deliveryAuthorization: { status: "APPROVED", ...(supplierId ? { supplierId } : {}), ...(destDate ? { date: { lte: destDate } } : {}) } },
     include: { deliveryAuthorization: true, goodsItem: true, unit: true, inventoryLines: { include: { document: true } } },
     orderBy: { id: "desc" },
   });
+  const tempNetDa = await tempNetBySource("sourceDeliveryAuthorizationLineId", lines.map((l: any) => l.id), excludeTempReceiptId);
   const result = lines
     .map((l: any) => {
-      const done = l.inventoryLines
+      const done = (tempNetDa.get(l.id) || 0) + l.inventoryLines
         .filter((r: any) => r.document.documentType === "WAREHOUSE_RECEIPT")
         .reduce((s: number, r: any) => s + Number(r.quantity), 0);
       const quantity = Number(l.quantity);
@@ -376,7 +402,51 @@ router.get("/warehouse-receipts/pickable-delivery-authorization-lines", can(`${F
       };
     })
     .filter((r: any) => r.remaining > 0);
-  res.json(result);
+  return result;
+}
+
+router.get("/warehouse-receipts/pickable-delivery-authorization-lines", can(`${FORM}.view`), async (req, res) => {
+  const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
+  res.json(await pickableDeliveryAuthorizationLines(destDate, (req.query.partyDetailCode as string) || null));
+});
+
+// ردیف‌های رسید موقتِ دارای مانده (مبنای «رسید موقت»): فقط رسیدهای موقتِ همان تامین‌کنندهٔ هدر با تاریخ ≤ تاریخ رسید
+export async function pickableTempReceiptLines(destDate: Date | null, partyDetailCode: string | null, excludeDocId?: number, warehouseId?: number | null): Promise<any[]> {
+  if (!partyDetailCode) return [];
+  const lines = await prisma.inventoryDocumentLine.findMany({
+    where: { document: { documentType: "TEMP_RECEIPT", detailCode: partyDetailCode, ...(warehouseId ? { warehouseId } : {}), ...(destDate ? { date: { lte: destDate } } : {}) } },
+    include: { document: { include: { warehouse: true } }, goodsItem: true, unit: true },
+    orderBy: { id: "desc" },
+  });
+  const usage = await tempLineUsage(lines.map((l) => l.id), excludeDocId);
+  return lines
+    .map((l) => {
+      const u = usage.get(l.id)!;
+      const quantity = Number(l.quantity);
+      const done = u.returned + u.converted;
+      return {
+        id: l.id,
+        sourceTempReceiptLineId: l.id,
+        tempReceiptId: l.documentId,
+        number: l.document.number,
+        date: l.document.date,
+        warehouseTitle: l.document.warehouse?.title ?? "",
+        goodsItemId: l.goodsItemId,
+        goodsItemCode: l.goodsItem.fullCode,
+        goodsItemTitle: l.goodsItem.title,
+        unitId: l.unitId,
+        unitTitle: l.unit.title,
+        quantity,
+        done,
+        remaining: quantity - done,
+      };
+    })
+    .filter((r) => r.remaining > 0);
+}
+
+router.get("/warehouse-receipts/pickable-temp-receipt-lines", can(`${FORM}.view`), async (req, res) => {
+  const destDate = req.query.destDate ? new Date(req.query.destDate as string) : null;
+  res.json(await pickableTempReceiptLines(destDate, (req.query.partyDetailCode as string) || null));
 });
 
 // =========================================================================
@@ -472,6 +542,7 @@ router.get("/warehouse-receipts/:id", can(`${FORM}.view`), async (req: AuthedReq
       sourceSupplyRequestLineId: l.sourceSupplyRequestLineId,
       sourcePurchaseOrderLineId: l.sourcePurchaseOrderLineId,
       sourceDeliveryAuthorizationLineId: l.sourceDeliveryAuthorizationLineId,
+      sourceTempReceiptLineId: l.sourceTempReceiptLineId,
       goodsItemId: l.goodsItemId,
       goodsItemCode: l.goodsItem.fullCode,
       goodsItemTitle: l.goodsItem.title,
@@ -496,8 +567,8 @@ export async function createWarehouseReceipt(body: HeaderBody) {
 
   const { id: partyId } = await assertDetailSelectorValid(body.partyDetailCode, { kind: "SUPPLIER_PARTY" });
   const partySupplierId = await resolveSupplierIdForParty(partyId);
-  const cleanedLines = await validateLines(body.lines, body.basis, partySupplierId);
   const date = new Date(body.date);
+  const cleanedLines = await validateLines(body.lines, body.basis, partySupplierId, undefined, undefined, { partyDetailCode: body.partyDetailCode, date });
   const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
   const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
   const serialSteps = await fetchCurrentSerialSteps(refs.flatMap((r) => r.serialIds));
@@ -540,6 +611,7 @@ export async function createWarehouseReceipt(body: HeaderBody) {
             sourceSupplyRequestLineId: l.sourceSupplyRequestLineId,
             sourcePurchaseOrderLineId: l.sourcePurchaseOrderLineId,
             sourceDeliveryAuthorizationLineId: l.sourceDeliveryAuthorizationLineId,
+            sourceTempReceiptLineId: l.sourceTempReceiptLineId,
             goodsItemId: l.goodsItemId,
             unitId: l.unitId,
             quantity: l.quantity,
@@ -603,8 +675,8 @@ router.put("/warehouse-receipts/:id", can(`${FORM}.edit`), async (req: AuthedReq
 
     const { id: partyId } = await assertDetailSelectorValid(body.partyDetailCode!, { kind: "SUPPLIER_PARTY" });
     const partySupplierId = await resolveSupplierIdForParty(partyId);
-    const cleanedLines = await validateLines(body.lines, body.basis, partySupplierId, id, existingSerialIds);
     const date = new Date(body.date);
+    const cleanedLines = await validateLines(body.lines, body.basis, partySupplierId, id, existingSerialIds, { partyDetailCode: body.partyDetailCode, date });
     const { warehouse, fiscalPeriod } = await validateWarehouseAndPeriod(body.warehouseId, date);
     const refs = await resolveTrackingRefs(cleanedLines, warehouse.id);
     const serialSteps = await fetchCurrentSerialSteps(refs.flatMap((r) => r.serialIds));
@@ -632,6 +704,7 @@ router.put("/warehouse-receipts/:id", can(`${FORM}.edit`), async (req: AuthedReq
               sourceSupplyRequestLineId: l.sourceSupplyRequestLineId,
               sourcePurchaseOrderLineId: l.sourcePurchaseOrderLineId,
               sourceDeliveryAuthorizationLineId: l.sourceDeliveryAuthorizationLineId,
+              sourceTempReceiptLineId: l.sourceTempReceiptLineId,
               goodsItemId: l.goodsItemId,
               unitId: l.unitId,
               quantity: l.quantity,

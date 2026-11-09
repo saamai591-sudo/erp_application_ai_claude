@@ -4,6 +4,7 @@ import { nextSerialNumber } from "../utils/coding";
 import { getAllowedGoodsTypes } from "../data/warehouseDocNatureMatrix";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
+import { assertPartyGroup } from "./partyGroups";
 
 const SUPPLIERS_FORM = findFormPrefix("suppliers");
 const PURCHASE_GROUPS_FORM = findFormPrefix("purchase-groups");
@@ -77,7 +78,7 @@ router.delete("/purchase-routes/:id", can(`${PURCHASE_ROUTES_FORM}.delete`), asy
 
 router.get("/suppliers", async (_req, res) => {
   const items = await prisma.supplier.findMany({
-    include: { party: true, groups: { include: { purchaseGroup: true }, orderBy: { rowOrder: "asc" } } },
+    include: { party: true, classGroup: { select: { title: true } }, groups: { include: { purchaseGroup: true }, orderBy: { rowOrder: "asc" } } },
     orderBy: { code: "asc" },
   });
   res.json(
@@ -86,6 +87,8 @@ router.get("/suppliers", async (_req, res) => {
       code: s.code,
       partyId: s.partyId,
       party: s.party,
+      classGroupId: s.classGroupId,
+      classGroupTitle: s.classGroup?.title ?? null,
       isActive: s.isActive,
       hasTransactions: s.hasTransactions,
       groupIds: s.groups.map((g: any) => g.purchaseGroupId),
@@ -104,7 +107,7 @@ async function setSupplierGroups(tx: any, supplierId: number, groupIds: number[]
 }
 
 router.post("/suppliers", can(`${SUPPLIERS_FORM}.create`), async (req, res) => {
-  const body = req.body as { code?: number; partyId: number; isActive?: boolean; groupIds?: number[] };
+  const body = req.body as { code?: number; partyId: number; isActive?: boolean; groupIds?: number[]; classGroupId?: number | null };
   if (!body.partyId) return res.status(400).json({ error: "طرف حساب الزامی است" });
 
   try {
@@ -120,9 +123,10 @@ router.post("/suppliers", can(`${SUPPLIERS_FORM}.create`), async (req, res) => {
       if (count !== groupIds.length) return res.status(400).json({ error: "یکی از گروه‌های خرید انتخاب‌شده یافت نشد" });
     }
 
+    const classGroupId = await assertPartyGroup("supplierGroup", body.classGroupId);
     const finalCode = body.code ?? (await nextSerialNumber(prisma.supplier, "code"));
     const created = await prisma.$transaction(async (tx: any) => {
-      const s = await tx.supplier.create({ data: { code: finalCode, partyId: body.partyId, isActive: body.isActive ?? true } });
+      const s = await tx.supplier.create({ data: { code: finalCode, partyId: body.partyId, isActive: body.isActive ?? true, classGroupId } });
       await setSupplierGroups(tx, s.id, groupIds);
       return s;
     });
@@ -135,7 +139,7 @@ router.post("/suppliers", can(`${SUPPLIERS_FORM}.create`), async (req, res) => {
 
 router.put("/suppliers/:id", can(`${SUPPLIERS_FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
-  const body = req.body as { partyId?: number; isActive?: boolean; groupIds?: number[] };
+  const body = req.body as { partyId?: number; isActive?: boolean; groupIds?: number[]; classGroupId?: number | null };
 
   const existing = await prisma.supplier.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "تامین‌کننده یافت نشد" });
@@ -154,8 +158,10 @@ router.put("/suppliers/:id", can(`${SUPPLIERS_FORM}.edit`), async (req, res) => 
       if (count !== groupIds.length) return res.status(400).json({ error: "یکی از گروه‌های خرید انتخاب‌شده یافت نشد" });
     }
 
+    // classGroupId: undefined = دست‌نخورده، null/خالی = «بدون گروه»
+    const classGroupId = body.classGroupId === undefined ? undefined : await assertPartyGroup("supplierGroup", body.classGroupId, existing.classGroupId);
     const updated = await prisma.$transaction(async (tx: any) => {
-      const s = await tx.supplier.update({ where: { id }, data: { partyId: body.partyId, isActive: body.isActive } });
+      const s = await tx.supplier.update({ where: { id }, data: { partyId: body.partyId, isActive: body.isActive, classGroupId } });
       if (groupIds !== undefined) await setSupplierGroups(tx, id, groupIds);
       return s;
     });

@@ -4,12 +4,13 @@ import { Modal } from "./Modal";
 import { AmountInput } from "./AmountInput";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { formatJalaliDate } from "../lib/formatDate";
+import { inPosApp, reportCardResultIfReady, runCardTransaction } from "../lib/posApp";
 
 // دیالوگ «دریافت با کارتخوان» و «دریافت با حواله» فرم فروش فروشگاهی (یک کامپوننت، دو حالت): کارتخوان‌ها / حساب‌های بانکیِ اختصاص‌یافته به ایستگاهِ فروش فهرست می‌شوند؛
 // کاربر هر ردیفی را که پول از آن آمده تیک می‌زند. مبلغ پیش‌فرض هر ردیفِ تیک‌خورده = «باقی‌مانده‌ی فروش» منهای مبلغ ردیف‌های تیک‌خوردهٔ قبلی (به ترتیب تیک‌زدن)، و کاربر می‌تواند
 // آن را تغییر دهد؛ با تغییر دستی یک ردیف، ردیف‌های بعدیِ دست‌نخورده دوباره از باقی‌مانده‌ی جدید پر می‌شوند. باقی‌مانده‌ی اولیه (remaining) از جمع «همه»ی دریافت‌های ثبت‌شده
 // (نقد، کارتی و حواله) سرور می‌آید، پس روش‌ها به‌طور متقابل روی هم اثر دارند. محاسبه‌ی اینجا فقط نمایشی است؛ سرور سقف را دوباره کنترل می‌کند.
-// «شماره پیگیری» هر ردیف اختیاری است. دکمه‌ی «ارسال به کارتخوان» (فقط حالت کارتخوان) مبلغ ردیف را به‌صورت یک «تراکنش کارتخوان» می‌فرستد (services/cardTerminalService.ts: درایور دستی/شبیه‌ساز)؛
+// «شماره پیگیری» هر ردیف اختیاری است. دکمه‌ی «ارسال به کارتخوان» (فقط حالت کارتخوان) مبلغ ردیف را به‌صورت یک «تراکنش کارتخوان» می‌فرستد (services/cardTerminalService.ts: درایور دستی/سداد/پارسیان)؛
 // دریافت فروش فقط با موفقیت تراکنش ساخته می‌شود و مبلغ تراکنش‌های در انتظار از باقی‌مانده رزرو است. فهرست تراکنش‌های همین فروش زیر جدول است.
 
 export interface CardTx {
@@ -24,6 +25,12 @@ export interface CardTx {
   errorMessage: string;
   receiptNumber: number | null;
   createdAt: string;
+  /** برنامه‌ی صندوق دستگاه را اجرا می‌کند (نه سرور و نه عامل) */
+  clientRun?: boolean;
+  requestUid?: string;
+  terminalNumber?: string;
+  deviceIp?: string;
+  devicePort?: number | null;
 }
 const TX_STATUS_FA: Record<CardTx["status"], string> = { PENDING: "در انتظار", SUCCESS: "موفق", FAILED: "ناموفق", CANCELLED: "لغو شد", UNKNOWN: "نامشخص" };
 const TX_COLOR: Record<CardTx["status"], string> = { PENDING: "#c27a12", SUCCESS: "#17803f", FAILED: "#b03a2e", CANCELLED: "#777", UNKNOWN: "#b03a2e" };
@@ -54,7 +61,7 @@ function TxPanel({ txs, busyId, onRefresh, onCancel, onResolve }: { txs: CardTx[
                       <input dir="ltr" style={{ width: 110 }} placeholder="شماره پیگیری" value={refs[t.id] ?? ""} onChange={(e) => setRefs({ ...refs, [t.id]: e.target.value })} />
                       <button type="button" className="btn" disabled={busyId === t.id || !(refs[t.id] ?? "").trim()} onClick={() => onResolve(t, "SUCCESS", refs[t.id] ?? "")}>ثبت موفق</button>
                       <button type="button" className="btn secondary" disabled={busyId === t.id} onClick={() => onResolve(t, "FAILED", "")}>ناموفق</button>
-                      {t.status === "PENDING" && <button type="button" className="btn secondary" disabled={busyId === t.id} onClick={() => onCancel(t)}>لغو</button>}
+                      {t.status === "PENDING" && !t.clientRun && <button type="button" className="btn secondary" disabled={busyId === t.id} onClick={() => onCancel(t)}>لغو</button>}
                     </div>
                   )}
                 </td>
@@ -244,12 +251,14 @@ export function StoreCardReceiptDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saleId]);
   // تراکنش خودکارِ در انتظار هر ۲ ثانیه استعلام می‌شود
-  const hasAutoPending = txs.some((t) => t.status === "PENDING" && t.automatic);
+  const hasAutoPending = txs.some((t) => t.automatic && (t.status === "PENDING" || (t.status === "UNKNOWN" && t.clientRun)));
   useEffect(() => {
     if (!hasAutoPending) return;
     const h = window.setInterval(async () => {
-      for (const t of txs.filter((x) => x.status === "PENDING" && x.automatic)) {
+      for (const t of txs.filter((x) => x.automatic && (x.status === "PENDING" || (x.status === "UNKNOWN" && x.clientRun)))) {
         try {
+          // نتیجه‌ی آماده در برنامه‌ی صندوق (مثلاً بعد از بارگذاری مجدد صفحه) به سرور داده می‌شود
+          if (t.clientRun && t.requestUid) await reportCardResultIfReady({ id: t.id, requestUid: t.requestUid, driver: t.driver, amount: t.amount, terminalNumber: t.terminalNumber ?? "", deviceIp: t.deviceIp, devicePort: t.devicePort });
           const r: CardTx = await api.post("/card-transactions/" + t.id + "/refresh", {}, { silent: true });
           if (r.status !== "PENDING") {
             await loadTxs();
@@ -285,7 +294,17 @@ export function StoreCardReceiptDialog({
     setSending(readerId);
     setTxError(null);
     try {
-      await api.post("/card-transactions", { saleId, cardReaderId: readerId, amount, date: txDate });
+      const tx: CardTx = await api.post("/card-transactions", { saleId, cardReaderId: readerId, amount, date: txDate, clientApp: inPosApp() });
+      if (tx.clientRun && tx.requestUid) {
+        // دستگاه را همین برنامه اجرا می‌کند؛ منتظر ماندن لازم نیست، فهرست هر ۲ ثانیه تازه می‌شود
+        runCardTransaction({ id: tx.id, requestUid: tx.requestUid, driver: tx.driver, amount: tx.amount, terminalNumber: tx.terminalNumber ?? "", deviceIp: tx.deviceIp, devicePort: tx.devicePort })
+          .then(async () => {
+            // نتیجه به سرور رسید: فهرست تراکنش‌ها و (با موفقیت) خودِ فروش و دریافت‌ها دوباره بارگذاری شود
+            await loadTxs();
+            onChanged?.();
+          })
+          .catch((e) => setTxError(String((e as Error)?.message || e)));
+      }
       setSel((cur) => cur.filter((s) => s.id !== readerId));
       await loadTxs();
     } catch (e) {

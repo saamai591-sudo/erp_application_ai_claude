@@ -1,0 +1,26 @@
+# فایل «افزودنی» برای نصب‌های موجود که فایل compose خودشان را دارند (حتی با override): به‌روزرسانی از داخل برنامه را بدون دست‌زدن به فایل‌های فعلی اضافه می‌کند.
+#  • تگ ایمیج backend/frontend را به ERP_VERSION وصل می‌کند (updater با عوض‌کردن آن در .env نسخه را عوض می‌کند)
+#  • UPDATER_TOKEN را به backend می‌دهد و سرویس updater را اضافه می‌کند (volume با نام backups باید در compose اصلی تعریف شده باشد)
+# راه‌اندازی: کنار docker-compose.yml بگذارید و در .env این‌ها را بنویسید:
+#   ERP_REGISTRY=<آدرس ریجستری>  ERP_VERSION=<نسخه>  UPDATER_TOKEN=<رشته‌ی تصادفی>
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.override.yml:docker-compose.updater.yml   (ویندوز: جداکننده ; ؛ override را فقط اگر دارید بنویسید)
+services:
+  backend:
+    image: ${ERP_REGISTRY:?ERP_REGISTRY را در .env تنظیم کنید}/accounting-erp-backend:${ERP_VERSION:?ERP_VERSION را در .env تنظیم کنید}
+    environment:
+      UPDATER_TOKEN: ${UPDATER_TOKEN:?UPDATER_TOKEN را در .env تنظیم کنید}
+  frontend:
+    image: ${ERP_REGISTRY}/accounting-erp-frontend:${ERP_VERSION}
+  updater:
+    # ERP_UPDATER_VERSION فقط برای راه‌اندازی اول است (وقتی ERP_VERSION هنوز نسخه‌ای است که ایمیج updater ندارد)
+    image: ${ERP_REGISTRY}/accounting-erp-updater:${ERP_UPDATER_VERSION:-${ERP_VERSION}}
+    restart: unless-stopped
+    init: true
+    environment:
+      UPDATER_TOKEN: ${UPDATER_TOKEN}
+      POSTGRES_USER: erp
+      POSTGRES_DB: accounting_erp
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/project
+      - backups:/backups

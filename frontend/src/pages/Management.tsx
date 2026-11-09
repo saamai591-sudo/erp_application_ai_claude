@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatJalaliDate } from "../lib/formatDate";
 import { ManagementBackup } from "../components/ManagementBackup";
+import { ManagementUpdate } from "../components/ManagementUpdate";
 
 // «مدیریت» (/management) — صفحه‌ی مستقل از ورود ERP برای فعال‌سازی و دیدن وضعیت لایسنس، با کلمه‌ی عبور خودش (در لایسنس است، نه کاربران ERP).
 //   ۱) لایسنس معتبری ثبت نشده: «دانلود فایل اطلاعات سرور» + «بارگذاری فایل لایسنس». فیلد کلمه‌ی عبور بعد از انتخاب فایل باز می‌شود و همان
@@ -97,14 +98,15 @@ export default function Management() {
   const [busy, setBusy] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   // منوی سمت راست پس از ورود: «لایسنس» | «تنظیمات پشتیبان‌گیری»؛ انتخاب در نشست مرورگر می‌ماند
-  const [section, setSectionState] = useState<"license" | "backup">(() => {
+  const [section, setSectionState] = useState<"license" | "backup" | "update">(() => {
     try {
-      return sessionStorage.getItem("management-section") === "backup" ? "backup" : "license";
+      const v = sessionStorage.getItem("management-section");
+      return v === "backup" || v === "update" ? v : "license";
     } catch {
       return "license";
     }
   });
-  const setSection = (s: "license" | "backup") => {
+  const setSection = (s: "license" | "backup" | "update") => {
     setSectionState(s);
     try {
       sessionStorage.setItem("management-section", s);
@@ -284,6 +286,7 @@ export default function Management() {
             <nav style={{ flex: "0 0 170px", display: "flex", flexDirection: "column", gap: 6 }} aria-label="منوی مدیریت">
               <button type="button" className={section === "license" ? "btn" : "btn secondary"} style={{ textAlign: "right" }} onClick={() => setSection("license")}>لایسنس</button>
               <button type="button" className={section === "backup" ? "btn" : "btn secondary"} style={{ textAlign: "right" }} onClick={() => setSection("backup")}>تنظیمات پشتیبان‌گیری</button>
+              <button type="button" className={section === "update" ? "btn" : "btn secondary"} style={{ textAlign: "right" }} onClick={() => setSection("update")}>به‌روزرسانی</button>
             </nav>
             <div style={{ flex: "1 1 420px", minWidth: 0, display: "flex", flexDirection: "column", gap: 14 }}>
             {section === "license" && (
@@ -325,6 +328,7 @@ export default function Management() {
           </>
             )}
             {section === "backup" && token && <ManagementBackup token={token} onUnauthorized={() => saveToken(null)} />}
+            {section === "update" && token && <ManagementUpdate token={token} onUnauthorized={() => saveToken(null)} />}
             </div>
           </div>
         )}

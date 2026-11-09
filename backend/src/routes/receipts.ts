@@ -7,12 +7,14 @@ import { assertRecordNotStale } from "../utils/concurrency";
 import { assertChequeNotUsedElsewhere, findChequeUses } from "../utils/chequeUsage";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, ConversionCurrency } from "../utils/currencyConversion";
-import { issueReceiptJournalEntry, revertReceiptJournalEntry, syncReceiptAccountingLines, getReceiptAccountingView, saveReceiptAccountingDetails } from "../services/receiptJournalEntryService";
+import { registerTreasuryAccountingRoutes } from "../services/treasuryDocAccountingActions";
+import { issueReceiptJournalEntry, revertReceiptJournalEntry, accountingApproveReceipt, getReceiptAccountingView, saveReceiptAccountingDetails } from "../services/receiptJournalEntryService";
 import { can } from "../authz/guard";
 import { assertReceiptAdvanceNotAllocated } from "../services/salesInvoiceAdvanceService";
 import { assertUsedInstrumentsUnchanged } from "../utils/instrumentLock";
 import { findFormPrefix } from "../authz/registry";
 import { emitWorkflowEvent } from "../services/workflowEngineService";
+import { RECEIPT_DOC_INCLUDE, receiptLineDoc } from "../services/settlementDocRef";
 
 const FORM = findFormPrefix("receipts");
 
@@ -88,7 +90,7 @@ interface InstrumentLineInput {
   description?: string | null;
 }
 
-interface SettlementLineInput {
+export interface SettlementLineInput {
   receiptTypeId: number;
   instrumentClientKey: string;
   partyId: number;
@@ -245,7 +247,14 @@ export function basisGroupOf(nature?: string | null): "VAT" | "MAIN" {
   return nature === "ADVANCE_VAT_RECEIPT" || nature === "SALES_VAT" ? "VAT" : "MAIN";
 }
 
-async function candidatesForBasisType(basisType: BasisType, partyId: number, excludeReceiptId?: number, nature?: string | null, includeVoided?: boolean): Promise<BasisCandidate[]> {
+// ردیف مؤثرِ مانده‌ی مبنا: ردیفِ رسیدِ تاییدشده یا ردیفِ هر «اعلامیه بدهکار بستانکار»؛ ردیف‌های سندِ در حال ویرایش (excludeReceiptId/excludeSettlementId) کنار گذاشته می‌شود
+function lineCounts(s: any, excludeReceiptId?: number, excludeSettlementId?: number): boolean {
+  const d = receiptLineDoc(s);
+  if (!d.approved) return false;
+  return d.kind === "PARTY_SETTLEMENT" ? !excludeSettlementId || d.id !== excludeSettlementId : !excludeReceiptId || d.id !== excludeReceiptId;
+}
+
+export async function candidatesForBasisType(basisType: BasisType, partyId: number, excludeReceiptId?: number, nature?: string | null, includeVoided?: boolean, excludeSettlementId?: number): Promise<BasisCandidate[]> {
   const group = basisGroupOf(nature);
   const sameGroup = (s: any) => basisGroupOf(s.receiptType?.nature) === group;
   // مبنای مانده‌ی سفارش فروش/پیش‌فاکتور: مبلغ − تخفیف ردیف (VAT هم از قبل روی مبلغِ پس از تخفیف حساب شده)
@@ -260,7 +269,7 @@ async function candidatesForBasisType(basisType: BasisType, partyId: number, exc
     const invoices = await withoutFiscalPeriodScope(() =>
       prisma.salesInvoice.findMany({
         where: { customerId: customer.id, ...(includeVoided ? {} : { status: { not: "VOIDED" } }) },
-        include: { lines: true, currency: true, receiptSettlementLines: { include: { receipt: true, receiptType: true } }, advanceAllocations: true },
+        include: { lines: true, currency: true, receiptSettlementLines: { include: { ...RECEIPT_DOC_INCLUDE, receiptType: true } }, advanceAllocations: true },
       })
     );
     return invoices.map((inv: any) => {
@@ -275,7 +284,7 @@ async function candidatesForBasisType(basisType: BasisType, partyId: number, exc
       // پیش‌دریافت‌های تخصیص‌یافته به فاکتور (تخصیص پیش‌دریافت) هم از مانده‌ی قابل دریافت کم می‌شوند
       const applied =
         inv.receiptSettlementLines
-          .filter((s: any) => sameGroup(s) && s.receipt.status === "APPROVED" && (!excludeReceiptId || s.receipt.id !== excludeReceiptId))
+          .filter((s: any) => sameGroup(s) && lineCounts(s, excludeReceiptId, excludeSettlementId))
           .reduce((s: number, l: any) => s + Number(l.amount), 0) +
         inv.advanceAllocations
           .filter((a: any) => a.nature === (group === "VAT" ? "ADVANCE_VAT_RECEIPT" : "ADVANCE_RECEIPT"))
@@ -290,7 +299,7 @@ async function candidatesForBasisType(basisType: BasisType, partyId: number, exc
     const invoices = await withoutFiscalPeriodScope(() =>
       prisma.purchaseInvoice.findMany({
         where: { partyId, status: "APPROVED" },
-        include: { lines: true, otherCostLines: true, currency: true, receiptSettlementLines: { include: { receipt: true } } },
+        include: { lines: true, otherCostLines: true, currency: true, receiptSettlementLines: { include: { ...RECEIPT_DOC_INCLUDE } } },
       })
     );
     return invoices.map((inv: any) => {
@@ -299,7 +308,7 @@ async function candidatesForBasisType(basisType: BasisType, partyId: number, exc
         inv.lines.reduce((s: number, l: any) => s + Number(l.amount) - Number(l.discount || 0), 0) +
         inv.otherCostLines.reduce((s: number, l: any) => s + Number(l.amount) - Number(l.discount || 0), 0);
       const applied = inv.receiptSettlementLines
-        .filter((s: any) => s.receipt.status === "APPROVED" && (!excludeReceiptId || s.receipt.id !== excludeReceiptId))
+        .filter((s: any) => lineCounts(s, excludeReceiptId, excludeSettlementId))
         .reduce((s: number, l: any) => s + Number(l.amount), 0);
       return {
         id: inv.id, number: inv.number, date: inv.date, currencyId: inv.currencyId, currencyTitle: inv.currency.title,
@@ -313,13 +322,13 @@ async function candidatesForBasisType(basisType: BasisType, partyId: number, exc
     const orders = await withoutFiscalPeriodScope(() =>
       prisma.salesOrder.findMany({
         where: { customerId: customer.id, status: "APPROVED" },
-        include: { lines: true, currency: true, receiptSettlementLines: { include: { receipt: true, receiptType: true } } },
+        include: { lines: true, currency: true, receiptSettlementLines: { include: { ...RECEIPT_DOC_INCLUDE, receiptType: true } } },
       })
     );
     return orders.map((o: any) => {
       const total = totalOf(o.lines);
       const applied = o.receiptSettlementLines
-        .filter((s: any) => sameGroup(s) && s.receipt.status === "APPROVED" && (!excludeReceiptId || s.receipt.id !== excludeReceiptId))
+        .filter((s: any) => sameGroup(s) && lineCounts(s, excludeReceiptId, excludeSettlementId))
         .reduce((s: number, l: any) => s + Number(l.amount), 0);
       // سفارش فروش اصلاً fxRate ندارد (سندی بدون تبدیل ارز) — همیشه ۱ گزارش می‌شود
       return {
@@ -334,7 +343,7 @@ async function candidatesForBasisType(basisType: BasisType, partyId: number, exc
     const quotes = await withoutFiscalPeriodScope(() =>
       prisma.salesQuote.findMany({
         where: { customerId: customer.id, status: "APPROVED" },
-        include: { lines: true, currency: true, receiptSettlementLines: { include: { receipt: true, receiptType: true, advanceAllocations: true } } },
+        include: { lines: true, currency: true, receiptSettlementLines: { include: { ...RECEIPT_DOC_INCLUDE, receiptType: true, advanceAllocations: true } } },
       })
     );
     // مانده‌ی قابل دریافتِ پیش‌فاکتور — برای هر دو گروه (اصل و ارزش افزوده) **یک فرمول**، محاسباتی (نه پرچم «تبدیل‌شده»؛ Documents/مانده ارزش افزوده قابل دریافت پیش فاکتور.md):
@@ -387,7 +396,7 @@ async function candidatesForBasisType(basisType: BasisType, partyId: number, exc
     }
     return quotes.map((q: any) => {
       const total = totalOf(q.lines);
-      const activeLines = q.receiptSettlementLines.filter((s: any) => sameGroup(s) && s.receipt.status === "APPROVED" && (!excludeReceiptId || s.receipt.id !== excludeReceiptId));
+      const activeLines = q.receiptSettlementLines.filter((s: any) => sameGroup(s) && lineCounts(s, excludeReceiptId, excludeSettlementId));
       const unallocatedAdvances = activeLines.reduce((s: number, l: any) => {
         const allocated = (l.advanceAllocations || []).reduce((a: number, x: any) => a + Number(x.amount), 0);
         return s + Math.max(0, Number(l.amount) - allocated);
@@ -438,13 +447,13 @@ const BASIS_FIELD: Record<Exclude<BasisType, "NONE">, "salesInvoiceId" | "purcha
   PROFORMA_INVOICE: "salesQuoteId",
 };
 
-async function validateSubjectLines(
+export async function validateSubjectLines(
   lines: SettlementLineInput[],
   instrumentByKey: Map<string, { id?: number; amount: number; baseAmount: number; currencyId: number; fxRate: number }>,
   baseCurrency: { id: number } & ConversionCurrency,
   // تاریخ سند دریافت: تاریخ هر سند مبنا باید ≤ این تاریخ باشد
   receiptDate: Date,
-  excludeReceiptId?: number,
+  excludeDoc?: number | { partySettlementId: number },
   // ردیف‌های موضوعات دریافتِ ذخیره‌شده‌ی ردیف‌های دارای گردش (در «ویرایش مجدد» تغییر نمی‌کنند) — مبلغشان از
   // مانده‌ی اسناد مبنا کم می‌شود تا بیش‌تخصیص رخ ندهد
   lockedSettlementLines: any[] = [],
@@ -452,19 +461,23 @@ async function validateSubjectLines(
 ) {
   if (allowEmpty && (!Array.isArray(lines) || lines.length === 0) && instrumentByKey.size === 0) return [];
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("سند دریافت باید حداقل یک ردیف موضوعات دریافت داشته باشد");
+  const excludeReceiptId = typeof excludeDoc === "number" ? excludeDoc : undefined;
+  const excludeSettlementId = typeof excludeDoc === "object" ? excludeDoc.partySettlementId : undefined;
+  const ownerWhere: any = excludeSettlementId ? { partySettlementId: excludeSettlementId } : { receiptId: excludeReceiptId };
+  const hasExclude = !!(excludeReceiptId || excludeSettlementId);
 
   // «نوع دریافت»ِ غیرفعال برای سند جدید قابل استفاده نیست؛ ولی سندِ موجودی که قبلاً از آن استفاده کرده، با همان نوع معتبر می‌ماند (ویرایش/ذخیره‌ی بدون تغییر نوع)
   const alreadyUsedTypeIds = new Set<number>(
-    excludeReceiptId ? (await prisma.receiptSettlementLine.findMany({ where: { receiptId: excludeReceiptId }, select: { receiptTypeId: true } })).map((x) => x.receiptTypeId) : []
+    hasExclude ? (await prisma.receiptSettlementLine.findMany({ where: ownerWhere, select: { receiptTypeId: true } })).map((x) => x.receiptTypeId) : []
   );
 
   // سندِ مبنایی که همین رسیدِ موجود قبلاً با آن ثبت شده، در ویرایش بدون تغییر معتبر می‌ماند (داده‌ی قدیمی را نمی‌شکند)؛ سند مبنای تازه باید ≤ تاریخ رسید باشد
   // این استثنا فقط وقتی برقرار است که تاریخ سند دریافت نسبت به نسخه‌ی ذخیره‌شده تغییر نکرده باشد؛ اگر کاربر تاریخ را عوض کند،
   // قاعده‌ی «تاریخ سند مبنا ≤ تاریخ سند» برای همه‌ی مبناها از نو اعمال می‌شود.
   const alreadyUsedBasis = new Set<string>();
-  const savedReceiptDate = excludeReceiptId ? (await prisma.receipt.findUnique({ where: { id: excludeReceiptId }, select: { date: true } }))?.date : null;
-  if (excludeReceiptId && savedReceiptDate && savedReceiptDate.getTime() === receiptDate.getTime()) {
-    for (const x of await prisma.receiptSettlementLine.findMany({ where: { receiptId: excludeReceiptId }, select: { salesInvoiceId: true, purchaseInvoiceId: true, salesOrderId: true, salesQuoteId: true } })) {
+  const savedReceiptDate = excludeReceiptId ? (await prisma.receipt.findUnique({ where: { id: excludeReceiptId }, select: { date: true } }))?.date : excludeSettlementId ? (await prisma.partySettlement.findUnique({ where: { id: excludeSettlementId }, select: { date: true } }))?.date : null;
+  if (hasExclude && savedReceiptDate && savedReceiptDate.getTime() === receiptDate.getTime()) {
+    for (const x of await prisma.receiptSettlementLine.findMany({ where: ownerWhere, select: { salesInvoiceId: true, purchaseInvoiceId: true, salesOrderId: true, salesQuoteId: true } })) {
       for (const [f, v] of Object.entries(x)) if (v) alreadyUsedBasis.add(`${f}:${v}`);
     }
   }
@@ -491,7 +504,7 @@ async function validateSubjectLines(
     if (!lockedBasisType) continue;
     const lockedBasisId = sl.salesInvoiceId || sl.purchaseInvoiceId || sl.salesOrderId || sl.salesQuoteId;
     // eslint-disable-next-line no-await-in-loop
-    const info = (await candidatesForBasisType(lockedBasisType, sl.partyId, excludeReceiptId, sl.receiptType?.nature)).find((c) => c.id === lockedBasisId);
+    const info = (await candidatesForBasisType(lockedBasisType, sl.partyId, excludeReceiptId, sl.receiptType?.nature, undefined, excludeSettlementId)).find((c) => c.id === lockedBasisId);
     if (!info) continue;
     // eslint-disable-next-line no-await-in-loop
     const rowCurrency = sl.currencyId === baseCurrency.id ? baseCurrency : await prisma.currency.findUnique({ where: { id: sl.currencyId } });
@@ -546,7 +559,7 @@ async function validateSubjectLines(
         if (f !== field && v) throw new Error(`ردیف ${idx + 1}: فقط سند مبنای متناسب با نوع دریافت باید انتخاب شود`);
       }
       // eslint-disable-next-line no-await-in-loop
-      const candidates = await candidatesForBasisType(basisType, l.partyId, excludeReceiptId, receiptType.nature);
+      const candidates = await candidatesForBasisType(basisType, l.partyId, excludeReceiptId, receiptType.nature, undefined, excludeSettlementId);
       basisInfo = candidates.find((c) => c.id === basisId) || null;
       if (!basisInfo) throw new Error(`ردیف ${idx + 1}: سند مبنای انتخاب‌شده یافت نشد یا متعلق به این طرف حساب نیست`);
       if (basisInfo.date.getTime() > receiptDate.getTime() && !alreadyUsedBasis.has(`${field}:${basisId}`)) {
@@ -1195,83 +1208,28 @@ router.put("/receipts/:id/re-edit", can(`${FORM}.reEdit`), async (req, res) => {
 // «تایید حسابداری» (مرحله‌ی بعد از ثبتِ دارای اثر): ردیف‌های حسابداری (پیش‌نویس سند در سطح فرم) ساخته/همگام می‌شود و سند قفل می‌شود؛ حسابدار تفصیل‌ها را
 // می‌بیند، ناقص‌ها را انتخاب و ذخیره می‌کند، و بعد «صدور سند» را می‌زند. لغو تایید، ردیف‌های حسابداری را نگه می‌دارد؛ حذف آن‌ها فقط با «حذف اطلاعات حسابداری».
 // =========================================================================
-router.post("/receipts/:id/accounting-approve", can(`${FORM}.accountingApprove`), async (req: any, res) => {
-  const id = Number(req.params.id);
-  const d = await prisma.receipt.findUnique({ where: { id } });
-  if (!d) return res.status(404).json({ error: "سند دریافت یافت نشد" });
-  if (d.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
-  if (d.status !== "APPROVED") return res.status(400).json({ error: "سند هنوز اثرگذار نشده است؛ ابتدا آن را ذخیره کنید" });
-  if (d.accountingStatus === "APPROVED") return res.status(400).json({ error: "این سند قبلاً تایید حسابداری شده است" });
-  try {
-    await syncReceiptAccountingLines(id);
-    await prisma.receipt.update({ where: { id }, data: { accountingStatus: "APPROVED", accountingApprovedAt: new Date(), accountingApprovedById: req.user?.id ?? null } });
-    res.json({ id, accountingStatus: "APPROVED" });
-  } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در تایید حسابداری" });
-  }
-});
-
-router.post("/receipts/:id/accounting-unapprove", can(`${FORM}.accountingUnapprove`), async (req, res) => {
-  const id = Number(req.params.id);
-  const d = await prisma.receipt.findUnique({ where: { id } });
-  if (!d) return res.status(404).json({ error: "سند دریافت یافت نشد" });
-  if (d.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
-  if (d.accountingStatus !== "APPROVED") return res.status(400).json({ error: "این سند تایید حسابداری نشده است" });
-  await prisma.receipt.update({ where: { id }, data: { accountingStatus: "NONE", accountingApprovedAt: null, accountingApprovedById: null } });
-  res.json({ id, accountingStatus: "NONE" });
-});
-
-router.get("/receipts/:id/accounting-lines", can(`${FORM}.view`), async (req, res) => {
-  try {
-    res.json(await getReceiptAccountingView(Number(req.params.id)));
-  } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا" });
-  }
-});
-
-router.put("/receipts/:id/accounting-lines", can(`${FORM}.accountingApprove`), async (req, res) => {
-  const id = Number(req.params.id);
-  const d = await prisma.receipt.findUnique({ where: { id } });
-  if (!d) return res.status(404).json({ error: "سند دریافت یافت نشد" });
-  if (d.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
-  if (d.accountingStatus !== "APPROVED") return res.status(400).json({ error: "ابتدا «تایید حسابداری» را انجام دهید" });
-  try {
-    await saveReceiptAccountingDetails(id, Array.isArray(req.body?.lines) ? req.body.lines : []);
-    res.json({ id });
-  } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در ذخیره" });
-  }
-});
-
-// حذف اطلاعات حسابداری: فقط وقتی سند «ثبت» است (تایید حسابداری لغو شده) و سند حسابداری ندارد و ردیف حسابداری دارد
-router.post("/receipts/:id/delete-accounting-info", can(`${FORM}.deleteAccountingInfo`), async (req, res) => {
-  const id = Number(req.params.id);
-  const d = await prisma.receipt.findUnique({ where: { id } });
-  if (!d) return res.status(404).json({ error: "سند دریافت یافت نشد" });
-  if (d.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
-  if (d.accountingStatus === "APPROVED") return res.status(400).json({ error: "ابتدا «لغو تایید حسابداری» را بزنید" });
-  const count = await prisma.receiptAccountingLine.count({ where: { receiptId: id } });
-  if (count === 0) return res.status(400).json({ error: "این سند اطلاعات حسابداری ندارد" });
-  await prisma.receiptAccountingLine.deleteMany({ where: { receiptId: id } });
-  res.json({ id, deleted: count });
-});
-
-router.post("/receipts/:id/issue-journal-entry", can(`${FORM}.issueJournalEntry`), async (req, res) => {
-  try {
-    const entry = await issueReceiptJournalEntry(Number(req.params.id));
-    res.json({ journalEntryId: entry.id, number: entry.number, referenceNumber: entry.referenceNumber, message: entry.message });
-  } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در صدور سند حسابداری" });
-  }
-});
-
-router.delete("/receipts/:id/journal-entry", can(`${FORM}.revertJournalEntry`), async (req, res) => {
-  try {
-    await revertReceiptJournalEntry(Number(req.params.id));
-    res.status(204).send();
-  } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در حذف سند حسابداری" });
-  }
+// مسیرهای مشترک «تایید حسابداری» و سند حسابداری (services/treasuryDocAccountingActions.ts؛ مشترک با پرداخت و تضمین‌ها)
+registerTreasuryAccountingRoutes(router, {
+  basePath: "/receipts",
+  form: FORM,
+  adapter: {
+    label: "سند دریافت",
+    jeLockMessage: JE_LOCK_MESSAGE,
+    requireEffective: true,
+    load: (id) => prisma.receipt.findUnique({ where: { id }, select: { status: true, accountingStatus: true, journalEntryId: true } }),
+    approve: (id, userId) => accountingApproveReceipt(id, userId),
+    setUnapproved: async (id) => {
+      await prisma.receipt.update({ where: { id }, data: { accountingStatus: "NONE", accountingApprovedAt: null, accountingApprovedById: null } });
+    },
+    view: (id) => getReceiptAccountingView(id),
+    saveDetails: (id, rows) => saveReceiptAccountingDetails(id, rows),
+    countLines: (id) => prisma.receiptAccountingLine.count({ where: { receiptId: id } }),
+    deleteLines: async (id) => {
+      await prisma.receiptAccountingLine.deleteMany({ where: { receiptId: id } });
+    },
+    issue: (id) => issueReceiptJournalEntry(id) as any,
+    revert: (id) => revertReceiptJournalEntry(id),
+  },
 });
 
 export default router;

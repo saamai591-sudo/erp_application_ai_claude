@@ -38,6 +38,18 @@ const TARGET_FIELD: Record<string, string | null> = {
   VOUCHER_RECEIVABLE: null,
   LOYALTY_DISCOUNT_EXPENSE: null,
   PETTY_CASH: "pettyCashId",
+  GUARANTEE_RECEIPT: "guaranteeTypeId",
+  GUARANTEE_PAYMENT: "guaranteeTypeId",
+  GUARANTEE_RECEIPT_PARTY: "guaranteeTypeId",
+  GUARANTEE_PAYMENT_PARTY: "guaranteeTypeId",
+};
+
+// جهت نوع تضمینِ قابل انتخاب برای هر نوع حساب تضمین
+const GUARANTEE_DIRECTION: Record<string, "RECEIPT" | "PAYMENT"> = {
+  GUARANTEE_RECEIPT: "RECEIPT",
+  GUARANTEE_RECEIPT_PARTY: "RECEIPT",
+  GUARANTEE_PAYMENT: "PAYMENT",
+  GUARANTEE_PAYMENT_PARTY: "PAYMENT",
 };
 
 const TARGET_LABEL: Record<string, string> = {
@@ -48,6 +60,7 @@ const TARGET_LABEL: Record<string, string> = {
   receiptTypeId: "موضوع دریافت",
   paymentTypeId: "موضوع پرداخت",
   pettyCashId: "تنخواه",
+  guaranteeTypeId: "نوع تضمین",
 };
 
 // موضوع دریافت/پرداختی که مبنایش فاکتور است، معین را از خودِ سند مبنا می‌گیرد (دریافتنی فروش/پرداختنی خرید
@@ -62,6 +75,7 @@ const TARGET_EXISTS: Record<string, (id: number) => Promise<any>> = {
   receiptTypeId: (id) => prisma.receiptType.findUnique({ where: { id } }),
   paymentTypeId: (id) => prisma.paymentType.findUnique({ where: { id } }),
   pettyCashId: (id) => prisma.pettyCash.findUnique({ where: { id } }),
+  guaranteeTypeId: (id) => prisma.guaranteeType.findUnique({ where: { id } }),
 };
 
 const INCLUDE = {
@@ -73,6 +87,7 @@ const INCLUDE = {
   receiptType: true,
   paymentType: true,
   pettyCash: true,
+  guaranteeType: true,
 };
 
 interface Body {
@@ -85,6 +100,7 @@ interface Body {
   receiptTypeId?: number | null;
   paymentTypeId?: number | null;
   pettyCashId?: number | null;
+  guaranteeTypeId?: number | null;
   effectiveDate?: string;
 }
 
@@ -107,6 +123,10 @@ async function buildData(b: Body, excludeId?: number, original?: { accountType: 
   if (field) {
     const target = await TARGET_EXISTS[field](targetId!);
     if (!target) throw new Error(`${TARGET_LABEL[field]} یافت نشد`);
+    // نوع حساب تضمین فقط برای نوع تضمینِ هم‌جهت (دریافت/پرداخت) معنا دارد
+    if (field === "guaranteeTypeId" && GUARANTEE_DIRECTION[accountType] !== target.direction) {
+      throw new Error(`نوع تضمین «${target.title}» از نوع ${target.direction === "RECEIPT" ? "دریافت" : "پرداخت"} است و برای این نوع حساب قابل انتخاب نیست`);
+    }
     // نوع دریافت/پرداختِ غیرفعال برای تنظیم جدید قابل انتخاب نیست؛ تنظیمی که از قبل همین نوع را دارد معتبر می‌ماند
     if ((field === "receiptTypeId" || field === "paymentTypeId") && target.isActive === false) {
       const existing = excludeId ? await prisma.treasuryAccountSetting.findUnique({ where: { id: excludeId } }) : null;

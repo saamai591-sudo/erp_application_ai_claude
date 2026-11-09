@@ -1,3 +1,4 @@
+import { PAYMENT_DOC_INCLUDE, paymentLineDoc } from "../services/settlementDocRef";
 import { EffectiveSettings } from "../services/goodsAccountingSettingService";
 import { Router } from "express";
 import { prisma } from "../lib/prisma";
@@ -12,6 +13,7 @@ import { resolveCostLineBasis } from "../services/serviceAccountingTreatment";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { getLineAmount, getLineAmounts, setLineAmount, deleteLatestLineAmount, enrichLinesWithAmount } from "../services/documentItemAmountService";
+import { setAssetLineAmount, deleteAssetLineAmounts } from "../services/assetAmountService";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { resolveDetailTypeId, resolveAccountDetailFields, resolveDetailTitles } from "../utils/detailValues";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
@@ -84,6 +86,7 @@ const router = Router();
 
 interface LineInput {
   sourceInventoryLineId?: number | null;
+  sourceAssetReceiptLineId?: number | null;
   goodsItemId?: number | null;
   unitId?: number | null;
   quantity: number;
@@ -111,7 +114,7 @@ interface OtherCostInput {
 interface HeaderBody {
   date: string;
   vendorInvoiceNumber?: string | null;
-  basis: "NO_BASIS" | "WAREHOUSE_RECEIPT";
+  basis: "NO_BASIS" | "WAREHOUSE_RECEIPT" | "ASSET_RECEIPT";
   partyId: number;
   purchaseTypeId: number;
   currencyId: number;
@@ -145,6 +148,30 @@ function resolveInvoiceFxRate(currencyId: number, baseCurrencyId: number, bodyFx
   return fxRate;
 }
 
+/**
+ * قاعده‌ی «صفر و یک»: هر رسید انبار خرید یا **کامل** (همه‌ی ردیف‌هایش) در یک فاکتور خرید می‌آید یا اصلاً نمی‌آید؛ شکستن ردیف‌های یک رسید بین دو فاکتور یا
+ * فاکتور کردنِ بخشی از آن ممنوع است. فاکتورِ قدیمیِ در حال ویرایش که پیش از این قاعده ناقص ثبت شده، تا وقتی مجموعه‌ی ردیف‌های همان رسید را تغییر ندهد، سالم می‌ماند.
+ */
+async function assertWholeReceipts(sourceLineIds: number[], excludeInvoiceId?: number) {
+  if (sourceLineIds.length === 0) return;
+  const lines = await prisma.inventoryDocumentLine.findMany({ where: { id: { in: sourceLineIds } }, select: { id: true, documentId: true } });
+  const docIds = Array.from(new Set(lines.map((l) => l.documentId)));
+  const all = await prisma.inventoryDocumentLine.findMany({ where: { documentId: { in: docIds } }, select: { id: true, documentId: true, document: { select: { number: true } } } });
+  const stored = excludeInvoiceId
+    ? new Set((await prisma.purchaseInvoiceLine.findMany({ where: { purchaseInvoiceId: excludeInvoiceId, sourceInventoryLineId: { not: null } }, select: { sourceInventoryLineId: true } })).map((l) => l.sourceInventoryLineId!))
+    : new Set<number>();
+  const incoming = new Set(sourceLineIds);
+  for (const docId of docIds) {
+    const docLines = all.filter((l) => l.documentId === docId);
+    const inInvoice = docLines.filter((l) => incoming.has(l.id));
+    if (inInvoice.length === docLines.length) continue;
+    // قدیمی‌ها: همان مجموعه‌ی ذخیره‌شده‌ی قبلی (ناقص) بدون تغییر
+    const storedOfDoc = docLines.filter((l) => stored.has(l.id));
+    if (storedOfDoc.length === inInvoice.length && storedOfDoc.every((l) => incoming.has(l.id))) continue;
+    throw new Error(`رسید انبار شماره ${docLines[0].document.number} باید کامل (با همه‌ی ${docLines.length} ردیفش) در یک فاکتور خرید بیاید؛ فاکتور کردنِ بخشی از ردیف‌های یک رسید مجاز نیست`);
+  }
+}
+
 async function validateLines(
   lines: LineInput[],
   basis: string,
@@ -159,6 +186,7 @@ async function validateLines(
 
   const cleaned: {
     sourceInventoryLineId: number | null;
+    sourceAssetReceiptLineId: number | null;
     goodsItemId: number;
     unitId: number;
     quantity: number;
@@ -176,8 +204,37 @@ async function validateLines(
     let unitId = l.unitId || 0;
     let quantity = Number(l.quantity);
     let sourceInventoryLineId: number | null = null;
+    let sourceAssetReceiptLineId: number | null = null;
 
-    if (basis === "WAREHOUSE_RECEIPT") {
+    if (basis === "ASSET_RECEIPT") {
+      // «رسید دارایی» (مجوز تحویل / بدون مبنا): هر ردیف رسید فقط یک‌بار و به‌طور کامل قابل فاکتور شدن است؛ تایید فاکتور بهای ردیف رسید را می‌نویسد.
+      // رسید با مبنای حواله انبار از قیمت‌گذاری انبار قیمت می‌گیرد، نه فاکتور خرید.
+      if (!l.sourceAssetReceiptLineId) throw new Error(`ردیف ${idx + 1}: انتخاب ردیف رسید دارایی الزامی است`);
+      const source = await prisma.assetReceiptLine.findUnique({
+        where: { id: l.sourceAssetReceiptLineId },
+        include: {
+          assetReceipt: true,
+          purchaseInvoiceLine: true,
+          amounts: { select: { id: true }, take: 1 },
+          sourceDeliveryAuthorizationLine: { include: { deliveryAuthorization: { include: { supplier: { include: { party: true } } } } } },
+        },
+      });
+      if (!source) throw new Error(`ردیف رسید دارایی برای ردیف ${idx + 1} یافت نشد`);
+      if (source.assetReceipt.basis === "WAREHOUSE_ISSUE") throw new Error(`ردیف ${idx + 1}: بهای رسید دارایی با مبنای حواله انبار از قیمت‌گذاری انبار می‌آید و با فاکتور خرید قیمت‌گذاری نمی‌شود`);
+      if (source.amounts.length) throw new Error(`ردیف رسید دارایی ردیف ${idx + 1} قبلاً قیمت‌گذاری شده است`);
+      if (source.assetReceipt.date > docDate) throw new Error(`تاریخ رسید دارایی ${source.assetReceipt.number} بعد از تاریخ فاکتور است`);
+      const authSupplierParty = source.sourceDeliveryAuthorizationLine?.deliveryAuthorization.supplier.party;
+      if (authSupplierParty && authSupplierParty.detailCode !== partyDetailCode) {
+        throw new Error(`طرف مقابل مجوز تحویل ردیف ${idx + 1} با طرف مقابل انتخاب‌شده در هدر یکسان نیست`);
+      }
+      if (source.purchaseInvoiceLine && source.purchaseInvoiceLine.purchaseInvoiceId !== excludeInvoiceId) {
+        throw new Error(`ردیف رسید دارایی انتخاب‌شده برای ردیف ${idx + 1} قبلاً در فاکتور خرید دیگری استفاده شده است`);
+      }
+      sourceAssetReceiptLineId = source.id;
+      goodsItemId = source.goodsItemId;
+      unitId = source.unitId;
+      quantity = Number(source.quantity); // مقدار همیشه از رسید مشتق می‌شود
+    } else if (basis === "WAREHOUSE_RECEIPT") {
       if (!l.sourceInventoryLineId) throw new Error(`ردیف ${idx + 1}: انتخاب ردیف رسید انبار خرید الزامی است`);
       const source = await prisma.inventoryDocumentLine.findFirst({
         where: { id: l.sourceInventoryLineId, document: { documentType: "WAREHOUSE_RECEIPT" } },
@@ -234,6 +291,7 @@ async function validateLines(
 
     cleaned.push({
       sourceInventoryLineId,
+      sourceAssetReceiptLineId,
       goodsItemId,
       unitId,
       quantity,
@@ -246,6 +304,7 @@ async function validateLines(
       description: l.description || null,
     });
   }
+  if (basis === "WAREHOUSE_RECEIPT") await assertWholeReceipts(cleaned.map((c) => c.sourceInventoryLineId!).filter(Boolean), excludeInvoiceId);
   return cleaned;
 }
 
@@ -401,7 +460,58 @@ router.get("/purchase-invoices/pickable-warehouse-receipt-lines", can(`${FORM}.v
     computeRemaining: (l: any) =>
       !l.purchaseInvoiceLine || l.purchaseInvoiceLine.purchaseInvoiceId === excludeInvoiceId ? Number(l.quantity) : 0,
   });
-  res.json(result);
+  // قاعده‌ی «صفر و یک»: فقط رسیدهایی که **همه‌ی** ردیف‌هایشان آزاد است (یا در همین فاکتورند) انتخاب‌شدنی‌اند
+  const docIds = Array.from(new Set(result.map((r) => r.documentId)));
+  const totals = docIds.length ? await prisma.inventoryDocumentLine.groupBy({ by: ["documentId"], where: { documentId: { in: docIds } }, _count: { _all: true } }) : [];
+  const totalOf = new Map(totals.map((t) => [t.documentId, t._count._all]));
+  const freeOf = new Map<number, number>();
+  for (const r of result) freeOf.set(r.documentId, (freeOf.get(r.documentId) ?? 0) + 1);
+  res.json(result.filter((r) => freeOf.get(r.documentId) === totalOf.get(r.documentId)));
+});
+
+// ردیف‌های رسید دارایی (مبنای مجوز تحویل / بدون مبنا) که هنوز قیمت‌گذاری نشده‌اند؛ برای مبنای «رسید دارایی». مجوز تحویلی که طرف‌حسابش با هدر فرق دارد نمی‌آید.
+router.get("/purchase-invoices/pickable-asset-receipt-lines", can(`${FORM}.view`), async (req, res) => {
+  const partyId = req.query.partyId ? Number(req.query.partyId) : null;
+  const excludeInvoiceId = req.query.excludeInvoiceId ? Number(req.query.excludeInvoiceId) : null;
+  const formDate = req.query.date ? new Date(req.query.date as string) : null;
+  if (!partyId || !formDate || isNaN(formDate.getTime())) return res.json([]);
+  const party = await prisma.party.findUnique({ where: { id: partyId } });
+  if (!party) return res.json([]);
+  const lines = await prisma.assetReceiptLine.findMany({
+    where: {
+      amounts: { none: {} },
+      assetReceipt: { basis: { in: ["DELIVERY_AUTHORIZATION", "NO_BASIS"] }, date: { lte: formDate } },
+    },
+    include: {
+      assetReceipt: { select: { number: true, date: true, basis: true } },
+      goodsItem: { select: { fullCode: true, title: true } },
+      unit: { select: { title: true } },
+      purchaseInvoiceLine: { select: { purchaseInvoiceId: true } },
+      sourceDeliveryAuthorizationLine: { select: { deliveryAuthorization: { select: { supplier: { select: { party: { select: { detailCode: true } } } } } } } },
+    },
+    orderBy: [{ assetReceiptId: "desc" }, { rowOrder: "asc" }],
+    take: 2000,
+  });
+  res.json(
+    lines
+      .filter((l) => !l.purchaseInvoiceLine || l.purchaseInvoiceLine.purchaseInvoiceId === excludeInvoiceId)
+      .filter((l) => {
+        const sp = l.sourceDeliveryAuthorizationLine?.deliveryAuthorization.supplier.party.detailCode;
+        return !sp || sp === party.detailCode;
+      })
+      .map((l) => ({
+        id: l.id,
+        receiptNumber: l.assetReceipt.number,
+        receiptDate: l.assetReceipt.date,
+        receiptBasis: l.assetReceipt.basis,
+        goodsItemId: l.goodsItemId,
+        goodsItemCode: l.goodsItem.fullCode,
+        goodsItemTitle: l.goodsItem.title,
+        unitId: l.unitId,
+        unitTitle: l.unit.title,
+        quantity: Number(l.quantity),
+      }))
+  );
 });
 
 // «صدور فاکتور خرید از رسید انبار» (راهبری، components/DownstreamDialogs.tsx): پیش‌نمایشِ فقط‌خواندنی برای دیالوگ — طرف مقابل رسید و تعداد ردیف‌های قابل‌فاکتور،
@@ -498,7 +608,7 @@ router.get("/purchase-invoices/:id", can(`${FORM}.view`), async (req, res) => {
       approver: true,
       journalEntry: true,
       lines: {
-        include: { goodsItem: true, unit: true, sourceInventoryLine: { include: { document: true } } },
+        include: { goodsItem: true, unit: true, sourceInventoryLine: { include: { document: true } }, sourceAssetReceiptLine: { include: { assetReceipt: true } } },
         orderBy: { rowOrder: "asc" },
       },
       otherCostLines: {
@@ -536,6 +646,8 @@ router.get("/purchase-invoices/:id", can(`${FORM}.view`), async (req, res) => {
       id: l.id,
       sourceInventoryLineId: l.sourceInventoryLineId,
       sourceWarehouseReceiptNumber: l.sourceInventoryLine?.document.number ?? null,
+      sourceAssetReceiptLineId: l.sourceAssetReceiptLineId,
+      sourceAssetReceiptNumber: l.sourceAssetReceiptLine?.assetReceipt.number ?? null,
       goodsItemId: l.goodsItemId,
       goodsItemCode: l.goodsItem.fullCode,
       goodsItemTitle: l.goodsItem.title,
@@ -807,6 +919,7 @@ router.post("/purchase-invoices/:id/approve", can(`${FORM}.approve`), async (req
       }
     }
 
+    const assetLines = invoice.lines.filter((l) => l.sourceAssetReceiptLineId);
     const receiptLines = invoice.lines.filter((l) => l.sourceInventoryLineId);
     const sourceLines = receiptLines.length
       ? await prisma.inventoryDocumentLine.findMany({
@@ -852,6 +965,18 @@ router.post("/purchase-invoices/:id/approve", can(`${FORM}.approve`), async (req
           data: { status: "FINALIZED", finalizedAt: new Date() },
         });
       }
+      // رسید دارایی: بهای (ارز مبنا) ردیف نوشته و کل رسید تایید (FINALIZED) می‌شود — دقیقاً هم‌الگوی رسید انبار
+      const assetReceiptIds = new Set<number>();
+      for (const l of assetLines) {
+        const cost = Number(costByLineId.get(l.id)?.cost ?? Number(l.baseAmount) - Number(l.baseDiscount));
+        if (await tx.assetReceiptLineAmount.count({ where: { assetReceiptLineId: l.sourceAssetReceiptLineId! } })) throw new Error("یکی از ردیف‌های رسید دارایی هم‌زمان قیمت‌گذاری شده است؛ دوباره تلاش کنید");
+        await setAssetLineAmount(tx, { lineId: l.sourceAssetReceiptLineId!, priceType: "PURCHASE_INVOICE", newAmount: cost, purchaseInvoiceLineId: l.id, createdById: req.user?.id ?? null });
+        const rl = await tx.assetReceiptLine.findUnique({ where: { id: l.sourceAssetReceiptLineId! }, select: { assetReceiptId: true } });
+        if (rl) assetReceiptIds.add(rl.assetReceiptId);
+      }
+      for (const rid of assetReceiptIds) {
+        await tx.assetReceipt.updateMany({ where: { id: rid, status: { not: "FINALIZED" } }, data: { status: "FINALIZED", finalizedAt: new Date() } });
+      }
       // دقیقاً هم‌الگوی servicePurchaseInvoices.ts#approve: به‌ازای هر ردیف تسهیم (allocation) هر ردیف
       // «سایر هزینه‌ها»ی مبنادار، یک INBOUND_RELATED_COST به ردیف رسید مربوطه «افزوده» می‌شود — این
       // اثر کاملاً مستقل و اضافه‌شونده به CROSS_ENTITY بالاست، نه بخشی از محاسبه‌ی آن.
@@ -896,7 +1021,14 @@ router.post("/purchase-invoices/:id/unapprove", can(`${FORM}.unapprove`), async 
   }
 
   const receiptLineIds = invoice.lines.filter((l) => l.sourceInventoryLineId).map((l) => l.sourceInventoryLineId!);
+  const assetLineIds = invoice.lines.filter((l) => l.sourceAssetReceiptLineId).map((l) => l.sourceAssetReceiptLineId!);
   const receiptDocs = new Map<number, { warehouseId: number; date: Date }>();
+
+  if (assetLineIds.length) {
+    // پلاکِ تاییدشده‌ای که از این ردیف‌ها ساخته شده بهای خود را از همین مبلغ گرفته است
+    const used = await prisma.fixedAssetComponent.findFirst({ where: { receiptLineId: { in: assetLineIds }, asset: { confirmedAt: { not: null } } }, select: { asset: { select: { detailCode: true } } } });
+    if (used) return res.status(400).json({ error: `پلاک تاییدشده‌ی ${used.asset.detailCode} از ردیف‌های رسید دارایی این فاکتور ساخته شده است؛ ابتدا تایید آن دارایی را برگردانید` });
+  }
 
   try {
     if (receiptLineIds.length) {
@@ -957,6 +1089,15 @@ router.post("/purchase-invoices/:id/unapprove", can(`${FORM}.unapprove`), async 
     for (const docId of receiptDocs.keys()) {
       await tx.inventoryDocument.updateMany({ where: { id: docId, status: "FINALIZED" }, data: { status: "REGISTERED", finalizedAt: null } });
     }
+    // رسید دارایی: بهای ردیف‌های این فاکتور پاک می‌شود و رسیدی که دیگر هیچ ردیف قیمت‌دار ندارد به «ثبت» برمی‌گردد
+    if (assetLineIds.length) {
+      const affected = await tx.assetReceiptLine.findMany({ where: { id: { in: assetLineIds } }, select: { assetReceiptId: true } });
+      await deleteAssetLineAmounts(tx, { lineIds: assetLineIds, priceType: "PURCHASE_INVOICE" });
+      for (const rid of new Set(affected.map((a) => a.assetReceiptId))) {
+        const priced = await tx.assetReceiptLine.count({ where: { assetReceiptId: rid, amounts: { some: {} } } });
+        if (!priced) await tx.assetReceipt.updateMany({ where: { id: rid, status: "FINALIZED" }, data: { status: "REGISTERED", finalizedAt: null } });
+      }
+    }
     // دقیقاً هم‌الگوی servicePurchaseInvoices.ts#unapprove: اثر INBOUND_RELATED_COST همیشه
     // additive/appended است (نه overwrite)، پس برگشت هم فقط یک رکورد تازه با Difference منفی اضافه
     // می‌کند — بدون کنترل «آیا قبلاً قیمت‌گذاری شده» (که فقط برای حذف کامل رکورد CROSS_ENTITY بالا لازم است).
@@ -999,7 +1140,8 @@ router.post("/purchase-invoices/:id/unapprove", can(`${FORM}.unapprove`), async 
 // سایر هزینه‌ها)؛ رکورد INBOUND_RELATED_COST هر تخصیصِ آن‌ها هم journalEntryId می‌گیرد.
 // =========================================================================
 
-router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournalEntry`), async (req, res) => {
+// منطق صدور سند در یک تابع نام‌دار تا کار زمان‌بندی‌شده‌ی «صدور سند حسابداری» (jobs/issuers) دقیقاً همین را صدا بزند
+export async function issuePurchaseInvoiceJournalHandler(req: any, res: any) {
   const id = Number(req.params.id);
   const invoice = await prisma.purchaseInvoice.findUnique({
     where: { id },
@@ -1345,7 +1487,7 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
     const advanceAdjustLines: IssueLineInput[] = [];
     const purchaseAdvanceAllocations = await prisma.purchaseInvoiceAdvanceAllocation.findMany({
       where: { purchaseInvoiceId: id },
-      include: { paymentSettlementLine: { include: { payment: true, paymentType: true } } },
+      include: { paymentSettlementLine: { include: { ...PAYMENT_DOC_INCLUDE, paymentType: true } } },
       orderBy: { id: "asc" },
     });
     if (purchaseAdvanceAllocations.length > 0) {
@@ -1363,7 +1505,7 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
         const natureTitle = isVatAdv ? "پیش‌پرداخت ارزش افزوده" : "پیش‌پرداخت";
         const resolved = await resolvePaymentSubjectAccount(l.paymentType, {});
         if (resolved.error || !resolved.account) {
-          errors.push(`برای نوع پرداخت «${l.paymentType.title}» (${natureTitle} پرداخت شماره ${l.payment.number}) معینِ ${natureTitle} تعریف نشده است`);
+          errors.push(`برای نوع پرداخت «${l.paymentType.title}» (${natureTitle} پرداخت شماره ${paymentLineDoc(l).number}) معینِ ${natureTitle} تعریف نشده است`);
           continue;
         }
         const account = resolved.account;
@@ -1378,7 +1520,7 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
           vHist += rowHist;
         }
         const details = resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode);
-        const advDescription = `بابت تخصیص ${natureTitle} پرداخت شماره ${l.payment.number} به فاکتور خرید ${invoice.number} ${partyTitle(invoice.party)}`.trim();
+        const advDescription = `بابت تخصیص ${natureTitle} پرداخت شماره ${paymentLineDoc(l).number} به فاکتور خرید ${invoice.number} ${partyTitle(invoice.party)}`.trim();
         if (account.isCurrency && !invIsBase) {
           advanceCreditLines.push({ accountId: account.id, ...details, currencyId: invoice.currencyId, debit: 0, credit: amount, fxRate: rowRate, description: advDescription });
         } else {
@@ -1546,7 +1688,8 @@ router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJour
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در صدور سند حسابداری" });
   }
-});
+}
+router.post("/purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournalEntry`), issuePurchaseInvoiceJournalHandler);
 
 router.delete("/purchase-invoices/:id/journal-entry", can(`${FORM}.revertJournalEntry`), async (req, res) => {
   const id = Number(req.params.id);
@@ -1556,6 +1699,8 @@ router.delete("/purchase-invoices/:id/journal-entry", can(`${FORM}.revertJournal
   });
   if (!invoice) return res.status(404).json({ error: "فاکتور خرید یافت نشد" });
   if (!invoice.journalEntryId) return res.status(400).json({ error: "برای این فاکتور سندی صادر نشده است" });
+  const acquired = await prisma.fixedAsset.findFirst({ where: { acquisitionJournalEntryId: { not: null }, components: { some: { receiptLine: { purchaseInvoiceLine: { purchaseInvoiceId: id } } } } }, select: { detailCode: true } });
+  if (acquired) return res.status(400).json({ error: `برای پلاک ${acquired.detailCode} (از ردیف‌های این فاکتور) سند تحصیل صادر شده است؛ ابتدا سند تحصیل را حذف کنید` });
 
   const sourceLineIds = invoice.lines.filter((l) => l.sourceInventoryLineId).map((l) => l.sourceInventoryLineId!);
   const costAllocationIds = invoice.otherCostLines.flatMap((c) => c.allocations.map((a) => a.id));

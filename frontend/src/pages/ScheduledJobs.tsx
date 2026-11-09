@@ -28,7 +28,8 @@ type ParamDef =
   | { key: string; type: "date"; label: string; help?: string; requiredForLive?: boolean }
   | { key: string; type: "number"; label: string; help?: string; requiredForLive?: boolean; integer?: boolean; min?: number; max?: number }
   | { key: string; type: "boolean"; label: string; help?: string }
-  | { key: string; type: "select"; label: string; help?: string; requiredForLive?: boolean; options: { value: string; label: string }[] };
+  | { key: string; type: "select"; label: string; help?: string; requiredForLive?: boolean; options: { value: string; label: string }[] }
+  | { key: string; type: "multiselect"; label: string; help?: string; requiredForLive?: boolean; options: { value: string; label: string; group?: string }[] };
 
 interface Schedule { type: ScheduleType; intervalMinutes: number | null; timeOfDay: string | null; weekdays: number[] }
 interface JobRow {
@@ -111,6 +112,10 @@ function resolvedText(def: ParamDef, resolved: any): string {
   if (def.type === "date") return resolved ? formatJalaliDate(resolved) : "—";
   if (def.type === "boolean") return resolved ? "بله" : "خیر";
   if (def.type === "select") return def.options.find((o) => o.value === resolved)?.label ?? "—";
+  if (def.type === "multiselect") {
+    const picked = def.options.filter((o) => Array.isArray(resolved) && resolved.includes(o.value));
+    return picked.length === 0 ? "—" : picked.map((o) => o.label).join("، ");
+  }
   return resolved === null || resolved === undefined ? "—" : toFaDigits(String(resolved));
 }
 
@@ -469,6 +474,41 @@ function ParamField({ def, value, today, onChange }: { def: ParamDef; value: any
             </option>
           ))}
         </select>
+      </div>
+    );
+  }
+  if (def.type === "multiselect") {
+    const picked: string[] = Array.isArray(value) ? value : [];
+    const toggle = (v: string, on: boolean) => onChange(def.options.map((o) => o.value).filter((x) => (x === v ? on : picked.includes(x))));
+    // گزینه‌ها با عنوان گروه (اگر داشته باشند) دسته‌بندی می‌شوند؛ ترتیب گروه‌ها همان ترتیب اولین گزینه‌ی هر گروه است
+    const groups = Array.from(new Set(def.options.map((o) => o.group ?? "")));
+    return (
+      <div>
+        {labelEl}
+        <div style={{ display: "flex", gap: 8, margin: "4px 0" }}>
+          <button type="button" className="btn secondary" style={{ padding: "2px 10px", fontSize: 12 }} onClick={() => onChange(def.options.map((o) => o.value))}>
+            انتخاب همه
+          </button>
+          <button type="button" className="btn secondary" style={{ padding: "2px 10px", fontSize: 12 }} onClick={() => onChange([])}>
+            هیچ‌کدام
+          </button>
+          <span style={{ fontSize: 12, color: "var(--ink-soft)", alignSelf: "center" }}>{toFaDigits(String(picked.length))} از {toFaDigits(String(def.options.length))} انتخاب شده</span>
+        </div>
+        {groups.map((g) => (
+          <div key={g || "_"} style={{ marginBottom: 6 }}>
+            {g && <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-soft)", margin: "4px 0 2px" }}>{g}</div>}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 16px" }}>
+              {def.options
+                .filter((o) => (o.group ?? "") === g)
+                .map((o) => (
+                  <label key={o.value} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
+                    <input type="checkbox" checked={picked.includes(o.value)} onChange={(e) => toggle(o.value, e.target.checked)} />
+                    {o.label}
+                  </label>
+                ))}
+            </div>
+          </div>
+        ))}
       </div>
     );
   }

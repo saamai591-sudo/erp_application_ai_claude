@@ -153,6 +153,7 @@ router.get("/warehouse-adjustments", can(`${FORM}.view`), async (req: AuthedRequ
         fiscalPeriodTitle: d.fiscalPeriod.title,
         description: d.description,
         status: d.status,
+        countId: (d as any).countId ?? null,
         lineCount: d.lines.length,
         totalQuantity: d.lines.reduce((s: number, l: any) => s + Number(l.quantity), 0),
         ...(showAmount ? { totalAmount: d.lines.reduce((s: number, l: any) => s + Number(amountByLineId.get(l.id) ?? 0), 0) } : {}),
@@ -190,6 +191,7 @@ router.get("/warehouse-adjustments/:id", can(`${FORM}.view`), async (req: Authed
     fiscalPeriodTitle: d.fiscalPeriod.title,
     description: d.description,
     status: d.status,
+    countId: (d as any).countId ?? null,
     finalizedAt: d.finalizedAt,
     updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
@@ -292,6 +294,7 @@ router.put("/warehouse-adjustments/:id", can(`${FORM}.edit`), async (req: Authed
     include: { lines: { include: { serials: true } }, warehouse: true },
   });
   if (!existing) return res.status(404).json({ error: "سند انبارگردانی یافت نشد" });
+  if ((existing as any).countId) return res.status(400).json({ error: "این سند از «مغایرت‌گیری شمارش انبار» صادر شده است و فقط از همان فرم (حذف مغایرت‌گیری) قابل ویرایش/حذف است" });
   const existingSerialIds = new Set(existing.lines.flatMap((l: any) => l.serials.map((s: any) => s.serialId)));
 
   // بعد از «تایید حسابداری» (status=FINALIZED)، این PUT دیگر امکان تغییر سرصفحه/مقدار/کالای ردیف‌ها را
@@ -401,6 +404,7 @@ router.delete("/warehouse-adjustments/:id", can(`${FORM}.delete`), async (req, r
   const id = Number(req.params.id);
   const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "WAREHOUSE_ADJUSTMENT" }, include: { lines: true, warehouse: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
+  if ((d as any).countId) return res.status(400).json({ error: "این سند از «مغایرت‌گیری شمارش انبار» صادر شده است و فقط از همان فرم (حذف مغایرت‌گیری) قابل ویرایش/حذف است" });
   if (d.status === "FINALIZED") return res.status(400).json({ error: "این سند با تایید انبار نهایی شده است و دیگر قابل حذف نیست" });
 
   try {

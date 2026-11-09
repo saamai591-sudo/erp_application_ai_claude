@@ -31,6 +31,11 @@ interface BalanceRow {
   totalCredit: number;
   balance: number;
   balanceNature: "DEBIT" | "CREDIT";
+  /** فقط در «مرور حسابهای ارزی» (ردیف = حساب/تفصیل × ارز؛ شناسه‌ی ردیف «شناسه|ارز») */
+  currencyId?: number;
+  currencyTitle?: string;
+  totalBaseDebit?: number;
+  totalBaseCredit?: number;
 }
 interface LedgerRow {
   id: number;
@@ -46,6 +51,9 @@ interface LedgerRow {
   credit: number;
   runningBalance: number;
   runningBalanceNature: "DEBIT" | "CREDIT";
+  currencyTitle?: string;
+  baseDebit?: number;
+  baseCredit?: number;
 }
 
 const STATUS_FA: Record<string, string> = { DRAFT: "ثبت", REVIEW: "بررسی", APPROVED: "تایید" };
@@ -57,6 +65,7 @@ const ISSUING_SYSTEM_FA: Record<string, string> = {
   WAREHOUSE: "اسناد انبار",
   PURCHASE: "فاکتور خرید",
   TREASURY: "خزانه‌داری",
+  FIXED_ASSET: "دارایی ثابت",
 };
 const DETAIL_SLOTS = [1, 2, 3] as const;
 
@@ -100,8 +109,27 @@ const detailBalanceColumns = [
   ...balanceColumns.slice(2),
 ];
 
+// «مرور حسابهای ارزی»: همان ستون‌ها + ستون «ارز» (مبالغ اصلی به ارزِ خط) و دو ستون معادل پایه
+const FX_CURRENCY_COLUMN = {
+  header: "ارز",
+  render: (r: BalanceRow) => r.currencyTitle ?? "",
+  width: "110px",
+  sortValue: (r: BalanceRow) => r.currencyTitle ?? "",
+  filterType: "string" as ColumnFilterType,
+  filterValue: (r: BalanceRow) => r.currencyTitle ?? "",
+};
+const FX_BASE_COLUMNS = [
+  { header: "معادل پایه بدهکار", render: (r: BalanceRow) => formatAmountFa(r.totalBaseDebit ?? 0), sortValue: (r: BalanceRow) => r.totalBaseDebit ?? 0, filterType: "number" as ColumnFilterType, filterValue: (r: BalanceRow) => r.totalBaseDebit ?? 0, decimal: true },
+  { header: "معادل پایه بستانکار", render: (r: BalanceRow) => formatAmountFa(r.totalBaseCredit ?? 0), sortValue: (r: BalanceRow) => r.totalBaseCredit ?? 0, filterType: "number" as ColumnFilterType, filterValue: (r: BalanceRow) => r.totalBaseCredit ?? 0, decimal: true },
+];
+const fxBalanceColumns = [...balanceColumns.slice(0, 2), FX_CURRENCY_COLUMN, ...balanceColumns.slice(2), ...FX_BASE_COLUMNS];
+const fxDetailBalanceColumns = [...detailBalanceColumns.slice(0, 3), FX_CURRENCY_COLUMN, ...detailBalanceColumns.slice(3), ...FX_BASE_COLUMNS];
+
 // نگاشت عنوان فارسی ستون به نام فیلد سمت سرور (route بک‌اند /reports/detail-summary)
 const DETAIL_SORT_FIELD_MAP: Record<string, string> = {
+  "ارز": "currencyTitle",
+  "معادل پایه بدهکار": "totalBaseDebit",
+  "معادل پایه بستانکار": "totalBaseCredit",
   "کد": "code",
   "عنوان": "title",
   "نوع تفصیل": "detailTypeTitle",
@@ -121,7 +149,7 @@ const DEFAULT_DETAIL_QUERY: DetailQueryState = { page: 1, pageSize: 25, sort: CO
 // LEDGER_COLUMNS در backend/src/routes/reports.ts یکی باشند. «مانده بدهکار/بستانکار» عمداً بدون
 // sortValue/filterType‌اند — یک مقدار تجمعیِ وابسته به ترتیب پردازش سرور است، نه مقدار مستقیم قابل
 // فیلتر (نگاه کنید به یادداشت مشابه در warehouseReview.ts#ledgerColumnDefs).
-function ledgerColumns(showRunningBalance: boolean): (BalanceTableColumn<LedgerRow> & { field: string })[] {
+function ledgerColumns(showRunningBalance: boolean, fx = false): (BalanceTableColumn<LedgerRow> & { field: string })[] {
   const cols: (BalanceTableColumn<LedgerRow> & { field: string })[] = [
     { header: "شماره سند", field: "number", render: (r) => toFaDigits(String(r.number)), sortValue: (r) => r.number, filterType: "number", filterValue: (r) => r.number },
     { header: "شماره عطف", field: "referenceNumber", render: (r) => toFaDigits(String(r.referenceNumber)), sortValue: (r) => r.referenceNumber, filterType: "number", filterValue: (r) => r.referenceNumber },
@@ -130,8 +158,15 @@ function ledgerColumns(showRunningBalance: boolean): (BalanceTableColumn<LedgerR
     { header: "سیستم", field: "issuingSystem", render: (r) => ISSUING_SYSTEM_FA[r.issuingSystem] || r.issuingSystem, sortValue: (r) => ISSUING_SYSTEM_FA[r.issuingSystem] || r.issuingSystem, filterType: "string", filterValue: (r) => ISSUING_SYSTEM_FA[r.issuingSystem] || r.issuingSystem },
     { header: "وضعیت", field: "status", render: (r) => <span className="badge">{STATUS_FA[r.status]}</span>, sortValue: (r) => STATUS_FA[r.status] || r.status, filterType: "string", filterValue: (r) => STATUS_FA[r.status] || r.status },
     { header: "شرح", field: "description", render: (r) => r.description || "—", sortValue: (r) => r.description || "", filterType: "string", filterValue: (r) => r.description || "" },
+    ...(fx ? [{ header: "ارز", field: "currencyTitle", render: (r: LedgerRow) => r.currencyTitle ?? "", sortValue: (r: LedgerRow) => r.currencyTitle ?? "", filterType: "string" as const, filterValue: (r: LedgerRow) => r.currencyTitle ?? "" }] : []),
     { header: "بدهکار", field: "debit", render: (r) => (r.debit ? formatAmountFa(r.debit) : "—"), sortValue: (r) => r.debit, filterType: "number", filterValue: (r) => r.debit, decimal: true },
     { header: "بستانکار", field: "credit", render: (r) => (r.credit ? formatAmountFa(r.credit) : "—"), sortValue: (r) => r.credit, filterType: "number", filterValue: (r) => r.credit, decimal: true },
+    ...(fx
+      ? [
+          { header: "معادل پایه بدهکار", field: "baseDebit", render: (r: LedgerRow) => (r.baseDebit ? formatAmountFa(r.baseDebit) : "—") },
+          { header: "معادل پایه بستانکار", field: "baseCredit", render: (r: LedgerRow) => (r.baseCredit ? formatAmountFa(r.baseCredit) : "—") },
+        ]
+      : []),
   ];
   if (showRunningBalance) {
     cols.push(
@@ -141,9 +176,12 @@ function ledgerColumns(showRunningBalance: boolean): (BalanceTableColumn<LedgerR
   }
   return cols;
 }
-const LEDGER_SORT_FIELD_MAP: Record<string, string> = Object.fromEntries(ledgerColumns(false).map((c) => [c.header, c.field]));
+const LEDGER_SORT_FIELD_MAP: Record<string, string> = Object.fromEntries(ledgerColumns(false, true).map((c) => [c.header, c.field]));
 
-export default function AccountsReview() {
+/** fx = «مرور حسابهای ارزی»: همین گزارش با گروه‌بندی همه‌ی تب‌ها به تفکیک ارز؛ ارزِ ردیف‌های انتخاب‌شده به فیلتر تب‌های دیگر ارث می‌رسد */
+export default function AccountsReview({ fx = false }: { fx?: boolean } = {}) {
+  // شناسه‌ی ردیف در حالت ارزی «شناسه|ارز» است؛ بخش اول شناسه‌ی حساب/کد تفصیل
+  const baseId = (id: SelectId): SelectId => (fx ? String(id).split("|")[0] : id);
   const { openTab } = useTabs();
   const snapshot = getAccountsReviewSnapshot();
   const [levels, setLevels] = useState<Level[]>([]);
@@ -256,8 +294,23 @@ export default function AccountsReview() {
     if (filters.numberTo) p.set("numberTo", filters.numberTo);
     if (filters.referenceFrom) p.set("referenceFrom", filters.referenceFrom);
     if (filters.referenceTo) p.set("referenceTo", filters.referenceTo);
+    if (fx) p.set("fx", "1");
     return p;
-  }, [filters]);
+  }, [filters, fx]);
+
+  /** ارزهای مجاز برای تب tabIndex: اشتراک ارزِ ردیف‌های انتخاب‌شده در همه‌ی تب‌های دیگرِ زنجیره (فقط حالت ارزی) */
+  function currencyConstraint(tabIndex: number): string[] {
+    if (!fx) return [];
+    let result: Set<string> | null = null;
+    for (const t of chain.tabsBefore(tabIndex)) {
+      const ids = Array.from(chain.get(t));
+      if (!ids.length) continue;
+      const cur = new Set(ids.map((i) => String(i).split("|")[1]));
+      result = result ? new Set(Array.from(result as Set<string>).filter((x: string) => cur.has(x))) : cur;
+    }
+    if (!result) return [];
+    return result.size ? Array.from(result) : ["-1"];
+  }
 
   /**
    * برای تب حسابیِ tabIndex (با سطح levelIndex)، از بین تب‌های حسابیِ «بالادست در ترتیب زمانی»،
@@ -271,7 +324,7 @@ export default function AccountsReview() {
     let descDist = Infinity;
     for (const t of before) {
       if (t >= accountTabCount) continue; // فقط تب‌های سطح حساب
-      const ids = Array.from(chain.get(t));
+      const ids = Array.from(new Set(Array.from(chain.get(t)).map(baseId)));
       if (!ids.length) continue;
       const dist = Math.abs(t - tabIndex);
       if (t < tabIndex && dist < parentDist) {
@@ -293,7 +346,7 @@ export default function AccountsReview() {
     for (const t of before) {
       if (t < detailTabStart || t >= ledgerTabIndex) continue;
       const slot = (t - detailTabStart + 1) as 1 | 2 | 3;
-      const ids = Array.from(chain.get(t)).map(String);
+      const ids = Array.from(new Set(Array.from(chain.get(t)).map((i) => String(baseId(i)))));
       if (ids.length) result[slot] = ids;
     }
     return result;
@@ -309,6 +362,8 @@ export default function AccountsReview() {
         const { parentIds, descendantIds } = accountConstraints(tabIndex);
         if (parentIds.length) p.set("parentIds", parentIds.join(","));
         if (descendantIds.length) p.set("descendantIds", descendantIds.join(","));
+        const curIds = currencyConstraint(tabIndex);
+        if (curIds.length) p.set("currencyIds", curIds.join(","));
         const details = detailConstraints(tabIndex);
         DETAIL_SLOTS.forEach((slot) => {
           if (details[slot].length) p.set(`detail${slot}Codes`, details[slot].join(","));
@@ -330,6 +385,8 @@ export default function AccountsReview() {
         p.set("slot", String(slot));
         const { parentIds } = accountConstraints(tabIndex);
         if (parentIds.length) p.set("parentIds", parentIds.join(","));
+        const curIds = currencyConstraint(tabIndex);
+        if (curIds.length) p.set("currencyIds", curIds.join(","));
         const details = detailConstraints(tabIndex);
         DETAIL_SLOTS.forEach((s) => {
           if (s !== slot && details[s].length) p.set(`detail${s}Codes`, details[s].join(","));
@@ -366,6 +423,8 @@ export default function AccountsReview() {
         const p = new URLSearchParams(filterParams);
         const { parentIds } = accountConstraints(ledgerTabIndex);
         if (parentIds.length) p.set("parentIds", parentIds.join(","));
+        const curIds = currencyConstraint(ledgerTabIndex);
+        if (curIds.length) p.set("currencyIds", curIds.join(","));
         const details = detailConstraints(ledgerTabIndex);
         DETAIL_SLOTS.forEach((slot) => {
           if (details[slot].length) p.set(`detail${slot}Codes`, details[slot].join(","));
@@ -513,7 +572,7 @@ export default function AccountsReview() {
     { key: "ledger", label: "گردش", count: 0 },
   ];
 
-  const ledgerCols = useMemo(() => ledgerColumns(showRunningBalance), [showRunningBalance]);
+  const ledgerCols = useMemo(() => ledgerColumns(showRunningBalance, fx), [showRunningBalance, fx]);
 
   return (
     <div>
@@ -572,7 +631,14 @@ export default function AccountsReview() {
         onChange={setActiveTab}
         actions={
           <>
-            <InfoHint text={`گزارش سلسله‌مراتبی مانده‌ی حساب‌ها — در هر تب چندین ردیف قابل انتخاب است؛ فقط حساب‌های دارای گردش در بازه نمایش داده می‌شوند`} title="مرور حسابها" />
+            <InfoHint
+              text={
+                fx
+                  ? "همان مرور حسابها با گروه‌بندی همه‌ی تب‌ها به تفکیک ارز؛ مبالغ به ارزِ خط هستند (معادل پایه جدا نمایش داده می‌شود). ارزِ ردیف‌های انتخاب‌شده در یک تب، فیلتر تب‌های دیگر هم می‌شود و مانده‌ی تجمعی گردش برای هر ارز جدا حساب می‌شود."
+                  : "گزارش سلسله‌مراتبی مانده‌ی حساب‌ها — در هر تب چندین ردیف قابل انتخاب است؛ فقط حساب‌های دارای گردش در بازه نمایش داده می‌شوند"
+              }
+              title={fx ? "مرور حسابهای ارزی" : "مرور حسابها"}
+            />
             <RefreshButton onClick={refreshCurrentTab} title="رفرش تب جاری" />
           </>
         }
@@ -583,7 +649,7 @@ export default function AccountsReview() {
         <SelectableBalanceTable
           stateKey={activeTab}
           rows={tabData[activeTab] || []}
-          columns={balanceColumns}
+          columns={fx ? fxBalanceColumns : balanceColumns}
           selected={chain.get(activeTab)}
           onToggle={onToggleRow}
           loading={tabLoader.loading}
@@ -600,7 +666,7 @@ export default function AccountsReview() {
           restoreFilters={(detailQuery[activeTab] ?? DEFAULT_DETAIL_QUERY).filters}
           restoreSort={(detailQuery[activeTab] ?? DEFAULT_DETAIL_QUERY).sort}
           rows={tabData[activeTab] || []}
-          columns={detailBalanceColumns}
+          columns={fx ? fxDetailBalanceColumns : detailBalanceColumns}
           selected={chain.get(activeTab)}
           onToggle={onToggleRow}
           loading={tabLoader.loading}

@@ -30,6 +30,8 @@ export const SERIAL_LIFECYCLE_BUCKETS: Record<InventoryDocumentType, SerialLifec
   WAREHOUSE_TRANSFER_IN: "TRANSFER_IN",
   WAREHOUSE_ADJUSTMENT: "UNRESTRICTED",
   INVENTORY_COUNTING_SHORTAGE: "OUTBOUND",
+  TEMP_RECEIPT: "UNRESTRICTED", // رسید موقت فقط تعدادی است؛ ردیابی سریال/بچ ندارد
+  TEMP_RECEIPT_RETURN: "UNRESTRICTED",
 };
 
 // جهت گذار هر باکت. برای بازگشتی‌ها هم همین from به‌عنوان فیلتر وضعیت پیکر استفاده می‌شود — طبق تصمیم

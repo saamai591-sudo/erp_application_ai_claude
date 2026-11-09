@@ -30,6 +30,8 @@ export function defaultParamValue(def: ParamDef): any {
       return def.default ?? false;
     case "select":
       return def.default ?? null;
+    case "multiselect":
+      return [...(def.default ?? [])];
   }
 }
 
@@ -39,8 +41,10 @@ export function normalizeParams(defs: ParamDef[], raw: unknown): { values: Recor
   const values: Record<string, any> = {};
   const errors: string[] = [];
   for (const def of defs) {
-    const has = Object.prototype.hasOwnProperty.call(src, def.key);
-    const v = has ? src[def.key] : undefined;
+    const hasNew = Object.prototype.hasOwnProperty.call(src, def.key);
+    const readKey = hasNew || !def.legacyKey ? def.key : def.legacyKey;
+    const has = Object.prototype.hasOwnProperty.call(src, readKey);
+    const v = has ? src[readKey] : undefined;
     switch (def.type) {
       case "dateWindow": {
         if (!has) {
@@ -89,6 +93,19 @@ export function normalizeParams(defs: ParamDef[], raw: unknown): { values: Recor
         }
         break;
       }
+      case "multiselect": {
+        if (!has) {
+          values[def.key] = defaultParamValue(def);
+          break;
+        }
+        const arr = Array.isArray(v) ? v : [];
+        const known = new Set(def.options.map((o) => o.value));
+        const bad = arr.filter((x) => typeof x !== "string" || !known.has(x));
+        if (bad.length > 0) errors.push(`«${def.label}»: گزینه‌ی نامعتبر (${bad.map(String).join("، ")})`);
+        // ترتیب گزینه‌ها همان ترتیب فهرست است (نه ترتیب کلیک)، بدون تکرار
+        values[def.key] = def.options.map((o) => o.value).filter((x) => arr.includes(x));
+        break;
+      }
     }
   }
   return { values, errors };
@@ -100,9 +117,20 @@ export function validateForLive(defs: ParamDef[], values: Record<string, any>): 
   for (const def of defs) {
     if (!def.requiredForLive) continue;
     const v = values[def.key];
-    const missing = def.type === "dateWindow" ? !v || v.fromDaysAgo === null || v.fromDaysAgo === undefined : v === null || v === undefined || v === "";
+    const missing =
+      def.type === "dateWindow"
+        ? !v || v.fromDaysAgo === null || v.fromDaysAgo === undefined
+        : def.type === "multiselect"
+          ? !Array.isArray(v) || v.length === 0
+          : v === null || v === undefined || v === "";
     if (missing) {
-      errors.push(def.type === "dateWindow" ? `برای حالت «واقعی»، سرِ قدیمی‌ترِ بازه‌ی «${def.label}» (از N روز قبل) باید مشخص باشد` : `برای حالت «واقعی»، «${def.label}» الزامی است`);
+      errors.push(
+        def.type === "dateWindow"
+          ? `برای حالت «واقعی»، سرِ قدیمی‌ترِ بازه‌ی «${def.label}» (از N روز قبل) باید مشخص باشد`
+          : def.type === "multiselect"
+            ? `برای حالت «واقعی»، دست‌کم یک گزینه از «${def.label}» باید انتخاب شود`
+            : `برای حالت «واقعی»، «${def.label}» الزامی است`
+      );
     }
   }
   return errors;

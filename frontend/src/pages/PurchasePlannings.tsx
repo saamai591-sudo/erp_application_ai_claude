@@ -379,7 +379,7 @@ function PurchasePlanningForm({ editId }: { editId?: number }) {
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
           {step === 1 && (
             <>
-              <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
+              <div className="je-header-grid" style={{ marginBottom: 6, maxWidth: 900 }}>
                 <div className="form-field">
                   <label>شماره</label>
                   <input dir="ltr" value={meta ? toFaDigits(String(meta.number)) : "خودکار پس از ذخیره"} disabled />

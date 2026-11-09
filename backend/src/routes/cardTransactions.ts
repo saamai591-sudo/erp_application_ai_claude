@@ -2,7 +2,7 @@ import { Router } from "express";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { StoreSaleError } from "../services/storeSaleService";
-import { cancelTransaction, driverOptions, listTransactions, refreshTransaction, resolveTransaction, startTransaction } from "../services/cardTerminalService";
+import { cancelTransaction, driverOptions, listTransactions, refreshTransaction, reportClientResult, resolveTransaction, startTransaction } from "../services/cardTerminalService";
 
 // فروش فروشگاهی › تراکنش‌های کارتخوان؛ منطق فقط در services/cardTerminalService.ts. دسترسی = همان فرم «دریافت فروشگاهی» (مشاهده / ایجاد).
 const FORM = findFormPrefix("store-receipts");
@@ -40,6 +40,14 @@ router.post("/card-transactions/:id/refresh", can(`${FORM}.create`), async (req,
 router.post("/card-transactions/:id/cancel", can(`${FORM}.create`), async (req, res) => {
   try {
     res.json(await cancelTransaction(Number(req.params.id)));
+  } catch (e) {
+    fail(res, e);
+  }
+});
+
+router.post("/card-transactions/:id/client-result", can(`${FORM}.create`), async (req, res) => {
+  try {
+    res.json(await reportClientResult(Number(req.params.id), req.body ?? {}));
   } catch (e) {
     fail(res, e);
   }

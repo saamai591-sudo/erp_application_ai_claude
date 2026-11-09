@@ -431,7 +431,8 @@ router.delete("/sales-return-invoices/:id", can(`${FORM}.delete`), async (req, r
 // درآمد.
 // =========================================================================
 
-router.post("/sales-return-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournalEntry`), async (req, res) => {
+// منطق صدور سند در یک تابع نام‌دار تا کار زمان‌بندی‌شده‌ی «صدور سند حسابداری» (jobs/issuers) دقیقاً همین را صدا بزند
+export async function issueSalesReturnInvoiceJournalHandler(req: any, res: any) {
   const id = Number(req.params.id);
   const invoice = await prisma.salesReturnInvoice.findUnique({
     where: { id },
@@ -616,7 +617,8 @@ router.post("/sales-return-invoices/:id/issue-journal-entry", can(`${FORM}.issue
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در صدور سند حسابداری" });
   }
-});
+}
+router.post("/sales-return-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournalEntry`), issueSalesReturnInvoiceJournalHandler);
 
 router.delete("/sales-return-invoices/:id/journal-entry", can(`${FORM}.revertJournalEntry`), async (req, res) => {
   const id = Number(req.params.id);

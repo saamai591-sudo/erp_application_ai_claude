@@ -1,11 +1,12 @@
-// برنامه‌ی دسکتاپ صندوق: صفحه‌ی ERP را در یک پنجره‌ی اختصاصی باز می‌کند، عامل کارتخوان را درون خودش اجرا می‌کند و چاپ مستقیم روی چاپگرهای ویندوز را (به درخواست صفحه) انجام می‌دهد.
-// تنظیمات (آدرس، توکن، …) در userData/config.json ذخیره می‌شود؛ بار اول پنجره‌ی تنظیمات باز می‌شود (بعداً: Ctrl+Shift+S).
+// برنامه‌ی دسکتاپ صندوق: صفحه‌ی ERP را در یک پنجره‌ی اختصاصی باز می‌کند و به درخواست صفحه، مستقیم با کارتخوان و چاپگرهای ویندوزِ همین کامپیوتر کار می‌کند (سرور فقط تراکنش/کار چاپ را آماده و نتیجه را ثبت می‌کند).
+// تنظیمات (آدرس سامانه، …) در userData/config.json ذخیره می‌شود؛ بار اول پنجره‌ی تنظیمات باز می‌شود (بعداً: Ctrl+Shift+S).
 import { app, BrowserWindow, Menu, ipcMain, shell } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createAgent } from "./agent-core/core.mjs";
+import { DRIVERS } from "./drivers/index.mjs";
+import { discoverAll } from "./drivers/sadad.mjs";
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const VERSION = app.getVersion();
@@ -30,9 +31,6 @@ function saveConfig(cfg) {
 let cfg = {};
 let mainWin = null;
 let setupWin = null;
-let agent = null;
-let agentState = { online: false, error: "" };
-let firstStatus = null; // برای صفحه‌ی تنظیمات: منتظر اولین نتیجه‌ی اتصال
 
 // ─── چاپ با Electron ───
 let worker = null; // پنجره‌ی پنهان فقط برای فهرست چاپگرها
@@ -76,31 +74,50 @@ async function printHtml({ html, printer, outFile = "", widthMm, paper = "ROLL" 
   }
 }
 
-// ─── عامل ───
-async function stopAgent() {
-  if (agent) {
-    const a = agent;
-    agent = null;
-    await a.stop().catch(() => {});
+// ─── کارتخوان: اجرای تراکنش روی دستگاه به درخواست صفحه (بدون عامل و توکن) ───
+// سرور فقط تراکنش را آماده و ثبت می‌کند؛ این برنامه مستقیم با دستگاهِ شبکه‌ی محل حرف می‌زند و صفحه نتیجه را با ورود خود کاربر به سرور می‌دهد.
+// هر تراکنش با requestUid یکتاست: درخواست تکراری همان اجرای قبلی را برمی‌گرداند (هرگز دو بار از کارت پول نمی‌رود)،
+// و نتیجه‌ی پایان‌یافته روی دیسک می‌ماند تا با بارگذاری مجدد صفحه یا بستن برنامه هم گم نشود و بتوان آن را به سرور رساند.
+const CARD_RESULTS_FILE = () => path.join(app.getPath("userData"), "card-results.json");
+const CLIENT_DRIVERS = ["SADAD", "PARSIAN"];
+const cardRuns = new Map(); // requestUid → { promise, result, at }
+function loadCardResults() {
+  try {
+    const arr = JSON.parse(fs.readFileSync(CARD_RESULTS_FILE(), "utf8"));
+    for (const [uid, r] of arr) if (Date.now() - r.at < 7 * 24 * 3600 * 1000) cardRuns.set(uid, r);
+  } catch {
+    /* فایل نیست */
   }
 }
-function startAgent() {
-  agentState = { online: false, error: "" };
-  if (!cfg.apiUrl || !cfg.token) return;
-  agent = createAgent({
-    serverUrl: cfg.apiUrl,
-    token: cfg.token,
-    pollMs: cfg.pollMs,
-    readers: cfg.readers,
-    version: `pos-${VERSION}`,
-    dataDir: app.getPath("userData"),
-    onStatus: (s) => {
-      agentState = s;
-      firstStatus?.(s);
-      buildMenu();
-    },
-  });
-  agent.start();
+function saveCardResults() {
+  try {
+    const done = [...cardRuns.entries()].filter(([, r]) => r.result).map(([uid, r]) => [uid, { result: r.result, at: r.at }]);
+    fs.writeFileSync(CARD_RESULTS_FILE(), JSON.stringify(done));
+  } catch {
+    /* ادامه */
+  }
+}
+function startCardRun(job) {
+  const uid = String(job.requestUid);
+  const existing = cardRuns.get(uid);
+  if (existing) return existing;
+  const run = { result: null, at: Date.now(), promise: null };
+  run.promise = (async () => {
+    let r;
+    try {
+      const drv = DRIVERS[job.driver];
+      if (!drv || !CLIENT_DRIVERS.includes(job.driver)) r = { status: "FAILED", errorCode: "NO_DRIVER", errorMessage: `درایور «${job.driver}» در برنامه‌ی صندوق پشتیبانی نمی‌شود` };
+      else r = await drv.send({ requestUid: uid, amount: job.amount, reader: { terminalNumber: job.terminalNumber }, config: job.ip ? { ip: job.ip, port: job.port } : (cfg.cardDevices || {})[job.terminalNumber] || {} }); // اولویت: آدرس ثبت‌شده در ERP ← config.json محلی ← پیدا کردن خودکار
+    } catch (e) {
+      // خطا بعد از شروع: ممکن است دستگاه اجرا کرده باشد ⇒ نامشخص (نه ناموفق)
+      r = { status: "UNKNOWN", errorCode: "APP_DRIVER_ERROR", errorMessage: String(e?.message || e).slice(0, 300) };
+    }
+    run.result = r;
+    saveCardResults();
+    return r;
+  })();
+  cardRuns.set(uid, run);
+  return run;
 }
 
 // ─── پنجره‌ها و منو ───
@@ -176,8 +193,6 @@ function openSetup() {
 
 function buildMenu() {
   const t = [
-    { label: agentState.online ? "عامل: متصل ✔" : `عامل: قطع${agentState.error ? " — " + agentState.error : ""}`, enabled: false },
-    { type: "separator" },
     { label: "بارگذاری مجدد", accelerator: "F5", click: () => mainWin?.webContents.reload() },
     { label: "تمام‌صفحه", accelerator: "F11", click: () => mainWin?.setFullScreen(!mainWin.isFullScreen()) },
     { label: "تنظیمات اتصال", accelerator: "CommandOrControl+Shift+S", click: () => openSetup() },
@@ -197,6 +212,24 @@ ipcMain.handle("pos:print", async (e, job) => {
   if (!job || typeof job.html !== "string" || !job.printer) throw new Error("کار چاپ نامعتبر است");
   await printHtml({ html: job.html, printer: String(job.printer), outFile: cfg.printOutDir ? path.join(cfg.printOutDir, `print-${Date.now()}.pdf`) : "", widthMm: job.widthMm, paper: job.paper });
   return { ok: true };
+});
+
+ipcMain.handle("pos:card-pay", async (e, job) => {
+  if (!fromAllowedPage(e)) throw new Error("درخواست مجاز نیست");
+  const amount = Number(job?.amount);
+  if (!job || !job.requestUid || !job.driver || !Number.isFinite(amount) || amount < 1) throw new Error("درخواست تراکنش نامعتبر است");
+  return startCardRun({ requestUid: job.requestUid, driver: String(job.driver), amount, terminalNumber: String(job.terminalNumber ?? ""), ip: job.ip ? String(job.ip) : "", port: Number(job.port) || undefined }).promise;
+});
+// جستجوی دستگاه‌های سداد روی شبکه‌ی همین کامپیوتر (برای انتخاب در فرم کارتخوان)
+ipcMain.handle("pos:card-discover", async (e) => {
+  if (!fromAllowedPage(e)) throw new Error("درخواست مجاز نیست");
+  return discoverAll(4500);
+});
+// نتیجه‌ی تراکنش (اگر پایان یافته): { status, ... } | { status: "RUNNING" } | null (اجرایی با این شناسه در این برنامه نیست)
+ipcMain.handle("pos:card-result", (e, requestUid) => {
+  if (!fromAllowedPage(e)) throw new Error("درخواست مجاز نیست");
+  const r = cardRuns.get(String(requestUid));
+  return r ? r.result ?? { status: "RUNNING" } : null;
 });
 
 // ─── IPC صفحه‌ی تنظیمات ───
@@ -224,23 +257,10 @@ ipcMain.handle("setup:probe", async (_e, appUrl) => {
 });
 
 ipcMain.handle("setup:save", async (_e, input) => {
-  const next = { ...cfg, appUrl: String(input.appUrl).replace(/\/+$/, ""), apiUrl: String(input.apiUrl).replace(/\/+$/, ""), token: String(input.token).trim(), fullscreen: !!input.fullscreen };
-  cfg = next;
+  cfg = { ...cfg, appUrl: String(input.appUrl).replace(/\/+$/, ""), apiUrl: String(input.apiUrl).replace(/\/+$/, ""), fullscreen: !!input.fullscreen };
+  delete cfg.token; // توکن عامل دیگر وجود ندارد
   saveConfig(cfg);
-  await stopAgent();
-  const first = new Promise((resolve) => {
-    firstStatus = (s) => {
-      firstStatus = null;
-      resolve(s);
-    };
-    setTimeout(() => {
-      firstStatus = null;
-      resolve({ online: false, error: "" });
-    }, 9000);
-  });
-  startAgent();
-  const s = await first;
-  return { online: s.online, error: s.error };
+  return { ok: true };
 });
 
 ipcMain.handle("setup:done", () => {
@@ -260,8 +280,8 @@ app.whenReady().then(() => {
   if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: true });
   cfg = loadConfig();
   buildMenu();
-  if (cfg.appUrl && cfg.token) {
-    startAgent();
+  loadCardResults();
+  if (cfg.appUrl) {
     openMain();
   } else {
     openSetup();
@@ -269,6 +289,3 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => app.quit());
-app.on("before-quit", () => {
-  agent?.stop();
-});

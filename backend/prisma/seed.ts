@@ -15,6 +15,7 @@ async function main() {
     { code: 6, title: "تنخواه دار", codeLength: 5, startNumber: 600, endNumber: 799 },
     { code: 7, title: "دوره مالی", codeLength: 5, startNumber: 800, endNumber: 899 },
     { code: 8, title: "پروژه", codeLength: 5, startNumber: 900, endNumber: 999 },
+    { code: 9, title: "دارایی ثابت", codeLength: 6, startNumber: 100001, endNumber: 999999 },
   ];
 
   for (const dt of detailTypes) {

@@ -95,7 +95,7 @@ export const WAREHOUSE_DOC_NATURE_MATRIX: WarehouseDocNatureRule[] = [
   { direction: "OUTBOUND", type: "انتقالی", allowedGoodsTypes: [...ALL_GOODS_TYPES] },
   { direction: "OUTBOUND", type: "ضایعات", allowedGoodsTypes: ["RAW_MATERIAL", "SEMI_FINISHED", "PRODUCT", "TRADE_GOODS", "SUPPLIES"] },
   { direction: "OUTBOUND", type: "انبارگردانی", allowedGoodsTypes: ["RAW_MATERIAL", "SEMI_FINISHED", "PRODUCT", "FIXED_ASSET", "TRADE_GOODS", "SUPPLIES"] },
-  { direction: "OUTBOUND", type: "دارایی ثابت", allowedGoodsTypes: ["FIXED_ASSET"] },
+  { direction: "OUTBOUND", type: "دارایی ثابت", allowedGoodsTypes: ["RAW_MATERIAL", "SEMI_FINISHED", "PRODUCT", "FIXED_ASSET", "TRADE_GOODS", "SUPPLIES"] }, // اجزای مونتاژ یک دارایی ممکن است ملزومات/مواد/کالای تجاری هم باشند
   { direction: "OUTBOUND", type: "تبدیل کالا", allowedGoodsTypes: ["RAW_MATERIAL", "TRADE_GOODS", "SUPPLIES"] },
   { direction: "OUTBOUND", type: "فروش ضایعات", allowedGoodsTypes: ["SCRAP"] },
   { direction: "OUTBOUND", type: "بازیافت ضایعات", allowedGoodsTypes: ["SCRAP"] },

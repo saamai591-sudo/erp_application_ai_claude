@@ -71,13 +71,27 @@ export function serializeForDepsKey(value: unknown): string {
  * fetch با آن شروع شده — یعنی یک پاسخ دیرآمده از یک درخواست قدیمی‌تر هرگز نمی‌تواند رندر تب را با
  * نتیجه‌ی یک fetch تازه‌تر (یا در حال اجرا) برای همان تب خراب کند.
  */
+/**
+ * مجموعه‌ی تب‌های بارگذاری‌شده + «مهر پاک‌سازی» (resetStamp): هر بار resetLoaded() صدا زده شود مهر یکی بالا می‌رود (و با افزودن تب‌ها حفظ می‌شود).
+ * useReviewTabActivation با دیدن عوض‌شدن مهر، امضای «آخرین بارگذاری» همه‌ی تب‌ها را فراموش می‌کند تا تب فعال حتماً دوباره از سرور بیاید — وگرنه
+ * وقتی امضای وابستگی‌ها (فیلتر/انتخاب بالادست) با «حذف همه فیلترها» یا تغییر بازه‌ی تاریخ عوض نمی‌شد، داده پاک می‌شد ولی بارگذاری مجددی انجام نمی‌شد
+ * و گرید خالی می‌ماند. همه‌ی صفحه‌های Review که resetLoaded را صدا می‌زنند بدون تغییر از این اصلاح بهره می‌برند.
+ */
+export class LoadedTabs extends Set<number> {
+  resetStamp = 0;
+}
+
 export function useReviewTabLoader(initialLoadedTabs: number[] = []) {
   const [loading, setLoading] = useState(false);
-  const [loadedTabs, setLoadedTabs] = useState<Set<number>>(() => new Set(initialLoadedTabs));
+  const [loadedTabs, setLoadedTabs] = useState<Set<number>>(() => new LoadedTabs(initialLoadedTabs));
   const generationRef = useRef<Record<number, number>>({});
 
   function resetLoaded() {
-    setLoadedTabs(new Set());
+    setLoadedTabs((prev) => {
+      const next = new LoadedTabs();
+      next.resetStamp = ((prev as LoadedTabs).resetStamp ?? 0) + 1;
+      return next;
+    });
     generationRef.current = {};
   }
 
@@ -93,7 +107,14 @@ export function useReviewTabLoader(initialLoadedTabs: number[] = []) {
     setLoading(true);
     try {
       await fetcher(isStale);
-      if (!isStale()) setLoadedTabs((prev) => new Set(prev).add(tabIndex));
+      if (!isStale()) {
+        setLoadedTabs((prev) => {
+          const next = new LoadedTabs(prev);
+          next.resetStamp = (prev as LoadedTabs).resetStamp ?? 0;
+          next.add(tabIndex);
+          return next;
+        });
+      }
     } catch (e: any) {
       if (!isStale()) onError(e?.message || "خطا در بارگذاری اطلاعات");
     } finally {
@@ -123,7 +144,15 @@ export function useReviewTabActivation(
 ) {
   const skippedInitialFetch = useRef(false);
   const lastKeyByTab = useRef<Record<number, string>>({});
+  const resetStamp = (loadedTabs as LoadedTabs).resetStamp ?? 0;
+  const lastResetStamp = useRef(resetStamp);
   useEffect(() => {
+    // resetLoaded() صدا زده شده (داده‌ی همه‌ی تب‌ها پاک شد): هر تب باید دوباره بارگذاری شود، حتی اگر امضای وابستگی‌هایش عوض نشده باشد
+    if (resetStamp !== lastResetStamp.current) {
+      lastResetStamp.current = resetStamp;
+      lastKeyByTab.current = {};
+      skippedInitialFetch.current = true;
+    }
     if (!ready) return;
     if (!skippedInitialFetch.current) {
       skippedInitialFetch.current = true;
@@ -136,5 +165,5 @@ export function useReviewTabActivation(
     lastKeyByTab.current[activeTab] = depsKey;
     onActivate(activeTab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, activeTab, depsKey]);
+  }, [ready, activeTab, depsKey, resetStamp]);
 }

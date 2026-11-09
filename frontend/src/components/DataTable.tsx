@@ -423,11 +423,14 @@ export function DataTable<T extends { id: number | string }>({
   serverPaging,
   stateKey,
   mobileColumns,
+  autoBestFit,
 }: {
   columns: Column<T>[];
   rows: T[];
   /** موبایل (≤۷۰۰px): فقط ستون‌های با این عنوان‌ها (و دکمه‌های ردیف) نمایش داده می‌شوند تا جدول (با سرستون، فیلتر و مرتب‌سازی) اسکرول افقی نخورد. پیش‌فرض: همه‌ی ستون‌ها. */
   mobileColumns?: string[];
+  /** opt-in: به‌محض نمایش (و با هر تغییر صفحه/ردیف‌ها) خودکار «Best Fit» اجرا شود — برای گزارش‌هایی که ستون متنی بلند (نام طرف‌حساب) دارند و بدون آن شکسته و پرارتفاع دیده می‌شوند */
+  autoBestFit?: boolean;
   /** اگر مشخص شود، دکمه‌ی «ویرایش» نمایش داده می‌شود و همیشه فرم را در یک تب جدید باز می‌کند (هرگز تب فهرست را بازنویسی نمی‌کند) */
   edit?: EditAction<T>;
   onDelete?: (row: T) => void;
@@ -605,6 +608,24 @@ export function DataTable<T extends { id: number | string }>({
     const widths = measureBestFitWidths(scrollAreaRef.current?.querySelector("table"), footerScrollRef.current?.querySelector("table"));
     setBestFit(widths.length ? widths : null);
   }
+  // autoBestFit: بعد از هر پاک‌شدنِ عرض‌ها (signature عوض شده)، پس از رندر با عرض‌های پیش‌فرض و آماده‌شدن فونت، یک‌بار اندازه‌گیری می‌شود؛ اگر اندازه‌گیری خالی باشد state عوض نمی‌شود و حلقه‌ای ساخته نمی‌شود
+  useEffect(() => {
+    if (!autoBestFit || bestFit !== null || pageRows.length === 0) return;
+    let cancelled = false;
+    let raf = 0;
+    const run = () => {
+      raf = requestAnimationFrame(() => {
+        if (!cancelled) applyBestFit();
+      });
+    };
+    if ((document as any).fonts?.ready) (document as any).fonts.ready.then(run);
+    else run();
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoBestFit, bestFit, bestFitSignature]);
   useLayoutEffect(() => {
     function measure() {
       const ths = theadRowRef.current?.querySelectorAll("th");

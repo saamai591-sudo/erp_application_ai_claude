@@ -25,7 +25,8 @@ function shape(r: any) {
     bankAccountTitle: r.bankAccount ? bankAccountDetailTitle(r.bankAccount) : "",
     title: r.title,
     driver: r.driver,
-    agentId: r.agentId ?? null,
+    deviceIp: r.deviceIp ?? "",
+    devicePort: r.devicePort ?? null,
     updatedAt: r.updatedAt,
   };
 }
@@ -38,7 +39,7 @@ function requiredText(raw: unknown, label: string, digits = false): string {
   return v;
 }
 
-async function clean(body: any, existing?: { bankAccountId: number; driver?: string; agentId?: number | null }) {
+async function clean(body: any, existing?: { bankAccountId: number; driver?: string; deviceIp?: string | null; devicePort?: number | null }) {
   const title = requiredText(body?.title, "عنوان");
   const terminalNumber = requiredText(body?.terminalNumber, "شماره پایانه", true);
   const merchantNumber = requiredText(body?.merchantNumber, "شماره پذیرنده", true);
@@ -49,14 +50,17 @@ async function clean(body: any, existing?: { bankAccountId: number; driver?: str
   // حساب غیرفعال برای انتخاب تازه پذیرفته نمی‌شود؛ حسابِ قبلیِ همین کارتخوان (که بعداً غیرفعال شده) می‌ماند
   if (!acc.isActive && existing?.bankAccountId !== bankAccountId) throw new Error("حساب بانکی انتخاب‌شده غیرفعال است");
   const driver = body?.driver === undefined || body?.driver === "" ? existing?.driver ?? "MANUAL" : String(body.driver);
-  if (driver !== "MANUAL" && driver !== "SIMULATOR") throw new Error("درایور کارتخوان نامعتبر است");
-  let agentId: number | null = existing?.agentId ?? null;
-  if (body?.agentId !== undefined) agentId = body.agentId ? Number(body.agentId) : null;
-  if (agentId) {
-    if (!(await prisma.cardTerminalAgent.findUnique({ where: { id: agentId }, select: { id: true } }))) throw new Error("عامل کارتخوان نامعتبر است");
-    if (driver === "MANUAL") throw new Error("کارتخوان با اتصال «دستی» عامل محلی نمی‌خواهد؛ یا اتصال را عوض کنید یا عامل را بردارید");
-  }
-  return { title, terminalNumber, merchantNumber, bankAccountId, driver: driver as "MANUAL" | "SIMULATOR", agentId };
+  if (driver !== "MANUAL" && driver !== "SADAD" && driver !== "PARSIAN") throw new Error("درایور کارتخوان نامعتبر است");
+  // آدرس دستگاه (اختیاری): IPv4 معتبر و پورت 1..65535؛ خالی = پیدا کردن خودکار
+  const ipRaw = toEnglishDigits(String(body?.deviceIp ?? existing?.deviceIp ?? "")).trim();
+  const deviceIp = ipRaw || null;
+  if (deviceIp && !/^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/.test(deviceIp)) throw new Error("آی‌پی دستگاه معتبر نیست (مثال: 192.168.1.50)");
+  const portRaw = body?.devicePort === undefined ? existing?.devicePort : body.devicePort;
+  const devicePort = portRaw === null || portRaw === "" || portRaw === undefined ? null : Number(toEnglishDigits(String(portRaw)));
+  if (devicePort !== null && (!Number.isInteger(devicePort) || devicePort < 1 || devicePort > 65535)) throw new Error("پورت دستگاه معتبر نیست");
+  if (!deviceIp && devicePort !== null) throw new Error("پورت بدون آی‌پی معنا ندارد؛ آی‌پی را هم وارد کنید یا پورت را خالی بگذارید");
+  if (driver === "PARSIAN" && !deviceIp) throw new Error("برای کارتخوان پارسیان آی‌پی دستگاه الزامی است (این دستگاه پخش شناسایی ندارد)");
+  return { title, terminalNumber, merchantNumber, bankAccountId, driver: driver as "MANUAL" | "SADAD" | "PARSIAN", deviceIp, devicePort };
 }
 
 async function assertNoDuplicate(d: { title: string; terminalNumber: string; merchantNumber: string }, excludeId?: number) {

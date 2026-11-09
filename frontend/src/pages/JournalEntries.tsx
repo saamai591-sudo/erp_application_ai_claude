@@ -788,7 +788,7 @@ function EntryForm({ editId }: { editId?: number }) {
         )}
 
         <fieldset disabled={isReadOnly} style={{ border: 0, padding: 0, margin: 0, flexShrink: 0 }}>
-        <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
+        <div className="je-header-grid" style={{ marginBottom: 6, maxWidth: 900 }}>
           <div className="form-field">
             <label>شماره سند</label>
             <input dir="ltr" value={entryMeta ? toFaDigits(String(entryMeta.number)) : "خودکار پس از ذخیره"} disabled />

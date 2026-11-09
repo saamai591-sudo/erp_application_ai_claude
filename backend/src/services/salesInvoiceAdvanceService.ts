@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import { RECEIPT_DOC_INCLUDE, receiptLineDoc, effectiveReceiptLine } from "./settlementDocRef";
 
 // =========================================================================
 // تخصیص پیش‌دریافت به فاکتور فروش — طبق Documents/تخصیص پیش دریافت.md و Documents/تغییرات تخصیص پیش‌دریافت.md.
@@ -109,9 +110,9 @@ export async function getSalesInvoiceAdvanceState(invoiceId: number) {
       partyId: invoice.customer.partyId,
       currencyId: invoice.currencyId,
       receiptType: { nature: { in: ADVANCE_NATURES } },
-      receipt: { status: "APPROVED", date: { lte: invoice.date } },
+      ...effectiveReceiptLine(invoice.date),
     },
-    include: { receipt: true, receiptType: true, currency: true, advanceAllocations: true },
+    include: { ...RECEIPT_DOC_INCLUDE, receiptType: true, currency: true, advanceAllocations: true },
     orderBy: { id: "asc" },
   });
 
@@ -124,9 +125,11 @@ export async function getSalesInvoiceAdvanceState(invoiceId: number) {
         receiptSettlementLineId: l.id,
         nature: l.receiptType.nature as AdvanceNature,
         natureTitle: NATURE_FA[l.receiptType.nature as AdvanceNature],
-        receiptId: l.receiptId,
-        receiptNumber: l.receipt.number,
-        receiptDate: l.receipt.date,
+        // ردیف می‌تواند از یک رسید یا از یک «اعلامیه بدهکار بستانکار» باشد (settlementDocRef)
+        receiptId: receiptLineDoc(l).id,
+        receiptKind: receiptLineDoc(l).kind,
+        receiptNumber: receiptLineDoc(l).number,
+        receiptDate: receiptLineDoc(l).date,
         currencyTitle: l.currency.title,
         fxRate: Number(l.fxRate),
         originalAmount: original,
@@ -184,15 +187,16 @@ export async function saveSalesInvoiceAdvanceAllocations(invoiceId: number, item
     // eslint-disable-next-line no-await-in-loop
     const line = await prisma.receiptSettlementLine.findUnique({
       where: { id: item.receiptSettlementLineId },
-      include: { receipt: true, receiptType: true, advanceAllocations: true },
+      include: { ...RECEIPT_DOC_INCLUDE, receiptType: true, advanceAllocations: true },
     });
     if (!line) throw new Error("پیش‌دریافت انتخاب‌شده یافت نشد");
-    const label = `پیش‌دریافت رسید شماره ${line.receipt.number}`;
+    const doc = receiptLineDoc(line);
+    const label = `پیش‌دریافت ${doc.kind === "PARTY_SETTLEMENT" ? "اعلامیه بدهکار بستانکار" : "رسید"} شماره ${doc.number}`;
     if (line.partyId !== invoice.customer.partyId) throw new Error(`${label}: طرف حساب با طرف حساب فاکتور یکسان نیست`);
     const nature = line.receiptType.nature as AdvanceNature;
     if (!ADVANCE_NATURES.includes(nature)) throw new Error(`${label}: نوع دریافت، «پیش‌دریافت» یا «پیش‌دریافت ارزش افزوده» نیست`);
-    if (line.receipt.status !== "APPROVED") throw new Error(`${label}: رسید دریافت تایید نشده است`);
-    if (line.receipt.date.getTime() > invoice.date.getTime()) throw new Error(`${label}: تاریخ دریافت بعد از تاریخ فاکتور است`);
+    if (!doc.approved) throw new Error(`${label}: رسید دریافت تایید نشده است`);
+    if (doc.date.getTime() > invoice.date.getTime()) throw new Error(`${label}: تاریخ دریافت بعد از تاریخ فاکتور است`);
     if (line.currencyId !== invoice.currencyId) throw new Error(`${label}: ارز پیش‌دریافت با ارز فاکتور یکسان نیست`);
 
     const allocatedToOthers = line.advanceAllocations.filter((a) => a.salesInvoiceId !== invoiceId).reduce((s, a) => s + Number(a.amount), 0);
@@ -219,9 +223,10 @@ export async function saveSalesInvoiceAdvanceAllocations(invoiceId: number, item
 }
 
 /** رسیدی که پیش‌دریافتش به فاکتور تخصیص داده شده، قابل برگشت از تایید/ویرایش مجدد (حذف ردیف) نیست تا تخصیص‌ها حذف شوند */
-export async function assertReceiptAdvanceNotAllocated(receiptId: number, instrumentLineIds?: number[]) {
+export async function assertReceiptAdvanceNotAllocated(doc: number | { partySettlementId: number }, instrumentLineIds?: number[]) {
+  const owner = typeof doc === "number" ? { receiptId: doc } : { partySettlementId: doc.partySettlementId };
   const count = await prisma.salesInvoiceAdvanceAllocation.count({
-    where: { receiptSettlementLine: { receiptId, ...(instrumentLineIds ? { instrumentLineId: { in: instrumentLineIds } } : {}) } },
+    where: { receiptSettlementLine: { ...owner, ...(instrumentLineIds ? { instrumentLineId: { in: instrumentLineIds } } : {}) } },
   });
   if (count > 0) throw new Error("این رسید دریافت (پیش‌دریافت) به فاکتور فروش تخصیص داده شده است؛ ابتدا تخصیص‌ها را حذف کنید");
 }
@@ -230,13 +235,13 @@ export async function assertReceiptAdvanceNotAllocated(receiptId: number, instru
 export async function assertAdvanceAllocationsStillValid(invoiceId: number, next: { customerId: number; currencyId: number; date: Date; netTotal: number; vatTotal: number }) {
   const allocations = await prisma.salesInvoiceAdvanceAllocation.findMany({
     where: { salesInvoiceId: invoiceId },
-    include: { receiptSettlementLine: { include: { receipt: true } }, salesInvoice: { include: { customer: true } } },
+    include: { receiptSettlementLine: { include: RECEIPT_DOC_INCLUDE }, salesInvoice: { include: { customer: true } } },
   });
   if (allocations.length === 0) return;
   const inv = allocations[0].salesInvoice;
   if (inv.customerId !== next.customerId) throw new Error("برای این فاکتور پیش‌دریافت تخصیص داده شده است؛ ابتدا تخصیص‌ها را حذف کنید تا مشتری قابل تغییر باشد");
   if (inv.currencyId !== next.currencyId) throw new Error("برای این فاکتور پیش‌دریافت تخصیص داده شده است؛ ابتدا تخصیص‌ها را حذف کنید تا ارز قابل تغییر باشد");
-  if (allocations.some((a) => a.receiptSettlementLine.receipt.date.getTime() > next.date.getTime())) {
+  if (allocations.some((a) => receiptLineDoc(a.receiptSettlementLine).date.getTime() > next.date.getTime())) {
     throw new Error("تاریخ فاکتور نمی‌تواند قبل از تاریخ دریافتِ پیش‌دریافت‌های تخصیص‌یافته باشد؛ ابتدا تخصیص‌ها را حذف کنید");
   }
   const allocated = allocations.filter((a) => a.nature === "ADVANCE_RECEIPT").reduce((s, a) => s + Number(a.amount), 0);

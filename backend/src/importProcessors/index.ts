@@ -24,6 +24,7 @@ import { findPartyByNationalId } from "../services/partyService";
 import { bulkSetValues, listParametersOfKind } from "../services/personnelValueService";
 import { upsertSalaryAccount } from "../services/employeeSalaryAccountService";
 import { cleanEntry, createEntry } from "../services/attendanceLeaveBalanceService";
+import { createOpeningLine } from "../services/partyBalanceOpeningService";
 import { DErr, prepareDataEntry, saveDataEntries, type DataEntryContext } from "../routes/payrollDataEntry";
 
 const DETAIL_TYPE_PARTY = 1;
@@ -610,6 +611,32 @@ export function registerAllImportProcessors() {
       }
     },
   });
+
+  // ── مانده اول دوره مشتریان / تامین‌کنندگان ──
+  // هر ردیف = (کد مشتری/تامین‌کننده [کد خودِ نقش]، کد ارز [خالی = ارز پایه]، مبلغ، نوع مانده «بدهکار/بستانکار»، شرح). سال مالی = سال مالی انتخاب‌شده‌ی کاربر.
+  // ثبت از همان createOpeningLine فرم (قفل، یکتایی طرف‌حساب+ارز، اعشار ارز)؛ خطای هر ردیف فقط همان ردیف را رد می‌کند.
+  for (const [entity, role] of [["party-balance-opening-customer", "CUSTOMER"], ["party-balance-opening-supplier", "SUPPLIER"]] as const) {
+    registerImportEntity(entity, {
+      row: async (row) => {
+        try {
+          const code = Number(toEnglishDigits((row.partyCode ?? "").trim()));
+          if (!Number.isInteger(code) || code <= 0) return { ok: false, error: `کد ${role === "CUSTOMER" ? "مشتری" : "تامین‌کننده"} الزامی است` };
+          const holder: any = role === "CUSTOMER" ? await prisma.customer.findUnique({ where: { code }, select: { partyId: true } }) : await prisma.supplier.findUnique({ where: { code }, select: { partyId: true } });
+          if (!holder) return { ok: false, error: `${role === "CUSTOMER" ? "مشتری" : "تامین‌کننده"} با کد «${code}» یافت نشد` };
+          const curCode = (row.currencyCode ?? "").trim();
+          const cur = curCode ? await prisma.currency.findUnique({ where: { code: curCode } }) : await prisma.currency.findFirst({ where: { isBase: true } });
+          if (!cur) return { ok: false, error: curCode ? `ارزی با کد «${curCode}» یافت نشد` : "ارز پایه تعریف نشده است" };
+          const natureRaw = (row.nature ?? "").trim();
+          const nature = BALANCE_NATURE_FA_REVERSE[natureRaw];
+          if (!nature) return { ok: false, error: "نوع مانده باید «بدهکار» یا «بستانکار» باشد" };
+          await createOpeningLine(role, { partyId: holder.partyId, currencyId: cur.id, amount: toEnglishDigits((row.amount ?? "").trim()).replace(/٫/g, "."), nature, description: row.description });
+          return { ok: true };
+        } catch (e: any) {
+          return { ok: false, error: e.message || "خطا در ثبت مانده‌ی اول دوره" };
+        }
+      },
+    });
+  }
 
   // ── منابع انسانی: کارمند ──
   // هر ردیف یک کارمند. شخص با «کد ملی» پیدا می‌شود (باید حقیقی و فعال و هنوز کارمند نباشد)؛ اگر شخصی با این کد ملی نیست، با نام و نام خانوادگی

@@ -1,14 +1,14 @@
 {
   "name": "erp-pos",
   "productName": "ERP Pos",
-  "version": "1.2.0",
-  "description": "برنامه‌ی دسکتاپ صندوق: ERP + عامل کارتخوان و چاپ مستقیم",
+  "version": "1.5.1",
+  "description": "برنامه‌ی دسکتاپ صندوق: ERP + کارتخوان و چاپ مستقیم",
   "main": "main.mjs",
   "type": "module",
   "private": true,
   "author": "Saam",
   "scripts": {
-    "prepare-agent": "node scripts/prepare.mjs",
+    "prepare": "node scripts/prepare.mjs",
     "start": "node scripts/prepare.mjs && electron .",
     "dist": "node scripts/prepare.mjs && electron-builder --win nsis --x64"
   },
@@ -20,7 +20,7 @@
     "appId": "ir.saam.erp.pos",
     "productName": "ERP Pos",
     "directories": { "output": "dist", "buildResources": "build" },
-    "files": ["main.mjs", "preload.cjs", "preload-main.cjs", "setup.html", "offline.html", "agent-core/**/*", "package.json"],
+    "files": ["main.mjs", "preload.cjs", "preload-main.cjs", "setup.html", "offline.html", "drivers/**/*", "package.json"],
     "win": { "target": "nsis", "icon": "build/icon.png", "signAndEditExecutable": false },
     "nsis": {
       "oneClick": true,

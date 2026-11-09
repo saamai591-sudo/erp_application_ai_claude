@@ -59,22 +59,34 @@ export async function findEffectiveTreasurySetting(where: any, docDate: Date) {
  * بداند برای «حذف اطلاعات حسابداری» کجا برود (یا به‌جای ویرایش، رکورد جدید با تاریخ اجرای جدید بسازد).
  */
 export async function treasurySettingUsageMessage(id: number): Promise<string | null> {
+  const g = await prisma.guaranteeAccountingLine.findMany({ where: { treasurySettingId: id }, select: { document: { select: { number: true, direction: true } } }, distinct: ["documentId"], take: 12 });
   const [r, p] = await Promise.all([
-    prisma.receiptAccountingLine.findMany({ where: { treasurySettingId: id }, select: { receipt: { select: { number: true } } }, distinct: ["receiptId"], take: 6 }),
-    prisma.paymentAccountingLine.findMany({ where: { treasurySettingId: id }, select: { payment: { select: { number: true } } }, distinct: ["paymentId"], take: 6 }),
+    prisma.receiptAccountingLine.findMany({ where: { treasurySettingId: id }, select: { receipt: { select: { number: true } }, partySettlement: { select: { number: true } } }, distinct: ["receiptId", "partySettlementId"], take: 12 }),
+    prisma.paymentAccountingLine.findMany({ where: { treasurySettingId: id }, select: { payment: { select: { number: true } }, partySettlement: { select: { number: true } } }, distinct: ["paymentId", "partySettlementId"], take: 12 }),
   ]);
-  if (r.length === 0 && p.length === 0) return null;
+  if (r.length === 0 && p.length === 0 && g.length === 0) return null;
+  const list = (xs: (number | undefined)[]) => `${xs.slice(0, 5).join("، ")}${xs.length > 5 ? " و ..." : ""}`;
+  const recvNums = r.filter((x) => x.receipt).map((x) => x.receipt!.number);
+  const payNums = p.filter((x) => x.payment).map((x) => x.payment!.number);
+  // «اعلامیه بدهکار بستانکار» هر دو طرفش را دارد؛ شماره‌ی هر هدر یک بار
+  const settleNums = Array.from(new Set([...r, ...p].filter((x) => x.partySettlement).map((x) => x.partySettlement!.number)));
   const parts: string[] = [];
-  if (r.length) parts.push(`دریافت شماره ${r.slice(0, 5).map((x) => x.receipt.number).join("، ")}${r.length > 5 ? " و ..." : ""}`);
-  if (p.length) parts.push(`پرداخت شماره ${p.slice(0, 5).map((x) => x.payment.number).join("، ")}${p.length > 5 ? " و ..." : ""}`);
+  if (recvNums.length) parts.push(`دریافت شماره ${list(recvNums)}`);
+  if (payNums.length) parts.push(`پرداخت شماره ${list(payNums)}`);
+  if (settleNums.length) parts.push(`اعلامیه بدهکار بستانکار شماره ${list(settleNums)}`);
+  const gRecv = g.filter((x) => x.document.direction === "RECEIPT").map((x) => x.document.number);
+  const gPay = g.filter((x) => x.document.direction === "PAYMENT").map((x) => x.document.number);
+  if (gRecv.length) parts.push(`دریافت تضمین شماره ${list(gRecv)}`);
+  if (gPay.length) parts.push(`پرداخت تضمین شماره ${list(gPay)}`);
   return `این تنظیم در اطلاعات حسابداری اسناد خزانه استفاده شده (${parts.join("؛ ")}) و قابل ویرایش/حذف نیست؛ برای تغییر حساب، رکورد جدید با تاریخ اجرای جدید ثبت کنید یا ابتدا «حذف اطلاعات حسابداری» آن اسناد را انجام دهید`;
 }
 
 /** شناسه‌ی رکوردهایی که ردیف حسابداری به آن‌ها وصل است (برای نمایش قفل در فهرست) */
 export async function treasurySettingIdsInUse(): Promise<Set<number>> {
-  const [r, p] = await Promise.all([
+  const [r, p, g] = await Promise.all([
     prisma.receiptAccountingLine.groupBy({ by: ["treasurySettingId"], where: { treasurySettingId: { not: null } } }),
     prisma.paymentAccountingLine.groupBy({ by: ["treasurySettingId"], where: { treasurySettingId: { not: null } } }),
+    prisma.guaranteeAccountingLine.groupBy({ by: ["treasurySettingId"], where: { treasurySettingId: { not: null } } }),
   ]);
-  return new Set<number>([...r, ...p].map((x) => x.treasurySettingId as number));
+  return new Set<number>([...r, ...p, ...g].map((x) => x.treasurySettingId as number));
 }

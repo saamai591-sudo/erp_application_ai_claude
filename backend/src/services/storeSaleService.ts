@@ -7,6 +7,7 @@ import { computePrice, findEffectiveStationPriceListId, loadItemPricing } from "
 import { assertNoNegativeStockAfterChange } from "./warehouseStockService";
 import { assertWarehouseOpenForDate } from "./warehouseConfirmationService";
 import { displayDate } from "../utils/dateDisplay";
+import { interpretBarcode } from "./barcodeInterpretationService";
 
 // فروش فروشگاهی › «فروش فروشگاهی» — تنها محل قواعد (سند مستقل؛ بدون سند حسابداری و بدون حواله انبار).
 // • ایستگاه فعال؛ تاریخ داخل دوره‌ی مالی جاری؛ برای فروش کالا انبارِ ایستگاه باید در آن تاریخ باز (تاییدنشده) باشد.
@@ -27,6 +28,8 @@ export interface StoreSaleLineInput {
   quantity: number;
   unitPrice?: number | null;
   description?: string | null;
+  /** بارکد خوانده‌شده؛ اگر «تفسیر بارکد» مبلغ (فی) داشته باشد، فیِ ردیف از همان می‌آید و بر فی اعلامیه مقدم است */
+  barcode?: string | null;
 }
 export interface StoreSaleBody {
   date?: string;
@@ -121,6 +124,7 @@ export interface CleanLine {
   priceListId: number;
   listPrice: number;
   description: string | null;
+  barcode: string | null;
 }
 
 /** اعتبارسنجی و محاسبه‌ی ردیف‌ها (فی، مبلغ، ارزش افزوده) — مشترک ثبت و ویرایش */
@@ -150,14 +154,25 @@ export async function cleanLines(lines: StoreSaleLineInput[] | undefined, statio
     if (!entry) throw new StoreSaleError(`کالای «${item.title}» (${row}) در اعلامیه‌ی قیمت ایستگاه «${station.title}» فی ندارد و قابل فروش نیست`);
     const listPrice = computePrice(entry, quantity).listPrice;
     let unitPrice = listPrice;
-    if (l.unitPrice !== undefined && l.unitPrice !== null && Math.abs(Number(l.unitPrice) - listPrice) > EPS) {
+    // فی از «تفسیر بارکد»: بر فی اعلامیه مقدم است و مجوز «تغییر فی» نمی‌خواهد؛ بارکد سمت سرور دوباره تفسیر می‌شود (به فی ارسالی کلاینت اعتماد نمی‌شود).
+    // اگر دیگر تفسیری با مبلغ نیست (تفسیر عوض یا حذف شده)، قواعد عادی فی اعمال می‌شود.
+    let barcode: string | null = null;
+    const bc = l.barcode ? String(l.barcode).trim() : "";
+    if (bc) {
+      const r = await interpretBarcode(bc);
+      if (r && r.goodsItemId === item.id && r.amount != null) {
+        unitPrice = r.amount;
+        barcode = bc;
+      }
+    }
+    if (barcode === null && l.unitPrice !== undefined && l.unitPrice !== null && Math.abs(Number(l.unitPrice) - listPrice) > EPS) {
       if (!allowPriceChange) throw new StoreSaleError(`فی ${row} با قیمت اعلامیه (${listPrice}) فرق دارد و مجوز «تغییر فی» را ندارید`);
       unitPrice = Number(l.unitPrice);
       if (!(unitPrice >= 0)) throw new StoreSaleError(`فی ${row} نامعتبر است`);
     }
     const amount = roundTo(quantity * unitPrice, dp);
     const vatAmount = computeLineVat(amount, 0, resolveVatRatePercent(item, defaultVat), dp);
-    out.push({ goodsItemId: item.id, unitId: item.mainUnitId, quantity, unitPrice, amount, vatAmount, priceListId, listPrice, description: l.description ? String(l.description).trim() || null : null });
+    out.push({ goodsItemId: item.id, unitId: item.mainUnitId, quantity, unitPrice, amount, vatAmount, priceListId, listPrice, description: l.description ? String(l.description).trim() || null : null, barcode });
   }
   return out;
 }
@@ -256,7 +271,7 @@ export async function createStoreSale(body: StoreSaleBody, allowPriceChange: boo
         customerId: customer.id,
         description: body.description ? String(body.description).trim() || null : null,
         createdById: userId(),
-        lines: { create: lines.map((l, i) => ({ rowOrder: i, goodsItemId: l.goodsItemId, unitId: l.unitId, quantity: l.quantity, unitPrice: l.unitPrice, amount: l.amount, vatAmount: l.vatAmount, priceListId: l.priceListId, listPrice: l.listPrice, description: l.description })) },
+        lines: { create: lines.map((l, i) => ({ rowOrder: i, goodsItemId: l.goodsItemId, unitId: l.unitId, quantity: l.quantity, unitPrice: l.unitPrice, amount: l.amount, vatAmount: l.vatAmount, priceListId: l.priceListId, listPrice: l.listPrice, description: l.description, barcode: l.barcode })) },
       },
     });
   });
@@ -295,7 +310,7 @@ export async function updateStoreSale(id: number, body: StoreSaleBody, allowPric
         warehouseId,
         customerId: customer.id,
         description: body.description ? String(body.description).trim() || null : null,
-        lines: { create: lines.map((l, i) => ({ rowOrder: i, goodsItemId: l.goodsItemId, unitId: l.unitId, quantity: l.quantity, unitPrice: l.unitPrice, amount: l.amount, vatAmount: l.vatAmount, priceListId: l.priceListId, listPrice: l.listPrice, description: l.description })) },
+        lines: { create: lines.map((l, i) => ({ rowOrder: i, goodsItemId: l.goodsItemId, unitId: l.unitId, quantity: l.quantity, unitPrice: l.unitPrice, amount: l.amount, vatAmount: l.vatAmount, priceListId: l.priceListId, listPrice: l.listPrice, description: l.description, barcode: l.barcode })) },
       },
     });
   });
@@ -359,6 +374,7 @@ export function saleShape(s: any, withLines = false, paid = 0) {
       amount: Number(l.amount),
       vatAmount: Number(l.vatAmount),
       listPrice: l.listPrice === null ? null : Number(l.listPrice),
+      lineBarcode: l.barcode ?? null,
       description: l.description ?? "",
     })),
   };

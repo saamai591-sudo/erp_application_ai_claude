@@ -33,6 +33,7 @@ const ACCOUNT_TYPE_FA: Record<string, string> = {
   PURCHASE_PAYABLE: "حساب پرداختنی خرید",
   PURCHASE_CONTROL: "کنترل خرید",
   PURCHASE_VAT: "ارزش افزوده خرید",
+  RETURN_CONTROL: "کنترل برگشت",
   SERVICE_PURCHASE: "خرید خدمت",
 };
 

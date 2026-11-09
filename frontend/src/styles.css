@@ -93,6 +93,7 @@
   --nc-mod-workflow: #5eead4;
   --nc-mod-store: #ff9f6b;
   --nc-mod-club: #e879f9;
+  --nc-mod-asset: #d4a373;
   --nc-sub-ops: #ffd23f;
   --nc-sub-structure: #5ab8ff;
   --nc-sub-report: #ff7fb8;
@@ -175,6 +176,7 @@
   --nc-mod-workflow: #5eead4;
   --nc-mod-store: #ff9f6b;
   --nc-mod-club: #e879f9;
+  --nc-mod-asset: #d4a373;
   --nc-sub-ops: #ffd23f;
   --nc-sub-structure: #5ab8ff;
   --nc-sub-report: #ff7fb8;
@@ -331,6 +333,7 @@
   --nc-mod-workflow: #5eead4;
   --nc-mod-store: #ff9f6b;
   --nc-mod-club: #e879f9;
+  --nc-mod-asset: #d4a373;
   --nc-sub-ops: #ffd23f;
   --nc-sub-structure: #5ab8ff;
   --nc-sub-report: #ff7fb8;
@@ -475,9 +478,19 @@ body {
   color: var(--sidebar-ink);
   padding: 20px 14px;
   flex-shrink: 0;
-  overflow-y: auto;
+  /* هدر (جستجو) ثابت می‌ماند و فقط فهرست ماژول‌ها (.sidebar-scroll) اسکرول می‌شود */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   transition: width 0.15s ease, padding 0.15s ease;
 }
+.sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.sidebar-search { width: 100%; min-width: 0; padding: 7px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.08); color: inherit; font: inherit; font-size: 13px; }
+.sidebar-search::placeholder { color: inherit; opacity: 0.55; }
+.sidebar-head { gap: 8px; flex-shrink: 0; }
+.sidebar-search-empty { padding: 10px 8px; opacity: 0.7; font-size: 13px; }
+.sidebar-search-hit { margin-bottom: 4px; }
+.sidebar-search-path { font-size: 11px; opacity: 0.6; padding: 4px 8px 0; }
 /* حالت جمع‌شده: فقط ستون آیکن ماژول‌ها — زیرماژول‌ها/فرم‌ها با کلیک روی هر آیکن به‌صورت فلای‌اوت شناور
    (ModuleFlyout در Layout.tsx) نشان داده می‌شوند، نه آکاردئون داخل خودِ سایدبار */
 .sidebar.sidebar-collapsed { width: 60px; padding: 14px 8px; }
@@ -558,6 +571,7 @@ body {
 .module-icon.mod-ic-inbox { color: var(--nc-mod-workflow); }
 .module-icon.mod-ic-store { color: var(--nc-mod-store); }
 .module-icon.mod-ic-gift { color: var(--nc-mod-club); }
+.module-icon.mod-ic-building { color: var(--nc-mod-asset); }
 
 .nav-submodule { margin: 4px 0 8px 0; padding-right: 8px; margin-right: 10px; }
 .submodule-title {
@@ -976,7 +990,10 @@ body {
    جمع‌ها) در صفحه‌ی کوچک/وقتی منوی کناری باز است از قاب بیرون می‌زد، به‌جای اینکه جدول درون قاب خودش (.je-lines-scroll) اسکرول شود. */
 fieldset { min-width: 0; }
 
-.je-lines-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+/* نوار بالای گرید اقلام (فشرده، پایه‌ی همه‌ی فرم‌های سند): فاصله و ارتفاع کم؛ دکمه‌های متنی و آیکن نوار هم کوچک */
+.je-lines-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.je-lines-toolbar .btn { padding: 2px 10px; font-size: 11.5px; line-height: 1.4; }
+.je-lines-toolbar .toolbar-icon-btn { padding: 3px; }
 .je-lines-title { font-weight: 600; font-size: 13px; color: var(--ink); }
 /* نوار «جمع» پایین گرید: فوتر flex-wrap است، پس در صفحه‌ی باریک کل این بخش ابتدا به خط بعد می‌رود و فقط اگر باز هم جا نشد، متنش
    می‌شکند (قبلاً nowrap بود و از قاب بیرون می‌زد). */
@@ -1123,7 +1140,7 @@ fieldset { min-width: 0; }
 .je-breadcrumb b { color: var(--ink); font-weight: 600; margin-left: 4px; }
 
 /* سلکتور چندستونی با فیلتر (RecordPicker) */
-.picker-field-wrap { display: flex; align-items: center; gap: 4px; width: 100%; }
+.picker-field-wrap { display: flex; align-items: center; gap: 4px; width: 100%; min-width: 0; flex: 1; }
 .picker-field {
   flex: 1;
   min-width: 0;
@@ -1146,6 +1163,8 @@ fieldset { min-width: 0; }
 .picker-field:hover { border-color: var(--primary); }
 .picker-field:disabled { background: var(--bg); color: var(--ink-soft); cursor: not-allowed; }
 .picker-field span { text-align: right; }
+/* عنوان بلند انتخاب‌شده نمی‌شکند: یک سطر با ... و متن کامل در tooltip (title دکمه) */
+.picker-field > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .picker-field svg { color: var(--ink-soft); flex-shrink: 0; }
 .picker-clear-btn {
   display: flex;
@@ -1245,7 +1264,7 @@ fieldset { min-width: 0; }
 }
 
 /* هدر سند حسابداری - شبکه سه‌ستونه فشرده */
-.je-header-grid { display: grid; grid-template-columns: 1fr 1fr 1.8fr; gap: 12px 20px; }
+.je-header-grid { display: grid; grid-template-columns: 1fr 1fr 1.8fr; gap: 6px 20px; }
 .je-header-grid .form-field { display: flex; flex-direction: row; align-items: center; gap: 8px; }
 /* آیتم‌های grid به‌طور پیش‌فرض min-width: auto دارند و از محتوایشان (برچسب + select) کوچک‌تر نمی‌شوند؛ در صفحه‌ی باریک ستون‌ها از قاب بیرون
    می‌زدند. اجازه‌ی کوچک‌شدن به خود فیلد و کنترل داخلش داده می‌شود. */
@@ -1255,12 +1274,28 @@ fieldset { min-width: 0; }
 .je-header-grid input,
 .je-header-grid select,
 .je-header-grid .jalali-date-input {
-  padding: 6px 8px;
+  padding: 4px 8px;
   font-size: 12.5px;
   flex: 1;
   min-width: 0;
 }
 .je-header-grid input:disabled { background: var(--bg); color: var(--ink-soft); }
+/* هدر چهارستونه (opt-in با کلاس cols-4؛ پیش‌فاکتور، فاکتور فروش، …): جای هر فیلد با کلاس‌های صریح مشخص می‌شود — ستون hc1..hc4 (از راست) و ردیف hr1..hr3 —
+   تا فیلدهای شرطی (ارز، سند حسابداری، …) چیدمان را به‌هم نزنند و ردیف‌ها بین ستون‌ها هم‌تراز بمانند. شرح: span-2 hr3 (دو ستون، ردیف سوم) */
+.je-header-grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: center; }
+.je-header-grid.cols-4 > .hc1 { grid-column: 1; }
+.je-header-grid.cols-4 > .hc2 { grid-column: 2; }
+.je-header-grid.cols-4 > .hc3 { grid-column: 3; }
+.je-header-grid.cols-4 > .hc4 { grid-column: 4; }
+.je-header-grid.cols-4 > .hr1 { grid-row: 1; }
+.je-header-grid.cols-4 > .hr2 { grid-row: 2; }
+.je-header-grid.cols-4 > .hr3 { grid-row: 3; }
+.je-header-grid.cols-4 > .span-2 { grid-column: 1 / span 2; }
+/* شرح دو ستونی که از ستون سوم شروع می‌شود (فاکتور فروش: ردیف دوم، کنار مرکز فروش) */
+.je-header-grid.cols-4 > .span-2-c3 { grid-column: 3 / span 2; }
+.je-header-grid .span-2 { grid-column: span 2; }
+/* شرح داخل ردیف flex فیلد باید تمام عرض باقی‌مانده را بگیرد (وگرنه به اندازه‌ی input پیش‌فرض می‌ماند) */
+.je-header-grid .form-field > .desc-field { flex: 1; min-width: 0; }
 
 /* ویزارد چندمرحله‌ای پایه */
 .wizard-steps { display: flex; align-items: center; margin-bottom: 20px; }
@@ -2058,6 +2093,7 @@ html[data-fx="off"] .fx-only { display: none !important; }
   --nc-mod-attendance: var(--icon-mono);
   --nc-mod-store: var(--icon-mono);
   --nc-mod-club: var(--icon-mono);
+  --nc-mod-asset: var(--icon-mono);
   --nc-sub-ops: var(--icon-mono);
   --nc-sub-structure: var(--icon-mono);
   --nc-sub-report: var(--icon-mono);
@@ -2105,7 +2141,9 @@ html[data-fx="off"] .fx-only { display: none !important; }
   .form-toolbar-left, .form-toolbar-right { gap: 2px; }
   .card { padding: 12px !important; }
 
-  .je-header-grid { grid-template-columns: 1fr; gap: 10px; }
+  .je-header-grid, .je-header-grid.cols-4 { grid-template-columns: 1fr; gap: 10px; }
+  .je-header-grid.cols-4 > * { grid-row: auto !important; grid-column: auto !important; }
+  .je-header-grid .span-2 { grid-column: auto; }
   .je-header-grid .form-field { flex-direction: column; align-items: stretch; gap: 4px; }
   .je-header-grid .form-field label { min-width: 0; }
   .je-header-grid input, .je-header-grid select, .je-header-grid .jalali-date-input { padding: 9px 10px; font-size: 16px; }
@@ -2283,3 +2321,32 @@ td .badge { padding: 0 9px; line-height: 1.5; vertical-align: middle; }
 
 /* فیلد کلمه‌ی عبور کارت وفاداری: متن معمولی با نقطه‌چین تا مرورگر پیشنهاد ذخیره‌ی رمز ندهد */
 .pw-nosave { -webkit-text-security: disc; text-security: disc; }
+
+/* دستیار (گفتگوی دستوری) */
+.assistant-page { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.assistant-chat { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 8px 2px; }
+.assistant-msg { display: flex; flex-direction: column; gap: 4px; max-width: min(92%, 1100px); }
+.assistant-msg.user { align-self: flex-start; }
+.assistant-msg.bot { align-self: stretch; max-width: 100%; }
+.assistant-bubble { padding: 6px 12px; border-radius: 12px; font-size: 13px; line-height: 1.8; border: 1px solid var(--line); background: var(--surface); }
+.assistant-msg.user .assistant-bubble { background: var(--primary-soft); border-color: var(--primary-soft); }
+.assistant-bubble.error { color: var(--danger); background: var(--danger-soft); border-color: var(--danger-soft); }
+.assistant-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.assistant-chip { padding: 3px 10px; border: 1px solid var(--primary); color: var(--primary); background: var(--surface); border-radius: 14px; font-family: inherit; font-size: 12px; cursor: pointer; }
+.assistant-chip:hover:not(:disabled) { background: var(--primary-soft); }
+.assistant-chip:disabled { opacity: 0.5; cursor: default; }
+.assistant-table-wrap { overflow-x: auto; }
+.assistant-table { border-collapse: collapse; font-size: 12.5px; background: var(--surface); }
+.assistant-table th, .assistant-table td { border: 1px solid var(--line); padding: 3px 10px; text-align: right; }
+.assistant-table th { background: var(--bg); font-weight: 600; }
+.assistant-prefill { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.assistant-input { display: flex; gap: 8px; padding: 8px 0 4px; }
+.assistant-input input { flex: 1; padding: 8px 10px; font-size: 13.5px; }
+
+/* صورتحساب طرف‌حساب: پنل خلاصه کنار جدول، همیشه در دید (RTL: سمت راست)؛ در عرض کم بالای جدول */
+.content > .party-statement-page { display: flex; flex-direction: row; gap: 12px; align-items: flex-start; }
+.party-statement-page > div { flex: 1; min-width: 0; min-height: 0; align-self: stretch; display: flex; flex-direction: column; }
+@media (max-width: 900px) {
+  .content > .party-statement-page { flex-direction: column; align-items: stretch; }
+  .party-statement-aside { width: auto !important; position: static !important; }
+}

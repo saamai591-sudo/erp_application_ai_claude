@@ -125,6 +125,7 @@ router.get("/inventory-counting-shortages", can(`${FORM}.view`), async (req: Aut
       fiscalPeriodTitle: d.fiscalPeriod.title,
       description: d.description,
       status: d.status,
+      countId: (d as any).countId ?? null,
       lineCount: d.lines.length,
       totalQuantity: d.lines.reduce((s: number, l: any) => s + Number(l.quantity), 0),
       ...((canViewAccounting && d.status === "FINALIZED") ? { totalAmount: d.lines.reduce((s: number, l: any) => s + Number(amountByLineId.get(l.id) ?? 0), 0) } : {}),
@@ -161,6 +162,7 @@ router.get("/inventory-counting-shortages/:id", can(`${FORM}.view`), async (req:
     fiscalPeriodTitle: d.fiscalPeriod.title,
     description: d.description,
     status: d.status,
+    countId: (d as any).countId ?? null,
     finalizedAt: d.finalizedAt,
     updatedAt: d.updatedAt,
     lines: d.lines.map((l: any) => ({
@@ -265,6 +267,7 @@ router.put("/inventory-counting-shortages/:id", can(`${FORM}.edit`), async (req,
     include: { lines: { include: { serials: true } }, warehouse: true },
   });
   if (!existing) return res.status(404).json({ error: "سند کسری انبارگردانی یافت نشد" });
+  if ((existing as any).countId) return res.status(400).json({ error: "این سند از «مغایرت‌گیری شمارش انبار» صادر شده است و فقط از همان فرم (حذف مغایرت‌گیری) قابل ویرایش/حذف است" });
   if (existing.status === "FINALIZED") return res.status(400).json({ error: "این سند با تایید انبار نهایی شده است و دیگر قابل ویرایش نیست" });
   const existingSerialIds = new Set(existing.lines.flatMap((l: any) => l.serials.map((s: any) => s.serialId)));
 
@@ -328,6 +331,7 @@ router.delete("/inventory-counting-shortages/:id", can(`${FORM}.delete`), async 
   const id = Number(req.params.id);
   const d = await prisma.inventoryDocument.findFirst({ where: { id, documentType: "INVENTORY_COUNTING_SHORTAGE" }, include: { lines: true, warehouse: true } });
   if (!d) return res.status(404).json({ error: "یافت نشد" });
+  if ((d as any).countId) return res.status(400).json({ error: "این سند از «مغایرت‌گیری شمارش انبار» صادر شده است و فقط از همان فرم (حذف مغایرت‌گیری) قابل ویرایش/حذف است" });
   if (d.status === "FINALIZED") return res.status(400).json({ error: "این سند با تایید انبار نهایی شده است و دیگر قابل حذف نیست" });
 
   try {

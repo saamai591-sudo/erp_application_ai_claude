@@ -1,6 +1,9 @@
 import { toFaDigits } from "./formatAmount";
 import { toEnglishDigits } from "./digits";
 import * as XLSX from "xlsx";
+import { fetchBranding } from "./branding";
+import { formKeyForPath, formTitleForKey } from "./frequentDescriptionForms";
+import { formatDisplayDate } from "./formatDate";
 
 // «خروجی اکسل» و «چاپ» مشترک همه‌ی جدول‌های پروژه (DataTable و SelectableBalanceTable) — طبق درخواست
 // کاربر («می‌خواهم همین امکانات در همه‌ی گریدهای پروژه باشد») و به‌صورت پایه/base، یعنی هر گرید جدیدی
@@ -123,21 +126,62 @@ export function exportGridToExcel<T>(columns: ExportColumn<T>[], rows: T[], grid
 /** نام قدیمی (پیش از این خروجی CSV بود)؛ برای سازگاری با فراخوانی‌های موجود */
 export const exportGridToCsv = exportGridToExcel;
 
-export function printGrid<T>(columns: ExportColumn<T>[], rows: T[], gridName: string) {
+/** تاریخ امروز (ساعت محلی مرورگر) به قالب ISO برای formatDisplayDate */
+function todayIso(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** @page margin-boxها (شماره‌ی صفحه با counter(page)/counter(pages)) از Chrome/Edge 131 به بعد پشتیبانی می‌شوند؛ مرورگرهای دیگر سرتیتر را در thead تکرارشونده می‌گیرند (بدون شماره‌ی صفحه) */
+function supportsPageMarginBoxes(): boolean {
+  const m = /(?:Chrome|Chromium|Edg)\/(\d+)/.exec(navigator.userAgent);
+  return !!m && Number(m[1]) >= 131;
+}
+
+/**
+ * چاپ مشترک همه‌ی گریدها. سرتیتر هر صفحه: نام شرکت (مشخصات شرکت)، عنوان گزارش (عنوان فرم در منو؛ یا `title`)، تاریخ گزارش و «صفحه n از m».
+ * window.open باید هم‌زمان با کلیک کاربر باشد، پس پنجره اول باز می‌شود و نام شرکت بعد از دریافت نوشته می‌شود.
+ */
+export async function printGrid<T>(columns: ExportColumn<T>[], rows: T[], gridName: string, title?: string) {
   const win = window.open("", "_blank", "width=1000,height=700");
   if (!win) return;
   const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const cssStr = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/[\r\n]+/g, " ");
+  win.document.write('<!doctype html><html dir="rtl"><body style="font-family:Tahoma,Arial;padding:16px">در حال آماده‌سازی چاپ…</body></html>');
+  const company = (await fetchBranding()).name;
+  const reportTitle = title || formTitleForKey(formKeyForPath(window.location.pathname)) || gridName;
+  const reportDate = formatDisplayDate(todayIso());
+  const margin = supportsPageMarginBoxes();
   const header = columns.map((c) => `<th>${escape(c.header)}</th>`).join("");
   const body = rows.map((row) => `<tr>${columns.map((c) => `<td>${escape(cellText(c, row))}</td>`).join("")}</tr>`).join("");
+  const pageCss = margin
+    ? `@page { margin: 18mm 10mm 12mm;
+        @top-right { content: "${cssStr(company)}"; font: 600 11px Tahoma, Arial; }
+        @top-center { content: "${cssStr(reportTitle)}"; font: 700 13px Tahoma, Arial; }
+        @top-left { content: "تاریخ گزارش: ${cssStr(toFaDigits(reportDate))}   صفحه " counter(page, persian) " از " counter(pages, persian); font: 11px Tahoma, Arial; }
+      }`
+    : "@page { margin: 12mm 10mm; }";
+  const colCount = columns.length;
+  const headRow = margin
+    ? ""
+    : `<tr class="rh"><th colspan="${colCount}"><div class="rhd"><span>${escape(company)}</span><b>${escape(reportTitle)}</b><span>تاریخ گزارش: ${escape(toFaDigits(reportDate))}</span></div></th></tr>`;
+  win.document.open();
   win.document.write(`<!doctype html>
-    <html dir="rtl" lang="fa"><head><meta charset="utf-8" /><title>${escape(gridName)}</title>
+    <html dir="rtl" lang="fa"><head><meta charset="utf-8" /><title>${escape(reportTitle)}</title>
     <style>
+      ${pageCss}
       body { font-family: Tahoma, "Segoe UI", Arial, sans-serif; padding: 16px; }
       table { width: 100%; border-collapse: collapse; font-size: 12px; }
+      thead { display: table-header-group; }
+      tr { page-break-inside: avoid; }
       th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: right; }
       th { background: #f3f4f6; font-weight: 600; }
+      tr.rh th { background: #fff; border: 0; border-bottom: 2px solid #999; font-size: 12px; }
+      .rhd { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+      @media print { body { padding: 0; } }
     </style></head>
-    <body><table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></body></html>`);
+    <body><table><thead>${headRow}<tr>${header}</tr></thead><tbody>${body}</tbody></table></body></html>`);
   win.document.close();
   win.focus();
   win.print();

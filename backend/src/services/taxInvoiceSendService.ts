@@ -17,6 +17,7 @@ import { assertTaxSendingLicensed } from "../license/licenseService";
 import { createTaxTransport, InquiryResult, TaxApiError, TaxTransport } from "./taxTransport";
 import { toWireInvoice } from "./taxWire";
 import { emitWorkflowEvent } from "./workflowEngineService";
+import { resolveTaxInvoiceType } from "./taxInvoiceTypeService";
 
 export interface SendItemInput extends Partial<TaxInvoiceOptions> {
   salesInvoiceId: number;
@@ -88,7 +89,17 @@ export async function sendTaxInvoices(items: SendItemInput[]): Promise<SendItemR
         continue;
       }
       base.invoiceNumber = inv.number;
-      const options: Partial<TaxInvoiceOptions> = { invoiceType: it.invoiceType, isArticle9: it.isArticle9, settlementMethod: it.settlementMethod };
+      // نوع صریح (انتخاب کاربر) همیشه برنده است؛ وگرنه از «قواعد نوع صورتحساب»، و بدون قاعده ارسال نمی‌شود
+      let invoiceType = it.invoiceType;
+      if (invoiceType === undefined || invoiceType === null) {
+        const resolved = await resolveTaxInvoiceType("SALES_INVOICE", inv);
+        if (resolved.error) {
+          results.push({ ...base, message: resolved.error });
+          continue;
+        }
+        invoiceType = resolved.type ?? undefined;
+      }
+      const options: Partial<TaxInvoiceOptions> = { invoiceType, isArticle9: it.isArticle9, settlementMethod: it.settlementMethod };
 
       const pre = await buildTaxInvoice(inv, options, { skipTaxId: true });
       if (pre.errorCount > 0) {

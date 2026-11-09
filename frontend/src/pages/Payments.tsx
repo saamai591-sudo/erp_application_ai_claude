@@ -892,7 +892,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         <fieldset disabled={formLocked} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
 
         <fieldset disabled={coreDisabled} style={{ border: 0, padding: 0, margin: 0 }}>
-          <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
+          <div className="je-header-grid" style={{ marginBottom: 6, maxWidth: 900 }}>
             <div className="form-field">
               <label>شماره</label>
               <input dir="ltr" value={meta ? toFaDigits(String(meta.number)) : "خودکار پس از ذخیره"} disabled />
@@ -933,7 +933,7 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         </fieldset>
 
         {/* شرح داخل همین fieldset است: در سند «تایید»شده فقط از مسیر «ویرایش مجدد» قابل تغییر است */}
-        <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
+        <div className="je-header-grid" style={{ marginBottom: 6, maxWidth: 900 }}>
           <div className="form-field full">
             <DescriptionField
               value={header.description}

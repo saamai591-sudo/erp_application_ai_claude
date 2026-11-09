@@ -51,18 +51,19 @@ export function FollowUpBanner({ info }: { info: FollowUpInfo | null }) {
   if (!info || !info.state) return null;
   const closed = info.state === "CLOSED_PARTIAL" || info.state === "CLOSED_NO_SALE";
   return (
-    <div className={closed ? "alert warn" : "alert"} style={{ marginBottom: 12, maxWidth: 900 }}>
+    // وضعیت و توضیحش در یک سطر (با شکستن خودکار فقط وقتی جا نباشد) و فشرده تا فضای فرم هدر نرود
+    <div className={closed ? "alert warn" : "alert"} style={{ marginBottom: 6, maxWidth: 1250, padding: "4px 10px", display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: 10, rowGap: 2 }}>
       <b>وضعیت پیگیری: {FOLLOWUP_FA[info.state]}</b>
       {closed ? (
-        <div style={{ marginTop: 4, fontSize: 13 }}>
+        <span style={{ fontSize: 12.5 }}>
           پیگیری مانده‌ی این پیش‌فاکتور بسته شده است{info.closedAt ? ` (${formatJalaliDate(info.closedAt)}${info.closedBy ? `، ${info.closedBy}` : ""})` : ""}. دلیل: {info.reasonTitle ?? "—"}
           {info.note ? ` — ${info.note}` : ""}. مبلغ کنار گذاشته‌شده (پس از تخفیف): {formatAmountFa(info.closedRemainingAmount ?? 0)} {info.currencyTitle}
           {info.closedRemainingVat ? ` + ارزش افزوده ${formatAmountFa(info.closedRemainingVat)}` : ""}. این مانده در انتخابگرهای سفارش/حواله/فاکتور نمی‌آید.
-        </div>
+        </span>
       ) : info.state === "OPEN" || info.state === "EXPIRED" ? (
-        <div style={{ marginTop: 4, fontSize: 13 }}>
+        <span style={{ fontSize: 12.5 }}>
           مانده‌ی قابل‌پیگیری: {formatAmountFa(info.remainingNet)} {info.currencyTitle} (پس از تخفیف){info.state === "EXPIRED" ? " — تاریخ اعتبار گذشته است" : ""}
-        </div>
+        </span>
       ) : null}
     </div>
   );

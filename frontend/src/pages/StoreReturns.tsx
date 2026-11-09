@@ -53,7 +53,7 @@ interface RetRow {
   deliveryId: number | null;
   deliveryNumber: number | null;
   updatedAt?: string;
-  lines?: { saleLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitTitle: string; quantity: number; unitPrice: number; listPrice: number | null; vatAmount: number }[];
+  lines?: { saleLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitTitle: string; quantity: number; unitPrice: number; listPrice: number | null; lineBarcode?: string | null; vatAmount: number }[];
 }
 interface SaleOpt {
   id: number;
@@ -91,6 +91,9 @@ interface FreeRow {
   /** فیِ دستی (فقط با مجوز تغییر فی)؛ خالی = فی اعلامیه */
   priceOverride: string;
   stored?: { unitPrice: number; vatAmount: number };
+  /** بارکدِ این ردیف و فیِ استخراج‌شده از «تفسیر بارکد» (بر فی اعلامیه مقدم و قفل است) */
+  barcode?: string;
+  barcodePrice?: number;
 }
 interface StationOpt {
   id: number;
@@ -265,7 +268,7 @@ function ReturnForm({ editId }: { editId?: number }) {
         setRows([]);
       } else {
         setQty({});
-        setRows((r.lines ?? []).map((l) => ({ goodsItemId: l.goodsItemId, code: l.goodsItemCode, title: l.goodsItemTitle, unitTitle: l.unitTitle, quantity: String(l.quantity), priceOverride: l.listPrice !== null && Math.abs(l.listPrice - l.unitPrice) > 1e-9 ? String(l.unitPrice) : "", stored: { unitPrice: l.unitPrice, vatAmount: l.vatAmount } })));
+        setRows((r.lines ?? []).map((l) => ({ goodsItemId: l.goodsItemId, code: l.goodsItemCode, title: l.goodsItemTitle, unitTitle: l.unitTitle, quantity: String(l.quantity), priceOverride: l.listPrice !== null && Math.abs(l.listPrice - l.unitPrice) > 1e-9 ? String(l.unitPrice) : "", stored: { unitPrice: l.unitPrice, vatAmount: l.vatAmount }, barcode: l.lineBarcode ?? undefined, barcodePrice: l.lineBarcode ? l.unitPrice : undefined })));
       }
     }
   }
@@ -324,6 +327,7 @@ function ReturnForm({ editId }: { editId?: number }) {
   // ── محاسبه‌ی نمایشیِ بدون مبنا (همان فرمول فروش؛ سرور مرجع است) ──
   const qtyOf = (r: FreeRow) => Number(r.quantity) || 0;
   function priceOf(r: FreeRow): number {
+    if (r.barcodePrice != null) return r.barcodePrice;
     if (r.priceOverride !== "" && canChangePrice) return Number(r.priceOverride) || 0;
     const it = itemMap.get(r.goodsItemId);
     if (!it) return r.stored?.unitPrice ?? 0;
@@ -350,19 +354,20 @@ function ReturnForm({ editId }: { editId?: number }) {
   const totalAmount = hasBasis ? lines.reduce((n, l) => n + calc(l).amount, 0) : rows.reduce((n, r) => n + amountOf(r), 0);
   const totalVat = hasBasis ? lines.reduce((n, l) => n + calc(l).vat, 0) : rows.reduce((n, r) => n + vatOf(r), 0);
 
-  function addItem(it: Sellable) {
+  const addQty = (a: number, b: number) => Math.round((a + b) * 1e6) / 1e6;
+  function addItem(it: Sellable, add = 1, bc?: { barcode: string; price: number }) {
     if (hasBasis) {
       const l = lines.find((x) => x.goodsItemId === it.id);
       if (!l) return showToast(`«${it.title}» در فروشِ مبنا نیست؛ برای کالای خارج از آن فروش، مبنا را خالی کنید`, "error");
       const cur = Number(qty[String(l.saleLineId)] || 0);
-      if (cur + 1 > l.remaining + 1e-6) return showToast(`مقدار برگشتیِ «${it.title}» از مانده‌ی قابل برگشت (${l.remaining}) بیشتر می‌شود`, "error");
-      setQty((q) => ({ ...q, [String(l.saleLineId)]: String(cur + 1) }));
+      if (cur + add > l.remaining + 1e-6) return showToast(`مقدار برگشتیِ «${it.title}» از مانده‌ی قابل برگشت (${l.remaining}) بیشتر می‌شود`, "error");
+      setQty((q) => ({ ...q, [String(l.saleLineId)]: String(addQty(cur, add)) }));
       return;
     }
     setRows((prev) => {
-      const i = prev.findIndex((r) => r.goodsItemId === it.id);
-      if (i >= 0) return prev.map((r, k) => (k === i ? { ...r, quantity: String(qtyOf(r) + 1) } : r));
-      return [...prev, { goodsItemId: it.id, code: it.fullCode, title: it.title, unitTitle: it.unitTitle, quantity: "1", priceOverride: "" }];
+      const i = prev.findIndex((r) => r.goodsItemId === it.id && r.barcodePrice === bc?.price);
+      if (i >= 0) return prev.map((r, k) => (k === i ? { ...r, quantity: String(addQty(qtyOf(r), add)) } : r));
+      return [...prev, { goodsItemId: it.id, code: it.fullCode, title: it.title, unitTitle: it.unitTitle, quantity: String(add), priceOverride: "", barcode: bc?.barcode, barcodePrice: bc?.price }];
     });
   }
   function onBarcodeEnter() {
@@ -370,10 +375,21 @@ function ReturnForm({ editId }: { editId?: number }) {
     if (!code) return;
     const key = normDigits(code);
     const it = byBarcode.get(key) ?? byCode.get(key);
-    if (!it) showToast(`بارکد/کد «${code}» یافت نشد یا کالا در اعلامیه‌ی قیمت این ایستگاه فی ندارد`, "error");
-    else addItem(it);
+    if (it) addItem(it);
+    else interpretAndAdd(code);
     setBarcode("");
     barcodeRef.current?.focus();
+  }
+  // بارکدی که مستقیم با بارکد/کد کالا جور نشد: «تفسیر بارکد» (کالا و خدمت › تنظیمات) کالا و مقدار را از روی طول و بازه‌ها استخراج می‌کند
+  async function interpretAndAdd(code: string) {
+    try {
+      const { result } = await api.post("/barcode-interpretations/interpret", { barcode: code });
+      const it = result?.goodsItemId != null ? itemMap.get(result.goodsItemId) : undefined;
+      if (it) return addItem(it, result.quantity != null && result.quantity > 0 ? result.quantity : 1, result.amount != null ? { barcode: code, price: result.amount } : undefined);
+      showToast(result?.error ? result.error + " (یا کالا در اعلامیه‌ی قیمت این ایستگاه فی ندارد)" : `بارکد/کد «${code}» یافت نشد یا کالا در اعلامیه‌ی قیمت این ایستگاه فی ندارد`, "error");
+    } catch (e) {
+      showToast((e as Error).message, "error");
+    }
   }
   function update(i: number, patch: Partial<FreeRow>) {
     setRows((prev) => prev.map((r, k) => (k === i ? { ...r, ...patch } : r)));
@@ -408,7 +424,7 @@ function ReturnForm({ editId }: { editId?: number }) {
         ...common,
         saleId: null,
         customerId: header.customerId ? Number(header.customerId) : undefined,
-        lines: rows.map((r) => ({ goodsItemId: r.goodsItemId, quantity: qtyOf(r), unitPrice: r.priceOverride !== "" && canChangePrice ? Number(r.priceOverride) : undefined })),
+        lines: rows.map((r) => ({ goodsItemId: r.goodsItemId, quantity: qtyOf(r), unitPrice: r.barcodePrice == null && r.priceOverride !== "" && canChangePrice ? Number(r.priceOverride) : undefined, barcode: r.barcodePrice != null ? r.barcode : undefined })),
       };
     }
     try {
@@ -625,7 +641,7 @@ function ReturnForm({ editId }: { editId?: number }) {
                       <input dir="ltr" inputMode="decimal" style={{ width: 90, textAlign: "center" }} value={r.quantity} onChange={(e) => update(i, { quantity: e.target.value.replace(/[^\d.]/g, "") })} />
                     </td>
                     <td data-label="فی" style={{ minWidth: 120 }}>
-                      {canChangePrice && !locked ? (
+                      {canChangePrice && !locked && r.barcodePrice == null ? (
                         <input dir="ltr" inputMode="decimal" style={{ width: 110, textAlign: "center" }} value={r.priceOverride !== "" ? r.priceOverride : String(priceOf(r))} onChange={(e) => update(i, { priceOverride: e.target.value.replace(/[^\d.]/g, "") })} title="فی اعلامیه؛ با مجوز «تغییر فی» قابل تغییر است" />
                       ) : (
                         <span title="فی از اعلامیه‌ی قیمت ایستگاه (قفل)">{formatAmountFa(priceOf(r))}</span>

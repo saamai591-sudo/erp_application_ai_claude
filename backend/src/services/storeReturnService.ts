@@ -60,7 +60,7 @@ interface ReturnBody {
   customerId?: number;
   description?: string | null;
   /** با مبنا: saleLineId + quantity؛ بدون مبنا: goodsItemId + quantity (+ unitPrice با مجوز «تغییر فی») */
-  lines?: { saleLineId?: number; goodsItemId?: number; quantity?: number | string; unitPrice?: number | null }[];
+  lines?: { saleLineId?: number; goodsItemId?: number; quantity?: number | string; unitPrice?: number | null; barcode?: string | null }[];
 }
 
 /** ردیف‌های قابل‌برگشتِ یک فروش: فروخته‌شده / قبلاً برگشت‌شده (به‌جز excludeReturnId) / مانده */
@@ -104,6 +104,7 @@ interface CleanReturnLine {
   vatAmount: number;
   priceListId: number | null;
   listPrice: number | null;
+  barcode: string | null;
 }
 
 /** ردیف‌های برگشتِ دارای مبنا: هر ردیف به یک ردیف فروش وصل است؛ مبلغ/ارزش‌افزوده متناسب با مقدار (برگشتِ آخر = باقیمانده‌ی دقیق) */
@@ -129,7 +130,7 @@ async function cleanBasisLines(body: ReturnBody, saleId: number, excludeReturnId
     const amount = full ? round(l.amount - l.returnedAmount) : round((l.amount * qty) / l.sold);
     const vatAmount = full ? round(l.vatAmount - l.returnedVat) : round((l.vatAmount * qty) / l.sold);
     const unit = await prisma.storeSaleLine.findUnique({ where: { id }, select: { unitId: true } });
-    out.push({ saleLineId: id, goodsItemId: l.goodsItemId, unitId: unit!.unitId, unitPrice: l.unitPrice, quantity: qty, amount, vatAmount, priceListId: null, listPrice: null });
+    out.push({ saleLineId: id, goodsItemId: l.goodsItemId, unitId: unit!.unitId, unitPrice: l.unitPrice, quantity: qty, amount, vatAmount, priceListId: null, listPrice: null, barcode: null });
   }
   if (out.length === 0) throw new StoreSaleError("حداقل یک ردیف با مقدار برگشتی وارد کنید");
   return out;
@@ -140,12 +141,12 @@ async function cleanFreeLines(body: ReturnBody, station: Awaited<ReturnType<type
   const raw = (Array.isArray(body.lines) ? body.lines : []).filter((l) => Number(String(l.quantity ?? "").replace(/,/g, "")) > 0);
   if (raw.length === 0) throw new StoreSaleError("حداقل یک ردیف با مقدار برگشتی وارد کنید");
   const lines = await cleanLines(
-    raw.map((l) => ({ goodsItemId: Number(l.goodsItemId), quantity: Number(String(l.quantity).replace(/,/g, "")), unitPrice: l.unitPrice ?? undefined })),
+    raw.map((l) => ({ goodsItemId: Number(l.goodsItemId), quantity: Number(String(l.quantity).replace(/,/g, "")), unitPrice: l.unitPrice ?? undefined, barcode: l.barcode ?? null })),
     station,
     date,
     allowPriceChange,
   );
-  return lines.map((l) => ({ saleLineId: null, goodsItemId: l.goodsItemId, unitId: l.unitId, unitPrice: l.unitPrice, quantity: l.quantity, amount: l.amount, vatAmount: l.vatAmount, priceListId: l.priceListId, listPrice: l.listPrice }));
+  return lines.map((l) => ({ saleLineId: null, goodsItemId: l.goodsItemId, unitId: l.unitId, unitPrice: l.unitPrice, quantity: l.quantity, amount: l.amount, vatAmount: l.vatAmount, priceListId: l.priceListId, listPrice: l.listPrice, barcode: l.barcode }));
 }
 
 const lineData = (l: CleanReturnLine, i: number) => ({
@@ -159,6 +160,7 @@ const lineData = (l: CleanReturnLine, i: number) => ({
   vatAmount: l.vatAmount,
   priceListId: l.priceListId,
   listPrice: l.listPrice,
+  barcode: l.barcode,
 });
 
 export async function createStoreReturn(body: ReturnBody, allowPriceChange = false) {
@@ -311,6 +313,7 @@ export function returnShape(r: any, paid = 0, withLines = false) {
       quantity: Number(l.quantity),
       unitPrice: Number(l.unitPrice),
       listPrice: l.listPrice !== null && l.listPrice !== undefined ? Number(l.listPrice) : null,
+      lineBarcode: l.barcode ?? null,
       amount: Number(l.amount),
       vatAmount: Number(l.vatAmount),
     }));

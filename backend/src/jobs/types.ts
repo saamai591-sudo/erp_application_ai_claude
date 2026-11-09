@@ -15,6 +15,8 @@ interface ParamBase {
   key: string;
   label: string;
   help?: string;
+  /** کلید قدیمیِ ذخیره‌شده‌ی همین پارامتر (بعد از تغییر نام)؛ تا اولین ذخیره‌ی جدید، مقدار از همان خوانده می‌شود تا تنظیم کاربر از دست نرود */
+  legacyKey?: string;
   /** برای حالت «واقعی» حتماً باید مقدار داشته باشد (برای dateWindow یعنی سرِ قدیمی‌ترِ بازه تعیین شده باشد) */
   requiredForLive?: boolean;
 }
@@ -24,7 +26,9 @@ export type ParamDef =
   | (ParamBase & { type: "date"; default?: string | null })
   | (ParamBase & { type: "number"; integer?: boolean; min?: number; max?: number; default?: number | null })
   | (ParamBase & { type: "boolean"; default?: boolean })
-  | (ParamBase & { type: "select"; options: { value: string; label: string }[]; default?: string | null });
+  | (ParamBase & { type: "select"; options: { value: string; label: string }[]; default?: string | null })
+  // چند گزینه از یک فهرست (مقدار = آرایه‌ی کلیدهای انتخاب‌شده)؛ requiredForLive یعنی دست‌کم یک گزینه
+  | (ParamBase & { type: "multiselect"; options: { value: string; label: string; group?: string }[]; default?: string[] });
 
 export type JobItemResult = "DONE" | "WOULD_DO" | "SKIPPED" | "FAILED";
 

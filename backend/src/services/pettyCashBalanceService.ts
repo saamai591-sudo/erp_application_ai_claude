@@ -76,7 +76,7 @@ export async function assertPettyCashRunningBalanceNotNegative(
 
   const events: BalanceEvent[] = [
     ...payments.map((p) => ({ date: p.date, amount: -Number(p.amount), custodianId: p.custodianId })),
-    ...fundingLines.map((f) => ({ date: f.payment.date, amount: Number(f.amount), custodianId: f.custodianId ?? undefined })),
+    ...fundingLines.filter((f) => f.payment).map((f) => ({ date: f.payment!.date, amount: Number(f.amount), custodianId: f.custodianId ?? undefined })),
     ...(opts.pendingEvents || []),
   ];
 

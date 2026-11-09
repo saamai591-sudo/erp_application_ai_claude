@@ -382,7 +382,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
     if (!p) return;
     (async () => {
       const fromOrder = !!p.orderId;
-      setHeader((h) => ({ ...h, date: p.date, basis: fromOrder ? "SALES_ORDER" : "SALES_QUOTE", warehouseId: String(p.warehouseId), partyId: String(p.partyId) }));
+      setHeader((h) => ({ ...h, date: p.date, basis: fromOrder ? "SALES_ORDER" : "SALES_QUOTE", warehouseId: p.warehouseId ? String(p.warehouseId) : "", partyId: String(p.partyId) }));
       try {
         const params = new URLSearchParams({ destDate: p.date, partyId: String(p.partyId) });
         const lines: (PickableLine & { salesOrderId?: number })[] = await api.get(`/sales-deliveries/${fromOrder ? "pickable-sales-order-lines" : "pickable-sales-quote-lines"}?${params.toString()}`);
@@ -488,7 +488,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
         )}
 
         <fieldset disabled={coreDisabled} style={{ border: 0, padding: 0, margin: 0 }}>
-          <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
+          <div className="je-header-grid" style={{ marginBottom: 6, maxWidth: 900 }}>
             <div className="form-field">
               <label>شماره</label>
               <input dir="ltr" value={meta ? toFaDigits(String(meta.number)) : "خودکار پس از ذخیره"} disabled />

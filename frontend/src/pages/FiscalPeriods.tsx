@@ -42,6 +42,15 @@ function defaultPeriodEnd(startIso: string): string {
   }
 }
 
+// فقط رقم و یک خط تیره بعد از رقم چهارم: nnnn یا nnnn-nnnn
+function sanitizePeriodTitle(v: string): string {
+  const s = v.replace(/[‐-―−]/g, "-");
+  const [a, ...rest] = s.split("-");
+  const first = digitsOnly(a).slice(0, 4);
+  if (rest.length === 0 || first.length < 4) return first;
+  return `${first}-${digitsOnly(rest.join("")).slice(0, 4)}`;
+}
+
 interface Period { id: number; code: string; title: string; fromDate: string; toDate: string; hasTransactions: boolean }
 
 export default function FiscalPeriods() {
@@ -124,8 +133,8 @@ function PeriodForm() {
         <ErrorToast message={formError} />
         <div className="form-grid">
           <div className="form-field">
-            <label>عنوان (عدد ۴ رقمی)<RequiredMark /></label>
-            <input dir="ltr" value={form.title} onChange={(e) => setForm({ ...form, title: digitsOnly(e.target.value).slice(0, 4) })} />
+            <label>عنوان (nnnn یا nnnn-nnnn)<RequiredMark /></label>
+            <input dir="ltr" value={form.title} onChange={(e) => setForm({ ...form, title: sanitizePeriodTitle(e.target.value) })} />
           </div>
           <div />
           <div className="form-field">
@@ -210,7 +219,7 @@ function PeriodEditForm({ editId }: { editId: number }) {
         <div className="form-grid">
           {/* فیلد «عنوان» بعد از ذخیره هم نمایش داده می‌شود (فقط‌خواندنی، هم‌ساختار فرم ایجاد) */}
           <div className="form-field">
-            <label>عنوان (عدد ۴ رقمی)</label>
+            <label>عنوان (nnnn یا nnnn-nnnn)</label>
             <input dir="ltr" value={title} disabled />
           </div>
           <div />

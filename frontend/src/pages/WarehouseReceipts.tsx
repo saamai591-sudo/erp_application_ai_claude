@@ -1,7 +1,8 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { ErrorToast } from "../components/ErrorToast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
+import { Modal } from "../components/Modal";
 import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
@@ -35,7 +36,7 @@ import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valu
 // کاربر دارای دسترسی «مشاهده اطلاعات حسابداری».
 const VIEW_ACCOUNTING_PERMISSION = "inventory.inbound-receipts.warehousing-warehouse-receipts.viewAccounting";
 
-type Basis = "NO_BASIS" | "SUPPLY_REQUEST" | "PURCHASE_ORDER" | "DELIVERY_AUTHORIZATION";
+type Basis = "NO_BASIS" | "SUPPLY_REQUEST" | "PURCHASE_ORDER" | "DELIVERY_AUTHORIZATION" | "TEMP_RECEIPT";
 type DocStatus = "REGISTERED" | "FINALIZED";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
@@ -52,6 +53,7 @@ interface PartyOption {
 interface GoodsItemRow {
   id: number;
   fullCode: string;
+  barcode?: string | null;
   title: string;
   mainUnitId: number;
   mainUnit?: { title: string };
@@ -66,6 +68,7 @@ interface PickableLine {
   sourceSupplyRequestLineId?: number;
   sourcePurchaseOrderLineId?: number;
   sourceDeliveryAuthorizationLineId?: number;
+  sourceTempReceiptLineId?: number;
   number: number;
   date: string;
   goodsItemId: number;
@@ -100,6 +103,7 @@ interface DetailLine {
   sourceSupplyRequestLineId: number | null;
   sourcePurchaseOrderLineId: number | null;
   sourceDeliveryAuthorizationLineId: number | null;
+  sourceTempReceiptLineId: number | null;
   goodsItemId: number;
   goodsItemCode: string;
   goodsItemTitle: string;
@@ -138,26 +142,30 @@ const BASIS_FA: Record<Basis, string> = {
   SUPPLY_REQUEST: "درخواست تامین",
   PURCHASE_ORDER: "سفارش خرید",
   DELIVERY_AUTHORIZATION: "مجوز تحویل",
+  TEMP_RECEIPT: "رسید موقت",
 };
 const STATUS_FA: Record<DocStatus, string> = { REGISTERED: "ثبت‌شده", FINALIZED: "تایید حسابداری شده" };
 const PICKABLE_ENDPOINT: Record<Exclude<Basis, "NO_BASIS">, string> = {
   SUPPLY_REQUEST: "/warehouse-receipts/pickable-supply-request-lines",
   PURCHASE_ORDER: "/warehouse-receipts/pickable-purchase-order-lines",
   DELIVERY_AUTHORIZATION: "/warehouse-receipts/pickable-delivery-authorization-lines",
+  TEMP_RECEIPT: "/warehouse-receipts/pickable-temp-receipt-lines",
 };
 const SOURCE_FIELD: Record<Exclude<Basis, "NO_BASIS">, keyof PickableLine> = {
   SUPPLY_REQUEST: "sourceSupplyRequestLineId",
   PURCHASE_ORDER: "sourcePurchaseOrderLineId",
   DELIVERY_AUTHORIZATION: "sourceDeliveryAuthorizationLineId",
+  TEMP_RECEIPT: "sourceTempReceiptLineId",
 };
 const SOURCE_LABEL: Record<Exclude<Basis, "NO_BASIS">, string> = {
   SUPPLY_REQUEST: "درخواست تامین مبدا",
   PURCHASE_ORDER: "سفارش خرید مبدا",
   DELIVERY_AUTHORIZATION: "مجوز تحویل مبدا",
+  TEMP_RECEIPT: "رسید موقت مبدا",
 };
 
 const INFO_TEXT =
-  "ثبت رسید انبار برای کالاهای دریافتی از تامین‌کننده. مبنا می‌تواند بدون مبنا، درخواست تامین، سفارش خرید یا مجوز تحویل باشد؛ " +
+  "ثبت رسید انبار برای کالاهای دریافتی از تامین‌کننده. مبنا می‌تواند بدون مبنا، درخواست تامین، سفارش خرید، مجوز تحویل یا رسید موقت (کالای تاییدشده‌ی انبار قرنطینه؛ انبار رسید می‌تواند با انبار رسید موقت فرق کند) باشد؛ " +
   "در حالت‌های دارای مبنا، هر ردیف از یک ردیف تایید‌شده و دارای مانده انتخاب می‌شود. سند از همان لحظه‌ی ذخیره در موجودی انبار اثر " +
   "می‌گذارد و مقدار مستقیماً توسط شما وارد می‌شود؛ فی/مبلغ فقط پس از «تایید حسابداری» توسط کاربر دارای دسترسی حسابداری انبار وارد می‌شود.";
 
@@ -266,6 +274,7 @@ interface RowState {
   sourceSupplyRequestLineId: string;
   sourcePurchaseOrderLineId: string;
   sourceDeliveryAuthorizationLineId: string;
+  sourceTempReceiptLineId: string;
   sourceNumber: string;
   goodsItemId: string;
   goodsItemCode: string;
@@ -287,6 +296,7 @@ function emptyRow(): RowState {
     sourceSupplyRequestLineId: "",
     sourcePurchaseOrderLineId: "",
     sourceDeliveryAuthorizationLineId: "",
+    sourceTempReceiptLineId: "",
     sourceNumber: "",
     goodsItemId: "",
     goodsItemCode: "",
@@ -308,6 +318,7 @@ function mapRows(d: Detail): RowState[] {
     sourceSupplyRequestLineId: l.sourceSupplyRequestLineId ? String(l.sourceSupplyRequestLineId) : "",
     sourcePurchaseOrderLineId: l.sourcePurchaseOrderLineId ? String(l.sourcePurchaseOrderLineId) : "",
     sourceDeliveryAuthorizationLineId: l.sourceDeliveryAuthorizationLineId ? String(l.sourceDeliveryAuthorizationLineId) : "",
+    sourceTempReceiptLineId: l.sourceTempReceiptLineId ? String(l.sourceTempReceiptLineId) : "",
     sourceNumber: "",
     goodsItemId: String(l.goodsItemId),
     goodsItemCode: l.goodsItemCode,
@@ -333,6 +344,11 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
+  const [barcode, setBarcode] = useState("");
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkErrors, setBulkErrors] = useState<string[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const detailConfig = useDocDetailConfig("WAREHOUSE_RECEIPT");
   const { header, setHeader, rows, setRows, meta, error, setError, loaded, submit, remove } = useDocumentForm<
@@ -368,7 +384,7 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
     if (header.date) params.set("destDate", header.date);
     // برای مبنای سفارش خرید/مجوز تحویل، فقط مبناهایی نشان داده می‌شوند که تامین‌کننده‌شان با «طرف
     // مقابل» انتخاب‌شده در هدر یکی است
-    if ((header.basis === "PURCHASE_ORDER" || header.basis === "DELIVERY_AUTHORIZATION") && header.partyDetailCode) {
+    if ((header.basis === "PURCHASE_ORDER" || header.basis === "DELIVERY_AUTHORIZATION" || header.basis === "TEMP_RECEIPT") && header.partyDetailCode) {
       params.set("partyDetailCode", header.partyDetailCode);
     }
     const q = params.toString() ? `?${params.toString()}` : "";
@@ -378,7 +394,7 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
       .catch(() => setPickableLines([]));
   }, [header.basis, header.date, header.partyDetailCode]);
 
-  const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceSupplyRequestLineId || r.sourcePurchaseOrderLineId || r.sourceDeliveryAuthorizationLineId);
+  const hasAnyLine = rows.some((r) => r.goodsItemId || r.sourceSupplyRequestLineId || r.sourcePurchaseOrderLineId || r.sourceDeliveryAuthorizationLineId || r.sourceTempReceiptLineId);
   // طبق طرح جدید چرخه‌ی عمر سند («ثبت‌شده → تایید حسابداری‌شده»): بعد از تایید حسابداری، سرصفحه/مقدار/
   // کالای ردیف‌ها برای همه (از جمله کاربر انباردار) قفل می‌شود. فی/مبلغ هرگز از این فرم ویرایش نمی‌شود
   // (فقط از طریق تایید فاکتور خرید مبتنی بر این رسید — نگاه کنید به یادداشت بالای فایل).
@@ -420,6 +436,7 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
       sourceSupplyRequestLineId: header.basis === "SUPPLY_REQUEST" ? sourceLineId : "",
       sourcePurchaseOrderLineId: header.basis === "PURCHASE_ORDER" ? sourceLineId : "",
       sourceDeliveryAuthorizationLineId: header.basis === "DELIVERY_AUTHORIZATION" ? sourceLineId : "",
+      sourceTempReceiptLineId: header.basis === "TEMP_RECEIPT" ? sourceLineId : "",
       sourceNumber: src ? String(src.number) : "",
       goodsItemId: src ? String(src.goodsItemId) : "",
       goodsItemCode: src ? src.goodsItemCode : "",
@@ -438,6 +455,154 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
   function addRow() {
     setRows((prev) => [...prev, { ...emptyRow(), details: newRowDetails(detailConfig, header.details) }]);
   }
+
+  // ورود بارکد: تطبیق مستقیم با بارکد/کد کالا، وگرنه «تفسیر بارکد» (کالا و خدمت › تنظیمات) کالا، مقدار، سریال و بچ را استخراج می‌کند.
+  // سریال/بچ استخراج‌شده در همان دیالوگ ردیابی ردیف ست می‌شود (سریالِ تعریف‌شده‌ی قابل‌انتخاب برای این نوع سند / بچِ تعریف‌شده‌ی کالا).
+  // بدون مبنا: ردیف کالا؛ با مبنا: همان کالا از ردیف‌های قابل انتخابِ مبنا (فقط ردیفِ مبنا؛ مقدار را سرور کنترل می‌کند).
+  // پردازشِ یک بارکد؛ پیام خطا یا null برمی‌گرداند. تغییر ردیف‌ها فقط با به‌روزرسانی تابعی است تا چند بارکد پشت‌سرهم (ورود تجمعی) درست جمع شوند.
+  const scannedSerials = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    scannedSerials.current = new Set(rows.flatMap((r) => r.serialIds.map((id) => `${r.goodsItemId}:${id}`)));
+  }, [rows]);
+
+  async function processBarcode(raw: string): Promise<string | null> {
+    const code = raw.trim().replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0)).replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660));
+    if (!code) return null;
+    let itemId: number | null = null;
+    let qty = 1;
+    let serialText: string | null = null;
+    let batchText: string | null = null;
+    const direct = goodsItems.find((g) => g.isActive && (g.barcode === code || g.fullCode === code));
+    if (direct) itemId = direct.id;
+    else {
+      try {
+        const { result } = await api.post("/barcode-interpretations/interpret", { barcode: code });
+        if (result?.goodsItemId == null) return result?.error ?? `بارکد/کد «${code}» یافت نشد`;
+        itemId = result.goodsItemId;
+        if (result.quantity != null && result.quantity > 0) qty = result.quantity;
+        serialText = result.serial ?? null;
+        batchText = result.batch ?? null;
+      } catch (e) {
+        return (e as ApiError).message;
+      }
+    }
+    const item = goodsItems.find((g) => g.id === itemId);
+    if (!item) return "کالای بارکد در فهرست کالاها نیست";
+
+    // سریال/بچ استخراج‌شده را به شناسه‌ی رکورد تعریف‌شده تبدیل می‌کنیم (همان فهرستی که دیالوگ ردیابی نشان می‌دهد)
+    let serialId: string | null = null;
+    let batchId: string | null = null;
+    if (item.trackingMethod === "SERIAL" && serialText) {
+      try {
+        const list: { id: number; serialNumber: string }[] = await api.get(`/serials/pickable?documentType=WAREHOUSE_RECEIPT&goodsItemId=${item.id}`);
+        const hit = list.find((x) => x.serialNumber === serialText);
+        if (!hit) return `سریال «${serialText}» برای «${item.title}» تعریف نشده یا برای رسید انبار قابل انتخاب نیست`;
+        serialId = String(hit.id);
+      } catch (e) {
+        return (e as ApiError).message;
+      }
+      const key = `${item.id}:${serialId}`;
+      if (scannedSerials.current.has(key)) return `سریال «${serialText}» قبلاً در ردیف‌ها آمده است`;
+      scannedSerials.current.add(key);
+      qty = 1; // هر سریال یک واحد است
+    } else if (item.trackingMethod === "BATCH" && batchText) {
+      try {
+        const list: { id: number; batchNumber: string; isActive: boolean }[] = await api.get(`/batches?goodsItemId=${item.id}`);
+        const hit = list.find((x) => x.batchNumber === batchText && x.isActive);
+        if (!hit) return `بچ «${batchText}» برای «${item.title}» تعریف نشده یا غیرفعال است`;
+        batchId = String(hit.id);
+      } catch (e) {
+        return (e as ApiError).message;
+      }
+    }
+
+    const add = (x: number, y: number) => Math.round((x + y) * 1e6) / 1e6;
+    // مقدار را اضافه می‌کند و سریال/بچ را (اگر از بارکد آمده) به ردیف می‌افزاید
+    const applyTrack = (r: RowState): RowState => {
+      const q = String(add(Number(r.quantity) || 0, qty));
+      if (serialId) return { ...r, quantity: q, serialIds: [...r.serialIds, serialId] };
+      if (batchId) {
+        const has = r.batchAllocations.some((x) => x.batchId === batchId);
+        return {
+          ...r,
+          quantity: q,
+          batchAllocations: has
+            ? r.batchAllocations.map((x) => (x.batchId === batchId ? { ...x, quantity: String(add(Number(x.quantity) || 0, qty)) } : x))
+            : [...r.batchAllocations, { batchId, quantity: String(qty) }],
+        };
+      }
+      return { ...r, quantity: q };
+    };
+    // ردیف‌های هم‌کالا فقط وقتی ادغام می‌شوند که ردیابی اجازه دهد (بدون ردیابی، یا سریال/بچ از بارکد آمده باشد)
+    const mergeable = item.trackingMethod === "NONE" || (item.trackingMethod === "SERIAL" && !!serialId) || (item.trackingMethod === "BATCH" && !!batchId);
+
+    if (header.basis === "NO_BASIS") {
+      setRows((prev) => {
+        const i = prev.findIndex((r) => r.goodsItemId === String(item.id) && mergeable);
+        if (i >= 0) return prev.map((r, k) => (k === i ? applyTrack(r) : r));
+        const blank = prev.findIndex((r) => !r.goodsItemId && !r.quantity);
+        const row = applyTrack({ ...emptyRow(), goodsItemId: String(item.id), goodsItemCode: item.fullCode, goodsItemTitle: item.title, unitId: String(item.mainUnitId), unitTitle: item.mainUnit?.title ?? "", quantity: "0", details: newRowDetails(detailConfig, header.details) });
+        return blank >= 0 ? prev.map((r, k) => (k === blank ? row : r)) : [...prev, row];
+      });
+      return null;
+    }
+    const field = SOURCE_FIELD[header.basis];
+    const srcOf = (r: RowState) => (field === "sourceSupplyRequestLineId" ? r.sourceSupplyRequestLineId : field === "sourcePurchaseOrderLineId" ? r.sourcePurchaseOrderLineId : field === "sourceTempReceiptLineId" ? r.sourceTempReceiptLineId : r.sourceDeliveryAuthorizationLineId);
+    const cand = pickableLines.filter((l) => l.goodsItemId === item.id);
+    if (cand.length === 0) return `«${item.title}» در ردیف‌های قابل انتخاب مبنای این سند نیست`;
+    setRows((prev) => {
+      const existing = cand.find((l) => prev.some((r) => srcOf(r) === String(l[field])));
+      if (existing) return prev.map((r) => (srcOf(r) === String(existing[field]) ? applyTrack(r) : r));
+      const src = cand[0];
+      return [
+        ...prev.filter((r) => r.goodsItemId || r.sourceSupplyRequestLineId || r.sourcePurchaseOrderLineId || r.sourceDeliveryAuthorizationLineId || r.sourceTempReceiptLineId),
+        applyTrack({
+          ...emptyRow(),
+          sourceSupplyRequestLineId: header.basis === "SUPPLY_REQUEST" ? String(src[field]) : "",
+          sourcePurchaseOrderLineId: header.basis === "PURCHASE_ORDER" ? String(src[field]) : "",
+          sourceDeliveryAuthorizationLineId: header.basis === "DELIVERY_AUTHORIZATION" ? String(src[field]) : "",
+          sourceTempReceiptLineId: header.basis === "TEMP_RECEIPT" ? String(src[field]) : "",
+          sourceNumber: String(src.number),
+          goodsItemId: String(src.goodsItemId),
+          goodsItemCode: src.goodsItemCode,
+          goodsItemTitle: src.goodsItemTitle,
+          unitId: String(src.unitId),
+          unitTitle: src.unitTitle,
+          quantity: "0",
+          details: newRowDetails(detailConfig, header.details),
+        }),
+      ];
+    });
+    return null;
+  }
+
+  async function onBarcodeEnter() {
+    const code = barcode;
+    if (!code.trim()) return;
+    setBarcode("");
+    const err = await processBarcode(code);
+    setError(err);
+  }
+
+  // «بارکد تجمیعی»: هر خط یک بارکد؛ خط‌ها یکی‌یکی تفسیر و اعمال می‌شوند. خط‌های ناموفق در کادر می‌مانند تا اصلاح شوند.
+  async function applyBulkBarcodes() {
+    const lines = bulkText.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+    if (lines.length === 0) return setBulkOpen(false);
+    setBulkBusy(true);
+    const failed: string[] = [];
+    const messages: string[] = [];
+    for (const [i, line] of lines.entries()) {
+      const err = await processBarcode(line);
+      if (err) {
+        failed.push(line);
+        messages.push(`خط ${i + 1} (${line}): ${err}`);
+      }
+    }
+    setBulkBusy(false);
+    setBulkErrors(messages);
+    setBulkText(failed.join("\n"));
+    if (failed.length === 0) setBulkOpen(false);
+  }
   function removeRow(idx: number) {
     setRows((prev) => prev.filter((_, i) => i !== idx));
   }
@@ -446,7 +611,7 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
   const totalAmount = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
 
   function buildBody() {
-    const nonEmptyRows = rows.filter((r) => r.goodsItemId || r.sourceSupplyRequestLineId || r.sourcePurchaseOrderLineId || r.sourceDeliveryAuthorizationLineId);
+    const nonEmptyRows = rows.filter((r) => r.goodsItemId || r.sourceSupplyRequestLineId || r.sourcePurchaseOrderLineId || r.sourceDeliveryAuthorizationLineId || r.sourceTempReceiptLineId);
     return {
       date: header.date,
       basis: header.basis,
@@ -459,6 +624,7 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
         sourceSupplyRequestLineId: r.sourceSupplyRequestLineId ? Number(r.sourceSupplyRequestLineId) : null,
         sourcePurchaseOrderLineId: r.sourcePurchaseOrderLineId ? Number(r.sourcePurchaseOrderLineId) : null,
         sourceDeliveryAuthorizationLineId: r.sourceDeliveryAuthorizationLineId ? Number(r.sourceDeliveryAuthorizationLineId) : null,
+        sourceTempReceiptLineId: r.sourceTempReceiptLineId ? Number(r.sourceTempReceiptLineId) : null,
         goodsItemId: r.goodsItemId ? Number(r.goodsItemId) : undefined,
         unitId: Number(r.unitId),
         quantity: Number(r.quantity) || 0,
@@ -481,6 +647,7 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
           if (header.basis === "SUPPLY_REQUEST" && !l.sourceSupplyRequestLineId) return `ردیف ${i + 1}: انتخاب ردیف درخواست تامین الزامی است`;
           if (header.basis === "PURCHASE_ORDER" && !l.sourcePurchaseOrderLineId) return `ردیف ${i + 1}: انتخاب ردیف سفارش خرید الزامی است`;
           if (header.basis === "DELIVERY_AUTHORIZATION" && !l.sourceDeliveryAuthorizationLineId) return `ردیف ${i + 1}: انتخاب ردیف مجوز تحویل الزامی است`;
+          if (header.basis === "TEMP_RECEIPT" && !l.sourceTempReceiptLineId) return `ردیف ${i + 1}: انتخاب ردیف رسید موقت الزامی است`;
           if (header.basis === "NO_BASIS" && !l.goodsItemId) return `کالا برای ردیف ${i + 1} الزامی است`;
           if (!(l.quantity > 0)) return `مقدار ردیف ${i + 1} باید عددی مثبت باشد`;
         }
@@ -531,7 +698,7 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
         )}
 
         <fieldset disabled={coreDisabled} style={{ border: 0, padding: 0, margin: 0 }}>
-          <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
+          <div className="je-header-grid" style={{ marginBottom: 6, maxWidth: 900 }}>
             <div className="form-field">
               <label>شماره</label>
               <input dir="ltr" value={meta ? toFaDigits(String(meta.number)) : "خودکار پس از ذخیره"} disabled />
@@ -597,7 +764,27 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
 
           {!coreDisabled && (
             <div className="je-lines-toolbar">
-              <span className="je-lines-title">ردیف‌های کالا</span>
+              <div style={{ display: "flex", alignItems: "center" }}>
+              <span className="je-lines-title" style={{ marginInlineEnd: 6 }}>ردیف‌های کالا</span>
+              <input
+                dir="ltr"
+                inputMode="text"
+                placeholder="بارکد کالا — Enter"
+                style={{ width: 200, margin: 0, borderTopLeftRadius: 0, borderBottomLeftRadius: 0 }}
+                value={barcode}
+                onChange={(e) => setBarcode(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    onBarcodeEnter();
+                  }
+                }}
+                title="بارکد یا کد کالا را وارد/اسکن کنید و Enter بزنید؛ با «تفسیر بارکد» کالا و مقدار از بارکد استخراج می‌شود"
+              />
+              <button type="button" className="btn secondary" style={{ padding: "4px 10px", fontSize: 12, margin: 0, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 0 }} onClick={() => { setBulkErrors([]); setBulkOpen(true); }} title="چندین بارکد را یک‌جا (هر خط یک بارکد) وارد کنید">
+                بارکد تجمیعی
+              </button>
+              </div>
               <button type="button" className="toolbar-icon-btn primary" onClick={addRow} title="ردیف جدید">
                 <PlusIcon />
               </button>
@@ -712,6 +899,32 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
           </div>
         </div>
       </form>
-    </FormPage>
+    {bulkOpen && (
+        <Modal title="بارکد تجمیعی" onClose={() => !bulkBusy && setBulkOpen(false)}>
+          <div style={{ minWidth: 380 }}>
+            <p style={{ fontSize: 12, opacity: 0.75, margin: "0 0 8px" }}>هر بارکد (یا کد کالا) را در یک خط بنویسید یا اسکن کنید؛ با Enter خط بعد شروع می‌شود. با «تایید» بارکدها یکی‌یکی تفسیر و به ردیف‌های سند اضافه می‌شوند.</p>
+            <textarea
+              dir="ltr"
+              autoFocus
+              rows={12}
+              style={{ width: "100%", fontFamily: "monospace" }}
+              value={bulkText}
+              disabled={bulkBusy}
+              onChange={(e) => setBulkText(e.target.value)}
+            />
+            {bulkErrors.length > 0 && (
+              <div style={{ margin: "8px 0", maxHeight: 140, overflow: "auto", color: "var(--danger, #c0392b)", fontSize: 12 }}>
+                <div style={{ fontWeight: 600 }}>بارکدهای زیر اعمال نشدند (در کادر مانده‌اند):</div>
+                {bulkErrors.map((m, i) => <div key={i}>{m}</div>)}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
+              <button type="button" className="btn secondary" disabled={bulkBusy} onClick={() => setBulkOpen(false)}>انصراف</button>
+              <button type="button" className="btn" disabled={bulkBusy || !bulkText.trim()} onClick={applyBulkBarcodes}>{bulkBusy ? "در حال تفسیر…" : "تایید"}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      </FormPage>
   );
 }

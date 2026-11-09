@@ -36,7 +36,7 @@ export function basisFieldPatch(basisType: string, basis: { id: number; kind?: "
 /** متن نمایشی سند مبنا: شماره؛ برای فاکتور خرید خدمات با برچسب «خدمات» تا با فاکتور کالای هم‌شماره اشتباه نشود */
 export const basisDisplayOf = (number: number | string, kind?: "GOODS" | "SERVICE") => toFaDigits(String(number)) + (kind === "SERVICE" ? " (خدمات)" : "");
 
-export type BasisSource = "payments" | "petty-cash-payments";
+export type BasisSource = "payments" | "petty-cash-payments" | "party-settlements";
 
 export function usePaymentBasisCandidates(opts: { source: BasisSource; basisType?: string; partyId?: string | number | null; paymentTypeId?: string | number | null; editId?: number; date?: string }) {
   const { source, basisType, partyId, paymentTypeId, editId, date } = opts;
@@ -52,7 +52,10 @@ export function usePaymentBasisCandidates(opts: { source: BasisSource; basisType
     const url =
       source === "payments"
         ? `/payments/pickable-basis-documents?basisType=${basisType}&partyId=${partyId}${type}${editId ? `&excludePaymentId=${editId}` : ""}`
-        : `/petty-cash-payments/basis/pickable-documents?basisType=${basisType}&partyId=${partyId}${type}${editId ? `&excludeId=${editId}` : ""}`;
+        : source === "party-settlements"
+          ? // «اعلامیه بدهکار بستانکار»: editId = شناسه‌ی همان اعلامیه (ردیف‌های خودش از مانده کم نمی‌شود)
+            `/party-settlements/pickable-payment-basis?basisType=${basisType}&partyId=${partyId}${type}${editId ? `&excludeSettlementId=${editId}` : ""}`
+          : `/petty-cash-payments/basis/pickable-documents?basisType=${basisType}&partyId=${partyId}${type}${editId ? `&excludeId=${editId}` : ""}`;
     // با هر تغییر تاریخ/نوع/طرف‌حساب، فهرست قبلی فوراً پاک می‌شود و پاسخ درخواست کهنه (دیرتر برگشته) نادیده گرفته می‌شود
     let stale = false;
     setCandidates([]);

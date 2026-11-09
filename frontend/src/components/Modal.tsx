@@ -33,14 +33,14 @@ export function Modal({
   onClose,
   children,
   wide,
-  closeButton,
+  closeButton = true,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   /** برای دیالوگ‌های دارای گرید/ستون‌های زیاد: عرض بزرگ‌تر (تا ۱۲۰۰px) */
   wide?: boolean;
-  /** دکمه‌ی × گوشه‌ی دیالوگ برای بستن */
+  /** دکمه‌ی × گوشه‌ی دیالوگ برای بستن؛ طبق قاعده‌ی پایه همه‌ی دیالوگ‌ها دارند (فقط با false حذف می‌شود) */
   closeButton?: boolean;
 }) {
   // در مرحله‌ی رندر خوانده می‌شود (قبل از commit)، چون autoFocus فیلدهای داخل دیالوگ در commit فوکوس را می‌دزدد.

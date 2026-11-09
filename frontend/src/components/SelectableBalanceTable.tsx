@@ -117,6 +117,7 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
   serverPaging,
   selectAll,
   stateKey,
+  autoBestFit,
   restoreFilters,
   restoreSort,
   onFiltersChange,
@@ -155,6 +156,8 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
    * می‌ماند.
    */
   stateKey?: string | number;
+  /** opt-in: به‌محض نمایش (و با هر تغییر ردیف‌ها/صفحه) خودکار «Best Fit» اجرا شود — برای گزارش‌هایی با ستون متنی بلند (نام طرف‌حساب/گروه) که بدون آن شکسته و پرارتفاع دیده می‌شوند */
+  autoBestFit?: boolean;
   /** فقط وقتی stateKey عوض شود مصرف می‌شوند — برای تب‌هایی که فیلتر/مرتب‌سازی واقعی‌شان بیرون از این
    * کامپوننت (سمت فراخوان‌کننده، مثل detailQuery[tab] در AccountsReview) نگه‌داری می‌شود، تا برگشتن
    * به آن تب، state محلی (که فقط برای نمایش آیکن فیلتر/جهت مرتب‌سازی است) را با مقدار واقعی هم‌گام
@@ -203,6 +206,24 @@ export function SelectableBalanceTable<T extends { id: SelectId }>({
     const widths = measureBestFitWidths(scrollAreaRef.current?.querySelector("table"), footerScrollRef.current?.querySelector("table"));
     setBestFit(widths.length ? widths : null);
   }
+  // autoBestFit: بعد از هر پاک‌شدنِ عرض‌ها (signature عوض شده)، پس از رندر با عرض‌های پیش‌فرض و آماده‌شدن فونت، یک‌بار اندازه‌گیری می‌شود؛ اگر اندازه‌گیری خالی باشد state عوض نمی‌شود و حلقه‌ای ساخته نمی‌شود
+  useEffect(() => {
+    if (!autoBestFit || bestFit !== null || rows.length === 0) return;
+    let cancelled = false;
+    let raf = 0;
+    const run = () => {
+      raf = requestAnimationFrame(() => {
+        if (!cancelled) applyBestFit();
+      });
+    };
+    if ((document as any).fonts?.ready) (document as any).fonts.ready.then(run);
+    else run();
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoBestFit, bestFit, bestFitSignature]);
 
   useLayoutEffect(() => {
     function measure() {

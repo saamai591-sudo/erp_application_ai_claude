@@ -265,7 +265,7 @@ async function customerIdOfQueryParty(req: any): Promise<number | null> {
  * ردیف‌های قابل‌تحویلِ سفارش‌های فروش تاییدشده‌ی یک مشتری (مانده > ۰، فقط کالا) — تنها پیاده‌سازی؛ هم انتخابگر ردیف مبنای فرم حواله
  * (pickable-sales-order-lines) و هم «صدور حواله از سفارش فروش» (from-order) از همین تابع استفاده می‌کنند. orderId: فقط ردیف‌های همان یک سفارش.
  */
-async function pickableSalesOrderLines(customerId: number, destDate: Date | null, excludeDeliveryId: number | null, orderId?: number) {
+export async function pickableSalesOrderLines(customerId: number, destDate: Date | null, excludeDeliveryId: number | null, orderId?: number) {
   const lines = await prisma.salesOrderLine.findMany({
     // ردیف خدمت وارد انبار/حواله نمی‌شود — فقط ردیف‌های کالا قابل انتخاب‌اند.
     where: { goodsItem: { kind: "GOODS" }, salesOrder: { status: "APPROVED", customerId, ...(destDate ? { date: { lte: destDate } } : {}), ...(orderId ? { id: orderId } : {}) } },
@@ -345,7 +345,7 @@ router.get("/sales-deliveries/from-order/:orderId", can(`${FORM}.create`), async
  * (pickable-sales-quote-lines) و هم «صدور حواله از پیش‌فاکتور» (from-quote) از همین تابع استفاده می‌کنند تا نتیجه یکی باشد.
  * quoteId: فقط ردیف‌های همان یک پیش‌فاکتور.
  */
-async function pickableSalesQuoteLines(customerId: number, destDate: Date | null, excludeDeliveryId: number | null, quoteId?: number) {
+export async function pickableSalesQuoteLines(customerId: number, destDate: Date | null, excludeDeliveryId: number | null, quoteId?: number) {
   const lines = await prisma.salesQuoteLine.findMany({
     // ردیف خدمت وارد انبار/حواله نمی‌شود — فقط ردیف‌های کالا قابل انتخاب‌اند.
     where: { goodsItem: { kind: "GOODS" }, salesQuote: { status: "APPROVED", customerId, ...(destDate ? { date: { lte: destDate } } : {}), ...(quoteId ? { id: quoteId } : {}) } },

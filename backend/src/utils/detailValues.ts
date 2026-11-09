@@ -40,6 +40,10 @@ async function titleForEntity(entityTable: string, entityId: number): Promise<st
       const p = await prisma.project.findUnique({ where: { id: entityId } });
       return p?.title || "—";
     }
+    case "FixedAsset": {
+      const fa = await prisma.fixedAsset.findUnique({ where: { id: entityId }, select: { title: true } });
+      return fa?.title || "—";
+    }
     case "FiscalPeriod": {
       const fp = await prisma.fiscalPeriod.findUnique({ where: { id: entityId } });
       return fp?.title || "—";

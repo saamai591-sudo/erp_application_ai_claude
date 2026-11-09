@@ -22,7 +22,8 @@ export interface DeliveryFromQuotePrefill {
   quoteId?: number;
   orderId?: number;
   date: string;
-  warehouseId: number;
+  /** null = انتخاب در فرم (مثلاً «دستیار» وقتی بیش از یک انبار فعال هست) */
+  warehouseId: number | null;
   partyId: number;
 }
 
@@ -36,12 +37,17 @@ export interface OrderFromQuotePrefill {
 }
 
 export interface InvoiceFromDeliveryPrefill {
-  deliveryId: number;
+  /** حواله‌ی مبنا (راهبری از حواله)؛ «دستیار» به‌جای آن basis + documentId می‌فرستد */
+  deliveryId?: number;
+  /** نوع مبنای ردیف‌ها؛ پیش‌فرض حواله فروش */
+  basis?: "SALES_DELIVERY" | "SALES_ORDER" | "SALES_QUOTE";
+  documentId?: number;
   date: string;
   customerId: number;
-  salesTypeId: number;
-  salesCenterId: number;
-  currencyId: number;
+  /** null = انتخاب در فرم */
+  salesTypeId: number | null;
+  salesCenterId: number | null;
+  currencyId: number | null;
   fxRate: string;
 }
 

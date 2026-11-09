@@ -346,12 +346,17 @@ router.post("/issue-warehouse-journal-entries/:id(\\d+)/issue", can(`${FORM}.iss
       warehouseGroupId != null
         ? findSetting(doc.date, goodsItem.accountingGroupId, "INVENTORY", (s) => s.warehouseGroupId === warehouseGroupId)
         : undefined;
-    const contraSetting = findSetting(
-      doc.date,
-      goodsItem.accountingGroupId,
-      direction === "IN" ? "WAREHOUSE_RECEIPT_CREDIT" : "WAREHOUSE_ISSUE_DEBIT",
-      (s) => s.warehouseDocType === doc.documentType
-    );
+    // «برگشت به تامین‌کننده»: حساب مقابلِ موجودی «کنترل برگشت» (RETURN_CONTROL، فقط به‌ازای گروه حسابداری) است نه «بدهکار حواله انبار»؛
+    // سند «برگشت خرید» همان حساب را بستانکار می‌کند و دو سند خودبه‌خود تهاتر می‌شوند.
+    const isSupplierReturn = doc.documentType === "SUPPLIER_RETURN";
+    const contraSetting = isSupplierReturn
+      ? findSetting(doc.date, goodsItem.accountingGroupId, "RETURN_CONTROL", () => true)
+      : findSetting(
+          doc.date,
+          goodsItem.accountingGroupId,
+          direction === "IN" ? "WAREHOUSE_RECEIPT_CREDIT" : "WAREHOUSE_ISSUE_DEBIT",
+          (s) => s.warehouseDocType === doc.documentType
+        );
 
     const docTypeTitle = DOC_TYPE_FA[doc.documentType] ?? doc.documentType;
     if (!inventorySetting) {
@@ -365,7 +370,7 @@ router.post("/issue-warehouse-journal-entries/:id(\\d+)/issue", can(`${FORM}.iss
       continue;
     }
     if (!contraSetting) {
-      const natureTitle = direction === "IN" ? "بستانکار رسید انبار" : "بدهکار حواله انبار";
+      const natureTitle = isSupplierReturn ? "کنترل برگشت" : direction === "IN" ? "بستانکار رسید انبار" : "بدهکار حواله انبار";
       errors.push({
         itemCode: goodsItem.fullCode,
         itemTitle: goodsItem.title,
@@ -556,6 +561,11 @@ router.delete("/issue-warehouse-journal-entries/:id(\\d+)/journal-entry", can(`$
   const i = await prisma.warehouseJournalEntryIssuance.findUnique({ where: { id } });
   if (!i) return res.status(404).json({ error: "یافت نشد" });
   if (!i.journalEntryId) return res.status(400).json({ error: "برای این مورد سندی صادر نشده است" });
+  const issuedLines = await prisma.documentItemAmount.findMany({ where: { warehouseJournalEntryIssuanceId: id }, select: { lineId: true } });
+  if (issuedLines.length) {
+    const acquired = await prisma.fixedAsset.findFirst({ where: { acquisitionJournalEntryId: { not: null }, components: { some: { receiptLine: { sourceInventoryLineId: { in: issuedLines.map((h) => h.lineId) } } } } }, select: { detailCode: true } });
+    if (acquired) return res.status(400).json({ error: `برای پلاک ${acquired.detailCode} (از ردیف‌های این حواله) سند تحصیل صادر شده است؛ ابتدا سند تحصیل را حذف کنید` });
+  }
 
   try {
     await prisma.$transaction([

@@ -52,6 +52,7 @@ const MODULE_ICON: Record<string, string> = {
   "کارتابل": "inbox",
   "فروش فروشگاهی": "store",
   "باشگاه مشتریان": "gift",
+  "دارایی ثابت": "building",
 };
 
 /** رنگ اختصاصی هر ساب‌ماژول (بر اساس عنوان ساب‌ماژول؛ همین عنوان‌ها در چند ماژول تکرار می‌شوند، پس یک‌بار نگاشت کافی است) */
@@ -683,6 +684,21 @@ export default function Layout() {
     [permissionsLoading, hasFormView]
   );
 
+  // جستجوی فرم در سایدبار: عنوان فرم (یا ماژول/زیرماژول) با نرمال‌سازی ی/ک عربی و نیم‌فاصله
+  const [menuQuery, setMenuQuery] = useState("");
+  const normQ = (t: string) => t.replace(/ي/g, "ی").replace(/ك/g, "ک").replace(/‌/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+  const menuMatches = useMemo(() => {
+    const q = normQ(menuQuery);
+    if (!q) return [];
+    const out: { item: (typeof visibleModules)[number]["subModules"][number]["items"][number]; path: string }[] = [];
+    for (const mod of visibleModules)
+      for (const sub of mod.subModules)
+        for (const item of sub.items) {
+          if (normQ(item.label).includes(q) || normQ(sub.title).includes(q) || normQ(mod.title).includes(q)) out.push({ item, path: `${mod.title} › ${sub.title}` });
+        }
+    return out;
+  }, [menuQuery, visibleModules]);
+
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
   if (preferencesLoading) return null;
@@ -706,10 +722,24 @@ export default function Layout() {
     <div className="app-shell">
       <aside
         className={`sidebar ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}
-        onScroll={() => flyoutAnchor && setFlyoutAnchor(null)}
       >
         <div className="sidebar-head">
-          {!sidebarCollapsed && <h1>حسابداری ERP</h1>}
+          {!sidebarCollapsed && (
+            <input
+              className="sidebar-search"
+              type="search"
+              placeholder="جستجوی فرم…"
+              value={menuQuery}
+              onChange={(e) => setMenuQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setMenuQuery("");
+                if (e.key === "Enter" && menuMatches[0]) {
+                  openTab(menuMatches[0].item.list);
+                  setMenuQuery("");
+                }
+              }}
+            />
+          )}
           <button
             className="sidebar-toggle-btn"
             onClick={toggleSidebarCollapsed}
@@ -718,7 +748,20 @@ export default function Layout() {
             <CollapseIcon collapsed={sidebarCollapsed} />
           </button>
         </div>
-        {visibleModules.map((mod) => {
+        <div className="sidebar-scroll" onScroll={() => flyoutAnchor && setFlyoutAnchor(null)}>
+        {!sidebarCollapsed && menuQuery.trim() ? (
+          menuMatches.length === 0 ? (
+            <div className="sidebar-search-empty">فرمی پیدا نشد</div>
+          ) : (
+            menuMatches.map(({ item, path }) => (
+              <div key={item.key} className="sidebar-search-hit">
+                <div className="sidebar-search-path">{path}</div>
+                <NavItemRow item={item} activePath={activePath} onOpen={(p: string) => { openTab(p); setMenuQuery(""); }} fitLabel />
+              </div>
+            ))
+          )
+        ) : null}
+        {(!menuQuery.trim() || sidebarCollapsed) && visibleModules.map((mod) => {
           // حالت جمع‌شده: به‌جای آکاردئون، فقط آیکن ماژول نشان داده می‌شود؛ کلیک روی آن ModuleFlyout را باز/بسته می‌کند
           if (sidebarCollapsed) {
             const isFlyoutOpen = flyoutAnchor?.title === mod.title;
@@ -768,6 +811,7 @@ export default function Layout() {
             </div>
           );
         })}
+        </div>
       </aside>
       {sidebarCollapsed &&
         flyoutAnchor &&

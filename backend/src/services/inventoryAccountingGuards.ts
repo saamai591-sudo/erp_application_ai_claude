@@ -89,4 +89,9 @@ export async function assertLineAmountChangeAllowed(tx: Db, lineId: number): Pro
   );
   if (!line) return;
   await assertFiscalYearNotAccountingClosed(tx, line.document.fiscalPeriodId, "تغییر مبلغ اسناد آن");
+  // ردیف حواله‌ی «دارایی ثابت» که در یک رسید دارایی تاییدشده استفاده شده: بهای رسید عکس ثابتِ همین مبلغ است؛ تغییر/برگشت قیمت‌گذاری باید بعد از برگشت تایید رسید باشد
+  const used = await withoutFiscalPeriodScope(() =>
+    tx.assetReceiptLine.findFirst({ where: { sourceInventoryLineId: lineId, assetReceipt: { status: "FINALIZED" } }, select: { assetReceipt: { select: { number: true } } } })
+  );
+  if (used) throw new Error(`این ردیف حواله در رسید دارایی تاییدشده‌ی ${used.assetReceipt.number} استفاده شده و بهای آن قابل تغییر نیست؛ ابتدا تایید رسید دارایی را برگردانید`);
 }

@@ -9,7 +9,9 @@ import { getVatRatePercentForDate } from "../services/accountingSettingsService"
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { computePrice, findEffectivePriceListId, loadItemPricing } from "../services/salesPriceService";
-import { createParty, updateParty, PartyError, PartyWarning, PartyInput } from "../services/partyService";
+import { updateParty, PartyError, PartyWarning, PartyInput } from "../services/partyService";
+import { createCustomer, CustomerError } from "../services/customerService";
+import { assertPartyGroup } from "./partyGroups";
 import { followUpStateOf, quoteRemainders } from "../services/salesQuoteFollowUpService";
 import { emitWorkflowEvent } from "../services/workflowEngineService";
 import { getRequestContext } from "../lib/requestContext";
@@ -55,13 +57,15 @@ function partyDisplayName(party: any) {
 // =========================================================================
 
 router.get("/customers", async (_req, res) => {
-  const items = await prisma.customer.findMany({ include: { party: true }, orderBy: { code: "asc" } });
+  const items = await prisma.customer.findMany({ include: { party: true, group: { select: { title: true } } }, orderBy: { code: "asc" } });
   res.json(
     items.map((c: any) => ({
       id: c.id,
       code: c.code,
       partyId: c.partyId,
       party: c.party,
+      groupId: c.groupId,
+      groupTitle: c.group?.title ?? null,
       isActive: c.isActive,
       hasTransactions: c.hasTransactions,
     }))
@@ -79,31 +83,18 @@ function partyErrorResponse(res: any, e: any, fallback: string) {
 // مشتری یا با «طرف‌حساب موجود» (partyId) ساخته می‌شود یا با «تعریف سریع شخص» (party: همان فیلدهای فرم اطلاعات پایه) — هر دو راه از همان سرویس مشترک
 // ساخت/ویرایش طرف‌حساب می‌گذرند (یک شخص = یک Party؛ کد/شناسه ملی و عنوان تفصیل تکراری بازدارنده است). ساخت و ویرایش هویت آزاد است (فقط دسترسی مشتری لازم است).
 router.post("/customers", can(`${CUSTOMERS_FORM}.create`), async (req, res) => {
-  const body = req.body as { code?: number; partyId?: number; party?: PartyInput; confirmDuplicate?: boolean; isActive?: boolean };
-  if (!body.partyId && !body.party) return res.status(400).json({ error: "طرف حساب الزامی است" });
+  const body = req.body as { code?: number; partyId?: number; party?: PartyInput; confirmDuplicate?: boolean; isActive?: boolean; groupId?: number | null };
   try {
-    let partyId = body.partyId;
-    const finalCode = body.code ?? (await nextSerialNumber(prisma.customer, "code"));
-    if (partyId) {
-      const party = await prisma.party.findUnique({ where: { id: partyId } });
-      if (!party) return res.status(404).json({ error: "طرف حساب یافت نشد" });
-      const dup = await prisma.customer.findUnique({ where: { partyId } });
-      if (dup) return res.status(400).json({ error: "این طرف حساب قبلاً به‌عنوان مشتری تعریف شده است" });
-    } else {
-      // کد مشتری پیش از ساخت شخص بررسی می‌شود تا شخص بی‌نقش (یتیم) نماند
-      if (body.code && (await prisma.customer.findUnique({ where: { code: body.code }, select: { id: true } }))) return res.status(400).json({ error: "کد تکراری است" });
-      partyId = (await createParty(body.party!, { confirmDuplicate: !!body.confirmDuplicate })).id;
-    }
-    const created = await prisma.customer.create({ data: { code: finalCode, partyId: partyId!, isActive: body.isActive ?? true } });
-    res.status(201).json(created);
+    res.status(201).json(await createCustomer(body));
   } catch (e: any) {
+    if (e instanceof CustomerError) return res.status(e.status).json({ error: e.message });
     partyErrorResponse(res, e, "خطا در ثبت مشتری");
   }
 });
 
 router.put("/customers/:id", can(`${CUSTOMERS_FORM}.edit`), async (req, res) => {
   const id = Number(req.params.id);
-  const body = req.body as { partyId?: number; isActive?: boolean; party?: PartyInput & { updatedAt?: string }; confirmDuplicate?: boolean };
+  const body = req.body as { partyId?: number; isActive?: boolean; groupId?: number | null; party?: PartyInput & { updatedAt?: string }; confirmDuplicate?: boolean };
   const existing = await prisma.customer.findUnique({ where: { id } });
   if (!existing) return res.status(404).json({ error: "مشتری یافت نشد" });
   try {
@@ -116,7 +107,9 @@ router.put("/customers/:id", can(`${CUSTOMERS_FORM}.edit`), async (req, res) => 
       const dup = await prisma.customer.findFirst({ where: { partyId: body.partyId, NOT: { id } } });
       if (dup) return res.status(400).json({ error: "این طرف حساب قبلاً به‌عنوان مشتری تعریف شده است" });
     }
-    const updated = await prisma.customer.update({ where: { id }, data: { partyId: body.partyId, isActive: body.isActive } });
+    // groupId: undefined = دست‌نخورده، null/خالی = «بدون گروه»
+    const groupId = body.groupId === undefined ? undefined : await assertPartyGroup("customerGroup", body.groupId, existing.groupId);
+    const updated = await prisma.customer.update({ where: { id }, data: { partyId: body.partyId, isActive: body.isActive, groupId } });
     res.json(updated);
   } catch (e: any) {
     partyErrorResponse(res, e, "خطا در ویرایش مشتری");
@@ -475,14 +468,29 @@ router.delete("/sales-quotes/:id", can(`${SALES_QUOTES_FORM}.delete`), async (re
   res.status(204).send();
 });
 
-router.post("/sales-quotes/:id/approve", can(`${SALES_QUOTES_FORM}.approve`), async (req, res) => {
-  const id = Number(req.params.id);
+/** تایید پیش‌فاکتور — تنها پیاده‌سازی؛ هم route زیر و هم «دستیار» از آن می‌خوانند. خطای کسب‌وکار با status (۴۰۴/۴۰۰) پرتاب می‌شود */
+export class QuoteApproveError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
+}
+export async function approveSalesQuote(id: number) {
   const d = await prisma.salesQuote.findUnique({ where: { id } });
-  if (!d) return res.status(404).json({ error: "یافت نشد" });
-  if (d.status !== "DRAFT") return res.status(400).json({ error: "فقط در وضعیت ثبت قابل تایید است" });
-  if (d.followUpClosedAt) return res.status(400).json({ error: "پیگیری این پیش‌فاکتور بسته شده است؛ ابتدا پیگیری را بازگشایی کنید" });
+  if (!d) throw new QuoteApproveError("یافت نشد", 404);
+  if (d.status !== "DRAFT") throw new QuoteApproveError("فقط در وضعیت ثبت قابل تایید است", 400);
+  if (d.followUpClosedAt) throw new QuoteApproveError("پیگیری این پیش‌فاکتور بسته شده است؛ ابتدا پیگیری را بازگشایی کنید", 400);
   await prisma.salesQuote.update({ where: { id }, data: { status: "APPROVED" } });
   await emitWorkflowEvent("SALES_QUOTE_APPROVED", id);
+}
+
+router.post("/sales-quotes/:id/approve", can(`${SALES_QUOTES_FORM}.approve`), async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    await approveSalesQuote(id);
+  } catch (e: any) {
+    if (e instanceof QuoteApproveError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
   res.json({ id, status: "APPROVED" });
 });
 

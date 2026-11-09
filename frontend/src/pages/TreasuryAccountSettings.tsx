@@ -40,9 +40,16 @@ const ACCOUNT_TYPE_FA: Record<string, string> = {
   VOUCHER_RECEIVABLE: "طلب از سازمان بابت بن‌کارت",
   LOYALTY_DISCOUNT_EXPENSE: "هزینه‌ی تخفیف وفاداری",
   PETTY_CASH: "تنخواه",
+  GUARANTEE_RECEIPT: "دریافت تضمین",
+  GUARANTEE_PAYMENT: "پرداخت تضمین",
+  GUARANTEE_RECEIPT_PARTY: "طرف حساب دریافت تضمین",
+  GUARANTEE_PAYMENT_PARTY: "طرف حساب پرداخت تضمین",
 };
 
-type TargetField = "bankAccountId" | "cashBoxId" | "receivableChequeTypeId" | "payableChequeTypeId" | "receiptTypeId" | "paymentTypeId" | "pettyCashId";
+// جهت نوع تضمینِ قابل انتخاب برای هر نوع حساب تضمین (هم‌راستا با بک‌اند)
+const GUARANTEE_DIRECTION: Record<string, "RECEIPT" | "PAYMENT"> = { GUARANTEE_RECEIPT: "RECEIPT", GUARANTEE_RECEIPT_PARTY: "RECEIPT", GUARANTEE_PAYMENT: "PAYMENT", GUARANTEE_PAYMENT_PARTY: "PAYMENT" };
+
+type TargetField = "bankAccountId" | "cashBoxId" | "receivableChequeTypeId" | "payableChequeTypeId" | "receiptTypeId" | "paymentTypeId" | "pettyCashId" | "guaranteeTypeId";
 
 // FX_GAIN_LOSS هیچ فیلد هدفی ندارد (فقط یک معین کلی، بدون انتخاب مورد)
 const TARGET_FIELD: Record<string, TargetField | null> = {
@@ -63,6 +70,10 @@ const TARGET_FIELD: Record<string, TargetField | null> = {
   VOUCHER_RECEIVABLE: null,
   LOYALTY_DISCOUNT_EXPENSE: null,
   PETTY_CASH: "pettyCashId",
+  GUARANTEE_RECEIPT: "guaranteeTypeId",
+  GUARANTEE_PAYMENT: "guaranteeTypeId",
+  GUARANTEE_RECEIPT_PARTY: "guaranteeTypeId",
+  GUARANTEE_PAYMENT_PARTY: "guaranteeTypeId",
 };
 
 const TARGET_LABEL: Record<TargetField, string> = {
@@ -73,6 +84,7 @@ const TARGET_LABEL: Record<TargetField, string> = {
   receiptTypeId: "موضوع دریافت",
   paymentTypeId: "موضوع پرداخت",
   pettyCashId: "تنخواه",
+  guaranteeTypeId: "نوع تضمین",
 };
 
 interface Level { id: number; title: string; order: number }
@@ -94,6 +106,7 @@ interface Setting {
   receiptTypeId: number | null;
   paymentTypeId: number | null;
   pettyCashId: number | null;
+  guaranteeTypeId: number | null;
   account: { id: number; code: string; title: string };
   bankAccount: BankAccountOption | null;
   cashBox: TitledOption | null;
@@ -102,6 +115,7 @@ interface Setting {
   receiptType: TitledOption | null;
   paymentType: TitledOption | null;
   pettyCash: TitledOption | null;
+  guaranteeType: TitledOption | null;
   /** تاریخ اجرا (ISO)؛ رکورد مؤثر یک سند = آخرین رکورد هم‌هدف با تاریخ اجرای ≤ تاریخ سند */
   effectiveDate: string;
   /** در سند حسابداری صادرشده استفاده شده؛ قفل */
@@ -122,6 +136,10 @@ function targetDisplay(r: Setting): string {
     case "RECEIPT_SUBJECT": return r.receiptType?.title || "—";
     case "PAYMENT_SUBJECT": return r.paymentType?.title || "—";
     case "PETTY_CASH": return r.pettyCash?.title || "—";
+    case "GUARANTEE_RECEIPT":
+    case "GUARANTEE_PAYMENT":
+    case "GUARANTEE_RECEIPT_PARTY":
+    case "GUARANTEE_PAYMENT_PARTY": return r.guaranteeType?.title || "—";
     default: return "—";
   }
 }
@@ -196,6 +214,7 @@ function SettingForm({ editId }: { editId?: number }) {
   const [receiptTypes, setReceiptTypes] = useState<TitledOption[]>([]);
   const [paymentTypes, setPaymentTypes] = useState<TitledOption[]>([]);
   const [pettyCashes, setPettyCashes] = useState<TitledOption[]>([]);
+  const [guaranteeTypes, setGuaranteeTypes] = useState<(TitledOption & { direction: string })[]>([]);
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_FORM);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
@@ -211,6 +230,7 @@ function SettingForm({ editId }: { editId?: number }) {
     api.get("/receipt-types").then(setReceiptTypes);
     api.get("/payment-types").then(setPaymentTypes);
     api.get("/petty-cashes").then(setPettyCashes);
+    api.get("/guarantee-types").then(setGuaranteeTypes);
   }, []);
 
   useEffect(() => {
@@ -257,12 +277,14 @@ function SettingForm({ editId }: { editId?: number }) {
     : field === "receiptTypeId" ? receiptTypes.filter((t) => t.isActive !== false || String(t.id) === form.targetId).filter((t) => !BASIS_FROM_DOCUMENT.has(t.basisType ?? "")).map((t) => ({ id: t.id, label: t.title }))
     : field === "paymentTypeId" ? paymentTypes.filter((t) => t.isActive !== false || String(t.id) === form.targetId).filter((t) => !BASIS_FROM_DOCUMENT.has(t.basisType ?? "")).filter((t) => t.nature !== "TO_BANK") /* «به بانک»: معین از حساب بانکی ردیف می‌آید */.map((t) => ({ id: t.id, label: t.title }))
     : field === "pettyCashId" ? pettyCashes.map((t) => ({ id: t.id, label: t.title }))
+    : field === "guaranteeTypeId" ? guaranteeTypes.filter((t) => t.direction === GUARANTEE_DIRECTION[form.accountType]).map((t) => ({ id: t.id, label: t.title }))
     : [];
 
   function onAccountTypeChange(accountType: string) {
     // هر نوع حساب فیلد هدف مخصوص خودش را دارد؛ مگر این‌که دو نوع همان فیلد را به اشتراک بگذارند
     // (حساب بانکی/کارمزد بانکی)، مقدار قبلی انتخاب پاک می‌شود
-    const sameField = accountType && form.accountType && TARGET_FIELD[accountType] === TARGET_FIELD[form.accountType];
+    // چهار نوع حساب تضمین یک فیلد را به اشتراک می‌گذارند ولی جهت نوع تضمین‌شان فرق دارد؛ پس انتخاب پاک می‌شود
+    const sameField = accountType && form.accountType && TARGET_FIELD[accountType] === TARGET_FIELD[form.accountType] && TARGET_FIELD[accountType] !== "guaranteeTypeId";
     setForm({ ...form, accountType, targetId: sameField ? form.targetId : "" });
   }
 

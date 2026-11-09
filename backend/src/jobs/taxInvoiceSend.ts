@@ -2,6 +2,7 @@ import { findFormPrefix } from "../authz/registry";
 import { prisma } from "../lib/prisma";
 import { buildTaxInvoice, TAX_INVOICE_INCLUDE, TaxInvoiceOptions } from "../services/taxInvoiceBuilder";
 import { refreshTaxInvoiceStatuses, sendTaxInvoices } from "../services/taxInvoiceSendService";
+import { resolveTaxInvoiceType } from "../services/taxInvoiceTypeService";
 import { isTaxTransportEnabled } from "../services/taxTransport";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { isoToDate } from "./time";
@@ -110,13 +111,21 @@ export default defineJob({
     );
     const batch = invoices.slice(0, maxPerRun);
     const hasMore = invoices.length > maxPerRun;
-    const options: Partial<TaxInvoiceOptions> = { invoiceType: 1, isArticle9: false, settlementMethod: settlement };
+    const baseOptions: Partial<TaxInvoiceOptions> = { isArticle9: false, settlementMethod: settlement };
 
     let sent = 0;
     let consecutiveFailures = 0;
     for (let i = 0; i < batch.length; i += 1) {
       const inv = batch[i];
       const ref = `فاکتور فروش ${inv.number}`;
+      // نوع از «قواعد نوع صورتحساب»؛ بدون قاعده منطبق، فاکتور رد می‌شود (نوع پیش‌فرض بی‌صدا نداریم)
+      // eslint-disable-next-line no-await-in-loop
+      const resolvedType = await resolveTaxInvoiceType("SALES_INVOICE", inv);
+      if (resolvedType.error) {
+        ctx.item({ ref, label: `${inv.customer.party.detailTitle ?? ""} — ${formatJalaliDateForMessage(inv.date)}`, result: "SKIPPED", message: resolvedType.error });
+        continue;
+      }
+      const options: Partial<TaxInvoiceOptions> = { ...baseOptions, invoiceType: resolvedType.type ?? undefined };
       // eslint-disable-next-line no-await-in-loop
       const built = await buildTaxInvoice(inv, options, { nowMs: ctx.now.getTime(), skipTaxId: true });
       const label = `${built.meta.customerTitle ?? ""} — ${formatJalaliDateForMessage(inv.date)}`;
@@ -131,7 +140,7 @@ export default defineJob({
         continue;
       }
       if (ctx.dryRun) {
-        ctx.item({ ref, label, result: "WOULD_DO", message: `ارسال با نوع ۱، ${settlement === 2 ? "نسیه" : "نقدی"}` });
+        ctx.item({ ref, label, result: "WOULD_DO", message: `ارسال با نوع ${options.invoiceType}، ${settlement === 2 ? "نسیه" : "نقدی"}` });
         continue;
       }
       if (consecutiveFailures >= CONSECUTIVE_FAILURE_LIMIT) {

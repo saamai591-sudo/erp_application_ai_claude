@@ -31,6 +31,7 @@ import { findIssuingDocType } from "./documentTypeService";
 const FX_TOLERANCE = 0.0001;
 
 function partyDisplayName(p: any): string {
+  if (!p) return "";
   return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
 }
 
@@ -74,10 +75,10 @@ async function dimsFor(account: AccountRef, detailCode: string | null): Promise<
   return resolveAccountDetailFields(account, typeId, detailCode);
 }
 
-export async function buildPaymentPlan(payment: any, treasurySettings: EffectiveTreasurySettings) {
+export async function buildPaymentPlan(payment: any, treasurySettings: EffectiveTreasurySettings, descriptionOverride?: string) {
   const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
   if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
-  const description = `بابت اعلامیه پرداخت ${payment.number} ${formatJalaliDateForMessage(payment.date)} ${partyDisplayName(payment.party)}`.trim();
+  const description = descriptionOverride ?? `بابت اعلامیه پرداخت ${payment.number} ${formatJalaliDateForMessage(payment.date)} ${partyDisplayName(payment.party)}`.trim();
   const errors: string[] = [];
   const plan: PlannedPaymentLine[] = [];
 
@@ -232,8 +233,21 @@ export async function buildPaymentPlan(payment: any, treasurySettings: Effective
   return { plan, errors, description };
 }
 
-async function loadPaymentForPlan(paymentId: number) {
-  const payment = await prisma.payment.findUnique({ where: { id: paymentId }, include: PAYMENT_PLAN_INCLUDE });
+// مرجع سندِ پرداخت: یک سند پرداخت (شناسه) یا بخش پرداختِ یک «اعلامیه بدهکار بستانکار» ({ partySettlementId }) که ردیف‌هایش مستقیم به هدر وصل است
+export type PaymentRef = number | { partySettlementId: number };
+type PScope = { paymentId: number } | { partySettlementId: number };
+const toPScope = (r: PaymentRef): PScope => (typeof r === "number" ? { paymentId: r } : r);
+const pOwner = (sc: PScope) => ("paymentId" in sc ? { paymentId: sc.paymentId } : { partySettlementId: sc.partySettlementId });
+
+// برای اعلامیه بدهکار بستانکار یک «سند مجازی» بدون ابزار ساخته می‌شود تا همان buildPaymentPlan (فقط ردیف‌های موضوع/تسعیر) کار کند
+async function loadPaymentForPlan(sc: PScope): Promise<any> {
+  if ("partySettlementId" in sc) {
+    const ps = await prisma.partySettlement.findUnique({ where: { id: sc.partySettlementId } });
+    if (!ps) throw new Error("اعلامیه یافت نشد");
+    const settlementLines = await prisma.paymentSettlementLine.findMany({ where: { partySettlementId: ps.id }, include: PAYMENT_PLAN_INCLUDE.settlementLines.include, orderBy: { rowOrder: "asc" } });
+    return { id: ps.id, number: ps.number, date: ps.date, party: null, status: "APPROVED", accountingStatus: ps.accountingStatus, journalEntryId: ps.journalEntryId, instrumentLines: [], settlementLines };
+  }
+  const payment = await prisma.payment.findUnique({ where: { id: sc.paymentId }, include: PAYMENT_PLAN_INCLUDE });
   if (!payment) throw new Error("سند پرداخت یافت نشد");
   return payment;
 }
@@ -258,12 +272,14 @@ async function paymentAutoDims(plan: PlannedPaymentLine[]) {
 }
 
 /** همگام‌سازی ردیف‌های حسابداری با ردیف‌های فرم — منطق و توضیح: syncReceiptAccountingLines */
-export async function syncPaymentAccountingLines(paymentId: number) {
-  const payment = await loadPaymentForPlan(paymentId);
+export async function syncPaymentAccountingLines(ref: PaymentRef) {
+  const sc = toPScope(ref);
+  const owner = pOwner(sc);
+  const payment = await loadPaymentForPlan(sc);
   const { plan, errors } = await buildPaymentPlan(payment, await newTreasurySettings());
   if (errors.length > 0) throw new Error(errors.join("\n"));
 
-  const existing = await prisma.paymentAccountingLine.findMany({ where: { paymentId } });
+  const existing = await prisma.paymentAccountingLine.findMany({ where: owner });
   const byKey = new Map(existing.map((e) => [keyOf(e), e]));
   const wanted = new Set<string>();
   const detailsOf = (d: Dims) => ({ detail1Code: d.detail1Code ?? null, detail2Code: d.detail2Code ?? null, detail3Code: d.detail3Code ?? null });
@@ -278,7 +294,7 @@ export async function syncPaymentAccountingLines(paymentId: number) {
       const cur = byKey.get(key);
       const refs = { treasurySettingId: p.treasurySettingId ?? null, goodsSettingId: p.goodsSettingId ?? null };
       if (!cur) {
-        await tx.paymentAccountingLine.create({ data: { paymentId, role: p.role, instrumentLineId: p.instrumentLineId ?? null, settlementLineId: p.settlementLineId ?? null, accountId: p.account.id, ...refs, ...detailsOf(dims), ...sourcesOf(dims) } });
+        await tx.paymentAccountingLine.create({ data: { ...owner, role: p.role, instrumentLineId: p.instrumentLineId ?? null, settlementLineId: p.settlementLineId ?? null, accountId: p.account.id, ...refs, ...detailsOf(dims), ...sourcesOf(dims) } });
       } else if (cur.accountId !== p.account.id) {
         await tx.paymentAccountingLine.update({ where: { id: cur.id }, data: { accountId: p.account.id, ...refs, ...detailsOf(dims), ...sourcesOf(dims) } });
       } else {
@@ -295,10 +311,11 @@ export async function syncPaymentAccountingLines(paymentId: number) {
   });
 }
 
-export async function getPaymentAccountingView(paymentId: number) {
-  const payment = await loadPaymentForPlan(paymentId);
+export async function getPaymentAccountingView(ref: PaymentRef) {
+  const sc = toPScope(ref);
+  const payment = await loadPaymentForPlan(sc);
   const { plan, errors } = await buildPaymentPlan(payment, await newTreasurySettings());
-  const children = await prisma.paymentAccountingLine.findMany({ where: { paymentId } });
+  const children = await prisma.paymentAccountingLine.findMany({ where: pOwner(sc) });
   const byKey = new Map(children.map((c) => [keyOf(c), c]));
   const typeIds = Array.from(new Set(plan.flatMap((p) => [p.account.detailType1Id, p.account.detailType2Id, p.account.detailType3Id]).filter((x): x is number => !!x)));
   const types = typeIds.length ? await prisma.detailType.findMany({ where: { id: { in: typeIds } } }) : [];
@@ -332,8 +349,8 @@ export async function getPaymentAccountingView(paymentId: number) {
   };
 }
 
-export async function savePaymentAccountingDetails(paymentId: number, rows: { id: number; detail1Code?: string | null; detail2Code?: string | null; detail3Code?: string | null }[]) {
-  const children = await prisma.paymentAccountingLine.findMany({ where: { paymentId }, include: { account: true } });
+export async function savePaymentAccountingDetails(ref: PaymentRef, rows: { id: number; detail1Code?: string | null; detail2Code?: string | null; detail3Code?: string | null }[]) {
+  const children = await prisma.paymentAccountingLine.findMany({ where: pOwner(toPScope(ref)), include: { account: true } });
   const byId = new Map(children.map((c) => [c.id, c]));
   const codes = Array.from(new Set(rows.flatMap((r) => [r.detail1Code, r.detail2Code, r.detail3Code]).filter((x): x is string => !!x)));
   const usages = codes.length ? await prisma.detailCodeUsage.findMany({ where: { code: { in: codes } } }) : [];
@@ -364,17 +381,18 @@ export async function savePaymentAccountingDetails(paymentId: number, rows: { id
   await prisma.$transaction(updates.map((u) => prisma.paymentAccountingLine.update({ where: { id: u.id }, data: u.data })));
 }
 
-export async function issuePaymentJournalEntry(paymentId: number) {
-  const payment = await loadPaymentForPlan(paymentId);
-  if (payment.journalEntryId) throw new Error("قبلاً برای این سند پرداخت، سند حسابداری صادر شده است");
-  if (payment.status !== "APPROVED") throw new Error("فقط برای سند پرداختِ ثبت‌شده (دارای اثر) می‌توان سند حسابداری صادر کرد");
-  if (payment.accountingStatus !== "APPROVED") throw new Error("ابتدا «تایید حسابداری» را انجام دهید و تفصیل‌ها را ذخیره کنید");
-
+/**
+ * خطوط سندِ یک پرداخت (بدون صدور): هم برای صدور سند خودِ پرداخت و هم برای «اعلامیه بدهکار بستانکار» (خطوط دو سند حاوی در یک سند).
+ * پیش‌شرط‌ها را فراخواننده بررسی می‌کند؛ `treasuryIds`/`goodsIds` شناسه‌ی تنظیمات استفاده‌شده‌اند (برای قفل بعد از صدور).
+ */
+export async function collectPaymentIssueLines(ref: PaymentRef, descriptionOverride?: string) {
+  const sc = toPScope(ref);
+  const payment = await loadPaymentForPlan(sc);
   const treasurySettings = await newTreasurySettings();
-  const { plan, errors, description } = await buildPaymentPlan(payment, treasurySettings);
+  const { plan, errors, description } = await buildPaymentPlan(payment, treasurySettings, descriptionOverride);
   if (errors.length > 0) throw new Error(errors.join("\n"));
 
-  const children = await prisma.paymentAccountingLine.findMany({ where: { paymentId } });
+  const children = await prisma.paymentAccountingLine.findMany({ where: pOwner(sc) });
   const byKey = new Map(children.map((c) => [keyOf(c), c]));
   const lines: IssueLineInput[] = [];
   for (const p of plan) {
@@ -394,6 +412,17 @@ export async function issuePaymentJournalEntry(paymentId: number) {
   // ترتیب سند همان قبلی: بدهکارها (کارمزد، موضوع، تسعیر) بعد بستانکارها (ابزار)
   const isCreditRole = (i: number) => plan[i].role === "INSTRUMENT";
   const ordered = [...lines.filter((_, i) => !isCreditRole(i)), ...lines.filter((_, i) => isCreditRole(i))];
+  const treasuryIds = Array.from(new Set(plan.map((p) => p.treasurySettingId).filter((x): x is number => !!x)));
+  const goodsIds = Array.from(new Set(plan.map((p) => p.goodsSettingId).filter((x): x is number => !!x)));
+  return { payment, ordered, description, treasuryIds, goodsIds };
+}
+
+export async function issuePaymentJournalEntry(paymentId: number) {
+  const head = await loadPaymentForPlan({ paymentId });
+  if (head.journalEntryId) throw new Error("قبلاً برای این سند پرداخت، سند حسابداری صادر شده است");
+  if (head.status !== "APPROVED") throw new Error("فقط برای سند پرداختِ ثبت‌شده (دارای اثر) می‌توان سند حسابداری صادر کرد");
+  if (head.accountingStatus !== "APPROVED") throw new Error("ابتدا «تایید حسابداری» را انجام دهید و تفصیل‌ها را ذخیره کنید");
+  const { payment, ordered, description, treasuryIds, goodsIds } = await collectPaymentIssueLines(paymentId);
 
   const docType = await findIssuingDocType("PAYMENT");
   if (!docType) throw new Error("نوع سند «اعلامیه پرداخت» در سیستم تعریف نشده است");
@@ -409,8 +438,8 @@ export async function issuePaymentJournalEntry(paymentId: number) {
   });
 
   await prisma.payment.update({ where: { id: paymentId }, data: { journalEntryId: entry.id } });
-  await markTreasurySettingsUsed(entry.id, Array.from(new Set(plan.map((p) => p.treasurySettingId).filter((x): x is number => !!x))));
-  await markSettingsUsed(entry.id, Array.from(new Set(plan.map((p) => p.goodsSettingId).filter((x): x is number => !!x))));
+  await markTreasurySettingsUsed(entry.id, treasuryIds);
+  await markSettingsUsed(entry.id, goodsIds);
   return entry;
 }
 
@@ -429,12 +458,13 @@ export async function accountingApprovePayment(paymentId: number, userId: number
  * می‌کند که syncPaymentAccountingLines + issuePaymentJournalEntry اعمال می‌کنند — معین‌ها باید پیدا شوند و هر سطح تفصیلی که معین دارد
  * باید مقدار داشته باشد (مقدار خودکار از ابزار/موضوع، یا مقدار دستیِ ذخیره‌شده‌ی حسابدار). هیچ‌چیز نمی‌نویسد.
  */
-export async function previewPaymentIssuance(paymentId: number): Promise<string[]> {
-  const payment = await loadPaymentForPlan(paymentId);
+export async function previewPaymentIssuance(ref: PaymentRef): Promise<string[]> {
+  const sc = toPScope(ref);
+  const payment = await loadPaymentForPlan(sc);
   const { plan, errors } = await buildPaymentPlan(payment, await newTreasurySettings());
   if (errors.length > 0) return errors;
   const problems: string[] = [];
-  const children = await prisma.paymentAccountingLine.findMany({ where: { paymentId } });
+  const children = await prisma.paymentAccountingLine.findMany({ where: pOwner(sc) });
   const byKey = new Map(children.map((c) => [keyOf(c), c]));
   const autoDims = await paymentAutoDims(plan);
   for (const p of plan) {

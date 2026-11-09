@@ -41,11 +41,11 @@ import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valu
 // هزینه‌ها» طبق تصمیم صریح کاربر دقیقاً همان جدول/منطق فاکتور خرید خدمات (ServicePurchaseInvoices.tsx)
 // را به اشتراک می‌گذارد — نگاه کنید به یادداشت بالای آن فایل و backend/src/routes/purchaseInvoices.ts.
 
-type Basis = "NO_BASIS" | "WAREHOUSE_RECEIPT";
+type Basis = "NO_BASIS" | "WAREHOUSE_RECEIPT" | "ASSET_RECEIPT";
 type Status = "DRAFT" | "APPROVED";
 type AllocationMethod = "VALUE" | "QUANTITY";
 const ALLOCATION_METHOD_FA: Record<AllocationMethod, string> = { VALUE: "نسبت مبلغ", QUANTITY: "نسبت مقدار" };
-const COST_BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", WAREHOUSE_RECEIPT: "رسید انبار" };
+const COST_BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", WAREHOUSE_RECEIPT: "رسید انبار", ASSET_RECEIPT: "رسید دارایی" };
 
 interface PartyOption {
   id: number;
@@ -66,7 +66,7 @@ interface ReceiptOption { id: number; number: number; date: string; warehouseTit
 interface ReceiptLine { id: number; goodsItemCode: string; goodsItemTitle: string; unitTitle: string; quantity: number; amount: number }
 
 const STATUS_FA: Record<Status, string> = { DRAFT: "ثبت", APPROVED: "تایید شده" };
-const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", WAREHOUSE_RECEIPT: "رسید انبار خرید" };
+const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", WAREHOUSE_RECEIPT: "رسید انبار خرید", ASSET_RECEIPT: "رسید دارایی" };
 const INFO_TEXT = "ثبت فاکتور خرید دریافتی از تامین‌کننده — بر مبنای رسید(های) انبار خرید قطعی‌شده (هر ردیف رسید فقط یک‌بار و به‌طور کامل فاکتور می‌شود) یا بدون مبنا. هزینه‌های جانبی فاکتور (حمل، بسته‌بندی و ...) در تب «سایر هزینه‌ها» ثبت می‌شوند — دقیقاً مثل فاکتور خرید خدمات، هر ردیف می‌تواند به رسید انبار دلخواهی (نه لزوماً رسید مبنای همین فاکتور) تسهیم شود. با تایید فاکتور، مبلغ ردیف‌های خودِ فاکتور روی ردیف‌های رسید انبار خرید مبنا نوشته می‌شود و جدا از آن، مبلغ تخصیص‌یافته‌ی هر ردیف «سایر هزینه‌ها» به ردیف رسید مربوطه افزوده می‌شود.";
 
 interface ListRow {
@@ -75,7 +75,7 @@ interface ListRow {
   currencyTitle: string; status: Status; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number; discountAmount: number; vatAmount: number; netAmount: number; advanceAmount: number;
 }
 interface DetailLine {
-  id: number; sourceInventoryLineId: number | null; sourceWarehouseReceiptNumber: number | null;
+  id: number; sourceInventoryLineId: number | null; sourceWarehouseReceiptNumber: number | null; sourceAssetReceiptLineId?: number | null; sourceAssetReceiptNumber?: number | null;
   goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string;
   quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null; details?: DetailValueDto[];
 }
@@ -197,6 +197,7 @@ function PurchaseInvoiceList() {
 
 interface RowState {
   sourceInventoryLineId: string; goodsItemId: string; goodsItemCode: string; goodsItemTitle: string;
+  sourceAssetReceiptLineId?: string; sourceAssetReceiptNumber?: string;
   unitId: string; unitTitle: string; quantity: string; unitPrice: string; amount: string; discount: string; vatAmount: string; description: string; details?: DetailValues;
 }
 interface CostRowState {
@@ -235,6 +236,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [services, setServices] = useState<ServiceOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableWarehouseReceiptLine[]>([]);
+  const [pickableAssetLines, setPickableAssetLines] = useState<PickableWarehouseReceiptLine[]>([]);
   const [receipts, setReceipts] = useState<ReceiptOption[]>([]);
   const detailConfig = useDocDetailConfig("PURCHASE_INVOICE");
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", vendorInvoiceNumber: "", basis: "NO_BASIS" as Basis, partyId: "", purchaseTypeId: "", currencyId: "", fxRate: "", description: "", details: {} as DetailValues });
@@ -303,6 +305,8 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
         setRows(
           d.lines.map((l) => ({
             sourceInventoryLineId: l.sourceInventoryLineId ? String(l.sourceInventoryLineId) : "",
+        sourceAssetReceiptLineId: l.sourceAssetReceiptLineId ? String(l.sourceAssetReceiptLineId) : "",
+        sourceAssetReceiptNumber: l.sourceAssetReceiptNumber ? String(l.sourceAssetReceiptNumber) : "",
             goodsItemId: String(l.goodsItemId),
             goodsItemCode: l.goodsItemCode,
             goodsItemTitle: l.goodsItemTitle,
@@ -356,6 +360,21 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       .get(`/purchase-invoices/pickable-warehouse-receipt-lines?partyId=${header.partyId}&date=${header.date}${q}`)
       .then(setPickableLines)
       .catch(() => setPickableLines([]));
+  }, [header.basis, header.partyId, header.date, editId]);
+
+  // مبنای «رسید دارایی» (مجوز تحویل / بدون مبنا): ردیف‌های قیمت‌گذاری‌نشده‌ی رسید دارایی؛ تایید فاکتور بهای آن‌ها را می‌نویسد
+  useEffect(() => {
+    if (header.basis !== "ASSET_RECEIPT" || !header.partyId || !header.date) {
+      setPickableAssetLines([]);
+      return;
+    }
+    const q = editId ? `&excludeInvoiceId=${editId}` : "";
+    api
+      .get(`/purchase-invoices/pickable-asset-receipt-lines?partyId=${header.partyId}&date=${header.date}${q}`)
+      .then((r: any[]) =>
+        setPickableAssetLines(r.map((l) => ({ id: l.id, number: l.receiptNumber, date: l.receiptDate, goodsItemId: l.goodsItemId, goodsItemCode: l.goodsItemCode, goodsItemTitle: l.goodsItemTitle, unitId: l.unitId, unitTitle: l.unitTitle, quantity: l.quantity, remaining: l.quantity })))
+      )
+      .catch(() => setPickableAssetLines([]));
   }, [header.basis, header.partyId, header.date, editId]);
 
   // «صدور فاکتور خرید از رسید» (components/DownstreamDialogs.tsx): هدر پر می‌شود و ردیف‌های قابل‌فاکتورِ همان رسید با **همان انتخابگر ردیف مبنا**
@@ -474,6 +493,32 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   }
   // طبق تصمیم صریح کاربر: انتخابگرهای سطح ردیف باید امکان انتخاب چندتایی داشته باشند — با تایید، ردیف
   // جاری (idx) با اولین مورد جایگزین و بقیه بلافاصله بعد از آن به گرید اضافه می‌شوند.
+  function onAssetLinesSelected(idx: number, selected: PickableWarehouseReceiptLine[]) {
+    if (selected.length === 0) return;
+    const newRows = selected.map(
+      (src): RowState => ({
+        sourceInventoryLineId: "",
+        sourceAssetReceiptLineId: String(src.id),
+        sourceAssetReceiptNumber: String(src.number),
+        goodsItemId: String(src.goodsItemId),
+        goodsItemCode: src.goodsItemCode,
+        goodsItemTitle: src.goodsItemTitle,
+        unitId: String(src.unitId),
+        unitTitle: src.unitTitle,
+        quantity: String(src.quantity),
+        unitPrice: "",
+        amount: "",
+        discount: "",
+        vatAmount: "",
+        description: "",
+      })
+    );
+    setRows((prev) => {
+      const next = [...prev];
+      next.splice(idx, 1, ...newRows);
+      return next;
+    });
+  }
   function onSourceLinesSelected(idx: number, selected: PickableWarehouseReceiptLine[]) {
     if (selected.length === 0) return;
     const newRows = selected.map(
@@ -496,6 +541,25 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       const next = [...prev];
       next.splice(idx, 1, ...newRows);
       return next;
+    });
+  }
+  /** مبنای «رسید انبار خرید»: رسید یا کامل (همه‌ی ردیف‌هایش) در فاکتور می‌آید یا اصلاً؛ ردیف‌ها قابل افزودن/حذف/ویرایش مقدار نیستند */
+  const rowDocId = (r: RowState): number | null => pickableLines.find((l) => String(l.id) === r.sourceInventoryLineId)?.documentId ?? null;
+  const usedDocIds = new Set(rows.map(rowDocId).filter((x): x is number => x !== null));
+  const pickableReceipts = Array.from(new Map(pickableLines.filter((l) => l.documentId != null && !usedDocIds.has(l.documentId)).map((l) => [l.documentId as number, l])).values());
+  function onReceiptsSelected(selected: PickableWarehouseReceiptLine[]) {
+    const docIds = new Set(selected.map((s) => s.documentId));
+    const lines = pickableLines.filter((l) => l.documentId != null && docIds.has(l.documentId));
+    if (lines.length === 0) return;
+    setRows((prev) => {
+      const kept = prev.filter((r) => r.goodsItemId || r.sourceInventoryLineId);
+      return [...kept, ...lines.map((src): RowState => ({ ...emptyRow(), sourceInventoryLineId: String(src.id), goodsItemId: String(src.goodsItemId), goodsItemCode: src.goodsItemCode, goodsItemTitle: src.goodsItemTitle, unitId: String(src.unitId), unitTitle: src.unitTitle, quantity: String(src.quantity) }))];
+    });
+  }
+  function removeReceipt(docId: number) {
+    setRows((prev) => {
+      const next = prev.filter((r) => rowDocId(r) !== docId);
+      return next.length ? next : [emptyRow()];
     });
   }
   function onGoodsItemsSelected(idx: number, selected: GoodsItemRow[]) {
@@ -650,6 +714,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       lines: nonEmptyRows.map((r) => ({
         details: valuesToPayload(r.details),
         sourceInventoryLineId: r.sourceInventoryLineId ? Number(r.sourceInventoryLineId) : null,
+        sourceAssetReceiptLineId: r.sourceAssetReceiptLineId ? Number(r.sourceAssetReceiptLineId) : null,
         goodsItemId: r.goodsItemId ? Number(r.goodsItemId) : undefined,
         unitId: r.unitId ? Number(r.unitId) : undefined,
         quantity: Number(r.quantity) || 0,
@@ -690,6 +755,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
     if (body.lines.length === 0) return setError("فاکتور خرید باید حداقل یک ردیف کالا داشته باشد");
     for (const [i, l] of body.lines.entries()) {
       if (header.basis === "WAREHOUSE_RECEIPT" && !l.sourceInventoryLineId) return setError(`ردیف ${i + 1}: انتخاب ردیف رسید انبار خرید الزامی است`);
+      if (header.basis === "ASSET_RECEIPT" && !l.sourceAssetReceiptLineId) return setError(`ردیف ${i + 1}: انتخاب ردیف رسید دارایی الزامی است`);
       if (header.basis === "NO_BASIS" && !l.goodsItemId) return setError(`کالا برای ردیف ${i + 1} الزامی است`);
       if (!(l.quantity > 0)) return setError(`مقدار ردیف ${i + 1} باید عددی مثبت باشد`);
       if (!(l.unitPrice >= 0)) return setError(`فی ردیف ${i + 1} نامعتبر است`);
@@ -744,6 +810,8 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
     setRows(
       d.lines.map((l) => ({
         sourceInventoryLineId: l.sourceInventoryLineId ? String(l.sourceInventoryLineId) : "",
+        sourceAssetReceiptLineId: l.sourceAssetReceiptLineId ? String(l.sourceAssetReceiptLineId) : "",
+        sourceAssetReceiptNumber: l.sourceAssetReceiptNumber ? String(l.sourceAssetReceiptNumber) : "",
         goodsItemId: String(l.goodsItemId),
         goodsItemCode: l.goodsItemCode,
         goodsItemTitle: l.goodsItemTitle,
@@ -845,7 +913,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       <form id="purchase-invoice-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
-          <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
+          <div className="je-header-grid" style={{ marginBottom: 6, maxWidth: 900 }}>
             <div className="form-field">
               <label>شماره</label>
               <input dir="ltr" value={meta ? toFaDigits(String(meta.number)) : "خودکار پس از ذخیره"} disabled />
@@ -879,6 +947,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
               <select value={header.basis} onChange={(e) => setHeader({ ...header, basis: e.target.value as Basis })} disabled={headerDisabled}>
                 <option value="NO_BASIS">{BASIS_FA.NO_BASIS}</option>
                 <option value="WAREHOUSE_RECEIPT">{BASIS_FA.WAREHOUSE_RECEIPT}</option>
+                <option value="ASSET_RECEIPT">{BASIS_FA.ASSET_RECEIPT}</option>
               </select>
             </div>
             <div className="form-field">
@@ -954,9 +1023,44 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
           <>
           <div className="je-lines-toolbar">
             <span className="je-lines-title">اقلام</span>
-            <button type="button" className="toolbar-icon-btn primary" onClick={addRow} title="ردیف جدید">
-              <PlusIcon />
-            </button>
+            {header.basis === "WAREHOUSE_RECEIPT" ? (
+              <>
+                <div style={{ minWidth: 220 }}>
+                  <RecordPickerField
+                    title="انتخاب رسید انبار خرید (کامل)"
+                    displayValue=""
+                    placeholder="+ افزودن رسید انبار"
+                    rows={pickableReceipts}
+                    columns={[
+                      { header: "شماره", render: (l: PickableWarehouseReceiptLine) => toFaDigits(String(l.number)), filterValue: (l: PickableWarehouseReceiptLine) => String(l.number), width: "80px" },
+                      { header: "تاریخ", render: (l: PickableWarehouseReceiptLine) => formatJalaliDate(l.date), filterValue: (l: PickableWarehouseReceiptLine) => String(l.date).slice(0, 10), width: "110px" },
+                      { header: "تعداد ردیف", render: (l: PickableWarehouseReceiptLine) => toFaDigits(String(pickableLines.filter((x) => x.documentId === l.documentId).length)), filterValue: () => "", width: "100px" },
+                    ]}
+                    multiSelect
+                    resultInDisplayOrder
+                    onOpen={guardRowEntry}
+                    onSelectMultiple={(selected) => onReceiptsSelected(selected as PickableWarehouseReceiptLine[])}
+                  />
+                </div>
+                {Array.from(usedDocIds).map((docId) => {
+                  const n = pickableLines.find((l) => l.documentId === docId)?.number;
+                  return (
+                    <span key={docId} className="chip" style={{ display: "inline-flex", gap: 6, alignItems: "center", padding: "2px 8px", border: "1px solid var(--line, #ccc)", borderRadius: 12, fontSize: 12 }}>
+                      رسید {toFaDigits(String(n ?? docId))}
+                      {!locked && (
+                        <button type="button" title="حذف کل این رسید از فاکتور" onClick={() => removeReceipt(docId)} style={{ border: 0, background: "none", cursor: "pointer" }}>
+                          ✕
+                        </button>
+                      )}
+                    </span>
+                  );
+                })}
+              </>
+            ) : (
+              <button type="button" className="toolbar-icon-btn primary" onClick={addRow} title="ردیف جدید">
+                <PlusIcon />
+              </button>
+            )}
           </div>
 
         <div className="grid-wrap je-lines-wrap">
@@ -966,6 +1070,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                 <tr>
                   <th>ردیف</th>
                   {header.basis === "WAREHOUSE_RECEIPT" && <th>رسید انبار خرید</th>}
+                  {header.basis === "ASSET_RECEIPT" && <th>رسید دارایی</th>}
                   <th>کالا</th>
                   <th>واحد</th>
                   <th>مقدار</th>
@@ -989,16 +1094,22 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                       {header.basis === "WAREHOUSE_RECEIPT" && (
                         <td style={{ minWidth: 90 }}>
+                          <span>{src ? toFaDigits(String(src.number)) : "—"}</span>
+                        </td>
+                      )}
+                      {header.basis === "ASSET_RECEIPT" && (
+                        <td style={{ minWidth: 90 }}>
                           <WarehouseReceiptLineSelector
-                            displayValue={src ? `${toFaDigits(String(src.number))}` : ""}
-                            rows={pickableLines}
+                            displayValue={row.sourceAssetReceiptNumber ? toFaDigits(row.sourceAssetReceiptNumber) : ""}
+                            rows={pickableAssetLines}
+                            title="انتخاب ردیف رسید دارایی"
                             onOpen={guardRowEntry}
-                            onSelectMultiple={(selected) => onSourceLinesSelected(idx, selected)}
+                            onSelectMultiple={(selected) => onAssetLinesSelected(idx, selected)}
                           />
                         </td>
                       )}
                       <td style={{ minWidth: 320 }}>
-                        {header.basis === "WAREHOUSE_RECEIPT" ? (
+                        {header.basis !== "NO_BASIS" ? (
                           <span>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</span>
                         ) : (
                           <RecordPickerField
@@ -1022,7 +1133,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                           value={row.quantity}
                           onChange={(v) => onQuantityChange(idx, v)}
                           allowDecimal
-                          disabled={header.basis === "WAREHOUSE_RECEIPT"}
+                          disabled={header.basis !== "NO_BASIS"}
                         />
                       </td>
                       <td style={{ minWidth: 120 }}>
@@ -1045,9 +1156,11 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                         <input value={row.description} onChange={(e) => updateRow(idx, { description: e.target.value })} />
                       </td>
                       <td>
-                        <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeRow(idx)}>
-                          حذف
-                        </button>
+                        {header.basis !== "WAREHOUSE_RECEIPT" && (
+                          <button type="button" className="btn danger" style={{ padding: "5px 8px", fontSize: 11 }} onClick={() => removeRow(idx)}>
+                            حذف
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );

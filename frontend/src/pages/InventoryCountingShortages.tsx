@@ -181,7 +181,7 @@ function InventoryCountingShortageForm({ editId, basePath }: { editId?: number; 
         physicalLocation: l.physicalLocation || "",
         details: detailsToValues(l.details),
       })),
-    mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
+    mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle, countId: (d as any).countId ?? null }),
     loadExtra: async () => {
       const [whs, items]: [Warehouse[], GoodsItemRow[]] = await Promise.all([
         api.get("/warehouses"),
@@ -195,7 +195,8 @@ function InventoryCountingShortageForm({ editId, basePath }: { editId?: number; 
   const isFinalized = meta?.status === "FINALIZED";
   // طبق تصمیم صریح کاربر: فیلدهای مبلغی تا وقتی سند Finalized نشده، اصلاً نمایش داده نمی‌شوند.
   const showAmount = canViewAccounting && isFinalized;
-  const coreDisabled = isFinalized;
+  const countLocked = !!meta?.countId;
+  const coreDisabled = isFinalized || countLocked;
 
   function updateRow(idx: number, patch: Partial<RowState>) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -264,7 +265,7 @@ function InventoryCountingShortageForm({ editId, basePath }: { editId?: number; 
   return (
     <FormPage
       title={editId ? "ویرایش کسری انبارگردانی" : "کسری انبارگردانی جدید"}
-      description={isFinalized ? "این سند «تایید انبار» شده است؛ سرصفحه، مقدار و کالای ردیف‌ها دیگر قابل ویرایش نیستند." : undefined}
+      description={countLocked ? "این سند از «مغایرت‌گیری شمارش انبار» صادر شده است و فقط از فرم «شمارش انبار» (حذف مغایرت‌گیری) قابل ویرایش/حذف است." : isFinalized ? "این سند «تایید انبار» شده است؛ سرصفحه، مقدار و کالای ردیف‌ها دیگر قابل ویرایش نیستند." : undefined}
       formId="inventory-counting-shortage-form"
       closePath={basePath}
       newPath={`${basePath}/new`}
@@ -283,7 +284,7 @@ function InventoryCountingShortageForm({ editId, basePath }: { editId?: number; 
         )}
 
         <fieldset disabled={coreDisabled} style={{ border: 0, padding: 0, margin: 0 }}>
-          <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
+          <div className="je-header-grid" style={{ marginBottom: 6, maxWidth: 900 }}>
             <div className="form-field">
               <label>شماره</label>
               <input dir="ltr" value={meta ? toFaDigits(String(meta.number)) : "خودکار پس از ذخیره"} disabled />

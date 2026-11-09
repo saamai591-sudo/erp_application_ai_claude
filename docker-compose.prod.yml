@@ -27,7 +27,7 @@ services:
     #   - "127.0.0.1:5433:5432"
 
   backend:
-    image: reg.greenbits.ir/accounting-erp-backend:latest
+    image: ${ERP_REGISTRY:-reg.greenbits.ir}/accounting-erp-backend:${ERP_VERSION:-latest}
     restart: unless-stopped
     init: true
     depends_on:
@@ -49,6 +49,8 @@ services:
       TAX_API_INSECURE_TLS: ${TAX_API_INSECURE_TLS:-false}
       # زمان‌بند «کارهای زمان‌بندی‌شده» — پیش‌فرض خاموش؛ فقط روی محیطی که باید خودکار کار کند true شود. نگاه کنید به .env.example
       SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-false}
+      # به‌روزرسانی از صفحه‌ی /management: توکن مشترک با سرویس updater (در .env بسازید؛ نگاه کنید به .env.example)
+      UPDATER_TOKEN: ${UPDATER_TOKEN:-}
     volumes:
       # پشتیبان‌های خودکار (سیاست از صفحه‌ی /management)؛ volume جدا تا با ساخت دوباره‌ی کانتینر پاک نشوند
       - backups:/backups
@@ -56,7 +58,7 @@ services:
       - "4000:4000"
 
   frontend:
-    image: reg.greenbits.ir/accounting-erp-frontend:latest
+    image: ${ERP_REGISTRY:-reg.greenbits.ir}/accounting-erp-frontend:${ERP_VERSION:-latest}
     restart: unless-stopped
     init: true
     depends_on:
@@ -68,6 +70,21 @@ services:
       VITE_API_URL: ${VITE_API_URL:-}
     ports:
       - "5173:5173"
+
+  # سرویس به‌روزرسانی (تنها بخشی که به docker دسترسی دارد). پورتش به بیرون باز نیست؛ فقط backend با UPDATER_TOKEN با آن حرف می‌زند.
+  # روی ویندوز (Docker Desktop با کانتینر لینوکس) همین docker.sock داخل ماشین مجازی لینوکس هم کار می‌کند.
+  updater:
+    image: ${ERP_REGISTRY:-reg.greenbits.ir}/accounting-erp-updater:${ERP_VERSION:-latest}
+    restart: unless-stopped
+    init: true
+    environment:
+      UPDATER_TOKEN: ${UPDATER_TOKEN:?UPDATER_TOKEN را در فایل .env تنظیم کنید}
+      POSTGRES_USER: erp
+      POSTGRES_DB: accounting_erp
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/project
+      - backups:/backups
 
 volumes:
   db_data:

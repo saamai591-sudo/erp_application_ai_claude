@@ -275,6 +275,25 @@ export async function lockWarehouseRow(tx: Db, warehouseId: number): Promise<Loc
  * سند موجودی اول دوره‌ی سال بعد را کهنه می‌گذاشت — رد می‌شود. زیر قفل ردیف انبار (همان تراکنش برگشت) اجرا می‌شود، پس
  * با بستنِ هم‌زمان همان انبار هم ترتیب‌بندی می‌شود.
  */
+/**
+ * مغایرت‌گیریِ انبارگردانی (رسید اضافی / حواله کسری) روی موجودی دفتری تا تاریخ سند تگ و تاریخ شمارش بنا شده است؛ برگشت از تایید به تاریخی
+ * کوچکتر یا مساوی تاریخ شمارشِ مغایرت‌گیری‌شده، آن را بی‌اعتبار می‌کند. پس تا وقتی مغایرت‌گیری حذف نشده، برگشت ممکن نیست.
+ */
+async function assertNoReconciledCountFrom(tx: Db, warehouseId: number, warehouseTitle: string, revertDate: Date): Promise<void> {
+  const count = await withoutFiscalPeriodScope(() =>
+    tx.inventoryCount.findFirst({
+      where: { date: { gte: revertDate }, status: "RECONCILED", issue: { warehouseId } },
+      select: { number: true, round: true, date: true },
+      orderBy: { date: "asc" },
+    })
+  );
+  if (count) {
+    throw new Error(
+      `برای انبار «${warehouseTitle}» شمارش انبارگردانی شماره ${count.number} (نوبت ${count.round}) به تاریخ ${formatJalaliDateForMessage(count.date)} تایید و مغایرت‌گیری شده است؛ برگشت از تایید به تاریخ ${formatJalaliDateForMessage(revertDate)} ممکن نیست — ابتدا «حذف مغایرت‌گیری» را در فرم «شمارش انبار» انجام دهید یا تاریخ را بعد از ${formatJalaliDateForMessage(count.date)} بگذارید`
+    );
+  }
+}
+
 async function assertNotQuantityClosedAfter(tx: Db, warehouseId: number, warehouseTitle: string, newConfirmedDate: Date): Promise<void> {
   const closed = await withoutFiscalPeriodScope(() =>
     tx.warehouseQuantityClose.findFirst({
@@ -408,6 +427,7 @@ export async function revertWarehouses(warehouseIds: number[], date: Date): Prom
           throw new Error(`انبار «${w.title}» تاریخ تاییدِ بزرگتر از تاریخ وارد‌شده ندارد`);
         }
         assertWarehouseConfirmedWithinCurrentFiscalYear(w, period);
+        await assertNoReconciledCountFrom(tx, w.id, w.title, date);
         await assertNotQuantityClosedAfter(tx, w.id, w.title, newConfirmedDate);
         const lines = await buildSnapshotLines(w.id, newConfirmedDate, tx);
         await replaceSnapshot(tx, w.id, newConfirmedDate, lines);

@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import { PAYMENT_DOC_INCLUDE, paymentLineDoc, effectivePaymentLine } from "./settlementDocRef";
 import { getAdvancePaymentMethodForDate } from "./accountingSettingsService";
 import { toBaseCurrencyAmount, ConversionCurrency } from "../utils/currencyConversion";
 
@@ -144,9 +145,9 @@ export async function getPurchaseInvoiceAdvanceState(invoiceId: number, kind: Pu
       partyId: invoice.partyId,
       currencyId: invoice.currencyId,
       paymentType: { nature: { in: PURCHASE_ADVANCE_NATURES } },
-      payment: { status: "APPROVED", date: { lte: invoice.date } },
+      ...effectivePaymentLine(invoice.date),
     },
-    include: { payment: true, paymentType: true, currency: true, advanceAllocations: true, servicePurchaseAdvanceAllocations: true },
+    include: { ...PAYMENT_DOC_INCLUDE, paymentType: true, currency: true, advanceAllocations: true, servicePurchaseAdvanceAllocations: true },
     orderBy: { id: "asc" },
   });
 
@@ -158,9 +159,11 @@ export async function getPurchaseInvoiceAdvanceState(invoiceId: number, kind: Pu
         paymentSettlementLineId: l.id,
         nature: l.paymentType.nature as PurchaseAdvanceNature,
         natureTitle: NATURE_FA[l.paymentType.nature as PurchaseAdvanceNature],
-        paymentId: l.paymentId,
-        paymentNumber: l.payment.number,
-        paymentDate: l.payment.date,
+        // ردیف می‌تواند از یک سند پرداخت یا از یک «اعلامیه بدهکار بستانکار» باشد (settlementDocRef)
+        paymentId: paymentLineDoc(l).id,
+        paymentKind: paymentLineDoc(l).kind,
+        paymentNumber: paymentLineDoc(l).number,
+        paymentDate: paymentLineDoc(l).date,
         currencyTitle: l.currency.title,
         fxRate: Number(l.fxRate),
         originalAmount: original,
@@ -218,15 +221,16 @@ export async function savePurchaseInvoiceAdvanceAllocations(invoiceId: number, i
     // eslint-disable-next-line no-await-in-loop
     const line = await prisma.paymentSettlementLine.findUnique({
       where: { id: item.paymentSettlementLineId },
-      include: { payment: true, paymentType: true, advanceAllocations: true, servicePurchaseAdvanceAllocations: true },
+      include: { ...PAYMENT_DOC_INCLUDE, paymentType: true, advanceAllocations: true, servicePurchaseAdvanceAllocations: true },
     });
     if (!line) throw new Error("پیش‌پرداخت انتخاب‌شده یافت نشد");
-    const label = `پیش‌پرداخت پرداخت شماره ${line.payment.number}`;
+    const doc = paymentLineDoc(line);
+    const label = `پیش‌پرداخت ${doc.kind === "PARTY_SETTLEMENT" ? "اعلامیه بدهکار بستانکار" : "پرداخت"} شماره ${doc.number}`;
     if (line.partyId !== invoice.partyId) throw new Error(`${label}: طرف حساب با طرف حساب فاکتور یکسان نیست`);
     const nature = line.paymentType.nature as PurchaseAdvanceNature;
     if (!PURCHASE_ADVANCE_NATURES.includes(nature)) throw new Error(`${label}: نوع پرداخت، ماهیت «پیش‌پرداخت» یا «پیش‌پرداخت ارزش افزوده» ندارد`);
-    if (line.payment.status !== "APPROVED") throw new Error(`${label}: پرداخت تایید نشده است`);
-    if (line.payment.date.getTime() > invoice.date.getTime()) throw new Error(`${label}: تاریخ پرداخت بعد از تاریخ فاکتور است`);
+    if (!doc.approved) throw new Error(`${label}: پرداخت تایید نشده است`);
+    if (doc.date.getTime() > invoice.date.getTime()) throw new Error(`${label}: تاریخ پرداخت بعد از تاریخ فاکتور است`);
     if (line.currencyId !== invoice.currencyId) throw new Error(`${label}: ارز پیش‌پرداخت با ارز فاکتور یکسان نیست`);
 
     const { toOthers: allocatedToOthers } = splitAllocations(line, kind, invoiceId);
@@ -255,8 +259,9 @@ export async function savePurchaseInvoiceAdvanceAllocations(invoiceId: number, i
 }
 
 /** پرداختی که پیش‌پرداختش به فاکتور خرید تخصیص داده شده، قابل برگشت از تایید نیست تا تخصیص‌ها حذف شوند */
-export async function assertPaymentAdvanceNotAllocated(paymentId: number, instrumentLineIds?: number[]) {
-  const where = { paymentSettlementLine: { paymentId, ...(instrumentLineIds ? { instrumentLineId: { in: instrumentLineIds } } : {}) } };
+export async function assertPaymentAdvanceNotAllocated(doc: number | { partySettlementId: number }, instrumentLineIds?: number[]) {
+  const owner = typeof doc === "number" ? { paymentId: doc } : { partySettlementId: doc.partySettlementId };
+  const where = { paymentSettlementLine: { ...owner, ...(instrumentLineIds ? { instrumentLineId: { in: instrumentLineIds } } : {}) } };
   const [goods, service] = await Promise.all([prisma.purchaseInvoiceAdvanceAllocation.count({ where }), prisma.servicePurchaseInvoiceAdvanceAllocation.count({ where })]);
   if (goods + service > 0) throw new Error("این پرداخت (پیش‌پرداخت) به فاکتور خرید تخصیص داده شده است؛ ابتدا تخصیص‌ها را حذف کنید");
 }
@@ -265,13 +270,13 @@ export async function assertPaymentAdvanceNotAllocated(paymentId: number, instru
 export async function assertAdvanceAllocationsStillValid(invoiceId: number, next: { partyId: number; currencyId: number; date: Date; netTotal: number; vatTotal: number }, kind: PurchaseAdvanceKind = "GOODS") {
   const allocations: any[] = await db[KINDS[kind].alloc].findMany({
     where: { [KINDS[kind].fk]: invoiceId },
-    include: { paymentSettlementLine: { include: { payment: true } } },
+    include: { paymentSettlementLine: { include: PAYMENT_DOC_INCLUDE } },
   });
   if (allocations.length === 0) return;
   const anyLine = allocations[0].paymentSettlementLine;
   if (anyLine.partyId !== next.partyId) throw new Error("برای این فاکتور پیش‌پرداخت تخصیص داده شده است؛ ابتدا تخصیص‌ها را حذف کنید تا طرف‌حساب قابل تغییر باشد");
   if (anyLine.currencyId !== next.currencyId) throw new Error("برای این فاکتور پیش‌پرداخت تخصیص داده شده است؛ ابتدا تخصیص‌ها را حذف کنید تا ارز قابل تغییر باشد");
-  if (allocations.some((a) => a.paymentSettlementLine.payment.date.getTime() > next.date.getTime())) {
+  if (allocations.some((a) => paymentLineDoc(a.paymentSettlementLine).date.getTime() > next.date.getTime())) {
     throw new Error("تاریخ فاکتور نمی‌تواند قبل از تاریخ پرداختِ پیش‌پرداخت‌های تخصیص‌یافته باشد؛ ابتدا تخصیص‌ها را حذف کنید");
   }
   const allocated = allocations.filter((a) => a.nature === "ADVANCE_PAYMENT").reduce((s, a) => s + Number(a.amount), 0);
@@ -317,7 +322,7 @@ export async function computePurchaseInvoiceLineCosts(invoiceId: number): Promis
   // Cost پایه = مبلغ − تخفیف (به ارز مبنا)، نه مبلغ ناخالص — utils/purchaseDiscount.ts
   const netBaseOf = (l: { baseAmount: unknown; baseDiscount: unknown }) => Number(l.baseAmount) - Number(l.baseDiscount);
   const noShare = () => invoice.lines.map((l) => ({ lineId: l.id, cost: netBaseOf(l), exchangeRateAdjustmentShare: 0 }));
-  if (invoice.basis !== "WAREHOUSE_RECEIPT") return noShare();
+  if (invoice.basis !== "WAREHOUSE_RECEIPT" && invoice.basis !== "ASSET_RECEIPT") return noShare();
 
   const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
   if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");

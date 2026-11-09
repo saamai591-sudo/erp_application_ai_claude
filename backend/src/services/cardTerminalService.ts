@@ -1,4 +1,4 @@
-import { randomUUID, randomInt } from "crypto";
+import { randomUUID } from "crypto";
 import { prisma } from "../lib/prisma";
 import { getRequestContext } from "../lib/requestContext";
 import { StoreSaleError, assertAfterLastDelivery, saleTotals } from "./storeSaleService";
@@ -10,8 +10,8 @@ import { assertWithinPayable, checked } from "./storeReceiptService";
 // • UNKNOWN (نتیجه‌ی نامشخص، مثلاً قطع ارتباط) نه دوباره فرستاده می‌شود نه نادیده گرفته می‌شود؛ فقط با استعلام یا تعیین دستی (موفق/ناموفق) بسته می‌شود.
 // • اتصال به مدل دستگاه فقط با «درایور» انجام می‌شود (رابط CardTerminalDriver)؛ برای افزودن دستگاه تازه یک درایور بنویسید و در DRIVERS ثبت کنید.
 // • شماره‌ی کامل کارت هرگز ذخیره نمی‌شود، فقط شماره‌ی ماسک‌شده.
-// • کارتخوانِ دارای «عامل محلی» (agent): سرور فقط یک دستور SEND در صف می‌گذارد و agent آن را از شبکه‌ی محل برمی‌دارد و نتیجه را برمی‌گرداند (services/cardTerminalAgentService.ts).
-//   دستورِ برداشته‌نشده تا مهلت = مطمئناً به دستگاه نرسیده ⇒ «ناموفق»؛ دستورِ برداشته‌شده بدون نتیجه تا مهلت ⇒ «نامشخص».
+// • درایور با runsOn="CLIENT" (مثل سداد): سرور فقط تراکنش را آماده می‌کند؛ «برنامه‌ی صندوق» روی کامپیوتر خود صندوق با دستگاه حرف می‌زند و نتیجه را با ورود کاربر گزارش می‌دهد (reportClientResult).
+//   تا ۵ دقیقه بدون گزارش ⇒ «نامشخص» (expireStale).
 // • هر کارتخوان هم‌زمان فقط یک تراکنش باز (در انتظار/نامشخص) دارد؛ درخواست دوم رد می‌شود (قفل 7100051 به شناسه‌ی کارتخوان).
 
 type TxStatus = "PENDING" | "SUCCESS" | "FAILED" | "CANCELLED" | "UNKNOWN";
@@ -35,6 +35,8 @@ export interface CardTerminalDriver {
   title: string;
   /** این درایور خودش نتیجه را اعلام می‌کند (استعلام معنا دارد)؛ false = کاربر نتیجه را دستی ثبت می‌کند */
   automatic: boolean;
+  /** CLIENT = دستگاه را برنامه‌ی صندوق (Electron) روی کامپیوتر خود صندوق اجرا می‌کند و نتیجه را با ورود کاربر گزارش می‌دهد؛ سرور فقط تراکنش را آماده و ثبت می‌کند (مثل چاپ) */
+  runsOn?: "CLIENT";
   send(tx: DriverTx): Promise<DriverResult>;
   inquire(tx: DriverTx): Promise<DriverResult>;
   cancel(tx: DriverTx): Promise<DriverResult>;
@@ -49,34 +51,39 @@ const manualDriver: CardTerminalDriver = {
   cancel: async () => ({ status: "CANCELLED" }),
 };
 
-/** شبیه‌ساز برای آزمایش: پس از ۴ ثانیه موفق می‌شود؛ مبلغ تمام‌شده به 111 = رد بانک، تمام‌شده به 222 = نتیجه‌ی نامشخص */
-const SIM_DELAY_MS = 4000;
-const simulatorDriver: CardTerminalDriver = {
-  title: "شبیه‌ساز (آزمایشی)",
+/** تراکنش برنامه‌ی صندوق: ۱۸۰ ثانیه انتظار کارت + دست‌دهی و استعلام ⇒ بعد از ۵ دقیقه بدون گزارش، نتیجه «نامشخص» است */
+export const CLIENT_RESULT_TIMEOUT_MS = 300_000;
+
+/** سداد (PcPos): دستگاه فقط در شبکه‌ی محل در دسترس است؛ درایور واقعی در برنامه‌ی صندوق اجرا می‌شود (pos-app/drivers/sadad.mjs) و نتیجه با POST /card-transactions/:id/client-result می‌آید. سرور هیچ‌چیز را خودش اجرا نمی‌کند. */
+const sadadDriver: CardTerminalDriver = {
+  title: "سداد (PcPos) — از برنامه‌ی صندوق",
   automatic: true,
+  runsOn: "CLIENT",
   send: async () => ({ status: "PENDING" }),
-  inquire: async (tx) => {
-    if (Date.now() - tx.createdAt.getTime() < SIM_DELAY_MS) return { status: "PENDING" };
-    const tail = Math.round(tx.amount) % 1000;
-    if (tail === 111) return { status: "FAILED", errorCode: "SIM_DECLINED", errorMessage: "تراکنش توسط بانک رد شد (شبیه‌ساز)" };
-    if (tail === 222) return { status: "UNKNOWN", errorCode: "SIM_TIMEOUT", errorMessage: "پاسخ دستگاه دریافت نشد (شبیه‌ساز)" };
-    const ref = String(randomInt(10_000_000, 99_999_999));
-    return { status: "SUCCESS", referenceNumber: `SIM${ref}`, maskedCard: `6037-****-****-${String(randomInt(1000, 9999))}` };
-  },
+  inquire: async () => ({ status: "PENDING" }),
   cancel: async () => ({ status: "CANCELLED" }),
 };
 
-export const AGENT_ONLINE_MS = 30_000;
-export const COMMAND_CLAIM_TIMEOUT_MS = 20_000;
-export const COMMAND_RESULT_TIMEOUT_MS = 180_000;
+/** پارسیان (PEC): مانند سداد، درایور واقعی در برنامه‌ی صندوق است (pos-app/drivers/parsian.mjs). آی‌پی دستگاه الزامی است (پخش شناسایی ندارد). */
+const parsianDriver: CardTerminalDriver = {
+  title: "پارسیان (PEC) — از برنامه‌ی صندوق",
+  automatic: true,
+  runsOn: "CLIENT",
+  send: async () => ({ status: "PENDING" }),
+  inquire: async () => ({ status: "PENDING" }),
+  cancel: async () => ({ status: "CANCELLED" }),
+};
 
-export const DRIVERS: Record<string, CardTerminalDriver> = { MANUAL: manualDriver, SIMULATOR: simulatorDriver };
+export const DRIVERS: Record<string, CardTerminalDriver> = { MANUAL: manualDriver, SADAD: sadadDriver, PARSIAN: parsianDriver };
 export const driverOptions = () => Object.entries(DRIVERS).map(([key, d]) => ({ key, title: d.title, automatic: d.automatic }));
+
+/** تراکنشی که برنامه‌ی صندوق اجرا می‌کند (نه خودِ سرور) */
+const isClientRun = (t: { driver: string }) => DRIVERS[t.driver]?.runsOn === "CLIENT";
 
 const EPS = 1e-6;
 const dayStr = (d: Date) => d.toISOString().slice(0, 10);
 
-const INCLUDE = { cardReader: { select: { title: true, terminalNumber: true, merchantNumber: true } }, receipt: { select: { number: true } } } as const;
+const INCLUDE = { cardReader: { select: { title: true, terminalNumber: true, merchantNumber: true, deviceIp: true, devicePort: true } }, receipt: { select: { number: true } } } as const;
 
 export function txShape(t: any) {
   return {
@@ -85,8 +92,12 @@ export function txShape(t: any) {
     cardReaderId: t.cardReaderId,
     cardReaderTitle: t.cardReader?.title ?? "",
     driver: t.driver,
-    automatic: !!DRIVERS[t.driver]?.automatic || !!t.agentId,
-    viaAgent: !!t.agentId,
+    automatic: !!DRIVERS[t.driver]?.automatic,
+    clientRun: isClientRun(t),
+    requestUid: t.requestUid,
+    terminalNumber: t.cardReader?.terminalNumber ?? "",
+    deviceIp: t.cardReader?.deviceIp ?? "",
+    devicePort: t.cardReader?.devicePort ?? null,
     date: dayStr(t.date),
     amount: Number(t.amount),
     status: t.status as TxStatus,
@@ -117,7 +128,7 @@ const toDriverTx = (t: any): DriverTx => ({ requestUid: t.requestUid, amount: Nu
 const cut = (v: unknown, n: number) => (v == null ? null : String(v).trim().slice(0, n) || null);
 
 /** ارسال مبلغ به کارتخوان: رزرو مبلغ زیر قفل فروش، سپس فراخوانی درایور (خارج از قفل) */
-export async function startTransaction(body: { saleId?: unknown; cardReaderId?: unknown; amount?: unknown; date?: unknown }) {
+export async function startTransaction(body: { saleId?: unknown; cardReaderId?: unknown; amount?: unknown; date?: unknown; clientApp?: unknown }) {
   const saleId = Number(body.saleId);
   const cardReaderId = Number(body.cardReaderId);
   if (!saleId) throw new StoreSaleError("فروش را انتخاب کنید");
@@ -133,27 +144,21 @@ export async function startTransaction(body: { saleId?: unknown; cardReaderId?: 
     await assertAfterLastDelivery(sale.stationId, date);
     const link = await tx.salesStationCardReader.findFirst({ where: { stationId: sale.stationId, cardReaderId }, select: { id: true } });
     if (!link) throw new StoreSaleError("این کارتخوان به ایستگاه این فروش اختصاص داده نشده است");
-    const reader = await tx.cardReader.findUnique({ where: { id: cardReaderId }, select: { driver: true, title: true, agentId: true, agent: { select: { isActive: true, lastSeenAt: true, name: true } } } });
+    const reader = await tx.cardReader.findUnique({ where: { id: cardReaderId }, select: { driver: true, title: true } });
+    if (isClientRun({ driver: reader!.driver }) && body.clientApp !== true) throw new StoreSaleError(`کارتخوان «${reader!.title}» فقط از «برنامه‌ی صندوق» کار می‌کند؛ سامانه را در آن برنامه باز کنید`);
     const busy = await tx.cardReaderTransaction.findFirst({ where: { cardReaderId, status: { in: ["PENDING", "UNKNOWN"] } }, select: { id: true, status: true } });
     if (busy) throw new StoreSaleError(`کارتخوان «${reader!.title}» در حال انجام تراکنش دیگری است${busy.status === "UNKNOWN" ? " (نتیجه‌ی آن نامشخص است؛ ابتدا همان را در فروش مربوطه تعیین تکلیف کنید)" : "؛ پس از پایان آن دوباره تلاش کنید"}`);
-    if (reader!.agentId) {
-      const a = reader!.agent!;
-      if (!a.isActive) throw new StoreSaleError(`عامل محلی «${a.name}» غیرفعال است`);
-      if (!a.lastSeenAt || Date.now() - a.lastSeenAt.getTime() > AGENT_ONLINE_MS) throw new StoreSaleError(`عامل محلی کارتخوان «${a.name}» در دسترس نیست؛ مطمئن شوید برنامه‌ی آن روی کامپیوتر صندوق روشن است`);
-    }
     const payable = saleTotals(sale.lines).payable;
     const paid = Number((await tx.storeReceipt.aggregate({ where: { saleId }, _sum: { amount: true } }))._sum.amount ?? 0);
     const reserved = Number((await tx.cardReaderTransaction.aggregate({ where: { saleId, status: { in: ["PENDING", "UNKNOWN"] } }, _sum: { amount: true } }))._sum.amount ?? 0);
     const free = payable - paid - reserved;
     if (amount > free + EPS) throw new StoreSaleError(`مبلغ از باقی‌مانده‌ی قابل دریافت (${Math.max(0, free)}) بیشتر است${reserved > 0 ? "؛ بخشی از آن در تراکنش‌های در انتظار کارتخوان رزرو شده است" : ""}`);
     const row = await tx.cardReaderTransaction.create({
-      data: { requestUid: randomUUID(), saleId, cardReaderId, driver: reader!.driver, agentId: reader!.agentId, date, amount, status: "PENDING", createdById: getRequestContext()?.userId ?? null },
+      data: { requestUid: randomUUID(), saleId, cardReaderId, driver: reader!.driver, date, amount, status: "PENDING", createdById: getRequestContext()?.userId ?? null },
       include: INCLUDE,
     });
-    if (reader!.agentId) await tx.cardTerminalCommand.create({ data: { transactionId: row.id, agentId: reader!.agentId, kind: "SEND", status: "QUEUED" } });
     return row;
   });
-  if (created.agentId) return txShape(created); // دستور در صف است؛ نتیجه را agent می‌آورد
   let result: DriverResult;
   try {
     result = await DRIVERS[created.driver].send(toDriverTx(created));
@@ -223,7 +228,7 @@ async function finalizeSuccess(id: number, r: DriverResult) {
 export async function refreshTransaction(id: number) {
   await expireStale();
   const t = await loadTx(id);
-  if (t.agentId) return txShape(t); // نتیجه را agent می‌آورد
+  if (isClientRun(t)) return txShape(t); // نتیجه را برنامه‌ی صندوق می‌آورد
   if (!["PENDING", "UNKNOWN"].includes(t.status)) return txShape(t);
   const drv = DRIVERS[t.driver];
   if (!drv.automatic) return txShape(t); // درایور دستی: نتیجه فقط با تعیین دستی
@@ -242,12 +247,8 @@ export async function cancelTransaction(id: number) {
   const t = await loadTx(id);
   if (t.status === "UNKNOWN") throw new StoreSaleError("نتیجه‌ی این تراکنش نامشخص است؛ ابتدا استعلام کنید یا نتیجه را دستی (موفق/ناموفق) ثبت کنید");
   if (t.status !== "PENDING") throw new StoreSaleError("فقط تراکنش در انتظار قابل لغو است");
-  if (t.agentId) {
-    // فقط تا وقتی agent دستور را برنداشته می‌شود لغو کرد (مطمئناً به دستگاه نرسیده)
-    const claim = await prisma.cardTerminalCommand.updateMany({ where: { transactionId: id, status: "QUEUED" }, data: { status: "EXPIRED", doneAt: new Date() } });
-    if (claim.count !== 1) throw new StoreSaleError("دستور به دستگاه رسیده است و لغو آن از اینجا ممکن نیست؛ منتظر نتیجه بمانید یا نتیجه را دستی (موفق/ناموفق) ثبت کنید");
-    return applyResult(id, { status: "CANCELLED" });
-  }
+  // لغو از سرور ممکن نیست: دستگاه ممکن است همین حالا کارت را بخواند و بعداً موفق شود؛ لغو باید روی خود دستگاه انجام شود و نتیجه‌ی آن به سرور می‌آید
+  if (isClientRun(t)) throw new StoreSaleError("این تراکنش را باید روی خود کارتخوان لغو کنید؛ نتیجه (لغو) خودکار ثبت می‌شود");
   let r: DriverResult;
   try {
     r = await DRIVERS[t.driver].cancel(toDriverTx(t));
@@ -255,6 +256,21 @@ export async function cancelTransaction(id: number) {
     throw new StoreSaleError(cut(e?.message, 300) ?? "لغو در دستگاه انجام نشد");
   }
   return applyResult(id, r.status === "PENDING" ? { status: "CANCELLED" } : r);
+}
+
+/**
+ * نتیجه‌ی تراکنشی که برنامه‌ی صندوق روی دستگاه اجرا کرده است (مثل نتیجه‌ی کار چاپ). فقط خودِ کاربر شروع‌کننده می‌تواند گزارش دهد؛
+ * گزارش تکراری بی‌اثر است (applyResult روی تراکنش بسته چیزی تغییر نمی‌دهد). یک تراکنش «نامشخص» هم با گزارش دیرهنگام بسته می‌شود.
+ */
+export async function reportClientResult(id: number, body: { status?: unknown; referenceNumber?: unknown; maskedCard?: unknown; errorCode?: unknown; errorMessage?: unknown }) {
+  const t = await loadTx(id);
+  if (!isClientRun(t)) throw new StoreSaleError("نتیجه‌ی این تراکنش از برنامه‌ی صندوق گزارش نمی‌شود");
+  const uid = getRequestContext()?.userId;
+  if (t.createdById && uid && t.createdById !== uid) throw new StoreSaleError("فقط کاربری که تراکنش را شروع کرده می‌تواند نتیجه‌ی آن را ثبت کند");
+  const status = String(body.status);
+  if (status !== "SUCCESS" && status !== "FAILED" && status !== "UNKNOWN") throw new StoreSaleError("وضعیت گزارش‌شده نامعتبر است");
+  if (status === "SUCCESS" && !cut(body.referenceNumber, 100)) throw new StoreSaleError("شماره پیگیری دستگاه در نتیجه نیست");
+  return applyResult(id, { status, referenceNumber: cut(body.referenceNumber, 100), maskedCard: cut(body.maskedCard, 30), errorCode: cut(body.errorCode, 50), errorMessage: cut(body.errorMessage, 300) });
 }
 
 /** تعیین دستیِ نتیجه (درایور دستی یا تراکنش UNKNOWN): موفق نیازمند شماره پیگیری است */
@@ -271,21 +287,12 @@ export async function resolveTransaction(id: number, body: { outcome?: unknown; 
 }
 
 /**
- * مهلت‌ها (تنبل، هر بار که فهرست/استعلام/poll انجام شود):
- * • دستور QUEUED که تا ۲۰ ثانیه برداشته نشد ⇒ مطمئناً به دستگاه نرسیده ⇒ تراکنش «ناموفق».
- * • دستور CLAIMED که تا ۳ دقیقه نتیجه نیاورد ⇒ ممکن است دستگاه اجرا کرده باشد ⇒ تراکنش «نامشخص».
+ * مهلت‌ها (تنبل، هر بار که فهرست/استعلام انجام شود): تراکنش برنامه‌ی صندوق که تا ۵ دقیقه گزارشی نیاورد ⇒ ممکن است دستگاه اجرا کرده باشد ⇒ «نامشخص»
+ * (گزارش دیرهنگام هنوز پذیرفته می‌شود).
  */
 export async function expireStale() {
-  const now = Date.now();
-  const queued = await prisma.cardTerminalCommand.findMany({ where: { status: "QUEUED", createdAt: { lt: new Date(now - COMMAND_CLAIM_TIMEOUT_MS) } }, select: { id: true, transactionId: true } });
-  for (const c of queued) {
-    const r = await prisma.cardTerminalCommand.updateMany({ where: { id: c.id, status: "QUEUED" }, data: { status: "EXPIRED", doneAt: new Date() } });
-    if (r.count === 1) await applyResult(c.transactionId, { status: "FAILED", errorCode: "AGENT_OFFLINE", errorMessage: "عامل محلی کارتخوان پاسخ نداد؛ درخواست به دستگاه نرسید" });
-  }
-  const claimed = await prisma.cardTerminalCommand.findMany({ where: { status: "CLAIMED", claimedAt: { lt: new Date(now - COMMAND_RESULT_TIMEOUT_MS) } }, select: { id: true, transactionId: true } });
-  for (const c of claimed) {
-    // دستور EXPIRED با claimedAt هنوز نتیجه‌ی دیرهنگام را می‌پذیرد (تراکنش UNKNOWN است)
-    const r = await prisma.cardTerminalCommand.updateMany({ where: { id: c.id, status: "CLAIMED" }, data: { status: "EXPIRED", doneAt: new Date() } });
-    if (r.count === 1) await applyResult(c.transactionId, { status: "UNKNOWN", errorCode: "AGENT_TIMEOUT", errorMessage: "نتیجه‌ای از عامل محلی نرسید؛ وضعیت را روی دستگاه بررسی کنید" });
-  }
+  const clientKeys = Object.entries(DRIVERS).filter(([, d]) => d.runsOn === "CLIENT").map(([k]) => k);
+  if (!clientKeys.length) return;
+  const stale = await prisma.cardReaderTransaction.findMany({ where: { status: "PENDING", driver: { in: clientKeys as any }, createdAt: { lt: new Date(Date.now() - CLIENT_RESULT_TIMEOUT_MS) } }, select: { id: true } });
+  for (const c of stale) await applyResult(c.id, { status: "UNKNOWN", errorCode: "CLIENT_TIMEOUT", errorMessage: "نتیجه‌ای از برنامه‌ی صندوق نرسید؛ وضعیت را روی دستگاه بررسی کنید" });
 }

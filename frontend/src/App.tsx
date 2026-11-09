@@ -23,6 +23,7 @@ import BankBranches from "./pages/BankBranches";
 import BankAccounts from "./pages/BankAccounts";
 import OrgUnits from "./pages/OrgUnits";
 import CostCenters from "./pages/CostCenters";
+import Projects from "./pages/Projects";
 import ReportingLevels from "./pages/ReportingLevels";
 import Accounts from "./pages/Accounts";
 import DocumentTypes from "./pages/DocumentTypes";
@@ -51,6 +52,11 @@ import Goods from "./pages/Goods";
 import Services from "./pages/Services";
 import InitialInventory from "./pages/InitialInventory";
 import WarehouseReceipts from "./pages/WarehouseReceipts";
+import TempReceipts from "./pages/TempReceipts";
+import CountingMethods from "./pages/CountingMethods";
+import CountTags from "./pages/CountTags";
+import InventoryCounts from "./pages/InventoryCounts";
+import TempReceiptReturns from "./pages/TempReceiptReturns";
 import CenterConsumptions from "./pages/CenterConsumptions";
 import ProjectConsumptions from "./pages/ProjectConsumptions";
 import ProductionConsumptions from "./pages/ProductionConsumptions";
@@ -86,6 +92,8 @@ import Customers from "./pages/Customers";
 import SalesTypes from "./pages/SalesTypes";
 import SalesCenters from "./pages/SalesCenters";
 import SalesQuoteLostReasons from "./pages/SalesQuoteLostReasons";
+import AssistantMacros from "./pages/AssistantMacros";
+import PurchaseReturns from "./pages/PurchaseReturns";
 import SalesPriceLists from "./pages/SalesPriceLists";
 import SalesStations from "./pages/SalesStations";
 import SalesShifts from "./pages/SalesShifts";
@@ -111,6 +119,21 @@ import { ReceivableChequeTypes, PayableChequeTypes } from "./pages/ChequeTypes";
 import TreasuryAccountSettings from "./pages/TreasuryAccountSettings";
 import ChequeBookLeaves from "./pages/ChequeBookLeaves";
 import PettyCashes from "./pages/PettyCashes";
+import AssetGroups from "./pages/AssetGroups";
+import AssetLocations from "./pages/AssetLocations";
+import AssetDepreciation from "./pages/AssetDepreciation";
+import AssetGroupChanges from "./pages/AssetGroupChanges";
+import AssetExits from "./pages/AssetExits";
+import AssetInsurances from "./pages/AssetInsurances";
+import AssetInsuranceCalculation from "./pages/AssetInsuranceCalculation";
+import AssetExitTypes from "./pages/AssetExitTypes";
+import AssetInsuranceTypes from "./pages/AssetInsuranceTypes";
+import AssetAccountSettings from "./pages/AssetAccountSettings";
+import AssetCard from "./pages/AssetCard";
+import AssetGroupReview from "./pages/AssetGroupReview";
+import AssetReceipts from "./pages/AssetReceipts";
+import FixedAssets from "./pages/FixedAssets";
+import AssetPositions from "./pages/AssetPositions";
 import TaxMemories from "./pages/TaxMemories";
 import Employees from "./pages/Employees";
 import Positions from "./pages/Positions";
@@ -137,7 +160,9 @@ import AttendanceEmployees from "./pages/AttendanceEmployees";
 import AttendanceMissionTypes from "./pages/AttendanceMissionTypes";
 import AttendanceRequestTypes from "./pages/AttendanceRequestTypes";
 import CardReaders from "./pages/CardReaders";
-import CardTerminalAgents from "./pages/CardTerminalAgents";
+import GuaranteeTypes from "./pages/GuaranteeTypes";
+import Guarantees from "./pages/Guarantees";
+import GuaranteeReturns from "./pages/GuaranteeReturns";
 import PrintGroups from "./pages/PrintGroups";
 import AttendanceMissionRequests from "./pages/AttendanceMissionRequests";
 import AttendanceMissionReports from "./pages/AttendanceMissionReports";
@@ -159,10 +184,12 @@ import { EmployeeEducation, EmployeeVeteran, EmployeeMarital } from "./pages/HrR
 import EmployeeSalaryAccounts from "./pages/EmployeeSalaryAccounts";
 import PayrollPaymentPreps from "./pages/PayrollPaymentPreps";
 import MyTasks from "./pages/MyTasks";
+import Assistant from "./pages/Assistant";
 import WorkflowAllTasks from "./pages/WorkflowAllTasks";
 import WorkflowProcesses from "./pages/WorkflowProcesses";
 import TradeLedgers from "./pages/TradeLedgers";
 import TaxInvoiceSubmission from "./pages/TaxInvoiceSubmission";
+import TaxInvoiceTypeRules from "./pages/TaxInvoiceTypeRules";
 import WarehouseDocDetails from "./pages/WarehouseDocDetails";
 import DetailRules from "./pages/DetailRules";
 import NumberingPatterns from "./pages/NumberingPatterns";
@@ -180,17 +207,26 @@ import SalesInvoices from "./pages/SalesInvoices";
 import SalesReturnInvoices from "./pages/SalesReturnInvoices";
 import SalesReview from "./pages/SalesReview";
 import PurchaseReview from "./pages/PurchaseReview";
+import BarcodeInterpretations from "./pages/BarcodeInterpretations";
+import QuoteReview from "./pages/QuoteReview";
+import PurchaseInvoiceBalance from "./pages/PurchaseInvoiceBalance";
 import BankAccountReview from "./pages/BankAccountReview";
 import CashReview from "./pages/CashReview";
 import PettyCashReview from "./pages/PettyCashReview";
 import ChequeDocumentsReview from "./pages/ChequeDocumentsReview";
 import TreasuryOpenings from "./pages/TreasuryOpenings";
+import PartyBalanceOpenings from "./pages/PartyBalanceOpenings";
+import PartyBalanceClose from "./pages/PartyBalanceClose";
+import PartyBalanceReport from "./pages/PartyBalanceReport";
+import PartyStatement from "./pages/PartyStatement";
+import PartyGroups from "./pages/PartyGroups";
 import TreasuryYearClose from "./pages/TreasuryYearClose";
 import PurchaseInvoices from "./pages/PurchaseInvoices";
 import ServicePurchaseInvoices from "./pages/ServicePurchaseInvoices";
 import WarehouseReview from "./pages/WarehouseReview";
 import StockAnalysis from "./pages/StockAnalysis";
 import Receipts from "./pages/Receipts";
+import PartySettlements from "./pages/PartySettlements";
 import Payments from "./pages/Payments";
 import Cheques from "./pages/Cheques";
 import ChequeDeposits from "./pages/ChequeDeposits";
@@ -275,6 +311,9 @@ export default function App() {
             <Route path="/cost-centers" element={<CostCenters />} />
             <Route path="/cost-centers/new" element={<CostCenters />} />
             <Route path="/cost-centers/:id/edit" element={<CostCenters />} />
+            <Route path="/projects" element={<Projects />} />
+            <Route path="/projects/new" element={<Projects />} />
+            <Route path="/projects/:id/edit" element={<Projects />} />
             <Route path="/org-units" element={<OrgUnits />} />
             <Route path="/org-units/new" element={<OrgUnits />} />
             <Route path="/org-units/:id/edit" element={<OrgUnits />} />
@@ -303,6 +342,7 @@ export default function App() {
             <Route path="/journal-consolidation/new" element={<JournalConsolidation />} />
             <Route path="/journal-consolidation/:id/edit" element={<JournalConsolidation />} />
             <Route path="/account-review" element={<AccountsReview />} />
+            <Route path="/fx-account-review" element={<AccountsReview fx />} />
             <Route path="/account-balance" element={<AccountBalance />} />
             <Route path="/olap-reports" element={<OlapReports />} />
             <Route path="/olap-reports/new" element={<OlapReports />} />
@@ -356,6 +396,14 @@ export default function App() {
             <Route path="/warehousing/warehouse-receipts" element={<WarehouseReceipts />} />
             <Route path="/warehousing/warehouse-receipts/new" element={<WarehouseReceipts />} />
             <Route path="/warehousing/warehouse-receipts/:id/edit" element={<WarehouseReceipts />} />
+            {(["counting-methods", "count-tags", "inventory-counts"] as const).flatMap((seg) => {
+              const El = seg === "counting-methods" ? CountingMethods : seg === "count-tags" ? CountTags : InventoryCounts;
+              return ["", "/new", "/:id/edit"].map((suffix) => <Route key={seg + suffix} path={`/warehousing/${seg}${suffix}`} element={<El />} />);
+            })}
+            {(["temp-receipts", "temp-receipt-returns"] as const).flatMap((seg) => {
+              const El = seg === "temp-receipts" ? TempReceipts : TempReceiptReturns;
+              return ["", "/new", "/:id/edit"].map((suffix) => <Route key={seg + suffix} path={`/warehousing/${seg}${suffix}`} element={<El />} />);
+            })}
             <Route path="/warehousing/warehouse-review" element={<WarehouseReview mode="qty" />} />
             <Route path="/warehousing/stock-analysis" element={<StockAnalysis />} />
             <Route path="/warehouse-accounting/warehouse-review" element={<WarehouseReview mode="amount" />} />
@@ -456,6 +504,9 @@ export default function App() {
             <Route path="/purchase-invoices" element={<PurchaseInvoices />} />
             <Route path="/purchase-invoices/new" element={<PurchaseInvoices />} />
             <Route path="/purchase-invoices/:id/edit" element={<PurchaseInvoices />} />
+            <Route path="/purchase-returns" element={<PurchaseReturns />} />
+            <Route path="/purchase-returns/new" element={<PurchaseReturns />} />
+            <Route path="/purchase-returns/:id/edit" element={<PurchaseReturns />} />
             <Route path="/service-purchase-invoices" element={<ServicePurchaseInvoices />} />
             <Route path="/service-purchase-invoices/new" element={<ServicePurchaseInvoices />} />
             <Route path="/service-purchase-invoices/:id/edit" element={<ServicePurchaseInvoices />} />
@@ -469,6 +520,9 @@ export default function App() {
             <Route path="/sales-centers" element={<SalesCenters />} />
             <Route path="/sales-centers/new" element={<SalesCenters />} />
             <Route path="/sales-centers/:id/edit" element={<SalesCenters />} />
+            <Route path="/assistant-macros" element={<AssistantMacros />} />
+            <Route path="/assistant-macros/new" element={<AssistantMacros />} />
+            <Route path="/assistant-macros/:id/edit" element={<AssistantMacros />} />
             <Route path="/sales-quote-lost-reasons" element={<SalesQuoteLostReasons />} />
             <Route path="/sales-quote-lost-reasons/new" element={<SalesQuoteLostReasons />} />
             <Route path="/sales-quote-lost-reasons/:id/edit" element={<SalesQuoteLostReasons />} />
@@ -514,6 +568,9 @@ export default function App() {
             <Route path="/print-groups" element={<PrintGroups />} />
             <Route path="/print-groups/new" element={<PrintGroups />} />
             <Route path="/print-groups/:id/edit" element={<PrintGroups />} />
+            <Route path="/barcode-interpretations" element={<BarcodeInterpretations />} />
+            <Route path="/barcode-interpretations/new" element={<BarcodeInterpretations />} />
+            <Route path="/barcode-interpretations/:id/edit" element={<BarcodeInterpretations />} />
             <Route path="/store-showcases" element={<StoreShowcases />} />
             <Route path="/store-showcases/new" element={<StoreShowcases />} />
             <Route path="/store-showcases/:id/edit" element={<StoreShowcases />} />
@@ -676,6 +733,7 @@ export default function App() {
             <Route path="/payroll-data-entry" element={<PayrollDataEntry />} />
             <Route path="/personnel-constants" element={<PersonnelConstants />} />
             <Route path="/my-tasks" element={<MyTasks />} />
+            <Route path="/assistant" element={<Assistant />} />
             <Route path="/my-tasks/:id" element={<MyTasks />} />
             <Route path="/workflow-all-tasks" element={<WorkflowAllTasks />} />
             <Route path="/workflow-processes" element={<WorkflowProcesses />} />
@@ -714,13 +772,63 @@ export default function App() {
             <Route path="/warehouse-doc-details/new" element={<WarehouseDocDetails />} />
             <Route path="/warehouse-doc-details/:id/edit" element={<WarehouseDocDetails />} />
             <Route path="/tax-invoice-submission" element={<TaxInvoiceSubmission />} />
+            <Route path="/tax-invoice-type-rules" element={<TaxInvoiceTypeRules />} />
+            <Route path="/tax-invoice-type-rules/new" element={<TaxInvoiceTypeRules />} />
+            <Route path="/tax-invoice-type-rules/:id/edit" element={<TaxInvoiceTypeRules />} />
             <Route path="/trade-ledgers" element={<TradeLedgers />} />
             <Route path="/trade-ledgers/new" element={<TradeLedgers />} />
             <Route path="/trade-ledgers/:id/edit" element={<TradeLedgers />} />
             <Route path="/card-readers" element={<CardReaders />} />
             <Route path="/card-readers/new" element={<CardReaders />} />
             <Route path="/card-readers/:id/edit" element={<CardReaders />} />
-            <Route path="/card-terminal-agents" element={<CardTerminalAgents />} />
+            <Route path="/guarantee-types" element={<GuaranteeTypes />} />
+            <Route path="/guarantee-types/new" element={<GuaranteeTypes />} />
+            <Route path="/guarantee-types/:id/edit" element={<GuaranteeTypes />} />
+            {(["guarantee-receipt-returns", "guarantee-payment-returns"] as const).flatMap((seg) => [
+              <Route key={seg} path={`/${seg}`} element={<GuaranteeReturns direction={seg === "guarantee-receipt-returns" ? "RECEIPT" : "PAYMENT"} />} />,
+              <Route key={seg + "-new"} path={`/${seg}/new`} element={<GuaranteeReturns direction={seg === "guarantee-receipt-returns" ? "RECEIPT" : "PAYMENT"} />} />,
+              <Route key={seg + "-edit"} path={`/${seg}/:id/edit`} element={<GuaranteeReturns direction={seg === "guarantee-receipt-returns" ? "RECEIPT" : "PAYMENT"} />} />,
+            ])}
+            {(["guarantee-receipts", "guarantee-payments"] as const).flatMap((seg) => [
+              <Route key={seg} path={`/${seg}`} element={<Guarantees direction={seg === "guarantee-receipts" ? "RECEIPT" : "PAYMENT"} />} />,
+              <Route key={seg + "-new"} path={`/${seg}/new`} element={<Guarantees direction={seg === "guarantee-receipts" ? "RECEIPT" : "PAYMENT"} />} />,
+              <Route key={seg + "-edit"} path={`/${seg}/:id/edit`} element={<Guarantees direction={seg === "guarantee-receipts" ? "RECEIPT" : "PAYMENT"} />} />,
+            ])}
+            <Route path="/asset-locations" element={<AssetLocations />} />
+            <Route path="/asset-groups" element={<AssetGroups />} />
+            <Route path="/asset-groups/new" element={<AssetGroups />} />
+            <Route path="/asset-groups/:id/edit" element={<AssetGroups />} />
+            <Route path="/asset-receipts" element={<AssetReceipts />} />
+            <Route path="/asset-receipts/new" element={<AssetReceipts />} />
+            <Route path="/asset-receipts/:id/edit" element={<AssetReceipts />} />
+            <Route path="/fixed-assets" element={<FixedAssets />} />
+            <Route path="/fixed-assets/new" element={<FixedAssets />} />
+            <Route path="/fixed-assets/:id/edit" element={<FixedAssets />} />
+            <Route path="/asset-depreciation" element={<AssetDepreciation />} />
+            <Route path="/asset-group-changes" element={<AssetGroupChanges />} />
+            <Route path="/asset-group-changes/new" element={<AssetGroupChanges />} />
+            <Route path="/asset-group-changes/:id/edit" element={<AssetGroupChanges />} />
+            <Route path="/asset-insurances" element={<AssetInsurances />} />
+            <Route path="/asset-insurances/new" element={<AssetInsurances />} />
+            <Route path="/asset-insurances/:id/edit" element={<AssetInsurances />} />
+            <Route path="/asset-insurance-calculation" element={<AssetInsuranceCalculation />} />
+            <Route path="/asset-exits" element={<AssetExits />} />
+            <Route path="/asset-exits/new" element={<AssetExits />} />
+            <Route path="/asset-exits/:id/edit" element={<AssetExits />} />
+            <Route path="/asset-exit-types" element={<AssetExitTypes />} />
+            <Route path="/asset-exit-types/new" element={<AssetExitTypes />} />
+            <Route path="/asset-exit-types/:id/edit" element={<AssetExitTypes />} />
+            <Route path="/asset-insurance-types" element={<AssetInsuranceTypes />} />
+            <Route path="/asset-insurance-types/new" element={<AssetInsuranceTypes />} />
+            <Route path="/asset-insurance-types/:id/edit" element={<AssetInsuranceTypes />} />
+            <Route path="/asset-account-settings" element={<AssetAccountSettings />} />
+            <Route path="/asset-account-settings/bulk" element={<AssetAccountSettings />} />
+            <Route path="/asset-account-settings/new" element={<AssetAccountSettings />} />
+            <Route path="/asset-account-settings/:id/edit" element={<AssetAccountSettings />} />
+            <Route path="/fixed-assets/:id/card" element={<AssetCard />} />
+            <Route path="/asset-group-review" element={<AssetGroupReview />} />
+            <Route path="/asset-positions" element={<AssetPositions />} />
+            <Route path="/asset-positions/new" element={<AssetPositions />} />
             <Route path="/petty-cashes" element={<PettyCashes />} />
             <Route path="/petty-cashes/new" element={<PettyCashes />} />
             <Route path="/petty-cashes/:id/edit" element={<PettyCashes />} />
@@ -750,6 +858,8 @@ export default function App() {
             <Route path="/sales-return-invoices/:id/edit" element={<SalesReturnInvoices />} />
             <Route path="/sales-review" element={<SalesReview />} />
             <Route path="/purchase-review" element={<PurchaseReview />} />
+            <Route path="/quote-review" element={<QuoteReview />} />
+            <Route path="/purchase-invoice-balance" element={<PurchaseInvoiceBalance />} />
             <Route path="/bank-account-review" element={<BankAccountReview />} />
             <Route path="/cash-review" element={<CashReview />} />
             <Route path="/petty-cash-review" element={<PettyCashReview />} />
@@ -759,11 +869,32 @@ export default function App() {
             <Route path="/treasury-openings/new" element={<TreasuryOpenings />} />
             <Route path="/treasury-openings/:id/edit" element={<TreasuryOpenings />} />
             <Route path="/treasury-year-close" element={<TreasuryYearClose />} />
+            <Route path="/customer-balance-openings" element={<PartyBalanceOpenings role="CUSTOMER" />} />
+            <Route path="/customer-balance-openings/new" element={<PartyBalanceOpenings role="CUSTOMER" />} />
+            <Route path="/customer-balance-openings/:id/edit" element={<PartyBalanceOpenings role="CUSTOMER" />} />
+            <Route path="/supplier-balance-openings" element={<PartyBalanceOpenings role="SUPPLIER" />} />
+            <Route path="/supplier-balance-openings/new" element={<PartyBalanceOpenings role="SUPPLIER" />} />
+            <Route path="/supplier-balance-openings/:id/edit" element={<PartyBalanceOpenings role="SUPPLIER" />} />
+            <Route path="/customer-groups" element={<PartyGroups kind="CUSTOMER" />} />
+            <Route path="/customer-groups/new" element={<PartyGroups kind="CUSTOMER" />} />
+            <Route path="/customer-groups/:id/edit" element={<PartyGroups kind="CUSTOMER" />} />
+            <Route path="/supplier-groups" element={<PartyGroups kind="SUPPLIER" />} />
+            <Route path="/supplier-groups/new" element={<PartyGroups kind="SUPPLIER" />} />
+            <Route path="/supplier-groups/:id/edit" element={<PartyGroups kind="SUPPLIER" />} />
+            <Route path="/customer-balance-report" element={<PartyBalanceReport scope="CUSTOMER" />} />
+            <Route path="/supplier-balance-report" element={<PartyBalanceReport scope="SUPPLIER" />} />
+            <Route path="/party-balance-report" element={<PartyBalanceReport scope="ALL" />} />
+            <Route path="/customer-statement" element={<PartyStatement scope="CUSTOMER" />} />
+            <Route path="/supplier-statement" element={<PartyStatement scope="SUPPLIER" />} />
+            <Route path="/party-statement" element={<PartyStatement scope="ALL" />} />
+            <Route path="/customer-balance-close" element={<PartyBalanceClose role="CUSTOMER" />} />
+            <Route path="/supplier-balance-close" element={<PartyBalanceClose role="SUPPLIER" />} />
 
             <Route path="/receipts" element={<Receipts />} />
             <Route path="/receipts/new" element={<Receipts />} />
             <Route path="/receipts/:id/edit" element={<Receipts />} />
             <Route path="/receipts/:id/re-edit" element={<Receipts />} />
+            {["/party-settlements", "/party-settlements/new", "/party-settlements/:id/edit"].map((p) => <Route key={p} path={p} element={<PartySettlements />} />)}
             <Route path="/payments" element={<Payments />} />
             <Route path="/payments/new" element={<Payments />} />
             <Route path="/payments/:id/edit" element={<Payments />} />

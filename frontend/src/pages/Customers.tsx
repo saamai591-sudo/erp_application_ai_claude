@@ -74,11 +74,15 @@ function partyToQuick(p: PartyOption & { addresses?: any[]; phones?: any[]; bank
   };
 }
 
+interface GroupOption { id: number; code: number; title: string; isActive: boolean }
+
 interface CustomerRow {
   id: number;
   code: number;
   partyId: number;
   party: PartyOption;
+  groupId: number | null;
+  groupTitle: string | null;
   isActive: boolean;
   hasTransactions: boolean;
 }
@@ -130,6 +134,7 @@ function CustomerList() {
         columns={[
           { header: "کد", render: (r) => toFaDigits(String(r.code)), width: "80px", filterType: "number", filterValue: (r) => r.code },
           { header: "طرف حساب", render: (r) => partyDisplayName(r.party), filterType: "string", filterValue: (r) => partyDisplayName(r.party) },
+          { header: "گروه", render: (r) => r.groupTitle || "—", filterType: "string", filterValue: (r) => r.groupTitle || "بدون گروه" },
           { header: "فعال", render: (r) => (r.isActive ? "بله" : "خیر"), width: "80px" },
         ]}
         rows={items}
@@ -140,7 +145,7 @@ function CustomerList() {
   );
 }
 
-const DEFAULT_FORM = { code: "", partyId: "", isActive: true };
+const DEFAULT_FORM = { code: "", partyId: "", groupId: "", isActive: true };
 
 function CustomerForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
@@ -148,6 +153,7 @@ function CustomerForm({ editId }: { editId?: number }) {
   const cacheKey = `form:${location.pathname}:form`;
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [hasTransactions, setHasTransactions] = useState(false);
+  const [groups, setGroups] = useState<GroupOption[]>([]);
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_FORM);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
@@ -164,6 +170,9 @@ function CustomerForm({ editId }: { editId?: number }) {
   useEffect(() => {
     loadParties();
   }, [editId]);
+  useEffect(() => {
+    api.get("/customer-groups").then(setGroups).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!editId) {
@@ -178,7 +187,7 @@ function CustomerForm({ editId }: { editId?: number }) {
       const found = items.find((i) => i.id === editId);
       if (found) {
         setHasTransactions(found.hasTransactions);
-        setForm({ code: String(found.code), partyId: String(found.partyId), isActive: found.isActive });
+        setForm({ code: String(found.code), partyId: String(found.partyId), groupId: found.groupId ? String(found.groupId) : "", isActive: found.isActive });
       }
       setLoaded(true);
     });
@@ -191,7 +200,7 @@ function CustomerForm({ editId }: { editId?: number }) {
     e.preventDefault();
     setError(null);
     if (!form.partyId) return setError("طرف حساب الزامی است");
-    const body = { code: form.code ? Number(form.code) : undefined, partyId: Number(form.partyId), isActive: form.isActive };
+    const body = { code: form.code ? Number(form.code) : undefined, partyId: Number(form.partyId), isActive: form.isActive, groupId: form.groupId ? Number(form.groupId) : null };
     try {
       if (editId) {
         await api.put(`/customers/${editId}`, body);
@@ -208,7 +217,7 @@ function CustomerForm({ editId }: { editId?: number }) {
 
   // تعریف سریع: شخص و مشتری با هم در یک درخواست ساخته می‌شوند (سرویس مشترک طرف‌حساب؛ کد/شناسه ملی و عنوان تفصیل تکراری رد می‌شود)
   async function createQuick(p: QuickParty, confirmDuplicate: boolean) {
-    const created = await api.post("/customers", { code: form.code ? Number(form.code) : undefined, isActive: form.isActive, party: quickToPayload(p), confirmDuplicate });
+    const created = await api.post("/customers", { code: form.code ? Number(form.code) : undefined, isActive: form.isActive, groupId: form.groupId ? Number(form.groupId) : null, party: quickToPayload(p), confirmDuplicate });
     flash();
     setDialog(null);
     navigate(`/customers/${created.id}/edit`);
@@ -289,6 +298,13 @@ function CustomerForm({ editId }: { editId?: number }) {
                 </button>
               )}
             </div>
+          </div>
+          <div className="form-field">
+            <label>گروه مشتری <FieldHint label="گروه مشتری" text="طبقه‌بندی مشتری (مثلاً دولتی/خصوصی) برای گزارش مانده به تفکیک گروه؛ فهرست گروه‌ها در تنظیمات فروش تعریف می‌شود" /></label>
+            <select value={(form as any).groupId ?? ""} onChange={(e) => setForm({ ...form, groupId: e.target.value } as any)}>
+              <option value="">بدون گروه</option>
+              {groups.filter((g) => g.isActive || String(g.id) === (form as any).groupId).map((g) => <option key={g.id} value={g.id}>{toFaDigits(String(g.code))} — {g.title}</option>)}
+            </select>
           </div>
           <div className="form-field">
             <label className="checkbox-row">

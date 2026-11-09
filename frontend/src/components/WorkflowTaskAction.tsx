@@ -14,6 +14,11 @@ export interface ReceiptFromTaskPrefill {
   partyId: number;
   partyDisplay: string;
   description: string;
+  /** مبلغ ردیف اول ابزار (ارز پایه)؛ فقط از «دستیار» پر می‌شود */
+  amount?: number | null;
+  /** ابزارها و موضوعات پیش‌تعیین‌شده‌ی «دستور میانبر دستیار» (فقط از دستیار پر می‌شود) */
+  instruments?: { type: "CASH" | "BANK_TRANSFER" | "CHEQUE" | "POS"; cashBoxId: number | null; bankAccountId: number | null; cardReaderId: number | null }[];
+  subjects?: { receiptTypeId: number; instrument: number }[];
 }
 
 export interface ActionTask {

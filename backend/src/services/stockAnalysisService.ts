@@ -20,6 +20,22 @@ export interface StockAnalysisRow {
   available: number;
 }
 
+// دریافت‌شده‌ی هر ردیف سفارش خرید = رسید انبار مستقیم/با مجوز تحویل + رسید موقت − برگشت رسید موقت
+// (رسید انبار با مبنای رسید موقت منبع سفارش ندارد، پس دوباره شمرده نمی‌شود)
+const RECEIVED_BY_PO_SQL = `SELECT x."poLineId", SUM(x.qty) AS qty FROM (
+        SELECT DISTINCT l."id" AS "lineId", COALESCE(l."sourcePurchaseOrderLineId", dal."purchaseOrderLineId") AS "poLineId", l."quantity" AS qty
+        FROM "InventoryDocumentLine" l
+        JOIN "InventoryDocument" d ON d."id" = l."documentId" AND d."documentType"::text IN ('WAREHOUSE_RECEIPT', 'TEMP_RECEIPT')
+        LEFT JOIN "DeliveryAuthorizationLine" dal ON dal."id" = l."sourceDeliveryAuthorizationLineId"
+        WHERE l."sourcePurchaseOrderLineId" IS NOT NULL OR l."sourceDeliveryAuthorizationLineId" IS NOT NULL
+        UNION ALL
+        SELECT l."id", COALESCE(tl."sourcePurchaseOrderLineId", dal2."purchaseOrderLineId"), -l."quantity"
+        FROM "InventoryDocumentLine" l
+        JOIN "InventoryDocument" d ON d."id" = l."documentId" AND d."documentType"::text = 'TEMP_RECEIPT_RETURN'
+        JOIN "InventoryDocumentLine" tl ON tl."id" = l."sourceTempReceiptLineId"
+        LEFT JOIN "DeliveryAuthorizationLine" dal2 ON dal2."id" = tl."sourceDeliveryAuthorizationLineId"
+      ) x GROUP BY x."poLineId"`;
+
 export async function getStockAnalysis(): Promise<StockAnalysisRow[]> {
   // علامت هر نوع سند (به‌جز تعدیل که مقدارش از قبل امضادار است) به‌صورت CASE ثابت و امن (فقط ثابت‌های کد، نه ورودی کاربر)
   const signCase = SIGNED_TYPES.map(
@@ -49,13 +65,7 @@ export async function getStockAnalysis(): Promise<StockAnalysisRow[]> {
       GROUP BY sl."goodsItemId"
     ),
     po_received AS (
-      SELECT x."poLineId", SUM(x.qty) AS qty FROM (
-        SELECT DISTINCT l."id" AS "lineId", COALESCE(l."sourcePurchaseOrderLineId", dal."purchaseOrderLineId") AS "poLineId", l."quantity" AS qty
-        FROM "InventoryDocumentLine" l
-        JOIN "InventoryDocument" d ON d."id" = l."documentId" AND d."documentType"::text = 'WAREHOUSE_RECEIPT'
-        LEFT JOIN "DeliveryAuthorizationLine" dal ON dal."id" = l."sourceDeliveryAuthorizationLineId"
-        WHERE l."sourcePurchaseOrderLineId" IS NOT NULL OR l."sourceDeliveryAuthorizationLineId" IS NOT NULL
-      ) x GROUP BY x."poLineId"
+      ${RECEIVED_BY_PO_SQL}
     ),
     in_transit AS (
       SELECT pl."goodsItemId" AS "itemId", SUM(GREATEST(pl."quantity" - COALESCE(r.qty, 0), 0)) AS qty
@@ -100,4 +110,57 @@ export async function getStockAnalysis(): Promise<StockAnalysisRow[]> {
       return { id: r.id, code: r.code, title: r.title, unit: r.unit, stock, inTransit, committed, available: stock + inTransit - committed };
     })
     .filter((r) => r.stock !== 0 || r.inTransit !== 0 || r.committed !== 0);
+}
+
+// ریز سفارش‌های پشت سلول «تعهدشده» (سفارش فروش تاییدشده) یا «در راه» (سفارش خرید تاییدشده) برای یک کالا.
+// همان تعریف مانده‌ی گزارش اصلی؛ فقط سفارش‌هایی که برای این کالا مانده > ۰ دارند (جمع «مانده»ها = مقدار سلول).
+export interface StockAnalysisOrderRow {
+  orderId: number;
+  number: number;
+  date: string;
+  partyTitle: string;
+  quantity: number;
+  remaining: number;
+}
+
+export async function getStockAnalysisOrders(itemId: number, kind: "committed" | "in-transit"): Promise<StockAnalysisOrderRow[]> {
+  const partyTitle = `COALESCE(NULLIF(p."detailTitle", ''), CASE WHEN p."category"::text = 'LEGAL' THEN p."name" ELSE TRIM(COALESCE(p."firstName", '') || ' ' || COALESCE(p."lastName", '')) END)`;
+  const sql =
+    kind === "committed"
+      ? `
+    WITH dv AS (
+      SELECT l."sourceSalesOrderLineId" AS "lineId", SUM(l."quantity") AS qty
+      FROM "InventoryDocumentLine" l
+      JOIN "InventoryDocument" d ON d."id" = l."documentId" AND d."documentType"::text = 'SALES_DELIVERY'
+      WHERE l."sourceSalesOrderLineId" IS NOT NULL
+      GROUP BY l."sourceSalesOrderLineId"
+    )
+    SELECT o."id" AS "orderId", o."number", o."date", ${partyTitle} AS "partyTitle",
+      SUM(sl."quantity") AS quantity, SUM(GREATEST(sl."quantity" - COALESCE(dv.qty, 0), 0)) AS remaining
+    FROM "SalesOrderLine" sl
+    JOIN "SalesOrder" o ON o."id" = sl."salesOrderId" AND o."status"::text = 'APPROVED'
+    JOIN "Customer" c ON c."id" = o."customerId"
+    JOIN "Party" p ON p."id" = c."partyId"
+    LEFT JOIN dv ON dv."lineId" = sl."id"
+    WHERE sl."goodsItemId" = $1
+    GROUP BY o."id", o."number", o."date", p."id"
+    HAVING SUM(GREATEST(sl."quantity" - COALESCE(dv.qty, 0), 0)) > 0
+    ORDER BY o."date", o."number"`
+      : `
+    WITH rc AS (
+      ${RECEIVED_BY_PO_SQL}
+    )
+    SELECT o."id" AS "orderId", o."number", o."date", ${partyTitle} AS "partyTitle",
+      SUM(pl."quantity") AS quantity, SUM(GREATEST(pl."quantity" - COALESCE(rc.qty, 0), 0)) AS remaining
+    FROM "PurchaseOrderLine" pl
+    JOIN "PurchaseOrder" o ON o."id" = pl."purchaseOrderId" AND o."status"::text = 'APPROVED'
+    JOIN "Supplier" s ON s."id" = o."supplierId"
+    JOIN "Party" p ON p."id" = s."partyId"
+    LEFT JOIN rc ON rc."poLineId" = pl."id"
+    WHERE pl."goodsItemId" = $1
+    GROUP BY o."id", o."number", o."date", p."id"
+    HAVING SUM(GREATEST(pl."quantity" - COALESCE(rc.qty, 0), 0)) > 0
+    ORDER BY o."date", o."number"`;
+  const rows = await prisma.$queryRawUnsafe<{ orderId: number; number: number; date: Date; partyTitle: string; quantity: any; remaining: any }[]>(sql, itemId);
+  return rows.map((r) => ({ orderId: r.orderId, number: r.number, date: new Date(r.date).toISOString().slice(0, 10), partyTitle: r.partyTitle || "", quantity: Number(r.quantity), remaining: Number(r.remaining) }));
 }

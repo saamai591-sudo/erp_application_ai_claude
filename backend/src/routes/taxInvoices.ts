@@ -6,6 +6,7 @@ import { buildTaxInvoice, DEFAULT_TAX_OPTIONS, invoiceTotalForList, loadSalesInv
 import { explainTaxCode } from "../services/taxErrorCodes";
 import { isTaxTransportEnabled } from "../services/taxTransport";
 import { refreshTaxInvoiceStatuses, sendTaxInvoices } from "../services/taxInvoiceSendService";
+import { resolveTaxInvoiceType } from "../services/taxInvoiceTypeService";
 
 // «ارسال صورتحساب به سامانه مودیان» (امور مالیاتی › عملیات) — ساخت/اعتبارسنجی JSON: services/taxInvoiceBuilder.ts، ارتباط با سامانه: services/taxTransport.ts (هنوز غیرفعال)
 
@@ -51,8 +52,16 @@ router.get("/candidates", can(`${FORM}.view`), async (req, res) => {
   const nowMs = Date.now();
   const rows = [];
   for (const inv of invoices) {
-    const built = await buildTaxInvoice(inv, DEFAULT_TAX_OPTIONS, { nowMs, skipTaxId: true });
+    // نوع پیشنهادی از «قواعد نوع صورتحساب»؛ اگر قاعده‌ای نبود، خطا و کاربر باید دستی نوع را انتخاب کند
+    const resolved = await resolveTaxInvoiceType("SALES_INVOICE", inv);
+    const built = await buildTaxInvoice(inv, { ...DEFAULT_TAX_OPTIONS, invoiceType: resolved.type ?? DEFAULT_TAX_OPTIONS.invoiceType }, { nowMs, skipTaxId: true });
+    if (resolved.error) {
+      built.problems.unshift({ severity: "error", scope: "header", message: resolved.error });
+      built.errorCount += 1;
+    }
     rows.push({
+      suggestedType: resolved.type,
+      typeError: resolved.error,
       id: inv.id,
       number: inv.number,
       date: inv.date,

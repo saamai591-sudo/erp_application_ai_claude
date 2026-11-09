@@ -214,6 +214,14 @@ function DuplicateIcon() {
   );
 }
 
+function MacroIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function emptyRow(): RowState {
   return { goodsItemId: "", goodsItemCode: "", goodsItemTitle: "", unitId: "", unitTitle: "", quantity: "", unitPrice: "", amount: "", discount: "", vatAmount: "", description: "", listPrice: "" };
 }
@@ -324,6 +332,18 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
+
+  /** ساخت «دستور میانبر دستیار» از روی همین پیش‌فاکتور: فرم دستور با نوع/مرکز فروش، شرح و اقلام پر می‌شود و مدیر انتخاب می‌کند چه چیزی ثابت بماند */
+  function createAssistantMacro() {
+    const payload = {
+      salesTypeId: Number(header.salesTypeId),
+      salesCenterId: Number(header.salesCenterId),
+      description: header.description,
+      lines: rows.filter((r) => r.goodsItemId && Number(r.quantity) > 0).map((r) => ({ goodsItemId: Number(r.goodsItemId), quantity: Number(r.quantity) })),
+    };
+    stageFormPrefill("/assistant-macros/new", payload);
+    openTab("/assistant-macros/new");
+  }
 
   function duplicateQuote() {
     const validDays =
@@ -593,6 +613,11 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
               <DuplicateIcon />
             </button>
           )}
+          {hasPermission("workflow.settings.assistant-macros.create") && (
+            <button type="button" className="toolbar-icon-btn" onClick={createAssistantMacro} title="ساخت دستور دستیار از روی این پیش‌فاکتور (قالب)">
+              <MacroIcon />
+            </button>
+          )}
           {hasPermission("sales.operations.sales-quotes.closeFollowUp") && followUp.info && (
             followUp.info.state === "CLOSED_PARTIAL" || followUp.info.state === "CLOSED_NO_SALE" ? (
               <button type="button" className="toolbar-icon-btn" title="بازگشایی پیگیری (مانده‌ی بسته‌شده دوباره قابل پیگیری می‌شود)" onClick={reopenFollowUp}>
@@ -613,26 +638,27 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
         <ErrorToast message={error} />
         <FollowUpBanner info={followUp.info} />
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
-          <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
-            <div className="form-field">
+          <div className="je-header-grid cols-4" style={{ marginBottom: 6, maxWidth: 1250 }}>
+            <div className="form-field hc1 hr1">
               <label>شماره</label>
               <input dir="ltr" value={meta ? toFaDigits(String(meta.number)) : "خودکار پس از ذخیره"} disabled />
             </div>
-            <div className="form-field">
-              <label>وضعیت</label>
-              <div><span className="badge">{STATUS_FA[status]}</span></div>
-            </div>
-            <div className="form-field">
+            <div className="form-field hc1 hr2">
               <label>تاریخ<RequiredMark /></label>
               <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
             </div>
-            <div className="form-field">
+            <div className="form-field hc2 hr1">
+              <label>وضعیت</label>
+              <div><span className="badge">{STATUS_FA[status]}</span></div>
+            </div>
+            <div className="form-field hc2 hr2">
               <label>تاریخ اعتبار <InfoHint text="اختیاری — تا این تاریخ پیش‌فاکتور معتبر است؛ در چاپ پیش‌فاکتور می‌آید. نباید قبل از تاریخ پیش‌فاکتور باشد." title="تاریخ اعتبار" /></label>
               <JalaliDatePicker value={header.validUntil} onChange={(v) => setHeader({ ...header, validUntil: v })} />
             </div>
-            <div className="form-field">
-              <label>مشتری<RequiredMark /></label>
+            <div className="form-field hc3 hr1">
               <RecordPickerField
+                inlineLabel="مشتری"
+                inlineRequired
                 title="انتخاب مشتری"
                 displayValue={(() => {
                   const c = customers.find((x) => String(x.id) === header.customerId);
@@ -646,38 +672,38 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
                 onSelect={(x) => setHeader({ ...header, customerId: String(x.id) })}
               />
             </div>
-            <div className="form-field">
+            <div className="form-field hc3 hr2">
               <label>نوع فروش<RequiredMark /></label>
               <select value={header.salesTypeId} onChange={(e) => setHeader({ ...header, salesTypeId: e.target.value })}>
                 <option value="">انتخاب کنید</option>
                 {salesTypes.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
               </select>
             </div>
-            <div className="form-field">
+            <div className="form-field hc4 hr1">
               <label>مرکز فروش<RequiredMark /></label>
               <select value={header.salesCenterId} onChange={(e) => setHeader({ ...header, salesCenterId: e.target.value })}>
                 <option value="">انتخاب کنید</option>
                 {salesCenters.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
               </select>
             </div>
-            <div className="form-field fx-only">
+            <div className="form-field fx-only hc4 hr2">
               <label>ارز<RequiredMark /></label>
               <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value })}>
                 <option value="">انتخاب کنید</option>
                 {currencies.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
               </select>
             </div>
-            <div className="form-field full">
+            <div className="form-field span-2 hr3">
               <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} />
             </div>
           </div>
 
-          <div className="je-lines-toolbar">
+          <div className="je-lines-toolbar" style={{ marginBottom: 4 }}>
             <span className="je-lines-title">اقلام</span>
-            <button type="button" className="btn secondary" style={{ marginInlineStart: "auto", marginInlineEnd: 8, padding: "4px 10px", fontSize: 12 }} onClick={recallPrices} disabled={locked} title="فی ردیف‌ها را دوباره از اعلامیه قیمت (برای مرکز، نوع فروش، ارز و تاریخ همین سند) فراخوانی می‌کند">
+            <button type="button" className="btn secondary" style={{ marginInlineStart: "auto", marginInlineEnd: 8, padding: "2px 10px", fontSize: 11.5, lineHeight: 1.4 }} onClick={recallPrices} disabled={locked} title="فی ردیف‌ها را دوباره از اعلامیه قیمت (برای مرکز، نوع فروش، ارز و تاریخ همین سند) فراخوانی می‌کند">
               بازفراخوانی قیمت
             </button>
-            <button type="button" className="toolbar-icon-btn primary mobile-fab" onClick={addRow} title="ردیف جدید">
+            <button type="button" className="toolbar-icon-btn primary mobile-fab" style={{ padding: 3 }} onClick={addRow} title="ردیف جدید">
               <PlusIcon />
             </button>
           </div>

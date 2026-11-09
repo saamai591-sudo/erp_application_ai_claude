@@ -42,6 +42,8 @@ export interface StockExcludeOptions {
   excludeInventoryCountingShortageId?: number;
   excludeStoreSaleIssueId?: number;
   excludeStoreSaleReturnId?: number;
+  excludeTempReceiptId?: number;
+  excludeTempReceiptReturnId?: number;
   /** فروش فروشگاهیِ در حال ویرایش (تعداد فروش‌های «تحویل‌نشده» از موجودی کم می‌شود) */
   excludeStoreSaleId?: number;
 }
@@ -84,6 +86,9 @@ export const SIGNED_TYPES: SignedTypeRule[] = [
   { documentType: "SUPPLIER_RETURN", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeSupplierReturnId" },
   { documentType: "FIXED_ASSET_ISSUE", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeFixedAssetIssueId" },
   { documentType: "INVENTORY_COUNTING_SHORTAGE", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeInventoryCountingShortageId" },
+  // رسید موقت (انبار قرنطینه): فقط تعدادی؛ تبدیل به رسید قطعی در conversionQuery پایین از همین انبار کم می‌شود
+  { documentType: "TEMP_RECEIPT", sign: 1, warehouseField: "warehouseId", excludeKey: "excludeTempReceiptId" },
+  { documentType: "TEMP_RECEIPT_RETURN", sign: -1, warehouseField: "warehouseId", excludeKey: "excludeTempReceiptReturnId" },
 ];
 
 function sum(rows: { quantity: any }[]): number {
@@ -144,7 +149,23 @@ export async function computeStockAsOf(
     })
     .then((rows) => -sum(rows));
 
-  const parts = await Promise.all([...signedQueries, adjustmentQuery, storeSaleQuery]);
+  // رسید انبار خرید با مبنای رسید موقت: مقدار از انبار رسید موقتِ مبنا کم می‌شود (در انبار خودش +۱ شده است)
+  const conversionQuery = db.inventoryDocumentLine
+    .findMany({
+      where: {
+        goodsItemId,
+        sourceTempReceiptLine: { document: { warehouseId } },
+        document: {
+          documentType: "WAREHOUSE_RECEIPT",
+          date: { lte: asOfDate },
+          ...(opts.excludeWarehouseReceiptId ? { NOT: { id: opts.excludeWarehouseReceiptId } } : {}),
+        },
+      },
+      select: { quantity: true },
+    })
+    .then((rows) => -sum(rows));
+
+  const parts = await Promise.all([...signedQueries, adjustmentQuery, storeSaleQuery, conversionQuery]);
   return parts.reduce((s, p) => s + p, 0);
 }
 

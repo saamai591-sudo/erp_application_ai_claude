@@ -26,14 +26,11 @@
 <body>
 <div class="box">
   <h1>اتصال به سرور ERP</h1>
-  <p class="sub">آدرس سامانه و توکن عامل را وارد کنید. توکن در ERP: مدیریت خزانه › تنظیمات › «عامل محلی» ← عامل جدید ساخته می‌شود (برای هر صندوق یک عامل جدا).</p>
+  <p class="sub">فقط آدرس سامانه را وارد کنید. کارتخوان‌ها (مثل سداد) و چاپگرها مستقیم از همین برنامه کار می‌کنند و توکن لازم نیست.</p>
 
   <label for="appUrl">آدرس سامانه</label>
   <input id="appUrl" type="text" placeholder="https://erp.example.ir" />
   <div class="hint">همان آدرسی که در مرورگر باز می‌کردید.</div>
-
-  <label for="token">توکن عامل</label>
-  <input id="token" type="password" placeholder="توکن را از ERP کپی کنید" autocomplete="off" />
 
   <div class="chk"><input id="fullscreen" type="checkbox" /><label for="fullscreen" style="margin:0;font-weight:normal">اجرای تمام‌صفحه (F11 برای تغییر)</label></div>
 
@@ -56,9 +53,8 @@
   let hadConfig = false;
   (async () => {
     const c = await pos.getConfig();
-    hadConfig = !!(c.appUrl && c.token);
+    hadConfig = !!c.appUrl;
     $("appUrl").value = c.appUrl || "";
-    $("token").value = c.token || "";
     $("apiUrl").value = c.apiUrl || "";
     $("fullscreen").checked = !!c.fullscreen;
     if (c.apiUrl) $("apiRow").style.display = "block";
@@ -70,9 +66,7 @@
     $("save").disabled = true;
     try {
       let appUrl = $("appUrl").value.trim().replace(/\/+$/, "");
-      const token = $("token").value.trim();
       if (!/^https?:\/\//i.test(appUrl)) return msg("err", "آدرس باید با http:// یا https:// شروع شود.");
-      if (token.length < 16 || /\s/.test(token)) return msg("err", "توکن معتبر نیست؛ آن را دقیقاً از ERP کپی کنید.");
       msg("info", "در حال بررسی آدرس سامانه...");
       let apiUrl = $("apiRow").style.display === "block" ? $("apiUrl").value.trim().replace(/\/+$/, "") : "";
       if (!apiUrl) {
@@ -81,17 +75,10 @@
         apiUrl = p.apiUrl;
         $("apiUrl").value = apiUrl;
       }
-      msg("info", "در حال اتصال عامل (بررسی توکن)...");
-      const r = await pos.save({ appUrl, apiUrl, token, fullscreen: $("fullscreen").checked });
-      if (r.online) {
-        msg("ok", "وصل شد ✔ عامل در ERP «آنلاین» است. برای ادامه روی «ورود به برنامه» بزنید.");
-        $("enter").style.display = "";
-        $("cancel").style.display = "none";
-      } else {
-        $("apiRow").style.display = "block";
-        $("enter").style.display = "";
-        msg("err", "تنظیمات ذخیره شد ولی عامل وصل نشد: " + (r.error || "پاسخی از سرور نیامد") + " — آدرس یا توکن را بررسی کنید، یا با «ورود به برنامه» ادامه دهید.");
-      }
+      const r = await pos.save({ appUrl, apiUrl, fullscreen: $("fullscreen").checked });
+      msg("ok", "ذخیره شد ✔ برای ادامه روی «ورود به برنامه» بزنید.");
+      $("enter").style.display = "";
+      $("cancel").style.display = "none";
     } catch (e) {
       msg("err", String(e.message || e));
     } finally {

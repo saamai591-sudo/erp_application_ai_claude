@@ -10,6 +10,13 @@ import { AuthedRequest } from "../middleware/auth";
 
 const ACCOUNT_REVIEW = findFormPrefix("account-review");
 const OLAP_REPORTS = findFormPrefix("olap-reports");
+const FX_REVIEW = findFormPrefix("fx-account-review");
+
+// «مرور حسابهای ارزی» همان endpointهای مرور حسابها با پارامتر fx=1 است (گروه‌بندی به تفکیک ارز، مقادیر ارزی)؛ دسترسی آن فرم جداست
+const reviewAccess: import("express").RequestHandler = (req, res, next) => can((req.query as any).fx === "1" ? `${FX_REVIEW}.view` : `${ACCOUNT_REVIEW}.view`)(req, res, next);
+
+type FxSum = { d: number; c: number; bd: number; bc: number };
+const emptyFx = (): FxSum => ({ d: 0, c: 0, bd: 0, bc: 0 });
 
 const router = Router();
 
@@ -149,8 +156,8 @@ function buildLineWhere(detail1Codes: string[], detail2Codes: string[], detail3C
   return where;
 }
 
-router.get("/trial-balance", can(`${ACCOUNT_REVIEW}.view`), async (req, res) => {
-  const q = req.query as any as { levelOrder: string; parentIds?: string; descendantIds?: string; detail1Codes?: string; detail2Codes?: string; detail3Codes?: string } & CommonFilters;
+router.get("/trial-balance", reviewAccess, async (req, res) => {
+  const q = req.query as any as { fx?: string; currencyIds?: string; levelOrder: string; parentIds?: string; descendantIds?: string; detail1Codes?: string; detail2Codes?: string; detail3Codes?: string } & CommonFilters;
   if (!q.levelOrder) return res.status(400).json({ error: "سطح گزارشگری مشخص نشده است" });
 
   const level = await prisma.reportingLevel.findFirst({ where: { order: Number(q.levelOrder) } });
@@ -202,11 +209,62 @@ router.get("/trial-balance", can(`${ACCOUNT_REVIEW}.view`), async (req, res) => 
   // در «یک» پرس‌وجوی groupBy گرفته و در حافظه روی هر حسابِ سطح جمع می‌شود. نتیجه با روش قبلی یکسان است.
   const leafIdsByAccount = new Map<number, number[]>();
   const allLeafIds = new Set<number>();
+  const selectedScope = descendantIds.length ? collectAllDescendantsMulti(descendantIds, allAccounts) : null;
   for (const acc of rowsAtLevel) {
-    const leaves = leavesOf(acc.id);
+    // وقتی در تب‌های عمیق‌تر (مثلاً معین) ردیف‌هایی انتخاب شده، مانده‌ی هر حساب فقط از برگ‌های زیرمجموعه‌ی همان انتخاب‌ها جمع می‌شود
+    const leaves = leavesOf(acc.id).filter((l) => !selectedScope || selectedScope.has(l));
     leafIdsByAccount.set(acc.id, leaves);
     leaves.forEach((l) => allLeafIds.add(l));
   }
+  // نسخه‌ی ارزی: به‌ازای هر (حساب، ارز) یک ردیف؛ مبالغ اصلی به ارزِ همان خط و معادل پایه جدا
+  if (q.fx === "1") {
+    const currencyIds = parseIdList(q.currencyIds);
+    const fxWhere: any = { accountId: { in: Array.from(allLeafIds) }, ...lineWhere, journalEntry: entryWhere };
+    if (currencyIds.length) fxWhere.currencyId = { in: currencyIds };
+    const grouped = allLeafIds.size
+      ? await prisma.journalEntryLine.groupBy({ by: ["accountId", "currencyId"], where: fxWhere, _sum: { debit: true, credit: true, baseDebit: true, baseCredit: true } })
+      : [];
+    const perLeaf = new Map<number, Map<number, FxSum>>();
+    for (const g of grouped) {
+      const m = perLeaf.get(g.accountId) ?? new Map<number, FxSum>();
+      m.set(g.currencyId, { d: Number(g._sum.debit || 0), c: Number(g._sum.credit || 0), bd: Number(g._sum.baseDebit || 0), bc: Number(g._sum.baseCredit || 0) });
+      perLeaf.set(g.accountId, m);
+    }
+    const currencyTitles = new Map((await prisma.currency.findMany({ select: { id: true, title: true } })).map((c) => [c.id, c.title]));
+    const out: any[] = [];
+    for (const acc of rowsAtLevel) {
+      const agg = new Map<number, FxSum>();
+      for (const leafId of leafIdsByAccount.get(acc.id) ?? []) {
+        for (const [cid, v] of perLeaf.get(leafId) ?? []) {
+          const a = agg.get(cid) ?? emptyFx();
+          a.d += v.d; a.c += v.c; a.bd += v.bd; a.bc += v.bc;
+          agg.set(cid, a);
+        }
+      }
+      for (const [cid, a] of agg) {
+        if (a.d === 0 && a.c === 0) continue;
+        const diff = a.d - a.c;
+        out.push({
+          id: `${acc.id}|${cid}`,
+          accountId: acc.id,
+          currencyId: cid,
+          currencyTitle: currencyTitles.get(cid) ?? String(cid),
+          code: computeFullAccountCode(acc.id, byId),
+          title: acc.title,
+          hasChildren: childrenMap.has(acc.id),
+          totalDebit: a.d,
+          totalCredit: a.c,
+          balance: Math.abs(diff),
+          balanceNature: diff >= 0 ? "DEBIT" : "CREDIT",
+          totalBaseDebit: a.bd,
+          totalBaseCredit: a.bc,
+        });
+      }
+    }
+    out.sort((x, y) => String(x.code).localeCompare(String(y.code)) || String(x.currencyTitle).localeCompare(String(y.currencyTitle)));
+    return res.json(out);
+  }
+
   const sums = new Map<number, { debit: number; credit: number }>();
   if (allLeafIds.size > 0) {
     const grouped = await prisma.journalEntryLine.groupBy({
@@ -249,14 +307,18 @@ router.get("/trial-balance", can(`${ACCOUNT_REVIEW}.view`), async (req, res) => 
 // انتخابگر slot) را تغذیه می‌کند؛ چون یک route نمی‌تواند دو کلید متفاوت را هم‌زمان به can() بدهد،
 // بررسی مجاز بودن این‌جا به‌صورت دستی (اجتماع دو دسترسی) انجام می‌شود.
 router.get("/detail-summary", async (req: AuthedRequest, res) => {
-  const [canAccountReview, canOlapReports] = await Promise.all([
+  const isFx = (req.query as any).fx === "1";
+  const [canAccountReview, canOlapReports, canFxReview] = await Promise.all([
     userHasAction(req.user!.id, `${ACCOUNT_REVIEW}.view`),
     userHasAction(req.user!.id, `${OLAP_REPORTS}.view`),
+    isFx ? userHasAction(req.user!.id, `${FX_REVIEW}.view`) : Promise.resolve(false),
   ]);
-  if (!canAccountReview && !canOlapReports) {
+  if (isFx ? !canFxReview : !canAccountReview && !canOlapReports) {
     return res.status(403).json({ error: "دسترسی لازم برای این عملیات را ندارید" });
   }
   const q = req.query as any as {
+    fx?: string;
+    currencyIds?: string;
     slot: string;
     parentIds?: string;
     detail1Codes?: string;
@@ -284,14 +346,18 @@ router.get("/detail-summary", async (req: AuthedRequest, res) => {
 
   const slotField = `detail${slot}Code`;
   lineWhere[slotField] = { not: null };
+  const fx = q.fx === "1";
+  const fxCurrencyIds = parseIdList(q.currencyIds);
+  if (fx && fxCurrencyIds.length) lineWhere.currencyId = { in: fxCurrencyIds };
 
   const entryWhere = buildEntryWhere(q);
 
   const grouped: any[] = await (prisma.journalEntryLine as any).groupBy({
-    by: [slotField],
+    by: fx ? [slotField, "currencyId"] : [slotField],
     where: { ...lineWhere, journalEntry: entryWhere },
-    _sum: { baseDebit: true, baseCredit: true },
+    _sum: { baseDebit: true, baseCredit: true, ...(fx ? { debit: true, credit: true } : {}) },
   });
+  const fxCurrencyTitles = fx ? new Map((await prisma.currency.findMany({ select: { id: true, title: true } })).map((c) => [c.id, c.title])) : new Map<number, string>();
 
   const codes = grouped.map((g) => g[slotField]).filter(Boolean);
   const titles = await resolveDetailTitles(codes);
@@ -304,11 +370,13 @@ router.get("/detail-summary", async (req: AuthedRequest, res) => {
   const results = grouped
     .map((g) => {
       const code = g[slotField] as string;
-      const totalDebit = Number(g._sum.baseDebit || 0);
-      const totalCredit = Number(g._sum.baseCredit || 0);
+      // نسخه‌ی ارزی: مبالغ اصلی به ارزِ خط (جمع پایه جدا در totalBase*)؛ شناسه‌ی ردیف = «کد|ارز»
+      const totalDebit = Number(fx ? g._sum.debit || 0 : g._sum.baseDebit || 0);
+      const totalCredit = Number(fx ? g._sum.credit || 0 : g._sum.baseCredit || 0);
       const diff = totalDebit - totalCredit;
       return {
-        id: code,
+        id: fx ? `${code}|${g.currencyId}` : code,
+        ...(fx ? { currencyId: g.currencyId as number, currencyTitle: fxCurrencyTitles.get(g.currencyId) ?? String(g.currencyId), totalBaseDebit: Number(g._sum.baseDebit || 0), totalBaseCredit: Number(g._sum.baseCredit || 0) } : {}),
         code,
         title: titles[code] || code,
         detailTypeTitle: typeTitles.get(code) ?? "",
@@ -331,6 +399,9 @@ router.get("/detail-summary", async (req: AuthedRequest, res) => {
     code: { type: "string", get: (r) => r.code },
     title: { type: "string", get: (r) => r.title },
     detailTypeTitle: { type: "string", get: (r) => r.detailTypeTitle },
+    currencyTitle: { type: "string", get: (r) => (r as any).currencyTitle ?? "" },
+    totalBaseDebit: { type: "number", get: (r) => (r as any).totalBaseDebit ?? 0 },
+    totalBaseCredit: { type: "number", get: (r) => (r as any).totalBaseCredit ?? 0 },
     totalDebit: { type: "number", get: (r) => r.totalDebit },
     totalCredit: { type: "number", get: (r) => r.totalCredit },
     balanceDebit: { type: "number", get: (r) => r.balanceDebit },
@@ -354,8 +425,10 @@ router.get("/detail-summary", async (req: AuthedRequest, res) => {
   res.json({ rows, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
 });
 
-router.get("/ledger", can(`${ACCOUNT_REVIEW}.view`), async (req, res) => {
+router.get("/ledger", reviewAccess, async (req, res) => {
   const q = req.query as any as {
+    fx?: string;
+    currencyIds?: string;
     parentIds?: string;
     detail1Codes?: string;
     detail2Codes?: string;
@@ -378,6 +451,12 @@ router.get("/ledger", can(`${ACCOUNT_REVIEW}.view`), async (req, res) => {
   const detail3Codes = parseCodeList(q.detail3Codes);
   const lineWhere: any = buildLineWhere(detail1Codes, detail2Codes, detail3Codes);
   if (accountScope) lineWhere.accountId = { in: accountScope };
+  // نسخه‌ی ارزی: مبالغ به ارزِ خط، مانده‌ی تجمعی جدا برای هر ارز، و فیلتر ارزهای ارث‌رسیده از تب‌های قبلی
+  const fx = q.fx === "1";
+  const debitField = fx ? "debit" : "baseDebit";
+  const creditField = fx ? "credit" : "baseCredit";
+  const fxCurrencyIds = parseIdList(q.currencyIds);
+  if (fx && fxCurrencyIds.length) lineWhere.currencyId = { in: fxCurrencyIds };
 
   const entryWhere = buildEntryWhere(q);
 
@@ -435,11 +514,15 @@ router.get("/ledger", can(`${ACCOUNT_REVIEW}.view`), async (req, res) => {
   }
   if (colFilters.debit) {
     const w = numberWhere(colFilters.debit);
-    if (w) lineAnd.push({ baseDebit: w });
+    if (w) lineAnd.push({ [debitField]: w });
   }
   if (colFilters.credit) {
     const w = numberWhere(colFilters.credit);
-    if (w) lineAnd.push({ baseCredit: w });
+    if (w) lineAnd.push({ [creditField]: w });
+  }
+  if (fx && colFilters.currencyTitle) {
+    const w = stringWhere(colFilters.currencyTitle);
+    if (w) lineAnd.push({ currency: { title: w } });
   }
 
   const where = { AND: [...lineAnd, { journalEntry: { AND: entryAnd } }] };
@@ -457,8 +540,9 @@ router.get("/ledger", can(`${ACCOUNT_REVIEW}.view`), async (req, res) => {
       issuingSystem: { journalEntry: { issuingSystem: dir } },
       status: { journalEntry: { status: dir } },
       description: { description: dir },
-      debit: { baseDebit: dir },
-      credit: { baseCredit: dir },
+      debit: { [debitField]: dir },
+      credit: { [creditField]: dir },
+      currencyTitle: { currency: { title: dir } },
     } as Record<string, any>)[field];
   // مرتب‌سازی چندستونه (پارامتر sorts) یا تک‌ستونه‌ی قبلی؛ rowOrder همیشه آخرین کلید است تا ترتیب ردیف‌های یک سند پایدار بماند
   const ledgerSortOrder = parseSorts(q.sorts, q.sortField, q.sortDir).map((k) => orderFor(k.field, k.dir)).filter(Boolean);
@@ -471,20 +555,35 @@ router.get("/ledger", can(`${ACCOUNT_REVIEW}.view`), async (req, res) => {
   const skip = (page - 1) * pageSize;
 
   // پاس سبک (فقط دو ستون عددی) روی همه‌ی ردیف‌های منطبق، برای محاسبه‌ی مانده‌ی تراکمی درست تا قبل از این صفحه
-  const allAmounts = await prisma.journalEntryLine.findMany({ where, select: { baseDebit: true, baseCredit: true }, orderBy });
+  const allAmounts = await prisma.journalEntryLine.findMany({ where, select: { baseDebit: true, baseCredit: true, debit: true, credit: true, currencyId: true }, orderBy });
   const total = allAmounts.length;
+  // مانده‌ی تجمعی: نسخه‌ی ارزی برای هر ارز جدا حساب می‌شود (جمع ارزهای مختلف بی‌معناست)
+  const cumByCurrency = new Map<number, number>();
   let cum = 0;
   const cumulative: number[] = allAmounts.map((l: any) => {
+    if (fx) {
+      const v = (cumByCurrency.get(l.currencyId) ?? 0) + Number(l.debit) - Number(l.credit);
+      cumByCurrency.set(l.currencyId, v);
+      return v;
+    }
     cum += Number(l.baseDebit) - Number(l.baseCredit);
     return cum;
   });
   const startingBalance = skip > 0 ? cumulative[skip - 1] ?? 0 : 0;
+  // شروعِ هر ارز در این صفحه = مانده‌ی تجمعی آن ارز تا قبل از ردیف اول صفحه
+  const startByCurrency = new Map<number, number>();
+  if (fx && skip > 0) {
+    const seen = new Map<number, number>();
+    allAmounts.slice(0, skip).forEach((l: any, i: number) => seen.set(l.currencyId, cumulative[i]));
+    for (const [cid, v] of seen) startByCurrency.set(cid, v);
+  }
 
   const lines = await prisma.journalEntryLine.findMany({
     where,
     include: {
       journalEntry: { include: { documentType: true } },
       account: true,
+      currency: { select: { title: true } },
     },
     orderBy,
     skip,
@@ -495,11 +594,14 @@ router.get("/ledger", can(`${ACCOUNT_REVIEW}.view`), async (req, res) => {
   const titles = await resolveDetailTitles(codes);
 
   let running = startingBalance;
+  const runningByCurrency = new Map<number, number>(startByCurrency);
   const rows = lines.map((l: any) => {
-    const debit = Number(l.baseDebit);
-    const credit = Number(l.baseCredit);
-    running += debit - credit;
+    const debit = Number(fx ? l.debit : l.baseDebit);
+    const credit = Number(fx ? l.credit : l.baseCredit);
+    if (fx) running = (runningByCurrency.get(l.currencyId) ?? 0) + debit - credit, runningByCurrency.set(l.currencyId, running);
+    else running += debit - credit;
     return {
+      ...(fx ? { currencyTitle: l.currency?.title ?? "", baseDebit: Number(l.baseDebit), baseCredit: Number(l.baseCredit) } : {}),
       id: l.id,
       journalEntryId: l.journalEntryId,
       number: l.journalEntry.number,

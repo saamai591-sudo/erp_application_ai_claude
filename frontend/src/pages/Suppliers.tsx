@@ -33,11 +33,15 @@ interface PurchaseGroupOption {
   isActive: boolean;
 }
 
+interface GroupOption { id: number; code: number; title: string; isActive: boolean }
+
 interface SupplierRow {
   id: number;
   code: number;
   partyId: number;
   party: PartyOption;
+  classGroupId: number | null;
+  classGroupTitle: string | null;
   isActive: boolean;
   hasTransactions: boolean;
   groupIds: number[];
@@ -91,6 +95,7 @@ function SupplierList() {
         columns={[
           { header: "کد", render: (r) => toFaDigits(String(r.code)), width: "80px", filterType: "number", filterValue: (r) => r.code },
           { header: "طرف حساب", render: (r) => partyDisplayName(r.party), filterType: "string", filterValue: (r) => partyDisplayName(r.party) },
+          { header: "گروه تامین‌کننده", render: (r) => r.classGroupTitle || "—", filterType: "string", filterValue: (r) => r.classGroupTitle || "بدون گروه" },
           { header: "گروه‌های خرید", render: (r) => (r.groups.length ? r.groups.map((g) => g.title).join("، ") : "—") },
           { header: "فعال", render: (r) => (r.isActive ? "بله" : "خیر"), width: "80px" },
         ]}
@@ -106,7 +111,7 @@ interface GroupRowState {
   purchaseGroupId: string;
 }
 
-const DEFAULT_FORM = { code: "", partyId: "", isActive: true };
+const DEFAULT_FORM = { code: "", partyId: "", classGroupId: "", isActive: true };
 
 function SupplierForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
@@ -114,6 +119,7 @@ function SupplierForm({ editId }: { editId?: number }) {
   const cacheKey = `form:${location.pathname}:form`;
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [allGroups, setAllGroups] = useState<PurchaseGroupOption[]>([]);
+  const [classGroups, setClassGroups] = useState<GroupOption[]>([]);
   const [hasTransactions, setHasTransactions] = useState(false);
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_FORM);
   const [groupRows, setGroupRows] = usePersistedState<GroupRowState[]>(`${cacheKey}:groups`, []);
@@ -124,6 +130,7 @@ function SupplierForm({ editId }: { editId?: number }) {
   useEffect(() => {
     api.get("/parties").then((p: PartyOption[]) => setParties(p.filter((x) => x.isActive))).catch(() => {});
     api.get("/purchase-groups").then((g: PurchaseGroupOption[]) => setAllGroups(g)).catch(() => {});
+    api.get("/supplier-groups").then(setClassGroups).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -140,7 +147,7 @@ function SupplierForm({ editId }: { editId?: number }) {
       const found = items.find((i) => i.id === editId);
       if (found) {
         setHasTransactions(found.hasTransactions);
-        setForm({ code: String(found.code), partyId: String(found.partyId), isActive: found.isActive });
+        setForm({ code: String(found.code), partyId: String(found.partyId), classGroupId: found.classGroupId ? String(found.classGroupId) : "", isActive: found.isActive });
         setGroupRows(found.groupIds.map((id) => ({ purchaseGroupId: String(id) })));
       }
       setLoaded(true);
@@ -166,7 +173,7 @@ function SupplierForm({ editId }: { editId?: number }) {
     setError(null);
     if (!form.partyId) return setError("طرف حساب الزامی است");
     const groupIds = groupRows.filter((r) => r.purchaseGroupId).map((r) => Number(r.purchaseGroupId));
-    const body = { code: form.code ? Number(form.code) : undefined, partyId: Number(form.partyId), isActive: form.isActive, groupIds };
+    const body = { code: form.code ? Number(form.code) : undefined, partyId: Number(form.partyId), isActive: form.isActive, classGroupId: form.classGroupId ? Number(form.classGroupId) : null, groupIds };
     try {
       if (editId) {
         await api.put(`/suppliers/${editId}`, body);
@@ -226,6 +233,13 @@ function SupplierForm({ editId }: { editId?: number }) {
               ]}
               onSelect={(p) => setForm({ ...form, partyId: String(p.id) })}
             />
+          </div>
+          <div className="form-field">
+            <label>گروه تامین‌کننده <FieldHint label="گروه تامین‌کننده" text="طبقه‌بندی تامین‌کننده برای گزارش مانده به تفکیک گروه؛ جدا از «گروه‌های خرید» (که ساختار خرید با کارشناس و کالاست). فهرست در تنظیمات زنجیره تامین تعریف می‌شود" /></label>
+            <select value={(form as any).classGroupId ?? ""} onChange={(e) => setForm({ ...form, classGroupId: e.target.value } as any)}>
+              <option value="">بدون گروه</option>
+              {classGroups.filter((g) => g.isActive || String(g.id) === (form as any).classGroupId).map((g) => <option key={g.id} value={g.id}>{toFaDigits(String(g.code))} — {g.title}</option>)}
+            </select>
           </div>
           <div className="form-field">
             <label className="checkbox-row">

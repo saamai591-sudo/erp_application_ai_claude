@@ -1,3 +1,4 @@
+import { PAYMENT_DOC_INCLUDE, paymentLineDoc } from "../services/settlementDocRef";
 import { EffectiveSettings } from "../services/goodsAccountingSettingService";
 import { DetailRuleIndex, applyRule } from "../services/detailRuleService";
 import { Router } from "express";
@@ -622,6 +623,9 @@ router.post("/service-purchase-invoices/:id/unapprove", can(`${FORM}.unapprove`)
   if (invoice.journalEntryId) {
     return res.status(400).json({ error: "برای این فاکتور سند حسابداری صادر شده؛ ابتدا سند حسابداری را حذف کنید" });
   }
+  // فاکتوری که یکی از ردیف‌هایش مبنای یک «بیمه‌نامه‌ی دارایی» است، از تایید برنمی‌گردد (مبلغ بیمه‌نامه از همین ردیف می‌آید)
+  const policy = await prisma.assetInsurancePolicy.findFirst({ where: { costLine: { servicePurchaseInvoiceId: id } }, select: { number: true } });
+  if (policy) return res.status(400).json({ error: `یکی از ردیف‌های این فاکتور مبنای بیمه‌نامه‌ی دارایی شماره ${policy.number} است؛ ابتدا آن بیمه‌نامه را حذف کنید` });
   // فاکتوری که سند مبنای یک پرداخت (اعلامیه پرداخت / پرداخت تنخواه / خلاصه‌ی تنخواه) است، از تایید برنمی‌گردد؛ پرداخت فقط برای فاکتور تاییدشده معتبر است
   const [paymentRows, pettyRows, pettySummaryRows] = await Promise.all([
     prisma.paymentSettlementLine.count({ where: { servicePurchaseInvoiceId: id } }),
@@ -665,7 +669,8 @@ router.post("/service-purchase-invoices/:id/unapprove", can(`${FORM}.unapprove`)
 // بستانکار «پرداختنی خرید» تجمیع در سطح معین است (نه یک خط به ازای هر ردیف فاکتور) — دقیقاً مثل کالا.
 // =========================================================================
 
-router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournalEntry`), async (req, res) => {
+// منطق صدور سند در یک تابع نام‌دار تا کار زمان‌بندی‌شده‌ی «صدور سند حسابداری» (jobs/issuers) دقیقاً همین را صدا بزند
+export async function issueServicePurchaseInvoiceJournalHandler(req: any, res: any) {
   const id = Number(req.params.id);
   const invoice = await prisma.servicePurchaseInvoice.findUnique({
     where: { id },
@@ -895,7 +900,7 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
     const advanceAdjustLines: IssueLineInput[] = [];
     const serviceAdvanceAllocations = await prisma.servicePurchaseInvoiceAdvanceAllocation.findMany({
       where: { servicePurchaseInvoiceId: id },
-      include: { paymentSettlementLine: { include: { payment: true, paymentType: true } } },
+      include: { paymentSettlementLine: { include: { ...PAYMENT_DOC_INCLUDE, paymentType: true } } },
       orderBy: { id: "asc" },
     });
     if (serviceAdvanceAllocations.length > 0 && errors.length === 0) {
@@ -913,7 +918,7 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
         const natureTitle = isVatAdv ? "پیش‌پرداخت ارزش افزوده" : "پیش‌پرداخت";
         const resolved = await resolvePaymentSubjectAccount(l.paymentType, {});
         if (resolved.error || !resolved.account) {
-          errors.push(`برای نوع پرداخت «${l.paymentType.title}» (${natureTitle} پرداخت شماره ${l.payment.number}) معینِ ${natureTitle} تعریف نشده است`);
+          errors.push(`برای نوع پرداخت «${l.paymentType.title}» (${natureTitle} پرداخت شماره ${paymentLineDoc(l).number}) معینِ ${natureTitle} تعریف نشده است`);
           continue;
         }
         const account = resolved.account;
@@ -928,7 +933,7 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
           vHist += rowHist;
         }
         const details = resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode);
-        const advDescription = `بابت تخصیص ${natureTitle} پرداخت شماره ${l.payment.number} به فاکتور خرید خدمات ${invoice.number} ${partyTitle(invoice.party) || ""}`.trim();
+        const advDescription = `بابت تخصیص ${natureTitle} پرداخت شماره ${paymentLineDoc(l).number} به فاکتور خرید خدمات ${invoice.number} ${partyTitle(invoice.party) || ""}`.trim();
         if (account.isCurrency && !invIsBase) {
           advanceCreditLines.push({ accountId: account.id, ...details, currencyId: invoice.currencyId, debit: 0, credit: amount, fxRate: rowRate, description: advDescription });
         } else {
@@ -1080,7 +1085,8 @@ router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.i
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در صدور سند حسابداری" });
   }
-});
+}
+router.post("/service-purchase-invoices/:id/issue-journal-entry", can(`${FORM}.issueJournalEntry`), issueServicePurchaseInvoiceJournalHandler);
 
 router.delete("/service-purchase-invoices/:id/journal-entry", can(`${FORM}.revertJournalEntry`), async (req, res) => {
   const id = Number(req.params.id);

@@ -1,9 +1,10 @@
 import { prisma } from "../lib/prisma";
+import { getRequestContext } from "../lib/requestContext";
 import { assertLineHasAmount, assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { toBaseCurrencyAmount } from "../utils/currencyConversion";
 import { assertLineAmountDecimals } from "../utils/amountDecimals";
 
-export type IssuingSystemType = "PAYROLL" | "ACCOUNTING" | "ACCOUNTING_EXCEL_IMPORT" | "ACCOUNT_CLOSING" | "OPENING_CLOSING" | "WAREHOUSE" | "PURCHASE" | "SALES" | "TREASURY";
+export type IssuingSystemType = "PAYROLL" | "ACCOUNTING" | "ACCOUNTING_EXCEL_IMPORT" | "ACCOUNT_CLOSING" | "OPENING_CLOSING" | "WAREHOUSE" | "PURCHASE" | "SALES" | "TREASURY" | "FIXED_ASSET";
 
 export interface IssueLineInput {
   accountId: number;
@@ -60,6 +61,14 @@ export interface IssueJournalEntryResult {
 }
 
 export const JOURNAL_ENTRY_ISSUED_MESSAGE = "سند با موفقیت صادر شد";
+
+/** سیگنال «صدور آزمایشی»: همه‌ی اعتبارسنجی‌های صدور سند گذشته و سند آماده‌ی نوشتن بود، ولی چیزی نوشته نشد (فقط در زمینه‌ی dryRunIssue) */
+export const ISSUE_DRY_RUN_MESSAGE = "صدور آزمایشی: سند معتبر است و صادر می‌شد";
+export class IssueDryRunSignal extends Error {
+  constructor() {
+    super(ISSUE_DRY_RUN_MESSAGE);
+  }
+}
 
 /**
  * نقطه‌ی مرکزی و یکتای صدور سند حسابداری در کل سیستم.
@@ -157,6 +166,8 @@ export async function issueJournalEntry(opts: IssueJournalEntryOptions): Promise
       `سند بالانس نیست. جمع بدهکار: ${totalDebit.toLocaleString("fa-IR")} — جمع بستانکار: ${totalCredit.toLocaleString("fa-IR")}`
     );
   }
+
+  if (getRequestContext()?.dryRunIssue) throw new IssueDryRunSignal();
 
   const lastNumber = await prisma.journalEntry.findFirst({
     where: { fiscalPeriodId: fiscalPeriod.id },

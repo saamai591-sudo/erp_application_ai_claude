@@ -32,6 +32,7 @@ import { findIssuingDocType } from "./documentTypeService";
 const RECEIPT_ISSUED_TOLERANCE = 0.0001;
 
 function partyDisplayName(p: any): string {
+  if (!p) return "";
   return p.category === "LEGAL" ? p.name || "" : `${p.firstName || ""} ${p.lastName || ""}`.trim();
 }
 
@@ -64,10 +65,10 @@ const RECEIPT_PLAN_INCLUDE = {
  * ردیف‌های حسابداریِ موردانتظار یک رسید (بدون تفصیل): هر ردیف ابزار ← INSTRUMENT، هر ردیف موضوع ← SUBJECT، و برای هر ردیف موضوعِ دارای اختلاف
  * ارزش ریالی ← FX. خطاها (تنظیم نبودن معین و ...) در errors برمی‌گردند.
  */
-export async function buildReceiptPlan(receipt: any, treasurySettings: EffectiveTreasurySettings, goodsSettings: EffectiveSettings<any>) {
+export async function buildReceiptPlan(receipt: any, treasurySettings: EffectiveTreasurySettings, goodsSettings: EffectiveSettings<any>, descriptionOverride?: string) {
   const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
   if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
-  const description = `بابت رسید دریافت ${receipt.number} ${formatJalaliDateForMessage(receipt.date)} ${partyDisplayName(receipt.party)}`.trim();
+  const description = descriptionOverride ?? `بابت رسید دریافت ${receipt.number} ${formatJalaliDateForMessage(receipt.date)} ${partyDisplayName(receipt.party)}`.trim();
   const errors: string[] = [];
   const plan: PlannedReceiptLine[] = [];
 
@@ -183,8 +184,21 @@ export async function buildReceiptPlan(receipt: any, treasurySettings: Effective
   return { plan, errors, description };
 }
 
-async function loadReceiptForPlan(receiptId: number) {
-  const receipt = await prisma.receipt.findUnique({ where: { id: receiptId }, include: RECEIPT_PLAN_INCLUDE });
+// مرجع سندِ دریافت: یک رسید (شناسه) یا بخش دریافتِ یک «اعلامیه بدهکار بستانکار» ({ partySettlementId }) که ردیف‌هایش مستقیم به هدر وصل است
+export type ReceiptRef = number | { partySettlementId: number };
+type RScope = { receiptId: number } | { partySettlementId: number };
+const toRScope = (r: ReceiptRef): RScope => (typeof r === "number" ? { receiptId: r } : r);
+const rOwner = (sc: RScope) => ("receiptId" in sc ? { receiptId: sc.receiptId } : { partySettlementId: sc.partySettlementId });
+
+// برای اعلامیه بدهکار بستانکار یک «سند مجازی» بدون ابزار ساخته می‌شود تا همان buildReceiptPlan (فقط ردیف‌های موضوع/تسعیر) کار کند
+async function loadReceiptForPlan(sc: RScope): Promise<any> {
+  if ("partySettlementId" in sc) {
+    const ps = await prisma.partySettlement.findUnique({ where: { id: sc.partySettlementId } });
+    if (!ps) throw new Error("اعلامیه یافت نشد");
+    const settlementLines = await prisma.receiptSettlementLine.findMany({ where: { partySettlementId: ps.id }, include: RECEIPT_PLAN_INCLUDE.settlementLines.include, orderBy: { rowOrder: "asc" } });
+    return { id: ps.id, number: ps.number, date: ps.date, party: null, status: "APPROVED", accountingStatus: ps.accountingStatus, journalEntryId: ps.journalEntryId, instrumentLines: [], settlementLines };
+  }
+  const receipt = await prisma.receipt.findUnique({ where: { id: sc.receiptId }, include: RECEIPT_PLAN_INCLUDE });
   if (!receipt) throw new Error("سند دریافت یافت نشد");
   return receipt;
 }
@@ -234,13 +248,15 @@ async function receiptAutoDims(plan: PlannedReceiptLine[]) {
  *    سطح‌های «خودکار» با مقدار فعلی ابزار/موضوع به‌روز می‌شوند و سطح‌های «دستی» (واردشده توسط حسابدار) دست‌نخورده می‌مانند (autoSlotRefreshPatch)؛
  *  - ردیفِ حسابداریِ دیگر موردانتظار نیست (مثلاً تسعیر که حذف شد) پاک می‌شود. (حذف ردیف پدر خودش فرزند را حذف کرده است.)
  */
-export async function syncReceiptAccountingLines(receiptId: number) {
-  const receipt = await loadReceiptForPlan(receiptId);
+export async function syncReceiptAccountingLines(ref: ReceiptRef) {
+  const sc = toRScope(ref);
+  const owner = rOwner(sc);
+  const receipt = await loadReceiptForPlan(sc);
   const { treasurySettings, goodsSettings } = await loadSettingSets();
   const { plan, errors } = await buildReceiptPlan(receipt, treasurySettings, goodsSettings);
   if (errors.length > 0) throw new Error(errors.join("\n"));
 
-  const existing = await prisma.receiptAccountingLine.findMany({ where: { receiptId } });
+  const existing = await prisma.receiptAccountingLine.findMany({ where: owner });
   const keyOf = receiptKeyOf;
   const autoDims = await receiptAutoDims(plan);
   const byKey = new Map(existing.map((e) => [keyOf(e), e]));
@@ -254,7 +270,7 @@ export async function syncReceiptAccountingLines(receiptId: number) {
       const auto = autoDims.get(key)!;
       if (!cur) {
         await tx.receiptAccountingLine.create({
-          data: { receiptId, role: p.role, instrumentLineId: p.instrumentLineId ?? null, settlementLineId: p.settlementLineId ?? null, accountId: p.account.id, treasurySettingId: p.treasurySettingId ?? null, goodsSettingId: p.goodsSettingId ?? null, ...auto, ...sourcesOf(auto) },
+          data: { ...owner, role: p.role, instrumentLineId: p.instrumentLineId ?? null, settlementLineId: p.settlementLineId ?? null, accountId: p.account.id, treasurySettingId: p.treasurySettingId ?? null, goodsSettingId: p.goodsSettingId ?? null, ...auto, ...sourcesOf(auto) },
         });
       } else if (cur.accountId !== p.account.id) {
         await tx.receiptAccountingLine.update({ where: { id: cur.id }, data: { accountId: p.account.id, treasurySettingId: p.treasurySettingId ?? null, goodsSettingId: p.goodsSettingId ?? null, ...auto, ...sourcesOf(auto) } });
@@ -275,12 +291,52 @@ export async function syncReceiptAccountingLines(receiptId: number) {
   });
 }
 
-/** نمای ردیف‌های حسابداری برای صفحه: خطوط طرح + مقدار ذخیره‌شده + نوع تفصیل هر سطح معین */
-export async function getReceiptAccountingView(receiptId: number) {
-  const receipt = await loadReceiptForPlan(receiptId);
+/**
+ * «تایید حسابداری» یک سند دریافت: همگام‌سازی ردیف‌های حسابداری + ثبت وضعیت (هم‌ارز accountingApprovePayment). منطق مشترک مسیر API
+ * (POST /receipts/:id/accounting-approve) و کار زمان‌بندی‌شده‌ی «صدور سند حسابداری». پیش‌شرط‌ها را فراخواننده بررسی می‌کند.
+ */
+export async function accountingApproveReceipt(receiptId: number, userId: number | null) {
+  await syncReceiptAccountingLines(receiptId);
+  await prisma.receipt.update({ where: { id: receiptId }, data: { accountingStatus: "APPROVED", accountingApprovedAt: new Date(), accountingApprovedById: userId } });
+}
+
+/**
+ * پیش‌بینی فقط‌خواندنیِ صدور سند (هم‌ارز previewPaymentIssuance): فهرست موانع؛ خالی = اگر «تایید حسابداری» انجام شود و سند صادر شود، موفق می‌شود.
+ * معین‌ها باید پیدا شوند و هر سطح تفصیلی که معین دارد باید مقدار داشته باشد (مقدار خودکار از ابزار/موضوع، یا مقدار دستیِ ذخیره‌شده). هیچ‌چیز نمی‌نویسد.
+ */
+export async function previewReceiptIssuance(ref: ReceiptRef): Promise<string[]> {
+  const sc = toRScope(ref);
+  const receipt = await loadReceiptForPlan(sc);
   const { treasurySettings, goodsSettings } = await loadSettingSets();
   const { plan, errors } = await buildReceiptPlan(receipt, treasurySettings, goodsSettings);
-  const children = await prisma.receiptAccountingLine.findMany({ where: { receiptId } });
+  if (errors.length > 0) return errors;
+  const problems: string[] = [];
+  const children = await prisma.receiptAccountingLine.findMany({ where: rOwner(sc) });
+  const byKey = new Map(children.map((c) => [receiptKeyOf(c), c]));
+  const autoDims = await receiptAutoDims(plan);
+  for (const p of plan) {
+    const key = receiptKeyOf(p);
+    const c = byKey.get(key);
+    const auto = autoDims.get(key) ?? {};
+    // مثل sync: ردیف با همان معین ⇒ سطح خودکار از مقدار فعلی ابزار/موضوع، سطح دستی همان ذخیره‌شده؛ معین عوض شده یا ردیف نو ⇒ مقدار خودکار
+    const keep = !!c && c.accountId === p.account.id;
+    for (const n of [1, 2, 3] as const) {
+      if (!(p.account as any)[`detailType${n}Id`]) continue;
+      const autoCode = ((auto as any)[`detail${n}Code`] as string | null | undefined) ?? null;
+      const stored = keep ? ((c as any)[`detail${n}Source`] === "AUTO" ? autoCode : ((c as any)[`detail${n}Code`] as string | null) ?? null) : autoCode;
+      if (!stored) problems.push(`«${p.label}»: تفصیل سطح ${n} مقدار ندارد و باید دستی در «تایید حسابداری» وارد شود`);
+    }
+  }
+  return problems;
+}
+
+/** نمای ردیف‌های حسابداری برای صفحه: خطوط طرح + مقدار ذخیره‌شده + نوع تفصیل هر سطح معین */
+export async function getReceiptAccountingView(ref: ReceiptRef) {
+  const sc = toRScope(ref);
+  const receipt = await loadReceiptForPlan(sc);
+  const { treasurySettings, goodsSettings } = await loadSettingSets();
+  const { plan, errors } = await buildReceiptPlan(receipt, treasurySettings, goodsSettings);
+  const children = await prisma.receiptAccountingLine.findMany({ where: rOwner(sc) });
   const keyOf = (r: { role: string; instrumentLineId?: number | null; settlementLineId?: number | null }) => `${r.role}:${r.instrumentLineId ?? ""}:${r.settlementLineId ?? ""}`;
   const byKey = new Map(children.map((c) => [keyOf(c), c]));
   const typeIds = Array.from(new Set(plan.flatMap((p) => [p.account.detailType1Id, p.account.detailType2Id, p.account.detailType3Id]).filter((x): x is number => !!x)));
@@ -318,8 +374,8 @@ export async function getReceiptAccountingView(receiptId: number) {
 }
 
 /** ذخیره‌ی تفصیل‌هایی که حسابدار انتخاب کرده؛ هر کد باید از نوع تفصیلِ همان سطحِ معینِ ردیف باشد */
-export async function saveReceiptAccountingDetails(receiptId: number, rows: { id: number; detail1Code?: string | null; detail2Code?: string | null; detail3Code?: string | null }[]) {
-  const children = await prisma.receiptAccountingLine.findMany({ where: { receiptId }, include: { account: true } });
+export async function saveReceiptAccountingDetails(ref: ReceiptRef, rows: { id: number; detail1Code?: string | null; detail2Code?: string | null; detail3Code?: string | null }[]) {
+  const children = await prisma.receiptAccountingLine.findMany({ where: rOwner(toRScope(ref)), include: { account: true } });
   const byId = new Map(children.map((c) => [c.id, c]));
   const codes = Array.from(new Set(rows.flatMap((r) => [r.detail1Code, r.detail2Code, r.detail3Code]).filter((x): x is string => !!x)));
   const usages = codes.length ? await prisma.detailCodeUsage.findMany({ where: { code: { in: codes } } }) : [];
@@ -350,20 +406,19 @@ export async function saveReceiptAccountingDetails(receiptId: number, rows: { id
   await prisma.$transaction(updates.map((u) => prisma.receiptAccountingLine.update({ where: { id: u.id }, data: u.data })));
 }
 
-export async function issueReceiptJournalEntry(receiptId: number) {
-  const receipt = await loadReceiptForPlan(receiptId);
-  if (receipt.journalEntryId) throw new Error("قبلاً برای این سند دریافت، سند حسابداری صادر شده است");
-  if (receipt.status !== "APPROVED") throw new Error("فقط برای سند دریافتِ ثبت‌شده (دارای اثر) می‌توان سند حسابداری صادر کرد");
-  if (receipt.accountingStatus !== "APPROVED") throw new Error("ابتدا «تایید حسابداری» را انجام دهید و تفصیل‌ها را ذخیره کنید");
-
-  const baseCurrency = await prisma.currency.findFirst({ where: { isBase: true } });
-  if (!baseCurrency) throw new Error("ارز پایه تعریف نشده است");
+/**
+ * خطوط سندِ یک رسید (بدون صدور): هم برای صدور سند خودِ دریافت و هم برای «اعلامیه بدهکار بستانکار» که خطوط دو سند حاوی را در یک سند می‌آورد.
+ * پیش‌شرط‌ها (تایید حسابداری و ...) را فراخواننده بررسی می‌کند؛ خطا (معین تعریف‌نشده، ردیف حسابداری ناقص) پرتاب می‌شود.
+ */
+export async function collectReceiptIssueLines(ref: ReceiptRef, descriptionOverride?: string) {
+  const sc = toRScope(ref);
+  const receipt = await loadReceiptForPlan(sc);
   const { treasurySettings, goodsSettings } = await loadSettingSets();
-  const { plan, errors, description } = await buildReceiptPlan(receipt, treasurySettings, goodsSettings);
+  const { plan, errors, description } = await buildReceiptPlan(receipt, treasurySettings, goodsSettings, descriptionOverride);
   if (errors.length > 0) throw new Error(errors.join("\n"));
 
   // تفصیل‌ها از ردیف‌های حسابداریِ ذخیره‌شده‌ی فرم می‌آیند؛ معین باید با معین فعلی یکی باشد (وگرنه تنظیمات بعد از تایید حسابداری عوض شده)
-  const children = await prisma.receiptAccountingLine.findMany({ where: { receiptId } });
+  const children = await prisma.receiptAccountingLine.findMany({ where: rOwner(sc) });
   const keyOf = (r: { role: string; instrumentLineId?: number | null; settlementLineId?: number | null }) => `${r.role}:${r.instrumentLineId ?? ""}:${r.settlementLineId ?? ""}`;
   const byKey = new Map(children.map((c) => [keyOf(c), c]));
   const lines: IssueLineInput[] = [];
@@ -383,6 +438,15 @@ export async function issueReceiptJournalEntry(receiptId: number) {
 
   // ترتیب سند همان قبلی: بدهکارها (ابزار)، بعد بستانکارها (موضوع) و تسعیرها
   const ordered = [...lines.filter((_, i) => plan[i].role === "INSTRUMENT"), ...lines.filter((_, i) => plan[i].role !== "INSTRUMENT")];
+  return { receipt, ordered, description, treasurySettings, goodsSettings };
+}
+
+export async function issueReceiptJournalEntry(receiptId: number) {
+  const head = await loadReceiptForPlan({ receiptId });
+  if (head.journalEntryId) throw new Error("قبلاً برای این سند دریافت، سند حسابداری صادر شده است");
+  if (head.status !== "APPROVED") throw new Error("فقط برای سند دریافتِ ثبت‌شده (دارای اثر) می‌توان سند حسابداری صادر کرد");
+  if (head.accountingStatus !== "APPROVED") throw new Error("ابتدا «تایید حسابداری» را انجام دهید و تفصیل‌ها را ذخیره کنید");
+  const { receipt, ordered, description, treasurySettings, goodsSettings } = await collectReceiptIssueLines(receiptId);
 
   const docType = await findIssuingDocType("RECEIPT");
   if (!docType) throw new Error("نوع سند «رسید دریافت» در سیستم تعریف نشده است");

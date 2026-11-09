@@ -142,9 +142,6 @@ export const REGISTRY: ModuleDef[] = [
           { key: "bank-accounts", title: "حساب بانکی", baseActions: CRUD },
           { key: "cost-centers", title: "مرکز هزینه", baseActions: CRUD },
           { key: "org-units", title: "واحد سازمانی", baseActions: CRUD },
-          // فرم مستقلی در منو ندارد (هیچ NavItem ای به آن اشاره نمی‌کند) اما یک API با CRUD کامل
-          // (backend/src/routes/projects.ts) است — طبق اصل «هر مسیر واقعی باید در Registry ثبت شود»
-          // این‌جا ثبت شده تا بدون هیچ کنترل دسترسی‌ای در معرض API نباشد، حتی بدون صفحه‌ی اختصاصی.
           { key: "projects", title: "پروژه", baseActions: CRUD },
           {
             key: "reporting-periods",
@@ -249,7 +246,10 @@ export const REGISTRY: ModuleDef[] = [
         title: "گزارش",
         forms: [
           { key: "account-review", title: "مرور حسابها", baseActions: ["view"] },
+          { key: "fx-account-review", title: "مرور حسابهای ارزی", baseActions: ["view"], requiresFeature: "FX" },
           { key: "account-balance", title: "تراز حسابها", baseActions: ["view"] },
+          { key: "party-balance-report", title: "مانده طرف‌حساب‌ها", baseActions: ["view"] },
+          { key: "party-statement", title: "صورتحساب طرف‌حساب", baseActions: ["view"] },
           { key: "olap-reports", title: "گزارش تحلیلی (OLAP)", baseActions: CRUD },
         ],
       },
@@ -277,11 +277,18 @@ export const REGISTRY: ModuleDef[] = [
           },
           { key: "goods-groups", title: "گروه کالا", baseActions: CRUD },
           { key: "goods-attributes", title: "ویژگی کالا خدمت", baseActions: CRUD },
+          { key: "barcode-interpretations", title: "تفسیر بارکد", baseActions: CRUD },
+          { key: "goods-request-types", title: "نوع درخواست کالا", baseActions: CRUD },
+        ],
+      },
+      {
+        key: "accounting-settings",
+        title: "تنظیمات حسابداری",
+        forms: [
           { key: "accounting-groups", title: "گروه حسابداری", baseActions: CRUD },
           { key: "goods-service-accounting", title: "حسابداری کالا و خدمت", baseActions: CRUD },
           { key: "warehouse-doc-details", title: "تفصیل‌های سند انبار", baseActions: CRUD, requiresModule: "inventory" },
           { key: "detail-rules", title: "قواعد تفصیل", baseActions: CRUD },
-          { key: "goods-request-types", title: "نوع درخواست کالا", baseActions: CRUD },
         ],
       },
       {
@@ -311,6 +318,14 @@ export const REGISTRY: ModuleDef[] = [
     key: "inventory",
     title: "مدیریت موجودی و انبار",
     subModules: [
+      {
+        key: "temp-receipts",
+        title: "رسید موقت",
+        forms: [
+          { key: "warehousing-temp-receipts", title: "رسید موقت", baseActions: CRUD },
+          { key: "warehousing-temp-receipt-returns", title: "برگشت رسید موقت", baseActions: CRUD },
+        ],
+      },
       {
         key: "inbound-receipts",
         title: "رسید انبار",
@@ -354,8 +369,29 @@ export const REGISTRY: ModuleDef[] = [
         ],
       },
       {
-        key: "operations",
-        title: "عملیات",
+        key: "stocktaking",
+        title: "انبارگردانی",
+        forms: [
+          { key: "warehousing-counting-methods", title: "روش انبارگردانی", baseActions: CRUD },
+          { key: "warehousing-count-tags", title: "تگ انبارگردانی", baseActions: ["view", "create", "delete"] },
+          // شمارش کور: علاوه بر مجوز پایه، هر نوبت مجوز جدا دارد (کاربر فقط نوبت‌های مجاز خودش را می‌بیند/ثبت می‌کند)
+          {
+            key: "warehousing-inventory-counts",
+            title: "شمارش انبار",
+            baseActions: CRUD,
+            actions: [
+              { key: "countRound1", title: "ثبت شمارش اول" },
+              { key: "countRound2", title: "ثبت شمارش دوم" },
+              { key: "countRound3", title: "ثبت شمارش سوم" },
+              { key: "reconcile", title: "مغایرت‌گیری (صدور سند کسری و اضافی)" },
+              { key: "deleteReconcile", title: "حذف مغایرت‌گیری" },
+            ],
+          },
+        ],
+      },
+      {
+        key: "period-end",
+        title: "عملیات دوره‌ای",
         forms: [
           {
             key: "warehousing-warehouse-confirmation",
@@ -366,12 +402,6 @@ export const REGISTRY: ModuleDef[] = [
               { key: "revertConfirm", title: "برگشت از تایید" },
             ],
           },
-        ],
-      },
-      {
-        key: "period-end",
-        title: "عملیات پایان دوره",
-        forms: [
           {
             key: "warehousing-quantity-close",
             title: "بستن تعدادی موجودی",
@@ -440,6 +470,8 @@ export const REGISTRY: ModuleDef[] = [
           { key: "purchase-experts", title: "کارشناس خرید", baseActions: CRUD },
           { key: "purchase-routes", title: "مسیر خرید", baseActions: CRUD },
           { key: "purchase-types", title: "نوع خرید", baseActions: CRUD },
+          { key: "supplier-groups", title: "گروه تامین‌کننده", baseActions: CRUD },
+          { key: "supplier-balance-openings", title: "مانده اول دوره تامین‌کنندگان", baseActions: CRUD },
         ],
       },
       {
@@ -483,6 +515,15 @@ export const REGISTRY: ModuleDef[] = [
             ],
           },
           {
+            key: "purchase-returns",
+            title: "برگشت خرید",
+            baseActions: CRUD,
+            actions: [
+              { key: "issueJournalEntry", title: "صدور سند حسابداری" },
+              { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
+            ],
+          },
+          {
             key: "service-purchase-invoices",
             title: "فاکتور خرید خدمات",
             baseActions: CRUD,
@@ -496,9 +537,59 @@ export const REGISTRY: ModuleDef[] = [
         ],
       },
       {
+        key: "periodic-ops",
+        title: "عملیات دوره‌ای",
+        forms: [
+          {
+            key: "supplier-balance-close",
+            title: "بستن سال مانده تامین‌کنندگان",
+            baseActions: ["view"],
+            actions: [
+              { key: "close", title: "بستن سال" },
+              { key: "reopen", title: "بازگشایی بستن سال" },
+            ],
+          },
+        ],
+      },
+      {
         key: "reports",
         title: "گزارش",
-        forms: [{ key: "purchase-review", title: "مرور خرید", baseActions: ["view"] }],
+        forms: [
+          { key: "purchase-review", title: "مرور خرید", baseActions: ["view"] },
+          { key: "purchase-invoice-balance", title: "مرور مانده فاکتور خرید", baseActions: ["view"] },
+          { key: "supplier-balance-report", title: "مانده تامین‌کنندگان", baseActions: ["view"] },
+          { key: "supplier-statement", title: "صورتحساب تامین‌کننده", baseActions: ["view"] },
+        ],
+      },
+    ],
+  },
+  {
+    key: "fixed-assets",
+    title: "دارایی ثابت",
+    subModules: [
+      {
+        key: "config",
+        title: "تنظیمات",
+        forms: [{ key: "asset-groups", title: "گروه حسابداری دارایی", baseActions: CRUD }, { key: "asset-locations", title: "درخت موقعیت دارایی", baseActions: CRUD }, { key: "asset-exit-types", title: "نوع خروج دارایی", baseActions: CRUD }, { key: "asset-insurance-types", title: "نوع بیمه دارایی", baseActions: CRUD }, { key: "asset-account-settings", title: "حسابهای دارایی ثابت", baseActions: CRUD }],
+      },
+      {
+        key: "operations",
+        title: "عملیات",
+        forms: [
+          { key: "asset-receipts", title: "رسید دارایی", baseActions: CRUD, actions: [VIEW_ACCOUNTING, { key: "confirm", title: "تایید رسید" }, { key: "unconfirm", title: "برگشت از تایید رسید" }] },
+          { key: "fixed-assets", title: "تعریف دارایی", baseActions: CRUD, actions: [VIEW_ACCOUNTING, { key: "createManual", title: "تعریف دستی (بدون رسید)" }, { key: "confirm", title: "تایید دارایی" }, { key: "unconfirm", title: "برگشت از تایید دارایی" }, { key: "issueJournalEntry", title: "صدور سند حسابداری تحصیل" }, { key: "revertJournalEntry", title: "حذف سند حسابداری تحصیل" }] },
+          { key: "asset-positions", title: "تغییر موقعیت دارایی", baseActions: ["view", "create", "delete"] },
+          { key: "asset-depreciation", title: "محاسبه استهلاک", baseActions: ["view"], actions: [{ key: "calculate", title: "محاسبه استهلاک" }, { key: "deleteCalculation", title: "حذف محاسبه" }, { key: "issueJournalEntry", title: "صدور سند حسابداری استهلاک" }, { key: "revertJournalEntry", title: "حذف سند حسابداری استهلاک" }] },
+          { key: "asset-group-changes", title: "تغییر گروه", baseActions: CRUD, actions: [VIEW_ACCOUNTING, { key: "confirm", title: "تایید تغییر گروه" }, { key: "unconfirm", title: "برگشت از تایید تغییر گروه" }, { key: "issueJournalEntry", title: "صدور سند حسابداری تغییر گروه" }, { key: "revertJournalEntry", title: "حذف سند حسابداری تغییر گروه" }] },
+          { key: "asset-insurances", title: "بیمه دارایی‌ها", baseActions: CRUD },
+          { key: "asset-insurance-calculation", title: "محاسبه هزینه بیمه", baseActions: ["view"], actions: [{ key: "calculate", title: "محاسبه هزینه بیمه" }, { key: "deleteCalculation", title: "حذف محاسبه" }, { key: "issueJournalEntry", title: "صدور سند حسابداری هزینه بیمه" }, { key: "revertJournalEntry", title: "حذف سند حسابداری هزینه بیمه" }] },
+          { key: "asset-exits", title: "خروج دارایی", baseActions: CRUD, actions: [VIEW_ACCOUNTING, { key: "confirm", title: "تایید خروج" }, { key: "unconfirm", title: "برگشت از تایید خروج" }, { key: "issueJournalEntry", title: "صدور سند حسابداری خروج" }, { key: "revertJournalEntry", title: "حذف سند حسابداری خروج" }] },
+        ],
+      },
+      {
+        key: "reports",
+        title: "گزارش",
+        forms: [{ key: "asset-group-review", title: "مرور گروه دارایی", baseActions: ["view"] }],
       },
     ],
   },
@@ -565,6 +656,8 @@ export const REGISTRY: ModuleDef[] = [
           { key: "sales-centers", title: "مرکز فروش", baseActions: CRUD },
           { key: "sales-price-lists", title: "اعلامیه قیمت فروش", baseActions: CRUD },
           { key: "sales-quote-lost-reasons", title: "دلایل فروش‌نشدن پیش‌فاکتور", baseActions: CRUD },
+          { key: "customer-groups", title: "گروه مشتری", baseActions: CRUD },
+          { key: "customer-balance-openings", title: "مانده اول دوره مشتریان", baseActions: CRUD },
         ],
       },
       {
@@ -597,9 +690,29 @@ export const REGISTRY: ModuleDef[] = [
         ],
       },
       {
+        key: "periodic-ops",
+        title: "عملیات دوره‌ای",
+        forms: [
+          {
+            key: "customer-balance-close",
+            title: "بستن سال مانده مشتریان",
+            baseActions: ["view"],
+            actions: [
+              { key: "close", title: "بستن سال" },
+              { key: "reopen", title: "بازگشایی بستن سال" },
+            ],
+          },
+        ],
+      },
+      {
         key: "reports",
         title: "گزارش",
-        forms: [{ key: "sales-review", title: "مرور فروش", baseActions: ["view"] }],
+        forms: [
+          { key: "sales-review", title: "مرور فروش", baseActions: ["view"] },
+          { key: "quote-review", title: "مرور پیش‌فاکتور", baseActions: ["view"] },
+          { key: "customer-balance-report", title: "مانده مشتریان", baseActions: ["view"] },
+          { key: "customer-statement", title: "صورتحساب مشتری", baseActions: ["view"] },
+        ],
       },
     ],
   },
@@ -765,12 +878,18 @@ export const REGISTRY: ModuleDef[] = [
       {
         key: "inbox",
         title: "کارتابل",
-        forms: [{ key: "my-tasks", title: "کارهای من", baseActions: ["view"], actions: [{ key: "act", title: "برداشتن، پیوست و انجام کار" }] }],
+        forms: [
+          { key: "my-tasks", title: "کارهای من", baseActions: ["view"], actions: [{ key: "act", title: "برداشتن، پیوست و انجام کار" }] },
+          { key: "assistant", title: "دستیار", baseActions: ["view"] },
+        ],
       },
       {
         key: "settings",
         title: "تنظیمات",
-        forms: [{ key: "workflow-processes", title: "تعریف فرایند", baseActions: CRUD }],
+        forms: [
+          { key: "workflow-processes", title: "تعریف فرایند", baseActions: CRUD },
+          { key: "assistant-macros", title: "دستورهای میانبر دستیار", baseActions: CRUD },
+        ],
       },
       {
         key: "reports",
@@ -866,6 +985,7 @@ export const REGISTRY: ModuleDef[] = [
               { key: "downloadCsr", title: "دانلود CSR" },
             ],
           },
+          { key: "tax-invoice-type-rules", title: "قواعد نوع صورتحساب", baseActions: CRUD },
         ],
       },
       {
@@ -909,7 +1029,17 @@ export const REGISTRY: ModuleDef[] = [
           { key: "petty-cashes", title: "تنخواه", baseActions: CRUD },
           { key: "petty-cash-custodians", title: "تنخواه‌دار", baseActions: CRUD },
           { key: "card-readers", title: "کارتخوان", baseActions: CRUD },
-          { key: "card-terminal-agents", title: "عامل محلی (کارتخوان و چاپ)", baseActions: CRUD },
+          { key: "guarantee-types", title: "نوع تضمین", baseActions: CRUD },
+        ],
+      },
+      {
+        key: "guarantees",
+        title: "تضامین",
+        forms: [
+          { key: "guarantee-receipts", title: "دریافت تضمین", baseActions: CRUD, actions: [{ key: "accountingApprove", title: "تایید حسابداری" }, { key: "accountingUnapprove", title: "لغو تایید حسابداری" }, { key: "deleteAccountingInfo", title: "حذف اطلاعات حسابداری" }, { key: "issueJournalEntry", title: "صدور سند حسابداری" }, { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" }] },
+          { key: "guarantee-receipt-returns", title: "استرداد دریافت تضمین", baseActions: CRUD, actions: [{ key: "issueJournalEntry", title: "صدور سند حسابداری" }, { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" }] },
+          { key: "guarantee-payment-returns", title: "استرداد پرداخت تضمین", baseActions: CRUD, actions: [{ key: "issueJournalEntry", title: "صدور سند حسابداری" }, { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" }] },
+          { key: "guarantee-payments", title: "پرداخت تضمین", baseActions: CRUD, actions: [{ key: "accountingApprove", title: "تایید حسابداری" }, { key: "accountingUnapprove", title: "لغو تایید حسابداری" }, { key: "deleteAccountingInfo", title: "حذف اطلاعات حسابداری" }, { key: "issueJournalEntry", title: "صدور سند حسابداری" }, { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" }] },
         ],
       },
       {
@@ -923,6 +1053,19 @@ export const REGISTRY: ModuleDef[] = [
             actions: [
               ...APPROVE_UNAPPROVE,
               { key: "reEdit", title: "ویرایش مجدد" },
+              { key: "accountingApprove", title: "تایید حسابداری" },
+              { key: "accountingUnapprove", title: "لغو تایید حسابداری" },
+              { key: "deleteAccountingInfo", title: "حذف اطلاعات حسابداری" },
+              { key: "issueJournalEntry", title: "صدور سند حسابداری" },
+              { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
+            ],
+          },
+          {
+            // تسویه بین طرف‌حساب‌ها بدون ابزار (مثلاً مشتری وجه فاکتور را از طرف ما به حساب تامین‌کننده می‌ریزد): services/partySettlementService.ts
+            key: "party-settlements",
+            title: "اعلامیه بدهکار بستانکار",
+            baseActions: CRUD,
+            actions: [
               { key: "accountingApprove", title: "تایید حسابداری" },
               { key: "accountingUnapprove", title: "لغو تایید حسابداری" },
               { key: "deleteAccountingInfo", title: "حذف اطلاعات حسابداری" },

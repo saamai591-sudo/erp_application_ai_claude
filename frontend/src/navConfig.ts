@@ -51,6 +51,7 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "bank-branches", label: "شعبه بانک", list: "/bank-branches", create: "/bank-branches/new", icon: "bank" },
           { key: "bank-accounts", label: "حساب بانکی", list: "/bank-accounts", create: "/bank-accounts/new", icon: "card" },
           { key: "cost-centers", label: "مرکز هزینه", list: "/cost-centers", create: "/cost-centers/new", icon: "briefcase" },
+          { key: "projects", label: "پروژه", list: "/projects", create: "/projects/new", icon: "briefcase" },
           { key: "org-units", label: "واحد سازمانی", list: "/org-units", create: "/org-units/new", icon: "building" },
           { key: "reporting-periods", label: "دوره گزارشگری", list: "/reporting-periods", create: "/reporting-periods/new", icon: "calendar" },
         ],
@@ -97,7 +98,10 @@ const RAW_MODULES: ModuleGroup[] = [
         title: "گزارش",
         items: [
           { key: "account-review", label: "مرور حسابها", list: "/account-review", icon: "tree", type: "report" },
+          { key: "fx-account-review", label: "مرور حسابهای ارزی", list: "/fx-account-review", icon: "tree", type: "report" },
           { key: "account-balance", label: "تراز حسابها", list: "/account-balance", icon: "ledger", type: "report" },
+          { key: "party-balance-report", label: "مانده طرف‌حساب‌ها", list: "/party-balance-report", icon: "wallet", type: "report" },
+          { key: "party-statement", label: "صورتحساب طرف‌حساب", list: "/party-statement", icon: "ledger", type: "report" },
           { key: "olap-reports", label: "گزارش تحلیلی (OLAP)", list: "/olap-reports", create: "/olap-reports/new", icon: "trend" },
         ],
       },
@@ -118,11 +122,17 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "goods-group-levels", label: "سطح گروه کالا", list: "/goods-group-levels", create: "/goods-group-levels/new", icon: "layers" },
           { key: "goods-groups", label: "گروه کالا", list: "/goods-groups", icon: "tree" },
           { key: "goods-attributes", label: "ویژگی کالا خدمت", list: "/goods-attributes", create: "/goods-attributes/new", icon: "pin" },
+          { key: "barcode-interpretations", label: "تفسیر بارکد", list: "/barcode-interpretations", create: "/barcode-interpretations/new", icon: "tag" },
+          { key: "goods-request-types", label: "نوع درخواست کالا", list: "/goods-request-types", create: "/goods-request-types/new", icon: "file" },
+        ],
+      },
+      {
+        title: "تنظیمات حسابداری",
+        items: [
           { key: "accounting-groups", label: "گروه حسابداری", list: "/accounting-groups", create: "/accounting-groups/new", icon: "coin" },
           { key: "goods-service-accounting", label: "حسابداری کالا و خدمت", list: "/goods-service-accounting", create: "/goods-service-accounting/new", icon: "ledger" },
           { key: "warehouse-doc-details", label: "تفصیل‌های سند", list: "/warehouse-doc-details", create: "/warehouse-doc-details/new", icon: "tag" },
           { key: "detail-rules", label: "قواعد تفصیل", list: "/detail-rules", create: "/detail-rules/new", icon: "layers" },
-          { key: "goods-request-types", label: "نوع درخواست کالا", list: "/goods-request-types", create: "/goods-request-types/new", icon: "file" },
         ],
       },
       {
@@ -144,6 +154,13 @@ const RAW_MODULES: ModuleGroup[] = [
   {
     title: "مدیریت موجودی و انبار",
     subModules: [
+      {
+        title: "رسید موقت",
+        items: [
+          { key: "warehousing-temp-receipts", label: "رسید موقت", list: "/warehousing/temp-receipts", create: "/warehousing/temp-receipts/new", icon: "file" },
+          { key: "warehousing-temp-receipt-returns", label: "برگشت رسید موقت", list: "/warehousing/temp-receipt-returns", create: "/warehousing/temp-receipt-returns/new", icon: "file" },
+        ],
+      },
       {
         // اسناد وارده (طبق همان طبقه‌بندی جهت IN/OUT که warehouseMovementService.OUTBOUND_DOC_TYPES
         // به‌عنوان مرجع واحد این تفکیک استفاده می‌کند)
@@ -193,14 +210,17 @@ const RAW_MODULES: ModuleGroup[] = [
         ],
       },
       {
-        title: "عملیات",
+        title: "انبارگردانی",
         items: [
-          { key: "warehousing-warehouse-confirmation", label: "تایید انبار", list: "/warehousing/warehouse-confirmation", icon: "shield" },
+          { key: "warehousing-counting-methods", label: "روش انبارگردانی", list: "/warehousing/counting-methods", create: "/warehousing/counting-methods/new", icon: "file" },
+          { key: "warehousing-count-tags", label: "تگ انبارگردانی", list: "/warehousing/count-tags", create: "/warehousing/count-tags/new", icon: "file" },
+          { key: "warehousing-inventory-counts", label: "شمارش انبار", list: "/warehousing/inventory-counts", create: "/warehousing/inventory-counts/new", icon: "file" },
         ],
       },
       {
-        title: "عملیات پایان دوره",
+        title: "عملیات دوره‌ای",
         items: [
+          { key: "warehousing-warehouse-confirmation", label: "تایید انبار", list: "/warehousing/warehouse-confirmation", icon: "shield" },
           { key: "warehousing-quantity-close", label: "بستن تعدادی موجودی", list: "/warehousing/quantity-close", icon: "shield" },
           { key: "warehousing-accounting-close", label: "بستن حسابداری موجودی", list: "/warehousing/accounting-close", icon: "coin" },
         ],
@@ -235,6 +255,8 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "purchase-experts", label: "کارشناس خرید", list: "/purchase-experts", create: "/purchase-experts/new", icon: "user" },
           { key: "purchase-routes", label: "مسیر خرید", list: "/purchase-routes", create: "/purchase-routes/new", icon: "tag" },
           { key: "purchase-types", label: "نوع خرید", list: "/purchase-types", create: "/purchase-types/new", icon: "tag" },
+          { key: "supplier-groups", label: "گروه تامین‌کننده", list: "/supplier-groups", create: "/supplier-groups/new", icon: "tag" },
+          { key: "supplier-balance-openings", label: "مانده اول دوره تامین‌کنندگان", list: "/supplier-balance-openings", create: "/supplier-balance-openings/new", icon: "wallet" },
         ],
       },
       {
@@ -248,12 +270,54 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "purchase-orders", label: "سفارش خرید", list: "/purchase-orders", create: "/purchase-orders/new", icon: "file" },
           { key: "delivery-authorizations", label: "مجوز تحویل", list: "/delivery-authorizations", create: "/delivery-authorizations/new", icon: "shield" },
           { key: "purchase-invoices", label: "فاکتور خرید", list: "/purchase-invoices", create: "/purchase-invoices/new", icon: "ledger" },
+          { key: "purchase-returns", label: "برگشت خرید", list: "/purchase-returns", create: "/purchase-returns/new", icon: "file" },
           { key: "service-purchase-invoices", label: "فاکتور خرید خدمات", list: "/service-purchase-invoices", create: "/service-purchase-invoices/new", icon: "ledger" },
         ],
       },
       {
+        title: "عملیات دوره‌ای",
+        items: [{ key: "supplier-balance-close", label: "بستن سال مانده تامین‌کنندگان", list: "/supplier-balance-close", icon: "wallet" }],
+      },
+      {
         title: "گزارش",
-        items: [{ key: "purchase-review", label: "مرور خرید", list: "/purchase-review", icon: "tree", type: "report" }],
+        items: [
+          { key: "purchase-review", label: "مرور خرید", list: "/purchase-review", icon: "tree", type: "report" },
+          { key: "purchase-invoice-balance", label: "مرور مانده فاکتور خرید", list: "/purchase-invoice-balance", icon: "ledger", type: "report" },
+          { key: "supplier-balance-report", label: "مانده تامین‌کنندگان", list: "/supplier-balance-report", icon: "wallet", type: "report" },
+          { key: "supplier-statement", label: "صورتحساب تامین‌کننده", list: "/supplier-statement", icon: "ledger", type: "report" },
+        ],
+      },
+    ],
+  },
+  {
+    title: "دارایی ثابت",
+    subModules: [
+      {
+        title: "تنظیمات",
+        items: [
+          { key: "asset-groups", label: "گروه حسابداری دارایی", list: "/asset-groups", create: "/asset-groups/new", icon: "layers" },
+          { key: "asset-locations", label: "درخت موقعیت دارایی", list: "/asset-locations", icon: "tree" },
+          { key: "asset-exit-types", label: "نوع خروج دارایی", list: "/asset-exit-types", create: "/asset-exit-types/new", icon: "layers" },
+          { key: "asset-insurance-types", label: "نوع بیمه دارایی", list: "/asset-insurance-types", create: "/asset-insurance-types/new", icon: "layers" },
+          { key: "asset-account-settings", label: "حسابهای دارایی ثابت", list: "/asset-account-settings", create: "/asset-account-settings/new", icon: "layers" },
+        ],
+      },
+      {
+        title: "عملیات",
+        items: [
+          { key: "asset-receipts", label: "رسید دارایی", list: "/asset-receipts", create: "/asset-receipts/new", icon: "box" },
+          { key: "fixed-assets", label: "تعریف دارایی", list: "/fixed-assets", create: "/fixed-assets/new", icon: "building" },
+          { key: "asset-positions", label: "تغییر موقعیت دارایی", list: "/asset-positions", create: "/asset-positions/new", icon: "pin" },
+          { key: "asset-group-changes", label: "تغییر گروه", list: "/asset-group-changes", create: "/asset-group-changes/new", icon: "layers" },
+          { key: "asset-insurances", label: "بیمه دارایی‌ها", list: "/asset-insurances", create: "/asset-insurances/new", icon: "box" },
+          { key: "asset-insurance-calculation", label: "محاسبه هزینه بیمه", list: "/asset-insurance-calculation", icon: "calculator" },
+          { key: "asset-exits", label: "خروج دارایی", list: "/asset-exits", create: "/asset-exits/new", icon: "box" },
+          { key: "asset-depreciation", label: "محاسبه استهلاک", list: "/asset-depreciation", icon: "calculator" },
+        ],
+      },
+      {
+        title: "گزارش",
+        items: [{ key: "asset-group-review", label: "مرور گروه دارایی", list: "/asset-group-review", icon: "tree", type: "report" }],
       },
     ],
   },
@@ -316,6 +380,8 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "sales-types", label: "نوع فروش", list: "/sales-types", create: "/sales-types/new", icon: "tag" },
           { key: "sales-centers", label: "مرکز فروش", list: "/sales-centers", create: "/sales-centers/new", icon: "briefcase" },
           { key: "sales-price-lists", label: "اعلامیه قیمت فروش", list: "/sales-price-lists", create: "/sales-price-lists/new", icon: "tag" },
+          { key: "customer-groups", label: "گروه مشتری", list: "/customer-groups", create: "/customer-groups/new", icon: "tag" },
+          { key: "customer-balance-openings", label: "مانده اول دوره مشتریان", list: "/customer-balance-openings", create: "/customer-balance-openings/new", icon: "wallet" },
           { key: "sales-quote-lost-reasons", label: "دلایل فروش‌نشدن پیش‌فاکتور", list: "/sales-quote-lost-reasons", create: "/sales-quote-lost-reasons/new", icon: "tag" },
         ],
       },
@@ -329,8 +395,17 @@ const RAW_MODULES: ModuleGroup[] = [
         ],
       },
       {
+        title: "عملیات دوره‌ای",
+        items: [{ key: "customer-balance-close", label: "بستن سال مانده مشتریان", list: "/customer-balance-close", icon: "wallet" }],
+      },
+      {
         title: "گزارش",
-        items: [{ key: "sales-review", label: "مرور فروش", list: "/sales-review", icon: "tree", type: "report" }],
+        items: [
+          { key: "sales-review", label: "مرور فروش", list: "/sales-review", icon: "tree", type: "report" },
+          { key: "quote-review", label: "مرور پیش‌فاکتور", list: "/quote-review", icon: "tree", type: "report" },
+          { key: "customer-balance-report", label: "مانده مشتریان", list: "/customer-balance-report", icon: "wallet", type: "report" },
+          { key: "customer-statement", label: "صورتحساب مشتری", list: "/customer-statement", icon: "ledger", type: "report" },
+        ],
       },
     ],
   },
@@ -349,13 +424,23 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "petty-cashes", label: "تنخواه", list: "/petty-cashes", create: "/petty-cashes/new", icon: "wallet" },
           { key: "petty-cash-custodians", label: "تنخواه‌دار", list: "/petty-cash-custodians", create: "/petty-cash-custodians/new", icon: "wallet" },
           { key: "card-readers", label: "کارتخوان", list: "/card-readers", create: "/card-readers/new", icon: "bank" },
-          { key: "card-terminal-agents", label: "عامل محلی (کارتخوان و چاپ)", list: "/card-terminal-agents", icon: "bank" },
+          { key: "guarantee-types", label: "نوع تضمین", list: "/guarantee-types", create: "/guarantee-types/new", icon: "tag" },
+        ],
+      },
+      {
+        title: "تضامین",
+        items: [
+          { key: "guarantee-receipts", label: "دریافت تضمین", list: "/guarantee-receipts", create: "/guarantee-receipts/new", icon: "ledger" },
+          { key: "guarantee-payments", label: "پرداخت تضمین", list: "/guarantee-payments", create: "/guarantee-payments/new", icon: "ledger" },
+          { key: "guarantee-receipt-returns", label: "استرداد دریافت تضمین", list: "/guarantee-receipt-returns", create: "/guarantee-receipt-returns/new", icon: "ledger" },
+          { key: "guarantee-payment-returns", label: "استرداد پرداخت تضمین", list: "/guarantee-payment-returns", create: "/guarantee-payment-returns/new", icon: "ledger" },
         ],
       },
       {
         title: "دریافت",
         items: [
           { key: "receipts", label: "دریافت", list: "/receipts", create: "/receipts/new", icon: "ledger" },
+          { key: "party-settlements", label: "اعلامیه بدهکار بستانکار", list: "/party-settlements", create: "/party-settlements/new", icon: "ledger" },
           { key: "cheque-deposits", label: "واگذاری به بانک", list: "/cheque-deposits", create: "/cheque-deposits/new", icon: "bank" },
           { key: "cheque-deposit-returns", label: "برگشت از واگذاری", list: "/cheque-deposit-returns", create: "/cheque-deposit-returns/new", icon: "bank" },
           { key: "cheque-clearings-receivable", label: "وصول و برگشت چک", list: "/cheque-clearings-receivable", create: "/cheque-clearings-receivable/new", icon: "ledger" },
@@ -394,7 +479,10 @@ const RAW_MODULES: ModuleGroup[] = [
     subModules: [
       {
         title: "تنظیمات",
-        items: [{ key: "tax-memories", label: "حافظه مالیاتی", list: "/tax-memories", create: "/tax-memories/new", icon: "shield" }],
+        items: [
+          { key: "tax-memories", label: "حافظه مالیاتی", list: "/tax-memories", create: "/tax-memories/new", icon: "shield" },
+          { key: "tax-invoice-type-rules", label: "قواعد نوع صورتحساب", list: "/tax-invoice-type-rules", create: "/tax-invoice-type-rules/new", icon: "layers" },
+        ],
       },
       {
         title: "عملیات",
@@ -491,11 +579,17 @@ const RAW_MODULES: ModuleGroup[] = [
     subModules: [
       {
         title: "کارتابل",
-        items: [{ key: "my-tasks", label: "کارهای من", list: "/my-tasks", icon: "file", type: "operational" }],
+        items: [
+          { key: "my-tasks", label: "کارهای من", list: "/my-tasks", icon: "file", type: "operational" },
+          { key: "assistant", label: "دستیار", list: "/assistant", icon: "file", type: "operational" },
+        ],
       },
       {
         title: "تنظیمات",
-        items: [{ key: "workflow-processes", label: "تعریف فرایند", list: "/workflow-processes", create: "/workflow-processes/new", icon: "sliders" }],
+        items: [
+          { key: "workflow-processes", label: "تعریف فرایند", list: "/workflow-processes", create: "/workflow-processes/new", icon: "sliders" },
+          { key: "assistant-macros", label: "دستورهای میانبر دستیار", list: "/assistant-macros", create: "/assistant-macros/new", icon: "sliders" },
+        ],
       },
       {
         title: "گزارش",

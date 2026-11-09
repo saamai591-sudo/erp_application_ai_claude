@@ -98,6 +98,67 @@ const nestedLines = (data: any): any[] => {
   return [...(Array.isArray(c) ? c : c ? [c] : []), ...(Array.isArray(m) ? m : m ? [m] : [])];
 };
 
+// قفل «بستن سال مانده طرف‌حساب‌ها» (services/partyBalanceService.ts): وقتی مانده‌ی نقشی در یک سال مالی بسته شده، اسنادی که روی آن مانده اثر دارند (فاکتورها،
+// دریافت/پرداخت، پرداخت تنخواه، وصول/برگشت چک) در همان سال نه ایجاد، نه ویرایش، نه حذف و نه تایید/برگشت از تایید می‌شوند — وگرنه مانده‌ی افتتاحیه‌ی سال بعد قدیمی می‌شد.
+// نقطه‌ی مرکزی (مثل قفل حذف سند حسابداری): همه‌ی مسیرها از همین کلاینت مشترک می‌گذرند. فقط به‌روزرسانی‌هایی که صرفاً اطلاعات سند حسابداری را عوض می‌کنند آزادند.
+const PARTY_LOCK_MODELS: Record<string, "CUSTOMER" | "SUPPLIER" | "ANY"> = {
+  SalesInvoice: "CUSTOMER",
+  SalesReturnInvoice: "CUSTOMER",
+  PurchaseInvoice: "SUPPLIER",
+  ServicePurchaseInvoice: "SUPPLIER",
+  PurchaseReturn: "SUPPLIER",
+  Receipt: "ANY",
+  Payment: "ANY",
+  PettyCashPayment: "ANY",
+  ChequeClearingReceivable: "ANY",
+  ChequeClearingPayable: "ANY",
+};
+const PARTY_LOCK_EXEMPT_KEYS = new Set(["journalEntryId", "journalEntry", "accountingStatus", "accountingApprovedAt", "accountingApprovedById", "updatedAt"]);
+let partyCloseCache: { at: number; rows: { fiscalPeriodId: number; role: string }[] } | null = null;
+export function invalidatePartyBalanceLockCache() {
+  partyCloseCache = null;
+}
+async function loadPartyCloses() {
+  if (!partyCloseCache || Date.now() - partyCloseCache.at > 5000) {
+    partyCloseCache = { at: Date.now(), rows: await rawPrisma.partyBalanceYearClose.findMany({ select: { fiscalPeriodId: true, role: true } }) };
+  }
+  return partyCloseCache.rows;
+}
+/** نقش‌هایی که مانده‌شان در این دوره مالی بسته شده */
+export async function closedPartyBalanceRoles(fiscalPeriodId: number): Promise<string[]> {
+  return (await loadPartyCloses()).filter((r) => r.fiscalPeriodId === fiscalPeriodId).map((r) => r.role);
+}
+const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+async function assertPartyBalanceYearOpen(model: string, operation: string, args: any) {
+  const kind = PARTY_LOCK_MODELS[model];
+  if (!kind) return;
+  if (operation === "update" || operation === "updateMany") {
+    const keys = Object.keys(args?.data || {});
+    if (keys.length && keys.every((k) => PARTY_LOCK_EXEMPT_KEYS.has(k))) return;
+  }
+  // سریع: اگر هیچ بستنی در سیستم نیست، چیزی برای بررسی نیست
+  if (!(await loadPartyCloses()).length) return;
+
+  const periodIds = new Set<number>();
+  const fromData = (d: any) => {
+    const id = d?.fiscalPeriodId ?? d?.fiscalPeriod?.connect?.id;
+    if (typeof id === "number") periodIds.add(id);
+  };
+  if (operation === "create" || operation === "upsert") fromData(args?.create ?? args?.data);
+  if (operation === "createMany") for (const d of Array.isArray(args?.data) ? args.data : [args?.data]) fromData(d);
+  if (operation === "update" || operation === "updateMany" || operation === "delete" || operation === "deleteMany" || operation === "upsert") {
+    const rows: { fiscalPeriodId: number }[] = await (rawPrisma as any)[lowerFirst(model)].findMany({ where: args?.where || {}, select: { fiscalPeriodId: true } });
+    for (const r of rows) periodIds.add(r.fiscalPeriodId);
+  }
+  for (const pid of periodIds) {
+    const closed = await closedPartyBalanceRoles(pid);
+    if (kind === "ANY" ? closed.length > 0 : closed.includes(kind)) {
+      const fp = await rawPrisma.fiscalPeriod.findUnique({ where: { id: pid }, select: { title: true } });
+      throw new Error(`مانده‌ی طرف‌حساب‌ها در سال مالی ${fp?.title ?? ""} بسته شده و تغییر این سند مجاز نیست؛ ابتدا در فرم «مانده اول دوره» (مشتریان یا تامین‌کنندگان) «بازگشایی بستن سال» را بزنید.`);
+    }
+  }
+}
+
 // «موارد استفاده» هنگام شکست حذف (lib/deleteUsage.ts): خطای کلید خارجی (P2003) در delete/deleteMany به پیامی با رکوردهای دقیقِ ارجاع‌دهنده تبدیل می‌شود
 async function deleteWithUsage(model: string, args: any, query: (a: any) => Promise<any>) {
   try {
@@ -138,10 +199,32 @@ export const prisma = rawPrisma.$extends({
       },
     },
     $allModels: {
-      delete({ model, args, query }) {
+      async create({ model, args, query }) {
+        await assertPartyBalanceYearOpen(model, "create", args);
+        return query(args);
+      },
+      async createMany({ model, args, query }) {
+        await assertPartyBalanceYearOpen(model, "createMany", args);
+        return query(args);
+      },
+      async update({ model, args, query }) {
+        await assertPartyBalanceYearOpen(model, "update", args);
+        return query(args);
+      },
+      async updateMany({ model, args, query }) {
+        await assertPartyBalanceYearOpen(model, "updateMany", args);
+        return query(args);
+      },
+      async upsert({ model, args, query }) {
+        await assertPartyBalanceYearOpen(model, "upsert", args);
+        return query(args);
+      },
+      async delete({ model, args, query }) {
+        await assertPartyBalanceYearOpen(model, "delete", args);
         return deleteWithUsage(model, args, query);
       },
-      deleteMany({ model, args, query }) {
+      async deleteMany({ model, args, query }) {
+        await assertPartyBalanceYearOpen(model, "deleteMany", args);
         return deleteWithUsage(model, args, query);
       },
       findMany({ model, args, query }) {

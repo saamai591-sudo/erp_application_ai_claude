@@ -41,6 +41,8 @@ const ENTITY_TYPE_TO_ACTION: Record<string, string> = {
   "payroll-data-entry": `${findFormPrefix("payroll-data-entry")}.edit`,
   "personnel-constant": `${findFormPrefix("personnel-constants")}.edit`,
   "employee-salary-account": `${findFormPrefix("employee-salary-accounts")}.create`,
+  "party-balance-opening-customer": `${findFormPrefix("customer-balance-openings")}.create`,
+  "party-balance-opening-supplier": `${findFormPrefix("supplier-balance-openings")}.create`,
   "attendance-leave-balance": `${findFormPrefix("attendance-leave-balance-entries")}.create`,
 };
 

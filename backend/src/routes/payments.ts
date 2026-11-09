@@ -9,6 +9,7 @@ import { assertRecordNotStale } from "../utils/concurrency";
 import { assertChequeNotUsedElsewhere, findChequeUses } from "../utils/chequeUsage";
 import { withoutFiscalPeriodScope } from "../lib/requestContext";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss, ConversionCurrency } from "../utils/currencyConversion";
+import { registerTreasuryAccountingRoutes } from "../services/treasuryDocAccountingActions";
 import { issuePaymentJournalEntry, revertPaymentJournalEntry, accountingApprovePayment, getPaymentAccountingView, savePaymentAccountingDetails } from "../services/paymentJournalEntryService";
 import { candidatesForBasisType, pickableBasisDocuments, basisGroupOf, rowBasisTypeOf, BasisType, RowBasisType, BasisCandidate } from "../services/paymentBasisCandidates";
 import { assertPettyCashRunningBalanceNotNegative } from "../services/pettyCashBalanceService";
@@ -80,7 +81,7 @@ interface InstrumentLineInput {
   description?: string | null;
 }
 
-interface SettlementLineInput {
+export interface SettlementLineInput {
   paymentTypeId: number;
   instrumentClientKey: string;
   partyId?: number | null;
@@ -275,13 +276,13 @@ router.get("/payments/pickable-basis-documents", can(`${FORM}.view`), async (req
 // ردیف‌های موضوعات پرداخت
 // =========================================================================
 
-async function validateSubjectLines(
+export async function validateSubjectLines(
   lines: SettlementLineInput[],
   instrumentByKey: Map<string, { id?: number; amount: number; baseAmount: number; currencyId: number; fxRate: number; bankAccountId?: number | null }>,
   baseCurrency: { id: number } & ConversionCurrency,
   // تاریخ سند پرداخت: تاریخ هر سند مبنا باید ≤ این تاریخ باشد
   paymentDate: Date,
-  excludePaymentId?: number,
+  excludeDoc?: number | { partySettlementId: number },
   // ردیف‌های موضوعات پرداختِ ذخیره‌شده‌ی ابزارهای دارای گردش (در «ویرایش مجدد» تغییر نمی‌کنند) — مبلغشان از
   // مانده‌ی اسناد مبنا کم می‌شود تا با ردیف‌های ویرایش‌شده روی یک سند مبنا بیش‌تخصیص رخ ندهد
   lockedSettlementLines: any[] = [],
@@ -289,14 +290,19 @@ async function validateSubjectLines(
 ) {
   if (allowEmpty && (!Array.isArray(lines) || lines.length === 0) && instrumentByKey.size === 0) return [];
   if (!Array.isArray(lines) || lines.length === 0) throw new Error("سند پرداخت باید حداقل یک ردیف موضوعات پرداخت داشته باشد");
+  // ویرایشِ یک پرداخت (عدد) یا یک «اعلامیه بدهکار بستانکار» ({ partySettlementId })؛ ردیف‌های خودِ آن سند از مانده/کنترل‌ها کنار گذاشته می‌شود
+  const excludePaymentId = typeof excludeDoc === "number" ? excludeDoc : undefined;
+  const excludeSettlementId = typeof excludeDoc === "object" ? excludeDoc.partySettlementId : undefined;
+  const ownerWhere: any = excludeSettlementId ? { partySettlementId: excludeSettlementId } : { paymentId: excludePaymentId };
+  const hasExclude = !!(excludePaymentId || excludeSettlementId);
 
   // سندِ مبنایی که همین پرداختِ موجود قبلاً با آن ثبت شده، در ویرایش بدون تغییر معتبر می‌ماند (داده‌ی قدیمی را نمی‌شکند)؛ سند مبنای تازه باید ≤ تاریخ پرداخت باشد
   // این استثنا فقط وقتی برقرار است که تاریخ سند پرداخت نسبت به نسخه‌ی ذخیره‌شده تغییر نکرده باشد؛ اگر کاربر تاریخ را عوض کند
   // (مثلاً جلوتر/عقب‌تر)، قاعده‌ی «تاریخ سند مبنا ≤ تاریخ سند» برای همه‌ی مبناها از نو اعمال می‌شود.
   const alreadyUsedBasis = new Set<string>();
-  const savedPaymentDate = excludePaymentId ? (await prisma.payment.findUnique({ where: { id: excludePaymentId }, select: { date: true } }))?.date : null;
-  if (excludePaymentId && savedPaymentDate && savedPaymentDate.getTime() === paymentDate.getTime()) {
-    for (const x of await prisma.paymentSettlementLine.findMany({ where: { paymentId: excludePaymentId }, select: { purchaseInvoiceId: true, servicePurchaseInvoiceId: true, salesInvoiceId: true, purchaseOrderId: true } })) {
+  const savedPaymentDate = excludePaymentId ? (await prisma.payment.findUnique({ where: { id: excludePaymentId }, select: { date: true } }))?.date : excludeSettlementId ? (await prisma.partySettlement.findUnique({ where: { id: excludeSettlementId }, select: { date: true } }))?.date : null;
+  if (hasExclude && savedPaymentDate && savedPaymentDate.getTime() === paymentDate.getTime()) {
+    for (const x of await prisma.paymentSettlementLine.findMany({ where: ownerWhere, select: { purchaseInvoiceId: true, servicePurchaseInvoiceId: true, salesInvoiceId: true, purchaseOrderId: true } })) {
       for (const [f, v] of Object.entries(x)) if (v) alreadyUsedBasis.add(`${f}:${v}`);
     }
   }
@@ -323,7 +329,7 @@ async function validateSubjectLines(
     // eslint-disable-next-line no-await-in-loop
     const lockedNature = (await prisma.paymentType.findUnique({ where: { id: sl.paymentTypeId }, select: { nature: true } }))?.nature;
     // eslint-disable-next-line no-await-in-loop
-    const info = (await candidatesForBasisType(lockedBasisType, sl.partyId as number, { excludePaymentId, nature: lockedNature })).find((c) => c.id === lockedBasisId);
+    const info = (await candidatesForBasisType(lockedBasisType, sl.partyId as number, { excludePaymentId, excludeSettlementId, nature: lockedNature })).find((c) => c.id === lockedBasisId);
     if (!info) continue;
     // eslint-disable-next-line no-await-in-loop
     const rowCurrency = sl.currencyId === baseCurrency.id ? baseCurrency : await prisma.currency.findUnique({ where: { id: sl.currencyId } });
@@ -338,7 +344,7 @@ async function validateSubjectLines(
 
   // «نوع پرداخت»ِ غیرفعال برای سند جدید قابل استفاده نیست؛ ولی سندِ موجودی که قبلاً از آن استفاده کرده، با همان نوع معتبر می‌ماند
   const alreadyUsedTypeIds = new Set<number>(
-    excludePaymentId ? (await prisma.paymentSettlementLine.findMany({ where: { paymentId: excludePaymentId }, select: { paymentTypeId: true } })).map((x) => x.paymentTypeId) : []
+    hasExclude ? (await prisma.paymentSettlementLine.findMany({ where: ownerWhere, select: { paymentTypeId: true } })).map((x) => x.paymentTypeId) : []
   );
 
   for (const [idx, l] of lines.entries()) {
@@ -416,7 +422,7 @@ async function validateSubjectLines(
         if (f !== field && v) throw new Error(`ردیف ${idx + 1}: فقط سند مبنای متناسب با نوع پرداخت باید انتخاب شود`);
       }
       // eslint-disable-next-line no-await-in-loop
-      const candidates = await candidatesForBasisType(rowBasisType, l.partyId as number, { excludePaymentId, nature: paymentType.nature });
+      const candidates = await candidatesForBasisType(rowBasisType, l.partyId as number, { excludePaymentId, excludeSettlementId, nature: paymentType.nature });
       basisInfo = candidates.find((c) => c.id === basisId) || null;
       if (!basisInfo) throw new Error(`ردیف ${idx + 1}: سند مبنای انتخاب‌شده یافت نشد یا متعلق به این طرف حساب نیست`);
       if (basisInfo.date.getTime() > paymentDate.getTime() && !alreadyUsedBasis.has(`${field}:${basisId}`)) {
@@ -1245,81 +1251,28 @@ router.put("/payments/:id/re-edit", can(`${FORM}.reEdit`), async (req, res) => {
 // =========================================================================
 // «تایید حسابداری» — توضیح کامل: routes/receipts.ts (همان الگو)
 // =========================================================================
-router.post("/payments/:id/accounting-approve", can(`${FORM}.accountingApprove`), async (req: any, res) => {
-  const id = Number(req.params.id);
-  const d = await prisma.payment.findUnique({ where: { id } });
-  if (!d) return res.status(404).json({ error: "سند پرداخت یافت نشد" });
-  if (d.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
-  if (d.status !== "APPROVED") return res.status(400).json({ error: "سند هنوز اثرگذار نشده است؛ ابتدا آن را ذخیره کنید" });
-  if (d.accountingStatus === "APPROVED") return res.status(400).json({ error: "این سند قبلاً تایید حسابداری شده است" });
-  try {
-    await accountingApprovePayment(id, req.user?.id ?? null);
-    res.json({ id, accountingStatus: "APPROVED" });
-  } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در تایید حسابداری" });
-  }
-});
-
-router.post("/payments/:id/accounting-unapprove", can(`${FORM}.accountingUnapprove`), async (req, res) => {
-  const id = Number(req.params.id);
-  const d = await prisma.payment.findUnique({ where: { id } });
-  if (!d) return res.status(404).json({ error: "سند پرداخت یافت نشد" });
-  if (d.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
-  if (d.accountingStatus !== "APPROVED") return res.status(400).json({ error: "این سند تایید حسابداری نشده است" });
-  await prisma.payment.update({ where: { id }, data: { accountingStatus: "NONE", accountingApprovedAt: null, accountingApprovedById: null } });
-  res.json({ id, accountingStatus: "NONE" });
-});
-
-router.get("/payments/:id/accounting-lines", can(`${FORM}.view`), async (req, res) => {
-  try {
-    res.json(await getPaymentAccountingView(Number(req.params.id)));
-  } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا" });
-  }
-});
-
-router.put("/payments/:id/accounting-lines", can(`${FORM}.accountingApprove`), async (req, res) => {
-  const id = Number(req.params.id);
-  const d = await prisma.payment.findUnique({ where: { id } });
-  if (!d) return res.status(404).json({ error: "سند پرداخت یافت نشد" });
-  if (d.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
-  if (d.accountingStatus !== "APPROVED") return res.status(400).json({ error: "ابتدا «تایید حسابداری» را انجام دهید" });
-  try {
-    await savePaymentAccountingDetails(id, Array.isArray(req.body?.lines) ? req.body.lines : []);
-    res.json({ id });
-  } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در ذخیره" });
-  }
-});
-
-router.post("/payments/:id/delete-accounting-info", can(`${FORM}.deleteAccountingInfo`), async (req, res) => {
-  const id = Number(req.params.id);
-  const d = await prisma.payment.findUnique({ where: { id } });
-  if (!d) return res.status(404).json({ error: "سند پرداخت یافت نشد" });
-  if (d.journalEntryId) return res.status(400).json({ error: JE_LOCK_MESSAGE });
-  if (d.accountingStatus === "APPROVED") return res.status(400).json({ error: "ابتدا «لغو تایید حسابداری» را بزنید" });
-  const count = await prisma.paymentAccountingLine.count({ where: { paymentId: id } });
-  if (count === 0) return res.status(400).json({ error: "این سند اطلاعات حسابداری ندارد" });
-  await prisma.paymentAccountingLine.deleteMany({ where: { paymentId: id } });
-  res.json({ id, deleted: count });
-});
-
-router.post("/payments/:id/issue-journal-entry", can(`${FORM}.issueJournalEntry`), async (req, res) => {
-  try {
-    const entry = await issuePaymentJournalEntry(Number(req.params.id));
-    res.json({ journalEntryId: entry.id, number: entry.number, referenceNumber: entry.referenceNumber, message: entry.message });
-  } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در صدور سند حسابداری" });
-  }
-});
-
-router.delete("/payments/:id/journal-entry", can(`${FORM}.revertJournalEntry`), async (req, res) => {
-  try {
-    await revertPaymentJournalEntry(Number(req.params.id));
-    res.status(204).send();
-  } catch (e: any) {
-    res.status(400).json({ error: e.message || "خطا در حذف سند حسابداری" });
-  }
+// مسیرهای مشترک «تایید حسابداری» و سند حسابداری (services/treasuryDocAccountingActions.ts؛ مشترک با دریافت و تضمین‌ها)
+registerTreasuryAccountingRoutes(router, {
+  basePath: "/payments",
+  form: FORM,
+  adapter: {
+    label: "سند پرداخت",
+    jeLockMessage: JE_LOCK_MESSAGE,
+    requireEffective: true,
+    load: (id) => prisma.payment.findUnique({ where: { id }, select: { status: true, accountingStatus: true, journalEntryId: true } }),
+    approve: (id, userId) => accountingApprovePayment(id, userId),
+    setUnapproved: async (id) => {
+      await prisma.payment.update({ where: { id }, data: { accountingStatus: "NONE", accountingApprovedAt: null, accountingApprovedById: null } });
+    },
+    view: (id) => getPaymentAccountingView(id),
+    saveDetails: (id, rows) => savePaymentAccountingDetails(id, rows),
+    countLines: (id) => prisma.paymentAccountingLine.count({ where: { paymentId: id } }),
+    deleteLines: async (id) => {
+      await prisma.paymentAccountingLine.deleteMany({ where: { paymentId: id } });
+    },
+    issue: (id) => issuePaymentJournalEntry(id) as any,
+    revert: (id) => revertPaymentJournalEntry(id),
+  },
 });
 
 export default router;

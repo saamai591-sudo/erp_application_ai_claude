@@ -16,6 +16,7 @@ function findNavItem(pathname: string): { item: NavItem; kind: "list" | "new" | 
 /** عنوان مناسب برای نمایش در تب، بر اساس مسیر فعلی */
 export function getTitleForPath(pathname: string): string {
   if (pathname === "/") return "خانه";
+  if (/^\/fixed-assets\/\d+\/card$/.test(pathname)) return "کارت دارایی";
   const found = findNavItem(pathname);
   if (!found) return "صفحه";
   if (found.kind === "list") return found.item.label;

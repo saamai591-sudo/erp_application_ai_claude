@@ -2,7 +2,7 @@ import { FormEvent, Fragment, useEffect, useState } from "react";
 import { TypePickerField } from "../components/TypePickerFields";
 import { ErrorToast } from "../components/ErrorToast";
 import { showError } from "../lib/toast";
-import { takeFormPrefill } from "../lib/formPrefill";
+import { stageFormPrefill, takeFormPrefill } from "../lib/formPrefill";
 import type { ReceiptFromTaskPrefill } from "../components/WorkflowTaskAction";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
@@ -286,6 +286,14 @@ function nextClientKey() {
   clientKeySeq += 1;
   return `new-${Date.now()}-${clientKeySeq}`;
 }
+function MacroIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function emptyInstrumentRow(): InstrumentRowState {
   return { clientKey: nextClientKey(), type: "CASH", amount: "", currencyId: "", fxRate: "", cashBoxId: "", bankAccountId: "", referenceNumber: "", chequeNumber: "", chequeDueDate: "", chequeBankBranchId: "", chequeTypeId: "", posTerminal: "", cardReaderId: "", description: "" };
 }
@@ -475,8 +483,59 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         // «ثبت دریافت» از کارِ کارتابل: طرف حساب و شرح از پیش‌فاکتور پیش‌پر می‌شود؛ ابزار و موضوعات را خود کاربر وارد می‌کند
         const fromTask = takeFormPrefill<ReceiptFromTaskPrefill>(location.pathname);
         setHeader({ date: defaultDocumentDate(fp), partyId: fromTask ? String(fromTask.partyId) : "", partyDisplay: fromTask?.partyDisplay ?? "", description: fromTask?.description ?? "" });
-        setInstrumentRows([emptyInstrumentRow()]);
-        setSettlementRows([]);
+        // ابزارها/موضوعاتِ پیش‌تعیین‌شده‌ی دستور میانبر: ردیف‌ها ساخته می‌شوند؛ مبلغ (اگر گفته شده) به ردیف اول ابزار و اولین موضوع آن می‌رسد
+        const presetIns = fromTask?.instruments ?? [];
+        const baseCur = cs.find((c) => c.isBase);
+        const insRows: InstrumentRowState[] = presetIns.length
+          ? presetIns.map((p, i) => {
+              const row: InstrumentRowState = { ...emptyInstrumentRow(), type: p.type, amount: i === 0 && fromTask?.amount ? String(fromTask.amount) : "", description: fromTask?.description ?? "" };
+              if (p.type === "CASH") {
+                row.cashBoxId = p.cashBoxId ? String(p.cashBoxId) : "";
+                if (baseCur) {
+                  row.currencyId = String(baseCur.id);
+                  row.fxRate = "1";
+                }
+              } else if (p.type === "CHEQUE") {
+                if (baseCur) {
+                  row.currencyId = String(baseCur.id);
+                  row.fxRate = "1";
+                }
+              } else if (p.type === "BANK_TRANSFER" && p.bankAccountId) {
+                row.bankAccountId = String(p.bankAccountId);
+                const ba = bas.find((a) => a.id === p.bankAccountId);
+                if (ba?.currencyId) row.currencyId = String(ba.currencyId);
+                if (ba?.currencyId && baseCur && ba.currencyId === baseCur.id) row.fxRate = "1";
+              } else if (p.type === "POS" && p.cardReaderId) {
+                row.cardReaderId = String(p.cardReaderId);
+                const cr = crs.find((r) => r.id === p.cardReaderId);
+                if (cr) {
+                  row.bankAccountId = String(cr.bankAccountId);
+                  row.posTerminal = cr.terminalNumber;
+                  const ba = bas.find((a) => a.id === cr.bankAccountId);
+                  if (ba?.currencyId) row.currencyId = String(ba.currencyId);
+                  if (ba?.currencyId && baseCur && ba.currencyId === baseCur.id) row.fxRate = "1";
+                }
+              }
+              return row;
+            })
+          : [{ ...emptyInstrumentRow(), amount: fromTask?.amount ? String(fromTask.amount) : "" }];
+        setInstrumentRows(insRows);
+        setSettlementRows(
+          (fromTask?.subjects ?? [])
+            .filter((sub) => insRows[sub.instrument])
+            .map((sub, i) => {
+              const ins = insRows[sub.instrument];
+              return {
+                ...emptySettlementRow(ins.clientKey, `ردیف ${toFaDigits(String(sub.instrument + 1))} - ${TYPE_FA[ins.type]}`, ins.currencyId),
+                receiptTypeId: String(sub.receiptTypeId),
+                partyId: fromTask?.partyId ? String(fromTask.partyId) : "",
+                partyDisplay: fromTask?.partyDisplay ?? "",
+                fxRate: ins.fxRate,
+                amount: i === 0 && sub.instrument === 0 && fromTask?.amount ? String(fromTask.amount) : "",
+                description: fromTask?.description ?? "",
+              };
+            })
+        );
         setMeta(null);
       }
       setLoaded(true);
@@ -484,6 +543,19 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
+
+  /** ساخت «دستور میانبر دستیار» از روی همین رسید: فرم دستور با کارِ «ثبت رسید دریافت» و شرحِ همین سند پر می‌شود (مدیر انتخاب می‌کند ثابت بماند یا پرسیده شود) */
+  function createAssistantMacro() {
+    // ابزارها و موضوعات فعلی همین سند هم به‌عنوان پیش‌تعیین پیشنهاد می‌شود (مدیر در فرم دستور حذف/اصلاح می‌کند)
+    const keyIndex = new Map(instrumentRows.map((r, i) => [r.clientKey, i]));
+    stageFormPrefill("/assistant-macros/new", {
+      actionKey: "receipt",
+      description: header.description,
+      instruments: instrumentRows.map((r) => ({ type: r.type, cashBoxId: r.cashBoxId ? Number(r.cashBoxId) : null, bankAccountId: r.type === "BANK_TRANSFER" && r.bankAccountId ? Number(r.bankAccountId) : null, cardReaderId: r.cardReaderId ? Number(r.cardReaderId) : null })),
+      subjects: settlementRows.filter((r) => r.receiptTypeId && keyIndex.has(r.instrumentClientKey)).map((r) => ({ receiptTypeId: Number(r.receiptTypeId), instrument: keyIndex.get(r.instrumentClientKey)! })),
+    });
+    openTab("/assistant-macros/new");
+  }
 
   const status: DocStatus = meta?.status || "DRAFT";
   // فقط فیلدهای هدر (تاریخ/طرف حساب) با این معیار قفل می‌شوند — این‌ها هرگز از طریق
@@ -845,6 +917,13 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
             ]
           : []
       }
+      toolbarExtra={
+        editId && !reEdit && perm("workflow.settings.assistant-macros.create") ? (
+          <button type="button" className="toolbar-icon-btn" onClick={createAssistantMacro} title="ساخت دستور دستیار از روی این رسید (قالب)">
+            <MacroIcon />
+          </button>
+        ) : undefined
+      }
       wide
     >
       <form id="receipt-form" onSubmit={onSubmit}>
@@ -854,7 +933,7 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         <fieldset disabled={formLocked} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
 
         <fieldset disabled={coreDisabled} style={{ border: 0, padding: 0, margin: 0 }}>
-          <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
+          <div className="je-header-grid" style={{ marginBottom: 6, maxWidth: 900 }}>
             <div className="form-field">
               <label>شماره</label>
               <input dir="ltr" value={meta ? toFaDigits(String(meta.number)) : "خودکار پس از ذخیره"} disabled />
@@ -895,7 +974,7 @@ function ReceiptForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
         </fieldset>
 
         {/* شرح داخل همین fieldset است: در سند «تایید»شده فقط از مسیر «ویرایش مجدد» قابل تغییر است */}
-        <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
+        <div className="je-header-grid" style={{ marginBottom: 6, maxWidth: 900 }}>
           <div className="form-field full">
             <DescriptionField
               value={header.description}

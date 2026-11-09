@@ -273,7 +273,7 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
     emptyRows: () => [emptyRow()],
     mapDetailToHeader: (d) => ({ date: d.date.slice(0, 10), warehouseId: String(d.warehouseId), description: d.description || "", details: detailsToValues(d.details) }),
     mapDetailToRows: mapRows,
-    mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
+    mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle, countId: (d as any).countId ?? null }),
     loadExtra: async () => {
       const [whs, items, currencies]: [Warehouse[], GoodsItemRow[], { isBase: boolean; decimalPlaces: number }[]] = await Promise.all([
         api.get("/warehouses"),
@@ -291,8 +291,9 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
   // ردیف‌ها برای همه قفل می‌شود؛ فقط فی/مبلغ (برای کاربر دارای دسترسی مشاهده اطلاعات حسابداری) قابل
   // ویرایش می‌ماند — نگاه کنید به شاخه‌ی status==="FINALIZED" در PUT بک‌اند.
   const isFinalized = meta?.status === "FINALIZED";
-  const coreDisabled = isFinalized;
-  const moneyEditable = isFinalized && canViewAccounting;
+  const countLocked = !!meta?.countId;
+  const coreDisabled = isFinalized || countLocked;
+  const moneyEditable = isFinalized && canViewAccounting && !countLocked;
   // طبق تصمیم صریح کاربر: فیلدهای مبلغی تا وقتی سند Finalized نشده، اصلاً نمایش داده نمی‌شوند.
   const showAmount = canViewAccounting && isFinalized;
 
@@ -410,13 +411,13 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
   return (
     <FormPage
       title={editId ? "ویرایش اضافات انبارگردانی" : "اضافات انبارگردانی جدید"}
-      description={isFinalized ? "این سند تایید حسابداری شده است؛ سرصفحه، مقدار و کالای ردیف‌ها دیگر قابل ویرایش نیستند." : undefined}
+      description={countLocked ? "این سند از «مغایرت‌گیری شمارش انبار» صادر شده است و فقط از فرم «شمارش انبار» (حذف مغایرت‌گیری) قابل ویرایش/حذف است." : isFinalized ? "این سند تایید حسابداری شده است؛ سرصفحه، مقدار و کالای ردیف‌ها دیگر قابل ویرایش نیستند." : undefined}
       formId="warehouse-adjustment-form"
       closePath={basePath}
       newPath={`${basePath}/new`}
       onDelete={editId && !coreDisabled ? handleDelete : undefined}
       extraActions={extraActions}
-      saveDisabled={isFinalized && !moneyEditable}
+      saveDisabled={countLocked || (isFinalized && !moneyEditable)}
       wide
     >
       <form id="warehouse-adjustment-form" onSubmit={onSubmit}>
@@ -430,7 +431,7 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
         )}
 
         <fieldset disabled={coreDisabled} style={{ border: 0, padding: 0, margin: 0 }}>
-          <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
+          <div className="je-header-grid" style={{ marginBottom: 6, maxWidth: 900 }}>
             <div className="form-field">
               <label>شماره</label>
               <input dir="ltr" value={meta ? toFaDigits(String(meta.number)) : "خودکار پس از ذخیره"} disabled />

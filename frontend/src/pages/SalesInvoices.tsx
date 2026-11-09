@@ -562,13 +562,17 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     const p = takeFormPrefill<InvoiceFromDeliveryPrefill>(location.pathname);
     if (!p) return;
     (async () => {
-      setHeader({ date: p.date, customerId: String(p.customerId), salesTypeId: String(p.salesTypeId), salesCenterId: String(p.salesCenterId), currencyId: String(p.currencyId), fxRate: p.fxRate, description: "" });
+      setHeader({ date: p.date, customerId: String(p.customerId), salesTypeId: p.salesTypeId ? String(p.salesTypeId) : "", salesCenterId: p.salesCenterId ? String(p.salesCenterId) : "", currencyId: p.currencyId ? String(p.currencyId) : "", fxRate: p.fxRate, description: "" });
+      // نوع/مرکز فروش یا ارز خالی (مبنای بدون سفارش/پیش‌فاکتور) یعنی کاربر در فرم انتخاب می‌کند؛ ردیف‌های مبنا بعد از انتخاب با دکمه‌ی انتخابگر مبنا می‌آیند
+      if (!p.salesTypeId || !p.salesCenterId || !p.currencyId) return;
       try {
-        const qs = new URLSearchParams({ type: "SALES_DELIVERY", customerId: String(p.customerId), salesTypeId: String(p.salesTypeId), salesCenterId: String(p.salesCenterId), currencyId: String(p.currencyId), date: p.date });
+        const basis = p.basis ?? "SALES_DELIVERY";
+        const docId = p.documentId ?? p.deliveryId;
+        const qs = new URLSearchParams({ type: basis, customerId: String(p.customerId), salesTypeId: String(p.salesTypeId), salesCenterId: String(p.salesCenterId), currencyId: String(p.currencyId), date: p.date });
         const lines: BasisLine[] = await api.get(`/sales-invoices/basis-lines?${qs.toString()}`);
-        const mine = lines.filter((l) => l.documentId === p.deliveryId && l.remaining > 0);
+        const mine = lines.filter((l) => l.documentId === docId && l.remaining > 0);
         if (mine.length === 0) {
-          setError("هیچ ردیف قابل‌صورتحسابی از این حواله باقی نمانده است");
+          setError("هیچ ردیف قابل‌صورتحسابی از این مبنا باقی نمانده است");
           return;
         }
         onBasisLinesPicked(0, mine);
@@ -787,28 +791,28 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
       <form id="sales-invoice-form" onSubmit={onSubmit}>
         <ErrorToast message={error} />
         <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0 }}>
-        <div className="je-header-grid" style={{ marginBottom: 16, maxWidth: 900 }}>
-          <div className="form-field">
+        <div className="je-header-grid cols-4" style={{ marginBottom: 6, maxWidth: 1250 }}>
+          <div className="form-field hc1 hr1">
             <label>شماره</label>
             <input dir="ltr" value={meta ? toFaDigits(String(meta.number)) : "خودکار پس از ذخیره"} disabled />
           </div>
           {meta?.journalEntryReferenceNumber && (
-            <div className="form-field">
+            <div className="form-field hc1 hr3">
               <label>سند حسابداری</label>
               <input dir="ltr" value={toFaDigits(String(meta.journalEntryReferenceNumber))} disabled />
             </div>
           )}
           {voided && (
-            <div className="form-field">
+            <div className="form-field hc2 hr3">
               <label>وضعیت</label>
               <input value={SALES_INVOICE_STATUS_FA.VOIDED} disabled style={{ color: "var(--danger)", fontWeight: 600 }} />
             </div>
           )}
-          <div className="form-field">
+          <div className="form-field hc1 hr2">
             <label>تاریخ<RequiredMark /></label>
             <JalaliDatePicker fiscalYear value={header.date} onChange={(v) => setHeader({ ...header, date: v })} disabled={headerDisabled} />
           </div>
-          <div className="form-field">
+          <div className="form-field hc2 hr1">
             <label>مشتری<RequiredMark /></label>
             <RecordPickerField
               title="انتخاب مشتری"
@@ -825,21 +829,21 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
               onSelect={(x) => setHeader({ ...header, customerId: String(x.id) })}
             />
           </div>
-          <div className="form-field">
+          <div className="form-field hc3 hr1">
             <label>نوع فروش<RequiredMark /></label>
             <select value={header.salesTypeId} onChange={(e) => setHeader({ ...header, salesTypeId: e.target.value })} disabled={headerDisabled}>
               <option value="">انتخاب کنید</option>
               {salesTypes.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
             </select>
           </div>
-          <div className="form-field">
+          <div className="form-field hc2 hr2">
             <label>مرکز فروش<RequiredMark /></label>
             <select value={header.salesCenterId} onChange={(e) => setHeader({ ...header, salesCenterId: e.target.value })} disabled={headerDisabled}>
               <option value="">انتخاب کنید</option>
               {salesCenters.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
             </select>
           </div>
-          <div className="form-field fx-only">
+          <div className="form-field fx-only hc4 hr1">
             <label>ارز<RequiredMark /></label>
             <select value={header.currencyId} onChange={(e) => setHeader({ ...header, currencyId: e.target.value, fxRate: "" })} disabled={headerDisabled}>
               <option value="">انتخاب کنید</option>
@@ -847,12 +851,12 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
             </select>
           </div>
           {needsFxRate && (
-            <div className="form-field fx-only">
+            <div className="form-field fx-only hc4 hr3">
               <label>نرخ ارز<RequiredMark /></label>
               <AmountInput value={header.fxRate} onChange={(v) => setHeader({ ...header, fxRate: v })} allowDecimal disabled={headerDisabled} />
             </div>
           )}
-          <div className="form-field full">
+          <div className="form-field span-2-c3 hr2">
             <DescriptionField value={header.description} onChange={(v) => setHeader({ ...header, description: v })} disabled={headerDisabled} />
           </div>
         </div>
