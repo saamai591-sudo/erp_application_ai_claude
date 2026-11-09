@@ -31,6 +31,7 @@ export async function findChequeUses(
   add("واگذاری به بانک", (await db.chequeDepositLine.findMany({ where: { chequeItemId }, include: { chequeDeposit: true } })).map((l: any) => l.chequeDeposit.number));
   add("برگشت از واگذاری", (await db.chequeDepositReturnLine.findMany({ where: { chequeItemId }, include: { chequeDepositReturn: true } })).map((l: any) => l.chequeDepositReturn.number));
   add("نتیجه وصول/برگشت (دریافتنی)", (await db.chequeClearingReceivableLine.findMany({ where: { chequeItemId }, include: { chequeClearingReceivable: true } })).map((l: any) => l.chequeClearingReceivable.number));
+  add("انتقال به صندوق", (await db.cashBoxTransferLine.findMany({ where: { chequeItemId }, include: { transfer: true } })).map((l: any) => l.transfer.number));
   add("نتیجه وصول/برگشت (پرداختنی)", (await db.chequeClearingPayableLine.findMany({ where: { chequeItemId }, include: { chequeClearingPayable: true } })).map((l: any) => l.chequeClearingPayable.number));
 
   return uses;

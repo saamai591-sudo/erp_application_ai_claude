@@ -16,7 +16,7 @@ export interface ChequeBaseEvent {
   number: number;
 }
 
-type DocKind = "receipt" | "payment" | "deposit" | "depositReturn" | "clearingReceivable" | "clearingPayable";
+type DocKind = "receipt" | "payment" | "deposit" | "depositReturn" | "clearingReceivable" | "clearingPayable" | "cashTransfer";
 export interface ExcludeDoc {
   kind: DocKind;
   id: number;
@@ -29,6 +29,7 @@ const TITLES: Record<DocKind, string> = {
   depositReturn: "برگشت از واگذاری",
   clearingReceivable: "وصول/برگشت چک دریافتی",
   clearingPayable: "وصول/برگشت چک پرداختی",
+  cashTransfer: "انتقال به صندوق",
 };
 
 /** آخرین اتفاق تاییدشده‌ی هر چک؛ excludeDoc = سندی که در حال ویرایش است (ردیف‌های خودش سند مبنا حساب نمی‌شوند) */
@@ -50,13 +51,14 @@ export async function latestChequeBaseEvents(chequeIds: number[], excludeDoc?: E
   const skip = (kind: DocKind, id: number) => excludeDoc?.kind === kind && excludeDoc.id === id;
 
   const where = { chequeItemId: { in: chequeIds }, chequeStep: { not: null } };
-  const [receipts, payments, deposits, depositReturns, clearingsR, clearingsP] = await Promise.all([
+  const [receipts, payments, deposits, depositReturns, clearingsR, clearingsP, transfers] = await Promise.all([
     db.receiptInstrumentLine.findMany({ where, select: { chequeItemId: true, chequeStep: true, receipt: { select: { id: true, date: true, number: true, status: true } } } }),
     db.paymentInstrumentLine.findMany({ where, select: { chequeItemId: true, chequeStep: true, payment: { select: { id: true, date: true, number: true, status: true } } } }),
     db.chequeDepositLine.findMany({ where, select: { chequeItemId: true, chequeStep: true, chequeDeposit: { select: { id: true, date: true, number: true, status: true } } } }),
     db.chequeDepositReturnLine.findMany({ where, select: { chequeItemId: true, chequeStep: true, chequeDepositReturn: { select: { id: true, date: true, number: true, status: true } } } }),
     db.chequeClearingReceivableLine.findMany({ where, select: { chequeItemId: true, chequeStep: true, chequeClearingReceivable: { select: { id: true, date: true, number: true, status: true } } } }),
     db.chequeClearingPayableLine.findMany({ where, select: { chequeItemId: true, chequeStep: true, chequeClearingPayable: { select: { id: true, date: true, number: true, status: true } } } }),
+    db.cashBoxTransferLine.findMany({ where, select: { chequeItemId: true, chequeStep: true, transfer: { select: { id: true, date: true, number: true } } } }),
   ]);
   for (const l of receipts) if (l.receipt.status === "APPROVED" && !skip("receipt", l.receipt.id)) consider(l.chequeItemId, l.chequeStep, l.receipt.date, "receipt", l.receipt.number);
   for (const l of payments) if (l.payment.status === "APPROVED" && !skip("payment", l.payment.id)) consider(l.chequeItemId, l.chequeStep, l.payment.date, "payment", l.payment.number);
@@ -64,6 +66,8 @@ export async function latestChequeBaseEvents(chequeIds: number[], excludeDoc?: E
   for (const l of depositReturns) if (l.chequeDepositReturn.status === "APPROVED" && !skip("depositReturn", l.chequeDepositReturn.id)) consider(l.chequeItemId, l.chequeStep, l.chequeDepositReturn.date, "depositReturn", l.chequeDepositReturn.number);
   for (const l of clearingsR) if (l.chequeClearingReceivable.status === "APPROVED" && !skip("clearingReceivable", l.chequeClearingReceivable.id)) consider(l.chequeItemId, l.chequeStep, l.chequeClearingReceivable.date, "clearingReceivable", l.chequeClearingReceivable.number);
   for (const l of clearingsP) if (l.chequeClearingPayable.status === "APPROVED" && !skip("clearingPayable", l.chequeClearingPayable.id)) consider(l.chequeItemId, l.chequeStep, l.chequeClearingPayable.date, "clearingPayable", l.chequeClearingPayable.number);
+  // انتقال به صندوق با ذخیره تاییدشده است (وضعیت جدا ندارد)
+  for (const l of transfers) if (!skip("cashTransfer", l.transfer.id)) consider(l.chequeItemId, l.chequeStep, l.transfer.date, "cashTransfer", l.transfer.number);
   return result;
 }
 

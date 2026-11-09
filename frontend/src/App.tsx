@@ -234,6 +234,7 @@ import Payments from "./pages/Payments";
 import Cheques from "./pages/Cheques";
 import ChequeDeposits from "./pages/ChequeDeposits";
 import ChequeDepositReturns from "./pages/ChequeDepositReturns";
+import CashBoxTransfers from "./pages/CashBoxTransfers";
 import ChequeClearingReceivable from "./pages/ChequeClearingReceivable";
 import ChequeClearingPayable from "./pages/ChequeClearingPayable";
 
@@ -920,6 +921,9 @@ export default function App() {
             <Route path="/cheque-deposits/new" element={<ChequeDeposits />} />
             <Route path="/cheque-deposits/:id/edit" element={<ChequeDeposits />} />
             <Route path="/cheque-deposits/:id/re-edit" element={<ChequeDeposits />} />
+            <Route path="/cash-box-transfers" element={<CashBoxTransfers />} />
+            <Route path="/cash-box-transfers/new" element={<CashBoxTransfers />} />
+            <Route path="/cash-box-transfers/:id/edit" element={<CashBoxTransfers />} />
             <Route path="/cheque-deposit-returns" element={<ChequeDepositReturns />} />
             <Route path="/cheque-deposit-returns/new" element={<ChequeDepositReturns />} />
             <Route path="/cheque-deposit-returns/:id/edit" element={<ChequeDepositReturns />} />

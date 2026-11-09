@@ -1143,6 +1143,7 @@ export const REGISTRY: ModuleDef[] = [
               { key: "revertJournalEntry", title: "حذف سند حسابداری صادرشده" },
             ],
           },
+          { key: "cash-box-transfers", title: "انتقال به صندوق", baseActions: CRUD },
           { key: "petty-cash-payments", title: "پرداخت از تنخواه", baseActions: CRUD },
           {
             key: "petty-cash-summaries",

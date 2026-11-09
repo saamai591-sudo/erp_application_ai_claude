@@ -203,6 +203,7 @@ import partySettlementsRoutes from "./routes/partySettlements";
 import chequesRoutes from "./routes/cheques";
 import chequeDepositsRoutes from "./routes/chequeDeposits";
 import chequeDepositReturnsRoutes from "./routes/chequeDepositReturns";
+import cashBoxTransfersRoutes from "./routes/cashBoxTransfers";
 import chequeClearingReceivableRoutes from "./routes/chequeClearingReceivable";
 import chequeClearingPayableRoutes from "./routes/chequeClearingPayable";
 
@@ -441,6 +442,7 @@ app.use("/api", partySettlementsRoutes);
 app.use("/api", chequesRoutes);
 app.use("/api", chequeDepositsRoutes);
 app.use("/api", chequeDepositReturnsRoutes);
+app.use("/api", cashBoxTransfersRoutes);
 app.use("/api", chequeClearingReceivableRoutes);
 app.use("/api", chequeClearingPayableRoutes);
 

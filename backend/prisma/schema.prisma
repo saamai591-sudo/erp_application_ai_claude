@@ -178,6 +178,7 @@ model FiscalPeriod {
   guaranteeReturns GuaranteeReturn[]
   guaranteeOperations GuaranteeOperation[]
   guaranteeExtensions GuaranteeExtension[]
+  cashBoxTransfers CashBoxTransfer[]
   guaranteeDocuments GuaranteeDocument[]
   inventoryCounts InventoryCount[]
   countTagIssues                 InventoryCountTagIssue[]
@@ -618,6 +619,8 @@ model CashBox {
   receiptInstrumentLines  ReceiptInstrumentLine[]
   treasuryAccountSettings TreasuryAccountSetting[]
   treasuryOpeningLines    TreasuryOpeningCashBox[]
+  cashBoxTransfersFrom    CashBoxTransfer[]        @relation("CashBoxTransferFrom")
+  cashBoxTransfersTo      CashBoxTransfer[]        @relation("CashBoxTransferTo")
   salesStations           SalesStation[]
   storeReceipts           StoreReceipt[]
 }
@@ -3268,6 +3271,7 @@ model ChequeItem {
   depositReturnLines      ChequeDepositReturnLine[]
   clearingReceivableLines ChequeClearingReceivableLine[]
   clearingPayableLines    ChequeClearingPayableLine[]
+  cashBoxTransferLines    CashBoxTransferLine[]
   // طبق Documents/افتتاحیه دریافت و پرداخت و بستن سال.md: هر چک متعلق به یک دوره مالی است (فهرست‌ها و انتخابگرهای چک خودکار
   // به دوره مالی جاری محدود می‌شوند). چک‌های افتتاحیه (isOpening) یا دستی در «افتتاحیه دریافت و پرداخت» ثبت شده‌اند یا با
   // «بستن سال دریافت و پرداخت» از چک فعال سال قبل ساخته شده‌اند (parentChequeId → رکورد سال قبل، با همان شماره‌ی چک).
@@ -8816,4 +8820,39 @@ model GuaranteeExtensionLine {
 
   @@index([extensionId])
   @@index([instrumentId])
+}
+
+/// «انتقال به صندوق» (مدیریت خزانه › پرداخت): انتقال چک‌های دریافتیِ «در دست» از یک صندوق به صندوق دیگر. ذخیره = اتفاقِ تاییدشده‌ی چرخه‌ی عمر چک
+/// (ChequeItem.step یک واحد بالا می‌رود و روی ردیف ثبت می‌شود)؛ فعلاً سند حسابداری ندارد. «صندوق فعلیِ چک» از آخرین رویداد (دریافت یا انتقال) محاسبه می‌شود
+/// (services/chequeHolderService.ts).
+model CashBoxTransfer {
+  id             Int                   @id @default(autoincrement())
+  fiscalPeriodId Int
+  number         Int
+  date           DateTime              @db.Date
+  fromCashBoxId  Int
+  toCashBoxId    Int
+  description    String?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  fiscalPeriod   FiscalPeriod          @relation(fields: [fiscalPeriodId], references: [id])
+  fromCashBox    CashBox               @relation("CashBoxTransferFrom", fields: [fromCashBoxId], references: [id])
+  toCashBox      CashBox               @relation("CashBoxTransferTo", fields: [toCashBoxId], references: [id])
+  lines          CashBoxTransferLine[]
+
+  @@unique([fiscalPeriodId, number])
+}
+
+model CashBoxTransferLine {
+  id           Int             @id @default(autoincrement())
+  transferId   Int
+  rowOrder     Int             @default(0)
+  chequeItemId Int
+  /// step چک بعد از این رویداد (هم‌الگوی chequeStep سایر ردیف‌های چرخه‌ی عمر)
+  chequeStep   Int?
+  transfer     CashBoxTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  chequeItem   ChequeItem      @relation(fields: [chequeItemId], references: [id])
+
+  @@index([transferId])
+  @@index([chequeItemId])
 }

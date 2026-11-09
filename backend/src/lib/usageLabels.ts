@@ -163,6 +163,7 @@ export const USAGE_META: Record<string, UsageMeta> = {
   CardReader: { label: "کارتخوان", base: "/card-readers" },
   GuaranteeType: { label: "نوع تضمین", base: "/guarantee-types" },
   GuaranteeExtension: { label: "تمدید ضمانت‌نامه", title: (r: any) => `شماره ${r.number}` },
+  CashBoxTransfer: { label: "انتقال به صندوق", base: "/cash-box-transfers", title: (r: any) => `شماره ${r.number}` },
   GuaranteeOperation: { label: "عملیات ضمانت‌نامه", title: (r: any) => `شماره ${r.number}` },
   GuaranteeReturn: { label: "استرداد تضمین", title: (r: any) => `شماره ${r.number}` },
   GuaranteeDocument: { label: "سند تضمین", title: (r: any) => `شماره ${r.number}` },
