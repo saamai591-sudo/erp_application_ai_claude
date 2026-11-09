@@ -19,6 +19,8 @@ const INTENTS: { key: string; re: RegExp }[] = [
   { key: "approve-quote", re: /(?:تایید|تأیید|تائید)\s*(?:کن\s*)?(?:پیش\s?فاکتور)|پیش\s?فاکتور[^،.]*?(?:تایید|تأیید|تائید)\s*(?:کن|شود)/ },
   { key: "sales-quote", re: /پیش\s?فاکتور|استعلام\s?قیمت|قیمت\s?بده/ },
   { key: "create-customer", re: /مشتری\s+(?:جدید|تازه)|تعریف\s+مشتری|ثبت\s+مشتری/ },
+  // «اعلامیه پرداخت»، «پرداخت به/وجه/جدید»، «ثبت/صدور … پرداخت»؛ قبل از «حواله» می‌آید تا «پرداخت با حواله بانکی» حواله‌ی فروش نشود
+  { key: "payment", re: /اعلامیه\s+پرداخت|پرداخت\s+(?:به|وجه|جدید|بزن|بساز)|(?:ثبت|صدور|صادر|ایجاد|بزن|بساز)\s*(?:یک\s+)?پرداخت/ },
   { key: "sales-delivery", re: /حواله/ },
   { key: "sales-invoice", re: /(?:ثبت|صدور|صادر|ایجاد|بزن|بساز)\s*(?:یک\s+)?(?:فاکتور|صورتحساب)|(?:فاکتور|صورتحساب)\s*(?:فروش\s*)?(?:جدید|بزن|بساز)/ },
   // «رسید انبار» دریافت نیست؛ فقط «رسید دریافت»، «دریافت از/وجه/جدید» و «ثبت/صدور … دریافت|رسید»
@@ -212,6 +214,32 @@ function extractReceipt(text: string, state: ChatState): Record<string, SlotValu
   return out;
 }
 
+/** «اعلامیه پرداخت به شرکت X مبلغ ۵۰ میلیون»: طرف حساب + مبلغ اختیاری */
+function extractPayment(text: string, state: ChatState): Record<string, SlotValue> {
+  if (state.pending?.slot === "description") return { description: SKIP_WORDS.test(text.trim()) ? "" : text.trim() };
+  if (state.pending?.slot === "amount") {
+    const a = parseAmount(text);
+    if (a) return { amount: a.value };
+    const n = Number(text.replace(/[,٬\s]/g, "").replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0)).replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660)));
+    return Number.isFinite(n) && n > 0 ? { amount: n } : {};
+  }
+  if (state.pending && state.pending.slot !== "party") return {};
+  const out: Record<string, SlotValue> = {};
+  let rest = text;
+  const amt = parseAmount(rest);
+  if (amt) {
+    out.amount = amt.value;
+    rest = rest.replace(amt.match, " ");
+  }
+  const t = rest
+    .replace(/(?:^|\s)(?:ثبت|صدور|صادر|ایجاد|بزن|بساز|کن|یک|جدید|اعلامیه|پرداخت|وجه|به|طرف|حساب|مبلغ)(?=\s|$)/g, " ")
+    .replace(/[?؟]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (t) out.party = { text: t };
+  return out;
+}
+
 /** «تایید پیش‌فاکتور 131» / «… برای شرکت X»: شماره یا مشتری؛ خودِ پیش‌فاکتور را موتور با دکمه می‌پرسد */
 function extractApproveQuote(text: string, state: ChatState): Record<string, SlotValue> {
   if (state.pending && state.pending.slot !== "customer" && state.pending.slot !== "quoteNumber") return {};
@@ -265,7 +293,7 @@ export const ruleInterpreter: Interpreter = {
         }
         const rest = text.slice(cut).trim();
         const slots: Record<string, SlotValue> =
-          macro.actionKey === "sales-quote" ? extractQuote(rest, { ...state, pending: null }) : macro.actionKey === "receipt" ? extractReceipt(rest, { ...state, pending: null }) : {};
+          macro.actionKey === "sales-quote" ? extractQuote(rest, { ...state, pending: null }) : macro.actionKey === "receipt" ? extractReceipt(rest, { ...state, pending: null }) : macro.actionKey === "payment" ? extractPayment(rest, { ...state, pending: null }) : {};
         if (macro.salesType && !slots.salesType) slots.salesType = macro.salesType;
         if (macro.salesCenter && !slots.salesCenter) slots.salesCenter = macro.salesCenter;
         if (macro.description && slots.description === undefined) slots.description = macro.description;
@@ -273,8 +301,11 @@ export const ruleInterpreter: Interpreter = {
         if (macro.actionKey === "receipt" && macro.hasReceiptPreset) slots.macroId = macro.id;
         // مشتریِ ثابتِ ماکروی رسید از متن کاربر مقدم است (ثابت = تغییر نمی‌کند)
         if (macro.actionKey === "receipt" && macro.receiptCustomer) slots.customer = macro.receiptCustomer;
+        if (macro.actionKey === "payment" && macro.hasPaymentPreset) slots.macroId = macro.id;
+        // طرف حسابِ ثابتِ ماکروی پرداخت هم از متن کاربر مقدم است
+        if (macro.actionKey === "payment" && macro.paymentParty) slots.party = macro.paymentParty;
         // ابزار و موضوع که انتخاب شده باشد، مبلغ بعداً در فرم قابل ویرایش نیست؛ پس مبلغ همین‌جا پرسیده می‌شود
-        const ask = [...macro.askFields, ...(macro.actionKey === "receipt" && macro.hasReceiptPreset ? ["amount"] : [])];
+        const ask = [...macro.askFields, ...((macro.actionKey === "receipt" && macro.hasReceiptPreset) || (macro.actionKey === "payment" && macro.hasPaymentPreset) ? ["amount"] : [])];
         // اقلام ثابتِ دستور؛ اگر کاربر هم اقلامی گفته، به آن‌ها اضافه می‌شود
         if (macro.lines.length) slots.lines = [...macro.lines.map((l): LineValue => (l.quantity === null ? { ref: l.ref, quantity: 1, askQty: true } : { ref: l.ref, quantity: l.quantity })), ...((slots.lines as LineValue[] | undefined) ?? [])];
         return { actionKey: macro.actionKey, slots, ask: ask.length ? ask : undefined };
@@ -291,6 +322,7 @@ export const ruleInterpreter: Interpreter = {
     else if (key === "approve-quote") slots = extractApproveQuote(body, hit ? { ...state, pending: null } : state);
     else if (key === "sales-delivery" || key === "sales-invoice") slots = extractCustomerOnly(body, hit ? { ...state, pending: null } : state);
     else if (key === "receipt") slots = extractReceipt(body, hit ? { ...state, pending: null } : state);
+    else if (key === "payment") slots = extractPayment(body, hit ? { ...state, pending: null } : state);
     else if (key === "stock") slots = hit || state.pending ? extractStock(body) : {};
     else if (key === "customer-invoices") slots = hit || state.pending ? extractCustomerInvoices(body) : {};
     return { actionKey: key, slots };

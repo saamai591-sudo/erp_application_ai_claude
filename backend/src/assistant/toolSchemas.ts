@@ -10,7 +10,7 @@ function slotSchema(s: SlotDef): Record<string, unknown> {
     case "lines":
       return { type: "array", description: s.title, items: { type: "object", properties: { text: { type: "string", description: "نام/کد کالا" }, quantity: { type: "number" } }, required: ["text", "quantity"] } };
     default:
-      return { type: "string", description: `${s.title}${["customer", "goodsItem", "salesType", "salesCenter"].includes(s.type) ? " (نام یا کد؛ سیستم خودش پیدا می‌کند)" : ""}` };
+      return { type: "string", description: `${s.title}${["customer", "party", "goodsItem", "salesType", "salesCenter"].includes(s.type) ? " (نام یا کد؛ سیستم خودش پیدا می‌کند)" : ""}` };
   }
 }
 

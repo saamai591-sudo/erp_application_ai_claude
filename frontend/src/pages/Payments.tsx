@@ -27,6 +27,7 @@ import { toBaseCurrencyAmount, fromBaseCurrencyAmount, calculateExchangeGainLoss
 import { DescriptionField } from "../components/DescriptionField";
 import { TreasuryAccountingPanel } from "../components/TreasuryAccountingPanel";
 import { usePermissions } from "../lib/usePermissions";
+import { stageFormPrefill, takeFormPrefill } from "../lib/formPrefill";
 
 // ماژول «خزانه‌داری» > پرداخت / اعلامیه پرداخت — هم‌الگوی Receipts.tsx (نگاه کنید به یادداشت‌های آن فایل و
 // backend/src/routes/payments.ts): چهار ابزار (نقد/حواله بانکی/چک/چک انتقالی) با ارز و نرخ ارز مستقل هر ردیف،
@@ -53,6 +54,16 @@ function statusLabel(status: DocStatus, accountingStatus?: AccountingStatus, has
   if (hasJournalEntry) return "سند صادر شده";
   if (accountingStatus === "APPROVED") return "تایید حسابداری";
   return status === "DRAFT" ? "ثبت (اثرگذاری با ذخیره‌ی بعدی)" : "ثبت";
+}
+
+/** باز شدن فرم «جدید» از «دستیار»: طرف حساب، شرح و مبلغ ردیف اول ابزار، و ابزارها/موضوعات پیش‌تعیین‌شده‌ی دستور میانبر (مبلغ به ردیف اول ابزار و اولین موضوعش می‌رسد) */
+export interface PaymentFromAssistantPrefill {
+  partyId: number;
+  partyDisplay: string;
+  description: string;
+  amount?: number | null;
+  instruments?: { type: InstrumentType; cashBoxId: number | null; bankAccountId: number | null }[];
+  subjects?: { paymentTypeId: number; instrument: number }[];
 }
 
 interface PartyOption { id: number; detailCode: string; category: "INDIVIDUAL" | "LEGAL"; isActive: boolean; firstName: string | null; lastName: string | null; name: string | null }
@@ -200,6 +211,14 @@ function PlusIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
       <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MacroIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -529,9 +548,55 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
           return;
         }
       } else {
-        setHeader({ date: defaultDocumentDate(fp), partyId: "", partyDisplay: "", description: "" });
-        setInstrumentRows([emptyInstrumentRow()]);
-        setSettlementRows([]);
+        // «ثبت پرداخت» از دستیار: طرف حساب و شرح پیش‌پر می‌شود؛ ابزار/موضوعات فقط اگر دستور میانبر تعیین کرده باشد
+        const fromAssistant = takeFormPrefill<PaymentFromAssistantPrefill>(location.pathname);
+        setHeader({ date: defaultDocumentDate(fp), partyId: fromAssistant ? String(fromAssistant.partyId) : "", partyDisplay: fromAssistant?.partyDisplay ?? "", description: fromAssistant?.description ?? "" });
+        const presetIns = fromAssistant?.instruments ?? [];
+        const baseCur = cs.find((c) => c.isBase);
+        const insRows: InstrumentRowState[] = presetIns.length
+          ? presetIns.map((p, i) => {
+              const row: InstrumentRowState = { ...emptyInstrumentRow(), type: p.type, amount: i === 0 && fromAssistant?.amount ? String(fromAssistant.amount) : "", description: fromAssistant?.description ?? "" };
+              if (p.type === "CASH") {
+                row.cashBoxId = p.cashBoxId ? String(p.cashBoxId) : "";
+                if (baseCur) {
+                  row.currencyId = String(baseCur.id);
+                  row.fxRate = "1";
+                }
+              } else if (p.type === "CHEQUE" || p.type === "CHEQUE_TRANSFER") {
+                // چک همیشه با ارز پایه است
+                if (baseCur) {
+                  row.currencyId = String(baseCur.id);
+                  row.fxRate = "1";
+                }
+                if (p.type === "CHEQUE" && p.bankAccountId) row.bankAccountId = String(p.bankAccountId);
+              } else if (p.type === "BANK_TRANSFER" && p.bankAccountId) {
+                row.bankAccountId = String(p.bankAccountId);
+                const ba = bas.find((a) => a.id === p.bankAccountId);
+                if (ba?.currencyId) row.currencyId = String(ba.currencyId);
+                if (ba?.currencyId && baseCur && ba.currencyId === baseCur.id) row.fxRate = "1";
+              }
+              return row;
+            })
+          : [{ ...emptyInstrumentRow(), amount: fromAssistant?.amount ? String(fromAssistant.amount) : "" }];
+        setInstrumentRows(insRows);
+        setSettlementRows(
+          (fromAssistant?.subjects ?? [])
+            .filter((sub) => insRows[sub.instrument])
+            .map((sub, i) => {
+              const ins = insRows[sub.instrument];
+              // برای ماهیت «به بانک/صندوق/تنخواه» به‌جای طرف حساب، حساب مقصد را کاربر در فرم انتخاب می‌کند
+              const partyTarget = selectorKind(rts.find((t) => t.id === sub.paymentTypeId)?.nature) === "PARTY";
+              return {
+                ...emptySettlementRow(ins.clientKey, `ردیف ${toFaDigits(String(sub.instrument + 1))} - ${TYPE_FA[ins.type]}`, ins.currencyId),
+                paymentTypeId: String(sub.paymentTypeId),
+                partyId: partyTarget && fromAssistant?.partyId ? String(fromAssistant.partyId) : "",
+                partyDisplay: partyTarget ? fromAssistant?.partyDisplay ?? "" : "",
+                fxRate: ins.fxRate,
+                amount: i === 0 && sub.instrument === 0 && fromAssistant?.amount ? String(fromAssistant.amount) : "",
+                description: fromAssistant?.description ?? "",
+              };
+            })
+        );
         setMeta(null);
       }
       setLoaded(true);
@@ -539,6 +604,18 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
+
+  /** ساخت «دستور میانبر دستیار» از روی همین اعلامیه: فرم دستور با کارِ «ثبت اعلامیه پرداخت» و شرح/ابزارها/موضوعات همین سند پر می‌شود (مدیر انتخاب می‌کند چه چیزی ثابت بماند) */
+  function createAssistantMacro() {
+    const keyIndex = new Map(instrumentRows.map((r, i) => [r.clientKey, i]));
+    stageFormPrefill("/assistant-macros/new", {
+      actionKey: "payment",
+      description: header.description,
+      instruments: instrumentRows.map((r) => ({ type: r.type, cashBoxId: r.type === "CASH" && r.cashBoxId ? Number(r.cashBoxId) : null, bankAccountId: (r.type === "BANK_TRANSFER" || r.type === "CHEQUE") && r.bankAccountId ? Number(r.bankAccountId) : null })),
+      subjects: settlementRows.filter((r) => r.paymentTypeId && keyIndex.has(r.instrumentClientKey)).map((r) => ({ paymentTypeId: Number(r.paymentTypeId), instrument: keyIndex.get(r.instrumentClientKey)! })),
+    });
+    openTab("/assistant-macros/new");
+  }
 
   const status: DocStatus = meta?.status || "DRAFT";
   // فقط فیلدهای هدر (تاریخ/طرف حساب) با این معیار قفل می‌شوند — این‌ها هرگز از طریق
@@ -882,6 +959,13 @@ function PaymentForm({ editId, reEdit }: { editId?: number; reEdit?: boolean }) 
                 : []),
             ]
           : []
+      }
+      toolbarExtra={
+        editId && !reEdit && perm("workflow.settings.assistant-macros.create") ? (
+          <button type="button" className="toolbar-icon-btn" onClick={createAssistantMacro} title="ساخت دستور دستیار از روی این اعلامیه (قالب)">
+            <MacroIcon />
+          </button>
+        ) : undefined
       }
       wide
     >

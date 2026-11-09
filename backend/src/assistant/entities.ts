@@ -70,6 +70,35 @@ async function searchCustomer(query: string): Promise<SearchResult> {
   return decide(ranked.map((c) => ({ ref: { id: c.id, label: customerLabel(c) }, exact: String(c.code) === q || loose(c.party.detailTitle ?? "") === q })));
 }
 
+const partyLabel = (p: { detailCode: string; detailTitle: string }) => `${p.detailCode} — ${p.detailTitle}`;
+
+/** هر طرف حساب فعال (مشتری، تأمین‌کننده، پرسنل، …) با نام/عنوان تفصیل/کد تفصیل */
+async function searchParty(query: string): Promise<SearchResult> {
+  const toks = tokens(query);
+  if (!toks.length) return { exact: null, candidates: [] };
+  const nq = norm(query);
+  const rows = await prisma.party.findMany({
+    where: {
+      isActive: true,
+      OR: [
+        { detailCode: { equals: nq } },
+        { nationalId: { equals: nq } },
+        ...toks.flatMap((t) => [
+          { detailTitle: { contains: t, mode: "insensitive" as const } },
+          { name: { contains: t, mode: "insensitive" as const } },
+          { firstName: { contains: t, mode: "insensitive" as const } },
+          { lastName: { contains: t, mode: "insensitive" as const } },
+        ]),
+      ],
+    },
+    select: { id: true, detailCode: true, detailTitle: true, name: true, firstName: true, lastName: true },
+    take: FETCH_LIMIT,
+  });
+  const ranked = rank(rows, query, (p) => `${p.detailTitle} ${p.name ?? ""} ${p.firstName ?? ""} ${p.lastName ?? ""}`, (p) => p.detailCode);
+  const q = loose(query);
+  return decide(ranked.map((p) => ({ ref: { id: p.id, label: partyLabel(p) }, exact: loose(p.detailCode) === q || loose(p.detailTitle) === q })));
+}
+
 async function searchGoods(query: string, kind?: "GOODS" | "SERVICE"): Promise<SearchResult> {
   const toks = tokens(query);
   if (!toks.length) return { exact: null, candidates: [] };
@@ -110,6 +139,8 @@ export async function searchEntity(type: SlotType, query: string): Promise<Searc
   switch (type) {
     case "customer":
       return searchCustomer(query);
+    case "party":
+      return searchParty(query);
     case "goodsItem":
       return searchGoods(query);
     case "salesType":
@@ -133,6 +164,10 @@ export async function entityLabel(type: SlotType, id: number): Promise<EntityRef
     case "customer": {
       const c = await prisma.customer.findFirst({ where: { id, isActive: true }, select: { id: true, code: true, party: { select: { detailTitle: true, name: true, firstName: true, lastName: true } } } });
       return c ? { id: c.id, label: customerLabel(c) } : null;
+    }
+    case "party": {
+      const p = await prisma.party.findFirst({ where: { id, isActive: true }, select: { id: true, detailCode: true, detailTitle: true } });
+      return p ? { id: p.id, label: partyLabel(p) } : null;
     }
     case "goodsItem": {
       const g = await prisma.goodsItem.findFirst({ where: { id, isActive: true }, select: { id: true, fullCode: true, title: true } });

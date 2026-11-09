@@ -8383,6 +8383,8 @@ model AssistantMacro {
   askFields       Json?
   /// فقط برای کار «ثبت رسید دریافت»: {instruments:[{type,cashBoxId,bankAccountId,cardReaderId}], subjects:[{receiptTypeId,instrument}]}
   receiptPreset   Json?
+  /// فقط برای کار «ثبت اعلامیه پرداخت»: {instruments:[{type,cashBoxId,bankAccountId}], subjects:[{paymentTypeId,instrument}], partyId?}
+  paymentPreset   Json?
   isActive        Boolean              @default(true)
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt

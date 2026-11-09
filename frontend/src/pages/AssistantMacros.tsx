@@ -37,14 +37,23 @@ interface Macro {
   lines: { goodsItemId: number; title: string; quantity: number | null; askQuantity: boolean }[];
   askFields: string[];
   receiptPreset: ReceiptPresetDto | null;
+  paymentPreset: PaymentPresetDto | null;
 }
 interface ReceiptPresetDto {
   instruments: { type: PType; cashBoxId: number | null; bankAccountId: number | null; cardReaderId: number | null }[];
   subjects: { receiptTypeId: number; instrument: number }[];
   customerId?: number | null;
 }
-type PType = "CASH" | "BANK_TRANSFER" | "CHEQUE" | "POS";
-const PTYPE_FA: Record<PType, string> = { CASH: "نقد", BANK_TRANSFER: "حواله/انتقال بانکی", CHEQUE: "چک", POS: "پوز/درگاه" };
+interface PaymentPresetDto {
+  instruments: { type: PType; cashBoxId: number | null; bankAccountId: number | null }[];
+  subjects: { paymentTypeId: number; instrument: number }[];
+  /** طرف حسابِ ثابت (Party.id) */
+  partyId?: number | null;
+}
+type PType = "CASH" | "BANK_TRANSFER" | "CHEQUE" | "POS" | "CHEQUE_TRANSFER";
+const PTYPE_FA: Record<PType, string> = { CASH: "نقد", BANK_TRANSFER: "حواله/انتقال بانکی", CHEQUE: "چک", POS: "پوز/درگاه", CHEQUE_TRANSFER: "چک انتقالی" };
+/** ابزارهای قابل‌پیش‌تعیین هر کار: رسید دریافت پوز دارد، اعلامیه پرداخت چک انتقالی (خرج‌کردن چک دریافتی) */
+const KIND_PTYPES: Record<"receipt" | "payment", PType[]> = { receipt: ["CASH", "BANK_TRANSFER", "CHEQUE", "POS"], payment: ["CASH", "BANK_TRANSFER", "CHEQUE", "CHEQUE_TRANSFER"] };
 interface PInstrument {
   type: PType;
   cashBoxId: string;
@@ -52,7 +61,8 @@ interface PInstrument {
   cardReaderId: string;
 }
 interface PSubject {
-  receiptTypeId: string;
+  /** نوع دریافت (رسید) یا نوع پرداخت (اعلامیه پرداخت) */
+  typeId: string;
   instrument: string;
 }
 interface FormLine {
@@ -85,6 +95,11 @@ export interface MacroFromQuotePrefill {
 /** پیش‌پر شدن فرم دستور از روی یک رسید دریافت (دکمه‌ی «ساخت دستور دستیار» در فرم رسید دریافت) */
 export interface MacroFromReceiptPrefill extends Partial<ReceiptPresetDto> {
   actionKey: "receipt";
+  description: string;
+}
+/** پیش‌پر شدن فرم دستور از روی یک اعلامیه پرداخت (دکمه‌ی «ساخت دستور دستیار» در فرم اعلامیه پرداخت) */
+export interface MacroFromPaymentPrefill extends Partial<PaymentPresetDto> {
+  actionKey: "payment";
   description: string;
 }
 interface Opt {
@@ -170,18 +185,18 @@ const DEFAULT_FORM = {
   discountPercent: "",
   modes: { salesType: "DEFAULT", salesCenter: "DEFAULT", description: "DEFAULT", discountPercent: "DEFAULT" } as Record<string, Mode>,
   lines: [] as FormLine[],
-  /** ابزارها و موضوعات رسید (فقط کار «ثبت رسید دریافت») */
+  /** ابزارها و موضوعات رسید دریافت / اعلامیه پرداخت (فقط کارهای ثبت رسید و پرداخت) */
   instruments: [] as PInstrument[],
   subjects: [] as PSubject[],
-  /** مشتریِ ثابتِ رسید (Customer.id)؛ خالی = از کاربر پرسیده شود */
+  /** مشتریِ ثابتِ رسید (Customer.id) یا طرف حسابِ ثابتِ پرداخت (Party.id)؛ خالی = از کاربر پرسیده شود */
   customerMode: "ASK" as "ASK" | "FIXED",
   customerId: "",
   roleIds: [] as number[],
   isActive: true,
 };
 
-const toPInstruments = (p?: ReceiptPresetDto["instruments"]): PInstrument[] => (p ?? []).map((r) => ({ type: r.type, cashBoxId: r.cashBoxId ? String(r.cashBoxId) : "", bankAccountId: r.bankAccountId ? String(r.bankAccountId) : "", cardReaderId: r.cardReaderId ? String(r.cardReaderId) : "" }));
-const toPSubjects = (p?: ReceiptPresetDto["subjects"]): PSubject[] => (p ?? []).map((r) => ({ receiptTypeId: String(r.receiptTypeId), instrument: String(r.instrument) }));
+const toPInstruments = (p?: { type: PType; cashBoxId: number | null; bankAccountId: number | null; cardReaderId?: number | null }[]): PInstrument[] => (p ?? []).map((r) => ({ type: r.type, cashBoxId: r.cashBoxId ? String(r.cashBoxId) : "", bankAccountId: r.bankAccountId ? String(r.bankAccountId) : "", cardReaderId: r.cardReaderId ? String(r.cardReaderId) : "" }));
+const toPSubjects = (p?: { receiptTypeId?: number; paymentTypeId?: number; instrument: number }[]): PSubject[] => (p ?? []).map((r) => ({ typeId: String(r.receiptTypeId ?? r.paymentTypeId ?? ""), instrument: String(r.instrument) }));
 
 function MacroForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
@@ -192,10 +207,12 @@ function MacroForm({ editId }: { editId?: number }) {
   const [goods, setGoods] = useState<GoodsOpt[]>([]);
   const [actions, setActions] = useState<{ key: string; title: string; presets: string[] }[]>([]);
   const [cashBoxes, setCashBoxes] = useState<Opt[]>([]);
-  const [bankAccounts, setBankAccounts] = useState<{ id: number; detailTitle: string }[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<{ id: number; detailTitle: string; accountType?: { hasChequeBook: boolean } }[]>([]);
   const [cardReaders, setCardReaders] = useState<Opt[]>([]);
   const [receiptTypes, setReceiptTypes] = useState<(Opt & { isActive: boolean })[]>([]);
   const [customers, setCustomers] = useState<{ id: number; code: number; party: { detailTitle: string } }[]>([]);
+  const [paymentTypes, setPaymentTypes] = useState<(Opt & { isActive: boolean })[]>([]);
+  const [parties, setParties] = useState<{ id: number; detailCode: string; detailTitle: string; isActive: boolean }[]>([]);
   const instruments = form.instruments ?? [];
   const subjects = form.subjects ?? [];
   const [error, setError] = useState<string | null>(null);
@@ -204,6 +221,8 @@ function MacroForm({ editId }: { editId?: number }) {
   // فیلدهای قابل‌پیش‌تعیینِ کارِ انتخاب‌شده (پیش‌فاکتور همه، رسید دریافت فقط «شرح»)؛ تا بارگذاری فهرست کارها همه نمایش داده می‌شود
   const presets = actions.find((a) => a.key === form.actionKey)?.presets;
   const supports = (f: string) => !presets || presets.includes(f);
+  /** رسید دریافت یا اعلامیه پرداخت (فقط وقتی فهرست کارها بارگذاری شده و کار انتخابی یکی از این دو است) */
+  const kind: "receipt" | "payment" | null = presets?.includes("receiptPreset") ? "receipt" : presets?.includes("paymentPreset") ? "payment" : null;
 
   useEffect(() => {
     api.get("/assistant-macros/options").then(setOpts).catch((e) => setError(e.message));
@@ -214,15 +233,17 @@ function MacroForm({ editId }: { editId?: number }) {
     api.get("/card-readers").then(setCardReaders).catch(() => {});
     api.get("/receipt-types").then(setReceiptTypes).catch(() => {});
     api.get("/customers").then(setCustomers).catch(() => {});
+    api.get("/payment-types").then(setPaymentTypes).catch(() => {});
+    api.get("/parties").then(setParties).catch(() => {});
   }, []);
 
   // ساخت از روی پیش‌فاکتور: داده‌ی پیش‌پر را یک‌بار برمی‌دارد (فقط فرم «جدید»)
   useEffect(() => {
     if (editId || hasPersistedState(cacheKey)) return;
-    const p = takeFormPrefill<MacroFromQuotePrefill | MacroFromReceiptPrefill>("/assistant-macros/new");
+    const p = takeFormPrefill<MacroFromQuotePrefill | MacroFromReceiptPrefill | MacroFromPaymentPrefill>("/assistant-macros/new");
     if (!p) return;
     if ("actionKey" in p) {
-      setForm({ ...DEFAULT_FORM, actionKey: p.actionKey, description: p.description, modes: { ...DEFAULT_FORM.modes, description: p.description ? "FIXED" : "DEFAULT" }, instruments: toPInstruments(p.instruments), subjects: toPSubjects(p.subjects) });
+      setForm({ ...DEFAULT_FORM, actionKey: p.actionKey, description: p.description, modes: { ...DEFAULT_FORM.modes, description: p.description ? "FIXED" : "DEFAULT" }, instruments: toPInstruments(p.instruments), subjects: toPSubjects(p.subjects as any) });
       return;
     }
     setForm({
@@ -242,7 +263,7 @@ function MacroForm({ editId }: { editId?: number }) {
       .get(`/assistant-macros/${editId}`)
       .then((m: Macro) => {
         if (!hasPersistedState(cacheKey))
-          setForm({ phrase: m.phrase, actionKey: m.actionKey, salesTypeId: m.salesTypeId ? String(m.salesTypeId) : "", salesCenterId: m.salesCenterId ? String(m.salesCenterId) : "", description: m.description, discountPercent: m.discountPercent ? String(m.discountPercent) : "", modes: modesOf(m), lines: m.lines.map((l) => ({ goodsItemId: String(l.goodsItemId), quantity: l.quantity === null ? "" : String(l.quantity), ask: l.askQuantity })), instruments: toPInstruments(m.receiptPreset?.instruments), subjects: toPSubjects(m.receiptPreset?.subjects), customerMode: m.receiptPreset?.customerId ? "FIXED" : "ASK", customerId: m.receiptPreset?.customerId ? String(m.receiptPreset.customerId) : "", roleIds: m.roleIds, isActive: m.isActive });
+          setForm({ phrase: m.phrase, actionKey: m.actionKey, salesTypeId: m.salesTypeId ? String(m.salesTypeId) : "", salesCenterId: m.salesCenterId ? String(m.salesCenterId) : "", description: m.description, discountPercent: m.discountPercent ? String(m.discountPercent) : "", modes: modesOf(m), lines: m.lines.map((l) => ({ goodsItemId: String(l.goodsItemId), quantity: l.quantity === null ? "" : String(l.quantity), ask: l.askQuantity })), instruments: toPInstruments((m.receiptPreset ?? m.paymentPreset)?.instruments), subjects: toPSubjects((m.receiptPreset ?? m.paymentPreset)?.subjects as any), customerMode: (m.receiptPreset?.customerId ?? m.paymentPreset?.partyId) ? "FIXED" : "ASK", customerId: String(m.receiptPreset?.customerId ?? m.paymentPreset?.partyId ?? ""), roleIds: m.roleIds, isActive: m.isActive });
         setLoaded(true);
       })
       .catch((e) => {
@@ -269,12 +290,12 @@ function MacroForm({ editId }: { editId?: number }) {
       if (fixed(f.key) && !v) return setError(`برای «${f.title}» حالت «ثابت» انتخاب شده ولی مقداری وارد نشده است`);
     }
     const askFields = modeFields.filter((f) => form.modes[f.key] === "ASK").map((f) => f.key);
-    const fixedCustomer = supports("receiptPreset") && (form.customerMode ?? "ASK") === "FIXED";
-    if (fixedCustomer && !form.customerId) return setError("برای «مشتری» حالت «ثابت» انتخاب شده ولی مشتری انتخاب نشده است");
-    const usePreset = supports("receiptPreset") && (instruments.length > 0 || fixedCustomer);
-    if (supports("receiptPreset")) {
+    const fixedCustomer = kind !== null && (form.customerMode ?? "ASK") === "FIXED";
+    if (fixedCustomer && !form.customerId) return setError(kind === "payment" ? "برای «طرف حساب» حالت «ثابت» انتخاب شده ولی طرف حسابی انتخاب نشده است" : "برای «مشتری» حالت «ثابت» انتخاب شده ولی مشتری انتخاب نشده است");
+    const usePreset = kind !== null && (instruments.length > 0 || fixedCustomer);
+    if (kind !== null) {
       if (subjects.length && !instruments.length) return setError("برای موضوعات، دست‌کم یک ابزار تعریف کنید");
-      if (subjects.some((x) => !x.receiptTypeId)) return setError("نوع دریافت هر موضوع را انتخاب کنید");
+      if (subjects.some((x) => !x.typeId)) return setError(kind === "payment" ? "نوع پرداخت هر موضوع را انتخاب کنید" : "نوع دریافت هر موضوع را انتخاب کنید");
     }
     if (!modeFields.some((f) => form.modes[f.key] !== "DEFAULT") && !lines.length && !usePreset) return setError(supports("lines") ? "دست‌کم یک فیلد را «ثابت» یا «بپرس» کنید یا اقلام ثابت بگذارید" : "شرح را «ثابت» یا «بپرس» کنید یا ابزار/موضوعات را تعریف کنید");
     const body = {
@@ -287,13 +308,22 @@ function MacroForm({ editId }: { editId?: number }) {
       description: fixed("description") ? form.description : "",
       discountPercent: fixed("discountPercent") ? Number(form.discountPercent) : null,
       askFields,
-      receiptPreset: usePreset
-        ? {
-            instruments: instruments.map((r) => ({ type: r.type, cashBoxId: r.cashBoxId ? Number(r.cashBoxId) : null, bankAccountId: r.bankAccountId ? Number(r.bankAccountId) : null, cardReaderId: r.cardReaderId ? Number(r.cardReaderId) : null })),
-            subjects: subjects.map((x) => ({ receiptTypeId: Number(x.receiptTypeId), instrument: Number(x.instrument) || 0 })),
-            customerId: fixedCustomer ? Number(form.customerId) : null,
-          }
-        : null,
+      receiptPreset:
+        usePreset && kind === "receipt"
+          ? {
+              instruments: instruments.map((r) => ({ type: r.type, cashBoxId: r.cashBoxId ? Number(r.cashBoxId) : null, bankAccountId: r.bankAccountId ? Number(r.bankAccountId) : null, cardReaderId: r.cardReaderId ? Number(r.cardReaderId) : null })),
+              subjects: subjects.map((x) => ({ receiptTypeId: Number(x.typeId), instrument: Number(x.instrument) || 0 })),
+              customerId: fixedCustomer ? Number(form.customerId) : null,
+            }
+          : null,
+      paymentPreset:
+        usePreset && kind === "payment"
+          ? {
+              instruments: instruments.map((r) => ({ type: r.type, cashBoxId: r.cashBoxId ? Number(r.cashBoxId) : null, bankAccountId: r.bankAccountId ? Number(r.bankAccountId) : null })),
+              subjects: subjects.map((x) => ({ paymentTypeId: Number(x.typeId), instrument: Number(x.instrument) || 0 })),
+              partyId: fixedCustomer ? Number(form.customerId) : null,
+            }
+          : null,
       lines: lines.map((l) => ({ goodsItemId: Number(l.goodsItemId), quantity: l.ask ? null : Number(l.quantity), askQuantity: l.ask })),
     };
     try {
@@ -339,7 +369,7 @@ function MacroForm({ editId }: { editId?: number }) {
           </div>
           <div className="form-field">
             <label>کار<RequiredMark /></label>
-            <select value={form.actionKey} onChange={(e) => setForm({ ...form, actionKey: e.target.value })}>
+            <select value={form.actionKey} onChange={(e) => setForm({ ...form, actionKey: e.target.value, instruments: [], subjects: [], customerMode: "ASK", customerId: "" })}>
               {actions.map((a) => (
                 <option key={a.key} value={a.key}>{a.title}</option>
               ))}
@@ -459,17 +489,17 @@ function MacroForm({ editId }: { editId?: number }) {
           </button>
         </div>
         )}
-        {supports("receiptPreset") && (
+        {kind !== null && (
           <div className="form-field" style={{ marginTop: 12, maxWidth: 420 }}>
             <label>
-              مشتری
-              <InfoHint text="«ثابت»: همیشه همین مشتری (مثلاً «متفرقه» برای دریافت از کارتخوان) و از کاربر پرسیده نمی‌شود. «از کاربر»: دستیار مشتری را می‌پرسد. مبلغ: وقتی ابزار/موضوع از پیش تعیین شده باشد، چون بعداً در فرم قابل ویرایش نیست، دستیار همیشه مبلغ را می‌پرسد." title="مشتری و مبلغ" />
+              {kind === "payment" ? "طرف حساب" : "مشتری"}
+              <InfoHint text={kind === "payment" ? "«ثابت»: همیشه همین طرف حساب (مثلاً یک تأمین‌کننده‌ی ثابت) و از کاربر پرسیده نمی‌شود. «از کاربر»: دستیار طرف حساب را می‌پرسد. مبلغ: وقتی ابزار/موضوع از پیش تعیین شده باشد، چون بعداً در فرم قابل ویرایش نیست، دستیار همیشه مبلغ را می‌پرسد." : "«ثابت»: همیشه همین مشتری (مثلاً «متفرقه» برای دریافت از کارتخوان) و از کاربر پرسیده نمی‌شود. «از کاربر»: دستیار مشتری را می‌پرسد. مبلغ: وقتی ابزار/موضوع از پیش تعیین شده باشد، چون بعداً در فرم قابل ویرایش نیست، دستیار همیشه مبلغ را می‌پرسد."} title={kind === "payment" ? "طرف حساب و مبلغ" : "مشتری و مبلغ"} />
             </label>
             <select value={form.customerMode ?? "ASK"} onChange={(e) => setForm({ ...form, customerMode: e.target.value as "ASK" | "FIXED" })} style={{ marginBottom: 4 }}>
               <option value="ASK">از کاربر پرسیده شود</option>
               <option value="FIXED">ثابت</option>
             </select>
-            {(form.customerMode ?? "ASK") === "FIXED" && (
+            {(form.customerMode ?? "ASK") === "FIXED" && kind === "receipt" && (
               <select value={form.customerId ?? ""} onChange={(e) => setForm({ ...form, customerId: e.target.value })}>
                 <option value="">— انتخاب —</option>
                 {customers.map((c) => (
@@ -477,13 +507,25 @@ function MacroForm({ editId }: { editId?: number }) {
                 ))}
               </select>
             )}
+            {(form.customerMode ?? "ASK") === "FIXED" && kind === "payment" && (
+              <RecordPickerField
+                title="انتخاب طرف حساب"
+                displayValue={parties.find((p) => String(p.id) === form.customerId)?.detailTitle ?? ""}
+                rows={parties.filter((p) => p.isActive)}
+                columns={[
+                  { header: "کد", render: (p: { detailCode: string }) => toFaDigits(p.detailCode), filterValue: (p: { detailCode: string }) => p.detailCode, width: "100px" },
+                  { header: "عنوان", render: (p: { detailTitle: string }) => p.detailTitle, filterValue: (p: { detailTitle: string }) => p.detailTitle },
+                ]}
+                onSelect={(p: { id: number }) => setForm({ ...form, customerId: String(p.id) })}
+              />
+            )}
           </div>
         )}
-        {supports("receiptPreset") && (
+        {kind !== null && (
           <div className="form-field" style={{ marginTop: 12 }}>
             <label>
-              ابزارهای دریافت
-              <InfoHint text="ابزار (نقد، حواله، چک، پوز) و صندوق/حساب/کارتخوانِ هر ردیف از پیش تعیین می‌شود. مبلغ و جزئیات چک را کاربر در فرم می‌نویسد؛ اگر کاربر مبلغ را در دستور بگوید، به ردیف اول ابزار (و اولین موضوعش) می‌رسد." title="ابزارهای دریافت" />
+              {kind === "payment" ? "ابزارهای پرداخت" : "ابزارهای دریافت"}
+              <InfoHint text={kind === "payment" ? "ابزار (نقد، حواله، چک، چک انتقالی) و صندوق/حساب بانکیِ هر ردیف از پیش تعیین می‌شود. مبلغ و جزئیات چک (نوع چک، دسته چک و …) را کاربر در فرم می‌نویسد؛ اگر کاربر مبلغ را در دستور بگوید، به ردیف اول ابزار (و اولین موضوعش) می‌رسد." : "ابزار (نقد، حواله، چک، پوز) و صندوق/حساب/کارتخوانِ هر ردیف از پیش تعیین می‌شود. مبلغ و جزئیات چک را کاربر در فرم می‌نویسد؛ اگر کاربر مبلغ را در دستور بگوید، به ردیف اول ابزار (و اولین موضوعش) می‌رسد."} title={kind === "payment" ? "ابزارهای پرداخت" : "ابزارهای دریافت"} />
             </label>
             <table className="je-lines-table">
               <thead>
@@ -500,12 +542,21 @@ function MacroForm({ editId }: { editId?: number }) {
                     <tr key={idx}>
                       <td>
                         <select value={r.type} onChange={(e) => upd({ type: e.target.value as PType, cashBoxId: "", bankAccountId: "", cardReaderId: "" })}>
-                          {(Object.keys(PTYPE_FA) as PType[]).map((t) => (
+                          {KIND_PTYPES[kind ?? "receipt"].map((t) => (
                             <option key={t} value={t}>{PTYPE_FA[t]}</option>
                           ))}
                         </select>
                       </td>
                       <td>
+                        {r.type === "CHEQUE_TRANSFER" && <span style={{ color: "var(--ink-soft)" }}>چکِ دریافتیِ قابل خرج‌کردن را کاربر در فرم انتخاب می‌کند</span>}
+                        {kind === "payment" && r.type === "CHEQUE" && (
+                          <select value={r.bankAccountId} onChange={(e) => upd({ bankAccountId: e.target.value })}>
+                            <option value="">— حساب صادرکننده در فرم انتخاب شود —</option>
+                            {bankAccounts.filter((b) => b.accountType?.hasChequeBook).map((b) => (
+                              <option key={b.id} value={b.id}>{b.detailTitle}</option>
+                            ))}
+                          </select>
+                        )}
                         {r.type === "CASH" && (
                           <select value={r.cashBoxId} onChange={(e) => upd({ cashBoxId: e.target.value })}>
                             <option value="">— در فرم انتخاب شود —</option>
@@ -530,7 +581,8 @@ function MacroForm({ editId }: { editId?: number }) {
                             ))}
                           </select>
                         )}
-                        {r.type === "CHEQUE" && <span style={{ color: "var(--ink-soft)" }}>شماره، سررسید و بانک چک را کاربر در فرم می‌نویسد</span>}
+                        {kind === "receipt" && r.type === "CHEQUE" && <span style={{ color: "var(--ink-soft)" }}>شماره، سررسید و بانک چک را کاربر در فرم می‌نویسد</span>}
+                        {kind === "payment" && r.type === "CHEQUE" && <span style={{ color: "var(--ink-soft)", display: "block", marginTop: 2 }}>نوع چک، دسته چک و سررسید را کاربر در فرم می‌نویسد</span>}
                       </td>
                       <td>
                         <button
@@ -557,11 +609,11 @@ function MacroForm({ editId }: { editId?: number }) {
             </button>
           </div>
         )}
-        {supports("receiptPreset") && instruments.length > 0 && (
+        {kind !== null && instruments.length > 0 && (
           <div className="form-field" style={{ marginTop: 12 }}>
             <label>
-              موضوعات دریافت
-              <InfoHint text="نوع دریافت هر موضوع (و ابزاری که از آن تسویه می‌شود) از پیش تعیین می‌شود؛ طرف حساب همان مشتری دستور است. مبنا (فاکتور/سفارش) و مبلغ را کاربر در فرم کامل می‌کند." title="موضوعات دریافت" />
+              {kind === "payment" ? "موضوعات پرداخت" : "موضوعات دریافت"}
+              <InfoHint text={kind === "payment" ? "نوع پرداخت هر موضوع (و ابزاری که با آن پرداخت می‌شود) از پیش تعیین می‌شود؛ طرف حساب همان طرف حساب دستور است. مبنا (فاکتور/سفارش) و مبلغ را کاربر در فرم کامل می‌کند." : "نوع دریافت هر موضوع (و ابزاری که از آن تسویه می‌شود) از پیش تعیین می‌شود؛ طرف حساب همان مشتری دستور است. مبنا (فاکتور/سفارش) و مبلغ را کاربر در فرم کامل می‌کند."} title={kind === "payment" ? "موضوعات پرداخت" : "موضوعات دریافت"} />
             </label>
             <table className="je-lines-table">
               <thead>
@@ -577,9 +629,9 @@ function MacroForm({ editId }: { editId?: number }) {
                   return (
                     <tr key={idx}>
                       <td>
-                        <select value={x.receiptTypeId} onChange={(e) => upd({ receiptTypeId: e.target.value })}>
+                        <select value={x.typeId} onChange={(e) => upd({ typeId: e.target.value })}>
                           <option value="">— انتخاب —</option>
-                          {receiptTypes.filter((t) => t.isActive || String(t.id) === x.receiptTypeId).map((t) => (
+                          {(kind === "payment" ? paymentTypes : receiptTypes).filter((t) => t.isActive || String(t.id) === x.typeId).map((t) => (
                             <option key={t.id} value={t.id}>{t.title}</option>
                           ))}
                         </select>
@@ -599,7 +651,7 @@ function MacroForm({ editId }: { editId?: number }) {
                 })}
               </tbody>
             </table>
-            <button type="button" className="btn-secondary" style={{ marginTop: 6 }} onClick={() => setForm({ ...form, subjects: [...subjects, { receiptTypeId: "", instrument: "0" }] })}>
+            <button type="button" className="btn-secondary" style={{ marginTop: 6 }} onClick={() => setForm({ ...form, subjects: [...subjects, { typeId: "", instrument: "0" }] })}>
               + موضوع
             </button>
           </div>

@@ -47,7 +47,7 @@ function sanitizeState(raw: unknown, allowParent = true): ChatState {
         })
         .filter((x: LineValue | null): x is LineValue => !!x);
     } else if (def.type === "number") {
-      if (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= (def.name === "amount" ? 1e13 : 100)) slots[def.name] = v;
+      if (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= (def.name === "amount" ? 1e13 : def.name === "macroId" ? 1e9 : 100)) slots[def.name] = v;
     } else if (def.type === "text") {
       if (typeof v === "string") slots[def.name] = v.slice(0, 500);
     } else if (def.type === "choice") {
@@ -341,7 +341,7 @@ export async function handleMessage(userId: number, input: ChatInput, interprete
     // پاسخ آزاد به سؤال یک اسلات وقتی تفسیرگر چیزی برنداشت
     if (JSON.stringify(state.slots) === before && state.pending) {
       const def = action.slots.find((d) => d.name === state.pending!.slot) as SlotDef | undefined;
-      if (def && ["customer", "goodsItem", "salesType", "salesCenter"].includes(def.type)) state.slots[def.name] = { text };
+      if (def && ["customer", "party", "goodsItem", "salesType", "salesCenter"].includes(def.type)) state.slots[def.name] = { text };
       else if (def && def.type === "choice") {
         const opts = def.choices ? await def.choices(ctx, state.slots) : def.options ?? [];
         const nt = norm(text);

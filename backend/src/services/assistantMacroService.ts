@@ -13,12 +13,14 @@ export class AssistantMacroError extends Error {}
 export const MACRO_ACTIONS: { key: string; title: string }[] = [
   { key: "sales-quote", title: "پیش‌فاکتور جدید" },
   { key: "receipt", title: "ثبت رسید دریافت" },
+  { key: "payment", title: "ثبت اعلامیه پرداخت" },
 ];
 
-/** فیلدهای قابل‌پیش‌تعیین هر کار: پیش‌فاکتور همه، رسید دریافت فقط «شرح» (بقیه‌ی فرم رسید را کاربر در فرم پر می‌کند) */
+/** فیلدهای قابل‌پیش‌تعیین هر کار: پیش‌فاکتور همه، رسید دریافت و اعلامیه پرداخت شرح + ابزار/موضوعات (بقیه‌ی فرم را کاربر در فرم پر می‌کند) */
 export const MACRO_PRESETS: Record<string, readonly string[]> = {
   "sales-quote": ["salesType", "salesCenter", "description", "discountPercent", "lines"],
   receipt: ["description", "receiptPreset"],
+  payment: ["description", "paymentPreset"],
 };
 
 /** شکل نرمال عبارت برای مقایسه: نرمال‌سازی ارقام/حروف؛ نیم‌فاصله و فاصله یکی‌اند («پیش‌فاکتور» = «پیش فاکتور») و فاصله‌های اضافه حذف می‌شود */
@@ -51,6 +53,20 @@ const receiptPresetOf = (m: any): ReceiptPreset | null => {
   return p && typeof p === "object" && ((Array.isArray(p.instruments) && p.instruments.length) || p.customerId) ? ({ instruments: [], subjects: [], ...p } as ReceiptPreset) : null;
 };
 
+/** پیش‌تعیین ابزار و موضوعات اعلامیه پرداخت (فقط برای کار «payment»)؛ ابزار چک/چک انتقالی جزئیاتش را کاربر در فرم می‌نویسد */
+export interface PaymentPreset {
+  instruments: { type: "CASH" | "BANK_TRANSFER" | "CHEQUE" | "CHEQUE_TRANSFER"; cashBoxId: number | null; bankAccountId: number | null }[];
+  /** instrument = شماره‌ی ردیف ابزار (از ۰) که این موضوع با آن پرداخت می‌شود */
+  subjects: { paymentTypeId: number; instrument: number }[];
+  /** طرف حسابِ ثابتِ دستور (Party.id)؛ خالی = از کاربر پرسیده می‌شود */
+  partyId?: number | null;
+}
+const PAYMENT_INSTRUMENT_TYPES = ["CASH", "BANK_TRANSFER", "CHEQUE", "CHEQUE_TRANSFER"] as const;
+const paymentPresetOf = (m: any): PaymentPreset | null => {
+  const p = m?.paymentPreset;
+  return p && typeof p === "object" && ((Array.isArray(p.instruments) && p.instruments.length) || p.partyId) ? ({ instruments: [], subjects: [], ...p } as PaymentPreset) : null;
+};
+
 const askFieldsOf = (m: any): string[] => (Array.isArray(m.askFields) ? (m.askFields as string[]).filter((f) => (ASKABLE_FIELDS as readonly string[]).includes(f)) : []);
 const presetLinesOf = (m: any): PresetLine[] => (Array.isArray(m.presetLines) ? (m.presetLines as PresetLine[]) : []);
 
@@ -77,6 +93,7 @@ export function macroShape(m: any, titles: Map<number, string> = new Map()) {
     lines: presetLinesOf(m).map((l) => ({ goodsItemId: l.goodsItemId, title: titles.get(l.goodsItemId) ?? "", quantity: l.quantity, askQuantity: l.quantity === null })),
     askFields: askFieldsOf(m),
     receiptPreset: receiptPresetOf(m),
+    paymentPreset: paymentPresetOf(m),
     isActive: m.isActive,
     roleIds: m.roles.map((r: any) => r.roleId),
     roleTitles: m.roles.map((r: any) => r.role.title),
@@ -130,6 +147,43 @@ async function cleanReceiptPreset(raw: any): Promise<ReceiptPreset | null> {
   return { instruments, subjects, customerId };
 }
 
+async function cleanPaymentPreset(raw: any): Promise<PaymentPreset | null> {
+  const ins: any[] = Array.isArray(raw?.instruments) ? raw.instruments : [];
+  const subs: any[] = Array.isArray(raw?.subjects) ? raw.subjects : [];
+  const partyId = raw?.partyId ? Number(raw.partyId) : null;
+  if (partyId) {
+    const p = await prisma.party.findUnique({ where: { id: partyId }, select: { isActive: true } });
+    if (!p) throw new AssistantMacroError("طرف حسابِ ثابت یافت نشد");
+    if (!p.isActive) throw new AssistantMacroError("طرف حسابِ ثابت غیرفعال است");
+  }
+  if (!ins.length && !subs.length && !partyId) return null;
+  if (!ins.length && subs.length) throw new AssistantMacroError("برای موضوعات، دست‌کم یک ابزار تعریف کنید");
+  if (ins.length > 5 || subs.length > 10) throw new AssistantMacroError("حداکثر ۵ ابزار و ۱۰ موضوع مجاز است");
+  const instruments: PaymentPreset["instruments"] = [];
+  for (const [i, r] of ins.entries()) {
+    const type = String(r?.type ?? "");
+    if (!(PAYMENT_INSTRUMENT_TYPES as readonly string[]).includes(type)) throw new AssistantMacroError(`نوع ابزار ردیف ${i + 1} نامعتبر است`);
+    const cashBoxId = type === "CASH" && r?.cashBoxId ? Number(r.cashBoxId) : null;
+    // حساب بانکی: حواله و صدور چک تازه (چک انتقالی، چک دریافتی موجود را خرج می‌کند و حساب بانکی ندارد)
+    const bankAccountId = (type === "BANK_TRANSFER" || type === "CHEQUE") && r?.bankAccountId ? Number(r.bankAccountId) : null;
+    if (cashBoxId && !(await prisma.cashBox.findUnique({ where: { id: cashBoxId }, select: { id: true } }))) throw new AssistantMacroError(`صندوق ردیف ${i + 1} یافت نشد`);
+    if (bankAccountId && !(await prisma.bankAccount.findUnique({ where: { id: bankAccountId }, select: { id: true } }))) throw new AssistantMacroError(`حساب بانکی ردیف ${i + 1} یافت نشد`);
+    instruments.push({ type: type as any, cashBoxId, bankAccountId });
+  }
+  const subjects: PaymentPreset["subjects"] = [];
+  for (const [i, r] of subs.entries()) {
+    const paymentTypeId = Number(r?.paymentTypeId);
+    if (!paymentTypeId) throw new AssistantMacroError(`نوع پرداخت موضوع ${i + 1} را انتخاب کنید`);
+    const t = await prisma.paymentType.findUnique({ where: { id: paymentTypeId }, select: { isActive: true, title: true } });
+    if (!t) throw new AssistantMacroError(`نوع پرداخت موضوع ${i + 1} یافت نشد`);
+    if (!t.isActive) throw new AssistantMacroError(`نوع پرداخت «${t.title}» غیرفعال است`);
+    const instrument = Number.isInteger(Number(r?.instrument)) ? Number(r.instrument) : 0;
+    if (instrument < 0 || instrument >= instruments.length) throw new AssistantMacroError(`ابزار موضوع ${i + 1} نامعتبر است`);
+    subjects.push({ paymentTypeId, instrument });
+  }
+  return { instruments, subjects, partyId };
+}
+
 async function clean(body: any, excludeId?: number) {
   const phrase = String(body?.phrase ?? "").replace(/\s+/g, " ").trim();
   if (phrase.length < 3) throw new AssistantMacroError("عبارت دستور حداقل ۳ حرف باشد");
@@ -174,11 +228,14 @@ async function clean(body: any, excludeId?: number) {
     }
   }
   const receiptPreset = supports("receiptPreset") ? await cleanReceiptPreset(body?.receiptPreset) : null;
-  if (!salesTypeId && !salesCenterId && !description && !discountPercent && !lines.length && !askFields.length && !receiptPreset)
+  const paymentPreset = supports("paymentPreset") ? await cleanPaymentPreset(body?.paymentPreset) : null;
+  if (!salesTypeId && !salesCenterId && !description && !discountPercent && !lines.length && !askFields.length && !receiptPreset && !paymentPreset)
     throw new AssistantMacroError(
       actionKey === "receipt"
         ? "شرح را «ثابت» یا «حتماً بپرس» کنید یا ابزار/موضوعات را پیش‌تعیین کنید (وگرنه دستور تفاوتی با «ثبت رسید دریافت» معمولی ندارد)"
-        : "دست‌کم یکی از «نوع فروش»، «مرکز فروش»، شرح، تخفیف یا اقلام ثابت را مشخص کنید (وگرنه دستور تفاوتی با پیش‌فاکتور معمولی ندارد)"
+        : actionKey === "payment"
+        ? "شرح را «ثابت» یا «حتماً بپرس» کنید یا طرف حساب/ابزار/موضوعات را پیش‌تعیین کنید (وگرنه دستور تفاوتی با «ثبت اعلامیه پرداخت» معمولی ندارد)"
+        :"دست‌کم یکی از «نوع فروش»، «مرکز فروش»، شرح، تخفیف یا اقلام ثابت را مشخص کنید (وگرنه دستور تفاوتی با پیش‌فاکتور معمولی ندارد)"
     );
 
   const roleIds: number[] = Array.from(new Set<number>((Array.isArray(body?.roleIds) ? body.roleIds : []).map(Number).filter((n: number) => n > 0)));
@@ -186,13 +243,13 @@ async function clean(body: any, excludeId?: number) {
     const found = await prisma.role.count({ where: { id: { in: roleIds } } });
     if (found !== roleIds.length) throw new AssistantMacroError("نقش انتخاب‌شده یافت نشد");
   }
-  return { phrase, actionKey, salesTypeId, salesCenterId, description, discountPercent, lines, askFields, receiptPreset, roleIds, isActive: body?.isActive !== false };
+  return { phrase, actionKey, salesTypeId, salesCenterId, description, discountPercent, lines, askFields, receiptPreset, paymentPreset, roleIds, isActive: body?.isActive !== false };
 }
 
 export async function createMacro(body: any) {
   const d = await clean(body);
   const m = await prisma.assistantMacro.create({
-    data: { phrase: d.phrase, actionKey: d.actionKey, salesTypeId: d.salesTypeId, salesCenterId: d.salesCenterId, description: d.description, discountPercent: d.discountPercent, presetLines: d.lines.length ? d.lines : Prisma.DbNull, askFields: d.askFields.length ? d.askFields : Prisma.DbNull, receiptPreset: d.receiptPreset ?? Prisma.DbNull, isActive: d.isActive, roles: { create: d.roleIds.map((roleId) => ({ roleId })) } },
+    data: { phrase: d.phrase, actionKey: d.actionKey, salesTypeId: d.salesTypeId, salesCenterId: d.salesCenterId, description: d.description, discountPercent: d.discountPercent, presetLines: d.lines.length ? d.lines : Prisma.DbNull, askFields: d.askFields.length ? d.askFields : Prisma.DbNull, receiptPreset: d.receiptPreset ?? Prisma.DbNull, paymentPreset: d.paymentPreset ?? Prisma.DbNull, isActive: d.isActive, roles: { create: d.roleIds.map((roleId) => ({ roleId })) } },
     include,
   });
   return macroShape(m, await itemTitles([m]));
@@ -205,7 +262,7 @@ export async function updateMacro(id: number, body: any) {
     await tx.assistantMacroRole.deleteMany({ where: { macroId: id } });
     return tx.assistantMacro.update({
       where: { id },
-      data: { phrase: d.phrase, actionKey: d.actionKey, salesTypeId: d.salesTypeId, salesCenterId: d.salesCenterId, description: d.description, discountPercent: d.discountPercent, presetLines: d.lines.length ? d.lines : Prisma.DbNull, askFields: d.askFields.length ? d.askFields : Prisma.DbNull, receiptPreset: d.receiptPreset ?? Prisma.DbNull, isActive: d.isActive, roles: { create: d.roleIds.map((roleId) => ({ roleId })) } },
+      data: { phrase: d.phrase, actionKey: d.actionKey, salesTypeId: d.salesTypeId, salesCenterId: d.salesCenterId, description: d.description, discountPercent: d.discountPercent, presetLines: d.lines.length ? d.lines : Prisma.DbNull, askFields: d.askFields.length ? d.askFields : Prisma.DbNull, receiptPreset: d.receiptPreset ?? Prisma.DbNull, paymentPreset: d.paymentPreset ?? Prisma.DbNull, isActive: d.isActive, roles: { create: d.roleIds.map((roleId) => ({ roleId })) } },
       include,
     });
   });
@@ -234,6 +291,10 @@ export interface MatchedMacro {
   hasReceiptPreset: boolean;
   /** مشتریِ ثابتِ ماکروی رسید (فقط اگر هنوز وجود دارد) */
   receiptCustomer: EntityRef | null;
+  /** ماکروی پرداخت دارای ابزار/موضوعات پیش‌تعیین‌شده است */
+  hasPaymentPreset: boolean;
+  /** طرف حسابِ ثابتِ ماکروی پرداخت (فقط اگر هنوز وجود دارد و فعال است) */
+  paymentParty: EntityRef | null;
 }
 
 /**
@@ -269,6 +330,8 @@ export async function findMacroForUser(userId: number, probe: string): Promise<M
     askFields: askFieldsOf(m),
     hasReceiptPreset: !!receiptPresetOf(m)?.instruments.length,
     receiptCustomer: await receiptCustomerOf(m),
+    hasPaymentPreset: !!paymentPresetOf(m)?.instruments.length,
+    paymentParty: await paymentPartyOf(m),
     lines: presetLinesOf(m)
       .map((l) => ({ item: items.get(l.goodsItemId), quantity: l.quantity }))
       .filter((l) => l.item?.isActive)
@@ -297,6 +360,22 @@ async function receiptCustomerOf(m: any): Promise<EntityRef | null> {
   if (!id) return null;
   const c = await prisma.customer.findUnique({ where: { id }, select: { id: true, party: { select: { detailTitle: true } } } });
   return c ? { id: c.id, label: c.party.detailTitle } : null;
+}
+
+async function paymentPartyOf(m: any): Promise<EntityRef | null> {
+  const id = paymentPresetOf(m)?.partyId;
+  if (!id) return null;
+  const p = await prisma.party.findUnique({ where: { id }, select: { id: true, detailTitle: true, isActive: true } });
+  return p && p.isActive ? { id: p.id, label: p.detailTitle } : null;
+}
+
+/** پیش‌تعیین اعلامیه پرداخت یک ماکرو برای کاربر (همان کنترل نقش؛ ماکروی غیرفعال/غیرمجاز = null) */
+export async function loadPaymentPreset(userId: number, macroId: number): Promise<PaymentPreset | null> {
+  const m = await prisma.assistantMacro.findUnique({ where: { id: macroId }, include: { roles: { select: { roleId: true } } } });
+  if (!m || !m.isActive || m.actionKey !== "payment") return null;
+  const roles = await prisma.userRole.findMany({ where: { userId }, select: { roleId: true, role: { select: { code: true } } } });
+  const ok = roles.some((r) => r.role.code === 1) || m.roles.length === 0 || m.roles.some((r) => roles.some((u) => u.roleId === r.roleId));
+  return ok ? paymentPresetOf(m) : null;
 }
 
 /** پیش‌تعیین رسید یک ماکرو برای کاربر (همان کنترل نقش findMacroForUser؛ ماکروی غیرفعال/غیرمجاز = null) */

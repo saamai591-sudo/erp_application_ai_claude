@@ -3,7 +3,7 @@
 // (و toolSchemas() اکشن‌ها را به‌صورت ابزارِ قابل‌فراخوانی برای مدل می‌دهد). موتور (engine.ts) مستقل از نوع تفسیرگر است.
 // وضعیت گفتگو (ChatState) سمت کلاینت نگه‌داشته و با هر پیام برگردانده می‌شود؛ سرور بدون حافظه است و هر اجرا دسترسی کاربر را دوباره می‌سنجد.
 
-export type SlotType = "customer" | "goodsItem" | "salesType" | "salesCenter" | "lines" | "number" | "text" | "choice";
+export type SlotType = "customer" | "party" | "goodsItem" | "salesType" | "salesCenter" | "lines" | "number" | "text" | "choice";
 
 export interface SlotDef {
   name: string;
