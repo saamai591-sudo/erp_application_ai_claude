@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { auditRoute } from "../middleware/auditEvent";
 import { prisma } from "../lib/prisma";
 import { startImportJob, isImportEntityRegistered } from "../services/importJobService";
 import { userHasAction } from "../authz/guard";
@@ -48,7 +49,7 @@ const ENTITY_TYPE_TO_ACTION: Record<string, string> = {
 
 const router = Router();
 
-router.post("/", async (req: AuthedRequest, res) => {
+router.post("/", auditRoute("IMPORT_JOB", (req) => `ورود از اکسل: ${String(req.body?.entityType ?? "").slice(0, 60)} — ${Array.isArray(req.body?.rows) ? req.body.rows.length : 0} ردیف`), async (req: AuthedRequest, res) => {
   const { entityType, rows, allowDuplicates } = req.body as {
     entityType: string;
     rows: Record<string, string>[];

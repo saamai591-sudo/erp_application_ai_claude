@@ -9,9 +9,11 @@ import { getAccountingCloseStatus, closeInventoryAccounting, reverseInventoryAcc
 // services/inventoryAccountingCloseService.ts — این فایل فقط لایه‌ی REST است.
 // =========================================================================
 
+import { auditRoute, bodyPick } from "../middleware/auditEvent";
 const FORM = findFormPrefix("warehousing-accounting-close");
 
 const router = Router();
+router.use("/inventory-accounting-close", auditRoute("INVENTORY_ACCOUNTING_CLOSE"));
 
 router.get("/inventory-accounting-close", can(`${FORM}.view`), async (_req, res) => {
   try {

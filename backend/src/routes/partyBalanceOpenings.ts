@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { auditRoute } from "../middleware/auditEvent";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { PartyBalanceRole, closeRole, reopenRole } from "../services/partyBalanceService";
@@ -51,8 +52,8 @@ for (const [slug, { role, openingForm, closeForm }] of Object.entries(ROLES)) {
   // بستن سال (فرم جدا، مجوز جدا)
   const closeBase = `/party-balance-close/${slug}`;
   router.get(closeBase, can(`${C}.view`), wrap(async (_req, res) => res.json(await closeStatus(role)), "خطا"));
-  router.post(`${closeBase}/close`, can(`${C}.close`), wrap(async (_req, res) => res.json(await closeRole(role)), "خطا در بستن"));
-  router.post(`${closeBase}/reopen`, can(`${C}.reopen`), wrap(async (_req, res) => res.json(await reopenRole(role)), "خطا در بازگشایی"));
+  router.post(`${closeBase}/close`, can(`${C}.close`), auditRoute("PARTY_BALANCE_CLOSE", () => `بستن سال مانده ${role === "CUSTOMER" ? "مشتریان" : "تامین‌کنندگان"}`), wrap(async (_req, res) => res.json(await closeRole(role)), "خطا در بستن"));
+  router.post(`${closeBase}/reopen`, can(`${C}.reopen`), auditRoute("PARTY_BALANCE_REOPEN", () => `بازگشایی سال مانده ${role === "CUSTOMER" ? "مشتریان" : "تامین‌کنندگان"}`), wrap(async (_req, res) => res.json(await reopenRole(role)), "خطا در بازگشایی"));
 }
 
 export default router;

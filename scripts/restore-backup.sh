@@ -58,6 +58,13 @@ mkdir -p backups
 SAFE="backups/pre-restore-$(date +%Y%m%d-%H%M%S).dump"
 dc exec -T db pg_dump -U "$DB_USER" -d "$DB_NAME" -Fc --no-owner > "$SAFE"
 echo "   ذخیره شد: $SAFE ($(du -h "$SAFE" | cut -f1))"
+# لاگ تغییرات (schema audit) در پشتیبان‌های خودکار نیست؛ با پاک‌شدن دیتابیس از بین می‌رفت، پس جدا نگه داشته و بعد از بازگردانی برگردانده می‌شود
+AUDIT_DUMP="backups/pre-restore-audit-$(date +%Y%m%d-%H%M%S).dump"
+if dc exec -T db pg_dump -U "$DB_USER" -d "$DB_NAME" -Fc --no-owner -n audit > "$AUDIT_DUMP" 2>/dev/null && [ -s "$AUDIT_DUMP" ]; then
+  echo "   لاگ تغییرات جدا نگه داشته شد: $AUDIT_DUMP"
+else
+  rm -f "$AUDIT_DUMP"; AUDIT_DUMP=""
+fi
 
 echo "۳) ساخت دوباره‌ی دیتابیس…"
 dc exec -T db psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"$DB_NAME\" WITH (FORCE)"
@@ -65,6 +72,15 @@ dc exec -T db psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATAB
 
 echo "۴) بازگردانی…"
 feed | dcin exec -T db pg_restore -U "$DB_USER" -d "$DB_NAME" --no-owner --no-privileges --exit-on-error
+
+if [ -n "$AUDIT_DUMP" ]; then
+  echo "   بازگرداندن لاگ تغییرات…"
+  if cat "$AUDIT_DUMP" | dcin exec -T db pg_restore -U "$DB_USER" -d "$DB_NAME" --no-owner --no-privileges; then
+    dc exec -T db psql -U "$DB_USER" -d "$DB_NAME" -c "INSERT INTO audit.event (kind, action, summary) VALUES ('EVENT', 'DB_RESTORED', 'بازگردانی پشتیبان روی دیتابیس انجام شد (لاگ‌های قبل از این رویداد ممکن است به تغییراتی اشاره کنند که دیگر در داده نیستند)')" || true
+  else
+    echo "   هشدار: لاگ تغییرات برنگشت؛ فایل $AUDIT_DUMP نگه داشته شده است."
+  fi
+fi
 
 echo "۵) راه‌اندازی دوباره…"
 dc up -d backend frontend

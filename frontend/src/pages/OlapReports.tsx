@@ -112,6 +112,7 @@ const STATUS_OPTIONS = [
 const ISSUING_SYSTEM_OPTIONS = [
   { value: "ACCOUNTING", label: "حسابداری" },
   { value: "ACCOUNTING_EXCEL_IMPORT", label: "حسابداری (ورود از اکسل)" },
+  { value: "DATA_MIGRATION", label: "مهاجرت داده" },
   { value: "ACCOUNT_CLOSING", label: "بستن حسابها" },
   { value: "OPENING_CLOSING", label: "افتتاحیه و اختتامیه" },
   { value: "TREASURY", label: "خزانه‌داری" },

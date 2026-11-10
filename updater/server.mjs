@@ -254,7 +254,7 @@ async function apply({ manifest, registry, fromVersion }) {
 
     step("پشتیبان‌گیری از دیتابیس");
     backupFile = path.join(BACKUP_DIR, `pre-update-${fromVersion || "x"}-to-${manifest.version}-${stamp}.dump`);
-    await run("docker", [...base, "exec", "-T", DB_SERVICE, "pg_dump", "-U", DB_USER, "-Fc", "--no-owner", DB_NAME], { stdoutFile: backupFile, timeoutMs: 1800000 });
+    await run("docker", [...base, "exec", "-T", DB_SERVICE, "pg_dump", "-U", DB_USER, "-Fc", "--no-owner", "--exclude-schema=audit", DB_NAME], { stdoutFile: backupFile, timeoutMs: 1800000 });
     const size = fs.statSync(backupFile).size;
     if (size < 1024) throw new UpdateFail("فایل پشتیبان خالی است؛ به‌روزرسانی انجام نشد");
     state.backupFile = path.basename(backupFile);

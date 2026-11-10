@@ -27,6 +27,7 @@ const LEDGER_STATUS_FA: Record<string, string> = { DRAFT: "ثبت", REVIEW: "ب�
 const LEDGER_ISSUING_SYSTEM_FA: Record<string, string> = {
   ACCOUNTING: "حسابداری",
   ACCOUNTING_EXCEL_IMPORT: "حسابداری (ورود از اکسل)",
+  DATA_MIGRATION: "مهاجرت داده",
   ACCOUNT_CLOSING: "بستن حسابها",
   OPENING_CLOSING: "افتتاحیه و اختتامیه",
   TREASURY: "خزانه‌داری",

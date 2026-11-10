@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { auditRoute } from "../middleware/auditEvent";
 import { prisma, getCurrentFiscalPeriod } from "../lib/prisma";
 import { renumberJournalEntries } from "../services/journalEntryRenumberService";
 import { resolveDetailTitles } from "../utils/detailValues";
@@ -428,7 +429,7 @@ router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
 
 // عملیات «شماره‌گذاری مجدد» فهرست: اسناد ثبت/بررسی دوره‌ی مالی جاری کاربر بر اساس تاریخ سند و شماره‌ی روزانه؛
 // منطق فقط در سرویس مشترک است (همان که تایید اسناد هم صدا می‌زند)
-router.post("/renumber", can(`${FORM}.renumber`), async (_req, res) => {
+router.post("/renumber", can(`${FORM}.renumber`), auditRoute("JOURNAL_RENUMBER"), async (_req, res) => {
   try {
     const fiscalPeriod = await getCurrentFiscalPeriod();
     if (!fiscalPeriod) return res.status(400).json({ error: "دوره مالی جاری مشخص نیست" });

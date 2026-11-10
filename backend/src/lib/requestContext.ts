@@ -8,10 +8,16 @@ interface RequestContext {
   bypassFiscalScope?: boolean;
   /** کاربر جاری (از توکن)؛ برای ثبت‌کننده‌ی سند و رویدادهای کارتابل */
   userId?: number;
+  /** نشانی IP درخواست (برای لاگ تغییرات) */
+  ip?: string;
   /** «صدور آزمایشی»: issueJournalEntry بعد از همه‌ی اعتبارسنجی‌ها و قبل از نوشتن چیزی، IssueDryRunSignal پرتاب می‌کند (کارهای زمان‌بندی‌شده در حالت آزمایشی) */
   dryRunIssue?: boolean;
   /** جعبه‌ی مشترکِ یک درخواست: نسخه‌های کپی‌شده‌ی زمینه (مثل withoutFiscalPeriodScope) همین شیء را نگه می‌دارند، پس چیزی که پایین‌دست می‌نویسد به پاسخ می‌رسد */
-  shared?: { deleteBlocked?: { header: string; message: string; groups: unknown[] } };
+  shared?: {
+    deleteBlocked?: { header: string; message: string; groups: unknown[] };
+    /** ردیف‌های لاگ تغییرات این درخواست؛ فقط وقتی پاسخ موفق بود نوشته می‌شوند (middleware/fiscalScope.ts). نبودنش = نوشتن فوری (کارهای زمان‌بندی‌شده/اسکریپت) */
+    auditBuffer?: import("../services/auditService").AuditRow[];
+  };
 }
 
 const als = new AsyncLocalStorage<RequestContext>();

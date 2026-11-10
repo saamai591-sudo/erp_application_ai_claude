@@ -232,7 +232,8 @@ export async function runBackup(trigger: "SCHEDULED" | "MANUAL") {
     const fileName = backupFileName(startedAt, version);
     const finalPath = safeBackupPath(fileName);
     tmp = `${finalPath}.partial`;
-    const dump = await run("pg_dump", ["-Fc", "--no-owner", "-f", tmp], pgEnv());
+    // schema «audit» (لاگ تغییرات) عمداً داخل پشتیبان نمی‌آید: حجم لاگ نباید در هر نسخه‌ی پشتیبان تکرار شود (services/auditService.ts)
+    const dump = await run("pg_dump", ["-Fc", "--no-owner", "--exclude-schema=audit", "-f", tmp], pgEnv());
     if (dump.code !== 0) throw new BackupError(`pg_dump ناموفق بود: ${dump.stderr.trim().slice(0, 600) || `کد ${dump.code}`}`);
     // سالم‌بودن آرشیو (فهرست محتوا خوانده می‌شود)
     const list = await run("pg_restore", ["--list", tmp], process.env, 10 * 60_000);

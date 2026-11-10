@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "crypto";
 import { prisma } from "../lib/prisma";
 import { tehranDate } from "../jobs/time";
 import { collectFingerprint, Fingerprint } from "./fingerprint";
-import { getPublicKey, LicenseBinding, LicenseModel, LicensePayload, parseLicenseFile } from "./licenseFile";
+import { getPublicKey, LicenseAudit, LicenseBinding, LicenseModel, LicensePayload, parseLicenseFile } from "./licenseFile";
 
 // وضعیت لایسنس این نصب. فعلاً (پله‌ی ۱) فقط اطلاع‌رسانی است: هیچ بخشی از برنامه بر اساس این وضعیت محدود نمی‌شود.
 //
@@ -54,6 +54,8 @@ export interface LicenseSummary {
   maxUsers: number | null;
   modules: string[] | null;
   features: string[] | null;
+  /** لاگ تغییرات (null = لایسنس مجاز نکرده) */
+  audit: LicenseAudit | null;
 }
 
 export interface LicenseStatus {
@@ -93,6 +95,7 @@ function summarize(p: LicensePayload): LicenseSummary {
     maxUsers: p.maxUsers,
     modules: p.modules,
     features: p.features,
+    audit: p.audit ?? null,
   };
 }
 
@@ -249,6 +252,14 @@ export interface Entitlements {
   features: string[] | null;
 }
 
+/** قابلیت‌هایی که وقتی features=null «همه» معنا می‌داد (قبل از اضافه‌شدن قابلیت‌های جدید). قابلیت‌های جدیدِ پرهزینه مثل AUDIT_LOG عمداً داخل «همه» نیستند. */
+const LEGACY_FEATURES = ["FX"];
+/** features مؤثر: AUDIT_LOG فقط وقتی لایسنس بخش audit دارد؛ features=null (لایسنس قدیمی) بدون audit همان قابلیت‌های قدیمی است */
+function effectiveFeatures(features: string[] | null, hasAudit: boolean): string[] | null {
+  if (features === null) return hasAudit ? null : LEGACY_FEATURES;
+  return hasAudit ? Array.from(new Set([...features, "AUDIT_LOG"])) : features;
+}
+
 export async function getEntitlements(): Promise<Entitlements> {
   const enforced = isEnforcementEnabled();
   const all: Entitlements = { enforced, modules: null, features: null };
@@ -259,7 +270,7 @@ export async function getEntitlements(): Promise<Entitlements> {
     return {
       enforced,
       modules: s.license.modules ? Array.from(new Set([...CORE_MODULES, ...s.license.modules])) : null,
-      features: s.license.features,
+      features: effectiveFeatures(s.license.features, !!s.license.audit),
     };
   } catch (e) {
     console.error("[license] خواندن امکانات لایسنس ناموفق بود", e);
@@ -277,6 +288,33 @@ export async function getMaxUsers(): Promise<number | null> {
   } catch (e) {
     console.error("[license] خواندن سقف کاربران ناموفق بود", e);
     return null;
+  }
+}
+
+/**
+ * مجوز «لاگ تغییرات» از لایسنس. برخلاف modules/features، نبودنِ شیء audit در لایسنس یعنی «مجاز نیست» (لاگ حجم سرورهای ما را بالا می‌برد).
+ * قفل خاموش (فقط محیط توسعه‌ی فروشنده) یا ساخت بدون کلید = مجاز و بدون سقف تا بشود امتحانش کرد.
+ */
+export interface AuditEntitlement {
+  licensed: boolean;
+  level: "BASIC" | "FULL";
+  /** null = بدون سقف */
+  maxRetentionDays: number | null;
+  maxStorageMB: number | null;
+}
+export async function getAuditEntitlement(): Promise<AuditEntitlement> {
+  const dev: AuditEntitlement = { licensed: true, level: "FULL", maxRetentionDays: null, maxStorageMB: null };
+  const none: AuditEntitlement = { licensed: false, level: "BASIC", maxRetentionDays: null, maxStorageMB: null };
+  if (!isEnforcementEnabled()) return dev;
+  try {
+    const s = await getCachedStatus();
+    if (s.state === "UNCONFIGURED") return dev;
+    if (!s.license || !isStateAllowed(s.state) || !s.license.audit) return none;
+    const a = s.license.audit;
+    return { licensed: true, level: a.level, maxRetentionDays: a.maxRetentionDays, maxStorageMB: a.maxStorageMB };
+  } catch (e) {
+    console.error("[license] خواندن مجوز لاگ تغییرات ناموفق بود", e);
+    return none;
   }
 }
 

@@ -5,6 +5,7 @@ import { renumberJournalEntries } from "../services/journalEntryRenumberService"
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 
+import { auditRoute, bodyPick } from "../middleware/auditEvent";
 const FORM = findFormPrefix("document-confirmation");
 
 const router = Router();
@@ -85,7 +86,7 @@ router.post("/check", can(`${FORM}.view`), async (req, res) => {
 });
 
 // تایید نهایی: همه اسناد بازه را به وضعیت «تایید» تغییر می‌دهد (صرف‌نظر از وضعیت فعلی‌شان)
-router.post("/confirm", can(`${FORM}.confirm`), async (req, res) => {
+router.post("/confirm", can(`${FORM}.confirm`), auditRoute("DOCUMENT_CONFIRM", bodyPick("date")), async (req, res) => {
   try {
     const { fiscalPeriod, date } = await validate(req.body.date);
     // ابتدا شماره‌گذاری مجدد (همان سرویس مشترکِ عملیات «شماره‌گذاری مجدد» فهرست اسناد)، سپس تایید؛
@@ -156,7 +157,7 @@ router.post("/uncheck", can(`${FORM}.unconfirm`), async (req, res) => {
   }
 });
 
-router.post("/unconfirm", can(`${FORM}.unconfirm`), async (req, res) => {
+router.post("/unconfirm", can(`${FORM}.unconfirm`), auditRoute("DOCUMENT_UNCONFIRM", bodyPick("date")), async (req, res) => {
   try {
     const { fiscalPeriod, date } = await validateRevert(req.body.date);
     // شرط وضعیت داخل خودِ updateMany دوباره بررسی می‌شود تا با تایید/برگشت همزمان ناسازگار نشود

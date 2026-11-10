@@ -122,6 +122,16 @@ export const REGISTRY: ModuleDef[] = [
             baseActions: ["view", "edit"],
             actions: [{ key: "run", title: "اجرای دستی" }],
           },
+          // API «ورود داده» برای برنامه‌ی مهاجرت از سیستم‌های قبلی (مثلاً سام)؛ فقط کلید مجوز، بدون صفحه در منو
+          { key: "data-migration", title: "مهاجرت داده", baseActions: [], actions: [{ key: "run", title: "اجرای ورود داده" }] },
+        ],
+      },
+      {
+        key: "reports",
+        title: "گزارش",
+        forms: [
+          // لاگ تغییرات فقط با مجوز لایسنس (features شامل AUDIT_LOG)؛ تنظیم آن در /management است نه اینجا
+          { key: "audit-log", title: "مرور لاگ تغییرات", baseActions: ["view"], requiresFeature: "AUDIT_LOG" },
         ],
       },
     ],

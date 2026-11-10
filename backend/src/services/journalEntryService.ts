@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import { queueAuditEvent } from "./auditService";
 import { getRequestContext } from "../lib/requestContext";
 import { assertLineHasAmount, assertDateNotConfirmed } from "../utils/journalEntryValidation";
 import { toBaseCurrencyAmount } from "../utils/currencyConversion";
@@ -210,6 +211,14 @@ export async function issueJournalEntry(opts: IssueJournalEntryOptions): Promise
       data: opts.sources.map((s) => ({ journalEntryId: entry.id, label: s.label, path: s.path })),
     });
   }
+
+  // لاگ تغییرات: «از کدام ماژول/فرم مبدا صادر شد» (خودِ ساخت سند را لاگ مرکزی رکورد ثبت می‌کند)
+  await queueAuditEvent({
+    action: "JOURNAL_ISSUED",
+    model: "JournalEntry",
+    recordId: entry.id,
+    summary: `سند ${entry.referenceNumber} — صادرکننده: ${opts.issuingSystem}${opts.sources?.length ? " — مبدا: " + opts.sources.map((x) => x.label).join("، ") : ""}`.slice(0, 300),
+  });
 
   return {
     id: entry.id,

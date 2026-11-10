@@ -197,6 +197,7 @@ import WarehouseDocDetails from "./pages/WarehouseDocDetails";
 import DetailRules from "./pages/DetailRules";
 import NumberingPatterns from "./pages/NumberingPatterns";
 import ScheduledJobs from "./pages/ScheduledJobs";
+import AuditLog from "./pages/AuditLog";
 import CompanyProfile from "./pages/CompanyProfile";
 import PrintTemplates from "./pages/PrintTemplates";
 import Management from "./pages/Management";
@@ -606,6 +607,7 @@ export default function App() {
             <Route path="/numbering-patterns/new" element={<NumberingPatterns />} />
             <Route path="/numbering-patterns/:id/edit" element={<NumberingPatterns />} />
             <Route path="/scheduled-jobs" element={<ScheduledJobs />} />
+            <Route path="/audit-log" element={<AuditLog />} />
             <Route path="/company-profile" element={<CompanyProfile />} />
             <Route path="/print-templates" element={<PrintTemplates />} />
             <Route path="/print-templates/new" element={<PrintTemplates />} />

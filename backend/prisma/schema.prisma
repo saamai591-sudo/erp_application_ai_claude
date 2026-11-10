@@ -3651,6 +3651,7 @@ enum IssuingSystem {
   PAYROLL
   ACCOUNTING
   ACCOUNTING_EXCEL_IMPORT
+  DATA_MIGRATION
   ACCOUNT_CLOSING
   OPENING_CLOSING
   WAREHOUSE
@@ -8369,6 +8370,22 @@ model TaxInvoiceTypeRule {
 
 /// «دستور میانبر دستیار»: عبارتی که کاربر در دستیار می‌نویسد ← یک کار موجود دستیار با مقدارهای از پیش‌تعیین‌شده (برای کل شرکت)
 /// نقش‌ها: خالی = همه‌ی کاربرانی که دسترسی خودِ کار را دارند؛ پر = فقط کاربران دارای یکی از این نقش‌ها
+enum AuditLevel {
+  BASIC
+  FULL
+}
+
+/// تنظیم «لاگ تغییرات» (singleton؛ فقط از /management) — رویدادها در schema جدای audit هستند (SQL خام، خارج از Prisma و خارج از پشتیبان)
+model AuditSetting {
+  id                     Int        @id @default(1)
+  enabled                Boolean    @default(false)
+  level                  AuditLevel @default(BASIC)
+  retentionDays          Int        @default(365)
+  lastMaintenanceAt      DateTime?
+  lastMaintenanceMessage String?
+  updatedAt              DateTime   @updatedAt
+}
+
 model AssistantMacro {
   id              Int                  @id @default(autoincrement())
   phrase          String               @unique

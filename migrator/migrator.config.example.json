@@ -1,0 +1,15 @@
+{
+  "sam": {
+    "server": "saamdata\saam",
+    "database": "Amoode",
+    "user": "sa",
+    "encrypt": false,
+    "trustServerCertificate": true
+  },
+  "erp": {
+    "url": "http://localhost:4000",
+    "mobile": "0999999999"
+  },
+  "modules": ["accounting"],
+  "batchSize": 200
+}

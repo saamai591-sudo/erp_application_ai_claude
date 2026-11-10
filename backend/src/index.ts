@@ -132,6 +132,7 @@ import taxInvoiceTypeRuleRoutes from "./routes/taxInvoiceTypeRules";
 import assistantRoutes from "./routes/assistant";
 import assistantMacroRoutes from "./routes/assistantMacros";
 import scheduledJobRoutes from "./routes/scheduledJobs";
+import auditLogRoutes from "./routes/auditLog";
 import companyProfileRoutes from "./routes/companyProfile";
 import printTemplateRoutes from "./routes/printTemplates";
 import printShareRoutes from "./routes/printShare";
@@ -140,7 +141,10 @@ import managementRoutes from "./routes/management";
 import { licenseGate } from "./license/licenseGate";
 import managementBackupRoutes from "./routes/managementBackup";
 import managementUpdateRoutes from "./routes/managementUpdate";
+import managementAuditRoutes from "./routes/managementAudit";
+import dataMigrationRoutes from "./routes/dataMigration";
 import { startBackupScheduler } from "./services/backupService";
+import { startAuditScheduler } from "./services/auditService";
 import { stampUnmarkedTaxMemories } from "./services/taxMemoryLicense";
 import { ensureDefaultFileStructures } from "./services/fileStructureService";
 import { fxOffBodyNormalizer } from "./license/fxOff";
@@ -239,6 +243,7 @@ app.use("/api", managementRoutes);
 // پشتیبان‌گیری خودکار (سیاست و دانلود) — فقط با نشست مدیریت؛ قبل از دروازه‌ی لایسنس تا انقضای لایسنس دسترسی به پشتیبان را نبندد
 app.use("/api", managementBackupRoutes);
 app.use("/api", managementUpdateRoutes);
+app.use("/api", managementAuditRoutes);
 // قفل کامل بدون لایسنس معتبر (همه‌ی مسیرها به‌جز health و management)
 app.use("/api", licenseGate);
 
@@ -264,6 +269,7 @@ app.use("/api/roles", roleRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/currencies", currencyRoutes);
 app.use("/api/fiscal-periods", fiscalPeriodRoutes);
+app.use("/api/data-migration", dataMigrationRoutes);
 app.use("/api/reporting-periods", reportingPeriodRoutes);
 app.use("/api/goods-pricing", goodsPricingRoutes);
 app.use("/api/org-structure", orgStructureRoutes);
@@ -327,6 +333,7 @@ app.use("/api/tax-invoice-type-rules", taxInvoiceTypeRuleRoutes);
 app.use("/api/assistant", assistantRoutes);
 app.use("/api", assistantMacroRoutes);
 app.use("/api", scheduledJobRoutes);
+app.use("/api", auditLogRoutes);
 app.use("/api", companyProfileRoutes);
 app.use("/api", printTemplateRoutes);
 app.use("/api/warehouse-doc-detail-settings", warehouseDocDetailSettingRoutes);
@@ -484,6 +491,7 @@ syncRegistryToDb()
       startScheduler().catch((e) => console.error("[scheduler] خطا در راه‌اندازی", e));
       // زمان‌سنج پشتیبان‌گیری (مستقل از SCHEDULER_ENABLED؛ فقط وقتی سیاست از «مدیریت» روشن شود کار می‌کند)
       startBackupScheduler().catch((e) => console.error("[backup] خطا در راه‌اندازی", e));
+      startAuditScheduler().catch((e) => console.error("[audit] خطا در راه‌اندازی", e));
       // حافظه‌های مالیاتیِ بدون سریال (قدیمی) با سریال لایسنس جاری علامت می‌خورند
       ensureDefaultFileStructures().catch((e) => console.error("[file-structures] ساخت ساختارهای پیش‌فرض نصب", e));
       stampUnmarkedTaxMemories().catch((e) => console.error("[tax-memory] علامت‌گذاری با سریال لایسنس", e));

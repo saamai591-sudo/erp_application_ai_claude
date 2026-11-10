@@ -3,6 +3,7 @@ import { formatJalaliDate } from "../lib/formatDate";
 import { Branding, DEFAULT_TITLE, fetchBranding } from "../lib/branding";
 import { ManagementBackup } from "../components/ManagementBackup";
 import { ManagementUpdate } from "../components/ManagementUpdate";
+import { ManagementAudit } from "../components/ManagementAudit";
 
 // «مدیریت» (/management) — صفحه‌ی مستقل از ورود ERP برای فعال‌سازی و دیدن وضعیت لایسنس، با کلمه‌ی عبور خودش (در لایسنس است، نه کاربران ERP).
 //   ۱) لایسنس معتبری ثبت نشده: «دانلود فایل اطلاعات سرور» + «بارگذاری فایل لایسنس». فیلد کلمه‌ی عبور بعد از انتخاب فایل باز می‌شود و همان
@@ -99,15 +100,15 @@ export default function Management() {
   const [busy, setBusy] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   // منوی سمت راست پس از ورود: «لایسنس» | «تنظیمات پشتیبان‌گیری»؛ انتخاب در نشست مرورگر می‌ماند
-  const [section, setSectionState] = useState<"license" | "backup" | "update">(() => {
+  const [section, setSectionState] = useState<"license" | "backup" | "update" | "audit">(() => {
     try {
       const v = sessionStorage.getItem("management-section");
-      return v === "backup" || v === "update" ? v : "license";
+      return v === "backup" || v === "update" || v === "audit" ? v : "license";
     } catch {
       return "license";
     }
   });
-  const setSection = (s: "license" | "backup" | "update") => {
+  const setSection = (s: "license" | "backup" | "update" | "audit") => {
     setSectionState(s);
     try {
       sessionStorage.setItem("management-section", s);
@@ -261,9 +262,10 @@ export default function Management() {
 
   const companyName = brand?.name || "";
   const initial = (companyName || DEFAULT_TITLE).trim().charAt(0);
-  const SECTIONS: { key: "license" | "backup" | "update"; label: string }[] = [
+  const SECTIONS: { key: "license" | "backup" | "update" | "audit"; label: string }[] = [
     { key: "license", label: "لایسنس" },
     { key: "backup", label: "تنظیمات پشتیبان‌گیری" },
+    { key: "audit", label: "لاگ تغییرات" },
     { key: "update", label: "به‌روزرسانی" },
   ];
 
@@ -387,6 +389,7 @@ export default function Management() {
                   </>
                 )}
                 {section === "backup" && token && <ManagementBackup token={token} onUnauthorized={() => saveToken(null)} />}
+                {section === "audit" && token && <ManagementAudit token={token} onUnauthorized={() => saveToken(null)} />}
                 {section === "update" && token && <ManagementUpdate token={token} onUnauthorized={() => saveToken(null)} />}
               </div>
             </div>

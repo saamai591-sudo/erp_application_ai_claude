@@ -1,9 +1,11 @@
 import { assertLineAmountDecimals } from "../utils/amountDecimals";
-import { PrismaClient, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import { rawPrisma } from "./rawPrisma";
 import { getRequestContext } from "./requestContext";
 import { explainDeleteFailure } from "./deleteUsage";
+import { auditChange, auditPre } from "../services/auditService";
 
-const rawPrisma = new PrismaClient();
+
 
 // همه‌ی مدل‌هایی که فیلد fiscalPeriodId دارند — پویا از DMMF خوانده می‌شود (نه یک لیست ثابت دستی) تا هر
 // مدل تازه‌ای که بعداً به schema.prisma با فیلد fiscalPeriodId اضافه شود، بدون هیچ تغییری در همین فایل
@@ -181,6 +183,7 @@ export const prisma = rawPrisma.$extends({
       },
     },
     journalEntry: {
+      // نکته: hookهای اختصاصی مدل و $allModels هر دو اجرا می‌شوند (لاگ تغییرات فقط در $allModels صدا زده می‌شود؛ اینجا دوباره صدا نزنید وگرنه دوبار ثبت می‌شود)
       async create({ args, query }) {
         await assertJournalLinesDecimals(nestedLines(args.data));
         return query(args);
@@ -201,31 +204,48 @@ export const prisma = rawPrisma.$extends({
     $allModels: {
       async create({ model, args, query }) {
         await assertPartyBalanceYearOpen(model, "create", args);
-        return query(args);
+        const r = await query(args);
+        await auditChange(model, "create", args, r);
+        return r;
       },
       async createMany({ model, args, query }) {
         await assertPartyBalanceYearOpen(model, "createMany", args);
-        return query(args);
+        const r = await query(args);
+        await auditChange(model, "createMany", args, r);
+        return r;
       },
       async update({ model, args, query }) {
         await assertPartyBalanceYearOpen(model, "update", args);
-        return query(args);
+        const pre = await auditPre(model, "update", args);
+        const r = await query(args);
+        await auditChange(model, "update", args, r, pre);
+        return r;
       },
       async updateMany({ model, args, query }) {
         await assertPartyBalanceYearOpen(model, "updateMany", args);
-        return query(args);
+        const r = await query(args);
+        await auditChange(model, "updateMany", args, r);
+        return r;
       },
       async upsert({ model, args, query }) {
         await assertPartyBalanceYearOpen(model, "upsert", args);
-        return query(args);
+        const pre = await auditPre(model, "upsert", args);
+        const r = await query(args);
+        await auditChange(model, "upsert", args, r, pre);
+        return r;
       },
       async delete({ model, args, query }) {
         await assertPartyBalanceYearOpen(model, "delete", args);
-        return deleteWithUsage(model, args, query);
+        const pre = await auditPre(model, "delete", args);
+        const r = await deleteWithUsage(model, args, query);
+        await auditChange(model, "delete", args, r, pre);
+        return r;
       },
       async deleteMany({ model, args, query }) {
         await assertPartyBalanceYearOpen(model, "deleteMany", args);
-        return deleteWithUsage(model, args, query);
+        const r = await deleteWithUsage(model, args, query);
+        await auditChange(model, "deleteMany", args, r);
+        return r;
       },
       findMany({ model, args, query }) {
         return withFiscalScope(model, args, query);

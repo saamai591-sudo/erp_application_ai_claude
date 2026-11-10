@@ -36,6 +36,10 @@ const RAW_MODULES: ModuleGroup[] = [
           { key: "scheduled-jobs", label: "کارهای زمان‌بندی‌شده", list: "/scheduled-jobs", icon: "calendar" },
         ],
       },
+      {
+        title: "گزارش",
+        items: [{ key: "audit-log", label: "مرور لاگ تغییرات", list: "/audit-log", icon: "file", type: "report" }],
+      },
     ],
   },
   {

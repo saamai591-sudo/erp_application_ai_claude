@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { auditRoute } from "../middleware/auditEvent";
 import { prisma } from "../lib/prisma";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
 import { computeFullAccountCode } from "../utils/accountCode";
@@ -136,7 +137,7 @@ router.delete("/:id", can(`${FORM}.delete`), async (req, res) => {
 });
 
 // حذف سند حسابداریِ صادرشده برای این رکورد افتتاحیه/اختتامیه (امکان صدور مجدد بعد از حذف)
-router.delete("/:id/journal-entry", can(`${FORM}.revertIssue`), async (req, res) => {
+router.delete("/:id/journal-entry", can(`${FORM}.revertIssue`), auditRoute("OPENING_CLOSING_REVERT"), async (req, res) => {
   const id = Number(req.params.id);
   const e = await prisma.openingClosingEntry.findUnique({ where: { id } });
   if (!e) return res.status(404).json({ error: "رکورد یافت نشد" });
@@ -155,7 +156,7 @@ router.delete("/:id/journal-entry", can(`${FORM}.revertIssue`), async (req, res)
   }
 });
 
-router.post("/:id/issue", can(`${FORM}.issue`), async (req, res) => {
+router.post("/:id/issue", can(`${FORM}.issue`), auditRoute("OPENING_CLOSING_ISSUE"), async (req, res) => {
   const id = Number(req.params.id);
   const e = await prisma.openingClosingEntry.findUnique({ where: { id }, include: { fiscalPeriod: true } });
   if (!e) return res.status(404).json({ error: "رکورد یافت نشد" });

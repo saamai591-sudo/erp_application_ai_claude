@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { auditRoute } from "../middleware/auditEvent";
 import bcrypt from "bcryptjs";
 import { prisma } from "../lib/prisma";
 import { AuthedRequest } from "../middleware/auth";
@@ -30,7 +31,7 @@ router.put("/me/preferences", async (req: AuthedRequest, res) => {
 });
 
 // تغییر کلمه عبور توسط خودِ کاربر: شناسه از توکن می‌آید و رمز فعلی باید درست وارد شود (بدون permission جدا، مثل تنظیمات کاربری)
-router.post("/me/change-password", async (req: AuthedRequest, res) => {
+router.post("/me/change-password", auditRoute("PASSWORD_CHANGED", () => "تغییر رمز توسط خود کاربر"), async (req: AuthedRequest, res) => {
   const { currentPassword, newPassword } = req.body as { currentPassword?: string; newPassword?: string };
   if (!currentPassword || !newPassword) return res.status(400).json({ error: "رمز عبور فعلی و رمز عبور جدید الزامی است" });
   if (newPassword.length < 6) return res.status(400).json({ error: "رمز عبور جدید باید حداقل ۶ کاراکتر باشد" });

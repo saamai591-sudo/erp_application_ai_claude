@@ -2427,3 +2427,11 @@ td .badge { padding: 0 9px; line-height: 1.5; vertical-align: middle; }
   .mg-nav button.active { border-bottom-color: var(--primary); }
   .mg-body { padding: 16px; }
 }
+
+/* لاگ تغییرات: جدول فیلد/قبل/بعد و کارت هر رویداد در «تاریخچه‌ی رکورد» */
+.audit-changes { width: 100%; border-collapse: collapse; font-size: 13px; }
+.audit-changes th, .audit-changes td { border: 1px solid var(--line); padding: 4px 8px; text-align: start; vertical-align: top; word-break: break-word; }
+.audit-changes th { background: var(--surface-2, var(--surface)); font-weight: 600; }
+.audit-event-card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--surface); }
+.audit-event-head { display: flex; gap: 14px; align-items: baseline; margin-bottom: 6px; flex-wrap: wrap; }
+.audit-changes th:first-child, .audit-changes td:first-child { width: 22%; }

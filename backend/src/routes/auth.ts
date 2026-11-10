@@ -2,6 +2,9 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { prisma } from "../lib/prisma";
 import { SESSION_IDLE_MINUTES, SESSION_MAX_HOURS, signToken, verifyToken } from "../middleware/auth";
+import { recordAuditEvent } from "../services/auditService";
+
+const clientIp = (req: any): string | null => (String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || req.ip || "").replace(/^::ffff:/, "") || null;
 
 const router = Router();
 
@@ -15,14 +18,17 @@ router.post("/login", async (req, res) => {
   const ident = String(mobile).trim();
   const user = await prisma.user.findFirst({ where: { OR: [{ mobile: ident }, { username: ident.toLowerCase() }] } });
   if (!user || !user.isActive) {
+    await recordAuditEvent({ kind: "AUTH", action: "LOGIN_FAILED", summary: `ورود ناموفق (کاربر یافت نشد/غیرفعال): ${ident.slice(0, 40)}`, userId: null, ip: clientIp(req) });
     return res.status(401).json({ error: "کاربری با این مشخصات یافت نشد یا غیرفعال است" });
   }
 
   const ok = await bcrypt.compare(password, user.passwordHash);
   if (!ok) {
+    await recordAuditEvent({ kind: "AUTH", action: "LOGIN_FAILED", summary: "ورود ناموفق (رمز اشتباه)", userId: user.id, ip: clientIp(req) });
     return res.status(401).json({ error: "شماره همراه/نام کاربری یا رمز عبور اشتباه است" });
   }
 
+  await recordAuditEvent({ kind: "AUTH", action: "LOGIN", summary: null, userId: user.id, ip: clientIp(req) });
   const token = signToken({ id: user.id, mobile: user.mobile, light: user.isLight });
   res.json({
     token,

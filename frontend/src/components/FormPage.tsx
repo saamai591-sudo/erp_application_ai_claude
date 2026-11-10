@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { clearTabDirty, confirmDiscard, currentTabPath, isTabDirty, markTabDirty } from "../lib/unsavedChanges";
 import { useTabs } from "../lib/TabsContext";
 import { InfoHint } from "./InfoHint";
+import { RecordHistoryButton } from "./RecordHistoryButton";
 
 function KebabIcon() {
   return (
@@ -199,7 +200,10 @@ export function FormPage({
           <button type="button" className={`toolbar-icon-btn toolbar-more-toggle${moreOpen ? " active" : ""}`} onClick={() => setMoreOpen((v) => !v)} title="سایر عملیات">
             <KebabIcon />
           </button>
-          <span className="toolbar-extra">{toolbarExtra}</span>
+          <span className="toolbar-extra">
+            <RecordHistoryButton />
+            {toolbarExtra}
+          </span>
           {hasMenu && (
             <div className="toolbar-menu-wrap">
               <button type="button" className="toolbar-icon-btn" onClick={() => setMenuOpen((v) => !v)} title="عملیات بیشتر">

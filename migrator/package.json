@@ -1,0 +1,17 @@
+{
+  "name": "erp-migrator",
+  "version": "0.1.0",
+  "description": "ابزار انتقال داده از سیستم‌های قبلی (سام) به ERP از طریق API ورود داده",
+  "private": true,
+  "type": "module",
+  "main": "src/engine.mjs",
+  "scripts": {
+    "check": "node src/cli.mjs check",
+    "dry-run": "node src/cli.mjs run --dry-run",
+    "run": "node src/cli.mjs run"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "mssql": "^11.0.1"
+  }
+}

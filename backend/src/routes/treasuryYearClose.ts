@@ -5,6 +5,7 @@ import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
 import { CLOSE_SECTIONS, CloseSection, sectionTitle, getCloseContext, previewCounts, closeSection, closeAll, reopenSection } from "../services/treasuryYearCloseService";
 
+import { auditRoute, bodyPick } from "../middleware/auditEvent";
 const FORM = findFormPrefix("treasury-year-close");
 
 // =========================================================================
@@ -13,6 +14,7 @@ const FORM = findFormPrefix("treasury-year-close");
 // =========================================================================
 
 const router = Router();
+router.use("/treasury-year-close", auditRoute("TREASURY_YEAR_CLOSE"));
 
 router.get("/treasury-year-close", can(`${FORM}.view`), async (_req, res) => {
   try {

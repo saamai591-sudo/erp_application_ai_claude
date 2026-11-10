@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { auditRoute } from "../middleware/auditEvent";
 import { prisma } from "../lib/prisma";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
@@ -178,7 +179,7 @@ router.put("/scheduled-jobs/:key", can(`${FORM}.edit`), async (req, res) => {
 });
 
 // اجرای دستی. اجرا در پس‌زمینه ادامه می‌یابد و runId برگردانده می‌شود؛ کلاینت وضعیت را با GET /scheduled-jobs/runs/:id پیگیری می‌کند.
-router.post("/scheduled-jobs/:key/run", can(`${FORM}.run`), async (req: AuthedRequest, res) => {
+router.post("/scheduled-jobs/:key/run", can(`${FORM}.run`), auditRoute("SCHEDULED_JOB_RUN", (req) => `کار ${req.params.key} — حالت ${req.body?.mode === "LIVE" ? "واقعی" : "آزمایشی"}`), async (req: AuthedRequest, res) => {
   const def = getJobDefinition(req.params.key);
   if (!def) return res.status(404).json({ error: "کار یافت نشد" });
   const mode = req.body?.mode === "LIVE" ? "LIVE" : "DRY_RUN";

@@ -1,6 +1,23 @@
 import { prisma } from "../lib/prisma";
 
 /**
+ * اولین کد آزادِ بعد از nextNumber: کدها بین همه‌ی انواع تفصیل یکتا هستند و داده‌ی واردشده از سیستم دیگر (مثلاً مهاجرت از سام) ممکن است کدی را
+ * اشغال کرده باشد که بیرون از دنباله‌ی همین نوع است؛ پس به‌جای خطای «کد تکراری»، به کد آزاد بعدی می‌رود.
+ */
+async function firstFreeCode(detailType: { title: string; codeLength: number; endNumber: number }, nextNumber: number): Promise<string> {
+  let n = nextNumber;
+  for (let guard = 0; guard < 100000; guard++) {
+    if (n > detailType.endNumber) {
+      throw new Error(`ظرفیت کدگذاری برای نوع تفصیل «${detailType.title}» تمام شده است (تا ${detailType.endNumber})`);
+    }
+    const code = String(n).padStart(detailType.codeLength, "0");
+    if (!(await prisma.detailCodeUsage.findUnique({ where: { code }, select: { id: true } }))) return code;
+    n++;
+  }
+  throw new Error("یافتن کد تفصیل آزاد ممکن نشد");
+}
+
+/**
  * تولید کد تفصیلی خودکار طبق مستند «نوع تفصیل»:
  * - اگر رکوردی از این نوع تفصیل قبلا ثبت شده: بزرگترین کد + ۱ (به شرط عدم عبور از شماره پایان)
  * - در غیر این صورت: شماره شروع نوع تفصیل
@@ -27,13 +44,7 @@ export async function generateDetailCode(detailTypeCode: number): Promise<{
     nextNumber = detailType.startNumber;
   }
 
-  if (nextNumber > detailType.endNumber) {
-    throw new Error(
-      `ظرفیت کدگذاری برای نوع تفصیل «${detailType.title}» تمام شده است (بازه ${detailType.startNumber} تا ${detailType.endNumber})`
-    );
-  }
-
-  const code = String(nextNumber).padStart(detailType.codeLength, "0");
+  const code = await firstFreeCode(detailType, nextNumber);
   return { code, detailTypeId: detailType.id };
 }
 
@@ -75,13 +86,7 @@ export async function resolveDetailCode(
     nextNumber = detailType.startNumber;
   }
 
-  if (nextNumber > detailType.endNumber) {
-    throw new Error(
-      `ظرفیت کدگذاری برای نوع تفصیل «${detailType.title}» تمام شده است (بازه ${detailType.startNumber} تا ${detailType.endNumber})`
-    );
-  }
-
-  const code = String(nextNumber).padStart(detailType.codeLength, "0");
+  const code = await firstFreeCode(detailType, nextNumber);
   return { code, detailTypeId: detailType.id };
 }
 
