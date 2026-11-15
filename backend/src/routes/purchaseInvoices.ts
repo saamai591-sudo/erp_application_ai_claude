@@ -14,7 +14,8 @@ import { findFormPrefix } from "../authz/registry";
 import { getLineAmount, getLineAmounts, setLineAmount, deleteLatestLineAmount, enrichLinesWithAmount } from "../services/documentItemAmountService";
 import { setAssetLineAmount, deleteAssetLineAmounts } from "../services/assetAmountService";
 import { issueJournalEntry, IssueLineInput } from "../services/journalEntryService";
-import { resolveDetailTypeId, resolveAccountDetailFields, resolveDetailTitles } from "../utils/detailValues";
+import { resolveDetailTypeId, resolveAccountDetailFields, resolveDetailTitles, resolveSystemDetailTypeId, DETAIL_TYPE_CODE_PURCHASE_ORDER } from "../utils/detailValues";
+import { orderCodesForInventoryLines, splitByWeights } from "../services/purchaseOrderDetailService";
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { toBaseCurrencyAmount, fromBaseCurrencyAmount, roundToCurrencyDecimals, ConversionCurrency } from "../utils/currencyConversion";
 import {
@@ -1142,6 +1143,12 @@ export async function issuePurchaseInvoiceJournalHandler(req: any, res: any) {
 
     const partyDetailCode = invoice.party.detailCode;
     const partyDetailTypeId = await resolveDetailTypeId(partyDetailCode);
+    // تفصیل «سفارش خرید»: سفارشِ هر ردیف رسید از زنجیره‌ی ردیف رسید ← سفارش/مجوز تحویل/رسید موقت (فقط روی معینی که سطح تفصیل «سفارش خرید» دارد می‌نشیند)
+    const orderTypeId = await resolveSystemDetailTypeId(DETAIL_TYPE_CODE_PURCHASE_ORDER);
+    const orderCodeByInvLine = await orderCodesForInventoryLines([
+      ...invoice.lines.map((l) => l.sourceInventoryLineId ?? 0),
+      ...invoice.otherCostLines.flatMap((c) => c.allocations.map((a) => a.inventoryDocumentLine.id)),
+    ]);
 
     const warehouseIds = Array.from(
       new Set([
@@ -1181,10 +1188,11 @@ export async function issuePurchaseInvoiceJournalHandler(req: any, res: any) {
     const headerExtra = new Map<number, string>(extraDetails.header.map((d) => [d.detailTypeId, d.detailCode]));
     const detailTypeTitles = new Map((await prisma.detailType.findMany({ select: { id: true, title: true } })).map((t) => [t.id, t.title]));
     const ruleErrors: string[] = [];
-    function detailsFor(setting: { id: number; account: any }, lineKind: "line" | "cost", lineId: number, goodsGroupId: number | null, warehouseId: number | null) {
+    function detailsFor(setting: { id: number; account: any }, lineKind: "line" | "cost", lineId: number, goodsGroupId: number | null, warehouseId: number | null, orderCode: string | null = null) {
       const base = resolveAccountDetailFields(setting.account, partyDetailTypeId, partyDetailCode);
+      const orderFields = orderCode ? resolveAccountDetailFields(setting.account, orderTypeId, orderCode) : {};
       const picked = ruleIndex.pick(setting.id, settingDocDate, { warehouseId, goodsGroupId, partyCode: partyDetailCode });
-      if (!picked) return base;
+      if (!picked) return { ...base, ...orderFields };
       const own = (lineKind === "line" ? extraDetails.byLine : extraDetails.byCostLine).get(lineId) ?? [];
       const applied = applyRule(
         picked.row,
@@ -1193,7 +1201,7 @@ export async function issuePurchaseInvoiceJournalHandler(req: any, res: any) {
         detailTypeTitles
       );
       for (const m of applied.errors) if (!ruleErrors.includes(m)) ruleErrors.push(m);
-      return { ...base, ...applied.fields };
+      return { ...base, ...applied.fields, ...orderFields };
     }
     const detailKey = (accountId: number, d: any) => [accountId, d.detail1Code ?? "", d.detail2Code ?? "", d.detail3Code ?? ""].join("|");
     function findSetting(accountingGroupId: number, accountType: string, match: (s: (typeof settings)[number]) => boolean) {
@@ -1214,7 +1222,7 @@ export async function issuePurchaseInvoiceJournalHandler(req: any, res: any) {
 
     const errors: string[] = [];
     const debitLines: IssueLineInput[] = [];
-    const creditByAccount = new Map<string, { amount: number; baseAmount: number; account: (typeof settings)[number]["account"]; details: any }>();
+    const creditByAccount = new Map<string, { amount: number; baseAmount: number; account: (typeof settings)[number]["account"]; details: any; orderCode: string | null }>();
     const vatDebitByAccount = new Map<string, { amount: number; account: (typeof settings)[number]["account"]; details: any }>();
     const costAllocationIds: number[] = [];
     // برای تخصیص پیش‌پرداخت + رویه‌ی «نرخ تاریخی» روی فاکتورهای بدون‌مبنا (بدون مکانیزم Cost/قیمت‌گذاری رسید انبار)؛
@@ -1283,7 +1291,8 @@ export async function issuePurchaseInvoiceJournalHandler(req: any, res: any) {
         continue;
       }
       const costInvoiceCcy = costBase === baseAmount ? amount : fromBaseCurrencyAmount(costBase, fxRate, invoice.currency);
-      const debitDetails = detailsFor(debitSetting, "line", line.id, goodsItem.goodsGroupId, line.sourceInventoryLine?.document.warehouseId ?? null);
+      const lineOrder = orderCodeByInvLine.get(line.sourceInventoryLineId ?? 0) ?? null;
+      const debitDetails = detailsFor(debitSetting, "line", line.id, goodsItem.goodsGroupId, line.sourceInventoryLine?.document.warehouseId ?? null, lineOrder);
       if (debitSetting === firstGoodsDebitSetting && !firstGoodsDebitDetails) firstGoodsDebitDetails = debitDetails;
       const debitIsCurrency = debitSetting.account.isCurrency;
       debitLines.push({
@@ -1306,18 +1315,18 @@ export async function issuePurchaseInvoiceJournalHandler(req: any, res: any) {
         creditBaseAmount += vatAmount;
       }
       // تجمیع بر اساس حساب + تفصیل‌ها: اگر قاعده برای خطوط مختلف تفصیل متفاوت (مثلاً پروژه‌ی متفاوت) بدهد، به‌ازای هر ترکیب یک ردیف می‌شود
-      const creditDetails = detailsFor(payableSetting, "line", line.id, goodsItem.goodsGroupId, line.sourceInventoryLine?.document.warehouseId ?? null);
+      const creditDetails = detailsFor(payableSetting, "line", line.id, goodsItem.goodsGroupId, line.sourceInventoryLine?.document.warehouseId ?? null, lineOrder);
       const creditKey = detailKey(payableSetting.accountId, creditDetails);
       const existingCredit = creditByAccount.get(creditKey);
       if (existingCredit) {
         existingCredit.amount += creditAmount;
         existingCredit.baseAmount += creditBaseAmount;
       } else {
-        creditByAccount.set(creditKey, { amount: creditAmount, baseAmount: creditBaseAmount, account: payableSetting.account, details: creditDetails });
+        creditByAccount.set(creditKey, { amount: creditAmount, baseAmount: creditBaseAmount, account: payableSetting.account, details: creditDetails, orderCode: lineOrder });
       }
 
       if (vatDebitSetting) {
-        const vatDetails = detailsFor(vatDebitSetting, "line", line.id, goodsItem.goodsGroupId, line.sourceInventoryLine?.document.warehouseId ?? null);
+        const vatDetails = detailsFor(vatDebitSetting, "line", line.id, goodsItem.goodsGroupId, line.sourceInventoryLine?.document.warehouseId ?? null, lineOrder);
         const vatKey = detailKey(vatDebitSetting.accountId, vatDetails);
         const existingVatDebit = vatDebitByAccount.get(vatKey);
         if (existingVatDebit) existingVatDebit.amount += vatAmount;
@@ -1336,6 +1345,8 @@ export async function issuePurchaseInvoiceJournalHandler(req: any, res: any) {
       const baseAmount = Number(cost.baseAmount) - Number(cost.baseDiscount);
       const vatAmount = Number(cost.vatAmount);
       const service = cost.service;
+      // وزن سفارش‌ها (سهم تخصیص‌ها) برای تقسیم بستانکار پرداختنی و بدهکار ارزش‌افزوده‌ی این ردیف؛ ردیف «هزینه» بدون رسید سفارشی ندارد
+      const costOrderWeights = new Map<string, number>();
 
       try {
         resolveCostLineBasis(service, cost.basis, `ردیف «سایر هزینه‌ها» خدمت «${service.title}»`);
@@ -1378,7 +1389,9 @@ export async function issuePurchaseInvoiceJournalHandler(req: any, res: any) {
               continue;
             }
           }
-          const debitDetails = detailsFor(debitSetting, "cost", cost.id, goodsItem.goodsGroupId, warehouseId);
+          const allocOrder = orderCodeByInvLine.get(a.inventoryDocumentLine.id) ?? null;
+          costOrderWeights.set(allocOrder ?? "", (costOrderWeights.get(allocOrder ?? "") ?? 0) + Math.abs(allocatedAmount));
+          const debitDetails = detailsFor(debitSetting, "cost", cost.id, goodsItem.goodsGroupId, warehouseId, allocOrder);
           const debitIsCurrency = debitSetting.account.isCurrency;
           debitLines.push({
             accountId: debitSetting.accountId,
@@ -1426,24 +1439,33 @@ export async function issuePurchaseInvoiceJournalHandler(req: any, res: any) {
         creditAmount += fromBaseCurrencyAmount(vatAmount, fxRate, invoice.currency);
         creditBaseAmount += vatAmount;
       }
-      // تجمیع بر اساس حساب + تفصیل‌ها: اگر قاعده برای خطوط مختلف تفصیل متفاوت (مثلاً پروژه‌ی متفاوت) بدهد، به‌ازای هر ترکیب یک ردیف می‌شود
-      const creditDetails = detailsFor(payableSetting, "cost", cost.id, service.goodsGroupId, null);
-      const creditKey = detailKey(payableSetting.accountId, creditDetails);
-      const existingCredit = creditByAccount.get(creditKey);
-      if (existingCredit) {
-        existingCredit.amount += creditAmount;
-        existingCredit.baseAmount += creditBaseAmount;
-      } else {
-        creditByAccount.set(creditKey, { amount: creditAmount, baseAmount: creditBaseAmount, account: payableSetting.account, details: creditDetails });
-      }
+      // تجمیع بر اساس حساب + تفصیل‌ها: اگر قاعده برای خطوط مختلف تفصیل متفاوت (مثلاً پروژه‌ی متفاوت) بدهد، به‌ازای هر ترکیب یک ردیف می‌شود.
+      // ردیف تسهیم‌شده بین سفارش‌های مختلف: بستانکار/ارزش‌افزوده به نسبت سهم هر سفارش تقسیم می‌شود (جمع دقیقاً برابر می‌ماند)
+      const pieceCodes = costOrderWeights.size > 0 ? Array.from(costOrderWeights.keys()) : [""];
+      const pieceWeights = costOrderWeights.size > 0 ? Array.from(costOrderWeights.values()) : [1];
+      const creditParts = splitByWeights(creditAmount, pieceWeights, invoice.currency.decimalPlaces);
+      const creditBaseParts = splitByWeights(creditBaseAmount, pieceWeights, baseCurrency.decimalPlaces);
+      const vatParts = splitByWeights(vatAmount, pieceWeights, baseCurrency.decimalPlaces);
+      pieceCodes.forEach((pc, pi) => {
+        const orderCode = pc || null;
+        const creditDetails = detailsFor(payableSetting, "cost", cost.id, service.goodsGroupId, null, orderCode);
+        const creditKey = detailKey(payableSetting.accountId, creditDetails);
+        const existingCredit = creditByAccount.get(creditKey);
+        if (existingCredit) {
+          existingCredit.amount += creditParts[pi];
+          existingCredit.baseAmount += creditBaseParts[pi];
+        } else {
+          creditByAccount.set(creditKey, { amount: creditParts[pi], baseAmount: creditBaseParts[pi], account: payableSetting.account, details: creditDetails, orderCode });
+        }
 
-      if (vatDebitSetting) {
-        const vatDetails = detailsFor(vatDebitSetting, "cost", cost.id, service.goodsGroupId, null);
-        const vatKey = detailKey(vatDebitSetting.accountId, vatDetails);
-        const existingVatDebit = vatDebitByAccount.get(vatKey);
-        if (existingVatDebit) existingVatDebit.amount += vatAmount;
-        else vatDebitByAccount.set(vatKey, { amount: vatAmount, account: vatDebitSetting.account, details: vatDetails });
-      }
+        if (vatDebitSetting) {
+          const vatDetails = detailsFor(vatDebitSetting, "cost", cost.id, service.goodsGroupId, null, orderCode);
+          const vatKey = detailKey(vatDebitSetting.accountId, vatDetails);
+          const existingVatDebit = vatDebitByAccount.get(vatKey);
+          if (existingVatDebit) existingVatDebit.amount += vatParts[pi];
+          else vatDebitByAccount.set(vatKey, { amount: vatParts[pi], account: vatDebitSetting.account, details: vatDetails });
+        }
+      });
     }
 
     // ---------- تخصیص پیش‌پرداخت (Documents/تخصیص پیش‌پرداخت در فاکتور خرید.md) ----------
@@ -1457,9 +1479,11 @@ export async function issuePurchaseInvoiceJournalHandler(req: any, res: any) {
     const advanceAdjustLines: IssueLineInput[] = [];
     const purchaseAdvanceAllocations = await prisma.purchaseInvoiceAdvanceAllocation.findMany({
       where: { purchaseInvoiceId: id },
-      include: { paymentSettlementLine: { include: { ...PAYMENT_DOC_INCLUDE, paymentType: true } } },
+      include: { paymentSettlementLine: { include: { ...PAYMENT_DOC_INCLUDE, paymentType: true, purchaseOrder: { select: { detailCode: true } } } } },
       orderBy: { id: "asc" },
     });
+    // هر تخصیص با سفارشِ پرداختش؛ برای کاهش پرداختنیِ همان سفارش (پایین)
+    const advRows: { orderCode: string | null; cur: number; inv: number }[] = [];
     if (purchaseAdvanceAllocations.length > 0) {
       const invIsBase = invoice.currencyId === baseCurrency.id;
       // مجموع کل (برای کاهش پرداختنی) + مجموع جدای «پیش‌پرداخت ارزش افزوده» (تسعیرش جدا از پیش‌پرداخت عادی شناسایی می‌شود)
@@ -1489,7 +1513,9 @@ export async function issuePurchaseInvoiceJournalHandler(req: any, res: any) {
           vInv += rowAtInvoice;
           vHist += rowHist;
         }
-        const details = resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode);
+        const advOrder = l.purchaseOrder?.detailCode ?? null;
+        advRows.push({ orderCode: advOrder, cur: amount, inv: rowAtInvoice });
+        const details = { ...resolveAccountDetailFields(account, partyDetailTypeId, partyDetailCode), ...(advOrder ? resolveAccountDetailFields(account, orderTypeId, advOrder) : {}) };
         const advDescription = `بابت تخصیص ${natureTitle} پرداخت شماره ${paymentLineDoc(l).number} به فاکتور خرید ${invoice.number} ${partyTitleOrNull(invoice.party)}`.trim();
         if (account.isCurrency && !invIsBase) {
           advanceCreditLines.push({ accountId: account.id, ...details, currencyId: invoice.currencyId, debit: 0, credit: amount, fxRate: rowRate, description: advDescription });
@@ -1502,17 +1528,26 @@ export async function issuePurchaseInvoiceJournalHandler(req: any, res: any) {
       // (amount به ارز فاکتور، baseAmount به ارز پایه با نرخ فاکتور)، پس هر دو با واحد خودشان کم می‌شوند؛ ردیف بستانکار نهایی
       // بسته به ارزی‌بودن معین یکی از این دو را انتخاب می‌کند (پایین‌تر) — دقیقاً هم‌الگوی ساختِ خودِ این سطل بالا.
       if (cur > 0) {
-        // پرداختنی ممکن است به‌خاطر قاعده‌ی تفصیل به چند ردیف (حساب + تفصیل) شکسته شده باشد؛ پیش‌پرداخت به‌ترتیب از ردیف‌ها کم می‌شود تا تمام شود
-        let remainingCur = cur;
-        let remainingInv = inv;
-        for (const [key, entry] of Array.from(creditByAccount.entries())) {
-          const takeCur = Math.min(entry.amount, remainingCur);
-          const takeInv = Math.min(entry.baseAmount, remainingInv);
-          entry.amount -= takeCur;
-          entry.baseAmount -= takeInv;
-          remainingCur -= takeCur;
-          remainingInv -= takeInv;
-          if (Math.abs(entry.amount) <= 0.005) creditByAccount.delete(key);
+        // پرداختنی ممکن است به‌خاطر قاعده‌ی تفصیل (یا تفصیل سفارش) به چند ردیف (حساب + تفصیل) شکسته شده باشد؛ هر تخصیص اول از ردیف‌های پرداختنیِ هم‌سفارشِ خودش کم می‌شود
+        // (تا مانده‌ی هر سفارش در دفتر صفر شود)، سپس به‌ترتیب از بقیه تا تمام شود
+        let remainingCur = 0;
+        let remainingInv = 0;
+        for (const row of advRows) {
+          let rc = row.cur;
+          let ri = row.inv;
+          const all = Array.from(creditByAccount.entries());
+          const ordered = [...all.filter(([, e]) => e.orderCode === row.orderCode), ...all.filter(([, e]) => e.orderCode !== row.orderCode)];
+          for (const [key, entry] of ordered) {
+            const takeCur = Math.min(entry.amount, rc);
+            const takeInv = Math.min(entry.baseAmount, ri);
+            entry.amount -= takeCur;
+            entry.baseAmount -= takeInv;
+            rc -= takeCur;
+            ri -= takeInv;
+            if (Math.abs(entry.amount) <= 0.005) creditByAccount.delete(key);
+          }
+          remainingCur += rc;
+          remainingInv += ri;
         }
         if (remainingCur > 0.005 || remainingInv > 0.005) errors.push("مجموع پیش‌پرداخت تخصیص‌یافته از مبلغ پرداختنی فاکتور بیشتر است");
       }

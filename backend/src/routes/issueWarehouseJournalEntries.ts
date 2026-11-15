@@ -11,6 +11,7 @@ import { issueJournalEntry, IssueLineInput } from "../services/journalEntryServi
 import { formatJalaliDateForMessage } from "../utils/jalaliDate";
 import { OUTBOUND_DOC_TYPES } from "../services/warehouseMovementService";
 import { resolveAccountDetailFields } from "../utils/detailValues";
+import { orderCodesForInventoryLines, orderDetailFields } from "../services/purchaseOrderDetailService";
 import { sendBulkError } from "../lib/bulkError";
 import { findIssuingDocType } from "../services/documentTypeService";
 
@@ -335,6 +336,8 @@ router.post("/issue-warehouse-journal-entries/:id(\\d+)/issue", can(`${FORM}.iss
     return effSettings.find(docDate, (s: any) => s.accountingGroupId === accountingGroupId && s.accountType === accountType && match(s)) as (typeof settings)[number] | undefined;
   }
 
+  // تفصیل «سفارش خرید»: سفارش هر ردیف سند انبار یک‌جا (فقط ردیف‌هایی که به سفارش برمی‌گردند)
+  const orderByLine = await orderCodesForInventoryLines(validRows.map((r) => r.line.id));
   const lines: IssueLineInput[] = [];
   for (const r of validRows) {
     const doc = r.line.document;
@@ -404,6 +407,12 @@ router.post("/issue-warehouse-journal-entries/:id(\\d+)/issue", can(`${FORM}.iss
       }
     }
     if (ruleFailed) continue;
+    // تفصیل «سفارش خرید» (نوع ۱۰): سفارشِ ردیف از زنجیره‌ی ردیف ← سفارش/مجوز تحویل/رسید موقت/رسید مبنا؛ فقط روی معینی که چنین سطحی دارد می‌نشیند
+    const orderCode = orderByLine.get(r.line.id) ?? null;
+    if (orderCode) {
+      inventoryDetails = { ...inventoryDetails, ...(await orderDetailFields(inventorySetting.account, orderCode)) };
+      contraDetails = { ...contraDetails, ...(await orderDetailFields(contraSetting.account, orderCode)) };
+    }
 
     if (direction === "IN") {
       lines.push({ accountId: inventorySetting.accountId, ...inventoryDetails, currencyId: baseCurrency.id, debit: amount, credit: 0, fxRate: 1, description });
