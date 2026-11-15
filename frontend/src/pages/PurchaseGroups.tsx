@@ -17,6 +17,8 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 
 import { PlusIcon } from "../components/icons";
 import { partyDisplayName } from "../lib/partyDisplay";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 interface PartyOption {
   id: number;
@@ -36,14 +38,6 @@ interface SupplierOption {
   isActive: boolean;
 }
 
-interface GoodsItemRow {
-  id: number;
-  fullCode: string;
-  title: string;
-  mainUnit?: { title: string };
-  isActive: boolean;
-  kind: string;
-}
 
 export interface PurchaseGroup {
   id: number;
@@ -129,7 +123,6 @@ function PurchaseGroupForm({ editId }: { editId?: number }) {
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [hasTransactions, setHasTransactions] = useState(false);
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_FORM);
   const [supplierRows, setSupplierRows] = usePersistedState<SupplierRowState[]>(`${cacheKey}:suppliers`, []);
@@ -141,7 +134,6 @@ function PurchaseGroupForm({ editId }: { editId?: number }) {
   useEffect(() => {
     api.get("/suppliers").then((s: SupplierOption[]) => setSuppliers(s)).catch(() => {});
     // طبق مستند «گروه خرید»: کالاهای مجاز، همان کالاهای مجاز در ماهیت «خرید» (نوع کالا-ماهیت سند انبار) + kind=GOODS
-    api.get("/goods-items?kind=GOODS&docDirection=INBOUND&docType=" + encodeURIComponent("خرید")).then((g: GoodsItemRow[]) => setGoodsItems(g)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -169,7 +161,7 @@ function PurchaseGroupForm({ editId }: { editId?: number }) {
   }, [editId]);
 
   const activeSuppliers = suppliers.filter((s) => s.isActive);
-  const activeGoodsItems = goodsItems.filter((g) => g.isActive);
+  useGoodsCatalog(goodsRows.map((r) => r.goodsItemId)); // کالاهای ردیف‌ها (عنوان، واحد) از روی شناسه از سرور خوانده می‌شوند
 
   function addSupplierRow() {
     setSupplierRows((prev) => [...prev, { supplierId: "" }]);
@@ -325,22 +317,17 @@ function PurchaseGroupForm({ editId }: { editId?: number }) {
               </thead>
               <tbody>
                 {goodsRows.map((row, idx) => {
-                  const item = goodsItems.find((g) => String(g.id) === row.goodsItemId);
-                  const pickerRows = activeGoodsItems.filter(
-                    (g) => g.id === item?.id || !goodsRows.some((r, i) => i !== idx && r.goodsItemId === String(g.id))
-                  );
+                  const item = cachedGoods(row.goodsItemId);
+                  const otherIds = goodsRows.filter((r, i) => i !== idx && r.goodsItemId).map((r) => Number(r.goodsItemId));
                   return (
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                       <td style={{ minWidth: 200 }}>
-                        <RecordPickerField
+                        <GoodsPickerField
                           title="انتخاب کالا"
-                          displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                          rows={pickerRows}
-                          columns={[
-                            { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                            { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                          ]}
+                          scope={{ kind: "GOODS", docDirection: "INBOUND", docType: "خرید" }}
+                          value={row.goodsItemId}
+                          excludeIds={otherIds}
                           onSelect={(g) => updateGoodsRow(idx, String(g.id))}
                         />
                       </td>

@@ -72,8 +72,8 @@ router.post("/production-orders/explosion", can(`${FORM}.view`), async (req, res
 router.get("/production-orders/options", async (req, res) => {
   const where: any = { status: req.query.all === "1" ? { in: ["RELEASED", "CLOSED"] } : "RELEASED" };
   if (req.query.outputItemId) where.outputItemId = Number(req.query.outputItemId);
-  const rows = await prisma.productionOrder.findMany({ where, include: { outputItem: { select: { id: true, fullCode: true, title: true } } }, orderBy: [{ date: "desc" }, { number: "desc" }] });
-  res.json(rows.map((o) => ({ id: o.id, number: o.number, date: isoDay(o.date), outputItemId: o.outputItemId, outputItemCode: o.outputItem.fullCode, outputItemTitle: o.outputItem.title, quantity: num(o.quantity), status: o.status, kind: o.salesOrderLineId || o.salesQuoteLineId ? "CUSTOM" : "STOCK" })));
+  const rows = await prisma.productionOrder.findMany({ where, include: { outputItem: { select: { id: true, fullCode: true, title: true } }, bom: { select: { number: true } } }, orderBy: [{ date: "desc" }, { number: "desc" }] });
+  res.json(rows.map((o) => ({ id: o.id, number: o.number, date: isoDay(o.date), outputItemId: o.outputItemId, outputItemCode: o.outputItem.fullCode, outputItemTitle: o.outputItem.title, quantity: num(o.quantity), status: o.status, bomId: o.bomId, bomNumber: o.bom?.number ?? null, kind: o.salesOrderLineId || o.salesQuoteLineId ? "CUSTOM" : "STOCK" })));
 });
 
 router.get("/production-orders/:id", can(`${FORM}.view`), async (req, res) => {
@@ -130,6 +130,14 @@ router.delete("/production-orders/:id", can(`${FORM}.delete`), async (req, res) 
 router.post("/production-orders/:id/release", can(`${FORM}.release`), async (req, res) => {
   try {
     res.json(orderShape(await setOrderStatus(Number(req.params.id), "RELEASED")));
+  } catch (e) {
+    sendError(res, e, "خطا");
+  }
+});
+// برگشت از صدور (برای اصلاح فرمول/اجزا): هم‌مجوز «صدور»؛ فقط وقتی دستور سند، آمار و محاسبه‌ی بها ندارد (services/productionOrderService.ts)
+router.post("/production-orders/:id/unrelease", can(`${FORM}.release`), async (req, res) => {
+  try {
+    res.json(orderShape(await setOrderStatus(Number(req.params.id), "DRAFT")));
   } catch (e) {
     sendError(res, e, "خطا");
   }

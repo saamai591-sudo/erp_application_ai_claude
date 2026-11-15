@@ -7,10 +7,11 @@ import { Modal } from "../components/Modal";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
 import { RecordPickerField } from "../components/RecordPicker";
-import { GoodsItemPicker, isProducedGoods, useGoodsOptions } from "../components/GoodsItemPicker";
+import { GoodsItemPicker, useGoodsOptions } from "../components/GoodsItemPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
+import { BomSelect, defaultBomId, useEligibleBoms } from "../components/BomSelect";
 import { RequiredMark } from "../components/RequiredMark";
 import { formatAmountFa, toFaDigits } from "../lib/formatAmount";
 import { DescriptionField } from "../components/DescriptionField";
@@ -104,9 +105,10 @@ function OrderForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
-  const goods = useGoodsOptions();
   const [form, setForm] = usePersistedState<FormState>(cacheKey, { ...EMPTY, date: todayIso() });
-  const [meta, setMeta] = useState<{ number: number | null; status: string; updatedAt: string | null; documentCount: number; producedQuantity: number; parentOrderId: number | null; parentOrderNumber: number | null; children: OrderChild[]; batches: { id: number; batchNumber: string; productionDate: string | null; itemTitle: string }[] }>({ number: null, status: "DRAFT", updatedAt: null, documentCount: 0, producedQuantity: 0, parentOrderId: null, parentOrderNumber: null, children: [], batches: [] });
+  // کالاهای ردیف‌ها (واحد، نوع ردیابی/کالا) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  const goods = useGoodsOptions([form.outputItemId, ...form.lines.map((l) => l.componentItemId)]);
+  const [meta, setMeta] = useState<{ number: number | null; bomNumber: number | null; status: string; updatedAt: string | null; documentCount: number; producedQuantity: number; parentOrderId: number | null; parentOrderNumber: number | null; children: OrderChild[]; batches: { id: number; batchNumber: string; productionDate: string | null; itemTitle: string }[] }>({ number: null, bomNumber: null, status: "DRAFT", updatedAt: null, documentCount: 0, producedQuantity: 0, parentOrderId: null, parentOrderNumber: null, children: [], batches: [] });
   const { hasPermission } = usePermissions();
   const { openTab } = useTabs();
   const [childrenOpen, setChildrenOpen] = useState(false);
@@ -115,12 +117,20 @@ function OrderForm({ editId }: { editId?: number }) {
   const [salesLines, setSalesLines] = useState<SalesLine[]>([]);
   const [consumeOpen, setConsumeOpen] = useState(false);
   const { flash } = useSavedFlash();
+  // فرمول‌های فعال و معتبر کالای خروجی در تاریخ دستور؛ برای دستور جدید جدیدترین‌شان پیش‌فرض می‌شود (کاربر می‌تواند عوض کند)
+  const eligible = useEligibleBoms(form.outputItemId ? [Number(form.outputItemId)] : [], form.date);
+  useEffect(() => {
+    if (editId || form.bomId || !form.outputItemId) return;
+    const d = defaultBomId(eligible[Number(form.outputItemId)]);
+    if (d) setForm((f) => (f.bomId || !f.outputItemId ? f : { ...f, bomId: d }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eligible, form.outputItemId]);
   // هشدار نبودن فرمول ساخت: کالا و تاریخ مشخص است، جزئی نیست و در آن تاریخ فرمول ساخت فعالی وجود ندارد
   const [bomWarning, setBomWarning] = useState<string | null>(null);
 
   async function load(id: number, applyForm: boolean) {
     const o = await api.get(`/production-orders/${id}`);
-    setMeta({ number: o.number, status: o.status, updatedAt: o.updatedAt, documentCount: o.documentCount, producedQuantity: o.producedQuantity, parentOrderId: o.parentOrderId ?? null, parentOrderNumber: o.parentOrderNumber ?? null, children: o.children ?? [], batches: o.batches ?? [] });
+    setMeta({ number: o.number, bomNumber: o.bomNumber ?? null, status: o.status, updatedAt: o.updatedAt, documentCount: o.documentCount, producedQuantity: o.producedQuantity, parentOrderId: o.parentOrderId ?? null, parentOrderNumber: o.parentOrderNumber ?? null, children: o.children ?? [], batches: o.batches ?? [] });
     if (applyForm) {
       setForm({
         date: o.date, outputItemId: String(o.outputItemId), quantity: String(o.quantity), bomId: o.bomId ? String(o.bomId) : "",
@@ -139,7 +149,7 @@ function OrderForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     setBomWarning(null);
-    if (!form.outputItemId || !form.date || form.lines.length > 0 || meta.status === "CLOSED") return;
+    if (!form.outputItemId || !form.date || form.lines.length > 0 || form.bomId || meta.status === "CLOSED") return;
     let cancelled = false;
     const t = setTimeout(() => {
       api
@@ -153,7 +163,7 @@ function OrderForm({ editId }: { editId?: number }) {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [form.outputItemId, form.date, form.lines.length, meta.status]);
+  }, [form.outputItemId, form.date, form.lines.length, form.bomId, meta.status]);
 
   // وضعیت تامین اجزا (فقط نمایشی): همان تعریف «آنالیز موجودی» — موجودی، در راه، در حال تولید، تعهدشده و در دسترس هر جزء
   const [avail, setAvail] = useState<Record<number, { stock: number; inTransit: number; inProduction: number; available: number }>>({});
@@ -209,15 +219,18 @@ function OrderForm({ editId }: { editId?: number }) {
 
   const locked = meta.status === "CLOSED";
   const itemLocked = meta.status !== "DRAFT" && !!editId;
+  // بعد از «صدور»: فرمول و اجزا قفل‌اند (فقط مقدار دستور — با تغییر متناسب اجزا — و تاریخ‌های برنامه‌ای/توضیح قابل ویرایش‌اند)
+  const structureLocked = meta.status === "RELEASED" && !!editId;
   const unitOf = (id: string) => goods.find((g) => g.id === Number(id))?.unit ?? "";
   const salesOptions = useMemo(() => salesLines.filter((s) => !form.outputItemId || s.goodsItemId === Number(form.outputItemId)), [salesLines, form.outputItemId]);
   const setLine = (i: number, patch: Partial<LineRow>) => setForm((f) => ({ ...f, lines: f.lines.map((l, k) => (k === i ? { ...l, ...patch } : l)) }));
 
-  async function fillFromBom() {
+  async function fillFromBom(bomId?: string) {
     setError(null);
     if (!form.outputItemId || !form.date || !(Number(form.quantity) > 0)) return setError("کالای خروجی، تاریخ و مقدار دستور را وارد کنید");
     try {
-      const b = await api.get(`/boms/active?itemId=${form.outputItemId}&date=${form.date}`);
+      const pick = bomId || form.bomId;
+      const b = pick ? await api.get(`/boms/${pick}`) : await api.get(`/boms/active?itemId=${form.outputItemId}&date=${form.date}`);
       const out = Number(b.outputQuantity) || 1;
       const qty = Number(form.quantity);
       setForm((f) => ({
@@ -233,6 +246,14 @@ function OrderForm({ editId }: { editId?: number }) {
     } catch (e) {
       setError((e as ApiError).message);
     }
+  }
+
+  // تغییر فرمول: اگر اجزا از قبل هست، با تأیید از فرمول تازه دوباره ساخته می‌شوند
+  async function changeBom(id: string) {
+    if (!id) return setForm((f) => ({ ...f, bomId: "" }));
+    if (form.lines.length > 0 && !window.confirm("اجزای فعلی با اجزای فرمول انتخاب‌شده جایگزین می‌شود. ادامه می‌دهید؟")) return;
+    if (Number(form.quantity) > 0) await fillFromBom(id);
+    else setForm((f) => ({ ...f, bomId: id }));
   }
 
   async function onSubmit(e: FormEvent) {
@@ -252,7 +273,7 @@ function OrderForm({ editId }: { editId?: number }) {
     try {
       if (editId) {
         await api.put(`/production-orders/${editId}`, payload);
-        await load(editId, false);
+        await load(editId, meta.status !== "DRAFT");
         flash();
       } else {
         const created = await api.post("/production-orders", payload);
@@ -290,6 +311,7 @@ function OrderForm({ editId }: { editId?: number }) {
   const extraActions: { label: string; onClick: () => void | Promise<void> }[] = [];
   if (editId && meta.status === "DRAFT") extraActions.push({ label: "صدور دستور", onClick: () => action("release", "دستور صادر شد") });
   if (editId && meta.status === "RELEASED") {
+    if (meta.documentCount === 0) extraActions.push({ label: "برگشت به پیش‌نویس (برای اصلاح فرمول/اجزا)", onClick: () => { if (window.confirm("دستور به پیش‌نویس برمی‌گردد و تا صدور دوباره، آمار تولید و سند مصرفی نمی‌تواند به آن وصل شود. ادامه می‌دهید؟")) action("unrelease", "دستور به پیش‌نویس برگشت"); } });
     extraActions.push({ label: "ایجاد سند مصرف از مانده‌ی اجزا", onClick: () => setConsumeOpen(true) });
     extraActions.push({ label: "بستن دستور", onClick: () => action("close", "دستور بسته شد") });
   }
@@ -346,7 +368,11 @@ function OrderForm({ editId }: { editId?: number }) {
             </div>
             <div className="form-field">
               <label>کالای خروجی<RequiredMark /></label>
-              <GoodsItemPicker goods={goods} value={form.outputItemId} filter={isProducedGoods} disabled={itemLocked} onChange={(g) => setForm({ ...form, outputItemId: String(g.id), salesOrderLineId: "", salesQuoteLineId: "", sourceLabel: "" })} />
+              <GoodsItemPicker value={form.outputItemId} produced disabled={itemLocked} onChange={(g) => setForm({ ...form, outputItemId: String(g.id), bomId: "", salesOrderLineId: "", salesQuoteLineId: "", sourceLabel: "" })} />
+            </div>
+            <div className="form-field">
+              <label>فرمول ساخت</label>
+              <BomSelect options={eligible[Number(form.outputItemId)]} value={form.bomId} currentNumber={meta.bomNumber} disabled={!form.outputItemId || structureLocked} onChange={changeBom} />
             </div>
             <div className="form-field">
               <label>مقدار دستور {unitOf(form.outputItemId) && `(${unitOf(form.outputItemId)})`}<RequiredMark /></label>
@@ -379,6 +405,7 @@ function OrderForm({ editId }: { editId?: number }) {
                   setForm({
                     ...form,
                     outputItemId: String(s.goodsItemId),
+                    bomId: String(s.goodsItemId) === form.outputItemId ? form.bomId : "",
                     salesOrderLineId: s.kind === "ORDER" ? String(s.lineId) : "",
                     salesQuoteLineId: s.kind === "QUOTE" ? String(s.lineId) : "",
                     sourceLabel: `${s.kind === "ORDER" ? "سفارش فروش" : "پیش‌فاکتور"} ${s.docNumber} — ${s.customer}`,
@@ -392,11 +419,17 @@ function OrderForm({ editId }: { editId?: number }) {
             </div>
           </div>
 
+          {structureLocked && (
+            <div className="card" style={{ padding: "6px 10px", marginBottom: 8, fontSize: 13 }}>
+              دستور صادر شده است؛ کالای خروجی، فرمول و اجزا قفل‌اند. با تغییر «مقدار دستور» (نه کمتر از تولیدشده) اجزا به همان نسبت عوض می‌شوند. برای تغییر فرمول یا اجزا، دستور را به پیش‌نویس برگردانید (فقط وقتی سند و آمار ندارد).
+            </div>
+          )}
           {bomWarning && form.lines.length === 0 && (
             <div className="card" role="alert" style={{ padding: "8px 12px", marginBottom: 8, borderInlineStart: "4px solid var(--warning, #e0a100)" }}>
               ⚠ {bomWarning}. اگر دستور را همین‌طور ثبت کنید هیچ جزئی نخواهد داشت؛ تاریخ را اصلاح کنید، فرمول ساخت تعریف کنید، یا اجزا را دستی وارد کنید.
             </div>
           )}
+          <fieldset disabled={structureLocked} style={{ border: "none", padding: 0, margin: 0, minWidth: 0 }}>
           <DocLinesGrid
             title="اجزای لازم"
             count={form.lines.length}
@@ -405,7 +438,7 @@ function OrderForm({ editId }: { editId?: number }) {
             addTitle="جزء جدید"
             toolbarExtra={
               <>
-                <button type="button" className="btn secondary" style={{ padding: "4px 10px", fontSize: 12 }} onClick={fillFromBom}>محاسبه از فرمول ساخت</button>
+                <button type="button" className="btn secondary" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => fillFromBom()}>محاسبه از فرمول ساخت</button>
                 {showAvail && <button type="button" className="btn secondary" style={{ padding: "4px 10px", fontSize: 12 }} onClick={previewExplosion} disabled={exploding} title="اجزای ساخته‌شدنی تا آخرین سطح باز می‌شود و موجودی/در راه/در حال تولید از نیاز کم می‌گردد؛ سندی ایجاد نمی‌شود">{exploding ? "در حال محاسبه…" : "پیش‌نمایش چندسطحی"}</button>}
                 {form.bomId && <span style={{ fontSize: 12, opacity: 0.75 }}>بر پایه‌ی فرمول ساخت</span>}
               </>
@@ -416,7 +449,7 @@ function OrderForm({ editId }: { editId?: number }) {
               {form.lines.map((l, i) => (
                 <tr key={i}>
                   <td>{toFaDigits(String(i + 1))}</td>
-                  <td><GoodsItemPicker goods={goods} value={l.componentItemId} onChange={(g) => setLine(i, { componentItemId: String(g.id) })} /></td>
+                  <td><GoodsItemPicker value={l.componentItemId} onChange={(g) => setLine(i, { componentItemId: String(g.id) })} /></td>
                   <td>{unitOf(l.componentItemId)}</td>
                   <td><AmountInput value={l.quantity} onChange={(v) => setLine(i, { quantity: v })} allowDecimal /></td>
                   {editId && <td>{toFaDigits(String(l.consumed))}</td>}
@@ -434,6 +467,7 @@ function OrderForm({ editId }: { editId?: number }) {
               ))}
             </tbody>
           </DocLinesGrid>
+          </fieldset>
         </fieldset>
       </form>
       {childrenOpen && editId && <ChildrenDialog orderId={editId} onClose={() => setChildrenOpen(false)} onDone={() => { setChildrenOpen(false); load(editId, false); }} />}

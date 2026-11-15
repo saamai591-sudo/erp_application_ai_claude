@@ -24,6 +24,7 @@ import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } fro
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { PlusIcon } from "../components/icons";
 import { partyDisplayName } from "../lib/partyDisplay";
+import { cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // «برگشت از فروش» — طبق stockAnalysis.md بند ۳۴؛ نگاه کنید به یادداشت بالای
 // backend/src/routes/salesReturns.ts برای توضیح طراحی (سکوت مستند در این مورد، هم‌الگوی بند ۴۰). طبق
@@ -43,7 +44,6 @@ interface PartyOption {
   lastName: string | null;
   name: string | null;
 }
-interface GoodsItemRow { id: number; trackingMethod: "NONE" | "BATCH" | "SERIAL"; isLocationTracked: boolean }
 interface PickableLine { id: number; sourceSalesDeliveryLineId: number; number: number; date: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
 
 interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; partyId: number | null; partyTitle: string | null; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number; totalAmount?: number }
@@ -133,7 +133,6 @@ function SalesReturnForm({ editId, basePath }: { editId?: number; basePath: stri
   const { hasPermission } = usePermissions();
   const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
@@ -168,16 +167,16 @@ function SalesReturnForm({ editId, basePath }: { editId?: number; basePath: stri
       })),
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     loadExtra: async () => {
-      const [whs, items, partyList]: [Warehouse[], GoodsItemRow[], PartyOption[]] = await Promise.all([
+      const [whs, partyList]: [Warehouse[], PartyOption[]] = await Promise.all([
         api.get("/warehouses"),
-        api.get("/goods-items?kind=GOODS"),
         api.get("/parties?customersOnly=true"),
       ]);
       setWarehouses(whs);
-      setGoodsItems(items);
       setParties(partyList);
     },
   });
+  // کالاهای ردیف‌ها (واحد، ردیابی، عنوان) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
 
   useEffect(() => {
     if (!header.warehouseId || !header.partyId) {
@@ -380,7 +379,7 @@ function SalesReturnForm({ editId, basePath }: { editId?: number; basePath: stri
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
+                  const item = cachedGoods(Number(row.goodsItemId));
                   const src = pickableLines.find((l) => String(l.sourceSalesDeliveryLineId) === row.sourceSalesDeliveryLineId);
                   const sourceDisplay = src ? `${toFaDigits(String(src.number))}` : row.sourceNumber ? toFaDigits(row.sourceNumber) : "";
                   return (

@@ -24,6 +24,8 @@ import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } fro
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { CostCenterPickerField } from "../components/TypePickerFields";
 import { PlusIcon } from "../components/icons";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { GoodsScope, cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // «مصرف مرکز هزینه» — طبق stockAnalysis.md بند ۳۴/۳۹، جایگزین حواله انبار عمومی قدیم (WAREHOUSE_ISSUE)
 // برای طرف‌مقابل «مرکز هزینه» است (نگاه کنید به یادداشت بالای backend/src/routes/centerConsumptions.ts).
@@ -31,21 +33,12 @@ import { PlusIcon } from "../components/icons";
 // نمای واحد است که ستون‌های مبلغی بر اساس مجوز کاربر نمایش/عدم‌نمایش داده می‌شوند (نه بر اساس مسیر URL).
 const VIEW_ACCOUNTING_PERMISSION = "inventory.outbound-issues.center-consumptions.viewAccounting";
 
+const GOODS_SCOPE: GoodsScope = { kind: "GOODS", docDirection: "OUTBOUND", docType: "مصرف" };
 type Basis = "NO_BASIS" | "GOODS_REQUEST";
 type DocStatus = "REGISTERED" | "FINALIZED";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
 interface CostCenterOption { id: number; detailCode: string; title: string; isActive?: boolean }
-interface GoodsItemRow {
-  id: number;
-  fullCode: string;
-  title: string;
-  mainUnitId: number;
-  mainUnit?: { title: string };
-  isActive: boolean;
-  trackingMethod: "NONE" | "BATCH" | "SERIAL";
-  isLocationTracked: boolean;
-}
 interface PickableLine { id: number; sourceGoodsRequestLineId: number; number: number; date: string; orgUnitTitle: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
 
 interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; basis: Basis; costCenterId: number | null; costCenterTitle: string | null; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number; totalAmount?: number }
@@ -158,7 +151,6 @@ function CenterConsumptionForm({ editId, basePath }: { editId?: number; basePath
   const { hasPermission } = usePermissions();
   const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenterOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
   const detailConfig = useDocDetailConfig("CENTER_CONSUMPTION");
@@ -193,16 +185,16 @@ function CenterConsumptionForm({ editId, basePath }: { editId?: number; basePath
       })),
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     loadExtra: async () => {
-      const [whs, items, ccs]: [Warehouse[], GoodsItemRow[], CostCenterOption[]] = await Promise.all([
+      const [whs, ccs]: [Warehouse[], CostCenterOption[]] = await Promise.all([
         api.get("/warehouses"),
-        api.get("/goods-items?kind=GOODS&docDirection=OUTBOUND&docType=مصرف"),
         api.get("/cost-centers"),
       ]);
       setWarehouses(whs);
-      setGoodsItems(items);
       setCostCenters(ccs);
     },
   });
+  // کالاهای ردیف‌ها (واحد، ردیابی، عنوان) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
 
   useEffect(() => {
     if (header.basis === "NO_BASIS") {
@@ -262,7 +254,7 @@ function CenterConsumptionForm({ editId, basePath }: { editId?: number; basePath
   }
 
   function onGoodsItemChange(idx: number, goodsItemId: string) {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "", unitTitle: "" });
   }
 
@@ -434,8 +426,7 @@ function CenterConsumptionForm({ editId, basePath }: { editId?: number; basePath
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
-                  const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
+                  const item = cachedGoods(Number(row.goodsItemId));
                   const src = pickableLines.find((l) => String(l.sourceGoodsRequestLineId) === row.sourceGoodsRequestLineId);
                   const sourceDisplay = src ? `${toFaDigits(String(src.number))}` : row.sourceNumber ? toFaDigits(row.sourceNumber) : "";
                   return (
@@ -463,18 +454,7 @@ function CenterConsumptionForm({ editId, basePath }: { editId?: number; basePath
                         {hasSourceColumn ? (
                           <span>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</span>
                         ) : (
-                          <RecordPickerField
-                            title="انتخاب کالا"
-                            disabled={coreDisabled}
-                            displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                            rows={pickerRows}
-                            columns={[
-                              { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                              { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                            ]}
-                            onOpen={guardRowEntry}
-                            onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
-                          />
+                          <GoodsPickerField scope={GOODS_SCOPE} value={row.goodsItemId} title="انتخاب کالا" disabled={coreDisabled} onOpen={guardRowEntry} onSelect={(g) => onGoodsItemChange(idx, String(g.id))} />
                         )}
                       </td>
                       <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>

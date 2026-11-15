@@ -7,7 +7,7 @@ import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
 import { RecordPickerField } from "../components/RecordPicker";
 import { CostCenterPickerField } from "../components/TypePickerFields";
-import { GoodsItemPicker, isProducedGoods, useGoodsOptions } from "../components/GoodsItemPicker";
+import { GoodsItemPicker, useGoodsOptions } from "../components/GoodsItemPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { BomSelect, defaultBomId, useEligibleBoms } from "../components/BomSelect";
 import { NewRecordButton } from "../components/NewRecordButton";
@@ -32,7 +32,7 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
 
 interface ListRow { id: number; number: number; date: string; costCenterTitle: string; lineCount: number; totalQuantity: number; description: string }
 interface CostCenterOpt { id: number; detailCode: string; title: string }
-interface OrderOpt { id: number; number: number; date: string; outputItemId: number; outputItemTitle: string; quantity: number; status: string }
+interface OrderOpt { id: number; number: number; date: string; outputItemId: number; outputItemTitle: string; quantity: number; status: string; bomId: number | null; bomNumber: number | null }
 interface BatchOpt { id: number; batchNumber: string; productionOrderId: number | null; isActive: boolean }
 /** batchId: "" = پیش‌فرض (بچ همان دستور، وگرنه بچ جدید)، "NEW" = بچ جدید، یا شناسه‌ی بچ موجود */
 interface LineRow { id?: number; batchId: string; batchNumber: string | null; goodsItemId: string; bomId: string; bomNumber: number | null; productionOrderId: string; quantity: string; scrapQuantity: string; note: string; received: number; delivered: number }
@@ -96,10 +96,11 @@ function StatForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
-  const goods = useGoodsOptions();
   const [costCenters, setCostCenters] = useState<CostCenterOpt[]>([]);
   const [orders, setOrders] = useState<OrderOpt[]>([]);
   const [form, setForm] = usePersistedState<FormState>(cacheKey, { ...EMPTY, date: todayIso() });
+  // کالاهای ردیف‌ها (واحد، نوع ردیابی/کالا) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  const goods = useGoodsOptions(form.lines.map((l) => l.goodsItemId));
   const [meta, setMeta] = useState<{ number: number | null; updatedAt: string | null }>({ number: null, updatedAt: null });
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
@@ -241,7 +242,7 @@ function StatForm({ editId }: { editId?: number }) {
             {form.lines.map((l, i) => (
               <tr key={i}>
                 <td>{toFaDigits(String(i + 1))}</td>
-                <td><GoodsItemPicker goods={goods} value={l.goodsItemId} filter={isProducedGoods} disabled={used(l)} onChange={(g) => setLine(i, { goodsItemId: String(g.id), bomId: String(g.id) === l.goodsItemId ? l.bomId : "", bomNumber: null, batchId: String(g.id) === l.goodsItemId ? l.batchId : "", batchNumber: String(g.id) === l.goodsItemId ? l.batchNumber : null, productionOrderId: orders.find((o) => o.id === Number(l.productionOrderId))?.outputItemId === g.id ? l.productionOrderId : "" })} /></td>
+                <td><GoodsItemPicker value={l.goodsItemId} produced disabled={used(l)} onChange={(g) => setLine(i, { goodsItemId: String(g.id), bomId: String(g.id) === l.goodsItemId ? l.bomId : "", bomNumber: null, batchId: String(g.id) === l.goodsItemId ? l.batchId : "", batchNumber: String(g.id) === l.goodsItemId ? l.batchNumber : null, productionOrderId: orders.find((o) => o.id === Number(l.productionOrderId))?.outputItemId === g.id ? l.productionOrderId : "" })} /></td>
                 <td><BomSelect options={boms[Number(l.goodsItemId)]} value={l.bomId} currentNumber={l.bomNumber} disabled={!l.goodsItemId} onChange={(v) => setLine(i, { bomId: v, bomNumber: null })} /></td>
                 <td>
                   {goods.find((g) => g.id === Number(l.goodsItemId))?.trackingMethod === "BATCH" ? (
@@ -269,7 +270,7 @@ function StatForm({ editId }: { editId?: number }) {
                       { header: "کالای خروجی", render: (o) => o.outputItemTitle, filterValue: (o) => o.outputItemTitle },
                       { header: "مقدار", render: (o) => toFaDigits(String(o.quantity)), filterValue: (o) => String(o.quantity), width: "90px" },
                     ]}
-                    onSelect={(o) => setLine(i, { productionOrderId: String(o.id), goodsItemId: String(o.outputItemId), ...(String(o.id) !== l.productionOrderId ? { batchId: "", batchNumber: null } : {}) })}
+                    onSelect={(o) => setLine(i, { productionOrderId: String(o.id), goodsItemId: String(o.outputItemId), ...(String(o.id) !== l.productionOrderId ? { batchId: "", batchNumber: null, ...(o.bomId ? { bomId: String(o.bomId), bomNumber: o.bomNumber } : {}) } : {}) })}
                   />
                 </td>
                 {editId && <><td>{toFaDigits(String(l.received))}</td><td>{toFaDigits(String(l.delivered))}</td></>}

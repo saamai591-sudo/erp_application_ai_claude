@@ -27,6 +27,8 @@ import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } fro
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { PlusIcon } from "../components/icons";
 import { toEnglishDigits } from "../lib/digits";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { GoodsScope, cachedGoods, ensureGoods, findGoodsByExactCode, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // این فرآیند («رسید انبار خرید») مستند تحلیل اختصاصی در پروژه ندارد؛ ساختار این فرم حاصل تصمیم
 // مشترک با کاربر است (نگاه کنید به یادداشت‌های backend/src/routes/warehouseReceipts.ts). طبق تصمیم
@@ -38,6 +40,7 @@ import { toEnglishDigits } from "../lib/digits";
 // کاربر دارای دسترسی «مشاهده اطلاعات حسابداری».
 const VIEW_ACCOUNTING_PERMISSION = "inventory.inbound-receipts.warehousing-warehouse-receipts.viewAccounting";
 
+const GOODS_SCOPE: GoodsScope = { kind: "GOODS", docDirection: "INBOUND", docType: "خرید" };
 type Basis = "NO_BASIS" | "SUPPLY_REQUEST" | "PURCHASE_ORDER" | "DELIVERY_AUTHORIZATION" | "TEMP_RECEIPT";
 type DocStatus = "REGISTERED" | "FINALIZED";
 
@@ -51,18 +54,6 @@ interface PartyOption {
   id: string;
   code: string;
   title: string;
-}
-interface GoodsItemRow {
-  id: number;
-  fullCode: string;
-  barcode?: string | null;
-  title: string;
-  mainUnitId: number;
-  mainUnit?: { title: string };
-  isActive: boolean;
-  kind: string;
-  trackingMethod: "NONE" | "BATCH" | "SERIAL";
-  isLocationTracked: boolean;
 }
 
 interface PickableLine {
@@ -335,7 +326,6 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
   const { hasPermission } = usePermissions();
   const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
   const [barcode, setBarcode] = useState("");
@@ -358,16 +348,16 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
     mapDetailToRows: mapRows,
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     loadExtra: async () => {
-      const [whs, items, partyOptions]: [Warehouse[], GoodsItemRow[], { code: string; title: string }[]] = await Promise.all([
+      const [whs, partyOptions]: [Warehouse[], { code: string; title: string }[]] = await Promise.all([
         api.get("/warehouses"),
-        api.get("/goods-items?kind=GOODS&docDirection=INBOUND&docType=خرید"),
         api.get("/detail-selector-options?kind=SUPPLIER_PARTY"),
       ]);
       setWarehouses(whs);
-      setGoodsItems(items);
       setParties(partyOptions.map((p) => ({ id: p.code, code: p.code, title: p.title })));
     },
   });
+  // کالاهای ردیف‌ها (واحد، ردیابی، عنوان) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
 
   useEffect(() => {
     if (header.basis === "NO_BASIS") {
@@ -442,7 +432,7 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
   }
 
   function onGoodsItemChange(idx: number, goodsItemId: string) {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "", unitTitle: "" });
   }
 
@@ -466,7 +456,7 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
     let qty = 1;
     let serialText: string | null = null;
     let batchText: string | null = null;
-    const direct = goodsItems.find((g) => g.isActive && (g.barcode === code || g.fullCode === code));
+    const direct = await findGoodsByExactCode(GOODS_SCOPE, code); // مطابقت دقیق با بارکد/کد کالا (جستجوی سمت سرور؛ فقط کالای فعال و مجاز برای این سند)
     if (direct) itemId = direct.id;
     else {
       try {
@@ -480,8 +470,11 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
         return (e as ApiError).message;
       }
     }
-    const item = goodsItems.find((g) => g.id === itemId);
+    await ensureGoods([itemId]);
+    const item = cachedGoods(itemId);
     if (!item) return "کالای بارکد در فهرست کالاها نیست";
+    // کالای تفسیر بارکد هم باید برای رسید انبار مجاز و فعال باشد (همان دامنه‌ی انتخابگر)
+    if (!direct && !(await findGoodsByExactCode(GOODS_SCOPE, item.fullCode))) return `کالای «${item.title}» برای این سند مجاز یا فعال نیست`;
 
     // سریال/بچ استخراج‌شده را به شناسه‌ی رکورد تعریف‌شده تبدیل می‌کنیم (همان فهرستی که دیالوگ ردیابی نشان می‌دهد)
     let serialId: string | null = null;
@@ -807,8 +800,7 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
-                  const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
+                  const item = cachedGoods(Number(row.goodsItemId));
                   const field = header.basis !== "NO_BASIS" ? SOURCE_FIELD[header.basis] : null;
                   const selectedSourceId = field ? (row as any)[field] : "";
                   const src = field ? pickableLines.find((l) => String(l[field]) === selectedSourceId) : undefined;
@@ -837,18 +829,7 @@ function WarehouseReceiptForm({ editId, basePath }: { editId?: number; basePath:
                         {hasSourceColumn ? (
                           <span>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</span>
                         ) : (
-                          <RecordPickerField
-                            title="انتخاب کالا"
-                            disabled={coreDisabled}
-                            displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                            rows={pickerRows}
-                            columns={[
-                              { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                              { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                            ]}
-                            onOpen={guardRowEntry}
-                            onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
-                          />
+                          <GoodsPickerField scope={GOODS_SCOPE} value={row.goodsItemId} title="انتخاب کالا" disabled={coreDisabled} onOpen={guardRowEntry} onSelect={(g) => onGoodsItemChange(idx, String(g.id))} />
                         )}
                       </td>
                       <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>

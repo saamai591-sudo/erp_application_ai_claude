@@ -25,6 +25,8 @@ import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valu
 import { CostCenterPickerField } from "../components/TypePickerFields";
 import { PlusIcon } from "../components/icons";
 import { recomputeAmount } from "../lib/rowHelpers";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { GoodsScope, cachedGoods, ensureGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // «رسید تولید» — طبق stockAnalysis.md بند ۳۴/۴۲ («دریافت محصول»)؛ این پروژه ماژول «تولید» ندارد، پس
 // این سند همیشه «بدون مبنا» و بدون طرف‌حساب است (نگاه کنید به یادداشت بالای
@@ -42,19 +44,10 @@ const VIEW_ACCOUNTING_PERMISSION = "inventory.inbound-receipts.production-receip
 const CONFIRM_PERMISSION = "inventory.inbound-receipts.production-receipts.accountingConfirm";
 const REVERT_PERMISSION = "inventory.inbound-receipts.production-receipts.accountingConfirmRevert";
 
+const GOODS_SCOPE: GoodsScope = { kind: "GOODS", docDirection: "INBOUND", docType: "تولید" };
 type DocStatus = "REGISTERED" | "FINALIZED";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
-interface GoodsItemRow {
-  id: number;
-  fullCode: string;
-  title: string;
-  mainUnitId: number;
-  mainUnit?: { title: string };
-  isActive: boolean;
-  trackingMethod: "NONE" | "BATCH" | "SERIAL";
-  isLocationTracked: boolean;
-}
 
 interface CostCenterOption { id: number; detailCode: string; title: string; isActive?: boolean }
 
@@ -195,7 +188,6 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
   const canConfirm = hasPermission(CONFIRM_PERMISSION);
   const canRevert = hasPermission(REVERT_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenterOption[]>([]);
   const [baseDecimalPlaces, setBaseDecimalPlaces] = useState(2);
 
@@ -213,19 +205,19 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
     mapDetailToRows: mapRows,
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     loadExtra: async () => {
-      const [whs, items, currencies, ccs]: [Warehouse[], GoodsItemRow[], { isBase: boolean; decimalPlaces: number }[], CostCenterOption[]] = await Promise.all([
+      const [whs, currencies, ccs]: [Warehouse[], { isBase: boolean; decimalPlaces: number }[], CostCenterOption[]] = await Promise.all([
         api.get("/warehouses"),
-        api.get("/goods-items?kind=GOODS&docDirection=INBOUND&docType=تولید"),
         api.get("/currencies"),
         api.get("/cost-centers"),
       ]);
       setWarehouses(whs);
-      setGoodsItems(items);
       const baseCurrency = currencies.find((c) => c.isBase);
       if (baseCurrency) setBaseDecimalPlaces(baseCurrency.decimalPlaces);
       setCostCenters(ccs);
     },
   });
+  // کالاهای ردیف‌ها (واحد، ردیابی، عنوان) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
 
   // طبق طرح جدید چرخه‌ی عمر سند («ثبت‌شده → تایید حسابداری‌شده»): بعد از تایید حسابداری، سرصفحه/مقدار/
   // کالای ردیف‌ها برای همه قفل می‌شود؛ فقط فی/مبلغ (برای کاربر دارای دسترسی مشاهده اطلاعات حسابداری)
@@ -242,7 +234,7 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
   }
 
   function onGoodsItemChange(idx: number, goodsItemId: string) {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "", unitTitle: "" });
   }
 
@@ -281,12 +273,13 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
     return pickableStat.map((s) => ({ ...s, remaining: liveRemaining(s, idx) })).filter((s) => s.remaining > 0);
   }
   function rowFromStat(s: StatPick) {
-    const item = goodsItems.find((g) => g.id === s.goodsItemId);
+    const item = cachedGoods(s.goodsItemId);
     return recomputeAmount({ ...emptyRow(), statLineId: String(s.lineId), statNumber: String(s.statNumber), goodsItemId: String(s.goodsItemId), unitId: item ? String(item.mainUnitId) : "", quantity: String(s.remaining), details: newRowDetails(detailConfig, header.details), ...(s.batchId ? { batchAllocations: [{ batchId: String(s.batchId), quantity: String(s.remaining) }], batchLocked: true } : {}) }, baseDecimalPlaces);
   }
   // انتخاب چندتایی: اولین مورد در همین ردیف، بقیه ردیف‌های جدید بعد از آن
-  function onStatLinesPicked(idx: number, picked: StatPick[]) {
+  async function onStatLinesPicked(idx: number, picked: StatPick[]) {
     if (!picked.length) return;
+    await ensureGoods(picked.map((p) => p.goodsItemId)); // واحد اصلی کالای ردیف‌های مبنا باید همین لحظه در کش باشد
     setRows((prev) => {
       const [first, ...rest] = picked;
       const next = prev.slice();
@@ -501,8 +494,7 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
-                  const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
+                  const item = cachedGoods(Number(row.goodsItemId));
                   return (
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
@@ -529,17 +521,7 @@ function ProductionReceiptForm({ editId, basePath }: { editId?: number; basePath
                         {statBasis ? (
                           <span>{row.goodsItemTitle || item ? `${toFaDigits(item?.fullCode ?? row.goodsItemCode)} — ${item?.title ?? row.goodsItemTitle}` : "—"}</span>
                         ) : (
-                          <RecordPickerField
-                            title="انتخاب کالا"
-                            disabled={coreDisabled}
-                            displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                            rows={pickerRows}
-                            columns={[
-                              { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                              { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                            ]}
-                            onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
-                          />
+                          <GoodsPickerField scope={GOODS_SCOPE} value={row.goodsItemId} title="انتخاب کالا" disabled={coreDisabled} onSelect={(g) => onGoodsItemChange(idx, String(g.id))} />
                         )}
                       </td>
                       <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>

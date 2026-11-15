@@ -5,7 +5,6 @@ import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
-import { RecordPickerField } from "../components/RecordPicker";
 import { TrackingCells } from "../components/TrackingCells";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
@@ -22,6 +21,8 @@ import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { PlusIcon } from "../components/icons";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { GoodsScope, cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // «انتقال بین انبارها» به دو سند مستقل تقسیم شده — این صفحه («حواله انتقالی») فقط طرف ارسال (خروج از
 // انبار مبدا) را پوشش می‌دهد. با قطعی‌کردن این سند، فقط موجودی انبار مبدا کم می‌شود؛ کالا تا زمانی که
@@ -32,20 +33,10 @@ import { PlusIcon } from "../components/icons";
 // مجوز کاربر نمایش/عدم‌نمایش داده می‌شوند.
 const VIEW_ACCOUNTING_PERMISSION = "inventory.outbound-issues.warehousing-warehouse-transfer-out.viewAccounting";
 
+const GOODS_SCOPE: GoodsScope = { kind: "GOODS", docDirection: "OUTBOUND", docType: "انتقالی" };
 type DocStatus = "REGISTERED" | "FINALIZED";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
-interface GoodsItemRow {
-  id: number;
-  fullCode: string;
-  title: string;
-  mainUnitId: number;
-  mainUnit?: { title: string };
-  isActive: boolean;
-  kind: string;
-  trackingMethod: "NONE" | "BATCH" | "SERIAL";
-  isLocationTracked: boolean;
-}
 
 interface ListRow {
   id: number;
@@ -203,7 +194,6 @@ function WarehouseTransferOutForm({ editId, basePath }: { editId?: number; baseP
   const { hasPermission } = usePermissions();
   const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
 
   const detailConfig = useDocDetailConfig("WAREHOUSE_TRANSFER_OUT");
   const { header, setHeader, rows, setRows, meta, error, loaded, submit, remove } = useDocumentForm<
@@ -231,14 +221,14 @@ function WarehouseTransferOutForm({ editId, basePath }: { editId?: number; baseP
       })),
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle, usedBy: d.usedBy }),
     loadExtra: async () => {
-      const [whs, items]: [Warehouse[], GoodsItemRow[]] = await Promise.all([
+      const [whs]: [Warehouse[]] = await Promise.all([
         api.get("/warehouses"),
-        api.get("/goods-items?kind=GOODS&docDirection=OUTBOUND&docType=انتقالی"),
       ]);
       setWarehouses(whs);
-      setGoodsItems(items);
     },
   });
+  // کالاهای ردیف‌ها (واحد، ردیابی، عنوان) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
 
   const usedBy = meta?.usedBy ?? [];
   // طبق درخواست صریح کاربر: سندی که یک سند «دریافت» (چه پیش‌نویس چه قطعی) به آن ارجاع دارد، «قفل»
@@ -255,7 +245,7 @@ function WarehouseTransferOutForm({ editId, basePath }: { editId?: number; baseP
   }
 
   function onGoodsItemChange(idx: number, goodsItemId: string) {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "" });
   }
 
@@ -425,23 +415,12 @@ function WarehouseTransferOutForm({ editId, basePath }: { editId?: number; baseP
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
-                  const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
+                  const item = cachedGoods(Number(row.goodsItemId));
                   return (
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                       <td style={{ minWidth: 200 }}>
-                        <RecordPickerField
-                          title="انتخاب کالا"
-                          disabled={coreDisabled}
-                          displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                          rows={pickerRows}
-                          columns={[
-                            { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                            { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                          ]}
-                          onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
-                        />
+                        <GoodsPickerField scope={GOODS_SCOPE} value={row.goodsItemId} title="انتخاب کالا" disabled={coreDisabled} onSelect={(g) => onGoodsItemChange(idx, String(g.id))} />
                       </td>
                       <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || "—"}</td>
                       <TrackingCells

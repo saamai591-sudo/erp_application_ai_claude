@@ -22,7 +22,6 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { useDefaultBaseCurrency } from "../lib/useDefaultBaseCurrency";
 import { api, ApiError } from "../lib/api";
-import { fetchSalesLineItems } from "../lib/salesLineItems";
 import { SalesType } from "./SalesTypes";
 import { SalesCenter } from "./SalesCenters";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
@@ -35,6 +34,8 @@ import { usePermissions } from "../lib/usePermissions";
 import { CloseFollowUpDialog, FOLLOWUP_FA, FollowUpBanner, useQuoteFollowUp } from "../components/QuoteFollowUp";
 import { CheckIcon, UndoIcon, PlusIcon, MacroIcon } from "../components/icons";
 import { partyTitleOf } from "../lib/partyDisplay";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { GoodsScope, cachedGoods, ensureGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // «پیش‌فاکتور» — بالاترین سند زنجیره فروش (پیش‌فاکتور > سفارش فروش > حواله فروش > فاکتور فروش)؛ این
 // ماژول هیچ مستند تحلیل اختصاصی در پروژه ندارد (رجوع کنید به یادداشت بالای schema.prisma و
@@ -44,11 +45,11 @@ import { partyTitleOf } from "../lib/partyDisplay";
 // ردیف‌ها اضافه شد، ولی برخلاف فاکتور خرید/فاکتور فروش، همیشه به همان ارز هدر محاسبه می‌شود، نه ارز
 // مبنا — چون این فرم اصلاً fxRate ندارد (سندی صرفاً اطلاعاتی، بدون اثر حسابداری، بدون نیاز به تبدیل ارز).
 
+const GOODS_SCOPE: GoodsScope = { kind: "GOODS,SERVICE", docDirection: "OUTBOUND", docType: "فروش" };
 type Status = "DRAFT" | "APPROVED";
 
 interface CustomerOption { id: number; code: number; partyId?: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null; detailTitle?: string | null } }
 interface CurrencyOption { id: number; code: string; title: string; decimalPlaces?: number }
-interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
 
 interface ListRow { followUpState?: string | null; followUpReasonTitle?: string | null; closedRemainingAmount?: number | null; id: number; number: number; date: string; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: Status; lineCount: number; totalAmount: number }
 interface DetailLine { id: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; discount: number; vatAmount: number; description: string | null; listPrice?: number | null }
@@ -208,9 +209,9 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
   const [salesTypes, setSalesTypes] = useState<SalesType[]>([]);
   const [salesCenters, setSalesCenters] = useState<SalesCenter[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", description: "", validUntil: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
   const [meta, setMeta] = usePersistedState<{ number: number; status: Status } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -225,19 +226,17 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [cu, st, sc, c, g, fp] = await Promise.all([
+      const [cu, st, sc, c, fp] = await Promise.all([
         api.get("/customers"),
         api.get("/sales-types"),
         api.get("/sales-centers"),
         api.get("/currencies"),
-        fetchSalesLineItems({ withWarehouseFilter: true }),
         fetchSelectedFiscalPeriod(),
       ]);
       setCustomers((cu as any[]).filter((x) => x.isActive));
       setSalesTypes(st);
       setSalesCenters((sc as any[]).filter((x) => x.isActive));
       setCurrencies(c);
-      setGoodsItems(g);
       setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
@@ -282,6 +281,8 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
     if (!loaded || editId) return;
     const p = takeFormPrefill<QuoteDuplicatePrefill>(location.pathname);
     if (!p) return;
+    (async () => {
+    await ensureGoods(p.rows.map((r) => r.goodsItemId)); // نرخ ارزش افزوده‌ی کالای ویژه از خود کالا می‌آید
     setHeader((h) => ({
       ...h,
       customerId: p.customerId,
@@ -298,11 +299,12 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
         ? [emptyRow()]
         : p.rows.map((r) => {
             if (!rateChanged || !r.goodsItemId) return { ...r, listPrice: "" };
-            const item = goodsItems.find((g) => g.id === Number(r.goodsItemId));
+            const item = cachedGoods(Number(r.goodsItemId));
             const vat = computeLineVat(Number(r.amount) || 0, Number(r.discount) || 0, resolveVatRatePercent(item, vatRateForDate(vatRates, header.date)), dec);
             return { ...r, vatAmount: String(vat), listPrice: "" };
           })
     );
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
 
@@ -349,7 +351,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
   // ویرایش کند — دقیقاً هم‌الگوی PurchaseInvoices.tsx/SalesInvoices.tsx با این تفاوت که تبدیل ارزی در
   // کار نیست.
   function computeSuggestedVat(amount: number, discount: number, goodsItemId: string): string {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     return String(computeLineVat(amount, discount, resolveVatRatePercent(item, vatRateForDate(vatRates, header.date)), currencies.find((c) => String(c.id) === String(header.currencyId))?.decimalPlaces ?? 2));
   }
   // ── فراخوانی قیمت از اعلامیه (فی پایه + پله‌ها): کلید زمینه = مرکز/نوع/ارز/تاریخ؛ جدول پله‌ی هر کالا یک‌بار می‌آید و تغییر مقدار بدون درخواست شبکه محاسبه می‌شود
@@ -449,7 +451,7 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
     }
   }
   async function onGoodsItemChange(idx: number, goodsItemId: string) {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "", listPrice: "" });
     if (!goodsItemId) return;
     const info = (await ensurePricing([goodsItemId]))[goodsItemId];
@@ -702,23 +704,12 @@ function SalesQuoteForm({ editId }: { editId?: number }) {
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
-                  const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
+                  const item = cachedGoods(Number(row.goodsItemId));
                   return (
                     <tr key={idx}>
                       <td data-label="ردیف" style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                       <td data-label="کالا" style={{ minWidth: 200 }}>
-                        <RecordPickerField
-                          title="انتخاب کالا"
-                          disabled={locked}
-                          displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                          rows={pickerRows}
-                          columns={[
-                            { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                            { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                          ]}
-                          onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
-                        />
+                        <GoodsPickerField scope={GOODS_SCOPE} value={row.goodsItemId} title="انتخاب کالا" disabled={locked} onSelect={(g) => onGoodsItemChange(idx, String(g.id))} />
                       </td>
                       <td data-label="واحد" style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>
                       <td data-label="مقدار" style={{ minWidth: 120 }}>

@@ -22,6 +22,8 @@ import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { PlusIcon } from "../components/icons";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { GoodsScope, cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // «حواله دارایی ثابت» — طبق stockAnalysis.md بند ۳۴/۴۱؛ نگاه کنید به یادداشت بالای
 // backend/src/routes/fixedAssetIssues.ts. بدون طرف‌حساب در سطح سند — اطلاعات تخصصی دارایی در ماژول
@@ -30,20 +32,11 @@ import { PlusIcon } from "../components/icons";
 // کاربر نمایش/عدم‌نمایش داده می‌شوند.
 const VIEW_ACCOUNTING_PERMISSION = "inventory.outbound-issues.fixed-asset-issues.viewAccounting";
 
+const GOODS_SCOPE: GoodsScope = { kind: "GOODS", docDirection: "OUTBOUND", docType: "دارایی ثابت" };
 type Basis = "NO_BASIS" | "GOODS_REQUEST";
 type DocStatus = "REGISTERED" | "FINALIZED";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
-interface GoodsItemRow {
-  id: number;
-  fullCode: string;
-  title: string;
-  mainUnitId: number;
-  mainUnit?: { title: string };
-  isActive: boolean;
-  trackingMethod: "NONE" | "BATCH" | "SERIAL";
-  isLocationTracked: boolean;
-}
 interface PickableLine { id: number; sourceGoodsRequestLineId: number; number: number; date: string; orgUnitTitle: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
 
 interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; basis: Basis; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number; totalAmount?: number }
@@ -133,7 +126,6 @@ function FixedAssetIssueForm({ editId, basePath }: { editId?: number; basePath: 
   const { hasPermission } = usePermissions();
   const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
   const detailConfig = useDocDetailConfig("FIXED_ASSET_ISSUE");
@@ -167,14 +159,14 @@ function FixedAssetIssueForm({ editId, basePath }: { editId?: number; basePath: 
       })),
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     loadExtra: async () => {
-      const [whs, items]: [Warehouse[], GoodsItemRow[]] = await Promise.all([
+      const [whs]: [Warehouse[]] = await Promise.all([
         api.get("/warehouses"),
-        api.get("/goods-items?kind=GOODS&docDirection=OUTBOUND&docType=دارایی ثابت"),
       ]);
       setWarehouses(whs);
-      setGoodsItems(items);
     },
   });
+  // کالاهای ردیف‌ها (واحد، ردیابی، عنوان) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
 
   useEffect(() => {
     if (header.basis === "NO_BASIS") {
@@ -229,7 +221,7 @@ function FixedAssetIssueForm({ editId, basePath }: { editId?: number; basePath: 
   }
 
   function onGoodsItemChange(idx: number, goodsItemId: string) {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "", unitTitle: "" });
   }
 
@@ -395,8 +387,7 @@ function FixedAssetIssueForm({ editId, basePath }: { editId?: number; basePath: 
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
-                  const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
+                  const item = cachedGoods(Number(row.goodsItemId));
                   const src = pickableLines.find((l) => String(l.sourceGoodsRequestLineId) === row.sourceGoodsRequestLineId);
                   const sourceDisplay = src ? `${toFaDigits(String(src.number))}` : row.sourceNumber ? toFaDigits(row.sourceNumber) : "";
                   return (
@@ -424,18 +415,7 @@ function FixedAssetIssueForm({ editId, basePath }: { editId?: number; basePath: 
                         {hasSourceColumn ? (
                           <span>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</span>
                         ) : (
-                          <RecordPickerField
-                            title="انتخاب کالا"
-                            disabled={coreDisabled}
-                            displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                            rows={pickerRows}
-                            columns={[
-                              { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                              { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                            ]}
-                            onOpen={guardRowEntry}
-                            onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
-                          />
+                          <GoodsPickerField scope={GOODS_SCOPE} value={row.goodsItemId} title="انتخاب کالا" disabled={coreDisabled} onOpen={guardRowEntry} onSelect={(g) => onGoodsItemChange(idx, String(g.id))} />
                         )}
                       </td>
                       <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>

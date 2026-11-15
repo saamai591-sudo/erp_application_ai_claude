@@ -6,6 +6,8 @@ import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
 import { RecordPickerField } from "../components/RecordPicker";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { GoodsLite, GoodsScope, useGoodsCatalog } from "../lib/goodsCatalog";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { ExcelImportButton } from "../components/ExcelImport";
@@ -50,16 +52,7 @@ interface PartyOption {
   lastName: string | null;
   name: string | null;
 }
-interface GoodsItemRow {
-  id: number;
-  fullCode: string;
-  title: string;
-  mainUnitId: number;
-  mainUnit?: { title: string };
-  isActive: boolean;
-  trackingMethod: "NONE" | "BATCH" | "SERIAL";
-  isLocationTracked: boolean;
-}
+const GOODS_SCOPE: GoodsScope = { kind: "GOODS", docDirection: "OUTBOUND", docType: "فروش" };
 interface PickableLine { id: number; sourceLineId: number; salesQuoteId?: number; customerPartyId?: number; number: number; date: string; customerTitle: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
 
 interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; basis: Basis; partyId: number | null; partyTitle: string | null; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number; totalAmount?: number }
@@ -220,7 +213,6 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
   const { hasPermission } = usePermissions();
   const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
@@ -256,16 +248,13 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
       })),
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     loadExtra: async () => {
-      const [whs, items, partyList]: [Warehouse[], GoodsItemRow[], PartyOption[]] = await Promise.all([
-        api.get("/warehouses"),
-        api.get("/goods-items?kind=GOODS&docDirection=OUTBOUND&docType=فروش"),
-        api.get("/parties?customersOnly=true"),
-      ]);
+      const [whs, partyList]: [Warehouse[], PartyOption[]] = await Promise.all([api.get("/warehouses"), api.get("/parties?customersOnly=true")]);
       setWarehouses(whs);
-      setGoodsItems(items);
       setParties(partyList);
     },
   });
+  // کالاهای ردیف‌ها (واحد، ردیابی، عنوان) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  const goodsCatalog = useGoodsCatalog(rows.map((r) => r.goodsItemId));
 
   useEffect(() => {
     if (header.basis === "NO_BASIS" || !header.partyId) {
@@ -366,9 +355,8 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
     });
   }
 
-  function onGoodsItemChange(idx: number, goodsItemId: string) {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
-    updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "", unitTitle: "" });
+  function onGoodsItemChange(idx: number, item: GoodsLite) {
+    updateRow(idx, { goodsItemId: String(item.id), unitId: String(item.mainUnitId), unitTitle: "" });
   }
 
   // «صدور حواله از پیش‌فاکتور» (components/DownstreamDialogs.tsx): هدر پر می‌شود و ردیف‌های قابل‌تحویل همان پیش‌فاکتور با **همان انتخابگر ردیف مبنا** (onSourceLinesPicked)
@@ -584,8 +572,7 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
-                  const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
+                  const item = goodsCatalog.get(row.goodsItemId);
                   const src = pickableLines.find((l) => String(l.sourceLineId) === row.sourceSalesOrderLineId);
                   const sourceDisplay = src ? `${toFaDigits(String(src.number))}` : row.sourceNumber ? toFaDigits(row.sourceNumber) : "";
                   return (
@@ -615,17 +602,13 @@ function SalesDeliveryForm({ editId }: { editId?: number }) {
                         {hasSourceColumn ? (
                           <span>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</span>
                         ) : (
-                          <RecordPickerField
+                          <GoodsPickerField
                             title="انتخاب کالا"
+                            scope={GOODS_SCOPE}
                             disabled={coreDisabled}
-                            displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                            rows={pickerRows}
-                            columns={[
-                              { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                              { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                            ]}
+                            value={row.goodsItemId}
                             onOpen={guardRowEntry}
-                            onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
+                            onSelect={(g) => onGoodsItemChange(idx, g)}
                           />
                         )}
                       </td>

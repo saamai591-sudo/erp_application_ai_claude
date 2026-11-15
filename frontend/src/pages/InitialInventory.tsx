@@ -5,7 +5,6 @@ import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
-import { RecordPickerField } from "../components/RecordPicker";
 import { TrackingCells } from "../components/TrackingCells";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
@@ -24,6 +23,8 @@ import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } fro
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { PlusIcon } from "../components/icons";
 import { recomputeAmount } from "../lib/rowHelpers";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { GoodsScope, cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // طبق تصمیم معماری «ادغام نمای انبارداری/حسابداری انبار»: این فرم دیگر دو مسیر/دو مود جدا ندارد —
 // یک نمای واحد است که ستون‌های مبلغی بر اساس مجوز کاربر نمایش داده می‌شوند، نه بر اساس مسیر URL. دقیقاً
@@ -34,18 +35,9 @@ const VIEW_ACCOUNTING_PERMISSION = "inventory.inbound-receipts.warehousing-initi
 const CONFIRM_PERMISSION = "inventory.inbound-receipts.warehousing-initial-inventory.accountingConfirm";
 const REVERT_PERMISSION = "inventory.inbound-receipts.warehousing-initial-inventory.accountingConfirmRevert";
 
+const GOODS_SCOPE: GoodsScope = { kind: "GOODS" };
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
 interface UnitOfMeasure { id: number; code: number; title: string }
-interface GoodsItemRow {
-  id: number;
-  fullCode: string;
-  title: string;
-  mainUnitId: number;
-  isActive: boolean;
-  kind: string;
-  trackingMethod: "NONE" | "BATCH" | "SERIAL";
-  isLocationTracked: boolean;
-}
 
 interface ListRow {
   id: number;
@@ -276,7 +268,6 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
   const canRevert = hasPermission(REVERT_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [units, setUnits] = useState<UnitOfMeasure[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [baseDecimalPlaces, setBaseDecimalPlaces] = useState(2);
   const [focusedRow, setFocusedRow] = useState<number | null>(null);
 
@@ -295,19 +286,19 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, creationType: d.creationType, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     dateField: "date",
     loadExtra: async () => {
-      const [whs, unitsList, items, currencies]: [Warehouse[], UnitOfMeasure[], GoodsItemRow[], { isBase: boolean; decimalPlaces: number }[]] = await Promise.all([
+      const [whs, unitsList, currencies]: [Warehouse[], UnitOfMeasure[], { isBase: boolean; decimalPlaces: number }[]] = await Promise.all([
         api.get("/warehouses"),
         api.get("/units-of-measure"),
-        api.get("/goods-items?kind=GOODS"),
         api.get("/currencies"),
       ]);
       setWarehouses(whs);
       setUnits(unitsList);
-      setGoodsItems(items);
       const baseCurrency = currencies.find((c) => c.isBase);
       if (baseCurrency) setBaseDecimalPlaces(baseCurrency.decimalPlaces);
     },
   });
+  // کالاهای ردیف‌ها (واحد، ردیابی، عنوان) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
 
   // طبق طرح جدید چرخه‌ی عمر سند («ثبت‌شده → تایید حسابداری‌شده»): مقدار/کالا/واحد/انبار/تاریخ فقط تا
   // وقتی سند «تایید حسابداری» نشده (یا سیستمی نباشد) قابل ویرایش‌اند؛ بعد از تایید حسابداری، فقط فی/
@@ -326,7 +317,7 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
   }
 
   function onGoodsItemChange(idx: number, goodsItemId: string) {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "" });
   }
 
@@ -379,7 +370,7 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
         for (const [i, l] of body.lines.entries()) {
           if (!l.unitId) return `واحد سنجش ردیف ${i + 1} الزامی است`;
           if (!(l.quantity > 0)) return `مقدار ردیف ${i + 1} باید عددی مثبت باشد`;
-          const item = goodsItems.find((g) => g.id === l.goodsItemId);
+          const item = cachedGoods(l.goodsItemId);
           if (item?.trackingMethod === "SERIAL" && l.serialIds.length !== l.quantity) {
             return `ردیف ${i + 1}: تعداد سریال‌های انتخاب‌شده باید با مقدار ردیف برابر باشد`;
           }
@@ -545,24 +536,12 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
             </thead>
             <tbody>
               {rows.map((row, idx) => {
-                const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
-                const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
+                const item = cachedGoods(Number(row.goodsItemId));
                 return (
                   <tr key={idx} onClick={() => setFocusedRow(idx)} className={focusedRow === idx ? "active-list" : ""}>
                     <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                     <td style={{ minWidth: 220 }}>
-                      <RecordPickerField
-                        title="انتخاب کالا"
-                        displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                        rows={pickerRows}
-                        columns={[
-                          { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                          { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                        ]}
-                        onOpen={() => setFocusedRow(idx)}
-                        onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
-                        disabled={nonMoneyReadOnly}
-                      />
+                      <GoodsPickerField scope={GOODS_SCOPE} value={row.goodsItemId} title="انتخاب کالا" disabled={nonMoneyReadOnly} onOpen={() => setFocusedRow(idx)} onSelect={(g) => onGoodsItemChange(idx, String(g.id))} />
                     </td>
                     <td style={{ minWidth: 110, color: "var(--ink-soft)" }}>
                       {units.find((u) => u.id === item?.mainUnitId)?.title || "—"}
@@ -618,7 +597,7 @@ function InitialInventoryForm({ editId, basePath }: { editId?: number; basePath:
 
         {focusedRow !== null && rows[focusedRow]?.goodsItemId && (
           <div className="je-breadcrumb">
-            <div><b>کالا:</b> {goodsItems.find((g) => g.id === Number(rows[focusedRow].goodsItemId))?.title || "—"}</div>
+            <div><b>کالا:</b> {cachedGoods(Number(rows[focusedRow].goodsItemId))?.title || "—"}</div>
           </div>
         )}
       </form>

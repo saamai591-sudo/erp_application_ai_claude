@@ -5,7 +5,6 @@ import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
-import { RecordPickerField } from "../components/RecordPicker";
 import { TrackingCells } from "../components/TrackingCells";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
@@ -25,6 +24,8 @@ import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } fro
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { CostCenterPickerField } from "../components/TypePickerFields";
 import { PlusIcon } from "../components/icons";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { GoodsScope, cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // «مصرف تولید» — طبق stockAnalysis.md بند ۳۴/۳۹/۴۲؛ این پروژه ماژول «تولید»/«دستور تولید» ندارد، پس
 // این سند همیشه «بدون مبنا» است (نگاه کنید به یادداشت بالای backend/src/routes/productionConsumptions.ts).
@@ -35,19 +36,10 @@ import { PlusIcon } from "../components/icons";
 // مبلغی بر اساس مجوز کاربر نمایش/عدم‌نمایش داده می‌شوند (نه بر اساس مسیر URL).
 const VIEW_ACCOUNTING_PERMISSION = "inventory.outbound-issues.production-consumptions.viewAccounting";
 
+const GOODS_SCOPE: GoodsScope = { kind: "GOODS", docDirection: "OUTBOUND", docType: "مصرف" };
 type DocStatus = "REGISTERED" | "FINALIZED";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
-interface GoodsItemRow {
-  id: number;
-  fullCode: string;
-  title: string;
-  mainUnitId: number;
-  mainUnit?: { title: string };
-  isActive: boolean;
-  trackingMethod: "NONE" | "BATCH" | "SERIAL";
-  isLocationTracked: boolean;
-}
 
 interface CostCenterOption { id: number; detailCode: string; title: string; isActive?: boolean }
 
@@ -160,7 +152,6 @@ function ProductionConsumptionForm({ editId, basePath }: { editId?: number; base
   const { hasPermission } = usePermissions();
   const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenterOption[]>([]);
 
   const detailConfig = useDocDetailConfig("PRODUCTION_CONSUMPTION");
@@ -192,16 +183,16 @@ function ProductionConsumptionForm({ editId, basePath }: { editId?: number; base
       })),
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     loadExtra: async () => {
-      const [whs, items, ccs]: [Warehouse[], GoodsItemRow[], CostCenterOption[]] = await Promise.all([
+      const [whs, ccs]: [Warehouse[], CostCenterOption[]] = await Promise.all([
         api.get("/warehouses"),
-        api.get("/goods-items?kind=GOODS&docDirection=OUTBOUND&docType=مصرف"),
         api.get("/cost-centers"),
       ]);
       setWarehouses(whs);
-      setGoodsItems(items);
       setCostCenters(ccs);
     },
   });
+  // کالاهای ردیف‌ها (واحد، ردیابی، عنوان) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
 
   const isFinalized = meta?.status === "FINALIZED";
   // طبق تصمیم صریح کاربر: فیلدهای مبلغی تا وقتی سند Finalized نشده، اصلاً نمایش داده نمی‌شوند.
@@ -213,7 +204,7 @@ function ProductionConsumptionForm({ editId, basePath }: { editId?: number; base
   }
 
   function onGoodsItemChange(idx: number, goodsItemId: string) {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "", unitTitle: "" });
   }
 
@@ -374,23 +365,12 @@ function ProductionConsumptionForm({ editId, basePath }: { editId?: number; base
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
-                  const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
+                  const item = cachedGoods(Number(row.goodsItemId));
                   return (
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                       <td style={{ minWidth: 200 }}>
-                        <RecordPickerField
-                          title="انتخاب کالا"
-                          disabled={coreDisabled}
-                          displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                          rows={pickerRows}
-                          columns={[
-                            { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                            { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                          ]}
-                          onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
-                        />
+                        <GoodsPickerField scope={GOODS_SCOPE} value={row.goodsItemId} title="انتخاب کالا" disabled={coreDisabled} onSelect={(g) => onGoodsItemChange(idx, String(g.id))} />
                       </td>
                       <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>
                       <TrackingCells

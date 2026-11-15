@@ -12,9 +12,9 @@ import { PartySectionCard } from "../components/PartySections";
 import { toFaDigits } from "../lib/formatAmount";
 import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
-import { fetchSalesLineItems } from "../lib/salesLineItems";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { GoodsPickerDialog } from "../components/GoodsPickerField";
 
 // فروش فروشگاهی › تنظیمات › «گروه چاپ»: مجموعه‌ای از کالاها و/یا گروه‌های کالا (مثلاً «غذاها»، «نوشیدنی‌ها») که اقلامشان هنگام «چاپ سفارش»
 // روی یک چاپگر مشخص (مثلاً آشپزخانه) چاپ می‌شود. چاپگر هر ایستگاه در بخش «چاپگرها»ی فرم ایستگاه فروش به گروه چاپ وصل می‌شود.
@@ -32,7 +32,6 @@ interface GroupRow {
   goodsGroups: { goodsGroupId: number; code: string; title: string }[];
   updatedAt?: string;
 }
-interface GoodsOption { id: number; fullCode: string; title: string; isActive?: boolean }
 interface GoodsGroupOption { id: number; code: string; title: string; isActive?: boolean }
 
 export default function PrintGroups() {
@@ -106,7 +105,6 @@ function GroupForm({ editId }: { editId?: number }) {
   const [code, setCode] = useState<number | null>(null);
   const [stations, setStations] = useState<{ id: number; title: string }[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | undefined>();
-  const [goods, setGoods] = useState<GoodsOption[]>([]);
   const [goodsGroups, setGoodsGroups] = useState<GoodsGroupOption[]>([]);
   const [pickGoods, setPickGoods] = useState(false);
   const [pickGroups, setPickGroups] = useState(false);
@@ -115,7 +113,7 @@ function GroupForm({ editId }: { editId?: number }) {
   const { flash } = useSavedFlash();
 
   useEffect(() => {
-    Promise.all([fetchSalesLineItems<GoodsOption>(), api.get("/goods-groups")]).then(([g, gg]) => { setGoods(g); setGoodsGroups(gg); }).catch(() => {});
+    api.get("/goods-groups").then((gg) => setGoodsGroups(gg)).catch(() => {});
     if (!editId) return;
     api.get(`/print-groups/${editId}`).then((r: GroupRow) => {
       setCode(r.code);
@@ -230,20 +228,15 @@ function GroupForm({ editId }: { editId?: number }) {
         )}
 
         {pickGoods && (
-          <MultiPickerDialog<GoodsOption>
+          <GoodsPickerDialog
             title="افزودن کالا به گروه چاپ"
-            rows={goods.filter((g) => g.isActive !== false || form.items.some((i) => i.goodsItemId === g.id))}
-            columns={[
-              { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "120px" },
-              { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-            ]}
-            initialChecked={new Set(form.items.map((i) => i.goodsItemId))}
-            confirmLabel="تایید"
-            wide
-            onConfirm={(checked) => {
-              const kept = form.items.filter((i) => checked.has(i.goodsItemId));
-              const added = goods.filter((g) => checked.has(g.id) && !form.items.some((i) => i.goodsItemId === g.id)).map((g) => ({ goodsItemId: g.id, code: g.fullCode, title: g.title }));
-              setForm({ ...form, items: [...kept, ...added] });
+            scope={{ kind: "GOODS,SERVICE" }}
+            multiple
+            excludeIds={form.items.map((i) => i.goodsItemId)}
+            onSelect={() => {}}
+            onSelectMultiple={(picked) => {
+              // کالاهای موجود می‌مانند (حذف با دکمه‌ی «حذف» هر ردیف)؛ تازه‌ها به انتها اضافه می‌شوند
+              setForm({ ...form, items: [...form.items, ...picked.map((g) => ({ goodsItemId: g.id, code: g.fullCode, title: g.title }))] });
               setPickGoods(false);
             }}
             onClose={() => setPickGoods(false)}

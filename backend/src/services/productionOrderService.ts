@@ -1,12 +1,15 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { assertDateWithinCurrentFiscalPeriod } from "../utils/fiscalPeriodValidation";
-import { activeBomFor, requiredComponents } from "./bomService";
+import { activeBomFor, assertLineBom, requiredComponents } from "./bomService";
 import { D, fail, isProducedType, isoDay, num, parseDay, positive } from "./productionCommon";
 
 // دستور تولید: مرکز هزینه‌ی بهای تمام‌شده. اتصال به ردیف سفارش فروش/پیش‌فاکتور = تولید سفارشی؛ بدون اتصال = برای انبار.
 //  • ردیف‌های دستور کپیِ قابل‌ویرایش از BOM هستند (BOM سفارشی)؛ بدون BOM هم می‌توان دستور ساخت.
 //  • وضعیت‌ها: DRAFT (ویرایش کامل) ← RELEASED (اسناد انبار فقط به دستور صادرشده وصل می‌شوند) ← CLOSED.
+//  • فرمول ساخت را کاربر صریح انتخاب می‌کند (یک کالا هم‌زمان چند فرمول فعال دارد؛ همان قاعده‌ی آمار تولید)؛ بدون انتخاب و بدون اجزا = جدیدترین فرمول فعال.
+//  • بعد از «صدور»: کالای خروجی، فرمول و اجزا قفل می‌شوند؛ فقط مقدار دستور (نه کمتر از تولیدشده‌ی تا حالا؛ اجزا متناسب تغییر می‌کنند)،
+//    تاریخ‌های برنامه‌ای، توضیح و اتصال به فروش قابل ویرایش‌اند. تغییر فرمول/اجزا = «برگشت به پیش‌نویس» (فقط وقتی سند، آمار و محاسبه‌ای ندارد).
 
 export const ORDER_INCLUDE = {
   outputItem: { select: { id: true, fullCode: true, title: true, mainUnit: { select: { title: true } } } },
@@ -53,6 +56,7 @@ export function orderShape(o: any, producedQty = 0, consumedByItem?: Map<number,
     producedQuantity: producedQty,
     status: o.status,
     bomId: o.bomId,
+    bomNumber: o.bom?.number ?? null,
     bomLabel: o.bom ? `#${o.bom.number} (از ${isoDay(o.bom.effectiveDate)})` : "",
     salesOrderLineId: o.salesOrderLineId,
     salesQuoteLineId: o.salesQuoteLineId,
@@ -97,7 +101,7 @@ async function loadSalesLink(body: any, outputItemId: number) {
 }
 
 /** اعتبارسنجی و آماده‌سازی داده‌ی دستور (ایجاد/ویرایش) */
-async function cleanOrder(body: any, existing?: { id: number; status: string; outputItemId: number }) {
+async function cleanOrder(body: any, existing?: { id: number; status: string; outputItemId: number; bomId: number | null }) {
   const date = parseDay(body?.date, "تاریخ دستور");
   await assertDateWithinCurrentFiscalPeriod(date);
   const outputItemId = Number(body?.outputItemId);
@@ -114,12 +118,16 @@ async function cleanOrder(body: any, existing?: { id: number; status: string; ou
   if (plannedStart && plannedEnd && plannedEnd < plannedStart) fail("تاریخ پایان برنامه‌ای قبل از شروع است");
   const link = await loadSalesLink(body, outputItemId);
 
-  // BOM: انتخاب صریح یا فعال در تاریخ دستور (می‌تواند نباشد)
+  // دستور صادرشده: فرمول و اجزا ثابت می‌مانند (کنترل و مقیاس‌دهی در updateProductionOrder)
+  if (existing && existing.status !== "DRAFT") {
+    return { data: { date, outputItemId, quantity, bomId: existing.bomId, ...link, plannedStart, plannedEnd, description: String(body?.description ?? "").trim() || null }, lines: [] as { componentItemId: number; quantity: Prisma.Decimal; note: string | null }[] };
+  }
+
+  // BOM: انتخاب صریح (باید برای همین کالا، فعال و با تاریخ شروع ≤ تاریخ دستور باشد؛ فرمول قبلاً ذخیره‌شده‌ی دستور مجاز می‌ماند) یا
+  // جدیدترین فرمول فعال در تاریخ دستور (می‌تواند نباشد)
   let bom: any = null;
   if (body?.bomId) {
-    bom = await prisma.bom.findUnique({ where: { id: Number(body.bomId) }, include: { lines: true } });
-    if (!bom) return fail("فرمول ساخت یافت نشد");
-    if (bom.outputItemId !== outputItemId) fail("فرمول ساخت انتخاب‌شده برای کالای دیگری است");
+    bom = await assertLineBom(body.bomId, outputItemId, date, "فرمول ساخت", new Set(existing?.bomId ? [existing.bomId] : []));
   } else if (!Array.isArray(body?.lines)) {
     bom = await activeBomFor(outputItemId, date);
   }
@@ -170,22 +178,55 @@ export async function createProductionOrder(body: any, userId?: number | null, e
 }
 
 export async function updateProductionOrder(id: number, body: any) {
-  const ex = await prisma.productionOrder.findUnique({ where: { id }, select: { id: true, status: true, outputItemId: true, _count: { select: { documents: true } } } });
+  const ex = await prisma.productionOrder.findUnique({
+    where: { id },
+    select: { id: true, status: true, outputItemId: true, bomId: true, quantity: true, lines: { select: { componentItemId: true, quantity: true, note: true }, orderBy: { id: "asc" } }, _count: { select: { documents: true } } },
+  });
   if (!ex) return fail("دستور تولید یافت نشد");
   if (ex!.status === "CLOSED") fail("دستور بسته‌شده قابل ویرایش نیست؛ ابتدا آن را باز کنید");
-  const { data, lines } = await cleanOrder(body, ex!);
+  const { data, lines: cleaned } = await cleanOrder(body, ex!);
   if (ex!._count.documents > 0 && data.outputItemId !== ex!.outputItemId) fail("دستور سند انبار دارد و کالای خروجی‌اش قابل تغییر نیست");
+
+  let lines = cleaned;
+  if (ex!.status === "RELEASED") {
+    // قفل بعد از صدور: فرمول و اجزا نباید عوض شوند (تغییرشان فقط با «برگشت به پیش‌نویس»)
+    const hint = "؛ برای تغییر، دستور را به پیش‌نویس برگردانید (فقط وقتی سند انبار، آمار تولید و محاسبه‌ی بها ندارد)";
+    if (body?.bomId !== undefined && body?.bomId !== null && body?.bomId !== "" && Number(body.bomId) !== (ex!.bomId ?? 0)) fail(`فرمول ساخت دستور صادرشده قابل تغییر نیست${hint}`);
+    const stored = new Map(ex!.lines.map((l) => [l.componentItemId, l]));
+    if (Array.isArray(body?.lines)) {
+      const sent = new Map<number, number>(body.lines.map((l: any) => [Number(l?.componentItemId), num(l?.quantity)]));
+      const same = sent.size === stored.size && [...stored].every(([cid, l]) => sent.has(cid) && Math.abs((sent.get(cid) ?? 0) - num(l.quantity)) < 1e-6);
+      if (!same) fail(`اجزای دستور صادرشده قابل تغییر نیست${hint}`);
+    }
+    // مقدار دستور: نه کمتر از تولیدشده؛ اجزا با همان نسبت تغییر می‌کنند (اگر مقدار عوض نشده، دقیقاً همان مقدارهای ذخیره‌شده می‌مانند)
+    const newQty = num(data.quantity);
+    const produced = (await orderQuantities([id])).produced.get(id) ?? 0;
+    if (newQty < produced) fail(`مقدار دستور نمی‌تواند از مقدار تولیدشده‌ی تا حالا (${produced}) کمتر باشد`);
+    const oldQty = num(ex!.quantity);
+    const factor = oldQty > 0 ? newQty / oldQty : 1;
+    const noteOf = new Map<number, string>(Array.isArray(body?.lines) ? body.lines.map((l: any) => [Number(l?.componentItemId), String(l?.note ?? "").trim()]) : []);
+    lines = ex!.lines.map((l) => ({
+      componentItemId: l.componentItemId,
+      quantity: factor === 1 ? l.quantity : D(Math.round(num(l.quantity) * factor * 1e6) / 1e6),
+      note: (noteOf.has(l.componentItemId) ? noteOf.get(l.componentItemId) || null : l.note) ?? null,
+    }));
+  }
   return prisma.$transaction(async (tx) => {
     await tx.productionOrderLine.deleteMany({ where: { orderId: id } });
     return tx.productionOrder.update({ where: { id }, data: { ...data, lines: { create: lines } }, include: ORDER_INCLUDE });
   });
 }
 
-export async function setOrderStatus(id: number, to: "RELEASED" | "CLOSED") {
-  const o = await prisma.productionOrder.findUnique({ where: { id }, select: { status: true, number: true } });
+export async function setOrderStatus(id: number, to: "RELEASED" | "CLOSED" | "DRAFT") {
+  const o = await prisma.productionOrder.findUnique({ where: { id }, select: { status: true, number: true, _count: { select: { documents: true, statLines: true, costItems: true } } } });
   if (!o) return fail("دستور تولید یافت نشد");
   if (to === "RELEASED" && !["DRAFT", "CLOSED"].includes(o!.status)) fail("دستور قبلاً صادر شده است");
   if (to === "CLOSED" && o!.status !== "RELEASED") fail("فقط دستور صادرشده بسته می‌شود");
+  if (to === "DRAFT") {
+    // برگشت از صدور برای اصلاح فرمول/اجزا: فقط وقتی هیچ چیزی به دستور وصل نیست
+    if (o!.status !== "RELEASED") fail("فقط دستور صادرشده به پیش‌نویس برمی‌گردد");
+    if (o!._count.documents || o!._count.statLines || o!._count.costItems) fail("دستور سند انبار، آمار تولید یا محاسبه‌ی بها دارد و به پیش‌نویس برنمی‌گردد");
+  }
   return prisma.productionOrder.update({ where: { id }, data: { status: to, closedAt: to === "CLOSED" ? new Date() : null }, include: ORDER_INCLUDE });
 }
 

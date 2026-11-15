@@ -22,13 +22,14 @@ import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, vali
 import { DescriptionField } from "../components/DescriptionField";
 import { CheckIcon, UndoIcon, PlusIcon, LoadIcon } from "../components/icons";
 import { partyTitleOf } from "../lib/partyDisplay";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { useGoodsCatalog } from "../lib/goodsCatalog";
 
 type Status = "DRAFT" | "APPROVED" | "REJECTED";
 
 interface PlanningOption { id: number; number: number; date: string; neededDate: string | null; purchaseGroupTitle: string }
 interface SupplierOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null } }
 interface CurrencyOption { id: number; code: string; title: string }
-interface ServiceOption { id: number; fullCode: string; title: string; kind: string }
 
 interface PlanningStage2Row { id: number; goodsItemCode: string; goodsItemTitle: string; unitTitle: string; quantity: number }
 interface PlanningDetail { id: number; neededDate: string | null; stage2Rows: PlanningStage2Row[] }
@@ -122,10 +123,10 @@ function PriceInquiryForm({ editId }: { editId?: number }) {
   const [plannings, setPlannings] = useState<PlanningOption[]>([]);
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
-  const [services, setServices] = useState<ServiceOption[]>([]);
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", purchasePlanningId: "", supplierId: "", validUntil: "", currencyId: "", paymentDeadline: "", description: "" });
   const [itemRows, setItemRows] = usePersistedState<ItemRowState[]>(`${cacheKey}:items`, []);
   const [costRows, setCostRows] = usePersistedState<CostRowState[]>(`${cacheKey}:costs`, []);
+  useGoodsCatalog(costRows.map((r) => r.serviceId)); // خدمت ردیف‌ها از روی شناسه از سرور خوانده می‌شود
   const [meta, setMeta] = usePersistedState<{ number: number; status: Status } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -135,15 +136,13 @@ function PriceInquiryForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [p, c, sv, fp] = await Promise.all([
+      const [p, c, fp] = await Promise.all([
         api.get(`/purchase-plannings/pickable?purpose=price-inquiry&userId=${user?.id || ""}`),
         api.get("/currencies"),
-        api.get("/goods-items?kind=SERVICE"),
         fetchSelectedFiscalPeriod(),
       ]);
       setPlannings(p);
       setCurrencies(c);
-      setServices(sv);
       setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
@@ -459,20 +458,15 @@ function PriceInquiryForm({ editId }: { editId?: number }) {
                   </thead>
                   <tbody>
                     {costRows.map((row, idx) => {
-                      const svc = services.find((s) => String(s.id) === row.serviceId);
                       return (
                         <tr key={idx}>
                           <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                           <td style={{ minWidth: 200 }}>
-                            <RecordPickerField
+                            <GoodsPickerField
                               title="انتخاب کد هزینه (خدمت)"
+                              scope={{ kind: "SERVICE" }}
                               disabled={locked}
-                              displayValue={svc ? `${toFaDigits(svc.fullCode)} — ${svc.title}` : ""}
-                              rows={services}
-                              columns={[
-                                { header: "کد", render: (s) => toFaDigits(s.fullCode), filterValue: (s) => s.fullCode, width: "110px" },
-                                { header: "عنوان", render: (s) => s.title, filterValue: (s) => s.title },
-                              ]}
+                              value={row.serviceId}
                               onSelect={(s) => updateCostRow(idx, { serviceId: String(s.id) })}
                             />
                           </td>

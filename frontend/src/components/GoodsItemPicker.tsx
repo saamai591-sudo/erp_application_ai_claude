@@ -1,66 +1,43 @@
-import { useEffect, useState } from "react";
-import { RecordPickerField } from "./RecordPicker";
-import { api } from "../lib/api";
-import { toFaDigits } from "../lib/formatAmount";
+import { useMemo } from "react";
+import { GoodsPickerField } from "./GoodsPickerField";
+import { GoodsLite, GoodsScope, useGoodsCatalog } from "../lib/goodsCatalog";
 
-// انتخابگر کالای ماژول تولید: فهرست کالاها (نه خدمت) از /goods-items همراه نوع کالای گروه حسابداری و واحد اصلی.
-// filter = محدودیت دلخواه (مثلاً فقط نیمه‌ساخته/محصول برای کالای خروجی فرمول/دستور).
+// انتخابگر کالای ماژول تولید (فرمول ساخت، دستور، آمار، پای کار، زمان‌بندی، …) روی لایه‌ی مشترک «کالا در فرم‌ها»
+// (lib/goodsCatalog + components/GoodsPickerField): جستجوی سمت سرور، بدون گرفتن کل فهرست کالا.
+// `produced` = فقط نیمه‌ساخته/محصول (کالای خروجی فرمول/دستور/آمار). `useGoodsOptions(ids)` فقط کالاهای همان شناسه‌ها را (از کش مشترک) می‌دهد.
 
 export interface GoodsOpt { id: number; fullCode: string; title: string; unit: string; goodsType: string; isActive: boolean; trackingMethod: "NONE" | "BATCH" | "SERIAL" }
 
-// فقط درخواست‌های هم‌زمان یکی می‌شوند؛ نتیجه نگه داشته نمی‌شود تا کالای تازه‌تعریف‌شده بدون بارگذاری مجدد صفحه دیده شود.
-let inflight: Promise<GoodsOpt[]> | null = null;
-function fetchGoodsOptions(): Promise<GoodsOpt[]> {
-  if (!inflight) {
-    inflight = api
-      .get("/goods-items?kind=GOODS")
-      .then((rows: any[]) => rows.map((g) => ({ id: g.id, fullCode: g.fullCode, title: g.title, unit: g.mainUnit?.title ?? "", goodsType: g.accountingGroup?.goodsType ?? "", isActive: g.isActive !== false, trackingMethod: g.trackingMethod ?? "NONE" })))
-      .finally(() => {
-        inflight = null;
-      });
-  }
-  return inflight;
-}
+const toOpt = (g: GoodsLite): GoodsOpt => ({ id: g.id, fullCode: g.fullCode, title: g.title, unit: g.mainUnit?.title ?? "", goodsType: g.accountingGroup?.goodsType ?? "", isActive: g.isActive, trackingMethod: g.trackingMethod ?? "NONE" });
+
+const ANY_GOODS: GoodsScope = { kind: "GOODS" };
+const PRODUCED_GOODS: GoodsScope = { kind: "GOODS", goodsTypes: "SEMI_FINISHED,PRODUCT" };
 
 export const isProducedGoods = (g: GoodsOpt) => g.goodsType === "SEMI_FINISHED" || g.goodsType === "PRODUCT";
 
-export function useGoodsOptions(): GoodsOpt[] {
-  const [rows, setRows] = useState<GoodsOpt[]>([]);
-  useEffect(() => {
-    fetchGoodsOptions().then(setRows).catch(() => setRows([]));
-  }, []);
-  return rows;
+/** کالاهای شناسه‌های داده‌شده (برای واحد، نوع ردیابی، نوع کالا)؛ هنوز نرسیده‌ها در نتیجه نیستند و با رسیدن، فرم دوباره رسم می‌شود */
+export function useGoodsOptions(ids: (number | string | null | undefined)[]): GoodsOpt[] {
+  const { get } = useGoodsCatalog(ids);
+  const key = ids.map(Number).filter((n) => Number.isInteger(n) && n > 0).join(",");
+  const found = key ? [...new Set(key.split(",").map(Number))].map((id) => get(id)).filter((g): g is GoodsLite => !!g) : [];
+  const sig = found.map((g) => g.id).join(",");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => found.map(toOpt), [sig]);
 }
 
 export function GoodsItemPicker({
-  goods,
   value,
   onChange,
-  filter,
+  produced,
   disabled,
   title = "انتخاب کالا",
 }: {
-  goods: GoodsOpt[];
   value: number | string | null | undefined;
   onChange: (g: GoodsOpt) => void;
-  filter?: (g: GoodsOpt) => boolean;
+  /** فقط نیمه‌ساخته/محصول */
+  produced?: boolean;
   disabled?: boolean;
   title?: string;
 }) {
-  const sel = goods.find((g) => g.id === Number(value));
-  const rows = goods.filter((g) => g.isActive && (!filter || filter(g)));
-  return (
-    <RecordPickerField<GoodsOpt>
-      title={title}
-      disabled={disabled}
-      displayValue={sel ? `${toFaDigits(sel.fullCode)} - ${sel.title}` : ""}
-      rows={rows}
-      columns={[
-        { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-        { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-        { header: "واحد", render: (g) => g.unit, filterValue: (g) => g.unit, width: "90px" },
-      ]}
-      onSelect={onChange}
-    />
-  );
+  return <GoodsPickerField scope={produced ? PRODUCED_GOODS : ANY_GOODS} value={value} disabled={disabled} title={title} onSelect={(g) => onChange(toOpt(g))} />;
 }

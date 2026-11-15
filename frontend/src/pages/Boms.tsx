@@ -90,8 +90,9 @@ function BomForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
-  const goods = useGoodsOptions();
   const [form, setForm] = usePersistedState<FormState>(cacheKey, EMPTY);
+  // کالاهای ردیف‌ها (واحد، نوع ردیابی/کالا) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  const goods = useGoodsOptions([form.outputItemId, ...form.lines.map((l) => l.componentItemId)]);
   const [meta, setMeta] = useState<{ number: number | null; locked: boolean; usedCount: number; updatedAt: string | null }>({ number: null, locked: false, usedCount: 0, updatedAt: null });
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
@@ -178,7 +179,7 @@ function BomForm({ editId }: { editId?: number }) {
         <div className="form-grid">
           <div className="form-field">
             <label>کالای خروجی (نیمه‌ساخته / محصول)<RequiredMark /></label>
-            <GoodsItemPicker goods={goods} value={form.outputItemId} filter={isProducedGoods} disabled={locked} onChange={(g) => setForm({ ...form, outputItemId: String(g.id) })} />
+            <GoodsItemPicker value={form.outputItemId} produced disabled={locked} onChange={(g) => setForm({ ...form, outputItemId: String(g.id) })} />
           </div>
           <div className="form-field">
             <label>مقدار خروجی {unitOf(form.outputItemId) && `(${unitOf(form.outputItemId)})`}<RequiredMark /></label>
@@ -209,7 +210,7 @@ function BomForm({ editId }: { editId?: number }) {
                 <td>{toFaDigits(String(i + 1))}</td>
                 <td>
                   <GoodsItemPicker
-                    goods={goods}
+                   
                     value={l.componentItemId}
                     disabled={locked}
                     onChange={(g) => {

@@ -19,6 +19,7 @@ import { toFaDigits } from "../lib/formatAmount";
 
 import { DescriptionField } from "../components/DescriptionField";
 import { partyDisplayName } from "../lib/partyDisplay";
+import { GoodsPickerField } from "../components/GoodsPickerField";
 
 const SOURCE_TYPE_FA: Record<string, string> = { MANUAL: "دستی", PURCHASE: "خرید", PRODUCTION: "تولید" };
 
@@ -131,14 +132,12 @@ function BatchForm({ editId }: { editId?: number }) {
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_FORM);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemOption[]>([]);
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const { flash } = useSavedFlash();
 
   useEffect(() => {
-    api.get("/goods-items?kind=GOODS&trackingMethod=BATCH").then(setGoodsItems).catch(() => {});
     api.get("/parties").then(setParties).catch(() => {});
   }, []);
 
@@ -167,7 +166,6 @@ function BatchForm({ editId }: { editId?: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
 
-  const selectedGoodsItem = goodsItems.find((g) => String(g.id) === form.goodsItemId);
   const selectedParty = parties.find((p) => String(p.id) === form.supplierId);
 
   async function suggestNumber() {
@@ -235,15 +233,11 @@ function BatchForm({ editId }: { editId?: number }) {
         <div className="form-grid">
           <div className="form-field">
             <label>کالا<RequiredMark /></label>
-            <RecordPickerField
+            <GoodsPickerField
               title="انتخاب کالا"
+              scope={{ kind: "GOODS", trackingMethod: "BATCH" }}
               disabled={!!editId}
-              displayValue={selectedGoodsItem ? `${toFaDigits(selectedGoodsItem.fullCode)} — ${selectedGoodsItem.title}` : ""}
-              rows={goodsItems.filter((g) => g.isActive || String(g.id) === form.goodsItemId)}
-              columns={[
-                { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-              ]}
+              value={form.goodsItemId}
               onSelect={(g) => setForm({ ...form, goodsItemId: String(g.id) })}
             />
           </div>

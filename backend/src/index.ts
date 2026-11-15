@@ -6,6 +6,7 @@ import { ensureLightRole } from "./services/userAccountService";
 import { errorDisclosureGuard, GENERIC_ERROR } from "./middleware/errorDisclosure";
 import { usageResponse } from "./middleware/usageResponse";
 import { corsPolicy, securityHeaders } from "./middleware/securityHeaders";
+import compression from "compression";
 import { fiscalScopeContext } from "./middleware/fiscalScope";
 import { syncRegistryToDb } from "./authz/sync";
 
@@ -239,6 +240,8 @@ process.on("uncaughtException", (err) => {
 });
 app.disable("x-powered-by");
 app.use(securityHeaders);
+// فشرده‌سازی پاسخ‌ها (gzip): فهرست‌های بزرگ مثل «کالاها» با ده‌ها هزار ردیف چندین برابر کوچک‌تر منتقل می‌شوند
+app.use(compression());
 app.use(corsPolicy);
 app.use(express.json({ limit: "50mb" }));
 // هیچ متن خطای داخلی (Prisma/SQL، مسیر فایل، stack) در پاسخ‌ها به کلاینت نمی‌رسد؛ جزئیات فقط در لاگ سرور می‌ماند (middleware/errorDisclosure.ts)

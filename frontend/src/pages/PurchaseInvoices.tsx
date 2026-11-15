@@ -35,6 +35,8 @@ import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } fro
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { PlusIcon, CheckIcon, UndoIcon, EyeIcon } from "../components/icons";
 import { partyDisplayName } from "../lib/partyDisplay";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { GoodsLite, GoodsScope, cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // این فرآیند («فاکتور خرید») مستند تحلیل اختصاصی در پروژه ندارد؛ ساختار این فرم حاصل تصمیم مشترک با
 // کاربر است (نگاه کنید به یادداشت‌های backend/src/routes/purchaseInvoices.ts). با تایید فاکتور، مبلغ
@@ -58,11 +60,8 @@ interface PartyOption {
   name: string | null;
 }
 interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; decimalPlaces: number; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null }
-interface GoodsItemRow {
-  id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean;
-  isSpecial: boolean; taxRate: number | string | null;
-}
-interface ServiceOption { id: number; fullCode: string; title: string; kind: string; isSpecial: boolean; taxRate: number | string | null; accountingTreatment?: "EXPENSE" | "INVENTORY_COST" | null }
+const GOODS_SCOPE: GoodsScope = { kind: "GOODS", docDirection: "INBOUND", docType: "خرید" };
+const SERVICE_SCOPE: GoodsScope = { kind: "SERVICE" };
 interface ReceiptOption { id: number; number: number; date: string; warehouseTitle: string; supplierTitle?: string }
 interface ReceiptLine { id: number; goodsItemCode: string; goodsItemTitle: string; unitTitle: string; quantity: number; amount: number }
 
@@ -206,8 +205,6 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [purchaseTypes, setPurchaseTypes] = useState<PurchaseType[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
-  const [services, setServices] = useState<ServiceOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableWarehouseReceiptLine[]>([]);
   const [pickableAssetLines, setPickableAssetLines] = useState<PickableWarehouseReceiptLine[]>([]);
   const [receipts, setReceipts] = useState<ReceiptOption[]>([]);
@@ -215,6 +212,8 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", vendorInvoiceNumber: "", basis: "NO_BASIS" as Basis, partyId: "", purchaseTypeId: "", currencyId: "", fxRate: "", description: "", details: {} as DetailValues });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
   const [costRows, setCostRows] = usePersistedState<CostRowState[]>(`${cacheKey}:costs`, []);
+  // کالا و خدمت ردیف‌ها (واحد، نرخ ارزش افزوده، نحوه حسابداری خدمت) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل گرفته نمی‌شود
+  useGoodsCatalog([...rows.map((r) => r.goodsItemId), ...costRows.map((r) => r.serviceId)]);
   const [activeSection, setActiveSection] = useState<"items" | "otherCosts">("items");
   const [allocationDialogIdx, setAllocationDialogIdx] = useState<number | null>(null);
   const [meta, setMeta] = usePersistedState<{
@@ -233,20 +232,16 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [p, pt, c, g, sv, rc, fp] = await Promise.all([
+      const [p, pt, c, rc, fp] = await Promise.all([
         api.get("/parties?suppliersOnly=true"),
         api.get("/purchase-types"),
         api.get("/currencies"),
-        api.get("/goods-items?kind=GOODS&docDirection=INBOUND&docType=خرید"),
-        api.get("/goods-items?kind=SERVICE"),
         api.get("/purchase-invoices/pickable-receipts"),
         fetchSelectedFiscalPeriod(),
       ]);
       setParties(p);
       setPurchaseTypes(pt);
       setCurrencies(c);
-      setGoodsItems(g);
-      setServices(sv);
       setReceipts(rc);
       setFiscalPeriod(fp);
 
@@ -446,7 +441,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
   // ویرایش کند (دقیقاً هم‌الگوی مبلغ که با تغییر فی/مقدار دوباره محاسبه می‌شود، ولی خودش هم مستقیماً
   // قابل‌ویرایش است).
   function computeSuggestedVat(amount: number, discount: number, goodsItemId: string): string {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item, vatRateForDate(vatRates, header.date)), baseCurrency?.decimalPlaces ?? 2));
   }
   function onUnitPriceChange(idx: number, unitPrice: string) {
@@ -535,7 +530,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       return next.length ? next : [emptyRow()];
     });
   }
-  function onGoodsItemsSelected(idx: number, selected: GoodsItemRow[]) {
+  function onGoodsItemsSelected(idx: number, selected: GoodsLite[]) {
     if (selected.length === 0) return;
     const newRows = selected.map(
       (item): RowState => ({ ...emptyRow(), goodsItemId: String(item.id), unitId: String(item.mainUnitId) })
@@ -569,12 +564,12 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
 
   // تب «سایر هزینه‌ها» — دقیقاً هم‌الگوی ServicePurchaseInvoices.tsx (همان جدول/منطق بک‌اند مشترک است).
   function computeSuggestedVatForCost(amount: number, discount: number, serviceId: string): string {
-    const svc = services.find((s) => String(s.id) === serviceId);
+    const svc = cachedGoods(serviceId);
     return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(svc, vatRateForDate(vatRates, header.date)), baseCurrency?.decimalPlaces ?? 2));
   }
 
   // انتخاب خدمت در «سایر هزینه‌ها»: مبنای ردیف از «نحوه حسابداری» خدمت تعیین می‌شود (بهای موجودی ⇒ رسید انبار الزامی، هزینه ⇒ رسید انبار مجاز نیست)
-  function onCostServiceSelected(idx: number, svc: ServiceOption) {
+  function onCostServiceSelected(idx: number, svc: GoodsLite) {
     if (svc.accountingTreatment === "INVENTORY_COST") {
       updateCostRow(idx, { serviceId: String(svc.id), basis: "WAREHOUSE_RECEIPT" });
     } else {
@@ -737,7 +732,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
       if (!(l.amount >= 0)) return setError(`مبلغ ردیف ${i + 1} سایر هزینه‌ها نامعتبر است`);
       if (l.basis === "WAREHOUSE_RECEIPT" && !l.sourceReceiptDocumentId) return setError(`سایر هزینه‌ها ردیف ${i + 1}: انتخاب رسید انبار الزامی است`);
       // بر اساس «نحوه حسابداری» خدمت (سمت سرور هم همین کنترل انجام می‌شود): بهای موجودی ⇒ رسید انبار الزامی؛ هزینه ⇒ رسید انبار ممنوع
-      const svc = services.find((x) => x.id === l.serviceId);
+      const svc = cachedGoods(l.serviceId);
       if (svc?.accountingTreatment === "INVENTORY_COST" && (l.basis !== "WAREHOUSE_RECEIPT" || !l.sourceReceiptDocumentId)) {
         return setError(`سایر هزینه‌ها ردیف ${i + 1}: نحوه حسابداری خدمت «${svc.title}» «بهای موجودی» است؛ انتخاب رسید انبار الزامی است`);
       }
@@ -1059,8 +1054,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
-                  const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
+                  const item = cachedGoods(Number(row.goodsItemId));
                   const src = pickableLines.find((l) => String(l.id) === row.sourceInventoryLineId);
                   return (
                     <tr key={idx}>
@@ -1085,18 +1079,13 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                         {header.basis !== "NO_BASIS" ? (
                           <span>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</span>
                         ) : (
-                          <RecordPickerField
+                          <GoodsPickerField
                             title="انتخاب کالا"
-                            displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                            rows={pickerRows}
-                            columns={[
-                              { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                              { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                            ]}
-                            multiSelect
-                            resultInDisplayOrder
+                            scope={GOODS_SCOPE}
+                            value={row.goodsItemId}
+                            multiple
                             onOpen={guardRowEntry}
-                            onSelectMultiple={(selected) => onGoodsItemsSelected(idx, selected as GoodsItemRow[])}
+                            onSelectMultiple={(selected) => onGoodsItemsSelected(idx, selected)}
                           />
                         )}
                       </td>
@@ -1180,7 +1169,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
               </thead>
               <tbody>
                 {costRows.map((row, idx) => {
-                  const svc = services.find((s) => String(s.id) === row.serviceId);
+                  const svc = cachedGoods(row.serviceId);
                   const receipt = receipts.find((r) => String(r.id) === row.sourceReceiptDocumentId);
                   const allocatedSum = round(row.allocations.reduce((s, a) => s + (Number(a.allocatedAmount) || 0), 0), decimalPlaces);
                   const balanced = row.basis !== "WAREHOUSE_RECEIPT" || !row.sourceReceiptDocumentId || allocatedSum === round(Number(row.amount) || 0, decimalPlaces);
@@ -1188,16 +1177,12 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                       <td style={{ minWidth: 200 }}>
-                        <RecordPickerField
+                        <GoodsPickerField
                           title="انتخاب کد هزینه (خدمت)"
-                          displayValue={svc ? `${toFaDigits(svc.fullCode)} — ${svc.title}` : ""}
-                          rows={services}
-                          columns={[
-                            { header: "کد", render: (s) => toFaDigits((s as ServiceOption).fullCode), filterValue: (s) => (s as ServiceOption).fullCode, width: "110px" },
-                            { header: "عنوان", render: (s) => (s as ServiceOption).title, filterValue: (s) => (s as ServiceOption).title },
-                          ]}
+                          scope={SERVICE_SCOPE}
+                          value={row.serviceId}
                           onOpen={guardRowEntry}
-                          onSelect={(s) => onCostServiceSelected(idx, s as ServiceOption)}
+                          onSelect={(s) => onCostServiceSelected(idx, s)}
                         />
                       </td>
                       <td style={{ minWidth: 120 }}>
@@ -1290,7 +1275,7 @@ function PurchaseInvoiceForm({ editId }: { editId?: number }) {
         <PurchaseCostAllocationDialog
           serviceTitle={(() => {
             const r = costRows[allocationDialogIdx];
-            const svc = services.find((s) => String(s.id) === r.serviceId);
+            const svc = cachedGoods(r.serviceId);
             return svc ? svc.title : "";
           })()}
           receiptNumber={Number(costRows[allocationDialogIdx].sourceReceiptNumber) || 0}

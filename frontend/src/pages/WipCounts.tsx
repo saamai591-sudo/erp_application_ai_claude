@@ -92,10 +92,11 @@ function WipForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
-  const goods = useGoodsOptions();
   const [periods, setPeriods] = useState<PeriodOpt[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenterOpt[]>([]);
   const [form, setForm] = usePersistedState<FormState>(cacheKey, EMPTY);
+  // کالاهای ردیف‌ها (واحد، نوع ردیابی/کالا) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  const goods = useGoodsOptions(form.lines.map((l) => l.goodsItemId));
   const [meta, setMeta] = useState<{ number: number | null; status: string; updatedAt: string | null; lockedReason: string | null }>({ number: null, status: "DRAFT", updatedAt: null, lockedReason: null });
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
@@ -253,7 +254,7 @@ function WipForm({ editId }: { editId?: number }) {
                   <td>
                     <CostCenterPickerField costCenters={costCenters} value={l.costCenterId} onChange={(id) => setLine(i, { costCenterId: id })} />
                   </td>
-                  <td><GoodsItemPicker goods={goods} value={l.goodsItemId} onChange={(g) => setLine(i, { goodsItemId: String(g.id), bomId: "", bomNumber: null })} /></td>
+                  <td><GoodsItemPicker value={l.goodsItemId} onChange={(g) => setLine(i, { goodsItemId: String(g.id), bomId: "", bomNumber: null })} /></td>
                   <td><AmountInput value={l.quantity} onChange={(v) => setLine(i, { quantity: v })} allowDecimal /></td>
                   <td>{isProduct(l) ? <AmountInput value={l.completionPercent} onChange={(v) => setLine(i, v === "" ? { completionPercent: v, bomId: "", bomNumber: null } : { completionPercent: v })} allowDecimal /> : <span style={{ opacity: 0.5 }}>—</span>}</td>
                   <td>{hasPct(l) ? <BomSelect options={eligible[Number(l.goodsItemId)]} value={l.bomId} currentNumber={l.bomNumber} onChange={(v) => setLine(i, { bomId: v, bomNumber: null })} /> : <span style={{ opacity: 0.5 }}>—</span>}</td>

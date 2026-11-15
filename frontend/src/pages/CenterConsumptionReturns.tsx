@@ -22,6 +22,7 @@ import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { PlusIcon } from "../components/icons";
+import { cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // «برگشت مصرف مرکز هزینه» — طبق stockAnalysis.md بند ۴۰: همیشه به یک ردیف مصرف مرکز هزینه‌ی
 // قطعی‌شده Reference می‌دهد (نه «بدون مبنا») + کنترل ReturnedQuantity <= IssuedQuantity. نگاه کنید به
@@ -33,7 +34,6 @@ const VIEW_ACCOUNTING_PERMISSION = "inventory.issue-returns.center-consumption-r
 type DocStatus = "REGISTERED" | "FINALIZED";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
-interface GoodsItemRow { id: number; trackingMethod: "NONE" | "BATCH" | "SERIAL"; isLocationTracked: boolean }
 interface PickableLine { id: number; sourceCenterConsumptionLineId: number; number: number; date: string; costCenterTitle: string | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
 
 interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number; totalAmount?: number }
@@ -122,7 +122,6 @@ function CenterConsumptionReturnForm({ editId, basePath }: { editId?: number; ba
   const { hasPermission } = usePermissions();
   const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
   const detailConfig = useDocDetailConfig("CENTER_CONSUMPTION_RETURN");
@@ -156,11 +155,12 @@ function CenterConsumptionReturnForm({ editId, basePath }: { editId?: number; ba
       })),
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     loadExtra: async () => {
-      const [whs, items]: [Warehouse[], GoodsItemRow[]] = await Promise.all([api.get("/warehouses"), api.get("/goods-items?kind=GOODS")]);
+      const whs: Warehouse[] = await api.get("/warehouses");
       setWarehouses(whs);
-      setGoodsItems(items);
     },
   });
+  // کالاهای ردیف‌ها (واحد، ردیابی، عنوان) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
 
   useEffect(() => {
     if (!header.warehouseId) {
@@ -342,7 +342,7 @@ function CenterConsumptionReturnForm({ editId, basePath }: { editId?: number; ba
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
+                  const item = cachedGoods(Number(row.goodsItemId));
                   const src = pickableLines.find((l) => String(l.sourceCenterConsumptionLineId) === row.sourceCenterConsumptionLineId);
                   const sourceDisplay = src
                     ? toFaDigits(String(src.number))

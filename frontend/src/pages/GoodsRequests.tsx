@@ -23,13 +23,15 @@ import { DescriptionField } from "../components/DescriptionField";
 import { CheckIcon, UndoIcon, RejectIcon, CloseFlagIcon, PlusIcon } from "../components/icons";
 import { partyDisplayName } from "../lib/partyDisplay";
 import { REQUEST_STATUS_FA } from "../lib/enumLabels";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { GoodsScope, cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
+const GOODS_SCOPE: GoodsScope = { kind: "GOODS" };
 type RequestNature = "CENTER_REQUEST" | "PROJECT_REQUEST" | "FIXED_ASSET_REQUEST";
 type RequestStatus = "DRAFT" | "REVIEWED" | "APPROVED" | "REJECTED" | "CLOSED";
 
 interface RequestTypeOption { id: number; code: number; title: string; nature: RequestNature }
 interface OrgUnitOption { id: number; code: number; title: string }
-interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; kind: string }
 interface CostCenterOption { id: number; title: string }
 interface ProjectOption { id: number; detailCode: string; title: string; isActive: boolean }
 interface PartyOption { id: number; detailCode: string; firstName: string | null; lastName: string | null; name: string | null; category: "INDIVIDUAL" | "LEGAL"; isActive: boolean }
@@ -187,12 +189,12 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
   const cacheKey = `form:${location.pathname}`;
   const [requestTypes, setRequestTypes] = useState<RequestTypeOption[]>([]);
   const [orgUnits, setOrgUnits] = useState<OrgUnitOption[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenterOption[]>([]);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { requestTypeId: "", orgUnitId: "", date: "", description: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
   const [meta, setMeta] = usePersistedState<{
     number: number;
     status: RequestStatus;
@@ -209,11 +211,9 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [types, units, items, ccs, projs, pts, fp]: [RequestTypeOption[], OrgUnitOption[], GoodsItemRow[], CostCenterOption[], ProjectOption[], PartyOption[], FiscalPeriodRange | null] =
-        await Promise.all([
+      const [types, units, ccs, projs, pts, fp]: [RequestTypeOption[], OrgUnitOption[], CostCenterOption[], ProjectOption[], PartyOption[], FiscalPeriodRange | null] = await Promise.all([
           api.get("/goods-request-types"),
           api.get("/org-units"),
-          api.get("/goods-items?kind=GOODS"),
           api.get("/cost-centers"),
           api.get("/projects").catch(() => []),
           api.get("/parties?category=INDIVIDUAL"),
@@ -221,7 +221,6 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
         ]);
       setRequestTypes(types);
       setOrgUnits(units);
-      setGoodsItems(items);
       setCostCenters(ccs);
       setProjects(projs);
       setParties(pts);
@@ -278,7 +277,7 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
   }
 
   function onGoodsItemChange(idx: number, goodsItemId: string) {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "", unitTitle: "" });
   }
 
@@ -510,8 +509,7 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
             </thead>
             <tbody>
               {rows.map((row, idx) => {
-                const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
-                const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
+                const item = cachedGoods(Number(row.goodsItemId));
                 const cc = costCenters.find((c) => String(c.id) === row.costCenterId);
                 const proj = projects.find((p) => String(p.id) === row.projectId);
                 const party = parties.find((p) => String(p.id) === row.partyId);
@@ -519,18 +517,7 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
                   <tr key={idx} onClick={() => setFocusedRow(idx)} className={focusedRow === idx ? "active-list" : ""}>
                     <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                     <td style={{ minWidth: 200 }}>
-                      <RecordPickerField
-                        title="انتخاب کالا"
-                        disabled={coreDisabled}
-                        displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                        rows={pickerRows}
-                        columns={[
-                          { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                          { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                        ]}
-                        onOpen={() => setFocusedRow(idx)}
-                        onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
-                      />
+                      <GoodsPickerField scope={GOODS_SCOPE} value={row.goodsItemId} title="انتخاب کالا" disabled={coreDisabled} onOpen={() => setFocusedRow(idx)} onSelect={(g) => onGoodsItemChange(idx, String(g.id))} />
                     </td>
                     <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>
                     <td style={{ minWidth: 130 }}>
@@ -612,7 +599,7 @@ function GoodsRequestForm({ editId }: { editId?: number }) {
 
         {focusedRow !== null && rows[focusedRow]?.goodsItemId && (
           <div className="je-breadcrumb">
-            <div><b>کالا:</b> {goodsItems.find((g) => g.id === Number(rows[focusedRow].goodsItemId))?.title || "—"}</div>
+            <div><b>کالا:</b> {cachedGoods(Number(rows[focusedRow].goodsItemId))?.title || "—"}</div>
           </div>
         )}
       </form>

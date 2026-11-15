@@ -4,7 +4,7 @@ import { ErrorToast } from "../components/ErrorToast";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { AmountInput } from "../components/AmountInput";
-import { GoodsItemPicker, isProducedGoods, useGoodsOptions } from "../components/GoodsItemPicker";
+import { GoodsItemPicker, useGoodsOptions } from "../components/GoodsItemPicker";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { formatJalaliDate } from "../lib/formatDate";
 import { CostCenterPickerField } from "../components/TypePickerFields";
@@ -91,8 +91,9 @@ function SheetForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
-  const goods = useGoodsOptions();
   const [form, setForm] = usePersistedState<FormState>(cacheKey, EMPTY);
+  // کالاهای ردیف‌ها (واحد، نوع ردیابی/کالا) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  const goods = useGoodsOptions(form.lines.map((l) => l.goodsItemId));
   const [meta, setMeta] = useState<{ locked: boolean }>({ locked: false });
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenterOpt[]>([]);
@@ -192,7 +193,7 @@ function SheetForm({ editId }: { editId?: number }) {
               {form.lines.map((l, i) => (
                 <tr key={i}>
                   <td>{toFaDigits(String(i + 1))}</td>
-                  <td><GoodsItemPicker goods={goods} value={l.goodsItemId} filter={isProducedGoods} disabled={locked} onChange={(g) => setLine(i, { goodsItemId: String(g.id) })} /></td>
+                  <td><GoodsItemPicker value={l.goodsItemId} produced disabled={locked} onChange={(g) => setLine(i, { goodsItemId: String(g.id) })} /></td>
                   <td>{unitOf(l.goodsItemId)}</td>
                   <td>
                     <select value={l.driverId} disabled={locked} onChange={(e) => setLine(i, { driverId: e.target.value })}>

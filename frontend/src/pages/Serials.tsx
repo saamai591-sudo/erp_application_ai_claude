@@ -4,7 +4,6 @@ import { showError } from "../lib/toast";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
-import { RecordPickerField } from "../components/RecordPicker";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
@@ -16,6 +15,7 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { formatJalaliDate } from "../lib/formatDate";
 import { toFaDigits } from "../lib/formatAmount";
 import { DescriptionField } from "../components/DescriptionField";
+import { GoodsPickerField } from "../components/GoodsPickerField";
 
 interface GoodsItemOption {
   id: number;
@@ -102,13 +102,11 @@ function SerialForm({ editId }: { editId?: number }) {
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_FORM);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const { flash } = useSavedFlash();
 
   useEffect(() => {
-    api.get("/goods-items?kind=GOODS&trackingMethod=SERIAL").then(setGoodsItems).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -134,7 +132,6 @@ function SerialForm({ editId }: { editId?: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editId]);
 
-  const selectedGoodsItem = goodsItems.find((g) => String(g.id) === form.goodsItemId);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -186,15 +183,11 @@ function SerialForm({ editId }: { editId?: number }) {
         <div className="form-grid">
           <div className="form-field">
             <label>کالا<RequiredMark /></label>
-            <RecordPickerField
+            <GoodsPickerField
               title="انتخاب کالا"
+              scope={{ kind: "GOODS", trackingMethod: "SERIAL" }}
               disabled={!!editId}
-              displayValue={selectedGoodsItem ? `${toFaDigits(selectedGoodsItem.fullCode)} — ${selectedGoodsItem.title}` : ""}
-              rows={goodsItems.filter((g) => g.isActive || String(g.id) === form.goodsItemId)}
-              columns={[
-                { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-              ]}
+              value={form.goodsItemId}
               onSelect={(g) => setForm({ ...form, goodsItemId: String(g.id) })}
             />
           </div>

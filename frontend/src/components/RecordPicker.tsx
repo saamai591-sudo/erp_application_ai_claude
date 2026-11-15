@@ -1,8 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Modal } from "./Modal";
 import { usePickerKeyboard } from "./pickerKeyboard";
 import { useFxEnabled } from "../lib/useEntitlements";
 import { RequiredMark } from "./RequiredMark";
+
+// فهرست‌های بزرگ (مثلاً ۲۵٬۰۰۰ کالا): فقط بخشی از ردیف‌ها در صفحه ساخته می‌شود و با «نمایش بیشتر» یا محدودتر کردن فیلتر ادامه می‌یابد؛
+// ساخت همه‌ی ردیف‌ها در DOM دیالوگ را چند ثانیه کند می‌کرد.
+const PAGE_ROWS = 200;
+const FA_COLLATOR = new Intl.Collator("fa");
 
 export interface PickerColumn<T> {
   header: string;
@@ -128,6 +133,8 @@ export function RecordPickerDialog<T extends { id: number | string }>({
   const fxEnabled = useFxEnabled();
   const columns = fxEnabled ? columnsProp : columnsProp.filter((c) => !c.fxOnly);
   const [filters, setFilters] = useState<Record<string, string>>({});
+  const deferredFilters = useDeferredValue(filters); // تایپ در فیلتر روان می‌ماند؛ فیلتر ردیف‌ها کمی دیرتر اعمال می‌شود
+  const [limit, setLimit] = useState(PAGE_ROWS);
   const [selectedId, setSelectedId] = useState<string | number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string | number>>(new Set());
   const [sort, setSort] = useState<{ header: string; dir: "asc" | "desc" } | null>(
@@ -141,7 +148,7 @@ export function RecordPickerDialog<T extends { id: number | string }>({
       const col = columns.find((c) => c.header === sort.header);
       if (col) {
         result.sort((a, b) => {
-          const cmp = col.filterValue(a).localeCompare(col.filterValue(b), "fa");
+          const cmp = FA_COLLATOR.compare(col.filterValue(a), col.filterValue(b));
           return sort.dir === "asc" ? cmp : -cmp;
         });
       }
@@ -153,13 +160,16 @@ export function RecordPickerDialog<T extends { id: number | string }>({
     () =>
       sortedRows.filter((row) =>
         columns.every((col) => {
-          const f = (filters[col.header] || "").trim().toLowerCase();
+          const f = (deferredFilters[col.header] || "").trim().toLowerCase();
           if (!f) return true;
           return col.filterValue(row).toLowerCase().includes(f);
         })
       ),
-    [sortedRows, columns, filters]
+    [sortedRows, columns, deferredFilters]
   );
+  // با تغییر فیلتر/مرتب‌سازی دوباره از اولِ فهرست شروع می‌کنیم
+  useEffect(() => setLimit(PAGE_ROWS), [deferredFilters, sort]);
+  const visibleRows = useMemo(() => (filteredRows.length > limit ? filteredRows.slice(0, limit) : filteredRows), [filteredRows, limit]);
 
   function toggleSort(header: string) {
     setSort((prev) => {
@@ -202,7 +212,7 @@ export function RecordPickerDialog<T extends { id: number | string }>({
   }
 
   const kb = usePickerKeyboard({
-    count: filteredRows.length,
+    count: visibleRows.length,
     resetKey: JSON.stringify([filters, sort]),
     onEnter: (i) => {
       const row = filteredRows[i];
@@ -262,7 +272,7 @@ export function RecordPickerDialog<T extends { id: number | string }>({
                 <td colSpan={columns.length + (multiSelect ? 1 : 0)} className="empty-state" style={{ border: "none" }}>موردی یافت نشد</td>
               </tr>
             )}
-            {filteredRows.map((row, idx) =>
+            {visibleRows.map((row, idx) =>
               multiSelect ? (
                 <tr
                   key={row.id}
@@ -295,6 +305,14 @@ export function RecordPickerDialog<T extends { id: number | string }>({
                   ))}
                 </tr>
               )
+            )}
+            {filteredRows.length > visibleRows.length && (
+              <tr>
+                <td colSpan={columns.length + (multiSelect ? 1 : 0)} style={{ textAlign: "center", padding: 8, border: "none" }}>
+                  {`نمایش ${visibleRows.length.toLocaleString("fa-IR")} از ${filteredRows.length.toLocaleString("fa-IR")} مورد — برای یافتن سریع‌تر فیلتر کنید `}
+                  <button type="button" className="btn secondary" style={{ padding: "2px 10px", fontSize: 12 }} onClick={() => setLimit((n) => n + PAGE_ROWS * 5)}>نمایش بیشتر</button>
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
@@ -329,7 +347,7 @@ function PickerSortIcon({ dir }: { dir: "asc" | "desc" | null }) {
   );
 }
 
-function SearchIcon() {
+export function SearchIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
       <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.8" />
@@ -338,7 +356,7 @@ function SearchIcon() {
   );
 }
 
-function ClearIcon() {
+export function ClearIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
       <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />

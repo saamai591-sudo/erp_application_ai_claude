@@ -12,10 +12,10 @@ import { showError } from "../lib/toast";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { takeFormPrefill } from "../lib/formPrefill";
-import { fetchSalesLineItems } from "../lib/salesLineItems";
 import { RecordPickerField } from "../components/RecordPicker";
 import { AmountInput } from "../components/AmountInput";
 import { toFaDigits } from "../lib/formatAmount";
+import { GoodsPickerField } from "../components/GoodsPickerField";
 
 // کارتابل › تنظیمات › دستورهای میانبر دستیار: عبارتی که کاربر در «دستیار» می‌نویسد ← یک کار (فعلاً پیش‌فاکتور) با نوع/مرکز فروشِ از پیش‌تعیین‌شده.
 // برای کل شرکت یکی است؛ هر دستور را می‌شود به نقش‌هایی محدود کرد (خالی = همه‌ی کاربرانِ دارای دسترسی خودِ کار).
@@ -79,12 +79,6 @@ const MODE_FIELDS: { key: "salesType" | "salesCenter" | "description" | "discoun
   { key: "description", title: "شرح" },
   { key: "discountPercent", title: "تخفیف (درصد)" },
 ];
-interface GoodsOpt {
-  id: number;
-  fullCode: string;
-  title: string;
-  isActive: boolean;
-}
 /** پیش‌پر شدن فرم دستور از روی یک پیش‌فاکتور (دکمه‌ی «ساخت دستور دستیار» در فرم پیش‌فاکتور) */
 export interface MacroFromQuotePrefill {
   salesTypeId: number;
@@ -204,7 +198,6 @@ function MacroForm({ editId }: { editId?: number }) {
   const cacheKey = `form:${location.pathname}:form`;
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_FORM);
   const [opts, setOpts] = useState<Options>({ roles: [], salesTypes: [], salesCenters: [] });
-  const [goods, setGoods] = useState<GoodsOpt[]>([]);
   const [actions, setActions] = useState<{ key: string; title: string; presets: string[] }[]>([]);
   const [cashBoxes, setCashBoxes] = useState<Opt[]>([]);
   const [bankAccounts, setBankAccounts] = useState<{ id: number; detailTitle: string; accountType?: { hasChequeBook: boolean } }[]>([]);
@@ -227,7 +220,6 @@ function MacroForm({ editId }: { editId?: number }) {
   useEffect(() => {
     api.get("/assistant-macros/options").then(setOpts).catch((e) => setError(e.message));
     api.get("/assistant-macros/actions").then(setActions).catch(() => {});
-    fetchSalesLineItems<GoodsOpt>().then(setGoods).catch(() => {});
     api.get("/cash-boxes").then(setCashBoxes).catch(() => {});
     api.get("/banking/accounts").then(setBankAccounts).catch(() => {});
     api.get("/card-readers").then(setCardReaders).catch(() => {});
@@ -454,19 +446,14 @@ function MacroForm({ editId }: { editId?: number }) {
             </thead>
             <tbody>
               {form.lines.map((l, idx) => {
-                const g = goods.find((x) => x.id === Number(l.goodsItemId));
                 return (
                   <tr key={idx}>
                     <td>
-                      <RecordPickerField
+                      <GoodsPickerField
                         title="انتخاب کالا"
-                        displayValue={g ? `${toFaDigits(g.fullCode)} — ${g.title}` : ""}
-                        rows={goods.filter((x) => x.isActive)}
-                        columns={[
-                          { header: "کد", render: (x: GoodsOpt) => toFaDigits(x.fullCode), filterValue: (x: GoodsOpt) => x.fullCode, width: "110px" },
-                          { header: "عنوان", render: (x: GoodsOpt) => x.title, filterValue: (x: GoodsOpt) => x.title },
-                        ]}
-                        onSelect={(x: GoodsOpt) => setForm({ ...form, lines: form.lines.map((r, i) => (i === idx ? { ...r, goodsItemId: String(x.id) } : r)) })}
+                        scope={{ kind: "GOODS,SERVICE" }}
+                        value={l.goodsItemId}
+                        onSelect={(x) => setForm({ ...form, lines: form.lines.map((r, i) => (i === idx ? { ...r, goodsItemId: String(x.id) } : r)) })}
                       />
                     </td>
                     <td>

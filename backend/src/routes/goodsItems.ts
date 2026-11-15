@@ -105,39 +105,103 @@ export async function resolveSerial(goodsGroupId: number, explicitCode: string |
 // کالا / خدمت — هر دو از یک جدول (GoodsItem) با تفکیک kind
 // =========================================================================
 
+// ──────────────── انتخاب کالا در فرم‌ها: جستجوی سمت سرور ────────────────
+// فرم‌ها دیگر کل فهرست کالا را نمی‌گیرند: انتخابگر با GET /goods-items/search جستجو می‌کند (چند ده مورد) و کالاهای ردیف‌های سند را با ids می‌خواند.
+// ستون‌های سبک (LITE) همان چیزی است که فرم‌های سند و انتخابگرها می‌خوانند؛ فهرست کامل برای صفحه‌ی مدیریت کالا همچنان GET /goods-items است.
+const LITE_SELECT = {
+  id: true, kind: true, goodsGroupId: true, code: true, fullCode: true, rawTitle: true, title: true, barcode: true,
+  mainUnitId: true, trackingMethod: true, isLocationTracked: true, accountingGroupId: true,
+  isSpecial: true, taxRate: true, taxItemId: true, accountingTreatment: true, isActive: true,
+  mainUnit: { select: { id: true, title: true } },
+  accountingGroup: { select: { id: true, title: true, goodsType: true } },
+} as const;
+
+const csv = (v: unknown) => String(v ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+const normalizeQuery = (q: string) => toEnglishDigits(q).replace(/ي/g, "ی").replace(/ك/g, "ک").replace(/s+/g, " ").trim();
+
+/** فیلتر «ماهیت/نوع سند انبار» (مستند «نوع کالا-ماهیت سند انبار»)؛ null = هیچ کالایی مجاز نیست. فقط برای کالا معنا دارد: خدمت وارد انبار نمی‌شود و مستثنی است */
+function docTypeFilter(direction: unknown, type: unknown): { OR: any[] } | undefined | null {
+  if (!direction || !type) return undefined;
+  const allowed = getAllowedGoodsTypes(direction as any, String(type));
+  if (!allowed || allowed.length === 0) return null;
+  return { OR: [{ kind: "SERVICE" }, { accountingGroup: { goodsType: { in: allowed as any } } }] };
+}
+
+/** دامنه‌ی مشترک فیلترها (kind, trackingMethod, نوع کالای گروه حسابداری، نوع سند انبار، فقط فعال‌ها) برای جستجو */
+function scopeWhere(req: any): any | null {
+  const kindList = csv(req.query.kind);
+  const goodsTypes = csv(req.query.goodsTypes);
+  const docFilter = docTypeFilter(req.query.docDirection, req.query.docType);
+  if (docFilter === null) return null;
+  // هر شرط یک عضو AND است تا شرط‌های دارای کلید یکسان (مثلاً OR فیلتر نوع سند و OR جستجوی دقیق) هرگز هم را بازنویسی نکنند
+  const excludeTreatment = String(req.query.excludeTreatment ?? "");
+  return {
+    AND: [
+      ...(kindList.length ? [{ kind: { in: kindList } }] : []),
+      ...(req.query.trackingMethod ? [{ trackingMethod: String(req.query.trackingMethod) }] : []),
+      ...(goodsTypes.length ? [{ accountingGroup: { goodsType: { in: goodsTypes } } }] : []),
+      ...(docFilter ? [docFilter] : []),
+      // نحوه‌ی حسابداری خدمت (مثلاً INVENTORY_COST کنار گذاشته شود)؛ خدمت/کالای بدون مقدار حذف نمی‌شود
+      ...(excludeTreatment ? [{ OR: [{ accountingTreatment: null }, { accountingTreatment: { not: excludeTreatment } }] }] : []),
+      ...(String(req.query.activeOnly ?? "1") === "0" ? [] : [{ isActive: true }]),
+    ],
+  };
+}
+
+// جستجوی کالا: q (چند کلمه؛ هر کلمه باید در کد/بارکد/عنوان بیاید، ارقام فارسی و «ي/ك» نرمال می‌شوند) یا ids (دریافت کالاهای مشخص، بدون فیلتر فعال/نوع).
+// نتیجه: کالای دقیقاً هم‌کد/هم‌بارکد با q اول می‌آید، سپس بر اساس کد؛ { rows, hasMore } (حداکثر limit، پیش‌فرض ۳۰ و سقف ۱۰۰).
+router.get("/goods-items/search", async (req, res) => {
+  const ids = csv(req.query.ids).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 500);
+  if (req.query.ids !== undefined) {
+    const rows = ids.length ? await prisma.goodsItem.findMany({ where: { id: { in: ids } }, select: LITE_SELECT }) : [];
+    return res.json({ rows, hasMore: false });
+  }
+  const scope = scopeWhere(req);
+  if (scope === null) return res.json({ rows: [], hasMore: false });
+  // exclude: کالاهای کنار گذاشته‌شده (مثلاً کالاهایی که در ردیف‌های دیگر همان فرم آمده‌اند)
+  const exclude = csv(req.query.exclude).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 500);
+  const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
+  const q = normalizeQuery(String(req.query.q ?? ""));
+  const tokens = q ? q.split(" ").slice(0, 5) : [];
+
+  let exact: any[] = [];
+  if (q) {
+    exact = await prisma.goodsItem.findMany({ where: { AND: [scope, ...(exclude.length ? [{ id: { notIn: exclude } }] : []), { OR: [{ fullCode: q }, { barcode: q }, { code: q }] }] }, select: LITE_SELECT, orderBy: { fullCode: "asc" }, take: 10 });
+  }
+  const insensitive = "insensitive" as const;
+  const rest = await prisma.goodsItem.findMany({
+    where: {
+      AND: [
+        scope,
+        ...(exact.length || exclude.length ? [{ id: { notIn: [...exclude, ...exact.map((r) => r.id)] } }] : []),
+        ...tokens.map((t) => ({ OR: [{ fullCode: { contains: t, mode: insensitive } }, { barcode: { contains: t, mode: insensitive } }, { title: { contains: t, mode: insensitive } }, { rawTitle: { contains: t, mode: insensitive } }] })),
+      ],
+    },
+    select: LITE_SELECT,
+    orderBy: { fullCode: "asc" },
+    take: limit + 1 - exact.length,
+  });
+  const all = [...exact, ...rest];
+  res.json({ rows: all.slice(0, limit), hasMore: all.length > limit });
+});
+
 router.get("/goods-items", async (req, res) => {
   // kind می‌تواند یک مقدار (GOODS | SERVICE) یا چند مقدار جداشده با ویرگول (GOODS,SERVICE) باشد.
-  const kind = req.query.kind as string | undefined;
-  const kindList = kind ? kind.split(",").map((k) => k.trim()).filter(Boolean) : [];
+  const kindList = csv(req.query.kind);
   const trackingMethod = req.query.trackingMethod as string | undefined;
 
-  // فیلتر اختیاری بر اساس ماهیت/نوع سند انبار (طبق مستند «نوع کالا-ماهیت سند انبار»):
-  // وقتی ماژول‌های آینده‌ی سند انبار (رسید انبار، حواله انبار، ...) بخواهند فقط کالاهای
-  // مجاز برای بارگذاری در سندی با ماهیت/نوع مشخص را نشان دهند، از این دو کوئری‌پارامتر استفاده می‌کنند.
-  const docDirection = req.query.docDirection as string | undefined; // "INBOUND" | "OUTBOUND"
-  const docType = req.query.docType as string | undefined; // مثلاً "خرید"
-  let allowedGoodsTypesFilter: any = undefined;
-  if (docDirection && docType) {
-    const allowed = getAllowedGoodsTypes(docDirection as any, docType);
-    if (!allowed || allowed.length === 0) return res.json([]);
-    // این فیلتر بر اساس «نوع کالای انبار» است و فقط برای کالا معنا دارد؛ خدمت وارد انبار نمی‌شود، پس
-    // وقتی kind شامل SERVICE است، خدمت‌ها از این فیلتر مستثنی‌اند.
-    allowedGoodsTypesFilter = { OR: [{ kind: "SERVICE" }, { accountingGroup: { goodsType: { in: allowed as any } } }] };
-  }
+  // فیلتر اختیاری بر اساس ماهیت/نوع سند انبار (طبق مستند «نوع کالا-ماهیت سند انبار»)
+  const docFilter = docTypeFilter(req.query.docDirection, req.query.docType);
+  if (docFilter === null) return res.json([]);
 
   const items = await prisma.goodsItem.findMany({
     where: {
       ...(kindList.length ? { kind: { in: kindList as any } } : {}),
       ...(trackingMethod ? { trackingMethod: trackingMethod as any } : {}),
-      ...(allowedGoodsTypesFilter || {}),
+      ...(docFilter || {}),
     },
-    include: {
-      goodsGroup: true,
-      mainUnit: true,
-      weightUnit: true,
-      accountingGroup: true,
-      attributeValues: { include: { attribute: true, item: true } },
-    },
+    // مقدار ویژگی‌ها (attributeValues) عمداً در فهرست نیست: فقط فرم کالا (GET /goods-items/:id) آن را می‌خواند
+    ...(docFilter ? { select: LITE_SELECT } : { include: { goodsGroup: true, mainUnit: true, weightUnit: true, accountingGroup: true } }),
     orderBy: { id: "desc" },
   });
   res.json(items);

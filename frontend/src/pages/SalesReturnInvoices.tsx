@@ -27,6 +27,8 @@ import { toBaseCurrencyAmount } from "../lib/currencyConversion";
 import { DescriptionField } from "../components/DescriptionField";
 import { PlusIcon, UndoIcon, EyeIcon } from "../components/icons";
 import { partyTitleOf } from "../lib/partyDisplay";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { GoodsScope, cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // «فاکتور برگشت از فروش» — طبق تصمیم صریح کاربر، دقیقاً هم‌ساختار/هم‌رفتار فاکتور فروش
 // (SalesInvoices.tsx)، با جایگزینی «حواله فروش» با «برگشت از فروش» (سند انبار SALES_RETURN — نگاه
@@ -34,11 +36,11 @@ import { partyTitleOf } from "../lib/partyDisplay";
 // تخفیف/ارزش‌افزوده/عدم وجود اکشن تایید همه دقیقاً هم‌الگوی فاکتور فروش‌اند — نگاه کنید به یادداشت بالای
 // backend/src/routes/salesReturnInvoices.ts برای جزئیات کامل، به‌خصوص تفاوت تنها (جهت سند حسابداری).
 
+const GOODS_SCOPE: GoodsScope = { kind: "GOODS" };
 type Basis = "NO_BASIS" | "SALES_RETURN";
 
 interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null; detailTitle?: string | null } }
 interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; decimalPlaces: number; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null }
-interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
 interface PickableLine { id: number; sourceInventoryLineId: number; salesReturnId: number; number: number; date: string; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
 
 interface ListRow { id: number; number: number; date: string; basis: Basis; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: "DRAFT"; journalEntryReferenceNumber: number | null; lineCount: number; totalAmount: number }
@@ -129,10 +131,10 @@ function SalesReturnInvoiceForm({ editId }: { editId?: number }) {
   const [salesTypes, setSalesTypes] = useState<SalesType[]>([]);
   const [salesCenters, setSalesCenters] = useState<SalesCenter[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", basis: "NO_BASIS" as Basis, customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", fxRate: "", description: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
   const [meta, setMeta] = usePersistedState<{ number: number; journalEntryId: number | null; journalEntryReferenceNumber: number | null } | null>(
     `${cacheKey}:meta`,
     null
@@ -145,19 +147,17 @@ function SalesReturnInvoiceForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [cu, st, sc, c, g, fp] = await Promise.all([
+      const [cu, st, sc, c, fp] = await Promise.all([
         api.get("/customers"),
         api.get("/sales-types"),
         api.get("/sales-centers"),
         api.get("/currencies"),
-        api.get("/goods-items?kind=GOODS"),
         fetchSelectedFiscalPeriod(),
       ]);
       setCustomers((cu as any[]).filter((x) => x.isActive));
       setSalesTypes(st);
       setSalesCenters((sc as any[]).filter((x) => x.isActive));
       setCurrencies(c);
-      setGoodsItems(g);
       setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
@@ -265,7 +265,7 @@ function SalesReturnInvoiceForm({ editId }: { editId?: number }) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
   function computeSuggestedVat(amount: number, discount: number, goodsItemId: string): string {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item, vatRateForDate(vatRates, header.date)), baseCurrency?.decimalPlaces ?? 2));
   }
   function onSourceLineChange(idx: number, sourceInventoryLineId: string) {
@@ -306,7 +306,7 @@ function SalesReturnInvoiceForm({ editId }: { editId?: number }) {
     updateRow(idx, { discount, vatAmount: computeSuggestedVat(Number(row.amount) || 0, Number(discount) || 0, row.goodsItemId) });
   }
   function onGoodsItemChange(idx: number, goodsItemId: string) {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "" });
   }
   function addRow() {
@@ -546,8 +546,7 @@ function SalesReturnInvoiceForm({ editId }: { editId?: number }) {
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
-                  const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
+                  const item = cachedGoods(Number(row.goodsItemId));
                   const src = pickableLines.find((l) => String(l.sourceInventoryLineId) === row.sourceInventoryLineId);
                   return (
                     <tr key={idx}>
@@ -572,17 +571,7 @@ function SalesReturnInvoiceForm({ editId }: { editId?: number }) {
                         {header.basis === "SALES_RETURN" ? (
                           <span>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</span>
                         ) : (
-                          <RecordPickerField
-                            title="انتخاب کالا"
-                            displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                            rows={pickerRows}
-                            columns={[
-                              { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                              { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                            ]}
-                            onOpen={guardRowEntry}
-                            onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
-                          />
+                          <GoodsPickerField scope={GOODS_SCOPE} value={row.goodsItemId} title="انتخاب کالا" onOpen={guardRowEntry} onSelect={(g) => onGoodsItemChange(idx, String(g.id))} />
                         )}
                       </td>
                       <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>

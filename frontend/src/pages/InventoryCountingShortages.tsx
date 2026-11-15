@@ -5,7 +5,6 @@ import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
-import { RecordPickerField } from "../components/RecordPicker";
 import { TrackingCells } from "../components/TrackingCells";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
@@ -23,6 +22,8 @@ import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { PlusIcon } from "../components/icons";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { GoodsScope, cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // «کسری انبارگردانی» — طبق تصمیم صریح کاربر، سندی مستقل از «اضافات انبارگردانی» (که از این پس
 // فقط مازاد را می‌پذیرد): یک حواله‌ی خروج مستقیم و ساده، بدون مبنا، بدون هیچ مقایسه‌ای با موجودی
@@ -31,19 +32,10 @@ import { PlusIcon } from "../components/icons";
 // قیمت‌گذاری می‌شود.
 const VIEW_ACCOUNTING_PERMISSION = "inventory.outbound-issues.inventory-counting-shortages.viewAccounting";
 
+const GOODS_SCOPE: GoodsScope = { kind: "GOODS", docDirection: "OUTBOUND", docType: "انبارگردانی" };
 type DocStatus = "REGISTERED" | "FINALIZED";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
-interface GoodsItemRow {
-  id: number;
-  fullCode: string;
-  title: string;
-  mainUnitId: number;
-  mainUnit?: { title: string };
-  isActive: boolean;
-  trackingMethod: "NONE" | "BATCH" | "SERIAL";
-  isLocationTracked: boolean;
-}
 
 interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number; totalAmount?: number }
 interface DetailLine { id: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitCost?: number; amount?: number; description: string | null; serialIds: number[]; batchAllocations: { batchId: number; batchNumber: string; expiryDate: string | null; quantity: number }[]; physicalLocation: string | null; details?: DetailValueDto[] }
@@ -152,7 +144,6 @@ function InventoryCountingShortageForm({ editId, basePath }: { editId?: number; 
   const { hasPermission } = usePermissions();
   const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
 
   const detailConfig = useDocDetailConfig("INVENTORY_COUNTING_SHORTAGE");
   const { header, setHeader, rows, setRows, meta, error, loaded, submit, remove } = useDocumentForm<
@@ -180,14 +171,14 @@ function InventoryCountingShortageForm({ editId, basePath }: { editId?: number; 
       })),
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle, countId: (d as any).countId ?? null }),
     loadExtra: async () => {
-      const [whs, items]: [Warehouse[], GoodsItemRow[]] = await Promise.all([
+      const [whs]: [Warehouse[]] = await Promise.all([
         api.get("/warehouses"),
-        api.get("/goods-items?kind=GOODS&docDirection=OUTBOUND&docType=انبارگردانی"),
       ]);
       setWarehouses(whs);
-      setGoodsItems(items);
     },
   });
+  // کالاهای ردیف‌ها (واحد، ردیابی، عنوان) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
 
   const isFinalized = meta?.status === "FINALIZED";
   // طبق تصمیم صریح کاربر: فیلدهای مبلغی تا وقتی سند Finalized نشده، اصلاً نمایش داده نمی‌شوند.
@@ -200,7 +191,7 @@ function InventoryCountingShortageForm({ editId, basePath }: { editId?: number; 
   }
 
   function onGoodsItemChange(idx: number, goodsItemId: string) {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "" });
   }
 
@@ -353,23 +344,12 @@ function InventoryCountingShortageForm({ editId, basePath }: { editId?: number; 
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
-                  const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
+                  const item = cachedGoods(Number(row.goodsItemId));
                   return (
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                       <td style={{ minWidth: 200 }}>
-                        <RecordPickerField
-                          title="انتخاب کالا"
-                          disabled={coreDisabled}
-                          displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                          rows={pickerRows}
-                          columns={[
-                            { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                            { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                          ]}
-                          onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
-                        />
+                        <GoodsPickerField scope={GOODS_SCOPE} value={row.goodsItemId} title="انتخاب کالا" disabled={coreDisabled} onSelect={(g) => onGoodsItemChange(idx, String(g.id))} />
                       </td>
                       <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || "—"}</td>
                       <TrackingCells

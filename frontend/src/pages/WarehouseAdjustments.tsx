@@ -5,7 +5,6 @@ import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { JalaliDatePicker } from "../components/JalaliDatePicker";
 import { AmountInput } from "../components/AmountInput";
-import { RecordPickerField } from "../components/RecordPicker";
 import { TrackingCells } from "../components/TrackingCells";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
@@ -24,6 +23,8 @@ import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } fro
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { PlusIcon } from "../components/icons";
 import { recomputeAmount } from "../lib/rowHelpers";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { GoodsScope, cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // «اضافات انبارگردانی» — طبق تصمیم صریح کاربر، دقیقاً هم‌الگوی موجودی اول دوره/رسید تولید:
 // بدون مقایسه با موجودی سیستمی؛ کاربر مستقیماً مقدار مازاد هر ردیف را وارد می‌کند (بدون مبنا). این سند
@@ -35,20 +36,10 @@ const VIEW_ACCOUNTING_PERMISSION = "inventory.inbound-receipts.warehousing-wareh
 const CONFIRM_PERMISSION = "inventory.inbound-receipts.warehousing-warehouse-adjustments.accountingConfirm";
 const REVERT_PERMISSION = "inventory.inbound-receipts.warehousing-warehouse-adjustments.accountingConfirmRevert";
 
+const GOODS_SCOPE: GoodsScope = { kind: "GOODS", docDirection: "INBOUND", docType: "انبارگردانی" };
 type DocStatus = "REGISTERED" | "FINALIZED";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
-interface GoodsItemRow {
-  id: number;
-  fullCode: string;
-  title: string;
-  mainUnitId: number;
-  mainUnit?: { title: string };
-  isActive: boolean;
-  kind: string;
-  trackingMethod: "NONE" | "BATCH" | "SERIAL";
-  isLocationTracked: boolean;
-}
 
 interface ListRow {
   id: number;
@@ -243,7 +234,6 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
   const canConfirm = hasPermission(CONFIRM_PERMISSION);
   const canRevert = hasPermission(REVERT_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [baseDecimalPlaces, setBaseDecimalPlaces] = useState(2);
 
   const detailConfig = useDocDetailConfig("WAREHOUSE_ADJUSTMENT");
@@ -260,17 +250,17 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
     mapDetailToRows: mapRows,
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle, countId: (d as any).countId ?? null }),
     loadExtra: async () => {
-      const [whs, items, currencies]: [Warehouse[], GoodsItemRow[], { isBase: boolean; decimalPlaces: number }[]] = await Promise.all([
+      const [whs, currencies]: [Warehouse[], { isBase: boolean; decimalPlaces: number }[]] = await Promise.all([
         api.get("/warehouses"),
-        api.get("/goods-items?kind=GOODS&docDirection=INBOUND&docType=انبارگردانی"),
         api.get("/currencies"),
       ]);
       setWarehouses(whs);
-      setGoodsItems(items);
       const baseCurrency = currencies.find((c) => c.isBase);
       if (baseCurrency) setBaseDecimalPlaces(baseCurrency.decimalPlaces);
     },
   });
+  // کالاهای ردیف‌ها (واحد، ردیابی، عنوان) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
 
   // طبق طرح چرخه‌ی عمر سند («ثبت‌شده → تایید حسابداری‌شده»): بعد از تایید حسابداری، سرصفحه/مقدار/کالای
   // ردیف‌ها برای همه قفل می‌شود؛ فقط فی/مبلغ (برای کاربر دارای دسترسی مشاهده اطلاعات حسابداری) قابل
@@ -287,7 +277,7 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
   }
 
   function onGoodsItemChange(idx: number, goodsItemId: string) {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "" });
   }
 
@@ -488,23 +478,12 @@ function WarehouseAdjustmentForm({ editId, basePath }: { editId?: number; basePa
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
-                  const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
+                  const item = cachedGoods(Number(row.goodsItemId));
                   return (
                     <tr key={idx}>
                       <td style={{ textAlign: "center", color: "var(--ink-soft)", fontWeight: 600 }}>{toFaDigits(String(idx + 1))}</td>
                       <td style={{ minWidth: 200 }}>
-                        <RecordPickerField
-                          title="انتخاب کالا"
-                          disabled={coreDisabled}
-                          displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                          rows={pickerRows}
-                          columns={[
-                            { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                            { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                          ]}
-                          onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
-                        />
+                        <GoodsPickerField scope={GOODS_SCOPE} value={row.goodsItemId} title="انتخاب کالا" disabled={coreDisabled} onSelect={(g) => onGoodsItemChange(idx, String(g.id))} />
                       </td>
                       <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || "—"}</td>
                       <TrackingCells

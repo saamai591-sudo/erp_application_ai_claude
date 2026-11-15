@@ -20,12 +20,14 @@ import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, vali
 import { DescriptionField } from "../components/DescriptionField";
 import { CheckIcon, UndoIcon, RejectIcon, CloseFlagIcon, PlusIcon } from "../components/icons";
 import { REQUEST_STATUS_FA } from "../lib/enumLabels";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { GoodsScope, cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
+const GOODS_SCOPE: GoodsScope = { kind: "GOODS", docDirection: "INBOUND", docType: "خرید" };
 type PurchaseRequestBasis = "NO_BASIS" | "SUPPLY_REQUEST";
 type RequestStatus = "DRAFT" | "REVIEWED" | "APPROVED" | "REJECTED" | "CLOSED";
 
 interface OrgUnitOption { id: number; code: number; title: string }
-interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; kind: string }
 
 interface PickableSupplyRequestLine {
   id: number;
@@ -177,10 +179,10 @@ function PurchaseRequestForm({ editId }: { editId?: number }) {
   const location = useLocation();
   const cacheKey = `form:${location.pathname}`;
   const [orgUnits, setOrgUnits] = useState<OrgUnitOption[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableSupplyRequestLine[]>([]);
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", basis: "NO_BASIS" as PurchaseRequestBasis, orgUnitId: "", description: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
   const [meta, setMeta] = usePersistedState<{ number: number; status: RequestStatus; reviewedAt: string | null; approverName: string | null; approvedAt: string | null } | null>(
     `${cacheKey}:meta`,
     null
@@ -192,13 +194,11 @@ function PurchaseRequestForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [units, items, fp]: [OrgUnitOption[], GoodsItemRow[], FiscalPeriodRange | null] = await Promise.all([
+      const [units, fp]: [OrgUnitOption[], FiscalPeriodRange | null] = await Promise.all([
         api.get("/org-units"),
-        api.get("/goods-items?kind=GOODS&docDirection=INBOUND&docType=خرید"),
         fetchSelectedFiscalPeriod(),
       ]);
       setOrgUnits(units);
-      setGoodsItems(items);
       setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
@@ -285,7 +285,7 @@ function PurchaseRequestForm({ editId }: { editId?: number }) {
     });
   }
   function onGoodsItemChange(idx: number, goodsItemId: string) {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "", unitTitle: "" });
   }
   function addRow() {
@@ -462,8 +462,7 @@ function PurchaseRequestForm({ editId }: { editId?: number }) {
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
-                  const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
+                  const item = cachedGoods(Number(row.goodsItemId));
                   const src = pickableLines.find((l) => String(l.supplyRequestLineId) === row.sourceSupplyRequestLineId);
                   const sourceDisplay = src ? `${toFaDigits(String(src.number))}` : row.sourceSupplyRequestNumber ? toFaDigits(row.sourceSupplyRequestNumber) : "";
                   return (
@@ -490,18 +489,7 @@ function PurchaseRequestForm({ editId }: { editId?: number }) {
                         {header.basis === "SUPPLY_REQUEST" ? (
                           <span>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</span>
                         ) : (
-                          <RecordPickerField
-                            title="انتخاب کالا"
-                            disabled={coreDisabled}
-                            displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                            rows={pickerRows}
-                            columns={[
-                              { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                              { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                            ]}
-                            onOpen={guardRowEntry}
-                            onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
-                          />
+                          <GoodsPickerField scope={GOODS_SCOPE} value={row.goodsItemId} title="انتخاب کالا" disabled={coreDisabled} onOpen={guardRowEntry} onSelect={(g) => onGoodsItemChange(idx, String(g.id))} />
                         )}
                       </td>
                       <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>

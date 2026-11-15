@@ -21,6 +21,7 @@ import { WarehouseGroup } from "./WarehouseGroups";
 import { PurchaseType } from "./PurchaseTypes";
 import { SalesType } from "./SalesTypes";
 import { WAREHOUSE_DOC_TYPE_FA } from "../lib/warehouseDocTypes";
+import { GoodsPickerField } from "../components/GoodsPickerField";
 
 const ACCOUNT_TYPE_FA: Record<string, string> = {
   SALES_VAT: "ارزش افزوده فروش",
@@ -114,7 +115,6 @@ interface GoodsServiceAccountingSetting {
   effectiveDate: string;
 }
 
-interface ServicePick { id: number; fullCode: string; title: string; isActive: boolean; accountingTreatment: string | null }
 
 export default function GoodsServiceAccounting() {
   const location = useLocation();
@@ -208,7 +208,6 @@ function SettingForm({ editId }: { editId?: number }) {
   const [purchaseTypes, setPurchaseTypes] = useState<PurchaseType[]>([]);
   const [salesTypes, setSalesTypes] = useState<SalesType[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
-  const [services, setServices] = useState<ServicePick[]>([]);
   const [hasTransactions, setHasTransactions] = useState(false);
   const [form, setForm] = usePersistedState(cacheKey, DEFAULT_SETTING_FORM);
   const [error, setError] = useState<string | null>(null);
@@ -221,7 +220,6 @@ function SettingForm({ editId }: { editId?: number }) {
     api.get("/purchase-types").then(setPurchaseTypes);
     api.get("/sales-types").then(setSalesTypes);
     api.get("/accounts").then(setAccounts);
-    api.get("/goods-items?kind=SERVICE").then((rows: ServicePick[]) => setServices(rows.filter((x) => x.isActive)));
   }, []);
 
   useEffect(() => {
@@ -276,8 +274,6 @@ function SettingForm({ editId }: { editId?: number }) {
   const showPurchaseType = PURCHASE_TYPES.has(form.accountType);
   const showService = SERVICE_TYPES.has(form.accountType);
   // فقط خدمتِ «هزینه» (یا خدمتی که همین رکورد برایش ثبت شده) قابل انتخاب است؛ «بهای موجودی» معین خرید جداگانه ندارد
-  const selectableServices = services.filter((x) => x.accountingTreatment !== "INVENTORY_COST");
-  const selectedService = services.find((x) => String(x.id) === form.serviceId);
   // «نوع حساب» اولین فیلد فرم است؛ «گروه حسابداری» تا وقتی نوعی انتخاب نشده نمایش داده نمی‌شود، و بعد از انتخاب نوع هم فقط برای نوع‌هایی که
   // بر اساس گروه حسابداری تفکیک می‌شوند (نه GROUPLESS_TYPES) نمایش داده می‌شود.
   const showAccountingGroup = !!form.accountType && !GROUPLESS_TYPES.has(form.accountType);
@@ -376,15 +372,11 @@ function SettingForm({ editId }: { editId?: number }) {
             {showService && (
               <>
                 <label>خدمت<RequiredMark /></label>
-                <RecordPickerField
+                <GoodsPickerField
                   title="انتخاب خدمت (نحوه حسابداری: هزینه)"
-                  displayValue={selectedService ? `${toFaDigits(selectedService.fullCode)} — ${selectedService.title}` : ""}
-                  rows={selectableServices}
+                  scope={{ kind: "SERVICE", excludeTreatment: "INVENTORY_COST" }}
+                  value={form.serviceId}
                   disabled={hasTransactions}
-                  columns={[
-                    { header: "کد", render: (x) => toFaDigits(x.fullCode), filterValue: (x) => x.fullCode, width: "120px" },
-                    { header: "عنوان", render: (x) => x.title, filterValue: (x) => x.title },
-                  ]}
                   onSelect={(x) => setForm({ ...form, serviceId: String(x.id) })}
                 />
               </>

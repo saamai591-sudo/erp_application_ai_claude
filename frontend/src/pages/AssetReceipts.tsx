@@ -21,6 +21,7 @@ import { CostCenterPickerField } from "../components/TypePickerFields";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePermissions } from "../lib/usePermissions";
 import { hasPersistedState, usePersistedState } from "../lib/usePersistedState";
+import { GoodsPickerField } from "../components/GoodsPickerField";
 
 // «رسید دارایی» (دارایی ثابت › عملیات): ورود اقلام به قلمرو دارایی ثابت. مبنا: حواله «دارایی ثابت» انبار، مجوز تحویل (مستقیم از تأمین‌کننده)
 // یا بدون مبنا. سند حسابداری ندارد؛ مقدار و بهای ردیف را نگه می‌دارد و «تعریف دارایی» از مانده‌ی آن پلاک می‌سازد.
@@ -30,7 +31,6 @@ const BASIS_FA: Record<Basis, string> = { NO_BASIS: "بدون مبنا", WAREHOU
 
 interface ReceiptRow { id: number; number: number; date: string; basis: Basis; status: "REGISTERED" | "FINALIZED"; description: string | null; lineCount: number; totalAmount: number | null; hasUnknownAmount: boolean }
 interface SourceLine { id: number; documentNumber: number; documentDate: string; goodsItemId: number; goodsItemTitle: string; goodsItemCode: string; unitId: number; unitTitle: string; quantity: string; remaining: string }
-interface GoodsOption { id: number; title: string; fullCode: string; mainUnitId: number; mainUnit: { title: string }; accountingGroup?: { goodsType: string } | null; kind: string; isActive?: boolean }
 interface Line {
   key: string;
   id?: number;
@@ -115,7 +115,6 @@ function ReceiptForm({ editId }: { editId?: number }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
   const [sources, setSources] = useState<SourceLine[]>([]);
-  const [goods, setGoods] = useState<GoodsOption[]>([]);
   const { flash } = useSavedFlash();
 
   const basis = form.basis;
@@ -169,7 +168,6 @@ function ReceiptForm({ editId }: { editId?: number }) {
     const ex = editId ? `?excludeReceiptId=${editId}` : "";
     if (basis === "WAREHOUSE_ISSUE") api.get(`/asset-receipts/pickable-issue-lines${ex}`).then(setSources).catch(() => setSources([]));
     else if (basis === "DELIVERY_AUTHORIZATION") api.get(`/asset-receipts/pickable-authorization-lines${ex}`).then(setSources).catch(() => setSources([]));
-    else api.get("/goods-items").then((r: GoodsOption[]) => setGoods(r.filter((g) => g.kind === "GOODS" && g.isActive !== false)));
   }, [basis, loaded, editId]);
 
   const usedSourceIds = useMemo(() => new Set(form.lines.map((l) => l.sourceInventoryLineId ?? l.sourceDeliveryAuthorizationLineId).filter(Boolean) as number[]), [form.lines]);
@@ -180,10 +178,6 @@ function ReceiptForm({ editId }: { editId?: number }) {
     { header: "واحد", render: (r) => r.unitTitle, filterValue: (r) => r.unitTitle, width: "80px" },
     { header: "مقدار", render: (r) => toFaDigits(String(Number(r.quantity))), filterValue: (r) => r.quantity, width: "80px" },
     { header: "مانده", render: (r) => toFaDigits(String(Number(r.remaining))), filterValue: (r) => r.remaining, width: "80px" },
-  ];
-  const goodsColumns: PickerColumn<GoodsOption>[] = [
-    { header: "کد", render: (r) => r.fullCode, filterValue: (r) => r.fullCode, width: "120px" },
-    { header: "عنوان", render: (r) => r.title, filterValue: (r) => r.title },
   ];
 
   function setLine(key: string, patch: Partial<Line>) {
@@ -351,11 +345,10 @@ function ReceiptForm({ editId }: { editId?: number }) {
                       {sourceBased || l.defined !== "0" ? (
                         l.goodsItemTitle
                       ) : (
-                        <RecordPickerField<GoodsOption>
+                        <GoodsPickerField
                           title="انتخاب کالای دارایی ثابت"
-                          displayValue={l.goodsItemTitle}
-                          rows={goods}
-                          columns={goodsColumns}
+                          scope={{ kind: "GOODS", goodsTypes: "FIXED_ASSET" }}
+                          value={l.goodsItemId}
                           onSelect={(g) => setLine(l.key, { goodsItemId: g.id, goodsItemTitle: g.title, unitId: g.mainUnitId, unitTitle: g.mainUnit?.title ?? "" })}
                         />
                       )}

@@ -22,6 +22,7 @@ import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { PlusIcon } from "../components/icons";
+import { cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // «انتقال بین انبارها» به دو سند مستقل تقسیم شده — این صفحه («رسید انتقال») طرف دریافت را پوشش
 // می‌دهد. هر ردیف باید به یک ردیف سند «حواله انتقالی» قطعی‌شده ارجاع بدهد که انبار مقصد اعلام‌شده‌ی آن
@@ -34,7 +35,6 @@ const VIEW_ACCOUNTING_PERMISSION = "inventory.inbound-receipts.warehousing-wareh
 type DocStatus = "REGISTERED" | "FINALIZED";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
-interface GoodsItemRow { id: number; trackingMethod: "NONE" | "BATCH" | "SERIAL"; isLocationTracked: boolean }
 interface PickableLine {
   id: number;
   sourceWarehouseTransferOutLineId: number;
@@ -138,7 +138,6 @@ function WarehouseTransferInForm({ editId, basePath }: { editId?: number; basePa
   const { hasPermission } = usePermissions();
   const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
   const detailConfig = useDocDetailConfig("WAREHOUSE_TRANSFER_IN");
@@ -172,11 +171,12 @@ function WarehouseTransferInForm({ editId, basePath }: { editId?: number; basePa
       })),
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     loadExtra: async () => {
-      const [whs, items]: [Warehouse[], GoodsItemRow[]] = await Promise.all([api.get("/warehouses"), api.get("/goods-items?kind=GOODS")]);
+      const whs: Warehouse[] = await api.get("/warehouses");
       setWarehouses(whs);
-      setGoodsItems(items);
     },
   });
+  // کالاهای ردیف‌ها (واحد، ردیابی، عنوان) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
 
   useEffect(() => {
     if (!header.warehouseId || !header.date) {
@@ -371,7 +371,7 @@ function WarehouseTransferInForm({ editId, basePath }: { editId?: number; basePa
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
+                  const item = cachedGoods(Number(row.goodsItemId));
                   const src = pickableLines.find((l) => String(l.sourceWarehouseTransferOutLineId) === row.sourceWarehouseTransferOutLineId);
                   const sourceDisplay = src ? `${toFaDigits(String(src.number))}` : row.sourceNumber ? toFaDigits(row.sourceNumber) : "";
                   return (

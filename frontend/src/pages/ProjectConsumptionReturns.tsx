@@ -22,6 +22,7 @@ import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { PlusIcon } from "../components/icons";
+import { cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // «برگشت مصرف پروژه» — همان الگوی CenterConsumptionReturns.tsx (طرف مقابل: پروژه به‌جای مرکز هزینه).
 // طبق تصمیم معماری «ادغام نمای انبارداری/حسابداری انبار»: این فرم دیگر دو مسیر/دو مود جدا ندارد — یک
@@ -31,7 +32,6 @@ const VIEW_ACCOUNTING_PERMISSION = "inventory.issue-returns.project-consumption-
 type DocStatus = "REGISTERED" | "FINALIZED";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
-interface GoodsItemRow { id: number; trackingMethod: "NONE" | "BATCH" | "SERIAL"; isLocationTracked: boolean }
 interface PickableLine { id: number; sourceProjectConsumptionLineId: number; number: number; date: string; projectTitle: string | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; done: number; remaining: number }
 
 interface ListRow { id: number; number: number; date: string; warehouseId: number; warehouseTitle: string; fiscalPeriodTitle: string; description: string | null; status: DocStatus; lineCount: number; totalQuantity: number; totalAmount?: number }
@@ -120,7 +120,6 @@ function ProjectConsumptionReturnForm({ editId, basePath }: { editId?: number; b
   const { hasPermission } = usePermissions();
   const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableLine[]>([]);
 
   const detailConfig = useDocDetailConfig("PROJECT_CONSUMPTION_RETURN");
@@ -154,11 +153,12 @@ function ProjectConsumptionReturnForm({ editId, basePath }: { editId?: number; b
       })),
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     loadExtra: async () => {
-      const [whs, items]: [Warehouse[], GoodsItemRow[]] = await Promise.all([api.get("/warehouses"), api.get("/goods-items?kind=GOODS")]);
+      const whs: Warehouse[] = await api.get("/warehouses");
       setWarehouses(whs);
-      setGoodsItems(items);
     },
   });
+  // کالاهای ردیف‌ها (واحد، ردیابی، عنوان) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
 
   useEffect(() => {
     if (!header.warehouseId) {
@@ -340,7 +340,7 @@ function ProjectConsumptionReturnForm({ editId, basePath }: { editId?: number; b
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
+                  const item = cachedGoods(Number(row.goodsItemId));
                   const src = pickableLines.find((l) => String(l.sourceProjectConsumptionLineId) === row.sourceProjectConsumptionLineId);
                   const sourceDisplay = src
                     ? toFaDigits(String(src.number))

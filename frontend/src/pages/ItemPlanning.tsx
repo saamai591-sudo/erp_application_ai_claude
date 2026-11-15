@@ -4,7 +4,7 @@ import { ErrorToast } from "../components/ErrorToast";
 import { DataTable } from "../components/DataTable";
 import { FormPage } from "../components/FormPage";
 import { AmountInput } from "../components/AmountInput";
-import { GoodsItemPicker, useGoodsOptions } from "../components/GoodsItemPicker";
+import { GoodsItemPicker } from "../components/GoodsItemPicker";
 import { RefreshButton } from "../components/RefreshButton";
 import { NewRecordButton } from "../components/NewRecordButton";
 import { InfoHint } from "../components/InfoHint";
@@ -79,7 +79,6 @@ function PlanForm({ editId }: { editId?: number }) {
   const navigate = useNavigate();
   const location = useLocation();
   const cacheKey = `form:${location.pathname}:form`;
-  const goods = useGoodsOptions();
   const [form, setForm] = usePersistedState<FormState>(cacheKey, EMPTY);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(!editId || hasPersistedState(cacheKey));
@@ -130,7 +129,7 @@ function PlanForm({ editId }: { editId?: number }) {
         <div className="form-grid">
           <div className="form-field">
             <label>کالا<RequiredMark /></label>
-            <GoodsItemPicker goods={goods} value={form.goodsItemId} disabled={!!editId} onChange={(g) => setForm({ ...form, goodsItemId: String(g.id) })} />
+            <GoodsItemPicker value={form.goodsItemId} disabled={!!editId} onChange={(g) => setForm({ ...form, goodsItemId: String(g.id) })} />
           </div>
           <div className="form-field">
             <label>زمان تامین (روز)</label>

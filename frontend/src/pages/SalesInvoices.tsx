@@ -21,7 +21,6 @@ import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { useDefaultBaseCurrency } from "../lib/useDefaultBaseCurrency";
 import { useTabs } from "../lib/TabsContext";
 import { api, ApiError } from "../lib/api";
-import { fetchSalesLineItems } from "../lib/salesLineItems";
 import { SalesType } from "./SalesTypes";
 import { SalesCenter } from "./SalesCenters";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
@@ -34,6 +33,8 @@ import type { InvoiceFromDeliveryPrefill } from "../components/DownstreamDialogs
 import { takeFormPrefill } from "../lib/formPrefill";
 import { PlusIcon, UndoIcon, EyeIcon, VoidIcon } from "../components/icons";
 import { partyTitleOf } from "../lib/partyDisplay";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { GoodsScope, cachedGoods, ensureGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // «فاکتور فروش نهایی» — آخرین سند زنجیره فروش. مبنا: بدون مبنا / حواله فروش. برخلاف فاکتور خرید
 // (که هر ردیف رسید انبار خرید را دقیقاً یک‌بار و کامل مصرف می‌کرد)، اینجا طبق تصمیم صریح کاربر رابطه
@@ -49,11 +50,11 @@ import { partyTitleOf } from "../lib/partyDisplay";
 // فاکتور خرید/فاکتور خرید خدمات) — با صدور سند، فرم قفل می‌شود.
 
 // «مبنا» در سطح ردیف است (نه هدر): هر ردیف مبنای خودش را دارد و مبنا تعیین می‌کند چه سندی/اقلامی قابل انتخاب است
+const GOODS_SCOPE: GoodsScope = { kind: "SERVICE" }; // «بدون مبنا»: فقط خدمت؛ کالا فقط از راه سند مبنا (حواله فروش) می‌آید
 type Basis = "NO_BASIS" | "SALES_DELIVERY" | "SALES_ORDER" | "SALES_QUOTE";
 
 interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null; detailTitle?: string | null } }
 interface CurrencyOption { id: number; code: string; title: string; isBase: boolean; decimalPlaces: number; baseVolume: number; rateDirection: "TO_BASE" | "FROM_BASE" | null }
-interface GoodsItemRow { id: number; kind?: "GOODS" | "SERVICE"; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
 // ردیف قابل صورتحسابِ یک سند مبنا (پاسخ GET /sales-invoices/basis-lines)
 interface BasisLine {
   basis: Basis;
@@ -272,11 +273,11 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   const [salesTypes, setSalesTypes] = useState<SalesType[]>([]);
   const [salesCenters, setSalesCenters] = useState<SalesCenter[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   // ردیف‌های قابل انتخاب هر نوع مبنا (سطح ردیف): فقط ردیف‌های دارای مانده از اسنادِ سازگار با هدر؛ سرور فیلتر می‌کند
   const [basisLines, setBasisLines] = useState<Record<string, BasisLine[]>>({});
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", fxRate: "", description: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
   const [meta, setMeta] = usePersistedState<{ number: number; journalEntryId: number | null; journalEntryReferenceNumber: number | null; status: SalesInvoiceStatus } | null>(
     `${cacheKey}:meta`,
     null
@@ -289,19 +290,17 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [cu, st, sc, c, g, fp] = await Promise.all([
+      const [cu, st, sc, c, fp] = await Promise.all([
         api.get("/customers"),
         api.get("/sales-types"),
         api.get("/sales-centers"),
         api.get("/currencies"),
-        fetchSalesLineItems(),
         fetchSelectedFiscalPeriod(),
       ]);
       setCustomers((cu as any[]).filter((x) => x.isActive));
       setSalesTypes(st);
       setSalesCenters((sc as any[]).filter((x) => x.isActive));
       setCurrencies(c);
-      setGoodsItems(g);
       setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
@@ -424,7 +423,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
   // ارز فاکتور)؛ این فقط پیش‌فرض اولیه است؛ کاربر بعد از محاسبه می‌تواند خودش مقدار مالیات را مستقیماً
   // ویرایش کند — دقیقاً هم‌الگوی PurchaseInvoices.tsx.
   function computeSuggestedVat(amount: number, discount: number, goodsItemId: string): string {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     return String(computeLineVat(toBaseAmount(amount), toBaseAmount(discount), resolveVatRatePercent(item, vatRateForDate(vatRates, header.date)), baseCurrency?.decimalPlaces ?? 2));
   }
   // تغییر مبنای یک ردیف: ردیف از نو (با همان مبنا) شروع می‌شود؛ سند مبدا/کالا/مقدار قبلی پاک می‌شود چون مبنای جدید فهرست و قواعد دیگری دارد
@@ -507,8 +506,9 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
       .filter((l) => l.remaining > 0 || basisLineKey(l) === current);
   }
   // اعمال انتخاب یک یا چند ردیف مبنا: اولین ردیف در همین سطر می‌نشیند و بقیه بلافاصله بعد از آن به‌صورت ردیف جدید اضافه می‌شوند
-  function onBasisLinesPicked(idx: number, picked: BasisLine[]) {
+  async function onBasisLinesPicked(idx: number, picked: BasisLine[]) {
     if (picked.length === 0) return;
+    await ensureGoods(picked.map((l) => l.goodsItemId)); // نرخ ارزش افزوده‌ی کالای ویژه از خود کالا می‌آید و کالای ردیف مبنا هنوز در کش نیست
     const newRows = picked.map(lineToRow);
     setRows((prev) => {
       const next = [...prev];
@@ -578,7 +578,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
     updateRow(idx, { discount, vatAmount: computeSuggestedVat(Number(row.amount) || 0, Number(discount) || 0, row.goodsItemId) });
   }
   function onGoodsItemChange(idx: number, goodsItemId: string) {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "" });
   }
   function addRow() {
@@ -851,9 +851,8 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
+                  const item = cachedGoods(Number(row.goodsItemId));
                   // «بدون مبنا» (و هر مبنایی که کالا/انبار ندارد): فقط خدمت قابل انتخاب است. انتخابگر کالا/خدمت همان رفتار قبلی (تک‌انتخابی) را دارد.
-                  const servicePickerRows = goodsItems.filter((g) => g.kind === "SERVICE" && g.isActive);
                   // فی/مبلغ ردیفی که از سند مبنا محاسبه می‌شود قابل ویرایش نیست (Documents/فراخوانی قیمت در فاکتور.md)
                   const priceLocked = row.priceLocked;
                   const hasSource = !!sourceKey(row);
@@ -887,17 +886,7 @@ function SalesInvoiceForm({ editId }: { editId?: number }) {
                       </td>
                       <td style={{ minWidth: 300 }}>
                         {row.basis === "NO_BASIS" ? (
-                          <RecordPickerField
-                            title="انتخاب خدمت"
-                            displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                            rows={servicePickerRows}
-                            columns={[
-                              { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                              { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                            ]}
-                            onOpen={guardRowEntry}
-                            onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
-                          />
+                          <GoodsPickerField scope={GOODS_SCOPE} value={row.goodsItemId} title="انتخاب خدمت" onOpen={guardRowEntry} onSelect={(g) => onGoodsItemChange(idx, String(g.id))} />
                         ) : (
                           <span>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</span>
                         )}

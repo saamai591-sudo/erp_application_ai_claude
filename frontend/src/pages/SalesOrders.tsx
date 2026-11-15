@@ -17,7 +17,6 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { useDefaultBaseCurrency } from "../lib/useDefaultBaseCurrency";
 import { api, ApiError } from "../lib/api";
-import { fetchSalesLineItems } from "../lib/salesLineItems";
 import { SalesType } from "./SalesTypes";
 import { SalesCenter } from "./SalesCenters";
 import { FiscalPeriodRange, fetchSelectedFiscalPeriod, defaultDocumentDate, validateDocumentDate } from "../lib/fiscalYearDefaultDate";
@@ -29,6 +28,8 @@ import { ORDER_DOWNSTREAM_ACTIONS, OrderFromQuotePrefill } from "../components/D
 import { takeFormPrefill } from "../lib/formPrefill";
 import { CheckIcon, UndoIcon, PlusIcon } from "../components/icons";
 import { partyTitleOf } from "../lib/partyDisplay";
+import { GoodsPickerField } from "../components/GoodsPickerField";
+import { GoodsScope, cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // «سفارش فروش» (تایید مشتری) — مرحله دوم زنجیره فروش. مبنا: بدون مبنا / پیش‌فاکتور. طبق تصمیم
 // صریح کاربر، «مانده‌ای» فقط برای حواله فروش/فاکتور فروش لازم است؛ اینجا (مثل سفارش خرید از استعلام
@@ -38,12 +39,12 @@ import { partyTitleOf } from "../lib/partyDisplay";
 // افزوده روی ردیف‌ها اضافه شد — همیشه به همان ارز هدر محاسبه می‌شود (نه ارز مبنا)، چون این فرم هم
 // fxRate ندارد.
 
+const GOODS_SCOPE: GoodsScope = { kind: "GOODS,SERVICE", docDirection: "OUTBOUND", docType: "فروش" };
 type Basis = "NO_BASIS" | "QUOTE";
 type Status = "DRAFT" | "APPROVED";
 
 interface CustomerOption { id: number; code: number; party: { category: "INDIVIDUAL" | "LEGAL"; firstName: string | null; lastName: string | null; name: string | null; detailTitle?: string | null } }
 interface CurrencyOption { id: number; code: string; title: string; decimalPlaces?: number }
-interface GoodsItemRow { id: number; fullCode: string; title: string; mainUnitId: number; mainUnit?: { title: string }; isActive: boolean; isSpecial: boolean; taxRate: number | string | null }
 interface PickableQuoteLine { id: number; sourceSalesQuoteLineId: number; salesQuoteId: number; number: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; unitPrice: number; unitDiscount: number; quantity: number; done: number; remaining: number }
 
 interface ListRow { id: number; number: number; date: string; basis: Basis; customerId: number; customerTitle: string; salesTypeId: number; salesTypeTitle: string | null; salesCenterId: number; salesCenterTitle: string | null; currencyTitle: string; status: Status; lineCount: number; totalAmount: number }
@@ -135,10 +136,10 @@ function SalesOrderForm({ editId }: { editId?: number }) {
   const [salesTypes, setSalesTypes] = useState<SalesType[]>([]);
   const [salesCenters, setSalesCenters] = useState<SalesCenter[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyOption[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableQuoteLine[]>([]);
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", basis: "NO_BASIS" as Basis, customerId: "", salesTypeId: "", salesCenterId: "", currencyId: "", description: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
   const [meta, setMeta] = usePersistedState<{ number: number; status: Status } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -148,19 +149,17 @@ function SalesOrderForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [cu, st, sc, c, g, fp] = await Promise.all([
+      const [cu, st, sc, c, fp] = await Promise.all([
         api.get("/customers"),
         api.get("/sales-types"),
         api.get("/sales-centers"),
         api.get("/currencies"),
-        fetchSalesLineItems({ withWarehouseFilter: true }),
         fetchSelectedFiscalPeriod(),
       ]);
       setCustomers((cu as any[]).filter((x) => x.isActive));
       setSalesTypes(st);
       setSalesCenters((sc as any[]).filter((x) => x.isActive));
       setCurrencies(c);
-      setGoodsItems(g);
       setFiscalPeriod(fp);
 
       if (hasPersistedState(`${cacheKey}:header`)) {
@@ -243,7 +242,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
   // (نه ارز مبنا، چون این فرم fxRate ندارد)؛ فقط پیش‌فرض اولیه است، کاربر می‌تواند بعداً خودش مقدار را
   // ویرایش کند — دقیقاً هم‌الگوی SalesQuotes.tsx.
   function computeSuggestedVat(amount: number, discount: number, goodsItemId: string, date = header.date, currencyId = header.currencyId): string {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     return String(computeLineVat(amount, discount, resolveVatRatePercent(item, vatRateForDate(vatRates, date)), currencies.find((c) => String(c.id) === String(currencyId))?.decimalPlaces ?? 2));
   }
   // ردیف سفارش از یک ردیف پیش‌فاکتورِ قابل‌انتخاب (هم انتخابگر ردیف و هم «صدور سفارش از پیش‌فاکتور» از همین استفاده می‌کنند)
@@ -329,7 +328,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
     updateRow(idx, { amount, unitPrice: String(unitPrice), vatAmount: computeSuggestedVat(Number(amount) || 0, Number(row.discount) || 0, row.goodsItemId) });
   }
   function onGoodsItemChange(idx: number, goodsItemId: string) {
-    const item = goodsItems.find((g) => g.id === Number(goodsItemId));
+    const item = cachedGoods(Number(goodsItemId));
     updateRow(idx, { goodsItemId, unitId: item ? String(item.mainUnitId) : "" });
   }
   function addRow() {
@@ -529,8 +528,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
-                  const pickerRows = item && !item.isActive ? goodsItems : goodsItems.filter((g) => g.isActive);
+                  const item = cachedGoods(Number(row.goodsItemId));
                   const src = pickableLines.find((l) => String(l.sourceSalesQuoteLineId) === row.sourceSalesQuoteLineId);
                   return (
                     <tr key={idx}>
@@ -556,18 +554,7 @@ function SalesOrderForm({ editId }: { editId?: number }) {
                         {header.basis === "QUOTE" ? (
                           <span>{row.goodsItemTitle ? `${toFaDigits(row.goodsItemCode)} — ${row.goodsItemTitle}` : "—"}</span>
                         ) : (
-                          <RecordPickerField
-                            title="انتخاب کالا"
-                            disabled={locked}
-                            displayValue={item ? `${toFaDigits(item.fullCode)} — ${item.title}` : ""}
-                            rows={pickerRows}
-                            columns={[
-                              { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "110px" },
-                              { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-                            ]}
-                            onOpen={guardRowEntry}
-                            onSelect={(g) => onGoodsItemChange(idx, String(g.id))}
-                          />
+                          <GoodsPickerField scope={GOODS_SCOPE} value={row.goodsItemId} title="انتخاب کالا" disabled={locked} onOpen={guardRowEntry} onSelect={(g) => onGoodsItemChange(idx, String(g.id))} />
                         )}
                       </td>
                       <td style={{ minWidth: 90, color: "var(--ink-soft)" }}>{item?.mainUnit?.title || row.unitTitle || "—"}</td>

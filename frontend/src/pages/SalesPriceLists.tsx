@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ErrorToast } from "../components/ErrorToast";
 import { DataTable } from "../components/DataTable";
@@ -18,7 +18,8 @@ import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
 import { useDefaultBaseCurrency } from "../lib/useDefaultBaseCurrency";
 import { api, ApiError } from "../lib/api";
-import { fetchSalesLineItems } from "../lib/salesLineItems";
+import { GoodsLite, useGoodsCatalog } from "../lib/goodsCatalog";
+import { GoodsPickerField } from "../components/GoodsPickerField";
 
 // فروش › تنظیمات › «اعلامیه قیمت فروش»: قیمت پایه‌ی کالا (به‌ازای واحد اصلی) + پله‌های مقدار، برای مجموعه‌ای از مراکز و انواع فروش و یک ارز.
 // فی پیش‌فاکتور از همین اعلامیه فراخوانی می‌شود (routes/salesOperations.ts). اعلامیه با «اعلامیه‌ی جدید» تغییر می‌کند و بعد از اولین استفاده در
@@ -152,7 +153,6 @@ function PriceListForm({ editId }: { editId?: number }) {
   const [centers, setCenters] = useState<Option[]>([]);
   const [types, setTypes] = useState<Option[]>([]);
   const [stations, setStations] = useState<Option[]>([]);
-  const [goods, setGoods] = useState<GoodsOption[]>([]);
   const [tab, setTab] = useState<Tab>("main");
   const [lineSearch, setLineSearch] = useState("");
   const [ruleSearch, setRuleSearch] = useState("");
@@ -166,12 +166,11 @@ function PriceListForm({ editId }: { editId?: number }) {
 
   useEffect(() => {
     async function init() {
-      const [c, sc, st, g, ss] = await Promise.all([api.get("/currencies"), api.get("/sales-centers"), api.get("/sales-types"), fetchSalesLineItems<GoodsOption>(), api.get("/sales-stations").catch(() => [])]);
+      const [c, sc, st, ss] = await Promise.all([api.get("/currencies"), api.get("/sales-centers"), api.get("/sales-types"), api.get("/sales-stations").catch(() => [])]);
       setCurrencies(c);
       setCenters((sc as Option[]).filter((x) => x.isActive !== false));
       setTypes(st);
       setStations((ss as Option[]).filter((x) => x.isActive !== false));
-      setGoods(g);
       if (!hasPersistedState(`${cacheKey}:form`) && editId) {
         const d = await api.get(`/sales-price-lists/${editId}`);
         setMeta({ number: d.number, used: d.used });
@@ -198,7 +197,9 @@ function PriceListForm({ editId }: { editId?: number }) {
   }, [editId]);
 
   const used = meta.used;
-  const goodsById = useMemo(() => new Map(goods.map((g) => [String(g.id), g])), [goods]);
+  // کالاهای ردیف‌ها و پله‌ها دسته‌ای و از روی شناسه از سرور خوانده می‌شوند (فهرست کامل کالا گرفته نمی‌شود)
+  const { get: getGoods } = useGoodsCatalog([...form.lines.map((l) => l.goodsItemId), ...form.rules.map((r) => r.goodsItemId)]);
+  const goodsById = { get: (id: string): GoodsLite | undefined => getGoods(id) };
   const itemLabel = (id: string) => {
     const g = goodsById.get(id);
     return g ? `${toFaDigits(g.fullCode)} — ${g.title}` : "";
@@ -282,8 +283,7 @@ function PriceListForm({ editId }: { editId?: number }) {
 
   if (!loaded) return null;
 
-  const itemsInLines = form.lines.map((l) => goodsById.get(l.goodsItemId)).filter((g): g is GoodsOption => !!g);
-  const activeGoods = goods.filter((g) => g.isActive);
+  const itemsInLines = form.lines.map((l) => goodsById.get(l.goodsItemId)).filter((g): g is GoodsLite => !!g);
 
   const pager = (page: number, pages: number, set: (n: number) => void, total: number) => (
     <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "8px 0" }}>
@@ -416,16 +416,12 @@ function PriceListForm({ editId }: { editId?: number }) {
                   <tr key={i}>
                     <td>{toFaDigits(String(i + 1))}</td>
                     <td>
-                      <RecordPickerField
+                      <GoodsPickerField
                         title="انتخاب کالا"
+                        scope={{ kind: "GOODS,SERVICE" }}
                         disabled={used}
-                        displayValue={itemLabel(r.goodsItemId)}
-                        rows={activeGoods}
-                        columns={[
-                          { header: "کد", render: (g: GoodsOption) => toFaDigits(g.fullCode), filterValue: (g: GoodsOption) => g.fullCode, width: "110px" },
-                          { header: "عنوان", render: (g: GoodsOption) => g.title, filterValue: (g: GoodsOption) => g.title },
-                        ]}
-                        onSelect={(g: GoodsOption) => setLine(i, { goodsItemId: String(g.id) })}
+                        value={r.goodsItemId}
+                        onSelect={(g) => setLine(i, { goodsItemId: String(g.id) })}
                       />
                     </td>
                     <td><AmountInput value={r.price} onChange={(v) => setLine(i, { price: v })} allowDecimal disabled={used} /></td>

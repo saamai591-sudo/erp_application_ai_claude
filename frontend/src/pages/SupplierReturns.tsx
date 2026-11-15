@@ -23,6 +23,7 @@ import { DescriptionField } from "../components/DescriptionField";
 import { DocDetailHeaderFields, DocDetailItemHeadCells, DocDetailItemCells } from "../components/WarehouseDocDetailFields";
 import { DetailValues, DetailValueDto, useDocDetailConfig, detailsToValues, valuesToPayload, changeHeaderDetail, newRowDetails } from "../lib/warehouseDocDetails";
 import { PlusIcon } from "../components/icons";
+import { cachedGoods, useGoodsCatalog } from "../lib/goodsCatalog";
 
 // «برگشت به تامین‌کننده» — طبق stockAnalysis.md بند ۳۸؛ نگاه کنید به یادداشت بالای
 // backend/src/routes/supplierReturns.ts. طرف مقابل (تامین‌کننده) در سطح سند الزامی است و باید با
@@ -34,7 +35,6 @@ const VIEW_ACCOUNTING_PERMISSION = "inventory.receipt-returns.supplier-returns.v
 type DocStatus = "REGISTERED" | "FINALIZED";
 
 interface Warehouse { id: number; code: number; title: string; isActive: boolean }
-interface GoodsItemRow { id: number; trackingMethod: "NONE" | "BATCH" | "SERIAL"; isLocationTracked: boolean }
 // طبق تصمیم صریح کاربر («انتخابگر تفصیل پایه»): تامین‌کننده‌ی برگشت به تامین‌کننده باید دقیقاً همان
 // شرط رسید انبار خرید (SUPPLIER_PARTY) را داشته باشد — دیگر از /parties خام خوانده نمی‌شود، از همان
 // اندپوینت مشترک /detail-selector-options؛ فقط code/title دارد.
@@ -131,7 +131,6 @@ function SupplierReturnForm({ editId, basePath }: { editId?: number; basePath: s
   const { hasPermission } = usePermissions();
   const canViewAccounting = hasPermission(VIEW_ACCOUNTING_PERMISSION);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [goodsItems, setGoodsItems] = useState<GoodsItemRow[]>([]);
   const [parties, setParties] = useState<PartyOption[]>([]);
   const [pickableLines, setPickableLines] = useState<PickableWarehouseReceiptLine[]>([]);
 
@@ -166,16 +165,16 @@ function SupplierReturnForm({ editId, basePath }: { editId?: number; basePath: s
       })),
     mapDetailToMeta: (d) => ({ number: d.number, status: d.status, fiscalPeriodTitle: d.fiscalPeriodTitle }),
     loadExtra: async () => {
-      const [whs, items, partyOptions]: [Warehouse[], GoodsItemRow[], { code: string; title: string }[]] = await Promise.all([
+      const [whs, partyOptions]: [Warehouse[], { code: string; title: string }[]] = await Promise.all([
         api.get("/warehouses"),
-        api.get("/goods-items?kind=GOODS"),
         api.get("/detail-selector-options?kind=SUPPLIER_PARTY"),
       ]);
       setWarehouses(whs);
-      setGoodsItems(items);
       setParties(partyOptions.map((p) => ({ id: p.code, code: p.code, title: p.title })));
     },
   });
+  // کالاهای ردیف‌ها (واحد، ردیابی، عنوان) از روی شناسه و دسته‌ای از سرور خوانده می‌شوند؛ فهرست کامل کالا دیگر گرفته نمی‌شود
+  useGoodsCatalog(rows.map((r) => r.goodsItemId));
 
   useEffect(() => {
     if (!header.warehouseId || !header.partyDetailCode || !header.date) {
@@ -390,7 +389,7 @@ function SupplierReturnForm({ editId, basePath }: { editId?: number; basePath: s
               </thead>
               <tbody>
                 {rows.map((row, idx) => {
-                  const item = goodsItems.find((g) => g.id === Number(row.goodsItemId));
+                  const item = cachedGoods(Number(row.goodsItemId));
                   const src = pickableLines.find((l) => String(l.id) === row.sourceWarehouseReceiptLineId);
                   const sourceDisplay = src ? `${toFaDigits(String(src.number))}` : row.sourceNumber ? toFaDigits(row.sourceNumber) : "";
                   return (

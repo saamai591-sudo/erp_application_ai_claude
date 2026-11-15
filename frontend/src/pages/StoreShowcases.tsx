@@ -13,9 +13,9 @@ import { PartySectionCard } from "../components/PartySections";
 import { toFaDigits } from "../lib/formatAmount";
 import { api, ApiError } from "../lib/api";
 import { showError } from "../lib/toast";
-import { fetchSalesLineItems } from "../lib/salesLineItems";
 import { useSavedFlash } from "../lib/useSavedFlash";
 import { usePersistedState, hasPersistedState } from "../lib/usePersistedState";
+import { GoodsPickerDialog } from "../components/GoodsPickerField";
 
 // فروش فروشگاهی › تنظیمات › «ویترین کالا»: مجموعه‌ی کاشی‌های فروش سریع (کالا + «عنوان نمایشی» + ترتیب) که در سایدبار فرم فروش/برگشت فروش فروشگاهی نمایش داده می‌شود.
 // تخصیص به ایستگاه‌ها دوطرفه است (از همین فرم یا از بخش «ویترین‌ها»ی فرم ایستگاه فروش). قواعد در سرور (services/storeShowcaseService.ts).
@@ -29,12 +29,6 @@ interface ShowcaseRow {
   stations: { id: number; code: number; title: string }[];
   items: { goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; displayTitle: string }[];
   updatedAt?: string;
-}
-interface GoodsOption {
-  id: number;
-  fullCode: string;
-  title: string;
-  isActive?: boolean;
 }
 interface StationOpt {
   id: number;
@@ -112,7 +106,6 @@ function ShowcaseForm({ editId }: { editId?: number }) {
   const [form, setForm] = usePersistedState(cacheKey, EMPTY);
   const [code, setCode] = useState<number | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | undefined>();
-  const [goods, setGoods] = useState<GoodsOption[]>([]);
   const [stations, setStations] = useState<StationOpt[]>([]);
   const [pickGoods, setPickGoods] = useState(false);
   const [pickStations, setPickStations] = useState(false);
@@ -121,7 +114,7 @@ function ShowcaseForm({ editId }: { editId?: number }) {
   const { flash } = useSavedFlash();
 
   useEffect(() => {
-    Promise.all([fetchSalesLineItems<GoodsOption>(), api.get("/sales-stations")]).then(([g, st]) => { setGoods(g); setStations(st); }).catch(() => {});
+    api.get("/sales-stations").then((st) => setStations(st)).catch(() => {});
     if (!editId) return;
     api.get(`/store-showcases/${editId}`).then((r: ShowcaseRow) => {
       setCode(r.code);
@@ -255,21 +248,15 @@ function ShowcaseForm({ editId }: { editId?: number }) {
         </PartySectionCard>
 
         {pickGoods && (
-          <MultiPickerDialog<GoodsOption>
+          <GoodsPickerDialog
             title="افزودن کالا به ویترین"
-            rows={goods.filter((g) => g.isActive !== false || items.some((i) => i.goodsItemId === g.id))}
-            columns={[
-              { header: "کد", render: (g) => toFaDigits(g.fullCode), filterValue: (g) => g.fullCode, width: "120px" },
-              { header: "عنوان", render: (g) => g.title, filterValue: (g) => g.title },
-            ]}
-            initialChecked={new Set(items.map((i) => i.goodsItemId))}
-            confirmLabel="تایید"
-            wide
-            onConfirm={(checked) => {
-              // کالاهای موجود با عنوان نمایشیِ ویرایش‌شده و ترتیبشان می‌مانند؛ تازه‌ها با عنوان کالا به انتها اضافه می‌شوند
-              const kept = items.filter((i) => checked.has(i.goodsItemId));
-              const added = goods.filter((g) => checked.has(g.id) && !items.some((i) => i.goodsItemId === g.id)).map((g) => ({ goodsItemId: g.id, code: g.fullCode, title: g.title, displayTitle: g.title }));
-              setItems([...kept, ...added]);
+            scope={{ kind: "GOODS,SERVICE" }}
+            multiple
+            excludeIds={items.map((i) => i.goodsItemId)}
+            onSelect={() => {}}
+            onSelectMultiple={(picked) => {
+              // کالاهای موجود با عنوان نمایشیِ ویرایش‌شده و ترتیبشان می‌مانند (حذف با دکمه‌ی «حذف» هر ردیف)؛ تازه‌ها با عنوان کالا به انتها اضافه می‌شوند
+              setItems([...items, ...picked.map((g) => ({ goodsItemId: g.id, code: g.fullCode, title: g.title, displayTitle: g.title }))]);
               setPickGoods(false);
             }}
             onClose={() => setPickGoods(false)}
