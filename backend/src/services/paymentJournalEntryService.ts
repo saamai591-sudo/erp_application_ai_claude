@@ -62,6 +62,7 @@ const PAYMENT_PLAN_INCLUDE = {
       purchaseInvoice: true,
       servicePurchaseInvoice: true,
       salesInvoice: true,
+      purchaseOrder: { select: { detailCode: true } },
     },
     orderBy: { rowOrder: "asc" as const },
   },
@@ -190,7 +191,9 @@ async function buildPaymentPlan(payment: any, treasurySettings: EffectiveTreasur
     const rowRate = Number(l.fxRate);
     const isBaseRow = l.currencyId === baseCurrency.id;
     const baseRow = isBaseRow ? amount : toBaseCurrencyAmount(amount, rowRate, l.currency, baseCurrency);
-    const baseDetails = custodianDetails ?? (await dimsFor(account, detailCode));
+    // تفصیل «سفارش خرید» (نوع ۱۰): اگر ردیف بر مبنای سفارش خرید است و معین سطحی از این نوع دارد، کد سفارش همان‌جا می‌نشیند
+    const orderDetails = l.purchaseOrder?.detailCode ? await dimsFor(account, l.purchaseOrder.detailCode) : {};
+    const baseDetails = { ...(custodianDetails ?? (await dimsFor(account, detailCode))), ...orderDetails };
 
     let debitBase: number;
     let entry: PlannedPaymentLine["entry"];

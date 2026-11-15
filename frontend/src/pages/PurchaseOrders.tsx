@@ -32,7 +32,7 @@ interface SupplierOption { id: number; code: number; party: { category: "INDIVID
 interface CurrencyOption { id: number; code: string; title: string }
 interface PickableItemLine { id: number; priceInquiryItemLineId: number; priceInquiryId: number; number: number; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; done: number; remaining: number }
 
-interface ListRow { id: number; number: number; date: string; basis: Basis; supplierId: number; supplierTitle: string; currencyTitle: string; status: Status; lineCount: number; totalAmount: number }
+interface ListRow { detailCode?: string | null; id: number; number: number; date: string; basis: Basis; supplierId: number; supplierTitle: string; currencyTitle: string; status: Status; lineCount: number; totalAmount: number }
 interface DetailLine { id: number; priceInquiryItemLineId: number | null; goodsItemId: number; goodsItemCode: string; goodsItemTitle: string; unitId: number; unitTitle: string; quantity: number; unitPrice: number; amount: number; description: string | null }
 interface Detail extends ListRow { currencyId: number; description: string | null; lines: DetailLine[] }
 
@@ -90,6 +90,7 @@ function PurchaseOrderList() {
       <DataTable
         columns={[
           { header: "شماره", render: (r) => toFaDigits(String(r.number)), width: "70px", filterType: "number", filterValue: (r) => r.number },
+          { header: "کد تفصیل", render: (r) => (r.detailCode ? toFaDigits(r.detailCode) : "—"), width: "90px", filterType: "string", filterValue: (r) => r.detailCode ?? "" },
           { header: "تاریخ", render: (r) => formatJalaliDate(r.date), filterType: "date", filterValue: (r) => r.date.slice(0, 10) },
           { header: "مبنا", render: (r) => BASIS_FA[r.basis], filterType: "string", filterValue: (r) => BASIS_FA[r.basis] },
           { header: "تامین کننده", render: (r) => r.supplierTitle, filterType: "string", filterValue: (r) => r.supplierTitle },
@@ -120,7 +121,7 @@ function PurchaseOrderForm({ editId }: { editId?: number }) {
   const [header, setHeader] = usePersistedState(`${cacheKey}:header`, { date: "", basis: "NO_BASIS" as Basis, supplierId: "", currencyId: "", description: "" });
   const [rows, setRows] = usePersistedState<RowState[]>(`${cacheKey}:rows`, []);
   useGoodsCatalog(rows.map((r) => r.goodsItemId));
-  const [meta, setMeta] = usePersistedState<{ number: number; status: Status } | null>(`${cacheKey}:meta`, null);
+  const [meta, setMeta] = usePersistedState<{ number: number; status: Status; detailCode?: string | null } | null>(`${cacheKey}:meta`, null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   useDefaultBaseCurrency({ enabled: !editId && loaded, currencies, current: header.currencyId, apply: (id) => setHeader((h) => ({ ...h, currencyId: id })) });
@@ -140,7 +141,7 @@ function PurchaseOrderForm({ editId }: { editId?: number }) {
       }
       if (editId) {
         const d: Detail = await api.get(`/purchase-orders/${editId}`);
-        setMeta({ number: d.number, status: d.status });
+        setMeta({ number: d.number, status: d.status, detailCode: d.detailCode ?? null });
         setHeader({ date: d.date.slice(0, 10), basis: d.basis, supplierId: String(d.supplierId), currencyId: String(d.currencyId), description: d.description || "" });
         setRows(
           d.lines.map((l) => ({
@@ -318,7 +319,7 @@ function PurchaseOrderForm({ editId }: { editId?: number }) {
     try {
       await api.post(`/purchase-orders/${editId}/${path}`, {});
       const d: Detail = await api.get(`/purchase-orders/${editId}`);
-      setMeta({ number: d.number, status: d.status });
+      setMeta({ number: d.number, status: d.status, detailCode: d.detailCode ?? null });
       flash();
     } catch (e) {
       showError((e as ApiError).message);
@@ -351,6 +352,10 @@ function PurchaseOrderForm({ editId }: { editId?: number }) {
             <div className="form-field">
               <label>شماره</label>
               <input dir="ltr" value={meta ? toFaDigits(String(meta.number)) : "خودکار پس از ذخیره"} disabled />
+            </div>
+            <div className="form-field">
+              <label>کد تفصیل <InfoHint text="تفصیل «سفارش خرید» (نوع تفصیل ۱۰): سیستم هنگام ثبت سفارش می‌دهد و عوض نمی‌شود. حسابی که این نوع تفصیل را داشته باشد، در سند دستی و در پرداخت‌های بر مبنای این سفارش با همین کد پر می‌شود." title="کد تفصیل سفارش" /></label>
+              <input dir="ltr" value={meta?.detailCode ? toFaDigits(meta.detailCode) : "خودکار پس از ذخیره"} disabled />
             </div>
             <div className="form-field">
               <label>وضعیت</label>

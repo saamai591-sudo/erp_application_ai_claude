@@ -40,6 +40,9 @@ async function cleanupOrphans(_req: any, res: any) {
       case "Project":
         exists = !!(await prisma.project.findUnique({ where: { id: u.entityId } }));
         break;
+      case "PurchaseOrder":
+        exists = !!(await prisma.purchaseOrder.findUnique({ where: { id: u.entityId } }));
+        break;
       case "FiscalPeriod":
         exists = !!(await prisma.fiscalPeriod.findUnique({ where: { id: u.entityId } }));
         break;

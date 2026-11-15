@@ -5,6 +5,8 @@ import { resolveDocumentFiscalPeriod } from "../utils/fiscalPeriodValidation";
 import { assertRecordNotStale } from "../utils/concurrency";
 import { can } from "../authz/guard";
 import { findFormPrefix } from "../authz/registry";
+import { generateDetailCode, registerDetailCode } from "../utils/coding";
+import { DETAIL_TYPE_CODE_PURCHASE_ORDER } from "../utils/detailValues";
 
 // =========================================================================
 // ماژول «زنجیره تامین» > ساب‌ماژول: عملیات
@@ -1453,6 +1455,7 @@ router.get("/purchase-orders", can(`${PURCHASE_ORDERS}.view`), async (_req, res)
       id: d.id,
       number: d.number,
       date: d.date,
+      detailCode: d.detailCode ?? null,
       basis: d.basis,
       supplierId: d.supplierId,
       supplierTitle: d.supplier.party.category === "LEGAL" ? d.supplier.party.name : `${d.supplier.party.firstName || ""} ${d.supplier.party.lastName || ""}`.trim(),
@@ -1480,6 +1483,7 @@ router.get("/purchase-orders/:id", can(`${PURCHASE_ORDERS}.view`), async (req, r
     id: d.id,
     number: d.number,
     date: d.date,
+    detailCode: d.detailCode ?? null,
     basis: d.basis,
     supplierId: d.supplierId,
     supplierTitle: d.supplier.party.category === "LEGAL" ? d.supplier.party.name : `${d.supplier.party.firstName || ""} ${d.supplier.party.lastName || ""}`.trim(),
@@ -1565,19 +1569,30 @@ router.post("/purchase-orders", can(`${PURCHASE_ORDERS}.create`), async (req, re
     const lines = await validatePurchaseOrderLines(body.lines, body.basis);
 
     const number = await nextNumber(prisma.purchaseOrder, fiscalPeriod.id);
-    const created = await prisma.purchaseOrder.create({
-      data: {
-        fiscalPeriodId: fiscalPeriod.id,
-        number,
-        date,
-        basis: body.basis as any,
-        supplierId: body.supplierId,
-        currencyId: body.currencyId,
-        description: body.description || null,
-        status: "DRAFT",
-        lines: { create: lines.map((l, idx) => ({ ...l, rowOrder: idx })) },
-      },
-    });
+    // کد تفصیل را سیستم می‌دهد؛ برخورد هم‌زمان (کد یکتا) با کد بعدی دوباره تلاش می‌شود
+    let created: any = null;
+    for (let attempt = 0; attempt < 5 && !created; attempt++) {
+      const { code, detailTypeId } = await generateDetailCode(DETAIL_TYPE_CODE_PURCHASE_ORDER);
+      try {
+        created = await prisma.purchaseOrder.create({
+          data: {
+            fiscalPeriodId: fiscalPeriod.id,
+            number,
+            date,
+            basis: body.basis as any,
+            supplierId: body.supplierId,
+            currencyId: body.currencyId,
+            description: body.description || null,
+            status: "DRAFT",
+            detailCode: code,
+            lines: { create: lines.map((l, idx) => ({ ...l, rowOrder: idx })) },
+          },
+        });
+        await registerDetailCode(code, detailTypeId, "PurchaseOrder", created.id);
+      } catch (e: any) {
+        if (e?.code !== "P2002" || attempt === 4 || created) throw e;
+      }
+    }
     res.status(201).json(created);
   } catch (e: any) {
     res.status(400).json({ error: e.message || "خطا در ثبت سفارش خرید" });
@@ -1627,7 +1642,14 @@ router.delete("/purchase-orders/:id", can(`${PURCHASE_ORDERS}.delete`), async (r
   if (!d) return res.status(404).json({ error: "یافت نشد" });
   if (d.status !== "DRAFT") return res.status(400).json({ error: "حذف فقط در حالت ثبت ممکن است" });
   if (await purchaseOrderHasDownstreamUsage(id)) return res.status(400).json({ error: "این فرم گردش دارد و قابل حذف نیست" });
-  await prisma.purchaseOrder.delete({ where: { id } });
+  // کد تفصیل سفارش اگر در سند حسابداری آمده باشد، حذف سفارش عنوان آن سطرها را بی‌صاحب می‌کند
+  if (d.detailCode && (await prisma.journalEntryLine.count({ where: { OR: [{ detail1Code: d.detailCode }, { detail2Code: d.detailCode }, { detail3Code: d.detailCode }] } })) > 0) {
+    return res.status(400).json({ error: "تفصیل این سفارش در سند حسابداری استفاده شده است و سفارش قابل حذف نیست" });
+  }
+  await prisma.$transaction([
+    prisma.detailCodeUsage.deleteMany({ where: { entityTable: "PurchaseOrder", entityId: id } }),
+    prisma.purchaseOrder.delete({ where: { id } }),
+  ]);
   res.status(204).send();
 });
 

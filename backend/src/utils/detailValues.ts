@@ -40,6 +40,11 @@ async function titleForEntity(entityTable: string, entityId: number): Promise<st
       const p = await prisma.project.findUnique({ where: { id: entityId } });
       return p?.title || "—";
     }
+    case "PurchaseOrder": {
+      // «سفارش <شماره> — <تامین‌کننده>»؛ عنوان ذخیره نمی‌شود تا با تغییر سفارش (تامین‌کننده‌ی پیش‌نویس) همیشه درست بماند
+      const o = await prisma.purchaseOrder.findUnique({ where: { id: entityId }, select: { number: true, supplier: { select: { party: { select: { detailTitle: true } } } } } });
+      return o ? `سفارش ${o.number} — ${o.supplier?.party?.detailTitle ?? ""}`.trim() : "—";
+    }
     case "FiscalPeriod": {
       const fp = await prisma.fiscalPeriod.findUnique({ where: { id: entityId } });
       return fp?.title || "—";
@@ -161,6 +166,8 @@ export async function resolveAccountDetailFieldsForCodes(
 export const DETAIL_TYPE_CODE_PARTY = 1;
 export const DETAIL_TYPE_CODE_COST_CENTER = 2;
 export const DETAIL_TYPE_CODE_PROJECT = 8;
+/** نوع تفصیل «سفارش خرید» (مهاجرت 20270516100000) */
+export const DETAIL_TYPE_CODE_PURCHASE_ORDER = 10;
 const DETAIL_TYPE_CODE_PETTY_CASH = 5;
 const DETAIL_TYPE_CODE_PETTY_CASH_CUSTODIAN = 6;
 

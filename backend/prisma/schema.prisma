@@ -2087,6 +2087,8 @@ model InquiryEvaluationItemLine {
 }
 
 model PurchaseOrder {
+  /// کد تفصیل «سفارش خرید» (نوع تفصیل ۱۰)؛ سیستم هنگام ثبت می‌دهد، هرگز تایپ نمی‌شود
+  detailCode             String?                 @unique
   guaranteeDocuments     GuaranteeDocument[]
   paymentSettlementLines PaymentSettlementLine[]
   id                     Int                     @id @default(autoincrement())
